@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hmac
 import inspect
 import json
 import os
@@ -29,9 +30,10 @@ class MnemosyneMcpServer:
     tools/call.
     """
 
-    def __init__(self, store_path: str | os.PathLike[str] | None = None):
+    def __init__(self, store_path: str | os.PathLike[str] | None = None, auth_token: str | None = None):
         self.engine = LocalMemoryEngine(store_path=store_path)
         self.queue = InProcessQueue()
+        self.auth_token = auth_token if auth_token is not None else os.environ.get("MNEMOSYNE_MCP_TOKEN")
         ingestion = IngestionPipeline(self.engine, queue=self.queue)
         self.tools = MemoryTools(self.engine, ingestion=ingestion, runtime_state=RuntimeState.from_store_path(store_path))
 
@@ -52,7 +54,10 @@ class MnemosyneMcpServer:
             elif method == "tools/call":
                 params = request.get("params") or {}
                 try:
-                    result = _tool_result(self.call_tool(str(params.get("name")), params.get("arguments") or {}))
+                    if not self._authorized(params):
+                        result = _tool_error("unauthorized: valid MCP auth token required")
+                    else:
+                        result = _tool_result(self.call_tool(str(params.get("name")), params.get("arguments") or {}))
                 except Exception as exc:  # noqa: BLE001 - tool errors are MCP results, not transport failures.
                     result = _tool_error(str(exc))
             else:
@@ -60,6 +65,15 @@ class MnemosyneMcpServer:
             return {"jsonrpc": "2.0", "id": request_id, "result": result}
         except Exception as exc:  # noqa: BLE001 - JSON-RPC must marshal failures.
             return _error(request_id, -32000, str(exc))
+
+    def _authorized(self, params: dict[str, Any]) -> bool:
+        if not self.auth_token:
+            return True
+        supplied = params.get("auth_token")
+        meta = params.get("_meta")
+        if supplied is None and isinstance(meta, dict):
+            supplied = meta.get("auth_token")
+        return isinstance(supplied, str) and hmac.compare_digest(supplied, self.auth_token)
 
     def call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         if name == "capture":
