@@ -10,6 +10,7 @@ from typing import Any, Literal
 from mnemosyne.consolidation import CONSOLIDATE_EVIDENCE_JOB, DEFAULT_CONSOLIDATION_PASSES
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.ids import content_cid
+from mnemosyne.media import MEDIA_EXTRACT_JOB, extract_derived_text
 from mnemosyne.models import Evidence, Resource
 from mnemosyne.provenance import SignedProvenanceVerifier
 from mnemosyne.queue import InProcessQueue, QueueJob
@@ -18,14 +19,6 @@ from mnemosyne.storage import LocalObjectStore
 
 
 Modality = Literal["text", "image", "audio", "video", "binary", "multimodal"]
-DERIVED_TEXT_FIELDS = (
-    "derived_text",
-    "ocr_text",
-    "transcript",
-    "caption",
-    "alt_text",
-    "description",
-)
 
 
 @dataclass(slots=True)
@@ -175,6 +168,18 @@ class IngestionPipeline:
         )
         queued_jobs: list[dict[str, Any]] = []
         if self.queue and not already_present:
+            if should_externalize and request.modality != "text" and not derived_sources:
+                queued_jobs.append(
+                    self._enqueue_media_extraction(
+                        cid=cid,
+                        request=request,
+                        branch=branch,
+                        trust_tier=trust_tier,
+                        sensitivity=sensitivity,
+                        capability_tags=capability_tags,
+                        content_pointer=content_pointer,
+                    ).to_dict()
+                )
             queued_jobs.append(
                 self._enqueue_consolidation(
                     cid=cid,
@@ -234,27 +239,35 @@ class IngestionPipeline:
             },
         )
 
-
-def extract_derived_text(metadata: dict[str, Any]) -> tuple[str, list[str]]:
-    parts: list[str] = []
-    sources: list[str] = []
-    for key in DERIVED_TEXT_FIELDS:
-        value = metadata.get(key)
-        if isinstance(value, str):
-            text = value.strip()
-            if text:
-                parts.append(text)
-                sources.append(key)
-        elif isinstance(value, list):
-            list_parts = [
-                item.strip()
-                for item in value
-                if isinstance(item, str) and item.strip()
-            ]
-            if list_parts:
-                parts.extend(list_parts)
-                sources.append(key)
-    return "\n".join(parts), sources
+    def _enqueue_media_extraction(
+        self,
+        *,
+        cid: str,
+        request: IngestRequest,
+        branch: str,
+        trust_tier: int,
+        sensitivity: int,
+        capability_tags: list[str],
+        content_pointer: str | None,
+    ) -> QueueJob:
+        if self.queue is None:
+            raise RuntimeError("media extraction queue is not configured")
+        return self.queue.enqueue(
+            MEDIA_EXTRACT_JOB,
+            {
+                "tenant_id": request.tenant_id,
+                "user_id": request.user_id,
+                "branch": branch,
+                "source_evidence_cid": cid,
+                "content_pointer": content_pointer,
+                "media_type": request.media_type,
+                "modality": request.modality,
+                "source_trust_tier": trust_tier,
+                "sensitivity": sensitivity,
+                "capability_tags": list(capability_tags),
+                "metadata": dict(request.metadata),
+            },
+        )
 
 
 def classify_request(request: IngestRequest, payload: bytes) -> dict[str, Any]:

@@ -12,10 +12,13 @@ import pytest
 from mnemosyne.consolidation import CONSOLIDATE_EVIDENCE_JOB, ConsolidationWorker
 from mnemosyne.gate import RegressionCase
 from mnemosyne.ingestion import IngestRequest, IngestionPipeline
+from mnemosyne.jobs import RuntimeJobHandlers
+from mnemosyne.media import MEDIA_EXTRACT_JOB, MediaExtractionResult
 from mnemosyne.mcp_server import MnemosyneMcpServer
 from mnemosyne.models import Assertion, Evidence, Relation
 from mnemosyne.postgres_engine import PostgresEngine
 from mnemosyne.queue import InProcessQueue, QueueWorker
+from mnemosyne.storage import LocalObjectStore
 
 
 pytest.importorskip("psycopg")
@@ -36,6 +39,18 @@ def run_postgres_cli(*args: str) -> dict:
         capture_output=True,
     )
     return json.loads(result.stdout)
+
+
+class StaticMediaExtractor:
+    def __init__(self, text: str):
+        self.text = text
+
+    def extract(self, payload: bytes, *, media_type: str, modality: str, metadata: dict):
+        return MediaExtractionResult(
+            text=self.text,
+            sources=["test_extractor"],
+            metadata={"media_type": media_type, "modality": modality, "bytes": len(payload)},
+        )
 
 
 def test_postgres_engine_live_contract_smoke() -> None:
@@ -386,6 +401,46 @@ def test_postgres_cli_ingests_file_with_c2pa_verifier(tmp_path) -> None:
     assert evidence["metadata"]["derived_text_sources"] == ["description"]
     assert evidence["metadata"]["provenance_decision"]["manifest"]["c2pa"]["claim_generator"] == "issuer-a"
     assert search["hits"][0]["id"] == ingested["cid"]
+
+
+def test_postgres_media_extract_job_appends_searchable_derived_evidence_live(tmp_path) -> None:
+    engine = PostgresEngine(live_dsn())
+    tenant = f"tenant-media-live-{uuid4()}"
+    user = "user-media-live"
+    queue = InProcessQueue()
+    object_store = LocalObjectStore(tmp_path / "objects")
+    pipeline = IngestionPipeline(engine, object_store, queue=queue)
+
+    result = pipeline.ingest(
+        IngestRequest(
+            tenant_id=tenant,
+            user_id=user,
+            actor="user",
+            source_type="microphone",
+            data=b"postgres-audio-bytes",
+            modality="audio",
+            media_type="audio/wav",
+        )
+    )
+    handlers = RuntimeJobHandlers(
+        engine,
+        queue,
+        object_store=object_store,
+        media_extractor=StaticMediaExtractor("Audio transcript says quarterly planning moved."),
+    )
+    worker = QueueWorker(queue, handlers.handlers())
+
+    assert [job["kind"] for job in result.queued_jobs] == [MEDIA_EXTRACT_JOB, CONSOLIDATE_EVIDENCE_JOB]
+    job = worker.run_once(MEDIA_EXTRACT_JOB)
+    derived_cid = job.result["details"]["derived_cid"]
+    search = engine.retrieve("quarterly planning moved", tenant)
+    derived = engine.get_evidence(tenant, derived_cid)
+
+    assert job.status == "complete"
+    assert derived is not None
+    assert derived.metadata["source_evidence_cid"] == result.cid
+    assert derived.metadata["derived_text_sources"] == ["test_extractor"]
+    assert search.hits[0].id == derived_cid
 
 
 def test_postgres_gated_consolidation_promotes_direct_user_fact_live() -> None:

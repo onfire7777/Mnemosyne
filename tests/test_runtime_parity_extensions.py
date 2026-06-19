@@ -8,6 +8,7 @@ from mnemosyne.gate import GateResult, RegressionCase
 from mnemosyne.ingestion import IngestRequest, IngestionPipeline
 from mnemosyne.jobs import CALIBRATE_JOB, LIFECYCLE_SWEEP_JOB, OBSERVABILITY_SNAPSHOT_JOB, RuntimeJobHandlers
 from mnemosyne.learning import Lesson, Procedure
+from mnemosyne.media import MEDIA_EXTRACT_JOB, MediaExtractionResult
 from mnemosyne.models import Evidence
 from mnemosyne.observability import MetricsRegistry
 from mnemosyne.parametric import ParametricTier
@@ -19,6 +20,18 @@ from mnemosyne.storage import LocalObjectStore
 
 TENANT = "tenant-runtime-extensions"
 USER = "user-runtime-extensions"
+
+
+class StaticMediaExtractor:
+    def __init__(self, text: str):
+        self.text = text
+
+    def extract(self, payload: bytes, *, media_type: str, modality: str, metadata: dict):
+        return MediaExtractionResult(
+            text=self.text,
+            sources=["test_extractor"],
+            metadata={"media_type": media_type, "modality": modality, "bytes": len(payload)},
+        )
 
 
 def test_local_object_store_addresses_bytes_and_blocks_bad_uris(tmp_path) -> None:
@@ -167,6 +180,51 @@ def test_ingestion_indexes_multimodal_derived_text_without_inline_bytes(tmp_path
     assert evidence.metadata["derived_text_sources"] == ["ocr_text", "caption"]
     assert "derived-text-indexed" in evidence.capability_tags
     assert hits.hits[0].id == result.cid
+
+
+def test_media_extract_job_appends_derived_evidence_without_mutating_source(tmp_path) -> None:
+    engine = LocalMemoryEngine()
+    queue = InProcessQueue()
+    object_store = LocalObjectStore(tmp_path / "objects")
+    pipeline = IngestionPipeline(engine, object_store, queue=queue)
+
+    result = pipeline.ingest(
+        IngestRequest(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="microphone",
+            data=b"opaque-audio-bytes",
+            modality="audio",
+            media_type="audio/wav",
+        )
+    )
+    source = engine.get_evidence(TENANT, result.cid)
+    handlers = RuntimeJobHandlers(
+        engine,
+        queue,
+        object_store=object_store,
+        media_extractor=StaticMediaExtractor("The meeting decided to keep Mnemosyne separate."),
+    )
+    worker = QueueWorker(queue, handlers.handlers())
+
+    assert [job["kind"] for job in result.queued_jobs] == [MEDIA_EXTRACT_JOB, CONSOLIDATE_EVIDENCE_JOB]
+    job = worker.run_once(MEDIA_EXTRACT_JOB)
+    derived_cid = job.result["details"]["derived_cid"]
+    derived = engine.get_evidence(TENANT, derived_cid)
+    hits = engine.retrieve("keep Mnemosyne separate", TENANT)
+
+    assert job.status == "complete"
+    assert source is not None
+    assert source.content == ""
+    assert derived is not None
+    assert derived.content == "The meeting decided to keep Mnemosyne separate."
+    assert derived.content_pointer == result.content_pointer
+    assert derived.metadata["source_evidence_cid"] == result.cid
+    assert derived.metadata["derived_text_sources"] == ["test_extractor"]
+    assert "derived-from-media" in derived.capability_tags
+    assert hits.hits[0].id == derived_cid
+    assert queue.snapshot()["queued"] == 2
 
 
 def test_ingestion_classifier_tags_untrusted_imperatives_and_pii(tmp_path) -> None:
