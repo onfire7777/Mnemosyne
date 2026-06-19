@@ -160,6 +160,18 @@ def test_mcp_server_initializes_lists_tools_and_calls_capture_search(tmp_path: P
         "forget",
         "export",
     }
+    tools_by_name = {tool["name"]: tool for tool in listed["result"]["tools"]}
+    capture_schema = tools_by_name["capture"]["inputSchema"]
+    assert capture_schema["properties"]["trust_tier"]["type"] == "integer"
+    assert "trust_tier" not in capture_schema["required"]
+    assert capture_schema["additionalProperties"] is False
+    graph_schema = tools_by_name["graph_query"]["inputSchema"]
+    assert graph_schema["properties"]["seeds"] == {"type": "array", "items": {"type": "string"}}
+    assert graph_schema["properties"]["hops"]["type"] == "integer"
+    assert "hops" not in graph_schema["required"]
+    supersede_schema = tools_by_name["supersede"]["inputSchema"]
+    assert supersede_schema["properties"]["new"]["type"] == "object"
+    assert "branch" not in supersede_schema["required"]
     assert capture["result"]["isError"] is False
     assert search["result"]["isError"] is False
     capture_content = capture["result"]["structuredContent"]
