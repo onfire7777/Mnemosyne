@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import inspect
 import json
 import os
 import sys
 from pathlib import Path
-from typing import Any, TextIO
+from types import UnionType
+from typing import Any, Literal, TextIO, Union, get_args, get_origin, get_type_hints
 
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.ingestion import IngestionPipeline
@@ -168,17 +170,68 @@ class MnemosyneMcpServer:
 
 
 def _to_mcp_tool_spec(spec: dict[str, Any]) -> dict[str, Any]:
-    properties = {arg: {"type": "string"} for arg in spec["arguments"]}
+    method = getattr(MemoryTools, spec["name"], None)
+    if method is None:
+        properties = {arg: {"type": "string"} for arg in spec["arguments"]}
+        required = list(spec["arguments"])
+    else:
+        signature = inspect.signature(method)
+        hints = get_type_hints(method)
+        properties = {}
+        required = []
+        for name, parameter in signature.parameters.items():
+            if name == "self":
+                continue
+            schema = _schema_for_type(hints.get(name, parameter.annotation))
+            if parameter.default is not inspect.Parameter.empty:
+                schema["default"] = parameter.default
+            else:
+                required.append(name)
+            properties[name] = schema
     return {
         "name": spec["name"],
         "description": spec["description"],
         "inputSchema": {
             "type": "object",
             "properties": properties,
-            "required": list(spec["arguments"]),
-            "additionalProperties": True,
+            "required": required,
+            "additionalProperties": False,
         },
     }
+
+
+def _schema_for_type(annotation: Any) -> dict[str, Any]:
+    if annotation in {inspect.Parameter.empty, Any}:
+        return {}
+    origin = get_origin(annotation)
+    args = get_args(annotation)
+    if origin in {Union, UnionType}:
+        non_null = [arg for arg in args if arg is not type(None)]
+        if len(non_null) == 1:
+            return _schema_for_type(non_null[0])
+        return {"anyOf": [_schema_for_type(arg) for arg in non_null]}
+    if origin is Literal:
+        values = list(args)
+        schema: dict[str, Any] = {"enum": values}
+        if values:
+            schema.update(_schema_for_type(type(values[0])))
+        return schema
+    if origin is list:
+        item_type = args[0] if args else Any
+        return {"type": "array", "items": _schema_for_type(item_type)}
+    if origin is dict:
+        return {"type": "object", "additionalProperties": True}
+    if annotation is str:
+        return {"type": "string"}
+    if annotation is int:
+        return {"type": "integer"}
+    if annotation is float:
+        return {"type": "number"}
+    if annotation is bool:
+        return {"type": "boolean"}
+    if annotation is bytes:
+        return {"type": "string", "contentEncoding": "base64"}
+    return {}
 
 
 def _error(request_id: Any, code: int, message: str) -> dict[str, Any]:
