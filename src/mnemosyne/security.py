@@ -65,6 +65,7 @@ class SecurityPolicy:
     min_policy_write_trust: int = int(TrustTier.OPERATOR)
     min_destructive_trust: int = int(TrustTier.USER_AUTHORED)
     consolidator_only_ops: tuple[str, ...] = (
+        "run_consolidation_passes",
         "promote_candidate",
         "prune_memory",
         "demote_fidelity",
