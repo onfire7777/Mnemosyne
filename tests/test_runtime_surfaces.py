@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import inspect
+import json
+import threading
 import tomllib
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import StringIO
 from pathlib import Path
 
 from mnemosyne.mcp_server import MnemosyneMcpServer
 from mnemosyne.models import Hit
 from mnemosyne.postgres_engine import PostgresEngine, _bytes_to_cid, _cid_to_bytes, _stable_uuid, _uuid_or_none, _vector_literal
-from mnemosyne.retrieval import LocalSimilarityReranker, semantic_entropy
+from mnemosyne.retrieval import HttpEmbeddingProvider, HttpReranker, LocalSimilarityReranker, semantic_entropy
 
 
 TENANT = "tenant-runtime"
@@ -47,6 +50,56 @@ def test_local_similarity_reranker_prefers_query_relevant_hits() -> None:
 
     assert [hit.id for hit in ranked] == ["postgres", "unrelated"]
     assert ranked[0].metadata["reranker"] == "local-similarity"
+
+
+def test_http_embedding_and_reranker_adapters_use_json_provider_contract() -> None:
+    requests: list[dict[str, object]] = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:  # noqa: N802 - stdlib callback name.
+            length = int(self.headers.get("Content-Length", "0"))
+            payload = json.loads(self.rfile.read(length).decode("utf-8"))
+            requests.append({"path": self.path, "payload": payload, "auth": self.headers.get("Authorization")})
+            if self.path == "/embed":
+                body = {"data": [{"embedding": [3.0, 4.0, 0.0, 99.0]}]}
+            else:
+                body = {"results": [{"index": 1, "relevance_score": 0.91}, {"index": 0, "relevance_score": 0.2}]}
+            encoded = json.dumps(body).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(encoded)))
+            self.end_headers()
+            self.wfile.write(encoded)
+
+        def log_message(self, format: str, *args: object) -> None:  # noqa: A002 - stdlib signature.
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_port}"
+    try:
+        embedding = HttpEmbeddingProvider(f"{base}/embed", model="embed-model", api_key="secret", dims=3)
+        vector = embedding.embed("hello")
+        reranker = HttpReranker(f"{base}/rerank", model="rank-model")
+        ranked = reranker.rerank(
+            "query",
+            [
+                Hit("a", "evidence", TENANT, "main", "first", 0.1, "candidate"),
+                Hit("b", "evidence", TENANT, "main", "second", 0.1, "candidate"),
+            ],
+            k=2,
+        )
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        server.server_close()
+
+    assert vector == [0.6, 0.8, 0.0]
+    assert [hit.id for hit in ranked] == ["b", "a"]
+    assert requests[0]["auth"] == "Bearer secret"
+    assert requests[0]["payload"] == {"input": "hello", "model": "embed-model"}
+    assert requests[1]["payload"]["model"] == "rank-model"
 
 
 def test_mcp_server_initializes_lists_tools_and_calls_capture_search(tmp_path: Path) -> None:

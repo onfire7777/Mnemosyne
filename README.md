@@ -59,11 +59,20 @@ MNEMOSYNE_POSTGRES_DSN=postgresql://mnemosyne:mnemosyne-local-dev@127.0.0.1:5432
   python -m mnemosyne.cli --backend postgres search --tenant tenant-a --query "preferred database"
 ```
 
+HTTP-compatible embedding/reranker providers can be selected from the same CLI:
+
+```bash
+python -m mnemosyne.cli --backend postgres \
+  --embedding-provider http --embedding-url http://127.0.0.1:8000/embed \
+  --reranker-provider http --reranker-url http://127.0.0.1:8000/rerank \
+  search --tenant tenant-a --query "preferred database"
+```
+
 ## Status
 
 The repository has a verified local scaffold plus runtime parity extensions. Current checks:
 
-- `.venv/bin/python -m pytest -q` returns 67 passing tests and 2 skipped live-DB tests.
-- With Docker compose Postgres running, `MNEMOSYNE_POSTGRES_DSN=postgresql://... .venv/bin/python -m pytest -q tests/test_postgres_engine_live.py` returns 2 passing live adapter tests covering tenant RLS, SQL FTS, pgvector assertion search, dense evidence fallback, recursive graph/PPR, tombstone and hard-delete forget modes, and CLI `--backend postgres`.
+- `.venv/bin/python -m pytest -q` returns 69 passing tests and 2 skipped live-DB tests.
+- With Docker compose Postgres running, `MNEMOSYNE_POSTGRES_DSN=postgresql://... .venv/bin/python -m pytest -q tests/test_postgres_engine_live.py` returns 2 passing live adapter tests covering tenant RLS, SQL FTS, pgvector assertion search, dense evidence fallback, recursive graph/PPR, tombstone and hard-delete forget modes, HTTP-configurable retrieval adapter wiring, and CLI `--backend postgres`.
 
 Exact 1:1 blueprint parity is still in progress. The controlling status artifact is `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md`.
