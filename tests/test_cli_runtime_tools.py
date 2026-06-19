@@ -138,6 +138,69 @@ def test_cli_ingests_binary_file_with_c2pa_verifier(tmp_path: Path) -> None:
     assert search["hits"][0]["id"] == ingested["cid"]
 
 
+def test_cli_drains_media_extraction_job_with_command_provider(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    objects = tmp_path / "objects"
+    asset = tmp_path / "capture.png"
+    asset.write_bytes(b"opaque screenshot bytes")
+    extractor = tmp_path / "extract-media.py"
+    extractor.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env python3",
+                "import json, sys",
+                "payload = {'text': 'Screenshot OCR says Mnemosyne is distinct.'}",
+                "payload['sources'] = ['ocr_text']",
+                "payload['metadata'] = {'path_seen': bool(sys.argv[1])}",
+                "print(json.dumps(payload))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    extractor.chmod(0o755)
+
+    ingested = run_cli(
+        store,
+        "--object-store",
+        str(objects),
+        "--media-extractor-command",
+        str(extractor),
+        "ingest",
+        "--tenant",
+        TENANT,
+        "--user",
+        USER,
+        "--actor",
+        "user",
+        "--source-type",
+        "screen-capture",
+        "--file",
+        str(asset),
+        "--modality",
+        "image",
+        "--media-type",
+        "image/png",
+    )
+    drained = run_cli(
+        store,
+        "--object-store",
+        str(objects),
+        "--media-extractor-command",
+        str(extractor),
+        "queue-drain",
+        "--limit",
+        "1",
+        "--kind",
+        "media_extract",
+    )
+    search = run_cli(store, "search", "--tenant", TENANT, "--query", "Screenshot OCR")
+
+    assert [job["kind"] for job in ingested["queued_jobs"]] == ["media_extract", "consolidate_evidence"]
+    assert drained["jobs"][0]["result"]["details"]["source_evidence_cid"] == ingested["cid"]
+    assert drained["jobs"][0]["result"]["details"]["derived_text_sources"] == ["ocr_text"]
+    assert search["hits"][0]["text"] == "Screenshot OCR says Mnemosyne is distinct."
+
+
 def test_cli_ingest_classifies_external_untrusted_content(tmp_path: Path) -> None:
     store = tmp_path / "mnemosyne.json"
     ingested = run_cli(

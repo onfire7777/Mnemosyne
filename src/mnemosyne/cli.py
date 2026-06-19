@@ -15,6 +15,7 @@ from mnemosyne.engine import LocalMemoryEngine, MemoryEngine
 from mnemosyne.eval import run_seed_suite
 from mnemosyne.ingestion import IngestRequest, IngestionPipeline
 from mnemosyne.jobs import RuntimeJobHandlers
+from mnemosyne.media import CommandMediaTextExtractor, MediaTextExtractor, MetadataMediaTextExtractor
 from mnemosyne.mcp_tools import MemoryTools, TOOL_SPEC
 from mnemosyne.models import Assertion, Relation
 from mnemosyne.observability import MetricsRegistry
@@ -22,6 +23,7 @@ from mnemosyne.provenance import C2paToolVerifier, SignedProvenanceVerifier
 from mnemosyne.queue import InProcessQueue, QueueWorker
 from mnemosyne.retrieval import HashingEmbeddingProvider, HttpEmbeddingProvider, HttpReranker, LocalSimilarityReranker, RetrievalAdapters
 from mnemosyne.runtime_state import RuntimeState
+from mnemosyne.storage import LocalObjectStore
 
 
 def default_store() -> Path:
@@ -34,6 +36,10 @@ def default_backend() -> str:
 
 def default_postgres_dsn() -> str | None:
     return os.environ.get("MNEMOSYNE_POSTGRES_DSN")
+
+
+def default_object_store() -> str:
+    return os.environ.get("MNEMOSYNE_OBJECT_STORE", ".mnemosyne/objects")
 
 
 def load_retrieval_adapters(args: argparse.Namespace) -> RetrievalAdapters:
@@ -98,6 +104,19 @@ def load_provenance_verifier(args: argparse.Namespace) -> SignedProvenanceVerifi
     return SignedProvenanceVerifier()
 
 
+def load_object_store(args: argparse.Namespace) -> LocalObjectStore:
+    return LocalObjectStore(Path(args.object_store))
+
+
+def load_media_extractor(args: argparse.Namespace) -> MediaTextExtractor:
+    if args.media_extractor_command:
+        return CommandMediaTextExtractor(
+            args.media_extractor_command,
+            timeout_seconds=float(args.media_extractor_timeout),
+        )
+    return MetadataMediaTextExtractor()
+
+
 def load_runtime_state(args: argparse.Namespace) -> RuntimeState | None:
     return RuntimeState.from_store_path(Path(args.store))
 
@@ -106,10 +125,15 @@ def load_tools(
     args: argparse.Namespace,
     ingestion_queue: InProcessQueue | None = None,
     runtime_state: RuntimeState | None = None,
-) -> MemoryTools:
+    ) -> MemoryTools:
     store = Path(args.store)
     engine = load_engine(args)
-    ingestion = IngestionPipeline(engine, provenance_verifier=load_provenance_verifier(args), queue=ingestion_queue)
+    ingestion = IngestionPipeline(
+        engine,
+        object_store=load_object_store(args),
+        provenance_verifier=load_provenance_verifier(args),
+        queue=ingestion_queue,
+    )
     return MemoryTools(engine, ingestion=ingestion, runtime_state=runtime_state or RuntimeState.from_store_path(store))
 
 
@@ -185,7 +209,13 @@ def cmd_ingest(args: argparse.Namespace) -> None:
         if ingestion_queue is None:
             raise SystemExit("--run-consolidation-once requires consolidation enqueueing.")
         metrics = MetricsRegistry()
-        handlers = RuntimeJobHandlers(tools.engine, ingestion_queue, metrics=metrics)
+        handlers = RuntimeJobHandlers(
+            tools.engine,
+            ingestion_queue,
+            metrics=metrics,
+            object_store=load_object_store(args),
+            media_extractor=load_media_extractor(args),
+        )
         worker = QueueWorker(ingestion_queue, handlers.handlers(), metrics=metrics)
         job = worker.run_once(CONSOLIDATE_EVIDENCE_JOB)
         result["consolidation_worker"] = {
@@ -600,7 +630,13 @@ def cmd_consolidate_once(args: argparse.Namespace) -> None:
     queue = runtime_state.load_queue() if runtime_state else InProcessQueue()
     tools = load_tools(args, ingestion_queue=queue, runtime_state=runtime_state)
     metrics = MetricsRegistry()
-    handlers = RuntimeJobHandlers(tools.engine, queue, metrics=metrics)
+    handlers = RuntimeJobHandlers(
+        tools.engine,
+        queue,
+        metrics=metrics,
+        object_store=load_object_store(args),
+        media_extractor=load_media_extractor(args),
+    )
     worker = QueueWorker(queue, handlers.handlers(), metrics=metrics)
     job = worker.run_once(CONSOLIDATE_EVIDENCE_JOB)
     if runtime_state:
@@ -613,7 +649,13 @@ def cmd_queue_drain(args: argparse.Namespace) -> None:
     queue = runtime_state.load_queue() if runtime_state else InProcessQueue()
     tools = load_tools(args, ingestion_queue=queue, runtime_state=runtime_state)
     metrics = MetricsRegistry()
-    handlers = RuntimeJobHandlers(tools.engine, queue, metrics=metrics)
+    handlers = RuntimeJobHandlers(
+        tools.engine,
+        queue,
+        metrics=metrics,
+        object_store=load_object_store(args),
+        media_extractor=load_media_extractor(args),
+    )
     worker = QueueWorker(queue, handlers.handlers(), metrics=metrics)
     jobs = worker.drain(limit=args.limit, kind=args.kind)
     if runtime_state:
@@ -626,6 +668,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--backend", choices=["local", "postgres"], default=default_backend(), help="Storage backend")
     parser.add_argument("--store", default=str(default_store()), help="Path to local JSON store")
     parser.add_argument("--postgres-dsn", default=default_postgres_dsn(), help="PostgreSQL DSN for --backend postgres")
+    parser.add_argument("--object-store", default=default_object_store(), help="Path to local object storage for externalized payloads")
     parser.add_argument("--embedding-provider", choices=["local", "http"], default=os.environ.get("MNEMOSYNE_EMBEDDING_PROVIDER", "local"))
     parser.add_argument("--embedding-url", default=os.environ.get("MNEMOSYNE_EMBEDDING_URL"))
     parser.add_argument("--embedding-model", default=os.environ.get("MNEMOSYNE_EMBEDDING_MODEL"))
@@ -641,6 +684,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--c2pa-tool", default=os.environ.get("MNEMOSYNE_C2PA_TOOL"))
     parser.add_argument("--trusted-provenance-issuer", action="append", default=os.environ.get("MNEMOSYNE_TRUSTED_PROVENANCE_ISSUERS", "").split(",") if os.environ.get("MNEMOSYNE_TRUSTED_PROVENANCE_ISSUERS") else [])
     parser.add_argument("--provenance-timeout", type=float, default=float(os.environ.get("MNEMOSYNE_PROVENANCE_TIMEOUT", "30")))
+    parser.add_argument("--media-extractor-command", default=os.environ.get("MNEMOSYNE_MEDIA_EXTRACTOR_COMMAND"))
+    parser.add_argument("--media-extractor-timeout", type=float, default=float(os.environ.get("MNEMOSYNE_MEDIA_EXTRACTOR_TIMEOUT", "30")))
     sub = parser.add_subparsers(dest="command", required=True)
 
     capture = sub.add_parser("capture")
