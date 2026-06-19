@@ -163,6 +163,15 @@ def test_postgres_adapter_uses_sql_retrieval_backends() -> None:
     assert "FROM relations" in inspect.getsource(PostgresEngine.graph_ppr)
 
 
+def test_postgres_adapter_sets_rls_tenant_context() -> None:
+    source = inspect.getsource(PostgresEngine)
+
+    assert "set_config('mnemosyne.tenant_id'" in source
+    assert "PostgresEngine.branch requires tenant_id" in source
+    assert "PostgresEngine.merge requires tenant_id" in source
+    assert "PostgresEngine.discard requires tenant_id" in source
+
+
 def test_postgres_engine_exposes_memory_tools_runtime_surface() -> None:
     required = {
         "retrieve",

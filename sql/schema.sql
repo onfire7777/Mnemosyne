@@ -273,3 +273,151 @@ CREATE TABLE IF NOT EXISTS audit_log (
   diff JSONB NOT NULL DEFAULT '{}'::jsonb,
   at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+CREATE OR REPLACE FUNCTION mnemosyne_current_tenant()
+RETURNS UUID
+LANGUAGE sql
+STABLE
+AS $$
+  SELECT nullif(current_setting('mnemosyne.tenant_id', true), '')::uuid
+$$;
+
+ALTER TABLE branches ENABLE ROW LEVEL SECURITY;
+ALTER TABLE branches FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS branches_tenant_isolation ON branches;
+CREATE POLICY branches_tenant_isolation ON branches
+  USING (tenant_id = mnemosyne_current_tenant())
+  WITH CHECK (tenant_id = mnemosyne_current_tenant());
+
+ALTER TABLE evidence ENABLE ROW LEVEL SECURITY;
+ALTER TABLE evidence FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS evidence_tenant_isolation ON evidence;
+CREATE POLICY evidence_tenant_isolation ON evidence
+  USING (tenant_id = mnemosyne_current_tenant())
+  WITH CHECK (tenant_id = mnemosyne_current_tenant());
+
+ALTER TABLE assertions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE assertions FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS assertions_tenant_isolation ON assertions;
+CREATE POLICY assertions_tenant_isolation ON assertions
+  USING (tenant_id = mnemosyne_current_tenant())
+  WITH CHECK (tenant_id = mnemosyne_current_tenant());
+
+ALTER TABLE justifications ENABLE ROW LEVEL SECURITY;
+ALTER TABLE justifications FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS justifications_tenant_isolation ON justifications;
+CREATE POLICY justifications_tenant_isolation ON justifications
+  USING (tenant_id = mnemosyne_current_tenant())
+  WITH CHECK (tenant_id = mnemosyne_current_tenant());
+
+ALTER TABLE entities ENABLE ROW LEVEL SECURITY;
+ALTER TABLE entities FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS entities_tenant_isolation ON entities;
+CREATE POLICY entities_tenant_isolation ON entities
+  USING (tenant_id = mnemosyne_current_tenant())
+  WITH CHECK (tenant_id = mnemosyne_current_tenant());
+
+ALTER TABLE entity_aliases ENABLE ROW LEVEL SECURITY;
+ALTER TABLE entity_aliases FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS entity_aliases_tenant_isolation ON entity_aliases;
+CREATE POLICY entity_aliases_tenant_isolation ON entity_aliases
+  USING (tenant_id = mnemosyne_current_tenant())
+  WITH CHECK (tenant_id = mnemosyne_current_tenant());
+
+ALTER TABLE relations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE relations FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS relations_tenant_isolation ON relations;
+CREATE POLICY relations_tenant_isolation ON relations
+  USING (tenant_id = mnemosyne_current_tenant())
+  WITH CHECK (tenant_id = mnemosyne_current_tenant());
+
+ALTER TABLE contradictions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE contradictions FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS contradictions_tenant_isolation ON contradictions;
+CREATE POLICY contradictions_tenant_isolation ON contradictions
+  USING (tenant_id = mnemosyne_current_tenant())
+  WITH CHECK (tenant_id = mnemosyne_current_tenant());
+
+ALTER TABLE procedures ENABLE ROW LEVEL SECURITY;
+ALTER TABLE procedures FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS procedures_tenant_isolation ON procedures;
+CREATE POLICY procedures_tenant_isolation ON procedures
+  USING (tenant_id = mnemosyne_current_tenant())
+  WITH CHECK (tenant_id = mnemosyne_current_tenant());
+
+ALTER TABLE lessons ENABLE ROW LEVEL SECURITY;
+ALTER TABLE lessons FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS lessons_tenant_isolation ON lessons;
+CREATE POLICY lessons_tenant_isolation ON lessons
+  USING (tenant_id = mnemosyne_current_tenant())
+  WITH CHECK (tenant_id = mnemosyne_current_tenant());
+
+ALTER TABLE preferences ENABLE ROW LEVEL SECURITY;
+ALTER TABLE preferences FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS preferences_tenant_isolation ON preferences;
+CREATE POLICY preferences_tenant_isolation ON preferences
+  USING (tenant_id = mnemosyne_current_tenant())
+  WITH CHECK (tenant_id = mnemosyne_current_tenant());
+
+ALTER TABLE user_latent ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_latent FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS user_latent_tenant_isolation ON user_latent;
+CREATE POLICY user_latent_tenant_isolation ON user_latent
+  USING (tenant_id = mnemosyne_current_tenant())
+  WITH CHECK (tenant_id = mnemosyne_current_tenant());
+
+ALTER TABLE trajectories ENABLE ROW LEVEL SECURITY;
+ALTER TABLE trajectories FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS trajectories_tenant_isolation ON trajectories;
+CREATE POLICY trajectories_tenant_isolation ON trajectories
+  USING (tenant_id = mnemosyne_current_tenant())
+  WITH CHECK (tenant_id = mnemosyne_current_tenant());
+
+ALTER TABLE self_model ENABLE ROW LEVEL SECURITY;
+ALTER TABLE self_model FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS self_model_tenant_isolation ON self_model;
+CREATE POLICY self_model_tenant_isolation ON self_model
+  USING (tenant_id = mnemosyne_current_tenant())
+  WITH CHECK (tenant_id = mnemosyne_current_tenant());
+
+ALTER TABLE eval_cases ENABLE ROW LEVEL SECURITY;
+ALTER TABLE eval_cases FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS eval_cases_tenant_isolation ON eval_cases;
+CREATE POLICY eval_cases_tenant_isolation ON eval_cases
+  USING (tenant_id = mnemosyne_current_tenant())
+  WITH CHECK (tenant_id = mnemosyne_current_tenant());
+
+ALTER TABLE resources ENABLE ROW LEVEL SECURITY;
+ALTER TABLE resources FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS resources_tenant_isolation ON resources;
+CREATE POLICY resources_tenant_isolation ON resources
+  USING (tenant_id = mnemosyne_current_tenant())
+  WITH CHECK (tenant_id = mnemosyne_current_tenant());
+
+ALTER TABLE merges ENABLE ROW LEVEL SECURITY;
+ALTER TABLE merges FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS merges_tenant_isolation ON merges;
+CREATE POLICY merges_tenant_isolation ON merges
+  USING (tenant_id = mnemosyne_current_tenant())
+  WITH CHECK (tenant_id = mnemosyne_current_tenant());
+
+ALTER TABLE deletion_log ENABLE ROW LEVEL SECURITY;
+ALTER TABLE deletion_log FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS deletion_log_tenant_isolation ON deletion_log;
+CREATE POLICY deletion_log_tenant_isolation ON deletion_log
+  USING (tenant_id = mnemosyne_current_tenant())
+  WITH CHECK (tenant_id = mnemosyne_current_tenant());
+
+ALTER TABLE conformal_calibration ENABLE ROW LEVEL SECURITY;
+ALTER TABLE conformal_calibration FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS conformal_calibration_tenant_isolation ON conformal_calibration;
+CREATE POLICY conformal_calibration_tenant_isolation ON conformal_calibration
+  USING (tenant_id = mnemosyne_current_tenant())
+  WITH CHECK (tenant_id = mnemosyne_current_tenant());
+
+ALTER TABLE audit_log ENABLE ROW LEVEL SECURITY;
+ALTER TABLE audit_log FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS audit_log_tenant_isolation ON audit_log;
+CREATE POLICY audit_log_tenant_isolation ON audit_log
+  USING (tenant_id IS NULL OR tenant_id = mnemosyne_current_tenant())
+  WITH CHECK (tenant_id IS NULL OR tenant_id = mnemosyne_current_tenant());

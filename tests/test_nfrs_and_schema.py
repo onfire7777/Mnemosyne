@@ -110,6 +110,16 @@ def test_schema_has_single_preference_valid_to_column() -> None:
     assert len(re.findall(r"\bvalid_to\b", match.group(1))) == 1
 
 
+def test_schema_enables_tenant_row_level_security() -> None:
+    schema = Path("sql/schema.sql").read_text(encoding="utf-8")
+
+    assert "CREATE OR REPLACE FUNCTION mnemosyne_current_tenant()" in schema
+    for table in ["branches", "evidence", "assertions", "relations", "preferences", "deletion_log", "audit_log"]:
+        assert f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY;" in schema
+        assert f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY;" in schema
+        assert f"CREATE POLICY {table}_tenant_isolation ON {table}" in schema
+
+
 def test_compose_file_mounts_schema_for_postgres_parity() -> None:
     compose = Path("docker-compose.yml").read_text(encoding="utf-8")
 
