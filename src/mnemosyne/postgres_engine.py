@@ -12,6 +12,7 @@ from mnemosyne.models import Assertion, Evidence, Hit, MergeReport, Preference, 
 from mnemosyne.policy import OperatingPolicy
 from mnemosyne.privacy import ErasureMode
 from mnemosyne.retrieval import HashingEmbeddingProvider, LocalSimilarityReranker, RetrievalAdapters
+from mnemosyne.security import TrustTier, trust_weight
 from mnemosyne.text import approx_tokens, cosine, hashing_embedding, lexical_score, tokenize
 
 
@@ -195,7 +196,7 @@ class PostgresEngine:
                     cur.execute(
                         """
                         UPDATE assertions
-                        SET confidence = %s, source_evidence_cids = %s, trust_tier = GREATEST(trust_tier, %s),
+                        SET confidence = %s, source_evidence_cids = %s, trust_tier = LEAST(trust_tier, %s),
                             last_accessed = now(), access_count = access_count + 1
                         WHERE id = %s
                         """,
@@ -381,9 +382,10 @@ class PostgresEngine:
         tenant_id = filt["tenant_id"]
         db_tenant_id = _stable_uuid("tenant", tenant_id)
         branch = filt.get("branch", "main")
-        min_trust = int(filt.get("min_trust_tier", self.policy.min_trust_tier))
-        max_sensitivity = int(filt.get("max_sensitivity", self.policy.max_sensitivity))
         include_quarantined = bool(filt.get("include_quarantined", False))
+        default_max_trust = int(TrustTier.UNTRUSTED_EXTERNAL) if include_quarantined else self.policy.max_trust_tier
+        max_trust = int(filt.get("max_trust_tier", filt.get("min_trust_tier", default_max_trust)))
+        max_sensitivity = int(filt.get("max_sensitivity", self.policy.max_sensitivity))
         hits: list[Hit] = []
         with self.connect() as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
@@ -395,13 +397,13 @@ class PostgresEngine:
                       e.source_type, ts_rank_cd(to_tsvector('english', coalesce(e.content, '')), q.query) AS score
                     FROM evidence e, q
                     WHERE e.tenant_id = %s AND e.branch = %s AND e.erased = false
-                      AND e.trust_tier >= %s AND e.sensitivity <= %s
+                      AND e.trust_tier <= %s AND e.sensitivity <= %s
                       AND (%s OR NOT (e.metadata ? 'quarantine_reason'))
                       AND to_tsvector('english', coalesce(e.content, '')) @@ q.query
                     ORDER BY score DESC
                     LIMIT %s
                     """,
-                    (query, db_tenant_id, branch, min_trust, max_sensitivity, include_quarantined, k),
+                    (query, db_tenant_id, branch, max_trust, max_sensitivity, include_quarantined, k),
                 )
                 for row in cur.fetchall():
                     cid = _bytes_to_cid(row["cid"])
@@ -428,12 +430,12 @@ class PostgresEngine:
                       ts_rank_cd(coalesce(a.lexeme, to_tsvector('english', concat_ws(' ', a.subject, a.predicate, a.object))), q.query) AS score
                     FROM assertions a, q
                     WHERE a.tenant_id = %s AND a.branch = %s AND a.status IN ('active', 'contested')
-                      AND a.trust_tier >= %s AND a.sensitivity <= %s
+                      AND a.trust_tier <= %s AND a.sensitivity <= %s
                       AND coalesce(a.lexeme, to_tsvector('english', concat_ws(' ', a.subject, a.predicate, a.object))) @@ q.query
                     ORDER BY score DESC, a.confidence DESC
                     LIMIT %s
                     """,
-                    (query, db_tenant_id, branch, min_trust, max_sensitivity, k),
+                    (query, db_tenant_id, branch, max_trust, max_sensitivity, k),
                 )
                 for row in cur.fetchall():
                     text = f"{row['subject']} {row['predicate']} {row['object']}"
@@ -460,9 +462,10 @@ class PostgresEngine:
         tenant_id = filt["tenant_id"]
         db_tenant_id = _stable_uuid("tenant", tenant_id)
         branch = filt.get("branch", "main")
-        min_trust = int(filt.get("min_trust_tier", self.policy.min_trust_tier))
-        max_sensitivity = int(filt.get("max_sensitivity", self.policy.max_sensitivity))
         include_quarantined = bool(filt.get("include_quarantined", False))
+        default_max_trust = int(TrustTier.UNTRUSTED_EXTERNAL) if include_quarantined else self.policy.max_trust_tier
+        max_trust = int(filt.get("max_trust_tier", filt.get("min_trust_tier", default_max_trust)))
+        max_sensitivity = int(filt.get("max_sensitivity", self.policy.max_sensitivity))
         query_vec = self.adapters.embedding.embed(query)
         query_literal = _vector_literal(query_vec)
         hits: list[Hit] = []
@@ -476,12 +479,12 @@ class PostgresEngine:
                       1.0 - (embedding <=> %s::vector) AS score
                     FROM assertions
                     WHERE tenant_id = %s AND branch = %s AND status IN ('active', 'contested')
-                      AND trust_tier >= %s AND sensitivity <= %s
+                      AND trust_tier <= %s AND sensitivity <= %s
                       AND embedding IS NOT NULL
                     ORDER BY embedding <=> %s::vector
                     LIMIT %s
                     """,
-                    (query_literal, db_tenant_id, branch, min_trust, max_sensitivity, query_literal, k),
+                    (query_literal, db_tenant_id, branch, max_trust, max_sensitivity, query_literal, k),
                 )
                 for row in cur.fetchall():
                     score = float(row["score"] or 0.0)
@@ -512,10 +515,10 @@ class PostgresEngine:
                     SELECT cid, branch, content, trust_tier, sensitivity, source_type
                     FROM evidence
                     WHERE tenant_id = %s AND branch = %s AND erased = false
-                      AND trust_tier >= %s AND sensitivity <= %s
+                      AND trust_tier <= %s AND sensitivity <= %s
                       AND (%s OR NOT (metadata ? 'quarantine_reason'))
                     """,
-                    (db_tenant_id, branch, min_trust, max_sensitivity, include_quarantined),
+                    (db_tenant_id, branch, max_trust, max_sensitivity, include_quarantined),
                 )
                 for row in cur.fetchall():
                     text = row["content"] or ""
@@ -722,7 +725,7 @@ class PostgresEngine:
                 actor="user",
                 source_type="correction",
                 content=correction_text,
-                trust_tier=3,
+                trust_tier=0,
                 access_policy={"tenant": tenant_id},
             ),
             branch=branch,
@@ -737,7 +740,7 @@ class PostgresEngine:
                 confidence=confidence,
                 source_evidence_cids=[cid],
                 status="active",
-                trust_tier=3,
+                trust_tier=0,
                 access_policy={"tenant": tenant_id},
             ),
             branch=branch,
@@ -1046,9 +1049,10 @@ class PostgresEngine:
         tenant_id = filt["tenant_id"]
         db_tenant_id = _stable_uuid("tenant", tenant_id)
         branch = filt.get("branch", "main")
-        min_trust = int(filt.get("min_trust_tier", 1))
-        max_sensitivity = int(filt.get("max_sensitivity", 10))
         include_quarantined = bool(filt.get("include_quarantined", False))
+        default_max_trust = int(TrustTier.UNTRUSTED_EXTERNAL) if include_quarantined else self.policy.max_trust_tier
+        max_trust = int(filt.get("max_trust_tier", filt.get("min_trust_tier", default_max_trust)))
+        max_sensitivity = int(filt.get("max_sensitivity", 10))
         candidates: list[Hit] = []
         with self.connect() as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
@@ -1058,10 +1062,10 @@ class PostgresEngine:
                     SELECT cid, tenant_id, branch, content, trust_tier, sensitivity, source_type
                     FROM evidence
                     WHERE tenant_id = %s AND branch = %s AND erased = false
-                      AND trust_tier >= %s AND sensitivity <= %s
+                      AND trust_tier <= %s AND sensitivity <= %s
                       AND (%s OR NOT (metadata ? 'quarantine_reason'))
                     """,
-                    (db_tenant_id, branch, min_trust, max_sensitivity, include_quarantined),
+                    (db_tenant_id, branch, max_trust, max_sensitivity, include_quarantined),
                 )
                 for row in cur.fetchall():
                     text = row["content"] or ""
@@ -1089,9 +1093,9 @@ class PostgresEngine:
                       source_evidence_cids, trust_tier, sensitivity
                     FROM assertions
                     WHERE tenant_id = %s AND branch = %s AND status IN ('active', 'contested')
-                      AND trust_tier >= %s AND sensitivity <= %s
+                      AND trust_tier <= %s AND sensitivity <= %s
                     """,
-                    (db_tenant_id, branch, min_trust, max_sensitivity),
+                    (db_tenant_id, branch, max_trust, max_sensitivity),
                 )
                 for row in cur.fetchall():
                     text = f"{row['subject']} {row['predicate']} {row['object']}"
@@ -1209,7 +1213,7 @@ class PostgresEngine:
         weighted = 0.0
         total = 0.0
         for hit in hits:
-            trust = min(max(hit.trust_tier / 3.0, 0.0), 1.0)
+            trust = trust_weight(hit.trust_tier)
             base = float(hit.metadata.get("confidence", 0.7))
             weighted += max(hit.score, 0.01) * trust * base
             total += max(hit.score, 0.01)

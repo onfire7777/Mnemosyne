@@ -27,6 +27,7 @@ from mnemosyne.models import (
 )
 from mnemosyne.policy import OperatingPolicy
 from mnemosyne.privacy import ErasureMode
+from mnemosyne.security import TrustTier, more_trusted, trust_weight
 from mnemosyne.text import approx_tokens, cosine, hashing_embedding, lexical_score, tokenize
 
 
@@ -256,7 +257,7 @@ class LocalMemoryEngine:
                 before = winner.to_dict()
                 winner.confidence = max(winner.confidence, incoming.confidence)
                 winner.source_evidence_cids = sorted(set(winner.source_evidence_cids + incoming.source_evidence_cids))
-                winner.trust_tier = max(winner.trust_tier, incoming.trust_tier)
+                winner.trust_tier = more_trusted(winner.trust_tier, incoming.trust_tier)
                 winner.last_accessed = utc_now()
                 self._audit(winner.tenant_id, "engine", "upsert_assertion.noop_or_reinforce", winner.id, {"before": before, "after": winner.to_dict()})
                 self._persist()
@@ -512,7 +513,7 @@ class LocalMemoryEngine:
                 actor="user",
                 source_type="correction",
                 content=correction_text,
-                trust_tier=3,
+                trust_tier=0,
                 access_policy={"tenant": tenant_id},
             ),
             branch=branch,
@@ -527,7 +528,7 @@ class LocalMemoryEngine:
                 confidence=confidence,
                 source_evidence_cids=[cid],
                 status="active",
-                trust_tier=3,
+                trust_tier=0,
                 access_policy={"tenant": tenant_id},
             ),
             branch=branch,
@@ -667,14 +668,15 @@ class LocalMemoryEngine:
     def _candidate_hits(self, filt: dict[str, Any]) -> list[Hit]:
         tenant_id = filt.get("tenant_id")
         branch = filt.get("branch", "main")
-        min_trust = int(filt.get("min_trust_tier", self.policy.min_trust_tier))
-        max_sensitivity = int(filt.get("max_sensitivity", self.policy.max_sensitivity))
         include_quarantined = bool(filt.get("include_quarantined", False))
+        default_max_trust = int(TrustTier.UNTRUSTED_EXTERNAL) if include_quarantined else self.policy.max_trust_tier
+        max_trust = int(filt.get("max_trust_tier", filt.get("min_trust_tier", default_max_trust)))
+        max_sensitivity = int(filt.get("max_sensitivity", self.policy.max_sensitivity))
         hits: list[Hit] = []
         for ev in self.evidence.values():
             if ev.erased or ev.tenant_id != tenant_id or ev.branch != branch:
                 continue
-            if ev.trust_tier < min_trust or ev.sensitivity > max_sensitivity:
+            if ev.trust_tier > max_trust or ev.sensitivity > max_sensitivity:
                 continue
             if not include_quarantined and ev.metadata.get("quarantine_reason"):
                 continue
@@ -698,7 +700,7 @@ class LocalMemoryEngine:
                 continue
             if assertion.status not in {"active", "contested"}:
                 continue
-            if assertion.trust_tier < min_trust or assertion.sensitivity > max_sensitivity:
+            if assertion.trust_tier > max_trust or assertion.sensitivity > max_sensitivity:
                 continue
             hits.append(
                 Hit(
@@ -728,7 +730,7 @@ class LocalMemoryEngine:
                     score=0.0,
                     channel="candidate",
                     provenance=list(pref.source_evidence_cids),
-                    trust_tier=3 if pref.explicit else 1,
+                    trust_tier=0 if pref.explicit else 3,
                     sensitivity=0,
                     metadata={"category": pref.category, "explicit": pref.explicit},
                 )
@@ -806,7 +808,7 @@ class LocalMemoryEngine:
         weighted = 0.0
         total = 0.0
         for hit in hits:
-            trust = min(max(hit.trust_tier / 3.0, 0.0), 1.0)
+            trust = trust_weight(hit.trust_tier)
             base = float(hit.metadata.get("confidence", 0.7))
             weighted += max(hit.score, 0.01) * trust * base
             total += max(hit.score, 0.01)

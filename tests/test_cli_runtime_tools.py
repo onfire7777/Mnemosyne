@@ -118,7 +118,7 @@ def test_cli_ingests_binary_file_with_c2pa_verifier(tmp_path: Path) -> None:
         "--metadata",
         json.dumps({"description": "Binary camera capture."}),
         "--trust-tier",
-        "1",
+        "5",
         "--sensitivity",
         "2",
     )
@@ -178,7 +178,7 @@ def test_cli_forget_supports_hard_delete_erasure_mode(tmp_path: Path) -> None:
         "--content",
         "Hard-delete this CLI evidence.",
         "--trust-tier",
-        "3",
+        "0",
     )
     forgotten = run_cli(
         store,

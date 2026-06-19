@@ -16,6 +16,8 @@ Build a memory compiler for AI agents that keeps an immutable, content-addressed
 
 Mnemosyne combines lossless memory, compiled truth, truth-maintenance belief revision, git-like branches, bitemporal queries, fidelity-tiered forgetting, calibrated abstention, user-controlled correction, and shadow-first self-optimization into one portable local-to-production memory substrate.
 
+Mnemosyne is its own memory system. It is distinct from gbrain and mempalace, and those systems must not be treated as interchangeable source-of-truth implementations. Mnemosyne can learn from prior systems, but this repository is building an independent, blueprint-controlled memory compiler with its own CLI/MCP surfaces, storage contracts, trust model, and parity tests.
+
 ## Implementation Defaults
 
 | Area | Decision | Rationale |

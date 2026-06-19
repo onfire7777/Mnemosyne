@@ -36,7 +36,7 @@ class ConsolidationWorker:
         decision = self.security.authorize_write(
             operation="promote_candidate",
             role="consolidator",
-            source_trust_tier=3,
+            source_trust_tier=0,
             destructive=False,
             target_sink="memory",
         )
@@ -69,11 +69,10 @@ class ConsolidationWorker:
                     confidence=job.confidence,
                     source_evidence_cids=job.source_evidence_cids,
                     status="active",
-                    trust_tier=3,
+                    trust_tier=0,
                     access_policy={"tenant": job.tenant_id},
                 ),
                 branch=branch,
             )
 
         return self.gate.evaluate(job.tenant_id, candidate, apply)
-

@@ -8,12 +8,40 @@ from typing import Any, Literal
 
 
 class TrustTier(IntEnum):
-    UNTRUSTED = 0
-    LOW = 1
-    NORMAL = 2
-    USER_AUTHORED = 3
-    VERIFIED = 4
-    OPERATOR = 5
+    DIRECT_USER = 0
+    USER_AUTHORED = 0
+    OPERATOR = 0
+    VERIFIED = 1
+    AUTHENTICATED = 2
+    NORMAL = 3
+    LOW = 4
+    UNTRUSTED_EXTERNAL = 5
+    UNTRUSTED = 5
+
+
+def more_trusted(left: int, right: int) -> int:
+    """Return the more trusted tier on the blueprint's lower-is-better scale."""
+
+    return min(left, right)
+
+
+def less_trusted(left: int, right: int) -> int:
+    """Return the less trusted tier on the blueprint's lower-is-better scale."""
+
+    return max(left, right)
+
+
+def meets_trust(source_tier: int, required_tier: int) -> bool:
+    """True when source_tier is at least as trusted as required_tier."""
+
+    return source_tier <= required_tier
+
+
+def trust_weight(trust_tier: int) -> float:
+    """Convert blueprint trust tiers to a confidence multiplier."""
+
+    bounded = min(max(trust_tier, int(TrustTier.DIRECT_USER)), int(TrustTier.UNTRUSTED_EXTERNAL))
+    return 1.0 - (bounded / float(TrustTier.UNTRUSTED_EXTERNAL))
 
 
 WriteRole = Literal["reader", "agent", "consolidator", "operator"]
@@ -62,11 +90,11 @@ class SecurityPolicy:
         if operation in self.consolidator_only_ops and role not in {"consolidator", "operator"}:
             return CapabilityDecision(False, "operation requires consolidator write authority", "consolidator", 0, operation)
         if target_sink in {"policy", "system_prompt", "safety_rail"}:
-            if role != "operator" or source_trust_tier < self.min_policy_write_trust:
+            if role != "operator" or not meets_trust(source_trust_tier, self.min_policy_write_trust):
                 return CapabilityDecision(False, "policy and safety rails require operator authority", "operator", self.min_policy_write_trust, operation)
-        if target_sink == "preference" and source_trust_tier < self.min_preference_write_trust:
+        if target_sink == "preference" and not meets_trust(source_trust_tier, self.min_preference_write_trust):
             return CapabilityDecision(False, "preference writes require user-authored or stronger evidence", "agent", self.min_preference_write_trust, operation)
-        if destructive and (role not in {"consolidator", "operator"} or source_trust_tier < self.min_destructive_trust):
+        if destructive and (role not in {"consolidator", "operator"} or not meets_trust(source_trust_tier, self.min_destructive_trust)):
             return CapabilityDecision(False, "destructive writes require mediated high-trust authority", "consolidator", self.min_destructive_trust, operation)
         return CapabilityDecision(True, "allowed", role, source_trust_tier, operation)
 
@@ -78,4 +106,3 @@ def sanitize_retrieved_text(text: str, trust_tier: int) -> dict[str, Any]:
         "instruction_authority": "none",
         "content": text,
     }
-
