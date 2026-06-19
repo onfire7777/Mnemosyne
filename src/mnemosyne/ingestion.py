@@ -7,9 +7,12 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
+from mnemosyne.consolidation import CONSOLIDATE_EVIDENCE_JOB, DEFAULT_CONSOLIDATION_PASSES
 from mnemosyne.engine import LocalMemoryEngine
+from mnemosyne.ids import content_cid
 from mnemosyne.models import Evidence, Resource
 from mnemosyne.provenance import SignedProvenanceVerifier
+from mnemosyne.queue import InProcessQueue, QueueJob
 from mnemosyne.security import TrustTier
 from mnemosyne.storage import LocalObjectStore
 
@@ -50,6 +53,7 @@ class IngestResult:
     quarantined: bool
     provenance: dict[str, Any]
     resource: Resource | None = None
+    queued_jobs: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -65,11 +69,13 @@ class IngestionPipeline:
         engine: LocalMemoryEngine,
         object_store: LocalObjectStore | None = None,
         provenance_verifier: SignedProvenanceVerifier | None = None,
+        queue: InProcessQueue | None = None,
         inline_text_limit: int = 16_384,
     ):
         self.engine = engine
         self.object_store = object_store or LocalObjectStore(Path(".mnemosyne/objects"))
         self.provenance_verifier = provenance_verifier or SignedProvenanceVerifier()
+        self.queue = queue
         self.inline_text_limit = inline_text_limit
 
     def ingest(self, request: IngestRequest, branch: str = "main") -> IngestResult:
@@ -123,6 +129,16 @@ class IngestionPipeline:
         content = request.content or ""
         if request.data is not None and request.modality != "text":
             content = metadata.get("alt_text") or metadata.get("description") or ""
+        predicted_cid = content_cid(
+            content,
+            {
+                "tenant_id": request.tenant_id,
+                "source_type": request.source_type,
+                "content_pointer": content_pointer,
+                "modality": request.modality,
+            },
+        )
+        already_present = self._evidence_exists(request.tenant_id, predicted_cid, branch)
 
         cid = self.engine.append_evidence(
             Evidence(
@@ -143,6 +159,18 @@ class IngestionPipeline:
             ),
             branch=branch,
         )
+        queued_jobs: list[dict[str, Any]] = []
+        if self.queue and not already_present:
+            queued_jobs.append(
+                self._enqueue_consolidation(
+                    cid=cid,
+                    request=request,
+                    branch=branch,
+                    trust_tier=trust_tier,
+                    sensitivity=sensitivity,
+                    capability_tags=capability_tags,
+                ).to_dict()
+            )
         return IngestResult(
             cid=cid,
             branch=branch,
@@ -152,6 +180,44 @@ class IngestionPipeline:
             quarantined=provenance.quarantine,
             provenance=provenance.to_dict(),
             resource=resource,
+            queued_jobs=queued_jobs,
+        )
+
+    def _evidence_exists(self, tenant_id: str, cid: str, branch: str) -> bool:
+        get_evidence = getattr(self.engine, "get_evidence", None)
+        if not callable(get_evidence):
+            return False
+        existing = get_evidence(tenant_id, cid, branch)
+        return existing is not None and not bool(getattr(existing, "erased", False))
+
+    def _enqueue_consolidation(
+        self,
+        *,
+        cid: str,
+        request: IngestRequest,
+        branch: str,
+        trust_tier: int,
+        sensitivity: int,
+        capability_tags: list[str],
+    ) -> QueueJob:
+        if self.queue is None:
+            raise RuntimeError("consolidation queue is not configured")
+        return self.queue.enqueue(
+            CONSOLIDATE_EVIDENCE_JOB,
+            {
+                "tenant_id": request.tenant_id,
+                "user_id": request.user_id,
+                "branch": branch,
+                "source_evidence_cids": [cid],
+                "trigger": "ingest",
+                "passes": list(DEFAULT_CONSOLIDATION_PASSES),
+                "trust_tier": trust_tier,
+                "sensitivity": sensitivity,
+                "capability_tags": list(capability_tags),
+                "modality": request.modality,
+                "source_type": request.source_type,
+                "source_identity": request.source_identity,
+            },
         )
 
 

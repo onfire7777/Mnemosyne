@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from hashlib import sha256
 
+from mnemosyne.consolidation import CONSOLIDATE_EVIDENCE_JOB, ConsolidationWorker
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.gate import GateResult, RegressionCase
 from mnemosyne.ingestion import IngestRequest, IngestionPipeline
@@ -149,6 +150,55 @@ def test_ingestion_classifier_tags_untrusted_imperatives_and_pii(tmp_path) -> No
     assert "pii-email" in evidence.capability_tags
     assert evidence.metadata["ingest_classification"]["sanitize_as_data"] is True
     assert evidence.access_policy["data_class"] == "pii"
+
+
+def test_ingestion_enqueues_consolidation_job_once_per_new_evidence(tmp_path) -> None:
+    engine = LocalMemoryEngine()
+    queue = InProcessQueue()
+    pipeline = IngestionPipeline(engine, LocalObjectStore(tmp_path / "objects"), queue=queue)
+    request = IngestRequest(
+        tenant_id=TENANT,
+        user_id=USER,
+        actor="user",
+        source_type="chat",
+        content="The project codename is Mnemosyne.",
+    )
+
+    first = pipeline.ingest(request)
+    second = pipeline.ingest(request)
+
+    assert len(first.queued_jobs) == 1
+    assert second.queued_jobs == []
+    job = queue.jobs[first.queued_jobs[0]["id"]]
+    assert job.kind == CONSOLIDATE_EVIDENCE_JOB
+    assert job.payload["source_evidence_cids"] == [first.cid]
+    assert job.payload["passes"][0] == "replayer"
+    assert queue.snapshot()["queued"] == 1
+
+
+def test_consolidation_queue_worker_runs_ordered_passes(tmp_path) -> None:
+    engine = LocalMemoryEngine()
+    queue = InProcessQueue()
+    pipeline = IngestionPipeline(engine, LocalObjectStore(tmp_path / "objects"), queue=queue)
+    result = pipeline.ingest(
+        IngestRequest(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="chat",
+            content="Mnemosyne keeps raw evidence as first-class memory.",
+        )
+    )
+    worker = QueueWorker(queue, {CONSOLIDATE_EVIDENCE_JOB: ConsolidationWorker(engine, gate_cases=[]).run_queue_payload})
+
+    job = worker.run_once(CONSOLIDATE_EVIDENCE_JOB)
+
+    assert job is not None
+    assert job.status == "complete"
+    assert job.result["source_evidence_cids"] == [result.cid]
+    assert job.result["evidence_seen"] == 1
+    assert job.result["passes_run"][:3] == ["replayer", "extractor", "resolver"]
+    assert "candidate_extraction_not_configured" in job.result["skipped"]
 
 
 def test_externalized_binary_evidence_cid_includes_object_pointer(tmp_path) -> None:
