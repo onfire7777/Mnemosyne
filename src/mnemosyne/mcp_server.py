@@ -10,7 +10,9 @@ from pathlib import Path
 from typing import Any, TextIO
 
 from mnemosyne.engine import LocalMemoryEngine
+from mnemosyne.ingestion import IngestionPipeline
 from mnemosyne.mcp_tools import MemoryTools, TOOL_SPEC
+from mnemosyne.queue import InProcessQueue
 from mnemosyne.runtime_state import RuntimeState
 
 
@@ -27,7 +29,9 @@ class MnemosyneMcpServer:
 
     def __init__(self, store_path: str | os.PathLike[str] | None = None):
         self.engine = LocalMemoryEngine(store_path=store_path)
-        self.tools = MemoryTools(self.engine, runtime_state=RuntimeState.from_store_path(store_path))
+        self.queue = InProcessQueue()
+        ingestion = IngestionPipeline(self.engine, queue=self.queue)
+        self.tools = MemoryTools(self.engine, ingestion=ingestion, runtime_state=RuntimeState.from_store_path(store_path))
 
     def handle(self, request: dict[str, Any]) -> dict[str, Any] | None:
         method = request.get("method")

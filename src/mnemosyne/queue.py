@@ -21,12 +21,20 @@ class QueueJob:
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     last_error: str | None = None
+    result: Any | None = None
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["created_at"] = self.created_at.astimezone(UTC).isoformat()
         data["updated_at"] = self.updated_at.astimezone(UTC).isoformat()
         return data
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "QueueJob":
+        copy = dict(data)
+        copy["created_at"] = _parse_dt(copy.get("created_at"))
+        copy["updated_at"] = _parse_dt(copy.get("updated_at"))
+        return cls(**copy)
 
 
 class InProcessQueue:
@@ -76,6 +84,25 @@ class InProcessQueue:
         counts: Counter[str] = Counter(job.status for job in self.jobs.values())
         return dict(counts)
 
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "order": list(self._order),
+            "jobs": [job.to_dict() for job in self.jobs.values()],
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any] | None) -> "InProcessQueue":
+        queue = cls()
+        if not data:
+            return queue
+        queue.jobs = {job.id: job for job in (QueueJob.from_dict(row) for row in data.get("jobs", []))}
+        queue._order = deque(job_id for job_id in data.get("order", []) if job_id in queue.jobs)
+        queued_ids = {job_id for job_id in queue._order}
+        for job in queue.jobs.values():
+            if job.status in {"queued", "retry"} and job.id not in queued_ids:
+                queue._order.append(job.id)
+        return queue
+
 
 class QueueWorker:
     def __init__(self, queue: InProcessQueue, handlers: dict[str, Callable[[dict[str, Any]], Any]]):
@@ -91,9 +118,19 @@ class QueueWorker:
             self.queue.fail(job.id, f"no handler for job kind {job.kind}")
             return job
         try:
-            handler(job.payload)
+            result = handler(job.payload)
+            job.result = result.to_dict() if hasattr(result, "to_dict") else result
         except Exception as exc:  # noqa: BLE001 - worker queue must record arbitrary job errors.
             self.queue.fail(job.id, str(exc))
         else:
             self.queue.complete(job.id)
         return job
+
+
+def _parse_dt(value: str | datetime | None) -> datetime:
+    if isinstance(value, datetime):
+        return value.astimezone(UTC) if value.tzinfo else value.replace(tzinfo=UTC)
+    if not value:
+        return datetime.now(UTC)
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    return parsed.astimezone(UTC) if parsed.tzinfo else parsed.replace(tzinfo=UTC)

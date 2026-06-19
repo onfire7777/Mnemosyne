@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from mnemosyne.learning import FailureAttribution, LearningSystem, Lesson, Procedure, Trajectory
+from mnemosyne.queue import InProcessQueue
 from mnemosyne.user_model import LatentUserProfile, UserMemoryKind, UserModel, UserModelEntry
 
 
@@ -23,6 +24,7 @@ class RuntimeState:
         self.data: dict[str, Any] = {
             "user_model": {"entries": [], "latent_profiles": []},
             "learning": {"trajectories": [], "attributions": [], "lessons": [], "procedures": []},
+            "queue": {"order": [], "jobs": []},
         }
         if self.path.exists():
             self.data.update(json.loads(self.path.read_text(encoding="utf-8")))
@@ -75,4 +77,11 @@ class RuntimeState:
             "lessons": [item.to_dict() for item in learning.lessons.values()],
             "procedures": [item.to_dict() for item in learning.procedures.values()],
         }
+        self.save()
+
+    def load_queue(self) -> InProcessQueue:
+        return InProcessQueue.from_dict(self.data.get("queue"))
+
+    def save_queue(self, queue: InProcessQueue) -> None:
+        self.data["queue"] = queue.to_dict()
         self.save()

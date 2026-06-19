@@ -10,12 +10,14 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
+from mnemosyne.consolidation import CONSOLIDATE_EVIDENCE_JOB, ConsolidationWorker
 from mnemosyne.engine import LocalMemoryEngine, MemoryEngine
 from mnemosyne.eval import run_seed_suite
 from mnemosyne.ingestion import IngestRequest, IngestionPipeline
 from mnemosyne.mcp_tools import MemoryTools, TOOL_SPEC
 from mnemosyne.models import Assertion, Relation
 from mnemosyne.provenance import C2paToolVerifier, SignedProvenanceVerifier
+from mnemosyne.queue import InProcessQueue, QueueWorker
 from mnemosyne.retrieval import HashingEmbeddingProvider, HttpEmbeddingProvider, HttpReranker, LocalSimilarityReranker, RetrievalAdapters
 from mnemosyne.runtime_state import RuntimeState
 
@@ -94,11 +96,19 @@ def load_provenance_verifier(args: argparse.Namespace) -> SignedProvenanceVerifi
     return SignedProvenanceVerifier()
 
 
-def load_tools(args: argparse.Namespace) -> MemoryTools:
+def load_runtime_state(args: argparse.Namespace) -> RuntimeState | None:
+    return RuntimeState.from_store_path(Path(args.store))
+
+
+def load_tools(
+    args: argparse.Namespace,
+    ingestion_queue: InProcessQueue | None = None,
+    runtime_state: RuntimeState | None = None,
+) -> MemoryTools:
     store = Path(args.store)
     engine = load_engine(args)
-    ingestion = IngestionPipeline(engine, provenance_verifier=load_provenance_verifier(args))
-    return MemoryTools(engine, ingestion=ingestion, runtime_state=RuntimeState.from_store_path(store))
+    ingestion = IngestionPipeline(engine, provenance_verifier=load_provenance_verifier(args), queue=ingestion_queue)
+    return MemoryTools(engine, ingestion=ingestion, runtime_state=runtime_state or RuntimeState.from_store_path(store))
 
 
 def json_default(value: Any) -> Any:
@@ -145,30 +155,43 @@ def load_signed_provenance(args: argparse.Namespace) -> dict[str, Any] | None:
 
 
 def cmd_ingest(args: argparse.Namespace) -> None:
-    tools = load_tools(args)
+    runtime_state = load_runtime_state(args)
+    ingestion_queue = None if args.no_enqueue_consolidation else runtime_state.load_queue() if runtime_state else InProcessQueue()
+    tools = load_tools(args, ingestion_queue=ingestion_queue, runtime_state=runtime_state)
     data = Path(args.file).read_bytes() if args.file else None
     content = args.content
     if data is None and content is None:
         raise SystemExit("ingest requires --content or --file.")
-    emit(
-        tools.ingest(
-            tenant_id=args.tenant,
-            user_id=args.user,
-            actor=args.actor,
-            source_type=args.source_type,
-            content=content,
-            data=data,
-            branch=args.branch,
-            trust_tier=args.trust_tier,
-            source_identity=args.source_identity,
-            media_type=args.media_type,
-            modality=args.modality,
-            metadata=parse_json_arg(args.metadata, {}),
-            signed_provenance=load_signed_provenance(args),
-            capability_tags=args.capability_tag,
-            sensitivity=args.sensitivity,
-        )
+    result = tools.ingest(
+        tenant_id=args.tenant,
+        user_id=args.user,
+        actor=args.actor,
+        source_type=args.source_type,
+        content=content,
+        data=data,
+        branch=args.branch,
+        trust_tier=args.trust_tier,
+        source_identity=args.source_identity,
+        media_type=args.media_type,
+        modality=args.modality,
+        metadata=parse_json_arg(args.metadata, {}),
+        signed_provenance=load_signed_provenance(args),
+        capability_tags=args.capability_tag,
+        sensitivity=args.sensitivity,
     )
+    if args.run_consolidation_once:
+        if ingestion_queue is None:
+            raise SystemExit("--run-consolidation-once requires consolidation enqueueing.")
+        consolidator = ConsolidationWorker(tools.engine, gate_cases=[])
+        worker = QueueWorker(ingestion_queue, {CONSOLIDATE_EVIDENCE_JOB: consolidator.run_queue_payload})
+        job = worker.run_once(CONSOLIDATE_EVIDENCE_JOB)
+        result["consolidation_worker"] = {
+            "queue": ingestion_queue.snapshot(),
+            "job": job.to_dict() if job else None,
+        }
+    if runtime_state and ingestion_queue:
+        runtime_state.save_queue(ingestion_queue)
+    emit(result)
 
 
 def cmd_assert(args: argparse.Namespace) -> None:
@@ -418,6 +441,24 @@ def cmd_eval(args: argparse.Namespace) -> None:
     emit({"passed": all(item.passed for item in outcomes), "outcomes": [item.__dict__ for item in outcomes]})
 
 
+def cmd_queue_snapshot(args: argparse.Namespace) -> None:
+    runtime_state = load_runtime_state(args)
+    queue = runtime_state.load_queue() if runtime_state else InProcessQueue()
+    emit({"queue": queue.snapshot(), "jobs": [job.to_dict() for job in queue.jobs.values()]})
+
+
+def cmd_consolidate_once(args: argparse.Namespace) -> None:
+    runtime_state = load_runtime_state(args)
+    queue = runtime_state.load_queue() if runtime_state else InProcessQueue()
+    tools = load_tools(args, ingestion_queue=queue, runtime_state=runtime_state)
+    consolidator = ConsolidationWorker(tools.engine, gate_cases=[])
+    worker = QueueWorker(queue, {CONSOLIDATE_EVIDENCE_JOB: consolidator.run_queue_payload})
+    job = worker.run_once(CONSOLIDATE_EVIDENCE_JOB)
+    if runtime_state:
+        runtime_state.save_queue(queue)
+    emit({"queue": queue.snapshot(), "job": job.to_dict() if job else None})
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="mneme", description="Mnemosyne local memory compiler CLI")
     parser.add_argument("--backend", choices=["local", "postgres"], default=default_backend(), help="Storage backend")
@@ -468,6 +509,8 @@ def build_parser() -> argparse.ArgumentParser:
     ingest.add_argument("--trust-tier", type=int)
     ingest.add_argument("--capability-tag", action="append", default=[])
     ingest.add_argument("--sensitivity", type=int, default=0)
+    ingest.add_argument("--no-enqueue-consolidation", action="store_true")
+    ingest.add_argument("--run-consolidation-once", action="store_true")
     ingest.set_defaults(func=cmd_ingest)
 
     assertion = sub.add_parser("assert")
@@ -648,6 +691,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     eval_cmd = sub.add_parser("eval")
     eval_cmd.set_defaults(func=cmd_eval)
+
+    queue_snapshot = sub.add_parser("queue-snapshot")
+    queue_snapshot.set_defaults(func=cmd_queue_snapshot)
+
+    consolidate_once = sub.add_parser("consolidate-once")
+    consolidate_once.set_defaults(func=cmd_consolidate_once)
     return parser
 
 

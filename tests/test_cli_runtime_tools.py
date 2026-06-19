@@ -159,6 +159,59 @@ def test_cli_ingest_classifies_external_untrusted_content(tmp_path: Path) -> Non
     assert evidence["metadata"]["ingest_classification"]["trust_tier"] == 5
 
 
+def test_cli_ingest_can_run_one_consolidation_worker_cycle(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    ingested = run_cli(
+        store,
+        "ingest",
+        "--tenant",
+        TENANT,
+        "--user",
+        USER,
+        "--actor",
+        "user",
+        "--source-type",
+        "chat",
+        "--content",
+        "Mnemosyne compiles raw experience through queue-backed consolidation.",
+        "--run-consolidation-once",
+    )
+
+    assert ingested["queued_jobs"][0]["kind"] == "consolidate_evidence"
+    assert ingested["consolidation_worker"]["queue"]["complete"] == 1
+    job = ingested["consolidation_worker"]["job"]
+    assert job["status"] == "complete"
+    assert job["result"]["source_evidence_cids"] == [ingested["cid"]]
+    assert job["result"]["passes_run"][:3] == ["replayer", "extractor", "resolver"]
+
+
+def test_cli_persists_queue_between_ingest_and_worker_commands(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    ingested = run_cli(
+        store,
+        "ingest",
+        "--tenant",
+        TENANT,
+        "--user",
+        USER,
+        "--actor",
+        "user",
+        "--source-type",
+        "chat",
+        "--content",
+        "A later worker should process this queued evidence.",
+    )
+    queued = run_cli(store, "queue-snapshot")
+    completed = run_cli(store, "consolidate-once")
+    after = run_cli(store, "queue-snapshot")
+
+    assert queued["queue"]["queued"] == 1
+    assert queued["jobs"][0]["payload"]["source_evidence_cids"] == [ingested["cid"]]
+    assert completed["job"]["status"] == "complete"
+    assert completed["job"]["result"]["source_evidence_cids"] == [ingested["cid"]]
+    assert after["queue"]["complete"] == 1
+
+
 def test_cli_preference_write_requires_explicit_or_high_trust_source(tmp_path: Path) -> None:
     denied = run_raw_cli(
         tmp_path / "mnemosyne.json",
