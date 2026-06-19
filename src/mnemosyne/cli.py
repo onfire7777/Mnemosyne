@@ -165,6 +165,7 @@ def cmd_ingest(args: argparse.Namespace) -> None:
             modality=args.modality,
             metadata=parse_json_arg(args.metadata, {}),
             signed_provenance=load_signed_provenance(args),
+            capability_tags=args.capability_tag,
             sensitivity=args.sensitivity,
         )
     )
@@ -464,7 +465,8 @@ def build_parser() -> argparse.ArgumentParser:
     ingest.add_argument("--signed-provenance")
     ingest.add_argument("--signed-provenance-file")
     ingest.add_argument("--branch", default="main")
-    ingest.add_argument("--trust-tier", type=int, default=0)
+    ingest.add_argument("--trust-tier", type=int)
+    ingest.add_argument("--capability-tag", action="append", default=[])
     ingest.add_argument("--sensitivity", type=int, default=0)
     ingest.set_defaults(func=cmd_ingest)
 
