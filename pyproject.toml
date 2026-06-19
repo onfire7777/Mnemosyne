@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=70"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mnemosyne-memory"
+version = "0.1.0"
+description = "A local-first memory compiler for AI agents based on the Mnemosyne v2 blueprint."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Mnemosyne Contributors" }]
+keywords = ["agent-memory", "retrieval", "belief-revision", "mcp", "postgres"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "License :: OSI Approved :: Apache Software License",
+  "Operating System :: OS Independent",
+  "Topic :: Database",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence"
+]
+
+[project.scripts]
+mneme = "mnemosyne.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+pythonpath = ["src"]

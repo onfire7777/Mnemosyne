@@ -1,0 +1,133 @@
+# Roadmap: Mnemosyne Memory
+
+## Overview
+
+This roadmap follows the v2 build blueprint exactly: foundations and contracts first, lossless retrieval second, belief and graph confidence third, personalization and consolidation fourth, procedural learning fifth, and profile-guided self-optimization last. Each phase is independently useful and verified through tests or explicit gap reports.
+
+## Phases
+
+**Phase Numbering:**
+- Integer phases match the blueprint's Phase 0 through Phase 5.
+- Decimal phases are reserved for urgent insertions if verification discovers missing prerequisites.
+
+- [x] **Phase 0: Foundations and Contracts** - Evidence ledger, branches, isolation, MCP/CLI skeleton, and seed regression suite.
+- [x] **Phase 1: Lossless Memory and Hybrid Retrieval** - Bitemporal assertions, provenance, hybrid retrieval, explain, correction, export, and forget.
+- [x] **Phase 2: Belief Core, Graph, and Confidence** - Full TMS/AGM, cascade invalidation, graph adapter, conformal calibration, and multi-hypothesis surfacing.
+- [x] **Phase 3: Personalization and Consolidation** - Six-category user model, latent advisory profile, warm-loop consolidation, fidelity lifecycle, and anti-degradation guard.
+- [x] **Phase 4: Procedural and Corrective Learning** - Trajectory logging, failure attribution, lesson induction, promotion gate, branch promote/rollback, and capability-secured writes.
+- [x] **Phase 5: Profile-Guided Self-Optimization** - Shadow-first policy optimization, self-model store, canary branches, diversity tripwire, and optional parametric tier boundaries.
+
+## Phase Details
+
+### Phase 0: Foundations and Contracts
+**Goal**: Capture evidence exactly, deduplicate by content address, isolate by tenant/source/trust, expose a stable agent-facing contract, and run a seed regression suite.
+**Depends on**: Nothing
+**Requirements**: REQ-001, REQ-002, REQ-003, REQ-004, REQ-011
+**Success Criteria** (what must be TRUE):
+  1. Same evidence ingested twice creates one row keyed by CID.
+  2. Evidence can be byte-recalled by CID until explicit erasure.
+  3. Branch discard removes candidate memories without touching main.
+  4. CLI and MCP facade expose capture, search, deep_search, explain, correct, forget, export.
+  5. Seed suite runs in CI-style local command.
+**Plans**: 4 plans
+
+Plans:
+- [x] 00-01: Initialize Python package, local engine contract, models, and identifiers.
+- [x] 00-02: Implement evidence ledger, branch, merge, discard, audit, and persistence.
+- [x] 00-03: Implement MCP-compatible facade and CLI skeleton.
+- [x] 00-04: Add regression tests for dedup, byte recall, branch rollback, and seed suite.
+
+### Phase 1: Lossless Memory and Hybrid Retrieval
+**Goal**: Add bitemporal assertions, supersession, provenance, hybrid retrieval, explainability, correction, export, and transitive forget behavior.
+**Depends on**: Phase 0
+**Requirements**: REQ-005, REQ-006, REQ-007, REQ-008, REQ-009
+**Success Criteria** (what must be TRUE):
+  1. Newer contradictory assertions supersede older beliefs without destructive overwrite.
+  2. As-of queries return the belief valid at the requested time.
+  3. Retrieval fuses lexical, deterministic dense, and graph channels with provenance.
+  4. Trust filters block low-trust poisoned memories.
+  5. Forget erases evidence content and retracts or trims dependent assertions.
+**Plans**: 5 plans
+
+Plans:
+- [x] 01-01: Implement assertion model, supersession, contested basics, and as-of queries.
+- [x] 01-02: Implement lexical, dense-hash, graph, RRF, MMR, U-curve, and budgeted retrieval.
+- [x] 01-03: Implement explain output with channel attribution and invariant rails.
+- [x] 01-04: Implement correct, export, and forget with provenance propagation.
+- [x] 01-05: Add tests for retrieval, trust filters, abstention, supersession, and erasure.
+
+### Phase 2: Belief Core, Graph, and Confidence
+**Goal**: Replace baseline supersession with full TMS/AGM semantics, justification DAG cascade invalidation, temporal graph adapters, calibrated confidence, conformal abstention, and multi-hypothesis belief packets.
+**Depends on**: Phase 1
+**Requirements**: REQ-013, REQ-014, REQ-009
+**Success Criteria** (what must be TRUE):
+  1. Belief operations classify ADD, UPDATE, SUPERSEDE, and NOOP with justifications.
+  2. Cascade invalidation recomputes dependent beliefs through the justification DAG.
+  3. Contested beliefs surface alternatives with probabilities instead of a forced answer.
+  4. Temporal graph retrieval supports cached fast path and live deep path behind the engine contract.
+  5. Calibration thresholds are learned from eval cases and drive abstention decisions.
+**Plans**: 5 plans
+
+Plans:
+- [x] 02-01: Add deterministic local security, lifecycle, gate, graph, and confidence scaffolding.
+- [x] 02-02: Implement full justification DAG storage and cascade invalidation.
+- [x] 02-03: Implement calibrated confidence datasets and conformal threshold updates.
+- [x] 02-04: Add graph adapter path and PPR latency benchmark harness.
+- [x] 02-05: Add contradiction-conformance and multi-hypothesis test suite.
+
+### Phase 3: Personalization and Consolidation
+**Goal**: Implement the dual user model, warm-loop consolidation, fidelity-tiered forgetting, spaced rehearsal, and long-horizon anti-degradation guard.
+**Depends on**: Phase 2
+**Requirements**: REQ-012, REQ-015, REQ-016
+**Success Criteria** (what must be TRUE):
+  1. Six typed user-model categories include scope, confidence, validity, exceptions, and override path.
+  2. Explicit instructions outrank inferred preferences and latent profile signals.
+  3. Consolidation emits candidates through a write-authorized consolidator role.
+  4. Fidelity demotion preserves pointers and triggers abstention on sole gist support.
+  5. Long-horizon no-degradation metric prevents consolidated memory from dropping below baseline.
+**Plans**: 5 plans
+
+Plans:
+- [x] 03-01: Add explicit preference precedence and fidelity lifecycle primitives.
+- [x] 03-02: Add deterministic consolidation worker through promotion gate.
+- [x] 03-03: Implement six-category model and scope-matching context assembly.
+- [x] 03-04: Implement consolidation role pipeline and incremental recompute guard.
+- [x] 03-05: Implement spaced rehearsal and anti-degradation metrics.
+
+### Phase 4: Procedural and Corrective Learning
+**Goal**: Capture trajectories, attribute failures, induce lessons and procedures, validate candidates with protected regression and counterfactual replay, and promote or roll back branches safely.
+**Depends on**: Phase 3
+**Requirements**: REQ-017, REQ-010, REQ-011
+**Success Criteria** (what must be TRUE):
+  1. Trajectories record task, steps, outcome, reward, and memory version.
+  2. Failure attribution creates candidate lessons without direct promotion.
+  3. Promotion gate scopes regression by relevance and blocks protected-case regressions.
+  4. Counterfactual replay runs on canary branches before activation.
+  5. Capability mediation prevents untrusted data from reaching preference, policy, or destructive sinks.
+**Plans**: 5 plans
+
+Plans:
+- [x] 04-01: Add promotion gate, protected cases, rollback, and capability checks.
+- [x] 04-02: Implement trajectory store and failure-attribution checklist.
+- [x] 04-03: Implement lesson and procedure induction.
+- [x] 04-04: Implement counterfactual replay harness.
+- [x] 04-05: Add MINJA and AgentPoison protected test tier.
+
+### Phase 5: Profile-Guided Self-Optimization
+**Goal**: Learn safe policy variants for routing, activation, thresholds, cadence, and fidelity demotion in shadow mode, promote only through gates, and maintain a self-model with diversity and proxy-divergence tripwires.
+**Depends on**: Phase 4
+**Requirements**: REQ-018, REQ-011, NFR-005
+**Success Criteria** (what must be TRUE):
+  1. Policy variants are constrained to immutable rails.
+  2. Shadow-mode outcomes are logged before any active promotion.
+  3. Candidate policy improves measured outcomes without protected regressions.
+  4. Self-model records effectiveness by metric and policy version.
+  5. Diversity and proxy-vs-true divergence tripwires auto-rollback bad variants.
+**Plans**: 5 plans
+
+Plans:
+- [x] 05-01: Add shadow policy variant evaluator and invariant-rail checks.
+- [x] 05-02: Implement self-model persistence and outcome windows.
+- [x] 05-03: Implement bandit-style policy proposal.
+- [x] 05-04: Implement diversity and proxy-divergence monitoring.
+- [x] 05-05: Add canary policy promotion and rollback tests.

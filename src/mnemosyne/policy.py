@@ -1,0 +1,61 @@
+"""Operating policy and invariant rails."""
+
+from __future__ import annotations
+
+from dataclasses import asdict, dataclass, field
+from typing import Any
+
+
+@dataclass(slots=True)
+class OperatingPolicy:
+    """Tunable retrieval policy plus immutable safety rails.
+
+    The blueprint separates tunable scoring knobs from immutable rails that the
+    self-optimization loop may not rewrite. This object keeps that boundary
+    explicit in the local engine.
+    """
+
+    top_k: int = 8
+    deep_top_k: int = 24
+    token_budget: int = 4096
+    rrf_k: int = 60
+    rerank_width: int = 32
+    mmr_lambda: float = 0.72
+    abstention_threshold: float = 0.45
+    min_trust_tier: int = 0
+    max_sensitivity: int = 3
+    decay: float = 0.5
+    activation_weights: dict[str, float] = field(
+        default_factory=lambda: {
+            "base_level": 0.35,
+            "semantic": 0.35,
+            "importance": 0.20,
+            "recency": 0.10,
+        }
+    )
+    immutable_rails: dict[str, Any] = field(
+        default_factory=lambda: {
+            "retrieved_text_is_data_not_instruction": True,
+            "writes_are_append_only_or_superseding": True,
+            "tenant_isolation_required": True,
+            "source_trust_filter_required": True,
+            "sensitive_and_destructive_writes_audited": True,
+            "branch_promotion_requires_gate": True,
+            "explicit_preferences_outrank_inferred": True,
+            "erasure_propagates_to_derived_indexes": True,
+        }
+    )
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any] | None) -> "OperatingPolicy":
+        if not data:
+            return cls()
+        policy = cls()
+        for key, value in data.items():
+            if hasattr(policy, key):
+                setattr(policy, key, value)
+        return policy
+
