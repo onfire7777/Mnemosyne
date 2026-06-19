@@ -185,6 +185,7 @@ def cmd_forget(args: argparse.Namespace) -> None:
             requested_by=args.requested_by,
             role=args.role,
             source_trust_tier=args.source_trust_tier,
+            erasure_mode=args.erasure_mode,
         )
     )
 
@@ -417,6 +418,7 @@ def build_parser() -> argparse.ArgumentParser:
     forget.add_argument("--requested-by", default="user")
     forget.add_argument("--role", default="operator", choices=["reader", "agent", "consolidator", "operator"])
     forget.add_argument("--source-trust-tier", type=int, default=3)
+    forget.add_argument("--erasure-mode", default="tombstone_recompute", choices=["tombstone_recompute", "hard_delete_legal"])
     forget.set_defaults(func=cmd_forget)
 
     export = sub.add_parser("export")

@@ -195,9 +195,33 @@ def test_forget_retracts_single_source_assertions_but_keeps_independent_evidence
     assertion = next(item for item in engine.export_tenant(TENANT)["assertions"] if item["id"] == assertion_id)
 
     assert result["erased"] is True
+    assert result["erasure_mode"] == "tombstone_recompute"
     assert assertion["status"] == "active"
     assert assertion["source_evidence_cids"] == [second]
     assert engine.get_evidence(TENANT, first) is None
+
+
+def test_hard_delete_erasure_removes_evidence_row_and_logs_mode() -> None:
+    engine = LocalMemoryEngine()
+    cid = engine.append_evidence(
+        Evidence(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="legal",
+            content="Delete this legal erasure request.",
+            trust_tier=3,
+            access_policy={"tenant": TENANT},
+        )
+    )
+
+    result = engine.forget(TENANT, cid, erasure_mode="hard_delete_legal")
+    exported = engine.export_tenant(TENANT)
+
+    assert result["erased"] is True
+    assert result["erasure_mode"] == "hard_delete_legal"
+    assert all(item["cid"] != cid for item in exported["evidence"])
+    assert exported["deletion_log"][-1]["erasure_mode"] == "hard_delete_legal"
 
 
 def test_explicit_preferences_outrank_inferred_preferences() -> None:

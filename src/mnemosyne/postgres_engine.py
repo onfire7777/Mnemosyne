@@ -9,6 +9,7 @@ from uuid import NAMESPACE_URL, UUID, uuid5
 from mnemosyne.ids import content_cid
 from mnemosyne.models import Assertion, Evidence, Hit, MergeReport, Preference, Relation, RetrievalResult, dt_to_json, parse_dt, utc_now
 from mnemosyne.policy import OperatingPolicy
+from mnemosyne.privacy import ErasureMode
 from collections import defaultdict
 
 from mnemosyne.retrieval import HashingEmbeddingProvider, LocalSimilarityReranker, RetrievalAdapters
@@ -739,24 +740,42 @@ class PostgresEngine:
             branch=branch,
         )
 
-    def forget(self, tenant_id: str, cid: str, branch: str = "main", requested_by: str = "user") -> dict[str, Any]:
+    def forget(
+        self,
+        tenant_id: str,
+        cid: str,
+        branch: str = "main",
+        requested_by: str = "user",
+        erasure_mode: ErasureMode | str = ErasureMode.TOMBSTONE_RECOMPUTE,
+    ) -> dict[str, Any]:
+        mode = ErasureMode(erasure_mode)
         db_tenant_id = _stable_uuid("tenant", tenant_id)
         cid_bytes = _cid_to_bytes(cid)
         propagated: dict[str, Any] = {"retracted_assertions": [], "trimmed_assertions": []}
         with self.connect() as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
                 self._set_tenant(cur, db_tenant_id)
-                cur.execute(
-                    """
-                    UPDATE evidence
-                    SET content = '', erased = true
-                    WHERE tenant_id = %s AND branch = %s AND cid = %s
-                    RETURNING cid
-                    """,
-                    (db_tenant_id, branch, cid_bytes),
-                )
+                if mode is ErasureMode.HARD_DELETE_LEGAL:
+                    cur.execute(
+                        """
+                        DELETE FROM evidence
+                        WHERE tenant_id = %s AND branch = %s AND cid = %s
+                        RETURNING cid
+                        """,
+                        (db_tenant_id, branch, cid_bytes),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        UPDATE evidence
+                        SET content = '', erased = true
+                        WHERE tenant_id = %s AND branch = %s AND cid = %s
+                        RETURNING cid
+                        """,
+                        (db_tenant_id, branch, cid_bytes),
+                    )
                 if not cur.fetchone():
-                    return {"erased": False, "reason": "evidence_not_found", "cid": cid}
+                    return {"erased": False, "reason": "evidence_not_found", "cid": cid, "erasure_mode": mode.value}
                 cur.execute(
                     """
                     SELECT id, source_evidence_cids
@@ -784,10 +803,10 @@ class PostgresEngine:
                     INSERT INTO deletion_log(tenant_id, evidence_cid, requested_by, propagated)
                     VALUES (%s, %s, %s, %s)
                     """,
-                    (db_tenant_id, cid_bytes, requested_by, self._jsonb(propagated)),
+                    (db_tenant_id, cid_bytes, requested_by, self._jsonb({**propagated, "erasure_mode": mode.value})),
                 )
-                self._audit(cur, db_tenant_id, requested_by, "forget", cid, propagated)
-        return {"erased": True, "cid": cid, "propagated": propagated}
+                self._audit(cur, db_tenant_id, requested_by, "forget", cid, {**propagated, "erasure_mode": mode.value})
+        return {"erased": True, "cid": cid, "erasure_mode": mode.value, "propagated": propagated}
 
     def export_tenant(self, tenant_id: str) -> dict[str, Any]:
         db_tenant_id = _stable_uuid("tenant", tenant_id)

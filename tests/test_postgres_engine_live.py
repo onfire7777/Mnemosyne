@@ -170,10 +170,35 @@ def test_postgres_cli_backend_live_smoke() -> None:
     run_postgres_cli("branch", "--tenant", tenant, "--name", "cli-candidate")
     branch_search = run_postgres_cli("search", "--tenant", tenant, "--branch", "cli-candidate", "--query", "CLI backend Postgres")
     run_postgres_cli("discard", "--tenant", tenant, "--branch", "cli-candidate")
+    legal = run_postgres_cli(
+        "capture",
+        "--tenant",
+        tenant,
+        "--user",
+        user,
+        "--source-type",
+        "legal",
+        "--content",
+        "Hard-delete this live Postgres evidence.",
+        "--trust-tier",
+        "3",
+    )
+    hard_deleted = run_postgres_cli(
+        "forget",
+        "--tenant",
+        tenant,
+        "--cid",
+        legal["cid"],
+        "--erasure-mode",
+        "hard_delete_legal",
+    )
+    after_delete = run_postgres_cli("export", "--tenant", tenant)
 
     assert asserted["id"]
     assert search["explain"]["channels"]["postgres_dense"] >= 1
     assert search["explain"]["channels"]["postgres_lexical"] >= 1
     assert deep["explain"]["channels"]["postgres_graph_ppr"] >= 1
     assert branch_search["hits"]
+    assert hard_deleted["erasure_mode"] == "hard_delete_legal"
+    assert all(item["cid"] != legal["cid"] for item in after_delete["evidence"])
     assert any(item["statement"] == "Prefer CLI-first memory workflows." for item in exported["preferences"])

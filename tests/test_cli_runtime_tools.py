@@ -76,6 +76,38 @@ def test_cli_preference_write_requires_explicit_or_high_trust_source(tmp_path: P
     assert allowed["security"]["allowed"] is True
 
 
+def test_cli_forget_supports_hard_delete_erasure_mode(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    captured = run_cli(
+        store,
+        "capture",
+        "--tenant",
+        TENANT,
+        "--user",
+        USER,
+        "--source-type",
+        "legal",
+        "--content",
+        "Hard-delete this CLI evidence.",
+        "--trust-tier",
+        "3",
+    )
+    forgotten = run_cli(
+        store,
+        "forget",
+        "--tenant",
+        TENANT,
+        "--cid",
+        captured["cid"],
+        "--erasure-mode",
+        "hard_delete_legal",
+    )
+    exported = run_cli(store, "export", "--tenant", TENANT)
+
+    assert forgotten["erasure_mode"] == "hard_delete_legal"
+    assert all(item["cid"] != captured["cid"] for item in exported["evidence"])
+
+
 def test_cli_profile_graph_learning_and_parametric_flows_persist(tmp_path: Path) -> None:
     store = tmp_path / "mnemosyne.json"
 

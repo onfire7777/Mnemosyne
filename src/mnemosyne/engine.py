@@ -26,6 +26,7 @@ from mnemosyne.models import (
     utc_now,
 )
 from mnemosyne.policy import OperatingPolicy
+from mnemosyne.privacy import ErasureMode
 from mnemosyne.text import approx_tokens, cosine, hashing_embedding, lexical_score, tokenize
 
 
@@ -83,7 +84,14 @@ class MemoryEngine(Protocol):
     ) -> str:
         raise NotImplementedError
 
-    def forget(self, tenant_id: str, cid: str, branch: str = "main", requested_by: str = "user") -> dict[str, Any]:
+    def forget(
+        self,
+        tenant_id: str,
+        cid: str,
+        branch: str = "main",
+        requested_by: str = "user",
+        erasure_mode: ErasureMode | str = ErasureMode.TOMBSTONE_RECOMPUTE,
+    ) -> dict[str, Any]:
         raise NotImplementedError
 
     def export_tenant(self, tenant_id: str) -> dict[str, Any]:
@@ -525,14 +533,25 @@ class LocalMemoryEngine:
             branch=branch,
         )
 
-    def forget(self, tenant_id: str, cid: str, branch: str = "main", requested_by: str = "user") -> dict[str, Any]:
+    def forget(
+        self,
+        tenant_id: str,
+        cid: str,
+        branch: str = "main",
+        requested_by: str = "user",
+        erasure_mode: ErasureMode | str = ErasureMode.TOMBSTONE_RECOMPUTE,
+    ) -> dict[str, Any]:
+        mode = ErasureMode(erasure_mode)
         with self._lock:
             key = self._evidence_key(tenant_id, branch, cid)
             ev = self.evidence.get(key)
             if not ev:
-                return {"erased": False, "reason": "evidence_not_found", "cid": cid}
-            ev.content = ""
-            ev.erased = True
+                return {"erased": False, "reason": "evidence_not_found", "cid": cid, "erasure_mode": mode.value}
+            if mode is ErasureMode.HARD_DELETE_LEGAL:
+                self.evidence.pop(key, None)
+            else:
+                ev.content = ""
+                ev.erased = True
             propagated: dict[str, Any] = {"retracted_assertions": [], "trimmed_assertions": []}
             for assertion in self.assertions.values():
                 if assertion.tenant_id != tenant_id or assertion.branch != branch:
@@ -551,13 +570,14 @@ class LocalMemoryEngine:
                 "tenant_id": tenant_id,
                 "evidence_cid": cid,
                 "requested_by": requested_by,
+                "erasure_mode": mode.value,
                 "propagated": propagated,
                 "at": utc_now().isoformat(),
             }
             self.deletion_log.append(entry)
-            self._audit(tenant_id, requested_by, "forget", cid, propagated)
+            self._audit(tenant_id, requested_by, "forget", cid, {**propagated, "erasure_mode": mode.value})
             self._persist()
-            return {"erased": True, "cid": cid, "propagated": propagated}
+            return {"erased": True, "cid": cid, "erasure_mode": mode.value, "propagated": propagated}
 
     def export_tenant(self, tenant_id: str) -> dict[str, Any]:
         return {

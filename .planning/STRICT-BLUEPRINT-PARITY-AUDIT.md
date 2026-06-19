@@ -13,13 +13,14 @@
   - `src/mnemosyne/retrieval.py` for embedding and reranker adapter boundaries plus local semantic entropy.
   - `src/mnemosyne/storage.py`, `src/mnemosyne/provenance.py`, `src/mnemosyne/ingestion.py`, and `src/mnemosyne/queue.py` for object storage, signed-provenance decisions, multimodal ingestion, and local queue semantics.
   - `src/mnemosyne/prefetch.py` and `src/mnemosyne/parametric.py` for FR-18 and FR-21 local boundaries.
-- Verification currently passes with `.venv/bin/python -m compileall -q src tests` and `.venv/bin/python -m pytest -q` returning 65 passing tests plus 2 skipped live-DB tests.
-- Fresh-schema Docker/Postgres verification passes with `MNEMOSYNE_POSTGRES_DSN=postgresql://... .venv/bin/python -m pytest -q tests/test_postgres_engine_live.py` returning 2 passing tests against the compose database and verifying tenant RLS, SQL FTS, pgvector assertion search, dense evidence fallback, recursive graph/PPR, branch/discard, forget, export, and CLI `--backend postgres`.
+- Verification currently passes with `.venv/bin/python -m compileall -q src tests` and `.venv/bin/python -m pytest -q` returning 67 passing tests plus 2 skipped live-DB tests.
+- Fresh-schema Docker/Postgres verification passes with `MNEMOSYNE_POSTGRES_DSN=postgresql://... .venv/bin/python -m pytest -q tests/test_postgres_engine_live.py` returning 2 passing tests against the compose database and verifying tenant RLS, SQL FTS, pgvector assertion search, dense evidence fallback, recursive graph/PPR, branch/discard, tombstone and hard-delete forget modes, export, and CLI `--backend postgres`.
 - Code-review blockers partially remediated after `REVIEW.md`: local graph tenant/branch leak fixed, MCP tool-result envelope added, Postgres public string-ID mapping added, Postgres high-level runtime methods added, and Postgres evidence conflict handling now restores durable fields.
 - CLI-first runtime tool coverage added for profile context, graph neighbors, prefetch, trajectory logging, failure attribution, lesson induction/promotion, procedure induction/validation, and parametric proposal/evaluation. MCP dispatch mirrors the same operations.
 - CLI backend selection added with `--backend local|postgres`, `--postgres-dsn`, and `MNEMOSYNE_POSTGRES_DSN`; the live smoke verifies capture/assert/relation/preference/search/deep-search/export/branch/discard through the Postgres CLI path.
 - Fail-closed capability enforcement added in `MemoryTools` for preference writes, hard-instruction profile writes, and destructive forget operations. CLI and facade tests verify denied low-trust writes and allowed explicit/operator writes.
 - Tenant RLS added to `sql/schema.sql` for tenant-owned tables. `PostgresEngine` sets `mnemosyne.tenant_id` before tenant-scoped SQL and requires tenant-scoped branch/merge/discard operations.
+- Explicit erasure modes added to local/Postgres forget paths and CLI: `tombstone_recompute` preserves the audit/deletion path while clearing evidence, and `hard_delete_legal` removes the evidence row while propagating derived assertion retraction/trimming.
 
 ## Remaining Exact-Parity Gaps
 
@@ -31,7 +32,7 @@
 | Consolidation role pipeline | Partial | Add queue-backed idle/server worker orchestration, extraction/summarization roles, entity resolution, incremental recompute, and protected-suite gate persistence. |
 | Signed provenance | Partial | Replace deterministic digest verifier with real C2PA verifier integration and trust-policy mapping. |
 | Multimodal retrieval | Partial | Add image/audio embedding/extraction and retrieval over externalized object payloads. |
-| Privacy and erasure | Partial | Implement legal hard-delete/crypto-shred policy, derived-index recompute, data residency enforcement, and live erasure integration tests. |
+| Privacy and erasure | Partial | Tombstone recompute and legal hard-delete modes now exist locally and in Postgres with live CLI coverage. Remaining work: crypto-shred/key-management policy, broader derived-index recompute, and data residency enforcement. |
 | Observability dashboards | Partial | Export metrics for dashboards and add deployment smoke checks for retrieval channels, calibration, promotion/rollback, contradiction backlog, and diversity/proxy tripwires. |
 | Parametric tier | Partial | Implement isolated LoRA/test-time-training artifact handling or a production-backed equivalent with shadow evaluation and rollback. |
 | Live parity suite | Partial | Engine and CLI live Postgres smokes now pass in Docker; expand to the full shared contract suite with optional production adapters enabled. |
