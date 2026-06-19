@@ -8,6 +8,7 @@ from enum import Enum
 from typing import Any
 
 from mnemosyne.ids import new_id
+from mnemosyne.models import parse_dt
 
 
 class UserMemoryKind(str, Enum):
@@ -54,6 +55,14 @@ class UserModelEntry:
         data["valid_to"] = self.valid_to.astimezone(UTC).isoformat() if self.valid_to else None
         return data
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "UserModelEntry":
+        copy = dict(data)
+        copy["kind"] = UserMemoryKind(copy["kind"])
+        copy["valid_from"] = parse_dt(copy.get("valid_from")) or datetime.now(UTC)
+        copy["valid_to"] = parse_dt(copy.get("valid_to"))
+        return cls(**copy)
+
 
 @dataclass(slots=True)
 class LatentUserProfile:
@@ -71,6 +80,12 @@ class LatentUserProfile:
             "summary": self.summary,
             "updated_at": self.updated_at.astimezone(UTC).isoformat(),
         }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "LatentUserProfile":
+        copy = dict(data)
+        copy["updated_at"] = parse_dt(copy.get("updated_at")) or datetime.now(UTC)
+        return cls(**copy)
 
 
 class UserModel:
@@ -130,4 +145,3 @@ class UserModel:
     @staticmethod
     def _conflicts(left: str, right: str) -> bool:
         return left.strip().lower() != right.strip().lower()
-

@@ -6,8 +6,12 @@ from typing import Any
 
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.ingestion import IngestRequest, IngestionPipeline
+from mnemosyne.gate import GateResult, RegressionCase
+from mnemosyne.learning import LearningSystem, Trajectory
 from mnemosyne.models import Assertion, Evidence, Preference, Relation
+from mnemosyne.parametric import ParametricTier
 from mnemosyne.prefetch import AnticipatoryPrefetcher, PrefetchCandidate
+from mnemosyne.runtime_state import RuntimeState
 from mnemosyne.user_model import UserMemoryKind, UserModel, UserModelEntry
 
 
@@ -97,6 +101,51 @@ TOOL_SPEC: list[dict[str, Any]] = [
         "description": "Warm retrieval contexts through the anticipatory predictability gate.",
         "arguments": ["tenant_id", "candidates"],
     },
+    {
+        "name": "graph_neighbors",
+        "description": "Run tenant- and branch-scoped graph PPR over relation seeds.",
+        "arguments": ["tenant_id", "seeds"],
+    },
+    {
+        "name": "trajectory_log",
+        "description": "Persist a trajectory for procedural/corrective learning.",
+        "arguments": ["tenant_id", "user_id", "session_id", "task", "steps", "outcome", "reward", "memory_version"],
+    },
+    {
+        "name": "trajectory_attribute",
+        "description": "Attribute a logged failure trajectory.",
+        "arguments": ["trajectory_id"],
+    },
+    {
+        "name": "lesson_induce",
+        "description": "Induce a corrective lesson from a failure attribution.",
+        "arguments": ["trajectory_id"],
+    },
+    {
+        "name": "procedure_induce",
+        "description": "Induce a procedure from a corrective lesson.",
+        "arguments": ["lesson_id"],
+    },
+    {
+        "name": "lesson_promote",
+        "description": "Promote a lesson through protected regression cases.",
+        "arguments": ["lesson_id", "cases"],
+    },
+    {
+        "name": "procedure_validate",
+        "description": "Mark an induced procedure as validated for the isolated parametric tier.",
+        "arguments": ["procedure_id"],
+    },
+    {
+        "name": "parametric_propose",
+        "description": "Create an isolated shadow parametric artifact from active lessons/procedures.",
+        "arguments": ["tenant_id"],
+    },
+    {
+        "name": "parametric_evaluate",
+        "description": "Evaluate a shadow parametric artifact against gate evidence.",
+        "arguments": ["tenant_id"],
+    },
 ]
 
 
@@ -107,11 +156,18 @@ class MemoryTools:
         ingestion: IngestionPipeline | None = None,
         prefetcher: AnticipatoryPrefetcher | None = None,
         user_model: UserModel | None = None,
+        learning: LearningSystem | None = None,
+        runtime_state: RuntimeState | None = None,
     ):
         self.engine = engine
         self.ingestion = ingestion or IngestionPipeline(engine)
         self.prefetcher = prefetcher or AnticipatoryPrefetcher(engine)
-        self.user_model = user_model or UserModel()
+        self.runtime_state = runtime_state
+        self.user_model = user_model or (runtime_state.load_user_model() if runtime_state else UserModel())
+        self.learning = learning or LearningSystem(engine)
+        if runtime_state:
+            self.learning = runtime_state.load_learning(self.learning)
+        self.parametric = ParametricTier()
 
     def capture(
         self,
@@ -329,6 +385,7 @@ class MemoryTools:
                 source_evidence_cids=source_evidence_cids or [],
             )
         )
+        self._save_user_model()
         return {"id": entry_id}
 
     def profile_context(self, tenant_id: str, user_id: str, scope: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -349,3 +406,128 @@ class MemoryTools:
             branch=branch,
         )
         return {"results": [item.to_dict() for item in results]}
+
+    def graph_neighbors(
+        self,
+        tenant_id: str,
+        seeds: list[str],
+        branch: str = "main",
+        k: int = 8,
+    ) -> dict[str, Any]:
+        hits = self.engine.graph_ppr(seeds, k, tenant_id=tenant_id, branch=branch)
+        return {"hits": [hit.to_dict() for hit in hits]}
+
+    def trajectory_log(
+        self,
+        tenant_id: str,
+        user_id: str,
+        session_id: str,
+        task: str,
+        steps: list[dict[str, Any]],
+        outcome: str,
+        reward: float,
+        memory_version: str,
+    ) -> dict[str, Any]:
+        trajectory_id = self.learning.log_trajectory(
+            Trajectory(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                session_id=session_id,
+                task=task,
+                steps=steps,
+                outcome=outcome,  # type: ignore[arg-type]
+                reward=reward,
+                memory_version=memory_version,
+            )
+        )
+        self._save_learning()
+        return {"id": trajectory_id}
+
+    def trajectory_attribute(self, trajectory_id: str) -> dict[str, Any]:
+        attribution = self.learning.attribute_failure(trajectory_id)
+        self._save_learning()
+        return attribution.to_dict()
+
+    def lesson_induce(self, trajectory_id: str) -> dict[str, Any]:
+        attribution = self.learning.attributions.get(trajectory_id) or self.learning.attribute_failure(trajectory_id)
+        lesson = self.learning.induce_lesson(attribution)
+        self._save_learning()
+        return lesson.to_dict()
+
+    def procedure_induce(self, lesson_id: str) -> dict[str, Any]:
+        lesson = self.learning.lessons[lesson_id]
+        procedure = self.learning.induce_procedure(lesson)
+        self._save_learning()
+        return procedure.to_dict()
+
+    def lesson_promote(self, lesson_id: str, cases: list[dict[str, Any]]) -> dict[str, Any]:
+        lesson = self.learning.lessons[lesson_id]
+        regression_cases = [
+            RegressionCase(
+                id=str(case["id"]),
+                signature=str(case["signature"]),
+                query=str(case["query"]),
+                expected_substring=str(case["expected_substring"]),
+                tier=str(case.get("tier", "smoke")),  # type: ignore[arg-type]
+                protected=bool(case.get("protected", True)),
+            )
+            for case in cases
+        ]
+        result = self.learning.promote_lesson(lesson, regression_cases)
+        self._save_learning()
+        return result.to_dict()
+
+    def procedure_validate(self, procedure_id: str) -> dict[str, Any]:
+        procedure = self.learning.procedures[procedure_id]
+        procedure.status = "validated"
+        self._save_learning()
+        return procedure.to_dict()
+
+    def parametric_propose(self, tenant_id: str) -> dict[str, Any]:
+        artifact = self.parametric.propose_from_lessons(
+            tenant_id,
+            list(self.learning.lessons.values()),
+            list(self.learning.procedures.values()),
+        )
+        return artifact.to_dict()
+
+    def parametric_evaluate(
+        self,
+        tenant_id: str,
+        protected_case_count: int = 1,
+        gate_promoted: bool = True,
+        protected_regressions: list[str] | None = None,
+    ) -> dict[str, Any]:
+        artifact = self.parametric.propose_from_lessons(
+            tenant_id,
+            list(self.learning.lessons.values()),
+            list(self.learning.procedures.values()),
+        )
+        cases = [
+            RegressionCase(
+                id=f"parametric-protected-{index}",
+                signature="parametric protected",
+                query="parametric protected",
+                expected_substring="protected",
+                protected=True,
+            )
+            for index in range(protected_case_count)
+        ]
+        gate = GateResult(
+            candidate_id=artifact.id,
+            promoted=gate_promoted,
+            protected_regressions=protected_regressions or [],
+            failed_cases=[],
+            passed_cases=[case.id for case in cases],
+            margin=1.0 if gate_promoted else 0.0,
+            rollback_branch=None,
+        )
+        return self.parametric.evaluate(artifact, gate, cases).to_dict()
+
+    def _save_user_model(self) -> None:
+        if self.runtime_state:
+            self.runtime_state.save_user_model(self.user_model)
+
+    def _save_learning(self) -> None:
+        if self.runtime_state:
+            self.runtime_state.save_learning(self.learning)

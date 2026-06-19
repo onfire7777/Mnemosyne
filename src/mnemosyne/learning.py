@@ -9,7 +9,7 @@ from typing import Any, Literal
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.gate import Candidate, GateResult, PromotionGate, RegressionCase
 from mnemosyne.ids import new_id
-from mnemosyne.models import Assertion
+from mnemosyne.models import Assertion, parse_dt
 
 
 @dataclass(slots=True)
@@ -30,6 +30,12 @@ class Trajectory:
         data["created_at"] = self.created_at.astimezone(UTC).isoformat()
         return data
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "Trajectory":
+        copy = dict(data)
+        copy["created_at"] = parse_dt(copy.get("created_at")) or datetime.now(UTC)
+        return cls(**copy)
+
 
 @dataclass(slots=True)
 class FailureAttribution:
@@ -41,6 +47,10 @@ class FailureAttribution:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "FailureAttribution":
+        return cls(**dict(data))
 
 
 @dataclass(slots=True)
@@ -55,6 +65,10 @@ class Lesson:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "Lesson":
+        return cls(**dict(data))
 
 
 @dataclass(slots=True)
@@ -71,6 +85,10 @@ class Procedure:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "Procedure":
+        return cls(**dict(data))
 
 
 class LearningSystem:
@@ -162,4 +180,3 @@ def counterfactual_replay_score(before_successes: int, after_successes: int, tot
     if total_cases <= 0:
         return 0.0
     return (after_successes - before_successes) / total_cases
-

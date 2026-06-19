@@ -12,7 +12,7 @@ See: .planning/PROJECT.md (updated 2026-06-19)
 Phase: Strict parity continuation after Phase 5 scaffold
 Plan: Exact blueprint parity audit and runtime gap closure
 Status: In progress; exact 1:1 blueprint parity is not complete.
-Last activity: 2026-06-19 — Added MCP runtime shim, Postgres adapter skeleton, retrieval adapters, object storage, signed-provenance decisions, multimodal ingestion, local queue, anticipatory prefetch, and parametric-tier boundaries. Remediated local graph tenant leak, MCP tool-result envelope, Postgres string-ID mapping, Postgres runtime facade gaps, and added a live Docker/Postgres adapter smoke. Strict audit remains open for exact production parity.
+Last activity: 2026-06-19 — Added CLI-first runtime coverage for profile, graph, prefetch, trajectory, lesson, procedure, and parametric flows with MCP mirror methods. The test suite now has 55 passing tests and 1 skipped live-DB test. Strict audit remains open for exact production parity.
 
 Progress: [███████░░░] local scaffold verified; production parity gaps remain
 
@@ -52,7 +52,7 @@ Progress: [███████░░░] local scaffold verified; production p
 
 ### Pending Todos
 
-- Finish exact blueprint parity, starting with expanding the live PostgresEngine smoke into a full shared contract suite and adding full MCP/CLI tool coverage for graph, trajectory, lesson, procedure, and parametric operations.
+- Finish exact blueprint parity, starting with expanding the live PostgresEngine smoke into a full shared contract suite, hardening CLI/MCP schemas, and adding official MCP SDK/server integration tests.
 - Replace Postgres fallback retrieval with real pgvector, FTS/BM25, graph, and reranker paths.
 - Add production auth/RLS, tenant-scoped branch APIs, C2PA verifier integration, multimodal extraction, and deployment observability.
 

@@ -11,6 +11,7 @@ from typing import Any, TextIO
 
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.mcp_tools import MemoryTools, TOOL_SPEC
+from mnemosyne.runtime_state import RuntimeState
 
 
 PROTOCOL_VERSION = "2024-11-05"
@@ -26,7 +27,7 @@ class MnemosyneMcpServer:
 
     def __init__(self, store_path: str | os.PathLike[str] | None = None):
         self.engine = LocalMemoryEngine(store_path=store_path)
-        self.tools = MemoryTools(self.engine)
+        self.tools = MemoryTools(self.engine, runtime_state=RuntimeState.from_store_path(store_path))
 
     def handle(self, request: dict[str, Any]) -> dict[str, Any] | None:
         method = request.get("method")
@@ -89,6 +90,24 @@ class MnemosyneMcpServer:
             return self.tools.profile_context(**arguments)
         if name == "prefetch":
             return self.tools.prefetch(**arguments)
+        if name == "graph_neighbors":
+            return self.tools.graph_neighbors(**arguments)
+        if name == "trajectory_log":
+            return self.tools.trajectory_log(**arguments)
+        if name == "trajectory_attribute":
+            return self.tools.trajectory_attribute(**arguments)
+        if name == "lesson_induce":
+            return self.tools.lesson_induce(**arguments)
+        if name == "procedure_induce":
+            return self.tools.procedure_induce(**arguments)
+        if name == "lesson_promote":
+            return self.tools.lesson_promote(**arguments)
+        if name == "procedure_validate":
+            return self.tools.procedure_validate(**arguments)
+        if name == "parametric_propose":
+            return self.tools.parametric_propose(**arguments)
+        if name == "parametric_evaluate":
+            return self.tools.parametric_evaluate(**arguments)
         raise ValueError(f"Unknown tool: {name}")
 
     def serve(self, stdin: TextIO = sys.stdin, stdout: TextIO = sys.stdout) -> None:

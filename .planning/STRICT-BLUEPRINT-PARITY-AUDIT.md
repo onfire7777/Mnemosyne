@@ -13,9 +13,10 @@
   - `src/mnemosyne/retrieval.py` for embedding and reranker adapter boundaries plus local semantic entropy.
   - `src/mnemosyne/storage.py`, `src/mnemosyne/provenance.py`, `src/mnemosyne/ingestion.py`, and `src/mnemosyne/queue.py` for object storage, signed-provenance decisions, multimodal ingestion, and local queue semantics.
   - `src/mnemosyne/prefetch.py` and `src/mnemosyne/parametric.py` for FR-18 and FR-21 local boundaries.
-- Verification currently passes with `.venv/bin/python -m compileall -q src tests` and `.venv/bin/python -m pytest -q` returning 54 passing tests plus 1 skipped live-DB test.
+- Verification currently passes with `.venv/bin/python -m compileall -q src tests` and `.venv/bin/python -m pytest -q` returning 55 passing tests plus 1 skipped live-DB test.
 - Live Docker/Postgres verification passes with `MNEMOSYNE_POSTGRES_DSN=postgresql://... .venv/bin/python -m pytest -q tests/test_postgres_engine_live.py` returning 1 passing test against the compose database.
 - Code-review blockers partially remediated after `REVIEW.md`: local graph tenant/branch leak fixed, MCP tool-result envelope added, Postgres public string-ID mapping added, Postgres high-level runtime methods added, and Postgres evidence conflict handling now restores durable fields.
+- CLI-first runtime tool coverage added for profile context, graph neighbors, prefetch, trajectory logging, failure attribution, lesson induction/promotion, procedure induction/validation, and parametric proposal/evaluation. MCP dispatch mirrors the same operations.
 
 ## Remaining Exact-Parity Gaps
 
@@ -23,7 +24,7 @@
 |---|---|---|
 | Production Postgres retrieval | Partial | Wire real pgvector embeddings, Postgres FTS/ParadeDB BM25, AGE/recursive graph retrieval, cross-encoder rerank, and live DB-backed parity tests. |
 | Tenant isolation and auth | Partial | Add MCP/API auth, tenant-scoped branch APIs, RLS or equivalent enforcement, and capability checks on every write path. |
-| Official MCP compatibility | Partial | Replace the minimal stdio shim with fully typed MCP SDK/server compliance, richer tool schemas, server-backed stateless mode, and integration tests against an MCP client. |
+| CLI/MCP runtime coverage | Partial | CLI-first coverage now exists for profile, graph, trajectory, lesson, procedure, prefetch, and parametric flows; remaining work is official MCP SDK/server compliance, richer schemas, and server-backed stateless mode. |
 | Consolidation role pipeline | Partial | Add queue-backed idle/server worker orchestration, extraction/summarization roles, entity resolution, incremental recompute, and protected-suite gate persistence. |
 | Signed provenance | Partial | Replace deterministic digest verifier with real C2PA verifier integration and trust-policy mapping. |
 | Multimodal retrieval | Partial | Add image/audio embedding/extraction and retrieval over externalized object payloads. |
@@ -40,5 +41,5 @@ The earlier `.planning/v1.0-MILESTONE-AUDIT.md` remains useful as evidence that 
 
 1. Expand the live Docker/Postgres smoke into a full shared contract suite.
 2. Replace Postgres fallback retrieval with real SQL vector/lexical paths and explicit graph adapter hooks.
-3. Complete MCP/CLI coverage for graph, trajectory, lesson, procedure, and parametric operations.
+3. Harden CLI/MCP schemas and add official MCP SDK/server integration tests.
 4. Add auth/RLS and tenant-scoped branch enforcement before making any production multi-tenant claim.

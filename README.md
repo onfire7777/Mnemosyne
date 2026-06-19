@@ -24,6 +24,7 @@ The v2 blueprint controls implementation. The earlier design is lineage only unl
 - `src/mnemosyne/queue.py` — in-process queue with queued/running/retry/complete/dead lifecycle.
 - `src/mnemosyne/prefetch.py` — anticipatory prefetch with predictability gate.
 - `src/mnemosyne/parametric.py` — isolated parametric-tier artifact promotion boundary.
+- `src/mnemosyne/runtime_state.py` — JSON-backed local runtime state for CLI/MCP user-profile and learning-loop objects.
 - `src/mnemosyne/security.py` — trust tiers, capability mediation, and data-never-instruction sanitization.
 - `src/mnemosyne/lifecycle.py` — fidelity demotion and gist-risk abstention hooks.
 - `src/mnemosyne/gate.py` — promotion gate with protected regression cases and branch rollback.
@@ -54,7 +55,7 @@ python -m mnemosyne.cli search --tenant tenant-a --query "preferred database"
 
 The repository has a verified local scaffold plus runtime parity extensions. Current checks:
 
-- `.venv/bin/python -m pytest -q` returns 54 passing tests and 1 skipped live-DB test.
+- `.venv/bin/python -m pytest -q` returns 55 passing tests and 1 skipped live-DB test.
 - With Docker compose Postgres running, `MNEMOSYNE_POSTGRES_DSN=postgresql://... .venv/bin/python -m pytest -q tests/test_postgres_engine_live.py` returns 1 passing live adapter test.
 
 Exact 1:1 blueprint parity is still in progress. The controlling status artifact is `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md`.

@@ -12,6 +12,7 @@ from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.eval import run_seed_suite
 from mnemosyne.mcp_tools import MemoryTools, TOOL_SPEC
 from mnemosyne.models import Assertion, Evidence, Preference, Relation
+from mnemosyne.runtime_state import RuntimeState
 
 
 def default_store() -> Path:
@@ -22,12 +23,17 @@ def load_engine(args: argparse.Namespace) -> LocalMemoryEngine:
     return LocalMemoryEngine(store_path=Path(args.store))
 
 
+def load_tools(args: argparse.Namespace) -> MemoryTools:
+    store = Path(args.store)
+    return MemoryTools(load_engine(args), runtime_state=RuntimeState.from_store_path(store))
+
+
 def emit(value: Any) -> None:
     print(json.dumps(value, indent=2, sort_keys=True))
 
 
 def cmd_capture(args: argparse.Namespace) -> None:
-    tools = MemoryTools(load_engine(args))
+    tools = load_tools(args)
     emit(
         tools.capture(
             tenant_id=args.tenant,
@@ -96,7 +102,7 @@ def cmd_preference(args: argparse.Namespace) -> None:
 
 
 def cmd_search(args: argparse.Namespace) -> None:
-    tools = MemoryTools(load_engine(args))
+    tools = load_tools(args)
     emit(
         tools.search(
             tenant_id=args.tenant,
@@ -109,17 +115,17 @@ def cmd_search(args: argparse.Namespace) -> None:
 
 
 def cmd_deep_search(args: argparse.Namespace) -> None:
-    tools = MemoryTools(load_engine(args))
+    tools = load_tools(args)
     emit(tools.deep_search(tenant_id=args.tenant, query=args.query, branch=args.branch))
 
 
 def cmd_explain(args: argparse.Namespace) -> None:
-    tools = MemoryTools(load_engine(args))
+    tools = load_tools(args)
     emit(tools.explain(tenant_id=args.tenant, query=args.query, branch=args.branch))
 
 
 def cmd_correct(args: argparse.Namespace) -> None:
-    tools = MemoryTools(load_engine(args))
+    tools = load_tools(args)
     emit(
         tools.correct(
             tenant_id=args.tenant,
@@ -135,13 +141,108 @@ def cmd_correct(args: argparse.Namespace) -> None:
 
 
 def cmd_forget(args: argparse.Namespace) -> None:
-    tools = MemoryTools(load_engine(args))
+    tools = load_tools(args)
     emit(tools.forget(tenant_id=args.tenant, cid=args.cid, branch=args.branch, requested_by=args.requested_by))
 
 
 def cmd_export(args: argparse.Namespace) -> None:
-    tools = MemoryTools(load_engine(args))
+    tools = load_tools(args)
     emit(tools.export(args.tenant))
+
+
+def parse_json_arg(value: str, default: Any) -> Any:
+    if not value:
+        return default
+    return json.loads(value)
+
+
+def cmd_profile_add(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(
+        tools.profile_add(
+            tenant_id=args.tenant,
+            user_id=args.user,
+            kind=args.kind,
+            statement=args.statement,
+            scope=parse_json_arg(args.scope, {}),
+            confidence=args.confidence,
+            exceptions=parse_json_arg(args.exceptions, {}),
+            source_evidence_cids=args.evidence_cid,
+        )
+    )
+
+
+def cmd_profile_context(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(tools.profile_context(args.tenant, args.user, scope=parse_json_arg(args.scope, {})))
+
+
+def cmd_graph_neighbors(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(tools.graph_neighbors(args.tenant, args.seed, branch=args.branch, k=args.k))
+
+
+def cmd_prefetch(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(tools.prefetch(args.tenant, candidates=parse_json_arg(args.candidates, []), branch=args.branch))
+
+
+def cmd_trajectory_log(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(
+        tools.trajectory_log(
+            tenant_id=args.tenant,
+            user_id=args.user,
+            session_id=args.session,
+            task=args.task,
+            steps=parse_json_arg(args.steps, []),
+            outcome=args.outcome,
+            reward=args.reward,
+            memory_version=args.memory_version,
+        )
+    )
+
+
+def cmd_trajectory_attribute(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(tools.trajectory_attribute(args.trajectory_id))
+
+
+def cmd_lesson_induce(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(tools.lesson_induce(args.trajectory_id))
+
+
+def cmd_procedure_induce(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(tools.procedure_induce(args.lesson_id))
+
+
+def cmd_lesson_promote(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(tools.lesson_promote(args.lesson_id, cases=parse_json_arg(args.cases, [])))
+
+
+def cmd_procedure_validate(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(tools.procedure_validate(args.procedure_id))
+
+
+def cmd_parametric_propose(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(tools.parametric_propose(args.tenant))
+
+
+def cmd_parametric_evaluate(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(
+        tools.parametric_evaluate(
+            args.tenant,
+            protected_case_count=args.protected_case_count,
+            gate_promoted=not args.gate_failed,
+            protected_regressions=args.protected_regression,
+        )
+    )
 
 
 def cmd_branch(args: argparse.Namespace) -> None:
@@ -275,6 +376,79 @@ def build_parser() -> argparse.ArgumentParser:
     discard.add_argument("--branch", required=True)
     discard.set_defaults(func=cmd_discard)
 
+    profile_add = sub.add_parser("profile-add")
+    profile_add.add_argument("--tenant", required=True)
+    profile_add.add_argument("--user", required=True)
+    profile_add.add_argument("--kind", required=True, choices=["identity", "hard_instruction", "explicit_preference", "inferred_preference", "situational_preference", "temporary_state"])
+    profile_add.add_argument("--statement", required=True)
+    profile_add.add_argument("--scope", default="{}")
+    profile_add.add_argument("--exceptions", default="{}")
+    profile_add.add_argument("--confidence", type=float, default=0.7)
+    profile_add.add_argument("--evidence-cid", action="append", default=[])
+    profile_add.set_defaults(func=cmd_profile_add)
+
+    profile_context = sub.add_parser("profile-context")
+    profile_context.add_argument("--tenant", required=True)
+    profile_context.add_argument("--user", required=True)
+    profile_context.add_argument("--scope", default="{}")
+    profile_context.set_defaults(func=cmd_profile_context)
+
+    graph_neighbors = sub.add_parser("graph-neighbors")
+    graph_neighbors.add_argument("--tenant", required=True)
+    graph_neighbors.add_argument("--seed", action="append", required=True)
+    graph_neighbors.add_argument("--branch", default="main")
+    graph_neighbors.add_argument("-k", type=int, default=8)
+    graph_neighbors.set_defaults(func=cmd_graph_neighbors)
+
+    prefetch = sub.add_parser("prefetch")
+    prefetch.add_argument("--tenant", required=True)
+    prefetch.add_argument("--candidates", required=True, help="JSON array of {query, probability, reason, metadata?}")
+    prefetch.add_argument("--branch", default="main")
+    prefetch.set_defaults(func=cmd_prefetch)
+
+    trajectory_log = sub.add_parser("trajectory-log")
+    trajectory_log.add_argument("--tenant", required=True)
+    trajectory_log.add_argument("--user", required=True)
+    trajectory_log.add_argument("--session", required=True)
+    trajectory_log.add_argument("--task", required=True)
+    trajectory_log.add_argument("--steps", required=True, help="JSON array of trajectory steps")
+    trajectory_log.add_argument("--outcome", required=True, choices=["success", "failure"])
+    trajectory_log.add_argument("--reward", type=float, required=True)
+    trajectory_log.add_argument("--memory-version", required=True)
+    trajectory_log.set_defaults(func=cmd_trajectory_log)
+
+    trajectory_attribute = sub.add_parser("trajectory-attribute")
+    trajectory_attribute.add_argument("--trajectory-id", required=True)
+    trajectory_attribute.set_defaults(func=cmd_trajectory_attribute)
+
+    lesson_induce = sub.add_parser("lesson-induce")
+    lesson_induce.add_argument("--trajectory-id", required=True)
+    lesson_induce.set_defaults(func=cmd_lesson_induce)
+
+    procedure_induce = sub.add_parser("procedure-induce")
+    procedure_induce.add_argument("--lesson-id", required=True)
+    procedure_induce.set_defaults(func=cmd_procedure_induce)
+
+    lesson_promote = sub.add_parser("lesson-promote")
+    lesson_promote.add_argument("--lesson-id", required=True)
+    lesson_promote.add_argument("--cases", required=True, help="JSON array of regression cases")
+    lesson_promote.set_defaults(func=cmd_lesson_promote)
+
+    procedure_validate = sub.add_parser("procedure-validate")
+    procedure_validate.add_argument("--procedure-id", required=True)
+    procedure_validate.set_defaults(func=cmd_procedure_validate)
+
+    parametric_propose = sub.add_parser("parametric-propose")
+    parametric_propose.add_argument("--tenant", required=True)
+    parametric_propose.set_defaults(func=cmd_parametric_propose)
+
+    parametric_evaluate = sub.add_parser("parametric-evaluate")
+    parametric_evaluate.add_argument("--tenant", required=True)
+    parametric_evaluate.add_argument("--protected-case-count", type=int, default=1)
+    parametric_evaluate.add_argument("--gate-failed", action="store_true")
+    parametric_evaluate.add_argument("--protected-regression", action="append", default=[])
+    parametric_evaluate.set_defaults(func=cmd_parametric_evaluate)
+
     tools = sub.add_parser("tools")
     tools.set_defaults(func=cmd_tools)
 
@@ -292,4 +466,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
