@@ -281,6 +281,42 @@ def cmd_get(args: argparse.Namespace) -> None:
     emit(tools.get(args.tenant, args.id, branch=args.branch))
 
 
+def cmd_propose(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(
+        tools.propose(
+            tenant_id=args.tenant,
+            user_id=args.user,
+            subject=args.subject,
+            predicate=args.predicate,
+            object_value=args.object,
+            source_evidence_cids=args.evidence_cid,
+            confidence=args.confidence,
+            trust_tier=args.trust_tier,
+            branch=args.branch,
+        )
+    )
+
+
+def cmd_confirm(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(tools.confirm(args.id, tenant_id=args.tenant, branch=args.branch, into=args.into))
+
+
+def cmd_supersede(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(
+        tools.supersede(
+            tenant_id=args.tenant,
+            user_id=args.user,
+            id=args.id,
+            new=parse_json_arg(args.new, {}),
+            branch=args.branch,
+            confidence=args.confidence,
+        )
+    )
+
+
 def cmd_correct(args: argparse.Namespace) -> None:
     tools = load_tools(args)
     emit(
@@ -346,9 +382,61 @@ def cmd_profile_context(args: argparse.Namespace) -> None:
     emit(tools.profile_context(args.tenant, args.user, scope=parse_json_arg(args.scope, {})))
 
 
+def cmd_profile_get_relevant(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(tools.profile_get_relevant(args.tenant, args.user, context=parse_json_arg(args.context, {})))
+
+
+def cmd_profile_record_explicit(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(
+        tools.profile_record_explicit(
+            args.tenant,
+            args.user,
+            args.statement,
+            scope=parse_json_arg(args.scope, {}),
+            confidence=args.confidence,
+            source_evidence_cids=args.evidence_cid,
+        )
+    )
+
+
+def cmd_profile_propose_inference(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(
+        tools.profile_propose_inference(
+            args.tenant,
+            args.user,
+            args.statement,
+            context=parse_json_arg(args.context, {}),
+            confidence=args.confidence,
+            source_evidence_cids=args.evidence_cid,
+        )
+    )
+
+
+def cmd_profile_correct(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(
+        tools.profile_correct(
+            args.tenant,
+            args.user,
+            args.id,
+            args.statement,
+            context=parse_json_arg(args.context, {}),
+            confidence=args.confidence,
+        )
+    )
+
+
 def cmd_graph_neighbors(args: argparse.Namespace) -> None:
     tools = load_tools(args)
     emit(tools.graph_neighbors(args.tenant, args.seed, branch=args.branch, k=args.k))
+
+
+def cmd_graph_query(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(tools.graph_query(args.tenant, args.seed, branch=args.branch, hops=args.hops, k=args.k))
 
 
 def cmd_graph_timeline(args: argparse.Namespace) -> None:
@@ -405,6 +493,11 @@ def cmd_lesson_promote(args: argparse.Namespace) -> None:
 def cmd_procedure_validate(args: argparse.Namespace) -> None:
     tools = load_tools(args)
     emit(tools.procedure_validate(args.procedure_id))
+
+
+def cmd_procedure_promote(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(tools.procedure_promote(args.procedure_id))
 
 
 def cmd_lesson_search(args: argparse.Namespace) -> None:
@@ -643,6 +736,34 @@ def build_parser() -> argparse.ArgumentParser:
     get.add_argument("--branch")
     get.set_defaults(func=cmd_get)
 
+    propose = sub.add_parser("propose")
+    propose.add_argument("--tenant", required=True)
+    propose.add_argument("--user", required=True)
+    propose.add_argument("--subject", required=True)
+    propose.add_argument("--predicate", required=True)
+    propose.add_argument("--object", required=True)
+    propose.add_argument("--evidence-cid", action="append", default=[])
+    propose.add_argument("--confidence", type=float, default=0.7)
+    propose.add_argument("--trust-tier", type=int, default=1)
+    propose.add_argument("--branch")
+    propose.set_defaults(func=cmd_propose)
+
+    confirm = sub.add_parser("confirm")
+    confirm.add_argument("--id", required=True)
+    confirm.add_argument("--tenant")
+    confirm.add_argument("--branch")
+    confirm.add_argument("--into", default="main")
+    confirm.set_defaults(func=cmd_confirm)
+
+    supersede = sub.add_parser("supersede")
+    supersede.add_argument("--tenant", required=True)
+    supersede.add_argument("--user", required=True)
+    supersede.add_argument("--id", required=True)
+    supersede.add_argument("--new", required=True, help="JSON object containing object_value/object and optional assertion fields")
+    supersede.add_argument("--branch", default="main")
+    supersede.add_argument("--confidence", type=float, default=0.95)
+    supersede.set_defaults(func=cmd_supersede)
+
     correct = sub.add_parser("correct")
     correct.add_argument("--tenant", required=True)
     correct.add_argument("--user", required=True)
@@ -705,12 +826,53 @@ def build_parser() -> argparse.ArgumentParser:
     profile_context.add_argument("--scope", default="{}")
     profile_context.set_defaults(func=cmd_profile_context)
 
+    profile_get_relevant = sub.add_parser("profile-get-relevant")
+    profile_get_relevant.add_argument("--tenant", required=True)
+    profile_get_relevant.add_argument("--user", required=True)
+    profile_get_relevant.add_argument("--context", default="{}")
+    profile_get_relevant.set_defaults(func=cmd_profile_get_relevant)
+
+    profile_record_explicit = sub.add_parser("profile-record-explicit")
+    profile_record_explicit.add_argument("--tenant", required=True)
+    profile_record_explicit.add_argument("--user", required=True)
+    profile_record_explicit.add_argument("--statement", required=True)
+    profile_record_explicit.add_argument("--scope", default="{}")
+    profile_record_explicit.add_argument("--confidence", type=float, default=0.9)
+    profile_record_explicit.add_argument("--evidence-cid", action="append", default=[])
+    profile_record_explicit.set_defaults(func=cmd_profile_record_explicit)
+
+    profile_propose_inference = sub.add_parser("profile-propose-inference")
+    profile_propose_inference.add_argument("--tenant", required=True)
+    profile_propose_inference.add_argument("--user", required=True)
+    profile_propose_inference.add_argument("--statement", required=True)
+    profile_propose_inference.add_argument("--context", default="{}")
+    profile_propose_inference.add_argument("--confidence", type=float, default=0.55)
+    profile_propose_inference.add_argument("--evidence-cid", action="append", default=[])
+    profile_propose_inference.set_defaults(func=cmd_profile_propose_inference)
+
+    profile_correct = sub.add_parser("profile-correct")
+    profile_correct.add_argument("--tenant", required=True)
+    profile_correct.add_argument("--user", required=True)
+    profile_correct.add_argument("--id", required=True)
+    profile_correct.add_argument("--statement", required=True)
+    profile_correct.add_argument("--context", default="{}")
+    profile_correct.add_argument("--confidence", type=float, default=0.95)
+    profile_correct.set_defaults(func=cmd_profile_correct)
+
     graph_neighbors = sub.add_parser("graph-neighbors")
     graph_neighbors.add_argument("--tenant", required=True)
     graph_neighbors.add_argument("--seed", action="append", required=True)
     graph_neighbors.add_argument("--branch", default="main")
     graph_neighbors.add_argument("-k", type=int, default=8)
     graph_neighbors.set_defaults(func=cmd_graph_neighbors)
+
+    graph_query = sub.add_parser("graph-query")
+    graph_query.add_argument("--tenant", required=True)
+    graph_query.add_argument("--seed", action="append", required=True)
+    graph_query.add_argument("--branch", default="main")
+    graph_query.add_argument("--hops", type=int, default=1)
+    graph_query.add_argument("-k", type=int, default=8)
+    graph_query.set_defaults(func=cmd_graph_query)
 
     graph_timeline = sub.add_parser("graph-timeline")
     graph_timeline.add_argument("--tenant", required=True)
@@ -743,6 +905,17 @@ def build_parser() -> argparse.ArgumentParser:
     trajectory_log.add_argument("--memory-version", required=True)
     trajectory_log.set_defaults(func=cmd_trajectory_log)
 
+    trajectory_record = sub.add_parser("trajectory-record")
+    trajectory_record.add_argument("--tenant", required=True)
+    trajectory_record.add_argument("--user", required=True)
+    trajectory_record.add_argument("--session", required=True)
+    trajectory_record.add_argument("--task", required=True)
+    trajectory_record.add_argument("--steps", required=True, help="JSON array of trajectory steps")
+    trajectory_record.add_argument("--outcome", required=True, choices=["success", "failure"])
+    trajectory_record.add_argument("--reward", type=float, required=True)
+    trajectory_record.add_argument("--memory-version", required=True)
+    trajectory_record.set_defaults(func=cmd_trajectory_log)
+
     trajectory_attribute = sub.add_parser("trajectory-attribute")
     trajectory_attribute.add_argument("--trajectory-id", required=True)
     trajectory_attribute.set_defaults(func=cmd_trajectory_attribute)
@@ -751,9 +924,17 @@ def build_parser() -> argparse.ArgumentParser:
     lesson_induce.add_argument("--trajectory-id", required=True)
     lesson_induce.set_defaults(func=cmd_lesson_induce)
 
+    lesson_propose = sub.add_parser("lesson-propose")
+    lesson_propose.add_argument("--trajectory-id", required=True)
+    lesson_propose.set_defaults(func=cmd_lesson_induce)
+
     procedure_induce = sub.add_parser("procedure-induce")
     procedure_induce.add_argument("--lesson-id", required=True)
     procedure_induce.set_defaults(func=cmd_procedure_induce)
+
+    procedure_propose = sub.add_parser("procedure-propose")
+    procedure_propose.add_argument("--lesson-id", required=True)
+    procedure_propose.set_defaults(func=cmd_procedure_induce)
 
     lesson_promote = sub.add_parser("lesson-promote")
     lesson_promote.add_argument("--lesson-id", required=True)
@@ -763,6 +944,10 @@ def build_parser() -> argparse.ArgumentParser:
     procedure_validate = sub.add_parser("procedure-validate")
     procedure_validate.add_argument("--procedure-id", required=True)
     procedure_validate.set_defaults(func=cmd_procedure_validate)
+
+    procedure_promote = sub.add_parser("procedure-promote")
+    procedure_promote.add_argument("--procedure-id", required=True)
+    procedure_promote.set_defaults(func=cmd_procedure_promote)
 
     lesson_search = sub.add_parser("lesson-search")
     lesson_search.add_argument("--signature", required=True)

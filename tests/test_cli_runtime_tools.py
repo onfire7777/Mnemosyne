@@ -312,8 +312,33 @@ def test_cli_profile_graph_learning_and_parametric_flows_persist(tmp_path: Path)
         "Prefer precise operational summaries.",
     )
     profile_context = run_cli(store, "profile-context", "--tenant", TENANT, "--user", USER)
+    inferred_profile = run_cli(
+        store,
+        "profile-propose-inference",
+        "--tenant",
+        TENANT,
+        "--user",
+        USER,
+        "--statement",
+        "Prefer long unverified summaries.",
+    )
+    corrected_profile = run_cli(
+        store,
+        "profile-correct",
+        "--tenant",
+        TENANT,
+        "--user",
+        USER,
+        "--id",
+        inferred_profile["id"],
+        "--statement",
+        "Prefer concise verified summaries.",
+    )
+    relevant_profile = run_cli(store, "profile-get-relevant", "--tenant", TENANT, "--user", USER)
     assert profile["id"]
     assert profile_context["authoritative"][0]["statement"] == "Prefer precise operational summaries."
+    assert corrected_profile["corrects"] == inferred_profile["id"]
+    assert any(item["statement"] == "Prefer concise verified summaries." for item in relevant_profile["authoritative"])
 
     captured = run_cli(
         store,
@@ -360,6 +385,35 @@ def test_cli_profile_graph_learning_and_parametric_flows_persist(tmp_path: Path)
         "--time",
         "2999-01-01T00:00:00Z",
     )
+    proposed = run_cli(
+        store,
+        "propose",
+        "--tenant",
+        TENANT,
+        "--user",
+        USER,
+        "--subject",
+        "Mnemosyne",
+        "--predicate",
+        "supports",
+        "--object",
+        "blueprint ABI aliases",
+        "--trust-tier",
+        "0",
+    )
+    confirmed = run_cli(store, "confirm", "--tenant", TENANT, "--id", proposed["id"])
+    superseded = run_cli(
+        store,
+        "supersede",
+        "--tenant",
+        TENANT,
+        "--user",
+        USER,
+        "--id",
+        asserted["id"],
+        "--new",
+        json.dumps({"object_value": "runtime ABI aliases", "source_evidence_cids": [captured["cid"]], "trust_tier": 0}),
+    )
     run_cli(
         store,
         "relation",
@@ -373,16 +427,21 @@ def test_cli_profile_graph_learning_and_parametric_flows_persist(tmp_path: Path)
         "Postgres",
     )
     graph = run_cli(store, "graph-neighbors", "--tenant", TENANT, "--seed", "Mnemosyne")
+    graph_alias = run_cli(store, "graph-query", "--tenant", TENANT, "--seed", "Mnemosyne")
     timeline = run_cli(store, "graph-timeline", "--tenant", TENANT, "--entity", "Mnemosyne")
     assert fetched["kind"] == "evidence"
     assert fetched["record"]["cid"] == captured["cid"]
     assert as_of["assertions"][0]["id"] == asserted["id"]
+    assert proposed["status"] == "proposed"
+    assert confirmed["merge"]["assertions_added"] >= 1
+    assert superseded["supersedes"] == asserted["id"]
     assert graph["hits"][0]["text"] == "Mnemosyne uses Postgres"
+    assert graph_alias["hits"][0]["text"] == "Mnemosyne uses Postgres"
     assert {event["kind"] for event in timeline["events"]} == {"assertion", "relation"}
 
     trajectory = run_cli(
         store,
-        "trajectory-log",
+        "trajectory-record",
         "--tenant",
         TENANT,
         "--user",
@@ -400,8 +459,8 @@ def test_cli_profile_graph_learning_and_parametric_flows_persist(tmp_path: Path)
         "--memory-version",
         "v1",
     )
-    lesson = run_cli(store, "lesson-induce", "--trajectory-id", trajectory["id"])
-    procedure = run_cli(store, "procedure-induce", "--lesson-id", lesson["id"])
+    lesson = run_cli(store, "lesson-propose", "--trajectory-id", trajectory["id"])
+    procedure = run_cli(store, "procedure-propose", "--lesson-id", lesson["id"])
     validated = run_cli(store, "procedure-validate", "--procedure-id", procedure["id"])
     lesson_search = run_cli(store, "lesson-search", "--tenant", TENANT, "--signature", "off by one")
     procedure_search = run_cli(store, "procedure-search", "--tenant", TENANT, "--query", "date-math-deploy")
@@ -425,6 +484,7 @@ def test_cli_profile_graph_learning_and_parametric_flows_persist(tmp_path: Path)
         ),
     )
     artifact = run_cli(store, "parametric-propose", "--tenant", TENANT)
+    promoted_procedure = run_cli(store, "procedure-promote", "--procedure-id", procedure["id"])
     rolled_back = run_cli(store, "procedure-rollback", "--procedure-id", procedure["id"])
     rolled_back_search = run_cli(store, "procedure-search", "--tenant", TENANT, "--query", "date-math-deploy", "--status", "rolled_back")
 
@@ -435,5 +495,6 @@ def test_cli_profile_graph_learning_and_parametric_flows_persist(tmp_path: Path)
     assert outcome["passed"] is False
     assert promoted["promoted"] is True
     assert set(artifact["source_ids"]) == {lesson["id"], procedure["id"]}
+    assert promoted_procedure["status"] == "promoted"
     assert rolled_back["status"] == "rolled_back"
     assert rolled_back_search["procedures"][0]["id"] == procedure["id"]
