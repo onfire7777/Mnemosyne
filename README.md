@@ -25,7 +25,7 @@ The v2 blueprint controls implementation. The earlier design is lineage only unl
 - `src/mnemosyne/prefetch.py` — anticipatory prefetch with predictability gate.
 - `src/mnemosyne/parametric.py` — isolated parametric-tier artifact promotion boundary.
 - `src/mnemosyne/runtime_state.py` — JSON-backed local runtime state for CLI/MCP user-profile and learning-loop objects.
-- `src/mnemosyne/security.py` — trust tiers, capability mediation, and data-never-instruction sanitization.
+- `src/mnemosyne/security.py` — trust tiers, capability mediation, fail-closed write authorization, and data-never-instruction sanitization.
 - `src/mnemosyne/lifecycle.py` — fidelity demotion and gist-risk abstention hooks.
 - `src/mnemosyne/gate.py` — promotion gate with protected regression cases and branch rollback.
 - `src/mnemosyne/consolidation.py` — warm-loop consolidation worker through the promotion gate.
@@ -63,7 +63,7 @@ MNEMOSYNE_POSTGRES_DSN=postgresql://mnemosyne:mnemosyne-local-dev@127.0.0.1:5432
 
 The repository has a verified local scaffold plus runtime parity extensions. Current checks:
 
-- `.venv/bin/python -m pytest -q` returns 60 passing tests and 2 skipped live-DB tests.
+- `.venv/bin/python -m pytest -q` returns 63 passing tests and 2 skipped live-DB tests.
 - With Docker compose Postgres running, `MNEMOSYNE_POSTGRES_DSN=postgresql://... .venv/bin/python -m pytest -q tests/test_postgres_engine_live.py` returns 2 passing live adapter tests covering SQL FTS, pgvector assertion search, dense evidence fallback, recursive graph/PPR, and CLI `--backend postgres`.
 
 Exact 1:1 blueprint parity is still in progress. The controlling status artifact is `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md`.

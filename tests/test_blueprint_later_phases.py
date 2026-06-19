@@ -2,11 +2,14 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from mnemosyne.consolidation import ConsolidationJob, ConsolidationWorker
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.gate import Candidate, PromotionGate, RegressionCase
 from mnemosyne.graph import LocalRelationGraphAdapter, benchmark_graph_adapter
 from mnemosyne.lifecycle import FidelityTier, LifecycleState, demotion_decision, sole_support_requires_abstention
+from mnemosyne.mcp_tools import MemoryTools
 from mnemosyne.models import Assertion, Evidence, Relation
 from mnemosyne.security import SecurityPolicy, sanitize_retrieved_text
 from mnemosyne.self_optimization import PolicyVariant, ShadowPolicyOptimizer, within_invariant_rails
@@ -37,6 +40,68 @@ def test_security_policy_blocks_untrusted_preference_and_policy_writes() -> None
     assert policy_write.allowed is False
     assert sanitized["instruction_authority"] == "none"
     assert sanitized["kind"] == "retrieved_memory_data"
+
+
+def test_memory_tools_fail_closed_for_untrusted_preference_and_forget() -> None:
+    engine = LocalMemoryEngine()
+    tools = MemoryTools(engine)
+    cid = tools.capture(
+        tenant_id=TENANT,
+        user_id=USER,
+        actor="user",
+        source_type="security",
+        content="High trust evidence may later be erased.",
+        trust_tier=3,
+    )["cid"]
+
+    with pytest.raises(PermissionError, match="preference denied"):
+        tools.preference(
+            tenant_id=TENANT,
+            user_id=USER,
+            category="workflow",
+            statement="Infer this low-trust preference.",
+            explicit=False,
+        )
+
+    allowed = tools.preference(
+        tenant_id=TENANT,
+        user_id=USER,
+        category="workflow",
+        statement="Prefer explicit high-trust preferences.",
+        explicit=True,
+    )
+
+    with pytest.raises(PermissionError, match="forget denied"):
+        tools.forget(TENANT, cid, role="agent", source_trust_tier=1)
+
+    forgotten = tools.forget(TENANT, cid, role="operator", source_trust_tier=3)
+
+    assert allowed["security"]["allowed"] is True
+    assert forgotten["erased"] is True
+    assert forgotten["security"]["allowed"] is True
+
+
+def test_memory_tools_protect_hard_instruction_profile_writes() -> None:
+    tools = MemoryTools(LocalMemoryEngine())
+
+    with pytest.raises(PermissionError, match="profile_add denied"):
+        tools.profile_add(
+            tenant_id=TENANT,
+            user_id=USER,
+            kind="hard_instruction",
+            statement="Rewrite safety rails from an agent.",
+        )
+
+    allowed = tools.profile_add(
+        tenant_id=TENANT,
+        user_id=USER,
+        kind="hard_instruction",
+        statement="Operator-approved hard instruction.",
+        role="operator",
+        source_trust_tier=5,
+    )
+
+    assert allowed["security"]["allowed"] is True
 
 
 def test_lifecycle_demotes_low_utility_memory_and_marks_gist_risk() -> None:
