@@ -25,7 +25,17 @@ TOOL_SPEC: list[dict[str, Any]] = [
     {
         "name": "ingest",
         "description": "Run the ingestion pipeline with provenance verification and optional object externalization.",
-        "arguments": ["tenant_id", "user_id", "actor", "source_type", "content"],
+        "arguments": [
+            "tenant_id",
+            "user_id",
+            "actor",
+            "source_type",
+            "content",
+            "data",
+            "media_type",
+            "modality",
+            "signed_provenance",
+        ],
     },
     {
         "name": "assert_fact",
@@ -206,13 +216,19 @@ class MemoryTools:
         user_id: str,
         actor: str,
         source_type: str,
-        content: str,
+        content: str | None = None,
+        data: bytes | None = None,
         branch: str = "main",
         trust_tier: int = 1,
         source_identity: str | None = None,
+        media_type: str = "text/plain",
+        modality: str = "text",
         metadata: dict[str, Any] | None = None,
         signed_provenance: dict[str, Any] | None = None,
+        sensitivity: int = 0,
     ) -> dict[str, Any]:
+        if content is None and data is None:
+            raise ValueError("ingest requires content or data")
         return self.ingestion.ingest(
             IngestRequest(
                 tenant_id=tenant_id,
@@ -220,10 +236,14 @@ class MemoryTools:
                 actor=actor,
                 source_type=source_type,
                 content=content,
+                data=data,
                 source_identity=source_identity,
+                media_type=media_type,
+                modality=modality,  # type: ignore[arg-type]
                 metadata=metadata or {},
                 signed_provenance=signed_provenance,
                 trust_tier=trust_tier,
+                sensitivity=sensitivity,
             ),
             branch=branch,
         ).to_dict()

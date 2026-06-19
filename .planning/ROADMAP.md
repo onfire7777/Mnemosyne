@@ -153,3 +153,5 @@ Plans:
 - [ ] 06-04: Complete ingestion, object storage, C2PA, multimodal extraction, and safe quarantine flow.
 - [ ] 06-05: Wire queue-backed consolidation, calibration, lifecycle, eval, and observability jobs.
 - [ ] 06-06: Validate exact parity with local and production deployment smoke suites.
+
+Checkpoint: CLI-first file ingestion now supports signed-provenance JSON and a `c2patool`-style verifier adapter; quarantined evidence is hidden from default retrieval. Plan 06-04 remains open for production trust-policy mapping, ingest-time classification, derived multimodal extraction/indexing, and queue-backed consolidation.

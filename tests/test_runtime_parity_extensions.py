@@ -9,7 +9,7 @@ from mnemosyne.learning import Lesson, Procedure
 from mnemosyne.models import Evidence
 from mnemosyne.parametric import ParametricTier
 from mnemosyne.prefetch import AnticipatoryPrefetcher, PrefetchCandidate
-from mnemosyne.provenance import SignedProvenanceVerifier
+from mnemosyne.provenance import C2paToolVerifier, SignedProvenanceVerifier
 from mnemosyne.queue import InProcessQueue, QueueWorker
 from mnemosyne.storage import LocalObjectStore
 
@@ -48,6 +48,52 @@ def test_signed_provenance_verifier_quarantines_digest_mismatch() -> None:
     assert invalid.trust_delta < 0
 
 
+def test_c2pa_tool_verifier_trusts_configured_issuer_and_quarantines_failures(tmp_path) -> None:
+    payload = b"camera bytes"
+    asset = tmp_path / "photo.jpg"
+    asset.write_bytes(payload)
+    verifier_stub = tmp_path / "c2pa-ok.py"
+    verifier_stub.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env python3",
+                "import json",
+                "print(json.dumps({'active_manifest': 'manifest-1', 'claim_generator': 'issuer-a'}))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    verifier_stub.chmod(0o755)
+    failing_stub = tmp_path / "c2pa-fail.py"
+    failing_stub.write_text("#!/usr/bin/env python3\nimport sys\nsys.exit(2)\n", encoding="utf-8")
+    failing_stub.chmod(0o755)
+    invalid_stub = tmp_path / "c2pa-invalid.py"
+    invalid_stub.write_text("#!/usr/bin/env python3\nprint('not json')\n", encoding="utf-8")
+    invalid_stub.chmod(0o755)
+
+    trusted = C2paToolVerifier(tool_path=str(verifier_stub), trusted_issuers=("issuer-a",)).verify(
+        payload, {"asset_path": str(asset)}
+    )
+    untrusted = C2paToolVerifier(tool_path=str(verifier_stub), trusted_issuers=("issuer-b",)).verify(
+        payload, {"asset_path": str(asset)}
+    )
+    failed = C2paToolVerifier(tool_path=str(failing_stub)).verify(payload, {"asset_path": str(asset)})
+    invalid = C2paToolVerifier(tool_path=str(invalid_stub)).verify(payload, {"asset_path": str(asset)})
+
+    assert trusted.valid is True
+    assert trusted.trusted is True
+    assert trusted.trust_delta == 2
+    assert trusted.manifest is not None
+    assert trusted.manifest["c2pa"]["claim_generator"] == "issuer-a"
+    assert untrusted.valid is True
+    assert untrusted.trusted is False
+    assert untrusted.trust_delta == 1
+    assert failed.quarantine is True
+    assert failed.trust_delta < 0
+    assert invalid.quarantine is True
+    assert invalid.reason == "c2pa verifier returned invalid json"
+
+
 def test_ingestion_pipeline_externalizes_multimodal_bytes_and_quarantines_bad_provenance(tmp_path) -> None:
     engine = LocalMemoryEngine()
     pipeline = IngestionPipeline(engine, LocalObjectStore(tmp_path / "objects"))
@@ -75,6 +121,9 @@ def test_ingestion_pipeline_externalizes_multimodal_bytes_and_quarantines_bad_pr
     assert evidence.modality == "image"
     assert evidence.content == "A whiteboard architecture diagram."
     assert evidence.metadata["quarantine_reason"] == "signed provenance digest mismatch"
+    assert engine.retrieve("whiteboard architecture", TENANT).hits == []
+    included = engine.retrieve("whiteboard architecture", TENANT, filt={"include_quarantined": True})
+    assert included.hits[0].id == result.cid
 
 
 def test_externalized_binary_evidence_cid_includes_object_pointer(tmp_path) -> None:

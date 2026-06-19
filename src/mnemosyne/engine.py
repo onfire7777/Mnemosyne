@@ -669,11 +669,14 @@ class LocalMemoryEngine:
         branch = filt.get("branch", "main")
         min_trust = int(filt.get("min_trust_tier", self.policy.min_trust_tier))
         max_sensitivity = int(filt.get("max_sensitivity", self.policy.max_sensitivity))
+        include_quarantined = bool(filt.get("include_quarantined", False))
         hits: list[Hit] = []
         for ev in self.evidence.values():
             if ev.erased or ev.tenant_id != tenant_id or ev.branch != branch:
                 continue
             if ev.trust_tier < min_trust or ev.sensitivity > max_sensitivity:
+                continue
+            if not include_quarantined and ev.metadata.get("quarantine_reason"):
                 continue
             hits.append(
                 Hit(

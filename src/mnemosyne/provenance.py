@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import subprocess
 from dataclasses import asdict, dataclass, field
 from hashlib import sha256
 from typing import Any
@@ -63,3 +65,99 @@ class SignedProvenanceVerifier:
             manifest=dict(manifest),
             diagnostics={"actual": actual},
         )
+
+
+@dataclass(frozen=True, slots=True)
+class C2paToolVerifier:
+    """Verifier adapter for `c2patool`-style JSON verification.
+
+    The configured tool must accept `asset_path --json` and write a JSON
+    verification report to stdout. If no asset path is present in the manifest,
+    this adapter delegates to the deterministic digest verifier.
+    """
+
+    tool_path: str = "c2patool"
+    trusted_issuers: tuple[str, ...] = ()
+    fallback: SignedProvenanceVerifier = field(default_factory=SignedProvenanceVerifier)
+    timeout_seconds: float = 30.0
+
+    def verify(self, payload: bytes, manifest: dict[str, Any] | None) -> ProvenanceDecision:
+        asset_path = str((manifest or {}).get("asset_path") or (manifest or {}).get("c2pa_asset_path") or "")
+        if not asset_path:
+            return self.fallback.verify(payload, manifest)
+        try:
+            completed = subprocess.run(
+                [self.tool_path, asset_path, "--json"],
+                check=False,
+                text=True,
+                capture_output=True,
+                timeout=self.timeout_seconds,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            return ProvenanceDecision(
+                valid=False,
+                trusted=False,
+                quarantine=True,
+                trust_delta=-5,
+                reason="c2pa verifier execution failed",
+                manifest=dict(manifest or {}),
+                diagnostics={"error": str(exc), "tool": self.tool_path},
+            )
+        if completed.returncode != 0:
+            return ProvenanceDecision(
+                valid=False,
+                trusted=False,
+                quarantine=True,
+                trust_delta=-5,
+                reason="c2pa verification failed",
+                manifest=dict(manifest or {}),
+                diagnostics={"returncode": completed.returncode, "stderr": completed.stderr[:1000]},
+            )
+        try:
+            report = json.loads(completed.stdout or "{}")
+        except json.JSONDecodeError as exc:
+            return ProvenanceDecision(
+                valid=False,
+                trusted=False,
+                quarantine=True,
+                trust_delta=-5,
+                reason="c2pa verifier returned invalid json",
+                manifest=dict(manifest or {}),
+                diagnostics={"error": str(exc)},
+            )
+        signer = _find_first(report, {"issuer", "signer", "claim_generator", "claimGenerator", "common_name", "name"})
+        trusted = bool(signer) and (not self.trusted_issuers or str(signer) in self.trusted_issuers)
+        return ProvenanceDecision(
+            valid=True,
+            trusted=trusted,
+            quarantine=False,
+            trust_delta=2 if trusted else 1,
+            reason="c2pa manifest verified" if trusted else "c2pa manifest valid but signer not trusted",
+            manifest={**dict(manifest or {}), "c2pa": _report_summary(report)},
+            diagnostics={"tool": self.tool_path, "signer": signer, "trusted_issuers": list(self.trusted_issuers)},
+        )
+
+
+def _find_first(value: Any, keys: set[str]) -> Any:
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if key in keys and item:
+                return item
+        for item in value.values():
+            found = _find_first(item, keys)
+            if found:
+                return found
+    elif isinstance(value, list):
+        for item in value:
+            found = _find_first(item, keys)
+            if found:
+                return found
+    return None
+
+
+def _report_summary(report: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "active_manifest": report.get("active_manifest") or report.get("activeManifest"),
+        "claim_generator": _find_first(report, {"claim_generator", "claimGenerator"}),
+        "issuer": _find_first(report, {"issuer", "signer", "common_name", "name"}),
+    }
