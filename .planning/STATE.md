@@ -12,7 +12,7 @@ See: .planning/PROJECT.md (updated 2026-06-19)
 Phase: Strict parity continuation after Phase 5 scaffold
 Plan: Exact blueprint parity audit and runtime gap closure
 Status: In progress; exact 1:1 blueprint parity is not complete.
-Last activity: 2026-06-19 — Added CLI-first runtime coverage plus Postgres retrieval parity for SQL FTS, pgvector assertion search, deterministic evidence dense fallback, and recursive graph/PPR. The test suite now has 58 passing tests and 1 skipped live-DB test; the DSN-backed live Postgres smoke passes separately. Strict audit remains open for exact production parity.
+Last activity: 2026-06-19 — Added CLI-first runtime coverage plus selectable CLI Postgres backend support, Postgres retrieval parity for SQL FTS, pgvector assertion search, deterministic evidence dense fallback, and recursive graph/PPR. The test suite now has 60 passing tests and 2 skipped live-DB tests; the DSN-backed live Postgres engine and CLI smokes pass separately. Strict audit remains open for exact production parity.
 
 Progress: [███████░░░] local scaffold verified; production parity gaps remain
 
@@ -49,6 +49,7 @@ Progress: [███████░░░] local scaffold verified; production p
 - [Phase 5]: Self-model store, outcome windows, policy variant proposal, tripwire checks, and canary policy gate are implemented locally.
 - [NFR]: Local latency benchmark, schema coverage, privacy classification, metrics registry, and Docker compose config are implemented.
 - [Phase 5]: Self-optimization remains shadow-first and constrained by immutable rails.
+- [Runtime]: CLI now supports `--backend local|postgres` plus `--postgres-dsn`/`MNEMOSYNE_POSTGRES_DSN`; live tests verify the Postgres backend through real CLI commands.
 
 ### Pending Todos
 

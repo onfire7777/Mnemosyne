@@ -39,6 +39,9 @@ class MemoryEngine(Protocol):
     def add_relation(self, relation: Relation, branch: str = "main") -> str:
         raise NotImplementedError
 
+    def add_preference(self, preference: Preference) -> str:
+        raise NotImplementedError
+
     def vector_search(self, query: str, k: int, filt: dict[str, Any]) -> list[Hit]:
         raise NotImplementedError
 

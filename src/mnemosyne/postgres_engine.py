@@ -7,7 +7,7 @@ from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from mnemosyne.ids import content_cid
-from mnemosyne.models import Assertion, Evidence, Hit, MergeReport, Relation, RetrievalResult, parse_dt, utc_now
+from mnemosyne.models import Assertion, Evidence, Hit, MergeReport, Preference, Relation, RetrievalResult, dt_to_json, parse_dt, utc_now
 from mnemosyne.policy import OperatingPolicy
 from collections import defaultdict
 
@@ -304,6 +304,68 @@ class PostgresEngine:
                 )
                 self._audit(cur, db_tenant_id, "engine", "add_relation", relation.id, {"branch": branch})
         return relation.id
+
+    def add_preference(self, preference: Preference) -> str:
+        self.ensure_tenant_and_branch(preference.tenant_id)
+        pref = Preference.from_dict(preference.to_dict())
+        db_tenant_id = _stable_uuid("tenant", pref.tenant_id)
+        db_user_id = _stable_uuid("user", pref.user_id)
+        with self.connect() as conn:
+            with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                cur.execute(
+                    """
+                    SELECT id, statement, explicit
+                    FROM preferences
+                    WHERE tenant_id = %s AND user_id = %s AND category = %s
+                      AND scope = %s AND status = 'active'
+                    """,
+                    (db_tenant_id, db_user_id, pref.category, self._jsonb(pref.scope)),
+                )
+                for row in cur.fetchall():
+                    if row["statement"] == pref.statement:
+                        continue
+                    if pref.explicit or not row["explicit"]:
+                        cur.execute(
+                            "UPDATE preferences SET status = 'superseded', valid_to = %s WHERE id = %s",
+                            (pref.valid_from, row["id"]),
+                        )
+                    else:
+                        pref.status = "retracted"
+                cur.execute(
+                    """
+                    INSERT INTO preferences (
+                      id, tenant_id, user_id, category, statement, scope, confidence,
+                      explicit, exceptions, source_evidence_cids, valid_from, valid_to,
+                      status
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (id) DO UPDATE
+                    SET statement = EXCLUDED.statement,
+                        confidence = EXCLUDED.confidence,
+                        explicit = EXCLUDED.explicit,
+                        exceptions = EXCLUDED.exceptions,
+                        source_evidence_cids = EXCLUDED.source_evidence_cids,
+                        valid_to = EXCLUDED.valid_to,
+                        status = EXCLUDED.status
+                    """,
+                    (
+                        pref.id,
+                        db_tenant_id,
+                        db_user_id,
+                        pref.category,
+                        pref.statement,
+                        self._jsonb(pref.scope),
+                        pref.confidence,
+                        pref.explicit,
+                        self._jsonb(pref.exceptions),
+                        _cid_list_to_bytes(pref.source_evidence_cids),
+                        pref.valid_from,
+                        pref.valid_to,
+                        pref.status,
+                    ),
+                )
+                self._audit(cur, db_tenant_id, "engine", "add_preference", pref.id, {"category": pref.category, "explicit": pref.explicit})
+        return pref.id
 
     def lexical_search(self, query: str, k: int, filt: dict[str, Any]) -> list[Hit]:
         tenant_id = filt["tenant_id"]
@@ -738,16 +800,26 @@ class PostgresEngine:
                 assertions = [_row_to_assertion(row).to_dict() for row in cur.fetchall()]
                 cur.execute("SELECT * FROM relations WHERE tenant_id = %s", (db_tenant_id,))
                 relations = [_row_to_relation(row, tenant_id).to_dict() for row in cur.fetchall()]
+                cur.execute(
+                    """
+                    SELECT p.*, t.name AS tenant_name
+                    FROM preferences p
+                    JOIN tenants t ON t.id = p.tenant_id
+                    WHERE p.tenant_id = %s
+                    """,
+                    (db_tenant_id,),
+                )
+                preferences = [_row_to_preference(row, tenant_id).to_dict() for row in cur.fetchall()]
                 cur.execute("SELECT * FROM audit_log WHERE tenant_id = %s", (db_tenant_id,))
-                audit = [dict(row) for row in cur.fetchall()]
+                audit = [_json_safe(dict(row)) for row in cur.fetchall()]
                 cur.execute("SELECT * FROM deletion_log WHERE tenant_id = %s", (db_tenant_id,))
-                deletion = [dict(row) for row in cur.fetchall()]
+                deletion = [_json_safe(dict(row)) for row in cur.fetchall()]
         return {
             "tenant_id": tenant_id,
             "evidence": evidence,
             "assertions": assertions,
             "relations": relations,
-            "preferences": [],
+            "preferences": preferences,
             "justifications": [],
             "contradictions": [],
             "audit_log": audit,
@@ -1116,6 +1188,24 @@ def _vector_literal(vector: list[float]) -> str:
     return "[" + ",".join(f"{value:.8g}" for value in vector) + "]"
 
 
+def _json_safe(value: Any) -> Any:
+    if isinstance(value, datetime):
+        return dt_to_json(value)
+    if isinstance(value, UUID):
+        return str(value)
+    if isinstance(value, memoryview):
+        return value.tobytes().hex()
+    if isinstance(value, bytes):
+        return value.hex()
+    if isinstance(value, list):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, tuple):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    return value
+
+
 def _bytes_to_cid(value: bytes | memoryview) -> str:
     raw = value.tobytes() if isinstance(value, memoryview) else value
     return raw.hex()
@@ -1222,4 +1312,22 @@ def _row_to_relation(row: dict[str, Any], tenant_id: str) -> Relation:
         valid_to=parse_dt(row["valid_to"]),
         source_evidence_cids=_bytes_list_to_cids(row["source_evidence_cids"]),
         access_policy=dict(row["access_policy"] or {}),
+    )
+
+
+def _row_to_preference(row: dict[str, Any], tenant_id: str) -> Preference:
+    return Preference(
+        id=str(row["id"]),
+        tenant_id=tenant_id,
+        user_id=str(row["user_id"]),
+        category=row["category"],
+        statement=row["statement"],
+        scope=dict(row["scope"] or {}),
+        confidence=float(row["confidence"]),
+        explicit=bool(row["explicit"]),
+        exceptions=dict(row["exceptions"] or {}),
+        source_evidence_cids=_bytes_list_to_cids(row["source_evidence_cids"]),
+        valid_from=parse_dt(row["valid_from"]) or utc_now(),
+        valid_to=parse_dt(row["valid_to"]),
+        status=row["status"],
     )

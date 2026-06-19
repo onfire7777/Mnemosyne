@@ -51,11 +51,19 @@ python -m mnemosyne.cli capture --tenant tenant-a --user user-a --source-type ch
 python -m mnemosyne.cli search --tenant tenant-a --query "preferred database"
 ```
 
+Postgres-backed CLI usage:
+
+```bash
+docker compose up -d postgres
+MNEMOSYNE_POSTGRES_DSN=postgresql://mnemosyne:mnemosyne-local-dev@127.0.0.1:54329/mnemosyne \
+  python -m mnemosyne.cli --backend postgres search --tenant tenant-a --query "preferred database"
+```
+
 ## Status
 
 The repository has a verified local scaffold plus runtime parity extensions. Current checks:
 
-- `.venv/bin/python -m pytest -q` returns 58 passing tests and 1 skipped live-DB test.
-- With Docker compose Postgres running, `MNEMOSYNE_POSTGRES_DSN=postgresql://... .venv/bin/python -m pytest -q tests/test_postgres_engine_live.py` returns 1 passing live adapter test covering SQL FTS, pgvector assertion search, dense evidence fallback, and recursive graph/PPR.
+- `.venv/bin/python -m pytest -q` returns 60 passing tests and 2 skipped live-DB tests.
+- With Docker compose Postgres running, `MNEMOSYNE_POSTGRES_DSN=postgresql://... .venv/bin/python -m pytest -q tests/test_postgres_engine_live.py` returns 2 passing live adapter tests covering SQL FTS, pgvector assertion search, dense evidence fallback, recursive graph/PPR, and CLI `--backend postgres`.
 
 Exact 1:1 blueprint parity is still in progress. The controlling status artifact is `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md`.
