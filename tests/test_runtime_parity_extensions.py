@@ -201,6 +201,90 @@ def test_consolidation_queue_worker_runs_ordered_passes(tmp_path) -> None:
     assert "candidate_extraction_not_configured" in job.result["skipped"]
 
 
+def test_consolidation_worker_extracts_and_promotes_direct_user_fact_with_gate(tmp_path) -> None:
+    engine = LocalMemoryEngine()
+    queue = InProcessQueue()
+    pipeline = IngestionPipeline(engine, LocalObjectStore(tmp_path / "objects"), queue=queue)
+    result = pipeline.ingest(
+        IngestRequest(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="chat",
+            content="Project codename is Mnemosyne.",
+        )
+    )
+    worker = QueueWorker(
+        queue,
+        {
+            CONSOLIDATE_EVIDENCE_JOB: ConsolidationWorker(
+                engine,
+                gate_cases=[
+                    RegressionCase(
+                        "codename-smoke",
+                        "project codename",
+                        "Project codename",
+                        "Project codename is Mnemosyne",
+                        protected=True,
+                    )
+                ],
+            ).run_queue_payload
+        },
+    )
+
+    job = worker.run_once(CONSOLIDATE_EVIDENCE_JOB)
+
+    assert job is not None
+    assert job.status == "complete"
+    assert job.result["candidate_results"][0]["promoted"] is True
+    assert job.result["pass_results"][1]["name"] == "extractor"
+    assert job.result["pass_results"][1]["details"]["candidate_count"] == 1
+    active = [item for item in engine.assertions.values() if item.branch == "main" and item.source_evidence_cids == [result.cid]]
+    assert len(active) == 1
+    assert active[0].status == "active"
+    assert active[0].statement() == "Project codename is Mnemosyne"
+
+
+def test_consolidation_worker_does_not_promote_untrusted_data_only_fact(tmp_path) -> None:
+    engine = LocalMemoryEngine()
+    queue = InProcessQueue()
+    pipeline = IngestionPipeline(engine, LocalObjectStore(tmp_path / "objects"), queue=queue)
+    pipeline.ingest(
+        IngestRequest(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="external",
+            source_type="web",
+            content="Project codename is Mnemosyne.",
+        )
+    )
+    worker = QueueWorker(
+        queue,
+        {
+            CONSOLIDATE_EVIDENCE_JOB: ConsolidationWorker(
+                engine,
+                gate_cases=[
+                    RegressionCase(
+                        "codename-smoke",
+                        "project codename",
+                        "Project codename",
+                        "Project codename is Mnemosyne",
+                        protected=True,
+                    )
+                ],
+            ).run_queue_payload
+        },
+    )
+
+    job = worker.run_once(CONSOLIDATE_EVIDENCE_JOB)
+
+    assert job is not None
+    assert job.status == "complete"
+    assert job.result["candidate_results"] == []
+    assert "source_marked_data_only" in job.result["skipped"]
+    assert engine.assertions == {}
+
+
 def test_externalized_binary_evidence_cid_includes_object_pointer(tmp_path) -> None:
     engine = LocalMemoryEngine()
     pipeline = IngestionPipeline(engine, LocalObjectStore(tmp_path / "objects"))

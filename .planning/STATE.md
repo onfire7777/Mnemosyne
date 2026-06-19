@@ -12,7 +12,7 @@ See: .planning/PROJECT.md (updated 2026-06-19)
 Phase: Strict parity continuation after Phase 5 scaffold
 Plan: Exact blueprint parity audit and runtime gap closure
 Status: In progress; exact 1:1 blueprint parity is not complete.
-Last activity: 2026-06-19 — Added CLI-first runtime coverage, selectable CLI Postgres backend support, Postgres retrieval parity for SQL FTS/pgvector/graph, fail-closed capability enforcement, Postgres tenant RLS, explicit erasure modes, HTTP-compatible embedding/reranker provider adapters, CLI file ingestion through a C2PA verifier adapter, blueprint-correct trust-tier semantics, deterministic ingest classification, and persisted local queue-backed consolidation jobs from ingestion. The test suite now has 78 passing tests and 3 skipped live-DB tests; a fresh-schema DSN-backed live Postgres run passes 3 engine/CLI smokes. Strict audit remains open for exact production parity.
+Last activity: 2026-06-19 — Added CLI-first runtime coverage, selectable CLI Postgres backend support, Postgres retrieval parity for SQL FTS/pgvector/graph, fail-closed capability enforcement, Postgres tenant RLS, explicit erasure modes, HTTP-compatible embedding/reranker provider adapters, CLI file ingestion through a C2PA verifier adapter, blueprint-correct trust-tier semantics, deterministic ingest classification, persisted local queue-backed consolidation jobs from ingestion, and gated deterministic fact extraction for direct-user evidence. The test suite now has 80 passing tests and 3 skipped live-DB tests; a fresh-schema DSN-backed live Postgres run passes 3 engine/CLI smokes. Strict audit remains open for exact production parity.
 
 Progress: [███████░░░] local scaffold verified; production parity gaps remain
 
