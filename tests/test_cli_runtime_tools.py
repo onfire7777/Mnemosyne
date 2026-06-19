@@ -75,6 +75,63 @@ def test_cli_exposes_retrieval_provider_flags() -> None:
     assert args.reranker_model == "qwen3-reranker"
 
 
+def test_cli_ingests_binary_file_with_c2pa_verifier(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    asset = tmp_path / "capture.bin"
+    asset.write_bytes(b"binary camera capture")
+    verifier_stub = tmp_path / "c2pa-ok.py"
+    verifier_stub.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env python3",
+                "import json",
+                "print(json.dumps({'active_manifest': 'manifest-1', 'claim_generator': 'issuer-a'}))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    verifier_stub.chmod(0o755)
+
+    ingested = run_cli(
+        store,
+        "--c2pa-tool",
+        str(verifier_stub),
+        "--trusted-provenance-issuer",
+        "issuer-a",
+        "ingest",
+        "--tenant",
+        TENANT,
+        "--user",
+        USER,
+        "--actor",
+        "external",
+        "--source-type",
+        "camera",
+        "--source-identity",
+        "device-1",
+        "--file",
+        str(asset),
+        "--modality",
+        "binary",
+        "--media-type",
+        "application/octet-stream",
+        "--metadata",
+        json.dumps({"description": "Binary camera capture."}),
+        "--trust-tier",
+        "1",
+        "--sensitivity",
+        "2",
+    )
+
+    assert ingested["content_pointer"] is not None
+    assert ingested["modality"] == "binary"
+    assert ingested["trust_tier"] == 3
+    assert ingested["quarantined"] is False
+    assert ingested["provenance"]["valid"] is True
+    assert ingested["provenance"]["trusted"] is True
+    assert ingested["provenance"]["manifest"]["c2pa"]["claim_generator"] == "issuer-a"
+
+
 def test_cli_preference_write_requires_explicit_or_high_trust_source(tmp_path: Path) -> None:
     denied = run_raw_cli(
         tmp_path / "mnemosyne.json",

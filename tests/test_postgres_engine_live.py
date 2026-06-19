@@ -202,3 +202,56 @@ def test_postgres_cli_backend_live_smoke() -> None:
     assert hard_deleted["erasure_mode"] == "hard_delete_legal"
     assert all(item["cid"] != legal["cid"] for item in after_delete["evidence"])
     assert any(item["statement"] == "Prefer CLI-first memory workflows." for item in exported["preferences"])
+
+
+def test_postgres_cli_ingests_file_with_c2pa_verifier(tmp_path) -> None:
+    tenant = f"tenant-cli-c2pa-live-{uuid4()}"
+    user = "user-cli-c2pa-live"
+    asset = tmp_path / "capture.bin"
+    asset.write_bytes(b"postgres binary capture")
+    verifier_stub = tmp_path / "c2pa-ok.py"
+    verifier_stub.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env python3",
+                "import json",
+                "print(json.dumps({'active_manifest': 'manifest-1', 'claim_generator': 'issuer-a'}))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    verifier_stub.chmod(0o755)
+
+    ingested = run_postgres_cli(
+        "--c2pa-tool",
+        str(verifier_stub),
+        "--trusted-provenance-issuer",
+        "issuer-a",
+        "ingest",
+        "--tenant",
+        tenant,
+        "--user",
+        user,
+        "--actor",
+        "external",
+        "--source-type",
+        "camera",
+        "--file",
+        str(asset),
+        "--modality",
+        "binary",
+        "--media-type",
+        "application/octet-stream",
+        "--metadata",
+        json.dumps({"description": "Postgres binary camera capture."}),
+        "--trust-tier",
+        "1",
+    )
+    exported = run_postgres_cli("export", "--tenant", tenant)
+    evidence = next(item for item in exported["evidence"] if item["cid"] == ingested["cid"])
+
+    assert ingested["content_pointer"] is not None
+    assert ingested["trust_tier"] == 3
+    assert ingested["provenance"]["trusted"] is True
+    assert evidence["content_pointer"] == ingested["content_pointer"]
+    assert evidence["metadata"]["provenance_decision"]["manifest"]["c2pa"]["claim_generator"] == "issuer-a"

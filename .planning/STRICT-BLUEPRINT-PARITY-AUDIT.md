@@ -13,8 +13,8 @@
   - `src/mnemosyne/retrieval.py` for embedding and reranker adapter boundaries plus local semantic entropy.
   - `src/mnemosyne/storage.py`, `src/mnemosyne/provenance.py`, `src/mnemosyne/ingestion.py`, and `src/mnemosyne/queue.py` for object storage, signed-provenance decisions, multimodal ingestion, and local queue semantics.
   - `src/mnemosyne/prefetch.py` and `src/mnemosyne/parametric.py` for FR-18 and FR-21 local boundaries.
-- Verification currently passes with `.venv/bin/python -m compileall -q src tests` and `.venv/bin/python -m pytest -q` returning 69 passing tests plus 2 skipped live-DB tests.
-- Fresh-schema Docker/Postgres verification passes with `MNEMOSYNE_POSTGRES_DSN=postgresql://... .venv/bin/python -m pytest -q tests/test_postgres_engine_live.py` returning 2 passing tests against the compose database and verifying tenant RLS, SQL FTS, pgvector assertion search, dense evidence fallback, recursive graph/PPR, branch/discard, tombstone and hard-delete forget modes, export, HTTP-configurable retrieval adapter wiring, and CLI `--backend postgres`.
+- Verification currently passes with `.venv/bin/python -m compileall -q src tests` and `.venv/bin/python -m pytest -q` returning 71 passing tests plus 3 skipped live-DB tests.
+- Fresh-schema Docker/Postgres verification passes with `MNEMOSYNE_POSTGRES_DSN=postgresql://... .venv/bin/python -m pytest -q tests/test_postgres_engine_live.py` returning 3 passing tests against the compose database and verifying tenant RLS, SQL FTS, pgvector assertion search, dense evidence fallback, recursive graph/PPR, branch/discard, tombstone and hard-delete forget modes, export, HTTP-configurable retrieval adapter wiring, CLI `--backend postgres`, and CLI file ingestion through the C2PA verifier adapter.
 - Code-review blockers partially remediated after `REVIEW.md`: local graph tenant/branch leak fixed, MCP tool-result envelope added, Postgres public string-ID mapping added, Postgres high-level runtime methods added, and Postgres evidence conflict handling now restores durable fields.
 - CLI-first runtime tool coverage added for profile context, graph neighbors, prefetch, trajectory logging, failure attribution, lesson induction/promotion, procedure induction/validation, and parametric proposal/evaluation. MCP dispatch mirrors the same operations.
 - CLI backend selection added with `--backend local|postgres`, `--postgres-dsn`, and `MNEMOSYNE_POSTGRES_DSN`; the live smoke verifies capture/assert/relation/preference/search/deep-search/export/branch/discard through the Postgres CLI path.
@@ -22,16 +22,17 @@
 - Tenant RLS added to `sql/schema.sql` for tenant-owned tables. `PostgresEngine` sets `mnemosyne.tenant_id` before tenant-scoped SQL and requires tenant-scoped branch/merge/discard operations.
 - Explicit erasure modes added to local/Postgres forget paths and CLI: `tombstone_recompute` preserves the audit/deletion path while clearing evidence, and `hard_delete_legal` removes the evidence row while propagating derived assertion retraction/trimming.
 - HTTP-compatible embedding and reranker adapters added, with CLI/env wiring for Postgres retrieval (`--embedding-provider`, `--embedding-url`, `--reranker-provider`, `--reranker-url`, model, API-key, dimension, and timeout controls). Local deterministic providers remain the default for offline verification.
+- CLI-first signed-provenance ingestion added with `ingest --file`, modality/media-type controls, signed-provenance JSON/file inputs, `--c2pa-tool`, trusted issuer mapping, fail-closed verifier errors, and local/Postgres tests. Quarantined evidence is now excluded from default retrieval unless the caller explicitly opts into `include_quarantined`.
 
 ## Remaining Exact-Parity Gaps
 
 | Area | Status | Required For 1:1 Blueprint Parity |
 |---|---|---|
 | Production Postgres retrieval | Partial | SQL FTS, pgvector assertion retrieval, deterministic evidence dense fallback, recursive graph/PPR, HTTP-compatible embedding/reranker adapters, and live DB smoke are implemented. Remaining work: validate provider deployments, add ParadeDB BM25 where needed, AGE/specialist graph adapters where needed, and full shared parity suite. |
-| Tenant isolation and auth | Partial | Capability checks now protect preference, hard-instruction profile, and destructive forget writes; Postgres tenant RLS is implemented and live-smoked. Remaining work: MCP/API auth, complete write-path coverage, and production identity/session handling. |
+| Tenant isolation and auth | Partial | Capability checks now protect preference, hard-instruction profile, and destructive forget writes; Postgres tenant RLS is implemented and live-smoked. Remaining work: MCP/API auth, complete write-path coverage, production identity/session handling, and migration of trust-tier semantics to the blueprint's `0` direct-user/highest trust through `5` untrusted-external scale. |
 | CLI/MCP runtime coverage | Partial | CLI-first coverage now exists for profile, graph, trajectory, lesson, procedure, prefetch, parametric flows, and local/Postgres backend selection; remaining work is official MCP SDK/server compliance, richer schemas, and server-backed stateless mode. |
 | Consolidation role pipeline | Partial | Add queue-backed idle/server worker orchestration, extraction/summarization roles, entity resolution, incremental recompute, and protected-suite gate persistence. |
-| Signed provenance | Partial | Replace deterministic digest verifier with real C2PA verifier integration and trust-policy mapping. |
+| Signed provenance | Partial | CLI and ingestion can invoke a `c2patool`-style verifier, map trusted issuers, fail closed on verifier errors, and hide quarantined evidence from default retrieval. Remaining work: production certificate-chain/trust-policy validation, report-to-asset binding assurance, and full capability/taint propagation from provenance decisions. |
 | Multimodal retrieval | Partial | Add image/audio embedding/extraction and retrieval over externalized object payloads. |
 | Privacy and erasure | Partial | Tombstone recompute and legal hard-delete modes now exist locally and in Postgres with live CLI coverage. Remaining work: crypto-shred/key-management policy, broader derived-index recompute, and data residency enforcement. |
 | Observability dashboards | Partial | Export metrics for dashboards and add deployment smoke checks for retrieval channels, calibration, promotion/rollback, contradiction backlog, and diversity/proxy tripwires. |
@@ -44,7 +45,8 @@ The earlier `.planning/v1.0-MILESTONE-AUDIT.md` remains useful as evidence that 
 
 ## Next Required Implementation Slice
 
-1. Expand the live Docker/Postgres smoke into a full shared contract suite.
-2. Wire production embedding and cross-encoder providers behind the existing Postgres retrieval adapter boundary.
-3. Harden CLI/MCP schemas and add official MCP SDK/server integration tests.
-4. Add auth/RLS and tenant-scoped branch enforcement before making any production multi-tenant claim.
+1. Migrate trust-tier semantics to match the blueprint contract (`0` direct-user/highest trust through `5` untrusted-external) and update retrieval/write gates accordingly.
+2. Expand the live Docker/Postgres smoke into a full shared contract suite.
+3. Wire production embedding and cross-encoder providers behind the existing Postgres retrieval adapter boundary.
+4. Harden CLI/MCP schemas and add official MCP SDK/server integration tests.
+5. Add auth/RLS and tenant-scoped branch enforcement before making any production multi-tenant claim.

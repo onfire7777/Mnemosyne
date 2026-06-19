@@ -12,8 +12,10 @@ from uuid import UUID
 
 from mnemosyne.engine import LocalMemoryEngine, MemoryEngine
 from mnemosyne.eval import run_seed_suite
+from mnemosyne.ingestion import IngestRequest, IngestionPipeline
 from mnemosyne.mcp_tools import MemoryTools, TOOL_SPEC
 from mnemosyne.models import Assertion, Relation
+from mnemosyne.provenance import C2paToolVerifier, SignedProvenanceVerifier
 from mnemosyne.retrieval import HashingEmbeddingProvider, HttpEmbeddingProvider, HttpReranker, LocalSimilarityReranker, RetrievalAdapters
 from mnemosyne.runtime_state import RuntimeState
 
@@ -82,9 +84,21 @@ def load_engine(args: argparse.Namespace) -> MemoryEngine:
     return LocalMemoryEngine(store_path=Path(args.store))
 
 
+def load_provenance_verifier(args: argparse.Namespace) -> SignedProvenanceVerifier | C2paToolVerifier:
+    if args.c2pa_tool:
+        return C2paToolVerifier(
+            tool_path=args.c2pa_tool,
+            trusted_issuers=tuple(args.trusted_provenance_issuer or []),
+            timeout_seconds=args.provenance_timeout,
+        )
+    return SignedProvenanceVerifier()
+
+
 def load_tools(args: argparse.Namespace) -> MemoryTools:
     store = Path(args.store)
-    return MemoryTools(load_engine(args), runtime_state=RuntimeState.from_store_path(store))
+    engine = load_engine(args)
+    ingestion = IngestionPipeline(engine, provenance_verifier=load_provenance_verifier(args))
+    return MemoryTools(engine, ingestion=ingestion, runtime_state=RuntimeState.from_store_path(store))
 
 
 def json_default(value: Any) -> Any:
@@ -115,6 +129,43 @@ def cmd_capture(args: argparse.Namespace) -> None:
             content=args.content,
             branch=args.branch,
             trust_tier=args.trust_tier,
+        )
+    )
+
+
+def load_signed_provenance(args: argparse.Namespace) -> dict[str, Any] | None:
+    manifest: dict[str, Any] = {}
+    if args.signed_provenance:
+        manifest.update(parse_json_arg(args.signed_provenance, {}))
+    if args.signed_provenance_file:
+        manifest.update(json.loads(Path(args.signed_provenance_file).read_text(encoding="utf-8")))
+    if args.file and args.c2pa_tool:
+        manifest.setdefault("asset_path", args.file)
+    return manifest or None
+
+
+def cmd_ingest(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    data = Path(args.file).read_bytes() if args.file else None
+    content = args.content
+    if data is None and content is None:
+        raise SystemExit("ingest requires --content or --file.")
+    emit(
+        tools.ingest(
+            tenant_id=args.tenant,
+            user_id=args.user,
+            actor=args.actor,
+            source_type=args.source_type,
+            content=content,
+            data=data,
+            branch=args.branch,
+            trust_tier=args.trust_tier,
+            source_identity=args.source_identity,
+            media_type=args.media_type,
+            modality=args.modality,
+            metadata=parse_json_arg(args.metadata, {}),
+            signed_provenance=load_signed_provenance(args),
+            sensitivity=args.sensitivity,
         )
     )
 
@@ -382,6 +433,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--retrieval-timeout", type=float, default=float(os.environ.get("MNEMOSYNE_RETRIEVAL_TIMEOUT", "30")))
     parser.add_argument("--lexical-backend", default=os.environ.get("MNEMOSYNE_LEXICAL_BACKEND", "postgres-fts"))
     parser.add_argument("--graph-backend", default=os.environ.get("MNEMOSYNE_GRAPH_BACKEND", "postgres-recursive-ppr"))
+    parser.add_argument("--c2pa-tool", default=os.environ.get("MNEMOSYNE_C2PA_TOOL"))
+    parser.add_argument("--trusted-provenance-issuer", action="append", default=os.environ.get("MNEMOSYNE_TRUSTED_PROVENANCE_ISSUERS", "").split(",") if os.environ.get("MNEMOSYNE_TRUSTED_PROVENANCE_ISSUERS") else [])
+    parser.add_argument("--provenance-timeout", type=float, default=float(os.environ.get("MNEMOSYNE_PROVENANCE_TIMEOUT", "30")))
     sub = parser.add_subparsers(dest="command", required=True)
 
     capture = sub.add_parser("capture")
@@ -394,6 +448,24 @@ def build_parser() -> argparse.ArgumentParser:
     capture.add_argument("--branch", default="main")
     capture.add_argument("--trust-tier", type=int, default=1)
     capture.set_defaults(func=cmd_capture)
+
+    ingest = sub.add_parser("ingest")
+    ingest.add_argument("--tenant", required=True)
+    ingest.add_argument("--user", required=True)
+    ingest.add_argument("--actor", default="user", choices=["user", "assistant", "tool", "system", "external"])
+    ingest.add_argument("--source-type", required=True)
+    ingest.add_argument("--source-identity")
+    ingest.add_argument("--content")
+    ingest.add_argument("--file")
+    ingest.add_argument("--modality", default="text", choices=["text", "image", "audio", "video", "binary", "multimodal"])
+    ingest.add_argument("--media-type", default="text/plain")
+    ingest.add_argument("--metadata", default="{}")
+    ingest.add_argument("--signed-provenance")
+    ingest.add_argument("--signed-provenance-file")
+    ingest.add_argument("--branch", default="main")
+    ingest.add_argument("--trust-tier", type=int, default=1)
+    ingest.add_argument("--sensitivity", type=int, default=0)
+    ingest.set_defaults(func=cmd_ingest)
 
     assertion = sub.add_parser("assert")
     assertion.add_argument("--tenant", required=True)
