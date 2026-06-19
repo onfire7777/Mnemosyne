@@ -54,6 +54,10 @@ class PostgresEngine:
     def connect(self) -> Any:
         return self._psycopg.connect(self.dsn)
 
+    @staticmethod
+    def _set_tenant(cur: Any, db_tenant_id: str) -> None:
+        cur.execute("SELECT set_config('mnemosyne.tenant_id', %s, true)", (str(db_tenant_id),))
+
     def ensure_tenant_and_branch(self, tenant_id: str, branch: str = "main", kind: str = "protected") -> None:
         db_tenant_id = _stable_uuid("tenant", tenant_id)
         with self.connect() as conn:
@@ -62,6 +66,7 @@ class PostgresEngine:
                     "INSERT INTO tenants(id, name) VALUES (%s, %s) ON CONFLICT (id) DO NOTHING",
                     (db_tenant_id, tenant_id),
                 )
+                self._set_tenant(cur, db_tenant_id)
                 cur.execute(
                     """
                     INSERT INTO branches(tenant_id, name, kind)
@@ -89,6 +94,7 @@ class PostgresEngine:
         cid_bytes = _cid_to_bytes(cid)
         with self.connect() as conn:
             with conn.cursor() as cur:
+                self._set_tenant(cur, db_tenant_id)
                 cur.execute(
                     """
                     INSERT INTO evidence (
@@ -146,6 +152,7 @@ class PostgresEngine:
         db_tenant_id = _stable_uuid("tenant", tenant_id)
         with self.connect() as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                self._set_tenant(cur, db_tenant_id)
                 cur.execute(
                     """
                     SELECT e.*, t.name AS tenant_name
@@ -168,6 +175,7 @@ class PostgresEngine:
         db_user_id = _stable_uuid("user", incoming.user_id) if incoming.user_id else None
         with self.connect() as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                self._set_tenant(cur, db_tenant_id)
                 cur.execute(
                     """
                     SELECT * FROM assertions
@@ -276,6 +284,7 @@ class PostgresEngine:
         db_tenant_id = _stable_uuid("tenant", relation.tenant_id)
         with self.connect() as conn:
             with conn.cursor() as cur:
+                self._set_tenant(cur, db_tenant_id)
                 cur.execute(
                     """
                     INSERT INTO relations (
@@ -312,6 +321,7 @@ class PostgresEngine:
         db_user_id = _stable_uuid("user", pref.user_id)
         with self.connect() as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                self._set_tenant(cur, db_tenant_id)
                 cur.execute(
                     """
                     SELECT id, statement, explicit
@@ -376,6 +386,7 @@ class PostgresEngine:
         hits: list[Hit] = []
         with self.connect() as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                self._set_tenant(cur, db_tenant_id)
                 cur.execute(
                     """
                     WITH q AS (SELECT plainto_tsquery('english', %s) AS query)
@@ -454,6 +465,7 @@ class PostgresEngine:
         hits: list[Hit] = []
         with self.connect() as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                self._set_tenant(cur, db_tenant_id)
                 cur.execute(
                     """
                     SELECT id, branch, subject, predicate, object, confidence,
@@ -553,6 +565,7 @@ class PostgresEngine:
         relation_by_pair: dict[tuple[str, str], dict[str, Any]] = {}
         with self.connect() as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                self._set_tenant(cur, db_tenant_id)
                 if moment:
                     cur.execute(
                         """
@@ -625,6 +638,7 @@ class PostgresEngine:
         db_tenant_id = _stable_uuid("tenant", tenant_id)
         with self.connect() as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                self._set_tenant(cur, db_tenant_id)
                 cur.execute(
                     """
                     SELECT a.*, t.name AS tenant_name
@@ -731,6 +745,7 @@ class PostgresEngine:
         propagated: dict[str, Any] = {"retracted_assertions": [], "trimmed_assertions": []}
         with self.connect() as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                self._set_tenant(cur, db_tenant_id)
                 cur.execute(
                     """
                     UPDATE evidence
@@ -778,6 +793,7 @@ class PostgresEngine:
         db_tenant_id = _stable_uuid("tenant", tenant_id)
         with self.connect() as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                self._set_tenant(cur, db_tenant_id)
                 cur.execute(
                     """
                     SELECT e.*, t.name AS tenant_name
@@ -829,14 +845,13 @@ class PostgresEngine:
     def branch(self, name: str, frm: str = "main", kind: str = "scratch", tenant_id: str | None = None) -> None:
         if name == frm:
             return
+        if not tenant_id:
+            raise ValueError("PostgresEngine.branch requires tenant_id")
+        db_tenant_id = _stable_uuid("tenant", tenant_id)
         with self.connect() as conn:
             with conn.cursor() as cur:
-                if tenant_id:
-                    tenants = [_stable_uuid("tenant", tenant_id)]
-                else:
-                    cur.execute("SELECT tenant_id FROM branches WHERE name = %s", (frm,))
-                    tenants = [row[0] for row in cur.fetchall()]
-                for db_tenant_id in tenants:
+                self._set_tenant(cur, db_tenant_id)
+                for db_tenant_id in [db_tenant_id]:
                     cur.execute(
                         """
                         INSERT INTO branches(tenant_id, name, from_branch, kind)
@@ -900,15 +915,14 @@ class PostgresEngine:
                     )
 
     def merge(self, frm: str, into: str = "main", tenant_id: str | None = None) -> MergeReport:
+        if not tenant_id:
+            raise ValueError("PostgresEngine.merge requires tenant_id")
         report = MergeReport(frm, into, 0, 0, 0, 0, [])
+        db_tenant_id = _stable_uuid("tenant", tenant_id)
         with self.connect() as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
-                if tenant_id:
-                    tenants = [_stable_uuid("tenant", tenant_id)]
-                else:
-                    cur.execute("SELECT tenant_id FROM branches WHERE name = %s", (frm,))
-                    tenants = [row["tenant_id"] for row in cur.fetchall()]
-                for db_tenant_id in tenants:
+                self._set_tenant(cur, db_tenant_id)
+                for db_tenant_id in [db_tenant_id]:
                     cur.execute(
                         """
                         INSERT INTO branches(tenant_id, name, from_branch, kind)
@@ -995,19 +1009,16 @@ class PostgresEngine:
     def discard(self, branch: str, tenant_id: str | None = None) -> None:
         if branch == "main":
             raise ValueError("main branch cannot be discarded")
+        if not tenant_id:
+            raise ValueError("PostgresEngine.discard requires tenant_id")
+        db_tenant_id = _stable_uuid("tenant", tenant_id)
         with self.connect() as conn:
             with conn.cursor() as cur:
-                if tenant_id:
-                    db_tenant_id = _stable_uuid("tenant", tenant_id)
-                    cur.execute("DELETE FROM relations WHERE tenant_id = %s AND branch = %s", (db_tenant_id, branch))
-                    cur.execute("DELETE FROM assertions WHERE tenant_id = %s AND branch = %s", (db_tenant_id, branch))
-                    cur.execute("DELETE FROM evidence WHERE tenant_id = %s AND branch = %s", (db_tenant_id, branch))
-                    cur.execute("DELETE FROM branches WHERE tenant_id = %s AND name = %s", (db_tenant_id, branch))
-                else:
-                    cur.execute("DELETE FROM relations WHERE branch = %s", (branch,))
-                    cur.execute("DELETE FROM assertions WHERE branch = %s", (branch,))
-                    cur.execute("DELETE FROM evidence WHERE branch = %s", (branch,))
-                    cur.execute("DELETE FROM branches WHERE name = %s", (branch,))
+                self._set_tenant(cur, db_tenant_id)
+                cur.execute("DELETE FROM relations WHERE tenant_id = %s AND branch = %s", (db_tenant_id, branch))
+                cur.execute("DELETE FROM assertions WHERE tenant_id = %s AND branch = %s", (db_tenant_id, branch))
+                cur.execute("DELETE FROM evidence WHERE tenant_id = %s AND branch = %s", (db_tenant_id, branch))
+                cur.execute("DELETE FROM branches WHERE tenant_id = %s AND name = %s", (db_tenant_id, branch))
 
     def _local_rank(self, query: str, k: int, filt: dict[str, Any], channel: str) -> list[Hit]:
         tenant_id = filt["tenant_id"]
@@ -1018,6 +1029,7 @@ class PostgresEngine:
         candidates: list[Hit] = []
         with self.connect() as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                self._set_tenant(cur, db_tenant_id)
                 cur.execute(
                     """
                     SELECT cid, tenant_id, branch, content, trust_tier, sensitivity, source_type
