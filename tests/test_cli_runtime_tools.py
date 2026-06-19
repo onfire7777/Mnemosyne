@@ -20,6 +20,30 @@ def run_cli(store: Path, *args: str) -> dict:
     return json.loads(result.stdout)
 
 
+def run_raw_cli(store: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, "-m", "mnemosyne.cli", "--store", str(store), *args],
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+
+
+def test_cli_backend_selection_requires_postgres_dsn(tmp_path: Path) -> None:
+    result = run_raw_cli(tmp_path / "mnemosyne.json", "--backend", "postgres", "--postgres-dsn", "", "search", "--tenant", TENANT, "--query", "anything")
+
+    assert result.returncode != 0
+    assert "Postgres backend requires --postgres-dsn or MNEMOSYNE_POSTGRES_DSN." in result.stderr
+
+
+def test_cli_tools_command_does_not_require_engine_backend(tmp_path: Path) -> None:
+    result = run_raw_cli(tmp_path / "mnemosyne.json", "--backend", "postgres", "--postgres-dsn", "", "tools")
+
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    assert any(tool["name"] == "search" for tool in payload["tools"])
+
+
 def test_cli_profile_graph_learning_and_parametric_flows_persist(tmp_path: Path) -> None:
     store = tmp_path / "mnemosyne.json"
 

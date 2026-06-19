@@ -48,10 +48,10 @@ After this review, the following blocker fixes were implemented and verified:
 - CR-05 partially fixed: `tools/call` now returns MCP-style `content`, `structuredContent`, and `isError`; `notifications/initialized` is suppressed in stdio serving.
 - CR-06 partially fixed: Postgres retrieval now writes assertion embeddings/lexemes, uses SQL FTS, pgvector assertion search, deterministic dense evidence fallback, recursive graph/PPR, RRF/MMR, and reranker boundaries. Remaining production work is external embedding providers, ParadeDB/BM25 where needed, AGE/specialist graph adapters where needed, and cross-encoder integration.
 - WR-01 fixed: Postgres evidence conflict handling restores content, metadata, modality, trust, sensitivity, signed provenance, and access policy.
-- WR-02 fixed for current scope: stdio framing/tool-result envelope tests were added, static Postgres retrieval guards were added, and `tests/test_postgres_engine_live.py` exercises the live Postgres adapter when `MNEMOSYNE_POSTGRES_DSN` is set.
+- WR-02 fixed for current scope: stdio framing/tool-result envelope tests were added, static Postgres retrieval guards were added, and `tests/test_postgres_engine_live.py` exercises both the live Postgres adapter and CLI `--backend postgres` path when `MNEMOSYNE_POSTGRES_DSN` is set.
 - WR-03 fixed: the public `MemoryEngine` protocol now includes the high-level runtime methods used by `MemoryTools`.
 
-Current verification: `.venv/bin/python -m compileall -q src tests` passes; `.venv/bin/python -m pytest -q` returns 58 passing tests and 1 skipped live-DB test; `MNEMOSYNE_POSTGRES_DSN=postgresql://... .venv/bin/python -m pytest -q tests/test_postgres_engine_live.py` returns 1 passing live Postgres test covering SQL FTS, pgvector assertion search, dense evidence fallback, recursive graph/PPR, branch/discard, forget, and export.
+Current verification: `.venv/bin/python -m compileall -q src tests` passes; `.venv/bin/python -m pytest -q` returns 60 passing tests and 2 skipped live-DB tests; `MNEMOSYNE_POSTGRES_DSN=postgresql://... .venv/bin/python -m pytest -q tests/test_postgres_engine_live.py` returns 2 passing live Postgres tests covering SQL FTS, pgvector assertion search, dense evidence fallback, recursive graph/PPR, branch/discard, forget, export, and CLI `--backend postgres`.
 
 ## Summary
 

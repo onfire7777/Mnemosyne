@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import os
+import json
+import subprocess
+import sys
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -18,6 +21,16 @@ def live_dsn() -> str:
     if not dsn:
         pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
     return dsn
+
+
+def run_postgres_cli(*args: str) -> dict:
+    result = subprocess.run(
+        [sys.executable, "-m", "mnemosyne.cli", "--backend", "postgres", "--postgres-dsn", live_dsn(), *args],
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+    return json.loads(result.stdout)
 
 
 def test_postgres_engine_live_contract_smoke() -> None:
@@ -87,3 +100,80 @@ def test_postgres_engine_live_contract_smoke() -> None:
     exported = engine.export_tenant(tenant)
     assert exported["tenant_id"] == tenant
     assert exported["assertions"]
+
+
+def test_postgres_cli_backend_live_smoke() -> None:
+    tenant = f"tenant-cli-live-{uuid4()}"
+    user = "user-cli-live"
+
+    captured = run_postgres_cli(
+        "capture",
+        "--tenant",
+        tenant,
+        "--user",
+        user,
+        "--source-type",
+        "cli-live",
+        "--content",
+        "The CLI backend can use live Postgres retrieval.",
+        "--trust-tier",
+        "3",
+    )
+    asserted = run_postgres_cli(
+        "assert",
+        "--tenant",
+        tenant,
+        "--user",
+        user,
+        "--subject",
+        "CLI backend",
+        "--predicate",
+        "uses",
+        "--object",
+        "live Postgres retrieval",
+        "--evidence-cid",
+        captured["cid"],
+        "--confidence",
+        "0.9",
+        "--trust-tier",
+        "3",
+    )
+    run_postgres_cli(
+        "relation",
+        "--tenant",
+        tenant,
+        "--source",
+        "CLI backend",
+        "--predicate",
+        "uses",
+        "--target",
+        "Postgres",
+        "--evidence-cid",
+        captured["cid"],
+    )
+    run_postgres_cli(
+        "preference",
+        "--tenant",
+        tenant,
+        "--user",
+        user,
+        "--category",
+        "tooling",
+        "--statement",
+        "Prefer CLI-first memory workflows.",
+        "--explicit",
+    )
+
+    search = run_postgres_cli("search", "--tenant", tenant, "--query", "CLI backend Postgres retrieval")
+    deep = run_postgres_cli("deep-search", "--tenant", tenant, "--query", "CLI backend")
+    exported = run_postgres_cli("export", "--tenant", tenant)
+    run_postgres_cli("branch", "--tenant", tenant, "--name", "cli-candidate")
+    branch_search = run_postgres_cli("search", "--tenant", tenant, "--branch", "cli-candidate", "--query", "CLI backend Postgres")
+    run_postgres_cli("discard", "--tenant", tenant, "--branch", "cli-candidate")
+
+    assert asserted["id"]
+    assert search["explain"]["channels"]["postgres_dense"] >= 1
+    assert search["explain"]["channels"]["postgres_lexical"] >= 1
+    assert deep["explain"]["channels"]["postgres_graph_ppr"] >= 1
+    assert branch_search["hits"]
+    assert any(item["statement"] == "Prefer CLI-first memory workflows." for item in exported["preferences"])

@@ -5,10 +5,12 @@ from __future__ import annotations
 import argparse
 import json
 import os
+from datetime import datetime
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
-from mnemosyne.engine import LocalMemoryEngine
+from mnemosyne.engine import LocalMemoryEngine, MemoryEngine
 from mnemosyne.eval import run_seed_suite
 from mnemosyne.mcp_tools import MemoryTools, TOOL_SPEC
 from mnemosyne.models import Assertion, Evidence, Preference, Relation
@@ -19,7 +21,27 @@ def default_store() -> Path:
     return Path(os.environ.get("MNEME_STORE", ".mnemosyne/store.json"))
 
 
-def load_engine(args: argparse.Namespace) -> LocalMemoryEngine:
+def default_backend() -> str:
+    return os.environ.get("MNEME_BACKEND", "local")
+
+
+def default_postgres_dsn() -> str | None:
+    return os.environ.get("MNEMOSYNE_POSTGRES_DSN")
+
+
+def load_engine(args: argparse.Namespace) -> MemoryEngine:
+    if args.backend == "postgres":
+        dsn = args.postgres_dsn or default_postgres_dsn()
+        if not dsn:
+            raise SystemExit("Postgres backend requires --postgres-dsn or MNEMOSYNE_POSTGRES_DSN.")
+        try:
+            from mnemosyne.postgres_engine import PostgresEngine, PostgresUnavailableError
+        except ImportError as exc:  # pragma: no cover - defensive for broken installs.
+            raise SystemExit("Postgres backend requires mnemosyne-memory[postgres].") from exc
+        try:
+            return PostgresEngine(dsn)
+        except PostgresUnavailableError as exc:
+            raise SystemExit(str(exc)) from exc
     return LocalMemoryEngine(store_path=Path(args.store))
 
 
@@ -28,8 +50,20 @@ def load_tools(args: argparse.Namespace) -> MemoryTools:
     return MemoryTools(load_engine(args), runtime_state=RuntimeState.from_store_path(store))
 
 
+def json_default(value: Any) -> Any:
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, UUID):
+        return str(value)
+    if isinstance(value, memoryview):
+        return value.tobytes().hex()
+    if isinstance(value, bytes):
+        return value.hex()
+    raise TypeError(f"Object of type {value.__class__.__name__} is not JSON serializable")
+
+
 def emit(value: Any) -> None:
-    print(json.dumps(value, indent=2, sort_keys=True))
+    print(json.dumps(value, indent=2, sort_keys=True, default=json_default))
 
 
 def cmd_capture(args: argparse.Namespace) -> None:
@@ -247,18 +281,28 @@ def cmd_parametric_evaluate(args: argparse.Namespace) -> None:
 
 def cmd_branch(args: argparse.Namespace) -> None:
     engine = load_engine(args)
-    engine.branch(name=args.name, frm=args.from_branch, kind=args.kind)
+    try:
+        engine.branch(name=args.name, frm=args.from_branch, kind=args.kind, tenant_id=args.tenant)
+    except TypeError:
+        engine.branch(name=args.name, frm=args.from_branch, kind=args.kind)
     emit({"branch": args.name, "from": args.from_branch, "kind": args.kind})
 
 
 def cmd_merge(args: argparse.Namespace) -> None:
     engine = load_engine(args)
-    emit(engine.merge(frm=args.from_branch, into=args.into).to_dict())
+    try:
+        report = engine.merge(frm=args.from_branch, into=args.into, tenant_id=args.tenant)
+    except TypeError:
+        report = engine.merge(frm=args.from_branch, into=args.into)
+    emit(report.to_dict())
 
 
 def cmd_discard(args: argparse.Namespace) -> None:
     engine = load_engine(args)
-    engine.discard(args.branch)
+    try:
+        engine.discard(args.branch, tenant_id=args.tenant)
+    except TypeError:
+        engine.discard(args.branch)
     emit({"discarded": args.branch})
 
 
@@ -273,7 +317,9 @@ def cmd_eval(args: argparse.Namespace) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="mneme", description="Mnemosyne local memory compiler CLI")
+    parser.add_argument("--backend", choices=["local", "postgres"], default=default_backend(), help="Storage backend")
     parser.add_argument("--store", default=str(default_store()), help="Path to local JSON store")
+    parser.add_argument("--postgres-dsn", default=default_postgres_dsn(), help="PostgreSQL DSN for --backend postgres")
     sub = parser.add_subparsers(dest="command", required=True)
 
     capture = sub.add_parser("capture")
@@ -365,15 +411,18 @@ def build_parser() -> argparse.ArgumentParser:
     branch.add_argument("--name", required=True)
     branch.add_argument("--from-branch", default="main")
     branch.add_argument("--kind", default="scratch")
+    branch.add_argument("--tenant", help="Tenant scope for Postgres backend")
     branch.set_defaults(func=cmd_branch)
 
     merge = sub.add_parser("merge")
     merge.add_argument("--from-branch", required=True)
     merge.add_argument("--into", default="main")
+    merge.add_argument("--tenant", help="Tenant scope for Postgres backend")
     merge.set_defaults(func=cmd_merge)
 
     discard = sub.add_parser("discard")
     discard.add_argument("--branch", required=True)
+    discard.add_argument("--tenant", help="Tenant scope for Postgres backend")
     discard.set_defaults(func=cmd_discard)
 
     profile_add = sub.add_parser("profile-add")
