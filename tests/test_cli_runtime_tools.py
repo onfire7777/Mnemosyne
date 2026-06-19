@@ -5,6 +5,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from mnemosyne.cli import build_parser
+
 
 TENANT = "tenant-cli"
 USER = "user-cli"
@@ -42,6 +44,35 @@ def test_cli_tools_command_does_not_require_engine_backend(tmp_path: Path) -> No
     assert result.returncode == 0
     payload = json.loads(result.stdout)
     assert any(tool["name"] == "search" for tool in payload["tools"])
+
+
+def test_cli_exposes_retrieval_provider_flags() -> None:
+    args = build_parser().parse_args(
+        [
+            "--backend",
+            "postgres",
+            "--postgres-dsn",
+            "postgresql://example/mnemosyne",
+            "--embedding-provider",
+            "http",
+            "--embedding-url",
+            "http://127.0.0.1:9999/embed",
+            "--embedding-model",
+            "qwen3-embedding",
+            "--reranker-provider",
+            "http",
+            "--reranker-url",
+            "http://127.0.0.1:9999/rerank",
+            "--reranker-model",
+            "qwen3-reranker",
+            "tools",
+        ]
+    )
+
+    assert args.embedding_provider == "http"
+    assert args.embedding_model == "qwen3-embedding"
+    assert args.reranker_provider == "http"
+    assert args.reranker_model == "qwen3-reranker"
 
 
 def test_cli_preference_write_requires_explicit_or_high_trust_source(tmp_path: Path) -> None:

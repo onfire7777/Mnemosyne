@@ -14,6 +14,7 @@ from mnemosyne.engine import LocalMemoryEngine, MemoryEngine
 from mnemosyne.eval import run_seed_suite
 from mnemosyne.mcp_tools import MemoryTools, TOOL_SPEC
 from mnemosyne.models import Assertion, Relation
+from mnemosyne.retrieval import HashingEmbeddingProvider, HttpEmbeddingProvider, HttpReranker, LocalSimilarityReranker, RetrievalAdapters
 from mnemosyne.runtime_state import RuntimeState
 
 
@@ -29,6 +30,42 @@ def default_postgres_dsn() -> str | None:
     return os.environ.get("MNEMOSYNE_POSTGRES_DSN")
 
 
+def load_retrieval_adapters(args: argparse.Namespace) -> RetrievalAdapters:
+    dims = int(args.embedding_dims)
+    timeout = float(args.retrieval_timeout)
+    if args.embedding_provider == "http":
+        if not args.embedding_url:
+            raise SystemExit("HTTP embedding provider requires --embedding-url or MNEMOSYNE_EMBEDDING_URL.")
+        embedding = HttpEmbeddingProvider(
+            url=args.embedding_url,
+            model=args.embedding_model,
+            api_key=args.embedding_api_key,
+            dims=dims,
+            timeout_seconds=timeout,
+        )
+    else:
+        embedding = HashingEmbeddingProvider(dims=dims)
+
+    if args.reranker_provider == "http":
+        if not args.reranker_url:
+            raise SystemExit("HTTP reranker provider requires --reranker-url or MNEMOSYNE_RERANKER_URL.")
+        reranker = HttpReranker(
+            url=args.reranker_url,
+            model=args.reranker_model,
+            api_key=args.reranker_api_key,
+            timeout_seconds=timeout,
+        )
+    else:
+        reranker = LocalSimilarityReranker(embedding_provider=embedding)
+
+    return RetrievalAdapters(
+        embedding=embedding,
+        reranker=reranker,
+        lexical_backend=args.lexical_backend,
+        graph_backend=args.graph_backend,
+    )
+
+
 def load_engine(args: argparse.Namespace) -> MemoryEngine:
     if args.backend == "postgres":
         dsn = args.postgres_dsn or default_postgres_dsn()
@@ -39,7 +76,7 @@ def load_engine(args: argparse.Namespace) -> MemoryEngine:
         except ImportError as exc:  # pragma: no cover - defensive for broken installs.
             raise SystemExit("Postgres backend requires mnemosyne-memory[postgres].") from exc
         try:
-            return PostgresEngine(dsn)
+            return PostgresEngine(dsn, adapters=load_retrieval_adapters(args))
         except PostgresUnavailableError as exc:
             raise SystemExit(str(exc)) from exc
     return LocalMemoryEngine(store_path=Path(args.store))
@@ -333,6 +370,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--backend", choices=["local", "postgres"], default=default_backend(), help="Storage backend")
     parser.add_argument("--store", default=str(default_store()), help="Path to local JSON store")
     parser.add_argument("--postgres-dsn", default=default_postgres_dsn(), help="PostgreSQL DSN for --backend postgres")
+    parser.add_argument("--embedding-provider", choices=["local", "http"], default=os.environ.get("MNEMOSYNE_EMBEDDING_PROVIDER", "local"))
+    parser.add_argument("--embedding-url", default=os.environ.get("MNEMOSYNE_EMBEDDING_URL"))
+    parser.add_argument("--embedding-model", default=os.environ.get("MNEMOSYNE_EMBEDDING_MODEL"))
+    parser.add_argument("--embedding-api-key", default=os.environ.get("MNEMOSYNE_EMBEDDING_API_KEY"))
+    parser.add_argument("--embedding-dims", type=int, default=int(os.environ.get("MNEMOSYNE_EMBEDDING_DIMS", "1024")))
+    parser.add_argument("--reranker-provider", choices=["local", "http"], default=os.environ.get("MNEMOSYNE_RERANKER_PROVIDER", "local"))
+    parser.add_argument("--reranker-url", default=os.environ.get("MNEMOSYNE_RERANKER_URL"))
+    parser.add_argument("--reranker-model", default=os.environ.get("MNEMOSYNE_RERANKER_MODEL"))
+    parser.add_argument("--reranker-api-key", default=os.environ.get("MNEMOSYNE_RERANKER_API_KEY"))
+    parser.add_argument("--retrieval-timeout", type=float, default=float(os.environ.get("MNEMOSYNE_RETRIEVAL_TIMEOUT", "30")))
+    parser.add_argument("--lexical-backend", default=os.environ.get("MNEMOSYNE_LEXICAL_BACKEND", "postgres-fts"))
+    parser.add_argument("--graph-backend", default=os.environ.get("MNEMOSYNE_GRAPH_BACKEND", "postgres-recursive-ppr"))
     sub = parser.add_subparsers(dest="command", required=True)
 
     capture = sub.add_parser("capture")

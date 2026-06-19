@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import math
+import os
+import urllib.request
 from collections import Counter
 from dataclasses import dataclass
 from typing import Protocol, Sequence
@@ -79,6 +82,75 @@ class LocalSimilarityReranker:
 
 
 @dataclass(frozen=True, slots=True)
+class HttpEmbeddingProvider:
+    """HTTP JSON embedding provider for managed or self-hosted models.
+
+    The adapter accepts OpenAI-style responses (`data[0].embedding`) and a
+    compact generic shape (`embedding`). Vectors are Matryoshka-truncated or
+    zero-padded to the configured target dimension, then normalized.
+    """
+
+    url: str
+    model: str | None = None
+    api_key: str | None = None
+    dims: int = 1024
+    timeout_seconds: float = 30.0
+    name: str = "http-embedding"
+
+    def embed(self, text: str) -> list[float]:
+        payload: dict[str, object] = {"input": text}
+        if self.model:
+            payload["model"] = self.model
+        response = _post_json(self.url, payload, self.api_key, self.timeout_seconds)
+        vector = _extract_embedding(response)
+        return _normalize_vector(vector, self.dims)
+
+
+@dataclass(frozen=True, slots=True)
+class HttpReranker:
+    """HTTP JSON reranker for cross-encoder-style providers.
+
+    The adapter accepts Cohere-style responses (`results[{index, relevance_score}]`)
+    and a compact generic shape (`results[{index, score}]`).
+    """
+
+    url: str
+    model: str | None = None
+    api_key: str | None = None
+    timeout_seconds: float = 30.0
+    name: str = "http-reranker"
+
+    def rerank(self, query: str, hits: Sequence[Hit], k: int) -> list[Hit]:
+        documents = [hit.text for hit in hits]
+        payload: dict[str, object] = {"query": query, "documents": documents, "top_n": k}
+        if self.model:
+            payload["model"] = self.model
+        response = _post_json(self.url, payload, self.api_key, self.timeout_seconds)
+        scored = _extract_rerank_scores(response)
+        ranked: list[Hit] = []
+        for index, score in scored:
+            if index < 0 or index >= len(hits):
+                continue
+            hit = hits[index]
+            ranked.append(
+                Hit(
+                    id=hit.id,
+                    kind=hit.kind,
+                    tenant_id=hit.tenant_id,
+                    branch=hit.branch,
+                    text=hit.text,
+                    score=float(score),
+                    channel=f"{hit.channel}+rerank",
+                    provenance=list(hit.provenance),
+                    trust_tier=hit.trust_tier,
+                    sensitivity=hit.sensitivity,
+                    metadata={**hit.metadata, "reranker": self.name},
+                )
+            )
+        return sorted(ranked, key=lambda item: item.score, reverse=True)[:k]
+
+
+@dataclass(frozen=True, slots=True)
 class RetrievalAdapters:
     """Configured retrieval boundaries used by runtime implementations."""
 
@@ -86,6 +158,51 @@ class RetrievalAdapters:
     reranker: Reranker = LocalSimilarityReranker()
     lexical_backend: str = "local-bm25-lite"
     graph_backend: str = "local-ppr"
+
+
+def retrieval_adapters_from_env(prefix: str = "MNEMOSYNE") -> RetrievalAdapters:
+    """Build retrieval adapters from environment variables.
+
+    Supported provider values:
+    - `{prefix}_EMBEDDING_PROVIDER=local|http`
+    - `{prefix}_RERANKER_PROVIDER=local|http`
+    """
+
+    embedding_provider = os.environ.get(f"{prefix}_EMBEDDING_PROVIDER", "local").lower()
+    reranker_provider = os.environ.get(f"{prefix}_RERANKER_PROVIDER", "local").lower()
+    dims = int(os.environ.get(f"{prefix}_EMBEDDING_DIMS", "1024"))
+    timeout = float(os.environ.get(f"{prefix}_RETRIEVAL_TIMEOUT", "30"))
+    if embedding_provider == "http":
+        embedding = HttpEmbeddingProvider(
+            url=_required_env(f"{prefix}_EMBEDDING_URL"),
+            model=os.environ.get(f"{prefix}_EMBEDDING_MODEL"),
+            api_key=os.environ.get(f"{prefix}_EMBEDDING_API_KEY"),
+            dims=dims,
+            timeout_seconds=timeout,
+        )
+    elif embedding_provider in {"local", "local-hashing", "hashing"}:
+        embedding = HashingEmbeddingProvider(dims=dims)
+    else:
+        raise ValueError(f"unsupported embedding provider: {embedding_provider}")
+
+    if reranker_provider == "http":
+        reranker: Reranker = HttpReranker(
+            url=_required_env(f"{prefix}_RERANKER_URL"),
+            model=os.environ.get(f"{prefix}_RERANKER_MODEL"),
+            api_key=os.environ.get(f"{prefix}_RERANKER_API_KEY"),
+            timeout_seconds=timeout,
+        )
+    elif reranker_provider in {"local", "local-similarity"}:
+        reranker = LocalSimilarityReranker(embedding_provider=embedding)
+    else:
+        raise ValueError(f"unsupported reranker provider: {reranker_provider}")
+
+    return RetrievalAdapters(
+        embedding=embedding,
+        reranker=reranker,
+        lexical_backend=os.environ.get(f"{prefix}_LEXICAL_BACKEND", "postgres-fts"),
+        graph_backend=os.environ.get(f"{prefix}_GRAPH_BACKEND", "postgres-recursive-ppr"),
+    )
 
 
 def semantic_entropy(alternatives: Sequence[str]) -> float:
@@ -107,3 +224,54 @@ def semantic_entropy(alternatives: Sequence[str]) -> float:
     entropy = -sum((count / total) * math.log(count / total, 2) for count in counts.values())
     max_entropy = math.log(len(counts), 2) if len(counts) > 1 else 1.0
     return entropy / max_entropy if max_entropy else 0.0
+
+
+def _required_env(name: str) -> str:
+    value = os.environ.get(name)
+    if not value:
+        raise ValueError(f"{name} is required")
+    return value
+
+
+def _post_json(url: str, payload: dict[str, object], api_key: str | None, timeout: float) -> dict[str, object]:
+    body = json.dumps(payload).encode("utf-8")
+    headers = {"Content-Type": "application/json", "Accept": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    request = urllib.request.Request(url, data=body, headers=headers, method="POST")
+    with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310 - URL is operator-configured.
+        return json.loads(response.read().decode("utf-8"))
+
+
+def _extract_embedding(response: dict[str, object]) -> list[float]:
+    if isinstance(response.get("embedding"), list):
+        return [float(value) for value in response["embedding"]]  # type: ignore[index]
+    data = response.get("data")
+    if isinstance(data, list) and data and isinstance(data[0], dict) and isinstance(data[0].get("embedding"), list):
+        return [float(value) for value in data[0]["embedding"]]
+    raise ValueError("embedding response must contain `embedding` or `data[0].embedding`")
+
+
+def _extract_rerank_scores(response: dict[str, object]) -> list[tuple[int, float]]:
+    results = response.get("results")
+    if not isinstance(results, list):
+        raise ValueError("reranker response must contain `results`")
+    scored: list[tuple[int, float]] = []
+    for item in results:
+        if not isinstance(item, dict):
+            continue
+        index = item.get("index")
+        score = item.get("score", item.get("relevance_score"))
+        if isinstance(index, int) and isinstance(score, (int, float)):
+            scored.append((index, float(score)))
+    return scored
+
+
+def _normalize_vector(vector: Sequence[float], dims: int) -> list[float]:
+    adjusted = list(vector[:dims])
+    if len(adjusted) < dims:
+        adjusted.extend([0.0] * (dims - len(adjusted)))
+    norm = math.sqrt(sum(value * value for value in adjusted))
+    if norm == 0.0:
+        return adjusted
+    return [value / norm for value in adjusted]

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 from datetime import UTC, datetime
 from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid5
@@ -10,8 +11,6 @@ from mnemosyne.ids import content_cid
 from mnemosyne.models import Assertion, Evidence, Hit, MergeReport, Preference, Relation, RetrievalResult, dt_to_json, parse_dt, utc_now
 from mnemosyne.policy import OperatingPolicy
 from mnemosyne.privacy import ErasureMode
-from collections import defaultdict
-
 from mnemosyne.retrieval import HashingEmbeddingProvider, LocalSimilarityReranker, RetrievalAdapters
 from mnemosyne.text import approx_tokens, cosine, hashing_embedding, lexical_score, tokenize
 
