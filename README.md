@@ -63,7 +63,7 @@ MNEMOSYNE_POSTGRES_DSN=postgresql://mnemosyne:mnemosyne-local-dev@127.0.0.1:5432
 
 The repository has a verified local scaffold plus runtime parity extensions. Current checks:
 
-- `.venv/bin/python -m pytest -q` returns 65 passing tests and 2 skipped live-DB tests.
-- With Docker compose Postgres running, `MNEMOSYNE_POSTGRES_DSN=postgresql://... .venv/bin/python -m pytest -q tests/test_postgres_engine_live.py` returns 2 passing live adapter tests covering tenant RLS, SQL FTS, pgvector assertion search, dense evidence fallback, recursive graph/PPR, and CLI `--backend postgres`.
+- `.venv/bin/python -m pytest -q` returns 67 passing tests and 2 skipped live-DB tests.
+- With Docker compose Postgres running, `MNEMOSYNE_POSTGRES_DSN=postgresql://... .venv/bin/python -m pytest -q tests/test_postgres_engine_live.py` returns 2 passing live adapter tests covering tenant RLS, SQL FTS, pgvector assertion search, dense evidence fallback, recursive graph/PPR, tombstone and hard-delete forget modes, and CLI `--backend postgres`.
 
 Exact 1:1 blueprint parity is still in progress. The controlling status artifact is `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md`.

@@ -12,7 +12,7 @@ See: .planning/PROJECT.md (updated 2026-06-19)
 Phase: Strict parity continuation after Phase 5 scaffold
 Plan: Exact blueprint parity audit and runtime gap closure
 Status: In progress; exact 1:1 blueprint parity is not complete.
-Last activity: 2026-06-19 — Added CLI-first runtime coverage, selectable CLI Postgres backend support, Postgres retrieval parity for SQL FTS/pgvector/graph, fail-closed capability enforcement, and Postgres tenant RLS policies with engine tenant-context setting. The test suite now has 65 passing tests and 2 skipped live-DB tests; a fresh-schema DSN-backed live Postgres run passes engine and CLI smokes. Strict audit remains open for exact production parity.
+Last activity: 2026-06-19 — Added CLI-first runtime coverage, selectable CLI Postgres backend support, Postgres retrieval parity for SQL FTS/pgvector/graph, fail-closed capability enforcement, Postgres tenant RLS, and explicit tombstone vs legal hard-delete erasure modes. The test suite now has 67 passing tests and 2 skipped live-DB tests; a fresh-schema DSN-backed live Postgres run passes engine and CLI smokes. Strict audit remains open for exact production parity.
 
 Progress: [███████░░░] local scaffold verified; production parity gaps remain
 
@@ -52,12 +52,13 @@ Progress: [███████░░░] local scaffold verified; production p
 - [Runtime]: CLI now supports `--backend local|postgres` plus `--postgres-dsn`/`MNEMOSYNE_POSTGRES_DSN`; live tests verify the Postgres backend through real CLI commands.
 - [Security]: `MemoryTools` now enforces `SecurityPolicy` for preference writes, hard-instruction profile writes, and destructive forget operations; CLI denials are covered by tests.
 - [Storage]: `sql/schema.sql` now enables and forces tenant RLS on tenant-owned tables, and `PostgresEngine` sets `mnemosyne.tenant_id` before tenant-scoped SQL.
+- [Privacy]: Local and Postgres forget paths now accept `tombstone_recompute` or `hard_delete_legal`; CLI exposes `--erasure-mode` and tests verify hard-delete removal.
 
 ### Pending Todos
 
 - Finish exact blueprint parity, starting with expanding the live PostgresEngine smoke into a full shared contract suite, hardening CLI/MCP schemas, and adding official MCP SDK/server integration tests.
 - Replace deterministic Postgres retrieval fallbacks with production embedding providers, ParadeDB/BM25 where needed, AGE/specialist graph adapters where needed, and cross-encoder reranker integrations.
-- Add production auth/session identity, complete write-path authorization, C2PA verifier integration, multimodal extraction, and deployment observability.
+- Add production auth/session identity, complete write-path authorization, crypto-shred/key-management policy, C2PA verifier integration, multimodal extraction, and deployment observability.
 
 ### Blockers/Concerns
 

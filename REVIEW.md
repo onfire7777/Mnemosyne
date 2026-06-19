@@ -49,11 +49,12 @@ After this review, the following blocker fixes were implemented and verified:
 - CR-06 partially fixed: Postgres retrieval now writes assertion embeddings/lexemes, uses SQL FTS, pgvector assertion search, deterministic dense evidence fallback, recursive graph/PPR, RRF/MMR, and reranker boundaries. Remaining production work is external embedding providers, ParadeDB/BM25 where needed, AGE/specialist graph adapters where needed, and cross-encoder integration.
 - Security follow-up: `MemoryTools` now fail-closes preference writes, hard-instruction profile writes, and destructive forget operations through `SecurityPolicy`; CLI/facade tests cover denied low-trust writes and allowed explicit/operator writes.
 - Tenant isolation follow-up: `sql/schema.sql` now enables/forces tenant RLS for tenant-owned tables, and `PostgresEngine` sets `mnemosyne.tenant_id` before tenant-scoped SQL. Fresh-schema live tests pass through engine and CLI paths.
+- Privacy follow-up: local and Postgres forget paths now support `tombstone_recompute` and `hard_delete_legal`, with CLI and fresh-schema live coverage for hard-delete evidence removal.
 - WR-01 fixed: Postgres evidence conflict handling restores content, metadata, modality, trust, sensitivity, signed provenance, and access policy.
 - WR-02 fixed for current scope: stdio framing/tool-result envelope tests were added, static Postgres retrieval guards were added, and `tests/test_postgres_engine_live.py` exercises both the live Postgres adapter and CLI `--backend postgres` path when `MNEMOSYNE_POSTGRES_DSN` is set.
 - WR-03 fixed: the public `MemoryEngine` protocol now includes the high-level runtime methods used by `MemoryTools`.
 
-Current verification: `.venv/bin/python -m compileall -q src tests` passes; `.venv/bin/python -m pytest -q` returns 65 passing tests and 2 skipped live-DB tests; `MNEMOSYNE_POSTGRES_DSN=postgresql://... .venv/bin/python -m pytest -q tests/test_postgres_engine_live.py` returns 2 passing live Postgres tests covering tenant RLS, SQL FTS, pgvector assertion search, dense evidence fallback, recursive graph/PPR, branch/discard, forget, export, and CLI `--backend postgres`.
+Current verification: `.venv/bin/python -m compileall -q src tests` passes; `.venv/bin/python -m pytest -q` returns 67 passing tests and 2 skipped live-DB tests; `MNEMOSYNE_POSTGRES_DSN=postgresql://... .venv/bin/python -m pytest -q tests/test_postgres_engine_live.py` returns 2 passing live Postgres tests covering tenant RLS, SQL FTS, pgvector assertion search, dense evidence fallback, recursive graph/PPR, branch/discard, tombstone and hard-delete forget modes, export, and CLI `--backend postgres`.
 
 ## Summary
 

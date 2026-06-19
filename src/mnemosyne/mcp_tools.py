@@ -365,6 +365,7 @@ class MemoryTools:
         requested_by: str = "user",
         role: WriteRole = "operator",
         source_trust_tier: int = 3,
+        erasure_mode: str = "tombstone_recompute",
     ) -> dict[str, Any]:
         decision = self._authorize(
             "forget",
@@ -372,7 +373,13 @@ class MemoryTools:
             source_trust_tier=source_trust_tier,
             destructive=True,
         )
-        result = self.engine.forget(tenant_id=tenant_id, cid=cid, branch=branch, requested_by=requested_by)
+        result = self.engine.forget(
+            tenant_id=tenant_id,
+            cid=cid,
+            branch=branch,
+            requested_by=requested_by,
+            erasure_mode=erasure_mode,
+        )
         result["security"] = decision
         return result
 
