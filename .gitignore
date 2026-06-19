@@ -24,7 +24,3 @@ venv/
 credentials.json
 service-account.json
 secrets.json
-
-
-.gbrain-source
-.sources/

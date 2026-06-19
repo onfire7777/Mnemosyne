@@ -14,7 +14,7 @@ Build a memory compiler for AI agents that keeps an immutable, content-addressed
 
 ## Product Thesis
 
-Mnemosyne combines lossless memory, GBrain-style compiled truth, truth-maintenance belief revision, git-like branches, bitemporal queries, fidelity-tiered forgetting, calibrated abstention, user-controlled correction, and shadow-first self-optimization into one portable local-to-production memory substrate.
+Mnemosyne combines lossless memory, compiled truth, truth-maintenance belief revision, git-like branches, bitemporal queries, fidelity-tiered forgetting, calibrated abstention, user-controlled correction, and shadow-first self-optimization into one portable local-to-production memory substrate.
 
 ## Implementation Defaults
 
@@ -41,4 +41,3 @@ Mnemosyne combines lossless memory, GBrain-style compiled truth, truth-maintenan
 - Tests must validate user-observable invariants, not just module imports.
 - Security checks must enforce trust boundaries in code and storage, not only in prompts.
 - No phase is complete because files exist; it is complete only when its verification report passes.
-
