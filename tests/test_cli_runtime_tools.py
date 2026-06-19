@@ -212,6 +212,26 @@ def test_cli_persists_queue_between_ingest_and_worker_commands(tmp_path: Path) -
     assert after["queue"]["complete"] == 1
 
 
+def test_cli_queue_enqueue_and_drain_runtime_job(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    enqueued = run_cli(
+        store,
+        "queue-enqueue",
+        "--kind",
+        "calibrate",
+        "--payload",
+        json.dumps({"tenant_id": TENANT, "memory_type": "fact", "scores": [0.25, 0.5], "confidence": 0.1}),
+    )
+    drained = run_cli(store, "queue-drain", "--limit", "1")
+    after = run_cli(store, "queue-snapshot")
+
+    assert enqueued["queue"]["queued"] == 1
+    assert drained["jobs"][0]["kind"] == "calibrate"
+    assert drained["jobs"][0]["status"] == "complete"
+    assert drained["jobs"][0]["result"]["details"]["abstain"] is True
+    assert after["queue"]["complete"] == 1
+
+
 def test_cli_preference_write_requires_explicit_or_high_trust_source(tmp_path: Path) -> None:
     denied = run_raw_cli(
         tmp_path / "mnemosyne.json",

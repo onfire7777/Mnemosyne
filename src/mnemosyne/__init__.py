@@ -7,6 +7,13 @@ from mnemosyne.calibration import CalibrationSet
 from mnemosyne.lifecycle import FidelityTier, LifecycleState
 from mnemosyne.graph import GraphBenchmarkResult, LocalRelationGraphAdapter
 from mnemosyne.guard import NoDegradationResult
+from mnemosyne.jobs import (
+    CALIBRATE_JOB,
+    EVAL_SUITE_JOB,
+    LIFECYCLE_SWEEP_JOB,
+    OBSERVABILITY_SNAPSHOT_JOB,
+    RuntimeJobHandlers,
+)
 from mnemosyne.learning import LearningSystem, Trajectory
 from mnemosyne.models import Assertion, Evidence, Hit, Preference, Relation
 from mnemosyne.parametric import ParametricArtifact, ParametricPromotionDecision, ParametricTier
@@ -26,7 +33,9 @@ __all__ = [
     "AnticipatoryPrefetcher",
     "BeliefRevisionCore",
     "CalibrationSet",
+    "CALIBRATE_JOB",
     "Evidence",
+    "EVAL_SUITE_JOB",
     "FidelityTier",
     "GraphBenchmarkResult",
     "Hit",
@@ -40,7 +49,9 @@ __all__ = [
     "LatentUserProfile",
     "LatencyBenchmarkResult",
     "LearningSystem",
+    "LIFECYCLE_SWEEP_JOB",
     "NoDegradationResult",
+    "OBSERVABILITY_SNAPSHOT_JOB",
     "OperatingPolicy",
     "ObjectRecord",
     "ParametricArtifact",
@@ -56,6 +67,7 @@ __all__ = [
     "QueueWorker",
     "Relation",
     "RetrievalAdapters",
+    "RuntimeJobHandlers",
     "SecurityPolicy",
     "SignedProvenanceVerifier",
     "SelfModelStore",

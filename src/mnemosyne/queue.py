@@ -105,26 +105,44 @@ class InProcessQueue:
 
 
 class QueueWorker:
-    def __init__(self, queue: InProcessQueue, handlers: dict[str, Callable[[dict[str, Any]], Any]]):
+    def __init__(self, queue: InProcessQueue, handlers: dict[str, Callable[[dict[str, Any]], Any]], metrics: Any | None = None):
         self.queue = queue
         self.handlers = handlers
+        self.metrics = metrics
 
     def run_once(self, kind: str | None = None) -> QueueJob | None:
         job = self.queue.lease(kind)
         if not job:
             return None
+        self._metric(f"queue.job.{job.kind}.started")
         handler = self.handlers.get(job.kind)
         if not handler:
             self.queue.fail(job.id, f"no handler for job kind {job.kind}")
+            self._metric(f"queue.job.{job.kind}.failed")
             return job
         try:
             result = handler(job.payload)
             job.result = result.to_dict() if hasattr(result, "to_dict") else result
         except Exception as exc:  # noqa: BLE001 - worker queue must record arbitrary job errors.
             self.queue.fail(job.id, str(exc))
+            self._metric(f"queue.job.{job.kind}.failed")
         else:
             self.queue.complete(job.id)
+            self._metric(f"queue.job.{job.kind}.complete")
         return job
+
+    def drain(self, limit: int = 10, kind: str | None = None) -> list[QueueJob]:
+        completed: list[QueueJob] = []
+        for _ in range(max(limit, 0)):
+            job = self.run_once(kind)
+            if job is None:
+                break
+            completed.append(job)
+        return completed
+
+    def _metric(self, name: str) -> None:
+        if self.metrics and hasattr(self.metrics, "increment"):
+            self.metrics.increment(name)
 
 
 def _parse_dt(value: str | datetime | None) -> datetime:

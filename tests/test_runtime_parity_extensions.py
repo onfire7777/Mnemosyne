@@ -6,8 +6,10 @@ from mnemosyne.consolidation import CONSOLIDATE_EVIDENCE_JOB, ConsolidationWorke
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.gate import GateResult, RegressionCase
 from mnemosyne.ingestion import IngestRequest, IngestionPipeline
+from mnemosyne.jobs import CALIBRATE_JOB, LIFECYCLE_SWEEP_JOB, OBSERVABILITY_SNAPSHOT_JOB, RuntimeJobHandlers
 from mnemosyne.learning import Lesson, Procedure
 from mnemosyne.models import Evidence
+from mnemosyne.observability import MetricsRegistry
 from mnemosyne.parametric import ParametricTier
 from mnemosyne.prefetch import AnticipatoryPrefetcher, PrefetchCandidate
 from mnemosyne.provenance import C2paToolVerifier, SignedProvenanceVerifier
@@ -335,6 +337,42 @@ def test_in_process_queue_retries_and_completes_jobs() -> None:
     assert job.status == "complete"
     assert job.attempts == 2
     assert queue.snapshot()["complete"] == 1
+
+
+def test_runtime_job_handlers_drain_calibration_lifecycle_and_observability_jobs() -> None:
+    engine = LocalMemoryEngine()
+    queue = InProcessQueue()
+    metrics = MetricsRegistry()
+    handlers = RuntimeJobHandlers(engine, queue, metrics=metrics)
+    worker = QueueWorker(queue, handlers.handlers(), metrics=metrics)
+    queue.enqueue(CALIBRATE_JOB, {"tenant_id": TENANT, "memory_type": "fact", "scores": [0.2, 0.4, 0.8], "confidence": 0.1})
+    queue.enqueue(
+        LIFECYCLE_SWEEP_JOB,
+        {
+            "states": [
+                {
+                    "item_id": "memory-1",
+                    "tier": "verbatim",
+                    "salience": 0.01,
+                    "importance": 0.0,
+                    "access_count": 0,
+                    "last_accessed": "2020-01-01T00:00:00Z",
+                }
+            ],
+            "now": "2026-01-01T00:00:00Z",
+        },
+    )
+    queue.enqueue(OBSERVABILITY_SNAPSHOT_JOB, {})
+
+    jobs = worker.drain(limit=3)
+
+    assert [job.status for job in jobs] == ["complete", "complete", "complete"]
+    assert jobs[0].result["details"]["abstain"] is True
+    assert jobs[1].result["details"]["demoted"] == 1
+    assert jobs[2].result["details"]["metrics"]["counters"]["observability.snapshots"] == 1
+    snapshot = metrics.snapshot()
+    assert snapshot.counters["queue.job.calibrate.complete"] == 1
+    assert snapshot.counters["lifecycle.demotions"] == 1
 
 
 def test_prefetch_gate_warms_only_predictable_safe_queries() -> None:
