@@ -33,15 +33,15 @@
 | Area | Status | Required For 1:1 Blueprint Parity |
 |---|---|---|
 | Production Postgres retrieval | Partial | SQL FTS, pgvector assertion retrieval, deterministic evidence dense fallback, recursive graph/PPR, HTTP-compatible embedding/reranker adapters, and live DB smoke are implemented. Remaining work: validate provider deployments, add ParadeDB BM25 where needed, AGE/specialist graph adapters where needed, and full shared parity suite. |
-| Tenant isolation and auth | Partial | Capability checks now protect preference, hard-instruction profile, and destructive forget writes; Postgres tenant RLS is implemented and live-smoked. Trust-tier direction now matches the blueprint scale. Remaining work: MCP/API auth, complete write-path coverage, and production identity/session handling. |
-| CLI/MCP runtime coverage | Partial | CLI-first coverage now exists for profile, graph, trajectory, lesson, procedure, prefetch, parametric flows, and local/Postgres backend selection; remaining work is official MCP SDK/server compliance, richer schemas, and server-backed stateless mode. |
+| Tenant isolation and auth | Partial | Capability checks now protect preference, hard-instruction profile, and destructive forget writes; Postgres tenant RLS is implemented and live-smoked; MCP `tools/call` has opt-in token enforcement. Trust-tier direction now matches the blueprint scale. Remaining work: complete write-path coverage, production identity/session handling, and deployment-grade auth integration. |
+| CLI/MCP runtime coverage | Partial | CLI-first coverage now exists for profile, graph, trajectory, lesson, procedure, prefetch, parametric flows, local/Postgres backend selection, and blueprint-facing ABI aliases; MCP tools now expose signature-derived JSON schemas and runtime JSON-RPC tests. Remaining work is official MCP SDK/server compliance and server-backed stateless production mode. |
 | Consolidation role pipeline | Partial | Ingest now queues ordered persisted local consolidation pass payloads; the CLI can inspect/enqueue/drain local jobs; the worker records structured pass results and can promote a simple direct-user fact candidate through the gate while refusing data-only untrusted facts; local handlers exist for calibration, lifecycle, eval, and observability jobs. Remaining work includes production PGMQ/Redis-style idle/server worker orchestration, richer extraction/summarization roles, entity resolution, incremental recompute, and protected-suite gate persistence. |
 | Signed provenance | Partial | CLI and ingestion can invoke a `c2patool`-style verifier, map trusted issuers, fail closed on verifier errors, and hide quarantined evidence from default retrieval. Remaining work: production certificate-chain/trust-policy validation, report-to-asset binding assurance, and full capability/taint propagation from provenance decisions. |
 | Multimodal retrieval | Partial | Add image/audio embedding/extraction and retrieval over externalized object payloads. |
 | Privacy and erasure | Partial | Tombstone recompute and legal hard-delete modes now exist locally and in Postgres with live CLI coverage. Remaining work: crypto-shred/key-management policy, broader derived-index recompute, and data residency enforcement. |
 | Observability dashboards | Partial | Export metrics for dashboards and add deployment smoke checks for retrieval channels, calibration, promotion/rollback, contradiction backlog, and diversity/proxy tripwires. |
 | Parametric tier | Partial | Implement isolated LoRA/test-time-training artifact handling or a production-backed equivalent with shadow evaluation and rollback. |
-| Live parity suite | Partial | Engine and CLI live Postgres smokes now pass in Docker; expand to the full shared contract suite with optional production adapters enabled. |
+| Live parity suite | Partial | Engine and CLI live Postgres smokes now pass in Docker; the live suite now covers bitemporal supersession, tenant isolation, branch merge retrieval, C2PA ingest, CLI backend use, and gated consolidation. Remaining work: expand to the full shared contract suite with optional production adapters enabled. |
 
 ## Supersession Note
 
@@ -49,7 +49,7 @@ The earlier `.planning/v1.0-MILESTONE-AUDIT.md` remains useful as evidence that 
 
 ## Next Required Implementation Slice
 
-1. Expand the live Docker/Postgres smoke into a full shared contract suite.
+1. Continue expanding the live Docker/Postgres smoke into the full shared contract suite.
 2. Wire production embedding and cross-encoder providers behind the existing Postgres retrieval adapter boundary.
-3. Harden CLI/MCP schemas and add official MCP SDK/server integration tests.
-4. Add auth/RLS and tenant-scoped branch enforcement before making any production multi-tenant claim.
+3. Add official MCP SDK/server integration tests and production stateless-server mode.
+4. Complete write-path auth coverage and production identity/session handling before making any production multi-tenant claim.
