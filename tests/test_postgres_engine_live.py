@@ -376,12 +376,16 @@ def test_postgres_cli_ingests_file_with_c2pa_verifier(tmp_path) -> None:
     )
     exported = run_postgres_cli("export", "--tenant", tenant)
     evidence = next(item for item in exported["evidence"] if item["cid"] == ingested["cid"])
+    search = run_postgres_cli("search", "--tenant", tenant, "--query", "binary camera capture")
 
     assert ingested["content_pointer"] is not None
     assert ingested["trust_tier"] == 3
     assert ingested["provenance"]["trusted"] is True
     assert evidence["content_pointer"] == ingested["content_pointer"]
+    assert evidence["content"] == "Postgres binary camera capture."
+    assert evidence["metadata"]["derived_text_sources"] == ["description"]
     assert evidence["metadata"]["provenance_decision"]["manifest"]["c2pa"]["claim_generator"] == "issuer-a"
+    assert search["hits"][0]["id"] == ingested["cid"]
 
 
 def test_postgres_gated_consolidation_promotes_direct_user_fact_live() -> None:
