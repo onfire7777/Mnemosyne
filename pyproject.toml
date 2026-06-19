@@ -20,8 +20,12 @@ classifiers = [
   "Topic :: Scientific/Engineering :: Artificial Intelligence"
 ]
 
+[project.optional-dependencies]
+postgres = ["psycopg[binary]>=3.2"]
+
 [project.scripts]
 mneme = "mnemosyne.cli:main"
+mneme-mcp = "mnemosyne.mcp_server:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

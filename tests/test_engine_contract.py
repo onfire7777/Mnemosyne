@@ -246,5 +246,52 @@ def test_deep_search_uses_graph_channel_when_relations_exist() -> None:
     assert result.explain["channels"]["graph_ppr"] >= 1
 
 
+def test_deep_search_graph_channel_respects_tenant_and_branch_isolation() -> None:
+    engine = LocalMemoryEngine()
+    engine.add_relation(
+        Relation(
+            tenant_id="tenant-a",
+            source="TenantA",
+            predicate="uses",
+            target="PrivateA",
+            source_evidence_cids=[],
+            access_policy={"tenant": "tenant-a"},
+        )
+    )
+    engine.add_relation(
+        Relation(
+            tenant_id="tenant-b",
+            source="TenantA",
+            predicate="uses",
+            target="PrivateB",
+            source_evidence_cids=[],
+            access_policy={"tenant": "tenant-b"},
+        )
+    )
+    engine.branch("draft")
+    engine.add_relation(
+        Relation(
+            tenant_id="tenant-a",
+            source="TenantA",
+            predicate="uses",
+            target="DraftOnly",
+            source_evidence_cids=[],
+            access_policy={"tenant": "tenant-a"},
+        ),
+        branch="draft",
+    )
+
+    main_result = engine.deep_search("TenantA", "tenant-a", branch="main")
+    draft_result = engine.deep_search("TenantA", "tenant-a", branch="draft")
+
+    main_text = "\n".join(hit.text for hit in main_result.hits)
+    draft_text = "\n".join(hit.text for hit in draft_result.hits)
+    assert "PrivateA" in main_text
+    assert "PrivateB" not in main_text
+    assert "DraftOnly" not in main_text
+    assert "DraftOnly" in draft_text
+    assert "PrivateB" not in draft_text
+
+
 def test_seed_regression_suite_passes() -> None:
     assert_seed_suite_passes()

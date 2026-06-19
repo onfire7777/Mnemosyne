@@ -16,6 +16,14 @@ The v2 blueprint controls implementation. The earlier design is lineage only unl
 
 - `src/mnemosyne/engine.py` — local deterministic engine implementing the MemoryEngine contract.
 - `src/mnemosyne/mcp_tools.py` — MCP-compatible tool facade: capture, search, deep_search, explain, correct, forget, export.
+- `src/mnemosyne/mcp_server.py` — stdio JSON-RPC MCP runtime shim with `initialize`, `tools/list`, `tools/call`, and notification handling.
+- `src/mnemosyne/postgres_engine.py` — PostgreSQL adapter for the canonical schema, including live smoke coverage for append/get/upsert/retrieve/as-of/branch/discard/forget/export.
+- `src/mnemosyne/retrieval.py` — embedding/reranker adapter protocols, deterministic local fallbacks, and semantic-entropy signal.
+- `src/mnemosyne/ingestion.py` — text/blob/multimodal ingestion pipeline with object externalization and signed-provenance decisions.
+- `src/mnemosyne/storage.py` — local content-addressed object store.
+- `src/mnemosyne/queue.py` — in-process queue with queued/running/retry/complete/dead lifecycle.
+- `src/mnemosyne/prefetch.py` — anticipatory prefetch with predictability gate.
+- `src/mnemosyne/parametric.py` — isolated parametric-tier artifact promotion boundary.
 - `src/mnemosyne/security.py` — trust tiers, capability mediation, and data-never-instruction sanitization.
 - `src/mnemosyne/lifecycle.py` — fidelity demotion and gist-risk abstention hooks.
 - `src/mnemosyne/gate.py` — promotion gate with protected regression cases and branch rollback.
@@ -44,4 +52,9 @@ python -m mnemosyne.cli search --tenant tenant-a --query "preferred database"
 
 ## Status
 
-The repository has a tested Phase 0-1 foundation and executable scaffolding for Phases 2-5. The full blueprint remains the active target; later phases are not marked complete until their dedicated verification reports pass.
+The repository has a verified local scaffold plus runtime parity extensions. Current checks:
+
+- `.venv/bin/python -m pytest -q` returns 54 passing tests and 1 skipped live-DB test.
+- With Docker compose Postgres running, `MNEMOSYNE_POSTGRES_DSN=postgresql://... .venv/bin/python -m pytest -q tests/test_postgres_engine_live.py` returns 1 passing live adapter test.
+
+Exact 1:1 blueprint parity is still in progress. The controlling status artifact is `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md`.

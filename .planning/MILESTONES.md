@@ -1,10 +1,12 @@
 # Milestones
 
-## v1.0 — Mnemosyne Blueprint Implementation
+## v1.0 — Mnemosyne Local Scaffold Checkpoint
 
-**Status:** complete  
+**Status:** superseded by strict blueprint parity continuation  
 **Completed:** 2026-06-19  
 **Audit:** `.planning/v1.0-MILESTONE-AUDIT.md`
+
+This checkpoint verified the deterministic local scaffold and initial GitHub project. It does not satisfy the later exact 1:1 blueprint parity objective. Current controlling status: `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md`.
 
 ### Shipped
 
@@ -17,9 +19,10 @@
 
 ### Verification
 
-- `python -m pytest` returned `39 passed`.
-- `python -m compileall -q src tests` passed.
+- Earlier checkpoint: `python -m pytest` returned `39 passed`.
+- Current strict-continuation suite: `.venv/bin/python -m pytest -q` returns 54 passing tests and 1 skipped live-DB test.
+- Current live Postgres smoke: `MNEMOSYNE_POSTGRES_DSN=postgresql://... .venv/bin/python -m pytest -q tests/test_postgres_engine_live.py` returns 1 passing test.
+- Current strict-continuation compile check: `.venv/bin/python -m compileall -q src tests` passes.
 - `python -m mnemosyne.cli tools` returned the expected tool list.
 - Docker Postgres initialized `sql/schema.sql` and reported 21 public tables.
-- `gsd-sdk roadmap analyze` reported 6/6 phases complete.
-
+- `gsd-sdk roadmap analyze` reported 6/6 original scaffold phases complete; strict blueprint parity remains reopened.

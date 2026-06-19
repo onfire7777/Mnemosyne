@@ -14,7 +14,14 @@ from mnemosyne.models import Hit
 class GraphAdapter(Protocol):
     name: str
 
-    def ppr(self, seeds: list[str], k: int, as_of: datetime | None = None) -> list[Hit]:
+    def ppr(
+        self,
+        seeds: list[str],
+        k: int,
+        as_of: datetime | None = None,
+        tenant_id: str | None = None,
+        branch: str | None = None,
+    ) -> list[Hit]:
         raise NotImplementedError
 
 
@@ -24,8 +31,15 @@ class LocalRelationGraphAdapter:
     def __init__(self, engine: LocalMemoryEngine):
         self.engine = engine
 
-    def ppr(self, seeds: list[str], k: int, as_of: datetime | None = None) -> list[Hit]:
-        return self.engine.graph_ppr(seeds, k, as_of=as_of)
+    def ppr(
+        self,
+        seeds: list[str],
+        k: int,
+        as_of: datetime | None = None,
+        tenant_id: str | None = None,
+        branch: str | None = None,
+    ) -> list[Hit]:
+        return self.engine.graph_ppr(seeds, k, as_of=as_of, tenant_id=tenant_id, branch=branch)
 
 
 @dataclass(slots=True)
@@ -63,4 +77,3 @@ def benchmark_graph_adapter(adapter: GraphAdapter, queries: list[list[str]], k: 
         max_ms=max(ordered),
         total_hits=total_hits,
     )
-

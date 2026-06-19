@@ -16,6 +16,7 @@ This roadmap follows the v2 build blueprint exactly: foundations and contracts f
 - [x] **Phase 3: Personalization and Consolidation** - Six-category user model, latent advisory profile, warm-loop consolidation, fidelity lifecycle, and anti-degradation guard.
 - [x] **Phase 4: Procedural and Corrective Learning** - Trajectory logging, failure attribution, lesson induction, promotion gate, branch promote/rollback, and capability-secured writes.
 - [x] **Phase 5: Profile-Guided Self-Optimization** - Shadow-first policy optimization, self-model store, canary branches, diversity tripwire, and optional parametric tier boundaries.
+- [ ] **Phase 6: Exact Blueprint Runtime Parity** - Complete production MCP/Postgres/retrieval/security/deployment parity beyond the deterministic local scaffold.
 
 ## Phase Details
 
@@ -131,3 +132,24 @@ Plans:
 - [x] 05-03: Implement bandit-style policy proposal.
 - [x] 05-04: Implement diversity and proxy-divergence monitoring.
 - [x] 05-05: Add canary policy promotion and rollback tests.
+
+### Phase 6: Exact Blueprint Runtime Parity
+**Goal**: Convert the verified local scaffold into exact 1:1 blueprint parity across runtime protocols, production storage/retrieval, security, deployment, multimodal ingestion, prefetch, and parametric-tier boundaries.
+**Depends on**: Phase 5
+**Requirements**: FR-3, FR-7, FR-9, FR-12, FR-18, FR-19, FR-20, FR-21, all production NFRs
+**Success Criteria** (what must be TRUE):
+  1. The same contract suite passes against LocalMemoryEngine and PostgresEngine in Docker.
+  2. MCP exposes the full blueprint tool surface with auth/capability enforcement and typed schemas.
+  3. Postgres retrieval uses real vector, lexical/BM25, graph, rerank, provenance, and budget paths instead of local fallbacks.
+  4. Ingestion verifies signed provenance, externalizes multimodal payloads, and indexes derived text safely.
+  5. Queue-backed workers run consolidation, embedding, calibration, eval, and lifecycle demotion off the hot path.
+  6. Production privacy/security rails cover tenant isolation, erasure recompute, C2PA trust, poisoning protection, and auditability.
+**Plans**: 6 plans
+
+Plans:
+- [ ] 06-01: Complete MCP/CLI runtime tool surface and auth/capability enforcement.
+- [ ] 06-02: Add live PostgresEngine contract tests and tenant-scoped branch semantics.
+- [ ] 06-03: Replace retrieval fallbacks with real pgvector, lexical/BM25, graph, and reranker adapters.
+- [ ] 06-04: Complete ingestion, object storage, C2PA, multimodal extraction, and safe quarantine flow.
+- [ ] 06-05: Wire queue-backed consolidation, calibration, lifecycle, eval, and observability jobs.
+- [ ] 06-06: Validate exact parity with local and production deployment smoke suites.

@@ -45,10 +45,45 @@ class MemoryEngine(Protocol):
     def lexical_search(self, query: str, k: int, filt: dict[str, Any]) -> list[Hit]:
         raise NotImplementedError
 
-    def graph_ppr(self, seeds: list[str], k: int, as_of: datetime | None = None) -> list[Hit]:
+    def graph_ppr(
+        self,
+        seeds: list[str],
+        k: int,
+        as_of: datetime | None = None,
+        tenant_id: str | None = None,
+        branch: str | None = None,
+    ) -> list[Hit]:
         raise NotImplementedError
 
-    def as_of(self, subject: str, predicate: str, t: datetime) -> list[Assertion]:
+    def as_of(self, subject: str, predicate: str, t: datetime, tenant_id: str | None = None, branch: str = "main") -> list[Assertion]:
+        raise NotImplementedError
+
+    def retrieve(self, query: str, tenant_id: str, branch: str = "main", deep: bool = False, filt: dict[str, Any] | None = None) -> RetrievalResult:
+        raise NotImplementedError
+
+    def deep_search(self, query: str, tenant_id: str, branch: str = "main", filt: dict[str, Any] | None = None) -> RetrievalResult:
+        raise NotImplementedError
+
+    def explain(self, query: str, tenant_id: str, branch: str = "main") -> dict[str, Any]:
+        raise NotImplementedError
+
+    def correct(
+        self,
+        tenant_id: str,
+        user_id: str,
+        subject: str,
+        predicate: str,
+        object_value: str,
+        correction_text: str,
+        branch: str = "main",
+        confidence: float = 0.95,
+    ) -> str:
+        raise NotImplementedError
+
+    def forget(self, tenant_id: str, cid: str, branch: str = "main", requested_by: str = "user") -> dict[str, Any]:
+        raise NotImplementedError
+
+    def export_tenant(self, tenant_id: str) -> dict[str, Any]:
         raise NotImplementedError
 
     def branch(self, name: str, frm: str = "main", kind: str = "scratch") -> None:
@@ -157,7 +192,15 @@ class LocalMemoryEngine:
     def append_evidence(self, ev: Evidence, branch: str = "main") -> str:
         with self._lock:
             self._require_branch(branch)
-            cid = content_cid(ev.content, {"tenant_id": ev.tenant_id, "source_type": ev.source_type})
+            cid = content_cid(
+                ev.content,
+                {
+                    "tenant_id": ev.tenant_id,
+                    "source_type": ev.source_type,
+                    "content_pointer": ev.content_pointer,
+                    "modality": ev.modality,
+                },
+            )
             key = self._evidence_key(ev.tenant_id, branch, cid)
             existing = self.evidence.get(key)
             if existing and not existing.erased:
@@ -322,13 +365,24 @@ class LocalMemoryEngine:
                 hits.append(hit)
         return sorted(hits, key=lambda item: item.score, reverse=True)[:k]
 
-    def graph_ppr(self, seeds: list[str], k: int, as_of: datetime | None = None) -> list[Hit]:
+    def graph_ppr(
+        self,
+        seeds: list[str],
+        k: int,
+        as_of: datetime | None = None,
+        tenant_id: str | None = None,
+        branch: str | None = None,
+    ) -> list[Hit]:
         seed_set = {seed.lower() for seed in seeds}
         if not seed_set:
             return []
         adjacency: dict[str, set[str]] = defaultdict(set)
         relation_by_pair: dict[tuple[str, str], Relation] = {}
         for rel in self.relations.values():
+            if tenant_id is not None and rel.tenant_id != tenant_id:
+                continue
+            if branch is not None and rel.branch != branch:
+                continue
             if as_of and not self._valid_at(rel.valid_from, rel.valid_to, as_of):
                 continue
             adjacency[rel.source.lower()].add(rel.target.lower())
@@ -375,7 +429,7 @@ class LocalMemoryEngine:
         k = self.policy.deep_top_k if deep else self.policy.top_k
         dense = self.vector_search(query, self.policy.rerank_width, effective_filter)
         lexical = self.lexical_search(query, self.policy.rerank_width, effective_filter)
-        graph = self.graph_ppr(tokenize(query), max(4, k // 2)) if deep else []
+        graph = self.graph_ppr(tokenize(query), max(4, k // 2), tenant_id=tenant_id, branch=branch) if deep else []
         fused = self._rrf([dense, lexical, graph], k=max(k * 2, self.policy.rerank_width))
         reranked = self._mmr(query, fused, k=max(k, 1))
         ordered = self._u_curve_order(reranked)

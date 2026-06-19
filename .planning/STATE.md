@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-06-19)
 
 **Core value:** Build a memory compiler with lossless evidence, typed projections, safe retrieval, branchable updates, and gated self-improvement.
-**Current focus:** GitHub project initialization
+**Current focus:** Strict blueprint parity gap closure
 
 ## Current Position
 
-Phase: 5 of 5 (Profile-Guided Self-Optimization)
-Plan: 05-05 of 5 in current phase
-Status: Milestone complete, GitHub initialization pending
-Last activity: 2026-06-19 — Audit passed and v1.0 milestone archive records were created.
+Phase: Strict parity continuation after Phase 5 scaffold
+Plan: Exact blueprint parity audit and runtime gap closure
+Status: In progress; exact 1:1 blueprint parity is not complete.
+Last activity: 2026-06-19 — Added MCP runtime shim, Postgres adapter skeleton, retrieval adapters, object storage, signed-provenance decisions, multimodal ingestion, local queue, anticipatory prefetch, and parametric-tier boundaries. Remediated local graph tenant leak, MCP tool-result envelope, Postgres string-ID mapping, Postgres runtime facade gaps, and added a live Docker/Postgres adapter smoke. Strict audit remains open for exact production parity.
 
-Progress: [██████████] 100%
+Progress: [███████░░░] local scaffold verified; production parity gaps remain
 
 ## Performance Metrics
 
@@ -52,11 +52,13 @@ Progress: [██████████] 100%
 
 ### Pending Todos
 
-- Create GitHub remote after repository verification and initial commit.
+- Finish exact blueprint parity, starting with expanding the live PostgresEngine smoke into a full shared contract suite and adding full MCP/CLI tool coverage for graph, trajectory, lesson, procedure, and parametric operations.
+- Replace Postgres fallback retrieval with real pgvector, FTS/BM25, graph, and reranker paths.
+- Add production auth/RLS, tenant-scoped branch APIs, C2PA verifier integration, multimodal extraction, and deployment observability.
 
 ### Blockers/Concerns
 
-- Git repository and GitHub remote still need to be initialized.
+- Exact 1:1 blueprint parity is not yet achieved; `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md` is the controlling status artifact.
 - Original documentation folder on Desktop is read-only to this process; project build lives in `/Users/admin/Projects/Mnemosyne`.
 - Docker/Postgres parity was verified live after launching Docker Desktop and recreating the schema volume.
 - Legal hard-delete semantics need operator policy beyond the local tombstone behavior.
@@ -65,9 +67,10 @@ Progress: [██████████] 100%
 
 | Category | Item | Status | Deferred At |
 |----------|------|--------|-------------|
-| Production storage | Docker Postgres extension parity | Open | Phase 0 |
-| Calibration | Conformal threshold calibration | Open | Phase 2 |
-| Security | MINJA and AgentPoison permanent suite | Open | Phase 4 |
+| Production storage | Full PostgresEngine parity beyond schema initialization | Open | Strict parity audit |
+| Retrieval | Real pgvector/BM25/graph/reranker adapters | Open | Strict parity audit |
+| Security | Auth/RLS, C2PA verifier, and expanded protected suite | Open | Strict parity audit |
+| Runtime | Full MCP protocol compatibility and complete tool surface | Open | Strict parity audit |
 
 ## Session Continuity
 

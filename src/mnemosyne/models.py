@@ -50,6 +50,9 @@ class Evidence:
     source_identity: str | None = None
     session_id: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    content_pointer: str | None = None
+    modality: Literal["text", "image", "audio", "video", "binary", "multimodal"] = "text"
+    signed_provenance: dict[str, Any] | None = None
     trust_tier: int = 1
     capability_tags: list[str] = field(default_factory=list)
     sensitivity: int = 0
@@ -231,6 +234,25 @@ class MergeReport:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+@dataclass(slots=True)
+class Resource:
+    tenant_id: str
+    kind: str
+    uri: str
+    version: int = 1
+    content_hash: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+    access_policy: dict[str, Any] = field(default_factory=dict)
+    id: str = field(default_factory=new_id)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "Resource":
+        return cls(**dict(data))
 
 
 @dataclass(slots=True)
