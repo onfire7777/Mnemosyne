@@ -10,12 +10,14 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
-from mnemosyne.consolidation import CONSOLIDATE_EVIDENCE_JOB, ConsolidationWorker
+from mnemosyne.consolidation import CONSOLIDATE_EVIDENCE_JOB
 from mnemosyne.engine import LocalMemoryEngine, MemoryEngine
 from mnemosyne.eval import run_seed_suite
 from mnemosyne.ingestion import IngestRequest, IngestionPipeline
+from mnemosyne.jobs import RuntimeJobHandlers
 from mnemosyne.mcp_tools import MemoryTools, TOOL_SPEC
 from mnemosyne.models import Assertion, Relation
+from mnemosyne.observability import MetricsRegistry
 from mnemosyne.provenance import C2paToolVerifier, SignedProvenanceVerifier
 from mnemosyne.queue import InProcessQueue, QueueWorker
 from mnemosyne.retrieval import HashingEmbeddingProvider, HttpEmbeddingProvider, HttpReranker, LocalSimilarityReranker, RetrievalAdapters
@@ -182,12 +184,14 @@ def cmd_ingest(args: argparse.Namespace) -> None:
     if args.run_consolidation_once:
         if ingestion_queue is None:
             raise SystemExit("--run-consolidation-once requires consolidation enqueueing.")
-        consolidator = ConsolidationWorker(tools.engine, gate_cases=[])
-        worker = QueueWorker(ingestion_queue, {CONSOLIDATE_EVIDENCE_JOB: consolidator.run_queue_payload})
+        metrics = MetricsRegistry()
+        handlers = RuntimeJobHandlers(tools.engine, ingestion_queue, metrics=metrics)
+        worker = QueueWorker(ingestion_queue, handlers.handlers(), metrics=metrics)
         job = worker.run_once(CONSOLIDATE_EVIDENCE_JOB)
         result["consolidation_worker"] = {
             "queue": ingestion_queue.snapshot(),
             "job": job.to_dict() if job else None,
+            "metrics": metrics.snapshot().to_dict(),
         }
     if runtime_state and ingestion_queue:
         runtime_state.save_queue(ingestion_queue)
@@ -447,16 +451,39 @@ def cmd_queue_snapshot(args: argparse.Namespace) -> None:
     emit({"queue": queue.snapshot(), "jobs": [job.to_dict() for job in queue.jobs.values()]})
 
 
+def cmd_queue_enqueue(args: argparse.Namespace) -> None:
+    runtime_state = load_runtime_state(args)
+    queue = runtime_state.load_queue() if runtime_state else InProcessQueue()
+    job = queue.enqueue(args.kind, parse_json_arg(args.payload, {}), max_attempts=args.max_attempts)
+    if runtime_state:
+        runtime_state.save_queue(queue)
+    emit({"queue": queue.snapshot(), "job": job.to_dict()})
+
+
 def cmd_consolidate_once(args: argparse.Namespace) -> None:
     runtime_state = load_runtime_state(args)
     queue = runtime_state.load_queue() if runtime_state else InProcessQueue()
     tools = load_tools(args, ingestion_queue=queue, runtime_state=runtime_state)
-    consolidator = ConsolidationWorker(tools.engine, gate_cases=[])
-    worker = QueueWorker(queue, {CONSOLIDATE_EVIDENCE_JOB: consolidator.run_queue_payload})
+    metrics = MetricsRegistry()
+    handlers = RuntimeJobHandlers(tools.engine, queue, metrics=metrics)
+    worker = QueueWorker(queue, handlers.handlers(), metrics=metrics)
     job = worker.run_once(CONSOLIDATE_EVIDENCE_JOB)
     if runtime_state:
         runtime_state.save_queue(queue)
-    emit({"queue": queue.snapshot(), "job": job.to_dict() if job else None})
+    emit({"queue": queue.snapshot(), "job": job.to_dict() if job else None, "metrics": metrics.snapshot().to_dict()})
+
+
+def cmd_queue_drain(args: argparse.Namespace) -> None:
+    runtime_state = load_runtime_state(args)
+    queue = runtime_state.load_queue() if runtime_state else InProcessQueue()
+    tools = load_tools(args, ingestion_queue=queue, runtime_state=runtime_state)
+    metrics = MetricsRegistry()
+    handlers = RuntimeJobHandlers(tools.engine, queue, metrics=metrics)
+    worker = QueueWorker(queue, handlers.handlers(), metrics=metrics)
+    jobs = worker.drain(limit=args.limit, kind=args.kind)
+    if runtime_state:
+        runtime_state.save_queue(queue)
+    emit({"queue": queue.snapshot(), "jobs": [job.to_dict() for job in jobs], "metrics": metrics.snapshot().to_dict()})
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -694,6 +721,17 @@ def build_parser() -> argparse.ArgumentParser:
 
     queue_snapshot = sub.add_parser("queue-snapshot")
     queue_snapshot.set_defaults(func=cmd_queue_snapshot)
+
+    queue_enqueue = sub.add_parser("queue-enqueue")
+    queue_enqueue.add_argument("--kind", required=True)
+    queue_enqueue.add_argument("--payload", default="{}")
+    queue_enqueue.add_argument("--max-attempts", type=int, default=3)
+    queue_enqueue.set_defaults(func=cmd_queue_enqueue)
+
+    queue_drain = sub.add_parser("queue-drain")
+    queue_drain.add_argument("--kind")
+    queue_drain.add_argument("--limit", type=int, default=10)
+    queue_drain.set_defaults(func=cmd_queue_drain)
 
     consolidate_once = sub.add_parser("consolidate-once")
     consolidate_once.set_defaults(func=cmd_consolidate_once)
