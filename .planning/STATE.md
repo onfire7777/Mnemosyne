@@ -12,7 +12,7 @@ See: .planning/PROJECT.md (updated 2026-06-19)
 Phase: Strict parity continuation after Phase 5 scaffold
 Plan: Exact blueprint parity audit and runtime gap closure
 Status: In progress; exact 1:1 blueprint parity is not complete.
-Last activity: 2026-06-19 — Added CLI-first runtime coverage, selectable CLI Postgres backend support, Postgres retrieval parity for SQL FTS/pgvector/graph, fail-closed capability enforcement, Postgres tenant RLS, explicit erasure modes, HTTP-compatible embedding/reranker provider adapters, CLI file ingestion through a C2PA verifier adapter, blueprint-correct trust-tier semantics, deterministic ingest classification, persisted local queue-backed consolidation jobs from ingestion, gated deterministic fact extraction for direct-user evidence, local queued calibration/lifecycle/eval/observability job handlers, tenant-aware promotion gates for Postgres, blueprint-facing CLI/MCP ABI aliases, signature-derived MCP tool schemas, optional MCP tools/call auth, and expanded live Postgres shared-contract coverage for bitemporal supersession, tenant isolation, and branch merge retrieval. The test suite now has 83 passing tests and 5 skipped live-DB tests locally; a fresh-schema DSN-backed live Postgres run passes 5 engine/CLI/consolidation/shared-contract smokes. Strict audit remains open for exact production parity.
+Last activity: 2026-06-19 — Added CLI-first runtime coverage, selectable CLI Postgres backend support, Postgres retrieval parity for SQL FTS/pgvector/graph, fail-closed capability enforcement, Postgres tenant RLS, explicit erasure modes, HTTP-compatible embedding/reranker provider adapters, CLI file ingestion through a C2PA verifier adapter, blueprint-correct trust-tier semantics, deterministic ingest classification, persisted local queue-backed consolidation jobs from ingestion, gated deterministic fact extraction for direct-user evidence, local queued calibration/lifecycle/eval/observability job handlers, tenant-aware promotion gates for Postgres, blueprint-facing CLI/MCP ABI aliases, signature-derived MCP tool schemas, optional MCP tools/call auth, expanded live Postgres shared-contract coverage for bitemporal supersession, tenant isolation, branch merge retrieval, and metadata-derived OCR/transcript/caption indexing for externalized object evidence. The test suite now has 85 passing tests and 6 skipped live-DB tests locally; a fresh-schema DSN-backed live Postgres run passes 6 engine/CLI/consolidation/shared-contract smokes. Strict audit remains open for exact production parity.
 
 Progress: [███████░░░] local scaffold verified; production parity gaps remain
 
@@ -56,13 +56,13 @@ Progress: [███████░░░] local scaffold verified; production p
 - [Retrieval]: CLI/Postgres can now use local or HTTP-compatible embedding and reranker providers via flags/env while keeping deterministic local defaults.
 - [Provenance]: CLI `ingest` now accepts `--file`, modality/media type, signed-provenance JSON, and a `--c2pa-tool` adapter; quarantined evidence is hidden from default retrieval unless `include_quarantined` is explicitly set.
 - [Security]: Trust-tier semantics now follow the blueprint scale: `0` direct-user/highest trust through `5` untrusted external; retrieval/write gates, provenance deltas, SQL defaults, and CLI defaults were migrated.
-- [Ingestion]: The hot path now classifies actor/source trust, adds capability/taint tags, detects simple PII, raises sensitivity/access-policy metadata, and marks untrusted imperatives as data-only.
+- [Ingestion]: The hot path now classifies actor/source trust, adds capability/taint tags, detects simple PII, raises sensitivity/access-policy metadata, marks untrusted imperatives as data-only, and indexes metadata-derived OCR/transcript/caption/alt/description text for externalized object evidence.
 
 ### Pending Todos
 
 - Finish exact blueprint parity, starting with expanding the live PostgresEngine smoke into a full shared contract suite, hardening CLI/MCP schemas, and adding official MCP SDK/server integration tests.
 - Validate production embedding/reranker deployments behind the HTTP-compatible adapter boundary; add ParadeDB/BM25 where needed and AGE/specialist graph adapters where needed.
-- Add production auth/session identity, complete write-path authorization, crypto-shred/key-management policy, C2PA verifier integration, multimodal extraction, and deployment observability.
+- Add production auth/session identity, complete write-path authorization, crypto-shred/key-management policy, production C2PA trust validation, native image/audio extraction and embedding providers, and deployment observability.
 
 ### Blockers/Concerns
 

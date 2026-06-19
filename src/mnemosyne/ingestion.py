@@ -18,6 +18,14 @@ from mnemosyne.storage import LocalObjectStore
 
 
 Modality = Literal["text", "image", "audio", "video", "binary", "multimodal"]
+DERIVED_TEXT_FIELDS = (
+    "derived_text",
+    "ocr_text",
+    "transcript",
+    "caption",
+    "alt_text",
+    "description",
+)
 
 
 @dataclass(slots=True)
@@ -127,8 +135,14 @@ class IngestionPipeline:
             metadata["resource"] = resource.to_dict()
 
         content = request.content or ""
+        derived_text, derived_sources = extract_derived_text(metadata)
         if request.data is not None and request.modality != "text":
-            content = metadata.get("alt_text") or metadata.get("description") or ""
+            content = derived_text
+        if derived_sources:
+            metadata["derived_text"] = derived_text
+            metadata["derived_text_sources"] = derived_sources
+            capability_tags.append("derived-text-indexed")
+            capability_tags = sorted(set(capability_tags))
         predicted_cid = content_cid(
             content,
             {
@@ -219,6 +233,28 @@ class IngestionPipeline:
                 "source_identity": request.source_identity,
             },
         )
+
+
+def extract_derived_text(metadata: dict[str, Any]) -> tuple[str, list[str]]:
+    parts: list[str] = []
+    sources: list[str] = []
+    for key in DERIVED_TEXT_FIELDS:
+        value = metadata.get(key)
+        if isinstance(value, str):
+            text = value.strip()
+            if text:
+                parts.append(text)
+                sources.append(key)
+        elif isinstance(value, list):
+            list_parts = [
+                item.strip()
+                for item in value
+                if isinstance(item, str) and item.strip()
+            ]
+            if list_parts:
+                parts.extend(list_parts)
+                sources.append(key)
+    return "\n".join(parts), sources
 
 
 def classify_request(request: IngestRequest, payload: bytes) -> dict[str, Any]:

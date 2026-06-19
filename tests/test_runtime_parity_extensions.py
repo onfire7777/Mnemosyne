@@ -129,6 +129,46 @@ def test_ingestion_pipeline_externalizes_multimodal_bytes_and_quarantines_bad_pr
     assert included.hits[0].id == result.cid
 
 
+def test_ingestion_indexes_multimodal_derived_text_without_inline_bytes(tmp_path) -> None:
+    engine = LocalMemoryEngine()
+    pipeline = IngestionPipeline(engine, LocalObjectStore(tmp_path / "objects"))
+
+    result = pipeline.ingest(
+        IngestRequest(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="screen-capture",
+            data=b"\x89PNG raw screenshot bytes mentioning nothing searchable",
+            modality="image",
+            media_type="image/png",
+            metadata={
+                "ocr_text": [
+                    "Project Mnemosyne bitemporal graph query.",
+                    "Procedure rollback uses a verified checkpoint.",
+                ],
+                "caption": "Screenshot of a memory timeline.",
+            },
+        )
+    )
+    evidence = engine.get_evidence(TENANT, result.cid)
+    hits = engine.retrieve("verified checkpoint", TENANT)
+
+    assert result.content_pointer is not None
+    assert evidence is not None
+    assert evidence.content == "\n".join(
+        [
+            "Project Mnemosyne bitemporal graph query.",
+            "Procedure rollback uses a verified checkpoint.",
+            "Screenshot of a memory timeline.",
+        ]
+    )
+    assert "raw screenshot bytes" not in evidence.content
+    assert evidence.metadata["derived_text_sources"] == ["ocr_text", "caption"]
+    assert "derived-text-indexed" in evidence.capability_tags
+    assert hits.hits[0].id == result.cid
+
+
 def test_ingestion_classifier_tags_untrusted_imperatives_and_pii(tmp_path) -> None:
     engine = LocalMemoryEngine()
     pipeline = IngestionPipeline(engine, LocalObjectStore(tmp_path / "objects"))

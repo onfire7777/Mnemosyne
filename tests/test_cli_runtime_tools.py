@@ -130,6 +130,12 @@ def test_cli_ingests_binary_file_with_c2pa_verifier(tmp_path: Path) -> None:
     assert ingested["provenance"]["valid"] is True
     assert ingested["provenance"]["trusted"] is True
     assert ingested["provenance"]["manifest"]["c2pa"]["claim_generator"] == "issuer-a"
+    exported = run_cli(store, "export", "--tenant", TENANT)
+    evidence = next(item for item in exported["evidence"] if item["cid"] == ingested["cid"])
+    search = run_cli(store, "search", "--tenant", TENANT, "--query", "camera capture")
+    assert evidence["content"] == "Binary camera capture."
+    assert evidence["metadata"]["derived_text_sources"] == ["description"]
+    assert search["hits"][0]["id"] == ingested["cid"]
 
 
 def test_cli_ingest_classifies_external_untrusted_content(tmp_path: Path) -> None:
