@@ -12,7 +12,7 @@ See: .planning/PROJECT.md (updated 2026-06-19)
 Phase: Strict parity continuation after Phase 5 scaffold
 Plan: Exact blueprint parity audit and runtime gap closure
 Status: In progress; exact 1:1 blueprint parity is not complete.
-Last activity: 2026-06-19 — Added CLI-first runtime coverage, selectable CLI Postgres backend support, Postgres retrieval parity for SQL FTS/pgvector/graph, fail-closed capability enforcement, Postgres tenant RLS, explicit erasure modes, HTTP-compatible embedding/reranker provider adapters, CLI file ingestion through a C2PA verifier adapter, and blueprint-correct trust-tier semantics. The test suite now has 72 passing tests and 3 skipped live-DB tests; a fresh-schema DSN-backed live Postgres run passes 3 engine/CLI smokes. Strict audit remains open for exact production parity.
+Last activity: 2026-06-19 — Added CLI-first runtime coverage, selectable CLI Postgres backend support, Postgres retrieval parity for SQL FTS/pgvector/graph, fail-closed capability enforcement, Postgres tenant RLS, explicit erasure modes, HTTP-compatible embedding/reranker provider adapters, CLI file ingestion through a C2PA verifier adapter, blueprint-correct trust-tier semantics, and deterministic ingest classification. The test suite now has 74 passing tests and 3 skipped live-DB tests; a fresh-schema DSN-backed live Postgres run passes 3 engine/CLI smokes. Strict audit remains open for exact production parity.
 
 Progress: [███████░░░] local scaffold verified; production parity gaps remain
 
@@ -56,6 +56,7 @@ Progress: [███████░░░] local scaffold verified; production p
 - [Retrieval]: CLI/Postgres can now use local or HTTP-compatible embedding and reranker providers via flags/env while keeping deterministic local defaults.
 - [Provenance]: CLI `ingest` now accepts `--file`, modality/media type, signed-provenance JSON, and a `--c2pa-tool` adapter; quarantined evidence is hidden from default retrieval unless `include_quarantined` is explicitly set.
 - [Security]: Trust-tier semantics now follow the blueprint scale: `0` direct-user/highest trust through `5` untrusted external; retrieval/write gates, provenance deltas, SQL defaults, and CLI defaults were migrated.
+- [Ingestion]: The hot path now classifies actor/source trust, adds capability/taint tags, detects simple PII, raises sensitivity/access-policy metadata, and marks untrusted imperatives as data-only.
 
 ### Pending Todos
 

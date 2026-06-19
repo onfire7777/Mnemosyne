@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -29,7 +30,8 @@ class IngestRequest:
     modality: Modality = "text"
     metadata: dict[str, Any] = field(default_factory=dict)
     signed_provenance: dict[str, Any] | None = None
-    trust_tier: int = int(TrustTier.DIRECT_USER)
+    trust_tier: int | None = None
+    capability_tags: list[str] = field(default_factory=list)
     sensitivity: int = 0
 
     def payload_bytes(self) -> bytes:
@@ -73,15 +75,31 @@ class IngestionPipeline:
     def ingest(self, request: IngestRequest, branch: str = "main") -> IngestResult:
         payload = request.payload_bytes()
         provenance = self.provenance_verifier.verify(payload, request.signed_provenance)
-        trust_tier = min(max(request.trust_tier + provenance.trust_delta, int(TrustTier.DIRECT_USER)), int(TrustTier.UNTRUSTED_EXTERNAL))
+        classification = classify_request(request, payload)
+        base_trust_tier = request.trust_tier if request.trust_tier is not None else classification["trust_tier"]
+        trust_tier = min(max(base_trust_tier + provenance.trust_delta, int(TrustTier.DIRECT_USER)), int(TrustTier.UNTRUSTED_EXTERNAL))
+        capability_tags = sorted(set(request.capability_tags + classification["capability_tags"]))
+        if provenance.trusted:
+            capability_tags.append("provenance-verified")
         metadata = {
             **request.metadata,
             "media_type": request.media_type,
             "provenance_decision": provenance.to_dict(),
+            "ingest_classification": classification,
         }
         if provenance.quarantine:
             trust_tier = int(TrustTier.UNTRUSTED_EXTERNAL)
             metadata["quarantine_reason"] = provenance.reason
+            capability_tags.append("quarantined")
+        if trust_tier >= int(TrustTier.UNTRUSTED_EXTERNAL):
+            capability_tags.extend(["data-only", "no-write-authority"])
+        capability_tags = sorted(set(capability_tags))
+        sensitivity = max(request.sensitivity, int(classification["sensitivity"]))
+        access_policy = {
+            "tenant": request.tenant_id,
+            "max_sensitivity": sensitivity,
+            "data_class": "pii" if sensitivity else "standard",
+        }
 
         content_pointer: str | None = None
         resource: Resource | None = None
@@ -118,9 +136,10 @@ class IngestionPipeline:
                 modality=request.modality,
                 metadata=metadata,
                 trust_tier=trust_tier,
-                sensitivity=request.sensitivity,
+                capability_tags=capability_tags,
+                sensitivity=sensitivity,
                 signed_provenance=request.signed_provenance,
-                access_policy={"tenant": request.tenant_id},
+                access_policy=access_policy,
             ),
             branch=branch,
         )
@@ -134,3 +153,71 @@ class IngestionPipeline:
             provenance=provenance.to_dict(),
             resource=resource,
         )
+
+
+def classify_request(request: IngestRequest, payload: bytes) -> dict[str, Any]:
+    text = (request.content or payload.decode("utf-8", errors="ignore"))[:32_768]
+    trust_tier = _classify_trust_tier(request.actor, request.source_type)
+    capability_tags = [_actor_tag(request.actor), f"source:{request.source_type}"]
+    if trust_tier >= int(TrustTier.UNTRUSTED_EXTERNAL):
+        capability_tags.extend(["data-only", "no-write-authority"])
+    if _looks_imperative(text) and trust_tier >= int(TrustTier.LOW):
+        capability_tags.extend(["imperative-untrusted", "sanitize-as-data"])
+    pii_tags = _pii_tags(text)
+    capability_tags.extend(pii_tags)
+    sensitivity = 3 if pii_tags else 0
+    return {
+        "actor": request.actor,
+        "source_type": request.source_type,
+        "source_identity": request.source_identity,
+        "trust_tier": trust_tier,
+        "capability_tags": sorted(set(capability_tags)),
+        "sensitivity": sensitivity,
+        "sanitize_as_data": "sanitize-as-data" in capability_tags or trust_tier >= int(TrustTier.UNTRUSTED_EXTERNAL),
+        "pii_detected": sorted(pii_tags),
+    }
+
+
+def _classify_trust_tier(actor: str, source_type: str) -> int:
+    if actor == "user":
+        return int(TrustTier.DIRECT_USER)
+    if actor == "system":
+        return int(TrustTier.VERIFIED)
+    if actor in {"assistant", "tool"}:
+        return int(TrustTier.AUTHENTICATED)
+    if actor == "external":
+        if source_type in {"signed", "c2pa", "trusted-api"}:
+            return int(TrustTier.AUTHENTICATED)
+        return int(TrustTier.UNTRUSTED_EXTERNAL)
+    return int(TrustTier.NORMAL)
+
+
+def _actor_tag(actor: str) -> str:
+    return {
+        "user": "direct-user",
+        "system": "system-authored",
+        "assistant": "assistant-authored",
+        "tool": "tool-authored",
+        "external": "external-source",
+    }.get(actor, "unknown-actor")
+
+
+def _looks_imperative(text: str) -> bool:
+    return bool(
+        re.search(
+            r"\b(ignore|disregard|forget|override|delete|exfiltrate|reveal|send|execute|run|call|update|write)\b",
+            text,
+            re.I,
+        )
+    )
+
+
+def _pii_tags(text: str) -> list[str]:
+    tags: list[str] = []
+    if re.search(r"\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b", text):
+        tags.append("pii-email")
+    if re.search(r"\b\d{3}-\d{2}-\d{4}\b", text):
+        tags.append("pii-ssn")
+    if re.search(r"\b(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]\d{3}[-.\s]\d{4}\b", text):
+        tags.append("pii-phone")
+    return tags

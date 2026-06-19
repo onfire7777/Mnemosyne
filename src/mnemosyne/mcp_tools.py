@@ -35,6 +35,7 @@ TOOL_SPEC: list[dict[str, Any]] = [
             "media_type",
             "modality",
             "signed_provenance",
+            "capability_tags",
         ],
     },
     {
@@ -219,12 +220,13 @@ class MemoryTools:
         content: str | None = None,
         data: bytes | None = None,
         branch: str = "main",
-        trust_tier: int = int(TrustTier.DIRECT_USER),
+        trust_tier: int | None = None,
         source_identity: str | None = None,
         media_type: str = "text/plain",
         modality: str = "text",
         metadata: dict[str, Any] | None = None,
         signed_provenance: dict[str, Any] | None = None,
+        capability_tags: list[str] | None = None,
         sensitivity: int = 0,
     ) -> dict[str, Any]:
         if content is None and data is None:
@@ -243,6 +245,7 @@ class MemoryTools:
                 metadata=metadata or {},
                 signed_provenance=signed_provenance,
                 trust_tier=trust_tier,
+                capability_tags=capability_tags or [],
                 sensitivity=sensitivity,
             ),
             branch=branch,
