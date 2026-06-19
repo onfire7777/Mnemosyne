@@ -12,6 +12,7 @@ from mnemosyne.models import Assertion, Evidence, Preference, Relation
 from mnemosyne.parametric import ParametricTier
 from mnemosyne.prefetch import AnticipatoryPrefetcher, PrefetchCandidate
 from mnemosyne.runtime_state import RuntimeState
+from mnemosyne.security import SecurityPolicy, WriteRole
 from mnemosyne.user_model import UserMemoryKind, UserModel, UserModelEntry
 
 
@@ -158,11 +159,13 @@ class MemoryTools:
         user_model: UserModel | None = None,
         learning: LearningSystem | None = None,
         runtime_state: RuntimeState | None = None,
+        security: SecurityPolicy | None = None,
     ):
         self.engine = engine
         self.ingestion = ingestion or IngestionPipeline(engine)
         self.prefetcher = prefetcher or AnticipatoryPrefetcher(engine)
         self.runtime_state = runtime_state
+        self.security = security or SecurityPolicy()
         self.user_model = user_model or (runtime_state.load_user_model() if runtime_state else UserModel())
         self.learning = learning or LearningSystem(engine)
         if runtime_state:
@@ -287,7 +290,16 @@ class MemoryTools:
         explicit: bool = False,
         confidence: float = 0.7,
         source_evidence_cids: list[str] | None = None,
+        role: WriteRole = "agent",
+        source_trust_tier: int | None = None,
     ) -> dict[str, Any]:
+        trust = source_trust_tier if source_trust_tier is not None else (3 if explicit else 1)
+        decision = self._authorize(
+            "preference",
+            role=role,
+            source_trust_tier=trust,
+            target_sink="preference",
+        )
         preference_id = self.engine.add_preference(
             Preference(
                 tenant_id=tenant_id,
@@ -299,7 +311,7 @@ class MemoryTools:
                 source_evidence_cids=source_evidence_cids or [],
             )
         )
-        return {"id": preference_id}
+        return {"id": preference_id, "security": decision}
 
     def search(
         self,
@@ -345,8 +357,24 @@ class MemoryTools:
         )
         return {"id": assertion_id, "branch": branch}
 
-    def forget(self, tenant_id: str, cid: str, branch: str = "main", requested_by: str = "user") -> dict[str, Any]:
-        return self.engine.forget(tenant_id=tenant_id, cid=cid, branch=branch, requested_by=requested_by)
+    def forget(
+        self,
+        tenant_id: str,
+        cid: str,
+        branch: str = "main",
+        requested_by: str = "user",
+        role: WriteRole = "operator",
+        source_trust_tier: int = 3,
+    ) -> dict[str, Any]:
+        decision = self._authorize(
+            "forget",
+            role=role,
+            source_trust_tier=source_trust_tier,
+            destructive=True,
+        )
+        result = self.engine.forget(tenant_id=tenant_id, cid=cid, branch=branch, requested_by=requested_by)
+        result["security"] = decision
+        return result
 
     def export(self, tenant_id: str) -> dict[str, Any]:
         return self.engine.export_tenant(tenant_id)
@@ -372,12 +400,37 @@ class MemoryTools:
         confidence: float = 0.7,
         exceptions: dict[str, Any] | None = None,
         source_evidence_cids: list[str] | None = None,
+        role: WriteRole = "agent",
+        source_trust_tier: int | None = None,
     ) -> dict[str, Any]:
+        memory_kind = UserMemoryKind(kind)
+        if memory_kind is UserMemoryKind.HARD_INSTRUCTION:
+            trust = source_trust_tier if source_trust_tier is not None else 3
+            decision = self._authorize(
+                "profile_add",
+                role=role,
+                source_trust_tier=trust,
+                target_sink="policy",
+            )
+        elif memory_kind in {UserMemoryKind.EXPLICIT_PREFERENCE, UserMemoryKind.INFERRED_PREFERENCE, UserMemoryKind.SITUATIONAL_PREFERENCE}:
+            trust = source_trust_tier if source_trust_tier is not None else (3 if memory_kind is UserMemoryKind.EXPLICIT_PREFERENCE else 1)
+            decision = self._authorize(
+                "profile_add",
+                role=role,
+                source_trust_tier=trust,
+                target_sink="preference",
+            )
+        else:
+            decision = self._authorize(
+                "profile_add",
+                role=role,
+                source_trust_tier=source_trust_tier if source_trust_tier is not None else 1,
+            )
         entry_id = self.user_model.add_entry(
             UserModelEntry(
                 tenant_id=tenant_id,
                 user_id=user_id,
-                kind=UserMemoryKind(kind),
+                kind=memory_kind,
                 statement=statement,
                 scope=scope or {},
                 confidence=confidence,
@@ -386,7 +439,7 @@ class MemoryTools:
             )
         )
         self._save_user_model()
-        return {"id": entry_id}
+        return {"id": entry_id, "security": decision}
 
     def profile_context(self, tenant_id: str, user_id: str, scope: dict[str, Any] | None = None) -> dict[str, Any]:
         return self.user_model.context_packet(tenant_id, user_id, scope or {})
@@ -531,3 +584,22 @@ class MemoryTools:
     def _save_learning(self) -> None:
         if self.runtime_state:
             self.runtime_state.save_learning(self.learning)
+
+    def _authorize(
+        self,
+        operation: str,
+        role: WriteRole,
+        source_trust_tier: int,
+        destructive: bool = False,
+        target_sink: str | None = None,
+    ) -> dict[str, Any]:
+        decision = self.security.authorize_write(
+            operation=operation,
+            role=role,
+            source_trust_tier=source_trust_tier,
+            destructive=destructive,
+            target_sink=target_sink,
+        )
+        if not decision.allowed:
+            raise PermissionError(f"{operation} denied: {decision.reason}")
+        return decision.to_dict()

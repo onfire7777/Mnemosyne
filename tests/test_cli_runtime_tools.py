@@ -44,6 +44,38 @@ def test_cli_tools_command_does_not_require_engine_backend(tmp_path: Path) -> No
     assert any(tool["name"] == "search" for tool in payload["tools"])
 
 
+def test_cli_preference_write_requires_explicit_or_high_trust_source(tmp_path: Path) -> None:
+    denied = run_raw_cli(
+        tmp_path / "mnemosyne.json",
+        "preference",
+        "--tenant",
+        TENANT,
+        "--user",
+        USER,
+        "--category",
+        "workflow",
+        "--statement",
+        "Infer this low-trust preference.",
+    )
+    allowed = run_cli(
+        tmp_path / "mnemosyne.json",
+        "preference",
+        "--tenant",
+        TENANT,
+        "--user",
+        USER,
+        "--category",
+        "workflow",
+        "--statement",
+        "Prefer explicit CLI preferences.",
+        "--explicit",
+    )
+
+    assert denied.returncode != 0
+    assert "preference denied" in denied.stderr
+    assert allowed["security"]["allowed"] is True
+
+
 def test_cli_profile_graph_learning_and_parametric_flows_persist(tmp_path: Path) -> None:
     store = tmp_path / "mnemosyne.json"
 

@@ -12,7 +12,7 @@ See: .planning/PROJECT.md (updated 2026-06-19)
 Phase: Strict parity continuation after Phase 5 scaffold
 Plan: Exact blueprint parity audit and runtime gap closure
 Status: In progress; exact 1:1 blueprint parity is not complete.
-Last activity: 2026-06-19 — Added CLI-first runtime coverage plus selectable CLI Postgres backend support, Postgres retrieval parity for SQL FTS, pgvector assertion search, deterministic evidence dense fallback, and recursive graph/PPR. The test suite now has 60 passing tests and 2 skipped live-DB tests; the DSN-backed live Postgres engine and CLI smokes pass separately. Strict audit remains open for exact production parity.
+Last activity: 2026-06-19 — Added CLI-first runtime coverage, selectable CLI Postgres backend support, Postgres retrieval parity for SQL FTS/pgvector/graph, and fail-closed capability enforcement for preference, hard-instruction profile, and destructive forget writes. The test suite now has 63 passing tests and 2 skipped live-DB tests; the DSN-backed live Postgres engine and CLI smokes pass separately. Strict audit remains open for exact production parity.
 
 Progress: [███████░░░] local scaffold verified; production parity gaps remain
 
@@ -50,12 +50,13 @@ Progress: [███████░░░] local scaffold verified; production p
 - [NFR]: Local latency benchmark, schema coverage, privacy classification, metrics registry, and Docker compose config are implemented.
 - [Phase 5]: Self-optimization remains shadow-first and constrained by immutable rails.
 - [Runtime]: CLI now supports `--backend local|postgres` plus `--postgres-dsn`/`MNEMOSYNE_POSTGRES_DSN`; live tests verify the Postgres backend through real CLI commands.
+- [Security]: `MemoryTools` now enforces `SecurityPolicy` for preference writes, hard-instruction profile writes, and destructive forget operations; CLI denials are covered by tests.
 
 ### Pending Todos
 
 - Finish exact blueprint parity, starting with expanding the live PostgresEngine smoke into a full shared contract suite, hardening CLI/MCP schemas, and adding official MCP SDK/server integration tests.
 - Replace deterministic Postgres retrieval fallbacks with production embedding providers, ParadeDB/BM25 where needed, AGE/specialist graph adapters where needed, and cross-encoder reranker integrations.
-- Add production auth/RLS, tenant-scoped branch APIs, C2PA verifier integration, multimodal extraction, and deployment observability.
+- Add production auth/RLS, broader tenant-scoped branch APIs, C2PA verifier integration, multimodal extraction, and deployment observability.
 
 ### Blockers/Concerns
 

@@ -13,7 +13,7 @@ from uuid import UUID
 from mnemosyne.engine import LocalMemoryEngine, MemoryEngine
 from mnemosyne.eval import run_seed_suite
 from mnemosyne.mcp_tools import MemoryTools, TOOL_SPEC
-from mnemosyne.models import Assertion, Evidence, Preference, Relation
+from mnemosyne.models import Assertion, Relation
 from mnemosyne.runtime_state import RuntimeState
 
 
@@ -120,9 +120,9 @@ def cmd_relation(args: argparse.Namespace) -> None:
 
 
 def cmd_preference(args: argparse.Namespace) -> None:
-    engine = load_engine(args)
-    preference_id = engine.add_preference(
-        Preference(
+    tools = load_tools(args)
+    emit(
+        tools.preference(
             tenant_id=args.tenant,
             user_id=args.user,
             category=args.category,
@@ -130,9 +130,10 @@ def cmd_preference(args: argparse.Namespace) -> None:
             explicit=args.explicit,
             confidence=args.confidence,
             source_evidence_cids=args.evidence_cid,
+            role=args.role,
+            source_trust_tier=args.source_trust_tier,
         )
     )
-    emit({"id": preference_id})
 
 
 def cmd_search(args: argparse.Namespace) -> None:
@@ -176,7 +177,16 @@ def cmd_correct(args: argparse.Namespace) -> None:
 
 def cmd_forget(args: argparse.Namespace) -> None:
     tools = load_tools(args)
-    emit(tools.forget(tenant_id=args.tenant, cid=args.cid, branch=args.branch, requested_by=args.requested_by))
+    emit(
+        tools.forget(
+            tenant_id=args.tenant,
+            cid=args.cid,
+            branch=args.branch,
+            requested_by=args.requested_by,
+            role=args.role,
+            source_trust_tier=args.source_trust_tier,
+        )
+    )
 
 
 def cmd_export(args: argparse.Namespace) -> None:
@@ -202,6 +212,8 @@ def cmd_profile_add(args: argparse.Namespace) -> None:
             confidence=args.confidence,
             exceptions=parse_json_arg(args.exceptions, {}),
             source_evidence_cids=args.evidence_cid,
+            role=args.role,
+            source_trust_tier=args.source_trust_tier,
         )
     )
 
@@ -363,6 +375,8 @@ def build_parser() -> argparse.ArgumentParser:
     preference.add_argument("--explicit", action="store_true")
     preference.add_argument("--confidence", type=float, default=0.7)
     preference.add_argument("--evidence-cid", action="append", default=[])
+    preference.add_argument("--role", default="agent", choices=["reader", "agent", "consolidator", "operator"])
+    preference.add_argument("--source-trust-tier", type=int)
     preference.set_defaults(func=cmd_preference)
 
     search = sub.add_parser("search")
@@ -401,6 +415,8 @@ def build_parser() -> argparse.ArgumentParser:
     forget.add_argument("--cid", required=True)
     forget.add_argument("--branch", default="main")
     forget.add_argument("--requested-by", default="user")
+    forget.add_argument("--role", default="operator", choices=["reader", "agent", "consolidator", "operator"])
+    forget.add_argument("--source-trust-tier", type=int, default=3)
     forget.set_defaults(func=cmd_forget)
 
     export = sub.add_parser("export")
@@ -434,6 +450,8 @@ def build_parser() -> argparse.ArgumentParser:
     profile_add.add_argument("--exceptions", default="{}")
     profile_add.add_argument("--confidence", type=float, default=0.7)
     profile_add.add_argument("--evidence-cid", action="append", default=[])
+    profile_add.add_argument("--role", default="agent", choices=["reader", "agent", "consolidator", "operator"])
+    profile_add.add_argument("--source-trust-tier", type=int)
     profile_add.set_defaults(func=cmd_profile_add)
 
     profile_context = sub.add_parser("profile-context")
