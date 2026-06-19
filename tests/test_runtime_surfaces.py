@@ -181,6 +181,34 @@ def test_mcp_server_initializes_lists_tools_and_calls_capture_search(tmp_path: P
     assert search_content["hits"][0]["provenance"] == [capture_content["cid"]]
 
 
+def test_mcp_server_requires_configured_auth_token_for_tool_calls(tmp_path: Path) -> None:
+    server = MnemosyneMcpServer(store_path=tmp_path / "store.json", auth_token="secret-token")
+    request = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {
+            "name": "capture",
+            "arguments": {
+                "tenant_id": TENANT,
+                "user_id": USER,
+                "actor": "user",
+                "source_type": "chat",
+                "content": "Authenticated MCP writes are accepted.",
+            },
+        },
+    }
+
+    denied = server.handle(request)
+    request["params"]["_meta"] = {"auth_token": "secret-token"}
+    allowed = server.handle(request)
+
+    assert denied["result"]["isError"] is True
+    assert "auth token required" in denied["result"]["content"][0]["text"]
+    assert allowed["result"]["isError"] is False
+    assert allowed["result"]["structuredContent"]["cid"]
+
+
 def test_mcp_server_suppresses_initialized_notification_and_frames_stdio(tmp_path: Path) -> None:
     server = MnemosyneMcpServer(store_path=tmp_path / "store.json")
     incoming = StringIO(
