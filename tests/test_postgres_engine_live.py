@@ -12,6 +12,7 @@ import pytest
 from mnemosyne.consolidation import CONSOLIDATE_EVIDENCE_JOB, ConsolidationWorker
 from mnemosyne.gate import RegressionCase
 from mnemosyne.ingestion import IngestRequest, IngestionPipeline
+from mnemosyne.mcp_server import MnemosyneMcpServer
 from mnemosyne.models import Assertion, Evidence, Relation
 from mnemosyne.postgres_engine import PostgresEngine
 from mnemosyne.queue import InProcessQueue, QueueWorker
@@ -287,6 +288,47 @@ def test_postgres_cli_backend_live_smoke() -> None:
     assert hard_deleted["erasure_mode"] == "hard_delete_legal"
     assert all(item["cid"] != legal["cid"] for item in after_delete["evidence"])
     assert any(item["statement"] == "Prefer CLI-first memory workflows." for item in exported["preferences"])
+
+
+def test_postgres_mcp_backend_live_smoke() -> None:
+    tenant = f"tenant-mcp-live-{uuid4()}"
+    user = "user-mcp-live"
+    server = MnemosyneMcpServer(backend="postgres", postgres_dsn=live_dsn())
+
+    capture = server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "capture",
+                "arguments": {
+                    "tenant_id": tenant,
+                    "user_id": user,
+                    "actor": "user",
+                    "source_type": "mcp-live",
+                    "content": "Postgres MCP backend captures production memory.",
+                    "trust_tier": 0,
+                },
+            },
+        }
+    )
+    search = server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+                "name": "search",
+                "arguments": {"tenant_id": tenant, "query": "Postgres MCP backend production memory"},
+            },
+        }
+    )
+
+    assert capture["result"]["isError"] is False
+    assert search["result"]["isError"] is False
+    assert search["result"]["structuredContent"]["explain"]["channels"]["postgres_dense"] >= 1
+    assert search["result"]["structuredContent"]["hits"][0]["provenance"] == [capture["result"]["structuredContent"]["cid"]]
 
 
 def test_postgres_cli_ingests_file_with_c2pa_verifier(tmp_path) -> None:
