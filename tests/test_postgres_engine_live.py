@@ -9,8 +9,12 @@ from uuid import uuid4
 
 import pytest
 
+from mnemosyne.consolidation import CONSOLIDATE_EVIDENCE_JOB, ConsolidationWorker
+from mnemosyne.gate import RegressionCase
+from mnemosyne.ingestion import IngestRequest, IngestionPipeline
 from mnemosyne.models import Assertion, Evidence, Relation
 from mnemosyne.postgres_engine import PostgresEngine
+from mnemosyne.queue import InProcessQueue, QueueWorker
 
 
 pytest.importorskip("psycopg")
@@ -255,3 +259,45 @@ def test_postgres_cli_ingests_file_with_c2pa_verifier(tmp_path) -> None:
     assert ingested["provenance"]["trusted"] is True
     assert evidence["content_pointer"] == ingested["content_pointer"]
     assert evidence["metadata"]["provenance_decision"]["manifest"]["c2pa"]["claim_generator"] == "issuer-a"
+
+
+def test_postgres_gated_consolidation_promotes_direct_user_fact_live() -> None:
+    engine = PostgresEngine(live_dsn())
+    tenant = f"tenant-gate-live-{uuid4()}"
+    user = "user-gate-live"
+    queue = InProcessQueue()
+    pipeline = IngestionPipeline(engine, queue=queue)
+    result = pipeline.ingest(
+        IngestRequest(
+            tenant_id=tenant,
+            user_id=user,
+            actor="user",
+            source_type="chat",
+            content="Postgres gate fact is tenant aware.",
+        )
+    )
+    worker = QueueWorker(
+        queue,
+        {
+            CONSOLIDATE_EVIDENCE_JOB: ConsolidationWorker(
+                engine,
+                gate_cases=[
+                    RegressionCase(
+                        "postgres-gate-smoke",
+                        "postgres gate fact",
+                        "Postgres gate fact",
+                        "Postgres gate fact is tenant aware",
+                        protected=True,
+                    )
+                ],
+            ).run_queue_payload
+        },
+    )
+
+    job = worker.run_once(CONSOLIDATE_EVIDENCE_JOB)
+    search = engine.retrieve("Postgres gate fact", tenant)
+
+    assert job is not None
+    assert job.status == "complete"
+    assert job.result["candidate_results"][0]["promoted"] is True
+    assert any(hit.kind == "assertion" and hit.provenance == [result.cid] for hit in search.hits)

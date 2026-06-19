@@ -72,9 +72,8 @@ class PromotionGate:
         apply_candidate: Callable[[LocalMemoryEngine, str], None],
     ) -> GateResult:
         branch = candidate.branch
-        if branch in self.engine.branches:
-            self.engine.discard(branch)
-        self.engine.branch(branch, frm="main", kind="canary")
+        self._reset_branch(branch, tenant_id)
+        self._branch(branch, tenant_id)
         apply_candidate(self.engine, branch)
         passed: list[str] = []
         failed: list[str] = []
@@ -94,9 +93,34 @@ class PromotionGate:
         promoted = not protected_regressions and not failed and margin > 0
         rollback_branch = None
         if promoted:
-            self.engine.merge(branch, into="main")
+            self._merge(branch, tenant_id)
         else:
             rollback_branch = branch
-            self.engine.discard(branch)
+            self._discard(branch, tenant_id)
         return GateResult(candidate.id, promoted, protected_regressions, failed, passed, margin, rollback_branch)
 
+    def _reset_branch(self, branch: str, tenant_id: str) -> None:
+        branches = getattr(self.engine, "branches", None)
+        if isinstance(branches, dict):
+            if branch in branches:
+                self._discard(branch, tenant_id)
+            return
+        self._discard(branch, tenant_id)
+
+    def _branch(self, branch: str, tenant_id: str) -> None:
+        try:
+            self.engine.branch(branch, frm="main", kind="canary", tenant_id=tenant_id)
+        except TypeError:
+            self.engine.branch(branch, frm="main", kind="canary")
+
+    def _merge(self, branch: str, tenant_id: str) -> None:
+        try:
+            self.engine.merge(branch, into="main", tenant_id=tenant_id)
+        except TypeError:
+            self.engine.merge(branch, into="main")
+
+    def _discard(self, branch: str, tenant_id: str) -> None:
+        try:
+            self.engine.discard(branch, tenant_id=tenant_id)
+        except TypeError:
+            self.engine.discard(branch)

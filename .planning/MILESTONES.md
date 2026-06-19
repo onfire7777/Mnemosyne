@@ -20,8 +20,8 @@ This checkpoint verified the deterministic local scaffold and initial GitHub pro
 ### Verification
 
 - Earlier checkpoint: `python -m pytest` returned `39 passed`.
-- Current strict-continuation suite: `.venv/bin/python -m pytest -q` returns 82 passing tests and 3 skipped live-DB tests.
-- Current live Postgres smoke: `MNEMOSYNE_POSTGRES_DSN=postgresql://... .venv/bin/python -m pytest -q tests/test_postgres_engine_live.py` returns 3 passing tests against a fresh schema and exercises tenant RLS, SQL FTS, pgvector assertion search, dense evidence fallback, recursive graph/PPR retrieval, hard-delete erasure, HTTP-configurable retrieval adapter wiring, the CLI `--backend postgres` path, and CLI file ingestion through the C2PA verifier adapter.
+- Current strict-continuation suite: `.venv/bin/python -m pytest -q` returns 82 passing tests and 4 skipped live-DB tests.
+- Current live Postgres smoke: `MNEMOSYNE_POSTGRES_DSN=postgresql://... .venv/bin/python -m pytest -q tests/test_postgres_engine_live.py` returns 4 passing tests against a fresh schema and exercises tenant RLS, SQL FTS, pgvector assertion search, dense evidence fallback, recursive graph/PPR retrieval, hard-delete erasure, HTTP-configurable retrieval adapter wiring, the CLI `--backend postgres` path, CLI file ingestion through the C2PA verifier adapter, and gated consolidation promotion on Postgres.
 - Current strict-continuation compile check: `.venv/bin/python -m compileall -q src tests` passes.
 - `python -m mnemosyne.cli tools` returned the expected tool list.
 - Docker Postgres initialized `sql/schema.sql` and reported 21 public tables.
