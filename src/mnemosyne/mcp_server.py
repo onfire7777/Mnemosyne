@@ -30,12 +30,32 @@ class MnemosyneMcpServer:
     tools/call.
     """
 
-    def __init__(self, store_path: str | os.PathLike[str] | None = None, auth_token: str | None = None):
-        self.engine = LocalMemoryEngine(store_path=store_path)
+    def __init__(
+        self,
+        store_path: str | os.PathLike[str] | None = None,
+        auth_token: str | None = None,
+        backend: str = "local",
+        postgres_dsn: str | None = None,
+    ):
+        if backend == "postgres":
+            dsn = postgres_dsn or os.environ.get("MNEMOSYNE_POSTGRES_DSN")
+            if not dsn:
+                raise ValueError("Postgres MCP backend requires postgres_dsn or MNEMOSYNE_POSTGRES_DSN.")
+            try:
+                from mnemosyne.postgres_engine import PostgresEngine
+            except ImportError as exc:  # pragma: no cover - defensive for broken installs.
+                raise ValueError("Postgres MCP backend requires mnemosyne-memory[postgres].") from exc
+            self.engine = PostgresEngine(dsn)
+            runtime_state = None
+        elif backend == "local":
+            self.engine = LocalMemoryEngine(store_path=store_path)
+            runtime_state = RuntimeState.from_store_path(store_path)
+        else:
+            raise ValueError(f"Unsupported MCP backend: {backend}")
         self.queue = InProcessQueue()
         self.auth_token = auth_token if auth_token is not None else os.environ.get("MNEMOSYNE_MCP_TOKEN")
         ingestion = IngestionPipeline(self.engine, queue=self.queue)
-        self.tools = MemoryTools(self.engine, ingestion=ingestion, runtime_state=RuntimeState.from_store_path(store_path))
+        self.tools = MemoryTools(self.engine, ingestion=ingestion, runtime_state=runtime_state)
 
     def handle(self, request: dict[str, Any]) -> dict[str, Any] | None:
         method = request.get("method")
@@ -271,11 +291,21 @@ def default_store() -> Path:
     return Path(os.environ.get("MNEME_STORE", ".mnemosyne/mcp-store.json"))
 
 
+def default_backend() -> str:
+    return os.environ.get("MNEME_BACKEND", "local")
+
+
+def default_postgres_dsn() -> str | None:
+    return os.environ.get("MNEMOSYNE_POSTGRES_DSN")
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="mneme-mcp", description="Run the Mnemosyne stdio MCP server")
     parser.add_argument("--store", default=str(default_store()), help="Path to local JSON store")
+    parser.add_argument("--backend", choices=["local", "postgres"], default=default_backend(), help="Storage backend for MCP tools")
+    parser.add_argument("--postgres-dsn", default=default_postgres_dsn(), help="Postgres DSN for --backend postgres")
     args = parser.parse_args(argv)
-    MnemosyneMcpServer(store_path=args.store).serve()
+    MnemosyneMcpServer(store_path=args.store, backend=args.backend, postgres_dsn=args.postgres_dsn).serve()
 
 
 if __name__ == "__main__":

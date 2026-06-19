@@ -209,6 +209,17 @@ def test_mcp_server_requires_configured_auth_token_for_tool_calls(tmp_path: Path
     assert allowed["result"]["structuredContent"]["cid"]
 
 
+def test_mcp_server_postgres_backend_requires_dsn(monkeypatch) -> None:
+    monkeypatch.delenv("MNEMOSYNE_POSTGRES_DSN", raising=False)
+
+    try:
+        MnemosyneMcpServer(backend="postgres")
+    except ValueError as exc:
+        assert "Postgres MCP backend requires" in str(exc)
+    else:  # pragma: no cover - defensive assertion clarity.
+        raise AssertionError("postgres MCP backend should require a DSN")
+
+
 def test_mcp_server_suppresses_initialized_notification_and_frames_stdio(tmp_path: Path) -> None:
     server = MnemosyneMcpServer(store_path=tmp_path / "store.json")
     incoming = StringIO(
