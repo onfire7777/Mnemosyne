@@ -106,6 +106,87 @@ def test_postgres_engine_live_contract_smoke() -> None:
     assert exported["assertions"]
 
 
+def test_postgres_engine_live_shared_contract_parity() -> None:
+    engine = PostgresEngine(live_dsn())
+    tenant = f"tenant-contract-live-{uuid4()}"
+    other_tenant = f"tenant-contract-other-{uuid4()}"
+    user = "user-live-contract"
+
+    cid = engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id=user,
+            actor="user",
+            source_type="contract",
+            content="Live contract status moved from draft to shipped.",
+            trust_tier=0,
+            access_policy={"tenant": tenant},
+        )
+    )
+    first_id = engine.upsert_assertion(
+        Assertion(
+            tenant_id=tenant,
+            user_id=user,
+            subject="live contract status",
+            predicate="is",
+            object="draft",
+            source_evidence_cids=[cid],
+            valid_from=datetime(2026, 1, 1, tzinfo=UTC),
+            trust_tier=0,
+            access_policy={"tenant": tenant},
+        )
+    )
+    second_id = engine.upsert_assertion(
+        Assertion(
+            tenant_id=tenant,
+            user_id=user,
+            subject="live contract status",
+            predicate="is",
+            object="shipped",
+            source_evidence_cids=[cid],
+            valid_from=datetime(2026, 2, 1, tzinfo=UTC),
+            trust_tier=0,
+            access_policy={"tenant": tenant},
+        )
+    )
+
+    jan = engine.as_of("live contract status", "is", datetime(2026, 1, 15, tzinfo=UTC), tenant_id=tenant)
+    feb = engine.as_of("live contract status", "is", datetime(2026, 2, 15, tzinfo=UTC), tenant_id=tenant)
+    by_id = {item["id"]: item for item in engine.export_tenant(tenant)["assertions"]}
+    isolated = engine.retrieve("live contract status shipped", other_tenant)
+
+    branch = f"candidate-contract-{uuid4()}"
+    engine.branch(branch, tenant_id=tenant)
+    branch_id = engine.upsert_assertion(
+        Assertion(
+            tenant_id=tenant,
+            user_id=user,
+            subject="branch-only parity",
+            predicate="proves",
+            object="tenant scoped merge",
+            trust_tier=0,
+            access_policy={"tenant": tenant},
+        ),
+        branch=branch,
+    )
+    main_before = engine.retrieve("branch-only parity", tenant)
+    branch_result = engine.retrieve("branch-only parity", tenant, branch=branch)
+    merge_report = engine.merge(branch, tenant_id=tenant)
+    main_after = engine.retrieve("branch-only parity", tenant)
+    engine.discard(branch, tenant_id=tenant)
+
+    assert jan[-1].id == first_id
+    assert feb[-1].id == second_id
+    assert by_id[first_id]["status"] == "superseded"
+    assert by_id[first_id]["superseded_by"] == second_id
+    assert by_id[second_id]["status"] == "active"
+    assert not isolated.hits
+    assert all(hit.id != branch_id for hit in main_before.hits)
+    assert any(hit.id == branch_id for hit in branch_result.hits)
+    assert merge_report.assertions_added >= 1
+    assert any(hit.id == branch_id for hit in main_after.hits)
+
+
 def test_postgres_cli_backend_live_smoke() -> None:
     tenant = f"tenant-cli-live-{uuid4()}"
     user = "user-cli-live"

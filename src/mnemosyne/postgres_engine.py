@@ -977,19 +977,8 @@ class PostgresEngine:
                     report.evidence_added += cur.rowcount
                     cur.execute(
                         """
-                        INSERT INTO assertions (
-                          id, tenant_id, user_id, branch, subject, predicate, object, scope,
-                          confidence, calibration, valid_from, valid_to, transaction_time,
-                          expired_at, justification_id, source_evidence_cids, status, version,
-                          superseded_by, trust_tier, sensitivity, access_policy, embedding,
-                          lexeme, last_accessed, access_count
-                        )
-                        SELECT gen_random_uuid(), tenant_id, user_id, %s, subject, predicate,
-                          object, scope, confidence, calibration, valid_from, valid_to,
-                          now(), expired_at, justification_id, source_evidence_cids, status,
-                          version, superseded_by, trust_tier, sensitivity, access_policy,
-                          embedding, lexeme, last_accessed, access_count
-                        FROM assertions src
+                        UPDATE assertions src
+                        SET branch = %s, transaction_time = now()
                         WHERE tenant_id = %s AND branch = %s
                           AND NOT EXISTS (
                             SELECT 1 FROM assertions dst
@@ -1004,13 +993,8 @@ class PostgresEngine:
                     report.assertions_added += cur.rowcount
                     cur.execute(
                         """
-                        INSERT INTO relations (
-                          id, tenant_id, branch, source, predicate, target, confidence,
-                          valid_from, valid_to, source_evidence_cids, access_policy
-                        )
-                        SELECT gen_random_uuid(), tenant_id, %s, source, predicate, target,
-                          confidence, valid_from, valid_to, source_evidence_cids, access_policy
-                        FROM relations src
+                        UPDATE relations src
+                        SET branch = %s
                         WHERE tenant_id = %s AND branch = %s
                           AND NOT EXISTS (
                             SELECT 1 FROM relations dst
