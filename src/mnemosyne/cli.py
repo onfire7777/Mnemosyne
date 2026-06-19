@@ -276,6 +276,11 @@ def cmd_explain(args: argparse.Namespace) -> None:
     emit(tools.explain(tenant_id=args.tenant, query=args.query, branch=args.branch))
 
 
+def cmd_get(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(tools.get(args.tenant, args.id, branch=args.branch))
+
+
 def cmd_correct(args: argparse.Namespace) -> None:
     tools = load_tools(args)
     emit(
@@ -346,6 +351,16 @@ def cmd_graph_neighbors(args: argparse.Namespace) -> None:
     emit(tools.graph_neighbors(args.tenant, args.seed, branch=args.branch, k=args.k))
 
 
+def cmd_graph_timeline(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(tools.graph_timeline(args.tenant, args.entity, branch=args.branch))
+
+
+def cmd_graph_as_of(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(tools.graph_as_of(args.tenant, args.subject, args.predicate, args.time, branch=args.branch))
+
+
 def cmd_prefetch(args: argparse.Namespace) -> None:
     tools = load_tools(args)
     emit(tools.prefetch(args.tenant, candidates=parse_json_arg(args.candidates, []), branch=args.branch))
@@ -390,6 +405,33 @@ def cmd_lesson_promote(args: argparse.Namespace) -> None:
 def cmd_procedure_validate(args: argparse.Namespace) -> None:
     tools = load_tools(args)
     emit(tools.procedure_validate(args.procedure_id))
+
+
+def cmd_lesson_search(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(tools.lesson_search(args.signature, tenant_id=args.tenant, status=args.status))
+
+
+def cmd_procedure_search(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(tools.procedure_search(args.query, tenant_id=args.tenant, status=args.status))
+
+
+def cmd_procedure_rollback(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(tools.procedure_rollback(args.procedure_id))
+
+
+def cmd_outcome_evaluate(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(
+        tools.outcome_evaluate(
+            trajectory_id=args.trajectory_id,
+            before_successes=args.before_successes,
+            after_successes=args.after_successes,
+            total_cases=args.total_cases,
+        )
+    )
 
 
 def cmd_parametric_propose(args: argparse.Namespace) -> None:
@@ -595,6 +637,12 @@ def build_parser() -> argparse.ArgumentParser:
     explain.add_argument("--branch", default="main")
     explain.set_defaults(func=cmd_explain)
 
+    get = sub.add_parser("get")
+    get.add_argument("--tenant", required=True)
+    get.add_argument("--id", required=True)
+    get.add_argument("--branch")
+    get.set_defaults(func=cmd_get)
+
     correct = sub.add_parser("correct")
     correct.add_argument("--tenant", required=True)
     correct.add_argument("--user", required=True)
@@ -664,6 +712,20 @@ def build_parser() -> argparse.ArgumentParser:
     graph_neighbors.add_argument("-k", type=int, default=8)
     graph_neighbors.set_defaults(func=cmd_graph_neighbors)
 
+    graph_timeline = sub.add_parser("graph-timeline")
+    graph_timeline.add_argument("--tenant", required=True)
+    graph_timeline.add_argument("--entity", required=True)
+    graph_timeline.add_argument("--branch", default="main")
+    graph_timeline.set_defaults(func=cmd_graph_timeline)
+
+    graph_as_of = sub.add_parser("graph-as-of")
+    graph_as_of.add_argument("--tenant", required=True)
+    graph_as_of.add_argument("--subject", required=True)
+    graph_as_of.add_argument("--predicate", required=True)
+    graph_as_of.add_argument("--time", required=True)
+    graph_as_of.add_argument("--branch", default="main")
+    graph_as_of.set_defaults(func=cmd_graph_as_of)
+
     prefetch = sub.add_parser("prefetch")
     prefetch.add_argument("--tenant", required=True)
     prefetch.add_argument("--candidates", required=True, help="JSON array of {query, probability, reason, metadata?}")
@@ -701,6 +763,29 @@ def build_parser() -> argparse.ArgumentParser:
     procedure_validate = sub.add_parser("procedure-validate")
     procedure_validate.add_argument("--procedure-id", required=True)
     procedure_validate.set_defaults(func=cmd_procedure_validate)
+
+    lesson_search = sub.add_parser("lesson-search")
+    lesson_search.add_argument("--signature", required=True)
+    lesson_search.add_argument("--tenant")
+    lesson_search.add_argument("--status")
+    lesson_search.set_defaults(func=cmd_lesson_search)
+
+    procedure_search = sub.add_parser("procedure-search")
+    procedure_search.add_argument("--query", required=True)
+    procedure_search.add_argument("--tenant")
+    procedure_search.add_argument("--status")
+    procedure_search.set_defaults(func=cmd_procedure_search)
+
+    procedure_rollback = sub.add_parser("procedure-rollback")
+    procedure_rollback.add_argument("--procedure-id", required=True)
+    procedure_rollback.set_defaults(func=cmd_procedure_rollback)
+
+    outcome_evaluate = sub.add_parser("outcome-evaluate")
+    outcome_evaluate.add_argument("--trajectory-id")
+    outcome_evaluate.add_argument("--before-successes", type=int)
+    outcome_evaluate.add_argument("--after-successes", type=int)
+    outcome_evaluate.add_argument("--total-cases", type=int)
+    outcome_evaluate.set_defaults(func=cmd_outcome_evaluate)
 
     parametric_propose = sub.add_parser("parametric-propose")
     parametric_propose.add_argument("--tenant", required=True)

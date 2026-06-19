@@ -76,6 +76,8 @@ class MnemosyneMcpServer:
             return self.tools.deep_search(**arguments)
         if name == "explain":
             return self.tools.explain(**arguments)
+        if name == "get":
+            return self.tools.get(**arguments)
         if name == "correct":
             return self.tools.correct(**arguments)
         if name == "forget":
@@ -96,6 +98,10 @@ class MnemosyneMcpServer:
             return self.tools.prefetch(**arguments)
         if name == "graph_neighbors":
             return self.tools.graph_neighbors(**arguments)
+        if name == "graph_timeline":
+            return self.tools.graph_timeline(**arguments)
+        if name == "graph_as_of":
+            return self.tools.graph_as_of(**arguments)
         if name == "trajectory_log":
             return self.tools.trajectory_log(**arguments)
         if name == "trajectory_attribute":
@@ -108,6 +114,14 @@ class MnemosyneMcpServer:
             return self.tools.lesson_promote(**arguments)
         if name == "procedure_validate":
             return self.tools.procedure_validate(**arguments)
+        if name == "procedure_search":
+            return self.tools.procedure_search(**arguments)
+        if name == "procedure_rollback":
+            return self.tools.procedure_rollback(**arguments)
+        if name == "lesson_search":
+            return self.tools.lesson_search(**arguments)
+        if name == "outcome_evaluate":
+            return self.tools.outcome_evaluate(**arguments)
         if name == "parametric_propose":
             return self.tools.parametric_propose(**arguments)
         if name == "parametric_evaluate":

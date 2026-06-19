@@ -7,8 +7,8 @@ from typing import Any
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.ingestion import IngestRequest, IngestionPipeline
 from mnemosyne.gate import GateResult, RegressionCase
-from mnemosyne.learning import LearningSystem, Trajectory
-from mnemosyne.models import Assertion, Evidence, Preference, Relation
+from mnemosyne.learning import LearningSystem, Trajectory, counterfactual_replay_score
+from mnemosyne.models import Assertion, Evidence, Preference, Relation, parse_dt
 from mnemosyne.parametric import ParametricTier
 from mnemosyne.prefetch import AnticipatoryPrefetcher, PrefetchCandidate
 from mnemosyne.runtime_state import RuntimeState
@@ -62,6 +62,11 @@ TOOL_SPEC: list[dict[str, Any]] = [
         "name": "deep_search",
         "description": "Expanded retrieval path with graph channel enabled when graph data exists.",
         "arguments": ["tenant_id", "query"],
+    },
+    {
+        "name": "get",
+        "description": "Fetch one memory record by id or cid from the tenant export surface.",
+        "arguments": ["tenant_id", "id"],
     },
     {
         "name": "explain",
@@ -119,6 +124,16 @@ TOOL_SPEC: list[dict[str, Any]] = [
         "arguments": ["tenant_id", "seeds"],
     },
     {
+        "name": "graph_timeline",
+        "description": "Return assertion and relation events involving an entity.",
+        "arguments": ["tenant_id", "entity"],
+    },
+    {
+        "name": "graph_as_of",
+        "description": "Return bitemporal assertions for a subject/predicate at a timestamp.",
+        "arguments": ["tenant_id", "subject", "predicate", "time"],
+    },
+    {
         "name": "trajectory_log",
         "description": "Persist a trajectory for procedural/corrective learning.",
         "arguments": ["tenant_id", "user_id", "session_id", "task", "steps", "outcome", "reward", "memory_version"],
@@ -147,6 +162,26 @@ TOOL_SPEC: list[dict[str, Any]] = [
         "name": "procedure_validate",
         "description": "Mark an induced procedure as validated for the isolated parametric tier.",
         "arguments": ["procedure_id"],
+    },
+    {
+        "name": "procedure_search",
+        "description": "Search procedures by name, body, signature, tenant, and status.",
+        "arguments": ["query"],
+    },
+    {
+        "name": "procedure_rollback",
+        "description": "Mark a procedure as rolled back without deleting history.",
+        "arguments": ["procedure_id"],
+    },
+    {
+        "name": "lesson_search",
+        "description": "Search lessons by failure signature, content, tenant, and status.",
+        "arguments": ["signature"],
+    },
+    {
+        "name": "outcome_evaluate",
+        "description": "Evaluate a logged trajectory outcome or counterfactual before/after counts.",
+        "arguments": ["trajectory_id"],
     },
     {
         "name": "parametric_propose",
@@ -360,6 +395,22 @@ class MemoryTools:
     def explain(self, tenant_id: str, query: str, branch: str = "main") -> dict[str, Any]:
         return self.engine.explain(query=query, tenant_id=tenant_id, branch=branch)
 
+    def get(self, tenant_id: str, id: str, branch: str | None = None) -> dict[str, Any]:
+        exported = self.engine.export_tenant(tenant_id)
+        for collection in ("evidence", "assertions", "relations", "preferences", "justifications", "contradictions"):
+            for item in exported.get(collection, []):
+                item_id = item.get("cid") or item.get("id")
+                if item_id != id:
+                    continue
+                if branch and item.get("branch") and item.get("branch") != branch:
+                    continue
+                return {"kind": collection.rstrip("s"), "record": item}
+        for collection, rows in (("lesson", self.learning.lessons.values()), ("procedure", self.learning.procedures.values())):
+            for item in rows:
+                if item.tenant_id == tenant_id and item.id == id:
+                    return {"kind": collection, "record": item.to_dict()}
+        raise KeyError(f"memory record not found: {id}")
+
     def correct(
         self,
         tenant_id: str,
@@ -505,6 +556,32 @@ class MemoryTools:
         hits = self.engine.graph_ppr(seeds, k, tenant_id=tenant_id, branch=branch)
         return {"hits": [hit.to_dict() for hit in hits]}
 
+    def graph_timeline(self, tenant_id: str, entity: str, branch: str = "main") -> dict[str, Any]:
+        exported = self.engine.export_tenant(tenant_id)
+        events: list[dict[str, Any]] = []
+        entity_l = entity.lower()
+        for assertion in exported.get("assertions", []):
+            if assertion.get("branch", "main") != branch:
+                continue
+            if entity_l not in {str(assertion.get("subject", "")).lower(), str(assertion.get("object", "")).lower()}:
+                continue
+            events.append({"kind": "assertion", "at": assertion.get("valid_from"), "record": assertion})
+        for relation in exported.get("relations", []):
+            if relation.get("branch", "main") != branch:
+                continue
+            if entity_l not in {str(relation.get("source", "")).lower(), str(relation.get("target", "")).lower()}:
+                continue
+            events.append({"kind": "relation", "at": relation.get("valid_from"), "record": relation})
+        events.sort(key=lambda item: str(item.get("at") or ""))
+        return {"entity": entity, "branch": branch, "events": events}
+
+    def graph_as_of(self, tenant_id: str, subject: str, predicate: str, time: str, branch: str = "main") -> dict[str, Any]:
+        moment = parse_dt(time)
+        if moment is None:
+            raise ValueError("graph_as_of requires an ISO timestamp")
+        assertions = self.engine.as_of(subject, predicate, moment, tenant_id=tenant_id, branch=branch)
+        return {"subject": subject, "predicate": predicate, "time": time, "assertions": [item.to_dict() for item in assertions]}
+
     def trajectory_log(
         self,
         tenant_id: str,
@@ -570,6 +647,63 @@ class MemoryTools:
         procedure.status = "validated"
         self._save_learning()
         return procedure.to_dict()
+
+    def lesson_search(self, signature: str, tenant_id: str | None = None, status: str | None = None) -> dict[str, Any]:
+        query = signature.lower()
+        lessons = []
+        for lesson in self.learning.lessons.values():
+            if tenant_id and lesson.tenant_id != tenant_id:
+                continue
+            if status and lesson.status != status:
+                continue
+            haystack = f"{lesson.failure_signature} {lesson.content}".lower()
+            if query in haystack:
+                lessons.append(lesson.to_dict())
+        return {"lessons": lessons}
+
+    def procedure_search(self, query: str, tenant_id: str | None = None, status: str | None = None) -> dict[str, Any]:
+        needle = query.lower()
+        procedures = []
+        for procedure in self.learning.procedures.values():
+            if tenant_id and procedure.tenant_id != tenant_id:
+                continue
+            if status and procedure.status != status:
+                continue
+            haystack = f"{procedure.name} {procedure.body} {procedure.signature}".lower()
+            if needle in haystack:
+                procedures.append(procedure.to_dict())
+        return {"procedures": procedures}
+
+    def procedure_rollback(self, procedure_id: str) -> dict[str, Any]:
+        procedure = self.learning.procedures[procedure_id]
+        procedure.status = "rolled_back"
+        self._save_learning()
+        return procedure.to_dict()
+
+    def outcome_evaluate(
+        self,
+        trajectory_id: str | None = None,
+        before_successes: int | None = None,
+        after_successes: int | None = None,
+        total_cases: int | None = None,
+    ) -> dict[str, Any]:
+        if trajectory_id:
+            trajectory = self.learning.trajectories[trajectory_id]
+            return {
+                "trajectory_id": trajectory.id,
+                "outcome": trajectory.outcome,
+                "reward": trajectory.reward,
+                "passed": trajectory.outcome == "success" and trajectory.reward > 0,
+                "memory_version": trajectory.memory_version,
+            }
+        if before_successes is None or after_successes is None or total_cases is None:
+            raise ValueError("outcome_evaluate requires trajectory_id or before/after/total counts")
+        return {
+            "counterfactual_replay_score": counterfactual_replay_score(before_successes, after_successes, total_cases),
+            "before_successes": before_successes,
+            "after_successes": after_successes,
+            "total_cases": total_cases,
+        }
 
     def parametric_propose(self, tenant_id: str) -> dict[str, Any]:
         artifact = self.parametric.propose_from_lessons(
