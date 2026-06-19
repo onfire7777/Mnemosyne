@@ -232,6 +232,7 @@ def cmd_search(args: argparse.Namespace) -> None:
             query=args.query,
             branch=args.branch,
             min_trust_tier=args.min_trust_tier,
+            max_trust_tier=args.max_trust_tier,
             max_sensitivity=args.max_sensitivity,
         )
     )
@@ -446,7 +447,7 @@ def build_parser() -> argparse.ArgumentParser:
     capture.add_argument("--source-identity")
     capture.add_argument("--content", required=True)
     capture.add_argument("--branch", default="main")
-    capture.add_argument("--trust-tier", type=int, default=1)
+    capture.add_argument("--trust-tier", type=int, default=0)
     capture.set_defaults(func=cmd_capture)
 
     ingest = sub.add_parser("ingest")
@@ -463,7 +464,7 @@ def build_parser() -> argparse.ArgumentParser:
     ingest.add_argument("--signed-provenance")
     ingest.add_argument("--signed-provenance-file")
     ingest.add_argument("--branch", default="main")
-    ingest.add_argument("--trust-tier", type=int, default=1)
+    ingest.add_argument("--trust-tier", type=int, default=0)
     ingest.add_argument("--sensitivity", type=int, default=0)
     ingest.set_defaults(func=cmd_ingest)
 
@@ -476,7 +477,7 @@ def build_parser() -> argparse.ArgumentParser:
     assertion.add_argument("--evidence-cid", action="append", default=[])
     assertion.add_argument("--branch", default="main")
     assertion.add_argument("--confidence", type=float, default=0.7)
-    assertion.add_argument("--trust-tier", type=int, default=1)
+    assertion.add_argument("--trust-tier", type=int, default=0)
     assertion.set_defaults(func=cmd_assert)
 
     relation = sub.add_parser("relation")
@@ -506,6 +507,7 @@ def build_parser() -> argparse.ArgumentParser:
     search.add_argument("--query", required=True)
     search.add_argument("--branch", default="main")
     search.add_argument("--min-trust-tier", type=int)
+    search.add_argument("--max-trust-tier", type=int)
     search.add_argument("--max-sensitivity", type=int)
     search.set_defaults(func=cmd_search)
 
@@ -538,7 +540,7 @@ def build_parser() -> argparse.ArgumentParser:
     forget.add_argument("--branch", default="main")
     forget.add_argument("--requested-by", default="user")
     forget.add_argument("--role", default="operator", choices=["reader", "agent", "consolidator", "operator"])
-    forget.add_argument("--source-trust-tier", type=int, default=3)
+    forget.add_argument("--source-trust-tier", type=int, default=0)
     forget.add_argument("--erasure-mode", default="tombstone_recompute", choices=["tombstone_recompute", "hard_delete_legal"])
     forget.set_defaults(func=cmd_forget)
 

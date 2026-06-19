@@ -22,7 +22,7 @@ class OperatingPolicy:
     rerank_width: int = 32
     mmr_lambda: float = 0.72
     abstention_threshold: float = 0.45
-    min_trust_tier: int = 0
+    max_trust_tier: int = 4
     max_sensitivity: int = 3
     decay: float = 0.5
     activation_weights: dict[str, float] = field(
@@ -55,7 +55,9 @@ class OperatingPolicy:
             return cls()
         policy = cls()
         for key, value in data.items():
+            if key == "min_trust_tier":
+                policy.max_trust_tier = value
+                continue
             if hasattr(policy, key):
                 setattr(policy, key, value)
         return policy
-

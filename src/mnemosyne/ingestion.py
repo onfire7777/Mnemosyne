@@ -9,6 +9,7 @@ from typing import Any, Literal
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.models import Evidence, Resource
 from mnemosyne.provenance import SignedProvenanceVerifier
+from mnemosyne.security import TrustTier
 from mnemosyne.storage import LocalObjectStore
 
 
@@ -28,7 +29,7 @@ class IngestRequest:
     modality: Modality = "text"
     metadata: dict[str, Any] = field(default_factory=dict)
     signed_provenance: dict[str, Any] | None = None
-    trust_tier: int = 1
+    trust_tier: int = int(TrustTier.DIRECT_USER)
     sensitivity: int = 0
 
     def payload_bytes(self) -> bytes:
@@ -72,14 +73,14 @@ class IngestionPipeline:
     def ingest(self, request: IngestRequest, branch: str = "main") -> IngestResult:
         payload = request.payload_bytes()
         provenance = self.provenance_verifier.verify(payload, request.signed_provenance)
-        trust_tier = max(0, request.trust_tier + provenance.trust_delta)
+        trust_tier = min(max(request.trust_tier + provenance.trust_delta, int(TrustTier.DIRECT_USER)), int(TrustTier.UNTRUSTED_EXTERNAL))
         metadata = {
             **request.metadata,
             "media_type": request.media_type,
             "provenance_decision": provenance.to_dict(),
         }
         if provenance.quarantine:
-            trust_tier = 0
+            trust_tier = int(TrustTier.UNTRUSTED_EXTERNAL)
             metadata["quarantine_reason"] = provenance.reason
 
         content_pointer: str | None = None

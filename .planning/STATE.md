@@ -12,7 +12,7 @@ See: .planning/PROJECT.md (updated 2026-06-19)
 Phase: Strict parity continuation after Phase 5 scaffold
 Plan: Exact blueprint parity audit and runtime gap closure
 Status: In progress; exact 1:1 blueprint parity is not complete.
-Last activity: 2026-06-19 — Added CLI-first runtime coverage, selectable CLI Postgres backend support, Postgres retrieval parity for SQL FTS/pgvector/graph, fail-closed capability enforcement, Postgres tenant RLS, explicit erasure modes, HTTP-compatible embedding/reranker provider adapters, and CLI file ingestion through a C2PA verifier adapter. The test suite now has 71 passing tests and 3 skipped live-DB tests; a fresh-schema DSN-backed live Postgres run passes 3 engine/CLI smokes. Strict audit remains open for exact production parity.
+Last activity: 2026-06-19 — Added CLI-first runtime coverage, selectable CLI Postgres backend support, Postgres retrieval parity for SQL FTS/pgvector/graph, fail-closed capability enforcement, Postgres tenant RLS, explicit erasure modes, HTTP-compatible embedding/reranker provider adapters, CLI file ingestion through a C2PA verifier adapter, and blueprint-correct trust-tier semantics. The test suite now has 72 passing tests and 3 skipped live-DB tests; a fresh-schema DSN-backed live Postgres run passes 3 engine/CLI smokes. Strict audit remains open for exact production parity.
 
 Progress: [███████░░░] local scaffold verified; production parity gaps remain
 
@@ -55,13 +55,13 @@ Progress: [███████░░░] local scaffold verified; production p
 - [Privacy]: Local and Postgres forget paths now accept `tombstone_recompute` or `hard_delete_legal`; CLI exposes `--erasure-mode` and tests verify hard-delete removal.
 - [Retrieval]: CLI/Postgres can now use local or HTTP-compatible embedding and reranker providers via flags/env while keeping deterministic local defaults.
 - [Provenance]: CLI `ingest` now accepts `--file`, modality/media type, signed-provenance JSON, and a `--c2pa-tool` adapter; quarantined evidence is hidden from default retrieval unless `include_quarantined` is explicitly set.
+- [Security]: Trust-tier semantics now follow the blueprint scale: `0` direct-user/highest trust through `5` untrusted external; retrieval/write gates, provenance deltas, SQL defaults, and CLI defaults were migrated.
 
 ### Pending Todos
 
 - Finish exact blueprint parity, starting with expanding the live PostgresEngine smoke into a full shared contract suite, hardening CLI/MCP schemas, and adding official MCP SDK/server integration tests.
 - Validate production embedding/reranker deployments behind the HTTP-compatible adapter boundary; add ParadeDB/BM25 where needed and AGE/specialist graph adapters where needed.
 - Add production auth/session identity, complete write-path authorization, crypto-shred/key-management policy, C2PA verifier integration, multimodal extraction, and deployment observability.
-- Migrate trust-tier semantics to match the blueprint contract (`0` direct-user/highest trust through `5` untrusted-external) or add an explicit compatibility layer with tests proving exact behavior.
 
 ### Blockers/Concerns
 
@@ -69,7 +69,6 @@ Progress: [███████░░░] local scaffold verified; production p
 - Original documentation folder on Desktop is read-only to this process; project build lives in `/Users/admin/Projects/Mnemosyne`.
 - Docker/Postgres parity was verified live after launching Docker Desktop and recreating the schema volume.
 - Legal hard-delete semantics need operator policy beyond the local tombstone behavior.
-- Current trust-tier implementation still treats larger numbers as more trusted, while the blueprint specifies `0` as direct-user/highest trust and `5` as untrusted-external.
 
 ## Deferred Items
 

@@ -53,7 +53,7 @@ class Evidence:
     content_pointer: str | None = None
     modality: Literal["text", "image", "audio", "video", "binary", "multimodal"] = "text"
     signed_provenance: dict[str, Any] | None = None
-    trust_tier: int = 1
+    trust_tier: int = 0
     capability_tags: list[str] = field(default_factory=list)
     sensitivity: int = 0
     access_policy: dict[str, Any] = field(default_factory=dict)
@@ -94,7 +94,7 @@ class Assertion:
     status: AssertionStatus = "candidate"
     version: int = 1
     superseded_by: str | None = None
-    trust_tier: int = 1
+    trust_tier: int = 0
     sensitivity: int = 0
     access_policy: dict[str, Any] = field(default_factory=dict)
     last_accessed: datetime | None = None
@@ -190,7 +190,7 @@ class Hit:
     score: float
     channel: str
     provenance: list[str] = field(default_factory=list)
-    trust_tier: int = 1
+    trust_tier: int = 0
     sensitivity: int = 0
     metadata: dict[str, Any] = field(default_factory=dict)
 

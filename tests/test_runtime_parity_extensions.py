@@ -43,9 +43,9 @@ def test_signed_provenance_verifier_quarantines_digest_mismatch() -> None:
 
     assert valid.valid is True
     assert valid.trusted is True
-    assert valid.trust_delta == 1
+    assert valid.trust_delta == -1
     assert invalid.quarantine is True
-    assert invalid.trust_delta < 0
+    assert invalid.trust_delta > 0
 
 
 def test_c2pa_tool_verifier_trusts_configured_issuer_and_quarantines_failures(tmp_path) -> None:
@@ -82,14 +82,14 @@ def test_c2pa_tool_verifier_trusts_configured_issuer_and_quarantines_failures(tm
 
     assert trusted.valid is True
     assert trusted.trusted is True
-    assert trusted.trust_delta == 2
+    assert trusted.trust_delta == -2
     assert trusted.manifest is not None
     assert trusted.manifest["c2pa"]["claim_generator"] == "issuer-a"
     assert untrusted.valid is True
     assert untrusted.trusted is False
-    assert untrusted.trust_delta == 1
+    assert untrusted.trust_delta == -1
     assert failed.quarantine is True
-    assert failed.trust_delta < 0
+    assert failed.trust_delta > 0
     assert invalid.quarantine is True
     assert invalid.reason == "c2pa verifier returned invalid json"
 
@@ -116,7 +116,7 @@ def test_ingestion_pipeline_externalizes_multimodal_bytes_and_quarantines_bad_pr
     assert result.content_pointer is not None
     assert result.resource is not None
     assert result.quarantined is True
-    assert result.trust_tier == 0
+    assert result.trust_tier == 5
     assert evidence is not None
     assert evidence.modality == "image"
     assert evidence.content == "A whiteboard architecture diagram."

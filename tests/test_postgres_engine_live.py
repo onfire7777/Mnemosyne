@@ -45,7 +45,7 @@ def test_postgres_engine_live_contract_smoke() -> None:
             actor="user",
             source_type="smoke",
             content="Live Postgres contract smoke uses Postgres retrieval.",
-            trust_tier=3,
+            trust_tier=0,
             access_policy={"tenant": tenant},
         )
     )
@@ -65,7 +65,7 @@ def test_postgres_engine_live_contract_smoke() -> None:
             source_evidence_cids=[cid],
             confidence=0.9,
             status="active",
-            trust_tier=3,
+            trust_tier=0,
             access_policy={"tenant": tenant},
         )
     )
@@ -117,7 +117,7 @@ def test_postgres_cli_backend_live_smoke() -> None:
         "--content",
         "The CLI backend can use live Postgres retrieval.",
         "--trust-tier",
-        "3",
+        "0",
     )
     asserted = run_postgres_cli(
         "assert",
@@ -136,7 +136,7 @@ def test_postgres_cli_backend_live_smoke() -> None:
         "--confidence",
         "0.9",
         "--trust-tier",
-        "3",
+        "0",
     )
     run_postgres_cli(
         "relation",
@@ -181,7 +181,7 @@ def test_postgres_cli_backend_live_smoke() -> None:
         "--content",
         "Hard-delete this live Postgres evidence.",
         "--trust-tier",
-        "3",
+        "0",
     )
     hard_deleted = run_postgres_cli(
         "forget",
@@ -245,7 +245,7 @@ def test_postgres_cli_ingests_file_with_c2pa_verifier(tmp_path) -> None:
         "--metadata",
         json.dumps({"description": "Postgres binary camera capture."}),
         "--trust-tier",
-        "1",
+        "5",
     )
     exported = run_postgres_cli("export", "--tenant", tenant)
     evidence = next(item for item in exported["evidence"] if item["cid"] == ingested["cid"])

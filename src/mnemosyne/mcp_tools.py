@@ -12,7 +12,7 @@ from mnemosyne.models import Assertion, Evidence, Preference, Relation
 from mnemosyne.parametric import ParametricTier
 from mnemosyne.prefetch import AnticipatoryPrefetcher, PrefetchCandidate
 from mnemosyne.runtime_state import RuntimeState
-from mnemosyne.security import SecurityPolicy, WriteRole
+from mnemosyne.security import SecurityPolicy, TrustTier, WriteRole
 from mnemosyne.user_model import UserMemoryKind, UserModel, UserModelEntry
 
 
@@ -190,7 +190,7 @@ class MemoryTools:
         source_type: str,
         content: str,
         branch: str = "main",
-        trust_tier: int = 1,
+        trust_tier: int = int(TrustTier.DIRECT_USER),
         source_identity: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
@@ -219,7 +219,7 @@ class MemoryTools:
         content: str | None = None,
         data: bytes | None = None,
         branch: str = "main",
-        trust_tier: int = 1,
+        trust_tier: int = int(TrustTier.DIRECT_USER),
         source_identity: str | None = None,
         media_type: str = "text/plain",
         modality: str = "text",
@@ -258,7 +258,7 @@ class MemoryTools:
         user_id: str | None = None,
         branch: str = "main",
         confidence: float = 0.7,
-        trust_tier: int = 1,
+        trust_tier: int = int(TrustTier.DIRECT_USER),
     ) -> dict[str, Any]:
         assertion_id = self.engine.upsert_assertion(
             Assertion(
@@ -313,7 +313,7 @@ class MemoryTools:
         role: WriteRole = "agent",
         source_trust_tier: int | None = None,
     ) -> dict[str, Any]:
-        trust = source_trust_tier if source_trust_tier is not None else (3 if explicit else 1)
+        trust = source_trust_tier if source_trust_tier is not None else (int(TrustTier.USER_AUTHORED) if explicit else int(TrustTier.UNTRUSTED_EXTERNAL))
         decision = self._authorize(
             "preference",
             role=role,
@@ -339,10 +339,13 @@ class MemoryTools:
         query: str,
         branch: str = "main",
         min_trust_tier: int | None = None,
+        max_trust_tier: int | None = None,
         max_sensitivity: int | None = None,
     ) -> dict[str, Any]:
         filt: dict[str, Any] = {}
-        if min_trust_tier is not None:
+        if max_trust_tier is not None:
+            filt["max_trust_tier"] = max_trust_tier
+        elif min_trust_tier is not None:
             filt["min_trust_tier"] = min_trust_tier
         if max_sensitivity is not None:
             filt["max_sensitivity"] = max_sensitivity
@@ -384,7 +387,7 @@ class MemoryTools:
         branch: str = "main",
         requested_by: str = "user",
         role: WriteRole = "operator",
-        source_trust_tier: int = 3,
+        source_trust_tier: int = int(TrustTier.USER_AUTHORED),
         erasure_mode: str = "tombstone_recompute",
     ) -> dict[str, Any]:
         decision = self._authorize(
@@ -432,7 +435,7 @@ class MemoryTools:
     ) -> dict[str, Any]:
         memory_kind = UserMemoryKind(kind)
         if memory_kind is UserMemoryKind.HARD_INSTRUCTION:
-            trust = source_trust_tier if source_trust_tier is not None else 3
+            trust = source_trust_tier if source_trust_tier is not None else int(TrustTier.USER_AUTHORED)
             decision = self._authorize(
                 "profile_add",
                 role=role,
@@ -440,7 +443,9 @@ class MemoryTools:
                 target_sink="policy",
             )
         elif memory_kind in {UserMemoryKind.EXPLICIT_PREFERENCE, UserMemoryKind.INFERRED_PREFERENCE, UserMemoryKind.SITUATIONAL_PREFERENCE}:
-            trust = source_trust_tier if source_trust_tier is not None else (3 if memory_kind is UserMemoryKind.EXPLICIT_PREFERENCE else 1)
+            trust = source_trust_tier if source_trust_tier is not None else (
+                int(TrustTier.USER_AUTHORED) if memory_kind is UserMemoryKind.EXPLICIT_PREFERENCE else int(TrustTier.UNTRUSTED_EXTERNAL)
+            )
             decision = self._authorize(
                 "profile_add",
                 role=role,
@@ -451,7 +456,7 @@ class MemoryTools:
             decision = self._authorize(
                 "profile_add",
                 role=role,
-                source_trust_tier=source_trust_tier if source_trust_tier is not None else 1,
+                source_trust_tier=source_trust_tier if source_trust_tier is not None else int(TrustTier.NORMAL),
             )
         entry_id = self.user_model.add_entry(
             UserModelEntry(

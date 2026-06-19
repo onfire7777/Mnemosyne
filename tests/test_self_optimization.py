@@ -27,7 +27,7 @@ def seeded_engine() -> LocalMemoryEngine:
             actor="user",
             source_type="seed",
             content="Self optimization must remain inside immutable rails.",
-            trust_tier=3,
+            trust_tier=0,
             access_policy={"tenant": TENANT},
         )
     )
@@ -40,7 +40,7 @@ def seeded_engine() -> LocalMemoryEngine:
             confidence=0.95,
             source_evidence_cids=[cid],
             status="active",
-            trust_tier=3,
+            trust_tier=0,
             access_policy={"tenant": TENANT},
         )
     )
@@ -129,4 +129,3 @@ def test_policy_canary_promotion_uses_gate_and_rails() -> None:
 
     assert result.promoted is True
     assert result.protected_regressions == []
-

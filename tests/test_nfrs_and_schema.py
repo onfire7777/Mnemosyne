@@ -23,7 +23,7 @@ def seeded_engine() -> LocalMemoryEngine:
             actor="user",
             source_type="seed",
             content="Fast retrieval should stay below the local benchmark budget.",
-            trust_tier=3,
+            trust_tier=0,
             access_policy={"tenant": TENANT},
         )
     )
@@ -36,7 +36,7 @@ def seeded_engine() -> LocalMemoryEngine:
             confidence=0.9,
             source_evidence_cids=[cid],
             status="active",
-            trust_tier=3,
+            trust_tier=0,
             access_policy={"tenant": TENANT},
         )
     )

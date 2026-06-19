@@ -164,7 +164,7 @@ class LearningSystem:
                     object=lesson.content,
                     confidence=0.8,
                     status="active",
-                    trust_tier=3,
+                    trust_tier=0,
                     access_policy={"tenant": lesson.tenant_id},
                 ),
                 branch=branch,
