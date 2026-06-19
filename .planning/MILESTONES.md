@@ -20,8 +20,8 @@ This checkpoint verified the deterministic local scaffold and initial GitHub pro
 ### Verification
 
 - Earlier checkpoint: `python -m pytest` returned `39 passed`.
-- Current strict-continuation suite: `.venv/bin/python -m pytest -q` returns 55 passing tests and 1 skipped live-DB test.
-- Current live Postgres smoke: `MNEMOSYNE_POSTGRES_DSN=postgresql://... .venv/bin/python -m pytest -q tests/test_postgres_engine_live.py` returns 1 passing test.
+- Current strict-continuation suite: `.venv/bin/python -m pytest -q` returns 58 passing tests and 1 skipped live-DB test.
+- Current live Postgres smoke: `MNEMOSYNE_POSTGRES_DSN=postgresql://... .venv/bin/python -m pytest -q tests/test_postgres_engine_live.py` returns 1 passing test and exercises SQL FTS, pgvector assertion search, dense evidence fallback, and recursive graph/PPR retrieval.
 - Current strict-continuation compile check: `.venv/bin/python -m compileall -q src tests` passes.
 - `python -m mnemosyne.cli tools` returned the expected tool list.
 - Docker Postgres initialized `sql/schema.sql` and reported 21 public tables.

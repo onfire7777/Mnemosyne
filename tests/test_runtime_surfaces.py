@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import inspect
 import tomllib
 from io import StringIO
 from pathlib import Path
 
 from mnemosyne.mcp_server import MnemosyneMcpServer
 from mnemosyne.models import Hit
-from mnemosyne.postgres_engine import PostgresEngine, _bytes_to_cid, _cid_to_bytes, _stable_uuid, _uuid_or_none
+from mnemosyne.postgres_engine import PostgresEngine, _bytes_to_cid, _cid_to_bytes, _stable_uuid, _uuid_or_none, _vector_literal
 from mnemosyne.retrieval import LocalSimilarityReranker, semantic_entropy
 
 
@@ -148,6 +149,18 @@ def test_postgres_cid_helpers_and_audit_uuid_guard() -> None:
     assert _uuid_or_none(cid) is None
     assert _stable_uuid("tenant", "tenant-a") == _stable_uuid("tenant", "tenant-a")
     assert _stable_uuid("tenant", "tenant-a") != _stable_uuid("tenant", "tenant-b")
+    assert _vector_literal([0.25, -0.5, 1.0]) == "[0.25,-0.5,1]"
+
+
+def test_postgres_adapter_uses_sql_retrieval_backends() -> None:
+    source = inspect.getsource(PostgresEngine)
+
+    assert "plainto_tsquery('english'" in source
+    assert "embedding <=> %s::vector" in source
+    assert "postgres_graph_ppr" in source
+    assert "return []" not in inspect.getsource(PostgresEngine.vector_search)
+    assert "del seeds" not in inspect.getsource(PostgresEngine.graph_ppr)
+    assert "FROM relations" in inspect.getsource(PostgresEngine.graph_ppr)
 
 
 def test_postgres_engine_exposes_memory_tools_runtime_surface() -> None:

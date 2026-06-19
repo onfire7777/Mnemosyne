@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from mnemosyne.benchmarks import retrieval_latency_benchmark
@@ -101,9 +102,16 @@ def test_canonical_schema_includes_all_blueprint_core_tables() -> None:
         assert f"CREATE TABLE IF NOT EXISTS {table}" in schema
 
 
+def test_schema_has_single_preference_valid_to_column() -> None:
+    schema = Path("sql/schema.sql").read_text(encoding="utf-8")
+    match = re.search(r"CREATE TABLE IF NOT EXISTS preferences \((.*?)\);", schema, re.S)
+
+    assert match is not None
+    assert len(re.findall(r"\bvalid_to\b", match.group(1))) == 1
+
+
 def test_compose_file_mounts_schema_for_postgres_parity() -> None:
     compose = Path("docker-compose.yml").read_text(encoding="utf-8")
 
     assert "pgvector/pgvector:pg16" in compose
     assert "./sql/schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro" in compose
-

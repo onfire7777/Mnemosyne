@@ -12,7 +12,7 @@ See: .planning/PROJECT.md (updated 2026-06-19)
 Phase: Strict parity continuation after Phase 5 scaffold
 Plan: Exact blueprint parity audit and runtime gap closure
 Status: In progress; exact 1:1 blueprint parity is not complete.
-Last activity: 2026-06-19 — Added CLI-first runtime coverage for profile, graph, prefetch, trajectory, lesson, procedure, and parametric flows with MCP mirror methods. The test suite now has 55 passing tests and 1 skipped live-DB test. Strict audit remains open for exact production parity.
+Last activity: 2026-06-19 — Added CLI-first runtime coverage plus Postgres retrieval parity for SQL FTS, pgvector assertion search, deterministic evidence dense fallback, and recursive graph/PPR. The test suite now has 58 passing tests and 1 skipped live-DB test; the DSN-backed live Postgres smoke passes separately. Strict audit remains open for exact production parity.
 
 Progress: [███████░░░] local scaffold verified; production parity gaps remain
 
@@ -53,7 +53,7 @@ Progress: [███████░░░] local scaffold verified; production p
 ### Pending Todos
 
 - Finish exact blueprint parity, starting with expanding the live PostgresEngine smoke into a full shared contract suite, hardening CLI/MCP schemas, and adding official MCP SDK/server integration tests.
-- Replace Postgres fallback retrieval with real pgvector, FTS/BM25, graph, and reranker paths.
+- Replace deterministic Postgres retrieval fallbacks with production embedding providers, ParadeDB/BM25 where needed, AGE/specialist graph adapters where needed, and cross-encoder reranker integrations.
 - Add production auth/RLS, tenant-scoped branch APIs, C2PA verifier integration, multimodal extraction, and deployment observability.
 
 ### Blockers/Concerns
@@ -68,7 +68,7 @@ Progress: [███████░░░] local scaffold verified; production p
 | Category | Item | Status | Deferred At |
 |----------|------|--------|-------------|
 | Production storage | Full PostgresEngine parity beyond schema initialization | Open | Strict parity audit |
-| Retrieval | Real pgvector/BM25/graph/reranker adapters | Open | Strict parity audit |
+| Retrieval | Production embedding/BM25/graph/reranker adapters beyond deterministic Postgres pgvector/FTS/PPR | Partial | Strict parity audit |
 | Security | Auth/RLS, C2PA verifier, and expanded protected suite | Open | Strict parity audit |
 | Runtime | Full MCP protocol compatibility and complete tool surface | Open | Strict parity audit |
 

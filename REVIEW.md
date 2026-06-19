@@ -44,14 +44,14 @@ After this review, the following blocker fixes were implemented and verified:
 - CR-01 fixed: `LocalMemoryEngine.graph_ppr()` now accepts tenant and branch filters, `retrieve()` passes those filters for deep graph search, and `tests/test_engine_contract.py` reproduces the cross-tenant/branch case.
 - CR-02 partially fixed: `PostgresEngine` now exposes `retrieve`, `deep_search`, `explain`, `correct`, `forget`, and `export_tenant`.
 - CR-03 fixed at the adapter boundary: public string tenant/user IDs are mapped to deterministic internal UUIDs by `PostgresEngine`.
-- CR-04 partially fixed: Postgres branch lifecycle now deletes assertions before branch rows and clones/merges assertions and relations in addition to evidence; live DB parity tests are still required.
+- CR-04 partially fixed: Postgres branch lifecycle now deletes assertions before branch rows and clones/merges assertions and relations in addition to evidence; the live DB smoke now exercises branch/discard, but the full shared branch contract suite is still required.
 - CR-05 partially fixed: `tools/call` now returns MCP-style `content`, `structuredContent`, and `isError`; `notifications/initialized` is suppressed in stdio serving.
-- CR-06 partially fixed: Postgres lexical fallback is no longer mislabeled as dense retrieval; real pgvector/BM25/graph/reranker parity remains open.
+- CR-06 partially fixed: Postgres retrieval now writes assertion embeddings/lexemes, uses SQL FTS, pgvector assertion search, deterministic dense evidence fallback, recursive graph/PPR, RRF/MMR, and reranker boundaries. Remaining production work is external embedding providers, ParadeDB/BM25 where needed, AGE/specialist graph adapters where needed, and cross-encoder integration.
 - WR-01 fixed: Postgres evidence conflict handling restores content, metadata, modality, trust, sensitivity, signed provenance, and access policy.
-- WR-02 fixed for current scope: stdio framing/tool-result envelope tests were added, and `tests/test_postgres_engine_live.py` exercises the live Postgres adapter when `MNEMOSYNE_POSTGRES_DSN` is set.
+- WR-02 fixed for current scope: stdio framing/tool-result envelope tests were added, static Postgres retrieval guards were added, and `tests/test_postgres_engine_live.py` exercises the live Postgres adapter when `MNEMOSYNE_POSTGRES_DSN` is set.
 - WR-03 fixed: the public `MemoryEngine` protocol now includes the high-level runtime methods used by `MemoryTools`.
 
-Current verification: `.venv/bin/python -m compileall -q src tests` passes; `.venv/bin/python -m pytest -q` returns 54 passing tests and 1 skipped live-DB test; `MNEMOSYNE_POSTGRES_DSN=postgresql://... .venv/bin/python -m pytest -q tests/test_postgres_engine_live.py` returns 1 passing live Postgres test.
+Current verification: `.venv/bin/python -m compileall -q src tests` passes; `.venv/bin/python -m pytest -q` returns 58 passing tests and 1 skipped live-DB test; `MNEMOSYNE_POSTGRES_DSN=postgresql://... .venv/bin/python -m pytest -q tests/test_postgres_engine_live.py` returns 1 passing live Postgres test covering SQL FTS, pgvector assertion search, dense evidence fallback, recursive graph/PPR, branch/discard, forget, and export.
 
 ## Summary
 

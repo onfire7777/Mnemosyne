@@ -246,6 +246,25 @@ def test_deep_search_uses_graph_channel_when_relations_exist() -> None:
     assert result.explain["channels"]["graph_ppr"] >= 1
 
 
+def test_deep_search_graph_channel_seeds_phrase_nodes_from_query_tokens() -> None:
+    engine = LocalMemoryEngine()
+    engine.add_relation(
+        Relation(
+            tenant_id=TENANT,
+            source="runtime smoke",
+            predicate="uses",
+            target="Postgres",
+            source_evidence_cids=[],
+            access_policy={"tenant": TENANT},
+        )
+    )
+
+    result = engine.deep_search("runtime smoke", TENANT)
+
+    assert result.explain["channels"]["graph_ppr"] >= 1
+    assert any(hit.kind == "relation" and "Postgres" in hit.text for hit in result.hits)
+
+
 def test_deep_search_graph_channel_respects_tenant_and_branch_isolation() -> None:
     engine = LocalMemoryEngine()
     engine.add_relation(

@@ -59,7 +59,8 @@ def test_postgres_engine_live_contract_smoke() -> None:
     result = engine.retrieve("runtime smoke Postgres", tenant)
     assert result.hits
     assert result.explain["channels"]["postgres_lexical"] >= 1
-    assert result.explain["channels"]["postgres_dense"] == 0
+    assert result.explain["channels"]["postgres_dense"] >= 1
+    assert result.explain["adapters"]["embedding_dims"] == 1024
 
     as_of = engine.as_of("runtime smoke", "uses", datetime.now(UTC), tenant_id=tenant)
     assert as_of and as_of[-1].id == assertion_id
@@ -74,6 +75,8 @@ def test_postgres_engine_live_contract_smoke() -> None:
             access_policy={"tenant": tenant},
         )
     )
+    deep = engine.deep_search("runtime smoke", tenant)
+    assert deep.explain["channels"]["postgres_graph_ppr"] >= 1
     engine.branch("candidate-live", tenant_id=tenant)
     branch_result = engine.retrieve("runtime smoke Postgres", tenant, branch="candidate-live")
     assert branch_result.hits

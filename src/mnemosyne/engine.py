@@ -376,6 +376,10 @@ class LocalMemoryEngine:
         seed_set = {seed.lower() for seed in seeds}
         if not seed_set:
             return []
+        def matches_seed(node: str) -> bool:
+            node_lower = node.lower()
+            return node_lower in seed_set or bool(set(tokenize(node_lower)) & seed_set)
+
         adjacency: dict[str, set[str]] = defaultdict(set)
         relation_by_pair: dict[tuple[str, str], Relation] = {}
         for rel in self.relations.values():
@@ -389,11 +393,11 @@ class LocalMemoryEngine:
             adjacency[rel.target.lower()].add(rel.source.lower())
             relation_by_pair[(rel.source.lower(), rel.target.lower())] = rel
             relation_by_pair[(rel.target.lower(), rel.source.lower())] = rel
-        ranks = {node: (1.0 if node in seed_set else 0.0) for node in adjacency}
+        ranks = {node: (1.0 if matches_seed(node) else 0.0) for node in adjacency}
         for seed in seed_set:
             ranks.setdefault(seed, 1.0)
         for _ in range(12):
-            next_ranks = {node: 0.15 * (1.0 if node in seed_set else 0.0) for node in ranks}
+            next_ranks = {node: 0.15 * (1.0 if matches_seed(node) else 0.0) for node in ranks}
             for node, neighbors in adjacency.items():
                 if not neighbors:
                     continue
@@ -403,7 +407,7 @@ class LocalMemoryEngine:
             ranks = next_ranks
         hits: list[Hit] = []
         for node, score in sorted(ranks.items(), key=lambda item: item[1], reverse=True):
-            if node in seed_set or score <= 0:
+            if matches_seed(node) or score <= 0:
                 continue
             rel = next((relation_by_pair[pair] for pair in relation_by_pair if pair[0] == node or pair[1] == node), None)
             if rel:

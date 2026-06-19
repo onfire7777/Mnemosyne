@@ -17,7 +17,7 @@ The v2 blueprint controls implementation. The earlier design is lineage only unl
 - `src/mnemosyne/engine.py` — local deterministic engine implementing the MemoryEngine contract.
 - `src/mnemosyne/mcp_tools.py` — MCP-compatible tool facade: capture, search, deep_search, explain, correct, forget, export.
 - `src/mnemosyne/mcp_server.py` — stdio JSON-RPC MCP runtime shim with `initialize`, `tools/list`, `tools/call`, and notification handling.
-- `src/mnemosyne/postgres_engine.py` — PostgreSQL adapter for the canonical schema, including live smoke coverage for append/get/upsert/retrieve/as-of/branch/discard/forget/export.
+- `src/mnemosyne/postgres_engine.py` — PostgreSQL adapter for the canonical schema, including SQL FTS, pgvector assertion search, deterministic evidence dense fallback, recursive graph/PPR, and live smoke coverage for append/get/upsert/retrieve/as-of/branch/discard/forget/export.
 - `src/mnemosyne/retrieval.py` — embedding/reranker adapter protocols, deterministic local fallbacks, and semantic-entropy signal.
 - `src/mnemosyne/ingestion.py` — text/blob/multimodal ingestion pipeline with object externalization and signed-provenance decisions.
 - `src/mnemosyne/storage.py` — local content-addressed object store.
@@ -55,7 +55,7 @@ python -m mnemosyne.cli search --tenant tenant-a --query "preferred database"
 
 The repository has a verified local scaffold plus runtime parity extensions. Current checks:
 
-- `.venv/bin/python -m pytest -q` returns 55 passing tests and 1 skipped live-DB test.
-- With Docker compose Postgres running, `MNEMOSYNE_POSTGRES_DSN=postgresql://... .venv/bin/python -m pytest -q tests/test_postgres_engine_live.py` returns 1 passing live adapter test.
+- `.venv/bin/python -m pytest -q` returns 58 passing tests and 1 skipped live-DB test.
+- With Docker compose Postgres running, `MNEMOSYNE_POSTGRES_DSN=postgresql://... .venv/bin/python -m pytest -q tests/test_postgres_engine_live.py` returns 1 passing live adapter test covering SQL FTS, pgvector assertion search, dense evidence fallback, and recursive graph/PPR.
 
 Exact 1:1 blueprint parity is still in progress. The controlling status artifact is `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md`.

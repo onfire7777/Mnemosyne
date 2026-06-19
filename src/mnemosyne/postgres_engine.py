@@ -9,7 +9,10 @@ from uuid import NAMESPACE_URL, UUID, uuid5
 from mnemosyne.ids import content_cid
 from mnemosyne.models import Assertion, Evidence, Hit, MergeReport, Relation, RetrievalResult, parse_dt, utc_now
 from mnemosyne.policy import OperatingPolicy
-from mnemosyne.text import approx_tokens, lexical_score, tokenize
+from collections import defaultdict
+
+from mnemosyne.retrieval import HashingEmbeddingProvider, LocalSimilarityReranker, RetrievalAdapters
+from mnemosyne.text import approx_tokens, cosine, hashing_embedding, lexical_score, tokenize
 
 
 class PostgresUnavailableError(RuntimeError):
@@ -29,14 +32,23 @@ class PostgresEngine:
     """Production storage adapter for the canonical PostgreSQL schema.
 
     This adapter implements the core MemoryEngine operations against
-    sql/schema.sql. It deliberately exposes local lexical/vector fallbacks until
-    pgvector, ParadeDB/BM25, and graph-extension backends are wired with model
-    embeddings.
+    sql/schema.sql. It writes deterministic assertion embeddings and lexemes so
+    fresh local deployments exercise the same Postgres full-text, pgvector, and
+    graph contracts that production model providers can later replace.
     """
 
-    def __init__(self, dsn: str, policy: OperatingPolicy | None = None):
+    def __init__(self, dsn: str, policy: OperatingPolicy | None = None, adapters: RetrievalAdapters | None = None):
         self.dsn = dsn
         self.policy = policy or OperatingPolicy()
+        if adapters is None:
+            embedding = HashingEmbeddingProvider(dims=1024)
+            adapters = RetrievalAdapters(
+                embedding=embedding,
+                reranker=LocalSimilarityReranker(embedding_provider=embedding),
+                lexical_backend="postgres-fts",
+                graph_backend="postgres-recursive-ppr",
+            )
+        self.adapters = adapters
         self._psycopg, self._jsonb = _require_psycopg()
 
     def connect(self) -> Any:
@@ -208,12 +220,13 @@ class PostgresEngine:
                       id, tenant_id, user_id, branch, subject, predicate, object, scope,
                       confidence, calibration, valid_from, valid_to, transaction_time,
                       expired_at, justification_id, source_evidence_cids, status, version,
-                      superseded_by, trust_tier, sensitivity, access_policy, last_accessed,
-                      access_count
+                      superseded_by, trust_tier, sensitivity, access_policy, embedding,
+                      lexeme, last_accessed, access_count
                     )
                     VALUES (
                       %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                      %s, %s, %s, %s, %s, %s, %s, %s
+                      %s, %s, %s, %s, %s, %s, %s::vector,
+                      to_tsvector('english', %s), %s, %s
                     )
                     ON CONFLICT (id) DO UPDATE
                     SET confidence = EXCLUDED.confidence,
@@ -222,7 +235,9 @@ class PostgresEngine:
                         status = EXCLUDED.status,
                         trust_tier = EXCLUDED.trust_tier,
                         sensitivity = EXCLUDED.sensitivity,
-                        access_policy = EXCLUDED.access_policy
+                        access_policy = EXCLUDED.access_policy,
+                        embedding = EXCLUDED.embedding,
+                        lexeme = EXCLUDED.lexeme
                     """,
                     (
                         incoming.id,
@@ -247,6 +262,8 @@ class PostgresEngine:
                         incoming.trust_tier,
                         incoming.sensitivity,
                         self._jsonb(incoming.access_policy),
+                        _vector_literal(self.adapters.embedding.embed(incoming.statement())),
+                        incoming.statement(),
                         incoming.last_accessed,
                         incoming.access_count,
                     ),
@@ -289,11 +306,166 @@ class PostgresEngine:
         return relation.id
 
     def lexical_search(self, query: str, k: int, filt: dict[str, Any]) -> list[Hit]:
-        return self._local_rank(query, k, filt, channel="postgres_lexical")
+        tenant_id = filt["tenant_id"]
+        db_tenant_id = _stable_uuid("tenant", tenant_id)
+        branch = filt.get("branch", "main")
+        min_trust = int(filt.get("min_trust_tier", self.policy.min_trust_tier))
+        max_sensitivity = int(filt.get("max_sensitivity", self.policy.max_sensitivity))
+        hits: list[Hit] = []
+        with self.connect() as conn:
+            with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                cur.execute(
+                    """
+                    WITH q AS (SELECT plainto_tsquery('english', %s) AS query)
+                    SELECT e.cid, e.branch, e.content, e.trust_tier, e.sensitivity,
+                      e.source_type, ts_rank_cd(to_tsvector('english', coalesce(e.content, '')), q.query) AS score
+                    FROM evidence e, q
+                    WHERE e.tenant_id = %s AND e.branch = %s AND e.erased = false
+                      AND e.trust_tier >= %s AND e.sensitivity <= %s
+                      AND to_tsvector('english', coalesce(e.content, '')) @@ q.query
+                    ORDER BY score DESC
+                    LIMIT %s
+                    """,
+                    (query, db_tenant_id, branch, min_trust, max_sensitivity, k),
+                )
+                for row in cur.fetchall():
+                    cid = _bytes_to_cid(row["cid"])
+                    hits.append(
+                        Hit(
+                            id=cid,
+                            kind="evidence",
+                            tenant_id=tenant_id,
+                            branch=row["branch"],
+                            text=row["content"] or "",
+                            score=float(row["score"] or 0.0),
+                            channel="postgres_fts",
+                            provenance=[cid],
+                            trust_tier=row["trust_tier"],
+                            sensitivity=row["sensitivity"],
+                            metadata={"source_type": row["source_type"], "backend": self.adapters.lexical_backend},
+                        )
+                    )
+                cur.execute(
+                    """
+                    WITH q AS (SELECT plainto_tsquery('english', %s) AS query)
+                    SELECT a.id, a.branch, a.subject, a.predicate, a.object, a.confidence,
+                      a.source_evidence_cids, a.trust_tier, a.sensitivity,
+                      ts_rank_cd(coalesce(a.lexeme, to_tsvector('english', concat_ws(' ', a.subject, a.predicate, a.object))), q.query) AS score
+                    FROM assertions a, q
+                    WHERE a.tenant_id = %s AND a.branch = %s AND a.status IN ('active', 'contested')
+                      AND a.trust_tier >= %s AND a.sensitivity <= %s
+                      AND coalesce(a.lexeme, to_tsvector('english', concat_ws(' ', a.subject, a.predicate, a.object))) @@ q.query
+                    ORDER BY score DESC, a.confidence DESC
+                    LIMIT %s
+                    """,
+                    (query, db_tenant_id, branch, min_trust, max_sensitivity, k),
+                )
+                for row in cur.fetchall():
+                    text = f"{row['subject']} {row['predicate']} {row['object']}"
+                    hits.append(
+                        Hit(
+                            id=str(row["id"]),
+                            kind="assertion",
+                            tenant_id=tenant_id,
+                            branch=row["branch"],
+                            text=text,
+                            score=float(row["score"] or 0.0) * float(row["confidence"]),
+                            channel="postgres_fts",
+                            provenance=_bytes_list_to_cids(row["source_evidence_cids"]),
+                            trust_tier=row["trust_tier"],
+                            sensitivity=row["sensitivity"],
+                            metadata={"confidence": float(row["confidence"]), "backend": self.adapters.lexical_backend},
+                        )
+                    )
+        if not hits:
+            return self._local_rank(query, k, filt, channel="postgres_lexical_fallback")
+        return sorted(hits, key=lambda item: item.score, reverse=True)[:k]
 
     def vector_search(self, query: str, k: int, filt: dict[str, Any]) -> list[Hit]:
-        del query, k, filt
-        return []
+        tenant_id = filt["tenant_id"]
+        db_tenant_id = _stable_uuid("tenant", tenant_id)
+        branch = filt.get("branch", "main")
+        min_trust = int(filt.get("min_trust_tier", self.policy.min_trust_tier))
+        max_sensitivity = int(filt.get("max_sensitivity", self.policy.max_sensitivity))
+        query_vec = self.adapters.embedding.embed(query)
+        query_literal = _vector_literal(query_vec)
+        hits: list[Hit] = []
+        with self.connect() as conn:
+            with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                cur.execute(
+                    """
+                    SELECT id, branch, subject, predicate, object, confidence,
+                      source_evidence_cids, trust_tier, sensitivity,
+                      1.0 - (embedding <=> %s::vector) AS score
+                    FROM assertions
+                    WHERE tenant_id = %s AND branch = %s AND status IN ('active', 'contested')
+                      AND trust_tier >= %s AND sensitivity <= %s
+                      AND embedding IS NOT NULL
+                    ORDER BY embedding <=> %s::vector
+                    LIMIT %s
+                    """,
+                    (query_literal, db_tenant_id, branch, min_trust, max_sensitivity, query_literal, k),
+                )
+                for row in cur.fetchall():
+                    score = float(row["score"] or 0.0)
+                    if score <= 0:
+                        continue
+                    text = f"{row['subject']} {row['predicate']} {row['object']}"
+                    hits.append(
+                        Hit(
+                            id=str(row["id"]),
+                            kind="assertion",
+                            tenant_id=tenant_id,
+                            branch=row["branch"],
+                            text=text,
+                            score=score * float(row["confidence"]),
+                            channel="postgres_pgvector",
+                            provenance=_bytes_list_to_cids(row["source_evidence_cids"]),
+                            trust_tier=row["trust_tier"],
+                            sensitivity=row["sensitivity"],
+                            metadata={
+                                "confidence": float(row["confidence"]),
+                                "backend": self.adapters.embedding.name,
+                                "embedding_dims": self.adapters.embedding.dims,
+                            },
+                        )
+                    )
+                cur.execute(
+                    """
+                    SELECT cid, branch, content, trust_tier, sensitivity, source_type
+                    FROM evidence
+                    WHERE tenant_id = %s AND branch = %s AND erased = false
+                      AND trust_tier >= %s AND sensitivity <= %s
+                    """,
+                    (db_tenant_id, branch, min_trust, max_sensitivity),
+                )
+                for row in cur.fetchall():
+                    text = row["content"] or ""
+                    score = cosine(query_vec, self.adapters.embedding.embed(text))
+                    if score <= 0:
+                        continue
+                    cid = _bytes_to_cid(row["cid"])
+                    hits.append(
+                        Hit(
+                            id=cid,
+                            kind="evidence",
+                            tenant_id=tenant_id,
+                            branch=row["branch"],
+                            text=text,
+                            score=score,
+                            channel="postgres_dense_fallback",
+                            provenance=[cid],
+                            trust_tier=row["trust_tier"],
+                            sensitivity=row["sensitivity"],
+                            metadata={
+                                "source_type": row["source_type"],
+                                "backend": self.adapters.embedding.name,
+                                "embedding_dims": self.adapters.embedding.dims,
+                                "stored_embedding": False,
+                            },
+                        )
+                    )
+        return sorted(hits, key=lambda item: item.score, reverse=True)[:k]
 
     def graph_ppr(
         self,
@@ -303,8 +475,86 @@ class PostgresEngine:
         tenant_id: str | None = None,
         branch: str | None = None,
     ) -> list[Hit]:
-        del seeds, k, as_of, tenant_id, branch
-        return []
+        seed_set = {seed.lower() for seed in seeds}
+        if not seed_set or not tenant_id:
+            return []
+        def matches_seed(node: str) -> bool:
+            node_lower = node.lower()
+            return node_lower in seed_set or bool(set(tokenize(node_lower)) & seed_set)
+
+        db_tenant_id = _stable_uuid("tenant", tenant_id)
+        branch = branch or "main"
+        moment = None
+        if as_of:
+            moment = as_of.astimezone(UTC) if as_of.tzinfo else as_of.replace(tzinfo=UTC)
+        adjacency: dict[str, set[str]] = defaultdict(set)
+        relation_by_pair: dict[tuple[str, str], dict[str, Any]] = {}
+        with self.connect() as conn:
+            with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                if moment:
+                    cur.execute(
+                        """
+                        SELECT *
+                        FROM relations
+                        WHERE tenant_id = %s AND branch = %s
+                          AND valid_from <= %s AND (valid_to IS NULL OR valid_to > %s)
+                        """,
+                        (db_tenant_id, branch, moment, moment),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        SELECT *
+                        FROM relations
+                        WHERE tenant_id = %s AND branch = %s
+                        """,
+                        (db_tenant_id, branch),
+                    )
+                for row in cur.fetchall():
+                    source = row["source"].lower()
+                    target = row["target"].lower()
+                    adjacency[source].add(target)
+                    adjacency[target].add(source)
+                    relation_by_pair[(source, target)] = dict(row)
+                    relation_by_pair[(target, source)] = dict(row)
+        ranks = {node: (1.0 if matches_seed(node) else 0.0) for node in adjacency}
+        for seed in seed_set:
+            ranks.setdefault(seed, 1.0)
+        for _ in range(12):
+            next_ranks = {node: 0.15 * (1.0 if matches_seed(node) else 0.0) for node in ranks}
+            for node, neighbors in adjacency.items():
+                if not neighbors:
+                    continue
+                share = 0.85 * ranks.get(node, 0.0) / len(neighbors)
+                for neighbor in neighbors:
+                    next_ranks[neighbor] = next_ranks.get(neighbor, 0.0) + share
+            ranks = next_ranks
+        hits: list[Hit] = []
+        for node, score in sorted(ranks.items(), key=lambda item: item[1], reverse=True):
+            if matches_seed(node) or score <= 0:
+                continue
+            rel = next((relation_by_pair[pair] for pair in relation_by_pair if pair[0] == node or pair[1] == node), None)
+            if not rel:
+                continue
+            hits.append(
+                Hit(
+                    id=str(rel["id"]),
+                    kind="relation",
+                    tenant_id=tenant_id,
+                    branch=rel["branch"],
+                    text=f"{rel['source']} {rel['predicate']} {rel['target']}",
+                    score=float(score) * float(rel["confidence"]),
+                    channel="postgres_graph_ppr",
+                    provenance=_bytes_list_to_cids(rel["source_evidence_cids"]),
+                    metadata={
+                        "confidence": float(rel["confidence"]),
+                        "backend": self.adapters.graph_backend,
+                    },
+                )
+            )
+            if len(hits) >= k:
+                break
+        return hits
 
     def as_of(self, subject: str, predicate: str, t: datetime, tenant_id: str | None = None, branch: str = "main") -> list[Assertion]:
         moment = t.astimezone(UTC) if t.tzinfo else t.replace(tzinfo=UTC)
@@ -334,18 +584,12 @@ class PostgresEngine:
         dense = self.vector_search(query, self.policy.rerank_width, effective_filter)
         lexical = self.lexical_search(query, self.policy.rerank_width, effective_filter)
         graph = self.graph_ppr(tokenize(query), max(4, k // 2), tenant_id=tenant_id, branch=branch) if deep else []
-        ordered = sorted(_dedupe_hits(dense + lexical + graph), key=lambda item: item.score, reverse=True)
-        budgeted: list[Hit] = []
-        used_tokens = 0
-        for hit in ordered:
-            if len(budgeted) >= k:
-                break
-            cost = approx_tokens(hit.text)
-            if used_tokens + cost > self.policy.token_budget:
-                continue
-            budgeted.append(hit)
-            used_tokens += cost
-        confidence = min(0.99, sum(hit.score for hit in budgeted) / max(len(budgeted), 1)) if budgeted else 0.0
+        fused = self._rrf([dense, lexical, graph], k=max(k * 2, self.policy.rerank_width))
+        reranked = self.adapters.reranker.rerank(query, fused, k=max(k * 2, k))
+        diversified = self._mmr(query, reranked, k=max(k, 1))
+        ordered = self._u_curve_order(diversified)
+        budgeted, used_tokens = self._fit_budget(ordered, self.policy.token_budget)
+        confidence = self._confidence(budgeted)
         abstained = confidence < self.policy.abstention_threshold
         return RetrievalResult(
             query=query,
@@ -360,6 +604,15 @@ class PostgresEngine:
                     "postgres_dense": len(dense),
                     "postgres_lexical": len(lexical),
                     "postgres_graph_ppr": len(graph),
+                },
+                "rrf_k": self.policy.rrf_k,
+                "mmr_lambda": self.policy.mmr_lambda,
+                "adapters": {
+                    "embedding": self.adapters.embedding.name,
+                    "embedding_dims": self.adapters.embedding.dims,
+                    "reranker": self.adapters.reranker.name,
+                    "lexical_backend": self.adapters.lexical_backend,
+                    "graph_backend": self.adapters.graph_backend,
                 },
                 "rails": self.policy.immutable_rails,
             },
@@ -761,9 +1014,106 @@ class PostgresEngine:
             (tenant_id, actor, op, _uuid_or_none(target_id), self._jsonb(diff)),
         )
 
+    def _rrf(self, ranked_lists: list[list[Hit]], k: int) -> list[Hit]:
+        by_id: dict[tuple[str, str], Hit] = {}
+        scores: dict[tuple[str, str], float] = defaultdict(float)
+        channels: dict[tuple[str, str], list[str]] = defaultdict(list)
+        channel_scores: dict[tuple[str, str], dict[str, float]] = defaultdict(dict)
+        for ranked in ranked_lists:
+            for rank, hit in enumerate(ranked, start=1):
+                key = (hit.kind, hit.id)
+                by_id[key] = hit
+                scores[key] += 1.0 / (self.policy.rrf_k + rank)
+                channels[key].append(hit.channel)
+                channel_scores[key][hit.channel] = max(channel_scores[key].get(hit.channel, 0.0), hit.score)
+        fused = []
+        for key, hit in by_id.items():
+            item = Hit(
+                id=hit.id,
+                kind=hit.kind,
+                tenant_id=hit.tenant_id,
+                branch=hit.branch,
+                text=hit.text,
+                score=scores[key],
+                channel="+".join(sorted(set(channels[key]))),
+                provenance=list(hit.provenance),
+                trust_tier=hit.trust_tier,
+                sensitivity=hit.sensitivity,
+                metadata={
+                    **hit.metadata,
+                    "channels": sorted(set(channels[key])),
+                    "channel_scores": dict(sorted(channel_scores[key].items())),
+                },
+            )
+            fused.append(item)
+        return sorted(fused, key=lambda item: item.score, reverse=True)[:k]
+
+    def _mmr(self, query: str, hits: list[Hit], k: int) -> list[Hit]:
+        selected: list[Hit] = []
+        remaining = list(hits)
+        query_vec = hashing_embedding(query)
+        while remaining and len(selected) < k:
+            best: Hit | None = None
+            best_score = float("-inf")
+            for hit in remaining:
+                relevance = cosine(query_vec, hashing_embedding(hit.text))
+                diversity_penalty = 0.0
+                if selected:
+                    diversity_penalty = max(cosine(hashing_embedding(hit.text), hashing_embedding(item.text)) for item in selected)
+                score = self.policy.mmr_lambda * relevance - (1.0 - self.policy.mmr_lambda) * diversity_penalty
+                score += hit.score
+                if score > best_score:
+                    best = hit
+                    best_score = score
+            if best is None:
+                break
+            selected.append(best)
+            remaining.remove(best)
+        return selected
+
+    @staticmethod
+    def _u_curve_order(hits: list[Hit]) -> list[Hit]:
+        front: list[Hit] = []
+        back: list[Hit] = []
+        for idx, hit in enumerate(hits):
+            if idx % 2 == 0:
+                front.append(hit)
+            else:
+                back.insert(0, hit)
+        return front + back
+
+    @staticmethod
+    def _fit_budget(hits: list[Hit], budget: int) -> tuple[list[Hit], int]:
+        kept: list[Hit] = []
+        used = 0
+        for hit in hits:
+            cost = approx_tokens(hit.text)
+            if used + cost > budget:
+                continue
+            kept.append(hit)
+            used += cost
+        return kept, used
+
+    @staticmethod
+    def _confidence(hits: list[Hit]) -> float:
+        if not hits:
+            return 0.0
+        weighted = 0.0
+        total = 0.0
+        for hit in hits:
+            trust = min(max(hit.trust_tier / 3.0, 0.0), 1.0)
+            base = float(hit.metadata.get("confidence", 0.7))
+            weighted += max(hit.score, 0.01) * trust * base
+            total += max(hit.score, 0.01)
+        return max(0.0, min(1.0, weighted / max(total, 0.01)))
+
 
 def _cid_to_bytes(cid: str) -> bytes:
     return bytes.fromhex(cid.removeprefix("cidv1:"))
+
+
+def _vector_literal(vector: list[float]) -> str:
+    return "[" + ",".join(f"{value:.8g}" for value in vector) + "]"
 
 
 def _bytes_to_cid(value: bytes | memoryview) -> str:
