@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from mnemosyne.engine import LocalMemoryEngine
+from mnemosyne.ids import new_id
 from mnemosyne.ingestion import IngestRequest, IngestionPipeline
 from mnemosyne.gate import GateResult, RegressionCase
 from mnemosyne.learning import LearningSystem, Trajectory, counterfactual_replay_score
@@ -74,9 +75,24 @@ TOOL_SPEC: list[dict[str, Any]] = [
         "arguments": ["tenant_id", "query"],
     },
     {
+        "name": "propose",
+        "description": "Write a candidate fact into an isolated proposal branch for later confirmation.",
+        "arguments": ["tenant_id", "user_id", "subject", "predicate", "object_value"],
+    },
+    {
+        "name": "confirm",
+        "description": "Confirm a proposed branch or candidate id by merging it into main.",
+        "arguments": ["id"],
+    },
+    {
         "name": "correct",
         "description": "Record an authoritative correction and upsert the superseding assertion.",
         "arguments": ["tenant_id", "user_id", "subject", "predicate", "object_value", "correction_text"],
+    },
+    {
+        "name": "supersede",
+        "description": "Supersede an existing assertion with a newer assertion value.",
+        "arguments": ["tenant_id", "user_id", "id", "new"],
     },
     {
         "name": "forget",
@@ -114,6 +130,26 @@ TOOL_SPEC: list[dict[str, Any]] = [
         "arguments": ["tenant_id", "user_id"],
     },
     {
+        "name": "profile_get_relevant",
+        "description": "Blueprint alias for returning relevant user-profile context.",
+        "arguments": ["tenant_id", "user_id"],
+    },
+    {
+        "name": "profile_record_explicit",
+        "description": "Blueprint alias for recording an explicit user preference.",
+        "arguments": ["tenant_id", "user_id", "statement"],
+    },
+    {
+        "name": "profile_propose_inference",
+        "description": "Blueprint alias for proposing an inferred user preference.",
+        "arguments": ["tenant_id", "user_id", "statement"],
+    },
+    {
+        "name": "profile_correct",
+        "description": "Record an explicit profile correction that supersedes weaker entries.",
+        "arguments": ["tenant_id", "user_id", "id", "statement"],
+    },
+    {
         "name": "prefetch",
         "description": "Warm retrieval contexts through the anticipatory predictability gate.",
         "arguments": ["tenant_id", "candidates"],
@@ -121,6 +157,11 @@ TOOL_SPEC: list[dict[str, Any]] = [
     {
         "name": "graph_neighbors",
         "description": "Run tenant- and branch-scoped graph PPR over relation seeds.",
+        "arguments": ["tenant_id", "seeds"],
+    },
+    {
+        "name": "graph_query",
+        "description": "Blueprint alias for graph neighbor query over relation seeds.",
         "arguments": ["tenant_id", "seeds"],
     },
     {
@@ -139,6 +180,11 @@ TOOL_SPEC: list[dict[str, Any]] = [
         "arguments": ["tenant_id", "user_id", "session_id", "task", "steps", "outcome", "reward", "memory_version"],
     },
     {
+        "name": "trajectory_record",
+        "description": "Blueprint alias for persisting a trajectory.",
+        "arguments": ["tenant_id", "user_id", "session_id", "task", "steps", "outcome", "reward", "memory_version"],
+    },
+    {
         "name": "trajectory_attribute",
         "description": "Attribute a logged failure trajectory.",
         "arguments": ["trajectory_id"],
@@ -149,8 +195,18 @@ TOOL_SPEC: list[dict[str, Any]] = [
         "arguments": ["trajectory_id"],
     },
     {
+        "name": "lesson_propose",
+        "description": "Blueprint alias for proposing a lesson from a trajectory.",
+        "arguments": ["trajectory_id"],
+    },
+    {
         "name": "procedure_induce",
         "description": "Induce a procedure from a corrective lesson.",
+        "arguments": ["lesson_id"],
+    },
+    {
+        "name": "procedure_propose",
+        "description": "Blueprint alias for proposing a procedure from a lesson.",
         "arguments": ["lesson_id"],
     },
     {
@@ -161,6 +217,11 @@ TOOL_SPEC: list[dict[str, Any]] = [
     {
         "name": "procedure_validate",
         "description": "Mark an induced procedure as validated for the isolated parametric tier.",
+        "arguments": ["procedure_id"],
+    },
+    {
+        "name": "procedure_promote",
+        "description": "Promote a validated procedure into the active procedural tier.",
         "arguments": ["procedure_id"],
     },
     {
@@ -411,6 +472,81 @@ class MemoryTools:
                     return {"kind": collection, "record": item.to_dict()}
         raise KeyError(f"memory record not found: {id}")
 
+    def propose(
+        self,
+        tenant_id: str,
+        user_id: str,
+        subject: str,
+        predicate: str,
+        object_value: str,
+        source_evidence_cids: list[str] | None = None,
+        confidence: float = 0.7,
+        trust_tier: int = int(TrustTier.NORMAL),
+        branch: str | None = None,
+    ) -> dict[str, Any]:
+        proposal_branch = branch or f"proposal-{new_id()}"
+        self._engine_branch(proposal_branch, "main", "proposal", tenant_id=tenant_id)
+        assertion_id = self.engine.upsert_assertion(
+            Assertion(
+                tenant_id=tenant_id,
+                subject=subject,
+                predicate=predicate,
+                object=object_value,
+                confidence=confidence,
+                source_evidence_cids=source_evidence_cids or [],
+                status="active",
+                trust_tier=trust_tier,
+                access_policy={"tenant": tenant_id},
+            ),
+            branch=proposal_branch,
+        )
+        return {
+            "id": assertion_id,
+            "proposal_id": proposal_branch,
+            "branch": proposal_branch,
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+            "status": "proposed",
+        }
+
+    def confirm(self, id: str, tenant_id: str | None = None, branch: str | None = None, into: str = "main") -> dict[str, Any]:
+        proposal_branch = branch or self._find_candidate_branch(id, tenant_id)
+        report = self._engine_merge(proposal_branch, into, tenant_id=tenant_id)
+        return {"id": id, "branch": proposal_branch, "into": into, "merge": report.to_dict()}
+
+    def supersede(
+        self,
+        tenant_id: str,
+        user_id: str,
+        id: str,
+        new: dict[str, Any],
+        branch: str = "main",
+        confidence: float = 0.95,
+    ) -> dict[str, Any]:
+        existing = self.get(tenant_id, id, branch=branch)
+        if existing["kind"] != "assertion":
+            raise ValueError("supersede currently supports assertion records")
+        record = existing["record"]
+        new_object = new.get("object_value", new.get("object"))
+        if new_object is None:
+            raise ValueError("supersede requires new.object_value or new.object")
+        assertion_id = self.engine.upsert_assertion(
+            Assertion(
+                tenant_id=tenant_id,
+                subject=str(new.get("subject", record["subject"])),
+                predicate=str(new.get("predicate", record["predicate"])),
+                object=str(new_object),
+                confidence=float(new.get("confidence", confidence)),
+                scope=dict(new.get("scope", record.get("scope") or {})),
+                source_evidence_cids=list(new.get("source_evidence_cids", record.get("source_evidence_cids") or [])),
+                trust_tier=int(new.get("trust_tier", record.get("trust_tier", int(TrustTier.USER_AUTHORED)))),
+                sensitivity=int(new.get("sensitivity", record.get("sensitivity", 1))),
+                access_policy=dict(new.get("access_policy", record.get("access_policy") or {"tenant": tenant_id})),
+            ),
+            branch=branch,
+        )
+        return {"id": assertion_id, "supersedes": id, "tenant_id": tenant_id, "user_id": user_id, "branch": branch}
+
     def correct(
         self,
         tenant_id: str,
@@ -463,16 +599,47 @@ class MemoryTools:
     def export(self, tenant_id: str) -> dict[str, Any]:
         return self.engine.export_tenant(tenant_id)
 
-    def branch(self, name: str, from_branch: str = "main", kind: str = "scratch") -> dict[str, Any]:
-        self.engine.branch(name=name, frm=from_branch, kind=kind)
-        return {"branch": name, "from": from_branch, "kind": kind}
+    def _engine_branch(self, name: str, from_branch: str = "main", kind: str = "scratch", tenant_id: str | None = None) -> None:
+        try:
+            self.engine.branch(name=name, frm=from_branch, kind=kind, tenant_id=tenant_id)
+        except TypeError:
+            self.engine.branch(name=name, frm=from_branch, kind=kind)
 
-    def merge(self, from_branch: str, into: str = "main") -> dict[str, Any]:
-        return self.engine.merge(frm=from_branch, into=into).to_dict()
+    def _engine_merge(self, from_branch: str, into: str = "main", tenant_id: str | None = None) -> Any:
+        try:
+            return self.engine.merge(frm=from_branch, into=into, tenant_id=tenant_id)
+        except TypeError:
+            return self.engine.merge(frm=from_branch, into=into)
 
-    def discard(self, branch: str) -> dict[str, Any]:
-        self.engine.discard(branch)
-        return {"discarded": branch}
+    def _engine_discard(self, branch: str, tenant_id: str | None = None) -> None:
+        try:
+            self.engine.discard(branch, tenant_id=tenant_id)
+        except TypeError:
+            self.engine.discard(branch)
+
+    def _find_candidate_branch(self, id: str, tenant_id: str | None) -> str:
+        branches = getattr(self.engine, "branches", {})
+        if isinstance(branches, dict) and id in branches:
+            return id
+        if tenant_id:
+            exported = self.engine.export_tenant(tenant_id)
+            for item in exported.get("assertions", []):
+                if item.get("id") == id and item.get("branch") != "main":
+                    return str(item["branch"])
+        if id.startswith("proposal-"):
+            return id
+        raise KeyError(f"proposal branch not found for {id}")
+
+    def branch(self, name: str, from_branch: str = "main", kind: str = "scratch", tenant_id: str | None = None) -> dict[str, Any]:
+        self._engine_branch(name, from_branch, kind, tenant_id=tenant_id)
+        return {"branch": name, "from": from_branch, "kind": kind, "tenant_id": tenant_id}
+
+    def merge(self, from_branch: str, into: str = "main", tenant_id: str | None = None) -> dict[str, Any]:
+        return self._engine_merge(from_branch, into, tenant_id=tenant_id).to_dict()
+
+    def discard(self, branch: str, tenant_id: str | None = None) -> dict[str, Any]:
+        self._engine_discard(branch, tenant_id=tenant_id)
+        return {"discarded": branch, "tenant_id": tenant_id}
 
     def profile_add(
         self,
@@ -530,6 +697,71 @@ class MemoryTools:
     def profile_context(self, tenant_id: str, user_id: str, scope: dict[str, Any] | None = None) -> dict[str, Any]:
         return self.user_model.context_packet(tenant_id, user_id, scope or {})
 
+    def profile_get_relevant(self, tenant_id: str, user_id: str, context: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.profile_context(tenant_id, user_id, scope=context)
+
+    def profile_record_explicit(
+        self,
+        tenant_id: str,
+        user_id: str,
+        statement: str,
+        scope: dict[str, Any] | None = None,
+        confidence: float = 0.9,
+        source_evidence_cids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        return self.profile_add(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            kind=UserMemoryKind.EXPLICIT_PREFERENCE.value,
+            statement=statement,
+            scope=scope,
+            confidence=confidence,
+            source_evidence_cids=source_evidence_cids,
+            role="agent",
+            source_trust_tier=int(TrustTier.USER_AUTHORED),
+        )
+
+    def profile_propose_inference(
+        self,
+        tenant_id: str,
+        user_id: str,
+        statement: str,
+        context: dict[str, Any] | None = None,
+        confidence: float = 0.55,
+        source_evidence_cids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        return self.profile_add(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            kind=UserMemoryKind.INFERRED_PREFERENCE.value,
+            statement=statement,
+            scope=context,
+            confidence=confidence,
+            source_evidence_cids=source_evidence_cids,
+            role="agent",
+            source_trust_tier=int(TrustTier.USER_AUTHORED),
+        )
+
+    def profile_correct(
+        self,
+        tenant_id: str,
+        user_id: str,
+        id: str,
+        statement: str,
+        context: dict[str, Any] | None = None,
+        confidence: float = 0.95,
+    ) -> dict[str, Any]:
+        result = self.profile_record_explicit(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            statement=statement,
+            scope=context,
+            confidence=confidence,
+            source_evidence_cids=[id],
+        )
+        result["corrects"] = id
+        return result
+
     def prefetch(self, tenant_id: str, candidates: list[dict[str, Any]], branch: str = "main") -> dict[str, Any]:
         results = self.prefetcher.prefetch(
             tenant_id,
@@ -555,6 +787,11 @@ class MemoryTools:
     ) -> dict[str, Any]:
         hits = self.engine.graph_ppr(seeds, k, tenant_id=tenant_id, branch=branch)
         return {"hits": [hit.to_dict() for hit in hits]}
+
+    def graph_query(self, tenant_id: str, seeds: list[str], branch: str = "main", hops: int = 1, k: int = 8) -> dict[str, Any]:
+        result = self.graph_neighbors(tenant_id, seeds, branch=branch, k=k)
+        result["hops"] = hops
+        return result
 
     def graph_timeline(self, tenant_id: str, entity: str, branch: str = "main") -> dict[str, Any]:
         exported = self.engine.export_tenant(tenant_id)
@@ -608,6 +845,19 @@ class MemoryTools:
         self._save_learning()
         return {"id": trajectory_id}
 
+    def trajectory_record(
+        self,
+        tenant_id: str,
+        user_id: str,
+        session_id: str,
+        task: str,
+        steps: list[dict[str, Any]],
+        outcome: str,
+        reward: float,
+        memory_version: str,
+    ) -> dict[str, Any]:
+        return self.trajectory_log(tenant_id, user_id, session_id, task, steps, outcome, reward, memory_version)
+
     def trajectory_attribute(self, trajectory_id: str) -> dict[str, Any]:
         attribution = self.learning.attribute_failure(trajectory_id)
         self._save_learning()
@@ -619,11 +869,17 @@ class MemoryTools:
         self._save_learning()
         return lesson.to_dict()
 
+    def lesson_propose(self, trajectory_id: str) -> dict[str, Any]:
+        return self.lesson_induce(trajectory_id)
+
     def procedure_induce(self, lesson_id: str) -> dict[str, Any]:
         lesson = self.learning.lessons[lesson_id]
         procedure = self.learning.induce_procedure(lesson)
         self._save_learning()
         return procedure.to_dict()
+
+    def procedure_propose(self, lesson_id: str) -> dict[str, Any]:
+        return self.procedure_induce(lesson_id)
 
     def lesson_promote(self, lesson_id: str, cases: list[dict[str, Any]]) -> dict[str, Any]:
         lesson = self.learning.lessons[lesson_id]
@@ -645,6 +901,12 @@ class MemoryTools:
     def procedure_validate(self, procedure_id: str) -> dict[str, Any]:
         procedure = self.learning.procedures[procedure_id]
         procedure.status = "validated"
+        self._save_learning()
+        return procedure.to_dict()
+
+    def procedure_promote(self, procedure_id: str) -> dict[str, Any]:
+        procedure = self.learning.procedures[procedure_id]
+        procedure.status = "promoted"
         self._save_learning()
         return procedure.to_dict()
 

@@ -78,8 +78,14 @@ class MnemosyneMcpServer:
             return self.tools.explain(**arguments)
         if name == "get":
             return self.tools.get(**arguments)
+        if name == "propose":
+            return self.tools.propose(**arguments)
+        if name == "confirm":
+            return self.tools.confirm(**arguments)
         if name == "correct":
             return self.tools.correct(**arguments)
+        if name == "supersede":
+            return self.tools.supersede(**arguments)
         if name == "forget":
             return self.tools.forget(**arguments)
         if name == "export":
@@ -94,26 +100,44 @@ class MnemosyneMcpServer:
             return self.tools.profile_add(**arguments)
         if name == "profile_context":
             return self.tools.profile_context(**arguments)
+        if name == "profile_get_relevant":
+            return self.tools.profile_get_relevant(**arguments)
+        if name == "profile_record_explicit":
+            return self.tools.profile_record_explicit(**arguments)
+        if name == "profile_propose_inference":
+            return self.tools.profile_propose_inference(**arguments)
+        if name == "profile_correct":
+            return self.tools.profile_correct(**arguments)
         if name == "prefetch":
             return self.tools.prefetch(**arguments)
         if name == "graph_neighbors":
             return self.tools.graph_neighbors(**arguments)
+        if name == "graph_query":
+            return self.tools.graph_query(**arguments)
         if name == "graph_timeline":
             return self.tools.graph_timeline(**arguments)
         if name == "graph_as_of":
             return self.tools.graph_as_of(**arguments)
         if name == "trajectory_log":
             return self.tools.trajectory_log(**arguments)
+        if name == "trajectory_record":
+            return self.tools.trajectory_record(**arguments)
         if name == "trajectory_attribute":
             return self.tools.trajectory_attribute(**arguments)
         if name == "lesson_induce":
             return self.tools.lesson_induce(**arguments)
+        if name == "lesson_propose":
+            return self.tools.lesson_propose(**arguments)
         if name == "procedure_induce":
             return self.tools.procedure_induce(**arguments)
+        if name == "procedure_propose":
+            return self.tools.procedure_propose(**arguments)
         if name == "lesson_promote":
             return self.tools.lesson_promote(**arguments)
         if name == "procedure_validate":
             return self.tools.procedure_validate(**arguments)
+        if name == "procedure_promote":
+            return self.tools.procedure_promote(**arguments)
         if name == "procedure_search":
             return self.tools.procedure_search(**arguments)
         if name == "procedure_rollback":
