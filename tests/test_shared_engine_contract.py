@@ -9,8 +9,9 @@ from uuid import uuid4
 import pytest
 
 from mnemosyne.engine import LocalMemoryEngine
-from mnemosyne.models import Assertion, Evidence
+from mnemosyne.models import Assertion, Evidence, Preference, Relation
 from mnemosyne.postgres_engine import PostgresEngine
+from mnemosyne.privacy import ErasureMode
 
 
 def _live_dsn() -> str | None:
@@ -140,6 +141,139 @@ def test_shared_engine_contract_bitemporal_assertion_as_of(engine_bundle: tuple[
 
     assert [item.object for item in past] == ["alpha"]
     assert [item.object for item in current] == ["beta"]
+
+
+def test_shared_engine_contract_exports_relations_and_preferences(engine_bundle: tuple[Any, str, str]) -> None:
+    engine, tenant, user = engine_bundle
+    cid = _append_evidence(
+        engine,
+        tenant,
+        user,
+        "Shared graph contract links source alpha to target beta.",
+    )
+    relation_id = engine.add_relation(
+        Relation(
+            tenant_id=tenant,
+            source="shared source alpha",
+            predicate="connects_to",
+            target="shared target beta",
+            confidence=0.91,
+            source_evidence_cids=[cid],
+            access_policy={"tenant": tenant},
+        )
+    )
+    preference_id = engine.add_preference(
+        Preference(
+            tenant_id=tenant,
+            user_id=user,
+            category="workflow",
+            statement="Prefer shared contract parity checks.",
+            explicit=True,
+            confidence=0.94,
+            source_evidence_cids=[cid],
+        )
+    )
+
+    exported = engine.export_tenant(tenant)
+
+    assert any(item["id"] == relation_id and item["source_evidence_cids"] == [cid] for item in exported["relations"])
+    assert any(item["id"] == preference_id and item["source_evidence_cids"] == [cid] for item in exported["preferences"])
+
+
+def test_shared_engine_contract_correct_adds_evidence_backed_assertion(engine_bundle: tuple[Any, str, str]) -> None:
+    engine, tenant, user = engine_bundle
+    subject = f"shared correction subject {uuid4()}"
+
+    assertion_id = engine.correct(
+        tenant,
+        user,
+        subject,
+        "prefers",
+        "corrected answer",
+        "Shared correction contract evidence.",
+    )
+    exported = engine.export_tenant(tenant)
+    assertion = next(item for item in exported["assertions"] if item["id"] == assertion_id)
+    correction_evidence = [
+        item
+        for item in exported["evidence"]
+        if item["source_type"] == "correction" and item["content"] == "Shared correction contract evidence."
+    ]
+
+    assert assertion["status"] == "active"
+    assert assertion["object"] == "corrected answer"
+    assert assertion["source_evidence_cids"] == [correction_evidence[0]["cid"]]
+
+
+def test_shared_engine_contract_forget_propagates_projection_erasure(engine_bundle: tuple[Any, str, str]) -> None:
+    engine, tenant, user = engine_bundle
+    erased_cid = _append_evidence(engine, tenant, user, "Shared erasure source that must be removed.")
+    surviving_cid = _append_evidence(engine, tenant, user, "Shared erasure source that must survive.")
+    assertion_id = engine.upsert_assertion(
+        Assertion(
+            tenant_id=tenant,
+            user_id=user,
+            subject=f"shared erasure subject {uuid4()}",
+            predicate="keeps",
+            object="surviving source only",
+            confidence=0.9,
+            source_evidence_cids=[erased_cid, surviving_cid],
+            status="active",
+            trust_tier=0,
+            access_policy={"tenant": tenant},
+        )
+    )
+    preference_id = engine.add_preference(
+        Preference(
+            tenant_id=tenant,
+            user_id=user,
+            category="workflow",
+            statement="Forget propagation retracts unbacked preferences.",
+            explicit=True,
+            source_evidence_cids=[erased_cid],
+        )
+    )
+    relation_id = engine.add_relation(
+        Relation(
+            tenant_id=tenant,
+            source="shared erasure source",
+            predicate="supports",
+            target="shared erasure target",
+            source_evidence_cids=[erased_cid],
+            access_policy={"tenant": tenant},
+        )
+    )
+
+    result = engine.forget(tenant, erased_cid, requested_by=user, erasure_mode=ErasureMode.TOMBSTONE_RECOMPUTE)
+    exported = engine.export_tenant(tenant)
+    assertion = next(item for item in exported["assertions"] if item["id"] == assertion_id)
+    preference = next(item for item in exported["preferences"] if item["id"] == preference_id)
+    relation = next(item for item in exported["relations"] if item["id"] == relation_id)
+
+    assert result["erased"] is True
+    assert assertion["source_evidence_cids"] == [surviving_cid]
+    assert assertion_id in result["propagated"]["trimmed_assertions"]
+    assert preference["status"] == "retracted"
+    assert preference["source_evidence_cids"] == []
+    assert preference_id in result["propagated"]["retracted_preferences"]
+    assert relation["valid_to"] is not None
+    assert relation["source_evidence_cids"] == []
+    assert relation_id in result["propagated"]["expired_relations"]
+    assert all(item["cid"] != erased_cid for item in exported["evidence"])
+
+
+def _append_evidence(engine: Any, tenant: str, user: str, content: str) -> str:
+    return engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id=user,
+            actor="user",
+            source_type="shared-contract",
+            content=content,
+            trust_tier=0,
+            access_policy={"tenant": tenant},
+        )
+    )
 
 
 def _branch(engine: Any, name: str, tenant: str) -> None:
