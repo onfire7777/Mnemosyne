@@ -12,6 +12,7 @@ from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.ids import content_cid
 from mnemosyne.media import MEDIA_EXTRACT_JOB, extract_derived_text
 from mnemosyne.models import Evidence, Resource
+from mnemosyne.privacy import classify_privacy, enforce_residency, normalize_residency
 from mnemosyne.provenance import SignedProvenanceVerifier
 from mnemosyne.queue import InProcessQueue, QueueJob
 from mnemosyne.security import TrustTier
@@ -72,20 +73,28 @@ class IngestionPipeline:
         provenance_verifier: SignedProvenanceVerifier | None = None,
         queue: InProcessQueue | None = None,
         inline_text_limit: int = 16_384,
+        allowed_residencies: tuple[str, ...] = ("local",),
     ):
         self.engine = engine
         self.object_store = object_store or LocalObjectStore(Path(".mnemosyne/objects"))
         self.provenance_verifier = provenance_verifier or SignedProvenanceVerifier()
         self.queue = queue
         self.inline_text_limit = inline_text_limit
+        self.allowed_residencies = tuple(normalize_residency(item) for item in allowed_residencies)
 
     def ingest(self, request: IngestRequest, branch: str = "main") -> IngestResult:
         payload = request.payload_bytes()
         provenance = self.provenance_verifier.verify(payload, request.signed_provenance)
         classification = classify_request(request, payload)
+        residency = normalize_residency(
+            request.metadata.get("residency") or request.metadata.get("data_residency")
+        )
+        enforce_residency(residency, self.allowed_residencies)
+        privacy = classify_privacy(_privacy_text(request, payload), residency=residency)
         base_trust_tier = request.trust_tier if request.trust_tier is not None else classification["trust_tier"]
         trust_tier = min(max(base_trust_tier + provenance.trust_delta, int(TrustTier.DIRECT_USER)), int(TrustTier.UNTRUSTED_EXTERNAL))
         capability_tags = sorted(set(request.capability_tags + classification["capability_tags"]))
+        capability_tags.append(f"residency:{residency}")
         if request.signed_provenance:
             capability_tags.append("provenance-valid" if provenance.valid else "provenance-invalid")
         if provenance.valid and _provenance_binds_asset(provenance.manifest):
@@ -99,6 +108,7 @@ class IngestionPipeline:
             "media_type": request.media_type,
             "provenance_decision": provenance.to_dict(),
             "ingest_classification": classification,
+            "privacy": privacy.to_dict(),
         }
         if provenance.quarantine:
             trust_tier = int(TrustTier.UNTRUSTED_EXTERNAL)
@@ -112,6 +122,8 @@ class IngestionPipeline:
             "tenant": request.tenant_id,
             "max_sensitivity": sensitivity,
             "data_class": "pii" if sensitivity else "standard",
+            "residency": residency,
+            "allowed_residencies": list(self.allowed_residencies),
         }
 
         content_pointer: str | None = None
@@ -323,6 +335,19 @@ def _provenance_binds_asset(manifest: dict[str, Any] | None) -> bool:
         asset_binding = c2pa.get("asset_binding")
         return isinstance(asset_binding, dict) and asset_binding.get("bound") is True
     return False
+
+
+def _privacy_text(request: IngestRequest, payload: bytes) -> str:
+    if request.content:
+        return request.content
+    for key in ("description", "alt_text", "caption", "transcript", "ocr_text"):
+        value = request.metadata.get(key)
+        if isinstance(value, str) and value:
+            return value
+    try:
+        return payload.decode("utf-8")
+    except UnicodeDecodeError:
+        return ""
 
 
 def _actor_tag(actor: str) -> str:
