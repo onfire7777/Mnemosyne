@@ -831,6 +831,65 @@ def test_mcp_server_binds_signed_session_and_rejects_tenant_mismatch(tmp_path: P
     assert searched["hits"][0]["provenance"] == [captured["cid"]]
 
 
+def test_mcp_server_accepts_keyring_sessions_and_rejects_revoked_session_ids(tmp_path: Path) -> None:
+    server = MnemosyneMcpServer(
+        store_path=tmp_path / "store.json",
+        session_keyring=json.dumps({"current": MCP_SESSION_SECRET}),
+        session_key_id="current",
+        session_revoked_ids="revoked-session",
+        require_session=True,
+    )
+    allowed_token = SessionTokenVerifier({"current": MCP_SESSION_SECRET}, active_key_id="current").sign(
+        SessionIdentity(
+            tenant_id=TENANT,
+            user_id=USER,
+            role="operator",
+            source_trust_tier=0,
+            session_id="active-session",
+        )
+    )
+    revoked_token = SessionTokenVerifier({"current": MCP_SESSION_SECRET}, active_key_id="current").sign(
+        SessionIdentity(
+            tenant_id=TENANT,
+            user_id=USER,
+            role="operator",
+            source_trust_tier=0,
+            session_id="revoked-session",
+        )
+    )
+
+    allowed = mcp_call(
+        server,
+        "capture",
+        {
+            "session_token": allowed_token,
+            "actor": "user",
+            "source_type": "chat",
+            "content": "Keyring MCP sessions authorize capture.",
+        },
+    )
+    denied = server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "capture",
+                "arguments": {
+                    "session_token": revoked_token,
+                    "actor": "user",
+                    "source_type": "chat",
+                    "content": "Revoked MCP sessions must fail.",
+                },
+            },
+        }
+    )
+
+    assert allowed["cid"]
+    assert denied["result"]["isError"] is True
+    assert "session id is revoked" in denied["result"]["content"][0]["text"]
+
+
 def test_mcp_server_session_overrides_self_asserted_authority(tmp_path: Path) -> None:
     server = MnemosyneMcpServer(
         store_path=tmp_path / "store.json",

@@ -28,7 +28,7 @@ from mnemosyne.provenance import C2paToolVerifier, ProvenanceTrustPolicy, Signed
 from mnemosyne.queue import InProcessQueue, PostgresQueue, QueueWorker
 from mnemosyne.retrieval import HashingEmbeddingProvider, HttpEmbeddingProvider, HttpReranker, LocalSimilarityReranker, RetrievalAdapters
 from mnemosyne.runtime_state import RuntimeState
-from mnemosyne.security import SessionAuthError, SessionTokenVerifier
+from mnemosyne.security import SessionAuthError, SessionTokenVerifier, parse_session_keyring, parse_session_revoke_list
 from mnemosyne.storage import CommandKeyManager, EncryptedLocalObjectStore, JsonKeyManager, LocalObjectStore
 
 
@@ -74,11 +74,8 @@ def default_allowed_residencies() -> list[str]:
 def apply_session_identity(args: argparse.Namespace) -> None:
     token = getattr(args, "session_token", None)
     if token:
-        secret = getattr(args, "session_secret", None)
-        if not secret:
-            raise SystemExit("--session-token requires --session-secret or MNEMOSYNE_SESSION_SECRET.")
         try:
-            identity = SessionTokenVerifier(secret).verify(token)
+            identity = _session_verifier_from_args(args).verify(token)
         except SessionAuthError as exc:
             raise SystemExit(f"session token denied: {exc}") from exc
         _bind_session_claim(args, "tenant", identity.tenant_id)
@@ -89,6 +86,23 @@ def apply_session_identity(args: argparse.Namespace) -> None:
             args.source_trust_tier = identity.source_trust_tier
         args.session_identity = identity
     _require_authorization_context(args)
+
+
+def _session_verifier_from_args(args: argparse.Namespace) -> SessionTokenVerifier:
+    keyring = parse_session_keyring(getattr(args, "session_keyring", None))
+    revoked_key_ids = parse_session_revoke_list(getattr(args, "session_revoked_key_ids", None))
+    revoked_session_ids = parse_session_revoke_list(getattr(args, "session_revoked_ids", None))
+    if keyring:
+        return SessionTokenVerifier(
+            keyring,
+            active_key_id=getattr(args, "session_key_id", None),
+            revoked_key_ids=revoked_key_ids,
+            revoked_session_ids=revoked_session_ids,
+        )
+    secret = getattr(args, "session_secret", None)
+    if not secret:
+        raise SessionAuthError("--session-token requires --session-secret, --session-keyring, or MNEMOSYNE_SESSION_SECRET.")
+    return SessionTokenVerifier(secret, revoked_key_ids=revoked_key_ids, revoked_session_ids=revoked_session_ids)
 
 
 def _bind_session_claim(args: argparse.Namespace, attr: str, value: str) -> None:
@@ -1134,6 +1148,26 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--session-token", default=os.environ.get("MNEMOSYNE_SESSION_TOKEN"), help="Signed Mnemosyne session token for CLI identity binding")
     parser.add_argument("--session-secret", default=os.environ.get("MNEMOSYNE_SESSION_SECRET"), help="HMAC secret for --session-token verification; prefer MNEMOSYNE_SESSION_SECRET")
+    parser.add_argument(
+        "--session-keyring",
+        default=os.environ.get("MNEMOSYNE_SESSION_KEYRING"),
+        help="JSON object or comma-separated kid=secret HMAC keyring for signed session tokens",
+    )
+    parser.add_argument(
+        "--session-key-id",
+        default=os.environ.get("MNEMOSYNE_SESSION_KEY_ID"),
+        help="Active key id used when issuing keyring-backed session tokens",
+    )
+    parser.add_argument(
+        "--session-revoked-key-ids",
+        default=os.environ.get("MNEMOSYNE_SESSION_REVOKED_KEY_IDS"),
+        help="Comma-separated session token key ids to reject",
+    )
+    parser.add_argument(
+        "--session-revoked-ids",
+        default=os.environ.get("MNEMOSYNE_SESSION_REVOKED_IDS"),
+        help="Comma-separated session ids to reject",
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
     capture = sub.add_parser("capture")
