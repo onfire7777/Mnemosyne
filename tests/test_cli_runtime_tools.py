@@ -510,6 +510,8 @@ def test_cli_ops_report_exports_dashboard_snapshot(tmp_path: Path) -> None:
     assert dashboard["report"]["counts"]["evidence"] == 1
     assert "Mnemosyne Ops Dashboard" in dashboard_html
     assert TENANT in dashboard_html
+    assert "Retrieval" in dashboard_html
+    assert "Calibration" in dashboard_html
     assert "Snapshot JSON" in dashboard_html
 
 
