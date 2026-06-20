@@ -17,7 +17,7 @@ from mnemosyne.ingestion import IngestRequest, IngestionPipeline
 from mnemosyne.jobs import RuntimeJobHandlers
 from mnemosyne.media import CommandMediaTextExtractor, MediaTextExtractor, MetadataMediaTextExtractor
 from mnemosyne.mcp_tools import MemoryTools, TOOL_SPEC
-from mnemosyne.observability import MetricsRegistry
+from mnemosyne.observability import MetricsRegistry, build_ops_report
 from mnemosyne.provenance import C2paToolVerifier, SignedProvenanceVerifier
 from mnemosyne.queue import InProcessQueue, QueueWorker
 from mnemosyne.retrieval import HashingEmbeddingProvider, HttpEmbeddingProvider, HttpReranker, LocalSimilarityReranker, RetrievalAdapters
@@ -688,6 +688,24 @@ def cmd_queue_drain(args: argparse.Namespace) -> None:
     emit({"queue": queue.snapshot(), "jobs": [job.to_dict() for job in jobs], "metrics": metrics.snapshot().to_dict()})
 
 
+def cmd_ops_report(args: argparse.Namespace) -> None:
+    runtime_state = load_runtime_state(args)
+    queue = runtime_state.load_queue() if runtime_state else InProcessQueue()
+    tools = load_tools(args, ingestion_queue=queue, runtime_state=runtime_state)
+    emit(
+        build_ops_report(
+            engine=tools.engine,
+            tenant_id=args.tenant,
+            queue_snapshot=queue.snapshot(),
+            learning=tools.learning,
+            proxy_score=args.proxy_score,
+            true_score=args.true_score,
+            min_diversity=args.min_diversity,
+            max_proxy_gap=args.max_proxy_gap,
+        )
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="mneme", description="Mnemosyne local memory compiler CLI")
     parser.add_argument("--backend", choices=["local", "postgres"], default=default_backend(), help="Storage backend")
@@ -1090,6 +1108,14 @@ def build_parser() -> argparse.ArgumentParser:
     queue_drain.add_argument("--kind")
     queue_drain.add_argument("--limit", type=int, default=10)
     queue_drain.set_defaults(func=cmd_queue_drain)
+
+    ops_report = sub.add_parser("ops-report")
+    ops_report.add_argument("--tenant", required=True)
+    ops_report.add_argument("--proxy-score", type=float)
+    ops_report.add_argument("--true-score", type=float)
+    ops_report.add_argument("--min-diversity", type=float, default=0.2)
+    ops_report.add_argument("--max-proxy-gap", type=float, default=0.15)
+    ops_report.set_defaults(func=cmd_ops_report)
 
     consolidate_once = sub.add_parser("consolidate-once")
     consolidate_once.set_defaults(func=cmd_consolidate_once)

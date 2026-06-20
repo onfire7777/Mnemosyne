@@ -301,6 +301,48 @@ def test_cli_queue_enqueue_and_drain_runtime_job(tmp_path: Path) -> None:
     assert after["queue"]["complete"] == 1
 
 
+def test_cli_ops_report_exports_dashboard_snapshot(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    run_cli(
+        store,
+        "capture",
+        "--tenant",
+        TENANT,
+        "--user",
+        USER,
+        "--source-type",
+        "ops",
+        "--content",
+        "Ops report should count durable evidence.",
+    )
+    run_cli(
+        store,
+        "queue-enqueue",
+        "--kind",
+        "calibrate",
+        "--payload",
+        json.dumps({"tenant_id": TENANT, "memory_type": "fact", "scores": [0.25], "confidence": 0.1}),
+    )
+
+    report = run_cli(
+        store,
+        "ops-report",
+        "--tenant",
+        TENANT,
+        "--proxy-score",
+        "0.9",
+        "--true-score",
+        "0.6",
+    )
+
+    assert report["counts"]["evidence"] == 1
+    assert report["counts"]["audit_events"] >= 1
+    assert report["queue"]["queued"] == 1
+    assert report["learning"]["lesson_diversity"] == 1.0
+    assert report["tripwires"]["proxy_true_gap"] == 0.30000000000000004
+    assert report["tripwires"]["passed"] is False
+
+
 def test_cli_preference_write_requires_explicit_or_high_trust_source(tmp_path: Path) -> None:
     denied = run_raw_cli(
         tmp_path / "mnemosyne.json",
