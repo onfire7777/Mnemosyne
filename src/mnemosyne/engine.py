@@ -116,13 +116,13 @@ class MemoryEngine(Protocol):
     def export_tenant(self, tenant_id: str) -> dict[str, Any]:
         raise NotImplementedError
 
-    def branch(self, name: str, frm: str = "main", kind: str = "scratch") -> None:
+    def branch(self, name: str, frm: str = "main", kind: str = "scratch", tenant_id: str | None = None) -> None:
         raise NotImplementedError
 
-    def merge(self, frm: str, into: str = "main") -> MergeReport:
+    def merge(self, frm: str, into: str = "main", tenant_id: str | None = None) -> MergeReport:
         raise NotImplementedError
 
-    def discard(self, branch: str) -> None:
+    def discard(self, branch: str, tenant_id: str | None = None) -> None:
         raise NotImplementedError
 
 
@@ -794,37 +794,49 @@ class LocalMemoryEngine:
             "deletion_log": [item for item in self.deletion_log if item.get("tenant_id") == tenant_id],
         }
 
-    def branch(self, name: str, frm: str = "main", kind: str = "scratch") -> None:
+    def branch(self, name: str, frm: str = "main", kind: str = "scratch", tenant_id: str | None = None) -> None:
         with self._lock:
-            if name in self.branches:
+            if name in self.branches and tenant_id is None:
                 return
             self._require_branch(frm)
-            self.branches[name] = {"from": frm, "kind": kind, "created_at": utc_now().isoformat()}
+            branch_meta = self.branches.setdefault(
+                name,
+                {"from": frm, "kind": kind, "created_at": utc_now().isoformat(), "tenants": []},
+            )
+            branch_tenants = set(branch_meta.get("tenants") or [])
+            if tenant_id is not None and tenant_id in branch_tenants:
+                return
             for ev in list(self.evidence.values()):
-                if ev.branch == frm:
+                if ev.branch == frm and (tenant_id is None or ev.tenant_id == tenant_id):
                     cloned = copy.deepcopy(ev)
                     cloned.branch = name
                     if cloned.cid:
                         self.evidence[self._evidence_key(cloned.tenant_id, name, cloned.cid)] = cloned
             for assertion in list(self.assertions.values()):
-                if assertion.branch == frm:
+                if assertion.branch == frm and (tenant_id is None or assertion.tenant_id == tenant_id):
                     cloned = copy.deepcopy(assertion)
                     cloned.branch = name
                     self.assertions[self._branch_key(cloned.tenant_id, name, cloned.id)] = cloned
             for rel in list(self.relations.values()):
-                if rel.branch == frm:
+                if rel.branch == frm and (tenant_id is None or rel.tenant_id == tenant_id):
                     cloned = copy.deepcopy(rel)
                     cloned.branch = name
                     self.relations[self._branch_key(cloned.tenant_id, name, cloned.id)] = cloned
-            self._audit("*", "engine", "branch", name, {"from": frm, "kind": kind})
+            if tenant_id is not None:
+                branch_meta["tenants"] = sorted(branch_tenants | {tenant_id})
+            self._audit(tenant_id or "*", "engine", "branch", name, {"from": frm, "kind": kind})
             self._persist()
 
-    def merge(self, frm: str, into: str = "main") -> MergeReport:
+    def merge(self, frm: str, into: str = "main", tenant_id: str | None = None) -> MergeReport:
         with self._lock:
             self._require_branch(frm)
             self._require_branch(into)
             report = MergeReport(frm, into, 0, 0, 0, 0, [])
-            for ev in [item for item in self.evidence.values() if item.branch == frm and not item.erased]:
+            for ev in [
+                item
+                for item in self.evidence.values()
+                if item.branch == frm and not item.erased and (tenant_id is None or item.tenant_id == tenant_id)
+            ]:
                 if not ev.cid:
                     continue
                 target_key = self._evidence_key(ev.tenant_id, into, ev.cid)
@@ -833,7 +845,11 @@ class LocalMemoryEngine:
                     cloned.branch = into
                     self.evidence[target_key] = cloned
                     report.evidence_added += 1
-            for assertion in [item for item in self.assertions.values() if item.branch == frm]:
+            for assertion in [
+                item
+                for item in self.assertions.values()
+                if item.branch == frm and (tenant_id is None or item.tenant_id == tenant_id)
+            ]:
                 before_count = len(self.assertions)
                 cloned = copy.deepcopy(assertion)
                 cloned.branch = into
@@ -842,7 +858,11 @@ class LocalMemoryEngine:
                     report.assertions_added += 1
                 else:
                     report.assertions_merged += 1
-            for rel in [item for item in self.relations.values() if item.branch == frm]:
+            for rel in [
+                item
+                for item in self.relations.values()
+                if item.branch == frm and (tenant_id is None or item.tenant_id == tenant_id)
+            ]:
                 target_key = self._branch_key(rel.tenant_id, into, rel.id)
                 if target_key not in self.relations:
                     cloned = copy.deepcopy(rel)
@@ -850,35 +870,65 @@ class LocalMemoryEngine:
                     self.relations[target_key] = cloned
                     report.relations_added += 1
             self.merge_log.append(report.to_dict())
-            self._audit("*", "engine", "merge", frm, report.to_dict())
+            self._audit(tenant_id or "*", "engine", "merge", frm, report.to_dict())
             self._persist()
             return report
 
-    def discard(self, branch: str) -> None:
+    def discard(self, branch: str, tenant_id: str | None = None) -> None:
         if branch == "main":
             raise ValueError("main branch cannot be discarded")
         with self._lock:
             self._require_branch(branch)
-            discarded_assertion_ids = {item.id for item in self.assertions.values() if item.branch == branch}
-            self.evidence = {key: item for key, item in self.evidence.items() if item.branch != branch}
-            self.assertions = {key: item for key, item in self.assertions.items() if item.branch != branch}
-            self.relations = {key: item for key, item in self.relations.items() if item.branch != branch}
-            surviving_assertion_ids = {item.id for item in self.assertions.values()}
+            discarded_assertion_ids = {
+                item.id
+                for item in self.assertions.values()
+                if item.branch == branch and (tenant_id is None or item.tenant_id == tenant_id)
+            }
+            self.evidence = {
+                key: item
+                for key, item in self.evidence.items()
+                if not (item.branch == branch and (tenant_id is None or item.tenant_id == tenant_id))
+            }
+            self.assertions = {
+                key: item
+                for key, item in self.assertions.items()
+                if not (item.branch == branch and (tenant_id is None or item.tenant_id == tenant_id))
+            }
+            self.relations = {
+                key: item
+                for key, item in self.relations.items()
+                if not (item.branch == branch and (tenant_id is None or item.tenant_id == tenant_id))
+            }
+            surviving_assertion_ids = {
+                item.id for item in self.assertions.values() if tenant_id is None or item.tenant_id == tenant_id
+            }
             orphaned_assertion_ids = discarded_assertion_ids - surviving_assertion_ids
             if orphaned_assertion_ids:
                 self.justifications = {
                     key: item
                     for key, item in self.justifications.items()
-                    if item.assertion_id not in orphaned_assertion_ids
-                    and not (set(item.dependency_ids) & orphaned_assertion_ids)
+                    if (tenant_id is not None and item.tenant_id != tenant_id)
+                    or (
+                        item.assertion_id not in orphaned_assertion_ids
+                        and not (set(item.dependency_ids) & orphaned_assertion_ids)
+                    )
                 }
                 self.contradictions = {
                     key: item
                     for key, item in self.contradictions.items()
-                    if item.a not in orphaned_assertion_ids and item.b not in orphaned_assertion_ids
+                    if (tenant_id is not None and item.tenant_id != tenant_id)
+                    or (item.a not in orphaned_assertion_ids and item.b not in orphaned_assertion_ids)
                 }
-            self.branches.pop(branch, None)
-            self._audit("*", "engine", "discard", branch, {})
+            branch_rows_remain = any(
+                item.branch == branch for item in [*self.evidence.values(), *self.assertions.values(), *self.relations.values()]
+            )
+            if tenant_id is not None and branch_rows_remain:
+                branch_meta = self.branches.get(branch)
+                if branch_meta:
+                    branch_meta["tenants"] = sorted(set(branch_meta.get("tenants") or []) - {tenant_id})
+            else:
+                self.branches.pop(branch, None)
+            self._audit(tenant_id or "*", "engine", "discard", branch, {})
             self._persist()
 
     def _candidate_hits(self, filt: dict[str, Any]) -> list[Hit]:
