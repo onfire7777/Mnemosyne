@@ -254,6 +254,11 @@ TOOL_SPEC: list[dict[str, Any]] = [
         "description": "Evaluate a shadow parametric artifact against gate evidence.",
         "arguments": ["tenant_id"],
     },
+    {
+        "name": "parametric_rollback",
+        "description": "Roll back a persisted isolated parametric artifact.",
+        "arguments": ["artifact_uri", "reason"],
+    },
 ]
 
 
@@ -267,6 +272,7 @@ class MemoryTools:
         learning: LearningSystem | None = None,
         runtime_state: RuntimeState | None = None,
         security: SecurityPolicy | None = None,
+        parametric: ParametricTier | None = None,
     ):
         self.engine = engine
         self.ingestion = ingestion or IngestionPipeline(engine)
@@ -277,7 +283,7 @@ class MemoryTools:
         self.learning = learning or LearningSystem(engine)
         if runtime_state:
             self.learning = runtime_state.load_learning(self.learning)
-        self.parametric = ParametricTier()
+        self.parametric = parametric or ParametricTier()
 
     def capture(
         self,
@@ -1123,6 +1129,12 @@ class MemoryTools:
             rollback_branch=None,
         )
         return self.parametric.evaluate(artifact, gate, cases).to_dict()
+
+    def parametric_rollback(self, artifact_uri: str, reason: str) -> dict[str, Any]:
+        if not self.parametric.artifact_store:
+            raise ValueError("parametric rollback requires an artifact store")
+        artifact = self.parametric.artifact_store.load_artifact(artifact_uri)
+        return self.parametric.rollback(artifact, reason).to_dict()
 
     def _save_user_model(self) -> None:
         if self.runtime_state:
