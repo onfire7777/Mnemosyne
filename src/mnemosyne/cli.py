@@ -17,7 +17,6 @@ from mnemosyne.ingestion import IngestRequest, IngestionPipeline
 from mnemosyne.jobs import RuntimeJobHandlers
 from mnemosyne.media import CommandMediaTextExtractor, MediaTextExtractor, MetadataMediaTextExtractor
 from mnemosyne.mcp_tools import MemoryTools, TOOL_SPEC
-from mnemosyne.models import Assertion, Relation
 from mnemosyne.observability import MetricsRegistry
 from mnemosyne.provenance import C2paToolVerifier, SignedProvenanceVerifier
 from mnemosyne.queue import InProcessQueue, QueueWorker
@@ -229,40 +228,39 @@ def cmd_ingest(args: argparse.Namespace) -> None:
 
 
 def cmd_assert(args: argparse.Namespace) -> None:
-    engine = load_engine(args)
-    assertion_id = engine.upsert_assertion(
-        Assertion(
+    tools = load_tools(args)
+    emit(
+        tools.assert_fact(
             tenant_id=args.tenant,
             user_id=args.user,
             subject=args.subject,
             predicate=args.predicate,
-            object=args.object,
+            object_value=args.object,
             source_evidence_cids=args.evidence_cid,
             confidence=args.confidence,
-            status="active",
             trust_tier=args.trust_tier,
-            access_policy={"tenant": args.tenant},
-        ),
-        branch=args.branch,
+            branch=args.branch,
+            role=args.role,
+            source_trust_tier=args.source_trust_tier,
+        )
     )
-    emit({"id": assertion_id, "branch": args.branch})
 
 
 def cmd_relation(args: argparse.Namespace) -> None:
-    engine = load_engine(args)
-    relation_id = engine.add_relation(
-        Relation(
+    tools = load_tools(args)
+    emit(
+        tools.relation(
             tenant_id=args.tenant,
             source=args.source,
             predicate=args.predicate,
             target=args.target,
             confidence=args.confidence,
             source_evidence_cids=args.evidence_cid,
-            access_policy={"tenant": args.tenant},
-        ),
-        branch=args.branch,
+            branch=args.branch,
+            role=args.role,
+            source_trust_tier=args.source_trust_tier,
+        )
     )
-    emit({"id": relation_id, "branch": args.branch})
 
 
 def cmd_preference(args: argparse.Namespace) -> None:
@@ -324,6 +322,8 @@ def cmd_propose(args: argparse.Namespace) -> None:
             confidence=args.confidence,
             trust_tier=args.trust_tier,
             branch=args.branch,
+            role=args.role,
+            source_trust_tier=args.source_trust_tier,
         )
     )
 
@@ -343,6 +343,8 @@ def cmd_supersede(args: argparse.Namespace) -> None:
             new=parse_json_arg(args.new, {}),
             branch=args.branch,
             confidence=args.confidence,
+            role=args.role,
+            source_trust_tier=args.source_trust_tier,
         )
     )
 
@@ -359,6 +361,8 @@ def cmd_correct(args: argparse.Namespace) -> None:
             correction_text=args.correction,
             branch=args.branch,
             confidence=args.confidence,
+            role=args.role,
+            source_trust_tier=args.source_trust_tier,
         )
     )
 
@@ -730,6 +734,8 @@ def build_parser() -> argparse.ArgumentParser:
     assertion.add_argument("--branch", default="main")
     assertion.add_argument("--confidence", type=float, default=0.7)
     assertion.add_argument("--trust-tier", type=int, default=0)
+    assertion.add_argument("--role", default="agent", choices=["reader", "agent", "consolidator", "operator"])
+    assertion.add_argument("--source-trust-tier", type=int)
     assertion.set_defaults(func=cmd_assert)
 
     relation = sub.add_parser("relation")
@@ -740,6 +746,8 @@ def build_parser() -> argparse.ArgumentParser:
     relation.add_argument("--evidence-cid", action="append", default=[])
     relation.add_argument("--branch", default="main")
     relation.add_argument("--confidence", type=float, default=0.7)
+    relation.add_argument("--role", default="agent", choices=["reader", "agent", "consolidator", "operator"])
+    relation.add_argument("--source-trust-tier", type=int, default=3)
     relation.set_defaults(func=cmd_relation)
 
     preference = sub.add_parser("preference")
@@ -791,6 +799,8 @@ def build_parser() -> argparse.ArgumentParser:
     propose.add_argument("--confidence", type=float, default=0.7)
     propose.add_argument("--trust-tier", type=int, default=1)
     propose.add_argument("--branch")
+    propose.add_argument("--role", default="agent", choices=["reader", "agent", "consolidator", "operator"])
+    propose.add_argument("--source-trust-tier", type=int)
     propose.set_defaults(func=cmd_propose)
 
     confirm = sub.add_parser("confirm")
@@ -807,6 +817,8 @@ def build_parser() -> argparse.ArgumentParser:
     supersede.add_argument("--new", required=True, help="JSON object containing object_value/object and optional assertion fields")
     supersede.add_argument("--branch", default="main")
     supersede.add_argument("--confidence", type=float, default=0.95)
+    supersede.add_argument("--role", default="agent", choices=["reader", "agent", "consolidator", "operator"])
+    supersede.add_argument("--source-trust-tier", type=int, default=0)
     supersede.set_defaults(func=cmd_supersede)
 
     correct = sub.add_parser("correct")
@@ -818,6 +830,8 @@ def build_parser() -> argparse.ArgumentParser:
     correct.add_argument("--correction", required=True)
     correct.add_argument("--branch", default="main")
     correct.add_argument("--confidence", type=float, default=0.95)
+    correct.add_argument("--role", default="agent", choices=["reader", "agent", "consolidator", "operator"])
+    correct.add_argument("--source-trust-tier", type=int, default=0)
     correct.set_defaults(func=cmd_correct)
 
     forget = sub.add_parser("forget")
