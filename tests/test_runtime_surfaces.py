@@ -19,11 +19,13 @@ from mnemosyne.mcp_tools import TOOL_SPEC
 from mnemosyne.models import Hit
 from mnemosyne.postgres_engine import PostgresEngine, _bytes_to_cid, _cid_to_bytes, _stable_uuid, _uuid_or_none, _vector_literal
 from mnemosyne.retrieval import HttpEmbeddingProvider, HttpReranker, LocalSimilarityReranker, semantic_entropy
+from mnemosyne.security import SessionIdentity, SessionTokenVerifier
 
 
 TENANT = "tenant-runtime"
 USER = "user-runtime"
 PARAMETRIC_AUTH = {"role": "operator", "source_trust_tier": 0}
+MCP_SESSION_SECRET = "mnemosyne-mcp-session-secret"
 
 
 def mcp_call(server: MnemosyneMcpServer, name: str, arguments: dict[str, object]) -> dict:
@@ -37,6 +39,25 @@ def mcp_call(server: MnemosyneMcpServer, name: str, arguments: dict[str, object]
     )
     assert response["result"]["isError"] is False, response["result"]["content"][0]["text"]
     return response["result"]["structuredContent"]
+
+
+def mcp_session_token(
+    *,
+    tenant_id: str = TENANT,
+    user_id: str = USER,
+    role: str = "operator",
+    source_trust_tier: int = 0,
+    session_id: str = "mcp-test-session",
+) -> str:
+    return SessionTokenVerifier(MCP_SESSION_SECRET).sign(
+        SessionIdentity(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            role=role,  # type: ignore[arg-type]
+            source_trust_tier=source_trust_tier,
+            session_id=session_id,
+        )
+    )
 
 
 def fake_kms_command(tmp_path: Path) -> tuple[str, Path]:
@@ -735,6 +756,187 @@ def test_mcp_server_requires_configured_auth_token_for_tool_calls(tmp_path: Path
     assert "auth token required" in denied["result"]["content"][0]["text"]
     assert allowed["result"]["isError"] is False
     assert allowed["result"]["structuredContent"]["cid"]
+
+
+def test_mcp_server_requires_signed_session_when_configured(tmp_path: Path) -> None:
+    server = MnemosyneMcpServer(
+        store_path=tmp_path / "store.json",
+        session_secret=MCP_SESSION_SECRET,
+        require_session=True,
+    )
+
+    response = server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "capture",
+                "arguments": {
+                    "tenant_id": TENANT,
+                    "user_id": USER,
+                    "actor": "user",
+                    "source_type": "chat",
+                    "content": "Unsigned MCP writes must fail closed.",
+                },
+            },
+        }
+    )
+
+    assert response["result"]["isError"] is True
+    assert "session token required" in response["result"]["content"][0]["text"]
+
+
+def test_mcp_server_binds_signed_session_and_rejects_tenant_mismatch(tmp_path: Path) -> None:
+    server = MnemosyneMcpServer(
+        store_path=tmp_path / "store.json",
+        session_secret=MCP_SESSION_SECRET,
+        require_session=True,
+    )
+    token = mcp_session_token(role="agent", source_trust_tier=3)
+
+    mismatch = server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "capture",
+                "arguments": {
+                    "session_token": token,
+                    "tenant_id": "other-tenant",
+                    "user_id": USER,
+                    "actor": "user",
+                    "source_type": "chat",
+                    "content": "Tenant mismatch must not be accepted.",
+                },
+            },
+        }
+    )
+    captured = mcp_call(
+        server,
+        "capture",
+        {
+            "session_token": token,
+            "actor": "user",
+            "source_type": "chat",
+            "content": "Signed sessions bind tenant and user for capture.",
+        },
+    )
+    searched = mcp_call(server, "search", {"session_token": token, "query": "bind tenant and user"})
+
+    assert mismatch["result"]["isError"] is True
+    assert "session tenant mismatch" in mismatch["result"]["content"][0]["text"]
+    assert captured["cid"]
+    assert searched["hits"][0]["provenance"] == [captured["cid"]]
+
+
+def test_mcp_server_session_overrides_self_asserted_authority(tmp_path: Path) -> None:
+    server = MnemosyneMcpServer(
+        store_path=tmp_path / "store.json",
+        session_secret=MCP_SESSION_SECRET,
+        require_session=True,
+    )
+    token = mcp_session_token(role="agent", source_trust_tier=5)
+
+    response = server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 99,
+            "method": "tools/call",
+            "params": {
+                "name": "parametric_propose",
+                "arguments": {
+                    "session_token": token,
+                    "tenant_id": TENANT,
+                    "role": "operator",
+                    "source_trust_tier": 0,
+                },
+            },
+        }
+    )
+
+    assert response["result"]["isError"] is True
+    assert "policy and safety rails require operator authority" in response["result"]["content"][0]["text"]
+
+
+def test_official_mcp_sdk_adapter_binds_signed_session_like_json_rpc(tmp_path: Path) -> None:
+    pytest.importorskip("mcp")
+    from mcp import types
+
+    server = build_sdk_server(
+        store_path=tmp_path / "sdk-session-store.json",
+        session_secret=MCP_SESSION_SECRET,
+        require_session=True,
+    )
+    token = mcp_session_token(role="agent", source_trust_tier=3)
+
+    async def exercise() -> None:
+        call_handler = server.request_handlers[types.CallToolRequest]
+        denied = await call_handler(
+            types.CallToolRequest(
+                params={
+                    "name": "capture",
+                    "arguments": {
+                        "tenant_id": TENANT,
+                        "user_id": USER,
+                        "actor": "user",
+                        "source_type": "sdk",
+                        "content": "Unsigned SDK session call must fail.",
+                    },
+                }
+            )
+        )
+        mismatch = await call_handler(
+            types.CallToolRequest(
+                params={
+                    "name": "capture",
+                    "arguments": {
+                        "session_token": token,
+                        "tenant_id": "other-tenant",
+                        "user_id": USER,
+                        "actor": "user",
+                        "source_type": "sdk",
+                        "content": "SDK tenant mismatch must fail.",
+                    },
+                }
+            )
+        )
+        captured = await call_handler(
+            types.CallToolRequest(
+                params={
+                    "name": "capture",
+                    "arguments": {
+                        "session_token": token,
+                        "actor": "user",
+                        "source_type": "sdk",
+                        "content": "SDK signed sessions bind Mnemosyne memory.",
+                    },
+                }
+            )
+        )
+        searched = await call_handler(
+            types.CallToolRequest(
+                params={
+                    "name": "search",
+                    "arguments": {
+                        "session_token": token,
+                        "query": "SDK signed sessions",
+                    },
+                }
+            )
+        )
+
+        assert denied.root.isError is True
+        assert "session token required" in denied.root.content[0].text
+        assert mismatch.root.isError is True
+        assert "session tenant mismatch" in mismatch.root.content[0].text
+        assert captured.root.isError is False
+        assert captured.root.structuredContent["cid"]
+        assert searched.root.isError is False
+        assert searched.root.structuredContent["hits"][0]["provenance"] == [captured.root.structuredContent["cid"]]
+
+    asyncio.run(exercise())
 
 
 def test_mcp_server_postgres_backend_requires_dsn(monkeypatch) -> None:
