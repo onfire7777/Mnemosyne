@@ -26,6 +26,7 @@ from mnemosyne.provenance import C2paToolVerifier, ProvenanceTrustPolicy, Signed
 from mnemosyne.queue import InProcessQueue, PostgresQueue, QueueWorker
 from mnemosyne.retrieval import HashingEmbeddingProvider, HttpEmbeddingProvider, HttpReranker, LocalSimilarityReranker, RetrievalAdapters
 from mnemosyne.runtime_state import RuntimeState
+from mnemosyne.security import SessionAuthError, SessionTokenVerifier
 from mnemosyne.storage import EncryptedLocalObjectStore, JsonKeyManager, LocalObjectStore
 
 
@@ -56,6 +57,51 @@ def default_object_key_store() -> str | None:
 def default_allowed_residencies() -> list[str]:
     raw = os.environ.get("MNEMOSYNE_ALLOWED_RESIDENCIES", "local")
     return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+def apply_session_identity(args: argparse.Namespace) -> None:
+    token = getattr(args, "session_token", None)
+    if token:
+        secret = getattr(args, "session_secret", None)
+        if not secret:
+            raise SystemExit("--session-token requires --session-secret or MNEMOSYNE_SESSION_SECRET.")
+        try:
+            identity = SessionTokenVerifier(secret).verify(token)
+        except SessionAuthError as exc:
+            raise SystemExit(f"session token denied: {exc}") from exc
+        _bind_session_claim(args, "tenant", identity.tenant_id)
+        _bind_session_claim(args, "user", identity.user_id)
+        if hasattr(args, "role"):
+            args.role = identity.role
+        if hasattr(args, "source_trust_tier"):
+            args.source_trust_tier = identity.source_trust_tier
+        args.session_identity = identity
+    _require_authorization_context(args)
+
+
+def _bind_session_claim(args: argparse.Namespace, attr: str, value: str) -> None:
+    if not hasattr(args, attr):
+        return
+    current = getattr(args, attr)
+    if current is None or current == "":
+        setattr(args, attr, value)
+        return
+    if str(current) != value:
+        raise SystemExit(f"session {attr} mismatch: CLI value does not match authenticated session")
+
+
+def _require_authorization_context(args: argparse.Namespace) -> None:
+    command = getattr(args, "command", None)
+    if command not in {"confirm", "branch", "merge", "discard"}:
+        return
+    missing: list[str] = []
+    if getattr(args, "role", None) is None:
+        missing.append("--role")
+    if getattr(args, "source_trust_tier", None) is None:
+        missing.append("--source-trust-tier")
+    if missing:
+        joined = " and ".join(missing)
+        raise SystemExit(f"{command} requires {joined} or --session-token.")
 
 
 def load_retrieval_adapters(args: argparse.Namespace) -> RetrievalAdapters:
@@ -952,6 +998,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--media-extractor-command", default=os.environ.get("MNEMOSYNE_MEDIA_EXTRACTOR_COMMAND"))
     parser.add_argument("--media-extractor-timeout", type=float, default=float(os.environ.get("MNEMOSYNE_MEDIA_EXTRACTOR_TIMEOUT", "30")))
     parser.add_argument("--parametric-artifact-store", default=os.environ.get("MNEMOSYNE_PARAMETRIC_ARTIFACT_STORE"))
+    parser.add_argument("--session-token", default=os.environ.get("MNEMOSYNE_SESSION_TOKEN"), help="Signed Mnemosyne session token for CLI identity binding")
+    parser.add_argument("--session-secret", default=os.environ.get("MNEMOSYNE_SESSION_SECRET"), help="HMAC secret for --session-token verification; prefer MNEMOSYNE_SESSION_SECRET")
     sub = parser.add_subparsers(dest="command", required=True)
 
     capture = sub.add_parser("capture")
@@ -1070,8 +1118,8 @@ def build_parser() -> argparse.ArgumentParser:
     confirm.add_argument("--tenant")
     confirm.add_argument("--branch")
     confirm.add_argument("--into", default="main")
-    confirm.add_argument("--role", required=True, choices=["reader", "agent", "consolidator", "operator"])
-    confirm.add_argument("--source-trust-tier", type=int, required=True)
+    confirm.add_argument("--role", choices=["reader", "agent", "consolidator", "operator"])
+    confirm.add_argument("--source-trust-tier", type=int)
     confirm.set_defaults(func=cmd_confirm)
 
     supersede = sub.add_parser("supersede")
@@ -1117,23 +1165,23 @@ def build_parser() -> argparse.ArgumentParser:
     branch.add_argument("--from-branch", default="main")
     branch.add_argument("--kind", default="scratch")
     branch.add_argument("--tenant", help="Tenant scope for Postgres backend")
-    branch.add_argument("--role", required=True, choices=["reader", "agent", "consolidator", "operator"])
-    branch.add_argument("--source-trust-tier", type=int, required=True)
+    branch.add_argument("--role", choices=["reader", "agent", "consolidator", "operator"])
+    branch.add_argument("--source-trust-tier", type=int)
     branch.set_defaults(func=cmd_branch)
 
     merge = sub.add_parser("merge")
     merge.add_argument("--from-branch", required=True)
     merge.add_argument("--into", default="main")
     merge.add_argument("--tenant", help="Tenant scope for Postgres backend")
-    merge.add_argument("--role", required=True, choices=["reader", "agent", "consolidator", "operator"])
-    merge.add_argument("--source-trust-tier", type=int, required=True)
+    merge.add_argument("--role", choices=["reader", "agent", "consolidator", "operator"])
+    merge.add_argument("--source-trust-tier", type=int)
     merge.set_defaults(func=cmd_merge)
 
     discard = sub.add_parser("discard")
     discard.add_argument("--branch", required=True)
     discard.add_argument("--tenant", help="Tenant scope for Postgres backend")
-    discard.add_argument("--role", required=True, choices=["reader", "agent", "consolidator", "operator"])
-    discard.add_argument("--source-trust-tier", type=int, required=True)
+    discard.add_argument("--role", choices=["reader", "agent", "consolidator", "operator"])
+    discard.add_argument("--source-trust-tier", type=int)
     discard.set_defaults(func=cmd_discard)
 
     profile_add = sub.add_parser("profile-add")
@@ -1370,6 +1418,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    apply_session_identity(args)
     args.func(args)
     return 0
 
