@@ -653,6 +653,77 @@ def serve_sdk_stdio(**kwargs: Any) -> None:
     asyncio.run(_serve_sdk_stdio(build_sdk_server(**kwargs)))
 
 
+def build_sdk_streamable_http_app(
+    *,
+    streamable_http_path: str = "/mcp",
+    health_path: str = "/healthz",
+    stateless: bool = True,
+    **kwargs: Any,
+) -> Any:
+    """Build an official MCP SDK StreamableHTTP ASGI app."""
+
+    try:
+        from mcp.server.fastmcp.server import StreamableHTTPASGIApp
+        from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+        from starlette.applications import Starlette
+        from starlette.responses import JSONResponse
+        from starlette.routing import Route
+    except ImportError as exc:  # pragma: no cover - exercised when optional extra is absent.
+        raise RuntimeError("Official MCP SDK streamable HTTP mode requires `mnemosyne-memory[mcp]`.") from exc
+
+    sdk_server = build_sdk_server(**kwargs)
+    session_manager = StreamableHTTPSessionManager(
+        app=sdk_server,
+        event_store=None,
+        json_response=True,
+        stateless=stateless,
+        security_settings=None,
+    )
+    streamable_app = StreamableHTTPASGIApp(session_manager)
+
+    async def health(_request: Any) -> Any:
+        return JSONResponse(
+            {
+                "ok": True,
+                "transport": "mcp-sdk-streamable-http",
+                "rpc_path": _normalize_http_path(streamable_http_path),
+                "stateless": bool(stateless),
+            }
+        )
+
+    app = Starlette(
+        routes=[
+            Route(_normalize_http_path(streamable_http_path), endpoint=streamable_app),
+            Route(_normalize_http_path(health_path), endpoint=health, methods=["GET"]),
+        ],
+        lifespan=lambda _app: session_manager.run(),
+    )
+    app.state.mnemosyne_streamable_http_manager = session_manager
+    return app
+
+
+def serve_sdk_streamable_http(
+    *,
+    host: str = "127.0.0.1",
+    port: int = 8765,
+    streamable_http_path: str = "/mcp",
+    health_path: str = "/healthz",
+    stateless: bool = True,
+    **kwargs: Any,
+) -> None:
+    try:
+        import uvicorn
+    except ImportError as exc:  # pragma: no cover - exercised when optional extra is absent.
+        raise RuntimeError("Official MCP SDK streamable HTTP mode requires `uvicorn`.") from exc
+    app = build_sdk_streamable_http_app(
+        streamable_http_path=streamable_http_path,
+        health_path=health_path,
+        stateless=stateless,
+        **kwargs,
+    )
+    uvicorn.run(app, host=host, port=port, log_level="info")
+
+
 def build_http_server(
     *,
     host: str = "127.0.0.1",
@@ -1242,6 +1313,28 @@ def main(argv: list[str] | None = None) -> None:
     )
     parser.add_argument("--stateless", action="store_true", help="Rebuild engine and tool state for each JSON-RPC tool call")
     parser.add_argument("--sdk", action="store_true", help="Use the official MCP Python SDK stdio transport")
+    parser.add_argument(
+        "--sdk-streamable-http",
+        action="store_true",
+        default=_env_flag("MNEMOSYNE_MCP_SDK_STREAMABLE_HTTP", default=False),
+        help="Serve the official MCP SDK StreamableHTTP transport instead of stdio",
+    )
+    parser.add_argument(
+        "--sdk-streamable-http-path",
+        default=os.environ.get("MNEMOSYNE_MCP_SDK_STREAMABLE_HTTP_PATH", "/mcp"),
+        help="Official MCP SDK StreamableHTTP endpoint path",
+    )
+    parser.add_argument(
+        "--sdk-streamable-health-path",
+        default=os.environ.get("MNEMOSYNE_MCP_SDK_STREAMABLE_HEALTH_PATH", "/healthz"),
+        help="Liveness endpoint path for --sdk-streamable-http",
+    )
+    parser.add_argument(
+        "--sdk-streamable-stateful",
+        action="store_true",
+        default=_env_flag("MNEMOSYNE_MCP_SDK_STREAMABLE_STATEFUL", default=False),
+        help="Use stateful StreamableHTTP sessions instead of stateless per-request SDK transports",
+    )
     parser.add_argument("--self-test", action="store_true", help="Run MCP deployment validation checks and exit")
     parser.add_argument("--http", action="store_true", help="Serve a hosted HTTP JSON-RPC MCP endpoint instead of stdio")
     parser.add_argument("--http-host", default=os.environ.get("MNEMOSYNE_MCP_HTTP_HOST", "127.0.0.1"))
@@ -1380,8 +1473,18 @@ def main(argv: list[str] | None = None) -> None:
         report = run_self_test(sdk=args.sdk, **config)
         print(json.dumps(report, indent=2, sort_keys=True))
         raise SystemExit(0 if report["ok"] else 1)
-    if args.http and args.sdk:
-        parser.error("--http and --sdk cannot be combined for serving")
+    if sum([bool(args.http), bool(args.sdk), bool(args.sdk_streamable_http)]) > 1:
+        parser.error("--http, --sdk, and --sdk-streamable-http cannot be combined for serving")
+    if args.sdk_streamable_http:
+        serve_sdk_streamable_http(
+            host=args.http_host,
+            port=args.http_port,
+            streamable_http_path=args.sdk_streamable_http_path,
+            health_path=args.sdk_streamable_health_path,
+            stateless=not args.sdk_streamable_stateful,
+            **config,
+        )
+        return
     if args.http:
         serve_http(
             host=args.http_host,

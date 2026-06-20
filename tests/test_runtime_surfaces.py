@@ -24,7 +24,13 @@ from cryptography.hazmat.primitives import serialization
 from cryptography import x509
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
-from mnemosyne.mcp_server import MnemosyneMcpServer, build_http_server, build_sdk_server, run_self_test
+from mnemosyne.mcp_server import (
+    MnemosyneMcpServer,
+    build_http_server,
+    build_sdk_server,
+    build_sdk_streamable_http_app,
+    run_self_test,
+)
 from mnemosyne.mcp_tools import TOOL_SPEC
 from mnemosyne.models import Hit
 from mnemosyne.postgres_engine import PostgresEngine, _bytes_to_cid, _cid_to_bytes, _stable_uuid, _uuid_or_none, _vector_literal
@@ -680,6 +686,38 @@ def test_official_mcp_sdk_adapter_lists_tools_and_calls_capture_search(tmp_path:
         assert captured.root.structuredContent["cid"]
         assert searched.root.isError is False
         assert searched.root.structuredContent["hits"]
+
+    asyncio.run(exercise())
+
+
+def test_official_mcp_sdk_streamable_http_adapter_lists_tools(tmp_path: Path) -> None:
+    pytest.importorskip("mcp")
+    httpx = pytest.importorskip("httpx")
+    from mcp.client.session import ClientSession
+    from mcp.client.streamable_http import streamable_http_client
+
+    app = build_sdk_streamable_http_app(store_path=tmp_path / "streamable-sdk-store.json")
+
+    async def exercise() -> None:
+        transport = httpx.ASGITransport(app=app)
+        async with app.state.mnemosyne_streamable_http_manager.run():
+            async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+                health = await client.get("/healthz")
+                assert health.status_code == 200
+                assert health.json()["transport"] == "mcp-sdk-streamable-http"
+                async with streamable_http_client(
+                    "http://testserver/mcp",
+                    http_client=client,
+                    terminate_on_close=False,
+                ) as streams:
+                    async with ClientSession(streams[0], streams[1]) as session:
+                        await session.initialize()
+                        tools = await session.list_tools()
+                        result = await session.call_tool("residency_policy", {})
+
+        assert len(tools.tools) == len(TOOL_SPEC)
+        assert any(tool.name == "capture" for tool in tools.tools)
+        assert result.isError is False
 
     asyncio.run(exercise())
 
