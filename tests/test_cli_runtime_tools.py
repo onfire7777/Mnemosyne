@@ -990,6 +990,88 @@ def test_cli_provider_check_uses_deployment_manifest(tmp_path: Path, monkeypatch
     ]
 
 
+def test_cli_provider_check_validates_oidc_manifest_without_sensitive_values(tmp_path: Path) -> None:
+    jwks, _ = make_oidc_token(oidc_payload())
+    jwks_file = tmp_path / "jwks.json"
+    jwks_file.write_text(json.dumps(jwks), encoding="utf-8")
+    policy_file = tmp_path / "authz-policy.json"
+    policy_file.write_text(
+        json.dumps(
+            {
+                "allowed_client_ids": ["prod-client-secret"],
+                "rules": [
+                    {
+                        "tenant_ids": ["tenant-secret"],
+                        "claim_contains": {"groups": "mnemosyne-operators"},
+                        "role": "operator",
+                        "source_trust_tier": 0,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    manifest = tmp_path / "providers.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "name": "oidc-provider-check",
+                "required_checks": ["oidc"],
+                "providers": {
+                    "oidc": {
+                        "jwks_file": str(jwks_file),
+                        "issuer": IDP_ISSUER,
+                        "audience": IDP_AUDIENCE,
+                        "authz_policy_file": str(policy_file),
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = run_cli(tmp_path / "mnemosyne.json", "provider-check", "--provider-manifest", str(manifest))
+
+    assert report["ok"] is True
+    oidc = report["checks"]["oidc"]
+    assert oidc["ok"] is True
+    assert oidc["jwks_key_count"] == 1
+    assert oidc["issuer_configured"] is True
+    assert oidc["audience_configured"] is True
+    assert oidc["authz_policy_configured"] is True
+    assert oidc["authz_policy"]["allowed_client_ids_count"] == 1
+    assert oidc["authz_policy"]["rules"][0]["claim_contains_fields"] == ["groups"]
+    encoded = json.dumps(report, sort_keys=True)
+    assert "prod-client-secret" not in encoded
+    assert "tenant-secret" not in encoded
+    assert "mnemosyne-operators" not in encoded
+
+
+def test_cli_provider_check_required_oidc_fails_closed_without_issuer(tmp_path: Path) -> None:
+    jwks, _ = make_oidc_token(oidc_payload())
+    jwks_file = tmp_path / "jwks.json"
+    jwks_file.write_text(json.dumps(jwks), encoding="utf-8")
+    manifest = tmp_path / "providers.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "name": "oidc-provider-check",
+                "required_checks": ["oidc"],
+                "providers": {"oidc": {"jwks_file": str(jwks_file)}},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = run_raw_cli(tmp_path / "mnemosyne.json", "provider-check", "--provider-manifest", str(manifest))
+    payload = json.loads(result.stdout)
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert payload["checks"]["oidc"]["ok"] is False
+    assert "issuer and audience" in payload["checks"]["oidc"]["error"]
+
+
 def test_cli_provider_check_manifest_requires_selected_checks(tmp_path: Path) -> None:
     manifest = tmp_path / "providers.json"
     manifest.write_text(
