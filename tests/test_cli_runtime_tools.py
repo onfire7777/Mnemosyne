@@ -5,9 +5,14 @@ import shlex
 import subprocess
 import sys
 import threading
+import time
+import base64
 from hashlib import sha256
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import padding, rsa
 
 from mnemosyne.cli import build_parser
 from mnemosyne.security import SessionIdentity, SessionTokenVerifier
@@ -17,6 +22,8 @@ TENANT = "tenant-cli"
 USER = "user-cli"
 SESSION_SECRET = "mnemosyne-test-session-secret"
 PARAMETRIC_AUTH = ("--role", "operator", "--source-trust-tier", "0")
+IDP_ISSUER = "https://idp.example.test/"
+IDP_AUDIENCE = "mnemosyne-production"
 
 
 def make_session_token(
@@ -34,6 +41,48 @@ def make_session_token(
             source_trust_tier=source_trust_tier,
         )
     )
+
+
+def b64url(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).decode("ascii").rstrip("=")
+
+
+def make_oidc_token(payload: dict[str, object], *, kid: str = "idp-key-1") -> tuple[dict[str, object], str]:
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    public_numbers = key.public_key().public_numbers()
+    jwks = {
+        "keys": [
+            {
+                "kty": "RSA",
+                "kid": kid,
+                "alg": "RS256",
+                "use": "sig",
+                "n": b64url(public_numbers.n.to_bytes((public_numbers.n.bit_length() + 7) // 8, "big")),
+                "e": b64url(public_numbers.e.to_bytes((public_numbers.e.bit_length() + 7) // 8, "big")),
+            }
+        ]
+    }
+    header = {"alg": "RS256", "kid": kid, "typ": "JWT"}
+    header_b64 = b64url(json.dumps(header, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+    payload_b64 = b64url(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+    signing_input = f"{header_b64}.{payload_b64}".encode("ascii")
+    signature = key.sign(signing_input, padding.PKCS1v15(), hashes.SHA256())
+    return jwks, f"{header_b64}.{payload_b64}.{b64url(signature)}"
+
+
+def oidc_payload(**overrides: object) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "iss": IDP_ISSUER,
+        "aud": IDP_AUDIENCE,
+        "sub": USER,
+        "tenant_id": TENANT,
+        "mnemosyne_role": "operator",
+        "mnemosyne_source_trust_tier": 0,
+        "exp": 2_000_000_000,
+        "jti": "cli-idp-session",
+    }
+    payload.update(overrides)
+    return payload
 
 
 def run_cli(store: Path, *args: str) -> dict:
@@ -67,6 +116,67 @@ def run_raw_cli(store: Path, *args: str) -> subprocess.CompletedProcess[str]:
         text=True,
         capture_output=True,
     )
+
+
+def test_cli_session_exchange_validates_oidc_jwks_and_mints_session_token(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    jwks, idp_token = make_oidc_token(oidc_payload())
+    jwks_file = tmp_path / "jwks.json"
+    jwks_file.write_text(json.dumps(jwks), encoding="utf-8")
+
+    exchanged = run_cli(
+        store,
+        "--session-secret",
+        SESSION_SECRET,
+        "session-exchange",
+        "--idp-token",
+        idp_token,
+        "--idp-jwks-file",
+        str(jwks_file),
+        "--idp-issuer",
+        IDP_ISSUER,
+        "--idp-audience",
+        IDP_AUDIENCE,
+        "--session-max-ttl-seconds",
+        "600",
+    )
+    verified = SessionTokenVerifier(SESSION_SECRET).verify(exchanged["session_token"])
+
+    assert exchanged["ok"] is True
+    assert verified.tenant_id == TENANT
+    assert verified.user_id == USER
+    assert verified.role == "operator"
+    assert verified.source_trust_tier == 0
+    assert verified.session_id == "cli-idp-session"
+    assert verified.expires_at is not None
+    assert verified.expires_at <= int(time.time()) + 600
+    assert idp_token not in json.dumps(exchanged)
+
+
+def test_cli_session_exchange_fails_closed_on_invalid_idp_claims(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    jwks, idp_token = make_oidc_token(oidc_payload(aud="wrong-audience"))
+    jwks_file = tmp_path / "jwks.json"
+    jwks_file.write_text(json.dumps(jwks), encoding="utf-8")
+
+    result = run_raw_cli(
+        store,
+        "--session-secret",
+        SESSION_SECRET,
+        "session-exchange",
+        "--idp-token",
+        idp_token,
+        "--idp-jwks-file",
+        str(jwks_file),
+        "--idp-issuer",
+        IDP_ISSUER,
+        "--idp-audience",
+        IDP_AUDIENCE,
+    )
+
+    assert result.returncode == 1
+    assert "audience" in result.stderr
+    assert idp_token not in result.stderr
 
 
 def fake_kms_command(tmp_path: Path) -> tuple[str, Path]:

@@ -15,6 +15,8 @@ from pathlib import Path
 from urllib import error as urlerror, request as urlrequest
 
 import pytest
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import padding, rsa
 
 from mnemosyne.mcp_server import MnemosyneMcpServer, build_http_server, build_sdk_server, run_self_test
 from mnemosyne.mcp_tools import TOOL_SPEC
@@ -34,6 +36,8 @@ TENANT = "tenant-runtime"
 USER = "user-runtime"
 PARAMETRIC_AUTH = {"role": "operator", "source_trust_tier": 0}
 MCP_SESSION_SECRET = "mnemosyne-mcp-session-secret"
+IDP_ISSUER = "https://idp.example.test/"
+IDP_AUDIENCE = "mnemosyne-production"
 
 
 def mcp_call(server: MnemosyneMcpServer, name: str, arguments: dict[str, object]) -> dict:
@@ -66,6 +70,48 @@ def mcp_session_token(
             session_id=session_id,
         )
     )
+
+
+def b64url(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).decode("ascii").rstrip("=")
+
+
+def make_oidc_token(payload: dict[str, object], *, kid: str = "idp-key-1") -> tuple[dict[str, object], str]:
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    public_numbers = key.public_key().public_numbers()
+    jwks = {
+        "keys": [
+            {
+                "kty": "RSA",
+                "kid": kid,
+                "alg": "RS256",
+                "use": "sig",
+                "n": b64url(public_numbers.n.to_bytes((public_numbers.n.bit_length() + 7) // 8, "big")),
+                "e": b64url(public_numbers.e.to_bytes((public_numbers.e.bit_length() + 7) // 8, "big")),
+            }
+        ]
+    }
+    header = {"alg": "RS256", "kid": kid, "typ": "JWT"}
+    header_b64 = b64url(json.dumps(header, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+    payload_b64 = b64url(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+    signing_input = f"{header_b64}.{payload_b64}".encode("ascii")
+    signature = key.sign(signing_input, padding.PKCS1v15(), hashes.SHA256())
+    return jwks, f"{header_b64}.{payload_b64}.{b64url(signature)}"
+
+
+def oidc_payload(**overrides: object) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "iss": IDP_ISSUER,
+        "aud": IDP_AUDIENCE,
+        "sub": USER,
+        "tenant_id": TENANT,
+        "mnemosyne_role": "operator",
+        "mnemosyne_source_trust_tier": 0,
+        "exp": 2_000_000_000,
+        "jti": "mcp-idp-session",
+    }
+    payload.update(overrides)
+    return payload
 
 
 def start_mcp_http_server(**kwargs: object) -> tuple[ThreadingHTTPServer, threading.Thread, str]:
@@ -1068,6 +1114,79 @@ def test_mcp_http_transport_enforces_auth_session_and_schema(tmp_path: Path) -> 
     assert auth_token not in encoded
     assert MCP_SESSION_SECRET not in encoded
     assert session_token not in encoded
+
+
+def test_mcp_http_session_exchange_validates_idp_and_issues_usable_session(tmp_path: Path) -> None:
+    auth_token = "http-session-exchange-auth"
+    jwks, idp_token = make_oidc_token(oidc_payload())
+    server, thread, base = start_mcp_http_server(
+        store_path=tmp_path / "store.json",
+        auth_token=auth_token,
+        session_secret=MCP_SESSION_SECRET,
+        require_session=True,
+        idp_jwks=json.dumps(jwks),
+        idp_issuer=IDP_ISSUER,
+        idp_audience=IDP_AUDIENCE,
+        session_max_ttl_seconds=600,
+    )
+    try:
+        _, health = http_json("GET", f"{base}/healthz")
+        unauthorized_status, unauthorized = http_json(
+            "POST",
+            f"{base}/session/exchange",
+            {"idp_token": idp_token},
+        )
+        exchange_status, exchanged = http_json(
+            "POST",
+            f"{base}/session/exchange",
+            {"idp_token": idp_token},
+            headers={"Authorization": f"Bearer {auth_token}"},
+        )
+        bad_status, bad_exchange = http_json(
+            "POST",
+            f"{base}/session/exchange",
+            {"idp_token": f"{idp_token}tampered"},
+            headers={"Authorization": f"Bearer {auth_token}"},
+        )
+        session_token = exchanged["session_token"] if exchanged else ""
+        call_status, call = http_json(
+            "POST",
+            f"{base}/mcp",
+            {
+                "jsonrpc": "2.0",
+                "id": 8,
+                "method": "tools/call",
+                "params": {
+                    "name": "residency_policy",
+                    "arguments": {},
+                },
+            },
+            headers={"Authorization": f"Bearer {auth_token}", "X-Mnemosyne-Session-Token": str(session_token)},
+        )
+    finally:
+        stop_mcp_http_server(server, thread)
+
+    encoded = json.dumps([health, unauthorized, exchanged, bad_exchange, call])
+    assert health is not None
+    assert health["session_exchange_configured"] is True
+    assert unauthorized_status == 401
+    assert unauthorized == {"error": "unauthorized", "ok": False}
+    assert exchange_status == 200
+    assert exchanged is not None
+    verified = SessionTokenVerifier(MCP_SESSION_SECRET).verify(exchanged["session_token"])
+    assert verified.tenant_id == TENANT
+    assert verified.user_id == USER
+    assert verified.role == "operator"
+    assert verified.source_trust_tier == 0
+    assert verified.session_id == "mcp-idp-session"
+    assert bad_status == 401
+    assert bad_exchange == {"error": "session exchange denied", "ok": False}
+    assert call_status == 200
+    assert call is not None
+    assert call["result"]["isError"] is False  # type: ignore[index]
+    assert idp_token not in encoded
+    assert MCP_SESSION_SECRET not in encoded
+    assert auth_token not in encoded
 
 
 def test_mcp_http_transport_rejects_malformed_and_oversized_payloads(tmp_path: Path) -> None:

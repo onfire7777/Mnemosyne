@@ -10,6 +10,8 @@ import json
 import os
 import sys
 import threading
+import urllib.error
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import UnionType
@@ -24,9 +26,11 @@ from mnemosyne.postgres_runtime_state import PostgresRuntimeState
 from mnemosyne.queue import InProcessQueue, PostgresQueue
 from mnemosyne.runtime_state import RuntimeState
 from mnemosyne.security import (
+    OidcJwtVerifier,
     SessionAuthError,
     SessionIdentity,
     SessionTokenVerifier,
+    issue_session_from_oidc,
     parse_session_keyring,
     parse_session_revoke_list,
 )
@@ -629,7 +633,23 @@ def build_http_server(
     port: int = 8765,
     rpc_path: str = "/mcp",
     health_path: str = "/healthz",
+    session_exchange_path: str = "/session/exchange",
     max_body_bytes: int = DEFAULT_HTTP_MAX_BODY_BYTES,
+    idp_jwks: str | None = None,
+    idp_jwks_file: str | None = None,
+    idp_jwks_url: str | None = None,
+    idp_allow_insecure_jwks_url: bool = False,
+    idp_issuer: str | None = None,
+    idp_audience: str | None = None,
+    idp_tenant_claim: str = "tenant_id",
+    idp_user_claim: str = "sub",
+    idp_role_claim: str = "mnemosyne_role",
+    idp_trust_claim: str = "mnemosyne_source_trust_tier",
+    idp_session_id_claim: str = "jti",
+    idp_algorithms: tuple[str, ...] = ("RS256", "ES256"),
+    idp_leeway_seconds: int = 60,
+    idp_timeout: float = 10,
+    session_max_ttl_seconds: int = 3600,
     **kwargs: Any,
 ) -> ThreadingHTTPServer:
     """Build a hosted HTTP JSON-RPC transport around the MCP facade."""
@@ -638,9 +658,32 @@ def build_http_server(
     facade_lock = threading.RLock()
     rpc_path = _normalize_http_path(rpc_path)
     health_path = _normalize_http_path(health_path)
+    session_exchange_path = _normalize_http_path(session_exchange_path)
     max_body_bytes = int(max_body_bytes)
     if max_body_bytes <= 0:
         raise ValueError("HTTP MCP max body bytes must be positive")
+    idp_verifier: OidcJwtVerifier | None = None
+    if idp_issuer or idp_audience or idp_jwks or idp_jwks_file or idp_jwks_url:
+        if not idp_issuer or not idp_audience:
+            raise ValueError("HTTP MCP session exchange requires idp issuer and audience")
+        idp_verifier = OidcJwtVerifier(
+            _load_oidc_jwks(
+                jwks=idp_jwks,
+                jwks_file=idp_jwks_file,
+                jwks_url=idp_jwks_url,
+                allow_insecure_url=idp_allow_insecure_jwks_url,
+                timeout=idp_timeout,
+            ),
+            issuer=idp_issuer,
+            audience=idp_audience,
+            tenant_claim=idp_tenant_claim,
+            user_claim=idp_user_claim,
+            role_claim=idp_role_claim,
+            trust_claim=idp_trust_claim,
+            session_id_claim=idp_session_id_claim,
+            allowed_algorithms=tuple(item for item in idp_algorithms if item),
+            leeway_seconds=idp_leeway_seconds,
+        )
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "MnemosyneMcpHTTP/0.1"
@@ -658,48 +701,97 @@ def build_http_server(
                     "protocolVersion": PROTOCOL_VERSION,
                     "transport": "http-json-rpc",
                     "rpc_path": rpc_path,
+                    "session_exchange_path": session_exchange_path,
                     "backend": facade.backend,
                     "stateless": facade.stateless,
                     "auth_token_required": bool(facade.auth_token),
                     "session_required": bool(facade.require_session),
+                    "session_exchange_configured": idp_verifier is not None,
                 },
             )
 
         def do_POST(self) -> None:  # noqa: N802 - stdlib callback name.
             path = urlsplit(self.path).path
+            if path == session_exchange_path:
+                self._handle_session_exchange()
+                return
             if path != rpc_path:
                 self._send_json(404, {"ok": False, "error": "not found"})
                 return
-            length_header = self.headers.get("Content-Length")
-            try:
-                length = int(length_header or "")
-            except ValueError:
-                self._send_json(411, _error(None, -32600, "Content-Length is required"))
+            request = self._read_json_request(non_object_message="JSON-RPC request must be an object")
+            if isinstance(request, tuple):
+                self._send_json(*request)
                 return
-            if length < 0:
-                self._send_json(400, _error(None, -32600, "Content-Length must be non-negative"))
-                return
-            if length > max_body_bytes:
-                self._send_json(413, _error(None, -32600, "Request body too large"))
-                return
-            raw = self.rfile.read(length)
-            try:
-                request = json.loads(raw.decode("utf-8"))
-            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-                self._send_json(400, _error(None, -32700, f"Invalid JSON: {exc}"))
-                return
-            if not isinstance(request, dict):
-                self._send_json(400, _error(None, -32600, "JSON-RPC request must be an object"))
-                return
-            request = self._inject_http_auth_metadata(request)
             with facade_lock:
-                response = facade.handle(request)
+                response = facade.handle(self._inject_http_auth_metadata(request))
             if response is None:
                 self.send_response(204)
                 self.send_header("Cache-Control", "no-store")
                 self.end_headers()
                 return
             self._send_json(200, response)
+
+        def _read_json_request(
+            self,
+            *,
+            non_object_message: str = "JSON request must be an object",
+        ) -> dict[str, Any] | tuple[int, dict[str, Any]]:
+            length_header = self.headers.get("Content-Length")
+            try:
+                length = int(length_header or "")
+            except ValueError:
+                return 411, _error(None, -32600, "Content-Length is required")
+            if length < 0:
+                return 400, _error(None, -32600, "Content-Length must be non-negative")
+            if length > max_body_bytes:
+                return 413, _error(None, -32600, "Request body too large")
+            raw = self.rfile.read(length)
+            try:
+                request = json.loads(raw.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                return 400, _error(None, -32700, f"Invalid JSON: {exc}")
+            if not isinstance(request, dict):
+                return 400, _error(None, -32600, non_object_message)
+            return request
+
+        def _handle_session_exchange(self) -> None:
+            if idp_verifier is None:
+                self._send_json(404, {"ok": False, "error": "session exchange is not configured"})
+                return
+            request = self._read_json_request()
+            if isinstance(request, tuple):
+                self._send_json(*request)
+                return
+            if not self._exchange_authorized(request):
+                self._send_json(401, {"ok": False, "error": "unauthorized"})
+                return
+            idp_token = request.get("idp_token")
+            if not isinstance(idp_token, str) or not idp_token:
+                self._send_json(400, {"ok": False, "error": "idp_token is required"})
+                return
+            signer = facade._session_verifier()
+            if signer is None:
+                self._send_json(503, {"ok": False, "error": "session signing is not configured"})
+                return
+            try:
+                session_token, issued = issue_session_from_oidc(
+                    verifier=idp_verifier,
+                    idp_token=idp_token,
+                    signer=signer,
+                    max_ttl_seconds=session_max_ttl_seconds,
+                )
+            except SessionAuthError:
+                self._send_json(401, {"ok": False, "error": "session exchange denied"})
+                return
+            self._send_json(
+                200,
+                {
+                    "ok": True,
+                    "session_token": session_token,
+                    "identity": issued.to_payload(),
+                    "expires_at": issued.expires_at,
+                },
+            )
 
         def _send_json(self, status: int, payload: dict[str, Any]) -> None:
             encoded = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
@@ -709,6 +801,19 @@ def build_http_server(
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
             self.wfile.write(encoded)
+
+        def _exchange_authorized(self, request: dict[str, Any]) -> bool:
+            if not facade.auth_token:
+                return True
+            supplied = request.get("auth_token")
+            meta = request.get("_meta")
+            if supplied is None and isinstance(meta, dict):
+                supplied = meta.get("auth_token")
+            if supplied is None:
+                auth_header = self.headers.get("Authorization", "")
+                if auth_header.startswith("Bearer "):
+                    supplied = auth_header.removeprefix("Bearer ").strip()
+            return isinstance(supplied, str) and hmac.compare_digest(supplied, facade.auth_token)
 
         def _inject_http_auth_metadata(self, request: dict[str, Any]) -> dict[str, Any]:
             if request.get("method") != "tools/call":
@@ -765,6 +870,39 @@ def _normalize_http_path(value: str) -> str:
     if not value:
         raise ValueError("HTTP MCP path must be non-empty")
     return value if value.startswith("/") else f"/{value}"
+
+
+def _load_oidc_jwks(
+    *,
+    jwks: str | None,
+    jwks_file: str | None,
+    jwks_url: str | None,
+    allow_insecure_url: bool,
+    timeout: float,
+) -> dict[str, Any]:
+    sources = [bool(jwks), bool(jwks_file), bool(jwks_url)]
+    if sum(sources) != 1:
+        raise SessionAuthError("OIDC session exchange requires exactly one JWKS source")
+    if jwks:
+        raw = jwks
+    elif jwks_file:
+        raw = Path(jwks_file).expanduser().read_text(encoding="utf-8")
+    else:
+        assert jwks_url is not None
+        if not jwks_url.startswith("https://") and not allow_insecure_url:
+            raise SessionAuthError("OIDC JWKS URL must use https unless insecure URLs are explicitly allowed")
+        try:
+            with urllib.request.urlopen(jwks_url, timeout=timeout) as response:  # noqa: S310 - URL is operator configured.
+                raw = response.read().decode("utf-8")
+        except (OSError, UnicodeDecodeError, urllib.error.URLError) as exc:
+            raise SessionAuthError("OIDC JWKS URL could not be loaded") from exc
+    try:
+        loaded = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise SessionAuthError("OIDC JWKS is not valid JSON") from exc
+    if not isinstance(loaded, dict):
+        raise SessionAuthError("OIDC JWKS must be a JSON object")
+    return loaded
 
 
 def run_self_test(*, sdk: bool = False, **kwargs: Any) -> dict[str, Any]:
@@ -1067,12 +1205,28 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--http-port", type=int, default=int(os.environ.get("MNEMOSYNE_MCP_HTTP_PORT", "8765")))
     parser.add_argument("--http-rpc-path", default=os.environ.get("MNEMOSYNE_MCP_HTTP_RPC_PATH", "/mcp"))
     parser.add_argument("--http-health-path", default=os.environ.get("MNEMOSYNE_MCP_HTTP_HEALTH_PATH", "/healthz"))
+    parser.add_argument("--http-session-exchange-path", default=os.environ.get("MNEMOSYNE_MCP_HTTP_SESSION_EXCHANGE_PATH", "/session/exchange"))
     parser.add_argument(
         "--http-max-body-bytes",
         type=int,
         default=int(os.environ.get("MNEMOSYNE_MCP_HTTP_MAX_BODY_BYTES", str(DEFAULT_HTTP_MAX_BODY_BYTES))),
         help="Maximum HTTP MCP JSON-RPC request body size",
     )
+    parser.add_argument("--idp-jwks", default=os.environ.get("MNEMOSYNE_MCP_IDP_JWKS"))
+    parser.add_argument("--idp-jwks-file", default=os.environ.get("MNEMOSYNE_MCP_IDP_JWKS_FILE"))
+    parser.add_argument("--idp-jwks-url", default=os.environ.get("MNEMOSYNE_MCP_IDP_JWKS_URL"))
+    parser.add_argument("--idp-allow-insecure-jwks-url", action="store_true", default=_env_flag("MNEMOSYNE_MCP_IDP_ALLOW_INSECURE_JWKS_URL", default=False))
+    parser.add_argument("--idp-issuer", default=os.environ.get("MNEMOSYNE_MCP_IDP_ISSUER"))
+    parser.add_argument("--idp-audience", default=os.environ.get("MNEMOSYNE_MCP_IDP_AUDIENCE"))
+    parser.add_argument("--idp-tenant-claim", default=os.environ.get("MNEMOSYNE_MCP_IDP_TENANT_CLAIM", "tenant_id"))
+    parser.add_argument("--idp-user-claim", default=os.environ.get("MNEMOSYNE_MCP_IDP_USER_CLAIM", "sub"))
+    parser.add_argument("--idp-role-claim", default=os.environ.get("MNEMOSYNE_MCP_IDP_ROLE_CLAIM", "mnemosyne_role"))
+    parser.add_argument("--idp-trust-claim", default=os.environ.get("MNEMOSYNE_MCP_IDP_TRUST_CLAIM", "mnemosyne_source_trust_tier"))
+    parser.add_argument("--idp-session-id-claim", default=os.environ.get("MNEMOSYNE_MCP_IDP_SESSION_ID_CLAIM", "jti"))
+    parser.add_argument("--idp-algorithm", action="append", default=os.environ.get("MNEMOSYNE_MCP_IDP_ALGORITHMS", "RS256,ES256").split(","))
+    parser.add_argument("--idp-leeway-seconds", type=int, default=int(os.environ.get("MNEMOSYNE_MCP_IDP_LEEWAY_SECONDS", "60")))
+    parser.add_argument("--idp-timeout", type=float, default=float(os.environ.get("MNEMOSYNE_MCP_IDP_TIMEOUT", "10")))
+    parser.add_argument("--session-max-ttl-seconds", type=int, default=int(os.environ.get("MNEMOSYNE_MCP_SESSION_MAX_TTL_SECONDS", "3600")))
     parser.add_argument("--auth-token", default=os.environ.get("MNEMOSYNE_MCP_TOKEN"), help="Require this token for tools/call")
     parser.add_argument(
         "--session-secret",
@@ -1148,7 +1302,23 @@ def main(argv: list[str] | None = None) -> None:
             port=args.http_port,
             rpc_path=args.http_rpc_path,
             health_path=args.http_health_path,
+            session_exchange_path=args.http_session_exchange_path,
             max_body_bytes=args.http_max_body_bytes,
+            idp_jwks=args.idp_jwks,
+            idp_jwks_file=args.idp_jwks_file,
+            idp_jwks_url=args.idp_jwks_url,
+            idp_allow_insecure_jwks_url=args.idp_allow_insecure_jwks_url,
+            idp_issuer=args.idp_issuer,
+            idp_audience=args.idp_audience,
+            idp_tenant_claim=args.idp_tenant_claim,
+            idp_user_claim=args.idp_user_claim,
+            idp_role_claim=args.idp_role_claim,
+            idp_trust_claim=args.idp_trust_claim,
+            idp_session_id_claim=args.idp_session_id_claim,
+            idp_algorithms=tuple(args.idp_algorithm),
+            idp_leeway_seconds=args.idp_leeway_seconds,
+            idp_timeout=args.idp_timeout,
+            session_max_ttl_seconds=args.session_max_ttl_seconds,
             **config,
         )
         return

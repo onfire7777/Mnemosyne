@@ -6,6 +6,8 @@ import argparse
 import json
 import os
 import tempfile
+import urllib.error
+import urllib.request
 from datetime import datetime
 from hashlib import sha256
 from pathlib import Path
@@ -36,7 +38,14 @@ from mnemosyne.retrieval import (
 )
 from mnemosyne.postgres_runtime_state import PostgresRuntimeState
 from mnemosyne.runtime_state import RuntimeState
-from mnemosyne.security import SessionAuthError, SessionTokenVerifier, parse_session_keyring, parse_session_revoke_list
+from mnemosyne.security import (
+    OidcJwtVerifier,
+    SessionAuthError,
+    SessionTokenVerifier,
+    issue_session_from_oidc,
+    parse_session_keyring,
+    parse_session_revoke_list,
+)
 from mnemosyne.storage import CommandKeyManager, EncryptedLocalObjectStore, JsonKeyManager, LocalObjectStore
 
 
@@ -123,6 +132,46 @@ def _session_verifier_from_args(args: argparse.Namespace) -> SessionTokenVerifie
     if not secret:
         raise SessionAuthError("--session-token requires --session-secret, --session-keyring, or MNEMOSYNE_SESSION_SECRET.")
     return SessionTokenVerifier(secret, revoked_key_ids=revoked_key_ids, revoked_session_ids=revoked_session_ids)
+
+
+def _session_signer_from_args(args: argparse.Namespace) -> SessionTokenVerifier:
+    keyring = parse_session_keyring(getattr(args, "session_keyring", None))
+    if keyring:
+        return SessionTokenVerifier(keyring, active_key_id=getattr(args, "session_key_id", None))
+    secret = getattr(args, "session_secret", None)
+    if not secret:
+        raise SessionAuthError("session-exchange requires --session-secret, --session-keyring, or MNEMOSYNE_SESSION_SECRET.")
+    return SessionTokenVerifier(secret)
+
+
+def _load_oidc_jwks(args: argparse.Namespace) -> dict[str, Any]:
+    sources = [
+        bool(getattr(args, "idp_jwks", None)),
+        bool(getattr(args, "idp_jwks_file", None)),
+        bool(getattr(args, "idp_jwks_url", None)),
+    ]
+    if sum(sources) != 1:
+        raise SessionAuthError("session-exchange requires exactly one of --idp-jwks, --idp-jwks-file, or --idp-jwks-url")
+    if args.idp_jwks:
+        raw = args.idp_jwks
+    elif args.idp_jwks_file:
+        raw = Path(args.idp_jwks_file).expanduser().read_text(encoding="utf-8")
+    else:
+        url = str(args.idp_jwks_url)
+        if not url.startswith("https://") and not args.idp_allow_insecure_jwks_url:
+            raise SessionAuthError("--idp-jwks-url must use https unless --idp-allow-insecure-jwks-url is set")
+        try:
+            with urllib.request.urlopen(url, timeout=args.idp_timeout) as response:  # noqa: S310 - URL is operator configured.
+                raw = response.read().decode("utf-8")
+        except (OSError, UnicodeDecodeError, urllib.error.URLError) as exc:
+            raise SessionAuthError("OIDC JWKS URL could not be loaded") from exc
+    try:
+        jwks = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise SessionAuthError("OIDC JWKS is not valid JSON") from exc
+    if not isinstance(jwks, dict):
+        raise SessionAuthError("OIDC JWKS must be a JSON object")
+    return jwks
 
 
 def _bind_session_claim(args: argparse.Namespace, attr: str, value: str) -> None:
@@ -368,6 +417,41 @@ def json_default(value: Any) -> Any:
 
 def emit(value: Any) -> None:
     print(json.dumps(value, indent=2, sort_keys=True, default=json_default))
+
+
+def cmd_session_exchange(args: argparse.Namespace) -> None:
+    if not args.idp_token:
+        raise SystemExit("session-exchange requires --idp-token or MNEMOSYNE_IDP_TOKEN")
+    try:
+        session_token, issued = issue_session_from_oidc(
+            verifier=OidcJwtVerifier(
+                _load_oidc_jwks(args),
+                issuer=args.idp_issuer,
+                audience=args.idp_audience,
+                tenant_claim=args.idp_tenant_claim,
+                user_claim=args.idp_user_claim,
+                role_claim=args.idp_role_claim,
+                trust_claim=args.idp_trust_claim,
+                session_id_claim=args.idp_session_id_claim,
+                allowed_algorithms=tuple(args.idp_algorithm),
+                leeway_seconds=args.idp_leeway_seconds,
+            ),
+            idp_token=args.idp_token,
+            signer=_session_signer_from_args(args),
+            max_ttl_seconds=args.session_max_ttl_seconds,
+        )
+    except SessionAuthError as exc:
+        raise SystemExit(f"session exchange denied: {exc}") from exc
+    emit(
+        {
+            "ok": True,
+            "session_token": session_token,
+            "identity": issued.to_payload(),
+            "issuer": args.idp_issuer,
+            "audience": args.idp_audience,
+            "expires_at": issued.expires_at,
+        }
+    )
 
 
 def cmd_capture(args: argparse.Namespace) -> None:
@@ -1509,6 +1593,25 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
+    session_exchange = sub.add_parser("session-exchange")
+    session_exchange.add_argument("--idp-token", default=os.environ.get("MNEMOSYNE_IDP_TOKEN"))
+    session_exchange.add_argument("--idp-jwks", default=os.environ.get("MNEMOSYNE_IDP_JWKS"))
+    session_exchange.add_argument("--idp-jwks-file", default=os.environ.get("MNEMOSYNE_IDP_JWKS_FILE"))
+    session_exchange.add_argument("--idp-jwks-url", default=os.environ.get("MNEMOSYNE_IDP_JWKS_URL"))
+    session_exchange.add_argument("--idp-allow-insecure-jwks-url", action="store_true", default=env_flag("MNEMOSYNE_IDP_ALLOW_INSECURE_JWKS_URL", default=False))
+    session_exchange.add_argument("--idp-issuer", required=not bool(os.environ.get("MNEMOSYNE_IDP_ISSUER")), default=os.environ.get("MNEMOSYNE_IDP_ISSUER"))
+    session_exchange.add_argument("--idp-audience", required=not bool(os.environ.get("MNEMOSYNE_IDP_AUDIENCE")), default=os.environ.get("MNEMOSYNE_IDP_AUDIENCE"))
+    session_exchange.add_argument("--idp-tenant-claim", default=os.environ.get("MNEMOSYNE_IDP_TENANT_CLAIM", "tenant_id"))
+    session_exchange.add_argument("--idp-user-claim", default=os.environ.get("MNEMOSYNE_IDP_USER_CLAIM", "sub"))
+    session_exchange.add_argument("--idp-role-claim", default=os.environ.get("MNEMOSYNE_IDP_ROLE_CLAIM", "mnemosyne_role"))
+    session_exchange.add_argument("--idp-trust-claim", default=os.environ.get("MNEMOSYNE_IDP_TRUST_CLAIM", "mnemosyne_source_trust_tier"))
+    session_exchange.add_argument("--idp-session-id-claim", default=os.environ.get("MNEMOSYNE_IDP_SESSION_ID_CLAIM", "jti"))
+    session_exchange.add_argument("--idp-algorithm", action="append", default=(os.environ.get("MNEMOSYNE_IDP_ALGORITHMS", "RS256,ES256").split(",")))
+    session_exchange.add_argument("--idp-leeway-seconds", type=int, default=int(os.environ.get("MNEMOSYNE_IDP_LEEWAY_SECONDS", "60")))
+    session_exchange.add_argument("--idp-timeout", type=float, default=float(os.environ.get("MNEMOSYNE_IDP_TIMEOUT", "10")))
+    session_exchange.add_argument("--session-max-ttl-seconds", type=int, default=int(os.environ.get("MNEMOSYNE_SESSION_MAX_TTL_SECONDS", "3600")))
+    session_exchange.set_defaults(func=cmd_session_exchange)
+
     capture = sub.add_parser("capture")
     capture.add_argument("--tenant", required=True)
     capture.add_argument("--user", required=True)
@@ -1952,7 +2055,8 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    apply_session_identity(args)
+    if args.command != "session-exchange":
+        apply_session_identity(args)
     args.func(args)
     return 0
 
