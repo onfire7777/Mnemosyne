@@ -6,11 +6,14 @@ import argparse
 import json
 import os
 import tempfile
+import time
 from collections.abc import Mapping
 from datetime import datetime
 from hashlib import sha256
 from pathlib import Path
 from typing import Any
+from urllib import error as urlerror, request as urlrequest
+from urllib.parse import urljoin, urlsplit, urlunsplit
 from uuid import UUID
 
 from mnemosyne.consolidation import CONSOLIDATE_EVIDENCE_JOB
@@ -1287,6 +1290,294 @@ def cmd_ops_report(args: argparse.Namespace) -> None:
     emit(report)
 
 
+def _display_url(url: str) -> str:
+    parsed = urlsplit(url)
+    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", ""))
+
+
+def _join_endpoint(base_url: str | None, path: str) -> str | None:
+    if not base_url:
+        return None
+    return urljoin(base_url.rstrip("/") + "/", path.lstrip("/"))
+
+
+def _bounded_json_body(response: Any, *, max_bytes: int = 1_048_576) -> dict[str, Any]:
+    raw = response.read(max_bytes + 1)
+    if len(raw) > max_bytes:
+        raise ValueError("HTTP response body exceeded 1048576 bytes")
+    try:
+        decoded = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"HTTP response was not valid JSON: {exc}") from exc
+    if not isinstance(decoded, dict):
+        raise ValueError("HTTP response JSON must be an object")
+    return decoded
+
+
+def _http_json_probe(
+    *,
+    url: str,
+    method: str,
+    headers: Mapping[str, str],
+    timeout_seconds: float,
+    payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    encoded_payload = None
+    request_headers = {"Accept": "application/json", **dict(headers)}
+    if payload is not None:
+        encoded_payload = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+        request_headers["Content-Type"] = "application/json"
+    started = time.monotonic()
+    request = urlrequest.Request(url, data=encoded_payload, headers=request_headers, method=method)
+    try:
+        with urlrequest.urlopen(request, timeout=timeout_seconds) as response:
+            body = _bounded_json_body(response)
+            return {
+                "ok": 200 <= int(response.status) < 300,
+                "status": int(response.status),
+                "latency_ms": round((time.monotonic() - started) * 1000, 3),
+                "json": body,
+            }
+    except urlerror.HTTPError as exc:
+        latency_ms = round((time.monotonic() - started) * 1000, 3)
+        try:
+            body = _bounded_json_body(exc)
+        except ValueError as body_exc:
+            body = {"ok": False, "error": str(body_exc)}
+        return {
+            "ok": False,
+            "status": int(exc.code),
+            "latency_ms": latency_ms,
+            "json": body,
+            "error": body.get("error") or f"HTTP {exc.code}",
+        }
+    except (TimeoutError, urlerror.URLError, ValueError) as exc:
+        return {
+            "ok": False,
+            "status": None,
+            "latency_ms": round((time.monotonic() - started) * 1000, 3),
+            "error": str(exc),
+        }
+
+
+def _json_rpc_probe(
+    *,
+    rpc_url: str,
+    headers: Mapping[str, str],
+    timeout_seconds: float,
+    request_id: str,
+    method: str,
+    params: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {"jsonrpc": "2.0", "id": request_id, "method": method}
+    if params is not None:
+        payload["params"] = params
+    probe = _http_json_probe(
+        url=rpc_url,
+        method="POST",
+        headers=headers,
+        timeout_seconds=timeout_seconds,
+        payload=payload,
+    )
+    response = probe.get("json")
+    if not probe.get("ok"):
+        return {
+            "ok": False,
+            "status": probe.get("status"),
+            "latency_ms": probe.get("latency_ms"),
+            "error": probe.get("error") or "HTTP request failed",
+        }
+    if not isinstance(response, dict):
+        return {
+            "ok": False,
+            "status": probe.get("status"),
+            "latency_ms": probe.get("latency_ms"),
+            "error": "JSON-RPC response must be an object",
+        }
+    if response.get("error") is not None:
+        error_payload = response.get("error")
+        message = error_payload.get("message") if isinstance(error_payload, dict) else "JSON-RPC error"
+        return {
+            "ok": False,
+            "status": probe.get("status"),
+            "latency_ms": probe.get("latency_ms"),
+            "error": message,
+        }
+    return {
+        "ok": True,
+        "status": probe.get("status"),
+        "latency_ms": probe.get("latency_ms"),
+        "result": response.get("result"),
+    }
+
+
+def cmd_mcp_http_soak(args: argparse.Namespace) -> None:
+    rpc_url = args.mcp_http_rpc_url or _join_endpoint(args.mcp_http_base_url, "/mcp")
+    health_url = args.mcp_http_health_url or _join_endpoint(args.mcp_http_base_url, "/healthz")
+    if not rpc_url or not health_url:
+        raise SystemExit("mcp-http-soak requires --base-url or both --rpc-url and --health-url.")
+    if args.iterations < 1:
+        raise SystemExit("--iterations must be at least 1.")
+    if args.timeout <= 0:
+        raise SystemExit("--timeout must be greater than 0.")
+    tool_arguments = parse_json_arg(args.tool_arguments, {})
+    if not isinstance(tool_arguments, dict):
+        raise SystemExit("--tool-arguments must be a JSON object.")
+
+    headers: dict[str, str] = {}
+    if args.auth_token:
+        headers["Authorization"] = f"Bearer {args.auth_token}"
+    if args.mcp_session_token:
+        headers["X-Mnemosyne-Session-Token"] = args.mcp_session_token
+
+    ok = True
+    health_probe = _http_json_probe(url=health_url, method="GET", headers=headers, timeout_seconds=args.timeout)
+    health_payload = health_probe.get("json") if isinstance(health_probe.get("json"), dict) else {}
+    health = {
+        "ok": bool(health_probe.get("ok") and health_payload.get("ok") is True),
+        "status": health_probe.get("status"),
+        "latency_ms": health_probe.get("latency_ms"),
+        "transport": health_payload.get("transport"),
+        "protocolVersion": health_payload.get("protocolVersion"),
+        "backend": health_payload.get("backend"),
+        "stateless": health_payload.get("stateless"),
+        "auth_token_required": health_payload.get("auth_token_required"),
+        "session_required": health_payload.get("session_required"),
+        "tls_enabled": health_payload.get("tls_enabled"),
+        "tls_client_cert_required": health_payload.get("tls_client_cert_required"),
+    }
+    if health_probe.get("error"):
+        health["error"] = health_probe["error"]
+    if not health["ok"]:
+        ok = False
+        health.setdefault("error", "health check failed")
+    if args.expected_transport and health.get("transport") != args.expected_transport:
+        ok = False
+        health["transport_mismatch"] = {
+            "expected": args.expected_transport,
+            "actual": health.get("transport"),
+        }
+    if args.require_stateless and health.get("stateless") is not True:
+        ok = False
+        health["stateless_mismatch"] = {"expected": True, "actual": health.get("stateless")}
+
+    protocol_version = str(health.get("protocolVersion") or "2024-11-05")
+    iterations: list[dict[str, Any]] = []
+    request_latencies: list[float] = [float(health_probe.get("latency_ms") or 0)]
+    failure_count = 0 if ok else 1
+
+    for index in range(1, args.iterations + 1):
+        started = time.monotonic()
+        initialize = _json_rpc_probe(
+            rpc_url=rpc_url,
+            headers=headers,
+            timeout_seconds=args.timeout,
+            request_id=f"soak-{index}-initialize",
+            method="initialize",
+            params={
+                "protocolVersion": protocol_version,
+                "capabilities": {},
+                "clientInfo": {"name": "mnemosyne-http-soak", "version": "1"},
+            },
+        )
+        tools_list = _json_rpc_probe(
+            rpc_url=rpc_url,
+            headers=headers,
+            timeout_seconds=args.timeout,
+            request_id=f"soak-{index}-tools",
+            method="tools/list",
+        )
+        tool_call = _json_rpc_probe(
+            rpc_url=rpc_url,
+            headers=headers,
+            timeout_seconds=args.timeout,
+            request_id=f"soak-{index}-read-only",
+            method="tools/call",
+            params={"name": args.read_only_tool, "arguments": tool_arguments},
+        )
+
+        tool_entries = []
+        if isinstance(tools_list.get("result"), dict) and isinstance(tools_list["result"].get("tools"), list):
+            tool_entries = tools_list["result"]["tools"]
+        contains_read_only_tool = any(
+            isinstance(item, dict) and item.get("name") == args.read_only_tool for item in tool_entries
+        )
+        if not tools_list.get("ok") or not contains_read_only_tool:
+            tools_list["ok"] = False
+            tools_list.setdefault("error", f"tools/list did not include {args.read_only_tool}")
+        tool_result = tool_call.get("result")
+        if not isinstance(tool_result, dict) or tool_result.get("isError") is not False:
+            tool_call["ok"] = False
+            tool_call.setdefault("error", "read-only tool call failed")
+
+        operation_ok = bool(initialize.get("ok") and tools_list.get("ok") and tool_call.get("ok"))
+        if not operation_ok:
+            ok = False
+            failure_count += 1
+        for probe in (initialize, tools_list, tool_call):
+            request_latencies.append(float(probe.get("latency_ms") or 0))
+        iterations.append(
+            {
+                "iteration": index,
+                "ok": operation_ok,
+                "duration_ms": round((time.monotonic() - started) * 1000, 3),
+                "initialize": {
+                    "ok": initialize.get("ok"),
+                    "status": initialize.get("status"),
+                    "latency_ms": initialize.get("latency_ms"),
+                    **({"error": initialize["error"]} if initialize.get("error") else {}),
+                },
+                "tools_list": {
+                    "ok": tools_list.get("ok"),
+                    "status": tools_list.get("status"),
+                    "latency_ms": tools_list.get("latency_ms"),
+                    "tool_count": len(tool_entries),
+                    "contains_read_only_tool": contains_read_only_tool,
+                    **({"error": tools_list["error"]} if tools_list.get("error") else {}),
+                },
+                "read_only_tool_call": {
+                    "ok": tool_call.get("ok"),
+                    "status": tool_call.get("status"),
+                    "latency_ms": tool_call.get("latency_ms"),
+                    **({"error": tool_call["error"]} if tool_call.get("error") else {}),
+                },
+            }
+        )
+
+    sorted_latencies = sorted(request_latencies)
+    p95_index = min(len(sorted_latencies) - 1, int(max(0, round(len(sorted_latencies) * 0.95) - 1)))
+    report = {
+        "ok": ok,
+        "target": {
+            "health_url": _display_url(health_url),
+            "rpc_url": _display_url(rpc_url),
+            "auth_token_configured": bool(args.auth_token),
+            "session_token_configured": bool(args.mcp_session_token),
+        },
+        "config": {
+            "iterations": args.iterations,
+            "timeout_seconds": args.timeout,
+            "read_only_tool": args.read_only_tool,
+            "tool_arguments_configured": bool(tool_arguments),
+            "expected_transport": args.expected_transport,
+            "require_stateless": bool(args.require_stateless),
+        },
+        "health": health,
+        "iterations": iterations,
+        "summary": {
+            "iterations": args.iterations,
+            "requests": 1 + args.iterations * 3,
+            "failures": failure_count,
+            "avg_latency_ms": round(sum(request_latencies) / len(request_latencies), 3),
+            "p95_latency_ms": sorted_latencies[p95_index],
+            "max_latency_ms": max(request_latencies),
+        },
+    }
+    emit(report)
+    if not ok:
+        raise SystemExit(1)
+
+
 def _read_provider_manifest(path: str | None) -> dict[str, Any]:
     if not path:
         return {}
@@ -2372,6 +2663,70 @@ def build_parser() -> argparse.ArgumentParser:
     provider_check = sub.add_parser("provider-check")
     provider_check.add_argument("--provider-manifest", help="JSON deployment manifest for provider health gates")
     provider_check.set_defaults(func=cmd_provider_check)
+
+    mcp_http_soak = sub.add_parser("mcp-http-soak")
+    mcp_http_soak.add_argument(
+        "--base-url",
+        dest="mcp_http_base_url",
+        default=os.environ.get("MNEMOSYNE_MCP_HTTP_BASE_URL"),
+        help="Hosted MCP HTTP base URL; derives /healthz and /mcp when explicit URLs are omitted",
+    )
+    mcp_http_soak.add_argument(
+        "--health-url",
+        dest="mcp_http_health_url",
+        default=os.environ.get("MNEMOSYNE_MCP_HTTP_HEALTH_URL"),
+        help="Explicit hosted MCP health URL",
+    )
+    mcp_http_soak.add_argument(
+        "--rpc-url",
+        dest="mcp_http_rpc_url",
+        default=os.environ.get("MNEMOSYNE_MCP_HTTP_RPC_URL"),
+        help="Explicit hosted MCP JSON-RPC URL",
+    )
+    mcp_http_soak.add_argument(
+        "--auth-token",
+        default=os.environ.get("MNEMOSYNE_MCP_HTTP_AUTH_TOKEN") or os.environ.get("MNEMOSYNE_MCP_TOKEN"),
+        help="Bearer token for hosted MCP requests",
+    )
+    mcp_http_soak.add_argument(
+        "--mcp-session-token",
+        default=os.environ.get("MNEMOSYNE_MCP_HTTP_SESSION_TOKEN") or os.environ.get("MNEMOSYNE_MCP_SESSION_TOKEN"),
+        help="Signed Mnemosyne session token forwarded to the hosted MCP endpoint",
+    )
+    mcp_http_soak.add_argument(
+        "--iterations",
+        type=int,
+        default=int(os.environ.get("MNEMOSYNE_MCP_HTTP_SOAK_ITERATIONS", "5")),
+        help="Number of initialize/list/read-only-call loops to run",
+    )
+    mcp_http_soak.add_argument(
+        "--timeout",
+        type=float,
+        default=float(os.environ.get("MNEMOSYNE_MCP_HTTP_SOAK_TIMEOUT", "10")),
+        help="Per-request timeout in seconds",
+    )
+    mcp_http_soak.add_argument(
+        "--read-only-tool",
+        default=os.environ.get("MNEMOSYNE_MCP_HTTP_SOAK_TOOL", "residency_policy"),
+        help="Read-only MCP tool used for the repeated call check",
+    )
+    mcp_http_soak.add_argument(
+        "--tool-arguments",
+        default=os.environ.get("MNEMOSYNE_MCP_HTTP_SOAK_TOOL_ARGUMENTS", "{}"),
+        help="JSON object of read-only tool arguments",
+    )
+    mcp_http_soak.add_argument(
+        "--expected-transport",
+        default=os.environ.get("MNEMOSYNE_MCP_HTTP_EXPECTED_TRANSPORT", "http-json-rpc"),
+        help="Expected health transport value; pass an empty string to skip this check",
+    )
+    mcp_http_soak.add_argument(
+        "--require-stateless",
+        action="store_true",
+        default=env_flag("MNEMOSYNE_MCP_HTTP_SOAK_REQUIRE_STATELESS", default=False),
+        help="Fail unless /healthz reports stateless=true",
+    )
+    mcp_http_soak.set_defaults(func=cmd_mcp_http_soak)
 
     residency_policy = sub.add_parser("residency-policy")
     residency_policy.set_defaults(func=cmd_residency_policy)
