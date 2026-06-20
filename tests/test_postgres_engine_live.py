@@ -436,6 +436,48 @@ def test_postgres_mcp_backend_live_smoke() -> None:
     assert search["result"]["structuredContent"]["hits"][0]["provenance"] == [capture["result"]["structuredContent"]["cid"]]
 
 
+def test_postgres_mcp_stateless_uses_tenant_scoped_durable_queue_live() -> None:
+    tenant = f"tenant-mcp-queue-live-{uuid4()}"
+    user = "user-mcp-queue-live"
+    dsn = live_dsn()
+    server = MnemosyneMcpServer(
+        backend="postgres",
+        postgres_dsn=dsn,
+        queue_backend="postgres",
+        stateless=True,
+    )
+
+    ingested = server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "ingest",
+                "arguments": {
+                    "tenant_id": tenant,
+                    "user_id": user,
+                    "actor": "user",
+                    "source_type": "mcp-live",
+                    "content": "Stateless Postgres MCP persists durable queue jobs.",
+                    "trust_tier": 0,
+                },
+            },
+        }
+    )
+    queue = PostgresQueue(dsn, tenant_id=tenant)
+    other_queue = PostgresQueue(dsn, tenant_id=f"{tenant}-other")
+    leased = queue.lease(CONSOLIDATE_EVIDENCE_JOB)
+
+    assert ingested["result"]["isError"] is False
+    assert [job["kind"] for job in ingested["result"]["structuredContent"]["queued_jobs"]] == [CONSOLIDATE_EVIDENCE_JOB]
+    assert queue.snapshot()["running"] == 1
+    assert other_queue.snapshot() == {}
+    assert leased is not None
+    assert leased.kind == CONSOLIDATE_EVIDENCE_JOB
+    assert leased.payload["tenant_id"] == tenant
+
+
 def test_postgres_cli_ingests_file_with_c2pa_verifier(tmp_path) -> None:
     tenant = f"tenant-cli-c2pa-live-{uuid4()}"
     user = "user-cli-c2pa-live"
