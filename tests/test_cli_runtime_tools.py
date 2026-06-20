@@ -373,6 +373,46 @@ def test_cli_assert_write_rejects_untrusted_source(tmp_path: Path) -> None:
     assert allowed["security"]["allowed"] is True
 
 
+def test_cli_branch_write_requires_authorized_context(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    denied = run_raw_cli(
+        store,
+        "branch",
+        "--name",
+        "low-trust",
+        "--role",
+        "agent",
+        "--source-trust-tier",
+        "5",
+    )
+    allowed = run_cli(
+        store,
+        "branch",
+        "--name",
+        "candidate",
+        "--role",
+        "agent",
+        "--source-trust-tier",
+        "3",
+    )
+    promotion_denied = run_raw_cli(
+        store,
+        "merge",
+        "--from-branch",
+        "candidate",
+        "--role",
+        "agent",
+        "--source-trust-tier",
+        "0",
+    )
+
+    assert denied.returncode != 0
+    assert "branch denied" in denied.stderr
+    assert allowed["security"]["allowed"] is True
+    assert promotion_denied.returncode != 0
+    assert "merge denied" in promotion_denied.stderr
+
+
 def test_cli_forget_supports_hard_delete_erasure_mode(tmp_path: Path) -> None:
     store = tmp_path / "mnemosyne.json"
     captured = run_cli(
@@ -510,7 +550,18 @@ def test_cli_profile_graph_learning_and_parametric_flows_persist(tmp_path: Path)
         "--trust-tier",
         "0",
     )
-    confirmed = run_cli(store, "confirm", "--tenant", TENANT, "--id", proposed["id"])
+    confirmed = run_cli(
+        store,
+        "confirm",
+        "--tenant",
+        TENANT,
+        "--id",
+        proposed["id"],
+        "--role",
+        "operator",
+        "--source-trust-tier",
+        "0",
+    )
     superseded = run_cli(
         store,
         "supersede",

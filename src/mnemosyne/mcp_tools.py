@@ -534,10 +534,30 @@ class MemoryTools:
             "security": decision,
         }
 
-    def confirm(self, id: str, tenant_id: str | None = None, branch: str | None = None, into: str = "main") -> dict[str, Any]:
+    def confirm(
+        self,
+        id: str,
+        role: WriteRole,
+        source_trust_tier: int,
+        tenant_id: str | None = None,
+        branch: str | None = None,
+        into: str = "main",
+    ) -> dict[str, Any]:
+        decision = self._authorize(
+            "confirm",
+            role=role,
+            source_trust_tier=source_trust_tier,
+            target_sink="branch_promotion",
+        )
         proposal_branch = branch or self._find_candidate_branch(id, tenant_id)
         report = self._engine_merge(proposal_branch, into, tenant_id=tenant_id)
-        return {"id": id, "branch": proposal_branch, "into": into, "merge": report.to_dict()}
+        return {
+            "id": id,
+            "branch": proposal_branch,
+            "into": into,
+            "merge": report.to_dict(),
+            "security": decision,
+        }
 
     def supersede(
         self,
@@ -678,16 +698,64 @@ class MemoryTools:
             return id
         raise KeyError(f"proposal branch not found for {id}")
 
-    def branch(self, name: str, from_branch: str = "main", kind: str = "scratch", tenant_id: str | None = None) -> dict[str, Any]:
+    def branch(
+        self,
+        name: str,
+        role: WriteRole,
+        source_trust_tier: int,
+        from_branch: str = "main",
+        kind: str = "scratch",
+        tenant_id: str | None = None,
+    ) -> dict[str, Any]:
+        decision = self._authorize(
+            "branch",
+            role=role,
+            source_trust_tier=source_trust_tier,
+            target_sink="branch",
+        )
         self._engine_branch(name, from_branch, kind, tenant_id=tenant_id)
-        return {"branch": name, "from": from_branch, "kind": kind, "tenant_id": tenant_id}
+        return {
+            "branch": name,
+            "from": from_branch,
+            "kind": kind,
+            "tenant_id": tenant_id,
+            "security": decision,
+        }
 
-    def merge(self, from_branch: str, into: str = "main", tenant_id: str | None = None) -> dict[str, Any]:
-        return self._engine_merge(from_branch, into, tenant_id=tenant_id).to_dict()
+    def merge(
+        self,
+        from_branch: str,
+        role: WriteRole,
+        source_trust_tier: int,
+        into: str = "main",
+        tenant_id: str | None = None,
+    ) -> dict[str, Any]:
+        decision = self._authorize(
+            "merge",
+            role=role,
+            source_trust_tier=source_trust_tier,
+            target_sink="branch_promotion",
+        )
+        report = self._engine_merge(from_branch, into, tenant_id=tenant_id).to_dict()
+        report["security"] = decision
+        return report
 
-    def discard(self, branch: str, tenant_id: str | None = None) -> dict[str, Any]:
+    def discard(
+        self,
+        branch: str,
+        role: WriteRole,
+        source_trust_tier: int,
+        tenant_id: str | None = None,
+    ) -> dict[str, Any]:
+        decision = self._authorize(
+            "discard",
+            role=role,
+            source_trust_tier=source_trust_tier,
+            destructive=True,
+            target_sink="branch_promotion",
+        )
         self._engine_discard(branch, tenant_id=tenant_id)
-        return {"discarded": branch, "tenant_id": tenant_id}
+        return {"discarded": branch, "tenant_id": tenant_id, "security": decision}
 
     def profile_add(
         self,

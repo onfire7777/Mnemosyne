@@ -64,6 +64,8 @@ class SecurityPolicy:
     min_preference_write_trust: int = int(TrustTier.USER_AUTHORED)
     min_belief_write_trust: int = int(TrustTier.NORMAL)
     min_correction_write_trust: int = int(TrustTier.USER_AUTHORED)
+    min_branch_write_trust: int = int(TrustTier.NORMAL)
+    min_branch_promotion_trust: int = int(TrustTier.USER_AUTHORED)
     min_policy_write_trust: int = int(TrustTier.OPERATOR)
     min_destructive_trust: int = int(TrustTier.USER_AUTHORED)
     consolidator_only_ops: tuple[str, ...] = (
@@ -101,6 +103,10 @@ class SecurityPolicy:
             return CapabilityDecision(False, "belief writes require normal-or-stronger source trust", "agent", self.min_belief_write_trust, operation)
         if target_sink == "belief_correction" and not meets_trust(source_trust_tier, self.min_correction_write_trust):
             return CapabilityDecision(False, "belief corrections require user-authored or stronger evidence", "agent", self.min_correction_write_trust, operation)
+        if target_sink == "branch" and not meets_trust(source_trust_tier, self.min_branch_write_trust):
+            return CapabilityDecision(False, "branch writes require normal-or-stronger source trust", "agent", self.min_branch_write_trust, operation)
+        if target_sink == "branch_promotion" and (role not in {"consolidator", "operator"} or not meets_trust(source_trust_tier, self.min_branch_promotion_trust)):
+            return CapabilityDecision(False, "branch promotion requires operator/consolidator authority and user-authored trust", "consolidator", self.min_branch_promotion_trust, operation)
         if destructive and (role not in {"consolidator", "operator"} or not meets_trust(source_trust_tier, self.min_destructive_trust)):
             return CapabilityDecision(False, "destructive writes require mediated high-trust authority", "consolidator", self.min_destructive_trust, operation)
         return CapabilityDecision(True, "allowed", role, source_trust_tier, operation)
