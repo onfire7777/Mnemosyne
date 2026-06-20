@@ -31,7 +31,7 @@
 - Protected regression cases can now be persisted with CLI `gate-case-add/list`; consolidation handlers load the saved suite and block promotion when a protected case fails.
 - Promotion gates now route branch, merge, and discard through tenant-aware engine calls when available, with live Postgres coverage for gated direct-user fact promotion.
 - Externalized multimodal evidence now indexes metadata-derived `derived_text`, OCR text, transcripts, captions, alt text, and descriptions while keeping raw bytes in object storage. When derived text is absent, ingest queues an async `media_extract` job; the worker reads object-store bytes through an operator-configured command extractor, appends derived evidence, and queues consolidation for the derived row. Local, CLI, and live Postgres tests verify retrieval over derived media text.
-- CLI `ops-report` now emits a tenant dashboard snapshot with memory counts, audit/deletion counts, queue state, learning lesson diversity, proxy-vs-true gap, and tripwire status, and `--dashboard-html` writes the snapshot as a static HTML dashboard artifact with retrieval, calibration, learning, and gate/eval sections.
+- CLI `ops-report` now emits a tenant dashboard snapshot with memory counts, audit/deletion counts, queue state including running jobs, learning lesson diversity, proxy-vs-true gap, and tripwire status, and `--dashboard-html` writes the snapshot as a static HTML dashboard artifact with retrieval, calibration, learning, and gate/eval sections.
 
 ## Remaining Exact-Parity Gaps
 
