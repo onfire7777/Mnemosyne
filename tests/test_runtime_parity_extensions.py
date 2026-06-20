@@ -589,6 +589,8 @@ def test_consolidation_worker_distills_lessons_procedures_and_summary(tmp_path) 
     assert job is not None
     assert job.status == "complete"
     pass_results = {item["name"]: item for item in job.result["pass_results"]}
+    assert pass_results["resolver"]["details"]["strategy"] == "deterministic_entity_key"
+    assert pass_results["resolver"]["details"]["resolved_entities"][0]["key"] == "deployment-target"
     assert pass_results["summarizer"]["status"] == "complete"
     assert pass_results["summarizer"]["details"]["source_cids"] == [result.cid]
     assert pass_results["lesson_distiller"]["status"] == "complete"
@@ -601,7 +603,9 @@ def test_consolidation_worker_distills_lessons_procedures_and_summary(tmp_path) 
     procedure = next(iter(learning.procedures.values()))
     assert lesson.lesson_type == "observed-pattern"
     assert lesson.failure_signature == "consolidation:deployment target is local-first cli"
+    assert "resolve entity `deployment-target`" in lesson.content
     assert procedure.kind == "consolidation-checklist"
+    assert procedure.signature["entity_key"] == "deployment-target"
 
     second = worker.run_once(CONSOLIDATE_EVIDENCE_JOB)
 
