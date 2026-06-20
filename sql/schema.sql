@@ -274,6 +274,23 @@ CREATE TABLE IF NOT EXISTS audit_log (
   at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS runtime_jobs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL,
+  payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+  status TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued', 'running', 'retry', 'complete', 'dead')),
+  attempts INT NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+  max_attempts INT NOT NULL DEFAULT 3 CHECK (max_attempts > 0),
+  last_error TEXT,
+  result JSONB,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS runtime_jobs_tenant_status_kind_idx
+  ON runtime_jobs(tenant_id, status, kind, created_at);
+
 CREATE OR REPLACE FUNCTION mnemosyne_current_tenant()
 RETURNS UUID
 LANGUAGE sql
@@ -421,3 +438,10 @@ DROP POLICY IF EXISTS audit_log_tenant_isolation ON audit_log;
 CREATE POLICY audit_log_tenant_isolation ON audit_log
   USING (tenant_id IS NULL OR tenant_id = mnemosyne_current_tenant())
   WITH CHECK (tenant_id IS NULL OR tenant_id = mnemosyne_current_tenant());
+
+ALTER TABLE runtime_jobs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE runtime_jobs FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS runtime_jobs_tenant_isolation ON runtime_jobs;
+CREATE POLICY runtime_jobs_tenant_isolation ON runtime_jobs
+  USING (tenant_id = mnemosyne_current_tenant())
+  WITH CHECK (tenant_id = mnemosyne_current_tenant());

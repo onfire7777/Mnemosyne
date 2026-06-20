@@ -6,6 +6,7 @@ from collections import Counter, deque
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Callable
+from uuid import NAMESPACE_URL, uuid5
 
 from mnemosyne.ids import new_id
 
@@ -104,8 +105,248 @@ class InProcessQueue:
         return queue
 
 
+class PostgresQueueUnavailableError(RuntimeError):
+    """Raised when the optional Postgres queue dependency is not installed."""
+
+
+class PostgresQueue:
+    """Tenant-scoped durable queue backed by PostgreSQL row leasing."""
+
+    def __init__(self, dsn: str, tenant_id: str):
+        self.dsn = dsn
+        self.tenant_id = tenant_id
+        self._psycopg, self._jsonb, self._dict_row = _require_psycopg_queue()
+        self._leased: dict[str, QueueJob] = {}
+        self.ensure_schema()
+
+    def connect(self) -> Any:
+        return self._psycopg.connect(self.dsn)
+
+    @property
+    def jobs(self) -> dict[str, QueueJob]:
+        return {job.id: job for job in self.list_jobs()}
+
+    def ensure_schema(self) -> None:
+        with self.connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS runtime_jobs (
+                      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                      tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+                      kind TEXT NOT NULL,
+                      payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+                      status TEXT NOT NULL DEFAULT 'queued'
+                        CHECK (status IN ('queued', 'running', 'retry', 'complete', 'dead')),
+                      attempts INT NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+                      max_attempts INT NOT NULL DEFAULT 3 CHECK (max_attempts > 0),
+                      last_error TEXT,
+                      result JSONB,
+                      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                    )
+                    """
+                )
+                cur.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS runtime_jobs_tenant_status_kind_idx
+                    ON runtime_jobs(tenant_id, status, kind, created_at)
+                    """
+                )
+                cur.execute("ALTER TABLE runtime_jobs ENABLE ROW LEVEL SECURITY")
+                cur.execute("ALTER TABLE runtime_jobs FORCE ROW LEVEL SECURITY")
+                cur.execute("DROP POLICY IF EXISTS runtime_jobs_tenant_isolation ON runtime_jobs")
+                cur.execute(
+                    """
+                    CREATE POLICY runtime_jobs_tenant_isolation ON runtime_jobs
+                      USING (tenant_id = mnemosyne_current_tenant())
+                      WITH CHECK (tenant_id = mnemosyne_current_tenant())
+                    """
+                )
+
+    def enqueue(self, kind: str, payload: dict[str, Any], max_attempts: int = 3) -> QueueJob:
+        job = QueueJob(kind=kind, payload=dict(payload), max_attempts=max_attempts)
+        db_tenant_id = self._tenant_db_id()
+        with self.connect() as conn:
+            with conn.cursor(row_factory=self._dict_row) as cur:
+                self._ensure_tenant(cur, db_tenant_id)
+                cur.execute(
+                    """
+                    INSERT INTO runtime_jobs(
+                      id, tenant_id, kind, payload, status, attempts, max_attempts,
+                      last_error, result, created_at, updated_at
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING *
+                    """,
+                    (
+                        job.id,
+                        db_tenant_id,
+                        job.kind,
+                        self._jsonb(job.payload),
+                        job.status,
+                        job.attempts,
+                        job.max_attempts,
+                        job.last_error,
+                        self._jsonb(job.result),
+                        job.created_at,
+                        job.updated_at,
+                    ),
+                )
+                return _job_from_row(cur.fetchone())
+
+    def lease(self, kind: str | None = None) -> QueueJob | None:
+        db_tenant_id = self._tenant_db_id()
+        with self.connect() as conn:
+            with conn.cursor(row_factory=self._dict_row) as cur:
+                self._ensure_tenant(cur, db_tenant_id)
+                if kind:
+                    cur.execute(
+                        """
+                        SELECT id
+                        FROM runtime_jobs
+                        WHERE tenant_id = %s
+                          AND status IN ('queued', 'retry')
+                          AND kind = %s
+                        ORDER BY created_at ASC, id ASC
+                        FOR UPDATE SKIP LOCKED
+                        LIMIT 1
+                        """,
+                        (db_tenant_id, kind),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        SELECT id
+                        FROM runtime_jobs
+                        WHERE tenant_id = %s
+                          AND status IN ('queued', 'retry')
+                        ORDER BY created_at ASC, id ASC
+                        FOR UPDATE SKIP LOCKED
+                        LIMIT 1
+                        """,
+                        (db_tenant_id,),
+                    )
+                row = cur.fetchone()
+                if row is None:
+                    return None
+                cur.execute(
+                    """
+                    UPDATE runtime_jobs
+                    SET status = 'running',
+                        attempts = attempts + 1,
+                        updated_at = now()
+                    WHERE id = %s AND tenant_id = %s
+                    RETURNING *
+                    """,
+                    (row["id"], db_tenant_id),
+                )
+                job = _job_from_row(cur.fetchone())
+                self._leased[job.id] = job
+                return job
+
+    def complete(self, job_id: str) -> None:
+        job = self._leased.pop(job_id, None)
+        if job:
+            job.status = "complete"
+            job.updated_at = datetime.now(UTC)
+        self._update_status(job_id, status="complete", result=job.result if job else None)
+
+    def fail(self, job_id: str, error: str) -> None:
+        job = self._leased.pop(job_id, None) or self._get_job(job_id)
+        status = "dead" if job and job.attempts >= job.max_attempts else "retry"
+        if job:
+            job.status = status
+            job.last_error = error
+            job.updated_at = datetime.now(UTC)
+        self._update_status(job_id, status=status, last_error=error)
+
+    def snapshot(self) -> dict[str, int]:
+        db_tenant_id = self._tenant_db_id()
+        with self.connect() as conn:
+            with conn.cursor(row_factory=self._dict_row) as cur:
+                self._ensure_tenant(cur, db_tenant_id)
+                cur.execute(
+                    """
+                    SELECT status, count(*) AS count
+                    FROM runtime_jobs
+                    WHERE tenant_id = %s
+                    GROUP BY status
+                    """,
+                    (db_tenant_id,),
+                )
+                return {str(row["status"]): int(row["count"]) for row in cur.fetchall()}
+
+    def list_jobs(self) -> list[QueueJob]:
+        db_tenant_id = self._tenant_db_id()
+        with self.connect() as conn:
+            with conn.cursor(row_factory=self._dict_row) as cur:
+                self._ensure_tenant(cur, db_tenant_id)
+                cur.execute(
+                    """
+                    SELECT *
+                    FROM runtime_jobs
+                    WHERE tenant_id = %s
+                    ORDER BY created_at ASC, id ASC
+                    """,
+                    (db_tenant_id,),
+                )
+                return [_job_from_row(row) for row in cur.fetchall()]
+
+    def _update_status(
+        self,
+        job_id: str,
+        *,
+        status: str,
+        result: Any | None = None,
+        last_error: str | None = None,
+    ) -> None:
+        db_tenant_id = self._tenant_db_id()
+        with self.connect() as conn:
+            with conn.cursor() as cur:
+                self._ensure_tenant(cur, db_tenant_id)
+                cur.execute(
+                    """
+                    UPDATE runtime_jobs
+                    SET status = %s,
+                        result = COALESCE(%s, result),
+                        last_error = COALESCE(%s, last_error),
+                        updated_at = now()
+                    WHERE id = %s AND tenant_id = %s
+                    """,
+                    (status, self._jsonb(result), last_error, job_id, db_tenant_id),
+                )
+
+    def _get_job(self, job_id: str) -> QueueJob | None:
+        db_tenant_id = self._tenant_db_id()
+        with self.connect() as conn:
+            with conn.cursor(row_factory=self._dict_row) as cur:
+                self._ensure_tenant(cur, db_tenant_id)
+                cur.execute(
+                    "SELECT * FROM runtime_jobs WHERE id = %s AND tenant_id = %s",
+                    (job_id, db_tenant_id),
+                )
+                row = cur.fetchone()
+                return _job_from_row(row) if row else None
+
+    def _tenant_db_id(self) -> str:
+        return str(uuid5(NAMESPACE_URL, f"mnemosyne:tenant:{self.tenant_id}"))
+
+    def _ensure_tenant(self, cur: Any, db_tenant_id: str) -> None:
+        cur.execute(
+            "INSERT INTO tenants(id, name) VALUES (%s, %s) ON CONFLICT (id) DO NOTHING",
+            (db_tenant_id, self.tenant_id),
+        )
+        cur.execute("SELECT set_config('mnemosyne.tenant_id', %s, true)", (db_tenant_id,))
+
+
 class QueueWorker:
-    def __init__(self, queue: InProcessQueue, handlers: dict[str, Callable[[dict[str, Any]], Any]], metrics: Any | None = None):
+    def __init__(
+        self,
+        queue: InProcessQueue | PostgresQueue,
+        handlers: dict[str, Callable[[dict[str, Any]], Any]],
+        metrics: Any | None = None,
+    ):
         self.queue = queue
         self.handlers = handlers
         self.metrics = metrics
@@ -152,3 +393,28 @@ def _parse_dt(value: str | datetime | None) -> datetime:
         return datetime.now(UTC)
     parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     return parsed.astimezone(UTC) if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+
+def _require_psycopg_queue() -> tuple[Any, Any, Any]:
+    try:
+        import psycopg  # type: ignore[import-not-found]
+        from psycopg.rows import dict_row  # type: ignore[import-not-found]
+        from psycopg.types.json import Jsonb  # type: ignore[import-not-found]
+    except ModuleNotFoundError as exc:  # pragma: no cover - exercised when optional dep absent.
+        raise PostgresQueueUnavailableError("Install mnemosyne-memory[postgres] to use PostgresQueue.") from exc
+    return psycopg, Jsonb, dict_row
+
+
+def _job_from_row(row: dict[str, Any]) -> QueueJob:
+    return QueueJob(
+        id=str(row["id"]),
+        kind=str(row["kind"]),
+        payload=dict(row["payload"] or {}),
+        max_attempts=int(row["max_attempts"]),
+        status=str(row["status"]),
+        attempts=int(row["attempts"]),
+        created_at=_parse_dt(row["created_at"]),
+        updated_at=_parse_dt(row["updated_at"]),
+        last_error=row.get("last_error"),
+        result=row.get("result"),
+    )

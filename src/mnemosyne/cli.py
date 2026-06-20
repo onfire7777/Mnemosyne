@@ -23,7 +23,7 @@ from mnemosyne.models import Hit
 from mnemosyne.observability import MetricsRegistry, build_ops_report, render_ops_dashboard
 from mnemosyne.parametric import ParametricArtifactStore, ParametricTier
 from mnemosyne.provenance import C2paToolVerifier, ProvenanceTrustPolicy, SignedProvenanceVerifier
-from mnemosyne.queue import InProcessQueue, QueueWorker
+from mnemosyne.queue import InProcessQueue, PostgresQueue, QueueWorker
 from mnemosyne.retrieval import HashingEmbeddingProvider, HttpEmbeddingProvider, HttpReranker, LocalSimilarityReranker, RetrievalAdapters
 from mnemosyne.runtime_state import RuntimeState
 from mnemosyne.storage import EncryptedLocalObjectStore, JsonKeyManager, LocalObjectStore
@@ -167,9 +167,23 @@ def load_runtime_state(args: argparse.Namespace) -> RuntimeState | None:
     return RuntimeState.from_store_path(Path(args.store))
 
 
+def load_queue(args: argparse.Namespace, runtime_state: RuntimeState | None = None) -> InProcessQueue | PostgresQueue:
+    if args.queue_backend == "postgres":
+        dsn = args.postgres_dsn or os.environ.get("MNEMOSYNE_POSTGRES_DSN")
+        if not dsn:
+            raise SystemExit("--queue-backend postgres requires --postgres-dsn or MNEMOSYNE_POSTGRES_DSN.")
+        tenant_id = getattr(args, "tenant", None) or args.queue_tenant
+        return PostgresQueue(dsn, tenant_id=tenant_id)
+    return runtime_state.load_queue() if runtime_state else InProcessQueue()
+
+
+def queue_uses_runtime_state(args: argparse.Namespace) -> bool:
+    return args.queue_backend == "local"
+
+
 def load_tools(
     args: argparse.Namespace,
-    ingestion_queue: InProcessQueue | None = None,
+    ingestion_queue: InProcessQueue | PostgresQueue | None = None,
     runtime_state: RuntimeState | None = None,
 ) -> MemoryTools:
     store = Path(args.store)
@@ -239,7 +253,7 @@ def load_signed_provenance(args: argparse.Namespace) -> dict[str, Any] | None:
 
 def cmd_ingest(args: argparse.Namespace) -> None:
     runtime_state = load_runtime_state(args)
-    ingestion_queue = None if args.no_enqueue_consolidation else runtime_state.load_queue() if runtime_state else InProcessQueue()
+    ingestion_queue = None if args.no_enqueue_consolidation else load_queue(args, runtime_state)
     tools = load_tools(args, ingestion_queue=ingestion_queue, runtime_state=runtime_state)
     data = Path(args.file).read_bytes() if args.file else None
     content = args.content
@@ -284,7 +298,7 @@ def cmd_ingest(args: argparse.Namespace) -> None:
             "job": job.to_dict() if job else None,
             "metrics": metrics.snapshot().to_dict(),
         }
-    if runtime_state and ingestion_queue:
+    if runtime_state and ingestion_queue and queue_uses_runtime_state(args):
         runtime_state.save_queue(ingestion_queue)
     emit(result)
 
@@ -704,7 +718,7 @@ def cmd_eval(args: argparse.Namespace) -> None:
 
 def cmd_queue_snapshot(args: argparse.Namespace) -> None:
     runtime_state = load_runtime_state(args)
-    queue = runtime_state.load_queue() if runtime_state else InProcessQueue()
+    queue = load_queue(args, runtime_state)
     emit({"queue": queue.snapshot(), "jobs": [job.to_dict() for job in queue.jobs.values()]})
 
 
@@ -732,16 +746,16 @@ def cmd_gate_case_list(args: argparse.Namespace) -> None:
 
 def cmd_queue_enqueue(args: argparse.Namespace) -> None:
     runtime_state = load_runtime_state(args)
-    queue = runtime_state.load_queue() if runtime_state else InProcessQueue()
+    queue = load_queue(args, runtime_state)
     job = queue.enqueue(args.kind, parse_json_arg(args.payload, {}), max_attempts=args.max_attempts)
-    if runtime_state:
+    if runtime_state and queue_uses_runtime_state(args):
         runtime_state.save_queue(queue)
     emit({"queue": queue.snapshot(), "job": job.to_dict()})
 
 
 def cmd_consolidate_once(args: argparse.Namespace) -> None:
     runtime_state = load_runtime_state(args)
-    queue = runtime_state.load_queue() if runtime_state else InProcessQueue()
+    queue = load_queue(args, runtime_state)
     tools = load_tools(args, ingestion_queue=queue, runtime_state=runtime_state)
     metrics = MetricsRegistry()
     handlers = RuntimeJobHandlers(
@@ -755,15 +769,17 @@ def cmd_consolidate_once(args: argparse.Namespace) -> None:
     )
     worker = QueueWorker(queue, handlers.handlers(), metrics=metrics)
     job = worker.run_once(CONSOLIDATE_EVIDENCE_JOB)
-    if runtime_state:
+    if runtime_state and queue_uses_runtime_state(args):
         runtime_state.save_queue(queue)
+        runtime_state.save_learning(tools.learning)
+    elif runtime_state:
         runtime_state.save_learning(tools.learning)
     emit({"queue": queue.snapshot(), "job": job.to_dict() if job else None, "metrics": metrics.snapshot().to_dict()})
 
 
 def cmd_queue_drain(args: argparse.Namespace) -> None:
     runtime_state = load_runtime_state(args)
-    queue = runtime_state.load_queue() if runtime_state else InProcessQueue()
+    queue = load_queue(args, runtime_state)
     tools = load_tools(args, ingestion_queue=queue, runtime_state=runtime_state)
     metrics = MetricsRegistry()
     handlers = RuntimeJobHandlers(
@@ -777,8 +793,10 @@ def cmd_queue_drain(args: argparse.Namespace) -> None:
     )
     worker = QueueWorker(queue, handlers.handlers(), metrics=metrics)
     jobs = worker.drain(limit=args.limit, kind=args.kind)
-    if runtime_state:
+    if runtime_state and queue_uses_runtime_state(args):
         runtime_state.save_queue(queue)
+        runtime_state.save_learning(tools.learning)
+    elif runtime_state:
         runtime_state.save_learning(tools.learning)
     emit({"queue": queue.snapshot(), "jobs": [job.to_dict() for job in jobs], "metrics": metrics.snapshot().to_dict()})
 
@@ -886,6 +904,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--backend", choices=["local", "postgres"], default=default_backend(), help="Storage backend")
     parser.add_argument("--store", default=str(default_store()), help="Path to local JSON store")
     parser.add_argument("--postgres-dsn", default=default_postgres_dsn(), help="PostgreSQL DSN for --backend postgres")
+    parser.add_argument(
+        "--queue-backend",
+        choices=["local", "postgres"],
+        default=os.environ.get("MNEMOSYNE_QUEUE_BACKEND", "local"),
+        help="Runtime job queue backend",
+    )
+    parser.add_argument(
+        "--queue-tenant",
+        default=os.environ.get("MNEMOSYNE_QUEUE_TENANT", "system"),
+        help="Tenant used by standalone Postgres queue commands",
+    )
     parser.add_argument("--object-store", default=default_object_store(), help="Path to local object storage for externalized payloads")
     parser.add_argument(
         "--object-store-encryption",

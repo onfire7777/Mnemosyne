@@ -13,12 +13,12 @@ import pytest
 from mnemosyne.consolidation import CONSOLIDATE_EVIDENCE_JOB, ConsolidationWorker
 from mnemosyne.gate import RegressionCase
 from mnemosyne.ingestion import IngestRequest, IngestionPipeline
-from mnemosyne.jobs import RuntimeJobHandlers
+from mnemosyne.jobs import CALIBRATE_JOB, RuntimeJobHandlers
 from mnemosyne.media import MEDIA_EXTRACT_JOB, MediaExtractionResult
 from mnemosyne.mcp_server import MnemosyneMcpServer
 from mnemosyne.models import Assertion, Evidence, Preference, Relation
 from mnemosyne.postgres_engine import PostgresEngine
-from mnemosyne.queue import InProcessQueue, QueueWorker
+from mnemosyne.queue import InProcessQueue, PostgresQueue, QueueWorker
 from mnemosyne.storage import LocalObjectStore
 
 
@@ -40,6 +40,75 @@ def run_postgres_cli(*args: str) -> dict:
         capture_output=True,
     )
     return json.loads(result.stdout)
+
+
+def test_postgres_queue_lifecycle_and_tenant_isolation_live() -> None:
+    tenant = f"tenant-queue-live-{uuid4()}"
+    other_tenant = f"tenant-queue-other-{uuid4()}"
+    queue = PostgresQueue(live_dsn(), tenant_id=tenant)
+    other_queue = PostgresQueue(live_dsn(), tenant_id=other_tenant)
+
+    enqueued = queue.enqueue(
+        CALIBRATE_JOB,
+        {"tenant_id": tenant, "scores": [0.1, 0.2, 0.3], "target_coverage": 0.9},
+        max_attempts=2,
+    )
+    assert queue.snapshot()["queued"] == 1
+    assert other_queue.lease() is None
+
+    leased = queue.lease(CALIBRATE_JOB)
+    assert leased is not None
+    assert leased.id == enqueued.id
+    assert leased.status == "running"
+    assert leased.attempts == 1
+    leased.result = {"ok": True}
+    queue.complete(leased.id)
+
+    jobs = queue.jobs
+    assert jobs[leased.id].status == "complete"
+    assert jobs[leased.id].result == {"ok": True}
+    assert queue.snapshot()["complete"] == 1
+    assert other_queue.snapshot() == {}
+
+
+def test_postgres_queue_cli_enqueue_and_drain_live() -> None:
+    tenant = f"tenant-queue-cli-{uuid4()}"
+    payload = {
+        "tenant_id": tenant,
+        "scores": [0.2, 0.4, 0.8],
+        "target_coverage": 0.9,
+        "confidence": 0.35,
+        "prediction_set_size": 2,
+    }
+    enqueued = run_postgres_cli(
+        "--queue-backend",
+        "postgres",
+        "--queue-tenant",
+        tenant,
+        "queue-enqueue",
+        "--kind",
+        CALIBRATE_JOB,
+        "--payload",
+        json.dumps(payload),
+    )
+    drained = run_postgres_cli(
+        "--queue-backend",
+        "postgres",
+        "--queue-tenant",
+        tenant,
+        "queue-drain",
+        "--kind",
+        CALIBRATE_JOB,
+        "--limit",
+        "1",
+    )
+    after = run_postgres_cli("--queue-backend", "postgres", "--queue-tenant", tenant, "queue-snapshot")
+
+    assert enqueued["queue"]["queued"] == 1
+    assert drained["jobs"][0]["status"] == "complete"
+    assert drained["jobs"][0]["result"]["kind"] == "calibrate"
+    assert drained["jobs"][0]["result"]["details"]["tenant_id"] == tenant
+    assert after["queue"]["complete"] == 1
 
 
 class StaticMediaExtractor:

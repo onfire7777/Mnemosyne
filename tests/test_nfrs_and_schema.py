@@ -96,6 +96,7 @@ def test_canonical_schema_includes_all_blueprint_core_tables() -> None:
         "merges",
         "deletion_log",
         "conformal_calibration",
+        "runtime_jobs",
     }
 
     for table in required_tables:
@@ -114,7 +115,16 @@ def test_schema_enables_tenant_row_level_security() -> None:
     schema = Path("sql/schema.sql").read_text(encoding="utf-8")
 
     assert "CREATE OR REPLACE FUNCTION mnemosyne_current_tenant()" in schema
-    for table in ["branches", "evidence", "assertions", "relations", "preferences", "deletion_log", "audit_log"]:
+    for table in [
+        "branches",
+        "evidence",
+        "assertions",
+        "relations",
+        "preferences",
+        "deletion_log",
+        "audit_log",
+        "runtime_jobs",
+    ]:
         assert f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY;" in schema
         assert f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY;" in schema
         assert f"CREATE POLICY {table}_tenant_isolation ON {table}" in schema
