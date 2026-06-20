@@ -703,10 +703,29 @@ def test_ops_dashboard_renderer_escapes_snapshot_values() -> None:
         "tenant_id": "<tenant>",
         "counts": {"evidence": 2, "assertions": 1, "relations": 0, "preferences": 1},
         "queue": {"queued": 3},
-        "metrics": {"counters": {"gate.promotions": 2, "gate.rollbacks": 1}},
+        "learning": {"lessons": 2, "procedures": 1, "lesson_diversity": 0.5},
+        "metrics": {
+            "counters": {
+                "retrieval.requests": 4,
+                "retrieval.abstentions": 1,
+                "retrieval.channel.lexical.hits": 3,
+                "calibration.jobs": 2,
+                "calibration.abstentions": 1,
+                "gate.promotions": 2,
+                "gate.rollbacks": 1,
+                "eval.cases.passed": 5,
+            },
+            "gauges": {
+                "retrieval.latency_ms.p95": 12.5,
+                "calibration.fact.threshold": 0.42,
+            },
+            "samples": {"retrieval.latency_ms": [8.0, 12.5]},
+        },
         "tripwires": {
             "passed": False,
             "open_contradictions": 1,
+            "proxy_true_gap": 0.3,
+            "max_proxy_gap": 0.15,
             "gate_promotions": 2,
             "gate_rollbacks": 1,
         },
@@ -719,6 +738,11 @@ def test_ops_dashboard_renderer_escapes_snapshot_values() -> None:
     assert "&lt;tenant&gt;" in dashboard
     assert "<tenant>" not in dashboard
     assert "ATTENTION" in dashboard
+    assert "Retrieval" in dashboard
+    assert "Calibration" in dashboard
+    assert "p95 latency ms" in dashboard
+    assert "0.42" in dashboard
+    assert "Eval passed" in dashboard
     assert "Snapshot JSON" in dashboard
 
 

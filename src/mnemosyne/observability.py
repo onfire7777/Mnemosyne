@@ -137,22 +137,69 @@ def render_ops_dashboard(report: dict[str, Any]) -> str:
     counts = report.get("counts", {})
     queue = report.get("queue", {})
     tripwires = report.get("tripwires", {})
+    learning = report.get("learning", {})
     metrics = report.get("metrics", {})
     counters = metrics.get("counters", {}) if isinstance(metrics, dict) else {}
-    cards = [
+    gauges = metrics.get("gauges", {}) if isinstance(metrics, dict) else {}
+    samples = metrics.get("samples", {}) if isinstance(metrics, dict) else {}
+    memory_cards = [
         ("Evidence", counts.get("evidence", 0)),
         ("Assertions", counts.get("assertions", 0)),
+        ("Active assertions", counts.get("active_assertions", 0)),
+        ("Contested assertions", counts.get("contested_assertions", 0)),
         ("Relations", counts.get("relations", 0)),
         ("Preferences", counts.get("preferences", 0)),
+        ("Audit events", counts.get("audit_events", 0)),
+        ("Deletions", counts.get("deletions", 0)),
         ("Open contradictions", tripwires.get("open_contradictions", 0)),
+    ]
+    queue_cards = [
         ("Queue depth", queue.get("queued", 0)),
+        ("Active jobs", queue.get("active", 0)),
+        ("Retry jobs", queue.get("retry", 0)),
+        ("Completed jobs", queue.get("complete", 0)),
+        ("Dead jobs", queue.get("dead", 0)),
+    ]
+    retrieval_cards = [
+        ("Requests", counters.get("retrieval.requests", 0)),
+        ("Abstentions", counters.get("retrieval.abstentions", 0)),
+        ("Lexical hits", counters.get("retrieval.channel.lexical.hits", 0)),
+        ("Dense hits", counters.get("retrieval.channel.dense_hash.hits", 0)),
+        ("Graph hits", counters.get("retrieval.channel.graph_ppr.hits", 0)),
+        ("p95 latency ms", gauges.get("retrieval.latency_ms.p95", 0)),
+        ("Latency samples", len(samples.get("retrieval.latency_ms", []))),
+    ]
+    calibration_cards = [
+        ("Calibration jobs", counters.get("calibration.jobs", 0)),
+        ("Calibration abstentions", counters.get("calibration.abstentions", 0)),
+        ("Proxy true gap", tripwires.get("proxy_true_gap", "n/a")),
+        ("Max proxy gap", tripwires.get("max_proxy_gap", "n/a")),
+        ("Fact threshold", gauges.get("calibration.fact.threshold", "n/a")),
+        ("Preference threshold", gauges.get("calibration.preference.threshold", "n/a")),
+    ]
+    learning_cards = [
+        ("Lessons", learning.get("lessons", 0)),
+        ("Procedures", learning.get("procedures", 0)),
+        ("Lesson diversity", learning.get("lesson_diversity", "n/a")),
+        ("Min diversity", tripwires.get("min_diversity", "n/a")),
+    ]
+    gate_cards = [
         ("Gate promotions", tripwires.get("gate_promotions", counters.get("gate.promotions", 0))),
         ("Gate rollbacks", tripwires.get("gate_rollbacks", counters.get("gate.rollbacks", 0))),
+        ("Eval passed", counters.get("eval.cases.passed", 0)),
+        ("Eval failed", counters.get("eval.cases.failed", 0)),
+        ("Lifecycle sweeps", counters.get("lifecycle.sweeps", 0)),
+        ("Lifecycle demotions", counters.get("lifecycle.demotions", 0)),
     ]
-    card_html = "\n".join(
-        f"<section class=\"card\"><div class=\"label\">{html.escape(label)}</div>"
-        f"<div class=\"value\">{html.escape(str(value))}</div></section>"
-        for label, value in cards
+    sections = "\n".join(
+        [
+            _render_dashboard_section("Memory State", memory_cards),
+            _render_dashboard_section("Queue", queue_cards),
+            _render_dashboard_section("Retrieval", retrieval_cards),
+            _render_dashboard_section("Calibration", calibration_cards),
+            _render_dashboard_section("Learning", learning_cards),
+            _render_dashboard_section("Gates and Eval", gate_cards),
+        ]
     )
     tripwire_class = "ok" if tripwires.get("passed") else "alert"
     tripwire_text = "PASS" if tripwires.get("passed") else "ATTENTION"
@@ -173,6 +220,8 @@ def render_ops_dashboard(report: dict[str, Any]) -> str:
     .label {{ color: #5b6675; font-size: 13px; }}
     .value {{ font-size: 28px; font-weight: 700; margin-top: 6px; }}
     .status {{ display: inline-block; margin-top: 8px; padding: 4px 8px; border-radius: 4px; font-weight: 700; }}
+    section.dashboard-section {{ margin: 0 0 24px; }}
+    h2 {{ margin: 0 0 12px; }}
     .ok {{ background: #dcfce7; color: #14532d; }}
     .alert {{ background: #fee2e2; color: #7f1d1d; }}
     pre {{ white-space: pre-wrap; background: #101827; color: #e6edf7; border-radius: 6px; padding: 16px; overflow: auto; }}
@@ -185,13 +234,33 @@ def render_ops_dashboard(report: dict[str, Any]) -> str:
     <span class="status {tripwire_class}">{tripwire_text}</span>
   </header>
   <main>
-    <div class="grid">{card_html}</div>
+    {sections}
     <h2>Snapshot JSON</h2>
     <pre>{snapshot}</pre>
   </main>
 </body>
 </html>
 """
+
+
+def _render_dashboard_section(title: str, cards: list[tuple[str, Any]]) -> str:
+    card_html = "\n".join(
+        f"<section class=\"card\"><div class=\"label\">{html.escape(label)}</div>"
+        f"<div class=\"value\">{html.escape(_format_dashboard_value(value))}</div></section>"
+        for label, value in cards
+    )
+    return (
+        f"<section class=\"dashboard-section\"><h2>{html.escape(title)}</h2>"
+        f"<div class=\"grid\">{card_html}</div></section>"
+    )
+
+
+def _format_dashboard_value(value: Any) -> str:
+    if value is None:
+        return "n/a"
+    if isinstance(value, float):
+        return f"{value:.3f}".rstrip("0").rstrip(".")
+    return str(value)
 
 
 def _percentile(values: list[float], percentile: int) -> float:
