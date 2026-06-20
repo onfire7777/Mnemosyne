@@ -13,7 +13,7 @@ from mnemosyne.models import Assertion, Contradiction, Evidence, Preference, Rel
 from mnemosyne.observability import MetricsRegistry, build_ops_report, render_ops_dashboard
 from mnemosyne.parametric import ParametricArtifactStore, ParametricTier
 from mnemosyne.prefetch import AnticipatoryPrefetcher, PrefetchCandidate
-from mnemosyne.provenance import C2paToolVerifier, SignedProvenanceVerifier
+from mnemosyne.provenance import C2paToolVerifier, ProvenanceTrustPolicy, SignedProvenanceVerifier
 from mnemosyne.queue import InProcessQueue, QueueWorker
 from mnemosyne.storage import EncryptedLocalObjectStore, JsonKeyManager, LocalObjectStore
 
@@ -140,6 +140,125 @@ def test_c2pa_tool_verifier_trusts_configured_issuer_and_quarantines_failures(tm
     assert failed.trust_delta > 0
     assert invalid.quarantine is True
     assert invalid.reason == "c2pa verifier returned invalid json"
+
+
+def test_c2pa_tool_verifier_enforces_required_trusted_issuer_policy(tmp_path) -> None:
+    payload = b"camera bytes"
+    asset_hash = sha256(payload).hexdigest()
+    asset = tmp_path / "photo.jpg"
+    asset.write_bytes(payload)
+    verifier_stub = tmp_path / "c2pa-ok.py"
+    verifier_stub.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env python3",
+                "import json",
+                f"print(json.dumps({{'active_manifest': 'manifest-1', 'claim_generator': 'issuer-b', 'asset_sha256': '{asset_hash}'}}))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    verifier_stub.chmod(0o755)
+    trust_policy = ProvenanceTrustPolicy(trusted_issuers=("issuer-a",), require_trusted_issuer=True)
+
+    decision = C2paToolVerifier(tool_path=str(verifier_stub), trust_policy=trust_policy).verify(
+        payload, {"asset_path": str(asset)}
+    )
+
+    assert decision.valid is True
+    assert decision.trusted is False
+    assert decision.quarantine is True
+    assert decision.trust_delta == 5
+    assert decision.reason == "c2pa manifest valid but signer rejected by trust policy"
+    assert decision.diagnostics["signer"] == "issuer-b"
+    assert decision.diagnostics["trust_policy"] == {
+        "require_trusted_issuer": True,
+        "trusted_issuers": ["issuer-a"],
+    }
+    assert decision.manifest is not None
+    assert decision.manifest["c2pa"]["asset_binding"] == {
+        "bound": True,
+        "method": "sha256",
+        "sha256": asset_hash,
+    }
+
+
+def test_c2pa_tool_verifier_enforces_scoped_trust_policy(tmp_path) -> None:
+    payload = b"camera bytes"
+    asset_hash = sha256(payload).hexdigest()
+    asset = tmp_path / "photo.jpg"
+    asset.write_bytes(payload)
+    verifier_stub = tmp_path / "c2pa-ok.py"
+    verifier_stub.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env python3",
+                "import json",
+                f"print(json.dumps({{'active_manifest': 'manifest-1', 'claim_generator': 'issuer-b', 'asset_sha256': '{asset_hash}'}}))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    verifier_stub.chmod(0o755)
+    trust_policy = ProvenanceTrustPolicy.from_dict(
+        {
+            "rules": [
+                {
+                    "scope": {"tenant_id": TENANT, "source_type": "camera", "modality": "image"},
+                    "trusted_issuers": ["issuer-b"],
+                }
+            ]
+        }
+    )
+    verifier = C2paToolVerifier(tool_path=str(verifier_stub), trust_policy=trust_policy)
+
+    trusted = verifier.verify(
+        payload,
+        {
+            "asset_path": str(asset),
+            "_ingest_context": {
+                "tenant_id": TENANT,
+                "source_type": "camera",
+                "modality": "image",
+            },
+        },
+    )
+    denied = verifier.verify(
+        payload,
+        {
+            "asset_path": str(asset),
+            "_ingest_context": {
+                "tenant_id": TENANT,
+                "source_type": "upload",
+                "modality": "image",
+            },
+        },
+    )
+
+    assert trusted.trusted is True
+    assert trusted.quarantine is False
+    assert trusted.diagnostics["trust_policy"] == {
+        "require_trusted_issuer": True,
+        "trusted_issuers": ["issuer-b"],
+    }
+    assert "_ingest_context" not in trusted.manifest
+    assert denied.valid is True
+    assert denied.trusted is False
+    assert denied.quarantine is True
+    assert denied.reason == "c2pa manifest valid but signer rejected by trust policy"
+    assert denied.diagnostics["trust_policy"] == {
+        "require_trusted_issuer": True,
+        "trusted_issuers": [],
+    }
+
+
+def test_provenance_trust_policy_rejects_ambiguous_boolean_values() -> None:
+    try:
+        ProvenanceTrustPolicy.from_dict({"require_trusted_issuer": "false"})
+    except ValueError as exc:
+        assert "require_trusted_issuer must be boolean" in str(exc)
+    else:
+        raise AssertionError("expected boolean policy validation failure")
 
 
 def test_c2pa_tool_verifier_quarantines_asset_hash_mismatch(tmp_path) -> None:
