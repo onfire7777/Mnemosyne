@@ -1479,6 +1479,31 @@ def test_cli_encrypted_object_store_can_use_command_key_provider(tmp_path: Path)
     assert forgotten["object_shred"]["reason"] == "key_shredded"
 
 
+def test_cli_provider_check_validates_command_key_provider(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    objects = tmp_path / "objects"
+    command, kms_state = fake_kms_command(tmp_path)
+    checked = run_cli(
+        store,
+        "--object-store",
+        str(objects),
+        "--object-store-encryption",
+        "aesgcm",
+        "--object-key-provider",
+        "command",
+        "--object-key-command",
+        command,
+        "provider-check",
+    )
+    state = json.loads(kms_state.read_text(encoding="utf-8"))
+
+    assert checked["ok"] is True
+    assert checked["checks"]["object_key_manager"]["ok"] is True
+    assert checked["checks"]["object_key_manager"]["provider"] == "command"
+    assert checked["checks"]["object_key_manager"]["shredded"] is True
+    assert state["keys"] == {}
+
+
 def test_cli_parametric_tier_can_use_command_provider(tmp_path: Path) -> None:
     store = tmp_path / "mnemosyne.json"
     command, provider_state = fake_parametric_command(tmp_path)

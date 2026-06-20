@@ -1095,6 +1095,42 @@ def cmd_provider_check(args: argparse.Namespace) -> None:
     else:
         checks["parametric"] = {"ok": True, "provider": "local", "skipped": True}
 
+    if args.object_store_encryption == "aesgcm":
+        try:
+            manager = load_object_key_manager(args)
+            tenant_id = "provider-health"
+            cid = sha256(b"mnemosyne object key provider health check").hexdigest()
+            key = manager.get_or_create_key(tenant_id, cid)
+            exists = manager.has_key(tenant_id, cid)
+            fetched = manager.get_key(tenant_id, cid)
+            shredded = manager.shred_key(tenant_id, cid)
+            if len(key) != 32 or fetched != key:
+                raise ValueError("object key provider did not return a stable 32-byte AES-256 key")
+            if not exists:
+                raise ValueError("object key provider failed has_key after get_or_create_key")
+            if not shredded:
+                raise ValueError("object key provider failed shred_key after health check")
+            checks["object_key_manager"] = {
+                "ok": True,
+                "provider": args.object_key_provider,
+                "key_id": manager.key_id(tenant_id, cid),
+                "shredded": True,
+            }
+        except Exception as exc:  # noqa: BLE001 - health checks return structured failures.
+            ok = False
+            checks["object_key_manager"] = {
+                "ok": False,
+                "provider": args.object_key_provider,
+                "error": str(exc),
+            }
+    else:
+        checks["object_key_manager"] = {
+            "ok": True,
+            "provider": args.object_key_provider,
+            "skipped": True,
+            "reason": "object-store encryption disabled",
+        }
+
     try:
         checks["residency_policy"] = {"ok": True, **load_tools(args).residency_policy()}
     except Exception as exc:  # noqa: BLE001 - health checks return structured failures.
