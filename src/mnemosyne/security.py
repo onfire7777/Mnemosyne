@@ -377,6 +377,29 @@ class OidcAuthorizationPolicy:
             identity_payload["session_id"] = session_id
         return SessionIdentity.from_payload(identity_payload)
 
+    def audit_summary(self) -> dict[str, Any]:
+        """Return a bounded, secret-free policy summary for deployment checks."""
+
+        return {
+            "version": 1,
+            "allowed_client_ids_count": len(self.allowed_client_ids),
+            "client_id_claims": list(self.client_id_claims),
+            "rule_count": len(self.rules),
+            "roles": sorted({str(rule["role"]) for rule in self.rules}),
+            "source_trust_tiers": sorted({int(rule["source_trust_tier"]) for rule in self.rules}),
+            "rules": [
+                {
+                    "index": index,
+                    "role": str(rule["role"]),
+                    "source_trust_tier": int(rule["source_trust_tier"]),
+                    "tenant_matcher_count": len(rule["tenant_ids"]),
+                    "claim_equals_fields": sorted(rule["claim_equals"]),
+                    "claim_contains_fields": sorted(rule["claim_contains"]),
+                }
+                for index, rule in enumerate(self.rules)
+            ],
+        }
+
     def _verify_client(self, payload: Mapping[str, Any]) -> None:
         if not self.allowed_client_ids:
             return

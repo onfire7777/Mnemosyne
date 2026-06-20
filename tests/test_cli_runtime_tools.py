@@ -523,6 +523,80 @@ def test_cli_session_exchange_exposes_jwks_rotation_flags() -> None:
     assert args.idp_authz_policy_file == "authz-policy.json"
 
 
+def test_cli_idp_authz_policy_check_summarizes_without_sensitive_values(tmp_path: Path) -> None:
+    policy_file = tmp_path / "authz-policy.json"
+    policy_file.write_text(
+        json.dumps(
+            {
+                "allowed_client_ids": ["mnemosyne-prod-client"],
+                "client_id_claims": ["azp", "client_id"],
+                "rules": [
+                    {
+                        "tenant_ids": ["tenant-secret"],
+                        "claim_equals": {"department": "memory-platform"},
+                        "claim_contains": {
+                            "groups": ["mnemosyne-operators"],
+                            "scope": ["mnemosyne.write"],
+                        },
+                        "role": "operator",
+                        "source_trust_tier": 0,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = run_cli(tmp_path / "mnemosyne.json", "idp-authz-policy-check", "--idp-authz-policy-file", str(policy_file))
+
+    assert report["ok"] is True
+    summary = report["policy"]
+    assert summary["allowed_client_ids_count"] == 1
+    assert summary["client_id_claims"] == ["azp", "client_id"]
+    assert summary["rule_count"] == 1
+    assert summary["roles"] == ["operator"]
+    assert summary["source_trust_tiers"] == [0]
+    assert summary["rules"] == [
+        {
+            "index": 0,
+            "role": "operator",
+            "source_trust_tier": 0,
+            "tenant_matcher_count": 1,
+            "claim_equals_fields": ["department"],
+            "claim_contains_fields": ["groups", "scope"],
+        }
+    ]
+    encoded = json.dumps(report, sort_keys=True)
+    assert "mnemosyne-prod-client" not in encoded
+    assert "tenant-secret" not in encoded
+    assert "mnemosyne-operators" not in encoded
+    assert "mnemosyne.write" not in encoded
+
+
+def test_cli_idp_authz_policy_check_fails_closed_on_invalid_policy(tmp_path: Path) -> None:
+    policy_file = tmp_path / "authz-policy.json"
+    policy_file.write_text(
+        json.dumps(
+            {
+                "rules": [
+                    {
+                        "claim_contains": {"groups": "mnemosyne-operators"},
+                        "role": "operator",
+                        "source_trust_tier": 0,
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = run_raw_cli(tmp_path / "mnemosyne.json", "idp-authz-policy-check", "--idp-authz-policy-file", str(policy_file))
+
+    assert result.returncode != 0
+    assert result.stdout == ""
+    assert "allowed_client_ids" in result.stderr
+
+
 def test_cli_provider_check_exercises_http_and_media_contracts(tmp_path: Path) -> None:
     requests: list[dict[str, object]] = []
 
