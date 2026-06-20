@@ -727,6 +727,10 @@ def test_consolidation_worker_extracts_and_promotes_direct_user_fact_with_gate(t
     assert len(active) == 1
     assert active[0].status == "active"
     assert active[0].statement() == "Project codename is Mnemosyne"
+    entities = engine.export_tenant(TENANT)["entities"]
+    assert entities[0]["canonical"] == "project-codename"
+    assert "Project codename" in entities[0]["aliases"]
+    assert entities[0]["source_evidence_cids"] == [result.cid]
 
 
 def test_consolidation_worker_distills_lessons_procedures_and_summary(tmp_path) -> None:

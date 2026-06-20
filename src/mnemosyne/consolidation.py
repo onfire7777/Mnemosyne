@@ -397,7 +397,18 @@ class ConsolidationWorker:
                 branch=branch,
             )
 
-        return self.gate.evaluate(job.tenant_id, candidate, apply)
+        result = self.gate.evaluate(job.tenant_id, candidate, apply)
+        if result.promoted and hasattr(self.engine, "register_entity"):
+            entity_key = _entity_key(job.candidate_subject)
+            self.engine.register_entity(
+                job.tenant_id,
+                entity_key,
+                alias=job.candidate_subject,
+                summary=candidate.description,
+                source_evidence_cids=job.source_evidence_cids,
+                access_policy=job.access_policy or {"tenant": job.tenant_id},
+            )
+        return result
 
 
 def _extract_simple_fact(text: str) -> tuple[str, str, str] | None:

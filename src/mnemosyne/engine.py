@@ -71,6 +71,19 @@ class MemoryEngine(Protocol):
     def set_calibration(self, calibration: CalibrationSet) -> None:
         raise NotImplementedError
 
+    def register_entity(
+        self,
+        tenant_id: str,
+        canonical: str,
+        *,
+        alias: str | None = None,
+        entity_type: str = "unknown",
+        summary: str | None = None,
+        source_evidence_cids: list[str] | None = None,
+        access_policy: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        raise NotImplementedError
+
     def deep_search(self, query: str, tenant_id: str, branch: str = "main", filt: dict[str, Any] | None = None) -> RetrievalResult:
         raise NotImplementedError
 
@@ -136,6 +149,7 @@ class LocalMemoryEngine:
         self.justifications: dict[str, Justification] = {}
         self.contradictions: dict[str, Contradiction] = {}
         self.calibrations: dict[tuple[str, str], CalibrationSet] = {}
+        self.entities: dict[tuple[str, str], dict[str, Any]] = {}
         self.audit_log: list[dict[str, Any]] = []
         self.deletion_log: list[dict[str, Any]] = []
         self.merge_log: list[dict[str, Any]] = []
@@ -177,6 +191,7 @@ class LocalMemoryEngine:
             "justifications": [item.to_dict() for item in self.justifications.values()],
             "contradictions": [item.to_dict() for item in self.contradictions.values()],
             "calibrations": [item.to_dict() for item in self.calibrations.values()],
+            "entities": list(self.entities.values()),
             "audit_log": self.audit_log,
             "deletion_log": self.deletion_log,
             "merge_log": self.merge_log,
@@ -207,6 +222,11 @@ class LocalMemoryEngine:
         self.calibrations = {
             (item.tenant_id, item.memory_type): item
             for item in (CalibrationSet(**row) for row in data.get("calibrations", []))
+        }
+        self.entities = {
+            (str(row["tenant_id"]), str(row["canonical"])): dict(row)
+            for row in data.get("entities", [])
+            if row.get("tenant_id") and row.get("canonical")
         }
         self.audit_log = list(data.get("audit_log", []))
         self.deletion_log = list(data.get("deletion_log", []))
@@ -507,6 +527,52 @@ class LocalMemoryEngine:
             )
             self._persist()
 
+    def register_entity(
+        self,
+        tenant_id: str,
+        canonical: str,
+        *,
+        alias: str | None = None,
+        entity_type: str = "unknown",
+        summary: str | None = None,
+        source_evidence_cids: list[str] | None = None,
+        access_policy: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        canonical = canonical.strip() or "unknown-entity"
+        source_cids = list(source_evidence_cids or [])
+        aliases = {canonical}
+        if alias and alias.strip():
+            aliases.add(alias.strip())
+        with self._lock:
+            key = (tenant_id, canonical)
+            row = self.entities.get(
+                key,
+                {
+                    "id": new_id(),
+                    "tenant_id": tenant_id,
+                    "canonical": canonical,
+                    "type": entity_type,
+                    "summary": summary,
+                    "salience": 0.5,
+                    "aliases": [],
+                    "source_evidence_cids": [],
+                    "access_policy": access_policy or {"tenant": tenant_id},
+                    "updated_at": utc_now().isoformat(),
+                },
+            )
+            row["type"] = row.get("type") or entity_type
+            if summary:
+                row["summary"] = summary
+            if access_policy:
+                row["access_policy"] = dict(access_policy)
+            row["aliases"] = sorted(set(row.get("aliases", [])) | aliases)
+            row["source_evidence_cids"] = sorted(set(row.get("source_evidence_cids", [])) | set(source_cids))
+            row["updated_at"] = utc_now().isoformat()
+            self.entities[key] = row
+            self._audit(tenant_id, "engine", "register_entity", canonical, {"aliases": row["aliases"]})
+            self._persist()
+            return dict(row)
+
     def _calibration_for(self, tenant_id: str, memory_type: str) -> CalibrationSet | None:
         return self.calibrations.get((tenant_id, memory_type))
 
@@ -705,6 +771,7 @@ class LocalMemoryEngine:
             "relations": [item.to_dict() for item in self.relations.values() if item.tenant_id == tenant_id],
             "preferences": [item.to_dict() for item in self.preferences.values() if item.tenant_id == tenant_id],
             "calibrations": [item.to_dict() for item in self.calibrations.values() if item.tenant_id == tenant_id],
+            "entities": [dict(item) for item in self.entities.values() if item.get("tenant_id") == tenant_id],
             "justifications": [item.to_dict() for item in self.justifications.values() if item.tenant_id == tenant_id],
             "contradictions": [item.to_dict() for item in self.contradictions.values() if item.tenant_id == tenant_id],
             "audit_log": [item for item in self.audit_log if item.get("tenant_id") == tenant_id],

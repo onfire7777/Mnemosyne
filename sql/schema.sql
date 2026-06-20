@@ -99,8 +99,13 @@ CREATE TABLE IF NOT EXISTS entities (
   summary TEXT,
   salience REAL NOT NULL DEFAULT 0.5,
   embedding VECTOR(1024),
-  access_policy JSONB NOT NULL DEFAULT '{}'::jsonb
+  source_evidence_cids BYTEA[] NOT NULL DEFAULT '{}',
+  access_policy JSONB NOT NULL DEFAULT '{}'::jsonb,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE entities ADD COLUMN IF NOT EXISTS source_evidence_cids BYTEA[] NOT NULL DEFAULT '{}';
+ALTER TABLE entities ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
+CREATE UNIQUE INDEX IF NOT EXISTS entities_tenant_canonical_unique ON entities (tenant_id, canonical);
 
 CREATE TABLE IF NOT EXISTS entity_aliases (
   tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,

@@ -715,3 +715,6 @@ def test_postgres_gated_consolidation_promotes_direct_user_fact_live() -> None:
     assert job.status == "complete"
     assert job.result["candidate_results"][0]["promoted"] is True
     assert any(hit.kind == "assertion" and hit.provenance == [result.cid] for hit in search.hits)
+    exported_entities = engine.export_tenant(tenant)["entities"]
+    assert exported_entities[0]["canonical"] == "postgres-gate-fact"
+    assert exported_entities[0]["source_evidence_cids"] == [result.cid]

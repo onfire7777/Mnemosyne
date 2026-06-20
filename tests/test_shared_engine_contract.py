@@ -140,6 +140,27 @@ def test_shared_engine_contract_retrieval_uses_conformal_calibration(
     assert exported["calibrations"][0]["memory_type"] == "fact"
 
 
+def test_shared_engine_contract_registers_entity_registry(engine_bundle: tuple[Any, str, str]) -> None:
+    engine, tenant, user = engine_bundle
+    cid = _append_evidence(engine, tenant, user, "Shared entity registry evidence.")
+
+    entity = engine.register_entity(
+        tenant,
+        "shared-entity",
+        alias="Shared Entity",
+        summary="Shared Entity has durable registry state.",
+        source_evidence_cids=[cid],
+        access_policy={"tenant": tenant},
+    )
+    exported = engine.export_tenant(tenant)["entities"]
+
+    assert entity["canonical"] == "shared-entity"
+    assert "Shared Entity" in entity["aliases"]
+    assert exported[0]["canonical"] == "shared-entity"
+    assert exported[0]["source_evidence_cids"] == [cid]
+    assert exported[0]["access_policy"]["tenant"] == tenant
+
+
 def test_shared_engine_contract_branches_and_discards(engine_bundle: tuple[Any, str, str]) -> None:
     engine, tenant, user = engine_bundle
     _branch(engine, "candidate", tenant)
