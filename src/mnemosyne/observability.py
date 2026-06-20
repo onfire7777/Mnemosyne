@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import html
+import json
 from collections import Counter
 from dataclasses import asdict, dataclass, field
 from math import ceil
@@ -129,6 +131,67 @@ def _learning_counts(learning: Any | None, tenant_id: str) -> dict[str, Any]:
         "procedures": len(procedures),
         "lesson_diversity": diversity,
     }
+
+
+def render_ops_dashboard(report: dict[str, Any]) -> str:
+    counts = report.get("counts", {})
+    queue = report.get("queue", {})
+    tripwires = report.get("tripwires", {})
+    metrics = report.get("metrics", {})
+    counters = metrics.get("counters", {}) if isinstance(metrics, dict) else {}
+    cards = [
+        ("Evidence", counts.get("evidence", 0)),
+        ("Assertions", counts.get("assertions", 0)),
+        ("Relations", counts.get("relations", 0)),
+        ("Preferences", counts.get("preferences", 0)),
+        ("Open contradictions", tripwires.get("open_contradictions", 0)),
+        ("Queue depth", queue.get("queued", 0)),
+        ("Gate promotions", tripwires.get("gate_promotions", counters.get("gate.promotions", 0))),
+        ("Gate rollbacks", tripwires.get("gate_rollbacks", counters.get("gate.rollbacks", 0))),
+    ]
+    card_html = "\n".join(
+        f"<section class=\"card\"><div class=\"label\">{html.escape(label)}</div>"
+        f"<div class=\"value\">{html.escape(str(value))}</div></section>"
+        for label, value in cards
+    )
+    tripwire_class = "ok" if tripwires.get("passed") else "alert"
+    tripwire_text = "PASS" if tripwires.get("passed") else "ATTENTION"
+    snapshot = html.escape(json.dumps(report, sort_keys=True, indent=2))
+    tenant = html.escape(str(report.get("tenant_id", "unknown")))
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mnemosyne Ops Dashboard - {tenant}</title>
+  <style>
+    body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; color: #18202a; background: #f6f7f9; }}
+    header {{ padding: 24px 32px; background: #132033; color: white; }}
+    main {{ padding: 24px 32px; max-width: 1080px; }}
+    .grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }}
+    .card {{ background: white; border: 1px solid #d9dee7; border-radius: 6px; padding: 16px; }}
+    .label {{ color: #5b6675; font-size: 13px; }}
+    .value {{ font-size: 28px; font-weight: 700; margin-top: 6px; }}
+    .status {{ display: inline-block; margin-top: 8px; padding: 4px 8px; border-radius: 4px; font-weight: 700; }}
+    .ok {{ background: #dcfce7; color: #14532d; }}
+    .alert {{ background: #fee2e2; color: #7f1d1d; }}
+    pre {{ white-space: pre-wrap; background: #101827; color: #e6edf7; border-radius: 6px; padding: 16px; overflow: auto; }}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Mnemosyne Ops Dashboard</h1>
+    <div>Tenant: {tenant}</div>
+    <span class="status {tripwire_class}">{tripwire_text}</span>
+  </header>
+  <main>
+    <div class="grid">{card_html}</div>
+    <h2>Snapshot JSON</h2>
+    <pre>{snapshot}</pre>
+  </main>
+</body>
+</html>
+"""
 
 
 def _percentile(values: list[float], percentile: int) -> float:
