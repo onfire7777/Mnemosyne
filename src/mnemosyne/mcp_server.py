@@ -19,6 +19,7 @@ from mnemosyne.mcp_tools import MemoryTools, TOOL_SPEC
 from mnemosyne.parametric import CommandParametricTrainer, ParametricArtifactStore, ParametricTier
 from mnemosyne.queue import InProcessQueue, PostgresQueue
 from mnemosyne.runtime_state import RuntimeState
+from mnemosyne.security import SessionAuthError, SessionIdentity, SessionTokenVerifier
 from mnemosyne.storage import CommandKeyManager, EncryptedLocalObjectStore, JsonKeyManager, LocalObjectStore
 
 
@@ -37,6 +38,8 @@ class MnemosyneMcpServer:
         self,
         store_path: str | os.PathLike[str] | None = None,
         auth_token: str | None = None,
+        session_secret: str | None = None,
+        require_session: bool | None = None,
         backend: str = "local",
         postgres_dsn: str | None = None,
         parametric_artifact_store: str | os.PathLike[str] | None = None,
@@ -93,6 +96,14 @@ class MnemosyneMcpServer:
         self.allowed_residencies = allowed_residencies or _default_allowed_residencies()
         self.stateless = stateless
         self.auth_token = auth_token if auth_token is not None else os.environ.get("MNEMOSYNE_MCP_TOKEN")
+        self.session_secret = (
+            session_secret if session_secret is not None else os.environ.get("MNEMOSYNE_MCP_SESSION_SECRET")
+        )
+        self.require_session = (
+            bool(require_session)
+            if require_session is not None
+            else _env_flag("MNEMOSYNE_MCP_REQUIRE_SESSION", default=False)
+        )
         self.tool_names = {item["name"] for item in TOOL_SPEC}
         if not self.stateless:
             self.engine, self.queue, self.runtime_state, self.tools = self._build_tools()
@@ -180,8 +191,13 @@ class MnemosyneMcpServer:
                     elif not self._authorized(params):
                         result = _tool_error("unauthorized: valid MCP auth token required")
                     else:
+                        name = str(params.get("name"))
                         arguments = params["arguments"] if "arguments" in params else {}
-                        result = _tool_result(self.call_tool(str(params.get("name")), arguments))
+                        if not isinstance(arguments, dict):
+                            result = _tool_error("Tool arguments must be a JSON object")
+                        else:
+                            prepared_arguments = self.prepare_tool_arguments(name, params, arguments)
+                            result = _tool_result(self.call_tool(name, prepared_arguments))
                 except Exception as exc:  # noqa: BLE001 - tool errors are MCP results, not transport failures.
                     result = _tool_error(str(exc))
             else:
@@ -198,6 +214,89 @@ class MnemosyneMcpServer:
         if supplied is None and isinstance(meta, dict):
             supplied = meta.get("auth_token")
         return isinstance(supplied, str) and hmac.compare_digest(supplied, self.auth_token)
+
+    def prepare_tool_arguments(
+        self,
+        name: str,
+        params: dict[str, Any] | None,
+        arguments: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Strip transport metadata and bind signed session claims to tool args."""
+
+        if not isinstance(arguments, dict):
+            raise ValueError("Tool arguments must be a JSON object")
+        clean_arguments = dict(arguments)
+        argument_meta = clean_arguments.pop("_meta", None)
+        clean_arguments.pop("auth_token", None)
+        token = clean_arguments.pop("session_token", None)
+        params = params or {}
+        if token is None:
+            token = params.get("session_token")
+        params_meta = params.get("_meta")
+        if token is None and isinstance(params_meta, dict):
+            token = params_meta.get("session_token")
+        if token is None and isinstance(argument_meta, dict):
+            token = argument_meta.get("session_token")
+        if token is None:
+            if self.require_session:
+                raise PermissionError("session token required")
+            return clean_arguments
+        if not isinstance(token, str) or not token:
+            raise PermissionError("session token must be a non-empty string")
+        if not self.session_secret:
+            raise PermissionError("session token denied: session secret is not configured")
+        try:
+            identity = SessionTokenVerifier(self.session_secret).verify(token)
+        except SessionAuthError as exc:
+            raise PermissionError(f"session token denied: {exc}") from exc
+        return self._bind_session_identity(name, clean_arguments, identity)
+
+    def _bind_session_identity(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        identity: SessionIdentity,
+    ) -> dict[str, Any]:
+        parameter_names = self._tool_parameter_names(name)
+        for key in ("tenant_id", "tenant"):
+            if key in arguments:
+                self._bind_string_claim(arguments, key, identity.tenant_id, "tenant")
+        for key in ("user_id", "user"):
+            if key in arguments:
+                self._bind_string_claim(arguments, key, identity.user_id, "user")
+        if "tenant_id" in parameter_names:
+            self._bind_string_claim(arguments, "tenant_id", identity.tenant_id, "tenant")
+        if "tenant" in parameter_names:
+            self._bind_string_claim(arguments, "tenant", identity.tenant_id, "tenant")
+        if "user_id" in parameter_names:
+            self._bind_string_claim(arguments, "user_id", identity.user_id, "user")
+        if "user" in parameter_names:
+            self._bind_string_claim(arguments, "user", identity.user_id, "user")
+        if "role" in parameter_names:
+            arguments["role"] = identity.role
+        if "source_trust_tier" in parameter_names:
+            arguments["source_trust_tier"] = identity.source_trust_tier
+        if "trust_tier" in parameter_names:
+            arguments["trust_tier"] = identity.source_trust_tier
+        if "source_identity" in parameter_names and "source_identity" not in arguments and identity.session_id:
+            arguments["source_identity"] = identity.session_id
+        return arguments
+
+    @staticmethod
+    def _bind_string_claim(arguments: dict[str, Any], key: str, value: str, label: str) -> None:
+        current = arguments.get(key)
+        if current is None or current == "":
+            arguments[key] = value
+            return
+        if str(current) != value:
+            raise PermissionError(f"session {label} mismatch: tool argument does not match authenticated session")
+
+    @staticmethod
+    def _tool_parameter_names(name: str) -> set[str]:
+        if not hasattr(MemoryTools, name):
+            return set()
+        signature = inspect.signature(getattr(MemoryTools, name))
+        return {key for key in signature.parameters if key != "self"}
 
     def call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         if name not in self.tool_names:
@@ -337,6 +436,8 @@ def build_sdk_server(**kwargs: Any) -> Any:
         auth_params: dict[str, Any] = {}
         if "auth_token" in raw_arguments:
             auth_params["auth_token"] = raw_arguments.pop("auth_token")
+        if "session_token" in raw_arguments:
+            auth_params["session_token"] = raw_arguments.pop("session_token")
         meta = raw_arguments.pop("_meta", None)
         if isinstance(meta, dict):
             auth_params["_meta"] = meta
@@ -345,6 +446,10 @@ def build_sdk_server(**kwargs: Any) -> Any:
         schema = schemas_by_name.get(name)
         if schema is None:
             return _sdk_tool_error(types, f"Unknown tool: {name}")
+        try:
+            raw_arguments = facade.prepare_tool_arguments(name, auth_params, raw_arguments)
+        except Exception as exc:  # noqa: BLE001 - SDK tool calls report failures as tool results.
+            return _sdk_tool_error(types, str(exc))
         try:
             jsonschema.validate(instance=raw_arguments, schema=schema)
         except jsonschema.ValidationError as exc:
@@ -423,6 +528,13 @@ def _load_parametric_trainer(
 def _default_allowed_residencies() -> tuple[str, ...]:
     raw = os.environ.get("MNEMOSYNE_ALLOWED_RESIDENCIES", "local")
     return tuple(item.strip() for item in raw.split(",") if item.strip())
+
+
+def _env_flag(name: str, *, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _default_object_key_provider() -> str:
@@ -528,10 +640,23 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--stateless", action="store_true", help="Rebuild engine and tool state for each JSON-RPC tool call")
     parser.add_argument("--sdk", action="store_true", help="Use the official MCP Python SDK stdio transport")
     parser.add_argument("--auth-token", default=os.environ.get("MNEMOSYNE_MCP_TOKEN"), help="Require this token for tools/call")
+    parser.add_argument(
+        "--session-secret",
+        default=os.environ.get("MNEMOSYNE_MCP_SESSION_SECRET"),
+        help="HMAC secret for signed MCP session_token claims",
+    )
+    parser.add_argument(
+        "--require-session",
+        action="store_true",
+        default=_env_flag("MNEMOSYNE_MCP_REQUIRE_SESSION", default=False),
+        help="Require a valid signed session_token on tools/call",
+    )
     args = parser.parse_args(argv)
     config = {
         "store_path": args.store,
         "auth_token": args.auth_token,
+        "session_secret": args.session_secret,
+        "require_session": args.require_session,
         "backend": args.backend,
         "postgres_dsn": args.postgres_dsn,
         "object_store": args.object_store,
