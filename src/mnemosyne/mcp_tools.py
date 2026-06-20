@@ -358,7 +358,15 @@ class MemoryTools:
         branch: str = "main",
         confidence: float = 0.7,
         trust_tier: int = int(TrustTier.DIRECT_USER),
+        role: WriteRole = "agent",
+        source_trust_tier: int | None = None,
     ) -> dict[str, Any]:
+        decision = self._authorize(
+            "assert_fact",
+            role=role,
+            source_trust_tier=source_trust_tier if source_trust_tier is not None else trust_tier,
+            target_sink="belief",
+        )
         assertion_id = self.engine.upsert_assertion(
             Assertion(
                 tenant_id=tenant_id,
@@ -374,7 +382,7 @@ class MemoryTools:
             ),
             branch=branch,
         )
-        return {"id": assertion_id, "branch": branch}
+        return {"id": assertion_id, "branch": branch, "security": decision}
 
     def relation(
         self,
@@ -385,7 +393,15 @@ class MemoryTools:
         branch: str = "main",
         confidence: float = 0.7,
         source_evidence_cids: list[str] | None = None,
+        role: WriteRole = "agent",
+        source_trust_tier: int = int(TrustTier.NORMAL),
     ) -> dict[str, Any]:
+        decision = self._authorize(
+            "relation",
+            role=role,
+            source_trust_tier=source_trust_tier,
+            target_sink="belief",
+        )
         relation_id = self.engine.add_relation(
             Relation(
                 tenant_id=tenant_id,
@@ -398,7 +414,7 @@ class MemoryTools:
             ),
             branch=branch,
         )
-        return {"id": relation_id, "branch": branch}
+        return {"id": relation_id, "branch": branch, "security": decision}
 
     def preference(
         self,
@@ -483,7 +499,15 @@ class MemoryTools:
         confidence: float = 0.7,
         trust_tier: int = int(TrustTier.NORMAL),
         branch: str | None = None,
+        role: WriteRole = "agent",
+        source_trust_tier: int | None = None,
     ) -> dict[str, Any]:
+        decision = self._authorize(
+            "propose",
+            role=role,
+            source_trust_tier=source_trust_tier if source_trust_tier is not None else trust_tier,
+            target_sink="belief",
+        )
         proposal_branch = branch or f"proposal-{new_id()}"
         self._engine_branch(proposal_branch, "main", "proposal", tenant_id=tenant_id)
         assertion_id = self.engine.upsert_assertion(
@@ -507,6 +531,7 @@ class MemoryTools:
             "tenant_id": tenant_id,
             "user_id": user_id,
             "status": "proposed",
+            "security": decision,
         }
 
     def confirm(self, id: str, tenant_id: str | None = None, branch: str | None = None, into: str = "main") -> dict[str, Any]:
@@ -522,7 +547,15 @@ class MemoryTools:
         new: dict[str, Any],
         branch: str = "main",
         confidence: float = 0.95,
+        role: WriteRole = "agent",
+        source_trust_tier: int = int(TrustTier.USER_AUTHORED),
     ) -> dict[str, Any]:
+        decision = self._authorize(
+            "supersede",
+            role=role,
+            source_trust_tier=source_trust_tier,
+            target_sink="belief_correction",
+        )
         existing = self.get(tenant_id, id, branch=branch)
         if existing["kind"] != "assertion":
             raise ValueError("supersede currently supports assertion records")
@@ -545,7 +578,14 @@ class MemoryTools:
             ),
             branch=branch,
         )
-        return {"id": assertion_id, "supersedes": id, "tenant_id": tenant_id, "user_id": user_id, "branch": branch}
+        return {
+            "id": assertion_id,
+            "supersedes": id,
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+            "branch": branch,
+            "security": decision,
+        }
 
     def correct(
         self,
@@ -557,7 +597,15 @@ class MemoryTools:
         correction_text: str,
         branch: str = "main",
         confidence: float = 0.95,
+        role: WriteRole = "agent",
+        source_trust_tier: int = int(TrustTier.USER_AUTHORED),
     ) -> dict[str, Any]:
+        decision = self._authorize(
+            "correct",
+            role=role,
+            source_trust_tier=source_trust_tier,
+            target_sink="belief_correction",
+        )
         assertion_id = self.engine.correct(
             tenant_id=tenant_id,
             user_id=user_id,
@@ -568,7 +616,7 @@ class MemoryTools:
             branch=branch,
             confidence=confidence,
         )
-        return {"id": assertion_id, "branch": branch}
+        return {"id": assertion_id, "branch": branch, "security": decision}
 
     def forget(
         self,

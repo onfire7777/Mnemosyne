@@ -333,6 +333,46 @@ def test_cli_preference_write_requires_explicit_or_high_trust_source(tmp_path: P
     assert allowed["security"]["allowed"] is True
 
 
+def test_cli_assert_write_rejects_untrusted_source(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    denied = run_raw_cli(
+        store,
+        "assert",
+        "--tenant",
+        TENANT,
+        "--subject",
+        "Project codename",
+        "--predicate",
+        "is",
+        "--object",
+        "Untrusted",
+        "--trust-tier",
+        "5",
+        "--source-trust-tier",
+        "5",
+    )
+    allowed = run_cli(
+        store,
+        "assert",
+        "--tenant",
+        TENANT,
+        "--subject",
+        "Project codename",
+        "--predicate",
+        "is",
+        "--object",
+        "Mnemosyne",
+        "--trust-tier",
+        "3",
+        "--source-trust-tier",
+        "3",
+    )
+
+    assert denied.returncode != 0
+    assert "assert_fact denied" in denied.stderr
+    assert allowed["security"]["allowed"] is True
+
+
 def test_cli_forget_supports_hard_delete_erasure_mode(tmp_path: Path) -> None:
     store = tmp_path / "mnemosyne.json"
     captured = run_cli(
