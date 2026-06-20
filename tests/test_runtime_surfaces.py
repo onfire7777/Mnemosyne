@@ -5,6 +5,7 @@ import base64
 import inspect
 import json
 import shlex
+import subprocess
 import sys
 import threading
 import tomllib
@@ -14,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from mnemosyne.mcp_server import MnemosyneMcpServer, build_sdk_server
+from mnemosyne.mcp_server import MnemosyneMcpServer, build_sdk_server, run_self_test
 from mnemosyne.mcp_tools import TOOL_SPEC
 from mnemosyne.models import Hit
 from mnemosyne.postgres_engine import PostgresEngine, _bytes_to_cid, _cid_to_bytes, _stable_uuid, _uuid_or_none, _vector_literal
@@ -761,6 +762,72 @@ def test_mcp_server_rejects_schema_invalid_json_rpc_tool_arguments(tmp_path: Pat
     assert unexpected_property["result"]["isError"] is True
     assert "unexpected" in unexpected_property["result"]["content"][0]["text"]
     assert explicit_null["result"]["isError"] is False
+
+
+def test_mcp_self_test_validates_auth_session_and_schema(tmp_path: Path) -> None:
+    auth_token = "mcp-self-test-auth-token"
+    report = run_self_test(
+        store_path=tmp_path / "store.json",
+        auth_token=auth_token,
+        session_secret=MCP_SESSION_SECRET,
+        require_session=True,
+    )
+    checks = {check["name"]: check for check in report["checks"]}
+    encoded = json.dumps(report)
+
+    assert report["ok"] is True
+    assert report["auth_token_required"] is True
+    assert report["session_required"] is True
+    assert checks["initialize"]["ok"] is True
+    assert checks["tools_list"]["ok"] is True
+    assert checks["tools_list"]["tool_count"] == len(TOOL_SPEC)
+    assert checks["auth_token_rejects_missing_token"]["ok"] is True
+    assert checks["session_rejects_missing_token"]["ok"] is True
+    assert checks["session_signing_configured"]["ok"] is True
+    assert checks["schema_rejects_invalid_arguments"]["ok"] is True
+    assert checks["read_only_tool_call"]["ok"] is True
+    assert auth_token not in encoded
+    assert MCP_SESSION_SECRET not in encoded
+    assert "session_token" not in encoded
+
+
+def test_mcp_self_test_fails_when_session_required_without_verifier(tmp_path: Path) -> None:
+    report = run_self_test(store_path=tmp_path / "store.json", require_session=True)
+    checks = {check["name"]: check for check in report["checks"]}
+
+    assert report["ok"] is False
+    assert checks["session_signing_configured"]["ok"] is False
+    assert checks["read_only_tool_call"]["ok"] is False
+
+
+def test_mcp_cli_self_test_reports_deployment_health(tmp_path: Path) -> None:
+    auth_token = "mcp-cli-self-test-auth-token"
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "mnemosyne.mcp_server",
+            "--store",
+            str(tmp_path / "store.json"),
+            "--self-test",
+            "--auth-token",
+            auth_token,
+            "--session-secret",
+            MCP_SESSION_SECRET,
+            "--require-session",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    report = json.loads(result.stdout)
+    encoded = json.dumps(report)
+
+    assert report["ok"] is True
+    assert report["backend"] == "local"
+    assert report["stateless"] is False
+    assert auth_token not in encoded
+    assert MCP_SESSION_SECRET not in encoded
 
 
 def test_mcp_server_stateless_mode_reloads_durable_engine_and_runtime_state(tmp_path: Path) -> None:
