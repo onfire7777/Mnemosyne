@@ -39,7 +39,7 @@ The v2 blueprint controls implementation. The earlier design is lineage only unl
 python3 -m venv .venv
 . .venv/bin/activate
 python -m pip install --upgrade pip setuptools wheel pytest
-python -m pip install -e .
+python -m pip install -e '.[mcp]'
 python -m pytest
 python -m mnemosyne.cli tools
 python -m mnemosyne.cli ops-report --tenant tenant-a --dashboard-html ./ops-dashboard.html
@@ -82,12 +82,17 @@ python -m mnemosyne.cli \
 ```
 
 `mneme-mcp` accepts the same object-store encryption, key-store, and allowed-residency flags for MCP ingestion.
+By default it runs Mnemosyne's deterministic stdio JSON-RPC shim; pass `--sdk` to run through the official Python MCP SDK:
+
+```bash
+mneme-mcp --store .mnemosyne/mcp-store.json --sdk
+```
 
 ## Status
 
 The repository has a verified local scaffold plus runtime parity extensions. Current checks:
 
-- `.venv/bin/python -m pytest -q` returns 106 passing tests and 7 skipped live-DB tests.
+- `.venv/bin/python -m pytest -q` returns 107 passing tests and 7 skipped live-DB tests with the optional MCP SDK extra installed.
 - With Docker compose Postgres running, `MNEMOSYNE_POSTGRES_DSN=postgresql://... .venv/bin/python -m pytest -q tests/test_postgres_engine_live.py` returns 7 passing live adapter tests covering tenant RLS, SQL FTS, pgvector assertion search, dense evidence fallback, recursive graph/PPR, branch/discard, branch merge retrieval, bitemporal supersession, tenant isolation, tombstone and hard-delete forget modes, transitive derived-evidence erasure across assertions/preferences/relations, HTTP-configurable retrieval adapter wiring, CLI `--backend postgres`, asset-bound CLI file ingestion through the C2PA verifier adapter, externalized payload derived-text retrieval, async media extraction, and gated consolidation promotion on Postgres.
 
 Exact 1:1 blueprint parity is still in progress. The controlling status artifact is `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md`.
