@@ -1504,6 +1504,41 @@ def test_cli_provider_check_validates_command_key_provider(tmp_path: Path) -> No
     assert state["keys"] == {}
 
 
+def test_cli_provider_check_fails_closed_on_bad_command_key_provider(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    objects = tmp_path / "objects"
+    script = tmp_path / "bad-kms.py"
+    script.write_text(
+        "\n".join(
+            [
+                "from __future__ import annotations",
+                "import json",
+                "print(json.dumps({'key': 'c2hvcnQ='}))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    command = " ".join(shlex.quote(item) for item in (sys.executable, str(script)))
+    result = run_raw_cli(
+        store,
+        "--object-store",
+        str(objects),
+        "--object-store-encryption",
+        "aesgcm",
+        "--object-key-provider",
+        "command",
+        "--object-key-command",
+        command,
+        "provider-check",
+    )
+    payload = json.loads(result.stdout)
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert payload["checks"]["object_key_manager"]["ok"] is False
+    assert "32-byte AES-256 key" in payload["checks"]["object_key_manager"]["error"]
+
+
 def test_cli_parametric_tier_can_use_command_provider(tmp_path: Path) -> None:
     store = tmp_path / "mnemosyne.json"
     command, provider_state = fake_parametric_command(tmp_path)
