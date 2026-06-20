@@ -11,6 +11,7 @@ from cryptography.hazmat.primitives.asymmetric import ec, padding, rsa
 from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
 
 from mnemosyne.security import (
+    OidcAuthorizationPolicy,
     OidcJwtVerifier,
     SessionAuthError,
     SessionIdentity,
@@ -416,6 +417,216 @@ def test_oidc_jwt_verifier_fails_closed_when_jwks_refresh_fails() -> None:
 
     with pytest.raises(SessionAuthError, match="JWKS refresh failed"):
         verifier.verify(token, now=1_900_000_000)
+
+
+def test_oidc_authorization_policy_maps_claims_without_raw_role_or_trust() -> None:
+    payload = oidc_payload(groups=["mnemosyne-operators"], scope="openid mnemosyne.write", azp="cli-client")
+    payload.pop("mnemosyne_role")
+    payload.pop("mnemosyne_source_trust_tier")
+    jwks, token = signed_oidc_token(payload)
+    policy = OidcAuthorizationPolicy.from_mapping(
+        {
+            "allowed_client_ids": ["cli-client"],
+            "rules": [
+                {
+                    "tenant_ids": ["tenant-a"],
+                    "claim_contains": {
+                        "groups": ["mnemosyne-operators"],
+                        "scope": "mnemosyne.write",
+                    },
+                    "role": "operator",
+                    "source_trust_tier": 0,
+                }
+            ],
+        }
+    )
+
+    identity = OidcJwtVerifier(jwks, issuer=ISSUER, audience=AUDIENCE, authorization_policy=policy).verify(
+        token,
+        now=1_900_000_000,
+    )
+
+    assert identity.tenant_id == "tenant-a"
+    assert identity.user_id == "user-a"
+    assert identity.role == "operator"
+    assert identity.source_trust_tier == 0
+    assert identity.session_id == "idp-session-a"
+
+
+def test_oidc_authorization_policy_supports_agent_role_and_claim_equals() -> None:
+    payload = oidc_payload(department="memory-platform", azp="cli-client")
+    payload.pop("mnemosyne_role")
+    payload.pop("mnemosyne_source_trust_tier")
+    jwks, token = signed_oidc_token(payload)
+    policy = OidcAuthorizationPolicy.from_mapping(
+        {
+            "allowed_client_ids": ["cli-client"],
+            "rules": [
+                {
+                    "tenant_ids": ["tenant-a"],
+                    "claim_equals": {"department": "memory-platform"},
+                    "role": "agent",
+                    "source_trust_tier": 3,
+                }
+            ],
+        }
+    )
+
+    identity = OidcJwtVerifier(jwks, issuer=ISSUER, audience=AUDIENCE, authorization_policy=policy).verify(
+        token,
+        now=1_900_000_000,
+    )
+
+    assert identity.role == "agent"
+    assert identity.source_trust_tier == 3
+
+
+def test_oidc_authorization_policy_claim_equals_requires_exact_list_match() -> None:
+    payload = oidc_payload(departments=["memory-platform", "security"], azp="cli-client")
+    payload.pop("mnemosyne_role")
+    payload.pop("mnemosyne_source_trust_tier")
+    jwks, token = signed_oidc_token(payload)
+    partial_policy = OidcAuthorizationPolicy.from_mapping(
+        {
+            "allowed_client_ids": ["cli-client"],
+            "rules": [
+                {
+                    "claim_equals": {"departments": ["memory-platform"]},
+                    "role": "agent",
+                    "source_trust_tier": 3,
+                }
+            ],
+        }
+    )
+
+    with pytest.raises(SessionAuthError, match="not authorized"):
+        OidcJwtVerifier(jwks, issuer=ISSUER, audience=AUDIENCE, authorization_policy=partial_policy).verify(
+            token,
+            now=1_900_000_000,
+        )
+
+    exact_policy = OidcAuthorizationPolicy.from_mapping(
+        {
+            "allowed_client_ids": ["cli-client"],
+            "rules": [
+                {
+                    "claim_equals": {"departments": ["memory-platform", "security"]},
+                    "role": "agent",
+                    "source_trust_tier": 3,
+                }
+            ],
+        }
+    )
+
+    identity = OidcJwtVerifier(jwks, issuer=ISSUER, audience=AUDIENCE, authorization_policy=exact_policy).verify(
+        token,
+        now=1_900_000_000,
+    )
+    assert identity.role == "agent"
+
+
+def test_oidc_authorization_policy_denies_unmatched_client_and_rules() -> None:
+    payload = oidc_payload(groups=["mnemosyne-readers"], scope="openid", azp="wrong-client")
+    jwks, token = signed_oidc_token(payload)
+    policy = OidcAuthorizationPolicy.from_mapping(
+        {
+            "allowed_client_ids": ["cli-client"],
+            "rules": [
+                {
+                    "tenant_ids": ["tenant-a"],
+                    "claim_contains": {"groups": "mnemosyne-operators"},
+                    "role": "operator",
+                    "source_trust_tier": 0,
+                }
+            ],
+        }
+    )
+
+    with pytest.raises(SessionAuthError, match="client is not authorized"):
+        OidcJwtVerifier(jwks, issuer=ISSUER, audience=AUDIENCE, authorization_policy=policy).verify(
+            token,
+            now=1_900_000_000,
+        )
+
+    payload["azp"] = "cli-client"
+    jwks, token = signed_oidc_token(payload)
+    with pytest.raises(SessionAuthError, match="not authorized"):
+        OidcJwtVerifier(jwks, issuer=ISSUER, audience=AUDIENCE, authorization_policy=policy).verify(
+            token,
+            now=1_900_000_000,
+        )
+
+
+def test_oidc_authorization_policy_rejects_malformed_or_ambiguous_rules() -> None:
+    with pytest.raises(SessionAuthError, match="allowed_client_ids"):
+        OidcAuthorizationPolicy.from_mapping(
+            {
+                "rules": [
+                    {
+                        "tenant_ids": ["tenant-a"],
+                        "claim_contains": {"groups": "mnemosyne-operators"},
+                        "role": "operator",
+                        "source_trust_tier": 0,
+                    }
+                ]
+            }
+        )
+    with pytest.raises(SessionAuthError, match="role"):
+        OidcAuthorizationPolicy.from_mapping(
+            {
+                "allowed_client_ids": ["cli-client"],
+                "rules": [
+                    {
+                        "tenant_ids": ["tenant-a"],
+                        "claim_contains": {"groups": "mnemosyne-operators"},
+                        "role": "writer",
+                        "source_trust_tier": 0,
+                    }
+                ],
+            }
+        )
+    with pytest.raises(SessionAuthError, match="unknown fields"):
+        OidcAuthorizationPolicy.from_mapping(
+            {
+                "allowed_client_ids": ["cli-client"],
+                "unexpected": True,
+                "rules": [
+                    {
+                        "tenant_ids": ["tenant-a"],
+                        "claim_contains": {"groups": "mnemosyne-operators"},
+                        "role": "operator",
+                        "source_trust_tier": 0,
+                    }
+                ],
+            }
+        )
+
+    payload = oidc_payload(groups=["mnemosyne-operators"], azp="cli-client")
+    jwks, token = signed_oidc_token(payload)
+    policy = OidcAuthorizationPolicy.from_mapping(
+        {
+            "allowed_client_ids": ["cli-client"],
+            "rules": [
+                {
+                    "tenant_ids": ["tenant-a"],
+                    "claim_contains": {"groups": "mnemosyne-operators"},
+                    "role": "operator",
+                    "source_trust_tier": 0,
+                },
+                {
+                    "tenant_ids": ["tenant-a"],
+                    "claim_contains": {"groups": "mnemosyne-operators"},
+                    "role": "consolidator",
+                    "source_trust_tier": 1,
+                },
+            ],
+        }
+    )
+    with pytest.raises(SessionAuthError, match="multiple authorization rules"):
+        OidcJwtVerifier(jwks, issuer=ISSUER, audience=AUDIENCE, authorization_policy=policy).verify(
+            token,
+            now=1_900_000_000,
+        )
 
 
 def test_issue_session_from_oidc_rejects_non_positive_ttl() -> None:

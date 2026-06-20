@@ -94,10 +94,11 @@ python -m mnemosyne.cli --session-secret "$SESSION_SECRET" session-exchange \
   --idp-token "$OIDC_ID_TOKEN" \
   --idp-jwks-url https://idp.example.com/.well-known/jwks.json \
   --idp-issuer https://idp.example.com/ \
-  --idp-audience mnemosyne
+  --idp-audience mnemosyne \
+  --idp-authz-policy-file ./mnemosyne-idp-authz-policy.json
 ```
 
-By default the verifier requires issuer, audience, expiration, and the tenant/user/role/trust claims `tenant_id`, `sub`, `mnemosyne_role`, and `mnemosyne_source_trust_tier`. JWKS input can be inline JSON, a file, or HTTPS URL; insecure JWKS URLs are rejected unless explicitly allowed for local testing. File and URL JWKS sources support bounded reads, cache TTL refresh, and refresh-on-unknown-`kid` rotation through `--idp-jwks-max-bytes`, `--idp-jwks-cache-ttl-seconds`, and `--idp-disable-refresh-on-unknown-kid`.
+By default the verifier requires issuer, audience, expiration, and the tenant/user/role/trust claims `tenant_id`, `sub`, `mnemosyne_role`, and `mnemosyne_source_trust_tier`. Deployments can instead pass `--idp-authz-policy` or `--idp-authz-policy-file` to map verified IdP client, tenant, and claim rules to Mnemosyne roles (`reader`, `agent`, `consolidator`, `operator`) plus a source trust tier. Policy mode requires `allowed_client_ids`, rejects malformed or unknown policy fields, denies missing and ambiguous rule matches, rejects invalid roles such as `writer`, and never falls back to raw IdP role/trust claims when a policy is configured. JWKS input can be inline JSON, a file, or HTTPS URL; insecure JWKS URLs are rejected unless explicitly allowed for local testing. File and URL JWKS sources support bounded reads, cache TTL refresh, and refresh-on-unknown-`kid` rotation through `--idp-jwks-max-bytes`, `--idp-jwks-cache-ttl-seconds`, and `--idp-disable-refresh-on-unknown-kid`.
 
 Encrypted local object storage is available for crypto-shred legal erasure:
 
@@ -136,7 +137,7 @@ mneme-mcp --http --http-host 127.0.0.1 --http-port 8765 \
 ```
 
 The self-test exercises `initialize`, `tools/list`, strict MCP input schemas, auth-token rejection, signed-session enforcement, and a read-only tool call. It redacts configured secrets and does not replace hosted HTTP/SSE/TLS/IdP/stateless soak validation.
-The hosted HTTP transport serves liveness metadata at `/healthz` and JSON-RPC at `/mcp`, reusing the same tool schema, auth-token, signed-session, stateless, queue, and backend enforcement as stdio. Pass bearer auth in `Authorization` and signed sessions in `X-Mnemosyne-Session-Token`, or through JSON-RPC `_meta` for non-HTTP transports. When OIDC settings are configured, `POST /session/exchange` accepts `{"idp_token":"..."}` with the static bearer token and returns a Mnemosyne signed session; hosted JWKS file/URL sources support the same bounded read, TTL refresh, and unknown-`kid` refresh controls with `MNEMOSYNE_MCP_IDP_*` environment variables. Deployments should still pass `--self-test` before exposure; HTTP mode is not a substitute for production TLS/client identity, deployment-grade authorization policy mapping, real IdP/JWKS rotation validation, or official streamable/SSE deployment validation.
+The hosted HTTP transport serves liveness metadata at `/healthz` and JSON-RPC at `/mcp`, reusing the same tool schema, auth-token, signed-session, stateless, queue, and backend enforcement as stdio. Pass bearer auth in `Authorization` and signed sessions in `X-Mnemosyne-Session-Token`, or through JSON-RPC `_meta` for non-HTTP transports. When OIDC settings are configured, `POST /session/exchange` accepts `{"idp_token":"..."}` with the static bearer token and returns a Mnemosyne signed session; hosted JWKS file/URL sources support the same bounded read, TTL refresh, unknown-`kid` refresh controls, and optional authz policy mapping with `MNEMOSYNE_MCP_IDP_*` environment variables. `/healthz` reports only whether session exchange and authz policy are configured, not policy contents. Deployments should still pass `--self-test` before exposure; HTTP mode is not a substitute for production TLS/client identity, real IdP/JWKS rotation validation, policy operations, or official streamable/SSE deployment validation.
 
 C2PA verifier trust can be scoped through a JSON policy file:
 
@@ -155,7 +156,7 @@ Policy files can define global `trusted_issuers`, `trusted_roots`, or scoped `ru
 The repository has a verified local scaffold plus runtime parity extensions. Current checks:
 
 - `.venv/bin/python -m compileall -q src tests` passes.
-- `.venv/bin/python -m pytest -q` collects 266 tests and returns 227 passing tests plus 39 skipped live-DB tests when `MNEMOSYNE_POSTGRES_DSN` is unset.
+- `.venv/bin/python -m pytest -q` collects 274 tests and returns 235 passing tests plus 39 skipped live-DB tests when `MNEMOSYNE_POSTGRES_DSN` is unset.
 - With Docker compose Postgres running, `MNEMOSYNE_POSTGRES_DSN=postgresql://... .venv/bin/python -m pytest -q tests/test_postgres_engine_live.py tests/test_shared_engine_contract.py` returns 63 passing live/shared adapter tests covering tenant RLS, SQL FTS, pgvector assertion search, dense evidence fallback, recursive graph/PPR, explain channels/rails/provenance, branch/discard, branch merge retrieval, bitemporal supersession, tenant isolation, tombstone and hard-delete forget modes, command-backed object key management, transitive derived-evidence erasure across assertions/preferences/relations, retrieval trust/sensitivity/quarantine filtering, deep graph tenant/branch isolation, hard-delete audit export, HTTP-configurable retrieval adapter wiring with strict provider response validation, CLI `--backend postgres`, fail-closed CLI `provider-check`, stateless MCP ingestion over tenant-scoped durable Postgres queues, shared local/Postgres evidence/retrieval/explain/branch/as-of/relation/preference/correction/forget-propagation contracts, durable Postgres queue leasing/drain, asset-bound CLI file ingestion through the C2PA verifier adapter, externalized payload derived-text retrieval, async media extraction, gated consolidation promotion on Postgres, and shared local/Postgres contract parity.
 
 Exact 1:1 blueprint parity is still in progress. The controlling status artifact is `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md`.

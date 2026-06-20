@@ -19,7 +19,7 @@ from urllib.parse import urlsplit
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.ingestion import IngestionPipeline
 from mnemosyne.mcp_tools import MemoryTools, TOOL_SPEC
-from mnemosyne.oidc_jwks import load_oidc_jwks, oidc_jwks_loader
+from mnemosyne.oidc_jwks import load_oidc_authorization_policy, load_oidc_jwks, oidc_jwks_loader
 from mnemosyne.parametric import CommandParametricTrainer, ParametricArtifactStore, ParametricTier
 from mnemosyne.postgres_runtime_state import PostgresRuntimeState
 from mnemosyne.queue import InProcessQueue, PostgresQueue
@@ -638,6 +638,8 @@ def build_http_server(
     idp_jwks_file: str | None = None,
     idp_jwks_url: str | None = None,
     idp_allow_insecure_jwks_url: bool = False,
+    idp_authz_policy: str | None = None,
+    idp_authz_policy_file: str | None = None,
     idp_issuer: str | None = None,
     idp_audience: str | None = None,
     idp_tenant_claim: str = "tenant_id",
@@ -665,7 +667,7 @@ def build_http_server(
     if max_body_bytes <= 0:
         raise ValueError("HTTP MCP max body bytes must be positive")
     idp_verifier: OidcJwtVerifier | None = None
-    if idp_issuer or idp_audience or idp_jwks or idp_jwks_file or idp_jwks_url:
+    if idp_issuer or idp_audience or idp_jwks or idp_jwks_file or idp_jwks_url or idp_authz_policy or idp_authz_policy_file:
         if not idp_issuer or not idp_audience:
             raise ValueError("HTTP MCP session exchange requires idp issuer and audience")
         idp_verifier = OidcJwtVerifier(
@@ -696,6 +698,10 @@ def build_http_server(
             ),
             jwks_cache_ttl_seconds=idp_jwks_cache_ttl_seconds,
             refresh_on_unknown_kid=idp_refresh_on_unknown_kid,
+            authorization_policy=load_oidc_authorization_policy(
+                policy=idp_authz_policy,
+                policy_file=idp_authz_policy_file,
+            ),
         )
 
     class Handler(BaseHTTPRequestHandler):
@@ -726,6 +732,9 @@ def build_http_server(
                     "session_exchange_refresh_on_unknown_kid": idp_refresh_on_unknown_kid
                     if idp_verifier is not None
                     else None,
+                    "session_exchange_authz_policy_configured": idp_verifier.authorization_policy is not None
+                    if idp_verifier is not None
+                    else False,
                 },
             )
 
@@ -1202,6 +1211,8 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--idp-jwks-file", default=os.environ.get("MNEMOSYNE_MCP_IDP_JWKS_FILE"))
     parser.add_argument("--idp-jwks-url", default=os.environ.get("MNEMOSYNE_MCP_IDP_JWKS_URL"))
     parser.add_argument("--idp-allow-insecure-jwks-url", action="store_true", default=_env_flag("MNEMOSYNE_MCP_IDP_ALLOW_INSECURE_JWKS_URL", default=False))
+    parser.add_argument("--idp-authz-policy", default=os.environ.get("MNEMOSYNE_MCP_IDP_AUTHZ_POLICY"))
+    parser.add_argument("--idp-authz-policy-file", default=os.environ.get("MNEMOSYNE_MCP_IDP_AUTHZ_POLICY_FILE"))
     parser.add_argument("--idp-issuer", default=os.environ.get("MNEMOSYNE_MCP_IDP_ISSUER"))
     parser.add_argument("--idp-audience", default=os.environ.get("MNEMOSYNE_MCP_IDP_AUDIENCE"))
     parser.add_argument("--idp-tenant-claim", default=os.environ.get("MNEMOSYNE_MCP_IDP_TENANT_CLAIM", "tenant_id"))
@@ -1301,6 +1312,8 @@ def main(argv: list[str] | None = None) -> None:
             idp_jwks_file=args.idp_jwks_file,
             idp_jwks_url=args.idp_jwks_url,
             idp_allow_insecure_jwks_url=args.idp_allow_insecure_jwks_url,
+            idp_authz_policy=args.idp_authz_policy,
+            idp_authz_policy_file=args.idp_authz_policy_file,
             idp_issuer=args.idp_issuer,
             idp_audience=args.idp_audience,
             idp_tenant_claim=args.idp_tenant_claim,

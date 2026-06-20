@@ -23,7 +23,7 @@ from mnemosyne.media import CommandMediaTextExtractor, MediaTextExtractor, Metad
 from mnemosyne.mcp_tools import MemoryTools, TOOL_SPEC
 from mnemosyne.models import Hit
 from mnemosyne.observability import MetricsRegistry, build_ops_report, render_ops_dashboard
-from mnemosyne.oidc_jwks import load_oidc_jwks, oidc_jwks_loader
+from mnemosyne.oidc_jwks import load_oidc_authorization_policy, load_oidc_jwks, oidc_jwks_loader
 from mnemosyne.parametric import CommandParametricTrainer, ParametricArtifactStore, ParametricTier
 from mnemosyne.provenance import C2paToolVerifier, ProvenanceTrustPolicy, SignedProvenanceVerifier
 from mnemosyne.queue import InProcessQueue, PostgresQueue, QueueWorker
@@ -421,6 +421,10 @@ def cmd_session_exchange(args: argparse.Namespace) -> None:
                 ),
                 jwks_cache_ttl_seconds=args.idp_jwks_cache_ttl_seconds,
                 refresh_on_unknown_kid=not args.idp_disable_refresh_on_unknown_kid,
+                authorization_policy=load_oidc_authorization_policy(
+                    policy=args.idp_authz_policy,
+                    policy_file=args.idp_authz_policy_file,
+                ),
             ),
             idp_token=args.idp_token,
             signer=_session_signer_from_args(args),
@@ -1585,6 +1589,8 @@ def build_parser() -> argparse.ArgumentParser:
     session_exchange.add_argument("--idp-jwks-file", default=os.environ.get("MNEMOSYNE_IDP_JWKS_FILE"))
     session_exchange.add_argument("--idp-jwks-url", default=os.environ.get("MNEMOSYNE_IDP_JWKS_URL"))
     session_exchange.add_argument("--idp-allow-insecure-jwks-url", action="store_true", default=env_flag("MNEMOSYNE_IDP_ALLOW_INSECURE_JWKS_URL", default=False))
+    session_exchange.add_argument("--idp-authz-policy", default=os.environ.get("MNEMOSYNE_IDP_AUTHZ_POLICY"))
+    session_exchange.add_argument("--idp-authz-policy-file", default=os.environ.get("MNEMOSYNE_IDP_AUTHZ_POLICY_FILE"))
     session_exchange.add_argument("--idp-issuer", required=not bool(os.environ.get("MNEMOSYNE_IDP_ISSUER")), default=os.environ.get("MNEMOSYNE_IDP_ISSUER"))
     session_exchange.add_argument("--idp-audience", required=not bool(os.environ.get("MNEMOSYNE_IDP_AUDIENCE")), default=os.environ.get("MNEMOSYNE_IDP_AUDIENCE"))
     session_exchange.add_argument("--idp-tenant-claim", default=os.environ.get("MNEMOSYNE_IDP_TENANT_CLAIM", "tenant_id"))
