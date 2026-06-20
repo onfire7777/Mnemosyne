@@ -1567,7 +1567,7 @@ def test_cli_parametric_tier_can_use_command_provider(tmp_path: Path) -> None:
     )
     lesson = run_cli(store, "lesson-propose", "--trajectory-id", trajectory["id"])
     procedure = run_cli(store, "procedure-propose", "--lesson-id", lesson["id"])
-    run_cli(store, "procedure-validate", "--procedure-id", procedure["id"])
+    run_cli(store, "procedure-validate", "--procedure-id", procedure["id"], *PARAMETRIC_AUTH)
     run_cli(
         store,
         "lesson-promote",
@@ -1585,6 +1585,7 @@ def test_cli_parametric_tier_can_use_command_provider(tmp_path: Path) -> None:
                 }
             ]
         ),
+        *PARAMETRIC_AUTH,
     )
     provider_args = (
         "--parametric-provider",
@@ -1626,6 +1627,27 @@ def test_cli_parametric_commands_require_operator_authorization(tmp_path: Path) 
 
     assert result.returncode != 0
     assert "parametric-propose requires --role and --source-trust-tier or --session-token." in result.stderr
+
+
+def test_cli_learning_activation_commands_require_authorization_context(tmp_path: Path) -> None:
+    commands = [
+        (
+            "lesson-promote",
+            "--lesson-id",
+            "lesson-missing",
+            "--cases",
+            "[]",
+        ),
+        ("procedure-validate", "--procedure-id", "procedure-missing"),
+        ("procedure-promote", "--procedure-id", "procedure-missing"),
+        ("procedure-rollback", "--procedure-id", "procedure-missing"),
+    ]
+
+    for command in commands:
+        result = run_raw_cli(tmp_path / "mnemosyne.json", *command)
+
+        assert result.returncode != 0
+        assert f"{command[0]} requires --role and --source-trust-tier or --session-token." in result.stderr
 
 
 def test_cli_provider_check_covers_parametric_command_contract(tmp_path: Path) -> None:
@@ -1846,7 +1868,7 @@ def test_cli_profile_graph_learning_and_parametric_flows_persist(tmp_path: Path)
     )
     lesson = run_cli(store, "lesson-propose", "--trajectory-id", trajectory["id"])
     procedure = run_cli(store, "procedure-propose", "--lesson-id", lesson["id"])
-    validated = run_cli(store, "procedure-validate", "--procedure-id", procedure["id"])
+    validated = run_cli(store, "procedure-validate", "--procedure-id", procedure["id"], *PARAMETRIC_AUTH)
     lesson_search = run_cli(store, "lesson-search", "--tenant", TENANT, "--signature", "off by one")
     procedure_search = run_cli(store, "procedure-search", "--tenant", TENANT, "--query", "date-math-deploy")
     outcome = run_cli(store, "outcome-evaluate", "--trajectory-id", trajectory["id"])
@@ -1867,6 +1889,7 @@ def test_cli_profile_graph_learning_and_parametric_flows_persist(tmp_path: Path)
                 }
             ]
         ),
+        *PARAMETRIC_AUTH,
     )
     artifact = run_cli(store, "parametric-propose", "--tenant", TENANT, *PARAMETRIC_AUTH)
     artifact_path = store.with_suffix(store.suffix + ".parametric") / TENANT / f"{artifact['id']}.json"
@@ -1883,8 +1906,8 @@ def test_cli_profile_graph_learning_and_parametric_flows_persist(tmp_path: Path)
         *PARAMETRIC_AUTH,
     )
     rollback_record = json.loads(artifact_path.read_text(encoding="utf-8"))
-    promoted_procedure = run_cli(store, "procedure-promote", "--procedure-id", procedure["id"])
-    rolled_back = run_cli(store, "procedure-rollback", "--procedure-id", procedure["id"])
+    promoted_procedure = run_cli(store, "procedure-promote", "--procedure-id", procedure["id"], *PARAMETRIC_AUTH)
+    rolled_back = run_cli(store, "procedure-rollback", "--procedure-id", procedure["id"], *PARAMETRIC_AUTH)
     rolled_back_search = run_cli(store, "procedure-search", "--tenant", TENANT, "--query", "date-math-deploy", "--status", "rolled_back")
     ops = run_cli(store, "ops-report", "--tenant", TENANT)
 

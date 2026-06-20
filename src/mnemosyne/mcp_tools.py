@@ -221,17 +221,17 @@ TOOL_SPEC: list[dict[str, Any]] = [
     {
         "name": "lesson_promote",
         "description": "Promote a lesson through protected regression cases.",
-        "arguments": ["lesson_id", "cases"],
+        "arguments": ["lesson_id", "cases", "role", "source_trust_tier"],
     },
     {
         "name": "procedure_validate",
         "description": "Mark an induced procedure as validated for the isolated parametric tier.",
-        "arguments": ["procedure_id"],
+        "arguments": ["procedure_id", "role", "source_trust_tier"],
     },
     {
         "name": "procedure_promote",
         "description": "Promote a validated procedure into the active procedural tier.",
-        "arguments": ["procedure_id"],
+        "arguments": ["procedure_id", "role", "source_trust_tier"],
     },
     {
         "name": "procedure_search",
@@ -241,7 +241,7 @@ TOOL_SPEC: list[dict[str, Any]] = [
     {
         "name": "procedure_rollback",
         "description": "Mark a procedure as rolled back without deleting history.",
-        "arguments": ["procedure_id"],
+        "arguments": ["procedure_id", "role", "source_trust_tier"],
     },
     {
         "name": "lesson_search",
@@ -1036,7 +1036,19 @@ class MemoryTools:
     def procedure_propose(self, lesson_id: str) -> dict[str, Any]:
         return self.procedure_induce(lesson_id)
 
-    def lesson_promote(self, lesson_id: str, cases: list[dict[str, Any]]) -> dict[str, Any]:
+    def lesson_promote(
+        self,
+        lesson_id: str,
+        cases: list[dict[str, Any]],
+        role: WriteRole,
+        source_trust_tier: int,
+    ) -> dict[str, Any]:
+        decision = self._authorize(
+            "lesson_promote",
+            role=role,
+            source_trust_tier=source_trust_tier,
+            target_sink="branch_promotion",
+        )
         lesson = self.learning.lessons[lesson_id]
         regression_cases = [
             RegressionCase(
@@ -1053,21 +1065,39 @@ class MemoryTools:
         self._save_learning()
         self.metrics.record_gate(promoted=result.promoted, rolled_back=bool(result.rollback_branch))
         self._save_metrics()
-        return result.to_dict()
+        payload = result.to_dict()
+        payload["security"] = decision
+        return payload
 
-    def procedure_validate(self, procedure_id: str) -> dict[str, Any]:
+    def procedure_validate(self, procedure_id: str, role: WriteRole, source_trust_tier: int) -> dict[str, Any]:
+        decision = self._authorize(
+            "procedure_validate",
+            role=role,
+            source_trust_tier=source_trust_tier,
+            target_sink="branch_promotion",
+        )
         procedure = self.learning.procedures[procedure_id]
         procedure.status = "validated"
         self._save_learning()
-        return procedure.to_dict()
+        payload = procedure.to_dict()
+        payload["security"] = decision
+        return payload
 
-    def procedure_promote(self, procedure_id: str) -> dict[str, Any]:
+    def procedure_promote(self, procedure_id: str, role: WriteRole, source_trust_tier: int) -> dict[str, Any]:
+        decision = self._authorize(
+            "procedure_promote",
+            role=role,
+            source_trust_tier=source_trust_tier,
+            target_sink="branch_promotion",
+        )
         procedure = self.learning.procedures[procedure_id]
         procedure.status = "promoted"
         self._save_learning()
         self.metrics.record_gate(promoted=True, rolled_back=False)
         self._save_metrics()
-        return procedure.to_dict()
+        payload = procedure.to_dict()
+        payload["security"] = decision
+        return payload
 
     def lesson_search(self, signature: str, tenant_id: str | None = None, status: str | None = None) -> dict[str, Any]:
         query = signature.lower()
@@ -1095,13 +1125,22 @@ class MemoryTools:
                 procedures.append(procedure.to_dict())
         return {"procedures": procedures}
 
-    def procedure_rollback(self, procedure_id: str) -> dict[str, Any]:
+    def procedure_rollback(self, procedure_id: str, role: WriteRole, source_trust_tier: int) -> dict[str, Any]:
+        decision = self._authorize(
+            "procedure_rollback",
+            role=role,
+            source_trust_tier=source_trust_tier,
+            destructive=True,
+            target_sink="branch_promotion",
+        )
         procedure = self.learning.procedures[procedure_id]
         procedure.status = "rolled_back"
         self._save_learning()
         self.metrics.record_gate(promoted=False, rolled_back=True)
         self._save_metrics()
-        return procedure.to_dict()
+        payload = procedure.to_dict()
+        payload["security"] = decision
+        return payload
 
     def outcome_evaluate(
         self,
