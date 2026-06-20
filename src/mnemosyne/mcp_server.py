@@ -38,28 +38,48 @@ class MnemosyneMcpServer:
         backend: str = "local",
         postgres_dsn: str | None = None,
         parametric_artifact_store: str | os.PathLike[str] | None = None,
+        stateless: bool = False,
     ):
-        if backend == "postgres":
-            dsn = postgres_dsn or os.environ.get("MNEMOSYNE_POSTGRES_DSN")
+        if backend not in {"local", "postgres"}:
+            raise ValueError(f"Unsupported MCP backend: {backend}")
+        if stateless and backend == "local" and not store_path:
+            raise ValueError("Stateless local MCP mode requires a durable store_path.")
+        self.store_path = store_path
+        self.backend = backend
+        self.postgres_dsn = postgres_dsn
+        self.parametric_artifact_store = parametric_artifact_store
+        self.stateless = stateless
+        self.auth_token = auth_token if auth_token is not None else os.environ.get("MNEMOSYNE_MCP_TOKEN")
+        self.tool_names = {item["name"] for item in TOOL_SPEC}
+        if not self.stateless:
+            self.engine, self.queue, self.runtime_state, self.tools = self._build_tools()
+
+    def _build_tools(self) -> tuple[Any, InProcessQueue, RuntimeState | None, MemoryTools]:
+        if self.backend == "postgres":
+            dsn = self.postgres_dsn or os.environ.get("MNEMOSYNE_POSTGRES_DSN")
             if not dsn:
                 raise ValueError("Postgres MCP backend requires postgres_dsn or MNEMOSYNE_POSTGRES_DSN.")
             try:
                 from mnemosyne.postgres_engine import PostgresEngine
             except ImportError as exc:  # pragma: no cover - defensive for broken installs.
                 raise ValueError("Postgres MCP backend requires mnemosyne-memory[postgres].") from exc
-            self.engine = PostgresEngine(dsn)
+            engine = PostgresEngine(dsn)
             runtime_state = None
-        elif backend == "local":
-            self.engine = LocalMemoryEngine(store_path=store_path)
-            runtime_state = RuntimeState.from_store_path(store_path)
         else:
-            raise ValueError(f"Unsupported MCP backend: {backend}")
-        self.queue = InProcessQueue()
-        self.auth_token = auth_token if auth_token is not None else os.environ.get("MNEMOSYNE_MCP_TOKEN")
-        ingestion = IngestionPipeline(self.engine, queue=self.queue)
-        self.tool_names = {item["name"] for item in TOOL_SPEC}
-        parametric = ParametricTier(ParametricArtifactStore(_parametric_store_path(store_path, parametric_artifact_store)))
-        self.tools = MemoryTools(self.engine, ingestion=ingestion, runtime_state=runtime_state, parametric=parametric)
+            engine = LocalMemoryEngine(store_path=self.store_path)
+            runtime_state = RuntimeState.from_store_path(self.store_path)
+        queue = runtime_state.load_queue() if runtime_state else InProcessQueue()
+        ingestion = IngestionPipeline(engine, queue=queue)
+        parametric = ParametricTier(
+            ParametricArtifactStore(_parametric_store_path(self.store_path, self.parametric_artifact_store))
+        )
+        tools = MemoryTools(engine, ingestion=ingestion, runtime_state=runtime_state, parametric=parametric)
+        return engine, queue, runtime_state, tools
+
+    @staticmethod
+    def _save_queue(runtime_state: RuntimeState | None, queue: InProcessQueue) -> None:
+        if runtime_state:
+            runtime_state.save_queue(queue)
 
     def handle(self, request: dict[str, Any]) -> dict[str, Any] | None:
         method = request.get("method")
@@ -107,8 +127,14 @@ class MnemosyneMcpServer:
             raise ValueError(f"Unknown tool: {name}")
         if not isinstance(arguments, dict):
             raise ValueError("Tool arguments must be a JSON object")
-        method = getattr(self.tools, name)
-        return method(**arguments)
+        if self.stateless:
+            _, queue, runtime_state, tools = self._build_tools()
+            result = getattr(tools, name)(**arguments)
+            self._save_queue(runtime_state, queue)
+            return result
+        result = getattr(self.tools, name)(**arguments)
+        self._save_queue(self.runtime_state, self.queue)
+        return result
 
     def serve(self, stdin: TextIO = sys.stdin, stdout: TextIO = sys.stdout) -> None:
         for raw_line in stdin:
@@ -242,12 +268,14 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--backend", choices=["local", "postgres"], default=default_backend(), help="Storage backend for MCP tools")
     parser.add_argument("--postgres-dsn", default=default_postgres_dsn(), help="Postgres DSN for --backend postgres")
     parser.add_argument("--parametric-artifact-store", default=os.environ.get("MNEMOSYNE_PARAMETRIC_ARTIFACT_STORE"))
+    parser.add_argument("--stateless", action="store_true", help="Rebuild engine and tool state for each JSON-RPC tool call")
     args = parser.parse_args(argv)
     MnemosyneMcpServer(
         store_path=args.store,
         backend=args.backend,
         postgres_dsn=args.postgres_dsn,
         parametric_artifact_store=args.parametric_artifact_store,
+        stateless=args.stateless,
     ).serve()
 
 

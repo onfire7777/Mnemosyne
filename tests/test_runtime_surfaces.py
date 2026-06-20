@@ -213,6 +213,40 @@ def test_mcp_server_rejects_non_object_tool_arguments(tmp_path: Path) -> None:
     assert "Tool arguments must be a JSON object" in response["result"]["content"][0]["text"]
 
 
+def test_mcp_server_stateless_mode_reloads_durable_engine_and_runtime_state(tmp_path: Path) -> None:
+    store = tmp_path / "store.json"
+    writer = MnemosyneMcpServer(store_path=store, stateless=True)
+    captured = mcp_call(
+        writer,
+        "capture",
+        {
+            "tenant_id": TENANT,
+            "user_id": USER,
+            "actor": "user",
+            "source_type": "chat",
+            "content": "Stateless MCP reloads durable evidence.",
+            "trust_tier": 3,
+        },
+    )
+    mcp_call(
+        writer,
+        "profile_add",
+        {
+            "tenant_id": TENANT,
+            "user_id": USER,
+            "kind": "explicit_preference",
+            "statement": "Prefer stateless MCP calls backed by durable state.",
+        },
+    )
+    reader = MnemosyneMcpServer(store_path=store, stateless=True)
+
+    search = mcp_call(reader, "search", {"tenant_id": TENANT, "query": "stateless durable evidence"})
+    profile = mcp_call(reader, "profile_context", {"tenant_id": TENANT, "user_id": USER})
+
+    assert search["hits"][0]["provenance"] == [captured["cid"]]
+    assert profile["authoritative"][0]["statement"] == "Prefer stateless MCP calls backed by durable state."
+
+
 def test_mcp_server_persists_parametric_artifacts_and_rolls_back(tmp_path: Path) -> None:
     store = tmp_path / "store.json"
     server = MnemosyneMcpServer(store_path=store)
