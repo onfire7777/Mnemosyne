@@ -72,8 +72,12 @@ class SignedProvenanceVerifier:
 _POLICY_FIELDS = {
     "trusted_issuers",
     "trustedIssuers",
+    "trusted_roots",
+    "trustedRoots",
     "require_trusted_issuer",
     "requireTrustedIssuer",
+    "require_trusted_root",
+    "requireTrustedRoot",
     "rules",
 }
 _POLICY_RULE_FIELDS = {
@@ -81,8 +85,12 @@ _POLICY_RULE_FIELDS = {
     "scope",
     "trusted_issuers",
     "trustedIssuers",
+    "trusted_roots",
+    "trustedRoots",
     "require_trusted_issuer",
     "requireTrustedIssuer",
+    "require_trusted_root",
+    "requireTrustedRoot",
 }
 _POLICY_SCOPE_FIELDS = {
     "tenant_id",
@@ -101,7 +109,9 @@ _POLICY_SCOPE_FIELDS = {
 class ProvenanceTrustRule:
     scope: tuple[tuple[str, tuple[str, ...]], ...] = ()
     trusted_issuers: tuple[str, ...] = ()
+    trusted_roots: tuple[str, ...] = ()
     require_trusted_issuer: bool = True
+    require_trusted_root: bool = False
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ProvenanceTrustRule":
@@ -121,11 +131,18 @@ class ProvenanceTrustRule:
         return cls(
             scope=scope,
             trusted_issuers=_trusted_issuer_tuple(data),
+            trusted_roots=_trusted_root_tuple(data),
             require_trusted_issuer=_bool_field(
                 data,
                 snake_name="require_trusted_issuer",
                 camel_name="requireTrustedIssuer",
                 default=True,
+            ),
+            require_trusted_root=_bool_field(
+                data,
+                snake_name="require_trusted_root",
+                camel_name="requireTrustedRoot",
+                default=False,
             ),
         )
 
@@ -139,10 +156,12 @@ class ProvenanceTrustRule:
 
 @dataclass(frozen=True, slots=True)
 class ProvenanceTrustPolicy:
-    """Issuer trust policy for production C2PA verification decisions."""
+    """Issuer and certificate-root trust policy for production C2PA decisions."""
 
     trusted_issuers: tuple[str, ...] = ()
+    trusted_roots: tuple[str, ...] = ()
     require_trusted_issuer: bool = False
+    require_trusted_root: bool = False
     rules: tuple[ProvenanceTrustRule, ...] = ()
 
     @classmethod
@@ -155,10 +174,17 @@ class ProvenanceTrustPolicy:
             raise ValueError("provenance trust policy rules must be a list")
         return cls(
             trusted_issuers=_trusted_issuer_tuple(data),
+            trusted_roots=_trusted_root_tuple(data),
             require_trusted_issuer=_bool_field(
                 data,
                 snake_name="require_trusted_issuer",
                 camel_name="requireTrustedIssuer",
+                default=False,
+            ),
+            require_trusted_root=_bool_field(
+                data,
+                snake_name="require_trusted_root",
+                camel_name="requireTrustedRoot",
                 default=False,
             ),
             rules=tuple(ProvenanceTrustRule.from_dict(dict(item)) for item in raw_rules),
@@ -178,10 +204,21 @@ class ProvenanceTrustPolicy:
                 if item
             )
         )
+        trusted_roots = tuple(
+            dict.fromkeys(
+                _normalize_fingerprint(item)
+                for rule in matching_rules
+                for item in (*self.trusted_roots, *rule.trusted_roots)
+                if item
+            )
+        )
         return ProvenanceTrustPolicy(
             trusted_issuers=trusted_issuers,
+            trusted_roots=trusted_roots,
             require_trusted_issuer=self.require_trusted_issuer
             or any(rule.require_trusted_issuer for rule in matching_rules),
+            require_trusted_root=self.require_trusted_root
+            or any(rule.require_trusted_root for rule in matching_rules),
         )
 
 
@@ -194,6 +231,19 @@ def _bool_field(data: dict[str, Any], *, snake_name: str, camel_name: str, defau
 
 def _trusted_issuer_tuple(data: dict[str, Any]) -> tuple[str, ...]:
     return _string_tuple(data.get("trusted_issuers", data.get("trustedIssuers", ())) or (), field="trusted_issuers")
+
+
+def _trusted_root_tuple(data: dict[str, Any]) -> tuple[str, ...]:
+    roots = []
+    for item in _string_tuple(
+        data.get("trusted_roots", data.get("trustedRoots", ())) or (),
+        field="trusted_roots",
+    ):
+        normalized = _normalize_fingerprint(item)
+        if not _HEX_SHA256.fullmatch(normalized):
+            raise ValueError("trusted_roots must contain SHA-256 certificate root fingerprints")
+        roots.append(normalized)
+    return tuple(dict.fromkeys(roots))
 
 
 def _string_tuple(raw_values: Any, *, field: str) -> tuple[str, ...]:
@@ -218,6 +268,7 @@ class C2paToolVerifier:
 
     tool_path: str = "c2patool"
     trusted_issuers: tuple[str, ...] = ()
+    trusted_roots: tuple[str, ...] = ()
     trust_policy: ProvenanceTrustPolicy = field(default_factory=ProvenanceTrustPolicy)
     fallback: SignedProvenanceVerifier = field(default_factory=SignedProvenanceVerifier)
     timeout_seconds: float = 30.0
@@ -281,6 +332,7 @@ class C2paToolVerifier:
                 diagnostics={"tool": self.tool_path, **dict(binding["diagnostics"])},
             )
         signer = _find_first(report, {"issuer", "signer", "claim_generator", "claimGenerator", "common_name", "commonName"})
+        certificate_roots = _collect_certificate_fingerprints(report)
         trust_policy = self._effective_trust_policy(
             {
                 **_policy_context(manifest_data),
@@ -289,14 +341,28 @@ class C2paToolVerifier:
             }
         )
         trusted_issuers = trust_policy.trusted_issuers
-        trusted = bool(signer) and (
+        trusted_roots = trust_policy.trusted_roots
+        issuer_trusted = bool(signer) and (
             (not trusted_issuers and not trust_policy.require_trusted_issuer) or str(signer) in trusted_issuers
         )
+        root_required = trust_policy.require_trusted_root or bool(trusted_roots)
+        root_trusted = bool(certificate_roots) and (
+            not trusted_roots or any(item in trusted_roots for item in certificate_roots)
+        )
+        trusted = issuer_trusted and (root_trusted if root_required else True)
         trust_diagnostics = {
             "require_trusted_issuer": trust_policy.require_trusted_issuer,
             "trusted_issuers": list(trusted_issuers),
         }
-        if trust_policy.require_trusted_issuer and not trusted:
+        if root_required:
+            trust_diagnostics.update(
+                {
+                    "require_trusted_root": trust_policy.require_trusted_root,
+                    "trusted_roots": list(trusted_roots),
+                    "certificate_roots": sorted(certificate_roots),
+                }
+            )
+        if trust_policy.require_trusted_issuer and not issuer_trusted:
             return ProvenanceDecision(
                 valid=True,
                 trusted=False,
@@ -312,6 +378,24 @@ class C2paToolVerifier:
                     "asset_binding": binding["summary"],
                 },
             )
+        if root_required and not root_trusted:
+            return ProvenanceDecision(
+                valid=True,
+                trusted=False,
+                quarantine=True,
+                trust_delta=5,
+                reason="c2pa manifest valid but certificate root rejected by trust policy",
+                manifest={**public_manifest, "c2pa": _report_summary(report, binding=binding)},
+                diagnostics={
+                    "tool": self.tool_path,
+                    "signer": signer,
+                    "trusted_issuers": list(trusted_issuers),
+                    "certificate_roots": sorted(certificate_roots),
+                    "trusted_roots": list(trusted_roots),
+                    "trust_policy": trust_diagnostics,
+                    "asset_binding": binding["summary"],
+                },
+            )
         return ProvenanceDecision(
             valid=True,
             trusted=trusted,
@@ -322,7 +406,9 @@ class C2paToolVerifier:
             diagnostics={
                 "tool": self.tool_path,
                 "signer": signer,
+                "certificate_roots": sorted(certificate_roots),
                 "trusted_issuers": list(trusted_issuers),
+                "trusted_roots": list(trusted_roots),
                 "trust_policy": trust_diagnostics,
                 "asset_binding": binding["summary"],
             },
@@ -331,9 +417,18 @@ class C2paToolVerifier:
     def _effective_trust_policy(self, context: dict[str, Any]) -> ProvenanceTrustPolicy:
         scoped_policy = self.trust_policy.for_context(context)
         issuers = tuple(dict.fromkeys(item for item in (*self.trusted_issuers, *scoped_policy.trusted_issuers) if item))
+        roots = tuple(
+            dict.fromkeys(
+                _normalize_fingerprint(item)
+                for item in (*self.trusted_roots, *scoped_policy.trusted_roots)
+                if item
+            )
+        )
         return ProvenanceTrustPolicy(
             trusted_issuers=issuers,
+            trusted_roots=roots,
             require_trusted_issuer=scoped_policy.require_trusted_issuer,
+            require_trusted_root=scoped_policy.require_trusted_root,
         )
 
 
@@ -369,6 +464,7 @@ def _find_first(value: Any, keys: set[str]) -> Any:
 
 _HEX_SHA256 = re.compile(r"^[0-9a-fA-F]{64}$")
 _ASSET_HASH_HINTS = ("asset", "content", "ingredient", "payload", "source")
+_CERT_FINGERPRINT_HINTS = ("cert", "certificate", "chain", "root", "signer", "trust")
 _PATH_KEYS = {
     "asset_path",
     "assetPath",
@@ -379,6 +475,46 @@ _PATH_KEYS = {
     "sourcePath",
     "path",
 }
+
+
+def _collect_certificate_fingerprints(value: Any, path: tuple[str, ...] = ()) -> set[str]:
+    matches: set[str] = set()
+    if isinstance(value, dict):
+        for key, item in value.items():
+            key_path = (*path, str(key))
+            if _path_mentions_certificate(key_path):
+                matches.update(_extract_fingerprint_values(item))
+            matches.update(_collect_certificate_fingerprints(item, key_path))
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            matches.update(_collect_certificate_fingerprints(item, (*path, str(index))))
+    return matches
+
+
+def _extract_fingerprint_values(value: Any) -> set[str]:
+    if isinstance(value, str):
+        normalized = _normalize_fingerprint(value)
+        return {normalized} if _HEX_SHA256.fullmatch(normalized) else set()
+    if isinstance(value, dict):
+        matches: set[str] = set()
+        for item in value.values():
+            matches.update(_extract_fingerprint_values(item))
+        return matches
+    if isinstance(value, list):
+        matches: set[str] = set()
+        for item in value:
+            matches.update(_extract_fingerprint_values(item))
+        return matches
+    return set()
+
+
+def _path_mentions_certificate(path: tuple[str, ...]) -> bool:
+    normalized = "_".join(_normalize_key(part) for part in path)
+    return any(hint in normalized for hint in _CERT_FINGERPRINT_HINTS)
+
+
+def _normalize_fingerprint(value: str) -> str:
+    return re.sub(r"[^0-9a-f]", "", value.lower().removeprefix("sha256:"))
 
 
 def _verify_report_asset_binding(report: dict[str, Any], actual_hash: str, asset_path: str) -> dict[str, Any]:
@@ -503,5 +639,6 @@ def _report_summary(report: dict[str, Any], *, binding: dict[str, Any] | None = 
         "active_manifest": report.get("active_manifest") or report.get("activeManifest"),
         "claim_generator": _find_first(report, {"claim_generator", "claimGenerator"}),
         "issuer": _find_first(report, {"issuer", "signer", "common_name", "commonName"}),
+        "certificate_roots": sorted(_collect_certificate_fingerprints(report)),
         "asset_binding": dict((binding or {}).get("summary") or {"bound": False, "method": "unchecked"}),
     }

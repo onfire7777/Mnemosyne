@@ -436,6 +436,7 @@ def test_cli_c2pa_verifier_uses_actual_file_over_manifest_asset_path(tmp_path: P
     store = tmp_path / "mnemosyne.json"
     asset = tmp_path / "capture.bin"
     asset.write_bytes(b"actual camera capture")
+    trusted_root = "aa" * 32
     decoy = tmp_path / "decoy.bin"
     decoy.write_bytes(b"decoy camera capture")
     verifier_stub = tmp_path / "c2pa-ok.py"
@@ -445,7 +446,7 @@ def test_cli_c2pa_verifier_uses_actual_file_over_manifest_asset_path(tmp_path: P
                 "#!/usr/bin/env python3",
                 "import hashlib, json, sys",
                 "payload = open(sys.argv[1], 'rb').read()",
-                "print(json.dumps({'active_manifest': 'manifest-1', 'claim_generator': 'issuer-a', 'asset_sha256': hashlib.sha256(payload).hexdigest(), 'asset_path': sys.argv[1]}))",
+                f"print(json.dumps({{'active_manifest': 'manifest-1', 'claim_generator': 'issuer-a', 'asset_sha256': hashlib.sha256(payload).hexdigest(), 'asset_path': sys.argv[1], 'certificate_chain': [{{'root_fingerprint': '{trusted_root}'}}]}}))",
             ]
         ),
         encoding="utf-8",
@@ -460,6 +461,8 @@ def test_cli_c2pa_verifier_uses_actual_file_over_manifest_asset_path(tmp_path: P
         str(verifier_stub),
         "--trusted-provenance-issuer",
         "issuer-a",
+        "--trusted-provenance-root",
+        trusted_root,
         "ingest",
         "--tenant",
         TENANT,
@@ -493,6 +496,7 @@ def test_cli_c2pa_verifier_uses_actual_file_over_manifest_asset_path(tmp_path: P
         "method": "sha256",
         "sha256": sha256(b"actual camera capture").hexdigest(),
     }
+    assert ingested["provenance"]["manifest"]["c2pa"]["certificate_roots"] == [trusted_root]
 
 
 def test_cli_enforces_allowed_residency_on_ingest(tmp_path: Path) -> None:
