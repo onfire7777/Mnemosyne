@@ -8,6 +8,7 @@ import hmac
 import inspect
 import json
 import os
+import ssl
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -680,6 +681,10 @@ def build_http_server(
     idp_jwks_cache_ttl_seconds: int = 300,
     idp_refresh_on_unknown_kid: bool = True,
     session_max_ttl_seconds: int = 3600,
+    tls_cert_file: str | None = None,
+    tls_key_file: str | None = None,
+    tls_client_ca_file: str | None = None,
+    tls_require_client_cert: bool = False,
     **kwargs: Any,
 ) -> ThreadingHTTPServer:
     """Build a hosted HTTP JSON-RPC transport around the MCP facade."""
@@ -761,6 +766,8 @@ def build_http_server(
                     "session_exchange_authz_policy_configured": idp_verifier.authorization_policy is not None
                     if idp_verifier is not None
                     else False,
+                    "tls_enabled": bool(tls_cert_file or tls_key_file),
+                    "tls_client_cert_required": bool(tls_require_client_cert),
                 },
             )
 
@@ -894,7 +901,22 @@ def build_http_server(
         def log_message(self, format: str, *args: object) -> None:  # noqa: A002 - stdlib signature.
             return
 
-    return ThreadingHTTPServer((host, port), Handler)
+    httpd = ThreadingHTTPServer((host, port), Handler)
+    if tls_cert_file or tls_key_file or tls_client_ca_file or tls_require_client_cert:
+        if not tls_cert_file or not tls_key_file:
+            httpd.server_close()
+            raise ValueError("HTTP MCP TLS requires both tls_cert_file and tls_key_file")
+        if tls_require_client_cert and not tls_client_ca_file:
+            httpd.server_close()
+            raise ValueError("HTTP MCP client certificate enforcement requires tls_client_ca_file")
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
+        context.load_cert_chain(certfile=tls_cert_file, keyfile=tls_key_file)
+        if tls_client_ca_file:
+            context.load_verify_locations(cafile=tls_client_ca_file)
+        context.verify_mode = ssl.CERT_REQUIRED if tls_require_client_cert else ssl.CERT_NONE
+        httpd.socket = context.wrap_socket(httpd.socket, server_side=True)
+    return httpd
 
 
 def serve_http(
@@ -1233,6 +1255,27 @@ def main(argv: list[str] | None = None) -> None:
         default=int(os.environ.get("MNEMOSYNE_MCP_HTTP_MAX_BODY_BYTES", str(DEFAULT_HTTP_MAX_BODY_BYTES))),
         help="Maximum HTTP MCP JSON-RPC request body size",
     )
+    parser.add_argument(
+        "--tls-cert-file",
+        default=os.environ.get("MNEMOSYNE_MCP_TLS_CERT_FILE"),
+        help="PEM server certificate for HTTPS hosted MCP transport",
+    )
+    parser.add_argument(
+        "--tls-key-file",
+        default=os.environ.get("MNEMOSYNE_MCP_TLS_KEY_FILE"),
+        help="PEM private key for HTTPS hosted MCP transport",
+    )
+    parser.add_argument(
+        "--tls-client-ca-file",
+        default=os.environ.get("MNEMOSYNE_MCP_TLS_CLIENT_CA_FILE"),
+        help="PEM CA bundle used to verify hosted MCP client certificates",
+    )
+    parser.add_argument(
+        "--tls-require-client-cert",
+        action="store_true",
+        default=_env_flag("MNEMOSYNE_MCP_TLS_REQUIRE_CLIENT_CERT", default=False),
+        help="Require a client certificate signed by --tls-client-ca-file",
+    )
     parser.add_argument("--idp-jwks", default=os.environ.get("MNEMOSYNE_MCP_IDP_JWKS"))
     parser.add_argument("--idp-jwks-file", default=os.environ.get("MNEMOSYNE_MCP_IDP_JWKS_FILE"))
     parser.add_argument("--idp-jwks-url", default=os.environ.get("MNEMOSYNE_MCP_IDP_JWKS_URL"))
@@ -1367,6 +1410,10 @@ def main(argv: list[str] | None = None) -> None:
             idp_jwks_cache_ttl_seconds=args.idp_jwks_cache_ttl_seconds,
             idp_refresh_on_unknown_kid=not args.idp_disable_refresh_on_unknown_kid,
             session_max_ttl_seconds=args.session_max_ttl_seconds,
+            tls_cert_file=args.tls_cert_file,
+            tls_key_file=args.tls_key_file,
+            tls_client_ca_file=args.tls_client_ca_file,
+            tls_require_client_cert=args.tls_require_client_cert,
             **config,
         )
         return

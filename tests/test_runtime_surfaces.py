@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import datetime as dt
+import ipaddress
 import inspect
 import json
 import shlex
+import ssl
 import subprocess
 import sys
 import threading
@@ -17,6 +20,9 @@ from urllib import error as urlerror, request as urlrequest
 import pytest
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
+from cryptography.hazmat.primitives import serialization
+from cryptography import x509
+from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
 from mnemosyne.mcp_server import MnemosyneMcpServer, build_http_server, build_sdk_server, run_self_test
 from mnemosyne.mcp_tools import TOOL_SPEC
@@ -114,6 +120,107 @@ def oidc_payload(**overrides: object) -> dict[str, object]:
     return payload
 
 
+def make_tls_material(tmp_path: Path) -> dict[str, Path]:
+    now = dt.datetime.now(dt.timezone.utc)
+    ca_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    ca_name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Mnemosyne test CA")])
+    ca_cert = (
+        x509.CertificateBuilder()
+        .subject_name(ca_name)
+        .issuer_name(ca_name)
+        .public_key(ca_key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - dt.timedelta(minutes=1))
+        .not_valid_after(now + dt.timedelta(days=1))
+        .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
+        .add_extension(
+            x509.KeyUsage(
+                digital_signature=True,
+                content_commitment=False,
+                key_encipherment=False,
+                data_encipherment=False,
+                key_agreement=False,
+                key_cert_sign=True,
+                crl_sign=True,
+                encipher_only=False,
+                decipher_only=False,
+            ),
+            critical=True,
+        )
+        .add_extension(x509.SubjectKeyIdentifier.from_public_key(ca_key.public_key()), critical=False)
+        .sign(ca_key, hashes.SHA256())
+    )
+
+    def signed_cert(
+        common_name: str,
+        *,
+        usage_oid: ExtendedKeyUsageOID,
+        subject_alt_names: list[x509.GeneralName] | None = None,
+    ) -> tuple[object, x509.Certificate]:
+        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name)])
+        builder = (
+            x509.CertificateBuilder()
+            .subject_name(subject)
+            .issuer_name(ca_cert.subject)
+            .public_key(key.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(now - dt.timedelta(minutes=1))
+            .not_valid_after(now + dt.timedelta(days=1))
+            .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+            .add_extension(
+                x509.KeyUsage(
+                    digital_signature=True,
+                    content_commitment=False,
+                    key_encipherment=True,
+                    data_encipherment=False,
+                    key_agreement=False,
+                    key_cert_sign=False,
+                    crl_sign=False,
+                    encipher_only=False,
+                    decipher_only=False,
+                ),
+                critical=True,
+            )
+            .add_extension(x509.SubjectKeyIdentifier.from_public_key(key.public_key()), critical=False)
+            .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_key.public_key()), critical=False)
+            .add_extension(x509.ExtendedKeyUsage([usage_oid]), critical=False)
+        )
+        if subject_alt_names:
+            builder = builder.add_extension(x509.SubjectAlternativeName(subject_alt_names), critical=False)
+        return key, builder.sign(ca_key, hashes.SHA256())
+
+    server_key, server_cert = signed_cert(
+        "localhost",
+        usage_oid=ExtendedKeyUsageOID.SERVER_AUTH,
+        subject_alt_names=[
+            x509.DNSName("localhost"),
+            x509.IPAddress(ipaddress.ip_address("127.0.0.1")),
+        ],
+    )
+    client_key, client_cert = signed_cert("mnemosyne-test-client", usage_oid=ExtendedKeyUsageOID.CLIENT_AUTH)
+
+    paths = {
+        "ca_cert": tmp_path / "ca.pem",
+        "server_cert": tmp_path / "server.pem",
+        "server_key": tmp_path / "server-key.pem",
+        "client_cert": tmp_path / "client.pem",
+        "client_key": tmp_path / "client-key.pem",
+    }
+    paths["ca_cert"].write_bytes(ca_cert.public_bytes(serialization.Encoding.PEM))
+    paths["server_cert"].write_bytes(server_cert.public_bytes(serialization.Encoding.PEM))
+    paths["client_cert"].write_bytes(client_cert.public_bytes(serialization.Encoding.PEM))
+    for key_name, key in (("server_key", server_key), ("client_key", client_key)):
+        paths[key_name].write_bytes(
+            key.private_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PrivateFormat.PKCS8,
+                encryption_algorithm=serialization.NoEncryption(),
+            )
+        )
+    return paths
+
+
 def start_mcp_http_server(**kwargs: object) -> tuple[ThreadingHTTPServer, threading.Thread, str]:
     server = build_http_server(host="127.0.0.1", port=0, **kwargs)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -156,12 +263,13 @@ def http_json(
     url: str,
     payload: dict[str, object] | None = None,
     headers: dict[str, str] | None = None,
+    context: ssl.SSLContext | None = None,
 ) -> tuple[int, dict[str, object] | None]:
     data = None if payload is None else json.dumps(payload).encode("utf-8")
     request_headers = {"Content-Type": "application/json", **(headers or {})}
     request = urlrequest.Request(url, data=data, method=method, headers=request_headers)
     try:
-        with urlrequest.urlopen(request, timeout=5) as response:  # noqa: S310 - test-local server.
+        with urlrequest.urlopen(request, timeout=5, context=context) as response:  # noqa: S310 - test-local server.
             body = response.read()
             return response.status, None if not body else json.loads(body.decode("utf-8"))
     except urlerror.HTTPError as exc:
@@ -1012,6 +1120,69 @@ def test_mcp_http_transport_health_lists_and_calls_capture_search(tmp_path: Path
     assert hits[0]["provenance"] == [captured_content["cid"]]
     assert notification_status == 204
     assert notification is None
+
+
+def test_mcp_http_transport_serves_tls_health(tmp_path: Path) -> None:
+    tls = make_tls_material(tmp_path)
+    server, thread, _ = start_mcp_http_server(
+        store_path=tmp_path / "store.json",
+        tls_cert_file=str(tls["server_cert"]),
+        tls_key_file=str(tls["server_key"]),
+    )
+    base = f"https://127.0.0.1:{server.server_port}"
+    context = ssl.create_default_context(cafile=str(tls["ca_cert"]))
+    try:
+        health_status, health = http_json("GET", f"{base}/healthz", context=context)
+    finally:
+        stop_mcp_http_server(server, thread)
+
+    assert health_status == 200
+    assert health is not None
+    assert health["ok"] is True
+    assert health["transport"] == "http-json-rpc"
+    assert health["tls_enabled"] is True
+    assert health["tls_client_cert_required"] is False
+
+
+def test_mcp_http_transport_requires_client_certificate(tmp_path: Path) -> None:
+    tls = make_tls_material(tmp_path)
+    server, thread, _ = start_mcp_http_server(
+        store_path=tmp_path / "store.json",
+        tls_cert_file=str(tls["server_cert"]),
+        tls_key_file=str(tls["server_key"]),
+        tls_client_ca_file=str(tls["ca_cert"]),
+        tls_require_client_cert=True,
+    )
+    base = f"https://127.0.0.1:{server.server_port}"
+    server_trust_context = ssl.create_default_context(cafile=str(tls["ca_cert"]))
+    client_identity_context = ssl.create_default_context(cafile=str(tls["ca_cert"]))
+    client_identity_context.load_cert_chain(str(tls["client_cert"]), str(tls["client_key"]))
+    try:
+        with pytest.raises((ssl.SSLError, urlerror.URLError, ConnectionError, OSError)):
+            http_json("GET", f"{base}/healthz", context=server_trust_context)
+        health_status, health = http_json("GET", f"{base}/healthz", context=client_identity_context)
+    finally:
+        stop_mcp_http_server(server, thread)
+
+    assert health_status == 200
+    assert health is not None
+    assert health["ok"] is True
+    assert health["tls_enabled"] is True
+    assert health["tls_client_cert_required"] is True
+
+
+def test_mcp_http_transport_rejects_incomplete_tls_config(tmp_path: Path) -> None:
+    tls = make_tls_material(tmp_path)
+    with pytest.raises(ValueError, match="both tls_cert_file and tls_key_file"):
+        build_http_server(host="127.0.0.1", port=0, tls_cert_file=str(tls["server_cert"]))
+    with pytest.raises(ValueError, match="client certificate enforcement requires tls_client_ca_file"):
+        build_http_server(
+            host="127.0.0.1",
+            port=0,
+            tls_cert_file=str(tls["server_cert"]),
+            tls_key_file=str(tls["server_key"]),
+            tls_require_client_cert=True,
+        )
 
 
 def test_mcp_http_transport_enforces_auth_session_and_schema(tmp_path: Path) -> None:
