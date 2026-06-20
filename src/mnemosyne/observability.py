@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import asdict, dataclass, field
+from math import ceil
 from typing import Any
 
 
@@ -11,15 +12,24 @@ from typing import Any
 class MetricsSnapshot:
     counters: dict[str, int] = field(default_factory=dict)
     gauges: dict[str, float] = field(default_factory=dict)
+    samples: dict[str, list[float]] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
 class MetricsRegistry:
-    def __init__(self) -> None:
-        self.counters: Counter[str] = Counter()
-        self.gauges: dict[str, float] = {}
+    def __init__(self, snapshot: MetricsSnapshot | dict[str, Any] | None = None) -> None:
+        if isinstance(snapshot, MetricsSnapshot):
+            source = snapshot.to_dict()
+        else:
+            source = snapshot or {}
+        self.counters: Counter[str] = Counter(source.get("counters") or {})
+        self.gauges: dict[str, float] = dict(source.get("gauges") or {})
+        self.samples: dict[str, list[float]] = {
+            name: [float(value) for value in values][-200:]
+            for name, values in (source.get("samples") or {}).items()
+        }
 
     def increment(self, name: str, amount: int = 1) -> None:
         self.counters[name] += amount
@@ -27,13 +37,21 @@ class MetricsRegistry:
     def gauge(self, name: str, value: float) -> None:
         self.gauges[name] = value
 
+    def observe(self, name: str, value: float) -> None:
+        values = self.samples.setdefault(name, [])
+        values.append(float(value))
+        del values[:-200]
+        self.gauge(f"{name}.p95", _percentile(values, 95))
+
     def snapshot(self) -> MetricsSnapshot:
-        return MetricsSnapshot(dict(self.counters), dict(self.gauges))
+        return MetricsSnapshot(dict(self.counters), dict(self.gauges), {name: list(values) for name, values in self.samples.items()})
 
     def record_retrieval(self, channel_counts: dict[str, int], latency_ms: float, abstained: bool) -> None:
+        self.increment("retrieval.requests", 1)
         for channel, count in channel_counts.items():
             self.increment(f"retrieval.channel.{channel}.hits", count)
         self.gauge("retrieval.p95_ms.latest_sample", latency_ms)
+        self.observe("retrieval.latency_ms", latency_ms)
         if abstained:
             self.increment("retrieval.abstentions", 1)
 
@@ -99,3 +117,11 @@ def _learning_counts(learning: Any | None, tenant_id: str) -> dict[str, Any]:
         "procedures": len(procedures),
         "lesson_diversity": diversity,
     }
+
+
+def _percentile(values: list[float], percentile: int) -> float:
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    index = max(0, min(len(ordered) - 1, ceil(percentile / 100 * len(ordered)) - 1))
+    return ordered[index]

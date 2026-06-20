@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from time import perf_counter
 from typing import Any
 
 from mnemosyne.engine import LocalMemoryEngine
@@ -10,6 +11,7 @@ from mnemosyne.ingestion import IngestRequest, IngestionPipeline
 from mnemosyne.gate import GateResult, RegressionCase
 from mnemosyne.learning import LearningSystem, Trajectory, counterfactual_replay_score
 from mnemosyne.models import Assertion, Evidence, Preference, Relation, parse_dt
+from mnemosyne.observability import MetricsRegistry
 from mnemosyne.parametric import ParametricTier
 from mnemosyne.prefetch import AnticipatoryPrefetcher, PrefetchCandidate
 from mnemosyne.runtime_state import RuntimeState
@@ -273,6 +275,7 @@ class MemoryTools:
         runtime_state: RuntimeState | None = None,
         security: SecurityPolicy | None = None,
         parametric: ParametricTier | None = None,
+        metrics: MetricsRegistry | None = None,
     ):
         self.engine = engine
         self.ingestion = ingestion or IngestionPipeline(engine)
@@ -284,6 +287,7 @@ class MemoryTools:
         if runtime_state:
             self.learning = runtime_state.load_learning(self.learning)
         self.parametric = parametric or ParametricTier()
+        self.metrics = metrics or (runtime_state.load_metrics() if runtime_state else MetricsRegistry())
 
     def capture(
         self,
@@ -470,13 +474,22 @@ class MemoryTools:
             filt["min_trust_tier"] = min_trust_tier
         if max_sensitivity is not None:
             filt["max_sensitivity"] = max_sensitivity
-        return self.engine.retrieve(query=query, tenant_id=tenant_id, branch=branch, filt=filt).to_dict()
+        start = perf_counter()
+        result = self.engine.retrieve(query=query, tenant_id=tenant_id, branch=branch, filt=filt)
+        self._record_retrieval(result.to_dict(), start)
+        return result.to_dict()
 
     def deep_search(self, tenant_id: str, query: str, branch: str = "main") -> dict[str, Any]:
-        return self.engine.deep_search(query=query, tenant_id=tenant_id, branch=branch).to_dict()
+        start = perf_counter()
+        result = self.engine.deep_search(query=query, tenant_id=tenant_id, branch=branch)
+        self._record_retrieval(result.to_dict(), start)
+        return result.to_dict()
 
     def explain(self, tenant_id: str, query: str, branch: str = "main") -> dict[str, Any]:
-        return self.engine.explain(query=query, tenant_id=tenant_id, branch=branch)
+        start = perf_counter()
+        result = self.engine.deep_search(query=query, tenant_id=tenant_id, branch=branch)
+        self._record_retrieval(result.to_dict(), start)
+        return result.to_dict()
 
     def get(self, tenant_id: str, id: str, branch: str | None = None) -> dict[str, Any]:
         exported = self.engine.export_tenant(tenant_id)
@@ -1143,6 +1156,20 @@ class MemoryTools:
     def _save_learning(self) -> None:
         if self.runtime_state:
             self.runtime_state.save_learning(self.learning)
+
+    def _save_metrics(self) -> None:
+        if self.runtime_state:
+            self.runtime_state.save_metrics(self.metrics)
+
+    def _record_retrieval(self, result: dict[str, Any], start: float) -> None:
+        latency_ms = (perf_counter() - start) * 1000
+        channels = result.get("explain", {}).get("channels", {})
+        self.metrics.record_retrieval(
+            {str(channel): int(count) for channel, count in channels.items()},
+            latency_ms,
+            bool(result.get("abstained")),
+        )
+        self._save_metrics()
 
     def _authorize(
         self,

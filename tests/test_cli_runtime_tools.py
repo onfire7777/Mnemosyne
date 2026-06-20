@@ -323,6 +323,7 @@ def test_cli_ops_report_exports_dashboard_snapshot(tmp_path: Path) -> None:
         "--payload",
         json.dumps({"tenant_id": TENANT, "memory_type": "fact", "scores": [0.25], "confidence": 0.1}),
     )
+    run_cli(store, "search", "--tenant", TENANT, "--query", "durable evidence")
 
     report = run_cli(
         store,
@@ -338,6 +339,10 @@ def test_cli_ops_report_exports_dashboard_snapshot(tmp_path: Path) -> None:
     assert report["counts"]["evidence"] == 1
     assert report["counts"]["audit_events"] >= 1
     assert report["queue"]["queued"] == 1
+    assert report["metrics"]["counters"]["retrieval.requests"] == 1
+    assert report["metrics"]["counters"]["retrieval.channel.lexical.hits"] >= 1
+    assert report["metrics"]["gauges"]["retrieval.latency_ms.p95"] >= 0
+    assert len(report["metrics"]["samples"]["retrieval.latency_ms"]) == 1
     assert report["learning"]["lesson_diversity"] == 1.0
     assert report["tripwires"]["proxy_true_gap"] == 0.30000000000000004
     assert report["tripwires"]["passed"] is False
