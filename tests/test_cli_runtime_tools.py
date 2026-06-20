@@ -2010,6 +2010,50 @@ def test_cli_queue_enqueue_and_drain_runtime_job(tmp_path: Path) -> None:
     assert after["queue"]["complete"] == 1
 
 
+def test_cli_worker_run_supervises_bounded_queue_cycles(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    run_cli(
+        store,
+        "queue-enqueue",
+        "--kind",
+        "calibrate",
+        "--payload",
+        json.dumps({"tenant_id": TENANT, "memory_type": "fact", "scores": [0.2, 0.5], "confidence": 0.1}),
+    )
+    run_cli(store, "queue-enqueue", "--kind", "observability_snapshot", "--payload", "{}")
+
+    supervised = run_cli(store, "worker-run", "--limit", "1", "--max-cycles", "3")
+    after = run_cli(store, "queue-snapshot")
+
+    assert supervised["ok"] is True
+    assert supervised["summary"]["processed"] == 2
+    assert supervised["summary"]["cycles"] == 3
+    assert supervised["summary"]["stopped_reason"] == "idle_exit"
+    assert [job["kind"] for job in supervised["jobs"]] == ["calibrate", "observability_snapshot"]
+    assert [cycle["processed"] for cycle in supervised["cycles"]] == [1, 1, 0]
+    assert supervised["queue"]["complete"] == 2
+    assert supervised["metrics"]["counters"]["queue.job.calibrate.complete"] == 1
+    assert supervised["metrics"]["counters"]["queue.job.observability_snapshot.complete"] == 1
+    assert supervised["metrics"]["counters"]["observability.snapshots"] == 1
+    assert after["queue"]["complete"] == 2
+
+
+def test_cli_worker_run_fail_on_dead_returns_nonzero(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    run_cli(store, "queue-enqueue", "--kind", "unknown_job", "--payload", "{}", "--max-attempts", "1")
+
+    result = run_raw_cli(store, "worker-run", "--limit", "1", "--max-cycles", "1", "--fail-on-dead")
+    report = json.loads(result.stdout)
+
+    assert result.returncode == 1
+    assert report["ok"] is False
+    assert report["summary"]["processed"] == 1
+    assert report["queue"]["dead"] == 1
+    assert report["jobs"][0]["kind"] == "unknown_job"
+    assert report["jobs"][0]["status"] == "dead"
+    assert "no handler for job kind unknown_job" in report["jobs"][0]["last_error"]
+
+
 def test_cli_ops_report_exports_dashboard_snapshot(tmp_path: Path) -> None:
     store = tmp_path / "mnemosyne.json"
     run_cli(

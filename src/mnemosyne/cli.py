@@ -1217,7 +1217,9 @@ def cmd_queue_enqueue(args: argparse.Namespace) -> None:
     emit({"queue": queue.snapshot(), "job": job.to_dict()})
 
 
-def cmd_consolidate_once(args: argparse.Namespace) -> None:
+def _runtime_worker_components(
+    args: argparse.Namespace,
+) -> tuple[RuntimeState | PostgresRuntimeState | None, InProcessQueue | PostgresQueue, MemoryTools, MetricsRegistry, QueueWorker]:
     runtime_state = load_runtime_state(args)
     queue = load_queue(args, runtime_state)
     tools = load_tools(args, ingestion_queue=queue, runtime_state=runtime_state)
@@ -1232,37 +1234,113 @@ def cmd_consolidate_once(args: argparse.Namespace) -> None:
         gate_cases=runtime_state.load_gate_cases() if runtime_state else [],
     )
     worker = QueueWorker(queue, handlers.handlers(), metrics=metrics)
-    job = worker.run_once(CONSOLIDATE_EVIDENCE_JOB)
+    return runtime_state, queue, tools, metrics, worker
+
+
+def _persist_worker_state(
+    args: argparse.Namespace,
+    runtime_state: RuntimeState | PostgresRuntimeState | None,
+    queue: InProcessQueue | PostgresQueue,
+    tools: MemoryTools,
+) -> None:
     if runtime_state and queue_uses_runtime_state(args):
         runtime_state.save_queue(queue)
         runtime_state.save_learning(tools.learning)
     elif runtime_state:
         runtime_state.save_learning(tools.learning)
+
+
+def cmd_consolidate_once(args: argparse.Namespace) -> None:
+    runtime_state, queue, tools, metrics, worker = _runtime_worker_components(args)
+    job = worker.run_once(CONSOLIDATE_EVIDENCE_JOB)
+    _persist_worker_state(args, runtime_state, queue, tools)
     emit({"queue": queue.snapshot(), "job": job.to_dict() if job else None, "metrics": metrics.snapshot().to_dict()})
 
 
 def cmd_queue_drain(args: argparse.Namespace) -> None:
-    runtime_state = load_runtime_state(args)
-    queue = load_queue(args, runtime_state)
-    tools = load_tools(args, ingestion_queue=queue, runtime_state=runtime_state)
-    metrics = MetricsRegistry()
-    handlers = RuntimeJobHandlers(
-        tools.engine,
-        queue,
-        metrics=metrics,
-        object_store=load_object_store(args),
-        media_extractor=load_media_extractor(args),
-        learning=tools.learning,
-        gate_cases=runtime_state.load_gate_cases() if runtime_state else [],
-    )
-    worker = QueueWorker(queue, handlers.handlers(), metrics=metrics)
+    runtime_state, queue, tools, metrics, worker = _runtime_worker_components(args)
     jobs = worker.drain(limit=args.limit, kind=args.kind)
-    if runtime_state and queue_uses_runtime_state(args):
-        runtime_state.save_queue(queue)
-        runtime_state.save_learning(tools.learning)
-    elif runtime_state:
-        runtime_state.save_learning(tools.learning)
+    _persist_worker_state(args, runtime_state, queue, tools)
     emit({"queue": queue.snapshot(), "jobs": [job.to_dict() for job in jobs], "metrics": metrics.snapshot().to_dict()})
+
+
+def cmd_worker_run(args: argparse.Namespace) -> None:
+    if args.limit < 1:
+        raise SystemExit("--limit must be at least 1.")
+    if args.max_cycles < 1:
+        raise SystemExit("--max-cycles must be at least 1.")
+    if args.idle_exit_after < 0:
+        raise SystemExit("--idle-exit-after must be zero or greater.")
+    if args.poll_interval < 0:
+        raise SystemExit("--poll-interval must be zero or greater.")
+
+    runtime_state, queue, tools, metrics, worker = _runtime_worker_components(args)
+    cycles: list[dict[str, Any]] = []
+    processed_jobs: list[dict[str, Any]] = []
+    idle_cycles = 0
+    stopped_reason = "max_cycles"
+    started = time.monotonic()
+
+    for cycle_number in range(1, args.max_cycles + 1):
+        cycle_jobs = []
+        cycle_started = time.monotonic()
+        for _ in range(args.limit):
+            job = worker.run_once(args.kind)
+            if job is None:
+                break
+            cycle_jobs.append(job)
+            processed_jobs.append(job.to_dict())
+        _persist_worker_state(args, runtime_state, queue, tools)
+
+        if cycle_jobs:
+            idle_cycles = 0
+        else:
+            idle_cycles += 1
+        cycles.append(
+            {
+                "cycle": cycle_number,
+                "processed": len(cycle_jobs),
+                "idle": not cycle_jobs,
+                "duration_ms": round((time.monotonic() - cycle_started) * 1000, 3),
+                "queue": queue.snapshot(),
+                "jobs": [job.to_dict() for job in cycle_jobs],
+            }
+        )
+        if not cycle_jobs and args.idle_exit_after and idle_cycles >= args.idle_exit_after:
+            stopped_reason = "idle_exit"
+            break
+        if args.poll_interval and cycle_number < args.max_cycles:
+            time.sleep(args.poll_interval)
+
+    final_queue = queue.snapshot()
+    ok = not (args.fail_on_dead and int(final_queue.get("dead", 0)) > 0)
+    report = {
+        "ok": ok,
+        "worker": {
+            "backend": args.queue_backend,
+            "tenant": runtime_state_tenant(args),
+            "kind": args.kind,
+            "limit": args.limit,
+            "max_cycles": args.max_cycles,
+            "idle_exit_after": args.idle_exit_after,
+            "poll_interval": args.poll_interval,
+            "fail_on_dead": bool(args.fail_on_dead),
+        },
+        "summary": {
+            "cycles": len(cycles),
+            "processed": len(processed_jobs),
+            "idle_cycles": idle_cycles,
+            "stopped_reason": stopped_reason,
+            "duration_ms": round((time.monotonic() - started) * 1000, 3),
+        },
+        "queue": final_queue,
+        "cycles": cycles,
+        "jobs": processed_jobs,
+        "metrics": metrics.snapshot().to_dict(),
+    }
+    emit(report)
+    if not ok:
+        raise SystemExit(1)
 
 
 def cmd_ops_report(args: argparse.Namespace) -> None:
@@ -2649,6 +2727,35 @@ def build_parser() -> argparse.ArgumentParser:
     queue_drain.add_argument("--kind")
     queue_drain.add_argument("--limit", type=int, default=10)
     queue_drain.set_defaults(func=cmd_queue_drain)
+
+    worker_run = sub.add_parser("worker-run")
+    worker_run.add_argument("--kind")
+    worker_run.add_argument("--limit", type=int, default=int(os.environ.get("MNEMOSYNE_WORKER_LIMIT", "10")))
+    worker_run.add_argument(
+        "--max-cycles",
+        type=int,
+        default=int(os.environ.get("MNEMOSYNE_WORKER_MAX_CYCLES", "1")),
+        help="Maximum worker supervision cycles before exiting",
+    )
+    worker_run.add_argument(
+        "--idle-exit-after",
+        type=int,
+        default=int(os.environ.get("MNEMOSYNE_WORKER_IDLE_EXIT_AFTER", "1")),
+        help="Stop after this many idle cycles; set 0 to disable idle exit",
+    )
+    worker_run.add_argument(
+        "--poll-interval",
+        type=float,
+        default=float(os.environ.get("MNEMOSYNE_WORKER_POLL_INTERVAL", "0")),
+        help="Seconds to sleep between worker cycles",
+    )
+    worker_run.add_argument(
+        "--fail-on-dead",
+        action="store_true",
+        default=env_flag("MNEMOSYNE_WORKER_FAIL_ON_DEAD", default=False),
+        help="Exit nonzero if the final queue snapshot contains dead jobs",
+    )
+    worker_run.set_defaults(func=cmd_worker_run)
 
     ops_report = sub.add_parser("ops-report")
     ops_report.add_argument("--tenant", required=True)
