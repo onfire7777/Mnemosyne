@@ -7,11 +7,13 @@ import binascii
 import hashlib
 import hmac
 import json
+import shlex
+import subprocess
 import threading
 import time
 from dataclasses import asdict, dataclass
 from enum import IntEnum
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any, Callable, Literal
 
 from cryptography.exceptions import InvalidSignature
@@ -249,6 +251,62 @@ def parse_session_keyring(raw: str | None) -> dict[str, str]:
             raise SessionAuthError("session key id is required")
         keyring[key_id] = value
     return keyring
+
+
+def load_session_secret_command(
+    command: str | Sequence[str],
+    *,
+    timeout_seconds: float = 10.0,
+) -> tuple[str | dict[str, str], str | None]:
+    """Load session signing material from a shell-free command provider."""
+
+    argv = shlex.split(command) if isinstance(command, str) else [str(item) for item in command]
+    if not argv:
+        raise SessionAuthError("session secret command must not be empty")
+    if timeout_seconds <= 0:
+        raise SessionAuthError("session secret command timeout must be positive")
+    try:
+        result = subprocess.run(
+            [*argv, "get_session_secret"],
+            input=json.dumps({"action": "get_session_secret"}),
+            text=True,
+            capture_output=True,
+            timeout=timeout_seconds,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise SessionAuthError("session secret command timed out") from exc
+    if result.returncode != 0:
+        detail = result.stderr.strip()
+        suffix = f": {detail[:200]}" if detail else ""
+        raise SessionAuthError(f"session secret command failed{suffix}")
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise SessionAuthError("session secret command response must be valid JSON") from exc
+    if not isinstance(payload, Mapping):
+        raise SessionAuthError("session secret command response must be a JSON object")
+    unknown_fields = set(payload).difference({"secret", "keyring", "active_key_id"})
+    if unknown_fields:
+        raise SessionAuthError("session secret command response contains unknown fields")
+    has_secret = payload.get("secret") is not None
+    has_keyring = payload.get("keyring") is not None
+    if has_secret == has_keyring:
+        raise SessionAuthError("session secret command response requires exactly one secret source")
+    active_key_id = str(payload["active_key_id"]) if payload.get("active_key_id") is not None else None
+    if has_secret:
+        if active_key_id:
+            raise SessionAuthError("session secret command active_key_id requires keyring")
+        secret = str(payload["secret"])
+        if not secret:
+            raise SessionAuthError("session secret command secret is required")
+        return secret, None
+    keyring_payload = payload["keyring"]
+    if not isinstance(keyring_payload, Mapping):
+        raise SessionAuthError("session secret command keyring must be a JSON object")
+    keyring = {str(key).strip(): str(value) for key, value in keyring_payload.items() if str(key).strip()}
+    SessionTokenVerifier(keyring, active_key_id=active_key_id)
+    return keyring, active_key_id
 
 
 def parse_session_revoke_list(raw: str | None) -> set[str]:

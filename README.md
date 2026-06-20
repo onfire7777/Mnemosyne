@@ -87,10 +87,12 @@ python -m mnemosyne.cli --session-token "$SIGNED_SESSION_TOKEN" \
   assert --tenant tenant-a --subject Mnemosyne --predicate has --object "session-bound writes"
 ```
 
+For deployment secret custody, `--session-secret-command` / `MNEMOSYNE_SESSION_SECRET_COMMAND` invokes a shell-free adapter with a `get_session_secret` action and JSON stdin. The adapter returns either `{"secret":"..."}` or `{"keyring":{"kid":"..."}, "active_key_id":"kid"}`; Mnemosyne uses the material for signing or verification without echoing it in command output.
+
 `session-exchange` validates an external OIDC/JWT identity token against a configured JWKS and mints the bounded Mnemosyne signed-session token used by CLI and MCP authorization:
 
 ```bash
-python -m mnemosyne.cli --session-secret "$SESSION_SECRET" session-exchange \
+python -m mnemosyne.cli --session-secret-command "$SESSION_SECRET_COMMAND" session-exchange \
   --idp-token "$OIDC_ID_TOKEN" \
   --idp-jwks-url https://idp.example.com/.well-known/jwks.json \
   --idp-issuer https://idp.example.com/ \
@@ -134,11 +136,11 @@ mneme-mcp --backend postgres --postgres-dsn "$MNEMOSYNE_POSTGRES_DSN" \
   --queue-backend postgres --stateless
 mneme-mcp --store .mnemosyne/mcp-store.json \
   --auth-token "$MNEMOSYNE_MCP_TOKEN" \
-  --session-secret "$MNEMOSYNE_MCP_SESSION_SECRET" \
+  --session-secret-command "$MNEMOSYNE_MCP_SESSION_SECRET_COMMAND" \
   --require-session --self-test
 mneme-mcp --http --http-host 127.0.0.1 --http-port 8765 \
   --auth-token "$MNEMOSYNE_MCP_TOKEN" \
-  --session-secret "$MNEMOSYNE_MCP_SESSION_SECRET" \
+  --session-secret-command "$MNEMOSYNE_MCP_SESSION_SECRET_COMMAND" \
   --require-session \
   --idp-jwks-url https://idp.example.com/.well-known/jwks.json \
   --idp-issuer https://idp.example.com/ \
@@ -146,6 +148,7 @@ mneme-mcp --http --http-host 127.0.0.1 --http-port 8765 \
 ```
 
 The self-test exercises `initialize`, `tools/list`, strict MCP input schemas, auth-token rejection, signed-session enforcement, and a read-only tool call. It redacts configured secrets and does not replace hosted HTTP/SSE/TLS/IdP/stateless soak validation.
+`mneme-mcp` accepts the same command-backed session custody contract through `--session-secret-command` / `MNEMOSYNE_MCP_SESSION_SECRET_COMMAND`.
 The hosted HTTP transport serves liveness metadata at `/healthz` and JSON-RPC at `/mcp`, reusing the same tool schema, auth-token, signed-session, stateless, queue, and backend enforcement as stdio. Pass bearer auth in `Authorization` and signed sessions in `X-Mnemosyne-Session-Token`, or through JSON-RPC `_meta` for non-HTTP transports. When OIDC settings are configured, `POST /session/exchange` accepts `{"idp_token":"..."}` with the static bearer token and returns a Mnemosyne signed session; hosted JWKS file/URL sources support the same bounded read, TTL refresh, unknown-`kid` refresh controls, and optional authz policy mapping with `MNEMOSYNE_MCP_IDP_*` environment variables. `/healthz` reports only whether session exchange and authz policy are configured, not policy contents. Deployments should still pass `--self-test` before exposure; HTTP mode is not a substitute for production TLS/client identity, real IdP/JWKS rotation validation, authz policy rollout/change-management, or official streamable/SSE deployment validation.
 
 C2PA verifier trust can be scoped through a JSON policy file:
@@ -165,7 +168,7 @@ Policy files can define global `trusted_issuers`, `trusted_roots`, or scoped `ru
 The repository has a verified local scaffold plus runtime parity extensions. Current checks:
 
 - `.venv/bin/python -m compileall -q src tests` passes.
-- `.venv/bin/python -m pytest -q` collects 276 tests and returns 237 passing tests plus 39 skipped live-DB tests when `MNEMOSYNE_POSTGRES_DSN` is unset.
+- `.venv/bin/python -m pytest -q` collects 280 tests and returns 241 passing tests plus 39 skipped live-DB tests when `MNEMOSYNE_POSTGRES_DSN` is unset.
 - With Docker compose Postgres running, `MNEMOSYNE_POSTGRES_DSN=postgresql://... .venv/bin/python -m pytest -q tests/test_postgres_engine_live.py tests/test_shared_engine_contract.py` returns 63 passing live/shared adapter tests covering tenant RLS, SQL FTS, pgvector assertion search, dense evidence fallback, recursive graph/PPR, explain channels/rails/provenance, branch/discard, branch merge retrieval, bitemporal supersession, tenant isolation, tombstone and hard-delete forget modes, command-backed object key management, transitive derived-evidence erasure across assertions/preferences/relations, retrieval trust/sensitivity/quarantine filtering, deep graph tenant/branch isolation, hard-delete audit export, HTTP-configurable retrieval adapter wiring with strict provider response validation, CLI `--backend postgres`, fail-closed CLI `provider-check`, stateless MCP ingestion over tenant-scoped durable Postgres queues, shared local/Postgres evidence/retrieval/explain/branch/as-of/relation/preference/correction/forget-propagation contracts, durable Postgres queue leasing/drain, asset-bound CLI file ingestion through the C2PA verifier adapter, externalized payload derived-text retrieval, async media extraction, gated consolidation promotion on Postgres, and shared local/Postgres contract parity.
 
 Exact 1:1 blueprint parity is still in progress. The controlling status artifact is `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md`.

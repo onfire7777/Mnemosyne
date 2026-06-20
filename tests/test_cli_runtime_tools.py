@@ -358,6 +358,80 @@ def test_cli_session_exchange_fails_closed_on_oversized_jwks_file(tmp_path: Path
     assert idp_token not in result.stderr
 
 
+def test_cli_session_exchange_uses_session_secret_command(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    payload = oidc_payload()
+    jwks, idp_token = make_oidc_token(payload)
+    jwks_file = tmp_path / "jwks.json"
+    jwks_file.write_text(json.dumps(jwks), encoding="utf-8")
+    command = fake_session_secret_command(
+        tmp_path,
+        {"keyring": {"cmd-key": "command-session-secret"}, "active_key_id": "cmd-key"},
+    )
+
+    output = run_cli(
+        store,
+        "--session-secret-command",
+        command,
+        "session-exchange",
+        "--idp-token",
+        idp_token,
+        "--idp-jwks-file",
+        str(jwks_file),
+        "--idp-issuer",
+        IDP_ISSUER,
+        "--idp-audience",
+        IDP_AUDIENCE,
+    )
+
+    identity = SessionTokenVerifier({"cmd-key": "command-session-secret"}).verify(output["session_token"])
+    assert identity.tenant_id == TENANT
+    assert identity.user_id == USER
+    assert identity.role == "operator"
+    encoded = json.dumps(output, sort_keys=True)
+    assert "command-session-secret" not in encoded
+
+
+def test_cli_session_secret_command_verifies_existing_session(tmp_path: Path) -> None:
+    command = fake_session_secret_command(tmp_path, {"secret": "command-session-secret"})
+    token = SessionTokenVerifier("command-session-secret").sign(
+        SessionIdentity(tenant_id=TENANT, user_id=USER, role="operator", source_trust_tier=0)
+    )
+
+    output = run_cli(tmp_path / "mnemosyne.json", "--session-token", token, "--session-secret-command", command, "tools")
+
+    assert "capture" in {tool["name"] for tool in output["tools"]}
+    assert "command-session-secret" not in json.dumps(output, sort_keys=True)
+
+
+def test_cli_session_secret_command_fails_closed_on_bad_response(tmp_path: Path) -> None:
+    script = tmp_path / "bad-session-secret.py"
+    script.write_text("print('not json')\n", encoding="utf-8")
+    command = " ".join(shlex.quote(item) for item in (sys.executable, str(script)))
+    jwks, idp_token = make_oidc_token(oidc_payload())
+    jwks_file = tmp_path / "jwks.json"
+    jwks_file.write_text(json.dumps(jwks), encoding="utf-8")
+
+    result = run_raw_cli(
+        tmp_path / "mnemosyne.json",
+        "--session-secret-command",
+        command,
+        "session-exchange",
+        "--idp-token",
+        idp_token,
+        "--idp-jwks-file",
+        str(jwks_file),
+        "--idp-issuer",
+        IDP_ISSUER,
+        "--idp-audience",
+        IDP_AUDIENCE,
+    )
+
+    assert result.returncode != 0
+    assert "session secret command response must be valid JSON" in result.stderr
+    assert idp_token not in result.stderr
+
+
 def fake_kms_command(tmp_path: Path) -> tuple[str, Path]:
     state = tmp_path / "kms-state.json"
     script = tmp_path / "fake-kms.py"
@@ -398,6 +472,30 @@ def fake_kms_command(tmp_path: Path) -> tuple[str, Path]:
     )
     command = " ".join(shlex.quote(item) for item in (sys.executable, str(script), str(state)))
     return command, state
+
+
+def fake_session_secret_command(tmp_path: Path, response: dict[str, object], *, name: str = "fake-session-secret") -> str:
+    response_file = tmp_path / f"{name}.json"
+    response_file.write_text(json.dumps(response, sort_keys=True), encoding="utf-8")
+    script = tmp_path / f"{name}.py"
+    script.write_text(
+        "\n".join(
+            [
+                "from __future__ import annotations",
+                "import json, sys",
+                "from pathlib import Path",
+                "response = Path(sys.argv[1])",
+                "action = sys.argv[2]",
+                "request = json.load(sys.stdin)",
+                "if action != 'get_session_secret' or request.get('action') != 'get_session_secret':",
+                "    print('bad action', file=sys.stderr)",
+                "    raise SystemExit(2)",
+                "print(response.read_text(encoding='utf-8'))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return " ".join(shlex.quote(item) for item in (sys.executable, str(script), str(response_file)))
 
 
 def fake_parametric_command(tmp_path: Path) -> tuple[str, Path]:
@@ -1857,7 +1955,10 @@ def test_cli_session_token_requires_secret(tmp_path: Path) -> None:
     )
 
     assert result.returncode != 0
-    assert "--session-token requires --session-secret, --session-keyring, or MNEMOSYNE_SESSION_SECRET." in result.stderr
+    assert (
+        "--session-token requires --session-secret, --session-keyring, --session-secret-command, "
+        "or MNEMOSYNE_SESSION_SECRET."
+    ) in result.stderr
 
 
 def test_cli_session_token_accepts_keyring_and_rejects_revoked_key(tmp_path: Path) -> None:
