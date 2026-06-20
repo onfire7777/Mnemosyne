@@ -17,7 +17,7 @@ from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.ingestion import IngestionPipeline
 from mnemosyne.mcp_tools import MemoryTools, TOOL_SPEC
 from mnemosyne.parametric import ParametricArtifactStore, ParametricTier
-from mnemosyne.queue import InProcessQueue
+from mnemosyne.queue import InProcessQueue, PostgresQueue
 from mnemosyne.runtime_state import RuntimeState
 from mnemosyne.storage import EncryptedLocalObjectStore, JsonKeyManager, LocalObjectStore
 
@@ -45,14 +45,31 @@ class MnemosyneMcpServer:
         object_store_encryption: str | None = None,
         object_key_store: str | os.PathLike[str] | None = None,
         allowed_residencies: tuple[str, ...] | None = None,
+        queue_backend: str | None = None,
+        queue_tenant: str | None = None,
     ):
         if backend not in {"local", "postgres"}:
             raise ValueError(f"Unsupported MCP backend: {backend}")
+        resolved_queue_backend = (
+            queue_backend
+            or os.environ.get("MNEMOSYNE_MCP_QUEUE_BACKEND")
+            or os.environ.get("MNEMOSYNE_QUEUE_BACKEND")
+            or ("postgres" if backend == "postgres" else "local")
+        )
+        if resolved_queue_backend not in {"local", "postgres"}:
+            raise ValueError(f"Unsupported MCP queue backend: {resolved_queue_backend}")
         if stateless and backend == "local" and not store_path:
             raise ValueError("Stateless local MCP mode requires a durable store_path.")
         self.store_path = store_path
         self.backend = backend
         self.postgres_dsn = postgres_dsn
+        self.queue_backend = resolved_queue_backend
+        self.queue_tenant = (
+            queue_tenant
+            or os.environ.get("MNEMOSYNE_MCP_QUEUE_TENANT")
+            or os.environ.get("MNEMOSYNE_QUEUE_TENANT")
+            or "system"
+        )
         self.parametric_artifact_store = parametric_artifact_store
         self.object_store = object_store or os.environ.get("MNEMOSYNE_OBJECT_STORE") or ".mnemosyne/objects"
         self.object_store_encryption = object_store_encryption or os.environ.get("MNEMOSYNE_OBJECT_STORE_ENCRYPTION", "none")
@@ -64,7 +81,7 @@ class MnemosyneMcpServer:
         if not self.stateless:
             self.engine, self.queue, self.runtime_state, self.tools = self._build_tools()
 
-    def _build_tools(self) -> tuple[Any, InProcessQueue, RuntimeState | None, MemoryTools]:
+    def _build_tools(self, queue_tenant: str | None = None) -> tuple[Any, Any, RuntimeState | None, MemoryTools]:
         if self.backend == "postgres":
             dsn = self.postgres_dsn or os.environ.get("MNEMOSYNE_POSTGRES_DSN")
             if not dsn:
@@ -78,7 +95,13 @@ class MnemosyneMcpServer:
         else:
             engine = LocalMemoryEngine(store_path=self.store_path)
             runtime_state = RuntimeState.from_store_path(self.store_path)
-        queue = runtime_state.load_queue() if runtime_state else InProcessQueue()
+        if self.queue_backend == "postgres":
+            dsn = self.postgres_dsn or os.environ.get("MNEMOSYNE_POSTGRES_DSN")
+            if not dsn:
+                raise ValueError("Postgres MCP queue backend requires postgres_dsn or MNEMOSYNE_POSTGRES_DSN.")
+            queue = PostgresQueue(dsn, tenant_id=queue_tenant or self.queue_tenant)
+        else:
+            queue = runtime_state.load_queue() if runtime_state else InProcessQueue()
         ingestion = IngestionPipeline(
             engine,
             object_store=_load_object_store(
@@ -96,9 +119,19 @@ class MnemosyneMcpServer:
         return engine, queue, runtime_state, tools
 
     @staticmethod
-    def _save_queue(runtime_state: RuntimeState | None, queue: InProcessQueue) -> None:
-        if runtime_state:
+    def _save_queue(runtime_state: RuntimeState | None, queue: Any) -> None:
+        if runtime_state and isinstance(queue, InProcessQueue):
             runtime_state.save_queue(queue)
+
+
+    @staticmethod
+    def _queue_tenant_from_arguments(arguments: dict[str, Any]) -> str | None:
+        for key in ("tenant_id", "tenant"):
+            value = arguments.get(key)
+            if isinstance(value, str) and value:
+                return value
+        return None
+
 
     def handle(self, request: dict[str, Any]) -> dict[str, Any] | None:
         method = request.get("method")
@@ -147,7 +180,7 @@ class MnemosyneMcpServer:
         if not isinstance(arguments, dict):
             raise ValueError("Tool arguments must be a JSON object")
         if self.stateless:
-            _, queue, runtime_state, tools = self._build_tools()
+            _, queue, runtime_state, tools = self._build_tools(self._queue_tenant_from_arguments(arguments))
             result = getattr(tools, name)(**arguments)
             self._save_queue(runtime_state, queue)
             return result
@@ -384,6 +417,17 @@ def main(argv: list[str] | None = None) -> None:
         help="Allowed data residency label for MCP ingestion; repeat or use MNEMOSYNE_ALLOWED_RESIDENCIES",
     )
     parser.add_argument("--parametric-artifact-store", default=os.environ.get("MNEMOSYNE_PARAMETRIC_ARTIFACT_STORE"))
+    parser.add_argument(
+        "--queue-backend",
+        choices=["local", "postgres"],
+        default=os.environ.get("MNEMOSYNE_MCP_QUEUE_BACKEND") or os.environ.get("MNEMOSYNE_QUEUE_BACKEND"),
+        help="Runtime job queue backend for MCP ingestion",
+    )
+    parser.add_argument(
+        "--queue-tenant",
+        default=os.environ.get("MNEMOSYNE_MCP_QUEUE_TENANT") or os.environ.get("MNEMOSYNE_QUEUE_TENANT"),
+        help="Fallback tenant scope for MCP Postgres queue jobs",
+    )
     parser.add_argument("--stateless", action="store_true", help="Rebuild engine and tool state for each JSON-RPC tool call")
     parser.add_argument("--sdk", action="store_true", help="Use the official MCP Python SDK stdio transport")
     parser.add_argument("--auth-token", default=os.environ.get("MNEMOSYNE_MCP_TOKEN"), help="Require this token for tools/call")
@@ -398,6 +442,8 @@ def main(argv: list[str] | None = None) -> None:
         "object_key_store": args.object_key_store,
         "allowed_residencies": tuple(args.allowed_residency),
         "parametric_artifact_store": args.parametric_artifact_store,
+        "queue_backend": args.queue_backend,
+        "queue_tenant": args.queue_tenant,
         "stateless": args.stateless,
     }
     if args.sdk:
