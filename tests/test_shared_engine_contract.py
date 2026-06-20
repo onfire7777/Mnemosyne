@@ -10,7 +10,7 @@ import pytest
 
 from mnemosyne.calibration import CalibrationSet
 from mnemosyne.engine import LocalMemoryEngine
-from mnemosyne.models import Assertion, Evidence, Preference, Relation
+from mnemosyne.models import Assertion, Contradiction, Evidence, Justification, Preference, Relation
 from mnemosyne.postgres_engine import PostgresEngine
 from mnemosyne.privacy import ErasureMode
 
@@ -182,6 +182,65 @@ def test_shared_engine_contract_direct_search_primitives(engine_bundle: tuple[An
     assert relation_id in {hit.id for hit in graph}
     assert all(hit.tenant_id == tenant for hit in [*lexical, *dense, *graph])
     assert all(hit.branch == "main" for hit in [*lexical, *dense, *graph])
+
+
+def test_shared_engine_contract_justifications_and_contradictions(engine_bundle: tuple[Any, str, str]) -> None:
+    engine, tenant, user = engine_bundle
+    cid = _append_evidence(engine, tenant, user, "Shared justification evidence supports conflict tracking.")
+    first_assertion = engine.upsert_assertion(
+        Assertion(
+            tenant_id=tenant,
+            user_id=user,
+            subject="Shared conflict subject",
+            predicate="has_answer",
+            object="alpha",
+            confidence=0.7,
+            source_evidence_cids=[cid],
+            trust_tier=0,
+            access_policy={"tenant": tenant},
+        )
+    )
+    second_assertion = engine.upsert_assertion(
+        Assertion(
+            tenant_id=tenant,
+            user_id=user,
+            subject="Shared conflict subject",
+            predicate="has_answer",
+            object="beta",
+            confidence=0.6,
+            source_evidence_cids=[cid],
+            trust_tier=0,
+            access_policy={"tenant": tenant},
+        )
+    )
+
+    justification_id = engine.add_justification(
+        Justification(
+            tenant_id=tenant,
+            assertion_id=first_assertion,
+            evidence_cids=[cid],
+            rule="shared-support-rule",
+            dependency_ids=[second_assertion],
+            kind="support",
+            label={"contract": "shared"},
+            hypothesis_prob=0.7,
+        )
+    )
+    contradiction_id = engine.add_contradiction(Contradiction(tenant_id=tenant, a=first_assertion, b=second_assertion))
+    duplicate_id = engine.add_contradiction(Contradiction(tenant_id=tenant, a=second_assertion, b=first_assertion))
+    exported = engine.export_tenant(tenant)
+    justification = next(item for item in exported["justifications"] if item["id"] == justification_id)
+    contradiction = next(item for item in exported["contradictions"] if item["id"] == contradiction_id)
+
+    assert duplicate_id == contradiction_id
+    assert justification["assertion_id"] == first_assertion
+    assert justification["evidence_cids"] == [cid]
+    assert justification["dependency_ids"] == [second_assertion]
+    assert justification["label"] == {"contract": "shared"}
+    assert justification["hypothesis_prob"] == 0.7
+    assert contradiction["a"] == first_assertion
+    assert contradiction["b"] == second_assertion
+    assert contradiction["status"] == "open"
 
 
 def test_shared_engine_contract_registers_entity_registry(engine_bundle: tuple[Any, str, str]) -> None:
