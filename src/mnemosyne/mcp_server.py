@@ -9,9 +9,12 @@ import inspect
 import json
 import os
 import sys
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import UnionType
 from typing import Any, Literal, TextIO, Union, get_args, get_origin, get_type_hints
+from urllib.parse import urlsplit
 
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.ingestion import IngestionPipeline
@@ -31,6 +34,7 @@ from mnemosyne.storage import CommandKeyManager, EncryptedLocalObjectStore, Json
 
 
 PROTOCOL_VERSION = "2024-11-05"
+DEFAULT_HTTP_MAX_BODY_BYTES = 1_048_576
 
 
 class MnemosyneMcpServer:
@@ -619,6 +623,150 @@ def serve_sdk_stdio(**kwargs: Any) -> None:
     asyncio.run(_serve_sdk_stdio(build_sdk_server(**kwargs)))
 
 
+def build_http_server(
+    *,
+    host: str = "127.0.0.1",
+    port: int = 8765,
+    rpc_path: str = "/mcp",
+    health_path: str = "/healthz",
+    max_body_bytes: int = DEFAULT_HTTP_MAX_BODY_BYTES,
+    **kwargs: Any,
+) -> ThreadingHTTPServer:
+    """Build a hosted HTTP JSON-RPC transport around the MCP facade."""
+
+    facade = MnemosyneMcpServer(**kwargs)
+    facade_lock = threading.RLock()
+    rpc_path = _normalize_http_path(rpc_path)
+    health_path = _normalize_http_path(health_path)
+    max_body_bytes = int(max_body_bytes)
+    if max_body_bytes <= 0:
+        raise ValueError("HTTP MCP max body bytes must be positive")
+
+    class Handler(BaseHTTPRequestHandler):
+        server_version = "MnemosyneMcpHTTP/0.1"
+
+        def do_GET(self) -> None:  # noqa: N802 - stdlib callback name.
+            path = urlsplit(self.path).path
+            if path != health_path:
+                self._send_json(404, {"ok": False, "error": "not found"})
+                return
+            self._send_json(
+                200,
+                {
+                    "ok": True,
+                    "server": "mnemosyne-memory",
+                    "protocolVersion": PROTOCOL_VERSION,
+                    "transport": "http-json-rpc",
+                    "rpc_path": rpc_path,
+                    "backend": facade.backend,
+                    "stateless": facade.stateless,
+                    "auth_token_required": bool(facade.auth_token),
+                    "session_required": bool(facade.require_session),
+                },
+            )
+
+        def do_POST(self) -> None:  # noqa: N802 - stdlib callback name.
+            path = urlsplit(self.path).path
+            if path != rpc_path:
+                self._send_json(404, {"ok": False, "error": "not found"})
+                return
+            length_header = self.headers.get("Content-Length")
+            try:
+                length = int(length_header or "")
+            except ValueError:
+                self._send_json(411, _error(None, -32600, "Content-Length is required"))
+                return
+            if length < 0:
+                self._send_json(400, _error(None, -32600, "Content-Length must be non-negative"))
+                return
+            if length > max_body_bytes:
+                self._send_json(413, _error(None, -32600, "Request body too large"))
+                return
+            raw = self.rfile.read(length)
+            try:
+                request = json.loads(raw.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                self._send_json(400, _error(None, -32700, f"Invalid JSON: {exc}"))
+                return
+            if not isinstance(request, dict):
+                self._send_json(400, _error(None, -32600, "JSON-RPC request must be an object"))
+                return
+            request = self._inject_http_auth_metadata(request)
+            with facade_lock:
+                response = facade.handle(request)
+            if response is None:
+                self.send_response(204)
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                return
+            self._send_json(200, response)
+
+        def _send_json(self, status: int, payload: dict[str, Any]) -> None:
+            encoded = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(encoded)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(encoded)
+
+        def _inject_http_auth_metadata(self, request: dict[str, Any]) -> dict[str, Any]:
+            if request.get("method") != "tools/call":
+                return request
+            params = request.get("params")
+            if not isinstance(params, dict):
+                return request
+            meta = params.get("_meta")
+            auth_meta = dict(meta) if isinstance(meta, dict) else {}
+            auth_header = self.headers.get("Authorization", "")
+            if auth_header.startswith("Bearer ") and "auth_token" not in auth_meta:
+                auth_meta["auth_token"] = auth_header.removeprefix("Bearer ").strip()
+            session_header = self.headers.get("X-Mnemosyne-Session-Token")
+            if session_header and "session_token" not in auth_meta:
+                auth_meta["session_token"] = session_header
+            if not auth_meta:
+                return request
+            cloned_params = dict(params)
+            cloned_params["_meta"] = auth_meta
+            cloned = dict(request)
+            cloned["params"] = cloned_params
+            return cloned
+
+        def log_message(self, format: str, *args: object) -> None:  # noqa: A002 - stdlib signature.
+            return
+
+    return ThreadingHTTPServer((host, port), Handler)
+
+
+def serve_http(
+    *,
+    host: str = "127.0.0.1",
+    port: int = 8765,
+    rpc_path: str = "/mcp",
+    health_path: str = "/healthz",
+    max_body_bytes: int = DEFAULT_HTTP_MAX_BODY_BYTES,
+    **kwargs: Any,
+) -> None:
+    httpd = build_http_server(
+        host=host,
+        port=port,
+        rpc_path=rpc_path,
+        health_path=health_path,
+        max_body_bytes=max_body_bytes,
+        **kwargs,
+    )
+    try:
+        httpd.serve_forever()
+    finally:
+        httpd.server_close()
+
+
+def _normalize_http_path(value: str) -> str:
+    if not value:
+        raise ValueError("HTTP MCP path must be non-empty")
+    return value if value.startswith("/") else f"/{value}"
+
+
 def run_self_test(*, sdk: bool = False, **kwargs: Any) -> dict[str, Any]:
     """Exercise the configured MCP facade without starting stdio service."""
 
@@ -914,6 +1062,17 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--stateless", action="store_true", help="Rebuild engine and tool state for each JSON-RPC tool call")
     parser.add_argument("--sdk", action="store_true", help="Use the official MCP Python SDK stdio transport")
     parser.add_argument("--self-test", action="store_true", help="Run MCP deployment validation checks and exit")
+    parser.add_argument("--http", action="store_true", help="Serve a hosted HTTP JSON-RPC MCP endpoint instead of stdio")
+    parser.add_argument("--http-host", default=os.environ.get("MNEMOSYNE_MCP_HTTP_HOST", "127.0.0.1"))
+    parser.add_argument("--http-port", type=int, default=int(os.environ.get("MNEMOSYNE_MCP_HTTP_PORT", "8765")))
+    parser.add_argument("--http-rpc-path", default=os.environ.get("MNEMOSYNE_MCP_HTTP_RPC_PATH", "/mcp"))
+    parser.add_argument("--http-health-path", default=os.environ.get("MNEMOSYNE_MCP_HTTP_HEALTH_PATH", "/healthz"))
+    parser.add_argument(
+        "--http-max-body-bytes",
+        type=int,
+        default=int(os.environ.get("MNEMOSYNE_MCP_HTTP_MAX_BODY_BYTES", str(DEFAULT_HTTP_MAX_BODY_BYTES))),
+        help="Maximum HTTP MCP JSON-RPC request body size",
+    )
     parser.add_argument("--auth-token", default=os.environ.get("MNEMOSYNE_MCP_TOKEN"), help="Require this token for tools/call")
     parser.add_argument(
         "--session-secret",
@@ -981,6 +1140,18 @@ def main(argv: list[str] | None = None) -> None:
         report = run_self_test(sdk=args.sdk, **config)
         print(json.dumps(report, indent=2, sort_keys=True))
         raise SystemExit(0 if report["ok"] else 1)
+    if args.http and args.sdk:
+        parser.error("--http and --sdk cannot be combined for serving")
+    if args.http:
+        serve_http(
+            host=args.http_host,
+            port=args.http_port,
+            rpc_path=args.http_rpc_path,
+            health_path=args.http_health_path,
+            max_body_bytes=args.http_max_body_bytes,
+            **config,
+        )
+        return
     if args.sdk:
         serve_sdk_stdio(**config)
     else:

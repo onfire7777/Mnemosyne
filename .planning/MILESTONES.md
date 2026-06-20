@@ -20,11 +20,12 @@ This checkpoint verified the deterministic local scaffold and initial GitHub pro
 ### Verification
 
 - Earlier checkpoint: `python -m pytest` returned `39 passed`.
-- Current strict-continuation suite: `.venv/bin/python -m pytest -q` collects 231 tests and returns 206 passing tests plus 25 skipped live-DB tests when `MNEMOSYNE_POSTGRES_DSN` is unset.
+- Current strict-continuation suite: `.venv/bin/python -m pytest -q` collects 235 tests and returns 210 passing tests plus 25 skipped live-DB tests when `MNEMOSYNE_POSTGRES_DSN` is unset.
 - Current live Postgres smoke: `MNEMOSYNE_POSTGRES_DSN=postgresql://... .venv/bin/python -m pytest -q tests/test_postgres_engine_live.py tests/test_shared_engine_contract.py` returns 63 passing tests against the compose database and exercises tenant RLS, SQL FTS, pgvector assertion search, dense evidence fallback, recursive graph/PPR retrieval, explain channels/rails/provenance, hard-delete erasure, command-backed object key management, HTTP-configurable retrieval adapter wiring with strict provider response validation, manifest-backed CLI `provider-check` gates, command-backed parametric adapter proposal/rollback, the CLI `--backend postgres` path, stateless MCP ingestion over tenant-scoped durable Postgres queues, CLI file ingestion through the C2PA verifier adapter, async media extraction, shared local/Postgres parity, and gated consolidation promotion on Postgres.
 - Current strict-continuation compile check: `.venv/bin/python -m compileall -q src tests` passes.
 - `python -m mnemosyne.cli tools` returned the expected tool list.
 - Docker Postgres initialized `sql/schema.sql` and reported 21 public tables.
 - `mneme-mcp --self-test` locally preflights MCP initialize/list/schema/auth/session/read-only-call behavior without exposing secrets.
+- `mneme-mcp --http` hosts the JSON-RPC MCP facade with health, bearer/session-header binding, body-size and malformed-request guards, and stateless restart durability coverage.
 - CLI `provider-check` fails command KMS providers that retain keys after claimed shred success.
 - `gsd-sdk roadmap analyze` reported 6/6 original scaffold phases complete; strict blueprint parity remains reopened.

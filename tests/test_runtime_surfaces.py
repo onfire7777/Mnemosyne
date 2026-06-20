@@ -12,10 +12,11 @@ import tomllib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import StringIO
 from pathlib import Path
+from urllib import error as urlerror, request as urlrequest
 
 import pytest
 
-from mnemosyne.mcp_server import MnemosyneMcpServer, build_sdk_server, run_self_test
+from mnemosyne.mcp_server import MnemosyneMcpServer, build_http_server, build_sdk_server, run_self_test
 from mnemosyne.mcp_tools import TOOL_SPEC
 from mnemosyne.models import Hit
 from mnemosyne.postgres_engine import PostgresEngine, _bytes_to_cid, _cid_to_bytes, _stable_uuid, _uuid_or_none, _vector_literal
@@ -65,6 +66,48 @@ def mcp_session_token(
             session_id=session_id,
         )
     )
+
+
+def start_mcp_http_server(**kwargs: object) -> tuple[ThreadingHTTPServer, threading.Thread, str]:
+    server = build_http_server(host="127.0.0.1", port=0, **kwargs)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server, thread, f"http://127.0.0.1:{server.server_port}"
+
+
+def stop_mcp_http_server(server: ThreadingHTTPServer, thread: threading.Thread) -> None:
+    server.shutdown()
+    thread.join(timeout=5)
+    server.server_close()
+
+
+def http_json(
+    method: str,
+    url: str,
+    payload: dict[str, object] | None = None,
+    headers: dict[str, str] | None = None,
+) -> tuple[int, dict[str, object] | None]:
+    data = None if payload is None else json.dumps(payload).encode("utf-8")
+    request_headers = {"Content-Type": "application/json", **(headers or {})}
+    request = urlrequest.Request(url, data=data, method=method, headers=request_headers)
+    try:
+        with urlrequest.urlopen(request, timeout=5) as response:  # noqa: S310 - test-local server.
+            body = response.read()
+            return response.status, None if not body else json.loads(body.decode("utf-8"))
+    except urlerror.HTTPError as exc:
+        body = exc.read()
+        return exc.code, None if not body else json.loads(body.decode("utf-8"))
+
+
+def http_post_raw(url: str, body: bytes) -> tuple[int, dict[str, object] | None]:
+    request = urlrequest.Request(url, data=body, method="POST", headers={"Content-Type": "application/json"})
+    try:
+        with urlrequest.urlopen(request, timeout=5) as response:  # noqa: S310 - test-local server.
+            response_body = response.read()
+            return response.status, None if not response_body else json.loads(response_body.decode("utf-8"))
+    except urlerror.HTTPError as exc:
+        response_body = exc.read()
+        return exc.code, None if not response_body else json.loads(response_body.decode("utf-8"))
 
 
 def fake_kms_command(tmp_path: Path) -> tuple[str, Path]:
@@ -828,6 +871,289 @@ def test_mcp_cli_self_test_reports_deployment_health(tmp_path: Path) -> None:
     assert report["stateless"] is False
     assert auth_token not in encoded
     assert MCP_SESSION_SECRET not in encoded
+
+
+def test_mcp_http_transport_health_lists_and_calls_capture_search(tmp_path: Path) -> None:
+    server, thread, base = start_mcp_http_server(store_path=tmp_path / "store.json")
+    try:
+        health_status, health = http_json("GET", f"{base}/healthz")
+        init_status, initialized = http_json("POST", f"{base}/mcp", {"jsonrpc": "2.0", "id": 1, "method": "initialize"})
+        list_status, listed = http_json("POST", f"{base}/mcp", {"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
+        capture_status, captured = http_json(
+            "POST",
+            f"{base}/mcp",
+            {
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "tools/call",
+                "params": {
+                    "name": "capture",
+                    "arguments": {
+                        "tenant_id": TENANT,
+                        "user_id": USER,
+                        "actor": "user",
+                        "source_type": "chat",
+                        "content": "Hosted MCP HTTP transport captures evidence.",
+                        "trust_tier": 3,
+                    },
+                },
+            },
+        )
+        search_status, searched = http_json(
+            "POST",
+            f"{base}/mcp",
+            {
+                "jsonrpc": "2.0",
+                "id": 4,
+                "method": "tools/call",
+                "params": {
+                    "name": "search",
+                    "arguments": {"tenant_id": TENANT, "query": "Hosted MCP HTTP transport"},
+                },
+            },
+        )
+        notification_status, notification = http_json(
+            "POST",
+            f"{base}/mcp",
+            {"jsonrpc": "2.0", "method": "notifications/initialized"},
+        )
+    finally:
+        stop_mcp_http_server(server, thread)
+
+    assert health_status == 200
+    assert health is not None
+    assert health["ok"] is True
+    assert health["transport"] == "http-json-rpc"
+    assert health["rpc_path"] == "/mcp"
+    assert health["auth_token_required"] is False
+    assert init_status == 200
+    assert initialized is not None
+    assert initialized["result"]["protocolVersion"] == "2024-11-05"  # type: ignore[index]
+    assert list_status == 200
+    assert listed is not None
+    first_tool = listed["result"]["tools"][0]  # type: ignore[index]
+    assert first_tool["inputSchema"]["additionalProperties"] is False
+    assert capture_status == 200
+    assert captured is not None
+    captured_content = captured["result"]["structuredContent"]  # type: ignore[index]
+    assert search_status == 200
+    assert searched is not None
+    hits = searched["result"]["structuredContent"]["hits"]  # type: ignore[index]
+    assert hits[0]["provenance"] == [captured_content["cid"]]
+    assert notification_status == 204
+    assert notification is None
+
+
+def test_mcp_http_transport_enforces_auth_session_and_schema(tmp_path: Path) -> None:
+    auth_token = "http-mcp-auth-token"
+    server, thread, base = start_mcp_http_server(
+        store_path=tmp_path / "store.json",
+        auth_token=auth_token,
+        session_secret=MCP_SESSION_SECRET,
+        require_session=True,
+    )
+    try:
+        _, health = http_json("GET", f"{base}/healthz")
+        _, missing_auth = http_json(
+            "POST",
+            f"{base}/mcp",
+            {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "residency_policy", "arguments": {}}},
+        )
+        _, wrong_auth = http_json(
+            "POST",
+            f"{base}/mcp",
+            {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "residency_policy", "arguments": {}}},
+            headers={"Authorization": "Bearer wrong-token"},
+        )
+        _, missing_session = http_json(
+            "POST",
+            f"{base}/mcp",
+            {
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "tools/call",
+                "params": {"name": "residency_policy", "arguments": {}},
+            },
+            headers={"Authorization": f"Bearer {auth_token}"},
+        )
+        session_token = mcp_session_token()
+        _, tampered_session = http_json(
+            "POST",
+            f"{base}/mcp",
+            {
+                "jsonrpc": "2.0",
+                "id": 4,
+                "method": "tools/call",
+                "params": {"name": "residency_policy", "arguments": {}},
+            },
+            headers={"Authorization": f"Bearer {auth_token}", "X-Mnemosyne-Session-Token": f"{session_token}tampered"},
+        )
+        tenant_mismatch_token = mcp_session_token(tenant_id="other-tenant")
+        _, tenant_mismatch = http_json(
+            "POST",
+            f"{base}/mcp",
+            {
+                "jsonrpc": "2.0",
+                "id": 5,
+                "method": "tools/call",
+                "params": {
+                    "name": "capture",
+                    "arguments": {
+                        "tenant_id": TENANT,
+                        "user_id": USER,
+                        "actor": "user",
+                        "source_type": "chat",
+                        "content": "Tenant mismatch should fail.",
+                        "trust_tier": 0,
+                    },
+                },
+            },
+            headers={"Authorization": f"Bearer {auth_token}", "X-Mnemosyne-Session-Token": tenant_mismatch_token},
+        )
+        _, schema_error = http_json(
+            "POST",
+            f"{base}/mcp",
+            {
+                "jsonrpc": "2.0",
+                "id": 6,
+                "method": "tools/call",
+                "params": {
+                    "name": "residency_policy",
+                    "arguments": {"unexpected": True},
+                },
+            },
+            headers={"Authorization": f"Bearer {auth_token}", "X-Mnemosyne-Session-Token": session_token},
+        )
+        _, ok = http_json(
+            "POST",
+            f"{base}/mcp",
+            {
+                "jsonrpc": "2.0",
+                "id": 7,
+                "method": "tools/call",
+                "params": {
+                    "name": "residency_policy",
+                    "arguments": {},
+                },
+            },
+            headers={"Authorization": f"Bearer {auth_token}", "X-Mnemosyne-Session-Token": session_token},
+        )
+    finally:
+        stop_mcp_http_server(server, thread)
+
+    encoded = json.dumps([health, missing_auth, wrong_auth, missing_session, tampered_session, tenant_mismatch, schema_error, ok])
+    assert health is not None
+    assert health["auth_token_required"] is True
+    assert health["session_required"] is True
+    assert missing_auth is not None
+    assert missing_auth["result"]["isError"] is True  # type: ignore[index]
+    assert "auth token" in missing_auth["result"]["content"][0]["text"]  # type: ignore[index]
+    assert wrong_auth is not None
+    assert wrong_auth["result"]["isError"] is True  # type: ignore[index]
+    assert "auth token" in wrong_auth["result"]["content"][0]["text"]  # type: ignore[index]
+    assert missing_session is not None
+    assert missing_session["result"]["isError"] is True  # type: ignore[index]
+    assert "session token required" in missing_session["result"]["content"][0]["text"]  # type: ignore[index]
+    assert tampered_session is not None
+    assert tampered_session["result"]["isError"] is True  # type: ignore[index]
+    assert "session token denied" in tampered_session["result"]["content"][0]["text"]  # type: ignore[index]
+    assert tenant_mismatch is not None
+    assert tenant_mismatch["result"]["isError"] is True  # type: ignore[index]
+    assert "session tenant mismatch" in tenant_mismatch["result"]["content"][0]["text"]  # type: ignore[index]
+    assert schema_error is not None
+    assert schema_error["result"]["isError"] is True  # type: ignore[index]
+    assert "unexpected" in schema_error["result"]["content"][0]["text"]  # type: ignore[index]
+    assert ok is not None
+    assert ok["result"]["isError"] is False  # type: ignore[index]
+    assert auth_token not in encoded
+    assert MCP_SESSION_SECRET not in encoded
+    assert session_token not in encoded
+
+
+def test_mcp_http_transport_rejects_malformed_and_oversized_payloads(tmp_path: Path) -> None:
+    server, thread, base = start_mcp_http_server(store_path=tmp_path / "store.json", max_body_bytes=128)
+    try:
+        malformed_status, malformed = http_post_raw(f"{base}/mcp", b"{bad-json")
+        non_object_status, non_object = http_post_raw(f"{base}/mcp", b"[]")
+        unsupported_status, unsupported = http_json(
+            "POST",
+            f"{base}/mcp",
+            {"jsonrpc": "2.0", "id": 1, "method": "unknown/method"},
+        )
+        oversized_status, oversized = http_post_raw(
+            f"{base}/mcp",
+            b'{"jsonrpc":"2.0","id":1,"method":"initialize","padding":"' + (b"a" * 160) + b'"}',
+        )
+        missing_status, missing = http_json("GET", f"{base}/missing")
+    finally:
+        stop_mcp_http_server(server, thread)
+
+    assert malformed_status == 400
+    assert malformed is not None
+    assert malformed["error"]["code"] == -32700  # type: ignore[index]
+    assert non_object_status == 400
+    assert non_object is not None
+    assert non_object["error"]["message"] == "JSON-RPC request must be an object"  # type: ignore[index]
+    assert unsupported_status == 200
+    assert unsupported is not None
+    assert unsupported["error"]["code"] == -32601  # type: ignore[index]
+    assert oversized_status == 413
+    assert oversized is not None
+    assert oversized["error"]["message"] == "Request body too large"  # type: ignore[index]
+    assert missing_status == 404
+    assert missing == {"error": "not found", "ok": False}
+
+
+def test_mcp_http_transport_stateless_mode_reloads_durable_state(tmp_path: Path) -> None:
+    store = tmp_path / "store.json"
+    server, thread, base = start_mcp_http_server(store_path=store, stateless=True)
+    try:
+        _, captured = http_json(
+            "POST",
+            f"{base}/mcp",
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {
+                    "name": "capture",
+                    "arguments": {
+                        "tenant_id": TENANT,
+                        "user_id": USER,
+                        "actor": "user",
+                        "source_type": "chat",
+                        "content": "Hosted stateless MCP reloads durable state.",
+                        "trust_tier": 3,
+                    },
+                },
+            },
+        )
+    finally:
+        stop_mcp_http_server(server, thread)
+
+    server, thread, base = start_mcp_http_server(store_path=store, stateless=True)
+    try:
+        _, searched = http_json(
+            "POST",
+            f"{base}/mcp",
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {
+                    "name": "search",
+                    "arguments": {"tenant_id": TENANT, "query": "Hosted stateless MCP"},
+                },
+            },
+        )
+    finally:
+        stop_mcp_http_server(server, thread)
+
+    assert captured is not None
+    assert searched is not None
+    captured_content = captured["result"]["structuredContent"]  # type: ignore[index]
+    hits = searched["result"]["structuredContent"]["hits"]  # type: ignore[index]
+    assert hits[0]["provenance"] == [captured_content["cid"]]
 
 
 def test_mcp_server_stateless_mode_reloads_durable_engine_and_runtime_state(tmp_path: Path) -> None:
