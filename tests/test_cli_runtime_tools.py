@@ -352,6 +352,194 @@ def test_cli_provider_check_returns_nonzero_for_malformed_http_provider(tmp_path
     assert report["checks"]["media_extractor"]["ok"] is True
 
 
+def test_cli_provider_check_uses_deployment_manifest(tmp_path: Path, monkeypatch) -> None:
+    requests: list[dict[str, object]] = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:  # noqa: N802 - stdlib callback name.
+            length = int(self.headers.get("Content-Length", "0"))
+            payload = json.loads(self.rfile.read(length).decode("utf-8"))
+            requests.append({"path": self.path, "payload": payload, "auth": self.headers.get("Authorization")})
+            if self.path == "/embed":
+                body = {"data": [{"embedding": [3.0, 4.0, 0.0, 99.0]}]}
+            else:
+                body = {"results": [{"index": 1, "relevance_score": 0.95}, {"index": 0, "relevance_score": 0.1}]}
+            encoded = json.dumps(body).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(encoded)))
+            self.end_headers()
+            self.wfile.write(encoded)
+
+        def log_message(self, format: str, *args: object) -> None:  # noqa: A002 - stdlib signature.
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    extractor = tmp_path / "extractor.py"
+    extractor.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env python3",
+                "import json",
+                "print(json.dumps({'text': 'manifest media health ok', 'sources': ['manifest-probe']}))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    extractor.chmod(0o755)
+    embedder = tmp_path / "media_embedder.py"
+    embedder.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env python3",
+                "import json, pathlib, sys",
+                "request = json.loads(sys.stdin.read())",
+                "assert pathlib.Path(sys.argv[1]).exists()",
+                "assert request['modality'] == 'image'",
+                "print(json.dumps({'embedding': [3.0, 4.0, 0.0]}))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    embedder.chmod(0o755)
+    kms_command, kms_state = fake_kms_command(tmp_path)
+    parametric_command, parametric_state = fake_parametric_command(tmp_path)
+    monkeypatch.setenv("MNEMOSYNE_TEST_EMBED_KEY", "embed-manifest-secret")
+    monkeypatch.setenv("MNEMOSYNE_TEST_RERANK_KEY", "rank-manifest-secret")
+    base = f"http://127.0.0.1:{server.server_port}"
+    manifest = tmp_path / "providers.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "name": "test-production-providers",
+                "required_checks": [
+                    "embedding",
+                    "reranker",
+                    "media_extractor",
+                    "media_embedding",
+                    "object_key_manager",
+                    "parametric",
+                    "residency_policy",
+                ],
+                "forbid_local": True,
+                "providers": {
+                    "retrieval": {
+                        "embedding": {
+                            "provider": "http",
+                            "url": f"{base}/embed",
+                            "model": "embed-manifest",
+                            "api_key": {"env": "MNEMOSYNE_TEST_EMBED_KEY"},
+                            "dims": 3,
+                        },
+                        "reranker": {
+                            "provider": "http",
+                            "url": f"{base}/rerank",
+                            "model": "rerank-manifest",
+                            "api_key": {"env": "MNEMOSYNE_TEST_RERANK_KEY"},
+                        },
+                    },
+                    "media": {
+                        "extractor": {"command": str(extractor)},
+                        "embedding": {"provider": "command", "command": str(embedder), "dims": 3},
+                    },
+                    "object_key": {
+                        "required": True,
+                        "provider": "command",
+                        "command": kms_command,
+                        "store": str(tmp_path / "object-keys"),
+                    },
+                    "parametric": {
+                        "provider": "command",
+                        "command": parametric_command,
+                        "adapter_kind": "lora-command-adapter",
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    try:
+        report = run_cli(tmp_path / "mnemosyne.json", "provider-check", "--provider-manifest", str(manifest))
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        server.server_close()
+
+    assert report["ok"] is True
+    assert report["manifest"] == {
+        "name": "test-production-providers",
+        "required_checks": [
+            "embedding",
+            "reranker",
+            "media_extractor",
+            "media_embedding",
+            "object_key_manager",
+            "parametric",
+            "residency_policy",
+        ],
+        "forbid_local": True,
+    }
+    assert report["checks"]["embedding"]["provider"] == "http"
+    assert report["checks"]["embedding"]["dimensions"] == 3
+    assert report["checks"]["reranker"]["top_id"] == "b"
+    assert report["checks"]["media_extractor"]["sources"] == ["manifest-probe"]
+    assert report["checks"]["media_embedding"]["dimensions"] == 3
+    assert report["checks"]["object_key_manager"]["provider"] == "command"
+    assert report["checks"]["object_key_manager"]["shredded"] is True
+    assert report["checks"]["parametric"]["adapter_kind"] == "lora-command-adapter"
+    assert [item["path"] for item in requests] == ["/embed", "/rerank"]
+    assert [item["auth"] for item in requests] == ["Bearer embed-manifest-secret", "Bearer rank-manifest-secret"]
+    assert json.loads(kms_state.read_text(encoding="utf-8"))["keys"] == {}
+    assert [call["action"] for call in json.loads(parametric_state.read_text(encoding="utf-8"))["calls"]] == [
+        "propose",
+        "rollback",
+    ]
+
+
+def test_cli_provider_check_manifest_requires_selected_checks(tmp_path: Path) -> None:
+    manifest = tmp_path / "providers.json"
+    manifest.write_text(
+        json.dumps({"name": "requires-media-embedding", "required_checks": ["media_embedding"], "providers": {}}),
+        encoding="utf-8",
+    )
+
+    result = run_raw_cli(tmp_path / "mnemosyne.json", "provider-check", "--provider-manifest", str(manifest))
+    payload = json.loads(result.stdout)
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert payload["checks"]["media_embedding"]["ok"] is False
+    assert payload["checks"]["media_embedding"]["error"] == "required check was skipped"
+
+
+def test_cli_provider_check_manifest_can_forbid_local_retrieval(tmp_path: Path) -> None:
+    manifest = tmp_path / "providers.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "name": "remote-retrieval-required",
+                "required_checks": ["embedding", "reranker"],
+                "forbid_local": True,
+                "providers": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = run_raw_cli(tmp_path / "mnemosyne.json", "provider-check", "--provider-manifest", str(manifest))
+    payload = json.loads(result.stdout)
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert payload["checks"]["embedding"]["ok"] is False
+    assert payload["checks"]["reranker"]["ok"] is False
+    assert payload["checks"]["embedding"]["error"] == "provider manifest forbids local retrieval providers"
+    assert payload["checks"]["reranker"]["error"] == "provider manifest forbids local retrieval providers"
+
+
 def test_cli_ingests_binary_file_with_c2pa_verifier(tmp_path: Path) -> None:
     store = tmp_path / "mnemosyne.json"
     asset = tmp_path / "capture.bin"

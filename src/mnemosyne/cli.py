@@ -1001,7 +1001,152 @@ def cmd_ops_report(args: argparse.Namespace) -> None:
     emit(report)
 
 
+def _read_provider_manifest(path: str | None) -> dict[str, Any]:
+    if not path:
+        return {}
+    manifest = json.loads(Path(path).expanduser().read_text(encoding="utf-8"))
+    if not isinstance(manifest, dict):
+        raise SystemExit("--provider-manifest must point to a JSON object")
+    return manifest
+
+
+def _manifest_value(value: Any) -> Any:
+    if isinstance(value, dict) and set(value) == {"env"}:
+        env_name = str(value["env"])
+        env_value = os.environ.get(env_name)
+        if env_value is None:
+            raise SystemExit(f"provider manifest requires environment variable {env_name}")
+        return env_value
+    return value
+
+
+def _apply_manifest_fields(args: argparse.Namespace, fields: dict[str, Any], mapping: dict[str, str]) -> None:
+    for source, target in mapping.items():
+        if source in fields and fields[source] is not None:
+            setattr(args, target, _manifest_value(fields[source]))
+
+
+def apply_provider_manifest(args: argparse.Namespace) -> dict[str, Any]:
+    manifest = _read_provider_manifest(getattr(args, "provider_manifest", None))
+    if not manifest:
+        return {"name": None, "required_checks": [], "forbid_local": False}
+    providers = manifest.get("providers", {})
+    if not isinstance(providers, dict):
+        raise SystemExit("provider manifest field 'providers' must be an object")
+    retrieval = providers.get("retrieval", {})
+    if isinstance(retrieval, dict):
+        _apply_manifest_fields(
+            args,
+            retrieval.get("embedding", {}) if isinstance(retrieval.get("embedding", {}), dict) else {},
+            {
+                "provider": "embedding_provider",
+                "url": "embedding_url",
+                "model": "embedding_model",
+                "api_key": "embedding_api_key",
+                "dims": "embedding_dims",
+                "timeout_seconds": "retrieval_timeout",
+            },
+        )
+        _apply_manifest_fields(
+            args,
+            retrieval.get("reranker", {}) if isinstance(retrieval.get("reranker", {}), dict) else {},
+            {
+                "provider": "reranker_provider",
+                "url": "reranker_url",
+                "model": "reranker_model",
+                "api_key": "reranker_api_key",
+                "timeout_seconds": "retrieval_timeout",
+            },
+        )
+        _apply_manifest_fields(
+            args,
+            retrieval,
+            {
+                "lexical_backend": "lexical_backend",
+                "graph_backend": "graph_backend",
+            },
+        )
+    media = providers.get("media", {})
+    if isinstance(media, dict):
+        _apply_manifest_fields(
+            args,
+            media.get("extractor", {}) if isinstance(media.get("extractor", {}), dict) else {},
+            {
+                "command": "media_extractor_command",
+                "timeout_seconds": "media_extractor_timeout",
+            },
+        )
+        _apply_manifest_fields(
+            args,
+            media.get("embedding", {}) if isinstance(media.get("embedding", {}), dict) else {},
+            {
+                "provider": "media_embedding_provider",
+                "command": "media_embedding_command",
+                "dims": "media_embedding_dims",
+                "timeout_seconds": "media_embedding_timeout",
+            },
+        )
+    object_key = providers.get("object_key", {})
+    if isinstance(object_key, dict):
+        _apply_manifest_fields(
+            args,
+            object_key,
+            {
+                "provider": "object_key_provider",
+                "command": "object_key_command",
+                "timeout_seconds": "object_key_timeout",
+                "store": "object_key_store",
+            },
+        )
+        if object_key.get("required") is True:
+            args.object_store_encryption = "aesgcm"
+    parametric = providers.get("parametric", {})
+    if isinstance(parametric, dict):
+        _apply_manifest_fields(
+            args,
+            parametric,
+            {
+                "provider": "parametric_provider",
+                "command": "parametric_command",
+                "adapter_kind": "parametric_adapter_kind",
+                "timeout_seconds": "parametric_timeout",
+            },
+        )
+    required = manifest.get("required_checks", [])
+    if not isinstance(required, list) or not all(isinstance(item, str) for item in required):
+        raise SystemExit("provider manifest field 'required_checks' must be an array of strings")
+    forbid_local = bool(manifest.get("forbid_local", False))
+    return {"name": manifest.get("name"), "required_checks": required, "forbid_local": forbid_local}
+
+
+def enforce_provider_manifest_policy(
+    checks: dict[str, dict[str, Any]],
+    manifest: dict[str, Any],
+) -> bool:
+    ok = True
+    if manifest.get("forbid_local"):
+        for check_name in ("embedding", "reranker"):
+            check = checks.get(check_name, {})
+            if check.get("ok") and check.get("provider") in {"local", "local-hashing", "hashing", "local-similarity"}:
+                check["ok"] = False
+                check["error"] = "provider manifest forbids local retrieval providers"
+                ok = False
+    for check_name in manifest.get("required_checks", []):
+        check = checks.get(check_name)
+        if check is None:
+            checks[check_name] = {"ok": False, "error": "required check was not executed"}
+            ok = False
+        elif check.get("skipped"):
+            check["ok"] = False
+            check["error"] = "required check was skipped"
+            ok = False
+        elif not check.get("ok"):
+            ok = False
+    return ok
+
+
 def cmd_provider_check(args: argparse.Namespace) -> None:
+    manifest = apply_provider_manifest(args)
     checks: dict[str, dict[str, Any]] = {}
     ok = True
     try:
@@ -1189,7 +1334,8 @@ def cmd_provider_check(args: argparse.Namespace) -> None:
         ok = False
         checks["residency_policy"] = {"ok": False, "error": str(exc)}
 
-    emit({"ok": ok, "checks": checks})
+    ok = enforce_provider_manifest_policy(checks, manifest) and ok
+    emit({"ok": ok, "manifest": manifest, "checks": checks})
     if not ok:
         raise SystemExit(1)
 
@@ -1783,6 +1929,7 @@ def build_parser() -> argparse.ArgumentParser:
     ops_report.set_defaults(func=cmd_ops_report)
 
     provider_check = sub.add_parser("provider-check")
+    provider_check.add_argument("--provider-manifest", help="JSON deployment manifest for provider health gates")
     provider_check.set_defaults(func=cmd_provider_check)
 
     residency_policy = sub.add_parser("residency-policy")
