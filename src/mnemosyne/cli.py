@@ -137,7 +137,19 @@ def _bind_session_claim(args: argparse.Namespace, attr: str, value: str) -> None
 
 def _require_authorization_context(args: argparse.Namespace) -> None:
     command = getattr(args, "command", None)
-    if command not in {"confirm", "branch", "merge", "discard", "parametric-propose", "parametric-evaluate", "parametric-rollback"}:
+    if command not in {
+        "confirm",
+        "branch",
+        "merge",
+        "discard",
+        "lesson-promote",
+        "procedure-validate",
+        "procedure-promote",
+        "procedure-rollback",
+        "parametric-propose",
+        "parametric-evaluate",
+        "parametric-rollback",
+    }:
         return
     missing: list[str] = []
     if getattr(args, "role", None) is None:
@@ -727,17 +739,36 @@ def cmd_procedure_induce(args: argparse.Namespace) -> None:
 
 def cmd_lesson_promote(args: argparse.Namespace) -> None:
     tools = load_tools(args)
-    emit(tools.lesson_promote(args.lesson_id, cases=parse_json_arg(args.cases, [])))
+    emit(
+        tools.lesson_promote(
+            args.lesson_id,
+            cases=parse_json_arg(args.cases, []),
+            role=args.role,
+            source_trust_tier=args.source_trust_tier,
+        )
+    )
 
 
 def cmd_procedure_validate(args: argparse.Namespace) -> None:
     tools = load_tools(args)
-    emit(tools.procedure_validate(args.procedure_id))
+    emit(
+        tools.procedure_validate(
+            args.procedure_id,
+            role=args.role,
+            source_trust_tier=args.source_trust_tier,
+        )
+    )
 
 
 def cmd_procedure_promote(args: argparse.Namespace) -> None:
     tools = load_tools(args)
-    emit(tools.procedure_promote(args.procedure_id))
+    emit(
+        tools.procedure_promote(
+            args.procedure_id,
+            role=args.role,
+            source_trust_tier=args.source_trust_tier,
+        )
+    )
 
 
 def cmd_lesson_search(args: argparse.Namespace) -> None:
@@ -752,7 +783,13 @@ def cmd_procedure_search(args: argparse.Namespace) -> None:
 
 def cmd_procedure_rollback(args: argparse.Namespace) -> None:
     tools = load_tools(args)
-    emit(tools.procedure_rollback(args.procedure_id))
+    emit(
+        tools.procedure_rollback(
+            args.procedure_id,
+            role=args.role,
+            source_trust_tier=args.source_trust_tier,
+        )
+    )
 
 
 def cmd_outcome_evaluate(args: argparse.Namespace) -> None:
@@ -1618,14 +1655,20 @@ def build_parser() -> argparse.ArgumentParser:
     lesson_promote = sub.add_parser("lesson-promote")
     lesson_promote.add_argument("--lesson-id", required=True)
     lesson_promote.add_argument("--cases", required=True, help="JSON array of regression cases")
+    lesson_promote.add_argument("--role", choices=["reader", "agent", "consolidator", "operator"])
+    lesson_promote.add_argument("--source-trust-tier", type=int)
     lesson_promote.set_defaults(func=cmd_lesson_promote)
 
     procedure_validate = sub.add_parser("procedure-validate")
     procedure_validate.add_argument("--procedure-id", required=True)
+    procedure_validate.add_argument("--role", choices=["reader", "agent", "consolidator", "operator"])
+    procedure_validate.add_argument("--source-trust-tier", type=int)
     procedure_validate.set_defaults(func=cmd_procedure_validate)
 
     procedure_promote = sub.add_parser("procedure-promote")
     procedure_promote.add_argument("--procedure-id", required=True)
+    procedure_promote.add_argument("--role", choices=["reader", "agent", "consolidator", "operator"])
+    procedure_promote.add_argument("--source-trust-tier", type=int)
     procedure_promote.set_defaults(func=cmd_procedure_promote)
 
     lesson_search = sub.add_parser("lesson-search")
@@ -1642,6 +1685,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     procedure_rollback = sub.add_parser("procedure-rollback")
     procedure_rollback.add_argument("--procedure-id", required=True)
+    procedure_rollback.add_argument("--role", choices=["reader", "agent", "consolidator", "operator"])
+    procedure_rollback.add_argument("--source-trust-tier", type=int)
     procedure_rollback.set_defaults(func=cmd_procedure_rollback)
 
     outcome_evaluate = sub.add_parser("outcome-evaluate")

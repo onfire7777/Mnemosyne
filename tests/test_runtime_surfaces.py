@@ -816,7 +816,7 @@ def test_mcp_server_persists_parametric_artifacts_and_rolls_back(tmp_path: Path)
     )
     lesson = mcp_call(server, "lesson_propose", {"trajectory_id": trajectory["id"]})
     procedure = mcp_call(server, "procedure_propose", {"lesson_id": lesson["id"]})
-    mcp_call(server, "procedure_validate", {"procedure_id": procedure["id"]})
+    mcp_call(server, "procedure_validate", {"procedure_id": procedure["id"], **PARAMETRIC_AUTH})
     mcp_call(
         server,
         "lesson_promote",
@@ -831,6 +831,7 @@ def test_mcp_server_persists_parametric_artifacts_and_rolls_back(tmp_path: Path)
                         "protected": True,
                     }
             ],
+            **PARAMETRIC_AUTH,
         },
     )
 
@@ -888,7 +889,7 @@ def test_mcp_server_parametric_tier_can_use_command_provider(tmp_path: Path) -> 
     )
     lesson = mcp_call(server, "lesson_propose", {"trajectory_id": trajectory["id"]})
     procedure = mcp_call(server, "procedure_propose", {"lesson_id": lesson["id"]})
-    mcp_call(server, "procedure_validate", {"procedure_id": procedure["id"]})
+    mcp_call(server, "procedure_validate", {"procedure_id": procedure["id"], **PARAMETRIC_AUTH})
     mcp_call(
         server,
         "lesson_promote",
@@ -903,6 +904,7 @@ def test_mcp_server_parametric_tier_can_use_command_provider(tmp_path: Path) -> 
                     "protected": True,
                 }
             ],
+            **PARAMETRIC_AUTH,
         },
     )
 
@@ -944,6 +946,65 @@ def test_mcp_parametric_provider_requires_operator_authority(tmp_path: Path) -> 
 
     assert response["result"]["isError"] is True
     assert "policy and safety rails require operator authority" in response["result"]["content"][0]["text"]
+
+
+def test_mcp_learning_activation_requires_mediated_authority(tmp_path: Path) -> None:
+    server = MnemosyneMcpServer(store_path=tmp_path / "mcp-store.json")
+    trajectory = mcp_call(
+        server,
+        "trajectory_record",
+        {
+            "tenant_id": TENANT,
+            "user_id": USER,
+            "session_id": "session-learning-authz",
+            "task": "learning promotion authz",
+            "steps": [{"name": "promote", "status": "failed", "error": "untrusted"}],
+            "outcome": "failure",
+            "reward": -1.0,
+            "memory_version": "v1",
+        },
+    )
+    lesson = mcp_call(server, "lesson_propose", {"trajectory_id": trajectory["id"]})
+    procedure = mcp_call(server, "procedure_propose", {"lesson_id": lesson["id"]})
+    low_trust = {"role": "agent", "source_trust_tier": 5}
+
+    denied_calls = [
+        (
+            "lesson_promote",
+            {
+                "lesson_id": lesson["id"],
+                "cases": [
+                    {
+                        "id": "case-learning-authz",
+                        "signature": "learning promotion authz",
+                        "query": "learning promotion authz",
+                        "expected_substring": "verify with tools",
+                        "protected": True,
+                    }
+                ],
+                **low_trust,
+            },
+        ),
+        ("procedure_validate", {"procedure_id": procedure["id"], **low_trust}),
+        ("procedure_promote", {"procedure_id": procedure["id"], **low_trust}),
+        ("procedure_rollback", {"procedure_id": procedure["id"], **low_trust}),
+    ]
+
+    for name, arguments in denied_calls:
+        response = server.handle(
+            {
+                "jsonrpc": "2.0",
+                "id": 99,
+                "method": "tools/call",
+                "params": {"name": name, "arguments": arguments},
+            }
+        )
+
+        assert response["result"]["isError"] is True
+        assert "branch promotion requires operator/consolidator authority" in response["result"]["content"][0]["text"]
+
+    assert server.tools.learning.lessons[lesson["id"]].status == "candidate"
+    assert server.tools.learning.procedures[procedure["id"]].status == "candidate"
 
 
 def test_mcp_server_requires_configured_auth_token_for_tool_calls(tmp_path: Path) -> None:
