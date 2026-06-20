@@ -171,13 +171,61 @@ def test_shared_engine_contract_evidence_cids_are_immutable(
 def test_shared_engine_contract_exports_all_and_json(engine_bundle: tuple[Any, str, str]) -> None:
     engine, tenant, user = engine_bundle
     cid = _append_evidence(engine, tenant, user, "Shared export-all contract evidence.")
+    erased_cid = _append_evidence(engine, tenant, user, "Shared export-all erased evidence must stay hidden.")
+    engine.forget(tenant, erased_cid, erasure_mode=ErasureMode.TOMBSTONE_RECOMPUTE.value)
+    engine.set_calibration(
+        CalibrationSet(
+            tenant_id=tenant,
+            memory_type="fact",
+            scores=[0.91],
+            target_coverage=0.9,
+        )
+    )
+    entity = engine.register_entity(
+        tenant,
+        "shared-export-entity",
+        alias="Shared Export Entity",
+        summary="Shared export-all includes entity registry rows.",
+        source_evidence_cids=[cid],
+        access_policy={"tenant": tenant},
+    )
 
     exported = engine.export_all()
     parsed = json.loads(engine.to_json())
+    expected_keys = {
+        "policy",
+        "branches",
+        "evidence",
+        "assertions",
+        "relations",
+        "preferences",
+        "justifications",
+        "contradictions",
+        "calibrations",
+        "entities",
+        "audit_log",
+        "deletion_log",
+        "merge_log",
+        "tenants",
+    }
 
+    assert expected_keys <= set(exported)
+    assert expected_keys <= set(parsed)
     assert exported["policy"]["top_k"] == parsed["policy"]["top_k"]
     assert any(item["cid"] == cid and item["tenant_id"] == tenant for item in exported["evidence"])
     assert any(item["cid"] == cid and item["tenant_id"] == tenant for item in parsed["evidence"])
+    assert all(item["cid"] != erased_cid for item in exported["evidence"])
+    assert all(item["cid"] != erased_cid for item in parsed["evidence"])
+    assert any(item["name"] == "main" and item["tenant_id"] == tenant for item in exported["branches"])
+    assert any(item["memory_type"] == "fact" and item["tenant_id"] == tenant for item in exported["calibrations"])
+    assert any(item["memory_type"] == "fact" and item["tenant_id"] == tenant for item in parsed["calibrations"])
+    assert any(item["canonical"] == entity["canonical"] and item["tenant_id"] == tenant for item in exported["entities"])
+    assert any(item["canonical"] == entity["canonical"] and item["tenant_id"] == tenant for item in parsed["entities"])
+    assert all(item["tenant_id"] != "*" for item in exported["tenants"])
+    tenant_export = next(item for item in exported["tenants"] if item["tenant_id"] == tenant)
+    assert any(item["cid"] == cid for item in tenant_export["evidence"])
+    assert all(item["cid"] != erased_cid for item in tenant_export["evidence"])
+    assert any(item["canonical"] == entity["canonical"] for item in tenant_export["entities"])
 
 
 def test_shared_engine_contract_explain_reports_channels_rails_and_provenance(engine_bundle: tuple[Any, str, str]) -> None:
