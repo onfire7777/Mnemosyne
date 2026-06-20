@@ -18,6 +18,7 @@ from mnemosyne.mcp_tools import MemoryTools, TOOL_SPEC
 from mnemosyne.parametric import ParametricArtifactStore, ParametricTier
 from mnemosyne.queue import InProcessQueue
 from mnemosyne.runtime_state import RuntimeState
+from mnemosyne.storage import EncryptedLocalObjectStore, JsonKeyManager, LocalObjectStore
 
 
 PROTOCOL_VERSION = "2024-11-05"
@@ -39,6 +40,10 @@ class MnemosyneMcpServer:
         postgres_dsn: str | None = None,
         parametric_artifact_store: str | os.PathLike[str] | None = None,
         stateless: bool = False,
+        object_store: str | os.PathLike[str] | None = None,
+        object_store_encryption: str | None = None,
+        object_key_store: str | os.PathLike[str] | None = None,
+        allowed_residencies: tuple[str, ...] | None = None,
     ):
         if backend not in {"local", "postgres"}:
             raise ValueError(f"Unsupported MCP backend: {backend}")
@@ -48,6 +53,10 @@ class MnemosyneMcpServer:
         self.backend = backend
         self.postgres_dsn = postgres_dsn
         self.parametric_artifact_store = parametric_artifact_store
+        self.object_store = object_store or os.environ.get("MNEMOSYNE_OBJECT_STORE") or ".mnemosyne/objects"
+        self.object_store_encryption = object_store_encryption or os.environ.get("MNEMOSYNE_OBJECT_STORE_ENCRYPTION", "none")
+        self.object_key_store = object_key_store or os.environ.get("MNEMOSYNE_OBJECT_KEY_STORE")
+        self.allowed_residencies = allowed_residencies or _default_allowed_residencies()
         self.stateless = stateless
         self.auth_token = auth_token if auth_token is not None else os.environ.get("MNEMOSYNE_MCP_TOKEN")
         self.tool_names = {item["name"] for item in TOOL_SPEC}
@@ -69,7 +78,16 @@ class MnemosyneMcpServer:
             engine = LocalMemoryEngine(store_path=self.store_path)
             runtime_state = RuntimeState.from_store_path(self.store_path)
         queue = runtime_state.load_queue() if runtime_state else InProcessQueue()
-        ingestion = IngestionPipeline(engine, queue=queue)
+        ingestion = IngestionPipeline(
+            engine,
+            object_store=_load_object_store(
+                self.object_store,
+                self.object_store_encryption,
+                self.object_key_store,
+            ),
+            queue=queue,
+            allowed_residencies=self.allowed_residencies,
+        )
         parametric = ParametricTier(
             ParametricArtifactStore(_parametric_store_path(self.store_path, self.parametric_artifact_store))
         )
@@ -262,11 +280,42 @@ def _parametric_store_path(
     return Path(".mnemosyne/mcp-parametric")
 
 
+def _default_allowed_residencies() -> tuple[str, ...]:
+    raw = os.environ.get("MNEMOSYNE_ALLOWED_RESIDENCIES", "local")
+    return tuple(item.strip() for item in raw.split(",") if item.strip())
+
+
+def _load_object_store(
+    root: str | os.PathLike[str],
+    encryption: str,
+    key_store: str | os.PathLike[str] | None,
+) -> LocalObjectStore:
+    if encryption == "aesgcm":
+        keys = Path(key_store).expanduser() if key_store else Path(root).expanduser() / ".keys.json"
+        return EncryptedLocalObjectStore(Path(root), JsonKeyManager(keys))
+    if encryption != "none":
+        raise ValueError(f"Unsupported object-store encryption: {encryption}")
+    return LocalObjectStore(Path(root))
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="mneme-mcp", description="Run the Mnemosyne stdio MCP server")
     parser.add_argument("--store", default=str(default_store()), help="Path to local JSON store")
     parser.add_argument("--backend", choices=["local", "postgres"], default=default_backend(), help="Storage backend for MCP tools")
     parser.add_argument("--postgres-dsn", default=default_postgres_dsn(), help="Postgres DSN for --backend postgres")
+    parser.add_argument("--object-store", default=os.environ.get("MNEMOSYNE_OBJECT_STORE", ".mnemosyne/objects"))
+    parser.add_argument(
+        "--object-store-encryption",
+        choices=["none", "aesgcm"],
+        default=os.environ.get("MNEMOSYNE_OBJECT_STORE_ENCRYPTION", "none"),
+    )
+    parser.add_argument("--object-key-store", default=os.environ.get("MNEMOSYNE_OBJECT_KEY_STORE"))
+    parser.add_argument(
+        "--allowed-residency",
+        action="append",
+        default=list(_default_allowed_residencies()),
+        help="Allowed data residency label for MCP ingestion; repeat or use MNEMOSYNE_ALLOWED_RESIDENCIES",
+    )
     parser.add_argument("--parametric-artifact-store", default=os.environ.get("MNEMOSYNE_PARAMETRIC_ARTIFACT_STORE"))
     parser.add_argument("--stateless", action="store_true", help="Rebuild engine and tool state for each JSON-RPC tool call")
     args = parser.parse_args(argv)
@@ -274,6 +323,10 @@ def main(argv: list[str] | None = None) -> None:
         store_path=args.store,
         backend=args.backend,
         postgres_dsn=args.postgres_dsn,
+        object_store=args.object_store,
+        object_store_encryption=args.object_store_encryption,
+        object_key_store=args.object_key_store,
+        allowed_residencies=tuple(args.allowed_residency),
         parametric_artifact_store=args.parametric_artifact_store,
         stateless=args.stateless,
     ).serve()

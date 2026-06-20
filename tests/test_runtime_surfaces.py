@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import inspect
 import json
 import threading
@@ -195,6 +196,67 @@ def test_mcp_server_initializes_lists_tools_and_calls_capture_search(tmp_path: P
     assert capture_content["cid"]
     assert search_content["hits"]
     assert search_content["hits"][0]["provenance"] == [capture_content["cid"]]
+
+
+def test_mcp_server_honors_object_encryption_and_residency_config(tmp_path: Path) -> None:
+    objects = tmp_path / "objects"
+    server = MnemosyneMcpServer(
+        store_path=tmp_path / "store.json",
+        object_store=objects,
+        object_store_encryption="aesgcm",
+        object_key_store=tmp_path / "keys.json",
+        allowed_residencies=("local", "eu"),
+    )
+    ingested = mcp_call(
+        server,
+        "ingest",
+        {
+            "tenant_id": TENANT,
+            "user_id": USER,
+            "actor": "user",
+            "source_type": "mcp-upload",
+            "data": base64.b64encode(b"mcp private payload bytes").decode("ascii"),
+            "modality": "binary",
+            "media_type": "application/octet-stream",
+            "metadata": {"residency": "eu", "description": "MCP encrypted private payload."},
+            "trust_tier": 0,
+        },
+    )
+    raw_objects = [path.read_bytes() for path in objects.rglob("*") if path.is_file()]
+    exported = mcp_call(server, "export", {"tenant_id": TENANT})
+    evidence = next(item for item in exported["evidence"] if item["cid"] == ingested["cid"])
+    rejected = server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 100,
+            "method": "tools/call",
+            "params": {
+                "name": "ingest",
+                "arguments": {
+                    "tenant_id": TENANT,
+                    "user_id": USER,
+                    "actor": "user",
+                    "source_type": "mcp-upload",
+                    "content": "disallowed residency",
+                    "metadata": {"residency": "us"},
+                    "trust_tier": 0,
+                },
+            },
+        }
+    )
+    forgotten = mcp_call(
+        server,
+        "forget",
+        {"tenant_id": TENANT, "cid": ingested["cid"], "erasure_mode": "hard_delete_legal"},
+    )
+
+    assert raw_objects
+    assert all(b"mcp private payload bytes" not in raw for raw in raw_objects)
+    assert evidence["access_policy"]["residency"] == "eu"
+    assert "residency:eu" in evidence["capability_tags"]
+    assert rejected["result"]["isError"] is True
+    assert "not allowed by this runtime" in rejected["result"]["content"][0]["text"]
+    assert forgotten["object_shred"]["crypto_shredded"] is True
 
 
 def test_mcp_server_rejects_non_object_tool_arguments(tmp_path: Path) -> None:

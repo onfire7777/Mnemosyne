@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 from time import perf_counter
 from typing import Any
 
@@ -336,6 +337,11 @@ class MemoryTools:
         capability_tags: list[str] | None = None,
         sensitivity: int = 0,
     ) -> dict[str, Any]:
+        if isinstance(data, str):
+            try:
+                data = base64.b64decode(data.encode("ascii"), validate=True)
+            except Exception as exc:
+                raise ValueError("ingest data must be base64-encoded when sent as a string") from exc
         if content is None and data is None:
             raise ValueError("ingest requires content or data")
         return self.ingestion.ingest(
