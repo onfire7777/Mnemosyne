@@ -55,9 +55,10 @@ class PostgresEngine:
     """Production storage adapter for the canonical PostgreSQL schema.
 
     This adapter implements the core MemoryEngine operations against
-    sql/schema.sql. It writes deterministic assertion embeddings and lexemes so
-    fresh local deployments exercise the same Postgres full-text, pgvector, and
-    graph contracts that production model providers can later replace.
+    sql/schema.sql. It writes deterministic evidence/assertion embeddings and
+    lexemes so fresh local deployments exercise the same Postgres full-text,
+    pgvector, and graph contracts that production model providers can later
+    replace.
     """
 
     def __init__(self, dsn: str, policy: OperatingPolicy | None = None, adapters: RetrievalAdapters | None = None):
@@ -86,6 +87,11 @@ class PostgresEngine:
         cur.execute("ALTER TABLE entities ADD COLUMN IF NOT EXISTS source_evidence_cids BYTEA[] NOT NULL DEFAULT '{}'")
         cur.execute("ALTER TABLE entities ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now()")
         cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS entities_tenant_canonical_unique ON entities (tenant_id, canonical)")
+
+    @staticmethod
+    def _ensure_evidence_vector_schema(cur: Any) -> None:
+        cur.execute("ALTER TABLE evidence ADD COLUMN IF NOT EXISTS embedding VECTOR(1024)")
+        cur.execute("CREATE INDEX IF NOT EXISTS evidence_embedding_hnsw ON evidence USING hnsw (embedding vector_cosine_ops)")
 
     def ensure_tenant_and_branch(self, tenant_id: str, branch: str = "main", kind: str = "protected") -> None:
         db_tenant_id = _stable_uuid("tenant", tenant_id)
@@ -123,19 +129,21 @@ class PostgresEngine:
             },
         )
         cid_bytes = _cid_to_bytes(cid)
+        embedding = _vector_literal(self.adapters.embedding.embed(ev.content)) if ev.content else None
         with self.connect() as conn:
             with conn.cursor() as cur:
                 self._set_tenant(cur, db_tenant_id)
+                self._ensure_evidence_vector_schema(cur)
                 cur.execute(
                     """
                     INSERT INTO evidence (
                       cid, branch, tenant_id, user_id, session_id, actor, source_type,
                       source_identity, content, content_pointer, modality, metadata,
                       trust_tier, capability_tags, sensitivity, signed_provenance,
-                      access_policy, erased, created_at
+                      access_policy, embedding, erased, created_at
                     )
                     VALUES (
-                      %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, false, %s
+                      %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::vector, false, %s
                     )
                     ON CONFLICT (tenant_id, branch, cid) DO NOTHING
                     """,
@@ -157,6 +165,7 @@ class PostgresEngine:
                         ev.sensitivity,
                         self._jsonb(ev.signed_provenance) if ev.signed_provenance else None,
                         self._jsonb(ev.access_policy),
+                        embedding,
                         ev.created_at,
                     ),
                 )
@@ -620,6 +629,57 @@ class PostgresEngine:
                             },
                         )
                     )
+                self._ensure_evidence_vector_schema(cur)
+                cur.execute(
+                    """
+                    SELECT cid, branch, content, trust_tier, sensitivity, source_type,
+                      1.0 - (embedding <=> %s::vector) AS score
+                    FROM evidence
+                    WHERE tenant_id = %s AND branch = %s AND erased = false
+                      AND trust_tier <= %s AND sensitivity <= %s
+                      AND (%s OR NOT (metadata ? 'quarantine_reason'))
+                      AND embedding IS NOT NULL
+                    ORDER BY embedding <=> %s::vector
+                    LIMIT %s
+                    """,
+                    (
+                        query_literal,
+                        db_tenant_id,
+                        branch,
+                        max_trust,
+                        max_sensitivity,
+                        include_quarantined,
+                        query_literal,
+                        k,
+                    ),
+                )
+                for row in cur.fetchall():
+                    text = row["content"] or ""
+                    score = float(row["score"] or 0.0)
+                    if score <= 0:
+                        continue
+                    cid = _bytes_to_cid(row["cid"])
+                    hits.append(
+                        Hit(
+                            id=cid,
+                            kind="evidence",
+                            tenant_id=tenant_id,
+                            branch=row["branch"],
+                            text=text,
+                            score=score,
+                            channel="postgres_pgvector",
+                            provenance=[cid],
+                            trust_tier=row["trust_tier"],
+                            sensitivity=row["sensitivity"],
+                            metadata={
+                                "source_type": row["source_type"],
+                                "backend": self.adapters.embedding.name,
+                                "embedding_dims": self.adapters.embedding.dims,
+                                "stored_embedding": True,
+                                "source_table": "evidence",
+                            },
+                        )
+                    )
                 cur.execute(
                     """
                     SELECT cid, branch, content, trust_tier, sensitivity, source_type
@@ -627,6 +687,7 @@ class PostgresEngine:
                     WHERE tenant_id = %s AND branch = %s AND erased = false
                       AND trust_tier <= %s AND sensitivity <= %s
                       AND (%s OR NOT (metadata ? 'quarantine_reason'))
+                      AND embedding IS NULL
                     """,
                     (db_tenant_id, branch, max_trust, max_sensitivity, include_quarantined),
                 )
@@ -653,6 +714,7 @@ class PostgresEngine:
                                 "backend": self.adapters.embedding.name,
                                 "embedding_dims": self.adapters.embedding.dims,
                                 "stored_embedding": False,
+                                "source_table": "evidence",
                             },
                         )
                     )

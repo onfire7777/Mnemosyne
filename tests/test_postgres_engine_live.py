@@ -17,7 +17,7 @@ from mnemosyne.jobs import CALIBRATE_JOB, RuntimeJobHandlers
 from mnemosyne.media import MEDIA_EXTRACT_JOB, MediaExtractionResult
 from mnemosyne.mcp_server import MnemosyneMcpServer
 from mnemosyne.models import Assertion, Evidence, Preference, Relation
-from mnemosyne.postgres_engine import PostgresEngine
+from mnemosyne.postgres_engine import PostgresEngine, _cid_to_bytes, _stable_uuid
 from mnemosyne.queue import InProcessQueue, PostgresQueue, QueueWorker
 from mnemosyne.storage import LocalObjectStore
 
@@ -190,6 +190,89 @@ def test_postgres_engine_live_contract_smoke() -> None:
     exported = engine.export_tenant(tenant)
     assert exported["tenant_id"] == tenant
     assert exported["assertions"]
+
+
+def test_postgres_evidence_vector_search_uses_stored_pgvector_live() -> None:
+    engine = PostgresEngine(live_dsn())
+    tenant = f"tenant-evidence-vector-{uuid4()}"
+    user = "user-evidence-vector"
+    cid = engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id=user,
+            actor="user",
+            source_type="vector-contract",
+            content="Evidence stored pgvector contract uses a durable basalt marker.",
+            trust_tier=0,
+            sensitivity=0,
+            access_policy={"tenant": tenant},
+        )
+    )
+
+    db_tenant_id = _stable_uuid("tenant", tenant)
+    with engine.connect() as conn:
+        with conn.cursor() as cur:
+            engine._set_tenant(cur, db_tenant_id)  # noqa: SLF001 - live RLS contract assertion.
+            cur.execute(
+                """
+                SELECT embedding IS NOT NULL
+                FROM evidence
+                WHERE tenant_id = %s AND branch = 'main' AND cid = %s
+                """,
+                (db_tenant_id, _cid_to_bytes(cid)),
+            )
+            assert cur.fetchone()[0] is True
+
+    hits = engine.vector_search(
+        "durable basalt stored pgvector",
+        5,
+        {"tenant_id": tenant, "branch": "main"},
+    )
+    evidence_hit = next(hit for hit in hits if hit.kind == "evidence" and hit.id == cid)
+    assert evidence_hit.channel == "postgres_pgvector"
+    assert evidence_hit.metadata["stored_embedding"] is True
+    assert evidence_hit.metadata["source_table"] == "evidence"
+
+
+def test_postgres_evidence_vector_search_keeps_null_embedding_fallback_live() -> None:
+    engine = PostgresEngine(live_dsn())
+    tenant = f"tenant-evidence-fallback-{uuid4()}"
+    user = "user-evidence-fallback"
+    cid = engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id=user,
+            actor="user",
+            source_type="vector-fallback-contract",
+            content="Legacy null embedding fallback keeps the quartz marker searchable.",
+            trust_tier=0,
+            sensitivity=0,
+            access_policy={"tenant": tenant},
+        )
+    )
+
+    db_tenant_id = _stable_uuid("tenant", tenant)
+    with engine.connect() as conn:
+        with conn.cursor() as cur:
+            engine._set_tenant(cur, db_tenant_id)  # noqa: SLF001 - live legacy-row simulation.
+            cur.execute(
+                """
+                UPDATE evidence
+                SET embedding = NULL
+                WHERE tenant_id = %s AND branch = 'main' AND cid = %s
+                """,
+                (db_tenant_id, _cid_to_bytes(cid)),
+            )
+
+    hits = engine.vector_search(
+        "quartz legacy fallback",
+        5,
+        {"tenant_id": tenant, "branch": "main"},
+    )
+    evidence_hit = next(hit for hit in hits if hit.kind == "evidence" and hit.id == cid)
+    assert evidence_hit.channel == "postgres_dense_fallback"
+    assert evidence_hit.metadata["stored_embedding"] is False
+    assert evidence_hit.metadata["source_table"] == "evidence"
 
 
 def test_postgres_local_rank_fallback_uses_policy_sensitivity_live() -> None:
