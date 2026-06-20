@@ -19,7 +19,7 @@ from mnemosyne.mcp_tools import MemoryTools, TOOL_SPEC
 from mnemosyne.parametric import ParametricArtifactStore, ParametricTier
 from mnemosyne.queue import InProcessQueue, PostgresQueue
 from mnemosyne.runtime_state import RuntimeState
-from mnemosyne.storage import EncryptedLocalObjectStore, JsonKeyManager, LocalObjectStore
+from mnemosyne.storage import CommandKeyManager, EncryptedLocalObjectStore, JsonKeyManager, LocalObjectStore
 
 
 PROTOCOL_VERSION = "2024-11-05"
@@ -44,6 +44,9 @@ class MnemosyneMcpServer:
         object_store: str | os.PathLike[str] | None = None,
         object_store_encryption: str | None = None,
         object_key_store: str | os.PathLike[str] | None = None,
+        object_key_provider: str | None = None,
+        object_key_command: str | None = None,
+        object_key_timeout: float | None = None,
         allowed_residencies: tuple[str, ...] | None = None,
         queue_backend: str | None = None,
         queue_tenant: str | None = None,
@@ -74,6 +77,9 @@ class MnemosyneMcpServer:
         self.object_store = object_store or os.environ.get("MNEMOSYNE_OBJECT_STORE") or ".mnemosyne/objects"
         self.object_store_encryption = object_store_encryption or os.environ.get("MNEMOSYNE_OBJECT_STORE_ENCRYPTION", "none")
         self.object_key_store = object_key_store or os.environ.get("MNEMOSYNE_OBJECT_KEY_STORE")
+        self.object_key_provider = object_key_provider or _default_object_key_provider()
+        self.object_key_command = object_key_command or os.environ.get("MNEMOSYNE_OBJECT_KEY_COMMAND")
+        self.object_key_timeout = object_key_timeout or float(os.environ.get("MNEMOSYNE_OBJECT_KEY_TIMEOUT", "30"))
         self.allowed_residencies = allowed_residencies or _default_allowed_residencies()
         self.stateless = stateless
         self.auth_token = auth_token if auth_token is not None else os.environ.get("MNEMOSYNE_MCP_TOKEN")
@@ -108,6 +114,9 @@ class MnemosyneMcpServer:
                 self.object_store,
                 self.object_store_encryption,
                 self.object_key_store,
+                self.object_key_provider,
+                self.object_key_command,
+                self.object_key_timeout,
             ),
             queue=queue,
             allowed_residencies=self.allowed_residencies,
@@ -385,12 +394,30 @@ def _default_allowed_residencies() -> tuple[str, ...]:
     return tuple(item.strip() for item in raw.split(",") if item.strip())
 
 
+def _default_object_key_provider() -> str:
+    return os.environ.get("MNEMOSYNE_OBJECT_KEY_PROVIDER") or (
+        "command" if os.environ.get("MNEMOSYNE_OBJECT_KEY_COMMAND") else "json"
+    )
+
+
 def _load_object_store(
     root: str | os.PathLike[str],
     encryption: str,
     key_store: str | os.PathLike[str] | None,
+    key_provider: str,
+    key_command: str | None,
+    key_timeout: float,
 ) -> LocalObjectStore:
     if encryption == "aesgcm":
+        if key_provider == "command":
+            if not key_command:
+                raise ValueError("object key provider command requires object_key_command.")
+            return EncryptedLocalObjectStore(
+                Path(root),
+                CommandKeyManager(key_command, timeout_seconds=key_timeout),
+            )
+        if key_provider != "json":
+            raise ValueError(f"Unsupported object key provider: {key_provider}")
         keys = Path(key_store).expanduser() if key_store else Path(root).expanduser() / ".keys.json"
         return EncryptedLocalObjectStore(Path(root), JsonKeyManager(keys))
     if encryption != "none":
@@ -410,6 +437,23 @@ def main(argv: list[str] | None = None) -> None:
         default=os.environ.get("MNEMOSYNE_OBJECT_STORE_ENCRYPTION", "none"),
     )
     parser.add_argument("--object-key-store", default=os.environ.get("MNEMOSYNE_OBJECT_KEY_STORE"))
+    parser.add_argument(
+        "--object-key-provider",
+        choices=["json", "command"],
+        default=_default_object_key_provider(),
+        help="Envelope-key manager for encrypted MCP object storage",
+    )
+    parser.add_argument(
+        "--object-key-command",
+        default=os.environ.get("MNEMOSYNE_OBJECT_KEY_COMMAND"),
+        help="Command key provider invoked as '<command> <action>' with JSON stdin",
+    )
+    parser.add_argument(
+        "--object-key-timeout",
+        type=float,
+        default=float(os.environ.get("MNEMOSYNE_OBJECT_KEY_TIMEOUT", "30")),
+        help="Timeout in seconds for --object-key-provider command",
+    )
     parser.add_argument(
         "--allowed-residency",
         action="append",
@@ -440,6 +484,9 @@ def main(argv: list[str] | None = None) -> None:
         "object_store": args.object_store,
         "object_store_encryption": args.object_store_encryption,
         "object_key_store": args.object_key_store,
+        "object_key_provider": args.object_key_provider,
+        "object_key_command": args.object_key_command,
+        "object_key_timeout": args.object_key_timeout,
         "allowed_residencies": tuple(args.allowed_residency),
         "parametric_artifact_store": args.parametric_artifact_store,
         "queue_backend": args.queue_backend,
