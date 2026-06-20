@@ -1169,6 +1169,8 @@ def test_mcp_http_session_exchange_validates_idp_and_issues_usable_session(tmp_p
     encoded = json.dumps([health, unauthorized, exchanged, bad_exchange, call])
     assert health is not None
     assert health["session_exchange_configured"] is True
+    assert health["session_exchange_jwks_cache_ttl_seconds"] == 300
+    assert health["session_exchange_refresh_on_unknown_kid"] is True
     assert unauthorized_status == 401
     assert unauthorized == {"error": "unauthorized", "ok": False}
     assert exchange_status == 200
@@ -1185,6 +1187,52 @@ def test_mcp_http_session_exchange_validates_idp_and_issues_usable_session(tmp_p
     assert call is not None
     assert call["result"]["isError"] is False  # type: ignore[index]
     assert idp_token not in encoded
+    assert MCP_SESSION_SECRET not in encoded
+    assert auth_token not in encoded
+
+
+def test_mcp_http_session_exchange_refreshes_file_jwks_rotation_on_unknown_kid(tmp_path: Path) -> None:
+    auth_token = "http-session-exchange-rotation-auth"
+    old_jwks, old_idp_token = make_oidc_token(oidc_payload(jti="old-idp-session"), kid="old-idp-key")
+    new_jwks, new_idp_token = make_oidc_token(oidc_payload(jti="new-idp-session"), kid="new-idp-key")
+    jwks_file = tmp_path / "idp-jwks.json"
+    jwks_file.write_text(json.dumps(old_jwks), encoding="utf-8")
+    server, thread, base = start_mcp_http_server(
+        store_path=tmp_path / "store.json",
+        auth_token=auth_token,
+        session_secret=MCP_SESSION_SECRET,
+        require_session=True,
+        idp_jwks_file=str(jwks_file),
+        idp_issuer=IDP_ISSUER,
+        idp_audience=IDP_AUDIENCE,
+        idp_jwks_cache_ttl_seconds=300,
+    )
+    try:
+        old_status, old_exchange = http_json(
+            "POST",
+            f"{base}/session/exchange",
+            {"idp_token": old_idp_token},
+            headers={"Authorization": f"Bearer {auth_token}"},
+        )
+        jwks_file.write_text(json.dumps(new_jwks), encoding="utf-8")
+        new_status, new_exchange = http_json(
+            "POST",
+            f"{base}/session/exchange",
+            {"idp_token": new_idp_token},
+            headers={"Authorization": f"Bearer {auth_token}"},
+        )
+    finally:
+        stop_mcp_http_server(server, thread)
+
+    encoded = json.dumps([old_exchange, new_exchange])
+    assert old_status == 200
+    assert old_exchange is not None
+    assert SessionTokenVerifier(MCP_SESSION_SECRET).verify(old_exchange["session_token"]).session_id == "old-idp-session"
+    assert new_status == 200
+    assert new_exchange is not None
+    assert SessionTokenVerifier(MCP_SESSION_SECRET).verify(new_exchange["session_token"]).session_id == "new-idp-session"
+    assert old_idp_token not in encoded
+    assert new_idp_token not in encoded
     assert MCP_SESSION_SECRET not in encoded
     assert auth_token not in encoded
 
