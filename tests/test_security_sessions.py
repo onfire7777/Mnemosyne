@@ -7,7 +7,14 @@ import json
 
 import pytest
 
-from mnemosyne.security import SessionAuthError, SessionIdentity, SessionTokenVerifier, TrustTier
+from mnemosyne.security import (
+    SessionAuthError,
+    SessionIdentity,
+    SessionTokenVerifier,
+    TrustTier,
+    parse_session_keyring,
+    parse_session_revoke_list,
+)
 
 
 SECRET = "session-unit-secret"
@@ -92,3 +99,58 @@ def test_session_token_verifier_rejects_invalid_claims() -> None:
         SessionTokenVerifier(SECRET).verify(invalid_role)
     with pytest.raises(SessionAuthError, match="source_trust_tier is out of range"):
         SessionTokenVerifier(SECRET).verify(invalid_trust)
+
+
+def test_session_token_verifier_supports_keyring_rotation() -> None:
+    keyring = {"old": "old-secret", "current": "current-secret"}
+    identity = SessionIdentity(
+        tenant_id="tenant-a",
+        user_id="user-a",
+        role="operator",
+        source_trust_tier=int(TrustTier.USER_AUTHORED),
+        session_id="session-a",
+    )
+
+    token = SessionTokenVerifier(keyring, active_key_id="current").sign(identity)
+    payload = json.loads(base64.urlsafe_b64decode(token.split(".")[0] + "==").decode("utf-8"))
+    verified = SessionTokenVerifier(keyring, active_key_id="current").verify(token)
+
+    assert payload["kid"] == "current"
+    assert verified == identity
+
+
+def test_session_token_verifier_rejects_revoked_key_and_session_ids() -> None:
+    keyring = {"old": "old-secret", "current": "current-secret"}
+    identity = SessionIdentity(
+        tenant_id="tenant-a",
+        user_id="user-a",
+        role="operator",
+        source_trust_tier=int(TrustTier.USER_AUTHORED),
+        session_id="session-a",
+    )
+    token = SessionTokenVerifier(keyring, active_key_id="old").sign(identity)
+
+    with pytest.raises(SessionAuthError, match="key id is revoked"):
+        SessionTokenVerifier(keyring, active_key_id="current", revoked_key_ids={"old"}).verify(token)
+    with pytest.raises(SessionAuthError, match="session id is revoked"):
+        SessionTokenVerifier(keyring, active_key_id="current", revoked_session_ids={"session-a"}).verify(token)
+
+
+def test_session_token_verifier_requires_known_key_id_for_keyrings() -> None:
+    token_without_key = SessionTokenVerifier(SECRET).sign(
+        SessionIdentity(
+            tenant_id="tenant-a",
+            user_id="user-a",
+            role="operator",
+            source_trust_tier=int(TrustTier.USER_AUTHORED),
+        )
+    )
+
+    with pytest.raises(SessionAuthError, match="key id is required"):
+        SessionTokenVerifier({"current": "current-secret"}).verify(token_without_key)
+
+
+def test_session_keyring_parsers_accept_json_and_csv() -> None:
+    assert parse_session_keyring('{"old":"a","current":"b"}') == {"old": "a", "current": "b"}
+    assert parse_session_keyring("old=a,current=b") == {"old": "a", "current": "b"}
+    assert parse_session_revoke_list("old, session-a,") == {"old", "session-a"}

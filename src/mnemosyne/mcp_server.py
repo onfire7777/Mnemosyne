@@ -19,7 +19,13 @@ from mnemosyne.mcp_tools import MemoryTools, TOOL_SPEC
 from mnemosyne.parametric import CommandParametricTrainer, ParametricArtifactStore, ParametricTier
 from mnemosyne.queue import InProcessQueue, PostgresQueue
 from mnemosyne.runtime_state import RuntimeState
-from mnemosyne.security import SessionAuthError, SessionIdentity, SessionTokenVerifier
+from mnemosyne.security import (
+    SessionAuthError,
+    SessionIdentity,
+    SessionTokenVerifier,
+    parse_session_keyring,
+    parse_session_revoke_list,
+)
 from mnemosyne.storage import CommandKeyManager, EncryptedLocalObjectStore, JsonKeyManager, LocalObjectStore
 
 
@@ -39,6 +45,10 @@ class MnemosyneMcpServer:
         store_path: str | os.PathLike[str] | None = None,
         auth_token: str | None = None,
         session_secret: str | None = None,
+        session_keyring: str | None = None,
+        session_key_id: str | None = None,
+        session_revoked_key_ids: str | None = None,
+        session_revoked_ids: str | None = None,
         require_session: bool | None = None,
         backend: str = "local",
         postgres_dsn: str | None = None,
@@ -98,6 +108,22 @@ class MnemosyneMcpServer:
         self.auth_token = auth_token if auth_token is not None else os.environ.get("MNEMOSYNE_MCP_TOKEN")
         self.session_secret = (
             session_secret if session_secret is not None else os.environ.get("MNEMOSYNE_MCP_SESSION_SECRET")
+        )
+        self.session_keyring = (
+            session_keyring if session_keyring is not None else os.environ.get("MNEMOSYNE_MCP_SESSION_KEYRING")
+        )
+        self.session_key_id = (
+            session_key_id if session_key_id is not None else os.environ.get("MNEMOSYNE_MCP_SESSION_KEY_ID")
+        )
+        self.session_revoked_key_ids = (
+            session_revoked_key_ids
+            if session_revoked_key_ids is not None
+            else os.environ.get("MNEMOSYNE_MCP_SESSION_REVOKED_KEY_IDS")
+        )
+        self.session_revoked_ids = (
+            session_revoked_ids
+            if session_revoked_ids is not None
+            else os.environ.get("MNEMOSYNE_MCP_SESSION_REVOKED_IDS")
         )
         self.require_session = (
             bool(require_session)
@@ -243,13 +269,33 @@ class MnemosyneMcpServer:
             return clean_arguments
         if not isinstance(token, str) or not token:
             raise PermissionError("session token must be a non-empty string")
-        if not self.session_secret:
+        verifier = self._session_verifier()
+        if verifier is None:
             raise PermissionError("session token denied: session secret is not configured")
         try:
-            identity = SessionTokenVerifier(self.session_secret).verify(token)
+            identity = verifier.verify(token)
         except SessionAuthError as exc:
             raise PermissionError(f"session token denied: {exc}") from exc
         return self._bind_session_identity(name, clean_arguments, identity)
+
+    def _session_verifier(self) -> SessionTokenVerifier | None:
+        keyring = parse_session_keyring(self.session_keyring)
+        revoked_key_ids = parse_session_revoke_list(self.session_revoked_key_ids)
+        revoked_session_ids = parse_session_revoke_list(self.session_revoked_ids)
+        if keyring:
+            return SessionTokenVerifier(
+                keyring,
+                active_key_id=self.session_key_id,
+                revoked_key_ids=revoked_key_ids,
+                revoked_session_ids=revoked_session_ids,
+            )
+        if not self.session_secret:
+            return None
+        return SessionTokenVerifier(
+            self.session_secret,
+            revoked_key_ids=revoked_key_ids,
+            revoked_session_ids=revoked_session_ids,
+        )
 
     def _bind_session_identity(
         self,
@@ -646,6 +692,26 @@ def main(argv: list[str] | None = None) -> None:
         help="HMAC secret for signed MCP session_token claims",
     )
     parser.add_argument(
+        "--session-keyring",
+        default=os.environ.get("MNEMOSYNE_MCP_SESSION_KEYRING"),
+        help="JSON object or comma-separated kid=secret HMAC keyring for signed MCP session_token claims",
+    )
+    parser.add_argument(
+        "--session-key-id",
+        default=os.environ.get("MNEMOSYNE_MCP_SESSION_KEY_ID"),
+        help="Active key id used when issuing keyring-backed MCP session tokens",
+    )
+    parser.add_argument(
+        "--session-revoked-key-ids",
+        default=os.environ.get("MNEMOSYNE_MCP_SESSION_REVOKED_KEY_IDS"),
+        help="Comma-separated MCP session token key ids to reject",
+    )
+    parser.add_argument(
+        "--session-revoked-ids",
+        default=os.environ.get("MNEMOSYNE_MCP_SESSION_REVOKED_IDS"),
+        help="Comma-separated MCP session ids to reject",
+    )
+    parser.add_argument(
         "--require-session",
         action="store_true",
         default=_env_flag("MNEMOSYNE_MCP_REQUIRE_SESSION", default=False),
@@ -656,6 +722,10 @@ def main(argv: list[str] | None = None) -> None:
         "store_path": args.store,
         "auth_token": args.auth_token,
         "session_secret": args.session_secret,
+        "session_keyring": args.session_keyring,
+        "session_key_id": args.session_key_id,
+        "session_revoked_key_ids": args.session_revoked_key_ids,
+        "session_revoked_ids": args.session_revoked_ids,
         "require_session": args.require_session,
         "backend": args.backend,
         "postgres_dsn": args.postgres_dsn,

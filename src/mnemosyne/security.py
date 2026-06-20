@@ -10,6 +10,7 @@ import json
 import time
 from dataclasses import asdict, dataclass
 from enum import IntEnum
+from collections.abc import Mapping
 from typing import Any, Literal
 
 
@@ -106,14 +107,49 @@ class SessionIdentity:
 class SessionTokenVerifier:
     """HMAC-SHA256 verifier for transport-provided Mnemosyne session claims."""
 
-    def __init__(self, secret: str | bytes):
-        self.secret = secret.encode("utf-8") if isinstance(secret, str) else bytes(secret)
-        if not self.secret:
-            raise SessionAuthError("session secret is required")
+    def __init__(
+        self,
+        secret: str | bytes | Mapping[str, str | bytes],
+        *,
+        active_key_id: str | None = None,
+        revoked_key_ids: set[str] | None = None,
+        revoked_session_ids: set[str] | None = None,
+    ):
+        self.revoked_key_ids = set(revoked_key_ids or set())
+        self.revoked_session_ids = set(revoked_session_ids or set())
+        self.active_key_id: str | None = None
+        if isinstance(secret, Mapping):
+            self.secrets: dict[str | None, bytes] = {}
+            for key_id, value in secret.items():
+                normalized_key_id = str(key_id).strip()
+                if not normalized_key_id:
+                    raise SessionAuthError("session key id is required")
+                normalized_secret = value.encode("utf-8") if isinstance(value, str) else bytes(value)
+                if not normalized_secret:
+                    raise SessionAuthError(f"session secret for key {normalized_key_id} is required")
+                self.secrets[normalized_key_id] = normalized_secret
+            if not self.secrets:
+                raise SessionAuthError("session keyring is required")
+            if active_key_id is not None:
+                if active_key_id not in self.secrets:
+                    raise SessionAuthError("active session key id is unknown")
+                self.active_key_id = active_key_id
+            elif len(self.secrets) == 1:
+                self.active_key_id = next(iter(self.secrets))
+        else:
+            normalized_secret = secret.encode("utf-8") if isinstance(secret, str) else bytes(secret)
+            if not normalized_secret:
+                raise SessionAuthError("session secret is required")
+            self.secrets = {None: normalized_secret}
 
     def sign(self, identity: SessionIdentity) -> str:
-        payload = _b64url_encode(json.dumps(identity.to_payload(), sort_keys=True, separators=(",", ":")).encode("utf-8"))
-        signature = _b64url_encode(hmac.new(self.secret, payload.encode("ascii"), hashlib.sha256).digest())
+        payload_data = identity.to_payload()
+        if self.active_key_id is not None:
+            if self.active_key_id in self.revoked_key_ids:
+                raise SessionAuthError("active session key id is revoked")
+            payload_data["kid"] = self.active_key_id
+        payload = _b64url_encode(json.dumps(payload_data, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+        signature = _b64url_encode(hmac.new(self._signing_secret(), payload.encode("ascii"), hashlib.sha256).digest())
         return f"{payload}.{signature}"
 
     def verify(self, token: str, *, now: int | None = None) -> SessionIdentity:
@@ -121,23 +157,91 @@ class SessionTokenVerifier:
         if len(parts) != 2:
             raise SessionAuthError("session token must be payload.signature")
         payload_b64, signature_b64 = parts
-        try:
-            expected = _b64url_encode(hmac.new(self.secret, payload_b64.encode("ascii"), hashlib.sha256).digest())
-        except UnicodeEncodeError as exc:
-            raise SessionAuthError("session token must be payload.signature") from exc
-        if not hmac.compare_digest(signature_b64, expected):
-            raise SessionAuthError("session token signature is invalid")
+        if None in self.secrets:
+            try:
+                expected = _b64url_encode(hmac.new(self.secrets[None], payload_b64.encode("ascii"), hashlib.sha256).digest())
+            except UnicodeEncodeError as exc:
+                raise SessionAuthError("session token must be payload.signature") from exc
+            if not hmac.compare_digest(signature_b64, expected):
+                raise SessionAuthError("session token signature is invalid")
         try:
             payload = json.loads(_b64url_decode(payload_b64).decode("utf-8"))
         except (binascii.Error, UnicodeDecodeError, ValueError, json.JSONDecodeError) as exc:
             raise SessionAuthError("session token payload is invalid") from exc
         if not isinstance(payload, dict):
             raise SessionAuthError("session token payload is invalid")
+        key_id = payload.get("kid")
+        if key_id is not None:
+            key_id = str(key_id)
+        secret = self._verification_secret(key_id)
+        if None not in self.secrets:
+            try:
+                expected = _b64url_encode(hmac.new(secret, payload_b64.encode("ascii"), hashlib.sha256).digest())
+            except UnicodeEncodeError as exc:
+                raise SessionAuthError("session token must be payload.signature") from exc
+            if not hmac.compare_digest(signature_b64, expected):
+                raise SessionAuthError("session token signature is invalid")
         identity = SessionIdentity.from_payload(payload)
         now_ts = int(time.time()) if now is None else now
         if identity.expires_at is not None and identity.expires_at <= now_ts:
             raise SessionAuthError("session token is expired")
+        if identity.session_id and identity.session_id in self.revoked_session_ids:
+            raise SessionAuthError("session id is revoked")
         return identity
+
+    def _signing_secret(self) -> bytes:
+        if self.active_key_id is not None:
+            return self.secrets[self.active_key_id]
+        if None not in self.secrets:
+            raise SessionAuthError("active session key id is required")
+        return self.secrets[None]
+
+    def _verification_secret(self, key_id: str | None) -> bytes:
+        if key_id is not None and key_id in self.revoked_key_ids:
+            raise SessionAuthError("session token key id is revoked")
+        if None in self.secrets:
+            return self.secrets[None]
+        if key_id is None:
+            raise SessionAuthError("session token key id is required")
+        if key_id not in self.secrets:
+            raise SessionAuthError("session token key id is unknown")
+        return self.secrets[key_id]
+
+
+def parse_session_keyring(raw: str | None) -> dict[str, str]:
+    """Parse a JSON object or comma-separated kid=secret session keyring."""
+
+    if not raw:
+        return {}
+    stripped = raw.strip()
+    if not stripped:
+        return {}
+    if stripped.startswith("{"):
+        try:
+            data = json.loads(stripped)
+        except json.JSONDecodeError as exc:
+            raise SessionAuthError("session keyring JSON is invalid") from exc
+        if not isinstance(data, dict):
+            raise SessionAuthError("session keyring must be a JSON object")
+        return {str(key).strip(): str(value) for key, value in data.items() if str(key).strip()}
+    keyring: dict[str, str] = {}
+    for entry in stripped.split(","):
+        if not entry.strip():
+            continue
+        if "=" not in entry:
+            raise SessionAuthError("session keyring entries must be kid=secret")
+        key_id, value = entry.split("=", 1)
+        key_id = key_id.strip()
+        if not key_id:
+            raise SessionAuthError("session key id is required")
+        keyring[key_id] = value
+    return keyring
+
+
+def parse_session_revoke_list(raw: str | None) -> set[str]:
+    if not raw:
+        return set()
+    return {item.strip() for item in raw.split(",") if item.strip()}
 
 
 def _b64url_encode(data: bytes) -> str:

@@ -1072,7 +1072,58 @@ def test_cli_session_token_requires_secret(tmp_path: Path) -> None:
     )
 
     assert result.returncode != 0
-    assert "--session-token requires --session-secret or MNEMOSYNE_SESSION_SECRET." in result.stderr
+    assert "--session-token requires --session-secret, --session-keyring, or MNEMOSYNE_SESSION_SECRET." in result.stderr
+
+
+def test_cli_session_token_accepts_keyring_and_rejects_revoked_key(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    token = SessionTokenVerifier({"current": SESSION_SECRET}, active_key_id="current").sign(
+        SessionIdentity(
+            tenant_id=TENANT,
+            user_id=USER,
+            role="operator",
+            source_trust_tier=0,
+        )
+    )
+
+    allowed = run_cli(
+        store,
+        "--session-token",
+        token,
+        "--session-keyring",
+        json.dumps({"current": SESSION_SECRET}),
+        "assert",
+        "--tenant",
+        TENANT,
+        "--subject",
+        "Session keyring",
+        "--predicate",
+        "authorizes",
+        "--object",
+        "cli write",
+    )
+    denied = run_raw_cli(
+        store,
+        "--session-token",
+        token,
+        "--session-keyring",
+        json.dumps({"current": SESSION_SECRET}),
+        "--session-revoked-key-ids",
+        "current",
+        "assert",
+        "--tenant",
+        TENANT,
+        "--subject",
+        "Session keyring",
+        "--predicate",
+        "rejects",
+        "--object",
+        "revoked key",
+    )
+
+    assert allowed["id"]
+    assert denied.returncode != 0
+    assert "session token key id is revoked" in denied.stderr
 
 
 def test_cli_forget_supports_hard_delete_erasure_mode(tmp_path: Path) -> None:
