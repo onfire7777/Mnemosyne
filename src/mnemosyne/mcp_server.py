@@ -145,6 +145,8 @@ class MnemosyneMcpServer:
             else _env_flag("MNEMOSYNE_MCP_REQUIRE_SESSION", default=False)
         )
         self.tool_names = {item["name"] for item in TOOL_SPEC}
+        self.tool_specs = [_to_mcp_tool_spec(item) for item in TOOL_SPEC]
+        self.tool_schemas_by_name = {item["name"]: item["inputSchema"] for item in self.tool_specs}
         if not self.stateless:
             self.engine, self.queue, self.runtime_state, self.tools = self._build_tools()
 
@@ -225,7 +227,7 @@ class MnemosyneMcpServer:
                     "capabilities": {"tools": {}},
                 }
             elif method == "tools/list":
-                result = {"tools": [_to_mcp_tool_spec(item) for item in TOOL_SPEC]}
+                result = {"tools": self.tool_specs}
             elif method == "tools/call":
                 params = request.get("params") or {}
                 try:
@@ -240,6 +242,7 @@ class MnemosyneMcpServer:
                             result = _tool_error("Tool arguments must be a JSON object")
                         else:
                             prepared_arguments = self.prepare_tool_arguments(name, params, arguments)
+                            _validate_tool_arguments(name, prepared_arguments, self.tool_schemas_by_name)
                             result = _tool_result(self.call_tool(name, prepared_arguments))
                 except Exception as exc:  # noqa: BLE001 - tool errors are MCP results, not transport failures.
                     result = _tool_error(str(exc))
@@ -424,13 +427,12 @@ def _to_mcp_tool_spec(spec: dict[str, Any]) -> dict[str, Any]:
 def _schema_for_type(annotation: Any) -> dict[str, Any]:
     if annotation in {inspect.Parameter.empty, Any}:
         return {}
+    if annotation is type(None):
+        return {"type": "null"}
     origin = get_origin(annotation)
     args = get_args(annotation)
     if origin in {Union, UnionType}:
-        non_null = [arg for arg in args if arg is not type(None)]
-        if len(non_null) == 1:
-            return _schema_for_type(non_null[0])
-        return {"anyOf": [_schema_for_type(arg) for arg in non_null]}
+        return {"anyOf": [_schema_for_type(arg) for arg in args]}
     if origin is Literal:
         values = list(args)
         schema: dict[str, Any] = {"enum": values}
@@ -453,6 +455,76 @@ def _schema_for_type(annotation: Any) -> dict[str, Any]:
     if annotation is bytes:
         return {"type": "string", "contentEncoding": "base64"}
     return {}
+
+
+def _validate_tool_arguments(name: str, arguments: dict[str, Any], schemas_by_name: dict[str, dict[str, Any]]) -> None:
+    schema = schemas_by_name.get(name)
+    if schema is None:
+        raise ValueError(f"Unknown tool: {name}")
+    try:
+        import jsonschema
+    except ImportError:
+        _validate_json_schema_subset(arguments, schema)
+        return
+    try:
+        jsonschema.validate(instance=arguments, schema=schema)
+    except jsonschema.ValidationError as exc:
+        raise ValueError(f"Input validation error: {exc.message}") from exc
+
+
+def _validate_json_schema_subset(instance: Any, schema: dict[str, Any], path: str = "$") -> None:
+    if "anyOf" in schema:
+        errors = []
+        for option in schema["anyOf"]:
+            try:
+                _validate_json_schema_subset(instance, option, path)
+                return
+            except ValueError as exc:
+                errors.append(str(exc))
+        raise ValueError(f"Input validation error: {path} does not match any allowed schema: {'; '.join(errors)}")
+    expected_type = schema.get("type")
+    if expected_type and not _json_type_matches(instance, expected_type):
+        raise ValueError(f"Input validation error: {path} must be {expected_type}")
+    if "enum" in schema and instance not in schema["enum"]:
+        raise ValueError(f"Input validation error: {path} must be one of {schema['enum']}")
+    if expected_type == "object" or isinstance(instance, dict):
+        if not isinstance(instance, dict):
+            return
+        properties = schema.get("properties", {})
+        for key in schema.get("required", []):
+            if key not in instance:
+                raise ValueError(f"Input validation error: {path}.{key} is required")
+        if schema.get("additionalProperties") is False:
+            extra = sorted(set(instance) - set(properties))
+            if extra:
+                raise ValueError(f"Input validation error: {path} has unexpected properties: {', '.join(extra)}")
+        for key, value in instance.items():
+            if key in properties:
+                _validate_json_schema_subset(value, properties[key], f"{path}.{key}")
+    if expected_type == "array" or isinstance(instance, list):
+        if not isinstance(instance, list):
+            return
+        item_schema = schema.get("items", {})
+        for index, value in enumerate(instance):
+            _validate_json_schema_subset(value, item_schema, f"{path}[{index}]")
+
+
+def _json_type_matches(value: Any, expected_type: str) -> bool:
+    if expected_type == "null":
+        return value is None
+    if expected_type == "object":
+        return isinstance(value, dict)
+    if expected_type == "array":
+        return isinstance(value, list)
+    if expected_type == "string":
+        return isinstance(value, str)
+    if expected_type == "integer":
+        return isinstance(value, int) and not isinstance(value, bool)
+    if expected_type == "number":
+        return (isinstance(value, int | float) and not isinstance(value, bool))
+    if expected_type == "boolean":
+        return isinstance(value, bool)
+    return True
 
 
 def _error(request_id: Any, code: int, message: str) -> dict[str, Any]:
@@ -478,14 +550,13 @@ def build_sdk_server(**kwargs: Any) -> Any:
     """Build an official MCP SDK server around the Mnemosyne tool facade."""
 
     try:
-        import jsonschema
         from mcp import types
         from mcp.server.lowlevel import Server
     except ImportError as exc:  # pragma: no cover - exercised when optional extra is absent.
         raise RuntimeError("Official MCP SDK mode requires `mnemosyne-memory[mcp]`.") from exc
 
     facade = MnemosyneMcpServer(**kwargs)
-    tool_specs = [_to_mcp_tool_spec(item) for item in TOOL_SPEC]
+    tool_specs = facade.tool_specs
     schemas_by_name = {item["name"]: item["inputSchema"] for item in tool_specs}
     server = Server("mnemosyne-memory", version="0.1.0")
 
@@ -514,9 +585,9 @@ def build_sdk_server(**kwargs: Any) -> Any:
         except Exception as exc:  # noqa: BLE001 - SDK tool calls report failures as tool results.
             return _sdk_tool_error(types, str(exc))
         try:
-            jsonschema.validate(instance=raw_arguments, schema=schema)
-        except jsonschema.ValidationError as exc:
-            return _sdk_tool_error(types, f"Input validation error: {exc.message}")
+            _validate_tool_arguments(name, raw_arguments, schemas_by_name)
+        except ValueError as exc:
+            return _sdk_tool_error(types, str(exc))
         try:
             return facade.call_tool(name, raw_arguments)
         except Exception as exc:  # noqa: BLE001 - SDK tool calls report failures as tool results.

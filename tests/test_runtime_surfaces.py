@@ -360,6 +360,7 @@ def test_mcp_server_initializes_lists_tools_and_calls_capture_search(tmp_path: P
     assert capture_schema["properties"]["trust_tier"]["type"] == "integer"
     assert "trust_tier" not in capture_schema["required"]
     assert capture_schema["additionalProperties"] is False
+    assert {"type": "null"} in tools_by_name["search"]["inputSchema"]["properties"]["max_sensitivity"]["anyOf"]
     graph_schema = tools_by_name["graph_query"]["inputSchema"]
     assert graph_schema["properties"]["seeds"] == {"type": "array", "items": {"type": "string"}}
     assert graph_schema["properties"]["hops"]["type"] == "integer"
@@ -704,6 +705,62 @@ def test_mcp_server_rejects_non_object_tool_arguments(tmp_path: Path) -> None:
 
     assert response["result"]["isError"] is True
     assert "Tool arguments must be a JSON object" in response["result"]["content"][0]["text"]
+
+
+def test_mcp_server_rejects_schema_invalid_json_rpc_tool_arguments(tmp_path: Path) -> None:
+    server = MnemosyneMcpServer(store_path=tmp_path / "store.json")
+
+    invalid_type = server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "search",
+                "arguments": {
+                    "tenant_id": TENANT,
+                    "query": "schema invalid request",
+                    "max_sensitivity": "high",
+                },
+            },
+        }
+    )
+    unexpected_property = server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+                "name": "search",
+                "arguments": {
+                    "tenant_id": TENANT,
+                    "query": "schema invalid request",
+                    "unexpected": True,
+                },
+            },
+        }
+    )
+    explicit_null = server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "tools/call",
+            "params": {
+                "name": "search",
+                "arguments": {
+                    "tenant_id": TENANT,
+                    "query": "schema valid nullable request",
+                    "max_sensitivity": None,
+                },
+            },
+        }
+    )
+
+    assert invalid_type["result"]["isError"] is True
+    assert "Input validation error" in invalid_type["result"]["content"][0]["text"]
+    assert unexpected_property["result"]["isError"] is True
+    assert "unexpected" in unexpected_property["result"]["content"][0]["text"]
+    assert explicit_null["result"]["isError"] is False
 
 
 def test_mcp_server_stateless_mode_reloads_durable_engine_and_runtime_state(tmp_path: Path) -> None:
