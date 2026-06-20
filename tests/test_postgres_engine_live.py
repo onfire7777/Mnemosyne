@@ -239,6 +239,56 @@ def test_postgres_local_rank_fallback_uses_policy_sensitivity_live() -> None:
     assert hidden in {hit.id for hit in override_hits}
 
 
+def test_postgres_ingestion_enforces_residency_transfer_policy_live(tmp_path: Path) -> None:
+    tenant = f"tenant-residency-live-{uuid4()}"
+    user = "user-residency-live"
+    dsn = live_dsn()
+    denied_pipeline = IngestionPipeline(
+        PostgresEngine(dsn),
+        LocalObjectStore(tmp_path / "denied-objects"),
+        allowed_residencies=("eu", "us"),
+        runtime_residency="us",
+    )
+    with pytest.raises(ValueError, match="cross-region residency transfer"):
+        denied_pipeline.ingest(
+            IngestRequest(
+                tenant_id=tenant,
+                user_id=user,
+                actor="user",
+                source_type="postgres-live",
+                content="EU live Postgres data cannot process in US without transfer policy.",
+                metadata={"residency": "eu"},
+                trust_tier=0,
+            )
+        )
+
+    engine = PostgresEngine(dsn)
+    allowed_pipeline = IngestionPipeline(
+        engine,
+        LocalObjectStore(tmp_path / "allowed-objects"),
+        allowed_residencies=("eu", "us"),
+        runtime_residency="us",
+        allowed_residency_transfers=("eu->us",),
+    )
+    accepted = allowed_pipeline.ingest(
+        IngestRequest(
+            tenant_id=tenant,
+            user_id=user,
+            actor="user",
+            source_type="postgres-live",
+            content="EU live Postgres data can process in US with explicit transfer policy.",
+            metadata={"residency": "eu"},
+            trust_tier=0,
+        )
+    )
+    exported = engine.export_tenant(tenant)
+    evidence = next(item for item in exported["evidence"] if item["cid"] == accepted.cid)
+
+    assert evidence["access_policy"]["runtime_residency"] == "us"
+    assert evidence["access_policy"]["cross_region_transfer"] is True
+    assert evidence["metadata"]["privacy"]["allowed_residency_transfers"] == ["eu->us"]
+
+
 def test_postgres_engine_live_shared_contract_parity() -> None:
     engine = PostgresEngine(live_dsn())
     tenant = f"tenant-contract-live-{uuid4()}"
