@@ -16,7 +16,7 @@ The v2 blueprint controls implementation. The earlier design is lineage only unl
 
 - `src/mnemosyne/engine.py` — local deterministic engine implementing the MemoryEngine contract.
 - `src/mnemosyne/mcp_tools.py` — MCP-compatible tool facade: capture, search, deep_search, explain, correct, forget, export.
-- `src/mnemosyne/mcp_server.py` — stdio JSON-RPC MCP runtime shim with `initialize`, `tools/list`, `tools/call`, and notification handling.
+- `src/mnemosyne/mcp_server.py` — MCP runtime surfaces for stdio JSON-RPC, hosted HTTP JSON-RPC, official SDK stdio, and official SDK StreamableHTTP.
 - `src/mnemosyne/postgres_engine.py` — PostgreSQL adapter for the canonical schema, including tenant RLS context, SQL FTS, pgvector assertion search, deterministic evidence dense fallback, recursive graph/PPR, and live smoke coverage for append/get/upsert/retrieve/as-of/branch/discard/forget/export.
 - `src/mnemosyne/retrieval.py` — embedding/reranker adapter protocols, deterministic local fallbacks, and semantic-entropy signal.
 - `src/mnemosyne/ingestion.py` — text/blob/multimodal ingestion pipeline with object externalization and signed-provenance decisions.
@@ -139,10 +139,12 @@ For production key custody, use `--object-key-provider command --object-key-comm
 For isolated parametric adapter custody, use `--parametric-provider command --parametric-command "<trainer-wrapper>"`. Mnemosyne invokes the command without a shell, passes JSON on stdin for `propose` and `rollback`, requires operator-grade role/trust authorization before trainer calls, enforces local mutation-rate/reward/sink/gate rails, and persists provider metrics/payloads with rollback metadata.
 
 `mneme-mcp` accepts the same object-store encryption, key-provider, allowed-residency, runtime queue, and parametric provider flags for MCP ingestion and runtime learning.
-By default it runs Mnemosyne's deterministic stdio JSON-RPC shim; pass `--sdk` to run through the official Python MCP SDK. Use `--self-test` as a local deployment preflight before wiring stdio into a host, or `--http` for Mnemosyne's hosted HTTP JSON-RPC transport:
+By default it runs Mnemosyne's deterministic stdio JSON-RPC shim; pass `--sdk` to run stdio through the official Python MCP SDK, or `--sdk-streamable-http` for the official SDK StreamableHTTP transport. Use `--self-test` as a local deployment preflight before wiring stdio into a host, or `--http` for Mnemosyne's hosted HTTP JSON-RPC transport:
 
 ```bash
 mneme-mcp --store .mnemosyne/mcp-store.json --sdk
+mneme-mcp --store .mnemosyne/mcp-store.json --sdk-streamable-http \
+  --http-host 127.0.0.1 --http-port 8765
 mneme-mcp --backend postgres --postgres-dsn "$MNEMOSYNE_POSTGRES_DSN" \
   --queue-backend postgres --stateless
 mneme-mcp --store .mnemosyne/mcp-store.json \
@@ -162,9 +164,10 @@ mneme-mcp --http --http-host 127.0.0.1 --http-port 8765 \
   --idp-audience mnemosyne
 ```
 
-The self-test exercises `initialize`, `tools/list`, strict MCP input schemas, auth-token rejection, signed-session enforcement, and a read-only tool call. It redacts configured secrets and does not replace official streamable/SSE, real IdP, production certificate lifecycle, or stateless soak validation.
+The self-test exercises `initialize`, `tools/list`, strict MCP input schemas, auth-token rejection, signed-session enforcement, and a read-only tool call. It redacts configured secrets and does not replace legacy SSE, real IdP, production certificate lifecycle, or stateless soak validation.
 `mneme-mcp` accepts the same command-backed session custody contract through `--session-secret-command` / `MNEMOSYNE_MCP_SESSION_SECRET_COMMAND`.
-The hosted HTTP transport serves liveness metadata at `/healthz` and JSON-RPC at `/mcp`, reusing the same tool schema, auth-token, signed-session, stateless, queue, and backend enforcement as stdio. Pass bearer auth in `Authorization` and signed sessions in `X-Mnemosyne-Session-Token`, or through JSON-RPC `_meta` for non-HTTP transports. `--tls-cert-file` and `--tls-key-file` enable HTTPS; `--tls-client-ca-file --tls-require-client-cert` enforces client certificate identity. When OIDC settings are configured, `POST /session/exchange` accepts `{"idp_token":"..."}` with the static bearer token and returns a Mnemosyne signed session; hosted JWKS file/URL sources support the same bounded read, TTL refresh, unknown-`kid` refresh controls, and optional authz policy mapping with `MNEMOSYNE_MCP_IDP_*` environment variables. `/healthz` reports only whether TLS, client-certificate enforcement, session exchange, and authz policy are configured, not policy contents. Deployments should still pass `--self-test` and `idp-authz-policy-rollout-check` before exposure; HTTP mode is not a substitute for real IdP/JWKS rotation validation, production certificate provisioning/rotation, or official streamable/SSE deployment validation.
+The official SDK StreamableHTTP transport serves the MCP endpoint at `/mcp` and liveness metadata at `/healthz` by default, uses stateless SDK sessions unless `--sdk-streamable-stateful` is set, and can be relocated with `--sdk-streamable-http-path` / `--sdk-streamable-health-path`. Local runtime tests verify SDK-client `initialize`, `tools/list`, and `tools/call` over the in-process StreamableHTTP ASGI surface; legacy SSE and production network/soak validation remain open.
+The hosted HTTP transport serves liveness metadata at `/healthz` and JSON-RPC at `/mcp`, reusing the same tool schema, auth-token, signed-session, stateless, queue, and backend enforcement as stdio. Pass bearer auth in `Authorization` and signed sessions in `X-Mnemosyne-Session-Token`, or through JSON-RPC `_meta` for non-HTTP transports. `--tls-cert-file` and `--tls-key-file` enable HTTPS; `--tls-client-ca-file --tls-require-client-cert` enforces client certificate identity. When OIDC settings are configured, `POST /session/exchange` accepts `{"idp_token":"..."}` with the static bearer token and returns a Mnemosyne signed session; hosted JWKS file/URL sources support the same bounded read, TTL refresh, unknown-`kid` refresh controls, and optional authz policy mapping with `MNEMOSYNE_MCP_IDP_*` environment variables. `/healthz` reports only whether TLS, client-certificate enforcement, session exchange, and authz policy are configured, not policy contents. Deployments should still pass `--self-test` and `idp-authz-policy-rollout-check` before exposure; HTTP mode is not a substitute for real IdP/JWKS rotation validation, production certificate provisioning/rotation, or legacy SSE deployment validation.
 
 C2PA verifier trust can be scoped through a JSON policy file:
 
@@ -183,7 +186,7 @@ Policy files can define global `trusted_issuers`, `trusted_roots`, or scoped `ru
 The repository has a verified local scaffold plus runtime parity extensions. Current checks:
 
 - `.venv/bin/python -m compileall -q src tests` passes.
-- `.venv/bin/python -m pytest -q` collects 287 tests and returns 248 passing tests plus 39 skipped live-DB tests when `MNEMOSYNE_POSTGRES_DSN` is unset.
+- `.venv/bin/python -m pytest -q` collects 288 tests and returns 249 passing tests plus 39 skipped live-DB tests when `MNEMOSYNE_POSTGRES_DSN` is unset.
 - With Docker compose Postgres running, `MNEMOSYNE_POSTGRES_DSN=postgresql://... .venv/bin/python -m pytest -q tests/test_postgres_engine_live.py tests/test_shared_engine_contract.py` returns 63 passing live/shared adapter tests covering tenant RLS, SQL FTS, pgvector assertion search, dense evidence fallback, recursive graph/PPR, explain channels/rails/provenance, branch/discard, branch merge retrieval, bitemporal supersession, tenant isolation, tombstone and hard-delete forget modes, command-backed object key management, transitive derived-evidence erasure across assertions/preferences/relations, retrieval trust/sensitivity/quarantine filtering, deep graph tenant/branch isolation, hard-delete audit export, HTTP-configurable retrieval adapter wiring with strict provider response validation, CLI `--backend postgres`, fail-closed CLI `provider-check`, stateless MCP ingestion over tenant-scoped durable Postgres queues, shared local/Postgres evidence/retrieval/explain/branch/as-of/relation/preference/correction/forget-propagation contracts, durable Postgres queue leasing/drain, asset-bound CLI file ingestion through the C2PA verifier adapter, externalized payload derived-text retrieval, async media extraction, gated consolidation promotion on Postgres, and shared local/Postgres contract parity.
 
 Exact 1:1 blueprint parity is still in progress. The controlling status artifact is `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md`.
