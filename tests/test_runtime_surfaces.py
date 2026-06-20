@@ -522,6 +522,59 @@ def test_mcp_server_honors_object_encryption_and_residency_config(tmp_path: Path
     assert forgotten["object_shred"]["crypto_shredded"] is True
 
 
+def test_mcp_server_enforces_cross_region_residency_transfers(tmp_path: Path) -> None:
+    denied_server = MnemosyneMcpServer(
+        store_path=tmp_path / "denied.json",
+        allowed_residencies=("eu", "us"),
+        runtime_residency="us",
+    )
+    denied = denied_server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "ingest",
+                "arguments": {
+                    "tenant_id": TENANT,
+                    "user_id": USER,
+                    "actor": "user",
+                    "source_type": "mcp-upload",
+                    "content": "EU data cannot process in US without explicit transfer.",
+                    "metadata": {"residency": "eu"},
+                    "trust_tier": 0,
+                },
+            },
+        }
+    )
+    allowed_server = MnemosyneMcpServer(
+        store_path=tmp_path / "allowed.json",
+        allowed_residencies=("eu", "us"),
+        runtime_residency="us",
+        allowed_residency_transfers=("eu->us",),
+    )
+    accepted = mcp_call(
+        allowed_server,
+        "ingest",
+        {
+            "tenant_id": TENANT,
+            "user_id": USER,
+            "actor": "user",
+            "source_type": "mcp-upload",
+            "content": "EU data can process in US with explicit transfer.",
+            "metadata": {"residency": "eu"},
+            "trust_tier": 0,
+        },
+    )
+    exported = mcp_call(allowed_server, "export", {"tenant_id": TENANT})
+    evidence = next(item for item in exported["evidence"] if item["cid"] == accepted["cid"])
+
+    assert denied["result"]["isError"] is True
+    assert "cross-region residency transfer" in denied["result"]["content"][0]["text"]
+    assert evidence["access_policy"]["runtime_residency"] == "us"
+    assert evidence["access_policy"]["cross_region_transfer"] is True
+
+
 def test_mcp_server_can_use_command_key_provider_for_encrypted_objects(tmp_path: Path) -> None:
     objects = tmp_path / "objects"
     command, kms_state = fake_kms_command(tmp_path)

@@ -12,7 +12,13 @@ from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.ids import content_cid
 from mnemosyne.media import MEDIA_EXTRACT_JOB, extract_derived_text
 from mnemosyne.models import Evidence, Resource
-from mnemosyne.privacy import classify_privacy, enforce_residency, normalize_residency
+from mnemosyne.privacy import (
+    classify_privacy,
+    enforce_residency,
+    enforce_residency_transfer,
+    normalize_residency,
+    normalize_residency_transfers,
+)
 from mnemosyne.provenance import SignedProvenanceVerifier
 from mnemosyne.queue import InProcessQueue, QueueJob
 from mnemosyne.security import TrustTier
@@ -74,6 +80,8 @@ class IngestionPipeline:
         queue: InProcessQueue | None = None,
         inline_text_limit: int = 16_384,
         allowed_residencies: tuple[str, ...] = ("local",),
+        runtime_residency: str | None = None,
+        allowed_residency_transfers: tuple[str, ...] = (),
     ):
         self.engine = engine
         self.object_store = object_store or LocalObjectStore(Path(".mnemosyne/objects"))
@@ -81,6 +89,8 @@ class IngestionPipeline:
         self.queue = queue
         self.inline_text_limit = inline_text_limit
         self.allowed_residencies = tuple(normalize_residency(item) for item in allowed_residencies)
+        self.runtime_residency = normalize_residency(runtime_residency) if runtime_residency else None
+        self.allowed_residency_transfers = normalize_residency_transfers(tuple(allowed_residency_transfers))
 
     def ingest(self, request: IngestRequest, branch: str = "main") -> IngestResult:
         payload = request.payload_bytes()
@@ -90,7 +100,22 @@ class IngestionPipeline:
             request.metadata.get("residency") or request.metadata.get("data_residency")
         )
         enforce_residency(residency, self.allowed_residencies)
+        target_residency = self.runtime_residency
+        if target_residency is None:
+            target_value = request.metadata.get("processing_residency") or request.metadata.get("runtime_residency")
+            target_residency = normalize_residency(target_value) if target_value else None
+        cross_region_transfer = enforce_residency_transfer(
+            residency,
+            target_residency,
+            self.allowed_residency_transfers,
+        )
         privacy = classify_privacy(_privacy_text(request, payload), residency=residency)
+        privacy_metadata = {
+            **privacy.to_dict(),
+            "runtime_residency": target_residency,
+            "cross_region_transfer": cross_region_transfer,
+            "allowed_residency_transfers": list(self.allowed_residency_transfers),
+        }
         base_trust_tier = request.trust_tier if request.trust_tier is not None else classification["trust_tier"]
         trust_tier = min(max(base_trust_tier + provenance.trust_delta, int(TrustTier.DIRECT_USER)), int(TrustTier.UNTRUSTED_EXTERNAL))
         capability_tags = sorted(set(request.capability_tags + classification["capability_tags"]))
@@ -108,7 +133,7 @@ class IngestionPipeline:
             "media_type": request.media_type,
             "provenance_decision": provenance.to_dict(),
             "ingest_classification": classification,
-            "privacy": privacy.to_dict(),
+            "privacy": privacy_metadata,
         }
         if provenance.quarantine:
             trust_tier = int(TrustTier.UNTRUSTED_EXTERNAL)
@@ -124,6 +149,9 @@ class IngestionPipeline:
             "data_class": "pii" if sensitivity else "standard",
             "residency": residency,
             "allowed_residencies": list(self.allowed_residencies),
+            "runtime_residency": target_residency,
+            "cross_region_transfer": cross_region_transfer,
+            "allowed_residency_transfers": list(self.allowed_residency_transfers),
         }
 
         content_pointer: str | None = None
