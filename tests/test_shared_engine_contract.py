@@ -8,6 +8,7 @@ from uuid import uuid4
 
 import pytest
 
+from mnemosyne.calibration import CalibrationSet
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.models import Assertion, Evidence, Preference, Relation
 from mnemosyne.postgres_engine import PostgresEngine
@@ -111,6 +112,32 @@ def test_shared_engine_contract_retrieval_records_assertion_access_and_activatio
     assert assertion_hit.metadata["activation"]["score"] > 0
     assert result.explain["activation"]["applied"] is True
     assert result.explain["read_marks"]["assertions"] >= 1
+
+
+def test_shared_engine_contract_retrieval_uses_conformal_calibration(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, user = engine_bundle
+    engine.set_calibration(
+        CalibrationSet(
+            tenant_id=tenant,
+            memory_type="fact",
+            scores=[0.95],
+            target_coverage=0.9,
+        )
+    )
+    _append_evidence(engine, tenant, user, "Shared calibrated abstention contract should retrieve evidence.")
+
+    result = engine.retrieve("calibrated abstention contract", tenant)
+    exported = engine.export_tenant(tenant)
+
+    assert result.hits
+    assert result.abstained is True
+    assert result.uncertainty_note
+    assert result.explain["calibration"]["source"] == "conformal"
+    assert result.explain["calibration"]["threshold"] == 0.95
+    assert result.explain["semantic_entropy"] >= 0.0
+    assert exported["calibrations"][0]["memory_type"] == "fact"
 
 
 def test_shared_engine_contract_branches_and_discards(engine_bundle: tuple[Any, str, str]) -> None:

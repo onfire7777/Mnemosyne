@@ -905,6 +905,7 @@ def test_runtime_job_handlers_drain_calibration_lifecycle_and_observability_jobs
     assert jobs[0].result["details"]["abstain"] is True
     assert jobs[1].result["details"]["demoted"] == 1
     assert jobs[2].result["details"]["metrics"]["counters"]["observability.snapshots"] == 1
+    assert engine.export_tenant(TENANT)["calibrations"][0]["memory_type"] == "fact"
     snapshot = metrics.snapshot()
     assert snapshot.counters["queue.job.calibrate.complete"] == 1
     assert snapshot.counters["lifecycle.demotions"] == 1

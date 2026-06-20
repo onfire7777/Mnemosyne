@@ -176,6 +176,8 @@ class RuntimeJobHandlers:
         confidence = float(payload.get("confidence", threshold))
         prediction_set_size = int(payload.get("prediction_set_size", 1))
         abstain = should_abstain(confidence, calibration, prediction_set_size=prediction_set_size)
+        if hasattr(self.engine, "set_calibration"):
+            self.engine.set_calibration(calibration)
         self.metrics.gauge(f"calibration.{calibration.memory_type}.threshold", threshold)
         self.metrics.increment("calibration.jobs")
         if abstain:
