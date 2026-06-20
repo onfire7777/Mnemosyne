@@ -67,6 +67,12 @@ class PostgresEngine:
     def _set_tenant(cur: Any, db_tenant_id: str) -> None:
         cur.execute("SELECT set_config('mnemosyne.tenant_id', %s, true)", (str(db_tenant_id),))
 
+    @staticmethod
+    def _ensure_entity_registry_schema(cur: Any) -> None:
+        cur.execute("ALTER TABLE entities ADD COLUMN IF NOT EXISTS source_evidence_cids BYTEA[] NOT NULL DEFAULT '{}'")
+        cur.execute("ALTER TABLE entities ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now()")
+        cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS entities_tenant_canonical_unique ON entities (tenant_id, canonical)")
+
     def ensure_tenant_and_branch(self, tenant_id: str, branch: str = "main", kind: str = "protected") -> None:
         db_tenant_id = _stable_uuid("tenant", tenant_id)
         with self.connect() as conn:
@@ -161,6 +167,7 @@ class PostgresEngine:
         db_tenant_id = _stable_uuid("tenant", tenant_id)
         with self.connect() as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                self._ensure_entity_registry_schema(cur)
                 self._set_tenant(cur, db_tenant_id)
                 cur.execute(
                     """
@@ -184,6 +191,7 @@ class PostgresEngine:
         db_user_id = _stable_uuid("user", incoming.user_id) if incoming.user_id else None
         with self.connect() as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                self._ensure_entity_registry_schema(cur)
                 self._set_tenant(cur, db_tenant_id)
                 cur.execute(
                     """
@@ -751,6 +759,80 @@ class PostgresEngine:
                     {"memory_type": calibration.memory_type, "scores": len(calibration.scores)},
                 )
 
+    def register_entity(
+        self,
+        tenant_id: str,
+        canonical: str,
+        *,
+        alias: str | None = None,
+        entity_type: str = "unknown",
+        summary: str | None = None,
+        source_evidence_cids: list[str] | None = None,
+        access_policy: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        canonical = canonical.strip() or "unknown-entity"
+        aliases = sorted({canonical, *([" ".join(alias.split())] if alias and alias.strip() else [])})
+        db_tenant_id = _stable_uuid("tenant", tenant_id)
+        self.ensure_tenant_and_branch(tenant_id, "main")
+        with self.connect() as conn:
+            with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                self._ensure_entity_registry_schema(cur)
+                self._set_tenant(cur, db_tenant_id)
+                cur.execute(
+                    """
+                    INSERT INTO entities(
+                      tenant_id, canonical, type, summary, source_evidence_cids,
+                      access_policy, updated_at
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, now())
+                    ON CONFLICT (tenant_id, canonical)
+                    DO UPDATE SET
+                      type = COALESCE(NULLIF(entities.type, ''), EXCLUDED.type),
+                      summary = COALESCE(EXCLUDED.summary, entities.summary),
+                      source_evidence_cids = COALESCE((
+                        SELECT array_agg(DISTINCT cid)
+                        FROM unnest(entities.source_evidence_cids || EXCLUDED.source_evidence_cids) AS cid
+                      ), '{}'::bytea[]),
+                      access_policy = CASE
+                        WHEN EXCLUDED.access_policy = '{}'::jsonb THEN entities.access_policy
+                        ELSE EXCLUDED.access_policy
+                      END,
+                      updated_at = now()
+                    RETURNING id, canonical, type, summary, salience, source_evidence_cids, access_policy, updated_at
+                    """,
+                    (
+                        db_tenant_id,
+                        canonical,
+                        entity_type,
+                        summary,
+                        _cid_list_to_bytes(source_evidence_cids or []),
+                        self._jsonb(access_policy or {"tenant": tenant_id}),
+                    ),
+                )
+                row = cur.fetchone()
+                for alias_value in aliases:
+                    cur.execute(
+                        """
+                        INSERT INTO entity_aliases(tenant_id, alias, entity_id)
+                        VALUES (%s, %s, %s)
+                        ON CONFLICT (tenant_id, alias) DO UPDATE SET entity_id = EXCLUDED.entity_id
+                        """,
+                        (db_tenant_id, alias_value, row["id"]),
+                    )
+                self._audit(cur, db_tenant_id, "engine", "register_entity", str(row["id"]), {"canonical": canonical})
+        return {
+            "id": str(row["id"]),
+            "tenant_id": tenant_id,
+            "canonical": row["canonical"],
+            "type": row["type"],
+            "summary": row["summary"],
+            "salience": float(row["salience"]),
+            "aliases": aliases,
+            "source_evidence_cids": _bytes_list_to_cids(row["source_evidence_cids"]),
+            "access_policy": dict(row["access_policy"] or {}),
+            "updated_at": dt_to_json(row["updated_at"]),
+        }
+
     def _calibration_for(self, tenant_id: str, memory_type: str) -> CalibrationSet | None:
         db_tenant_id = _stable_uuid("tenant", tenant_id)
         with self.connect() as conn:
@@ -1054,6 +1136,32 @@ class PostgresEngine:
                     }
                     for row in cur.fetchall()
                 ]
+                cur.execute(
+                    """
+                    SELECT e.*, COALESCE(array_agg(a.alias ORDER BY a.alias) FILTER (WHERE a.alias IS NOT NULL), '{}') AS aliases
+                    FROM entities e
+                    LEFT JOIN entity_aliases a ON a.tenant_id = e.tenant_id AND a.entity_id = e.id
+                    WHERE e.tenant_id = %s
+                    GROUP BY e.id
+                    ORDER BY e.canonical
+                    """,
+                    (db_tenant_id,),
+                )
+                entities = [
+                    {
+                        "id": str(row["id"]),
+                        "tenant_id": tenant_id,
+                        "canonical": row["canonical"],
+                        "type": row["type"],
+                        "summary": row["summary"],
+                        "salience": float(row["salience"]),
+                        "aliases": list(row["aliases"]),
+                        "source_evidence_cids": _bytes_list_to_cids(row["source_evidence_cids"]),
+                        "access_policy": dict(row["access_policy"] or {}),
+                        "updated_at": dt_to_json(row["updated_at"]),
+                    }
+                    for row in cur.fetchall()
+                ]
         return {
             "tenant_id": tenant_id,
             "evidence": evidence,
@@ -1061,6 +1169,7 @@ class PostgresEngine:
             "relations": relations,
             "preferences": preferences,
             "calibrations": calibrations,
+            "entities": entities,
             "justifications": [],
             "contradictions": [],
             "audit_log": audit,
