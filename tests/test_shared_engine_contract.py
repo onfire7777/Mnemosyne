@@ -107,6 +107,67 @@ def test_shared_engine_contract_preserves_lossless_evidence_envelope(
         assert record["access_policy"] == access_policy
 
 
+def test_shared_engine_contract_evidence_cids_are_immutable(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, user = engine_bundle
+    content = "Duplicate content-addressed evidence should not mutate its envelope."
+    cid = engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id=user,
+            actor="user",
+            source_type="immutable-source",
+            source_identity="first-source",
+            session_id="first-session",
+            content=content,
+            metadata={"version": "first"},
+            content_pointer="objects/shared/immutable.txt",
+            trust_tier=0,
+            capability_tags=["first"],
+            sensitivity=0,
+            signed_provenance={"issuer": "first"},
+            access_policy={"tenant": tenant, "version": "first"},
+        )
+    )
+
+    duplicate_cid = engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id=f"{user}-mutator",
+            actor="tool",
+            source_type="immutable-source",
+            source_identity="second-source",
+            session_id="second-session",
+            content=content,
+            metadata={"version": "second"},
+            content_pointer="objects/shared/immutable.txt",
+            trust_tier=5,
+            capability_tags=["second"],
+            sensitivity=4,
+            signed_provenance={"issuer": "second"},
+            access_policy={"tenant": tenant, "version": "second"},
+        )
+    )
+
+    recalled = engine.get_evidence(tenant, cid)
+    exported = next(item for item in engine.export_tenant(tenant)["evidence"] if item["cid"] == cid)
+
+    assert duplicate_cid == cid
+    assert recalled is not None
+    for record in (recalled.to_dict(), exported):
+        assert record["user_id"] == user
+        assert record["actor"] == "user"
+        assert record["source_identity"] == "first-source"
+        assert record["session_id"] == "first-session"
+        assert record["metadata"]["version"] == "first"
+        assert record["trust_tier"] == 0
+        assert record["capability_tags"] == ["first"]
+        assert record["sensitivity"] == 0
+        assert record["signed_provenance"] == {"issuer": "first"}
+        assert record["access_policy"]["version"] == "first"
+
+
 def test_shared_engine_contract_exports_all_and_json(engine_bundle: tuple[Any, str, str]) -> None:
     engine, tenant, user = engine_bundle
     cid = _append_evidence(engine, tenant, user, "Shared export-all contract evidence.")
@@ -697,6 +758,32 @@ def test_shared_engine_contract_forget_propagates_projection_erasure(engine_bund
 
     assert entity_canonical in removal["propagated"]["removed_entities"]
     assert all(item["canonical"] != entity_canonical for item in exported_after_removal["entities"])
+
+
+def test_shared_engine_contract_tombstoned_evidence_cannot_be_replayed(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, user = engine_bundle
+    evidence = Evidence(
+        tenant_id=tenant,
+        user_id=user,
+        actor="user",
+        source_type="shared-replay",
+        content="Tombstoned evidence replay must remain forgotten.",
+        content_pointer="objects/shared/replay.txt",
+        metadata={"case": "tombstone-replay"},
+        access_policy={"tenant": tenant},
+    )
+    cid = engine.append_evidence(evidence)
+
+    result = engine.forget(tenant, cid, requested_by=user, erasure_mode=ErasureMode.TOMBSTONE_RECOMPUTE)
+    replay_cid = engine.append_evidence(evidence)
+    exported = engine.export_tenant(tenant)
+
+    assert result["erased"] is True
+    assert replay_cid == cid
+    assert engine.get_evidence(tenant, cid) is None
+    assert all(item["cid"] != cid for item in exported["evidence"])
 
 
 def test_shared_engine_contract_retrieval_filters_trust_sensitivity_and_quarantine(engine_bundle: tuple[Any, str, str]) -> None:

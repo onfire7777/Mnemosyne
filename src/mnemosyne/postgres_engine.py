@@ -137,23 +137,7 @@ class PostgresEngine:
                     VALUES (
                       %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, false, %s
                     )
-                    ON CONFLICT (tenant_id, branch, cid)
-                    DO UPDATE SET
-                      user_id = EXCLUDED.user_id,
-                      session_id = EXCLUDED.session_id,
-                      actor = EXCLUDED.actor,
-                      source_type = EXCLUDED.source_type,
-                      source_identity = EXCLUDED.source_identity,
-                      content = EXCLUDED.content,
-                      content_pointer = EXCLUDED.content_pointer,
-                      modality = EXCLUDED.modality,
-                      metadata = EXCLUDED.metadata,
-                      trust_tier = EXCLUDED.trust_tier,
-                      capability_tags = EXCLUDED.capability_tags,
-                      sensitivity = EXCLUDED.sensitivity,
-                      signed_provenance = EXCLUDED.signed_provenance,
-                      access_policy = EXCLUDED.access_policy,
-                      erased = false
+                    ON CONFLICT (tenant_id, branch, cid) DO NOTHING
                     """,
                     (
                         cid_bytes,
