@@ -1100,10 +1100,29 @@ class LocalMemoryEngine:
     def to_json(self) -> str:
         return json.dumps(self.export_all(), indent=2, sort_keys=True)
 
+    def _export_branches(self) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        for name, meta in self.branches.items():
+            tenants = list(meta.get("tenants") or [])
+            if not tenants:
+                tenants = [None]
+            for tenant in tenants:
+                rows.append(
+                    {
+                        "tenant_id": tenant,
+                        "name": name,
+                        "from_branch": meta.get("from"),
+                        "kind": meta.get("kind"),
+                        "head": None,
+                        "created_at": meta.get("created_at"),
+                    }
+                )
+        return rows
+
     def export_all(self) -> dict[str, Any]:
         return {
             "policy": self.policy.to_dict(),
-            "branches": self.branches,
+            "branches": self._export_branches(),
             "evidence": [item.to_dict() for item in self.evidence.values()],
             "assertions": [item.to_dict() for item in self.assertions.values()],
             "relations": [item.to_dict() for item in self.relations.values()],
