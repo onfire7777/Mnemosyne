@@ -26,7 +26,14 @@ from mnemosyne.observability import MetricsRegistry, build_ops_report, render_op
 from mnemosyne.parametric import CommandParametricTrainer, ParametricArtifactStore, ParametricTier
 from mnemosyne.provenance import C2paToolVerifier, ProvenanceTrustPolicy, SignedProvenanceVerifier
 from mnemosyne.queue import InProcessQueue, PostgresQueue, QueueWorker
-from mnemosyne.retrieval import HashingEmbeddingProvider, HttpEmbeddingProvider, HttpReranker, LocalSimilarityReranker, RetrievalAdapters
+from mnemosyne.retrieval import (
+    CommandMediaEmbeddingProvider,
+    HashingEmbeddingProvider,
+    HttpEmbeddingProvider,
+    HttpReranker,
+    LocalSimilarityReranker,
+    RetrievalAdapters,
+)
 from mnemosyne.runtime_state import RuntimeState
 from mnemosyne.security import SessionAuthError, SessionTokenVerifier, parse_session_keyring, parse_session_revoke_list
 from mnemosyne.storage import CommandKeyManager, EncryptedLocalObjectStore, JsonKeyManager, LocalObjectStore
@@ -999,6 +1006,31 @@ def cmd_provider_check(args: argparse.Namespace) -> None:
         ok = False
         checks["media_extractor"] = {"ok": False, "provider": "command", "error": str(exc)}
 
+    if args.media_embedding_provider == "command":
+        try:
+            if not args.media_embedding_command:
+                raise ValueError("command media embedding provider requires --media-embedding-command")
+            vector = CommandMediaEmbeddingProvider(
+                args.media_embedding_command,
+                dims=int(args.media_embedding_dims),
+                timeout_seconds=float(args.media_embedding_timeout),
+            ).embed_media(
+                b"Mnemosyne media embedding provider health check",
+                media_type="image/png",
+                modality="image",
+                metadata={"description": "Mnemosyne media embedding provider health check"},
+            )
+            checks["media_embedding"] = {
+                "ok": True,
+                "provider": "command",
+                "dimensions": len(vector),
+            }
+        except Exception as exc:  # noqa: BLE001 - health checks return structured failures.
+            ok = False
+            checks["media_embedding"] = {"ok": False, "provider": "command", "error": str(exc)}
+    else:
+        checks["media_embedding"] = {"ok": True, "provider": "none", "skipped": True}
+
     if args.parametric_provider == "command":
         try:
             if not args.parametric_command:
@@ -1123,6 +1155,27 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--provenance-timeout", type=float, default=float(os.environ.get("MNEMOSYNE_PROVENANCE_TIMEOUT", "30")))
     parser.add_argument("--media-extractor-command", default=os.environ.get("MNEMOSYNE_MEDIA_EXTRACTOR_COMMAND"))
     parser.add_argument("--media-extractor-timeout", type=float, default=float(os.environ.get("MNEMOSYNE_MEDIA_EXTRACTOR_TIMEOUT", "30")))
+    parser.add_argument(
+        "--media-embedding-provider",
+        choices=["none", "command"],
+        default=os.environ.get("MNEMOSYNE_MEDIA_EMBEDDING_PROVIDER", "none"),
+        help="Multimodal image/audio/video embedding provider",
+    )
+    parser.add_argument(
+        "--media-embedding-command",
+        default=os.environ.get("MNEMOSYNE_MEDIA_EMBEDDING_COMMAND"),
+        help="Command media embedder invoked as '<command> <file>' with JSON metadata on stdin",
+    )
+    parser.add_argument(
+        "--media-embedding-dims",
+        type=int,
+        default=int(os.environ.get("MNEMOSYNE_MEDIA_EMBEDDING_DIMS", os.environ.get("MNEMOSYNE_EMBEDDING_DIMS", "1024"))),
+    )
+    parser.add_argument(
+        "--media-embedding-timeout",
+        type=float,
+        default=float(os.environ.get("MNEMOSYNE_MEDIA_EMBEDDING_TIMEOUT", "30")),
+    )
     parser.add_argument("--parametric-artifact-store", default=os.environ.get("MNEMOSYNE_PARAMETRIC_ARTIFACT_STORE"))
     parser.add_argument(
         "--parametric-provider",

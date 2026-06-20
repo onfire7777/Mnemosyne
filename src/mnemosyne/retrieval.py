@@ -5,6 +5,9 @@ from __future__ import annotations
 import json
 import math
 import os
+import shlex
+import subprocess
+import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -32,6 +35,23 @@ class EmbeddingProvider(Protocol):
 
     def embed(self, text: str) -> list[float]:
         """Return a normalized embedding vector for text."""
+
+
+class MediaEmbeddingProvider(Protocol):
+    """Boundary for image/audio/video embedding providers."""
+
+    name: str
+    dims: int
+
+    def embed_media(
+        self,
+        payload: bytes,
+        *,
+        media_type: str,
+        modality: str,
+        metadata: dict[str, object] | None = None,
+    ) -> list[float]:
+        """Return a normalized embedding vector for raw media bytes."""
 
 
 class Reranker(Protocol):
@@ -109,6 +129,71 @@ class HttpEmbeddingProvider:
         response = _post_json(self.url, payload, self.api_key, self.timeout_seconds)
         vector = _extract_embedding(response)
         return _normalize_vector(vector, self.dims)
+
+
+class CommandMediaEmbeddingProvider:
+    """Shell-free command adapter for operator-managed multimodal embedders.
+
+    The command is invoked as `<command> <tmp-media-path>` with JSON metadata on
+    stdin. It must write a JSON object containing `embedding` or
+    `data[0].embedding` to stdout.
+    """
+
+    name = "command-media-embedding"
+
+    def __init__(self, command: str | Sequence[str], *, dims: int = 1024, timeout_seconds: float = 30.0):
+        self.command = shlex.split(command) if isinstance(command, str) else list(command)
+        if not self.command:
+            raise ValueError("media embedding command must not be empty")
+        if dims <= 0:
+            raise ValueError("media embedding dimensions must be positive")
+        if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
+            raise ValueError("media embedding timeout must be positive")
+        self.dims = dims
+        self.timeout_seconds = timeout_seconds
+
+    def embed_media(
+        self,
+        payload: bytes,
+        *,
+        media_type: str,
+        modality: str,
+        metadata: dict[str, object] | None = None,
+    ) -> list[float]:
+        with tempfile.NamedTemporaryFile() as tmp:
+            tmp.write(payload)
+            tmp.flush()
+            request = {
+                "path": tmp.name,
+                "media_type": media_type,
+                "modality": modality,
+                "metadata": metadata or {},
+            }
+            try:
+                completed = subprocess.run(
+                    [*self.command, tmp.name],
+                    input=json.dumps(request),
+                    check=True,
+                    text=True,
+                    capture_output=True,
+                    timeout=self.timeout_seconds,
+                )
+            except subprocess.TimeoutExpired as exc:
+                raise ValueError("media embedding command timed out") from exc
+            except subprocess.CalledProcessError as exc:
+                detail = (exc.stderr or exc.stdout or "").strip()[:512]
+                suffix = f": {detail}" if detail else ""
+                raise ValueError(f"media embedding command failed{suffix}") from exc
+        output = completed.stdout.strip()
+        if not output:
+            raise ValueError("media embedding command returned no JSON")
+        try:
+            parsed = json.loads(output)
+        except json.JSONDecodeError as exc:
+            raise ValueError("media embedding response must be valid JSON") from exc
+        if not isinstance(parsed, dict):
+            raise ValueError("media embedding response must be a JSON object")
+        return _normalize_vector(_extract_embedding(parsed), self.dims)
 
 
 @dataclass(frozen=True, slots=True)

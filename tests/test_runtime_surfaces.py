@@ -18,7 +18,13 @@ from mnemosyne.mcp_server import MnemosyneMcpServer, build_sdk_server
 from mnemosyne.mcp_tools import TOOL_SPEC
 from mnemosyne.models import Hit
 from mnemosyne.postgres_engine import PostgresEngine, _bytes_to_cid, _cid_to_bytes, _stable_uuid, _uuid_or_none, _vector_literal
-from mnemosyne.retrieval import HttpEmbeddingProvider, HttpReranker, LocalSimilarityReranker, semantic_entropy
+from mnemosyne.retrieval import (
+    CommandMediaEmbeddingProvider,
+    HttpEmbeddingProvider,
+    HttpReranker,
+    LocalSimilarityReranker,
+    semantic_entropy,
+)
 from mnemosyne.security import SessionIdentity, SessionTokenVerifier
 
 
@@ -260,6 +266,33 @@ def test_http_retrieval_adapters_fail_closed_on_malformed_provider_responses() -
         server.shutdown()
         thread.join(timeout=5)
         server.server_close()
+
+
+def test_command_media_embedding_provider_validates_json_contract(tmp_path: Path) -> None:
+    embedder = tmp_path / "embedder.py"
+    embedder.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env python3",
+                "import json, pathlib, sys",
+                "request = json.loads(sys.stdin.read())",
+                "assert pathlib.Path(sys.argv[1]).read_bytes() == b'media-bytes'",
+                "assert request['media_type'] == 'image/png'",
+                "print(json.dumps({'embedding': [3.0, 4.0, 0.0, 99.0]}))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    embedder.chmod(0o755)
+
+    vector = CommandMediaEmbeddingProvider(str(embedder), dims=3).embed_media(
+        b"media-bytes",
+        media_type="image/png",
+        modality="image",
+        metadata={"source": "unit"},
+    )
+
+    assert vector == [0.6, 0.8, 0.0]
 
 
 def test_mcp_server_initializes_lists_tools_and_calls_capture_search(tmp_path: Path) -> None:
