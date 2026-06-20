@@ -5,10 +5,12 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import socket
+import ssl
 import tempfile
 import time
 from collections.abc import Mapping
-from datetime import datetime
+from datetime import UTC, datetime
 from hashlib import sha256
 from pathlib import Path
 from typing import Any
@@ -1656,6 +1658,127 @@ def cmd_mcp_http_soak(args: argparse.Namespace) -> None:
         raise SystemExit(1)
 
 
+def _tls_target(args: argparse.Namespace) -> tuple[str, int, str]:
+    if args.url:
+        parsed = urlsplit(args.url)
+        if parsed.scheme != "https":
+            raise SystemExit("--url must use https:// for tls-cert-check.")
+        if not parsed.hostname:
+            raise SystemExit("--url must include a hostname.")
+        host = parsed.hostname
+        port = int(parsed.port or 443)
+    else:
+        if not args.host:
+            raise SystemExit("tls-cert-check requires --url or --host.")
+        host = args.host
+        port = int(args.port)
+    return host, port, args.server_name or host
+
+
+def _cert_name(value: Any) -> str:
+    if not isinstance(value, tuple):
+        return ""
+    parts: list[str] = []
+    for relative_name in value:
+        if not isinstance(relative_name, tuple):
+            continue
+        for item in relative_name:
+            if isinstance(item, tuple) and len(item) == 2:
+                parts.append(f"{item[0]}={item[1]}")
+    return ", ".join(parts)
+
+
+def _parse_cert_time(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    return datetime.strptime(value, "%b %d %H:%M:%S %Y %Z").replace(tzinfo=UTC)
+
+
+def _tls_version(value: str) -> ssl.TLSVersion:
+    versions = {
+        "TLSv1.2": ssl.TLSVersion.TLSv1_2,
+        "TLSv1.3": ssl.TLSVersion.TLSv1_3,
+    }
+    return versions[value]
+
+
+def cmd_tls_cert_check(args: argparse.Namespace) -> None:
+    host, port, server_name = _tls_target(args)
+    if args.timeout <= 0:
+        raise SystemExit("--timeout must be greater than 0.")
+    if args.min_days_valid < 0:
+        raise SystemExit("--min-days-valid must be zero or greater.")
+
+    target = {
+        "host": host,
+        "port": port,
+        "server_name": server_name,
+        "ca_file_configured": bool(args.ca_file),
+        "minimum_tls_version": args.min_tls_version,
+    }
+    try:
+        context = ssl.create_default_context(cafile=args.ca_file)
+        context.minimum_version = _tls_version(args.min_tls_version)
+        started = time.monotonic()
+        with socket.create_connection((host, port), timeout=args.timeout) as raw_socket:
+            with context.wrap_socket(raw_socket, server_hostname=server_name) as tls_socket:
+                certificate = tls_socket.getpeercert()
+                tls_version = tls_socket.version()
+                cipher = tls_socket.cipher()
+        latency_ms = round((time.monotonic() - started) * 1000, 3)
+    except (OSError, ssl.SSLError, ValueError) as exc:
+        emit(
+            {
+                "ok": False,
+                "target": target,
+                "error": str(exc),
+                "checks": {
+                    "chain_valid": False,
+                    "hostname_valid": False,
+                    "min_days_valid": False,
+                },
+            }
+        )
+        raise SystemExit(1) from exc
+
+    not_before = _parse_cert_time(certificate.get("notBefore"))
+    not_after = _parse_cert_time(certificate.get("notAfter"))
+    days_remaining = ((not_after - datetime.now(UTC)).total_seconds() / 86_400) if not_after else None
+    subject_alt_names = [
+        {"type": str(kind), "value": str(value)}
+        for kind, value in certificate.get("subjectAltName", [])
+        if isinstance(kind, str)
+    ]
+    min_days_ok = days_remaining is not None and days_remaining >= args.min_days_valid
+    report = {
+        "ok": bool(min_days_ok),
+        "target": target,
+        "tls": {
+            "version": tls_version,
+            "cipher": cipher[0] if cipher else None,
+            "latency_ms": latency_ms,
+        },
+        "certificate": {
+            "subject": _cert_name(certificate.get("subject")),
+            "issuer": _cert_name(certificate.get("issuer")),
+            "serial_number": certificate.get("serialNumber"),
+            "not_before": not_before.isoformat() if not_before else None,
+            "not_after": not_after.isoformat() if not_after else None,
+            "days_remaining": round(days_remaining, 3) if days_remaining is not None else None,
+            "subject_alt_names": subject_alt_names,
+        },
+        "checks": {
+            "chain_valid": True,
+            "hostname_valid": True,
+            "min_days_valid": min_days_ok,
+            "min_days_required": args.min_days_valid,
+        },
+    }
+    emit(report)
+    if not report["ok"]:
+        raise SystemExit(1)
+
+
 def _read_provider_manifest(path: str | None) -> dict[str, Any]:
     if not path:
         return {}
@@ -2770,6 +2893,33 @@ def build_parser() -> argparse.ArgumentParser:
     provider_check = sub.add_parser("provider-check")
     provider_check.add_argument("--provider-manifest", help="JSON deployment manifest for provider health gates")
     provider_check.set_defaults(func=cmd_provider_check)
+
+    tls_cert_check = sub.add_parser("tls-cert-check")
+    tls_cert_check.add_argument("--url", default=os.environ.get("MNEMOSYNE_TLS_CHECK_URL"))
+    tls_cert_check.add_argument("--host", default=os.environ.get("MNEMOSYNE_TLS_CHECK_HOST"))
+    tls_cert_check.add_argument(
+        "--port",
+        type=int,
+        default=int(os.environ.get("MNEMOSYNE_TLS_CHECK_PORT", "443")),
+    )
+    tls_cert_check.add_argument("--server-name", default=os.environ.get("MNEMOSYNE_TLS_CHECK_SERVER_NAME"))
+    tls_cert_check.add_argument("--ca-file", default=os.environ.get("MNEMOSYNE_TLS_CHECK_CA_FILE"))
+    tls_cert_check.add_argument(
+        "--timeout",
+        type=float,
+        default=float(os.environ.get("MNEMOSYNE_TLS_CHECK_TIMEOUT", "10")),
+    )
+    tls_cert_check.add_argument(
+        "--min-days-valid",
+        type=float,
+        default=float(os.environ.get("MNEMOSYNE_TLS_CHECK_MIN_DAYS_VALID", "30")),
+    )
+    tls_cert_check.add_argument(
+        "--min-tls-version",
+        choices=["TLSv1.2", "TLSv1.3"],
+        default=os.environ.get("MNEMOSYNE_TLS_CHECK_MIN_TLS_VERSION", "TLSv1.2"),
+    )
+    tls_cert_check.set_defaults(func=cmd_tls_cert_check)
 
     mcp_http_soak = sub.add_parser("mcp-http-soak")
     mcp_http_soak.add_argument(

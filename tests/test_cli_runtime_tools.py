@@ -7,12 +7,16 @@ import sys
 import threading
 import time
 import base64
+from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from cryptography import x509
 from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
+from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
 from mnemosyne.cli import build_parser
 from mnemosyne.mcp_server import build_http_server
@@ -46,6 +50,81 @@ def make_session_token(
 
 def b64url(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).decode("ascii").rstrip("=")
+
+
+def write_tls_fixture(tmp_path: Path, *, server_days_valid: int = 45) -> tuple[Path, Path, Path]:
+    now = datetime.now(UTC)
+    ca_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    ca_name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Mnemosyne Test CA")])
+    ca_cert = (
+        x509.CertificateBuilder()
+        .subject_name(ca_name)
+        .issuer_name(ca_name)
+        .public_key(ca_key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - timedelta(days=1))
+        .not_valid_after(now + timedelta(days=365))
+        .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
+        .add_extension(
+            x509.KeyUsage(
+                digital_signature=True,
+                content_commitment=False,
+                key_encipherment=False,
+                data_encipherment=False,
+                key_agreement=False,
+                key_cert_sign=True,
+                crl_sign=True,
+                encipher_only=False,
+                decipher_only=False,
+            ),
+            critical=True,
+        )
+        .add_extension(x509.SubjectKeyIdentifier.from_public_key(ca_key.public_key()), critical=False)
+        .sign(ca_key, hashes.SHA256())
+    )
+    server_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    server_name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "localhost")])
+    server_cert = (
+        x509.CertificateBuilder()
+        .subject_name(server_name)
+        .issuer_name(ca_name)
+        .public_key(server_key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - timedelta(days=1))
+        .not_valid_after(now + timedelta(days=server_days_valid))
+        .add_extension(x509.SubjectAlternativeName([x509.DNSName("localhost")]), critical=False)
+        .add_extension(
+            x509.KeyUsage(
+                digital_signature=True,
+                content_commitment=False,
+                key_encipherment=True,
+                data_encipherment=False,
+                key_agreement=False,
+                key_cert_sign=False,
+                crl_sign=False,
+                encipher_only=False,
+                decipher_only=False,
+            ),
+            critical=True,
+        )
+        .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]), critical=False)
+        .add_extension(x509.SubjectKeyIdentifier.from_public_key(server_key.public_key()), critical=False)
+        .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_key.public_key()), critical=False)
+        .sign(ca_key, hashes.SHA256())
+    )
+    ca_path = tmp_path / "ca.pem"
+    cert_path = tmp_path / "server.pem"
+    key_path = tmp_path / "server-key.pem"
+    ca_path.write_bytes(ca_cert.public_bytes(serialization.Encoding.PEM))
+    cert_path.write_bytes(server_cert.public_bytes(serialization.Encoding.PEM))
+    key_path.write_bytes(
+        server_key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+    )
+    return ca_path, cert_path, key_path
 
 
 def make_oidc_token(payload: dict[str, object], *, kid: str = "idp-key-1") -> tuple[dict[str, object], str]:
@@ -1085,6 +1164,67 @@ def test_cli_mcp_http_soak_fails_closed_without_required_auth(tmp_path: Path) ->
     assert report["summary"]["failures"] == 1
     assert report["target"]["auth_token_configured"] is False
     assert "soak-secret" not in result.stdout
+
+
+def test_cli_tls_cert_check_validates_chain_hostname_and_expiry(tmp_path: Path) -> None:
+    ca_path, cert_path, key_path = write_tls_fixture(tmp_path, server_days_valid=45)
+    server = build_http_server(
+        host="127.0.0.1",
+        port=0,
+        store_path=tmp_path / "mcp-store.json",
+        tls_cert_file=cert_path,
+        tls_key_file=key_path,
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        report = run_cli(
+            tmp_path / "mnemosyne.json",
+            "tls-cert-check",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(server.server_port),
+            "--server-name",
+            "localhost",
+            "--ca-file",
+            str(ca_path),
+            "--min-days-valid",
+            "10",
+        )
+        failed = run_raw_cli(
+            tmp_path / "mnemosyne.json",
+            "tls-cert-check",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(server.server_port),
+            "--server-name",
+            "localhost",
+            "--ca-file",
+            str(ca_path),
+            "--min-days-valid",
+            "400",
+        )
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        server.server_close()
+
+    failed_report = json.loads(failed.stdout)
+    assert report["ok"] is True
+    assert report["checks"]["chain_valid"] is True
+    assert report["checks"]["hostname_valid"] is True
+    assert report["checks"]["min_days_valid"] is True
+    assert report["target"]["server_name"] == "localhost"
+    assert report["certificate"]["days_remaining"] > 40
+    assert {"type": "DNS", "value": "localhost"} in report["certificate"]["subject_alt_names"]
+    assert failed.returncode == 1
+    assert failed_report["ok"] is False
+    assert failed_report["checks"]["chain_valid"] is True
+    assert failed_report["checks"]["hostname_valid"] is True
+    assert failed_report["checks"]["min_days_valid"] is False
+    assert failed_report["checks"]["min_days_required"] == 400.0
 
 
 def test_cli_provider_check_uses_deployment_manifest(tmp_path: Path, monkeypatch) -> None:
