@@ -548,23 +548,46 @@ class LocalMemoryEngine:
             ev = self.evidence.get(key)
             if not ev:
                 return {"erased": False, "reason": "evidence_not_found", "cid": cid, "erasure_mode": mode.value}
+            derived_cids = [
+                item.cid
+                for item in self.evidence.values()
+                if item.tenant_id == tenant_id
+                and item.branch == branch
+                and not item.erased
+                and item.metadata.get("source_evidence_cid") == cid
+                and item.cid != cid
+            ]
+            affected_cids = {cid, *derived_cids}
             if mode is ErasureMode.HARD_DELETE_LEGAL:
                 self.evidence.pop(key, None)
+                for derived_cid in derived_cids:
+                    self.evidence.pop(self._evidence_key(tenant_id, branch, derived_cid), None)
             else:
                 ev.content = ""
                 ev.erased = True
-            propagated: dict[str, Any] = {"retracted_assertions": [], "trimmed_assertions": []}
+                for derived_cid in derived_cids:
+                    derived = self.evidence.get(self._evidence_key(tenant_id, branch, derived_cid))
+                    if derived:
+                        derived.content = ""
+                        derived.erased = True
+            propagated: dict[str, Any] = {
+                "retracted_assertions": [],
+                "trimmed_assertions": [],
+                "erased_derived_evidence": derived_cids,
+            }
             for assertion in self.assertions.values():
                 if assertion.tenant_id != tenant_id or assertion.branch != branch:
                     continue
-                if cid not in assertion.source_evidence_cids:
+                if not affected_cids.intersection(assertion.source_evidence_cids):
                     continue
-                if len(set(assertion.source_evidence_cids)) <= 1:
+                surviving_sources = [item for item in assertion.source_evidence_cids if item not in affected_cids]
+                if not surviving_sources:
                     assertion.status = "retracted"
                     assertion.expired_at = utc_now()
+                    assertion.source_evidence_cids = []
                     propagated["retracted_assertions"].append(assertion.id)
                 else:
-                    assertion.source_evidence_cids = [item for item in assertion.source_evidence_cids if item != cid]
+                    assertion.source_evidence_cids = surviving_sources
                     propagated["trimmed_assertions"].append(assertion.id)
             entry = {
                 "id": new_id(),

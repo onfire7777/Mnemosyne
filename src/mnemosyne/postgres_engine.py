@@ -757,41 +757,65 @@ class PostgresEngine:
         mode = ErasureMode(erasure_mode)
         db_tenant_id = _stable_uuid("tenant", tenant_id)
         cid_bytes = _cid_to_bytes(cid)
-        propagated: dict[str, Any] = {"retracted_assertions": [], "trimmed_assertions": []}
+        propagated: dict[str, Any] = {"retracted_assertions": [], "trimmed_assertions": [], "erased_derived_evidence": []}
         with self.connect() as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
                 self._set_tenant(cur, db_tenant_id)
+                cur.execute(
+                    """
+                    SELECT cid
+                    FROM evidence
+                    WHERE tenant_id = %s AND branch = %s AND cid = %s
+                    """,
+                    (db_tenant_id, branch, cid_bytes),
+                )
+                if not cur.fetchone():
+                    return {"erased": False, "reason": "evidence_not_found", "cid": cid, "erasure_mode": mode.value}
+                cur.execute(
+                    """
+                    SELECT cid
+                    FROM evidence
+                    WHERE tenant_id = %s AND branch = %s
+                      AND erased = false
+                      AND metadata->>'source_evidence_cid' = %s
+                      AND cid <> %s
+                    """,
+                    (db_tenant_id, branch, cid, cid_bytes),
+                )
+                derived_cid_bytes = [bytes(row["cid"]) for row in cur.fetchall()]
+                derived_cids = [_bytes_to_cid(item) for item in derived_cid_bytes]
+                affected_cid_bytes = [cid_bytes, *derived_cid_bytes]
+                affected_cids = {cid, *derived_cids}
+                propagated["erased_derived_evidence"] = derived_cids
                 if mode is ErasureMode.HARD_DELETE_LEGAL:
                     cur.execute(
                         """
                         DELETE FROM evidence
-                        WHERE tenant_id = %s AND branch = %s AND cid = %s
+                        WHERE tenant_id = %s AND branch = %s AND cid = ANY(%s)
                         RETURNING cid
                         """,
-                        (db_tenant_id, branch, cid_bytes),
+                        (db_tenant_id, branch, affected_cid_bytes),
                     )
                 else:
                     cur.execute(
                         """
                         UPDATE evidence
                         SET content = '', erased = true
-                        WHERE tenant_id = %s AND branch = %s AND cid = %s
+                        WHERE tenant_id = %s AND branch = %s AND cid = ANY(%s)
                         RETURNING cid
                         """,
-                        (db_tenant_id, branch, cid_bytes),
+                        (db_tenant_id, branch, affected_cid_bytes),
                     )
-                if not cur.fetchone():
-                    return {"erased": False, "reason": "evidence_not_found", "cid": cid, "erasure_mode": mode.value}
                 cur.execute(
                     """
                     SELECT id, source_evidence_cids
                     FROM assertions
-                    WHERE tenant_id = %s AND branch = %s AND %s = ANY(source_evidence_cids)
+                    WHERE tenant_id = %s AND branch = %s AND source_evidence_cids && %s
                     """,
-                    (db_tenant_id, branch, cid_bytes),
+                    (db_tenant_id, branch, affected_cid_bytes),
                 )
                 for row in cur.fetchall():
-                    sources = [item for item in _bytes_list_to_cids(row["source_evidence_cids"]) if item != cid]
+                    sources = [item for item in _bytes_list_to_cids(row["source_evidence_cids"]) if item not in affected_cids]
                     if sources:
                         cur.execute(
                             "UPDATE assertions SET source_evidence_cids = %s WHERE id = %s",
