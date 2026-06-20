@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -54,6 +55,18 @@ def test_shared_engine_contract_retrieves_and_exports_evidence(engine_bundle: tu
     assert recalled.content == "Shared engine contract stores the orchid retrieval fact."
     assert any(hit.id == cid for hit in retrieved.hits)
     assert any(item["cid"] == cid for item in exported["evidence"])
+
+
+def test_shared_engine_contract_exports_all_and_json(engine_bundle: tuple[Any, str, str]) -> None:
+    engine, tenant, user = engine_bundle
+    cid = _append_evidence(engine, tenant, user, "Shared export-all contract evidence.")
+
+    exported = engine.export_all()
+    parsed = json.loads(engine.to_json())
+
+    assert exported["policy"]["top_k"] == parsed["policy"]["top_k"]
+    assert any(item["cid"] == cid and item["tenant_id"] == tenant for item in exported["evidence"])
+    assert any(item["cid"] == cid and item["tenant_id"] == tenant for item in parsed["evidence"])
 
 
 def test_shared_engine_contract_explain_reports_channels_rails_and_provenance(engine_bundle: tuple[Any, str, str]) -> None:
