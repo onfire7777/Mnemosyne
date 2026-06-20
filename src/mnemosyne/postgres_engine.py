@@ -111,6 +111,8 @@ class PostgresEngine:
         db_user_id = _stable_uuid("user", ev.user_id)
         db_session_id = _stable_uuid("session", ev.session_id) if ev.session_id else None
         metadata = {**ev.metadata, "_external_tenant_id": ev.tenant_id, "_external_user_id": ev.user_id}
+        if ev.session_id:
+            metadata["_external_session_id"] = ev.session_id
         cid = content_cid(
             ev.content,
             {
@@ -1842,7 +1844,7 @@ def _row_to_evidence(row: dict[str, Any], cid: str) -> Evidence:
         actor=row["actor"],
         source_type=row["source_type"],
         source_identity=row["source_identity"],
-        session_id=str(row["session_id"]) if row["session_id"] else None,
+        session_id=str(metadata.get("_external_session_id") or row["session_id"]) if row["session_id"] else None,
         content=row["content"] or "",
         metadata=metadata,
         content_pointer=row["content_pointer"],
