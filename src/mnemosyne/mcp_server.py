@@ -30,6 +30,7 @@ from mnemosyne.security import (
     SessionIdentity,
     SessionTokenVerifier,
     issue_session_from_oidc,
+    load_session_secret_command,
     parse_session_keyring,
     parse_session_revoke_list,
 )
@@ -54,6 +55,8 @@ class MnemosyneMcpServer:
         auth_token: str | None = None,
         session_secret: str | None = None,
         session_keyring: str | None = None,
+        session_secret_command: str | None = None,
+        session_secret_command_timeout: float = 10.0,
         session_key_id: str | None = None,
         session_revoked_key_ids: str | None = None,
         session_revoked_ids: str | None = None,
@@ -134,6 +137,12 @@ class MnemosyneMcpServer:
         self.session_keyring = (
             session_keyring if session_keyring is not None else os.environ.get("MNEMOSYNE_MCP_SESSION_KEYRING")
         )
+        self.session_secret_command = (
+            session_secret_command
+            if session_secret_command is not None
+            else os.environ.get("MNEMOSYNE_MCP_SESSION_SECRET_COMMAND")
+        )
+        self.session_secret_command_timeout = session_secret_command_timeout
         self.session_key_id = (
             session_key_id if session_key_id is not None else os.environ.get("MNEMOSYNE_MCP_SESSION_KEY_ID")
         )
@@ -311,17 +320,34 @@ class MnemosyneMcpServer:
         keyring = parse_session_keyring(self.session_keyring)
         revoked_key_ids = parse_session_revoke_list(self.session_revoked_key_ids)
         revoked_session_ids = parse_session_revoke_list(self.session_revoked_ids)
+        sources = sum([bool(keyring), bool(self.session_secret), bool(self.session_secret_command)])
+        if sources > 1:
+            raise SessionAuthError(
+                "MCP session auth requires at most one of --session-secret, --session-keyring, or --session-secret-command"
+            )
+        material: str | dict[str, str] | None = None
+        active_key_id = self.session_key_id
         if keyring:
+            material = keyring
+        elif self.session_secret_command:
+            material, command_active_key_id = load_session_secret_command(
+                self.session_secret_command,
+                timeout_seconds=float(self.session_secret_command_timeout),
+            )
+            active_key_id = active_key_id or command_active_key_id
+        elif self.session_secret:
+            material = self.session_secret
+        if material is None:
+            return None
+        if isinstance(material, dict):
             return SessionTokenVerifier(
-                keyring,
-                active_key_id=self.session_key_id,
+                material,
+                active_key_id=active_key_id,
                 revoked_key_ids=revoked_key_ids,
                 revoked_session_ids=revoked_session_ids,
             )
-        if not self.session_secret:
-            return None
         return SessionTokenVerifier(
-            self.session_secret,
+            material,
             revoked_key_ids=revoked_key_ids,
             revoked_session_ids=revoked_session_ids,
         )
@@ -1243,6 +1269,17 @@ def main(argv: list[str] | None = None) -> None:
         help="JSON object or comma-separated kid=secret HMAC keyring for signed MCP session_token claims",
     )
     parser.add_argument(
+        "--session-secret-command",
+        default=os.environ.get("MNEMOSYNE_MCP_SESSION_SECRET_COMMAND"),
+        help="Shell-free command provider that returns MCP session secret JSON for deployment secret custody",
+    )
+    parser.add_argument(
+        "--session-secret-command-timeout",
+        type=float,
+        default=float(os.environ.get("MNEMOSYNE_MCP_SESSION_SECRET_COMMAND_TIMEOUT", "10")),
+        help="Timeout in seconds for --session-secret-command",
+    )
+    parser.add_argument(
         "--session-key-id",
         default=os.environ.get("MNEMOSYNE_MCP_SESSION_KEY_ID"),
         help="Active key id used when issuing keyring-backed MCP session tokens",
@@ -1269,6 +1306,8 @@ def main(argv: list[str] | None = None) -> None:
         "auth_token": args.auth_token,
         "session_secret": args.session_secret,
         "session_keyring": args.session_keyring,
+        "session_secret_command": args.session_secret_command,
+        "session_secret_command_timeout": args.session_secret_command_timeout,
         "session_key_id": args.session_key_id,
         "session_revoked_key_ids": args.session_revoked_key_ids,
         "session_revoked_ids": args.session_revoked_ids,

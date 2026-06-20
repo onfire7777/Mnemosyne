@@ -42,6 +42,7 @@ from mnemosyne.security import (
     SessionAuthError,
     SessionTokenVerifier,
     issue_session_from_oidc,
+    load_session_secret_command,
     parse_session_keyring,
     parse_session_revoke_list,
 )
@@ -117,30 +118,53 @@ def apply_session_identity(args: argparse.Namespace) -> None:
 
 
 def _session_verifier_from_args(args: argparse.Namespace) -> SessionTokenVerifier:
-    keyring = parse_session_keyring(getattr(args, "session_keyring", None))
+    material, active_key_id = _session_material_from_args(args, purpose="--session-token")
     revoked_key_ids = parse_session_revoke_list(getattr(args, "session_revoked_key_ids", None))
     revoked_session_ids = parse_session_revoke_list(getattr(args, "session_revoked_ids", None))
-    if keyring:
+    if isinstance(material, dict):
         return SessionTokenVerifier(
-            keyring,
-            active_key_id=getattr(args, "session_key_id", None),
+            material,
+            active_key_id=active_key_id,
             revoked_key_ids=revoked_key_ids,
             revoked_session_ids=revoked_session_ids,
         )
-    secret = getattr(args, "session_secret", None)
-    if not secret:
-        raise SessionAuthError("--session-token requires --session-secret, --session-keyring, or MNEMOSYNE_SESSION_SECRET.")
-    return SessionTokenVerifier(secret, revoked_key_ids=revoked_key_ids, revoked_session_ids=revoked_session_ids)
+    return SessionTokenVerifier(material, revoked_key_ids=revoked_key_ids, revoked_session_ids=revoked_session_ids)
 
 
 def _session_signer_from_args(args: argparse.Namespace) -> SessionTokenVerifier:
+    material, active_key_id = _session_material_from_args(args, purpose="session-exchange")
+    if isinstance(material, dict):
+        return SessionTokenVerifier(material, active_key_id=active_key_id)
+    return SessionTokenVerifier(material)
+
+
+def _session_material_from_args(
+    args: argparse.Namespace,
+    *,
+    purpose: str,
+) -> tuple[str | dict[str, str], str | None]:
     keyring = parse_session_keyring(getattr(args, "session_keyring", None))
-    if keyring:
-        return SessionTokenVerifier(keyring, active_key_id=getattr(args, "session_key_id", None))
     secret = getattr(args, "session_secret", None)
-    if not secret:
-        raise SessionAuthError("session-exchange requires --session-secret, --session-keyring, or MNEMOSYNE_SESSION_SECRET.")
-    return SessionTokenVerifier(secret)
+    command = getattr(args, "session_secret_command", None)
+    source_count = sum([bool(keyring), bool(secret), bool(command)])
+    if source_count > 1:
+        raise SessionAuthError(
+            f"{purpose} requires at most one of --session-secret, --session-keyring, or --session-secret-command."
+        )
+    active_key_id = getattr(args, "session_key_id", None)
+    if keyring:
+        return keyring, active_key_id
+    if secret:
+        return secret, None
+    if command:
+        material, command_active_key_id = load_session_secret_command(
+            command,
+            timeout_seconds=float(getattr(args, "session_secret_command_timeout", 10.0)),
+        )
+        return material, active_key_id or command_active_key_id
+    raise SessionAuthError(
+        f"{purpose} requires --session-secret, --session-keyring, --session-secret-command, or MNEMOSYNE_SESSION_SECRET."
+    )
 
 
 def _bind_session_claim(args: argparse.Namespace, attr: str, value: str) -> None:
@@ -1578,6 +1602,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--session-keyring",
         default=os.environ.get("MNEMOSYNE_SESSION_KEYRING"),
         help="JSON object or comma-separated kid=secret HMAC keyring for signed session tokens",
+    )
+    parser.add_argument(
+        "--session-secret-command",
+        default=os.environ.get("MNEMOSYNE_SESSION_SECRET_COMMAND"),
+        help="Shell-free command provider that returns session secret JSON for deployment secret custody",
+    )
+    parser.add_argument(
+        "--session-secret-command-timeout",
+        type=float,
+        default=float(os.environ.get("MNEMOSYNE_SESSION_SECRET_COMMAND_TIMEOUT", "10")),
+        help="Timeout in seconds for --session-secret-command",
     )
     parser.add_argument(
         "--session-key-id",

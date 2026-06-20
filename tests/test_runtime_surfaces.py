@@ -121,6 +121,30 @@ def start_mcp_http_server(**kwargs: object) -> tuple[ThreadingHTTPServer, thread
     return server, thread, f"http://127.0.0.1:{server.server_port}"
 
 
+def fake_session_secret_command(tmp_path: Path, response: dict[str, object], *, name: str = "fake-session-secret") -> str:
+    response_file = tmp_path / f"{name}.json"
+    response_file.write_text(json.dumps(response, sort_keys=True), encoding="utf-8")
+    script = tmp_path / f"{name}.py"
+    script.write_text(
+        "\n".join(
+            [
+                "from __future__ import annotations",
+                "import json, sys",
+                "from pathlib import Path",
+                "response = Path(sys.argv[1])",
+                "action = sys.argv[2]",
+                "request = json.load(sys.stdin)",
+                "if action != 'get_session_secret' or request.get('action') != 'get_session_secret':",
+                "    print('bad action', file=sys.stderr)",
+                "    raise SystemExit(2)",
+                "print(response.read_text(encoding='utf-8'))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return " ".join(shlex.quote(item) for item in (sys.executable, str(script), str(response_file)))
+
+
 def stop_mcp_http_server(server: ThreadingHTTPServer, thread: threading.Thread) -> None:
     server.shutdown()
     thread.join(timeout=5)
@@ -1114,6 +1138,43 @@ def test_mcp_http_transport_enforces_auth_session_and_schema(tmp_path: Path) -> 
     assert auth_token not in encoded
     assert MCP_SESSION_SECRET not in encoded
     assert session_token not in encoded
+
+
+def test_mcp_http_transport_uses_session_secret_command(tmp_path: Path) -> None:
+    auth_token = "http-mcp-auth-token"
+    command_secret = "command-mcp-session-secret"
+    command = fake_session_secret_command(tmp_path, {"secret": command_secret})
+    session_token = SessionTokenVerifier(command_secret).sign(
+        SessionIdentity(tenant_id=TENANT, user_id=USER, role="operator", source_trust_tier=0)
+    )
+    server, thread, base = start_mcp_http_server(
+        store_path=tmp_path / "store.json",
+        auth_token=auth_token,
+        session_secret_command=command,
+        require_session=True,
+    )
+    try:
+        status, response = http_json(
+            "POST",
+            f"{base}/mcp",
+            {
+                "jsonrpc": "2.0",
+                "id": 9,
+                "method": "tools/call",
+                "params": {"name": "residency_policy", "arguments": {}},
+            },
+            headers={"Authorization": f"Bearer {auth_token}", "X-Mnemosyne-Session-Token": session_token},
+        )
+    finally:
+        stop_mcp_http_server(server, thread)
+
+    encoded = json.dumps(response)
+    assert status == 200
+    assert response is not None
+    assert response["result"]["isError"] is False  # type: ignore[index]
+    assert command_secret not in encoded
+    assert session_token not in encoded
+    assert auth_token not in encoded
 
 
 def test_mcp_http_session_exchange_validates_idp_and_issues_usable_session(tmp_path: Path) -> None:
