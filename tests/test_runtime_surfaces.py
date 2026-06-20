@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import inspect
 import json
@@ -9,7 +10,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import StringIO
 from pathlib import Path
 
-from mnemosyne.mcp_server import MnemosyneMcpServer
+import pytest
+
+from mnemosyne.mcp_server import MnemosyneMcpServer, build_sdk_server
 from mnemosyne.mcp_tools import TOOL_SPEC
 from mnemosyne.models import Hit
 from mnemosyne.postgres_engine import PostgresEngine, _bytes_to_cid, _cid_to_bytes, _stable_uuid, _uuid_or_none, _vector_literal
@@ -196,6 +199,91 @@ def test_mcp_server_initializes_lists_tools_and_calls_capture_search(tmp_path: P
     assert capture_content["cid"]
     assert search_content["hits"]
     assert search_content["hits"][0]["provenance"] == [capture_content["cid"]]
+
+
+def test_official_mcp_sdk_adapter_lists_tools_and_calls_capture_search(tmp_path: Path) -> None:
+    pytest.importorskip("mcp")
+    from mcp import types
+
+    server = build_sdk_server(store_path=tmp_path / "sdk-store.json", auth_token="token")
+
+    async def exercise() -> None:
+        list_handler = server.request_handlers[types.ListToolsRequest]
+        call_handler = server.request_handlers[types.CallToolRequest]
+        listed = await list_handler(types.ListToolsRequest())
+        tools_by_name = {tool.name: tool for tool in listed.root.tools}
+
+        denied = await call_handler(
+            types.CallToolRequest(
+                params={
+                    "name": "capture",
+                    "arguments": {
+                        "tenant_id": TENANT,
+                        "user_id": USER,
+                        "actor": "user",
+                        "source_type": "sdk",
+                        "content": "Unauthorized SDK call should fail closed.",
+                    },
+                }
+            )
+        )
+        invalid = await call_handler(
+            types.CallToolRequest(
+                params={
+                    "name": "capture",
+                    "arguments": {
+                        "auth_token": "token",
+                        "tenant_id": TENANT,
+                        "user_id": USER,
+                        "actor": "user",
+                        "source_type": "sdk",
+                        "content": "Invalid SDK call should fail schema validation.",
+                        "unexpected": True,
+                    },
+                }
+            )
+        )
+        captured = await call_handler(
+            types.CallToolRequest(
+                params={
+                    "name": "capture",
+                    "arguments": {
+                        "auth_token": "token",
+                        "tenant_id": TENANT,
+                        "user_id": USER,
+                        "actor": "user",
+                        "source_type": "sdk",
+                        "content": "Official MCP SDK captures Mnemosyne memory.",
+                        "trust_tier": 3,
+                    },
+                }
+            )
+        )
+        searched = await call_handler(
+            types.CallToolRequest(
+                params={
+                    "name": "search",
+                    "arguments": {
+                        "auth_token": "token",
+                        "tenant_id": TENANT,
+                        "query": "SDK Mnemosyne memory",
+                    },
+                }
+            )
+        )
+
+        assert set(tools_by_name) == {item["name"] for item in TOOL_SPEC}
+        assert tools_by_name["capture"].inputSchema["additionalProperties"] is False
+        assert denied.root.isError is True
+        assert "unauthorized" in denied.root.content[0].text
+        assert invalid.root.isError is True
+        assert "Input validation error" in invalid.root.content[0].text
+        assert captured.root.isError is False
+        assert captured.root.structuredContent["cid"]
+        assert searched.root.isError is False
+        assert searched.root.structuredContent["hits"]
+
+    asyncio.run(exercise())
 
 
 def test_mcp_server_honors_object_encryption_and_residency_config(tmp_path: Path) -> None:

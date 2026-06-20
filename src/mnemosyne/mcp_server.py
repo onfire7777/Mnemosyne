@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import hmac
 import inspect
 import json
@@ -253,6 +254,72 @@ def _tool_error(message: str) -> dict[str, Any]:
     }
 
 
+def build_sdk_server(**kwargs: Any) -> Any:
+    """Build an official MCP SDK server around the Mnemosyne tool facade."""
+
+    try:
+        import jsonschema
+        from mcp import types
+        from mcp.server.lowlevel import Server
+    except ImportError as exc:  # pragma: no cover - exercised when optional extra is absent.
+        raise RuntimeError("Official MCP SDK mode requires `mnemosyne-memory[mcp]`.") from exc
+
+    facade = MnemosyneMcpServer(**kwargs)
+    tool_specs = [_to_mcp_tool_spec(item) for item in TOOL_SPEC]
+    schemas_by_name = {item["name"]: item["inputSchema"] for item in tool_specs}
+    server = Server("mnemosyne-memory", version="0.1.0")
+
+    @server.list_tools()
+    async def list_tools() -> list[Any]:
+        return [types.Tool(**item) for item in tool_specs]
+
+    @server.call_tool(validate_input=False)
+    async def call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any] | Any:
+        raw_arguments = dict(arguments or {})
+        auth_params: dict[str, Any] = {}
+        if "auth_token" in raw_arguments:
+            auth_params["auth_token"] = raw_arguments.pop("auth_token")
+        meta = raw_arguments.pop("_meta", None)
+        if isinstance(meta, dict):
+            auth_params["_meta"] = meta
+        if not facade._authorized(auth_params):
+            return _sdk_tool_error(types, "unauthorized: valid MCP auth token required")
+        schema = schemas_by_name.get(name)
+        if schema is None:
+            return _sdk_tool_error(types, f"Unknown tool: {name}")
+        try:
+            jsonschema.validate(instance=raw_arguments, schema=schema)
+        except jsonschema.ValidationError as exc:
+            return _sdk_tool_error(types, f"Input validation error: {exc.message}")
+        try:
+            return facade.call_tool(name, raw_arguments)
+        except Exception as exc:  # noqa: BLE001 - SDK tool calls report failures as tool results.
+            return _sdk_tool_error(types, str(exc))
+
+    return server
+
+
+def _sdk_tool_error(types_module: Any, message: str) -> Any:
+    return types_module.CallToolResult(
+        content=[types_module.TextContent(type="text", text=message)],
+        isError=True,
+    )
+
+
+async def _serve_sdk_stdio(server: Any) -> None:
+    try:
+        from mcp.server.stdio import stdio_server
+    except ImportError as exc:  # pragma: no cover - exercised when optional extra is absent.
+        raise RuntimeError("Official MCP SDK mode requires `mnemosyne-memory[mcp]`.") from exc
+
+    async with stdio_server() as (read_stream, write_stream):
+        await server.run(read_stream, write_stream, server.create_initialization_options())
+
+
+def serve_sdk_stdio(**kwargs: Any) -> None:
+    asyncio.run(_serve_sdk_stdio(build_sdk_server(**kwargs)))
+
+
 def default_store() -> Path:
     return Path(os.environ.get("MNEME_STORE", ".mnemosyne/mcp-store.json"))
 
@@ -318,18 +385,25 @@ def main(argv: list[str] | None = None) -> None:
     )
     parser.add_argument("--parametric-artifact-store", default=os.environ.get("MNEMOSYNE_PARAMETRIC_ARTIFACT_STORE"))
     parser.add_argument("--stateless", action="store_true", help="Rebuild engine and tool state for each JSON-RPC tool call")
+    parser.add_argument("--sdk", action="store_true", help="Use the official MCP Python SDK stdio transport")
+    parser.add_argument("--auth-token", default=os.environ.get("MNEMOSYNE_MCP_TOKEN"), help="Require this token for tools/call")
     args = parser.parse_args(argv)
-    MnemosyneMcpServer(
-        store_path=args.store,
-        backend=args.backend,
-        postgres_dsn=args.postgres_dsn,
-        object_store=args.object_store,
-        object_store_encryption=args.object_store_encryption,
-        object_key_store=args.object_key_store,
-        allowed_residencies=tuple(args.allowed_residency),
-        parametric_artifact_store=args.parametric_artifact_store,
-        stateless=args.stateless,
-    ).serve()
+    config = {
+        "store_path": args.store,
+        "auth_token": args.auth_token,
+        "backend": args.backend,
+        "postgres_dsn": args.postgres_dsn,
+        "object_store": args.object_store,
+        "object_store_encryption": args.object_store_encryption,
+        "object_key_store": args.object_key_store,
+        "allowed_residencies": tuple(args.allowed_residency),
+        "parametric_artifact_store": args.parametric_artifact_store,
+        "stateless": args.stateless,
+    }
+    if args.sdk:
+        serve_sdk_stdio(**config)
+    else:
+        MnemosyneMcpServer(**config).serve()
 
 
 if __name__ == "__main__":

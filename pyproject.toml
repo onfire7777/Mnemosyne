@@ -23,6 +23,7 @@ classifiers = [
 
 [project.optional-dependencies]
 postgres = ["psycopg[binary]>=3.2"]
+mcp = ["mcp>=1.28,<2"]
 
 [project.scripts]
 mneme = "mnemosyne.cli:main"
