@@ -16,7 +16,7 @@ from mnemosyne.ingestion import IngestRequest, IngestionPipeline
 from mnemosyne.jobs import RuntimeJobHandlers
 from mnemosyne.media import MEDIA_EXTRACT_JOB, MediaExtractionResult
 from mnemosyne.mcp_server import MnemosyneMcpServer
-from mnemosyne.models import Assertion, Evidence, Relation
+from mnemosyne.models import Assertion, Evidence, Preference, Relation
 from mnemosyne.postgres_engine import PostgresEngine
 from mnemosyne.queue import InProcessQueue, QueueWorker
 from mnemosyne.storage import LocalObjectStore
@@ -475,9 +475,30 @@ def test_postgres_media_extract_job_appends_searchable_derived_evidence_live(tmp
             access_policy={"tenant": tenant},
         )
     )
+    preference_id = engine.add_preference(
+        Preference(
+            tenant_id=tenant,
+            user_id=user,
+            category="workflow",
+            statement="Quarterly planning moved.",
+            source_evidence_cids=[derived_cid],
+        )
+    )
+    relation_id = engine.add_relation(
+        Relation(
+            tenant_id=tenant,
+            source="quarterly planning",
+            predicate="moved",
+            target="true",
+            source_evidence_cids=[derived_cid],
+            access_policy={"tenant": tenant},
+        )
+    )
     forgotten = engine.forget(tenant, result.cid)
     exported = engine.export_tenant(tenant)
     exported_assertion = next(item for item in exported["assertions"] if item["id"] == assertion_id)
+    exported_preference = next(item for item in exported["preferences"] if item["id"] == preference_id)
+    exported_relation = next(item for item in exported["relations"] if item["id"] == relation_id)
 
     assert job.status == "complete"
     assert derived is not None
@@ -488,6 +509,12 @@ def test_postgres_media_extract_job_appends_searchable_derived_evidence_live(tmp
     assert all(item["cid"] not in {result.cid, derived_cid} for item in exported["evidence"])
     assert exported_assertion["status"] == "retracted"
     assert exported_assertion["source_evidence_cids"] == []
+    assert exported_preference["status"] == "retracted"
+    assert exported_preference["source_evidence_cids"] == []
+    assert exported_relation["valid_to"] is not None
+    assert exported_relation["source_evidence_cids"] == []
+    assert forgotten["propagated"]["retracted_preferences"] == [preference_id]
+    assert forgotten["propagated"]["expired_relations"] == [relation_id]
 
 
 def test_postgres_gated_consolidation_promotes_direct_user_fact_live() -> None:

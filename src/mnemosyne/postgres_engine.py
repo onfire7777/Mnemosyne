@@ -757,7 +757,15 @@ class PostgresEngine:
         mode = ErasureMode(erasure_mode)
         db_tenant_id = _stable_uuid("tenant", tenant_id)
         cid_bytes = _cid_to_bytes(cid)
-        propagated: dict[str, Any] = {"retracted_assertions": [], "trimmed_assertions": [], "erased_derived_evidence": []}
+        propagated: dict[str, Any] = {
+            "retracted_assertions": [],
+            "trimmed_assertions": [],
+            "retracted_preferences": [],
+            "trimmed_preferences": [],
+            "expired_relations": [],
+            "trimmed_relations": [],
+            "erased_derived_evidence": [],
+        }
         with self.connect() as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
                 self._set_tenant(cur, db_tenant_id)
@@ -828,6 +836,50 @@ class PostgresEngine:
                             (_cid_list_to_bytes([]), row["id"]),
                         )
                         propagated["retracted_assertions"].append(str(row["id"]))
+                cur.execute(
+                    """
+                    SELECT id, source_evidence_cids
+                    FROM preferences
+                    WHERE tenant_id = %s AND source_evidence_cids && %s
+                    """,
+                    (db_tenant_id, affected_cid_bytes),
+                )
+                for row in cur.fetchall():
+                    sources = [item for item in _bytes_list_to_cids(row["source_evidence_cids"]) if item not in affected_cids]
+                    if sources:
+                        cur.execute(
+                            "UPDATE preferences SET source_evidence_cids = %s WHERE id = %s",
+                            (_cid_list_to_bytes(sources), row["id"]),
+                        )
+                        propagated["trimmed_preferences"].append(str(row["id"]))
+                    else:
+                        cur.execute(
+                            "UPDATE preferences SET status = 'retracted', valid_to = now(), source_evidence_cids = %s WHERE id = %s",
+                            (_cid_list_to_bytes([]), row["id"]),
+                        )
+                        propagated["retracted_preferences"].append(str(row["id"]))
+                cur.execute(
+                    """
+                    SELECT id, source_evidence_cids
+                    FROM relations
+                    WHERE tenant_id = %s AND branch = %s AND source_evidence_cids && %s
+                    """,
+                    (db_tenant_id, branch, affected_cid_bytes),
+                )
+                for row in cur.fetchall():
+                    sources = [item for item in _bytes_list_to_cids(row["source_evidence_cids"]) if item not in affected_cids]
+                    if sources:
+                        cur.execute(
+                            "UPDATE relations SET source_evidence_cids = %s WHERE id = %s",
+                            (_cid_list_to_bytes(sources), row["id"]),
+                        )
+                        propagated["trimmed_relations"].append(str(row["id"]))
+                    else:
+                        cur.execute(
+                            "UPDATE relations SET valid_to = now(), source_evidence_cids = %s WHERE id = %s",
+                            (_cid_list_to_bytes([]), row["id"]),
+                        )
+                        propagated["expired_relations"].append(str(row["id"]))
                 cur.execute(
                     """
                     INSERT INTO deletion_log(tenant_id, evidence_cid, requested_by, propagated)
