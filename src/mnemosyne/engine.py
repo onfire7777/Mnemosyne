@@ -706,6 +706,8 @@ class LocalMemoryEngine:
                 "trimmed_preferences": [],
                 "expired_relations": [],
                 "trimmed_relations": [],
+                "removed_entities": [],
+                "trimmed_entities": [],
                 "erased_derived_evidence": derived_cids,
             }
             for assertion in self.assertions.values():
@@ -749,6 +751,20 @@ class LocalMemoryEngine:
                 else:
                     relation.source_evidence_cids = surviving_sources
                     propagated["trimmed_relations"].append(relation.id)
+            for key, entity in list(self.entities.items()):
+                if entity.get("tenant_id") != tenant_id:
+                    continue
+                current_sources = list(entity.get("source_evidence_cids") or [])
+                if not current_sources or not affected_cids.intersection(current_sources):
+                    continue
+                surviving_sources = [item for item in current_sources if item not in affected_cids]
+                if surviving_sources:
+                    entity["source_evidence_cids"] = surviving_sources
+                    entity["updated_at"] = utc_now().isoformat()
+                    propagated["trimmed_entities"].append(entity["canonical"])
+                else:
+                    self.entities.pop(key, None)
+                    propagated["removed_entities"].append(entity["canonical"])
             entry = {
                 "id": new_id(),
                 "tenant_id": tenant_id,
