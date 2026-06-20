@@ -928,6 +928,7 @@ def test_shared_engine_contract_merges_branch_evidence_assertions_and_relations(
     report = _merge(engine, branch, tenant)
     after = engine.retrieve("Shared merge contract branch-only evidence", tenant)
     exported = engine.export_tenant(tenant)
+    exported_all = engine.export_all()
 
     assert cid not in {hit.id for hit in before.hits}
     assert cid in {hit.id for hit in after.hits}
@@ -937,6 +938,14 @@ def test_shared_engine_contract_merges_branch_evidence_assertions_and_relations(
     assert any(item["cid"] == cid and item["branch"] == "main" for item in exported["evidence"])
     assert any(item["id"] == assertion_id and item["branch"] == "main" for item in exported["assertions"])
     assert any(item["id"] == relation_id and item["branch"] == "main" for item in exported["relations"])
+    assert any(
+        item["from_branch"] == branch
+        and item["into_branch"] == "main"
+        and item["evidence_added"] >= 1
+        and item["assertions_added"] >= 1
+        and item["relations_added"] >= 1
+        for item in exported_all["merge_log"]
+    )
 
 
 def test_shared_engine_contract_deep_graph_respects_tenant_and_branch(engine_bundle: tuple[Any, str, str]) -> None:

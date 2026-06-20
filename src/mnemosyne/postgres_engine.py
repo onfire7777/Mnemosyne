@@ -1333,6 +1333,20 @@ class PostgresEngine:
                         }
                         for row in cur.fetchall()
                     )
+                merge_log: list[dict[str, Any]] = []
+                for tenant_row in tenant_rows:
+                    self._set_tenant(cur, tenant_row["id"])
+                    cur.execute(
+                        """
+                        SELECT report
+                        FROM merges
+                        WHERE tenant_id = %s
+                        ORDER BY id
+                        """,
+                        (tenant_row["id"],),
+                    )
+                    for row in cur.fetchall():
+                        merge_log.append(dict(row["report"]))
         tenant_exports = [self.export_tenant(row["name"]) for row in tenant_rows]
         return {
             "policy": self.policy.to_dict(),
@@ -1347,7 +1361,7 @@ class PostgresEngine:
             "entities": [item for exported in tenant_exports for item in exported["entities"]],
             "audit_log": [item for exported in tenant_exports for item in exported["audit_log"]],
             "deletion_log": [item for exported in tenant_exports for item in exported["deletion_log"]],
-            "merge_log": [],
+            "merge_log": merge_log,
             "tenants": tenant_exports,
         }
 
