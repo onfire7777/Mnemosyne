@@ -16,7 +16,7 @@ from typing import Any, Literal, TextIO, Union, get_args, get_origin, get_type_h
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.ingestion import IngestionPipeline
 from mnemosyne.mcp_tools import MemoryTools, TOOL_SPEC
-from mnemosyne.parametric import ParametricArtifactStore, ParametricTier
+from mnemosyne.parametric import CommandParametricTrainer, ParametricArtifactStore, ParametricTier
 from mnemosyne.queue import InProcessQueue, PostgresQueue
 from mnemosyne.runtime_state import RuntimeState
 from mnemosyne.storage import CommandKeyManager, EncryptedLocalObjectStore, JsonKeyManager, LocalObjectStore
@@ -40,6 +40,10 @@ class MnemosyneMcpServer:
         backend: str = "local",
         postgres_dsn: str | None = None,
         parametric_artifact_store: str | os.PathLike[str] | None = None,
+        parametric_provider: str | None = None,
+        parametric_command: str | None = None,
+        parametric_adapter_kind: str | None = None,
+        parametric_timeout: float | None = None,
         stateless: bool = False,
         object_store: str | os.PathLike[str] | None = None,
         object_store_encryption: str | None = None,
@@ -74,6 +78,12 @@ class MnemosyneMcpServer:
             or "system"
         )
         self.parametric_artifact_store = parametric_artifact_store
+        self.parametric_provider = parametric_provider or os.environ.get("MNEMOSYNE_PARAMETRIC_PROVIDER", "local")
+        self.parametric_command = parametric_command or os.environ.get("MNEMOSYNE_PARAMETRIC_COMMAND")
+        self.parametric_adapter_kind = parametric_adapter_kind or os.environ.get(
+            "MNEMOSYNE_PARAMETRIC_ADAPTER_KIND", "command-parametric-adapter"
+        )
+        self.parametric_timeout = parametric_timeout or float(os.environ.get("MNEMOSYNE_PARAMETRIC_TIMEOUT", "300"))
         self.object_store = object_store or os.environ.get("MNEMOSYNE_OBJECT_STORE") or ".mnemosyne/objects"
         self.object_store_encryption = object_store_encryption or os.environ.get("MNEMOSYNE_OBJECT_STORE_ENCRYPTION", "none")
         self.object_key_store = object_key_store or os.environ.get("MNEMOSYNE_OBJECT_KEY_STORE")
@@ -122,7 +132,13 @@ class MnemosyneMcpServer:
             allowed_residencies=self.allowed_residencies,
         )
         parametric = ParametricTier(
-            ParametricArtifactStore(_parametric_store_path(self.store_path, self.parametric_artifact_store))
+            ParametricArtifactStore(_parametric_store_path(self.store_path, self.parametric_artifact_store)),
+            trainer=_load_parametric_trainer(
+                self.parametric_provider,
+                self.parametric_command,
+                self.parametric_adapter_kind,
+                self.parametric_timeout,
+            ),
         )
         tools = MemoryTools(engine, ingestion=ingestion, runtime_state=runtime_state, parametric=parametric)
         return engine, queue, runtime_state, tools
@@ -389,6 +405,21 @@ def _parametric_store_path(
     return Path(".mnemosyne/mcp-parametric")
 
 
+def _load_parametric_trainer(
+    provider: str,
+    command: str | None,
+    adapter_kind: str,
+    timeout: float,
+) -> CommandParametricTrainer | None:
+    if provider == "local":
+        return None
+    if provider == "command":
+        if not command:
+            raise ValueError("parametric provider command requires parametric_command.")
+        return CommandParametricTrainer(command, adapter_kind=adapter_kind, timeout_seconds=timeout)
+    raise ValueError(f"Unsupported parametric provider: {provider}")
+
+
 def _default_allowed_residencies() -> tuple[str, ...]:
     raw = os.environ.get("MNEMOSYNE_ALLOWED_RESIDENCIES", "local")
     return tuple(item.strip() for item in raw.split(",") if item.strip())
@@ -462,6 +493,28 @@ def main(argv: list[str] | None = None) -> None:
     )
     parser.add_argument("--parametric-artifact-store", default=os.environ.get("MNEMOSYNE_PARAMETRIC_ARTIFACT_STORE"))
     parser.add_argument(
+        "--parametric-provider",
+        choices=["local", "command"],
+        default=os.environ.get("MNEMOSYNE_PARAMETRIC_PROVIDER", "local"),
+        help="Parametric-tier provider for LoRA/test-time-training adapter artifacts",
+    )
+    parser.add_argument(
+        "--parametric-command",
+        default=os.environ.get("MNEMOSYNE_PARAMETRIC_COMMAND"),
+        help="Command provider invoked as '<command> <action>' with JSON stdin",
+    )
+    parser.add_argument(
+        "--parametric-adapter-kind",
+        default=os.environ.get("MNEMOSYNE_PARAMETRIC_ADAPTER_KIND", "command-parametric-adapter"),
+        help="Adapter kind label for --parametric-provider command",
+    )
+    parser.add_argument(
+        "--parametric-timeout",
+        type=float,
+        default=float(os.environ.get("MNEMOSYNE_PARAMETRIC_TIMEOUT", "300")),
+        help="Timeout in seconds for --parametric-provider command",
+    )
+    parser.add_argument(
         "--queue-backend",
         choices=["local", "postgres"],
         default=os.environ.get("MNEMOSYNE_MCP_QUEUE_BACKEND") or os.environ.get("MNEMOSYNE_QUEUE_BACKEND"),
@@ -489,6 +542,10 @@ def main(argv: list[str] | None = None) -> None:
         "object_key_timeout": args.object_key_timeout,
         "allowed_residencies": tuple(args.allowed_residency),
         "parametric_artifact_store": args.parametric_artifact_store,
+        "parametric_provider": args.parametric_provider,
+        "parametric_command": args.parametric_command,
+        "parametric_adapter_kind": args.parametric_adapter_kind,
+        "parametric_timeout": args.parametric_timeout,
         "queue_backend": args.queue_backend,
         "queue_tenant": args.queue_tenant,
         "stateless": args.stateless,

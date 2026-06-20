@@ -251,17 +251,17 @@ TOOL_SPEC: list[dict[str, Any]] = [
     {
         "name": "parametric_propose",
         "description": "Create an isolated shadow parametric artifact from active lessons/procedures.",
-        "arguments": ["tenant_id"],
+        "arguments": ["tenant_id", "role", "source_trust_tier"],
     },
     {
         "name": "parametric_evaluate",
         "description": "Evaluate a shadow parametric artifact against gate evidence.",
-        "arguments": ["tenant_id"],
+        "arguments": ["artifact_uri", "role", "source_trust_tier"],
     },
     {
         "name": "parametric_rollback",
         "description": "Roll back a persisted isolated parametric artifact.",
-        "arguments": ["artifact_uri", "reason"],
+        "arguments": ["artifact_uri", "reason", "role", "source_trust_tier"],
     },
 ]
 
@@ -1120,26 +1120,40 @@ class MemoryTools:
             "total_cases": total_cases,
         }
 
-    def parametric_propose(self, tenant_id: str) -> dict[str, Any]:
+    def parametric_propose(self, tenant_id: str, role: WriteRole, source_trust_tier: int) -> dict[str, Any]:
+        security = self._authorize(
+            "parametric_propose",
+            role=role,
+            source_trust_tier=source_trust_tier,
+            target_sink="safety_rail",
+        )
         artifact = self.parametric.propose_from_lessons(
             tenant_id,
             list(self.learning.lessons.values()),
             list(self.learning.procedures.values()),
         )
-        return artifact.to_dict()
+        result = artifact.to_dict()
+        result["security"] = security
+        return result
 
     def parametric_evaluate(
         self,
-        tenant_id: str,
+        artifact_uri: str,
+        role: WriteRole,
+        source_trust_tier: int,
         protected_case_count: int = 1,
         gate_promoted: bool = True,
         protected_regressions: list[str] | None = None,
     ) -> dict[str, Any]:
-        artifact = self.parametric.propose_from_lessons(
-            tenant_id,
-            list(self.learning.lessons.values()),
-            list(self.learning.procedures.values()),
+        if not self.parametric.artifact_store:
+            raise ValueError("parametric evaluation requires an artifact store")
+        security = self._authorize(
+            "parametric_evaluate",
+            role=role,
+            source_trust_tier=source_trust_tier,
+            target_sink="safety_rail",
         )
+        artifact = self.parametric.artifact_store.load_artifact(artifact_uri)
         cases = [
             RegressionCase(
                 id=f"parametric-protected-{index}",
@@ -1162,16 +1176,27 @@ class MemoryTools:
         decision = self.parametric.evaluate(artifact, gate, cases)
         self.metrics.record_gate(promoted=decision.promoted, rolled_back=not decision.promoted)
         self._save_metrics()
-        return decision.to_dict()
+        result = decision.to_dict()
+        result["security"] = security
+        return result
 
-    def parametric_rollback(self, artifact_uri: str, reason: str) -> dict[str, Any]:
+    def parametric_rollback(self, artifact_uri: str, reason: str, role: WriteRole, source_trust_tier: int) -> dict[str, Any]:
         if not self.parametric.artifact_store:
             raise ValueError("parametric rollback requires an artifact store")
+        security = self._authorize(
+            "parametric_rollback",
+            role=role,
+            source_trust_tier=source_trust_tier,
+            destructive=True,
+            target_sink="safety_rail",
+        )
         artifact = self.parametric.artifact_store.load_artifact(artifact_uri)
         rolled_back = self.parametric.rollback(artifact, reason)
         self.metrics.record_gate(promoted=False, rolled_back=True)
         self._save_metrics()
-        return rolled_back.to_dict()
+        result = rolled_back.to_dict()
+        result["security"] = security
+        return result
 
     def _save_user_model(self) -> None:
         if self.runtime_state:

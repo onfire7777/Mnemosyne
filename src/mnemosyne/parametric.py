@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import json
+import math
+import shlex
+import subprocess
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol, Sequence
 
 from mnemosyne.gate import GateResult, RegressionCase
 from mnemosyne.ids import new_id
@@ -55,6 +58,104 @@ class ParametricPromotionDecision:
         return data
 
 
+class ParametricTrainer(Protocol):
+    """Boundary for real LoRA/test-time-training adapter providers."""
+
+    adapter_kind: str
+
+    def propose(
+        self,
+        tenant_id: str,
+        lessons: list[Lesson],
+        procedures: list[Procedure],
+        source_ids: list[str],
+        immutable_rails: list[str],
+    ) -> dict[str, Any]: ...
+
+    def rollback(self, artifact: ParametricArtifact, reason: str) -> dict[str, Any]: ...
+
+
+class CommandParametricTrainer:
+    """Command-backed LoRA/test-time-training provider boundary.
+
+    The command is invoked without a shell. Each call appends the action name as
+    the final argv item and sends JSON on stdin. `propose` should return a JSON
+    object with optional `adapter_kind`, `metrics`, `artifact_ref`, and
+    `metadata`. `rollback` may return `rollback_ref` and `metrics`.
+    """
+
+    def __init__(
+        self,
+        command: str | Sequence[str],
+        *,
+        adapter_kind: str = "command-parametric-adapter",
+        timeout_seconds: float = 300.0,
+    ):
+        self.command = _command_argv(command)
+        if not self.command:
+            raise ValueError("parametric command must not be empty")
+        if not adapter_kind.strip():
+            raise ValueError("parametric adapter kind must not be empty")
+        if timeout_seconds <= 0:
+            raise ValueError("parametric command timeout must be positive")
+        self.adapter_kind = adapter_kind
+        self.timeout_seconds = timeout_seconds
+
+    def propose(
+        self,
+        tenant_id: str,
+        lessons: list[Lesson],
+        procedures: list[Procedure],
+        source_ids: list[str],
+        immutable_rails: list[str],
+    ) -> dict[str, Any]:
+        return self._call(
+            "propose",
+            {
+                "tenant_id": tenant_id,
+                "adapter_kind": self.adapter_kind,
+                "source_ids": source_ids,
+                "immutable_rails": immutable_rails,
+                "lessons": [lesson.to_dict() for lesson in lessons if lesson.id in source_ids],
+                "procedures": [procedure.to_dict() for procedure in procedures if procedure.id in source_ids],
+            },
+        )
+
+    def rollback(self, artifact: ParametricArtifact, reason: str) -> dict[str, Any]:
+        return self._call(
+            "rollback",
+            {
+                "tenant_id": artifact.tenant_id,
+                "artifact": artifact.to_dict(),
+                "reason": reason,
+            },
+        )
+
+    def _call(self, action: str, payload: dict[str, Any]) -> dict[str, Any]:
+        try:
+            completed = subprocess.run(
+                [*self.command, action],
+                input=json.dumps({"action": action, **payload}),
+                text=True,
+                capture_output=True,
+                timeout=self.timeout_seconds,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise TimeoutError(f"parametric provider timed out during {action}") from exc
+        if completed.returncode != 0:
+            detail = completed.stderr.strip()[:512]
+            suffix = f": {detail}" if detail else ""
+            raise ValueError(f"parametric provider failed during {action}{suffix}")
+        try:
+            parsed = json.loads(completed.stdout or "{}")
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"parametric provider {action} response must be valid JSON") from exc
+        if not isinstance(parsed, dict):
+            raise ValueError(f"parametric provider {action} response must be a JSON object")
+        return parsed
+
+
 class ParametricTier:
     """Shadow-only boundary for validated lessons/procedures.
 
@@ -70,8 +171,13 @@ class ParametricTier:
         "protected_regression_suite_required",
     )
 
-    def __init__(self, artifact_store: "ParametricArtifactStore | None" = None):
+    def __init__(
+        self,
+        artifact_store: "ParametricArtifactStore | None" = None,
+        trainer: ParametricTrainer | None = None,
+    ):
         self.artifact_store = artifact_store
+        self.trainer = trainer
 
     def propose_from_lessons(self, tenant_id: str, lessons: list[Lesson], procedures: list[Procedure]) -> ParametricArtifact:
         active_lessons = [lesson.id for lesson in lessons if lesson.tenant_id == tenant_id and lesson.status == "active"]
@@ -79,11 +185,24 @@ class ParametricTier:
         artifact = ParametricArtifact(
             tenant_id=tenant_id,
             source_ids=active_lessons + active_procedures,
-            adapter_kind="local-shadow-adapter",
+            adapter_kind=self.trainer.adapter_kind if self.trainer else "local-shadow-adapter",
             immutable_rails=list(self.required_rails),
         )
+        payload: dict[str, Any] = {"phase": "proposal"}
+        if self.trainer and artifact.source_ids:
+            provider = self.trainer.propose(
+                tenant_id,
+                lessons,
+                procedures,
+                artifact.source_ids,
+                artifact.immutable_rails,
+            )
+            artifact.adapter_kind = _provider_adapter_kind(provider, default=self.trainer.adapter_kind)
+            artifact.metrics.update(_provider_metrics(provider.get("metrics", {})))
+            artifact.metrics["provider_invoked"] = 1.0
+            payload["provider"] = _provider_payload(provider)
         if self.artifact_store:
-            self.artifact_store.write(artifact, {"phase": "proposal"})
+            self.artifact_store.write(artifact, payload)
         return artifact
 
     def evaluate(
@@ -114,10 +233,16 @@ class ParametricTier:
 
     def rollback(self, artifact: ParametricArtifact, reason: str) -> ParametricArtifact:
         artifact.status = "rolled_back"
-        artifact.rollback_ref = f"rollback-{new_id()}"
+        payload: dict[str, Any] = {"phase": "rolled_back", "reason": reason}
+        provider: dict[str, Any] = {}
+        if self.trainer:
+            provider = self.trainer.rollback(artifact, reason)
+            payload["provider"] = _provider_payload(provider)
+            artifact.metrics.update(_provider_metrics(provider.get("metrics", {})))
+        artifact.rollback_ref = str(provider.get("rollback_ref") or provider.get("rollbackRef") or f"rollback-{new_id()}")
         artifact.metrics["rolled_back"] = 1.0
         if self.artifact_store:
-            self.artifact_store.write(artifact, {"phase": "rolled_back", "reason": reason})
+            self.artifact_store.write(artifact, payload)
         return artifact
 
 
@@ -172,3 +297,46 @@ class ParametricArtifactStore:
     def _validate_segment(value: str, label: str) -> None:
         if not value or value in {".", ".."} or "/" in value or "\\" in value or ".." in value:
             raise ValueError(f"invalid parametric {label} id")
+
+
+def _provider_adapter_kind(provider: dict[str, Any], *, default: str) -> str:
+    adapter_kind = str(provider.get("adapter_kind") or provider.get("adapterKind") or default).strip()
+    if not adapter_kind:
+        raise ValueError("parametric provider adapter_kind must not be empty")
+    return adapter_kind
+
+
+def _provider_metrics(raw: Any) -> dict[str, float]:
+    if not raw:
+        return {}
+    if not isinstance(raw, dict):
+        raise ValueError("parametric provider metrics must be an object")
+    metrics: dict[str, float] = {}
+    for key, value in raw.items():
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError("parametric provider metric values must be numeric")
+        number = float(value)
+        if not math.isfinite(number):
+            raise ValueError("parametric provider metric values must be finite")
+        metrics[str(key)] = number
+    return metrics
+
+
+def _provider_payload(provider: dict[str, Any]) -> dict[str, Any]:
+    allowed = {
+        "adapter_kind",
+        "adapterKind",
+        "artifact_ref",
+        "artifactRef",
+        "rollback_ref",
+        "rollbackRef",
+        "metrics",
+        "metadata",
+    }
+    return {str(key): value for key, value in provider.items() if key in allowed}
+
+
+def _command_argv(command: str | Sequence[str]) -> list[str]:
+    if isinstance(command, str):
+        return shlex.split(command)
+    return [str(item) for item in command]

@@ -16,6 +16,7 @@ from mnemosyne.security import SessionIdentity, SessionTokenVerifier
 TENANT = "tenant-cli"
 USER = "user-cli"
 SESSION_SECRET = "mnemosyne-test-session-secret"
+PARAMETRIC_AUTH = ("--role", "operator", "--source-trust-tier", "0")
 
 
 def make_session_token(
@@ -108,6 +109,52 @@ def fake_kms_command(tmp_path: Path) -> tuple[str, Path]:
     )
     command = " ".join(shlex.quote(item) for item in (sys.executable, str(script), str(state)))
     return command, state
+
+
+def fake_parametric_command(tmp_path: Path) -> tuple[str, Path]:
+    state = tmp_path / "parametric-state.json"
+    script = tmp_path / "fake-parametric.py"
+    script.write_text(
+        "\n".join(
+            [
+                "from __future__ import annotations",
+                "import json, sys",
+                "from pathlib import Path",
+                "state = Path(sys.argv[1])",
+                "action = sys.argv[2]",
+                "request = json.load(sys.stdin)",
+                "data = json.loads(state.read_text()) if state.exists() else {'calls': []}",
+                "data.setdefault('calls', []).append({'action': action, 'tenant_id': request.get('tenant_id'), 'source_ids': request.get('source_ids')})",
+                "state.write_text(json.dumps(data, sort_keys=True), encoding='utf-8')",
+                "if action == 'propose':",
+                "    print(json.dumps({'adapter_kind': 'lora-command-adapter', 'artifact_ref': 'provider://' + request['tenant_id'] + '/adapter', 'metrics': {'source_count': len(request['source_ids']), 'rail_count': len(request['immutable_rails'])}, 'metadata': {'lesson_count': len(request['lessons']), 'procedure_count': len(request['procedures'])}}))",
+                "elif action == 'rollback':",
+                "    print(json.dumps({'rollback_ref': 'provider-rollback-' + request['artifact']['id'], 'metrics': {'provider_rolled_back': 1}}))",
+                "else:",
+                "    print('bad action', file=sys.stderr)",
+                "    raise SystemExit(2)",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    command = " ".join(shlex.quote(item) for item in (sys.executable, str(script), str(state)))
+    return command, state
+
+
+def fake_broken_parametric_command(tmp_path: Path, output: str) -> str:
+    script = tmp_path / "broken-parametric.py"
+    script.write_text(
+        "\n".join(
+            [
+                "from __future__ import annotations",
+                "import sys",
+                "print(sys.argv[2], file=sys.stderr)",
+                f"print({output!r})",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return " ".join(shlex.quote(item) for item in (sys.executable, str(script), str(tmp_path / "broken-state.json")))
 
 
 def test_cli_backend_selection_requires_postgres_dsn(tmp_path: Path) -> None:
@@ -1180,6 +1227,134 @@ def test_cli_encrypted_object_store_can_use_command_key_provider(tmp_path: Path)
     assert forgotten["object_shred"]["reason"] == "key_shredded"
 
 
+def test_cli_parametric_tier_can_use_command_provider(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    command, provider_state = fake_parametric_command(tmp_path)
+    trajectory = run_cli(
+        store,
+        "trajectory-record",
+        "--tenant",
+        TENANT,
+        "--user",
+        USER,
+        "--session",
+        "session-parametric-provider",
+        "--task",
+        "parametric provider smoke",
+        "--steps",
+        json.dumps([{"name": "verify", "status": "failed", "error": "provider"}]),
+        "--outcome",
+        "failure",
+        "--reward",
+        "-1",
+        "--memory-version",
+        "v1",
+    )
+    lesson = run_cli(store, "lesson-propose", "--trajectory-id", trajectory["id"])
+    procedure = run_cli(store, "procedure-propose", "--lesson-id", lesson["id"])
+    run_cli(store, "procedure-validate", "--procedure-id", procedure["id"])
+    run_cli(
+        store,
+        "lesson-promote",
+        "--lesson-id",
+        lesson["id"],
+        "--cases",
+        json.dumps(
+            [
+                {
+                    "id": "case-parametric-provider",
+                    "signature": "parametric provider smoke",
+                    "query": "provider regression",
+                    "expected_substring": "verify with tools",
+                    "protected": True,
+                }
+            ]
+        ),
+    )
+    provider_args = (
+        "--parametric-provider",
+        "command",
+        "--parametric-command",
+        command,
+        "--parametric-adapter-kind",
+        "lora-command-adapter",
+    )
+    artifact = run_cli(store, *provider_args, "parametric-propose", "--tenant", TENANT, *PARAMETRIC_AUTH)
+    artifact_path = store.with_suffix(store.suffix + ".parametric") / TENANT / f"{artifact['id']}.json"
+    proposal_record = json.loads(artifact_path.read_text(encoding="utf-8"))
+    rolled_back = run_cli(
+        store,
+        *provider_args,
+        "parametric-rollback",
+        "--artifact-uri",
+        artifact["artifact_uri"],
+        "--reason",
+        "provider rollback smoke",
+        *PARAMETRIC_AUTH,
+    )
+    rollback_record = json.loads(artifact_path.read_text(encoding="utf-8"))
+    calls = json.loads(provider_state.read_text(encoding="utf-8"))["calls"]
+
+    assert artifact["adapter_kind"] == "lora-command-adapter"
+    assert artifact["metrics"]["provider_invoked"] == 1.0
+    assert artifact["metrics"]["source_count"] == 2.0
+    assert proposal_record["payload"]["provider"]["artifact_ref"] == f"provider://{TENANT}/adapter"
+    assert proposal_record["payload"]["provider"]["metadata"] == {"lesson_count": 1, "procedure_count": 1}
+    assert rolled_back["rollback_ref"] == f"provider-rollback-{artifact['id']}"
+    assert rolled_back["metrics"]["provider_rolled_back"] == 1.0
+    assert rollback_record["payload"]["provider"]["rollback_ref"] == f"provider-rollback-{artifact['id']}"
+    assert [call["action"] for call in calls] == ["propose", "rollback"]
+
+
+def test_cli_parametric_commands_require_operator_authorization(tmp_path: Path) -> None:
+    result = run_raw_cli(tmp_path / "mnemosyne.json", "parametric-propose", "--tenant", TENANT)
+
+    assert result.returncode != 0
+    assert "parametric-propose requires --role and --source-trust-tier or --session-token." in result.stderr
+
+
+def test_cli_provider_check_covers_parametric_command_contract(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    command, provider_state = fake_parametric_command(tmp_path)
+
+    checked = run_cli(
+        store,
+        "--parametric-provider",
+        "command",
+        "--parametric-command",
+        command,
+        "--parametric-adapter-kind",
+        "lora-command-adapter",
+        "provider-check",
+    )
+    calls = json.loads(provider_state.read_text(encoding="utf-8"))["calls"]
+
+    assert checked["ok"] is True
+    assert checked["checks"]["parametric"]["ok"] is True
+    assert checked["checks"]["parametric"]["adapter_kind"] == "lora-command-adapter"
+    assert [call["action"] for call in calls] == ["propose", "rollback"]
+
+
+def test_cli_provider_check_fails_closed_on_bad_parametric_provider(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    command = fake_broken_parametric_command(tmp_path, "[]")
+
+    result = run_raw_cli(
+        store,
+        "--parametric-provider",
+        "command",
+        "--parametric-command",
+        command,
+        "provider-check",
+    )
+    payload = json.loads(result.stdout)
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert payload["checks"]["parametric"]["ok"] is False
+    assert "JSON object" in payload["checks"]["parametric"]["error"]
+
+
 def test_cli_profile_graph_learning_and_parametric_flows_persist(tmp_path: Path) -> None:
     store = tmp_path / "mnemosyne.json"
 
@@ -1378,9 +1553,11 @@ def test_cli_profile_graph_learning_and_parametric_flows_persist(tmp_path: Path)
             ]
         ),
     )
-    artifact = run_cli(store, "parametric-propose", "--tenant", TENANT)
+    artifact = run_cli(store, "parametric-propose", "--tenant", TENANT, *PARAMETRIC_AUTH)
     artifact_path = store.with_suffix(store.suffix + ".parametric") / TENANT / f"{artifact['id']}.json"
-    artifact_record = json.loads(artifact_path.read_text(encoding="utf-8"))
+    proposal_record = json.loads(artifact_path.read_text(encoding="utf-8"))
+    evaluated_artifact = run_cli(store, "parametric-evaluate", "--artifact-uri", artifact["artifact_uri"], *PARAMETRIC_AUTH)
+    evaluated_record = json.loads(artifact_path.read_text(encoding="utf-8"))
     rolled_back_artifact = run_cli(
         store,
         "parametric-rollback",
@@ -1388,6 +1565,7 @@ def test_cli_profile_graph_learning_and_parametric_flows_persist(tmp_path: Path)
         artifact["artifact_uri"],
         "--reason",
         "protected regression after deploy",
+        *PARAMETRIC_AUTH,
     )
     rollback_record = json.loads(artifact_path.read_text(encoding="utf-8"))
     promoted_procedure = run_cli(store, "procedure-promote", "--procedure-id", procedure["id"])
@@ -1402,9 +1580,13 @@ def test_cli_profile_graph_learning_and_parametric_flows_persist(tmp_path: Path)
     assert outcome["passed"] is False
     assert promoted["promoted"] is True
     assert set(artifact["source_ids"]) == {lesson["id"], procedure["id"]}
+    assert evaluated_artifact["artifact"]["id"] == artifact["id"]
+    assert evaluated_artifact["promoted"] is True
     assert artifact["artifact_uri"].startswith("local-parametric://")
-    assert artifact_record["payload"]["phase"] == "proposal"
-    assert artifact_record["artifact"]["status"] == "shadow"
+    assert proposal_record["payload"]["phase"] == "proposal"
+    assert proposal_record["artifact"]["status"] == "shadow"
+    assert evaluated_record["payload"]["phase"] == "promoted"
+    assert evaluated_record["artifact"]["status"] == "promoted"
     assert rolled_back_artifact["status"] == "rolled_back"
     assert rolled_back_artifact["rollback_ref"].startswith("rollback-")
     assert rollback_record["payload"]["phase"] == "rolled_back"

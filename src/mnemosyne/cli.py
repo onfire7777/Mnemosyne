@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import tempfile
 from datetime import datetime
 from hashlib import sha256
 from pathlib import Path
@@ -17,11 +18,12 @@ from mnemosyne.eval import run_seed_suite
 from mnemosyne.gate import RegressionCase
 from mnemosyne.ingestion import IngestRequest, IngestionPipeline
 from mnemosyne.jobs import RuntimeJobHandlers
+from mnemosyne.learning import Lesson, Procedure
 from mnemosyne.media import CommandMediaTextExtractor, MediaTextExtractor, MetadataMediaTextExtractor
 from mnemosyne.mcp_tools import MemoryTools, TOOL_SPEC
 from mnemosyne.models import Hit
 from mnemosyne.observability import MetricsRegistry, build_ops_report, render_ops_dashboard
-from mnemosyne.parametric import ParametricArtifactStore, ParametricTier
+from mnemosyne.parametric import CommandParametricTrainer, ParametricArtifactStore, ParametricTier
 from mnemosyne.provenance import C2paToolVerifier, ProvenanceTrustPolicy, SignedProvenanceVerifier
 from mnemosyne.queue import InProcessQueue, PostgresQueue, QueueWorker
 from mnemosyne.retrieval import HashingEmbeddingProvider, HttpEmbeddingProvider, HttpReranker, LocalSimilarityReranker, RetrievalAdapters
@@ -102,7 +104,7 @@ def _bind_session_claim(args: argparse.Namespace, attr: str, value: str) -> None
 
 def _require_authorization_context(args: argparse.Namespace) -> None:
     command = getattr(args, "command", None)
-    if command not in {"confirm", "branch", "merge", "discard"}:
+    if command not in {"confirm", "branch", "merge", "discard", "parametric-propose", "parametric-evaluate", "parametric-rollback"}:
         return
     missing: list[str] = []
     if getattr(args, "role", None) is None:
@@ -232,7 +234,18 @@ def load_parametric_tier(args: argparse.Namespace) -> ParametricTier:
     if not root:
         store = Path(args.store).expanduser()
         root = store.with_suffix(store.suffix + ".parametric")
-    return ParametricTier(ParametricArtifactStore(root))
+    trainer = None
+    if args.parametric_provider == "command":
+        if not args.parametric_command:
+            raise SystemExit("--parametric-provider command requires --parametric-command.")
+        trainer = CommandParametricTrainer(
+            args.parametric_command,
+            adapter_kind=args.parametric_adapter_kind,
+            timeout_seconds=float(args.parametric_timeout),
+        )
+    elif args.parametric_provider != "local":
+        raise SystemExit(f"Unsupported parametric provider: {args.parametric_provider}")
+    return ParametricTier(ParametricArtifactStore(root), trainer=trainer)
 
 
 def load_runtime_state(args: argparse.Namespace) -> RuntimeState | None:
@@ -720,14 +733,16 @@ def cmd_outcome_evaluate(args: argparse.Namespace) -> None:
 
 def cmd_parametric_propose(args: argparse.Namespace) -> None:
     tools = load_tools(args)
-    emit(tools.parametric_propose(args.tenant))
+    emit(tools.parametric_propose(args.tenant, role=args.role, source_trust_tier=args.source_trust_tier))
 
 
 def cmd_parametric_evaluate(args: argparse.Namespace) -> None:
     tools = load_tools(args)
     emit(
         tools.parametric_evaluate(
-            args.tenant,
+            args.artifact_uri,
+            role=args.role,
+            source_trust_tier=args.source_trust_tier,
             protected_case_count=args.protected_case_count,
             gate_promoted=not args.gate_failed,
             protected_regressions=args.protected_regression,
@@ -737,7 +752,7 @@ def cmd_parametric_evaluate(args: argparse.Namespace) -> None:
 
 def cmd_parametric_rollback(args: argparse.Namespace) -> None:
     tools = load_tools(args)
-    emit(tools.parametric_rollback(args.artifact_uri, args.reason))
+    emit(tools.parametric_rollback(args.artifact_uri, args.reason, role=args.role, source_trust_tier=args.source_trust_tier))
 
 
 def cmd_branch(args: argparse.Namespace) -> None:
@@ -970,6 +985,55 @@ def cmd_provider_check(args: argparse.Namespace) -> None:
         ok = False
         checks["media_extractor"] = {"ok": False, "provider": "command", "error": str(exc)}
 
+    if args.parametric_provider == "command":
+        try:
+            if not args.parametric_command:
+                raise ValueError("command parametric provider requires --parametric-command")
+            with tempfile.TemporaryDirectory(prefix="mnemosyne-parametric-check-") as tmp:
+                tier = ParametricTier(
+                    ParametricArtifactStore(Path(tmp)),
+                    trainer=CommandParametricTrainer(
+                        args.parametric_command,
+                        adapter_kind=args.parametric_adapter_kind,
+                        timeout_seconds=float(args.parametric_timeout),
+                    ),
+                )
+                artifact = tier.propose_from_lessons(
+                    "provider-health",
+                    [
+                        Lesson(
+                            tenant_id="provider-health",
+                            lesson_type="behavior",
+                            failure_signature="provider-health",
+                            content="provider health check",
+                            status="active",
+                        )
+                    ],
+                    [
+                        Procedure(
+                            tenant_id="provider-health",
+                            kind="skill",
+                            name="provider-health",
+                            body="provider health check",
+                            signature={"check": "parametric"},
+                            status="validated",
+                        )
+                    ],
+                )
+                rolled_back = tier.rollback(artifact, "provider health rollback")
+            checks["parametric"] = {
+                "ok": True,
+                "provider": "command",
+                "adapter_kind": artifact.adapter_kind,
+                "artifact_id": artifact.id,
+                "rollback_ref": rolled_back.rollback_ref,
+            }
+        except Exception as exc:  # noqa: BLE001 - health checks return structured failures.
+            ok = False
+            checks["parametric"] = {"ok": False, "provider": "command", "error": str(exc)}
+    else:
+        checks["parametric"] = {"ok": True, "provider": "local", "skipped": True}
+
     emit({"ok": ok, "checks": checks})
     if not ok:
         raise SystemExit(1)
@@ -1046,6 +1110,28 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--media-extractor-command", default=os.environ.get("MNEMOSYNE_MEDIA_EXTRACTOR_COMMAND"))
     parser.add_argument("--media-extractor-timeout", type=float, default=float(os.environ.get("MNEMOSYNE_MEDIA_EXTRACTOR_TIMEOUT", "30")))
     parser.add_argument("--parametric-artifact-store", default=os.environ.get("MNEMOSYNE_PARAMETRIC_ARTIFACT_STORE"))
+    parser.add_argument(
+        "--parametric-provider",
+        choices=["local", "command"],
+        default=os.environ.get("MNEMOSYNE_PARAMETRIC_PROVIDER", "local"),
+        help="Parametric-tier provider for LoRA/test-time-training adapter artifacts",
+    )
+    parser.add_argument(
+        "--parametric-command",
+        default=os.environ.get("MNEMOSYNE_PARAMETRIC_COMMAND"),
+        help="Command provider invoked as '<command> <action>' with JSON stdin",
+    )
+    parser.add_argument(
+        "--parametric-adapter-kind",
+        default=os.environ.get("MNEMOSYNE_PARAMETRIC_ADAPTER_KIND", "command-parametric-adapter"),
+        help="Adapter kind label for --parametric-provider command",
+    )
+    parser.add_argument(
+        "--parametric-timeout",
+        type=float,
+        default=float(os.environ.get("MNEMOSYNE_PARAMETRIC_TIMEOUT", "300")),
+        help="Timeout in seconds for --parametric-provider command",
+    )
     parser.add_argument("--session-token", default=os.environ.get("MNEMOSYNE_SESSION_TOKEN"), help="Signed Mnemosyne session token for CLI identity binding")
     parser.add_argument("--session-secret", default=os.environ.get("MNEMOSYNE_SESSION_SECRET"), help="HMAC secret for --session-token verification; prefer MNEMOSYNE_SESSION_SECRET")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -1399,10 +1485,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     parametric_propose = sub.add_parser("parametric-propose")
     parametric_propose.add_argument("--tenant", required=True)
+    parametric_propose.add_argument("--role", choices=["reader", "agent", "consolidator", "operator"])
+    parametric_propose.add_argument("--source-trust-tier", type=int)
     parametric_propose.set_defaults(func=cmd_parametric_propose)
 
     parametric_evaluate = sub.add_parser("parametric-evaluate")
-    parametric_evaluate.add_argument("--tenant", required=True)
+    parametric_evaluate.add_argument("--artifact-uri", required=True)
+    parametric_evaluate.add_argument("--role", choices=["reader", "agent", "consolidator", "operator"])
+    parametric_evaluate.add_argument("--source-trust-tier", type=int)
     parametric_evaluate.add_argument("--protected-case-count", type=int, default=1)
     parametric_evaluate.add_argument("--gate-failed", action="store_true")
     parametric_evaluate.add_argument("--protected-regression", action="append", default=[])
@@ -1411,6 +1501,8 @@ def build_parser() -> argparse.ArgumentParser:
     parametric_rollback = sub.add_parser("parametric-rollback")
     parametric_rollback.add_argument("--artifact-uri", required=True)
     parametric_rollback.add_argument("--reason", required=True)
+    parametric_rollback.add_argument("--role", choices=["reader", "agent", "consolidator", "operator"])
+    parametric_rollback.add_argument("--source-trust-tier", type=int)
     parametric_rollback.set_defaults(func=cmd_parametric_rollback)
 
     tools = sub.add_parser("tools")

@@ -23,6 +23,7 @@ from mnemosyne.retrieval import HttpEmbeddingProvider, HttpReranker, LocalSimila
 
 TENANT = "tenant-runtime"
 USER = "user-runtime"
+PARAMETRIC_AUTH = {"role": "operator", "source_trust_tier": 0}
 
 
 def mcp_call(server: MnemosyneMcpServer, name: str, arguments: dict[str, object]) -> dict:
@@ -69,6 +70,36 @@ def fake_kms_command(tmp_path: Path) -> tuple[str, Path]:
                 "    shredded = keys.pop(key_id, None) is not None",
                 "    save()",
                 "    print(json.dumps({'shredded': shredded}))",
+                "else:",
+                "    print('bad action', file=sys.stderr)",
+                "    raise SystemExit(2)",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    command = " ".join(shlex.quote(item) for item in (sys.executable, str(script), str(state)))
+    return command, state
+
+
+def fake_parametric_command(tmp_path: Path) -> tuple[str, Path]:
+    state = tmp_path / "parametric-state.json"
+    script = tmp_path / "fake-parametric.py"
+    script.write_text(
+        "\n".join(
+            [
+                "from __future__ import annotations",
+                "import json, sys",
+                "from pathlib import Path",
+                "state = Path(sys.argv[1])",
+                "action = sys.argv[2]",
+                "request = json.load(sys.stdin)",
+                "data = json.loads(state.read_text()) if state.exists() else {'calls': []}",
+                "data.setdefault('calls', []).append({'action': action, 'tenant_id': request.get('tenant_id'), 'source_ids': request.get('source_ids')})",
+                "state.write_text(json.dumps(data, sort_keys=True), encoding='utf-8')",
+                "if action == 'propose':",
+                "    print(json.dumps({'adapter_kind': 'test-time-command-adapter', 'artifact_ref': 'provider://' + request['tenant_id'] + '/adapter', 'metrics': {'source_count': len(request['source_ids']), 'rail_count': len(request['immutable_rails'])}, 'metadata': {'lesson_count': len(request['lessons']), 'procedure_count': len(request['procedures'])}}))",
+                "elif action == 'rollback':",
+                "    print(json.dumps({'rollback_ref': 'provider-rollback-' + request['artifact']['id'], 'metrics': {'provider_rolled_back': 1}}))",
                 "else:",
                 "    print('bad action', file=sys.stderr)",
                 "    raise SystemExit(2)",
@@ -566,15 +597,21 @@ def test_mcp_server_persists_parametric_artifacts_and_rolls_back(tmp_path: Path)
         },
     )
 
-    artifact = mcp_call(server, "parametric_propose", {"tenant_id": TENANT})
+    artifact = mcp_call(server, "parametric_propose", {"tenant_id": TENANT, **PARAMETRIC_AUTH})
     artifact_path = store.with_suffix(store.suffix + ".parametric") / TENANT / f"{artifact['id']}.json"
     proposal_record = json.loads(artifact_path.read_text(encoding="utf-8"))
+    evaluated = mcp_call(
+        server,
+        "parametric_evaluate",
+        {"artifact_uri": artifact["artifact_uri"], **PARAMETRIC_AUTH},
+    )
     rolled_back = mcp_call(
         server,
         "parametric_rollback",
         {
             "artifact_uri": artifact["artifact_uri"],
             "reason": "protected regression after MCP proposal",
+            **PARAMETRIC_AUTH,
         },
     )
     rollback_record = json.loads(artifact_path.read_text(encoding="utf-8"))
@@ -582,9 +619,94 @@ def test_mcp_server_persists_parametric_artifacts_and_rolls_back(tmp_path: Path)
     assert set(artifact["source_ids"]) == {lesson["id"], procedure["id"]}
     assert artifact["artifact_uri"].startswith("local-parametric://")
     assert proposal_record["payload"]["phase"] == "proposal"
+    assert evaluated["artifact"]["id"] == artifact["id"]
+    assert evaluated["promoted"] is True
     assert rolled_back["status"] == "rolled_back"
     assert rolled_back["rollback_ref"].startswith("rollback-")
     assert rollback_record["payload"]["phase"] == "rolled_back"
+
+
+def test_mcp_server_parametric_tier_can_use_command_provider(tmp_path: Path) -> None:
+    store = tmp_path / "store.json"
+    command, provider_state = fake_parametric_command(tmp_path)
+    server = MnemosyneMcpServer(
+        store_path=store,
+        parametric_provider="command",
+        parametric_command=command,
+        parametric_adapter_kind="test-time-command-adapter",
+    )
+    trajectory = mcp_call(
+        server,
+        "trajectory_record",
+        {
+            "tenant_id": TENANT,
+            "user_id": USER,
+            "session_id": "session-mcp-parametric-provider",
+            "task": "MCP parametric provider",
+            "steps": [{"name": "train", "status": "failed", "error": "provider"}],
+            "outcome": "failure",
+            "reward": -1.0,
+            "memory_version": "v1",
+        },
+    )
+    lesson = mcp_call(server, "lesson_propose", {"trajectory_id": trajectory["id"]})
+    procedure = mcp_call(server, "procedure_propose", {"lesson_id": lesson["id"]})
+    mcp_call(server, "procedure_validate", {"procedure_id": procedure["id"]})
+    mcp_call(
+        server,
+        "lesson_promote",
+        {
+            "lesson_id": lesson["id"],
+            "cases": [
+                {
+                    "id": "mcp-parametric-provider-case",
+                    "signature": "MCP parametric provider",
+                    "query": "provider regression",
+                    "expected_substring": "verify with tools",
+                    "protected": True,
+                }
+            ],
+        },
+    )
+
+    artifact = mcp_call(server, "parametric_propose", {"tenant_id": TENANT, **PARAMETRIC_AUTH})
+    artifact_path = store.with_suffix(store.suffix + ".parametric") / TENANT / f"{artifact['id']}.json"
+    proposal_record = json.loads(artifact_path.read_text(encoding="utf-8"))
+    rolled_back = mcp_call(
+        server,
+        "parametric_rollback",
+        {"artifact_uri": artifact["artifact_uri"], "reason": "provider rollback smoke", **PARAMETRIC_AUTH},
+    )
+    rollback_record = json.loads(artifact_path.read_text(encoding="utf-8"))
+    calls = json.loads(provider_state.read_text(encoding="utf-8"))["calls"]
+
+    assert artifact["adapter_kind"] == "test-time-command-adapter"
+    assert artifact["metrics"]["provider_invoked"] == 1.0
+    assert artifact["metrics"]["source_count"] == 2.0
+    assert proposal_record["payload"]["provider"]["artifact_ref"] == f"provider://{TENANT}/adapter"
+    assert rolled_back["rollback_ref"] == f"provider-rollback-{artifact['id']}"
+    assert rolled_back["metrics"]["provider_rolled_back"] == 1.0
+    assert rollback_record["payload"]["provider"]["rollback_ref"] == f"provider-rollback-{artifact['id']}"
+    assert [call["action"] for call in calls] == ["propose", "rollback"]
+
+
+def test_mcp_parametric_provider_requires_operator_authority(tmp_path: Path) -> None:
+    server = MnemosyneMcpServer(store_path=tmp_path / "mcp-store.json")
+
+    response = server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 99,
+            "method": "tools/call",
+            "params": {
+                "name": "parametric_propose",
+                "arguments": {"tenant_id": TENANT, "role": "agent", "source_trust_tier": 5},
+            },
+        }
+    )
+
+    assert response["result"]["isError"] is True
+    assert "policy and safety rails require operator authority" in response["result"]["content"][0]["text"]
 
 
 def test_mcp_server_requires_configured_auth_token_for_tool_calls(tmp_path: Path) -> None:
