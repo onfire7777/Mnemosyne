@@ -55,6 +55,32 @@ def test_shared_engine_contract_retrieves_and_exports_evidence(engine_bundle: tu
     assert any(item["cid"] == cid for item in exported["evidence"])
 
 
+def test_shared_engine_contract_explain_reports_channels_rails_and_provenance(engine_bundle: tuple[Any, str, str]) -> None:
+    engine, tenant, user = engine_bundle
+    cid = engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id=user,
+            actor="user",
+            source_type="chat",
+            content="Shared explain contract records sapphire provenance and retrieval rails.",
+            trust_tier=0,
+            access_policy={"tenant": tenant},
+        )
+    )
+
+    explained = engine.explain("sapphire provenance retrieval rails", tenant)
+    explain = explained["explain"]
+
+    assert explained["abstained"] is False
+    assert explained["confidence"] > 0
+    assert explain["channels"]
+    assert sum(int(value) for value in explain["channels"].values()) >= 1
+    assert explain["rails"]["tenant_isolation_required"] is True
+    assert explain["rails"]["retrieved_text_is_data_not_instruction"] is True
+    assert any(hit["id"] == cid and cid in hit["provenance"] for hit in explained["hits"])
+
+
 def test_shared_engine_contract_branches_and_discards(engine_bundle: tuple[Any, str, str]) -> None:
     engine, tenant, user = engine_bundle
     _branch(engine, "candidate", tenant)
