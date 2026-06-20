@@ -9,7 +9,20 @@ from uuid import NAMESPACE_URL, UUID, uuid5
 
 from mnemosyne.calibration import CalibrationSet, conformal_threshold
 from mnemosyne.ids import content_cid
-from mnemosyne.models import Assertion, Evidence, Hit, MergeReport, Preference, Relation, RetrievalResult, dt_to_json, parse_dt, utc_now
+from mnemosyne.models import (
+    Assertion,
+    Contradiction,
+    Evidence,
+    Hit,
+    Justification,
+    MergeReport,
+    Preference,
+    Relation,
+    RetrievalResult,
+    dt_to_json,
+    parse_dt,
+    utc_now,
+)
 from mnemosyne.policy import OperatingPolicy
 from mnemosyne.privacy import ErasureMode
 from mnemosyne.retrieval import (
@@ -330,6 +343,93 @@ class PostgresEngine:
                 )
                 self._audit(cur, db_tenant_id, "engine", "add_relation", relation.id, {"branch": branch})
         return relation.id
+
+    def add_justification(self, justification: Justification) -> str:
+        self.ensure_tenant_and_branch(justification.tenant_id)
+        db_tenant_id = _stable_uuid("tenant", justification.tenant_id)
+        with self.connect() as conn:
+            with conn.cursor() as cur:
+                self._set_tenant(cur, db_tenant_id)
+                cur.execute(
+                    """
+                    INSERT INTO justifications (
+                      id, tenant_id, assertion_id, evidence_cids, rule,
+                      dependency_ids, kind, label, hypothesis_prob
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (id) DO UPDATE
+                    SET evidence_cids = EXCLUDED.evidence_cids,
+                        rule = EXCLUDED.rule,
+                        dependency_ids = EXCLUDED.dependency_ids,
+                        kind = EXCLUDED.kind,
+                        label = EXCLUDED.label,
+                        hypothesis_prob = EXCLUDED.hypothesis_prob
+                    """,
+                    (
+                        justification.id,
+                        db_tenant_id,
+                        justification.assertion_id,
+                        _cid_list_to_bytes(justification.evidence_cids),
+                        justification.rule,
+                        list(justification.dependency_ids),
+                        justification.kind,
+                        self._jsonb(justification.label),
+                        justification.hypothesis_prob,
+                    ),
+                )
+                self._audit(
+                    cur,
+                    db_tenant_id,
+                    "engine",
+                    "add_justification",
+                    justification.id,
+                    {"assertion_id": justification.assertion_id},
+                )
+        return justification.id
+
+    def add_contradiction(self, contradiction: Contradiction) -> str:
+        self.ensure_tenant_and_branch(contradiction.tenant_id)
+        db_tenant_id = _stable_uuid("tenant", contradiction.tenant_id)
+        with self.connect() as conn:
+            with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                self._set_tenant(cur, db_tenant_id)
+                cur.execute(
+                    """
+                    SELECT id
+                    FROM contradictions
+                    WHERE tenant_id = %s AND status = 'open'
+                      AND ((a = %s AND b = %s) OR (a = %s AND b = %s))
+                    LIMIT 1
+                    """,
+                    (db_tenant_id, contradiction.a, contradiction.b, contradiction.b, contradiction.a),
+                )
+                existing = cur.fetchone()
+                if existing:
+                    return str(existing["id"])
+                cur.execute(
+                    """
+                    INSERT INTO contradictions(id, tenant_id, a, b, detected_at, status, resolution)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        contradiction.id,
+                        db_tenant_id,
+                        contradiction.a,
+                        contradiction.b,
+                        contradiction.detected_at,
+                        contradiction.status,
+                        contradiction.resolution,
+                    ),
+                )
+                self._audit(
+                    cur,
+                    db_tenant_id,
+                    "engine",
+                    "add_contradiction",
+                    contradiction.id,
+                    {"a": contradiction.a, "b": contradiction.b},
+                )
+        return contradiction.id
 
     def add_preference(self, preference: Preference) -> str:
         self.ensure_tenant_and_branch(preference.tenant_id)
@@ -1143,6 +1243,34 @@ class PostgresEngine:
                     (db_tenant_id,),
                 )
                 preferences = [_row_to_preference(row, tenant_id).to_dict() for row in cur.fetchall()]
+                cur.execute("SELECT * FROM justifications WHERE tenant_id = %s ORDER BY id", (db_tenant_id,))
+                justifications = [
+                    {
+                        "tenant_id": tenant_id,
+                        "assertion_id": str(row["assertion_id"]) if row["assertion_id"] else None,
+                        "evidence_cids": _bytes_list_to_cids(row["evidence_cids"]),
+                        "rule": row["rule"],
+                        "dependency_ids": [str(item) for item in row["dependency_ids"]],
+                        "kind": row["kind"],
+                        "label": dict(row["label"] or {}),
+                        "hypothesis_prob": row["hypothesis_prob"],
+                        "id": str(row["id"]),
+                    }
+                    for row in cur.fetchall()
+                ]
+                cur.execute("SELECT * FROM contradictions WHERE tenant_id = %s ORDER BY detected_at, id", (db_tenant_id,))
+                contradictions = [
+                    {
+                        "tenant_id": tenant_id,
+                        "a": str(row["a"]),
+                        "b": str(row["b"]),
+                        "status": row["status"],
+                        "resolution": row["resolution"],
+                        "detected_at": dt_to_json(row["detected_at"]),
+                        "id": str(row["id"]),
+                    }
+                    for row in cur.fetchall()
+                ]
                 cur.execute("SELECT * FROM audit_log WHERE tenant_id = %s", (db_tenant_id,))
                 audit = [_row_to_audit_log(row) for row in cur.fetchall()]
                 cur.execute("SELECT * FROM deletion_log WHERE tenant_id = %s", (db_tenant_id,))
@@ -1192,8 +1320,8 @@ class PostgresEngine:
             "preferences": preferences,
             "calibrations": calibrations,
             "entities": entities,
-            "justifications": [],
-            "contradictions": [],
+            "justifications": justifications,
+            "contradictions": contradictions,
             "audit_log": audit,
             "deletion_log": deletion,
         }
