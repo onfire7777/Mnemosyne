@@ -440,6 +440,7 @@ class OidcAuthorizationPolicy:
 
         return {
             "version": 1,
+            "fingerprint": self.fingerprint(),
             "allowed_client_ids_count": len(self.allowed_client_ids),
             "client_id_claims": list(self.client_id_claims),
             "rule_count": len(self.rules),
@@ -448,6 +449,7 @@ class OidcAuthorizationPolicy:
             "rules": [
                 {
                     "index": index,
+                    **({"name": rule["name"]} if rule["name"] else {}),
                     "role": str(rule["role"]),
                     "source_trust_tier": int(rule["source_trust_tier"]),
                     "tenant_matcher_count": len(rule["tenant_ids"]),
@@ -457,6 +459,38 @@ class OidcAuthorizationPolicy:
                 for index, rule in enumerate(self.rules)
             ],
         }
+
+    def canonical_mapping(self) -> dict[str, Any]:
+        """Return the deterministic full policy mapping used for fingerprinting."""
+
+        return {
+            "version": 1,
+            "allowed_client_ids": sorted(self.allowed_client_ids),
+            "client_id_claims": list(self.client_id_claims),
+            "rules": [
+                {
+                    "name": rule["name"],
+                    "tenant_ids": list(rule["tenant_ids"]),
+                    "claim_equals": {
+                        claim: list(expected)
+                        for claim, expected in sorted(rule["claim_equals"].items())
+                    },
+                    "claim_contains": {
+                        claim: list(expected)
+                        for claim, expected in sorted(rule["claim_contains"].items())
+                    },
+                    "role": str(rule["role"]),
+                    "source_trust_tier": int(rule["source_trust_tier"]),
+                }
+                for rule in self.rules
+            ],
+        }
+
+    def fingerprint(self) -> str:
+        """Return a stable SHA-256 fingerprint for rollout/change control."""
+
+        payload = json.dumps(self.canonical_mapping(), sort_keys=True, separators=(",", ":")).encode("utf-8")
+        return hashlib.sha256(payload).hexdigest()
 
     def _verify_client(self, payload: Mapping[str, Any]) -> None:
         if not self.allowed_client_ids:
@@ -491,6 +525,7 @@ class OidcAuthorizationPolicy:
         if not tenant_ids and not claim_equals and not claim_contains:
             raise SessionAuthError("OIDC authz rule requires at least one matcher")
         return {
+            "name": str(rule.get("name", "")).strip() or None,
             "role": str(role),
             "source_trust_tier": source_trust_tier,
             "tenant_ids": tenant_ids,
