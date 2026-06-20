@@ -1223,6 +1223,24 @@ def apply_provider_manifest(args: argparse.Namespace) -> dict[str, Any]:
                 "timeout_seconds": "parametric_timeout",
             },
         )
+    oidc = providers.get("oidc", {})
+    if isinstance(oidc, dict):
+        _apply_manifest_fields(
+            args,
+            oidc,
+            {
+                "jwks": "provider_oidc_jwks",
+                "jwks_file": "provider_oidc_jwks_file",
+                "jwks_url": "provider_oidc_jwks_url",
+                "allow_insecure_jwks_url": "provider_oidc_allow_insecure_jwks_url",
+                "issuer": "provider_oidc_issuer",
+                "audience": "provider_oidc_audience",
+                "authz_policy": "provider_oidc_authz_policy",
+                "authz_policy_file": "provider_oidc_authz_policy_file",
+                "timeout_seconds": "provider_oidc_timeout",
+                "jwks_max_bytes": "provider_oidc_jwks_max_bytes",
+            },
+        )
     required = manifest.get("required_checks", [])
     if not isinstance(required, list) or not all(isinstance(item, str) for item in required):
         raise SystemExit("provider manifest field 'required_checks' must be an array of strings")
@@ -1447,6 +1465,50 @@ def cmd_provider_check(args: argparse.Namespace) -> None:
             "skipped": True,
             "reason": "object-store encryption disabled",
         }
+
+    oidc_fields = {
+        "jwks": getattr(args, "provider_oidc_jwks", None),
+        "jwks_file": getattr(args, "provider_oidc_jwks_file", None),
+        "jwks_url": getattr(args, "provider_oidc_jwks_url", None),
+        "issuer": getattr(args, "provider_oidc_issuer", None),
+        "audience": getattr(args, "provider_oidc_audience", None),
+        "authz_policy": getattr(args, "provider_oidc_authz_policy", None),
+        "authz_policy_file": getattr(args, "provider_oidc_authz_policy_file", None),
+    }
+    if any(oidc_fields.values()):
+        try:
+            if not oidc_fields["issuer"] or not oidc_fields["audience"]:
+                raise SessionAuthError("OIDC provider check requires issuer and audience")
+            jwks_document = load_oidc_jwks(
+                jwks=oidc_fields["jwks"],
+                jwks_file=oidc_fields["jwks_file"],
+                jwks_url=oidc_fields["jwks_url"],
+                allow_insecure_url=bool(getattr(args, "provider_oidc_allow_insecure_jwks_url", False)),
+                timeout=float(getattr(args, "provider_oidc_timeout", 10.0)),
+                max_bytes=int(getattr(args, "provider_oidc_jwks_max_bytes", 1024 * 1024)),
+            )
+            keys = jwks_document.get("keys") if isinstance(jwks_document, dict) else None
+            if not isinstance(keys, list) or not keys:
+                raise SessionAuthError("OIDC JWKS must include at least one key")
+            policy = load_oidc_authorization_policy(
+                policy=oidc_fields["authz_policy"],
+                policy_file=oidc_fields["authz_policy_file"],
+            )
+            check: dict[str, Any] = {
+                "ok": True,
+                "jwks_key_count": len(keys),
+                "issuer_configured": True,
+                "audience_configured": True,
+                "authz_policy_configured": policy is not None,
+            }
+            if policy is not None:
+                check["authz_policy"] = policy.audit_summary()
+            checks["oidc"] = check
+        except Exception as exc:  # noqa: BLE001 - health checks return structured failures.
+            ok = False
+            checks["oidc"] = {"ok": False, "error": str(exc)}
+    else:
+        checks["oidc"] = {"ok": True, "provider": "none", "skipped": True}
 
     try:
         checks["residency_policy"] = {"ok": True, **load_tools(args).residency_policy()}

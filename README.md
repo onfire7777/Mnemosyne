@@ -77,7 +77,7 @@ python -m mnemosyne.cli --backend postgres \
   search --tenant tenant-a --query "preferred database"
 ```
 
-Use `provider-check` with the same flags, or `provider-check --provider-manifest ./providers.json`, for deployment smoke checks. It returns structured JSON and exits nonzero if any required embedding, reranker, media-extractor, media-embedding, object-key/KMS, parametric-provider, or residency-policy contract fails.
+Use `provider-check` with the same flags, or `provider-check --provider-manifest ./providers.json`, for deployment smoke checks. It returns structured JSON and exits nonzero if any required embedding, reranker, media-extractor, media-embedding, object-key/KMS, parametric-provider, OIDC/JWKS, authz-policy, or residency-policy contract fails.
 
 Signed CLI session tokens can bind tenant/user identity and write authority before a subcommand executes:
 
@@ -168,7 +168,7 @@ Policy files can define global `trusted_issuers`, `trusted_roots`, or scoped `ru
 The repository has a verified local scaffold plus runtime parity extensions. Current checks:
 
 - `.venv/bin/python -m compileall -q src tests` passes.
-- `.venv/bin/python -m pytest -q` collects 280 tests and returns 241 passing tests plus 39 skipped live-DB tests when `MNEMOSYNE_POSTGRES_DSN` is unset.
+- `.venv/bin/python -m pytest -q` collects 282 tests and returns 243 passing tests plus 39 skipped live-DB tests when `MNEMOSYNE_POSTGRES_DSN` is unset.
 - With Docker compose Postgres running, `MNEMOSYNE_POSTGRES_DSN=postgresql://... .venv/bin/python -m pytest -q tests/test_postgres_engine_live.py tests/test_shared_engine_contract.py` returns 63 passing live/shared adapter tests covering tenant RLS, SQL FTS, pgvector assertion search, dense evidence fallback, recursive graph/PPR, explain channels/rails/provenance, branch/discard, branch merge retrieval, bitemporal supersession, tenant isolation, tombstone and hard-delete forget modes, command-backed object key management, transitive derived-evidence erasure across assertions/preferences/relations, retrieval trust/sensitivity/quarantine filtering, deep graph tenant/branch isolation, hard-delete audit export, HTTP-configurable retrieval adapter wiring with strict provider response validation, CLI `--backend postgres`, fail-closed CLI `provider-check`, stateless MCP ingestion over tenant-scoped durable Postgres queues, shared local/Postgres evidence/retrieval/explain/branch/as-of/relation/preference/correction/forget-propagation contracts, durable Postgres queue leasing/drain, asset-bound CLI file ingestion through the C2PA verifier adapter, externalized payload derived-text retrieval, async media extraction, gated consolidation promotion on Postgres, and shared local/Postgres contract parity.
 
 Exact 1:1 blueprint parity is still in progress. The controlling status artifact is `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md`.
