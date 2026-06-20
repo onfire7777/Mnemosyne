@@ -27,6 +27,7 @@ from mnemosyne.models import (
 )
 from mnemosyne.policy import OperatingPolicy
 from mnemosyne.privacy import ErasureMode
+from mnemosyne.retrieval import activation_explain, apply_activation_scores
 from mnemosyne.security import TrustTier, more_trusted, trust_weight
 from mnemosyne.text import approx_tokens, cosine, hashing_embedding, lexical_score, tokenize
 
@@ -448,8 +449,10 @@ class LocalMemoryEngine:
         graph = self.graph_ppr(tokenize(query), max(4, k // 2), tenant_id=tenant_id, branch=branch) if deep else []
         fused = self._rrf([dense, lexical, graph], k=max(k * 2, self.policy.rerank_width))
         reranked = self._mmr(query, fused, k=max(k, 1))
-        ordered = self._u_curve_order(reranked)
+        activated = apply_activation_scores(reranked, self.policy)
+        ordered = self._u_curve_order(activated)
         budgeted, used = self._fit_budget(ordered, self.policy.token_budget)
+        read_marks = self._record_retrieval_access(budgeted)
         confidence = self._confidence(budgeted)
         abstained = confidence < self.policy.abstention_threshold
         note = None
@@ -471,9 +474,28 @@ class LocalMemoryEngine:
                 },
                 "rrf_k": self.policy.rrf_k,
                 "mmr_lambda": self.policy.mmr_lambda,
+                "activation": activation_explain(budgeted, self.policy),
+                "read_marks": {"assertions": read_marks},
                 "rails": self.policy.immutable_rails,
             },
         )
+
+    def _record_retrieval_access(self, hits: list[Hit]) -> int:
+        touched = 0
+        now = utc_now()
+        with self._lock:
+            for hit in hits:
+                if hit.kind != "assertion":
+                    continue
+                assertion = self.assertions.get(self._branch_key(hit.tenant_id, hit.branch, hit.id))
+                if assertion is None:
+                    continue
+                assertion.last_accessed = now
+                assertion.access_count += 1
+                touched += 1
+            if touched:
+                self._persist()
+        return touched
 
     def deep_search(self, query: str, tenant_id: str, branch: str = "main", filt: dict[str, Any] | None = None) -> RetrievalResult:
         return self.retrieve(query=query, tenant_id=tenant_id, branch=branch, deep=True, filt=filt)
@@ -768,7 +790,12 @@ class LocalMemoryEngine:
                     provenance=list(assertion.source_evidence_cids),
                     trust_tier=assertion.trust_tier,
                     sensitivity=assertion.sensitivity,
-                    metadata={"status": assertion.status, "confidence": assertion.confidence},
+                    metadata={
+                        "status": assertion.status,
+                        "confidence": assertion.confidence,
+                        "last_accessed": assertion.last_accessed.isoformat() if assertion.last_accessed else None,
+                        "access_count": assertion.access_count,
+                    },
                 )
             )
         for pref in self.preferences.values():

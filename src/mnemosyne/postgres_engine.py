@@ -11,7 +11,13 @@ from mnemosyne.ids import content_cid
 from mnemosyne.models import Assertion, Evidence, Hit, MergeReport, Preference, Relation, RetrievalResult, dt_to_json, parse_dt, utc_now
 from mnemosyne.policy import OperatingPolicy
 from mnemosyne.privacy import ErasureMode
-from mnemosyne.retrieval import HashingEmbeddingProvider, LocalSimilarityReranker, RetrievalAdapters
+from mnemosyne.retrieval import (
+    HashingEmbeddingProvider,
+    LocalSimilarityReranker,
+    RetrievalAdapters,
+    activation_explain,
+    apply_activation_scores,
+)
 from mnemosyne.security import TrustTier, trust_weight
 from mnemosyne.text import approx_tokens, cosine, hashing_embedding, lexical_score, tokenize
 
@@ -426,7 +432,7 @@ class PostgresEngine:
                     """
                     WITH q AS (SELECT plainto_tsquery('english', %s) AS query)
                     SELECT a.id, a.branch, a.subject, a.predicate, a.object, a.confidence,
-                      a.source_evidence_cids, a.trust_tier, a.sensitivity,
+                      a.source_evidence_cids, a.trust_tier, a.sensitivity, a.last_accessed, a.access_count,
                       ts_rank_cd(coalesce(a.lexeme, to_tsvector('english', concat_ws(' ', a.subject, a.predicate, a.object))), q.query) AS score
                     FROM assertions a, q
                     WHERE a.tenant_id = %s AND a.branch = %s AND a.status IN ('active', 'contested')
@@ -451,7 +457,12 @@ class PostgresEngine:
                             provenance=_bytes_list_to_cids(row["source_evidence_cids"]),
                             trust_tier=row["trust_tier"],
                             sensitivity=row["sensitivity"],
-                            metadata={"confidence": float(row["confidence"]), "backend": self.adapters.lexical_backend},
+                            metadata={
+                                "confidence": float(row["confidence"]),
+                                "backend": self.adapters.lexical_backend,
+                                "last_accessed": row["last_accessed"].isoformat() if row["last_accessed"] else None,
+                                "access_count": row["access_count"],
+                            },
                         )
                     )
         if not hits:
@@ -475,7 +486,7 @@ class PostgresEngine:
                 cur.execute(
                     """
                     SELECT id, branch, subject, predicate, object, confidence,
-                      source_evidence_cids, trust_tier, sensitivity,
+                      source_evidence_cids, trust_tier, sensitivity, last_accessed, access_count,
                       1.0 - (embedding <=> %s::vector) AS score
                     FROM assertions
                     WHERE tenant_id = %s AND branch = %s AND status IN ('active', 'contested')
@@ -507,6 +518,8 @@ class PostgresEngine:
                                 "confidence": float(row["confidence"]),
                                 "backend": self.adapters.embedding.name,
                                 "embedding_dims": self.adapters.embedding.dims,
+                                "last_accessed": row["last_accessed"].isoformat() if row["last_accessed"] else None,
+                                "access_count": row["access_count"],
                             },
                         )
                     )
@@ -670,8 +683,10 @@ class PostgresEngine:
         fused = self._rrf([dense, lexical, graph], k=max(k * 2, self.policy.rerank_width))
         reranked = self.adapters.reranker.rerank(query, fused, k=max(k * 2, k))
         diversified = self._mmr(query, reranked, k=max(k, 1))
-        ordered = self._u_curve_order(diversified)
+        activated = apply_activation_scores(diversified, self.policy)
+        ordered = self._u_curve_order(activated)
         budgeted, used_tokens = self._fit_budget(ordered, self.policy.token_budget)
+        read_marks = self._record_retrieval_access(budgeted)
         confidence = self._confidence(budgeted)
         abstained = confidence < self.policy.abstention_threshold
         return RetrievalResult(
@@ -690,6 +705,8 @@ class PostgresEngine:
                 },
                 "rrf_k": self.policy.rrf_k,
                 "mmr_lambda": self.policy.mmr_lambda,
+                "activation": activation_explain(budgeted, self.policy),
+                "read_marks": {"assertions": read_marks},
                 "adapters": {
                     "embedding": self.adapters.embedding.name,
                     "embedding_dims": self.adapters.embedding.dims,
@@ -700,6 +717,33 @@ class PostgresEngine:
                 "rails": self.policy.immutable_rails,
             },
         )
+
+    def _record_retrieval_access(self, hits: list[Hit]) -> int:
+        ids_by_scope: dict[tuple[str, str], list[UUID]] = defaultdict(list)
+        for hit in hits:
+            if hit.kind != "assertion":
+                continue
+            assertion_id = _uuid_or_none(hit.id)
+            if assertion_id:
+                ids_by_scope[(hit.tenant_id, hit.branch)].append(assertion_id)
+        if not ids_by_scope:
+            return 0
+        touched = 0
+        with self.connect() as conn:
+            with conn.cursor() as cur:
+                for (tenant_id, branch), assertion_ids in ids_by_scope.items():
+                    db_tenant_id = _stable_uuid("tenant", tenant_id)
+                    self._set_tenant(cur, db_tenant_id)
+                    cur.execute(
+                        """
+                        UPDATE assertions
+                        SET last_accessed = now(), access_count = access_count + 1
+                        WHERE tenant_id = %s AND branch = %s AND id = ANY(%s::uuid[])
+                        """,
+                        (db_tenant_id, branch, [str(item) for item in assertion_ids]),
+                    )
+                    touched += max(cur.rowcount or 0, 0)
+        return touched
 
     def deep_search(self, query: str, tenant_id: str, branch: str = "main", filt: dict[str, Any] | None = None) -> RetrievalResult:
         return self.retrieve(query=query, tenant_id=tenant_id, branch=branch, deep=True, filt=filt)
@@ -1113,7 +1157,7 @@ class PostgresEngine:
         include_quarantined = bool(filt.get("include_quarantined", False))
         default_max_trust = int(TrustTier.UNTRUSTED_EXTERNAL) if include_quarantined else self.policy.max_trust_tier
         max_trust = int(filt.get("max_trust_tier", filt.get("min_trust_tier", default_max_trust)))
-        max_sensitivity = int(filt.get("max_sensitivity", 10))
+        max_sensitivity = int(filt.get("max_sensitivity", self.policy.max_sensitivity))
         candidates: list[Hit] = []
         with self.connect() as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
@@ -1151,7 +1195,7 @@ class PostgresEngine:
                 cur.execute(
                     """
                     SELECT id, tenant_id, branch, subject, predicate, object, confidence,
-                      source_evidence_cids, trust_tier, sensitivity
+                      source_evidence_cids, trust_tier, sensitivity, last_accessed, access_count
                     FROM assertions
                     WHERE tenant_id = %s AND branch = %s AND status IN ('active', 'contested')
                       AND trust_tier <= %s AND sensitivity <= %s
@@ -1174,6 +1218,11 @@ class PostgresEngine:
                                 provenance=_bytes_list_to_cids(row["source_evidence_cids"]),
                                 trust_tier=row["trust_tier"],
                                 sensitivity=row["sensitivity"],
+                                metadata={
+                                    "confidence": float(row["confidence"]),
+                                    "last_accessed": row["last_accessed"].isoformat() if row["last_accessed"] else None,
+                                    "access_count": row["access_count"],
+                                },
                             )
                         )
         return sorted(candidates, key=lambda item: item.score, reverse=True)[:k]

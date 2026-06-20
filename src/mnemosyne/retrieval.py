@@ -10,9 +10,12 @@ import urllib.parse
 import urllib.request
 from collections import Counter
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Protocol, Sequence
 
-from mnemosyne.models import Hit
+from mnemosyne.models import Hit, parse_dt, utc_now
+from mnemosyne.policy import OperatingPolicy
+from mnemosyne.security import trust_weight
 from mnemosyne.text import cosine, hashing_embedding, lexical_score, tokenize
 
 
@@ -232,6 +235,101 @@ def semantic_entropy(alternatives: Sequence[str]) -> float:
     entropy = -sum((count / total) * math.log(count / total, 2) for count in counts.values())
     max_entropy = math.log(len(counts), 2) if len(counts) > 1 else 1.0
     return entropy / max_entropy if max_entropy else 0.0
+
+
+def apply_activation_scores(hits: Sequence[Hit], policy: OperatingPolicy, *, now: datetime | None = None) -> list[Hit]:
+    """Apply blueprint-style activation scoring to already retrieved hits."""
+
+    if not hits:
+        return []
+    moment = now or utc_now()
+    max_relevance = max((max(hit.score, 0.0) for hit in hits), default=0.0)
+    weights = dict(policy.activation_weights)
+    total_weight = max(sum(max(float(value), 0.0) for value in weights.values()), 0.01)
+    activated: list[Hit] = []
+    for hit in hits:
+        semantic = max(hit.score, 0.0) / max(max_relevance, 0.01)
+        confidence = _bounded_float(hit.metadata.get("confidence", 0.7), default=0.7)
+        access_count = _bounded_int(hit.metadata.get("access_count", 0))
+        base_level = min(1.0, math.log1p(access_count) / math.log(11))
+        recency = _recency_score(hit.metadata.get("last_accessed"), moment, policy.decay)
+        importance = confidence * trust_weight(hit.trust_tier)
+        activation = (
+            max(weights.get("base_level", 0.0), 0.0) * base_level
+            + max(weights.get("semantic", 0.0), 0.0) * semantic
+            + max(weights.get("importance", 0.0), 0.0) * importance
+            + max(weights.get("recency", 0.0), 0.0) * recency
+        ) / total_weight
+        metadata = {
+            **hit.metadata,
+            "activation": {
+                "score": round(max(0.0, min(1.0, activation)), 6),
+                "components": {
+                    "base_level": round(base_level, 6),
+                    "semantic": round(semantic, 6),
+                    "importance": round(importance, 6),
+                    "recency": round(recency, 6),
+                },
+            },
+        }
+        activated.append(
+            Hit(
+                id=hit.id,
+                kind=hit.kind,
+                tenant_id=hit.tenant_id,
+                branch=hit.branch,
+                text=hit.text,
+                score=max(hit.score, 0.0) * (0.5 + max(0.0, min(1.0, activation))),
+                channel=hit.channel,
+                provenance=list(hit.provenance),
+                trust_tier=hit.trust_tier,
+                sensitivity=hit.sensitivity,
+                metadata=metadata,
+            )
+        )
+    return sorted(activated, key=lambda item: item.score, reverse=True)
+
+
+def activation_explain(hits: Sequence[Hit], policy: OperatingPolicy) -> dict[str, object]:
+    return {
+        "weights": dict(policy.activation_weights),
+        "applied": True,
+        "hits": [
+            {
+                "id": hit.id,
+                "kind": hit.kind,
+                "score": round(hit.score, 6),
+                "activation": hit.metadata.get("activation", {}),
+            }
+            for hit in hits
+        ],
+    }
+
+
+def _recency_score(value: object, now: datetime, decay: float) -> float:
+    accessed = value if isinstance(value, datetime) else parse_dt(value)
+    if accessed is None:
+        return 0.0
+    accessed = accessed.astimezone(UTC) if accessed.tzinfo else accessed.replace(tzinfo=UTC)
+    age_days = max((now - accessed).total_seconds(), 0.0) / 86_400.0
+    return 1.0 / (1.0 + max(decay, 0.0) * age_days)
+
+
+def _bounded_float(value: object, *, default: float) -> float:
+    try:
+        number = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return default
+    if not math.isfinite(number):
+        return default
+    return max(0.0, min(1.0, number))
+
+
+def _bounded_int(value: object) -> int:
+    try:
+        return max(0, int(value))  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return 0
 
 
 def _required_env(name: str) -> str:
