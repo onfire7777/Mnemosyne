@@ -1536,6 +1536,44 @@ class PostgresEngine:
                 self._set_tenant(cur, db_tenant_id)
                 cur.execute("DELETE FROM relations WHERE tenant_id = %s AND branch = %s", (db_tenant_id, branch))
                 cur.execute("DELETE FROM assertions WHERE tenant_id = %s AND branch = %s", (db_tenant_id, branch))
+                cur.execute(
+                    """
+                    DELETE FROM justifications j
+                    WHERE j.tenant_id = %s
+                      AND (
+                        NOT EXISTS (
+                          SELECT 1 FROM assertions a
+                          WHERE a.tenant_id = j.tenant_id AND a.id = j.assertion_id
+                        )
+                        OR EXISTS (
+                          SELECT 1
+                          FROM unnest(j.dependency_ids) AS dep(id)
+                          WHERE NOT EXISTS (
+                            SELECT 1 FROM assertions a
+                            WHERE a.tenant_id = j.tenant_id AND a.id = dep.id
+                          )
+                        )
+                      )
+                    """,
+                    (db_tenant_id,),
+                )
+                cur.execute(
+                    """
+                    DELETE FROM contradictions c
+                    WHERE c.tenant_id = %s
+                      AND (
+                        NOT EXISTS (
+                          SELECT 1 FROM assertions a
+                          WHERE a.tenant_id = c.tenant_id AND a.id = c.a
+                        )
+                        OR NOT EXISTS (
+                          SELECT 1 FROM assertions a
+                          WHERE a.tenant_id = c.tenant_id AND a.id = c.b
+                        )
+                      )
+                    """,
+                    (db_tenant_id,),
+                )
                 cur.execute("DELETE FROM evidence WHERE tenant_id = %s AND branch = %s", (db_tenant_id, branch))
                 cur.execute("DELETE FROM branches WHERE tenant_id = %s AND name = %s", (db_tenant_id, branch))
 

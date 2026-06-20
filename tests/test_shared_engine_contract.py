@@ -301,6 +301,129 @@ def test_shared_engine_contract_branches_and_discards(engine_bundle: tuple[Any, 
     assert engine.get_evidence(tenant, cid, branch="candidate") is None
 
 
+def test_shared_engine_contract_discard_prunes_branch_tms_rows(engine_bundle: tuple[Any, str, str]) -> None:
+    engine, tenant, user = engine_bundle
+    branch = f"shared-discard-tms-{uuid4()}"
+    _branch(engine, branch, tenant)
+    cid = _append_evidence(
+        engine,
+        tenant,
+        user,
+        "Branch discard should prune abandoned TMS rows.",
+        branch=branch,
+    )
+    first_assertion = engine.upsert_assertion(
+        Assertion(
+            tenant_id=tenant,
+            user_id=user,
+            branch=branch,
+            subject=f"discarded branch first {uuid4()}",
+            predicate="is",
+            object="temporary",
+            source_evidence_cids=[cid],
+            status="active",
+        ),
+        branch=branch,
+    )
+    second_assertion = engine.upsert_assertion(
+        Assertion(
+            tenant_id=tenant,
+            user_id=user,
+            branch=branch,
+            subject=f"discarded branch second {uuid4()}",
+            predicate="is",
+            object="temporary",
+            source_evidence_cids=[cid],
+            status="active",
+        ),
+        branch=branch,
+    )
+    justification_id = engine.add_justification(
+        Justification(
+            tenant_id=tenant,
+            assertion_id=first_assertion,
+            evidence_cids=[cid],
+            dependency_ids=[second_assertion],
+            rule="shared discard branch tms",
+        )
+    )
+    contradiction_id = engine.add_contradiction(
+        Contradiction(tenant_id=tenant, a=first_assertion, b=second_assertion)
+    )
+
+    before = engine.export_tenant(tenant)
+    assert any(item["id"] == justification_id for item in before["justifications"])
+    assert any(item["id"] == contradiction_id for item in before["contradictions"])
+
+    _discard(engine, branch, tenant)
+    exported = engine.export_tenant(tenant)
+
+    assert engine.get_evidence(tenant, cid, branch=branch) is None
+    assert all(item["id"] not in {first_assertion, second_assertion} for item in exported["assertions"])
+    assert all(item["id"] != justification_id for item in exported["justifications"])
+    assert all(item["id"] != contradiction_id for item in exported["contradictions"])
+
+
+def test_shared_engine_contract_discard_prunes_orphaned_tms_dependencies(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, user = engine_bundle
+    main_cid = _append_evidence(engine, tenant, user, "Main assertion survives discarded dependency branch.")
+    main_assertion = engine.upsert_assertion(
+        Assertion(
+            tenant_id=tenant,
+            user_id=user,
+            subject=f"surviving main assertion {uuid4()}",
+            predicate="is",
+            object="durable",
+            source_evidence_cids=[main_cid],
+            status="active",
+        )
+    )
+    branch = f"shared-discard-dependency-{uuid4()}"
+    _branch(engine, branch, tenant)
+    branch_cid = _append_evidence(
+        engine,
+        tenant,
+        user,
+        "Branch dependency should be pruned from surviving TMS rows.",
+        branch=branch,
+    )
+    dependency_assertion = engine.upsert_assertion(
+        Assertion(
+            tenant_id=tenant,
+            user_id=user,
+            branch=branch,
+            subject=f"discarded dependency assertion {uuid4()}",
+            predicate="is",
+            object="temporary",
+            source_evidence_cids=[branch_cid],
+            status="active",
+        ),
+        branch=branch,
+    )
+    justification_id = engine.add_justification(
+        Justification(
+            tenant_id=tenant,
+            assertion_id=main_assertion,
+            evidence_cids=[main_cid],
+            dependency_ids=[dependency_assertion],
+            rule="shared discard orphan dependency",
+        )
+    )
+    contradiction_id = engine.add_contradiction(
+        Contradiction(tenant_id=tenant, a=main_assertion, b=dependency_assertion)
+    )
+
+    _discard(engine, branch, tenant)
+    exported = engine.export_tenant(tenant)
+
+    assert any(item["id"] == main_assertion and item["branch"] == "main" for item in exported["assertions"])
+    assert all(item["id"] != dependency_assertion for item in exported["assertions"])
+    assert all(item["id"] != justification_id for item in exported["justifications"])
+    assert all(item["id"] != contradiction_id for item in exported["contradictions"])
+
+
 def test_shared_engine_contract_bitemporal_assertion_as_of(engine_bundle: tuple[Any, str, str]) -> None:
     engine, tenant, user = engine_bundle
     now = datetime.now(UTC)
@@ -705,6 +828,7 @@ def _append_evidence(
     trust_tier: int = 0,
     sensitivity: int = 0,
     metadata: dict[str, Any] | None = None,
+    branch: str = "main",
 ) -> str:
     return engine.append_evidence(
         Evidence(
@@ -717,7 +841,8 @@ def _append_evidence(
             trust_tier=trust_tier,
             sensitivity=sensitivity,
             access_policy={"tenant": tenant},
-        )
+        ),
+        branch=branch,
     )
 
 
