@@ -831,7 +831,9 @@ def cmd_discard(args: argparse.Namespace) -> None:
 
 
 def cmd_tools(args: argparse.Namespace) -> None:
-    emit({"tools": TOOL_SPEC})
+    from mnemosyne.mcp_server import _to_mcp_tool_spec
+
+    emit({"tools": [_to_mcp_tool_spec(item) for item in TOOL_SPEC]})
 
 
 def cmd_eval(args: argparse.Namespace) -> None:

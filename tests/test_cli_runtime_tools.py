@@ -169,7 +169,10 @@ def test_cli_tools_command_does_not_require_engine_backend(tmp_path: Path) -> No
 
     assert result.returncode == 0
     payload = json.loads(result.stdout)
-    assert any(tool["name"] == "search" for tool in payload["tools"])
+    tools_by_name = {tool["name"]: tool for tool in payload["tools"]}
+    assert "search" in tools_by_name
+    assert "inputSchema" in tools_by_name["search"]
+    assert {"type": "null"} in tools_by_name["search"]["inputSchema"]["properties"]["max_sensitivity"]["anyOf"]
 
 
 def test_cli_exposes_retrieval_provider_flags() -> None:
