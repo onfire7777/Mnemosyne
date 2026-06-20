@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid5
 
+from mnemosyne.calibration import CalibrationSet, conformal_threshold
 from mnemosyne.ids import content_cid
 from mnemosyne.models import Assertion, Evidence, Hit, MergeReport, Preference, Relation, RetrievalResult, dt_to_json, parse_dt, utc_now
 from mnemosyne.policy import OperatingPolicy
@@ -17,6 +18,7 @@ from mnemosyne.retrieval import (
     RetrievalAdapters,
     activation_explain,
     apply_activation_scores,
+    semantic_entropy,
 )
 from mnemosyne.security import TrustTier, trust_weight
 from mnemosyne.text import approx_tokens, cosine, hashing_embedding, lexical_score, tokenize
@@ -688,7 +690,10 @@ class PostgresEngine:
         budgeted, used_tokens = self._fit_budget(ordered, self.policy.token_budget)
         read_marks = self._record_retrieval_access(budgeted)
         confidence = self._confidence(budgeted)
-        abstained = confidence < self.policy.abstention_threshold
+        calibration = self._calibration_for(tenant_id, "fact")
+        threshold = conformal_threshold(calibration) if calibration else self.policy.abstention_threshold
+        entropy = semantic_entropy([hit.text for hit in budgeted])
+        abstained = confidence < threshold
         return RetrievalResult(
             query=query,
             hits=budgeted,
@@ -706,6 +711,8 @@ class PostgresEngine:
                 "rrf_k": self.policy.rrf_k,
                 "mmr_lambda": self.policy.mmr_lambda,
                 "activation": activation_explain(budgeted, self.policy),
+                "calibration": self._calibration_explain(calibration, threshold),
+                "semantic_entropy": entropy,
                 "read_marks": {"assertions": read_marks},
                 "adapters": {
                     "embedding": self.adapters.embedding.name,
@@ -717,6 +724,67 @@ class PostgresEngine:
                 "rails": self.policy.immutable_rails,
             },
         )
+
+    def set_calibration(self, calibration: CalibrationSet) -> None:
+        db_tenant_id = _stable_uuid("tenant", calibration.tenant_id)
+        self.ensure_tenant_and_branch(calibration.tenant_id, "main")
+        with self.connect() as conn:
+            with conn.cursor() as cur:
+                self._set_tenant(cur, db_tenant_id)
+                cur.execute(
+                    """
+                    INSERT INTO conformal_calibration(tenant_id, memory_type, scores, target_coverage, updated_at)
+                    VALUES (%s, %s, %s, %s, now())
+                    ON CONFLICT (tenant_id, memory_type)
+                    DO UPDATE SET scores = EXCLUDED.scores,
+                                  target_coverage = EXCLUDED.target_coverage,
+                                  updated_at = now()
+                    """,
+                    (db_tenant_id, calibration.memory_type, list(calibration.scores), calibration.target_coverage),
+                )
+                self._audit(
+                    cur,
+                    db_tenant_id,
+                    "engine",
+                    "set_calibration",
+                    None,
+                    {"memory_type": calibration.memory_type, "scores": len(calibration.scores)},
+                )
+
+    def _calibration_for(self, tenant_id: str, memory_type: str) -> CalibrationSet | None:
+        db_tenant_id = _stable_uuid("tenant", tenant_id)
+        with self.connect() as conn:
+            with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                self._set_tenant(cur, db_tenant_id)
+                cur.execute(
+                    """
+                    SELECT memory_type, scores, target_coverage
+                    FROM conformal_calibration
+                    WHERE tenant_id = %s AND memory_type = %s
+                    """,
+                    (db_tenant_id, memory_type),
+                )
+                row = cur.fetchone()
+        if not row:
+            return None
+        return CalibrationSet(
+            tenant_id=tenant_id,
+            memory_type=str(row["memory_type"]),
+            scores=[float(score) for score in row["scores"]],
+            target_coverage=float(row["target_coverage"]),
+        )
+
+    @staticmethod
+    def _calibration_explain(calibration: CalibrationSet | None, threshold: float) -> dict[str, Any]:
+        if calibration is None:
+            return {"source": "policy", "memory_type": "fact", "threshold": threshold}
+        return {
+            "source": "conformal",
+            "memory_type": calibration.memory_type,
+            "threshold": threshold,
+            "target_coverage": calibration.target_coverage,
+            "scores": len(calibration.scores),
+        }
 
     def _record_retrieval_access(self, hits: list[Hit]) -> int:
         ids_by_scope: dict[tuple[str, str], list[UUID]] = defaultdict(list)
@@ -975,12 +1043,24 @@ class PostgresEngine:
                 audit = [_row_to_audit_log(row) for row in cur.fetchall()]
                 cur.execute("SELECT * FROM deletion_log WHERE tenant_id = %s", (db_tenant_id,))
                 deletion = [_json_safe(dict(row)) for row in cur.fetchall()]
+                cur.execute("SELECT * FROM conformal_calibration WHERE tenant_id = %s", (db_tenant_id,))
+                calibrations = [
+                    {
+                        "tenant_id": tenant_id,
+                        "memory_type": row["memory_type"],
+                        "scores": [float(score) for score in row["scores"]],
+                        "target_coverage": float(row["target_coverage"]),
+                        "updated_at": dt_to_json(row["updated_at"]),
+                    }
+                    for row in cur.fetchall()
+                ]
         return {
             "tenant_id": tenant_id,
             "evidence": evidence,
             "assertions": assertions,
             "relations": relations,
             "preferences": preferences,
+            "calibrations": calibrations,
             "justifications": [],
             "contradictions": [],
             "audit_log": audit,

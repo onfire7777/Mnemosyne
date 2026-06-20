@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
 
+from mnemosyne.calibration import CalibrationSet, conformal_threshold
 from mnemosyne.ids import content_cid, new_id
 from mnemosyne.models import (
     Assertion,
@@ -27,7 +28,7 @@ from mnemosyne.models import (
 )
 from mnemosyne.policy import OperatingPolicy
 from mnemosyne.privacy import ErasureMode
-from mnemosyne.retrieval import activation_explain, apply_activation_scores
+from mnemosyne.retrieval import activation_explain, apply_activation_scores, semantic_entropy
 from mnemosyne.security import TrustTier, more_trusted, trust_weight
 from mnemosyne.text import approx_tokens, cosine, hashing_embedding, lexical_score, tokenize
 
@@ -65,6 +66,9 @@ class MemoryEngine(Protocol):
         raise NotImplementedError
 
     def retrieve(self, query: str, tenant_id: str, branch: str = "main", deep: bool = False, filt: dict[str, Any] | None = None) -> RetrievalResult:
+        raise NotImplementedError
+
+    def set_calibration(self, calibration: CalibrationSet) -> None:
         raise NotImplementedError
 
     def deep_search(self, query: str, tenant_id: str, branch: str = "main", filt: dict[str, Any] | None = None) -> RetrievalResult:
@@ -131,6 +135,7 @@ class LocalMemoryEngine:
         self.preferences: dict[str, Preference] = {}
         self.justifications: dict[str, Justification] = {}
         self.contradictions: dict[str, Contradiction] = {}
+        self.calibrations: dict[tuple[str, str], CalibrationSet] = {}
         self.audit_log: list[dict[str, Any]] = []
         self.deletion_log: list[dict[str, Any]] = []
         self.merge_log: list[dict[str, Any]] = []
@@ -171,6 +176,7 @@ class LocalMemoryEngine:
             "preferences": [item.to_dict() for item in self.preferences.values()],
             "justifications": [item.to_dict() for item in self.justifications.values()],
             "contradictions": [item.to_dict() for item in self.contradictions.values()],
+            "calibrations": [item.to_dict() for item in self.calibrations.values()],
             "audit_log": self.audit_log,
             "deletion_log": self.deletion_log,
             "merge_log": self.merge_log,
@@ -198,6 +204,10 @@ class LocalMemoryEngine:
         self.preferences = {item.id: item for item in (Preference.from_dict(row) for row in data.get("preferences", []))}
         self.justifications = {item.id: item for item in (Justification.from_dict(row) for row in data.get("justifications", []))}
         self.contradictions = {item.id: item for item in (Contradiction.from_dict(row) for row in data.get("contradictions", []))}
+        self.calibrations = {
+            (item.tenant_id, item.memory_type): item
+            for item in (CalibrationSet(**row) for row in data.get("calibrations", []))
+        }
         self.audit_log = list(data.get("audit_log", []))
         self.deletion_log = list(data.get("deletion_log", []))
         self.merge_log = list(data.get("merge_log", []))
@@ -454,7 +464,10 @@ class LocalMemoryEngine:
         budgeted, used = self._fit_budget(ordered, self.policy.token_budget)
         read_marks = self._record_retrieval_access(budgeted)
         confidence = self._confidence(budgeted)
-        abstained = confidence < self.policy.abstention_threshold
+        calibration = self._calibration_for(tenant_id, "fact")
+        threshold = conformal_threshold(calibration) if calibration else self.policy.abstention_threshold
+        entropy = semantic_entropy([hit.text for hit in budgeted])
+        abstained = confidence < threshold
         note = None
         if abstained:
             note = "Evidence is too thin, low-trust, or conflicting for a confident answer."
@@ -475,10 +488,38 @@ class LocalMemoryEngine:
                 "rrf_k": self.policy.rrf_k,
                 "mmr_lambda": self.policy.mmr_lambda,
                 "activation": activation_explain(budgeted, self.policy),
+                "calibration": self._calibration_explain(calibration, threshold),
+                "semantic_entropy": entropy,
                 "read_marks": {"assertions": read_marks},
                 "rails": self.policy.immutable_rails,
             },
         )
+
+    def set_calibration(self, calibration: CalibrationSet) -> None:
+        with self._lock:
+            self.calibrations[(calibration.tenant_id, calibration.memory_type)] = copy.deepcopy(calibration)
+            self._audit(
+                calibration.tenant_id,
+                "engine",
+                "set_calibration",
+                calibration.memory_type,
+                {"scores": len(calibration.scores), "target_coverage": calibration.target_coverage},
+            )
+            self._persist()
+
+    def _calibration_for(self, tenant_id: str, memory_type: str) -> CalibrationSet | None:
+        return self.calibrations.get((tenant_id, memory_type))
+
+    def _calibration_explain(self, calibration: CalibrationSet | None, threshold: float) -> dict[str, Any]:
+        if calibration is None:
+            return {"source": "policy", "memory_type": "fact", "threshold": threshold}
+        return {
+            "source": "conformal",
+            "memory_type": calibration.memory_type,
+            "threshold": threshold,
+            "target_coverage": calibration.target_coverage,
+            "scores": len(calibration.scores),
+        }
 
     def _record_retrieval_access(self, hits: list[Hit]) -> int:
         touched = 0
@@ -663,6 +704,7 @@ class LocalMemoryEngine:
             "assertions": [item.to_dict() for item in self.assertions.values() if item.tenant_id == tenant_id],
             "relations": [item.to_dict() for item in self.relations.values() if item.tenant_id == tenant_id],
             "preferences": [item.to_dict() for item in self.preferences.values() if item.tenant_id == tenant_id],
+            "calibrations": [item.to_dict() for item in self.calibrations.values() if item.tenant_id == tenant_id],
             "justifications": [item.to_dict() for item in self.justifications.values() if item.tenant_id == tenant_id],
             "contradictions": [item.to_dict() for item in self.contradictions.values() if item.tenant_id == tenant_id],
             "audit_log": [item for item in self.audit_log if item.get("tenant_id") == tenant_id],
