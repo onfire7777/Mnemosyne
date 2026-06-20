@@ -57,6 +57,56 @@ def test_shared_engine_contract_retrieves_and_exports_evidence(engine_bundle: tu
     assert any(item["cid"] == cid for item in exported["evidence"])
 
 
+def test_shared_engine_contract_preserves_lossless_evidence_envelope(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, user = engine_bundle
+    provenance = {
+        "manifest_id": "urn:mnemosyne:test-manifest",
+        "issuer": "shared-contract-verifier",
+        "asset_hash": "sha256:" + "a" * 64,
+        "valid": True,
+    }
+    access_policy = {"tenant": tenant, "residency": "us", "purpose": "shared-contract"}
+    cid = engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id=user,
+            actor="tool",
+            source_type="c2pa-asset",
+            source_identity="camera:shared-contract",
+            session_id="session-shared-envelope",
+            content="Lossless evidence envelope should survive storage round trips.",
+            metadata={"ocr_text": "envelope orchid", "labels": ["lossless", "shared"]},
+            content_pointer="objects/tenant/shared-envelope.bin",
+            modality="image",
+            signed_provenance=provenance,
+            trust_tier=1,
+            capability_tags=["signed-provenance", "derived-text"],
+            sensitivity=2,
+            access_policy=access_policy,
+        )
+    )
+
+    recalled = engine.get_evidence(tenant, cid)
+    exported = next(item for item in engine.export_tenant(tenant)["evidence"] if item["cid"] == cid)
+
+    assert recalled is not None
+    for record in (recalled.to_dict(), exported):
+        assert record["actor"] == "tool"
+        assert record["source_type"] == "c2pa-asset"
+        assert record["source_identity"] == "camera:shared-contract"
+        assert record["session_id"] == "session-shared-envelope"
+        assert record["metadata"]["ocr_text"] == "envelope orchid"
+        assert record["content_pointer"] == "objects/tenant/shared-envelope.bin"
+        assert record["modality"] == "image"
+        assert record["signed_provenance"] == provenance
+        assert record["trust_tier"] == 1
+        assert record["capability_tags"] == ["signed-provenance", "derived-text"]
+        assert record["sensitivity"] == 2
+        assert record["access_policy"] == access_policy
+
+
 def test_shared_engine_contract_exports_all_and_json(engine_bundle: tuple[Any, str, str]) -> None:
     engine, tenant, user = engine_bundle
     cid = _append_evidence(engine, tenant, user, "Shared export-all contract evidence.")
