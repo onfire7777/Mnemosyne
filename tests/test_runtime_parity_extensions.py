@@ -9,7 +9,7 @@ from mnemosyne.ingestion import IngestRequest, IngestionPipeline
 from mnemosyne.jobs import CALIBRATE_JOB, LIFECYCLE_SWEEP_JOB, OBSERVABILITY_SNAPSHOT_JOB, RuntimeJobHandlers
 from mnemosyne.learning import Lesson, Procedure
 from mnemosyne.media import MEDIA_EXTRACT_JOB, MediaExtractionResult
-from mnemosyne.models import Contradiction, Evidence
+from mnemosyne.models import Assertion, Contradiction, Evidence
 from mnemosyne.observability import MetricsRegistry, build_ops_report
 from mnemosyne.parametric import ParametricArtifactStore, ParametricTier
 from mnemosyne.prefetch import AnticipatoryPrefetcher, PrefetchCandidate
@@ -364,6 +364,54 @@ def test_media_extract_job_appends_derived_evidence_without_mutating_source(tmp_
     assert "derived-from-media" in derived.capability_tags
     assert hits.hits[0].id == derived_cid
     assert queue.snapshot()["queued"] == 2
+
+
+def test_forget_transitively_erases_media_derived_evidence_and_assertions(tmp_path) -> None:
+    engine = LocalMemoryEngine()
+    queue = InProcessQueue()
+    object_store = LocalObjectStore(tmp_path / "objects")
+    pipeline = IngestionPipeline(engine, object_store, queue=queue)
+    result = pipeline.ingest(
+        IngestRequest(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="microphone",
+            data=b"opaque-audio-bytes",
+            modality="audio",
+            media_type="audio/wav",
+        )
+    )
+    handlers = RuntimeJobHandlers(
+        engine,
+        queue,
+        object_store=object_store,
+        media_extractor=StaticMediaExtractor("Derived transcript says Mnemosyne remains separate."),
+    )
+    job = QueueWorker(queue, handlers.handlers()).run_once(MEDIA_EXTRACT_JOB)
+    derived_cid = job.result["details"]["derived_cid"]
+    assertion = Assertion(
+        tenant_id=TENANT,
+        subject="Mnemosyne",
+        predicate="remains",
+        object="separate",
+        source_evidence_cids=[derived_cid],
+        status="active",
+        access_policy={"tenant": TENANT},
+    )
+    assertion_id = engine.upsert_assertion(assertion)
+
+    forgotten = engine.forget(TENANT, result.cid)
+    source = next(item for item in engine.evidence.values() if item.cid == result.cid)
+    derived = next(item for item in engine.evidence.values() if item.cid == derived_cid)
+    retracted = next(item for item in engine.assertions.values() if item.id == assertion_id)
+
+    assert forgotten["erased"] is True
+    assert forgotten["propagated"]["erased_derived_evidence"] == [derived_cid]
+    assert source is not None and source.erased is True
+    assert derived is not None and derived.erased is True
+    assert retracted.status == "retracted"
+    assert retracted.source_evidence_cids == []
 
 
 def test_ingestion_classifier_tags_untrusted_imperatives_and_pii(tmp_path) -> None:

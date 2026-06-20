@@ -464,12 +464,30 @@ def test_postgres_media_extract_job_appends_searchable_derived_evidence_live(tmp
     derived_cid = job.result["details"]["derived_cid"]
     search = engine.retrieve("quarterly planning moved", tenant)
     derived = engine.get_evidence(tenant, derived_cid)
+    assertion_id = engine.upsert_assertion(
+        Assertion(
+            tenant_id=tenant,
+            subject="quarterly planning",
+            predicate="moved",
+            object="true",
+            source_evidence_cids=[derived_cid],
+            status="active",
+            access_policy={"tenant": tenant},
+        )
+    )
+    forgotten = engine.forget(tenant, result.cid)
+    exported = engine.export_tenant(tenant)
+    exported_assertion = next(item for item in exported["assertions"] if item["id"] == assertion_id)
 
     assert job.status == "complete"
     assert derived is not None
     assert derived.metadata["source_evidence_cid"] == result.cid
     assert derived.metadata["derived_text_sources"] == ["test_extractor"]
     assert search.hits[0].id == derived_cid
+    assert forgotten["propagated"]["erased_derived_evidence"] == [derived_cid]
+    assert all(item["cid"] not in {result.cid, derived_cid} for item in exported["evidence"])
+    assert exported_assertion["status"] == "retracted"
+    assert exported_assertion["source_evidence_cids"] == []
 
 
 def test_postgres_gated_consolidation_promotes_direct_user_fact_live() -> None:
