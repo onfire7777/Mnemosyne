@@ -10,8 +10,6 @@ import json
 import os
 import sys
 import threading
-import urllib.error
-import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import UnionType
@@ -21,6 +19,7 @@ from urllib.parse import urlsplit
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.ingestion import IngestionPipeline
 from mnemosyne.mcp_tools import MemoryTools, TOOL_SPEC
+from mnemosyne.oidc_jwks import load_oidc_jwks, oidc_jwks_loader
 from mnemosyne.parametric import CommandParametricTrainer, ParametricArtifactStore, ParametricTier
 from mnemosyne.postgres_runtime_state import PostgresRuntimeState
 from mnemosyne.queue import InProcessQueue, PostgresQueue
@@ -649,6 +648,9 @@ def build_http_server(
     idp_algorithms: tuple[str, ...] = ("RS256", "ES256"),
     idp_leeway_seconds: int = 60,
     idp_timeout: float = 10,
+    idp_jwks_max_bytes: int = 1024 * 1024,
+    idp_jwks_cache_ttl_seconds: int = 300,
+    idp_refresh_on_unknown_kid: bool = True,
     session_max_ttl_seconds: int = 3600,
     **kwargs: Any,
 ) -> ThreadingHTTPServer:
@@ -667,12 +669,13 @@ def build_http_server(
         if not idp_issuer or not idp_audience:
             raise ValueError("HTTP MCP session exchange requires idp issuer and audience")
         idp_verifier = OidcJwtVerifier(
-            _load_oidc_jwks(
+            load_oidc_jwks(
                 jwks=idp_jwks,
                 jwks_file=idp_jwks_file,
                 jwks_url=idp_jwks_url,
                 allow_insecure_url=idp_allow_insecure_jwks_url,
                 timeout=idp_timeout,
+                max_bytes=idp_jwks_max_bytes,
             ),
             issuer=idp_issuer,
             audience=idp_audience,
@@ -683,6 +686,16 @@ def build_http_server(
             session_id_claim=idp_session_id_claim,
             allowed_algorithms=tuple(item for item in idp_algorithms if item),
             leeway_seconds=idp_leeway_seconds,
+            jwks_loader=oidc_jwks_loader(
+                jwks=idp_jwks,
+                jwks_file=idp_jwks_file,
+                jwks_url=idp_jwks_url,
+                allow_insecure_url=idp_allow_insecure_jwks_url,
+                timeout=idp_timeout,
+                max_bytes=idp_jwks_max_bytes,
+            ),
+            jwks_cache_ttl_seconds=idp_jwks_cache_ttl_seconds,
+            refresh_on_unknown_kid=idp_refresh_on_unknown_kid,
         )
 
     class Handler(BaseHTTPRequestHandler):
@@ -707,6 +720,12 @@ def build_http_server(
                     "auth_token_required": bool(facade.auth_token),
                     "session_required": bool(facade.require_session),
                     "session_exchange_configured": idp_verifier is not None,
+                    "session_exchange_jwks_cache_ttl_seconds": idp_jwks_cache_ttl_seconds
+                    if idp_verifier is not None
+                    else None,
+                    "session_exchange_refresh_on_unknown_kid": idp_refresh_on_unknown_kid
+                    if idp_verifier is not None
+                    else None,
                 },
             )
 
@@ -870,39 +889,6 @@ def _normalize_http_path(value: str) -> str:
     if not value:
         raise ValueError("HTTP MCP path must be non-empty")
     return value if value.startswith("/") else f"/{value}"
-
-
-def _load_oidc_jwks(
-    *,
-    jwks: str | None,
-    jwks_file: str | None,
-    jwks_url: str | None,
-    allow_insecure_url: bool,
-    timeout: float,
-) -> dict[str, Any]:
-    sources = [bool(jwks), bool(jwks_file), bool(jwks_url)]
-    if sum(sources) != 1:
-        raise SessionAuthError("OIDC session exchange requires exactly one JWKS source")
-    if jwks:
-        raw = jwks
-    elif jwks_file:
-        raw = Path(jwks_file).expanduser().read_text(encoding="utf-8")
-    else:
-        assert jwks_url is not None
-        if not jwks_url.startswith("https://") and not allow_insecure_url:
-            raise SessionAuthError("OIDC JWKS URL must use https unless insecure URLs are explicitly allowed")
-        try:
-            with urllib.request.urlopen(jwks_url, timeout=timeout) as response:  # noqa: S310 - URL is operator configured.
-                raw = response.read().decode("utf-8")
-        except (OSError, UnicodeDecodeError, urllib.error.URLError) as exc:
-            raise SessionAuthError("OIDC JWKS URL could not be loaded") from exc
-    try:
-        loaded = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise SessionAuthError("OIDC JWKS is not valid JSON") from exc
-    if not isinstance(loaded, dict):
-        raise SessionAuthError("OIDC JWKS must be a JSON object")
-    return loaded
 
 
 def run_self_test(*, sdk: bool = False, **kwargs: Any) -> dict[str, Any]:
@@ -1226,6 +1212,13 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--idp-algorithm", action="append", default=os.environ.get("MNEMOSYNE_MCP_IDP_ALGORITHMS", "RS256,ES256").split(","))
     parser.add_argument("--idp-leeway-seconds", type=int, default=int(os.environ.get("MNEMOSYNE_MCP_IDP_LEEWAY_SECONDS", "60")))
     parser.add_argument("--idp-timeout", type=float, default=float(os.environ.get("MNEMOSYNE_MCP_IDP_TIMEOUT", "10")))
+    parser.add_argument("--idp-jwks-max-bytes", type=int, default=int(os.environ.get("MNEMOSYNE_MCP_IDP_JWKS_MAX_BYTES", str(1024 * 1024))))
+    parser.add_argument("--idp-jwks-cache-ttl-seconds", type=int, default=int(os.environ.get("MNEMOSYNE_MCP_IDP_JWKS_CACHE_TTL_SECONDS", "300")))
+    parser.add_argument(
+        "--idp-disable-refresh-on-unknown-kid",
+        action="store_true",
+        default=_env_flag("MNEMOSYNE_MCP_IDP_DISABLE_REFRESH_ON_UNKNOWN_KID", default=False),
+    )
     parser.add_argument("--session-max-ttl-seconds", type=int, default=int(os.environ.get("MNEMOSYNE_MCP_SESSION_MAX_TTL_SECONDS", "3600")))
     parser.add_argument("--auth-token", default=os.environ.get("MNEMOSYNE_MCP_TOKEN"), help="Require this token for tools/call")
     parser.add_argument(
@@ -1318,6 +1311,9 @@ def main(argv: list[str] | None = None) -> None:
             idp_algorithms=tuple(args.idp_algorithm),
             idp_leeway_seconds=args.idp_leeway_seconds,
             idp_timeout=args.idp_timeout,
+            idp_jwks_max_bytes=args.idp_jwks_max_bytes,
+            idp_jwks_cache_ttl_seconds=args.idp_jwks_cache_ttl_seconds,
+            idp_refresh_on_unknown_kid=not args.idp_disable_refresh_on_unknown_kid,
             session_max_ttl_seconds=args.session_max_ttl_seconds,
             **config,
         )

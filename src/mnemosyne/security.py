@@ -7,11 +7,12 @@ import binascii
 import hashlib
 import hmac
 import json
+import threading
 import time
 from dataclasses import asdict, dataclass
 from enum import IntEnum
 from collections.abc import Mapping
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes
@@ -286,11 +287,17 @@ class OidcJwtVerifier:
         session_id_claim: str = "jti",
         allowed_algorithms: tuple[str, ...] = ("RS256", "ES256"),
         leeway_seconds: int = 60,
+        jwks_loader: Callable[[], Mapping[str, Any]] | None = None,
+        jwks_cache_ttl_seconds: int | None = None,
+        refresh_on_unknown_kid: bool = True,
     ):
         if not issuer:
             raise SessionAuthError("OIDC issuer is required")
         if not audience:
             raise SessionAuthError("OIDC audience is required")
+        self._jwks_lock = threading.RLock()
+        self._jwks_loader = jwks_loader
+        self._jwks_loaded_at = int(time.time())
         self.issuer = issuer
         self.audience = audience
         self.tenant_claim = tenant_claim
@@ -304,41 +311,77 @@ class OidcJwtVerifier:
         self.leeway_seconds = int(leeway_seconds)
         if self.leeway_seconds < 0:
             raise SessionAuthError("OIDC leeway must be non-negative")
+        self.jwks_cache_ttl_seconds = None if jwks_cache_ttl_seconds is None else int(jwks_cache_ttl_seconds)
+        if self.jwks_cache_ttl_seconds is not None and self.jwks_cache_ttl_seconds < 0:
+            raise SessionAuthError("OIDC JWKS cache TTL must be non-negative")
+        self.refresh_on_unknown_kid = bool(refresh_on_unknown_kid)
+        self._install_jwks(jwks, loaded_at=self._jwks_loaded_at)
+
+    def _install_jwks(self, jwks: Mapping[str, Any], *, loaded_at: int) -> None:
         keys = jwks.get("keys")
         if not isinstance(keys, list) or not keys:
             raise SessionAuthError("OIDC JWKS must contain keys")
-        self.keys_by_id: dict[str, Mapping[str, Any]] = {}
+        keys_by_id: dict[str, Mapping[str, Any]] = {}
         for key in keys:
             if not isinstance(key, Mapping):
                 continue
             key_id = str(key.get("kid") or "")
             if key_id:
-                if key_id in self.keys_by_id:
+                if key_id in keys_by_id:
                     raise SessionAuthError("OIDC JWKS contains duplicate kid")
                 if key.get("use") not in (None, "sig"):
                     raise SessionAuthError("OIDC JWKS key use is not allowed")
                 key_ops = key.get("key_ops")
                 if key_ops is not None and (not isinstance(key_ops, list) or "verify" not in key_ops):
                     raise SessionAuthError("OIDC JWKS key_ops must allow verify")
-                self.keys_by_id[key_id] = key
-        if not self.keys_by_id:
+                keys_by_id[key_id] = key
+        if not keys_by_id:
             raise SessionAuthError("OIDC JWKS keys must include kid")
+        with self._jwks_lock:
+            self.keys_by_id = keys_by_id
+            self._jwks_loaded_at = loaded_at
+
+    def refresh_jwks(self, *, now: int | None = None, force: bool = False) -> bool:
+        if self._jwks_loader is None:
+            return False
+        now_ts = int(time.time()) if now is None else int(now)
+        with self._jwks_lock:
+            if not force and self.jwks_cache_ttl_seconds is None:
+                return False
+            if not force and self.jwks_cache_ttl_seconds is not None:
+                if now_ts - self._jwks_loaded_at < self.jwks_cache_ttl_seconds:
+                    return False
+            try:
+                jwks = self._jwks_loader()
+            except SessionAuthError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - exchange must fail closed on loader failures.
+                raise SessionAuthError("OIDC JWKS refresh failed") from exc
+            self._install_jwks(jwks, loaded_at=now_ts)
+            return True
 
     def verify(self, token: str, *, now: int | None = None) -> SessionIdentity:
+        now_ts = int(time.time()) if now is None else int(now)
         header, payload, signing_input, signature = self._decode_compact_jwt(token)
+        self.refresh_jwks(now=now_ts)
         algorithm = str(header.get("alg") or "")
         if algorithm not in self.allowed_algorithms:
             raise SessionAuthError("OIDC token alg is not allowed")
         key_id = str(header.get("kid") or "")
         if not key_id:
             raise SessionAuthError("OIDC token kid is required")
-        key = self.keys_by_id.get(key_id)
+        with self._jwks_lock:
+            key = self.keys_by_id.get(key_id)
+        if key is None and self.refresh_on_unknown_kid:
+            self.refresh_jwks(now=now_ts, force=True)
+            with self._jwks_lock:
+                key = self.keys_by_id.get(key_id)
         if key is None:
             raise SessionAuthError("OIDC token kid is unknown")
         if str(key.get("alg") or algorithm) != algorithm:
             raise SessionAuthError("OIDC JWKS key alg does not match token alg")
         self._verify_signature(algorithm, key, signing_input, signature)
-        self._verify_registered_claims(payload, now=now)
+        self._verify_registered_claims(payload, now=now_ts)
         return self._identity_from_claims(payload)
 
     @staticmethod

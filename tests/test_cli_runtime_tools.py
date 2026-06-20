@@ -153,6 +153,57 @@ def test_cli_session_exchange_validates_oidc_jwks_and_mints_session_token(tmp_pa
     assert idp_token not in json.dumps(exchanged)
 
 
+def test_cli_session_exchange_refreshes_rotated_jwks_url_on_unknown_kid(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    old_jwks, _ = make_oidc_token(oidc_payload(), kid="old-idp-key")
+    new_jwks, idp_token = make_oidc_token(oidc_payload(), kid="new-idp-key")
+    responses = [old_jwks, new_jwks]
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, format: str, *args: object) -> None:  # noqa: A002 - stdlib signature.
+            return
+
+        def do_GET(self) -> None:  # noqa: N802 - stdlib callback name.
+            payload = responses.pop(0) if responses else new_jwks
+            encoded = json.dumps(payload).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(encoded)))
+            self.end_headers()
+            self.wfile.write(encoded)
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        exchanged = run_cli(
+            store,
+            "--session-secret",
+            SESSION_SECRET,
+            "session-exchange",
+            "--idp-token",
+            idp_token,
+            "--idp-jwks-url",
+            f"http://127.0.0.1:{server.server_port}/jwks.json",
+            "--idp-allow-insecure-jwks-url",
+            "--idp-issuer",
+            IDP_ISSUER,
+            "--idp-audience",
+            IDP_AUDIENCE,
+            "--idp-jwks-cache-ttl-seconds",
+            "300",
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+    verified = SessionTokenVerifier(SESSION_SECRET).verify(exchanged["session_token"])
+    assert verified.tenant_id == TENANT
+    assert responses == []
+    assert idp_token not in json.dumps(exchanged)
+
+
 def test_cli_session_exchange_fails_closed_on_invalid_idp_claims(tmp_path: Path) -> None:
     store = tmp_path / "mnemosyne.json"
     jwks, idp_token = make_oidc_token(oidc_payload(aud="wrong-audience"))
@@ -176,6 +227,34 @@ def test_cli_session_exchange_fails_closed_on_invalid_idp_claims(tmp_path: Path)
 
     assert result.returncode == 1
     assert "audience" in result.stderr
+    assert idp_token not in result.stderr
+
+
+def test_cli_session_exchange_fails_closed_on_oversized_jwks_file(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    _, idp_token = make_oidc_token(oidc_payload())
+    jwks_file = tmp_path / "oversized-jwks.json"
+    jwks_file.write_text(json.dumps({"keys": []}), encoding="utf-8")
+
+    result = run_raw_cli(
+        store,
+        "--session-secret",
+        SESSION_SECRET,
+        "session-exchange",
+        "--idp-token",
+        idp_token,
+        "--idp-jwks-file",
+        str(jwks_file),
+        "--idp-jwks-max-bytes",
+        "1",
+        "--idp-issuer",
+        IDP_ISSUER,
+        "--idp-audience",
+        IDP_AUDIENCE,
+    )
+
+    assert result.returncode == 1
+    assert "size limit" in result.stderr
     assert idp_token not in result.stderr
 
 
@@ -312,6 +391,33 @@ def test_cli_exposes_retrieval_provider_flags() -> None:
     assert args.embedding_model == "qwen3-embedding"
     assert args.reranker_provider == "http"
     assert args.reranker_model == "qwen3-reranker"
+
+
+def test_cli_session_exchange_exposes_jwks_rotation_flags() -> None:
+    args = build_parser().parse_args(
+        [
+            "--session-secret",
+            SESSION_SECRET,
+            "session-exchange",
+            "--idp-token",
+            "idp-token",
+            "--idp-jwks-file",
+            "jwks.json",
+            "--idp-issuer",
+            IDP_ISSUER,
+            "--idp-audience",
+            IDP_AUDIENCE,
+            "--idp-jwks-max-bytes",
+            "4096",
+            "--idp-jwks-cache-ttl-seconds",
+            "0",
+            "--idp-disable-refresh-on-unknown-kid",
+        ]
+    )
+
+    assert args.idp_jwks_max_bytes == 4096
+    assert args.idp_jwks_cache_ttl_seconds == 0
+    assert args.idp_disable_refresh_on_unknown_kid is True
 
 
 def test_cli_provider_check_exercises_http_and_media_contracts(tmp_path: Path) -> None:

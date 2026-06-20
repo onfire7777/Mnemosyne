@@ -337,6 +337,87 @@ def test_oidc_jwt_verifier_rejects_unsafe_jwks_metadata() -> None:
         OidcJwtVerifier(jwks, issuer=ISSUER, audience=AUDIENCE, allowed_algorithms=())
 
 
+def test_oidc_jwt_verifier_refreshes_jwks_for_unknown_kid() -> None:
+    old_jwks, _ = signed_oidc_token(oidc_payload(), kid="old-key")
+    new_jwks, token = signed_oidc_token(oidc_payload(), kid="new-key")
+    refreshes = 0
+
+    def load_rotated_jwks() -> dict[str, object]:
+        nonlocal refreshes
+        refreshes += 1
+        return new_jwks
+
+    identity = OidcJwtVerifier(
+        old_jwks,
+        issuer=ISSUER,
+        audience=AUDIENCE,
+        jwks_loader=load_rotated_jwks,
+        jwks_cache_ttl_seconds=300,
+    ).verify(token, now=1_900_000_000)
+
+    assert identity.tenant_id == "tenant-a"
+    assert refreshes == 1
+
+
+def test_oidc_jwt_verifier_can_disable_unknown_kid_refresh() -> None:
+    old_jwks, _ = signed_oidc_token(oidc_payload(), kid="old-key")
+    new_jwks, token = signed_oidc_token(oidc_payload(), kid="new-key")
+
+    def load_rotated_jwks() -> dict[str, object]:
+        return new_jwks
+
+    verifier = OidcJwtVerifier(
+        old_jwks,
+        issuer=ISSUER,
+        audience=AUDIENCE,
+        jwks_loader=load_rotated_jwks,
+        refresh_on_unknown_kid=False,
+    )
+
+    with pytest.raises(SessionAuthError, match="kid is unknown"):
+        verifier.verify(token, now=1_900_000_000)
+
+
+def test_oidc_jwt_verifier_refreshes_expired_jwks_cache() -> None:
+    old_jwks, _ = signed_oidc_token(oidc_payload(), kid="shared-key")
+    new_jwks, token = signed_oidc_token(oidc_payload(), kid="shared-key")
+    refreshes = 0
+
+    def load_rotated_jwks() -> dict[str, object]:
+        nonlocal refreshes
+        refreshes += 1
+        return new_jwks
+
+    identity = OidcJwtVerifier(
+        old_jwks,
+        issuer=ISSUER,
+        audience=AUDIENCE,
+        jwks_loader=load_rotated_jwks,
+        jwks_cache_ttl_seconds=0,
+    ).verify(token, now=1_900_000_000)
+
+    assert identity.user_id == "user-a"
+    assert refreshes == 1
+
+
+def test_oidc_jwt_verifier_fails_closed_when_jwks_refresh_fails() -> None:
+    jwks, token = signed_oidc_token(oidc_payload())
+
+    def fail_refresh() -> dict[str, object]:
+        raise RuntimeError("network unavailable")
+
+    verifier = OidcJwtVerifier(
+        jwks,
+        issuer=ISSUER,
+        audience=AUDIENCE,
+        jwks_loader=fail_refresh,
+        jwks_cache_ttl_seconds=0,
+    )
+
+    with pytest.raises(SessionAuthError, match="JWKS refresh failed"):
+        verifier.verify(token, now=1_900_000_000)
+
+
 def test_issue_session_from_oidc_rejects_non_positive_ttl() -> None:
     jwks, token = signed_oidc_token(oidc_payload())
     verifier = OidcJwtVerifier(jwks, issuer=ISSUER, audience=AUDIENCE)
