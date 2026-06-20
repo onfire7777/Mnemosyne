@@ -140,6 +140,50 @@ def test_shared_engine_contract_retrieval_uses_conformal_calibration(
     assert exported["calibrations"][0]["memory_type"] == "fact"
 
 
+def test_shared_engine_contract_direct_search_primitives(engine_bundle: tuple[Any, str, str]) -> None:
+    engine, tenant, user = engine_bundle
+    cid = _append_evidence(
+        engine,
+        tenant,
+        user,
+        "Shared primitive search contract stores the garnet needle evidence.",
+    )
+    assertion_id = engine.upsert_assertion(
+        Assertion(
+            tenant_id=tenant,
+            user_id=user,
+            subject="Shared primitive search",
+            predicate="finds",
+            object="garnet needle",
+            confidence=0.92,
+            source_evidence_cids=[cid],
+            trust_tier=0,
+            access_policy={"tenant": tenant},
+        )
+    )
+    relation_id = engine.add_relation(
+        Relation(
+            tenant_id=tenant,
+            source="shared primitive seed",
+            predicate="points_to",
+            target="primitive target",
+            source_evidence_cids=[cid],
+            access_policy={"tenant": tenant},
+        )
+    )
+    filt = {"tenant_id": tenant, "branch": "main", "max_trust_tier": 3, "max_sensitivity": 2}
+
+    lexical = engine.lexical_search("garnet needle", 10, filt)
+    dense = engine.vector_search("garnet needle", 10, filt)
+    graph = engine.graph_ppr(["shared primitive seed"], 5, tenant_id=tenant, branch="main")
+
+    assert {cid, assertion_id} & {hit.id for hit in lexical}
+    assert {cid, assertion_id} & {hit.id for hit in dense}
+    assert relation_id in {hit.id for hit in graph}
+    assert all(hit.tenant_id == tenant for hit in [*lexical, *dense, *graph])
+    assert all(hit.branch == "main" for hit in [*lexical, *dense, *graph])
+
+
 def test_shared_engine_contract_registers_entity_registry(engine_bundle: tuple[Any, str, str]) -> None:
     engine, tenant, user = engine_bundle
     cid = _append_evidence(engine, tenant, user, "Shared entity registry evidence.")
