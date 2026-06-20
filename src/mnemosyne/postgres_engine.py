@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections import defaultdict
 from datetime import UTC, datetime
 from typing import Any
@@ -1324,6 +1325,55 @@ class PostgresEngine:
             "contradictions": contradictions,
             "audit_log": audit,
             "deletion_log": deletion,
+        }
+
+    def to_json(self) -> str:
+        return json.dumps(self.export_all(), indent=2, sort_keys=True)
+
+    def export_all(self) -> dict[str, Any]:
+        with self.connect() as conn:
+            with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                cur.execute("SELECT id, name FROM tenants ORDER BY name")
+                tenant_rows = list(cur.fetchall())
+                branches: list[dict[str, Any]] = []
+                for tenant_row in tenant_rows:
+                    self._set_tenant(cur, tenant_row["id"])
+                    cur.execute(
+                        """
+                        SELECT name, from_branch, kind, head, created_at
+                        FROM branches
+                        WHERE tenant_id = %s
+                        ORDER BY name
+                        """,
+                        (tenant_row["id"],),
+                    )
+                    branches.extend(
+                        {
+                            "tenant_id": tenant_row["name"],
+                            "name": row["name"],
+                            "from_branch": row["from_branch"],
+                            "kind": row["kind"],
+                            "head": _bytes_to_cid(row["head"]) if row["head"] else None,
+                            "created_at": dt_to_json(row["created_at"]),
+                        }
+                        for row in cur.fetchall()
+                    )
+        tenant_exports = [self.export_tenant(row["name"]) for row in tenant_rows]
+        return {
+            "policy": self.policy.to_dict(),
+            "branches": branches,
+            "evidence": [item for exported in tenant_exports for item in exported["evidence"]],
+            "assertions": [item for exported in tenant_exports for item in exported["assertions"]],
+            "relations": [item for exported in tenant_exports for item in exported["relations"]],
+            "preferences": [item for exported in tenant_exports for item in exported["preferences"]],
+            "justifications": [item for exported in tenant_exports for item in exported["justifications"]],
+            "contradictions": [item for exported in tenant_exports for item in exported["contradictions"]],
+            "calibrations": [item for exported in tenant_exports for item in exported["calibrations"]],
+            "entities": [item for exported in tenant_exports for item in exported["entities"]],
+            "audit_log": [item for exported in tenant_exports for item in exported["audit_log"]],
+            "deletion_log": [item for exported in tenant_exports for item in exported["deletion_log"]],
+            "merge_log": [],
+            "tenants": tenant_exports,
         }
 
     def branch(self, name: str, frm: str = "main", kind: str = "scratch", tenant_id: str | None = None) -> None:
