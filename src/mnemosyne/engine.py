@@ -246,8 +246,9 @@ class LocalMemoryEngine:
             )
             key = self._evidence_key(ev.tenant_id, branch, cid)
             existing = self.evidence.get(key)
-            if existing and not existing.erased:
-                self._audit(ev.tenant_id, ev.actor, "append_evidence.noop_dedup", cid, {"branch": branch})
+            if existing:
+                op = "append_evidence.blocked_erased_replay" if existing.erased else "append_evidence.noop_dedup"
+                self._audit(ev.tenant_id, ev.actor, op, cid, {"branch": branch})
                 self._persist()
                 return cid
             stored = copy.deepcopy(ev)
