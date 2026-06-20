@@ -69,6 +69,142 @@ class SignedProvenanceVerifier:
         )
 
 
+_POLICY_FIELDS = {
+    "trusted_issuers",
+    "trustedIssuers",
+    "require_trusted_issuer",
+    "requireTrustedIssuer",
+    "rules",
+}
+_POLICY_RULE_FIELDS = {
+    "name",
+    "scope",
+    "trusted_issuers",
+    "trustedIssuers",
+    "require_trusted_issuer",
+    "requireTrustedIssuer",
+}
+_POLICY_SCOPE_FIELDS = {
+    "tenant_id",
+    "user_id",
+    "actor",
+    "source_type",
+    "source_identity",
+    "modality",
+    "media_type",
+    "asset_path",
+    "asset_sha256",
+}
+
+
+@dataclass(frozen=True, slots=True)
+class ProvenanceTrustRule:
+    scope: tuple[tuple[str, tuple[str, ...]], ...] = ()
+    trusted_issuers: tuple[str, ...] = ()
+    require_trusted_issuer: bool = True
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ProvenanceTrustRule":
+        unknown = set(data) - _POLICY_RULE_FIELDS
+        if unknown:
+            raise ValueError(f"unknown provenance trust rule fields: {', '.join(sorted(unknown))}")
+        raw_scope = data.get("scope", {}) or {}
+        if not isinstance(raw_scope, dict):
+            raise ValueError("provenance trust rule scope must be an object")
+        unknown_scope = set(raw_scope) - _POLICY_SCOPE_FIELDS
+        if unknown_scope:
+            raise ValueError(f"unknown provenance trust scope fields: {', '.join(sorted(unknown_scope))}")
+        scope = tuple(
+            (str(key), _string_tuple(value, field=f"scope.{key}"))
+            for key, value in sorted(raw_scope.items())
+        )
+        return cls(
+            scope=scope,
+            trusted_issuers=_trusted_issuer_tuple(data),
+            require_trusted_issuer=_bool_field(
+                data,
+                snake_name="require_trusted_issuer",
+                camel_name="requireTrustedIssuer",
+                default=True,
+            ),
+        )
+
+    def matches(self, context: dict[str, Any]) -> bool:
+        for key, accepted_values in self.scope:
+            actual = context.get(key)
+            if actual is None or str(actual) not in accepted_values:
+                return False
+        return True
+
+
+@dataclass(frozen=True, slots=True)
+class ProvenanceTrustPolicy:
+    """Issuer trust policy for production C2PA verification decisions."""
+
+    trusted_issuers: tuple[str, ...] = ()
+    require_trusted_issuer: bool = False
+    rules: tuple[ProvenanceTrustRule, ...] = ()
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ProvenanceTrustPolicy":
+        unknown = set(data) - _POLICY_FIELDS
+        if unknown:
+            raise ValueError(f"unknown provenance trust policy fields: {', '.join(sorted(unknown))}")
+        raw_rules = data.get("rules", ()) or ()
+        if not isinstance(raw_rules, list | tuple):
+            raise ValueError("provenance trust policy rules must be a list")
+        return cls(
+            trusted_issuers=_trusted_issuer_tuple(data),
+            require_trusted_issuer=_bool_field(
+                data,
+                snake_name="require_trusted_issuer",
+                camel_name="requireTrustedIssuer",
+                default=False,
+            ),
+            rules=tuple(ProvenanceTrustRule.from_dict(dict(item)) for item in raw_rules),
+        )
+
+    def for_context(self, context: dict[str, Any]) -> "ProvenanceTrustPolicy":
+        if not self.rules:
+            return self
+        matching_rules = tuple(rule for rule in self.rules if rule.matches(context))
+        if not matching_rules:
+            return ProvenanceTrustPolicy(require_trusted_issuer=True)
+        trusted_issuers = tuple(
+            dict.fromkeys(
+                item
+                for rule in matching_rules
+                for item in (*self.trusted_issuers, *rule.trusted_issuers)
+                if item
+            )
+        )
+        return ProvenanceTrustPolicy(
+            trusted_issuers=trusted_issuers,
+            require_trusted_issuer=self.require_trusted_issuer
+            or any(rule.require_trusted_issuer for rule in matching_rules),
+        )
+
+
+def _bool_field(data: dict[str, Any], *, snake_name: str, camel_name: str, default: bool) -> bool:
+    raw = data.get(snake_name, data.get(camel_name, default))
+    if isinstance(raw, bool):
+        return raw
+    raise ValueError(f"{snake_name} must be boolean")
+
+
+def _trusted_issuer_tuple(data: dict[str, Any]) -> tuple[str, ...]:
+    return _string_tuple(data.get("trusted_issuers", data.get("trustedIssuers", ())) or (), field="trusted_issuers")
+
+
+def _string_tuple(raw_values: Any, *, field: str) -> tuple[str, ...]:
+    if isinstance(raw_values, str):
+        raw_values = [raw_values]
+    elif not isinstance(raw_values, (list, tuple, set)):
+        raw_values = [raw_values]
+    values = (str(item).strip() for item in raw_values)
+    return tuple(dict.fromkeys(item for item in values if item))
+
+
 @dataclass(frozen=True, slots=True)
 class C2paToolVerifier:
     """Verifier adapter for `c2patool`-style JSON verification.
@@ -82,11 +218,14 @@ class C2paToolVerifier:
 
     tool_path: str = "c2patool"
     trusted_issuers: tuple[str, ...] = ()
+    trust_policy: ProvenanceTrustPolicy = field(default_factory=ProvenanceTrustPolicy)
     fallback: SignedProvenanceVerifier = field(default_factory=SignedProvenanceVerifier)
     timeout_seconds: float = 30.0
 
     def verify(self, payload: bytes, manifest: dict[str, Any] | None) -> ProvenanceDecision:
-        asset_path = str((manifest or {}).get("asset_path") or (manifest or {}).get("c2pa_asset_path") or "")
+        manifest_data = dict(manifest or {})
+        public_manifest = _public_manifest(manifest_data)
+        asset_path = str(manifest_data.get("asset_path") or manifest_data.get("c2pa_asset_path") or "")
         if not asset_path:
             return self.fallback.verify(payload, manifest)
         try:
@@ -104,7 +243,7 @@ class C2paToolVerifier:
                 quarantine=True,
                 trust_delta=5,
                 reason="c2pa verifier execution failed",
-                manifest=dict(manifest or {}),
+                manifest=public_manifest,
                 diagnostics={"error": str(exc), "tool": self.tool_path},
             )
         if completed.returncode != 0:
@@ -114,7 +253,7 @@ class C2paToolVerifier:
                 quarantine=True,
                 trust_delta=5,
                 reason="c2pa verification failed",
-                manifest=dict(manifest or {}),
+                manifest=public_manifest,
                 diagnostics={"returncode": completed.returncode, "stderr": completed.stderr[:1000]},
             )
         try:
@@ -126,7 +265,7 @@ class C2paToolVerifier:
                 quarantine=True,
                 trust_delta=5,
                 reason="c2pa verifier returned invalid json",
-                manifest=dict(manifest or {}),
+                manifest=public_manifest,
                 diagnostics={"error": str(exc)},
             )
         actual_hash = sha256(payload).hexdigest()
@@ -138,25 +277,77 @@ class C2paToolVerifier:
                 quarantine=True,
                 trust_delta=5,
                 reason=str(binding["reason"]),
-                manifest={**dict(manifest or {}), "c2pa": _report_summary(report, binding=binding)},
+                manifest={**public_manifest, "c2pa": _report_summary(report, binding=binding)},
                 diagnostics={"tool": self.tool_path, **dict(binding["diagnostics"])},
             )
         signer = _find_first(report, {"issuer", "signer", "claim_generator", "claimGenerator", "common_name", "commonName"})
-        trusted = bool(signer) and (not self.trusted_issuers or str(signer) in self.trusted_issuers)
+        trust_policy = self._effective_trust_policy(
+            {
+                **_policy_context(manifest_data),
+                "asset_path": asset_path,
+                "asset_sha256": actual_hash,
+            }
+        )
+        trusted_issuers = trust_policy.trusted_issuers
+        trusted = bool(signer) and (
+            (not trusted_issuers and not trust_policy.require_trusted_issuer) or str(signer) in trusted_issuers
+        )
+        trust_diagnostics = {
+            "require_trusted_issuer": trust_policy.require_trusted_issuer,
+            "trusted_issuers": list(trusted_issuers),
+        }
+        if trust_policy.require_trusted_issuer and not trusted:
+            return ProvenanceDecision(
+                valid=True,
+                trusted=False,
+                quarantine=True,
+                trust_delta=5,
+                reason="c2pa manifest valid but signer rejected by trust policy",
+                manifest={**public_manifest, "c2pa": _report_summary(report, binding=binding)},
+                diagnostics={
+                    "tool": self.tool_path,
+                    "signer": signer,
+                    "trusted_issuers": list(trusted_issuers),
+                    "trust_policy": trust_diagnostics,
+                    "asset_binding": binding["summary"],
+                },
+            )
         return ProvenanceDecision(
             valid=True,
             trusted=trusted,
             quarantine=False,
             trust_delta=-2 if trusted else -1,
             reason="c2pa manifest verified" if trusted else "c2pa manifest valid but signer not trusted",
-            manifest={**dict(manifest or {}), "c2pa": _report_summary(report, binding=binding)},
+            manifest={**public_manifest, "c2pa": _report_summary(report, binding=binding)},
             diagnostics={
                 "tool": self.tool_path,
                 "signer": signer,
-                "trusted_issuers": list(self.trusted_issuers),
+                "trusted_issuers": list(trusted_issuers),
+                "trust_policy": trust_diagnostics,
                 "asset_binding": binding["summary"],
             },
         )
+
+    def _effective_trust_policy(self, context: dict[str, Any]) -> ProvenanceTrustPolicy:
+        scoped_policy = self.trust_policy.for_context(context)
+        issuers = tuple(dict.fromkeys(item for item in (*self.trusted_issuers, *scoped_policy.trusted_issuers) if item))
+        return ProvenanceTrustPolicy(
+            trusted_issuers=issuers,
+            require_trusted_issuer=scoped_policy.require_trusted_issuer,
+        )
+
+
+def _public_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
+    public = dict(manifest)
+    public.pop("_ingest_context", None)
+    return public
+
+
+def _policy_context(manifest: dict[str, Any]) -> dict[str, Any]:
+    context = manifest.get("_ingest_context")
+    if not isinstance(context, dict):
+        return {}
+    return {str(key): value for key, value in context.items() if key in _POLICY_SCOPE_FIELDS}
 
 
 def _find_first(value: Any, keys: set[str]) -> Any:

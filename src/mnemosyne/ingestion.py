@@ -84,7 +84,7 @@ class IngestionPipeline:
 
     def ingest(self, request: IngestRequest, branch: str = "main") -> IngestResult:
         payload = request.payload_bytes()
-        provenance = self.provenance_verifier.verify(payload, request.signed_provenance)
+        provenance = self.provenance_verifier.verify(payload, _provenance_manifest_for_request(request))
         classification = classify_request(request, payload)
         residency = normalize_residency(
             request.metadata.get("residency") or request.metadata.get("data_residency")
@@ -335,6 +335,24 @@ def _provenance_binds_asset(manifest: dict[str, Any] | None) -> bool:
         asset_binding = c2pa.get("asset_binding")
         return isinstance(asset_binding, dict) and asset_binding.get("bound") is True
     return False
+
+
+def _provenance_manifest_for_request(request: IngestRequest) -> dict[str, Any] | None:
+    if not request.signed_provenance:
+        return None
+    manifest = dict(request.signed_provenance)
+    if "asset_path" in manifest or "c2pa_asset_path" in manifest:
+        manifest["_ingest_context"] = {
+            "tenant_id": request.tenant_id,
+            "user_id": request.user_id,
+            "actor": request.actor,
+            "source_type": request.source_type,
+            "source_identity": request.source_identity or "",
+            "modality": request.modality,
+            "media_type": request.media_type,
+            "asset_path": str(manifest.get("asset_path") or manifest.get("c2pa_asset_path") or ""),
+        }
+    return manifest
 
 
 def _privacy_text(request: IngestRequest, payload: bytes) -> str:

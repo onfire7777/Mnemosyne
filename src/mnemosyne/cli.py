@@ -22,7 +22,7 @@ from mnemosyne.mcp_tools import MemoryTools, TOOL_SPEC
 from mnemosyne.models import Hit
 from mnemosyne.observability import MetricsRegistry, build_ops_report, render_ops_dashboard
 from mnemosyne.parametric import ParametricArtifactStore, ParametricTier
-from mnemosyne.provenance import C2paToolVerifier, SignedProvenanceVerifier
+from mnemosyne.provenance import C2paToolVerifier, ProvenanceTrustPolicy, SignedProvenanceVerifier
 from mnemosyne.queue import InProcessQueue, QueueWorker
 from mnemosyne.retrieval import HashingEmbeddingProvider, HttpEmbeddingProvider, HttpReranker, LocalSimilarityReranker, RetrievalAdapters
 from mnemosyne.runtime_state import RuntimeState
@@ -112,12 +112,31 @@ def load_engine(args: argparse.Namespace) -> MemoryEngine:
 
 def load_provenance_verifier(args: argparse.Namespace) -> SignedProvenanceVerifier | C2paToolVerifier:
     if args.c2pa_tool:
+        trust_policy = load_provenance_trust_policy(args)
         return C2paToolVerifier(
             tool_path=args.c2pa_tool,
-            trusted_issuers=tuple(args.trusted_provenance_issuer or []),
+            trust_policy=trust_policy,
             timeout_seconds=args.provenance_timeout,
         )
     return SignedProvenanceVerifier()
+
+
+def load_provenance_trust_policy(args: argparse.Namespace) -> ProvenanceTrustPolicy:
+    trusted_issuers = [str(item).strip() for item in (args.trusted_provenance_issuer or []) if str(item).strip()]
+    require_trusted_issuer = False
+    rules = ()
+    policy_path = getattr(args, "provenance_trust_policy", None)
+    if policy_path:
+        policy_data = json.loads(Path(policy_path).read_text(encoding="utf-8"))
+        policy = ProvenanceTrustPolicy.from_dict(policy_data)
+        trusted_issuers.extend(policy.trusted_issuers)
+        require_trusted_issuer = policy.require_trusted_issuer
+        rules = policy.rules
+    return ProvenanceTrustPolicy(
+        trusted_issuers=tuple(dict.fromkeys(trusted_issuers)),
+        require_trusted_issuer=require_trusted_issuer,
+        rules=rules,
+    )
 
 
 def load_object_store(args: argparse.Namespace) -> LocalObjectStore:
@@ -214,7 +233,7 @@ def load_signed_provenance(args: argparse.Namespace) -> dict[str, Any] | None:
     if args.signed_provenance_file:
         manifest.update(json.loads(Path(args.signed_provenance_file).read_text(encoding="utf-8")))
     if args.file and args.c2pa_tool:
-        manifest.setdefault("asset_path", args.file)
+        manifest["asset_path"] = args.file
     return manifest or None
 
 
@@ -899,6 +918,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--graph-backend", default=os.environ.get("MNEMOSYNE_GRAPH_BACKEND", "postgres-recursive-ppr"))
     parser.add_argument("--c2pa-tool", default=os.environ.get("MNEMOSYNE_C2PA_TOOL"))
     parser.add_argument("--trusted-provenance-issuer", action="append", default=os.environ.get("MNEMOSYNE_TRUSTED_PROVENANCE_ISSUERS", "").split(",") if os.environ.get("MNEMOSYNE_TRUSTED_PROVENANCE_ISSUERS") else [])
+    parser.add_argument("--provenance-trust-policy", default=os.environ.get("MNEMOSYNE_PROVENANCE_TRUST_POLICY"))
     parser.add_argument("--provenance-timeout", type=float, default=float(os.environ.get("MNEMOSYNE_PROVENANCE_TIMEOUT", "30")))
     parser.add_argument("--media-extractor-command", default=os.environ.get("MNEMOSYNE_MEDIA_EXTRACTOR_COMMAND"))
     parser.add_argument("--media-extractor-timeout", type=float, default=float(os.environ.get("MNEMOSYNE_MEDIA_EXTRACTOR_TIMEOUT", "30")))

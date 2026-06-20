@@ -235,6 +235,149 @@ def test_cli_ingests_binary_file_with_c2pa_verifier(tmp_path: Path) -> None:
     assert search["hits"][0]["id"] == ingested["cid"]
 
 
+def test_cli_ingest_c2pa_trust_policy_quarantines_untrusted_signer(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    asset = tmp_path / "capture.bin"
+    payload = b"binary camera capture"
+    asset.write_bytes(payload)
+    asset_hash = sha256(payload).hexdigest()
+    verifier_stub = tmp_path / "c2pa-ok.py"
+    verifier_stub.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env python3",
+                "import json",
+                f"print(json.dumps({{'active_manifest': 'manifest-1', 'claim_generator': 'issuer-b', 'asset_sha256': '{asset_hash}'}}))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    verifier_stub.chmod(0o755)
+    trust_policy = tmp_path / "trust-policy.json"
+    trust_policy.write_text(
+        json.dumps(
+            {
+                "rules": [
+                    {
+                        "scope": {"tenant_id": TENANT, "source_type": "camera", "modality": "binary"},
+                        "trusted_issuers": ["issuer-a"],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    ingested = run_cli(
+        store,
+        "--c2pa-tool",
+        str(verifier_stub),
+        "--provenance-trust-policy",
+        str(trust_policy),
+        "ingest",
+        "--tenant",
+        TENANT,
+        "--user",
+        USER,
+        "--actor",
+        "external",
+        "--source-type",
+        "camera",
+        "--source-identity",
+        "device-1",
+        "--file",
+        str(asset),
+        "--modality",
+        "binary",
+        "--media-type",
+        "application/octet-stream",
+        "--metadata",
+        json.dumps({"description": "Binary camera capture."}),
+        "--trust-tier",
+        "5",
+        "--sensitivity",
+        "2",
+    )
+
+    assert ingested["quarantined"] is True
+    assert ingested["provenance"]["valid"] is True
+    assert ingested["provenance"]["trusted"] is False
+    assert ingested["provenance"]["reason"] == "c2pa manifest valid but signer rejected by trust policy"
+    assert ingested["provenance"]["diagnostics"]["trust_policy"] == {
+        "require_trusted_issuer": True,
+        "trusted_issuers": ["issuer-a"],
+    }
+    exported = run_cli(store, "export", "--tenant", TENANT)
+    evidence = next(item for item in exported["evidence"] if item["cid"] == ingested["cid"])
+    search = run_cli(store, "search", "--tenant", TENANT, "--query", "camera capture")
+    assert evidence["metadata"]["quarantine_reason"] == "c2pa manifest valid but signer rejected by trust policy"
+    assert "quarantined" in evidence["capability_tags"]
+    assert search["hits"] == []
+
+
+def test_cli_c2pa_verifier_uses_actual_file_over_manifest_asset_path(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    asset = tmp_path / "capture.bin"
+    asset.write_bytes(b"actual camera capture")
+    decoy = tmp_path / "decoy.bin"
+    decoy.write_bytes(b"decoy camera capture")
+    verifier_stub = tmp_path / "c2pa-ok.py"
+    verifier_stub.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env python3",
+                "import hashlib, json, sys",
+                "payload = open(sys.argv[1], 'rb').read()",
+                "print(json.dumps({'active_manifest': 'manifest-1', 'claim_generator': 'issuer-a', 'asset_sha256': hashlib.sha256(payload).hexdigest(), 'asset_path': sys.argv[1]}))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    verifier_stub.chmod(0o755)
+    malicious_manifest = tmp_path / "provenance.json"
+    malicious_manifest.write_text(json.dumps({"asset_path": str(decoy)}), encoding="utf-8")
+
+    ingested = run_cli(
+        store,
+        "--c2pa-tool",
+        str(verifier_stub),
+        "--trusted-provenance-issuer",
+        "issuer-a",
+        "ingest",
+        "--tenant",
+        TENANT,
+        "--user",
+        USER,
+        "--actor",
+        "external",
+        "--source-type",
+        "camera",
+        "--source-identity",
+        "device-1",
+        "--file",
+        str(asset),
+        "--signed-provenance-file",
+        str(malicious_manifest),
+        "--modality",
+        "binary",
+        "--media-type",
+        "application/octet-stream",
+        "--trust-tier",
+        "5",
+        "--sensitivity",
+        "2",
+    )
+
+    assert ingested["quarantined"] is False
+    assert ingested["provenance"]["trusted"] is True
+    assert ingested["provenance"]["manifest"]["asset_path"] == str(asset)
+    assert ingested["provenance"]["manifest"]["c2pa"]["asset_binding"] == {
+        "bound": True,
+        "method": "sha256",
+        "sha256": sha256(b"actual camera capture").hexdigest(),
+    }
+
+
 def test_cli_enforces_allowed_residency_on_ingest(tmp_path: Path) -> None:
     store = tmp_path / "mnemosyne.json"
     accepted = run_cli(

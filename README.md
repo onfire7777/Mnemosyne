@@ -88,11 +88,23 @@ By default it runs Mnemosyne's deterministic stdio JSON-RPC shim; pass `--sdk` t
 mneme-mcp --store .mnemosyne/mcp-store.json --sdk
 ```
 
+C2PA verifier trust can be scoped through a JSON policy file:
+
+```bash
+python -m mnemosyne.cli \
+  --c2pa-tool c2patool \
+  --provenance-trust-policy ./c2pa-trust-policy.json \
+  ingest --tenant tenant-a --user user-a --actor external --source-type camera \
+  --file ./capture.bin --modality binary --trust-tier 5
+```
+
+Policy files can define global `trusted_issuers` or scoped `rules` such as `{"rules": [{"scope": {"tenant_id": "tenant-a", "source_type": "camera", "modality": "binary"}, "trusted_issuers": ["issuer-a"]}]}`. When scoped rules are present, no matching rule means the otherwise valid manifest is quarantined instead of trusted.
+
 ## Status
 
 The repository has a verified local scaffold plus runtime parity extensions. Current checks:
 
-- `.venv/bin/python -m pytest -q` returns 109 passing tests and 7 skipped live-DB tests with the optional MCP SDK extra installed.
+- `.venv/bin/python -m pytest -q` returns 114 passing tests and 7 skipped live-DB tests with the optional MCP SDK extra installed.
 - With Docker compose Postgres running, `MNEMOSYNE_POSTGRES_DSN=postgresql://... .venv/bin/python -m pytest -q tests/test_postgres_engine_live.py` returns 7 passing live adapter tests covering tenant RLS, SQL FTS, pgvector assertion search, dense evidence fallback, recursive graph/PPR, branch/discard, branch merge retrieval, bitemporal supersession, tenant isolation, tombstone and hard-delete forget modes, transitive derived-evidence erasure across assertions/preferences/relations, HTTP-configurable retrieval adapter wiring, CLI `--backend postgres`, asset-bound CLI file ingestion through the C2PA verifier adapter, externalized payload derived-text retrieval, async media extraction, and gated consolidation promotion on Postgres.
 
 Exact 1:1 blueprint parity is still in progress. The controlling status artifact is `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md`.
