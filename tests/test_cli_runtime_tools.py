@@ -705,6 +705,7 @@ def test_cli_profile_graph_learning_and_parametric_flows_persist(tmp_path: Path)
     promoted_procedure = run_cli(store, "procedure-promote", "--procedure-id", procedure["id"])
     rolled_back = run_cli(store, "procedure-rollback", "--procedure-id", procedure["id"])
     rolled_back_search = run_cli(store, "procedure-search", "--tenant", TENANT, "--query", "date-math-deploy", "--status", "rolled_back")
+    ops = run_cli(store, "ops-report", "--tenant", TENANT)
 
     assert validated["status"] == "validated"
     assert lesson_search["lessons"][0]["id"] == lesson["id"]
@@ -722,3 +723,5 @@ def test_cli_profile_graph_learning_and_parametric_flows_persist(tmp_path: Path)
     assert promoted_procedure["status"] == "promoted"
     assert rolled_back["status"] == "rolled_back"
     assert rolled_back_search["procedures"][0]["id"] == procedure["id"]
+    assert ops["tripwires"]["gate_promotions"] >= 2
+    assert ops["tripwires"]["gate_rollbacks"] >= 2

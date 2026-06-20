@@ -9,8 +9,8 @@ from mnemosyne.ingestion import IngestRequest, IngestionPipeline
 from mnemosyne.jobs import CALIBRATE_JOB, LIFECYCLE_SWEEP_JOB, OBSERVABILITY_SNAPSHOT_JOB, RuntimeJobHandlers
 from mnemosyne.learning import Lesson, Procedure
 from mnemosyne.media import MEDIA_EXTRACT_JOB, MediaExtractionResult
-from mnemosyne.models import Evidence
-from mnemosyne.observability import MetricsRegistry
+from mnemosyne.models import Contradiction, Evidence
+from mnemosyne.observability import MetricsRegistry, build_ops_report
 from mnemosyne.parametric import ParametricArtifactStore, ParametricTier
 from mnemosyne.prefetch import AnticipatoryPrefetcher, PrefetchCandidate
 from mnemosyne.provenance import C2paToolVerifier, SignedProvenanceVerifier
@@ -471,6 +471,17 @@ def test_runtime_job_handlers_drain_calibration_lifecycle_and_observability_jobs
     snapshot = metrics.snapshot()
     assert snapshot.counters["queue.job.calibrate.complete"] == 1
     assert snapshot.counters["lifecycle.demotions"] == 1
+
+
+def test_ops_report_flags_open_contradiction_backlog() -> None:
+    engine = LocalMemoryEngine()
+    engine.add_contradiction(Contradiction(tenant_id=TENANT, a="fact-a", b="fact-b"))
+
+    report = build_ops_report(engine=engine, tenant_id=TENANT, max_open_contradictions=0)
+
+    assert report["counts"]["contradictions"] == 1
+    assert report["tripwires"]["open_contradictions"] == 1
+    assert report["tripwires"]["passed"] is False
 
 
 def test_prefetch_gate_warms_only_predictable_safe_queries() -> None:
