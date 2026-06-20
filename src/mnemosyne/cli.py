@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 import tempfile
+from collections.abc import Mapping
 from datetime import datetime
 from hashlib import sha256
 from pathlib import Path
@@ -38,6 +39,7 @@ from mnemosyne.retrieval import (
 from mnemosyne.postgres_runtime_state import PostgresRuntimeState
 from mnemosyne.runtime_state import RuntimeState
 from mnemosyne.security import (
+    OidcAuthorizationPolicy,
     OidcJwtVerifier,
     SessionAuthError,
     SessionTokenVerifier,
@@ -479,6 +481,179 @@ def cmd_idp_authz_policy_check(args: argparse.Namespace) -> None:
     if policy is None:
         raise SystemExit("idp-authz-policy-check requires --idp-authz-policy or --idp-authz-policy-file")
     emit({"ok": True, "policy": policy.audit_summary()})
+
+
+def _load_required_oidc_authz_policy(
+    *,
+    label: str,
+    policy: str | None,
+    policy_file: str | None,
+) -> OidcAuthorizationPolicy:
+    try:
+        loaded = load_oidc_authorization_policy(policy=policy, policy_file=policy_file)
+    except SessionAuthError as exc:
+        raise SystemExit(f"{label} idp authz policy denied: {exc}") from exc
+    if loaded is None:
+        raise SystemExit(f"{label} idp authz policy is required")
+    return loaded
+
+
+def _require_expected_policy_fingerprint(*, label: str, expected: str | None, actual: str) -> None:
+    if not expected:
+        raise SystemExit(f"{label} expected fingerprint is required")
+    if expected.strip().lower() != actual:
+        raise SystemExit(f"{label} fingerprint mismatch")
+
+
+def _policy_rule_names(summary: Mapping[str, Any]) -> set[str]:
+    names: set[str] = set()
+    for rule in summary.get("rules", []):
+        if isinstance(rule, Mapping) and rule.get("name"):
+            names.add(str(rule["name"]))
+    return names
+
+
+def _policy_diff_summary(
+    current: OidcAuthorizationPolicy,
+    candidate: OidcAuthorizationPolicy,
+    *,
+    current_summary: Mapping[str, Any],
+    candidate_summary: Mapping[str, Any],
+) -> dict[str, Any]:
+    current_rules = current.canonical_mapping()["rules"]
+    candidate_rules = candidate.canonical_mapping()["rules"]
+    compared_rules = min(len(current_rules), len(candidate_rules))
+    changed_rule_indexes = [
+        index
+        for index in range(compared_rules)
+        if current_rules[index] != candidate_rules[index]
+    ]
+    current_names = _policy_rule_names(current_summary)
+    candidate_names = _policy_rule_names(candidate_summary)
+    return {
+        "fingerprint_changed": current_summary["fingerprint"] != candidate_summary["fingerprint"],
+        "allowed_client_ids_count_delta": int(candidate_summary["allowed_client_ids_count"])
+        - int(current_summary["allowed_client_ids_count"]),
+        "client_id_claims_changed": list(current_summary["client_id_claims"]) != list(candidate_summary["client_id_claims"]),
+        "rule_count_delta": int(candidate_summary["rule_count"]) - int(current_summary["rule_count"]),
+        "roles_added": sorted(set(candidate_summary["roles"]) - set(current_summary["roles"])),
+        "roles_removed": sorted(set(current_summary["roles"]) - set(candidate_summary["roles"])),
+        "source_trust_tiers_added": sorted(set(candidate_summary["source_trust_tiers"]) - set(current_summary["source_trust_tiers"])),
+        "source_trust_tiers_removed": sorted(set(current_summary["source_trust_tiers"]) - set(candidate_summary["source_trust_tiers"])),
+        "named_rules_added": sorted(candidate_names - current_names),
+        "named_rules_removed": sorted(current_names - candidate_names),
+        "changed_rule_indexes": changed_rule_indexes,
+    }
+
+
+def _load_policy_simulations(path: str | None) -> list[Mapping[str, Any]]:
+    if not path:
+        return []
+    try:
+        loaded = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"simulation file denied: {exc}") from exc
+    if not isinstance(loaded, list):
+        raise SystemExit("simulation file must contain a JSON array")
+    simulations: list[Mapping[str, Any]] = []
+    for index, item in enumerate(loaded):
+        if not isinstance(item, Mapping):
+            raise SystemExit(f"simulation {index} must be a JSON object")
+        if not isinstance(item.get("payload"), Mapping):
+            raise SystemExit(f"simulation {index} requires object payload")
+        if not item.get("tenant_id") or not item.get("user_id"):
+            raise SystemExit(f"simulation {index} requires tenant_id and user_id")
+        simulations.append(item)
+    return simulations
+
+
+def _policy_authorization_outcome(policy: OidcAuthorizationPolicy, simulation: Mapping[str, Any]) -> dict[str, Any]:
+    expires_at = simulation.get("expires_at")
+    session_id = simulation.get("session_id")
+    try:
+        identity = policy.authorize(
+            simulation["payload"],  # type: ignore[arg-type]
+            tenant_id=str(simulation["tenant_id"]),
+            user_id=str(simulation["user_id"]),
+            expires_at=int(expires_at) if expires_at is not None else None,
+            session_id=str(session_id) if session_id is not None else None,
+        )
+    except SessionAuthError as exc:
+        return {"authorized": False, "error": str(exc)}
+    return {
+        "authorized": True,
+        "role": identity.role,
+        "source_trust_tier": identity.source_trust_tier,
+    }
+
+
+def _policy_simulation_report(
+    current: OidcAuthorizationPolicy,
+    candidate: OidcAuthorizationPolicy,
+    simulations: list[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    report: list[dict[str, Any]] = []
+    for index, simulation in enumerate(simulations):
+        current_outcome = _policy_authorization_outcome(current, simulation)
+        candidate_outcome = _policy_authorization_outcome(candidate, simulation)
+        report.append(
+            {
+                "index": index,
+                "current": current_outcome,
+                "candidate": candidate_outcome,
+                "changed": current_outcome != candidate_outcome,
+            }
+        )
+    return report
+
+
+def cmd_idp_authz_policy_rollout_check(args: argparse.Namespace) -> None:
+    current = _load_required_oidc_authz_policy(
+        label="current",
+        policy=args.current_idp_authz_policy,
+        policy_file=args.current_idp_authz_policy_file,
+    )
+    candidate = _load_required_oidc_authz_policy(
+        label="candidate",
+        policy=args.candidate_idp_authz_policy,
+        policy_file=args.candidate_idp_authz_policy_file,
+    )
+    current_summary = current.audit_summary()
+    candidate_summary = candidate.audit_summary()
+    _require_expected_policy_fingerprint(
+        label="current",
+        expected=args.expected_current_fingerprint,
+        actual=str(current_summary["fingerprint"]),
+    )
+    _require_expected_policy_fingerprint(
+        label="candidate",
+        expected=args.expected_candidate_fingerprint,
+        actual=str(candidate_summary["fingerprint"]),
+    )
+    simulations = _policy_simulation_report(current, candidate, _load_policy_simulations(args.simulation_file))
+    simulation_change_count = sum(1 for item in simulations if item["changed"])
+    rollout = {
+        "current": current_summary,
+        "candidate": candidate_summary,
+        "diff": _policy_diff_summary(
+            current,
+            candidate,
+            current_summary=current_summary,
+            candidate_summary=candidate_summary,
+        ),
+        "simulation_change_count": simulation_change_count,
+        "simulations": simulations,
+    }
+    if simulation_change_count and not args.allow_simulation_changes:
+        emit(
+            {
+                "ok": False,
+                "error": "simulation authorization changes require --allow-simulation-changes",
+                "rollout": rollout,
+            }
+        )
+        raise SystemExit(1)
+    emit({"ok": True, "rollout": rollout})
 
 
 def cmd_capture(args: argparse.Namespace) -> None:
@@ -1728,6 +1903,43 @@ def build_parser() -> argparse.ArgumentParser:
         default=os.environ.get("MNEMOSYNE_IDP_AUTHZ_POLICY_FILE"),
     )
     idp_authz_policy_check.set_defaults(func=cmd_idp_authz_policy_check)
+
+    idp_authz_policy_rollout_check = sub.add_parser("idp-authz-policy-rollout-check")
+    idp_authz_policy_rollout_check.add_argument(
+        "--current-idp-authz-policy",
+        default=os.environ.get("MNEMOSYNE_CURRENT_IDP_AUTHZ_POLICY"),
+    )
+    idp_authz_policy_rollout_check.add_argument(
+        "--current-idp-authz-policy-file",
+        default=os.environ.get("MNEMOSYNE_CURRENT_IDP_AUTHZ_POLICY_FILE"),
+    )
+    idp_authz_policy_rollout_check.add_argument(
+        "--candidate-idp-authz-policy",
+        default=os.environ.get("MNEMOSYNE_CANDIDATE_IDP_AUTHZ_POLICY"),
+    )
+    idp_authz_policy_rollout_check.add_argument(
+        "--candidate-idp-authz-policy-file",
+        default=os.environ.get("MNEMOSYNE_CANDIDATE_IDP_AUTHZ_POLICY_FILE"),
+    )
+    idp_authz_policy_rollout_check.add_argument(
+        "--expected-current-fingerprint",
+        default=os.environ.get("MNEMOSYNE_EXPECTED_CURRENT_IDP_AUTHZ_POLICY_FINGERPRINT"),
+    )
+    idp_authz_policy_rollout_check.add_argument(
+        "--expected-candidate-fingerprint",
+        default=os.environ.get("MNEMOSYNE_EXPECTED_CANDIDATE_IDP_AUTHZ_POLICY_FINGERPRINT"),
+    )
+    idp_authz_policy_rollout_check.add_argument(
+        "--simulation-file",
+        default=os.environ.get("MNEMOSYNE_IDP_AUTHZ_POLICY_SIMULATION_FILE"),
+        help="JSON array of tenant/user/payload claim simulations for current-vs-candidate rollout checks",
+    )
+    idp_authz_policy_rollout_check.add_argument(
+        "--allow-simulation-changes",
+        action="store_true",
+        default=env_flag("MNEMOSYNE_IDP_AUTHZ_POLICY_ALLOW_SIMULATION_CHANGES", default=False),
+    )
+    idp_authz_policy_rollout_check.set_defaults(func=cmd_idp_authz_policy_rollout_check)
 
     capture = sub.add_parser("capture")
     capture.add_argument("--tenant", required=True)

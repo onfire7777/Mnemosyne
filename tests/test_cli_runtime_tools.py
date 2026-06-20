@@ -304,6 +304,171 @@ def test_cli_session_exchange_authz_policy_miss_fails_closed(tmp_path: Path) -> 
     assert idp_token not in result.stderr
 
 
+def test_cli_idp_authz_policy_check_reports_fingerprint_without_claim_values(tmp_path: Path) -> None:
+    policy_file = tmp_path / "authz-policy.json"
+    policy_file.write_text(
+        json.dumps(
+            {
+                "allowed_client_ids": ["cli-client"],
+                "rules": [
+                    {
+                        "name": "operator-access",
+                        "tenant_ids": [TENANT],
+                        "claim_contains": {"groups": "mnemosyne-operators"},
+                        "role": "operator",
+                        "source_trust_tier": 0,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = run_cli(tmp_path / "mnemosyne.json", "idp-authz-policy-check", "--idp-authz-policy-file", str(policy_file))
+
+    assert report["ok"] is True
+    assert len(report["policy"]["fingerprint"]) == 64
+    assert report["policy"]["rules"][0]["name"] == "operator-access"
+    encoded = json.dumps(report, sort_keys=True)
+    assert "cli-client" not in encoded
+    assert "mnemosyne-operators" not in encoded
+
+
+def test_cli_idp_authz_policy_rollout_requires_fingerprints_and_gates_simulation_changes(
+    tmp_path: Path,
+) -> None:
+    store = tmp_path / "mnemosyne.json"
+    current_policy_file = tmp_path / "current-authz-policy.json"
+    candidate_policy_file = tmp_path / "candidate-authz-policy.json"
+    simulation_file = tmp_path / "simulations.json"
+    current_policy_file.write_text(
+        json.dumps(
+            {
+                "allowed_client_ids": ["cli-client"],
+                "rules": [
+                    {
+                        "name": "operator-access",
+                        "tenant_ids": [TENANT],
+                        "claim_contains": {"groups": "mnemosyne-operators"},
+                        "role": "operator",
+                        "source_trust_tier": 0,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    candidate_policy_file.write_text(
+        json.dumps(
+            {
+                "allowed_client_ids": ["cli-client", "cli-rollout-client"],
+                "rules": [
+                    {
+                        "name": "operator-access",
+                        "tenant_ids": [TENANT],
+                        "claim_contains": {"groups": "mnemosyne-operators"},
+                        "role": "operator",
+                        "source_trust_tier": 0,
+                    },
+                    {
+                        "name": "auditor-access",
+                        "tenant_ids": [TENANT],
+                        "claim_contains": {"groups": "mnemosyne-auditors"},
+                        "role": "agent",
+                        "source_trust_tier": 1,
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    simulation_file.write_text(
+        json.dumps(
+            [
+                {
+                    "tenant_id": TENANT,
+                    "user_id": USER,
+                    "payload": {
+                        "azp": "cli-client",
+                        "groups": ["mnemosyne-auditors"],
+                        "scope": "mnemosyne.admin",
+                    },
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    current_fingerprint = run_cli(
+        store,
+        "idp-authz-policy-check",
+        "--idp-authz-policy-file",
+        str(current_policy_file),
+    )["policy"]["fingerprint"]
+    candidate_fingerprint = run_cli(
+        store,
+        "idp-authz-policy-check",
+        "--idp-authz-policy-file",
+        str(candidate_policy_file),
+    )["policy"]["fingerprint"]
+
+    missing_ack = run_raw_cli(
+        store,
+        "idp-authz-policy-rollout-check",
+        "--current-idp-authz-policy-file",
+        str(current_policy_file),
+        "--candidate-idp-authz-policy-file",
+        str(candidate_policy_file),
+        "--expected-current-fingerprint",
+        current_fingerprint,
+    )
+    assert missing_ack.returncode == 1
+    assert "candidate expected fingerprint is required" in missing_ack.stderr
+
+    denied = run_raw_cli(
+        store,
+        "idp-authz-policy-rollout-check",
+        "--current-idp-authz-policy-file",
+        str(current_policy_file),
+        "--candidate-idp-authz-policy-file",
+        str(candidate_policy_file),
+        "--expected-current-fingerprint",
+        current_fingerprint,
+        "--expected-candidate-fingerprint",
+        candidate_fingerprint,
+        "--simulation-file",
+        str(simulation_file),
+    )
+    denied_payload = json.loads(denied.stdout)
+    assert denied.returncode == 1
+    assert denied_payload["ok"] is False
+    assert denied_payload["rollout"]["simulation_change_count"] == 1
+
+    allowed = run_cli(
+        store,
+        "idp-authz-policy-rollout-check",
+        "--current-idp-authz-policy-file",
+        str(current_policy_file),
+        "--candidate-idp-authz-policy-file",
+        str(candidate_policy_file),
+        "--expected-current-fingerprint",
+        current_fingerprint,
+        "--expected-candidate-fingerprint",
+        candidate_fingerprint,
+        "--simulation-file",
+        str(simulation_file),
+        "--allow-simulation-changes",
+    )
+    assert allowed["ok"] is True
+    assert allowed["rollout"]["diff"]["allowed_client_ids_count_delta"] == 1
+    assert allowed["rollout"]["diff"]["named_rules_added"] == ["auditor-access"]
+    assert allowed["rollout"]["simulations"][0]["candidate"]["role"] == "agent"
+    encoded = json.dumps([denied_payload, allowed], sort_keys=True)
+    assert "cli-client" not in encoded
+    assert "cli-rollout-client" not in encoded
+    assert "mnemosyne-auditors" not in encoded
+    assert "mnemosyne.admin" not in encoded
+
+
 def test_cli_session_exchange_fails_closed_on_invalid_idp_claims(tmp_path: Path) -> None:
     store = tmp_path / "mnemosyne.json"
     jwks, idp_token = make_oidc_token(oidc_payload(aud="wrong-audience"))
