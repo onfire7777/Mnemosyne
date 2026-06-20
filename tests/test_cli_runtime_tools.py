@@ -1692,6 +1692,7 @@ def test_cli_provider_check_validates_command_key_provider(tmp_path: Path) -> No
     assert checked["checks"]["object_key_manager"]["ok"] is True
     assert checked["checks"]["object_key_manager"]["provider"] == "command"
     assert checked["checks"]["object_key_manager"]["shredded"] is True
+    assert checked["checks"]["object_key_manager"]["post_shred_verified"] is True
     assert state["keys"] == {}
 
 
@@ -1728,6 +1729,68 @@ def test_cli_provider_check_fails_closed_on_bad_command_key_provider(tmp_path: P
     assert payload["ok"] is False
     assert payload["checks"]["object_key_manager"]["ok"] is False
     assert "32-byte AES-256 key" in payload["checks"]["object_key_manager"]["error"]
+
+
+def test_cli_provider_check_fails_closed_when_command_key_provider_retains_shredded_key(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    objects = tmp_path / "objects"
+    state = tmp_path / "retaining-kms-state.json"
+    script = tmp_path / "retaining-kms.py"
+    script.write_text(
+        "\n".join(
+            [
+                "from __future__ import annotations",
+                "import base64, hashlib, json, sys",
+                "from pathlib import Path",
+                "state = Path(sys.argv[1])",
+                "action = sys.argv[2]",
+                "request = json.load(sys.stdin)",
+                "data = json.loads(state.read_text()) if state.exists() else {'keys': {}}",
+                "keys = data.setdefault('keys', {})",
+                "key_id = request['key_id']",
+                "def stable_key(): return base64.urlsafe_b64encode(hashlib.sha256(key_id.encode()).digest()).decode('ascii')",
+                "def save(): state.write_text(json.dumps(data, sort_keys=True), encoding='utf-8')",
+                "if action == 'get_or_create_key':",
+                "    keys.setdefault(key_id, stable_key())",
+                "    save()",
+                "    print(json.dumps({'key': keys[key_id]}))",
+                "elif action == 'get_key':",
+                "    if key_id not in keys:",
+                "        print('missing key', file=sys.stderr)",
+                "        raise SystemExit(4)",
+                "    print(json.dumps({'key': keys[key_id]}))",
+                "elif action == 'has_key':",
+                "    print(json.dumps({'exists': key_id in keys}))",
+                "elif action == 'shred_key':",
+                "    keys.setdefault(key_id, stable_key())",
+                "    save()",
+                "    print(json.dumps({'shredded': True}))",
+                "else:",
+                "    print('bad action', file=sys.stderr)",
+                "    raise SystemExit(2)",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    command = " ".join(shlex.quote(item) for item in (sys.executable, str(script), str(state)))
+    result = run_raw_cli(
+        store,
+        "--object-store",
+        str(objects),
+        "--object-store-encryption",
+        "aesgcm",
+        "--object-key-provider",
+        "command",
+        "--object-key-command",
+        command,
+        "provider-check",
+    )
+    payload = json.loads(result.stdout)
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert payload["checks"]["object_key_manager"]["ok"] is False
+    assert "retained key after shred_key" in payload["checks"]["object_key_manager"]["error"]
 
 
 def test_cli_parametric_tier_can_use_command_provider(tmp_path: Path) -> None:

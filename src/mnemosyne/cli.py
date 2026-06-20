@@ -1307,11 +1307,20 @@ def cmd_provider_check(args: argparse.Namespace) -> None:
                 raise ValueError("object key provider failed has_key after get_or_create_key")
             if not shredded:
                 raise ValueError("object key provider failed shred_key after health check")
+            if manager.has_key(tenant_id, cid):
+                raise ValueError("object key provider retained key after shred_key health check")
+            try:
+                manager.get_key(tenant_id, cid)
+            except Exception:  # noqa: BLE001 - missing key is the expected post-shred state.
+                post_shred_verified = True
+            else:
+                raise ValueError("object key provider returned key after shred_key health check")
             checks["object_key_manager"] = {
                 "ok": True,
                 "provider": args.object_key_provider,
                 "key_id": manager.key_id(tenant_id, cid),
                 "shredded": True,
+                "post_shred_verified": post_shred_verified,
             }
         except Exception as exc:  # noqa: BLE001 - health checks return structured failures.
             ok = False

@@ -619,6 +619,122 @@ def serve_sdk_stdio(**kwargs: Any) -> None:
     asyncio.run(_serve_sdk_stdio(build_sdk_server(**kwargs)))
 
 
+def run_self_test(*, sdk: bool = False, **kwargs: Any) -> dict[str, Any]:
+    """Exercise the configured MCP facade without starting stdio service."""
+
+    checks: list[dict[str, Any]] = []
+
+    def record(name: str, ok: bool, **details: Any) -> None:
+        checks.append({"name": name, "ok": ok, **details})
+
+    try:
+        server = MnemosyneMcpServer(**kwargs)
+    except Exception as exc:  # noqa: BLE001 - self-test reports structured config failures.
+        return {"ok": False, "checks": [{"name": "construct", "ok": False, "error": str(exc)}]}
+
+    initialize = server.handle({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})
+    initialized = initialize.get("result", {}).get("protocolVersion") == PROTOCOL_VERSION
+    record("initialize", initialized, protocol=initialize.get("result", {}).get("protocolVersion"))
+
+    tools_list = server.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}})
+    tools = tools_list.get("result", {}).get("tools", [])
+    schemas_ok = bool(tools) and all(
+        item.get("inputSchema", {}).get("type") == "object"
+        and item.get("inputSchema", {}).get("additionalProperties") is False
+        for item in tools
+    )
+    record("tools_list", schemas_ok, tool_count=len(tools))
+
+    auth_params = _self_test_auth_params(server, include_session=False)
+    if server.auth_token:
+        unauthorized = _self_test_tool_call(server, "residency_policy", {})
+        record("auth_token_rejects_missing_token", unauthorized.get("isError") is True)
+    else:
+        record("auth_token_rejects_missing_token", True, skipped=True, reason="auth token not configured")
+
+    session_token = _self_test_session_token(server)
+    if server.require_session:
+        missing_session = _self_test_tool_call(server, "residency_policy", {}, auth_params=auth_params)
+        record("session_rejects_missing_token", missing_session.get("isError") is True)
+        session_config_ok = session_token is not None
+        record("session_signing_configured", session_config_ok)
+    else:
+        record("session_rejects_missing_token", True, skipped=True, reason="signed session not required")
+        session_config_ok = True
+
+    authorized_params = _self_test_auth_params(server, include_session=True)
+    if server.require_session and session_token is None:
+        record("schema_rejects_invalid_arguments", False, error="session token is required but no verifier is configured")
+        record("read_only_tool_call", False, error="session token is required but no verifier is configured")
+    else:
+        invalid_schema = _self_test_tool_call(
+            server,
+            "residency_policy",
+            {"unexpected": True},
+            auth_params=authorized_params,
+        )
+        record("schema_rejects_invalid_arguments", invalid_schema.get("isError") is True)
+        read_only = _self_test_tool_call(server, "residency_policy", {}, auth_params=authorized_params)
+        record("read_only_tool_call", read_only.get("isError") is False)
+
+    if sdk:
+        try:
+            build_sdk_server(**kwargs)
+            record("sdk_build", True)
+        except Exception as exc:  # noqa: BLE001 - optional SDK readiness is a deployment check.
+            record("sdk_build", False, error=str(exc))
+
+    ok = initialized and schemas_ok and session_config_ok and all(item["ok"] for item in checks)
+    return {
+        "ok": ok,
+        "backend": server.backend,
+        "stateless": server.stateless,
+        "auth_token_required": bool(server.auth_token),
+        "session_required": bool(server.require_session),
+        "checks": checks,
+    }
+
+
+def _self_test_auth_params(server: MnemosyneMcpServer, *, include_session: bool) -> dict[str, Any]:
+    params: dict[str, Any] = {}
+    if server.auth_token:
+        params["auth_token"] = server.auth_token
+    if include_session:
+        token = _self_test_session_token(server)
+        if token:
+            params["session_token"] = token
+    return params
+
+
+def _self_test_session_token(server: MnemosyneMcpServer) -> str | None:
+    verifier = server._session_verifier()
+    if verifier is None:
+        return None
+    return verifier.sign(
+        SessionIdentity(
+            tenant_id="mcp-self-test",
+            user_id="mcp-self-test",
+            role="operator",
+            source_trust_tier=0,
+            session_id="mcp-self-test",
+        )
+    )
+
+
+def _self_test_tool_call(
+    server: MnemosyneMcpServer,
+    name: str,
+    arguments: dict[str, Any],
+    *,
+    auth_params: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    params = {"name": name, "arguments": dict(arguments)}
+    if auth_params:
+        params.update(auth_params)
+    response = server.handle({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": params})
+    return response.get("result", {})
+
+
 def default_store() -> Path:
     return Path(os.environ.get("MNEME_STORE", ".mnemosyne/mcp-store.json"))
 
@@ -797,6 +913,7 @@ def main(argv: list[str] | None = None) -> None:
     )
     parser.add_argument("--stateless", action="store_true", help="Rebuild engine and tool state for each JSON-RPC tool call")
     parser.add_argument("--sdk", action="store_true", help="Use the official MCP Python SDK stdio transport")
+    parser.add_argument("--self-test", action="store_true", help="Run MCP deployment validation checks and exit")
     parser.add_argument("--auth-token", default=os.environ.get("MNEMOSYNE_MCP_TOKEN"), help="Require this token for tools/call")
     parser.add_argument(
         "--session-secret",
@@ -860,6 +977,10 @@ def main(argv: list[str] | None = None) -> None:
         "queue_tenant": args.queue_tenant,
         "stateless": args.stateless,
     }
+    if args.self_test:
+        report = run_self_test(sdk=args.sdk, **config)
+        print(json.dumps(report, indent=2, sort_keys=True))
+        raise SystemExit(0 if report["ok"] else 1)
     if args.sdk:
         serve_sdk_stdio(**config)
     else:
