@@ -15,6 +15,7 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 
 from mnemosyne.cli import build_parser
+from mnemosyne.mcp_server import build_http_server
 from mnemosyne.security import SessionIdentity, SessionTokenVerifier
 
 
@@ -1006,6 +1007,84 @@ def test_cli_provider_check_returns_nonzero_for_malformed_http_provider(tmp_path
     assert report["checks"]["reranker"]["ok"] is False
     assert "at least one scored result" in report["checks"]["reranker"]["error"]
     assert report["checks"]["media_extractor"]["ok"] is True
+
+
+def test_cli_mcp_http_soak_validates_stateless_hosted_server(tmp_path: Path) -> None:
+    server = build_http_server(
+        host="127.0.0.1",
+        port=0,
+        store_path=tmp_path / "mcp-store.json",
+        auth_token="soak-secret",
+        stateless=True,
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        report = run_cli(
+            tmp_path / "mnemosyne.json",
+            "mcp-http-soak",
+            "--base-url",
+            f"http://127.0.0.1:{server.server_port}",
+            "--auth-token",
+            "soak-secret",
+            "--iterations",
+            "2",
+            "--require-stateless",
+        )
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        server.server_close()
+
+    serialized = json.dumps(report)
+    assert report["ok"] is True
+    assert report["health"]["transport"] == "http-json-rpc"
+    assert report["health"]["stateless"] is True
+    assert report["health"]["auth_token_required"] is True
+    assert report["summary"]["iterations"] == 2
+    assert report["summary"]["requests"] == 7
+    assert report["summary"]["failures"] == 0
+    assert [item["ok"] for item in report["iterations"]] == [True, True]
+    assert all(item["tools_list"]["contains_read_only_tool"] for item in report["iterations"])
+    assert report["target"]["auth_token_configured"] is True
+    assert "soak-secret" not in serialized
+
+
+def test_cli_mcp_http_soak_fails_closed_without_required_auth(tmp_path: Path) -> None:
+    server = build_http_server(
+        host="127.0.0.1",
+        port=0,
+        store_path=tmp_path / "mcp-store.json",
+        auth_token="soak-secret",
+        stateless=True,
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        result = run_raw_cli(
+            tmp_path / "mnemosyne.json",
+            "mcp-http-soak",
+            "--base-url",
+            f"http://127.0.0.1:{server.server_port}",
+            "--iterations",
+            "1",
+            "--require-stateless",
+        )
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        server.server_close()
+
+    report = json.loads(result.stdout)
+    assert result.returncode == 1
+    assert report["ok"] is False
+    assert report["health"]["ok"] is True
+    assert report["iterations"][0]["initialize"]["ok"] is True
+    assert report["iterations"][0]["tools_list"]["ok"] is True
+    assert report["iterations"][0]["read_only_tool_call"]["ok"] is False
+    assert report["summary"]["failures"] == 1
+    assert report["target"]["auth_token_configured"] is False
+    assert "soak-secret" not in result.stdout
 
 
 def test_cli_provider_check_uses_deployment_manifest(tmp_path: Path, monkeypatch) -> None:
