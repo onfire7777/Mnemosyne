@@ -9,6 +9,7 @@ from typing import Any
 from mnemosyne.calibration import CalibrationSet, conformal_threshold, should_abstain
 from mnemosyne.consolidation import CONSOLIDATE_EVIDENCE_JOB, DEFAULT_CONSOLIDATION_PASSES, ConsolidationWorker
 from mnemosyne.eval import run_seed_suite
+from mnemosyne.gate import RegressionCase
 from mnemosyne.lifecycle import FidelityTier, LifecycleState, demotion_decision
 from mnemosyne.media import MEDIA_EXTRACT_JOB, MediaTextExtractor, MetadataMediaTextExtractor
 from mnemosyne.models import Evidence
@@ -42,6 +43,7 @@ class RuntimeJobHandlers:
         object_store: LocalObjectStore | None = None,
         media_extractor: MediaTextExtractor | None = None,
         learning: Any | None = None,
+        gate_cases: list[RegressionCase] | None = None,
     ):
         self.engine = engine
         self.queue = queue
@@ -49,7 +51,8 @@ class RuntimeJobHandlers:
         self.object_store = object_store or LocalObjectStore(".mnemosyne/objects")
         self.media_extractor = media_extractor or MetadataMediaTextExtractor()
         self.learning = learning
-        self.consolidator = ConsolidationWorker(engine, gate_cases=[], learning=learning)
+        self.gate_cases = gate_cases or []
+        self.consolidator = ConsolidationWorker(engine, gate_cases=self.gate_cases, learning=learning)
 
     def handlers(self) -> dict[str, Any]:
         return {

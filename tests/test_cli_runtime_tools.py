@@ -404,6 +404,45 @@ def test_cli_ingest_can_run_one_consolidation_worker_cycle(tmp_path: Path) -> No
     assert report["learning"]["procedures"] == 1
 
 
+def test_cli_persisted_gate_case_blocks_consolidation_promotion(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    listed = run_cli(
+        store,
+        "gate-case-add",
+        "--id",
+        "protected-sentinel",
+        "--signature",
+        "runtime consolidation target",
+        "--query",
+        "sentinel regression",
+        "--expected-substring",
+        "required protected memory",
+        "--protected",
+    )
+    ingested = run_cli(
+        store,
+        "ingest",
+        "--tenant",
+        TENANT,
+        "--user",
+        USER,
+        "--actor",
+        "user",
+        "--source-type",
+        "chat",
+        "--content",
+        "Runtime consolidation target is local CLI.",
+        "--run-consolidation-once",
+    )
+
+    candidate = ingested["consolidation_worker"]["job"]["result"]["candidate_results"][0]
+
+    assert listed["case"]["id"] == "protected-sentinel"
+    assert run_cli(store, "gate-case-list")["cases"][0]["protected"] is True
+    assert candidate["promoted"] is False
+    assert candidate["protected_regressions"] == ["protected-sentinel"]
+
+
 def test_cli_persists_queue_between_ingest_and_worker_commands(tmp_path: Path) -> None:
     store = tmp_path / "mnemosyne.json"
     ingested = run_cli(

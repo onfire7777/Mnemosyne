@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 from datetime import datetime
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -13,6 +14,7 @@ from uuid import UUID
 from mnemosyne.consolidation import CONSOLIDATE_EVIDENCE_JOB
 from mnemosyne.engine import LocalMemoryEngine, MemoryEngine
 from mnemosyne.eval import run_seed_suite
+from mnemosyne.gate import RegressionCase
 from mnemosyne.ingestion import IngestRequest, IngestionPipeline
 from mnemosyne.jobs import RuntimeJobHandlers
 from mnemosyne.media import CommandMediaTextExtractor, MediaTextExtractor, MetadataMediaTextExtractor
@@ -168,6 +170,11 @@ def load_tools(
     )
 
 
+def gate_case_id(signature: str, query: str, expected_substring: str) -> str:
+    digest = sha256(f"{signature}\0{query}\0{expected_substring}".encode("utf-8")).hexdigest()[:12]
+    return f"gate-{digest}"
+
+
 def json_default(value: Any) -> Any:
     if isinstance(value, datetime):
         return value.isoformat()
@@ -247,6 +254,7 @@ def cmd_ingest(args: argparse.Namespace) -> None:
             object_store=load_object_store(args),
             media_extractor=load_media_extractor(args),
             learning=tools.learning,
+            gate_cases=tools.runtime_state.load_gate_cases() if tools.runtime_state else [],
         )
         worker = QueueWorker(ingestion_queue, handlers.handlers(), metrics=metrics)
         job = worker.run_once(CONSOLIDATE_EVIDENCE_JOB)
@@ -681,6 +689,28 @@ def cmd_queue_snapshot(args: argparse.Namespace) -> None:
     emit({"queue": queue.snapshot(), "jobs": [job.to_dict() for job in queue.jobs.values()]})
 
 
+def cmd_gate_case_add(args: argparse.Namespace) -> None:
+    runtime_state = load_runtime_state(args)
+    cases = {case.id: case for case in runtime_state.load_gate_cases()}
+    case = RegressionCase(
+        id=args.id or gate_case_id(args.signature, args.query, args.expected_substring),
+        signature=args.signature,
+        query=args.query,
+        expected_substring=args.expected_substring,
+        tier=args.tier,
+        protected=args.protected,
+    )
+    cases[case.id] = case
+    ordered = sorted(cases.values(), key=lambda item: item.id)
+    runtime_state.save_gate_cases(ordered)
+    emit({"case": case.to_dict(), "cases": [item.to_dict() for item in ordered]})
+
+
+def cmd_gate_case_list(args: argparse.Namespace) -> None:
+    runtime_state = load_runtime_state(args)
+    emit({"cases": [case.to_dict() for case in runtime_state.load_gate_cases()]})
+
+
 def cmd_queue_enqueue(args: argparse.Namespace) -> None:
     runtime_state = load_runtime_state(args)
     queue = runtime_state.load_queue() if runtime_state else InProcessQueue()
@@ -702,6 +732,7 @@ def cmd_consolidate_once(args: argparse.Namespace) -> None:
         object_store=load_object_store(args),
         media_extractor=load_media_extractor(args),
         learning=tools.learning,
+        gate_cases=runtime_state.load_gate_cases() if runtime_state else [],
     )
     worker = QueueWorker(queue, handlers.handlers(), metrics=metrics)
     job = worker.run_once(CONSOLIDATE_EVIDENCE_JOB)
@@ -723,6 +754,7 @@ def cmd_queue_drain(args: argparse.Namespace) -> None:
         object_store=load_object_store(args),
         media_extractor=load_media_extractor(args),
         learning=tools.learning,
+        gate_cases=runtime_state.load_gate_cases() if runtime_state else [],
     )
     worker = QueueWorker(queue, handlers.handlers(), metrics=metrics)
     jobs = worker.drain(limit=args.limit, kind=args.kind)
@@ -1244,6 +1276,18 @@ def build_parser() -> argparse.ArgumentParser:
 
     queue_snapshot = sub.add_parser("queue-snapshot")
     queue_snapshot.set_defaults(func=cmd_queue_snapshot)
+
+    gate_case_add = sub.add_parser("gate-case-add")
+    gate_case_add.add_argument("--id")
+    gate_case_add.add_argument("--signature", required=True)
+    gate_case_add.add_argument("--query", required=True)
+    gate_case_add.add_argument("--expected-substring", required=True)
+    gate_case_add.add_argument("--tier", choices=["smoke", "core", "archive"], default="smoke")
+    gate_case_add.add_argument("--protected", action="store_true")
+    gate_case_add.set_defaults(func=cmd_gate_case_add)
+
+    gate_case_list = sub.add_parser("gate-case-list")
+    gate_case_list.set_defaults(func=cmd_gate_case_list)
 
     queue_enqueue = sub.add_parser("queue-enqueue")
     queue_enqueue.add_argument("--kind", required=True)
