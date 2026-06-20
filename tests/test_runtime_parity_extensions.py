@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from hashlib import sha256
 
+import pytest
+
 from mnemosyne.consolidation import CONSOLIDATE_EVIDENCE_JOB, ConsolidationWorker
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.gate import GateResult, RegressionCase
@@ -1014,7 +1016,7 @@ def test_parametric_tier_requires_validated_sources_and_protected_gate(tmp_path)
     )
     artifact = tier.propose_from_lessons(TENANT, [active_lesson], [active_procedure])
     gate = GateResult(
-        candidate_id="candidate",
+        candidate_id=artifact.id,
         promoted=True,
         protected_regressions=[],
         failed_cases=[],
@@ -1030,10 +1032,93 @@ def test_parametric_tier_requires_validated_sources_and_protected_gate(tmp_path)
     rollback_record = store.read(rolled_back.artifact_uri)
 
     assert artifact.source_ids == [active_lesson.id, active_procedure.id]
+    assert "mutation_rate_bounds_enforced" in artifact.immutable_rails
+    assert artifact.rail_report["reward_signal"] == "external_only"
     assert decision.promoted is True
     assert stored["artifact"]["status"] == "promoted"
     assert stored["payload"]["phase"] == "promoted"
+    assert stored["payload"]["rail_report"]["gate"]["candidate_id"] == artifact.id
     assert rolled_back.status == "rolled_back"
     assert rolled_back.rollback_ref.startswith("rollback-")
     assert store.load_artifact(rolled_back.artifact_uri).rollback_ref == rolled_back.rollback_ref
     assert rollback_record["payload"]["phase"] == "rolled_back"
+
+
+def test_parametric_invariant_rails_reject_provider_mutation_rate(tmp_path) -> None:
+    class BadMutationTrainer:
+        adapter_kind = "bad-mutation-adapter"
+
+        def propose(self, tenant_id, lessons, procedures, source_ids, immutable_rails):
+            return {"metrics": {"mutation_rate": 0.5}, "metadata": {"reward_signal": "external_only"}}
+
+        def rollback(self, artifact, reason):
+            return {"rollback_ref": "bad-rollback"}
+
+    tier = ParametricTier(ParametricArtifactStore(tmp_path / "parametric"), trainer=BadMutationTrainer())
+    lesson = Lesson(
+        tenant_id=TENANT,
+        lesson_type="corrective",
+        failure_signature="unsafe-mutation",
+        content="Reject broad mutation.",
+        status="active",
+    )
+
+    with pytest.raises(ValueError, match="mutation_rate exceeds 0.05"):
+        tier.propose_from_lessons(TENANT, [lesson], [])
+
+
+def test_parametric_invariant_rails_reject_mismatched_gate_candidate(tmp_path) -> None:
+    tier = ParametricTier(ParametricArtifactStore(tmp_path / "parametric"))
+    lesson = Lesson(
+        tenant_id=TENANT,
+        lesson_type="corrective",
+        failure_signature="artifact-mismatch",
+        content="Evaluate the exact proposed artifact.",
+        status="active",
+    )
+    artifact = tier.propose_from_lessons(TENANT, [lesson], [])
+    gate = GateResult(
+        candidate_id="different-artifact",
+        promoted=True,
+        protected_regressions=[],
+        failed_cases=[],
+        passed_cases=["protected"],
+        margin=0.99,
+        rollback_branch=None,
+    )
+    protected = [RegressionCase("protected", "artifact", "artifact", "artifact", protected=True)]
+
+    decision = tier.evaluate(artifact, gate, protected)
+    stored = tier.artifact_store.read(artifact.artifact_uri)
+
+    assert decision.promoted is False
+    assert "gate candidate must match artifact" in decision.reason
+    assert stored["artifact"]["status"] == "rejected"
+    assert stored["payload"]["phase"] == "rejected"
+
+
+def test_parametric_invariant_rails_reject_low_gate_margin(tmp_path) -> None:
+    tier = ParametricTier(ParametricArtifactStore(tmp_path / "parametric"))
+    lesson = Lesson(
+        tenant_id=TENANT,
+        lesson_type="corrective",
+        failure_signature="low-margin",
+        content="Require a margin over run-to-run noise.",
+        status="active",
+    )
+    artifact = tier.propose_from_lessons(TENANT, [lesson], [])
+    gate = GateResult(
+        candidate_id=artifact.id,
+        promoted=True,
+        protected_regressions=[],
+        failed_cases=[],
+        passed_cases=["protected"],
+        margin=0.0,
+        rollback_branch=None,
+    )
+    protected = [RegressionCase("protected", "margin", "margin", "margin", protected=True)]
+
+    decision = tier.evaluate(artifact, gate, protected)
+
+    assert decision.promoted is False
+    assert "gate margin below noise rail" in decision.reason

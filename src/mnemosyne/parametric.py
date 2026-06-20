@@ -23,6 +23,7 @@ class ParametricArtifact:
     status: str = "shadow"
     metrics: dict[str, float] = field(default_factory=dict)
     immutable_rails: list[str] = field(default_factory=list)
+    rail_report: dict[str, Any] = field(default_factory=dict)
     artifact_uri: str | None = None
     rollback_ref: str | None = None
     id: str = field(default_factory=new_id)
@@ -39,6 +40,7 @@ class ParametricArtifact:
             status=str(data.get("status", "shadow")),
             metrics=dict(data.get("metrics") or {}),
             immutable_rails=list(data.get("immutable_rails") or []),
+            rail_report=dict(data.get("rail_report") or {}),
             artifact_uri=data.get("artifact_uri"),
             rollback_ref=data.get("rollback_ref"),
             id=str(data["id"]),
@@ -73,6 +75,96 @@ class ParametricTrainer(Protocol):
     ) -> dict[str, Any]: ...
 
     def rollback(self, artifact: ParametricArtifact, reason: str) -> dict[str, Any]: ...
+
+
+@dataclass(frozen=True, slots=True)
+class ParametricInvariantRails:
+    max_supersession_rate: float = 0.05
+    max_prune_fraction_per_pass: float = 0.02
+    max_source_mutation_rate: float = 0.05
+    min_gate_margin: float = 0.01
+    reward_signal: str = "external_only"
+    monotonic_trust: bool = True
+    untrusted_to_system_prompt: str = "forbidden"
+
+    def labels(self) -> tuple[str, ...]:
+        return (
+            "tenant_isolation_required",
+            "branch_promotion_requires_gate",
+            "protected_regression_suite_required",
+            "mutation_rate_bounds_enforced",
+            "monotonic_trust_required",
+            "external_reward_signal_required",
+            "untrusted_to_system_prompt_forbidden",
+        )
+
+    def proposal_report(self, artifact: ParametricArtifact, provider: dict[str, Any]) -> dict[str, Any]:
+        metadata = _provider_metadata(provider)
+        metrics = artifact.metrics
+        self._check_rate(metrics, "supersession_rate", self.max_supersession_rate)
+        self._check_rate(metrics, "mutation_rate", self.max_source_mutation_rate)
+        self._check_rate(metrics, "source_mutation_rate", self.max_source_mutation_rate)
+        self._check_rate(metrics, "prune_fraction", self.max_prune_fraction_per_pass)
+        self._check_rate(metrics, "prune_fraction_per_pass", self.max_prune_fraction_per_pass)
+
+        reward_signal = str(metadata.get("reward_signal", self.reward_signal))
+        if reward_signal != self.reward_signal:
+            raise ValueError("parametric invariant rail violated: reward_signal must be external_only")
+        if metadata.get("monotonic_trust") is False:
+            raise ValueError("parametric invariant rail violated: monotonic_trust cannot be disabled")
+        trust_delta = metadata.get("trust_tier_delta")
+        if isinstance(trust_delta, (int, float)) and not isinstance(trust_delta, bool) and trust_delta < 0:
+            raise ValueError("parametric invariant rail violated: trust tier cannot be widened")
+        if metadata.get("target_sink") == "system_prompt" or metadata.get("untrusted_to_system_prompt") is True:
+            raise ValueError("parametric invariant rail violated: untrusted_to_system_prompt is forbidden")
+        if metadata.get("eval_source_overlap") is True:
+            raise ValueError("parametric invariant rail violated: source data overlaps evaluation suite")
+
+        return {
+            "source_count": len(artifact.source_ids),
+            "reward_signal": self.reward_signal,
+            "monotonic_trust": self.monotonic_trust,
+            "untrusted_to_system_prompt": self.untrusted_to_system_prompt,
+            "bounds": {
+                "max_supersession_rate": self.max_supersession_rate,
+                "max_prune_fraction_per_pass": self.max_prune_fraction_per_pass,
+                "max_source_mutation_rate": self.max_source_mutation_rate,
+            },
+            "provider_metadata_checked": bool(metadata),
+        }
+
+    def gate_report(
+        self,
+        artifact: ParametricArtifact,
+        gate_result: GateResult,
+        protected_cases: list[RegressionCase],
+    ) -> dict[str, Any]:
+        if gate_result.candidate_id != artifact.id:
+            raise ValueError("parametric invariant rail violated: gate candidate must match artifact")
+        if gate_result.margin <= self.min_gate_margin:
+            raise ValueError("parametric invariant rail violated: gate margin below noise rail")
+        if gate_result.rollback_branch is not None and gate_result.promoted:
+            raise ValueError("parametric invariant rail violated: promoted gate cannot carry rollback branch")
+        protected_ids = {case.id for case in protected_cases if case.protected}
+        passed_ids = set(gate_result.passed_cases)
+        if protected_ids - passed_ids:
+            raise ValueError("parametric invariant rail violated: all protected cases must pass")
+        return {
+            **artifact.rail_report,
+            "gate": {
+                "candidate_id": gate_result.candidate_id,
+                "protected_case_count": len(protected_ids),
+                "margin": gate_result.margin,
+                "min_gate_margin": self.min_gate_margin,
+            },
+        }
+
+    @staticmethod
+    def _check_rate(metrics: dict[str, float], key: str, limit: float) -> None:
+        if key not in metrics:
+            return
+        if metrics[key] > limit:
+            raise ValueError(f"parametric invariant rail violated: {key} exceeds {limit}")
 
 
 class CommandParametricTrainer:
@@ -165,19 +257,16 @@ class ParametricTier:
     regressions keep them in shadow.
     """
 
-    required_rails = (
-        "tenant_isolation_required",
-        "branch_promotion_requires_gate",
-        "protected_regression_suite_required",
-    )
-
     def __init__(
         self,
         artifact_store: "ParametricArtifactStore | None" = None,
         trainer: ParametricTrainer | None = None,
+        rails: ParametricInvariantRails | None = None,
     ):
         self.artifact_store = artifact_store
         self.trainer = trainer
+        self.rails = rails or ParametricInvariantRails()
+        self.required_rails = self.rails.labels()
 
     def propose_from_lessons(self, tenant_id: str, lessons: list[Lesson], procedures: list[Procedure]) -> ParametricArtifact:
         active_lessons = [lesson.id for lesson in lessons if lesson.tenant_id == tenant_id and lesson.status == "active"]
@@ -189,6 +278,7 @@ class ParametricTier:
             immutable_rails=list(self.required_rails),
         )
         payload: dict[str, Any] = {"phase": "proposal"}
+        provider: dict[str, Any] = {}
         if self.trainer and artifact.source_ids:
             provider = self.trainer.propose(
                 tenant_id,
@@ -201,6 +291,8 @@ class ParametricTier:
             artifact.metrics.update(_provider_metrics(provider.get("metrics", {})))
             artifact.metrics["provider_invoked"] = 1.0
             payload["provider"] = _provider_payload(provider)
+        artifact.rail_report = self.rails.proposal_report(artifact, provider)
+        payload["rail_report"] = artifact.rail_report
         if self.artifact_store:
             self.artifact_store.write(artifact, payload)
         return artifact
@@ -220,15 +312,31 @@ class ParametricTier:
         if not all(rail in artifact.immutable_rails for rail in self.required_rails):
             artifact.status = "rejected"
             return ParametricPromotionDecision(False, "immutable rails missing", artifact)
+        try:
+            artifact.rail_report = self.rails.gate_report(artifact, gate_result, protected_cases)
+        except ValueError as exc:
+            artifact.status = "rejected"
+            if self.artifact_store:
+                self.artifact_store.write(
+                    artifact,
+                    {"phase": "rejected", "reason": str(exc), "gate": gate_result.to_dict(), "rail_report": artifact.rail_report},
+                )
+            return ParametricPromotionDecision(False, str(exc), artifact, gate_result.to_dict())
         if not gate_result.promoted or gate_result.protected_regressions:
             artifact.status = "shadow"
             if self.artifact_store:
-                self.artifact_store.write(artifact, {"phase": "shadow", "gate": gate_result.to_dict()})
+                self.artifact_store.write(
+                    artifact,
+                    {"phase": "shadow", "gate": gate_result.to_dict(), "rail_report": artifact.rail_report},
+                )
             return ParametricPromotionDecision(False, "promotion gate did not clear protected cases", artifact, gate_result.to_dict())
         artifact.status = "promoted"
         artifact.metrics["protected_cases"] = float(len(protected_cases))
         if self.artifact_store:
-            self.artifact_store.write(artifact, {"phase": "promoted", "gate": gate_result.to_dict()})
+            self.artifact_store.write(
+                artifact,
+                {"phase": "promoted", "gate": gate_result.to_dict(), "rail_report": artifact.rail_report},
+            )
         return ParametricPromotionDecision(True, "parametric artifact promoted in isolated tier", artifact, gate_result.to_dict())
 
     def rollback(self, artifact: ParametricArtifact, reason: str) -> ParametricArtifact:
@@ -334,6 +442,15 @@ def _provider_payload(provider: dict[str, Any]) -> dict[str, Any]:
         "metadata",
     }
     return {str(key): value for key, value in provider.items() if key in allowed}
+
+
+def _provider_metadata(provider: dict[str, Any]) -> dict[str, Any]:
+    raw = provider.get("metadata", {})
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise ValueError("parametric provider metadata must be an object")
+    return {str(key): value for key, value in raw.items()}
 
 
 def _command_argv(command: str | Sequence[str]) -> list[str]:

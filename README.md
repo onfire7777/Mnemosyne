@@ -101,7 +101,7 @@ python -m mnemosyne.cli \
 
 For production key custody, use `--object-key-provider command --object-key-command "<kms-wrapper>"`. Mnemosyne invokes the command without a shell, passes JSON on stdin, and expects JSON on stdout for `get_or_create_key`, `get_key`, `has_key`, and `shred_key`.
 
-For isolated parametric adapter custody, use `--parametric-provider command --parametric-command "<trainer-wrapper>"`. Mnemosyne invokes the command without a shell, passes JSON on stdin for `propose` and `rollback`, requires operator-grade role/trust authorization before trainer calls, preserves current local source/rail/gate checks, and persists provider metrics/payloads with rollback metadata.
+For isolated parametric adapter custody, use `--parametric-provider command --parametric-command "<trainer-wrapper>"`. Mnemosyne invokes the command without a shell, passes JSON on stdin for `propose` and `rollback`, requires operator-grade role/trust authorization before trainer calls, enforces local mutation-rate/reward/sink/gate rails, and persists provider metrics/payloads with rollback metadata.
 
 `mneme-mcp` accepts the same object-store encryption, key-provider, allowed-residency, runtime queue, and parametric provider flags for MCP ingestion and runtime learning.
 By default it runs Mnemosyne's deterministic stdio JSON-RPC shim; pass `--sdk` to run through the official Python MCP SDK:
@@ -129,7 +129,7 @@ Policy files can define global `trusted_issuers`, `trusted_roots`, or scoped `ru
 The repository has a verified local scaffold plus runtime parity extensions. Current checks:
 
 - `uv run python -m compileall -q src tests` passes.
-- `uv run pytest -q` collects 162 tests and returns 142 passing tests plus 20 skipped live-DB tests with the optional MCP SDK extra installed.
+- `uv run pytest -q` collects 165 tests and returns 145 passing tests plus 20 skipped live-DB tests with the optional MCP SDK extra installed.
 - With Docker compose Postgres running, `MNEMOSYNE_POSTGRES_DSN=postgresql://... uv run pytest -q tests/test_postgres_engine_live.py tests/test_shared_engine_contract.py` returns 30 passing live/shared adapter tests covering tenant RLS, SQL FTS, pgvector assertion search, dense evidence fallback, recursive graph/PPR, branch/discard, branch merge retrieval, bitemporal supersession, tenant isolation, tombstone and hard-delete forget modes, command-backed object key management, transitive derived-evidence erasure across assertions/preferences/relations, retrieval trust/sensitivity/quarantine filtering, deep graph tenant/branch isolation, hard-delete audit export, HTTP-configurable retrieval adapter wiring with strict provider response validation, CLI `--backend postgres`, fail-closed CLI `provider-check`, stateless MCP ingestion over tenant-scoped durable Postgres queues, shared local/Postgres evidence/retrieval/branch/as-of/relation/preference/correction/forget-propagation contracts, durable Postgres queue leasing/drain, asset-bound CLI file ingestion through the C2PA verifier adapter, externalized payload derived-text retrieval, async media extraction, gated consolidation promotion on Postgres, and shared local/Postgres contract parity.
 
 Exact 1:1 blueprint parity is still in progress. The controlling status artifact is `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md`.
