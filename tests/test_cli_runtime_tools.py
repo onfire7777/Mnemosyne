@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 import subprocess
 import sys
 import threading
@@ -65,6 +66,48 @@ def run_raw_cli(store: Path, *args: str) -> subprocess.CompletedProcess[str]:
         text=True,
         capture_output=True,
     )
+
+
+def fake_kms_command(tmp_path: Path) -> tuple[str, Path]:
+    state = tmp_path / "kms-state.json"
+    script = tmp_path / "fake-kms.py"
+    script.write_text(
+        "\n".join(
+            [
+                "from __future__ import annotations",
+                "import base64, hashlib, json, sys",
+                "from pathlib import Path",
+                "state = Path(sys.argv[1])",
+                "action = sys.argv[2]",
+                "request = json.load(sys.stdin)",
+                "data = json.loads(state.read_text()) if state.exists() else {'keys': {}}",
+                "keys = data.setdefault('keys', {})",
+                "key_id = request['key_id']",
+                "def save(): state.write_text(json.dumps(data, sort_keys=True), encoding='utf-8')",
+                "if action == 'get_or_create_key':",
+                "    keys.setdefault(key_id, base64.urlsafe_b64encode(hashlib.sha256(key_id.encode()).digest()).decode('ascii'))",
+                "    save()",
+                "    print(json.dumps({'key': keys[key_id]}))",
+                "elif action == 'get_key':",
+                "    if key_id not in keys:",
+                "        print('missing key', file=sys.stderr)",
+                "        raise SystemExit(4)",
+                "    print(json.dumps({'key': keys[key_id]}))",
+                "elif action == 'has_key':",
+                "    print(json.dumps({'exists': key_id in keys}))",
+                "elif action == 'shred_key':",
+                "    shredded = keys.pop(key_id, None) is not None",
+                "    save()",
+                "    print(json.dumps({'shredded': shredded}))",
+                "else:",
+                "    print('bad action', file=sys.stderr)",
+                "    raise SystemExit(2)",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    command = " ".join(shlex.quote(item) for item in (sys.executable, str(script), str(state)))
+    return command, state
 
 
 def test_cli_backend_selection_requires_postgres_dsn(tmp_path: Path) -> None:
@@ -1069,6 +1112,68 @@ def test_cli_hard_delete_crypto_shreds_encrypted_object_payload(tmp_path: Path) 
     assert forgotten["object_shred"]["crypto_shredded"] is True
     assert forgotten["object_shred"]["reason"] == "key_shredded"
     assert all(item["cid"] != ingested["cid"] for item in exported["evidence"])
+
+
+def test_cli_encrypted_object_store_can_use_command_key_provider(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    objects = tmp_path / "objects"
+    asset = tmp_path / "capture.bin"
+    asset.write_bytes(b"kms managed legal payload")
+    command, kms_state = fake_kms_command(tmp_path)
+    encrypted_args = (
+        "--object-store",
+        str(objects),
+        "--object-store-encryption",
+        "aesgcm",
+        "--object-key-provider",
+        "command",
+        "--object-key-command",
+        command,
+    )
+    ingested = run_cli(
+        store,
+        *encrypted_args,
+        "ingest",
+        "--tenant",
+        TENANT,
+        "--user",
+        USER,
+        "--actor",
+        "user",
+        "--source-type",
+        "legal",
+        "--file",
+        str(asset),
+        "--modality",
+        "binary",
+        "--metadata",
+        json.dumps({"description": "Command-KMS encrypted legal payload."}),
+        "--trust-tier",
+        "0",
+    )
+    raw_objects = [path.read_bytes() for path in objects.rglob("*") if path.is_file()]
+    before_shred = json.loads(kms_state.read_text(encoding="utf-8"))
+
+    forgotten = run_cli(
+        store,
+        *encrypted_args,
+        "forget",
+        "--tenant",
+        TENANT,
+        "--cid",
+        ingested["cid"],
+        "--erasure-mode",
+        "hard_delete_legal",
+    )
+    after_shred = json.loads(kms_state.read_text(encoding="utf-8"))
+
+    assert raw_objects
+    assert all(b"kms managed legal payload" not in raw for raw in raw_objects)
+    assert len(before_shred["keys"]) == 1
+    assert after_shred["keys"] == {}
+    assert not (objects / ".keys.json").exists()
+    assert forgotten["object_shred"]["crypto_shredded"] is True
+    assert forgotten["object_shred"]["reason"] == "key_shredded"
 
 
 def test_cli_profile_graph_learning_and_parametric_flows_persist(tmp_path: Path) -> None:

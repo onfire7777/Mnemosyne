@@ -5,9 +5,11 @@ from __future__ import annotations
 import base64
 import json
 import os
+import shlex
+import subprocess
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol, Sequence
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
@@ -111,6 +113,20 @@ class LocalObjectStore:
         return uri.removeprefix(self.uri_prefix)
 
 
+class ObjectKeyManager(Protocol):
+    """Envelope-key manager boundary for local JSON and production KMS adapters."""
+
+    def key_id(self, tenant_id: str, cid: str) -> str: ...
+
+    def get_or_create_key(self, tenant_id: str, cid: str) -> bytes: ...
+
+    def get_key(self, tenant_id: str, cid: str) -> bytes: ...
+
+    def has_key(self, tenant_id: str, cid: str) -> bool: ...
+
+    def shred_key(self, tenant_id: str, cid: str) -> bool: ...
+
+
 class JsonKeyManager:
     """Small JSON key manager for local encrypted object storage.
 
@@ -167,12 +183,90 @@ class JsonKeyManager:
         tmp.replace(self.path)
 
 
+class CommandKeyManager:
+    """Command-backed key manager for KMS/HSM/Vault style deployments.
+
+    The command is invoked without a shell. Each call appends the action name as
+    the final argv item and sends a JSON request on stdin. The command must emit
+    JSON on stdout:
+
+    - `get_or_create_key` / `get_key`: `{"key": "<urlsafe-base64-32-byte-key>"}`
+    - `has_key`: `{"exists": true}`
+    - `shred_key`: `{"shredded": true}`
+    """
+
+    def __init__(self, command: str | Sequence[str], timeout_seconds: float = 30.0):
+        self.command = _command_argv(command)
+        if not self.command:
+            raise ValueError("object key command must not be empty")
+        if timeout_seconds <= 0:
+            raise ValueError("object key command timeout must be positive")
+        self.timeout_seconds = timeout_seconds
+
+    def key_id(self, tenant_id: str, cid: str) -> str:
+        return bytes_cid(f"{tenant_id}:{cid}".encode("utf-8"))
+
+    def get_or_create_key(self, tenant_id: str, cid: str) -> bytes:
+        return self._key_action("get_or_create_key", tenant_id, cid)
+
+    def get_key(self, tenant_id: str, cid: str) -> bytes:
+        return self._key_action("get_key", tenant_id, cid)
+
+    def has_key(self, tenant_id: str, cid: str) -> bool:
+        response = self._call("has_key", tenant_id, cid)
+        return bool(response.get("exists"))
+
+    def shred_key(self, tenant_id: str, cid: str) -> bool:
+        response = self._call("shred_key", tenant_id, cid)
+        return bool(response.get("shredded"))
+
+    def _key_action(self, action: str, tenant_id: str, cid: str) -> bytes:
+        response = self._call(action, tenant_id, cid)
+        raw_key = response.get("key", response.get("key_b64", response.get("plaintext_key")))
+        if not isinstance(raw_key, str):
+            raise ValueError(f"object key command {action} response must include a base64 key")
+        key = _b64decode(raw_key)
+        if len(key) != 32:
+            raise ValueError("object key command must return a 32-byte AES-256 key")
+        return key
+
+    def _call(self, action: str, tenant_id: str, cid: str) -> dict[str, Any]:
+        payload = {
+            "action": action,
+            "tenant_id": tenant_id,
+            "cid": cid,
+            "key_id": self.key_id(tenant_id, cid),
+        }
+        try:
+            completed = subprocess.run(
+                [*self.command, action],
+                input=json.dumps(payload),
+                text=True,
+                capture_output=True,
+                timeout=self.timeout_seconds,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise TimeoutError(f"object key command timed out during {action}") from exc
+        if completed.returncode != 0:
+            detail = completed.stderr.strip()[:512]
+            suffix = f": {detail}" if detail else ""
+            raise ValueError(f"object key command failed during {action}{suffix}")
+        try:
+            parsed = json.loads(completed.stdout)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"object key command {action} response must be valid JSON") from exc
+        if not isinstance(parsed, dict):
+            raise ValueError(f"object key command {action} response must be a JSON object")
+        return parsed
+
+
 class EncryptedLocalObjectStore(LocalObjectStore):
     """AES-GCM local object store with per-object crypto-shred keys."""
 
     uri_prefix = "local-object+aesgcm://sha256/"
 
-    def __init__(self, root: str | Path, key_manager: JsonKeyManager | None = None):
+    def __init__(self, root: str | Path, key_manager: ObjectKeyManager | None = None):
         super().__init__(root)
         self.key_manager = key_manager or JsonKeyManager(self.root / ".keys.json")
 
@@ -289,3 +383,9 @@ def _b64encode(data: bytes) -> str:
 
 def _b64decode(data: str) -> bytes:
     return base64.urlsafe_b64decode(data.encode("ascii"))
+
+
+def _command_argv(command: str | Sequence[str]) -> list[str]:
+    if isinstance(command, str):
+        return shlex.split(command)
+    return [str(item) for item in command]

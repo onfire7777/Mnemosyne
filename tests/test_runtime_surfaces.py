@@ -4,6 +4,8 @@ import asyncio
 import base64
 import inspect
 import json
+import shlex
+import sys
 import threading
 import tomllib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -34,6 +36,48 @@ def mcp_call(server: MnemosyneMcpServer, name: str, arguments: dict[str, object]
     )
     assert response["result"]["isError"] is False, response["result"]["content"][0]["text"]
     return response["result"]["structuredContent"]
+
+
+def fake_kms_command(tmp_path: Path) -> tuple[str, Path]:
+    state = tmp_path / "kms-state.json"
+    script = tmp_path / "fake-kms.py"
+    script.write_text(
+        "\n".join(
+            [
+                "from __future__ import annotations",
+                "import base64, hashlib, json, sys",
+                "from pathlib import Path",
+                "state = Path(sys.argv[1])",
+                "action = sys.argv[2]",
+                "request = json.load(sys.stdin)",
+                "data = json.loads(state.read_text()) if state.exists() else {'keys': {}}",
+                "keys = data.setdefault('keys', {})",
+                "key_id = request['key_id']",
+                "def save(): state.write_text(json.dumps(data, sort_keys=True), encoding='utf-8')",
+                "if action == 'get_or_create_key':",
+                "    keys.setdefault(key_id, base64.urlsafe_b64encode(hashlib.sha256(key_id.encode()).digest()).decode('ascii'))",
+                "    save()",
+                "    print(json.dumps({'key': keys[key_id]}))",
+                "elif action == 'get_key':",
+                "    if key_id not in keys:",
+                "        print('missing key', file=sys.stderr)",
+                "        raise SystemExit(4)",
+                "    print(json.dumps({'key': keys[key_id]}))",
+                "elif action == 'has_key':",
+                "    print(json.dumps({'exists': key_id in keys}))",
+                "elif action == 'shred_key':",
+                "    shredded = keys.pop(key_id, None) is not None",
+                "    save()",
+                "    print(json.dumps({'shredded': shredded}))",
+                "else:",
+                "    print('bad action', file=sys.stderr)",
+                "    raise SystemExit(2)",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    command = " ".join(shlex.quote(item) for item in (sys.executable, str(script), str(state)))
+    return command, state
 
 
 def test_semantic_entropy_distinguishes_identical_and_divergent_answers() -> None:
@@ -390,6 +434,48 @@ def test_mcp_server_honors_object_encryption_and_residency_config(tmp_path: Path
     assert "residency:eu" in evidence["capability_tags"]
     assert rejected["result"]["isError"] is True
     assert "not allowed by this runtime" in rejected["result"]["content"][0]["text"]
+    assert forgotten["object_shred"]["crypto_shredded"] is True
+
+
+def test_mcp_server_can_use_command_key_provider_for_encrypted_objects(tmp_path: Path) -> None:
+    objects = tmp_path / "objects"
+    command, kms_state = fake_kms_command(tmp_path)
+    server = MnemosyneMcpServer(
+        store_path=tmp_path / "store.json",
+        object_store=objects,
+        object_store_encryption="aesgcm",
+        object_key_provider="command",
+        object_key_command=command,
+    )
+    ingested = mcp_call(
+        server,
+        "ingest",
+        {
+            "tenant_id": TENANT,
+            "user_id": USER,
+            "actor": "user",
+            "source_type": "mcp-upload",
+            "data": base64.b64encode(b"mcp kms private payload").decode("ascii"),
+            "modality": "binary",
+            "media_type": "application/octet-stream",
+            "metadata": {"description": "MCP command-KMS private payload."},
+            "trust_tier": 0,
+        },
+    )
+    raw_objects = [path.read_bytes() for path in objects.rglob("*") if path.is_file()]
+    before_shred = json.loads(kms_state.read_text(encoding="utf-8"))
+    forgotten = mcp_call(
+        server,
+        "forget",
+        {"tenant_id": TENANT, "cid": ingested["cid"], "erasure_mode": "hard_delete_legal"},
+    )
+    after_shred = json.loads(kms_state.read_text(encoding="utf-8"))
+
+    assert raw_objects
+    assert all(b"mcp kms private payload" not in raw for raw in raw_objects)
+    assert len(before_shred["keys"]) == 1
+    assert after_shred["keys"] == {}
+    assert not (objects / ".keys.json").exists()
     assert forgotten["object_shred"]["crypto_shredded"] is True
 
 

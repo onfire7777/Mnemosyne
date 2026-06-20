@@ -27,7 +27,7 @@ from mnemosyne.queue import InProcessQueue, PostgresQueue, QueueWorker
 from mnemosyne.retrieval import HashingEmbeddingProvider, HttpEmbeddingProvider, HttpReranker, LocalSimilarityReranker, RetrievalAdapters
 from mnemosyne.runtime_state import RuntimeState
 from mnemosyne.security import SessionAuthError, SessionTokenVerifier
-from mnemosyne.storage import EncryptedLocalObjectStore, JsonKeyManager, LocalObjectStore
+from mnemosyne.storage import CommandKeyManager, EncryptedLocalObjectStore, JsonKeyManager, LocalObjectStore
 
 
 def default_store() -> Path:
@@ -52,6 +52,16 @@ def default_object_store_encryption() -> str:
 
 def default_object_key_store() -> str | None:
     return os.environ.get("MNEMOSYNE_OBJECT_KEY_STORE")
+
+
+def default_object_key_provider() -> str:
+    return os.environ.get("MNEMOSYNE_OBJECT_KEY_PROVIDER") or (
+        "command" if os.environ.get("MNEMOSYNE_OBJECT_KEY_COMMAND") else "json"
+    )
+
+
+def default_object_key_command() -> str | None:
+    return os.environ.get("MNEMOSYNE_OBJECT_KEY_COMMAND")
 
 
 def default_allowed_residencies() -> list[str]:
@@ -187,9 +197,19 @@ def load_provenance_trust_policy(args: argparse.Namespace) -> ProvenanceTrustPol
 
 def load_object_store(args: argparse.Namespace) -> LocalObjectStore:
     if args.object_store_encryption == "aesgcm":
-        key_store = Path(args.object_key_store) if args.object_key_store else Path(args.object_store) / ".keys.json"
-        return EncryptedLocalObjectStore(Path(args.object_store), JsonKeyManager(key_store))
+        return EncryptedLocalObjectStore(Path(args.object_store), load_object_key_manager(args))
     return LocalObjectStore(Path(args.object_store))
+
+
+def load_object_key_manager(args: argparse.Namespace) -> JsonKeyManager | CommandKeyManager:
+    if args.object_key_provider == "command":
+        if not args.object_key_command:
+            raise SystemExit("--object-key-provider command requires --object-key-command.")
+        return CommandKeyManager(args.object_key_command, timeout_seconds=float(args.object_key_timeout))
+    if args.object_key_provider != "json":
+        raise SystemExit(f"Unsupported object key provider: {args.object_key_provider}")
+    key_store = Path(args.object_key_store) if args.object_key_store else Path(args.object_store) / ".keys.json"
+    return JsonKeyManager(key_store)
 
 
 def load_media_extractor(args: argparse.Namespace) -> MediaTextExtractor:
@@ -975,7 +995,24 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--object-key-store",
         default=default_object_key_store(),
-        help="Path to JSON key store for --object-store-encryption aesgcm",
+        help="Path to JSON key store for --object-store-encryption aesgcm and --object-key-provider json",
+    )
+    parser.add_argument(
+        "--object-key-provider",
+        choices=["json", "command"],
+        default=default_object_key_provider(),
+        help="Envelope-key manager for encrypted object storage",
+    )
+    parser.add_argument(
+        "--object-key-command",
+        default=default_object_key_command(),
+        help="Command key provider invoked as '<command> <action>' with JSON stdin",
+    )
+    parser.add_argument(
+        "--object-key-timeout",
+        type=float,
+        default=float(os.environ.get("MNEMOSYNE_OBJECT_KEY_TIMEOUT", "30")),
+        help="Timeout in seconds for --object-key-provider command",
     )
     parser.add_argument(
         "--allowed-residency",
