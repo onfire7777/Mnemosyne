@@ -915,6 +915,8 @@ def cmd_provider_check(args: argparse.Namespace) -> None:
             ],
             k=2,
         )
+        if not ranked:
+            raise ValueError("reranker returned no health-check hits")
         checks["reranker"] = {
             "ok": True,
             "provider": args.reranker_provider,
@@ -943,6 +945,8 @@ def cmd_provider_check(args: argparse.Namespace) -> None:
         checks["media_extractor"] = {"ok": False, "provider": "command", "error": str(exc)}
 
     emit({"ok": ok, "checks": checks})
+    if not ok:
+        raise SystemExit(1)
 
 
 def build_parser() -> argparse.ArgumentParser:
