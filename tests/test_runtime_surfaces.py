@@ -628,6 +628,26 @@ def test_mcp_server_requires_runtime_residency_when_configured(tmp_path: Path) -
     assert evidence["access_policy"]["cross_region_transfer"] is False
 
 
+def test_mcp_server_reports_residency_policy(tmp_path: Path) -> None:
+    server = MnemosyneMcpServer(
+        store_path=tmp_path / "store.json",
+        allowed_residencies=("eu", "us"),
+        runtime_residency="us",
+        allowed_residency_transfers=("eu->us",),
+        require_runtime_residency=True,
+    )
+    tools = server.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+    policy = mcp_call(server, "residency_policy", {})
+
+    tool_names = {item["name"] for item in tools["result"]["tools"]}
+    assert "residency_policy" in tool_names
+    assert policy["allowed_residencies"] == ["eu", "us"]
+    assert policy["runtime_residency"] == "us"
+    assert policy["require_runtime_residency"] is True
+    assert policy["allowed_residency_transfers"] == ["eu->us"]
+    assert policy["warnings"] == []
+
+
 def test_mcp_server_can_use_command_key_provider_for_encrypted_objects(tmp_path: Path) -> None:
     objects = tmp_path / "objects"
     command, kms_state = fake_kms_command(tmp_path)
