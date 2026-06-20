@@ -313,11 +313,17 @@ def test_shared_engine_contract_branch_names_are_tenant_scoped(engine_bundle: tu
 
     assert engine.get_evidence(tenant, tenant_cid, branch=branch) is not None
     assert engine.get_evidence(other_tenant, other_cid, branch=branch) is not None
+    branches = engine.export_all()["branches"]
+    assert any(item["tenant_id"] == tenant and item["name"] == branch for item in branches)
+    assert any(item["tenant_id"] == other_tenant and item["name"] == branch for item in branches)
 
     _discard(engine, branch, tenant)
 
+    branches_after_discard = engine.export_all()["branches"]
     assert engine.get_evidence(tenant, tenant_cid, branch=branch) is None
     assert engine.get_evidence(other_tenant, other_cid, branch=branch) is not None
+    assert not any(item["tenant_id"] == tenant and item["name"] == branch for item in branches_after_discard)
+    assert any(item["tenant_id"] == other_tenant and item["name"] == branch for item in branches_after_discard)
 
 
 def test_shared_engine_contract_discard_prunes_branch_tms_rows(engine_bundle: tuple[Any, str, str]) -> None:
