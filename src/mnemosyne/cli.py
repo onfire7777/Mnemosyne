@@ -722,6 +722,7 @@ def cmd_ops_report(args: argparse.Namespace) -> None:
             true_score=args.true_score,
             min_diversity=args.min_diversity,
             max_proxy_gap=args.max_proxy_gap,
+            max_open_contradictions=args.max_open_contradictions,
         )
     )
 
@@ -1141,6 +1142,7 @@ def build_parser() -> argparse.ArgumentParser:
     ops_report.add_argument("--true-score", type=float)
     ops_report.add_argument("--min-diversity", type=float, default=0.2)
     ops_report.add_argument("--max-proxy-gap", type=float, default=0.15)
+    ops_report.add_argument("--max-open-contradictions", type=int, default=0)
     ops_report.set_defaults(func=cmd_ops_report)
 
     consolidate_once = sub.add_parser("consolidate-once")

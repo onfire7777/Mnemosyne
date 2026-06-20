@@ -1031,6 +1031,8 @@ class MemoryTools:
         ]
         result = self.learning.promote_lesson(lesson, regression_cases)
         self._save_learning()
+        self.metrics.record_gate(promoted=result.promoted, rolled_back=bool(result.rollback_branch))
+        self._save_metrics()
         return result.to_dict()
 
     def procedure_validate(self, procedure_id: str) -> dict[str, Any]:
@@ -1043,6 +1045,8 @@ class MemoryTools:
         procedure = self.learning.procedures[procedure_id]
         procedure.status = "promoted"
         self._save_learning()
+        self.metrics.record_gate(promoted=True, rolled_back=False)
+        self._save_metrics()
         return procedure.to_dict()
 
     def lesson_search(self, signature: str, tenant_id: str | None = None, status: str | None = None) -> dict[str, Any]:
@@ -1075,6 +1079,8 @@ class MemoryTools:
         procedure = self.learning.procedures[procedure_id]
         procedure.status = "rolled_back"
         self._save_learning()
+        self.metrics.record_gate(promoted=False, rolled_back=True)
+        self._save_metrics()
         return procedure.to_dict()
 
     def outcome_evaluate(
@@ -1141,13 +1147,19 @@ class MemoryTools:
             margin=1.0 if gate_promoted else 0.0,
             rollback_branch=None,
         )
-        return self.parametric.evaluate(artifact, gate, cases).to_dict()
+        decision = self.parametric.evaluate(artifact, gate, cases)
+        self.metrics.record_gate(promoted=decision.promoted, rolled_back=not decision.promoted)
+        self._save_metrics()
+        return decision.to_dict()
 
     def parametric_rollback(self, artifact_uri: str, reason: str) -> dict[str, Any]:
         if not self.parametric.artifact_store:
             raise ValueError("parametric rollback requires an artifact store")
         artifact = self.parametric.artifact_store.load_artifact(artifact_uri)
-        return self.parametric.rollback(artifact, reason).to_dict()
+        rolled_back = self.parametric.rollback(artifact, reason)
+        self.metrics.record_gate(promoted=False, rolled_back=True)
+        self._save_metrics()
+        return rolled_back.to_dict()
 
     def _save_user_model(self) -> None:
         if self.runtime_state:

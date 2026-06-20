@@ -73,13 +73,21 @@ def build_ops_report(
     true_score: float | None = None,
     min_diversity: float = 0.2,
     max_proxy_gap: float = 0.15,
+    max_open_contradictions: int = 0,
 ) -> dict[str, Any]:
     exported = engine.export_tenant(tenant_id)
     assertions = exported.get("assertions", [])
+    contradictions = exported.get("contradictions", [])
+    open_contradictions = sum(1 for item in contradictions if item.get("status") == "open")
+    metric_counters = metrics.counters if metrics else {}
     learning_counts = _learning_counts(learning, tenant_id)
     diversity = learning_counts["lesson_diversity"]
     proxy_gap = abs(proxy_score - true_score) if proxy_score is not None and true_score is not None else None
-    tripwire_passed = diversity >= min_diversity and (proxy_gap is None or proxy_gap <= max_proxy_gap)
+    tripwire_passed = (
+        diversity >= min_diversity
+        and (proxy_gap is None or proxy_gap <= max_proxy_gap)
+        and open_contradictions <= max_open_contradictions
+    )
     return {
         "tenant_id": tenant_id,
         "counts": {
@@ -89,7 +97,7 @@ def build_ops_report(
             "contested_assertions": sum(1 for item in assertions if item.get("status") == "contested"),
             "relations": len(exported.get("relations", [])),
             "preferences": len(exported.get("preferences", [])),
-            "contradictions": len(exported.get("contradictions", [])),
+            "contradictions": len(contradictions),
             "deletions": len(exported.get("deletion_log", [])),
             "audit_events": len(exported.get("audit_log", [])),
         },
@@ -102,6 +110,10 @@ def build_ops_report(
             "min_diversity": min_diversity,
             "proxy_true_gap": proxy_gap,
             "max_proxy_gap": max_proxy_gap,
+            "open_contradictions": open_contradictions,
+            "max_open_contradictions": max_open_contradictions,
+            "gate_promotions": int(metric_counters.get("gate.promotions", 0)),
+            "gate_rollbacks": int(metric_counters.get("gate.rollbacks", 0)),
         },
     }
 
