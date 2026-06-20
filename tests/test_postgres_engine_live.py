@@ -268,9 +268,29 @@ def test_postgres_cli_backend_live_smoke() -> None:
     search = run_postgres_cli("search", "--tenant", tenant, "--query", "CLI backend Postgres retrieval")
     deep = run_postgres_cli("deep-search", "--tenant", tenant, "--query", "CLI backend")
     exported = run_postgres_cli("export", "--tenant", tenant)
-    run_postgres_cli("branch", "--tenant", tenant, "--name", "cli-candidate")
+    run_postgres_cli(
+        "branch",
+        "--tenant",
+        tenant,
+        "--name",
+        "cli-candidate",
+        "--role",
+        "operator",
+        "--source-trust-tier",
+        "0",
+    )
     branch_search = run_postgres_cli("search", "--tenant", tenant, "--branch", "cli-candidate", "--query", "CLI backend Postgres")
-    run_postgres_cli("discard", "--tenant", tenant, "--branch", "cli-candidate")
+    run_postgres_cli(
+        "discard",
+        "--tenant",
+        tenant,
+        "--branch",
+        "cli-candidate",
+        "--role",
+        "operator",
+        "--source-trust-tier",
+        "0",
+    )
     legal = run_postgres_cli(
         "capture",
         "--tenant",

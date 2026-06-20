@@ -330,7 +330,16 @@ def cmd_propose(args: argparse.Namespace) -> None:
 
 def cmd_confirm(args: argparse.Namespace) -> None:
     tools = load_tools(args)
-    emit(tools.confirm(args.id, tenant_id=args.tenant, branch=args.branch, into=args.into))
+    emit(
+        tools.confirm(
+            args.id,
+            role=args.role,
+            source_trust_tier=args.source_trust_tier,
+            tenant_id=args.tenant,
+            branch=args.branch,
+            into=args.into,
+        )
+    )
 
 
 def cmd_supersede(args: argparse.Namespace) -> None:
@@ -579,30 +588,42 @@ def cmd_parametric_evaluate(args: argparse.Namespace) -> None:
 
 
 def cmd_branch(args: argparse.Namespace) -> None:
-    engine = load_engine(args)
-    try:
-        engine.branch(name=args.name, frm=args.from_branch, kind=args.kind, tenant_id=args.tenant)
-    except TypeError:
-        engine.branch(name=args.name, frm=args.from_branch, kind=args.kind)
-    emit({"branch": args.name, "from": args.from_branch, "kind": args.kind})
+    tools = load_tools(args)
+    emit(
+        tools.branch(
+            name=args.name,
+            role=args.role,
+            source_trust_tier=args.source_trust_tier,
+            from_branch=args.from_branch,
+            kind=args.kind,
+            tenant_id=args.tenant,
+        )
+    )
 
 
 def cmd_merge(args: argparse.Namespace) -> None:
-    engine = load_engine(args)
-    try:
-        report = engine.merge(frm=args.from_branch, into=args.into, tenant_id=args.tenant)
-    except TypeError:
-        report = engine.merge(frm=args.from_branch, into=args.into)
-    emit(report.to_dict())
+    tools = load_tools(args)
+    emit(
+        tools.merge(
+            from_branch=args.from_branch,
+            role=args.role,
+            source_trust_tier=args.source_trust_tier,
+            into=args.into,
+            tenant_id=args.tenant,
+        )
+    )
 
 
 def cmd_discard(args: argparse.Namespace) -> None:
-    engine = load_engine(args)
-    try:
-        engine.discard(args.branch, tenant_id=args.tenant)
-    except TypeError:
-        engine.discard(args.branch)
-    emit({"discarded": args.branch})
+    tools = load_tools(args)
+    emit(
+        tools.discard(
+            branch=args.branch,
+            role=args.role,
+            source_trust_tier=args.source_trust_tier,
+            tenant_id=args.tenant,
+        )
+    )
 
 
 def cmd_tools(args: argparse.Namespace) -> None:
@@ -808,6 +829,8 @@ def build_parser() -> argparse.ArgumentParser:
     confirm.add_argument("--tenant")
     confirm.add_argument("--branch")
     confirm.add_argument("--into", default="main")
+    confirm.add_argument("--role", required=True, choices=["reader", "agent", "consolidator", "operator"])
+    confirm.add_argument("--source-trust-tier", type=int, required=True)
     confirm.set_defaults(func=cmd_confirm)
 
     supersede = sub.add_parser("supersede")
@@ -853,17 +876,23 @@ def build_parser() -> argparse.ArgumentParser:
     branch.add_argument("--from-branch", default="main")
     branch.add_argument("--kind", default="scratch")
     branch.add_argument("--tenant", help="Tenant scope for Postgres backend")
+    branch.add_argument("--role", required=True, choices=["reader", "agent", "consolidator", "operator"])
+    branch.add_argument("--source-trust-tier", type=int, required=True)
     branch.set_defaults(func=cmd_branch)
 
     merge = sub.add_parser("merge")
     merge.add_argument("--from-branch", required=True)
     merge.add_argument("--into", default="main")
     merge.add_argument("--tenant", help="Tenant scope for Postgres backend")
+    merge.add_argument("--role", required=True, choices=["reader", "agent", "consolidator", "operator"])
+    merge.add_argument("--source-trust-tier", type=int, required=True)
     merge.set_defaults(func=cmd_merge)
 
     discard = sub.add_parser("discard")
     discard.add_argument("--branch", required=True)
     discard.add_argument("--tenant", help="Tenant scope for Postgres backend")
+    discard.add_argument("--role", required=True, choices=["reader", "agent", "consolidator", "operator"])
+    discard.add_argument("--source-trust-tier", type=int, required=True)
     discard.set_defaults(func=cmd_discard)
 
     profile_add = sub.add_parser("profile-add")
