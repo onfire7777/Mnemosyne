@@ -122,7 +122,16 @@ class ConsolidationWorker:
             candidates = self._candidate_payloads(payload, evidence)
             if candidates:
                 pass_results.append(PassResult("extractor", "complete", {"candidate_count": len(candidates)}))
-                pass_results.append(PassResult("resolver", "complete", {"strategy": "deterministic_text_pattern"}))
+                pass_results.append(
+                    PassResult(
+                        "resolver",
+                        "complete",
+                        {
+                            "strategy": "deterministic_entity_key",
+                            "resolved_entities": _resolved_entities(candidates),
+                        },
+                    )
+                )
                 for candidate in candidates:
                     result = self.run_job(
                         ConsolidationJob(
@@ -223,14 +232,17 @@ class ConsolidationWorker:
             if not fact:
                 continue
             subject, predicate, object_value = fact
+            entity_label = _entity_label(subject)
+            entity_key = _entity_key(entity_label)
             signature = f"{subject} {predicate} {object_value}".lower()
             candidates.append(
                 {
                     "signature": signature,
-                    "query": subject,
-                    "candidate_subject": subject,
+                    "query": entity_label,
+                    "candidate_subject": entity_label,
                     "candidate_predicate": predicate,
                     "candidate_object": object_value,
+                    "entity_key": entity_key,
                     "trust_tier": item.trust_tier,
                     "sensitivity": item.sensitivity,
                     "access_policy": item.access_policy,
@@ -273,7 +285,8 @@ class ConsolidationWorker:
             content = (
                 f"Evidence supports `{candidate['candidate_subject']} "
                 f"{candidate['candidate_predicate']} {candidate['candidate_object']}`; "
-                "preserve source CIDs and promote only through the gate."
+                f"resolve entity `{candidate.get('entity_key', candidate['candidate_subject'])}`, "
+                "preserve source CIDs, and promote only through the gate."
             )
             lesson = Lesson(
                 tenant_id=tenant_id,
@@ -293,7 +306,11 @@ class ConsolidationWorker:
         procedure_ids: list[str] = []
         created = 0
         for candidate in candidates:
-            signature = {"source": "consolidation", "candidate_signature": candidate["signature"]}
+            signature = {
+                "source": "consolidation",
+                "candidate_signature": candidate["signature"],
+                "entity_key": candidate.get("entity_key"),
+            }
             existing = next(
                 (
                     item
@@ -310,8 +327,9 @@ class ConsolidationWorker:
                 "1. Re-read source evidence CIDs\n"
                 f"2. Verify `{candidate['candidate_subject']} "
                 f"{candidate['candidate_predicate']} {candidate['candidate_object']}`\n"
-                "3. Check trust tier, sensitivity, and access policy\n"
-                "4. Promote only through protected gate evaluation"
+                f"3. Resolve entity key `{candidate.get('entity_key', 'n/a')}`\n"
+                "4. Check trust tier, sensitivity, and access policy\n"
+                "5. Promote only through protected gate evaluation"
             )
             procedure = Procedure(
                 tenant_id=tenant_id,
@@ -398,3 +416,36 @@ def _extract_simple_fact(text: str) -> tuple[str, str, str] | None:
     if not subject or not object_value:
         return None
     return subject, predicate, object_value
+
+
+def _entity_label(subject: str) -> str:
+    return re.sub(r"\s+", " ", subject.strip())
+
+
+def _entity_key(subject: str) -> str:
+    normalized = _entity_label(subject).lower()
+    normalized = re.sub(r"^(the|a|an)\s+", "", normalized)
+    normalized = re.sub(r"[^a-z0-9]+", "-", normalized).strip("-")
+    return normalized or "unknown-entity"
+
+
+def _resolved_entities(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    entities: dict[str, dict[str, Any]] = {}
+    for candidate in candidates:
+        key = str(candidate.get("entity_key") or _entity_key(str(candidate["candidate_subject"])))
+        entity = entities.setdefault(
+            key,
+            {
+                "key": key,
+                "label": str(candidate["candidate_subject"]),
+                "aliases": [],
+                "candidate_signatures": [],
+            },
+        )
+        alias = str(candidate["candidate_subject"])
+        if alias not in entity["aliases"]:
+            entity["aliases"].append(alias)
+        signature = str(candidate["signature"])
+        if signature not in entity["candidate_signatures"]:
+            entity["candidate_signatures"].append(signature)
+    return list(entities.values())
