@@ -24,7 +24,7 @@ from mnemosyne.provenance import C2paToolVerifier, SignedProvenanceVerifier
 from mnemosyne.queue import InProcessQueue, QueueWorker
 from mnemosyne.retrieval import HashingEmbeddingProvider, HttpEmbeddingProvider, HttpReranker, LocalSimilarityReranker, RetrievalAdapters
 from mnemosyne.runtime_state import RuntimeState
-from mnemosyne.storage import LocalObjectStore
+from mnemosyne.storage import EncryptedLocalObjectStore, JsonKeyManager, LocalObjectStore
 
 
 def default_store() -> Path:
@@ -41,6 +41,14 @@ def default_postgres_dsn() -> str | None:
 
 def default_object_store() -> str:
     return os.environ.get("MNEMOSYNE_OBJECT_STORE", ".mnemosyne/objects")
+
+
+def default_object_store_encryption() -> str:
+    return os.environ.get("MNEMOSYNE_OBJECT_STORE_ENCRYPTION", "none")
+
+
+def default_object_key_store() -> str | None:
+    return os.environ.get("MNEMOSYNE_OBJECT_KEY_STORE")
 
 
 def load_retrieval_adapters(args: argparse.Namespace) -> RetrievalAdapters:
@@ -106,6 +114,9 @@ def load_provenance_verifier(args: argparse.Namespace) -> SignedProvenanceVerifi
 
 
 def load_object_store(args: argparse.Namespace) -> LocalObjectStore:
+    if args.object_store_encryption == "aesgcm":
+        key_store = Path(args.object_key_store) if args.object_key_store else Path(args.object_store) / ".keys.json"
+        return EncryptedLocalObjectStore(Path(args.object_store), JsonKeyManager(key_store))
     return LocalObjectStore(Path(args.object_store))
 
 
@@ -807,6 +818,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--store", default=str(default_store()), help="Path to local JSON store")
     parser.add_argument("--postgres-dsn", default=default_postgres_dsn(), help="PostgreSQL DSN for --backend postgres")
     parser.add_argument("--object-store", default=default_object_store(), help="Path to local object storage for externalized payloads")
+    parser.add_argument(
+        "--object-store-encryption",
+        choices=["none", "aesgcm"],
+        default=default_object_store_encryption(),
+        help="Encrypt local object storage payloads with per-object AES-GCM keys",
+    )
+    parser.add_argument(
+        "--object-key-store",
+        default=default_object_key_store(),
+        help="Path to JSON key store for --object-store-encryption aesgcm",
+    )
     parser.add_argument("--embedding-provider", choices=["local", "http"], default=os.environ.get("MNEMOSYNE_EMBEDDING_PROVIDER", "local"))
     parser.add_argument("--embedding-url", default=os.environ.get("MNEMOSYNE_EMBEDDING_URL"))
     parser.add_argument("--embedding-model", default=os.environ.get("MNEMOSYNE_EMBEDDING_MODEL"))

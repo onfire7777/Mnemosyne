@@ -14,6 +14,7 @@ from mnemosyne.models import Assertion, Evidence, Preference, Relation, parse_dt
 from mnemosyne.observability import MetricsRegistry
 from mnemosyne.parametric import ParametricTier
 from mnemosyne.prefetch import AnticipatoryPrefetcher, PrefetchCandidate
+from mnemosyne.privacy import ErasureMode
 from mnemosyne.runtime_state import RuntimeState
 from mnemosyne.security import SecurityPolicy, TrustTier, WriteRole
 from mnemosyne.user_model import UserMemoryKind, UserModel, UserModelEntry
@@ -673,13 +674,18 @@ class MemoryTools:
             source_trust_tier=source_trust_tier,
             destructive=True,
         )
+        mode = ErasureMode(erasure_mode)
+        evidence = self.engine.get_evidence(tenant_id, cid, branch)
+        content_pointer = evidence.content_pointer if evidence else None
         result = self.engine.forget(
             tenant_id=tenant_id,
             cid=cid,
             branch=branch,
             requested_by=requested_by,
-            erasure_mode=erasure_mode,
+            erasure_mode=mode,
         )
+        if result.get("erased") and mode is ErasureMode.HARD_DELETE_LEGAL and content_pointer:
+            result["object_shred"] = self.ingestion.object_store.shred(content_pointer, tenant_id=tenant_id)
         result["security"] = decision
         return result
 

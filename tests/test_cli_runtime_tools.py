@@ -575,6 +575,64 @@ def test_cli_forget_supports_hard_delete_erasure_mode(tmp_path: Path) -> None:
     assert all(item["cid"] != captured["cid"] for item in exported["evidence"])
 
 
+def test_cli_hard_delete_crypto_shreds_encrypted_object_payload(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    objects = tmp_path / "objects"
+    keys = tmp_path / "keys.json"
+    asset = tmp_path / "capture.bin"
+    asset.write_bytes(b"legal payload bytes")
+    encrypted_args = (
+        "--object-store",
+        str(objects),
+        "--object-store-encryption",
+        "aesgcm",
+        "--object-key-store",
+        str(keys),
+    )
+    ingested = run_cli(
+        store,
+        *encrypted_args,
+        "ingest",
+        "--tenant",
+        TENANT,
+        "--user",
+        USER,
+        "--actor",
+        "user",
+        "--source-type",
+        "legal",
+        "--file",
+        str(asset),
+        "--modality",
+        "binary",
+        "--metadata",
+        json.dumps({"description": "Encrypted legal payload."}),
+        "--trust-tier",
+        "0",
+    )
+    raw_objects = [path.read_bytes() for path in objects.rglob("*") if path.is_file()]
+
+    forgotten = run_cli(
+        store,
+        *encrypted_args,
+        "forget",
+        "--tenant",
+        TENANT,
+        "--cid",
+        ingested["cid"],
+        "--erasure-mode",
+        "hard_delete_legal",
+    )
+    exported = run_cli(store, *encrypted_args, "export", "--tenant", TENANT)
+
+    assert raw_objects
+    assert all(b"legal payload bytes" not in raw for raw in raw_objects)
+    assert forgotten["erasure_mode"] == "hard_delete_legal"
+    assert forgotten["object_shred"]["crypto_shredded"] is True
+    assert forgotten["object_shred"]["reason"] == "key_shredded"
+    assert all(item["cid"] != ingested["cid"] for item in exported["evidence"])
+
+
 def test_cli_profile_graph_learning_and_parametric_flows_persist(tmp_path: Path) -> None:
     store = tmp_path / "mnemosyne.json"
 

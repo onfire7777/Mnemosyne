@@ -15,7 +15,7 @@ from mnemosyne.parametric import ParametricArtifactStore, ParametricTier
 from mnemosyne.prefetch import AnticipatoryPrefetcher, PrefetchCandidate
 from mnemosyne.provenance import C2paToolVerifier, SignedProvenanceVerifier
 from mnemosyne.queue import InProcessQueue, QueueWorker
-from mnemosyne.storage import LocalObjectStore
+from mnemosyne.storage import EncryptedLocalObjectStore, JsonKeyManager, LocalObjectStore
 
 
 TENANT = "tenant-runtime-extensions"
@@ -49,6 +49,32 @@ def test_local_object_store_addresses_bytes_and_blocks_bad_uris(tmp_path) -> Non
         assert "unsupported object uri" in str(exc)
     else:
         raise AssertionError("unsafe URI should be rejected")
+
+
+def test_encrypted_object_store_crypto_shreds_payload_keys(tmp_path) -> None:
+    store = EncryptedLocalObjectStore(
+        tmp_path / "objects",
+        JsonKeyManager(tmp_path / "keys.json"),
+    )
+    record = store.put_bytes(b"private image bytes", TENANT, kind="image", media_type="image/png")
+    raw_path = store._path_for_cid(record.cid)
+
+    assert record.uri.startswith("local-object+aesgcm://sha256/")
+    assert b"private image bytes" not in raw_path.read_bytes()
+    assert store.exists(record.uri)
+    assert store.read_bytes(record.uri) == b"private image bytes"
+
+    shred = store.shred(record.uri, tenant_id=TENANT)
+
+    assert shred["shredded"] is True
+    assert shred["crypto_shredded"] is True
+    assert store.exists(record.uri) is False
+    try:
+        store.read_bytes(record.uri)
+    except KeyError as exc:
+        assert "shredded" in str(exc)
+    else:
+        raise AssertionError("shredded object key should prevent decryption")
 
 
 def test_signed_provenance_verifier_quarantines_digest_mismatch() -> None:
