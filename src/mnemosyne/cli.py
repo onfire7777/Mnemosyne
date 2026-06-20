@@ -34,6 +34,7 @@ from mnemosyne.retrieval import (
     LocalSimilarityReranker,
     RetrievalAdapters,
 )
+from mnemosyne.postgres_runtime_state import PostgresRuntimeState
 from mnemosyne.runtime_state import RuntimeState
 from mnemosyne.security import SessionAuthError, SessionTokenVerifier, parse_session_keyring, parse_session_revoke_list
 from mnemosyne.storage import CommandKeyManager, EncryptedLocalObjectStore, JsonKeyManager, LocalObjectStore
@@ -293,16 +294,28 @@ def load_parametric_tier(args: argparse.Namespace) -> ParametricTier:
     return ParametricTier(ParametricArtifactStore(root), trainer=trainer)
 
 
-def load_runtime_state(args: argparse.Namespace) -> RuntimeState | None:
+def runtime_state_tenant(args: argparse.Namespace) -> str:
+    return getattr(args, "tenant", None) or getattr(args, "queue_tenant", None) or "system"
+
+
+def load_runtime_state(args: argparse.Namespace) -> RuntimeState | PostgresRuntimeState | None:
+    if args.backend == "postgres":
+        dsn = args.postgres_dsn or os.environ.get("MNEMOSYNE_POSTGRES_DSN")
+        if not dsn:
+            raise SystemExit("--backend postgres requires --postgres-dsn or MNEMOSYNE_POSTGRES_DSN.")
+        return PostgresRuntimeState(dsn, tenant_id=runtime_state_tenant(args))
     return RuntimeState.from_store_path(Path(args.store))
 
 
-def load_queue(args: argparse.Namespace, runtime_state: RuntimeState | None = None) -> InProcessQueue | PostgresQueue:
+def load_queue(
+    args: argparse.Namespace,
+    runtime_state: RuntimeState | PostgresRuntimeState | None = None,
+) -> InProcessQueue | PostgresQueue:
     if args.queue_backend == "postgres":
         dsn = args.postgres_dsn or os.environ.get("MNEMOSYNE_POSTGRES_DSN")
         if not dsn:
             raise SystemExit("--queue-backend postgres requires --postgres-dsn or MNEMOSYNE_POSTGRES_DSN.")
-        tenant_id = getattr(args, "tenant", None) or args.queue_tenant
+        tenant_id = runtime_state_tenant(args)
         return PostgresQueue(dsn, tenant_id=tenant_id)
     return runtime_state.load_queue() if runtime_state else InProcessQueue()
 
@@ -314,10 +327,10 @@ def queue_uses_runtime_state(args: argparse.Namespace) -> bool:
 def load_tools(
     args: argparse.Namespace,
     ingestion_queue: InProcessQueue | PostgresQueue | None = None,
-    runtime_state: RuntimeState | None = None,
+    runtime_state: RuntimeState | PostgresRuntimeState | None = None,
 ) -> MemoryTools:
-    store = Path(args.store)
     engine = load_engine(args)
+    resolved_runtime_state = runtime_state if runtime_state is not None else load_runtime_state(args)
     ingestion = IngestionPipeline(
         engine,
         object_store=load_object_store(args),
@@ -331,7 +344,7 @@ def load_tools(
     return MemoryTools(
         engine,
         ingestion=ingestion,
-        runtime_state=runtime_state or RuntimeState.from_store_path(store),
+        runtime_state=resolved_runtime_state,
         parametric=load_parametric_tier(args),
     )
 
@@ -1633,26 +1646,32 @@ def build_parser() -> argparse.ArgumentParser:
     trajectory_record.set_defaults(func=cmd_trajectory_log)
 
     trajectory_attribute = sub.add_parser("trajectory-attribute")
+    trajectory_attribute.add_argument("--tenant")
     trajectory_attribute.add_argument("--trajectory-id", required=True)
     trajectory_attribute.set_defaults(func=cmd_trajectory_attribute)
 
     lesson_induce = sub.add_parser("lesson-induce")
+    lesson_induce.add_argument("--tenant")
     lesson_induce.add_argument("--trajectory-id", required=True)
     lesson_induce.set_defaults(func=cmd_lesson_induce)
 
     lesson_propose = sub.add_parser("lesson-propose")
+    lesson_propose.add_argument("--tenant")
     lesson_propose.add_argument("--trajectory-id", required=True)
     lesson_propose.set_defaults(func=cmd_lesson_induce)
 
     procedure_induce = sub.add_parser("procedure-induce")
+    procedure_induce.add_argument("--tenant")
     procedure_induce.add_argument("--lesson-id", required=True)
     procedure_induce.set_defaults(func=cmd_procedure_induce)
 
     procedure_propose = sub.add_parser("procedure-propose")
+    procedure_propose.add_argument("--tenant")
     procedure_propose.add_argument("--lesson-id", required=True)
     procedure_propose.set_defaults(func=cmd_procedure_induce)
 
     lesson_promote = sub.add_parser("lesson-promote")
+    lesson_promote.add_argument("--tenant")
     lesson_promote.add_argument("--lesson-id", required=True)
     lesson_promote.add_argument("--cases", required=True, help="JSON array of regression cases")
     lesson_promote.add_argument("--role", choices=["reader", "agent", "consolidator", "operator"])
@@ -1660,12 +1679,14 @@ def build_parser() -> argparse.ArgumentParser:
     lesson_promote.set_defaults(func=cmd_lesson_promote)
 
     procedure_validate = sub.add_parser("procedure-validate")
+    procedure_validate.add_argument("--tenant")
     procedure_validate.add_argument("--procedure-id", required=True)
     procedure_validate.add_argument("--role", choices=["reader", "agent", "consolidator", "operator"])
     procedure_validate.add_argument("--source-trust-tier", type=int)
     procedure_validate.set_defaults(func=cmd_procedure_validate)
 
     procedure_promote = sub.add_parser("procedure-promote")
+    procedure_promote.add_argument("--tenant")
     procedure_promote.add_argument("--procedure-id", required=True)
     procedure_promote.add_argument("--role", choices=["reader", "agent", "consolidator", "operator"])
     procedure_promote.add_argument("--source-trust-tier", type=int)
@@ -1684,6 +1705,7 @@ def build_parser() -> argparse.ArgumentParser:
     procedure_search.set_defaults(func=cmd_procedure_search)
 
     procedure_rollback = sub.add_parser("procedure-rollback")
+    procedure_rollback.add_argument("--tenant")
     procedure_rollback.add_argument("--procedure-id", required=True)
     procedure_rollback.add_argument("--role", choices=["reader", "agent", "consolidator", "operator"])
     procedure_rollback.add_argument("--source-trust-tier", type=int)

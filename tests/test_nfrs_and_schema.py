@@ -97,6 +97,7 @@ def test_canonical_schema_includes_all_blueprint_core_tables() -> None:
         "deletion_log",
         "conformal_calibration",
         "runtime_jobs",
+        "runtime_state",
     }
 
     for table in required_tables:
@@ -124,6 +125,7 @@ def test_schema_enables_tenant_row_level_security() -> None:
         "deletion_log",
         "audit_log",
         "runtime_jobs",
+        "runtime_state",
     ]:
         assert f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY;" in schema
         assert f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY;" in schema

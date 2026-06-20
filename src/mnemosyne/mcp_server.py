@@ -17,6 +17,7 @@ from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.ingestion import IngestionPipeline
 from mnemosyne.mcp_tools import MemoryTools, TOOL_SPEC
 from mnemosyne.parametric import CommandParametricTrainer, ParametricArtifactStore, ParametricTier
+from mnemosyne.postgres_runtime_state import PostgresRuntimeState
 from mnemosyne.queue import InProcessQueue, PostgresQueue
 from mnemosyne.runtime_state import RuntimeState
 from mnemosyne.security import (
@@ -150,7 +151,7 @@ class MnemosyneMcpServer:
         if not self.stateless:
             self.engine, self.queue, self.runtime_state, self.tools = self._build_tools()
 
-    def _build_tools(self, queue_tenant: str | None = None) -> tuple[Any, Any, RuntimeState | None, MemoryTools]:
+    def _build_tools(self, queue_tenant: str | None = None) -> tuple[Any, Any, Any, MemoryTools]:
         if self.backend == "postgres":
             dsn = self.postgres_dsn or os.environ.get("MNEMOSYNE_POSTGRES_DSN")
             if not dsn:
@@ -159,8 +160,9 @@ class MnemosyneMcpServer:
                 from mnemosyne.postgres_engine import PostgresEngine
             except ImportError as exc:  # pragma: no cover - defensive for broken installs.
                 raise ValueError("Postgres MCP backend requires mnemosyne-memory[postgres].") from exc
+            runtime_tenant = queue_tenant or self.queue_tenant
             engine = PostgresEngine(dsn)
-            runtime_state = None
+            runtime_state = PostgresRuntimeState(dsn, tenant_id=runtime_tenant)
         else:
             engine = LocalMemoryEngine(store_path=self.store_path)
             runtime_state = RuntimeState.from_store_path(self.store_path)

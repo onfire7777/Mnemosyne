@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
+from inspect import signature
 from typing import Any, Literal
 
 from mnemosyne.engine import LocalMemoryEngine
@@ -101,8 +102,29 @@ class LearningSystem:
 
     def log_trajectory(self, trajectory: Trajectory) -> str:
         self.trajectories[trajectory.id] = trajectory
-        self.engine._audit(trajectory.tenant_id, "learning", "log_trajectory", trajectory.id, {"task": trajectory.task, "outcome": trajectory.outcome})
+        self._audit(
+            trajectory.tenant_id,
+            "learning",
+            "log_trajectory",
+            trajectory.id,
+            {"task": trajectory.task, "outcome": trajectory.outcome},
+        )
         return trajectory.id
+
+    def _audit(self, tenant_id: str, actor: str, op: str, target_id: str | None, diff: dict[str, Any]) -> None:
+        audit = getattr(self.engine, "_audit", None)
+        if audit is None:
+            return
+        if len(signature(audit).parameters) == 5:
+            audit(tenant_id, actor, op, target_id, diff)
+            return
+        from mnemosyne.postgres_engine import _stable_uuid
+
+        db_tenant_id = _stable_uuid("tenant", tenant_id)
+        with self.engine.connect() as conn:
+            with conn.cursor() as cur:
+                self.engine._set_tenant(cur, db_tenant_id)
+                audit(cur, db_tenant_id, actor, op, target_id, diff)
 
     def attribute_failure(self, trajectory_id: str) -> FailureAttribution:
         trajectory = self.trajectories[trajectory_id]
