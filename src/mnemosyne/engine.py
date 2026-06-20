@@ -859,9 +859,24 @@ class LocalMemoryEngine:
             raise ValueError("main branch cannot be discarded")
         with self._lock:
             self._require_branch(branch)
+            discarded_assertion_ids = {item.id for item in self.assertions.values() if item.branch == branch}
             self.evidence = {key: item for key, item in self.evidence.items() if item.branch != branch}
             self.assertions = {key: item for key, item in self.assertions.items() if item.branch != branch}
             self.relations = {key: item for key, item in self.relations.items() if item.branch != branch}
+            surviving_assertion_ids = {item.id for item in self.assertions.values()}
+            orphaned_assertion_ids = discarded_assertion_ids - surviving_assertion_ids
+            if orphaned_assertion_ids:
+                self.justifications = {
+                    key: item
+                    for key, item in self.justifications.items()
+                    if item.assertion_id not in orphaned_assertion_ids
+                    and not (set(item.dependency_ids) & orphaned_assertion_ids)
+                }
+                self.contradictions = {
+                    key: item
+                    for key, item in self.contradictions.items()
+                    if item.a not in orphaned_assertion_ids and item.b not in orphaned_assertion_ids
+                }
             self.branches.pop(branch, None)
             self._audit("*", "engine", "discard", branch, {})
             self._persist()
