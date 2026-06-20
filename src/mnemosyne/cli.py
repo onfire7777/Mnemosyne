@@ -83,6 +83,13 @@ def default_allowed_residency_transfers() -> list[str]:
     return [item.strip() for item in raw.split(",") if item.strip()]
 
 
+def env_flag(name: str, *, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
 def apply_session_identity(args: argparse.Namespace) -> None:
     token = getattr(args, "session_token", None)
     if token:
@@ -307,6 +314,7 @@ def load_tools(
         allowed_residencies=tuple(args.allowed_residency),
         runtime_residency=args.runtime_residency,
         allowed_residency_transfers=tuple(args.allowed_residency_transfer),
+        require_runtime_residency=args.require_runtime_residency,
     )
     return MemoryTools(
         engine,
@@ -1153,6 +1161,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         default=default_allowed_residency_transfers(),
         help="Allowed cross-region transfer in source->target form; repeat or use MNEMOSYNE_ALLOWED_RESIDENCY_TRANSFERS",
+    )
+    parser.add_argument(
+        "--require-runtime-residency",
+        action="store_true",
+        default=env_flag("MNEMOSYNE_REQUIRE_RUNTIME_RESIDENCY", default=False),
+        help="Fail ingestion unless a runtime processing residency is configured or supplied in metadata",
     )
     parser.add_argument("--embedding-provider", choices=["local", "http"], default=os.environ.get("MNEMOSYNE_EMBEDDING_PROVIDER", "local"))
     parser.add_argument("--embedding-url", default=os.environ.get("MNEMOSYNE_EMBEDDING_URL"))

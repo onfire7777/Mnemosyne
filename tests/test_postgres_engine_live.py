@@ -243,6 +243,25 @@ def test_postgres_ingestion_enforces_residency_transfer_policy_live(tmp_path: Pa
     tenant = f"tenant-residency-live-{uuid4()}"
     user = "user-residency-live"
     dsn = live_dsn()
+    required_pipeline = IngestionPipeline(
+        PostgresEngine(dsn),
+        LocalObjectStore(tmp_path / "required-objects"),
+        allowed_residencies=("eu",),
+        require_runtime_residency=True,
+    )
+    with pytest.raises(ValueError, match="runtime residency is required"):
+        required_pipeline.ingest(
+            IngestRequest(
+                tenant_id=tenant,
+                user_id=user,
+                actor="user",
+                source_type="postgres-live",
+                content="EU live Postgres data needs an explicit processing residency.",
+                metadata={"residency": "eu"},
+                trust_tier=0,
+            )
+        )
+
     denied_pipeline = IngestionPipeline(
         PostgresEngine(dsn),
         LocalObjectStore(tmp_path / "denied-objects"),

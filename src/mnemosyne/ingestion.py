@@ -82,6 +82,7 @@ class IngestionPipeline:
         allowed_residencies: tuple[str, ...] = ("local",),
         runtime_residency: str | None = None,
         allowed_residency_transfers: tuple[str, ...] = (),
+        require_runtime_residency: bool = False,
     ):
         self.engine = engine
         self.object_store = object_store or LocalObjectStore(Path(".mnemosyne/objects"))
@@ -91,6 +92,7 @@ class IngestionPipeline:
         self.allowed_residencies = tuple(normalize_residency(item) for item in allowed_residencies)
         self.runtime_residency = normalize_residency(runtime_residency) if runtime_residency else None
         self.allowed_residency_transfers = normalize_residency_transfers(tuple(allowed_residency_transfers))
+        self.require_runtime_residency = require_runtime_residency
 
     def ingest(self, request: IngestRequest, branch: str = "main") -> IngestResult:
         payload = request.payload_bytes()
@@ -104,6 +106,8 @@ class IngestionPipeline:
         if target_residency is None:
             target_value = request.metadata.get("processing_residency") or request.metadata.get("runtime_residency")
             target_residency = normalize_residency(target_value) if target_value else None
+        if self.require_runtime_residency and target_residency is None:
+            raise ValueError("runtime residency is required by this runtime")
         cross_region_transfer = enforce_residency_transfer(
             residency,
             target_residency,

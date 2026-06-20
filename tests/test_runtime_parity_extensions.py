@@ -503,6 +503,51 @@ def test_ingestion_denies_cross_region_transfer_without_allowlist(tmp_path) -> N
     assert evidence.metadata["privacy"]["allowed_residency_transfers"] == ["eu->us"]
 
 
+def test_ingestion_requires_runtime_residency_when_configured(tmp_path) -> None:
+    denied_pipeline = IngestionPipeline(
+        LocalMemoryEngine(),
+        LocalObjectStore(tmp_path / "denied-objects"),
+        allowed_residencies=("eu",),
+        require_runtime_residency=True,
+    )
+    with pytest.raises(ValueError, match="runtime residency is required"):
+        denied_pipeline.ingest(
+            IngestRequest(
+                tenant_id=TENANT,
+                user_id=USER,
+                actor="user",
+                source_type="chat",
+                content="Runtime residency must be explicit.",
+                metadata={"residency": "eu"},
+                trust_tier=0,
+            )
+        )
+
+    engine = LocalMemoryEngine()
+    allowed_pipeline = IngestionPipeline(
+        engine,
+        LocalObjectStore(tmp_path / "allowed-objects"),
+        allowed_residencies=("eu",),
+        require_runtime_residency=True,
+    )
+    accepted = allowed_pipeline.ingest(
+        IngestRequest(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="chat",
+            content="Runtime residency can be supplied per request.",
+            metadata={"residency": "eu", "processing_residency": "eu"},
+            trust_tier=0,
+        )
+    )
+    evidence = engine.get_evidence(TENANT, accepted.cid)
+
+    assert evidence is not None
+    assert evidence.access_policy["runtime_residency"] == "eu"
+    assert evidence.access_policy["cross_region_transfer"] is False
+
+
 def test_ingestion_indexes_multimodal_derived_text_without_inline_bytes(tmp_path) -> None:
     engine = LocalMemoryEngine()
     pipeline = IngestionPipeline(engine, LocalObjectStore(tmp_path / "objects"))

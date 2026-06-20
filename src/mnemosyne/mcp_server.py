@@ -67,6 +67,7 @@ class MnemosyneMcpServer:
         allowed_residencies: tuple[str, ...] | None = None,
         runtime_residency: str | None = None,
         allowed_residency_transfers: tuple[str, ...] | None = None,
+        require_runtime_residency: bool | None = None,
         queue_backend: str | None = None,
         queue_tenant: str | None = None,
     ):
@@ -111,6 +112,11 @@ class MnemosyneMcpServer:
             allowed_residency_transfers
             if allowed_residency_transfers is not None
             else _default_allowed_residency_transfers()
+        )
+        self.require_runtime_residency = (
+            bool(require_runtime_residency)
+            if require_runtime_residency is not None
+            else _env_flag("MNEMOSYNE_REQUIRE_RUNTIME_RESIDENCY", default=False)
         )
         self.stateless = stateless
         self.auth_token = auth_token if auth_token is not None else os.environ.get("MNEMOSYNE_MCP_TOKEN")
@@ -177,6 +183,7 @@ class MnemosyneMcpServer:
             allowed_residencies=self.allowed_residencies,
             runtime_residency=self.runtime_residency,
             allowed_residency_transfers=self.allowed_residency_transfers,
+            require_runtime_residency=self.require_runtime_residency,
         )
         parametric = ParametricTier(
             ParametricArtifactStore(_parametric_store_path(self.store_path, self.parametric_artifact_store)),
@@ -675,6 +682,12 @@ def main(argv: list[str] | None = None) -> None:
         default=list(_default_allowed_residency_transfers()),
         help="Allowed MCP cross-region transfer in source->target form; repeat or use MNEMOSYNE_ALLOWED_RESIDENCY_TRANSFERS",
     )
+    parser.add_argument(
+        "--require-runtime-residency",
+        action="store_true",
+        default=_env_flag("MNEMOSYNE_REQUIRE_RUNTIME_RESIDENCY", default=False),
+        help="Fail MCP ingestion unless a runtime processing residency is configured or supplied in metadata",
+    )
     parser.add_argument("--parametric-artifact-store", default=os.environ.get("MNEMOSYNE_PARAMETRIC_ARTIFACT_STORE"))
     parser.add_argument(
         "--parametric-provider",
@@ -764,6 +777,7 @@ def main(argv: list[str] | None = None) -> None:
         "allowed_residencies": tuple(args.allowed_residency),
         "runtime_residency": args.runtime_residency,
         "allowed_residency_transfers": tuple(args.allowed_residency_transfer),
+        "require_runtime_residency": args.require_runtime_residency,
         "parametric_artifact_store": args.parametric_artifact_store,
         "parametric_provider": args.parametric_provider,
         "parametric_command": args.parametric_command,

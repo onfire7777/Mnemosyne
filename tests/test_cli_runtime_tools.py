@@ -693,6 +693,71 @@ def test_cli_enforces_cross_region_residency_transfer_policy(tmp_path: Path) -> 
     assert evidence["access_policy"]["cross_region_transfer"] is True
 
 
+def test_cli_requires_runtime_residency_when_configured(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    rejected = run_raw_cli(
+        store,
+        "--allowed-residency",
+        "eu",
+        "--require-runtime-residency",
+        "ingest",
+        "--tenant",
+        TENANT,
+        "--user",
+        USER,
+        "--actor",
+        "user",
+        "--source-type",
+        "chat",
+        "--content",
+        "Runtime residency cannot be omitted in strict mode.",
+        "--metadata",
+        json.dumps({"residency": "eu"}),
+        "--trust-tier",
+        "0",
+    )
+    accepted = run_cli(
+        store,
+        "--allowed-residency",
+        "eu",
+        "--runtime-residency",
+        "eu",
+        "--require-runtime-residency",
+        "ingest",
+        "--tenant",
+        TENANT,
+        "--user",
+        USER,
+        "--actor",
+        "user",
+        "--source-type",
+        "chat",
+        "--content",
+        "Runtime residency is configured in strict mode.",
+        "--metadata",
+        json.dumps({"residency": "eu"}),
+        "--trust-tier",
+        "0",
+    )
+    exported = run_cli(
+        store,
+        "--allowed-residency",
+        "eu",
+        "--runtime-residency",
+        "eu",
+        "--require-runtime-residency",
+        "export",
+        "--tenant",
+        TENANT,
+    )
+    evidence = next(item for item in exported["evidence"] if item["cid"] == accepted["cid"])
+
+    assert rejected.returncode != 0
+    assert "runtime residency is required" in rejected.stderr
+    assert evidence["access_policy"]["runtime_residency"] == "eu"
+    assert evidence["access_policy"]["cross_region_transfer"] is False
+
+
 def test_cli_drains_media_extraction_job_with_command_provider(tmp_path: Path) -> None:
     store = tmp_path / "mnemosyne.json"
     objects = tmp_path / "objects"
