@@ -262,7 +262,211 @@ def test_shared_engine_contract_forget_propagates_projection_erasure(engine_bund
     assert all(item["cid"] != erased_cid for item in exported["evidence"])
 
 
-def _append_evidence(engine: Any, tenant: str, user: str, content: str) -> str:
+def test_shared_engine_contract_retrieval_filters_trust_sensitivity_and_quarantine(engine_bundle: tuple[Any, str, str]) -> None:
+    engine, tenant, user = engine_bundle
+    trusted_cid = _append_evidence(
+        engine,
+        tenant,
+        user,
+        "Shared filter contract keeps trusted visible evidence.",
+        trust_tier=0,
+        sensitivity=0,
+    )
+    low_trust_cid = _append_evidence(
+        engine,
+        tenant,
+        user,
+        "Shared filter contract hides low trust evidence.",
+        trust_tier=5,
+        sensitivity=0,
+    )
+    sensitive_cid = _append_evidence(
+        engine,
+        tenant,
+        user,
+        "Shared filter contract hides sensitive evidence.",
+        trust_tier=0,
+        sensitivity=5,
+    )
+    quarantined_cid = _append_evidence(
+        engine,
+        tenant,
+        user,
+        "Shared filter contract hides quarantined evidence.",
+        trust_tier=0,
+        sensitivity=0,
+        metadata={"quarantine_reason": "untrusted-manifest"},
+    )
+
+    filtered = engine.retrieve(
+        "Shared filter contract evidence",
+        tenant,
+        filt={"max_trust_tier": 3, "max_sensitivity": 2},
+    )
+    include_quarantined = engine.retrieve(
+        "Shared filter contract quarantined evidence",
+        tenant,
+        filt={"max_trust_tier": 3, "max_sensitivity": 2, "include_quarantined": True},
+    )
+
+    filtered_ids = {hit.id for hit in filtered.hits}
+    quarantine_ids = {hit.id for hit in include_quarantined.hits}
+    assert trusted_cid in filtered_ids
+    assert low_trust_cid not in filtered_ids
+    assert sensitive_cid not in filtered_ids
+    assert quarantined_cid not in filtered_ids
+    assert quarantined_cid in quarantine_ids
+
+
+def test_shared_engine_contract_merges_branch_evidence_assertions_and_relations(engine_bundle: tuple[Any, str, str]) -> None:
+    engine, tenant, user = engine_bundle
+    branch = f"shared-merge-{uuid4()}"
+    _branch(engine, branch, tenant)
+    cid = engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id=user,
+            actor="user",
+            source_type="shared-contract",
+            content="Shared merge contract moves branch-only evidence.",
+            trust_tier=0,
+            access_policy={"tenant": tenant},
+        ),
+        branch=branch,
+    )
+    assertion_id = engine.upsert_assertion(
+        Assertion(
+            tenant_id=tenant,
+            user_id=user,
+            subject=f"shared merge subject {uuid4()}",
+            predicate="moves",
+            object="branch projection",
+            confidence=0.9,
+            source_evidence_cids=[cid],
+            status="active",
+            trust_tier=0,
+            access_policy={"tenant": tenant},
+        ),
+        branch=branch,
+    )
+    relation_id = engine.add_relation(
+        Relation(
+            tenant_id=tenant,
+            source="shared merge source",
+            predicate="moves_to",
+            target="shared merge target",
+            branch=branch,
+            source_evidence_cids=[cid],
+            access_policy={"tenant": tenant},
+        ),
+        branch=branch,
+    )
+
+    before = engine.retrieve("Shared merge contract branch-only evidence", tenant)
+    report = _merge(engine, branch, tenant)
+    after = engine.retrieve("Shared merge contract branch-only evidence", tenant)
+    exported = engine.export_tenant(tenant)
+
+    assert cid not in {hit.id for hit in before.hits}
+    assert cid in {hit.id for hit in after.hits}
+    assert report.evidence_added >= 1
+    assert report.assertions_added >= 1
+    assert report.relations_added >= 1
+    assert any(item["cid"] == cid and item["branch"] == "main" for item in exported["evidence"])
+    assert any(item["id"] == assertion_id and item["branch"] == "main" for item in exported["assertions"])
+    assert any(item["id"] == relation_id and item["branch"] == "main" for item in exported["relations"])
+
+
+def test_shared_engine_contract_deep_graph_respects_tenant_and_branch(engine_bundle: tuple[Any, str, str]) -> None:
+    engine, tenant, user = engine_bundle
+    other_tenant = f"{tenant}-other"
+    branch = f"shared-graph-{uuid4()}"
+    main_cid = _append_evidence(engine, tenant, user, "Shared graph isolation main evidence.")
+    other_cid = _append_evidence(engine, other_tenant, user, "Shared graph isolation other tenant evidence.")
+    _branch(engine, branch, tenant)
+    branch_cid = engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id=user,
+            actor="user",
+            source_type="shared-contract",
+            content="Shared graph isolation branch evidence.",
+            trust_tier=0,
+            access_policy={"tenant": tenant},
+        ),
+        branch=branch,
+    )
+    main_relation_id = engine.add_relation(
+        Relation(
+            tenant_id=tenant,
+            source="shared graph seed",
+            predicate="links",
+            target="main-only target",
+            source_evidence_cids=[main_cid],
+            access_policy={"tenant": tenant},
+        )
+    )
+    other_relation_id = engine.add_relation(
+        Relation(
+            tenant_id=other_tenant,
+            source="shared graph seed",
+            predicate="links",
+            target="other-tenant target",
+            source_evidence_cids=[other_cid],
+            access_policy={"tenant": other_tenant},
+        )
+    )
+    branch_relation_id = engine.add_relation(
+        Relation(
+            tenant_id=tenant,
+            source="shared graph seed",
+            predicate="links",
+            target="branch-only target",
+            branch=branch,
+            source_evidence_cids=[branch_cid],
+            access_policy={"tenant": tenant},
+        ),
+        branch=branch,
+    )
+
+    main = engine.deep_search("shared graph seed", tenant)
+    branch_result = engine.deep_search("shared graph seed", tenant, branch=branch)
+
+    assert main_relation_id in {hit.id for hit in main.hits}
+    assert other_relation_id not in {hit.id for hit in main.hits}
+    assert branch_relation_id not in {hit.id for hit in main.hits}
+    assert branch_relation_id in {hit.id for hit in branch_result.hits}
+
+
+def test_shared_engine_contract_hard_delete_records_audit_and_deletion_log(engine_bundle: tuple[Any, str, str]) -> None:
+    engine, tenant, user = engine_bundle
+    cid = _append_evidence(engine, tenant, user, "Shared hard-delete contract evidence.")
+
+    result = engine.forget(tenant, cid, requested_by=user, erasure_mode=ErasureMode.HARD_DELETE_LEGAL)
+    exported = engine.export_tenant(tenant)
+
+    assert result["erased"] is True
+    assert result["erasure_mode"] == "hard_delete_legal"
+    assert engine.get_evidence(tenant, cid) is None
+    assert all(item["cid"] != cid for item in exported["evidence"])
+    assert any(
+        item["evidence_cid"] == cid
+        and (item.get("erasure_mode") or item.get("propagated", {}).get("erasure_mode")) == "hard_delete_legal"
+        for item in exported["deletion_log"]
+    )
+    assert any(item["op"] == "forget" and item["target_id"] == cid for item in exported["audit_log"])
+
+
+def _append_evidence(
+    engine: Any,
+    tenant: str,
+    user: str,
+    content: str,
+    *,
+    trust_tier: int = 0,
+    sensitivity: int = 0,
+    metadata: dict[str, Any] | None = None,
+) -> str:
     return engine.append_evidence(
         Evidence(
             tenant_id=tenant,
@@ -270,7 +474,9 @@ def _append_evidence(engine: Any, tenant: str, user: str, content: str) -> str:
             actor="user",
             source_type="shared-contract",
             content=content,
-            trust_tier=0,
+            metadata=metadata or {},
+            trust_tier=trust_tier,
+            sensitivity=sensitivity,
             access_policy={"tenant": tenant},
         )
     )
@@ -281,6 +487,13 @@ def _branch(engine: Any, name: str, tenant: str) -> None:
         engine.branch(name, tenant_id=tenant)
     except TypeError:
         engine.branch(name)
+
+
+def _merge(engine: Any, name: str, tenant: str) -> Any:
+    try:
+        return engine.merge(name, tenant_id=tenant)
+    except TypeError:
+        return engine.merge(name)
 
 
 def _discard(engine: Any, name: str, tenant: str) -> None:
