@@ -301,6 +301,25 @@ def test_shared_engine_contract_branches_and_discards(engine_bundle: tuple[Any, 
     assert engine.get_evidence(tenant, cid, branch="candidate") is None
 
 
+def test_shared_engine_contract_branch_names_are_tenant_scoped(engine_bundle: tuple[Any, str, str]) -> None:
+    engine, tenant, user = engine_bundle
+    other_tenant = f"{tenant}-other"
+    other_user = f"{user}-other"
+    branch = f"shared-tenant-branch-{uuid4()}"
+    tenant_cid = _append_evidence(engine, tenant, user, "Tenant one branch snapshot should be isolated.")
+    _branch(engine, branch, tenant)
+    other_cid = _append_evidence(engine, other_tenant, other_user, "Tenant two branch snapshot should be isolated.")
+    _branch(engine, branch, other_tenant)
+
+    assert engine.get_evidence(tenant, tenant_cid, branch=branch) is not None
+    assert engine.get_evidence(other_tenant, other_cid, branch=branch) is not None
+
+    _discard(engine, branch, tenant)
+
+    assert engine.get_evidence(tenant, tenant_cid, branch=branch) is None
+    assert engine.get_evidence(other_tenant, other_cid, branch=branch) is not None
+
+
 def test_shared_engine_contract_discard_prunes_branch_tms_rows(engine_bundle: tuple[Any, str, str]) -> None:
     engine, tenant, user = engine_bundle
     branch = f"shared-discard-tms-{uuid4()}"
