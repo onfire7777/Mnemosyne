@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from mnemosyne.gate import RegressionCase
 from mnemosyne.learning import FailureAttribution, LearningSystem, Lesson, Procedure, Trajectory
 from mnemosyne.observability import MetricsRegistry
 from mnemosyne.queue import InProcessQueue
@@ -93,4 +94,11 @@ class RuntimeState:
 
     def save_metrics(self, metrics: MetricsRegistry) -> None:
         self.data["metrics"] = metrics.snapshot().to_dict()
+        self.save()
+
+    def load_gate_cases(self) -> list[RegressionCase]:
+        return [RegressionCase.from_dict(row) for row in self.data.get("gate_cases", [])]
+
+    def save_gate_cases(self, cases: list[RegressionCase]) -> None:
+        self.data["gate_cases"] = [case.to_dict() for case in cases]
         self.save()
