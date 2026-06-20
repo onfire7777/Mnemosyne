@@ -573,6 +573,10 @@ class LocalMemoryEngine:
             propagated: dict[str, Any] = {
                 "retracted_assertions": [],
                 "trimmed_assertions": [],
+                "retracted_preferences": [],
+                "trimmed_preferences": [],
+                "expired_relations": [],
+                "trimmed_relations": [],
                 "erased_derived_evidence": derived_cids,
             }
             for assertion in self.assertions.values():
@@ -589,6 +593,33 @@ class LocalMemoryEngine:
                 else:
                     assertion.source_evidence_cids = surviving_sources
                     propagated["trimmed_assertions"].append(assertion.id)
+            for preference in self.preferences.values():
+                if preference.tenant_id != tenant_id:
+                    continue
+                if not affected_cids.intersection(preference.source_evidence_cids):
+                    continue
+                surviving_sources = [item for item in preference.source_evidence_cids if item not in affected_cids]
+                if not surviving_sources:
+                    preference.status = "retracted"
+                    preference.valid_to = utc_now()
+                    preference.source_evidence_cids = []
+                    propagated["retracted_preferences"].append(preference.id)
+                else:
+                    preference.source_evidence_cids = surviving_sources
+                    propagated["trimmed_preferences"].append(preference.id)
+            for relation in self.relations.values():
+                if relation.tenant_id != tenant_id or relation.branch != branch:
+                    continue
+                if not affected_cids.intersection(relation.source_evidence_cids):
+                    continue
+                surviving_sources = [item for item in relation.source_evidence_cids if item not in affected_cids]
+                if not surviving_sources:
+                    relation.valid_to = utc_now()
+                    relation.source_evidence_cids = []
+                    propagated["expired_relations"].append(relation.id)
+                else:
+                    relation.source_evidence_cids = surviving_sources
+                    propagated["trimmed_relations"].append(relation.id)
             entry = {
                 "id": new_id(),
                 "tenant_id": tenant_id,

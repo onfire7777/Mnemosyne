@@ -9,7 +9,7 @@ from mnemosyne.ingestion import IngestRequest, IngestionPipeline
 from mnemosyne.jobs import CALIBRATE_JOB, LIFECYCLE_SWEEP_JOB, OBSERVABILITY_SNAPSHOT_JOB, RuntimeJobHandlers
 from mnemosyne.learning import Lesson, Procedure
 from mnemosyne.media import MEDIA_EXTRACT_JOB, MediaExtractionResult
-from mnemosyne.models import Assertion, Contradiction, Evidence
+from mnemosyne.models import Assertion, Contradiction, Evidence, Preference, Relation
 from mnemosyne.observability import MetricsRegistry, build_ops_report
 from mnemosyne.parametric import ParametricArtifactStore, ParametricTier
 from mnemosyne.prefetch import AnticipatoryPrefetcher, PrefetchCandidate
@@ -400,11 +400,32 @@ def test_forget_transitively_erases_media_derived_evidence_and_assertions(tmp_pa
         access_policy={"tenant": TENANT},
     )
     assertion_id = engine.upsert_assertion(assertion)
+    preference_id = engine.add_preference(
+        Preference(
+            tenant_id=TENANT,
+            user_id=USER,
+            category="workflow",
+            statement="Keep Mnemosyne separate.",
+            source_evidence_cids=[derived_cid],
+        )
+    )
+    relation_id = engine.add_relation(
+        Relation(
+            tenant_id=TENANT,
+            source="Mnemosyne",
+            predicate="remains",
+            target="separate",
+            source_evidence_cids=[derived_cid],
+            access_policy={"tenant": TENANT},
+        )
+    )
 
     forgotten = engine.forget(TENANT, result.cid)
     source = next(item for item in engine.evidence.values() if item.cid == result.cid)
     derived = next(item for item in engine.evidence.values() if item.cid == derived_cid)
     retracted = next(item for item in engine.assertions.values() if item.id == assertion_id)
+    preference = engine.preferences[preference_id]
+    relation = next(item for item in engine.relations.values() if item.id == relation_id)
 
     assert forgotten["erased"] is True
     assert forgotten["propagated"]["erased_derived_evidence"] == [derived_cid]
@@ -412,6 +433,12 @@ def test_forget_transitively_erases_media_derived_evidence_and_assertions(tmp_pa
     assert derived is not None and derived.erased is True
     assert retracted.status == "retracted"
     assert retracted.source_evidence_cids == []
+    assert preference.status == "retracted"
+    assert preference.source_evidence_cids == []
+    assert relation.valid_to is not None
+    assert relation.source_evidence_cids == []
+    assert forgotten["propagated"]["retracted_preferences"] == [preference_id]
+    assert forgotten["propagated"]["expired_relations"] == [relation_id]
 
 
 def test_ingestion_classifier_tags_untrusted_imperatives_and_pii(tmp_path) -> None:
