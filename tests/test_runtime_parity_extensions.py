@@ -7,7 +7,7 @@ from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.gate import GateResult, RegressionCase
 from mnemosyne.ingestion import IngestRequest, IngestionPipeline
 from mnemosyne.jobs import CALIBRATE_JOB, LIFECYCLE_SWEEP_JOB, OBSERVABILITY_SNAPSHOT_JOB, RuntimeJobHandlers
-from mnemosyne.learning import Lesson, Procedure
+from mnemosyne.learning import LearningSystem, Lesson, Procedure
 from mnemosyne.media import MEDIA_EXTRACT_JOB, MediaExtractionResult
 from mnemosyne.models import Assertion, Contradiction, Evidence, Preference, Relation
 from mnemosyne.observability import MetricsRegistry, build_ops_report, render_ops_dashboard
@@ -557,6 +557,55 @@ def test_consolidation_worker_extracts_and_promotes_direct_user_fact_with_gate(t
     assert len(active) == 1
     assert active[0].status == "active"
     assert active[0].statement() == "Project codename is Mnemosyne"
+
+
+def test_consolidation_worker_distills_lessons_procedures_and_summary(tmp_path) -> None:
+    engine = LocalMemoryEngine()
+    learning = LearningSystem(engine)
+    queue = InProcessQueue()
+    pipeline = IngestionPipeline(engine, LocalObjectStore(tmp_path / "objects"), queue=queue)
+    result = pipeline.ingest(
+        IngestRequest(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="chat",
+            content="Deployment target is local-first CLI.",
+        )
+    )
+    worker = QueueWorker(
+        queue,
+        {
+            CONSOLIDATE_EVIDENCE_JOB: ConsolidationWorker(
+                engine,
+                gate_cases=[],
+                learning=learning,
+            ).run_queue_payload
+        },
+    )
+
+    job = worker.run_once(CONSOLIDATE_EVIDENCE_JOB)
+
+    assert job is not None
+    assert job.status == "complete"
+    pass_results = {item["name"]: item for item in job.result["pass_results"]}
+    assert pass_results["summarizer"]["status"] == "complete"
+    assert pass_results["summarizer"]["details"]["source_cids"] == [result.cid]
+    assert pass_results["lesson_distiller"]["status"] == "complete"
+    assert pass_results["lesson_distiller"]["details"]["created"] == 1
+    assert pass_results["skill_inducer"]["status"] == "complete"
+    assert pass_results["skill_inducer"]["details"]["created"] == 1
+    assert len(learning.lessons) == 1
+    assert len(learning.procedures) == 1
+    lesson = next(iter(learning.lessons.values()))
+    procedure = next(iter(learning.procedures.values()))
+    assert lesson.lesson_type == "observed-pattern"
+    assert lesson.failure_signature == "consolidation:deployment target is local-first cli"
+    assert procedure.kind == "consolidation-checklist"
+
+    second = worker.run_once(CONSOLIDATE_EVIDENCE_JOB)
+
+    assert second is None
 
 
 def test_consolidation_worker_does_not_promote_untrusted_data_only_fact(tmp_path) -> None:

@@ -246,9 +246,12 @@ def cmd_ingest(args: argparse.Namespace) -> None:
             metrics=metrics,
             object_store=load_object_store(args),
             media_extractor=load_media_extractor(args),
+            learning=tools.learning,
         )
         worker = QueueWorker(ingestion_queue, handlers.handlers(), metrics=metrics)
         job = worker.run_once(CONSOLIDATE_EVIDENCE_JOB)
+        if tools.runtime_state:
+            tools.runtime_state.save_learning(tools.learning)
         result["consolidation_worker"] = {
             "queue": ingestion_queue.snapshot(),
             "job": job.to_dict() if job else None,
@@ -698,11 +701,13 @@ def cmd_consolidate_once(args: argparse.Namespace) -> None:
         metrics=metrics,
         object_store=load_object_store(args),
         media_extractor=load_media_extractor(args),
+        learning=tools.learning,
     )
     worker = QueueWorker(queue, handlers.handlers(), metrics=metrics)
     job = worker.run_once(CONSOLIDATE_EVIDENCE_JOB)
     if runtime_state:
         runtime_state.save_queue(queue)
+        runtime_state.save_learning(tools.learning)
     emit({"queue": queue.snapshot(), "job": job.to_dict() if job else None, "metrics": metrics.snapshot().to_dict()})
 
 
@@ -717,11 +722,13 @@ def cmd_queue_drain(args: argparse.Namespace) -> None:
         metrics=metrics,
         object_store=load_object_store(args),
         media_extractor=load_media_extractor(args),
+        learning=tools.learning,
     )
     worker = QueueWorker(queue, handlers.handlers(), metrics=metrics)
     jobs = worker.drain(limit=args.limit, kind=args.kind)
     if runtime_state:
         runtime_state.save_queue(queue)
+        runtime_state.save_learning(tools.learning)
     emit({"queue": queue.snapshot(), "jobs": [job.to_dict() for job in jobs], "metrics": metrics.snapshot().to_dict()})
 
 

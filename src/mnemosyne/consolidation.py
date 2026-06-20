@@ -8,6 +8,7 @@ from typing import Any
 
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.gate import Candidate, GateResult, PromotionGate, RegressionCase
+from mnemosyne.learning import Lesson, Procedure
 from mnemosyne.models import Assertion, Evidence
 from mnemosyne.security import SecurityPolicy, TrustTier
 
@@ -71,10 +72,17 @@ class ConsolidationRunResult:
 
 
 class ConsolidationWorker:
-    def __init__(self, engine: LocalMemoryEngine, gate_cases: list[RegressionCase], security: SecurityPolicy | None = None):
+    def __init__(
+        self,
+        engine: LocalMemoryEngine,
+        gate_cases: list[RegressionCase],
+        security: SecurityPolicy | None = None,
+        learning: Any | None = None,
+    ):
         self.engine = engine
         self.security = security or SecurityPolicy()
         self.gate = PromotionGate(engine, gate_cases)
+        self.learning = learning
 
     def run_queue_payload(self, payload: dict[str, Any]) -> ConsolidationRunResult:
         decision = self.security.authorize_write(
@@ -104,6 +112,7 @@ class ConsolidationWorker:
             )
         ]
         candidate_results: list[dict[str, Any]] = []
+        candidates: list[dict[str, Any]] = []
         skipped: list[str] = list(missing)
 
         if self._contains_no_write_data(evidence, payload):
@@ -140,6 +149,30 @@ class ConsolidationWorker:
 
         for pass_name in passes_run:
             if pass_name in {"replayer", "extractor", "resolver", "belief_reviser"}:
+                continue
+            if pass_name == "summarizer":
+                summary = self._summarize_evidence(evidence)
+                if summary:
+                    pass_results.append(PassResult(pass_name, "complete", summary))
+                else:
+                    skipped.append("summarizer_no_evidence")
+                    pass_results.append(PassResult(pass_name, "skipped", {"reason": "no_evidence"}))
+                continue
+            if pass_name == "lesson_distiller":
+                lesson_result = self._distill_lessons(tenant_id, candidates)
+                status = "complete" if lesson_result["lessons"] else "skipped"
+                if status == "skipped":
+                    skipped.append("lesson_distiller_no_candidates")
+                    lesson_result["reason"] = "no_candidates_or_learning_store"
+                pass_results.append(PassResult(pass_name, status, lesson_result))
+                continue
+            if pass_name == "skill_inducer":
+                procedure_result = self._induce_procedures(tenant_id, candidates)
+                status = "complete" if procedure_result["procedures"] else "skipped"
+                if status == "skipped":
+                    skipped.append("skill_inducer_no_candidates")
+                    procedure_result["reason"] = "no_candidates_or_learning_store"
+                pass_results.append(PassResult(pass_name, status, procedure_result))
                 continue
             if pass_name == "promotion_gate" and candidate_results:
                 promoted = sum(1 for item in candidate_results if item.get("promoted"))
@@ -204,6 +237,93 @@ class ConsolidationWorker:
                 }
             )
         return candidates
+
+    @staticmethod
+    def _summarize_evidence(evidence: list[Evidence]) -> dict[str, Any] | None:
+        if not evidence:
+            return None
+        combined = " ".join(item.content.strip() for item in evidence if item.content.strip())
+        first_sentence = re.split(r"(?<=[.!?])\s+", combined.strip())[0] if combined.strip() else ""
+        tokens = first_sentence.split()
+        summary = " ".join(tokens[:32])
+        return {
+            "evidence_count": len(evidence),
+            "summary": summary,
+            "source_cids": [item.cid for item in evidence if item.cid],
+        }
+
+    def _distill_lessons(self, tenant_id: str, candidates: list[dict[str, Any]]) -> dict[str, Any]:
+        if self.learning is None or not candidates:
+            return {"lessons": []}
+        lesson_ids: list[str] = []
+        created = 0
+        for candidate in candidates:
+            signature = f"consolidation:{candidate['signature']}"
+            existing = next(
+                (
+                    item
+                    for item in self.learning.lessons.values()
+                    if item.tenant_id == tenant_id and item.failure_signature == signature
+                ),
+                None,
+            )
+            if existing:
+                lesson_ids.append(existing.id)
+                continue
+            content = (
+                f"Evidence supports `{candidate['candidate_subject']} "
+                f"{candidate['candidate_predicate']} {candidate['candidate_object']}`; "
+                "preserve source CIDs and promote only through the gate."
+            )
+            lesson = Lesson(
+                tenant_id=tenant_id,
+                lesson_type="observed-pattern",
+                failure_signature=signature,
+                content=content,
+                votes=1,
+            )
+            self.learning.lessons[lesson.id] = lesson
+            lesson_ids.append(lesson.id)
+            created += 1
+        return {"lessons": lesson_ids, "created": created, "reused": len(lesson_ids) - created}
+
+    def _induce_procedures(self, tenant_id: str, candidates: list[dict[str, Any]]) -> dict[str, Any]:
+        if self.learning is None or not candidates:
+            return {"procedures": []}
+        procedure_ids: list[str] = []
+        created = 0
+        for candidate in candidates:
+            signature = {"source": "consolidation", "candidate_signature": candidate["signature"]}
+            existing = next(
+                (
+                    item
+                    for item in self.learning.procedures.values()
+                    if item.tenant_id == tenant_id and item.signature == signature
+                ),
+                None,
+            )
+            if existing:
+                procedure_ids.append(existing.id)
+                continue
+            name = f"Consolidate {candidate['candidate_subject']}"
+            body = (
+                "1. Re-read source evidence CIDs\n"
+                f"2. Verify `{candidate['candidate_subject']} "
+                f"{candidate['candidate_predicate']} {candidate['candidate_object']}`\n"
+                "3. Check trust tier, sensitivity, and access policy\n"
+                "4. Promote only through protected gate evaluation"
+            )
+            procedure = Procedure(
+                tenant_id=tenant_id,
+                kind="consolidation-checklist",
+                name=name,
+                body=body,
+                signature=signature,
+            )
+            self.learning.procedures[procedure.id] = procedure
+            procedure_ids.append(procedure.id)
+            created += 1
+        return {"procedures": procedure_ids, "created": created, "reused": len(procedure_ids) - created}
 
     @staticmethod
     def _contains_no_write_data(evidence: list[Evidence], payload: dict[str, Any]) -> bool:
