@@ -17,6 +17,7 @@ from mnemosyne.ingestion import IngestRequest, IngestionPipeline
 from mnemosyne.jobs import RuntimeJobHandlers
 from mnemosyne.media import CommandMediaTextExtractor, MediaTextExtractor, MetadataMediaTextExtractor
 from mnemosyne.mcp_tools import MemoryTools, TOOL_SPEC
+from mnemosyne.models import Hit
 from mnemosyne.observability import MetricsRegistry, build_ops_report
 from mnemosyne.parametric import ParametricArtifactStore, ParametricTier
 from mnemosyne.provenance import C2paToolVerifier, SignedProvenanceVerifier
@@ -727,6 +728,79 @@ def cmd_ops_report(args: argparse.Namespace) -> None:
     )
 
 
+def cmd_provider_check(args: argparse.Namespace) -> None:
+    checks: dict[str, dict[str, Any]] = {}
+    ok = True
+    try:
+        adapters = load_retrieval_adapters(args)
+        vector = adapters.embedding.embed("Mnemosyne provider health check")
+        checks["embedding"] = {
+            "ok": True,
+            "provider": args.embedding_provider,
+            "dimensions": len(vector),
+            "model": args.embedding_model,
+        }
+    except Exception as exc:  # noqa: BLE001 - health checks return structured failures.
+        ok = False
+        checks["embedding"] = {"ok": False, "provider": args.embedding_provider, "error": str(exc)}
+        adapters = None
+
+    try:
+        reranker = adapters.reranker if adapters else load_retrieval_adapters(args).reranker
+        ranked = reranker.rerank(
+            "provider health",
+            [
+                Hit(
+                    id="a",
+                    kind="evidence",
+                    tenant_id="health",
+                    branch="main",
+                    text="irrelevant text",
+                    score=0.1,
+                    channel="health",
+                ),
+                Hit(
+                    id="b",
+                    kind="evidence",
+                    tenant_id="health",
+                    branch="main",
+                    text="provider health check",
+                    score=0.1,
+                    channel="health",
+                ),
+            ],
+            k=2,
+        )
+        checks["reranker"] = {
+            "ok": True,
+            "provider": args.reranker_provider,
+            "top_id": ranked[0].id if ranked else None,
+            "model": args.reranker_model,
+        }
+    except Exception as exc:  # noqa: BLE001 - health checks return structured failures.
+        ok = False
+        checks["reranker"] = {"ok": False, "provider": args.reranker_provider, "error": str(exc)}
+
+    try:
+        extracted = load_media_extractor(args).extract(
+            b"Mnemosyne provider health check",
+            media_type="text/plain",
+            modality="binary",
+            metadata={"description": "Mnemosyne provider health check"},
+        )
+        checks["media_extractor"] = {
+            "ok": True,
+            "provider": "command" if args.media_extractor_command else "metadata",
+            "text_length": len(extracted.text),
+            "sources": extracted.sources,
+        }
+    except Exception as exc:  # noqa: BLE001 - health checks return structured failures.
+        ok = False
+        checks["media_extractor"] = {"ok": False, "provider": "command", "error": str(exc)}
+
+    emit({"ok": ok, "checks": checks})
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="mneme", description="Mnemosyne local memory compiler CLI")
     parser.add_argument("--backend", choices=["local", "postgres"], default=default_backend(), help="Storage backend")
@@ -1144,6 +1218,9 @@ def build_parser() -> argparse.ArgumentParser:
     ops_report.add_argument("--max-proxy-gap", type=float, default=0.15)
     ops_report.add_argument("--max-open-contradictions", type=int, default=0)
     ops_report.set_defaults(func=cmd_ops_report)
+
+    provider_check = sub.add_parser("provider-check")
+    provider_check.set_defaults(func=cmd_provider_check)
 
     consolidate_once = sub.add_parser("consolidate-once")
     consolidate_once.set_defaults(func=cmd_consolidate_once)

@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from mnemosyne.cli import build_parser
@@ -73,6 +75,76 @@ def test_cli_exposes_retrieval_provider_flags() -> None:
     assert args.embedding_model == "qwen3-embedding"
     assert args.reranker_provider == "http"
     assert args.reranker_model == "qwen3-reranker"
+
+
+def test_cli_provider_check_exercises_http_and_media_contracts(tmp_path: Path) -> None:
+    requests: list[dict[str, object]] = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:  # noqa: N802 - stdlib callback name.
+            length = int(self.headers.get("Content-Length", "0"))
+            payload = json.loads(self.rfile.read(length).decode("utf-8"))
+            requests.append({"path": self.path, "payload": payload})
+            if self.path == "/embed":
+                body = {"data": [{"embedding": [3.0, 4.0, 0.0, 99.0]}]}
+            else:
+                body = {"results": [{"index": 1, "relevance_score": 0.95}, {"index": 0, "relevance_score": 0.1}]}
+            encoded = json.dumps(body).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(encoded)))
+            self.end_headers()
+            self.wfile.write(encoded)
+
+        def log_message(self, format: str, *args: object) -> None:  # noqa: A002 - stdlib signature.
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    extractor = tmp_path / "extractor.py"
+    extractor.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env python3",
+                "import json",
+                "print(json.dumps({'text': 'media health ok', 'sources': ['probe']}))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    extractor.chmod(0o755)
+    base = f"http://127.0.0.1:{server.server_port}"
+    try:
+        report = run_cli(
+            tmp_path / "mnemosyne.json",
+            "--embedding-provider",
+            "http",
+            "--embedding-url",
+            f"{base}/embed",
+            "--embedding-model",
+            "embed-health",
+            "--embedding-dims",
+            "3",
+            "--reranker-provider",
+            "http",
+            "--reranker-url",
+            f"{base}/rerank",
+            "--reranker-model",
+            "rerank-health",
+            "--media-extractor-command",
+            str(extractor),
+            "provider-check",
+        )
+    finally:
+        server.shutdown()
+
+    assert report["ok"] is True
+    assert report["checks"]["embedding"]["dimensions"] == 3
+    assert report["checks"]["reranker"]["top_id"] == "b"
+    assert report["checks"]["media_extractor"]["provider"] == "command"
+    assert report["checks"]["media_extractor"]["sources"] == ["probe"]
+    assert [item["path"] for item in requests] == ["/embed", "/rerank"]
 
 
 def test_cli_ingests_binary_file_with_c2pa_verifier(tmp_path: Path) -> None:
