@@ -179,18 +179,24 @@ def load_provenance_verifier(args: argparse.Namespace) -> SignedProvenanceVerifi
 
 def load_provenance_trust_policy(args: argparse.Namespace) -> ProvenanceTrustPolicy:
     trusted_issuers = [str(item).strip() for item in (args.trusted_provenance_issuer or []) if str(item).strip()]
+    trusted_roots = [str(item).strip() for item in (args.trusted_provenance_root or []) if str(item).strip()]
     require_trusted_issuer = False
+    require_trusted_root = False
     rules = ()
     policy_path = getattr(args, "provenance_trust_policy", None)
     if policy_path:
         policy_data = json.loads(Path(policy_path).read_text(encoding="utf-8"))
         policy = ProvenanceTrustPolicy.from_dict(policy_data)
         trusted_issuers.extend(policy.trusted_issuers)
+        trusted_roots.extend(policy.trusted_roots)
         require_trusted_issuer = policy.require_trusted_issuer
+        require_trusted_root = policy.require_trusted_root
         rules = policy.rules
     return ProvenanceTrustPolicy(
         trusted_issuers=tuple(dict.fromkeys(trusted_issuers)),
+        trusted_roots=tuple(dict.fromkeys(trusted_roots)),
         require_trusted_issuer=require_trusted_issuer,
+        require_trusted_root=require_trusted_root,
         rules=rules,
     )
 
@@ -1034,6 +1040,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--graph-backend", default=os.environ.get("MNEMOSYNE_GRAPH_BACKEND", "postgres-recursive-ppr"))
     parser.add_argument("--c2pa-tool", default=os.environ.get("MNEMOSYNE_C2PA_TOOL"))
     parser.add_argument("--trusted-provenance-issuer", action="append", default=os.environ.get("MNEMOSYNE_TRUSTED_PROVENANCE_ISSUERS", "").split(",") if os.environ.get("MNEMOSYNE_TRUSTED_PROVENANCE_ISSUERS") else [])
+    parser.add_argument("--trusted-provenance-root", action="append", default=os.environ.get("MNEMOSYNE_TRUSTED_PROVENANCE_ROOTS", "").split(",") if os.environ.get("MNEMOSYNE_TRUSTED_PROVENANCE_ROOTS") else [])
     parser.add_argument("--provenance-trust-policy", default=os.environ.get("MNEMOSYNE_PROVENANCE_TRUST_POLICY"))
     parser.add_argument("--provenance-timeout", type=float, default=float(os.environ.get("MNEMOSYNE_PROVENANCE_TIMEOUT", "30")))
     parser.add_argument("--media-extractor-command", default=os.environ.get("MNEMOSYNE_MEDIA_EXTRACTOR_COMMAND"))

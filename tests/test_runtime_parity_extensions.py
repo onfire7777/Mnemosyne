@@ -183,6 +183,55 @@ def test_c2pa_tool_verifier_enforces_required_trusted_issuer_policy(tmp_path) ->
     }
 
 
+def test_c2pa_tool_verifier_enforces_certificate_root_policy(tmp_path) -> None:
+    payload = b"camera bytes"
+    asset_hash = sha256(payload).hexdigest()
+    trusted_root = "aa" * 32
+    rejected_root = "bb" * 32
+    asset = tmp_path / "photo.jpg"
+    asset.write_bytes(payload)
+    verifier_stub = tmp_path / "c2pa-root.py"
+    verifier_stub.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env python3",
+                "import json",
+                f"print(json.dumps({{'active_manifest': 'manifest-1', 'claim_generator': 'issuer-a', 'asset_sha256': '{asset_hash}', 'certificate_chain': [{{'root_fingerprint': '{trusted_root}'}}]}}))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    verifier_stub.chmod(0o755)
+    trusted_policy = ProvenanceTrustPolicy(
+        trusted_issuers=("issuer-a",),
+        trusted_roots=(trusted_root,),
+        require_trusted_issuer=True,
+    )
+    rejected_policy = ProvenanceTrustPolicy(
+        trusted_issuers=("issuer-a",),
+        trusted_roots=(rejected_root,),
+        require_trusted_issuer=True,
+    )
+
+    trusted = C2paToolVerifier(tool_path=str(verifier_stub), trust_policy=trusted_policy).verify(
+        payload, {"asset_path": str(asset)}
+    )
+    rejected = C2paToolVerifier(tool_path=str(verifier_stub), trust_policy=rejected_policy).verify(
+        payload, {"asset_path": str(asset)}
+    )
+
+    assert trusted.valid is True
+    assert trusted.trusted is True
+    assert trusted.manifest is not None
+    assert trusted.manifest["c2pa"]["certificate_roots"] == [trusted_root]
+    assert rejected.valid is True
+    assert rejected.trusted is False
+    assert rejected.quarantine is True
+    assert rejected.reason == "c2pa manifest valid but certificate root rejected by trust policy"
+    assert rejected.diagnostics["certificate_roots"] == [trusted_root]
+    assert rejected.diagnostics["trusted_roots"] == [rejected_root]
+
+
 def test_c2pa_tool_verifier_enforces_scoped_trust_policy(tmp_path) -> None:
     payload = b"camera bytes"
     asset_hash = sha256(payload).hexdigest()

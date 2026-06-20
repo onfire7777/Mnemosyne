@@ -120,14 +120,14 @@ python -m mnemosyne.cli \
   --file ./capture.bin --modality binary --trust-tier 5
 ```
 
-Policy files can define global `trusted_issuers` or scoped `rules` such as `{"rules": [{"scope": {"tenant_id": "tenant-a", "source_type": "camera", "modality": "binary"}, "trusted_issuers": ["issuer-a"]}]}`. When scoped rules are present, no matching rule means the otherwise valid manifest is quarantined instead of trusted.
+Policy files can define global `trusted_issuers`, `trusted_roots`, or scoped `rules` such as `{"rules": [{"scope": {"tenant_id": "tenant-a", "source_type": "camera", "modality": "binary"}, "trusted_issuers": ["issuer-a"], "trusted_roots": ["<sha256-root-fingerprint>"]}]}`. When scoped rules are present, no matching rule means the otherwise valid manifest is quarantined instead of trusted.
 
 ## Status
 
 The repository has a verified local scaffold plus runtime parity extensions. Current checks:
 
 - `uv run python -m compileall -q src tests` passes.
-- `uv run pytest -q` collects 155 tests and returns 135 passing tests plus 20 skipped live-DB tests with the optional MCP SDK extra installed.
+- `uv run pytest -q` collects 156 tests and returns 136 passing tests plus 20 skipped live-DB tests with the optional MCP SDK extra installed.
 - With Docker compose Postgres running, `MNEMOSYNE_POSTGRES_DSN=postgresql://... uv run pytest -q tests/test_postgres_engine_live.py tests/test_shared_engine_contract.py` returns 30 passing live/shared adapter tests covering tenant RLS, SQL FTS, pgvector assertion search, dense evidence fallback, recursive graph/PPR, branch/discard, branch merge retrieval, bitemporal supersession, tenant isolation, tombstone and hard-delete forget modes, command-backed object key management, transitive derived-evidence erasure across assertions/preferences/relations, retrieval trust/sensitivity/quarantine filtering, deep graph tenant/branch isolation, hard-delete audit export, HTTP-configurable retrieval adapter wiring with strict provider response validation, CLI `--backend postgres`, fail-closed CLI `provider-check`, stateless MCP ingestion over tenant-scoped durable Postgres queues, shared local/Postgres evidence/retrieval/branch/as-of/relation/preference/correction/forget-propagation contracts, durable Postgres queue leasing/drain, asset-bound CLI file ingestion through the C2PA verifier adapter, externalized payload derived-text retrieval, async media extraction, gated consolidation promotion on Postgres, and shared local/Postgres contract parity.
 
 Exact 1:1 blueprint parity is still in progress. The controlling status artifact is `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md`.
