@@ -38,11 +38,14 @@ CREATE TABLE IF NOT EXISTS evidence (
   sensitivity SMALLINT NOT NULL DEFAULT 0,
   signed_provenance JSONB,
   access_policy JSONB NOT NULL DEFAULT '{}'::jsonb,
+  embedding VECTOR(1024),
   erased BOOLEAN NOT NULL DEFAULT false,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (tenant_id, branch, cid),
   FOREIGN KEY (tenant_id, branch) REFERENCES branches(tenant_id, name)
 );
+
+CREATE INDEX IF NOT EXISTS evidence_embedding_hnsw ON evidence USING hnsw (embedding vector_cosine_ops);
 
 CREATE TABLE IF NOT EXISTS assertions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
