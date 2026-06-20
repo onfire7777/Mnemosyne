@@ -155,7 +155,7 @@ def render_ops_dashboard(report: dict[str, Any]) -> str:
     ]
     queue_cards = [
         ("Queue depth", queue.get("queued", 0)),
-        ("Active jobs", queue.get("active", 0)),
+        ("Active jobs", queue.get("running", queue.get("active", 0))),
         ("Retry jobs", queue.get("retry", 0)),
         ("Completed jobs", queue.get("complete", 0)),
         ("Dead jobs", queue.get("dead", 0)),

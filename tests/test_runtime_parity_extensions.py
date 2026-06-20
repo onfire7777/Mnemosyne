@@ -925,7 +925,7 @@ def test_ops_dashboard_renderer_escapes_snapshot_values() -> None:
     report = {
         "tenant_id": "<tenant>",
         "counts": {"evidence": 2, "assertions": 1, "relations": 0, "preferences": 1},
-        "queue": {"queued": 3},
+        "queue": {"queued": 3, "running": 2, "retry": 1, "complete": 4, "dead": 1},
         "learning": {"lessons": 2, "procedures": 1, "lesson_diversity": 0.5},
         "metrics": {
             "counters": {
@@ -963,6 +963,7 @@ def test_ops_dashboard_renderer_escapes_snapshot_values() -> None:
     assert "ATTENTION" in dashboard
     assert "Retrieval" in dashboard
     assert "Calibration" in dashboard
+    assert '<div class="label">Active jobs</div><div class="value">2</div>' in dashboard
     assert "p95 latency ms" in dashboard
     assert "0.42" in dashboard
     assert "Eval passed" in dashboard
