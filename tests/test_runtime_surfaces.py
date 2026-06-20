@@ -9,6 +9,7 @@ from io import StringIO
 from pathlib import Path
 
 from mnemosyne.mcp_server import MnemosyneMcpServer
+from mnemosyne.mcp_tools import TOOL_SPEC
 from mnemosyne.models import Hit
 from mnemosyne.postgres_engine import PostgresEngine, _bytes_to_cid, _cid_to_bytes, _stable_uuid, _uuid_or_none, _vector_literal
 from mnemosyne.retrieval import HttpEmbeddingProvider, HttpReranker, LocalSimilarityReranker, semantic_entropy
@@ -16,6 +17,19 @@ from mnemosyne.retrieval import HttpEmbeddingProvider, HttpReranker, LocalSimila
 
 TENANT = "tenant-runtime"
 USER = "user-runtime"
+
+
+def mcp_call(server: MnemosyneMcpServer, name: str, arguments: dict[str, object]) -> dict:
+    response = server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 99,
+            "method": "tools/call",
+            "params": {"name": name, "arguments": arguments},
+        }
+    )
+    assert response["result"]["isError"] is False, response["result"]["content"][0]["text"]
+    return response["result"]["structuredContent"]
 
 
 def test_semantic_entropy_distinguishes_identical_and_divergent_answers() -> None:
@@ -157,10 +171,12 @@ def test_mcp_server_initializes_lists_tools_and_calls_capture_search(tmp_path: P
         "procedure_validate",
         "parametric_propose",
         "parametric_evaluate",
+        "parametric_rollback",
         "forget",
         "export",
     }
     tools_by_name = {tool["name"]: tool for tool in listed["result"]["tools"]}
+    assert set(tools_by_name) == {item["name"] for item in TOOL_SPEC}
     capture_schema = tools_by_name["capture"]["inputSchema"]
     assert capture_schema["properties"]["trust_tier"]["type"] == "integer"
     assert "trust_tier" not in capture_schema["required"]
@@ -179,6 +195,80 @@ def test_mcp_server_initializes_lists_tools_and_calls_capture_search(tmp_path: P
     assert capture_content["cid"]
     assert search_content["hits"]
     assert search_content["hits"][0]["provenance"] == [capture_content["cid"]]
+
+
+def test_mcp_server_rejects_non_object_tool_arguments(tmp_path: Path) -> None:
+    server = MnemosyneMcpServer(store_path=tmp_path / "store.json")
+
+    response = server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {"name": "search", "arguments": ["not", "an", "object"]},
+        }
+    )
+
+    assert response["result"]["isError"] is True
+    assert "Tool arguments must be a JSON object" in response["result"]["content"][0]["text"]
+
+
+def test_mcp_server_persists_parametric_artifacts_and_rolls_back(tmp_path: Path) -> None:
+    store = tmp_path / "store.json"
+    server = MnemosyneMcpServer(store_path=store)
+    trajectory = mcp_call(
+        server,
+        "trajectory_record",
+        {
+            "tenant_id": TENANT,
+            "user_id": USER,
+            "session_id": "session-mcp",
+            "task": "MCP parametric rollback",
+            "steps": [{"name": "train", "status": "failed", "error": "regression"}],
+            "outcome": "failure",
+            "reward": -1.0,
+            "memory_version": "v1",
+        },
+    )
+    lesson = mcp_call(server, "lesson_propose", {"trajectory_id": trajectory["id"]})
+    procedure = mcp_call(server, "procedure_propose", {"lesson_id": lesson["id"]})
+    mcp_call(server, "procedure_validate", {"procedure_id": procedure["id"]})
+    mcp_call(
+        server,
+        "lesson_promote",
+        {
+            "lesson_id": lesson["id"],
+            "cases": [
+                    {
+                        "id": "mcp-parametric-case",
+                        "signature": "MCP parametric rollback",
+                        "query": "regression verify tools durable memory",
+                        "expected_substring": "verify with tools",
+                        "protected": True,
+                    }
+            ],
+        },
+    )
+
+    artifact = mcp_call(server, "parametric_propose", {"tenant_id": TENANT})
+    artifact_path = store.with_suffix(store.suffix + ".parametric") / TENANT / f"{artifact['id']}.json"
+    proposal_record = json.loads(artifact_path.read_text(encoding="utf-8"))
+    rolled_back = mcp_call(
+        server,
+        "parametric_rollback",
+        {
+            "artifact_uri": artifact["artifact_uri"],
+            "reason": "protected regression after MCP proposal",
+        },
+    )
+    rollback_record = json.loads(artifact_path.read_text(encoding="utf-8"))
+
+    assert set(artifact["source_ids"]) == {lesson["id"], procedure["id"]}
+    assert artifact["artifact_uri"].startswith("local-parametric://")
+    assert proposal_record["payload"]["phase"] == "proposal"
+    assert rolled_back["status"] == "rolled_back"
+    assert rolled_back["rollback_ref"].startswith("rollback-")
+    assert rollback_record["payload"]["phase"] == "rolled_back"
 
 
 def test_mcp_server_requires_configured_auth_token_for_tool_calls(tmp_path: Path) -> None:

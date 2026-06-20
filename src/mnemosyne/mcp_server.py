@@ -15,6 +15,7 @@ from typing import Any, Literal, TextIO, Union, get_args, get_origin, get_type_h
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.ingestion import IngestionPipeline
 from mnemosyne.mcp_tools import MemoryTools, TOOL_SPEC
+from mnemosyne.parametric import ParametricArtifactStore, ParametricTier
 from mnemosyne.queue import InProcessQueue
 from mnemosyne.runtime_state import RuntimeState
 
@@ -36,6 +37,7 @@ class MnemosyneMcpServer:
         auth_token: str | None = None,
         backend: str = "local",
         postgres_dsn: str | None = None,
+        parametric_artifact_store: str | os.PathLike[str] | None = None,
     ):
         if backend == "postgres":
             dsn = postgres_dsn or os.environ.get("MNEMOSYNE_POSTGRES_DSN")
@@ -55,7 +57,9 @@ class MnemosyneMcpServer:
         self.queue = InProcessQueue()
         self.auth_token = auth_token if auth_token is not None else os.environ.get("MNEMOSYNE_MCP_TOKEN")
         ingestion = IngestionPipeline(self.engine, queue=self.queue)
-        self.tools = MemoryTools(self.engine, ingestion=ingestion, runtime_state=runtime_state)
+        self.tool_names = {item["name"] for item in TOOL_SPEC}
+        parametric = ParametricTier(ParametricArtifactStore(_parametric_store_path(store_path, parametric_artifact_store)))
+        self.tools = MemoryTools(self.engine, ingestion=ingestion, runtime_state=runtime_state, parametric=parametric)
 
     def handle(self, request: dict[str, Any]) -> dict[str, Any] | None:
         method = request.get("method")
@@ -74,10 +78,13 @@ class MnemosyneMcpServer:
             elif method == "tools/call":
                 params = request.get("params") or {}
                 try:
-                    if not self._authorized(params):
+                    if not isinstance(params, dict):
+                        result = _tool_error("Tool params must be a JSON object")
+                    elif not self._authorized(params):
                         result = _tool_error("unauthorized: valid MCP auth token required")
                     else:
-                        result = _tool_result(self.call_tool(str(params.get("name")), params.get("arguments") or {}))
+                        arguments = params["arguments"] if "arguments" in params else {}
+                        result = _tool_result(self.call_tool(str(params.get("name")), arguments))
                 except Exception as exc:  # noqa: BLE001 - tool errors are MCP results, not transport failures.
                     result = _tool_error(str(exc))
             else:
@@ -96,97 +103,12 @@ class MnemosyneMcpServer:
         return isinstance(supplied, str) and hmac.compare_digest(supplied, self.auth_token)
 
     def call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-        if name == "capture":
-            return self.tools.capture(**arguments)
-        if name == "ingest":
-            return self.tools.ingest(**arguments)
-        if name == "assert_fact":
-            return self.tools.assert_fact(**arguments)
-        if name == "relation":
-            return self.tools.relation(**arguments)
-        if name == "preference":
-            return self.tools.preference(**arguments)
-        if name == "search":
-            return self.tools.search(**arguments)
-        if name == "deep_search":
-            return self.tools.deep_search(**arguments)
-        if name == "explain":
-            return self.tools.explain(**arguments)
-        if name == "get":
-            return self.tools.get(**arguments)
-        if name == "propose":
-            return self.tools.propose(**arguments)
-        if name == "confirm":
-            return self.tools.confirm(**arguments)
-        if name == "correct":
-            return self.tools.correct(**arguments)
-        if name == "supersede":
-            return self.tools.supersede(**arguments)
-        if name == "forget":
-            return self.tools.forget(**arguments)
-        if name == "export":
-            return self.tools.export(**arguments)
-        if name == "branch":
-            return self.tools.branch(**arguments)
-        if name == "merge":
-            return self.tools.merge(**arguments)
-        if name == "discard":
-            return self.tools.discard(**arguments)
-        if name == "profile_add":
-            return self.tools.profile_add(**arguments)
-        if name == "profile_context":
-            return self.tools.profile_context(**arguments)
-        if name == "profile_get_relevant":
-            return self.tools.profile_get_relevant(**arguments)
-        if name == "profile_record_explicit":
-            return self.tools.profile_record_explicit(**arguments)
-        if name == "profile_propose_inference":
-            return self.tools.profile_propose_inference(**arguments)
-        if name == "profile_correct":
-            return self.tools.profile_correct(**arguments)
-        if name == "prefetch":
-            return self.tools.prefetch(**arguments)
-        if name == "graph_neighbors":
-            return self.tools.graph_neighbors(**arguments)
-        if name == "graph_query":
-            return self.tools.graph_query(**arguments)
-        if name == "graph_timeline":
-            return self.tools.graph_timeline(**arguments)
-        if name == "graph_as_of":
-            return self.tools.graph_as_of(**arguments)
-        if name == "trajectory_log":
-            return self.tools.trajectory_log(**arguments)
-        if name == "trajectory_record":
-            return self.tools.trajectory_record(**arguments)
-        if name == "trajectory_attribute":
-            return self.tools.trajectory_attribute(**arguments)
-        if name == "lesson_induce":
-            return self.tools.lesson_induce(**arguments)
-        if name == "lesson_propose":
-            return self.tools.lesson_propose(**arguments)
-        if name == "procedure_induce":
-            return self.tools.procedure_induce(**arguments)
-        if name == "procedure_propose":
-            return self.tools.procedure_propose(**arguments)
-        if name == "lesson_promote":
-            return self.tools.lesson_promote(**arguments)
-        if name == "procedure_validate":
-            return self.tools.procedure_validate(**arguments)
-        if name == "procedure_promote":
-            return self.tools.procedure_promote(**arguments)
-        if name == "procedure_search":
-            return self.tools.procedure_search(**arguments)
-        if name == "procedure_rollback":
-            return self.tools.procedure_rollback(**arguments)
-        if name == "lesson_search":
-            return self.tools.lesson_search(**arguments)
-        if name == "outcome_evaluate":
-            return self.tools.outcome_evaluate(**arguments)
-        if name == "parametric_propose":
-            return self.tools.parametric_propose(**arguments)
-        if name == "parametric_evaluate":
-            return self.tools.parametric_evaluate(**arguments)
-        raise ValueError(f"Unknown tool: {name}")
+        if name not in self.tool_names:
+            raise ValueError(f"Unknown tool: {name}")
+        if not isinstance(arguments, dict):
+            raise ValueError("Tool arguments must be a JSON object")
+        method = getattr(self.tools, name)
+        return method(**arguments)
 
     def serve(self, stdin: TextIO = sys.stdin, stdout: TextIO = sys.stdout) -> None:
         for raw_line in stdin:
@@ -299,13 +221,34 @@ def default_postgres_dsn() -> str | None:
     return os.environ.get("MNEMOSYNE_POSTGRES_DSN")
 
 
+def _parametric_store_path(
+    store_path: str | os.PathLike[str] | None,
+    configured_path: str | os.PathLike[str] | None,
+) -> Path:
+    env_path = os.environ.get("MNEMOSYNE_PARAMETRIC_ARTIFACT_STORE")
+    if configured_path:
+        return Path(configured_path).expanduser()
+    if env_path:
+        return Path(env_path).expanduser()
+    if store_path:
+        path = Path(store_path).expanduser()
+        return path.with_suffix(path.suffix + ".parametric")
+    return Path(".mnemosyne/mcp-parametric")
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="mneme-mcp", description="Run the Mnemosyne stdio MCP server")
     parser.add_argument("--store", default=str(default_store()), help="Path to local JSON store")
     parser.add_argument("--backend", choices=["local", "postgres"], default=default_backend(), help="Storage backend for MCP tools")
     parser.add_argument("--postgres-dsn", default=default_postgres_dsn(), help="Postgres DSN for --backend postgres")
+    parser.add_argument("--parametric-artifact-store", default=os.environ.get("MNEMOSYNE_PARAMETRIC_ARTIFACT_STORE"))
     args = parser.parse_args(argv)
-    MnemosyneMcpServer(store_path=args.store, backend=args.backend, postgres_dsn=args.postgres_dsn).serve()
+    MnemosyneMcpServer(
+        store_path=args.store,
+        backend=args.backend,
+        postgres_dsn=args.postgres_dsn,
+        parametric_artifact_store=args.parametric_artifact_store,
+    ).serve()
 
 
 if __name__ == "__main__":
