@@ -299,6 +299,14 @@ CREATE TABLE IF NOT EXISTS runtime_jobs (
 CREATE INDEX IF NOT EXISTS runtime_jobs_tenant_status_kind_idx
   ON runtime_jobs(tenant_id, status, kind, created_at);
 
+CREATE TABLE IF NOT EXISTS runtime_state (
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  key TEXT NOT NULL,
+  payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (tenant_id, key)
+);
+
 CREATE OR REPLACE FUNCTION mnemosyne_current_tenant()
 RETURNS UUID
 LANGUAGE sql
@@ -451,5 +459,12 @@ ALTER TABLE runtime_jobs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE runtime_jobs FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS runtime_jobs_tenant_isolation ON runtime_jobs;
 CREATE POLICY runtime_jobs_tenant_isolation ON runtime_jobs
+  USING (tenant_id = mnemosyne_current_tenant())
+  WITH CHECK (tenant_id = mnemosyne_current_tenant());
+
+ALTER TABLE runtime_state ENABLE ROW LEVEL SECURITY;
+ALTER TABLE runtime_state FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS runtime_state_tenant_isolation ON runtime_state;
+CREATE POLICY runtime_state_tenant_isolation ON runtime_state
   USING (tenant_id = mnemosyne_current_tenant())
   WITH CHECK (tenant_id = mnemosyne_current_tenant());

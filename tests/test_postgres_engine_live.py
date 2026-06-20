@@ -275,6 +275,73 @@ def test_postgres_evidence_vector_search_keeps_null_embedding_fallback_live() ->
     assert evidence_hit.metadata["source_table"] == "evidence"
 
 
+def test_postgres_mcp_runtime_state_persists_profile_and_learning_live() -> None:
+    tenant = f"tenant-runtime-state-{uuid4()}"
+    user = "user-runtime-state"
+    dsn = live_dsn()
+    server = MnemosyneMcpServer(backend="postgres", postgres_dsn=dsn, stateless=True, queue_tenant=tenant)
+
+    server.call_tool(
+        "profile_add",
+        {
+            "tenant_id": tenant,
+            "user_id": user,
+            "kind": "explicit_preference",
+            "statement": "Prefer Postgres-backed runtime state for MCP tools.",
+            "scope": {"category": "workflow"},
+        },
+    )
+    trajectory = server.call_tool(
+        "trajectory_record",
+        {
+            "tenant_id": tenant,
+            "user_id": user,
+            "session_id": "session-runtime-state",
+            "task": "Postgres runtime state parity",
+            "steps": [{"name": "persist", "status": "failed", "error": "runtime state dropped"}],
+            "outcome": "failure",
+            "reward": -1.0,
+            "memory_version": "v-runtime-state",
+        },
+    )
+
+    reloaded = MnemosyneMcpServer(backend="postgres", postgres_dsn=dsn, stateless=True, queue_tenant=tenant)
+    profile = reloaded.call_tool(
+        "profile_context",
+        {"tenant_id": tenant, "user_id": user, "scope": {"category": "workflow"}},
+    )
+    lesson = reloaded.call_tool("lesson_propose", {"trajectory_id": trajectory["id"]})
+    procedure = reloaded.call_tool("procedure_propose", {"lesson_id": lesson["id"]})
+
+    assert profile["authoritative"][0]["statement"] == "Prefer Postgres-backed runtime state for MCP tools."
+    assert lesson["tenant_id"] == tenant
+    assert procedure["tenant_id"] == tenant
+
+    engine = PostgresEngine(dsn)
+    db_tenant_id = _stable_uuid("tenant", tenant)
+    with engine.connect() as conn:
+        with conn.cursor() as cur:
+            engine._set_tenant(cur, db_tenant_id)  # noqa: SLF001 - live RLS mirror assertion.
+            cur.execute(
+                """
+                SELECT
+                  (SELECT count(*) FROM runtime_state WHERE tenant_id = %s AND key IN ('user_model', 'learning')),
+                  (SELECT count(*) FROM preferences WHERE tenant_id = %s),
+                  (SELECT count(*) FROM trajectories WHERE tenant_id = %s),
+                  (SELECT count(*) FROM lessons WHERE tenant_id = %s),
+                  (SELECT count(*) FROM procedures WHERE tenant_id = %s)
+                """,
+                (db_tenant_id, db_tenant_id, db_tenant_id, db_tenant_id, db_tenant_id),
+            )
+            runtime_rows, preferences, trajectories, lessons, procedures = cur.fetchone()
+
+    assert runtime_rows == 2
+    assert preferences == 1
+    assert trajectories == 1
+    assert lessons == 1
+    assert procedures == 1
+
+
 def test_postgres_local_rank_fallback_uses_policy_sensitivity_live() -> None:
     engine = PostgresEngine(live_dsn())
     tenant = f"tenant-fallback-sensitivity-{uuid4()}"
