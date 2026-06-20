@@ -35,6 +35,30 @@ def test_evidence_ledger_deduplicates_and_recalls_bytes() -> None:
     assert any(item["op"] == "append_evidence.noop_dedup" for item in engine.audit_log)
 
 
+def test_local_engine_loads_export_json_branch_shape(tmp_path) -> None:
+    engine = LocalMemoryEngine()
+    cid = engine.append_evidence(
+        Evidence(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="chat",
+            content="Export JSON should reload into an operational local engine.",
+            trust_tier=0,
+            access_policy={"tenant": TENANT},
+        )
+    )
+    store = tmp_path / "mnemosyne-export.json"
+    store.write_text(engine.to_json(), encoding="utf-8")
+
+    loaded = LocalMemoryEngine(store)
+    loaded.branch("candidate", tenant_id=TENANT)
+
+    assert loaded.get_evidence(TENANT, cid) is not None
+    assert loaded.get_evidence(TENANT, cid, branch="candidate") is not None
+    assert any(item["name"] == "main" and item["tenant_id"] == TENANT for item in loaded.export_all()["branches"])
+
+
 def test_bitemporal_supersession_and_as_of_queries() -> None:
     engine = LocalMemoryEngine()
     t1 = datetime(2026, 1, 1, tzinfo=UTC)

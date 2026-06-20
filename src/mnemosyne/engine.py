@@ -203,7 +203,28 @@ class LocalMemoryEngine:
     def _load(self) -> None:
         data = json.loads(self.store_path.read_text(encoding="utf-8"))
         self.policy = OperatingPolicy.from_dict(data.get("policy"))
-        self.branches = data.get("branches") or self.branches
+        branches = data.get("branches")
+        if isinstance(branches, list):
+            loaded_branches: dict[str, dict[str, Any]] = {}
+            for row in branches:
+                if not isinstance(row, dict) or not row.get("name"):
+                    continue
+                name = str(row["name"])
+                meta = loaded_branches.setdefault(
+                    name,
+                    {
+                        "from": row.get("from_branch"),
+                        "kind": row.get("kind") or "scratch",
+                        "created_at": row.get("created_at") or utc_now().isoformat(),
+                        "tenants": [],
+                    },
+                )
+                tenant_id = row.get("tenant_id")
+                if tenant_id is not None:
+                    meta["tenants"] = sorted(set(meta.get("tenants") or []) | {tenant_id})
+            self.branches = loaded_branches or self.branches
+        else:
+            self.branches = branches or self.branches
         self.evidence = {
             self._evidence_key(ev.tenant_id, ev.branch, ev.cid or ""): ev
             for ev in (Evidence.from_dict(item) for item in data.get("evidence", []))
@@ -1107,10 +1128,15 @@ class LocalMemoryEngine:
     def _export_branches(self) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
         for name, meta in self.branches.items():
-            tenants = list(meta.get("tenants") or [])
+            tenants = {
+                item.tenant_id
+                for item in [*self.evidence.values(), *self.assertions.values(), *self.relations.values()]
+                if item.branch == name
+            }
+            tenants.update(meta.get("tenants") or [])
             if not tenants:
-                tenants = [None]
-            for tenant in tenants:
+                tenants = {None}
+            for tenant in sorted(tenants, key=lambda item: item or ""):
                 rows.append(
                     {
                         "tenant_id": tenant,
@@ -1124,16 +1150,46 @@ class LocalMemoryEngine:
         return rows
 
     def export_all(self) -> dict[str, Any]:
+        tenant_ids: set[str] = set()
+        for collection in (
+            self.evidence.values(),
+            self.assertions.values(),
+            self.relations.values(),
+            self.preferences.values(),
+            self.justifications.values(),
+            self.contradictions.values(),
+            self.calibrations.values(),
+        ):
+            for item in collection:
+                tenant_id = getattr(item, "tenant_id", None)
+                if tenant_id and tenant_id != "*":
+                    tenant_ids.add(tenant_id)
+        for item in self.entities.values():
+            tenant_id = item.get("tenant_id")
+            if tenant_id and tenant_id != "*":
+                tenant_ids.add(tenant_id)
+        for item in (*self.audit_log, *self.deletion_log, *self.merge_log):
+            tenant_id = item.get("tenant_id") if isinstance(item, dict) else None
+            if tenant_id and tenant_id != "*":
+                tenant_ids.add(tenant_id)
+        for meta in self.branches.values():
+            for tenant_id in meta.get("tenants") or []:
+                if tenant_id and tenant_id != "*":
+                    tenant_ids.add(tenant_id)
+        tenant_exports = [self.export_tenant(tenant_id) for tenant_id in sorted(tenant_ids)]
         return {
             "policy": self.policy.to_dict(),
             "branches": self._export_branches(),
-            "evidence": [item.to_dict() for item in self.evidence.values()],
-            "assertions": [item.to_dict() for item in self.assertions.values()],
-            "relations": [item.to_dict() for item in self.relations.values()],
-            "preferences": [item.to_dict() for item in self.preferences.values()],
-            "justifications": [item.to_dict() for item in self.justifications.values()],
-            "contradictions": [item.to_dict() for item in self.contradictions.values()],
-            "audit_log": self.audit_log,
-            "deletion_log": self.deletion_log,
+            "evidence": [item for exported in tenant_exports for item in exported["evidence"]],
+            "assertions": [item for exported in tenant_exports for item in exported["assertions"]],
+            "relations": [item for exported in tenant_exports for item in exported["relations"]],
+            "preferences": [item for exported in tenant_exports for item in exported["preferences"]],
+            "justifications": [item for exported in tenant_exports for item in exported["justifications"]],
+            "contradictions": [item for exported in tenant_exports for item in exported["contradictions"]],
+            "calibrations": [item for exported in tenant_exports for item in exported["calibrations"]],
+            "entities": [item for exported in tenant_exports for item in exported["entities"]],
+            "audit_log": [item for exported in tenant_exports for item in exported["audit_log"]],
+            "deletion_log": [item for exported in tenant_exports for item in exported["deletion_log"]],
             "merge_log": self.merge_log,
+            "tenants": tenant_exports,
         }
