@@ -686,6 +686,17 @@ def test_cli_profile_graph_learning_and_parametric_flows_persist(tmp_path: Path)
         ),
     )
     artifact = run_cli(store, "parametric-propose", "--tenant", TENANT)
+    artifact_path = store.with_suffix(store.suffix + ".parametric") / TENANT / f"{artifact['id']}.json"
+    artifact_record = json.loads(artifact_path.read_text(encoding="utf-8"))
+    rolled_back_artifact = run_cli(
+        store,
+        "parametric-rollback",
+        "--artifact-uri",
+        artifact["artifact_uri"],
+        "--reason",
+        "protected regression after deploy",
+    )
+    rollback_record = json.loads(artifact_path.read_text(encoding="utf-8"))
     promoted_procedure = run_cli(store, "procedure-promote", "--procedure-id", procedure["id"])
     rolled_back = run_cli(store, "procedure-rollback", "--procedure-id", procedure["id"])
     rolled_back_search = run_cli(store, "procedure-search", "--tenant", TENANT, "--query", "date-math-deploy", "--status", "rolled_back")
@@ -697,6 +708,12 @@ def test_cli_profile_graph_learning_and_parametric_flows_persist(tmp_path: Path)
     assert outcome["passed"] is False
     assert promoted["promoted"] is True
     assert set(artifact["source_ids"]) == {lesson["id"], procedure["id"]}
+    assert artifact["artifact_uri"].startswith("local-parametric://")
+    assert artifact_record["payload"]["phase"] == "proposal"
+    assert artifact_record["artifact"]["status"] == "shadow"
+    assert rolled_back_artifact["status"] == "rolled_back"
+    assert rolled_back_artifact["rollback_ref"].startswith("rollback-")
+    assert rollback_record["payload"]["phase"] == "rolled_back"
     assert promoted_procedure["status"] == "promoted"
     assert rolled_back["status"] == "rolled_back"
     assert rolled_back_search["procedures"][0]["id"] == procedure["id"]

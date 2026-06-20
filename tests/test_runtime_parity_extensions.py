@@ -11,7 +11,7 @@ from mnemosyne.learning import Lesson, Procedure
 from mnemosyne.media import MEDIA_EXTRACT_JOB, MediaExtractionResult
 from mnemosyne.models import Evidence
 from mnemosyne.observability import MetricsRegistry
-from mnemosyne.parametric import ParametricTier
+from mnemosyne.parametric import ParametricArtifactStore, ParametricTier
 from mnemosyne.prefetch import AnticipatoryPrefetcher, PrefetchCandidate
 from mnemosyne.provenance import C2paToolVerifier, SignedProvenanceVerifier
 from mnemosyne.queue import InProcessQueue, QueueWorker
@@ -500,8 +500,9 @@ def test_prefetch_gate_warms_only_predictable_safe_queries() -> None:
     assert prefetcher.get_warmed(TENANT, "predictable next task") is not None
 
 
-def test_parametric_tier_requires_validated_sources_and_protected_gate() -> None:
-    tier = ParametricTier()
+def test_parametric_tier_requires_validated_sources_and_protected_gate(tmp_path) -> None:
+    store = ParametricArtifactStore(tmp_path / "parametric")
+    tier = ParametricTier(store)
     active_lesson = Lesson(
         tenant_id=TENANT,
         lesson_type="corrective",
@@ -530,7 +531,15 @@ def test_parametric_tier_requires_validated_sources_and_protected_gate() -> None
     protected = [RegressionCase("protected", "retry", "retry", "idempotency", protected=True)]
 
     decision = tier.evaluate(artifact, gate, protected)
+    stored = store.read(artifact.artifact_uri)
+    rolled_back = tier.rollback(artifact, "protected regression after deploy")
+    rollback_record = store.read(rolled_back.artifact_uri)
 
     assert artifact.source_ids == [active_lesson.id, active_procedure.id]
     assert decision.promoted is True
-    assert artifact.status == "promoted"
+    assert stored["artifact"]["status"] == "promoted"
+    assert stored["payload"]["phase"] == "promoted"
+    assert rolled_back.status == "rolled_back"
+    assert rolled_back.rollback_ref.startswith("rollback-")
+    assert store.load_artifact(rolled_back.artifact_uri).rollback_ref == rolled_back.rollback_ref
+    assert rollback_record["payload"]["phase"] == "rolled_back"

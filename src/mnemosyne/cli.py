@@ -18,6 +18,7 @@ from mnemosyne.jobs import RuntimeJobHandlers
 from mnemosyne.media import CommandMediaTextExtractor, MediaTextExtractor, MetadataMediaTextExtractor
 from mnemosyne.mcp_tools import MemoryTools, TOOL_SPEC
 from mnemosyne.observability import MetricsRegistry, build_ops_report
+from mnemosyne.parametric import ParametricArtifactStore, ParametricTier
 from mnemosyne.provenance import C2paToolVerifier, SignedProvenanceVerifier
 from mnemosyne.queue import InProcessQueue, QueueWorker
 from mnemosyne.retrieval import HashingEmbeddingProvider, HttpEmbeddingProvider, HttpReranker, LocalSimilarityReranker, RetrievalAdapters
@@ -116,6 +117,14 @@ def load_media_extractor(args: argparse.Namespace) -> MediaTextExtractor:
     return MetadataMediaTextExtractor()
 
 
+def load_parametric_tier(args: argparse.Namespace) -> ParametricTier:
+    root = args.parametric_artifact_store
+    if not root:
+        store = Path(args.store).expanduser()
+        root = store.with_suffix(store.suffix + ".parametric")
+    return ParametricTier(ParametricArtifactStore(root))
+
+
 def load_runtime_state(args: argparse.Namespace) -> RuntimeState | None:
     return RuntimeState.from_store_path(Path(args.store))
 
@@ -124,7 +133,7 @@ def load_tools(
     args: argparse.Namespace,
     ingestion_queue: InProcessQueue | None = None,
     runtime_state: RuntimeState | None = None,
-    ) -> MemoryTools:
+) -> MemoryTools:
     store = Path(args.store)
     engine = load_engine(args)
     ingestion = IngestionPipeline(
@@ -133,7 +142,12 @@ def load_tools(
         provenance_verifier=load_provenance_verifier(args),
         queue=ingestion_queue,
     )
-    return MemoryTools(engine, ingestion=ingestion, runtime_state=runtime_state or RuntimeState.from_store_path(store))
+    return MemoryTools(
+        engine,
+        ingestion=ingestion,
+        runtime_state=runtime_state or RuntimeState.from_store_path(store),
+        parametric=load_parametric_tier(args),
+    )
 
 
 def json_default(value: Any) -> Any:
@@ -587,6 +601,11 @@ def cmd_parametric_evaluate(args: argparse.Namespace) -> None:
     )
 
 
+def cmd_parametric_rollback(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(tools.parametric_rollback(args.artifact_uri, args.reason))
+
+
 def cmd_branch(args: argparse.Namespace) -> None:
     tools = load_tools(args)
     emit(
@@ -729,6 +748,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--provenance-timeout", type=float, default=float(os.environ.get("MNEMOSYNE_PROVENANCE_TIMEOUT", "30")))
     parser.add_argument("--media-extractor-command", default=os.environ.get("MNEMOSYNE_MEDIA_EXTRACTOR_COMMAND"))
     parser.add_argument("--media-extractor-timeout", type=float, default=float(os.environ.get("MNEMOSYNE_MEDIA_EXTRACTOR_TIMEOUT", "30")))
+    parser.add_argument("--parametric-artifact-store", default=os.environ.get("MNEMOSYNE_PARAMETRIC_ARTIFACT_STORE"))
     sub = parser.add_subparsers(dest="command", required=True)
 
     capture = sub.add_parser("capture")
@@ -1088,6 +1108,11 @@ def build_parser() -> argparse.ArgumentParser:
     parametric_evaluate.add_argument("--gate-failed", action="store_true")
     parametric_evaluate.add_argument("--protected-regression", action="append", default=[])
     parametric_evaluate.set_defaults(func=cmd_parametric_evaluate)
+
+    parametric_rollback = sub.add_parser("parametric-rollback")
+    parametric_rollback.add_argument("--artifact-uri", required=True)
+    parametric_rollback.add_argument("--reason", required=True)
+    parametric_rollback.set_defaults(func=cmd_parametric_rollback)
 
     tools = sub.add_parser("tools")
     tools.set_defaults(func=cmd_tools)
