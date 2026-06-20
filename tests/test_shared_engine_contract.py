@@ -349,12 +349,21 @@ def test_shared_engine_contract_forget_propagates_projection_erasure(engine_bund
             access_policy={"tenant": tenant},
         )
     )
+    entity_canonical = f"shared-erasure-entity-{uuid4()}"
+    engine.register_entity(
+        tenant,
+        entity_canonical,
+        alias="Shared Erasure Entity",
+        source_evidence_cids=[erased_cid, surviving_cid],
+        access_policy={"tenant": tenant},
+    )
 
     result = engine.forget(tenant, erased_cid, requested_by=user, erasure_mode=ErasureMode.TOMBSTONE_RECOMPUTE)
     exported = engine.export_tenant(tenant)
     assertion = next(item for item in exported["assertions"] if item["id"] == assertion_id)
     preference = next(item for item in exported["preferences"] if item["id"] == preference_id)
     relation = next(item for item in exported["relations"] if item["id"] == relation_id)
+    entity = next(item for item in exported["entities"] if item["canonical"] == entity_canonical)
 
     assert result["erased"] is True
     assert assertion["source_evidence_cids"] == [surviving_cid]
@@ -365,7 +374,15 @@ def test_shared_engine_contract_forget_propagates_projection_erasure(engine_bund
     assert relation["valid_to"] is not None
     assert relation["source_evidence_cids"] == []
     assert relation_id in result["propagated"]["expired_relations"]
+    assert entity["source_evidence_cids"] == [surviving_cid]
+    assert entity_canonical in result["propagated"]["trimmed_entities"]
     assert all(item["cid"] != erased_cid for item in exported["evidence"])
+
+    removal = engine.forget(tenant, surviving_cid, requested_by=user, erasure_mode=ErasureMode.TOMBSTONE_RECOMPUTE)
+    exported_after_removal = engine.export_tenant(tenant)
+
+    assert entity_canonical in removal["propagated"]["removed_entities"]
+    assert all(item["canonical"] != entity_canonical for item in exported_after_removal["entities"])
 
 
 def test_shared_engine_contract_retrieval_filters_trust_sensitivity_and_quarantine(engine_bundle: tuple[Any, str, str]) -> None:

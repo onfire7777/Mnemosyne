@@ -958,6 +958,8 @@ class PostgresEngine:
             "trimmed_preferences": [],
             "expired_relations": [],
             "trimmed_relations": [],
+            "removed_entities": [],
+            "trimmed_entities": [],
             "erased_derived_evidence": [],
         }
         with self.connect() as conn:
@@ -1074,6 +1076,26 @@ class PostgresEngine:
                             (_cid_list_to_bytes([]), row["id"]),
                         )
                         propagated["expired_relations"].append(str(row["id"]))
+                self._ensure_entity_registry_schema(cur)
+                cur.execute(
+                    """
+                    SELECT id, canonical, source_evidence_cids
+                    FROM entities
+                    WHERE tenant_id = %s AND source_evidence_cids && %s
+                    """,
+                    (db_tenant_id, affected_cid_bytes),
+                )
+                for row in cur.fetchall():
+                    sources = [item for item in _bytes_list_to_cids(row["source_evidence_cids"]) if item not in affected_cids]
+                    if sources:
+                        cur.execute(
+                            "UPDATE entities SET source_evidence_cids = %s, updated_at = now() WHERE id = %s",
+                            (_cid_list_to_bytes(sources), row["id"]),
+                        )
+                        propagated["trimmed_entities"].append(row["canonical"])
+                    else:
+                        cur.execute("DELETE FROM entities WHERE id = %s", (row["id"],))
+                        propagated["removed_entities"].append(row["canonical"])
                 cur.execute(
                     """
                     INSERT INTO deletion_log(tenant_id, evidence_cid, requested_by, propagated)
