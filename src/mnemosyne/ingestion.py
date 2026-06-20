@@ -252,6 +252,22 @@ class IngestionPipeline:
             queued_jobs=queued_jobs,
         )
 
+    def residency_policy(self) -> dict[str, object]:
+        warnings: list[str] = []
+        if not self.allowed_residencies:
+            warnings.append("no allowed residency labels configured; all residency labels are accepted")
+        if not self.require_runtime_residency:
+            warnings.append("runtime residency is optional; missing processing residency will be accepted")
+        return {
+            "allowed_residencies": list(self.allowed_residencies),
+            "runtime_residency": self.runtime_residency,
+            "require_runtime_residency": self.require_runtime_residency,
+            "request_runtime_residency_required": self.require_runtime_residency and self.runtime_residency is None,
+            "allowed_residency_transfers": list(self.allowed_residency_transfers),
+            "cross_region_transfers_allowed": bool(self.allowed_residency_transfers),
+            "warnings": warnings,
+        }
+
     def _evidence_exists(self, tenant_id: str, cid: str, branch: str) -> bool:
         get_evidence = getattr(self.engine, "get_evidence", None)
         if not callable(get_evidence):

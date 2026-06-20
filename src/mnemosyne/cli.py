@@ -1095,9 +1095,20 @@ def cmd_provider_check(args: argparse.Namespace) -> None:
     else:
         checks["parametric"] = {"ok": True, "provider": "local", "skipped": True}
 
+    try:
+        checks["residency_policy"] = {"ok": True, **load_tools(args).residency_policy()}
+    except Exception as exc:  # noqa: BLE001 - health checks return structured failures.
+        ok = False
+        checks["residency_policy"] = {"ok": False, "error": str(exc)}
+
     emit({"ok": ok, "checks": checks})
     if not ok:
         raise SystemExit(1)
+
+
+def cmd_residency_policy(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(tools.residency_policy())
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1668,6 +1679,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     provider_check = sub.add_parser("provider-check")
     provider_check.set_defaults(func=cmd_provider_check)
+
+    residency_policy = sub.add_parser("residency-policy")
+    residency_policy.set_defaults(func=cmd_residency_policy)
 
     consolidate_once = sub.add_parser("consolidate-once")
     consolidate_once.set_defaults(func=cmd_consolidate_once)

@@ -758,6 +758,45 @@ def test_cli_requires_runtime_residency_when_configured(tmp_path: Path) -> None:
     assert evidence["access_policy"]["cross_region_transfer"] is False
 
 
+def test_cli_reports_residency_policy_and_provider_check(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    policy = run_cli(
+        store,
+        "--allowed-residency",
+        "eu",
+        "--allowed-residency",
+        "us",
+        "--runtime-residency",
+        "us",
+        "--allowed-residency-transfer",
+        "eu->us",
+        "--require-runtime-residency",
+        "residency-policy",
+    )
+    check = run_cli(
+        store,
+        "--allowed-residency",
+        "eu",
+        "--allowed-residency",
+        "us",
+        "--runtime-residency",
+        "us",
+        "--allowed-residency-transfer",
+        "eu->us",
+        "--require-runtime-residency",
+        "provider-check",
+    )
+
+    assert policy["allowed_residencies"] == ["local", "eu", "us"]
+    assert policy["runtime_residency"] == "us"
+    assert policy["require_runtime_residency"] is True
+    assert policy["allowed_residency_transfers"] == ["eu->us"]
+    assert policy["warnings"] == []
+    assert check["ok"] is True
+    assert check["checks"]["residency_policy"]["ok"] is True
+    assert check["checks"]["residency_policy"]["allowed_residency_transfers"] == ["eu->us"]
+
+
 def test_cli_drains_media_extraction_job_with_command_provider(tmp_path: Path) -> None:
     store = tmp_path / "mnemosyne.json"
     objects = tmp_path / "objects"

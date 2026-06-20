@@ -109,6 +109,11 @@ TOOL_SPEC: list[dict[str, Any]] = [
         "arguments": ["tenant_id"],
     },
     {
+        "name": "residency_policy",
+        "description": "Inspect configured data/runtime residency enforcement and transfer allowlists.",
+        "arguments": [],
+    },
+    {
         "name": "branch",
         "description": "Create a branch from an existing branch.",
         "arguments": ["name"],
@@ -363,6 +368,9 @@ class MemoryTools:
             ),
             branch=branch,
         ).to_dict()
+
+    def residency_policy(self) -> dict[str, object]:
+        return self.ingestion.residency_policy()
 
     def assert_fact(
         self,

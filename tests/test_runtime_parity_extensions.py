@@ -548,6 +548,26 @@ def test_ingestion_requires_runtime_residency_when_configured(tmp_path) -> None:
     assert evidence.access_policy["cross_region_transfer"] is False
 
 
+def test_ingestion_reports_residency_policy(tmp_path) -> None:
+    pipeline = IngestionPipeline(
+        LocalMemoryEngine(),
+        LocalObjectStore(tmp_path / "objects"),
+        allowed_residencies=("EU", "US"),
+        runtime_residency="US",
+        allowed_residency_transfers=("EU:US",),
+        require_runtime_residency=True,
+    )
+    policy = pipeline.residency_policy()
+
+    assert policy["allowed_residencies"] == ["eu", "us"]
+    assert policy["runtime_residency"] == "us"
+    assert policy["require_runtime_residency"] is True
+    assert policy["request_runtime_residency_required"] is False
+    assert policy["allowed_residency_transfers"] == ["eu->us"]
+    assert policy["cross_region_transfers_allowed"] is True
+    assert policy["warnings"] == []
+
+
 def test_ingestion_indexes_multimodal_derived_text_without_inline_bytes(tmp_path) -> None:
     engine = LocalMemoryEngine()
     pipeline = IngestionPipeline(engine, LocalObjectStore(tmp_path / "objects"))
