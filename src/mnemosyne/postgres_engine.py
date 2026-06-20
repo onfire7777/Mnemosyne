@@ -948,6 +948,7 @@ class PostgresEngine:
             return
         if not tenant_id:
             raise ValueError("PostgresEngine.branch requires tenant_id")
+        self.ensure_tenant_and_branch(tenant_id, frm)
         db_tenant_id = _stable_uuid("tenant", tenant_id)
         with self.connect() as conn:
             with conn.cursor() as cur:
