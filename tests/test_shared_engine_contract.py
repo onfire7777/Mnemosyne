@@ -308,6 +308,44 @@ def test_shared_engine_contract_direct_search_primitives(engine_bundle: tuple[An
     assert all(hit.branch == "main" for hit in [*lexical, *dense, *graph])
 
 
+def test_shared_engine_contract_graph_ppr_skips_expired_relations_by_default(engine_bundle: tuple[Any, str, str]) -> None:
+    engine, tenant, _user = engine_bundle
+    now = datetime.now(UTC)
+    expired_from = now - timedelta(days=3)
+    expired_to = now - timedelta(days=2)
+    active_from = now - timedelta(days=1)
+    seed = f"temporal seed {uuid4()}"
+    expired_id = engine.add_relation(
+        Relation(
+            tenant_id=tenant,
+            source=seed,
+            predicate="expired_edge",
+            target="expired graph target",
+            valid_from=expired_from,
+            valid_to=expired_to,
+            access_policy={"tenant": tenant},
+        )
+    )
+    active_id = engine.add_relation(
+        Relation(
+            tenant_id=tenant,
+            source=seed,
+            predicate="active_edge",
+            target="active graph target",
+            valid_from=active_from,
+            access_policy={"tenant": tenant},
+        )
+    )
+
+    current_graph = engine.graph_ppr([seed], 10, tenant_id=tenant, branch="main")
+    historical_graph = engine.graph_ppr([seed], 10, as_of=expired_from + timedelta(hours=1), tenant_id=tenant, branch="main")
+
+    assert active_id in {hit.id for hit in current_graph}
+    assert expired_id not in {hit.id for hit in current_graph}
+    assert expired_id in {hit.id for hit in historical_graph}
+    assert active_id not in {hit.id for hit in historical_graph}
+
+
 def test_shared_engine_contract_justifications_and_contradictions(engine_bundle: tuple[Any, str, str]) -> None:
     engine, tenant, user = engine_bundle
     cid = _append_evidence(engine, tenant, user, "Shared justification evidence supports conflict tracking.")

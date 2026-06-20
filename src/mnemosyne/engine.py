@@ -420,6 +420,9 @@ class LocalMemoryEngine:
         seed_set = {seed.lower() for seed in seeds}
         if not seed_set:
             return []
+        moment = as_of or utc_now()
+        moment = moment.astimezone(UTC) if moment.tzinfo else moment.replace(tzinfo=UTC)
+
         def matches_seed(node: str) -> bool:
             node_lower = node.lower()
             return node_lower in seed_set or bool(set(tokenize(node_lower)) & seed_set)
@@ -431,7 +434,7 @@ class LocalMemoryEngine:
                 continue
             if branch is not None and rel.branch != branch:
                 continue
-            if as_of and not self._valid_at(rel.valid_from, rel.valid_to, as_of):
+            if not self._valid_at(rel.valid_from, rel.valid_to, moment):
                 continue
             adjacency[rel.source.lower()].add(rel.target.lower())
             adjacency[rel.target.lower()].add(rel.source.lower())
