@@ -10,7 +10,7 @@ from mnemosyne.jobs import CALIBRATE_JOB, LIFECYCLE_SWEEP_JOB, OBSERVABILITY_SNA
 from mnemosyne.learning import Lesson, Procedure
 from mnemosyne.media import MEDIA_EXTRACT_JOB, MediaExtractionResult
 from mnemosyne.models import Assertion, Contradiction, Evidence, Preference, Relation
-from mnemosyne.observability import MetricsRegistry, build_ops_report
+from mnemosyne.observability import MetricsRegistry, build_ops_report, render_ops_dashboard
 from mnemosyne.parametric import ParametricArtifactStore, ParametricTier
 from mnemosyne.prefetch import AnticipatoryPrefetcher, PrefetchCandidate
 from mnemosyne.provenance import C2paToolVerifier, SignedProvenanceVerifier
@@ -696,6 +696,30 @@ def test_ops_report_flags_open_contradiction_backlog() -> None:
     assert report["counts"]["contradictions"] == 1
     assert report["tripwires"]["open_contradictions"] == 1
     assert report["tripwires"]["passed"] is False
+
+
+def test_ops_dashboard_renderer_escapes_snapshot_values() -> None:
+    report = {
+        "tenant_id": "<tenant>",
+        "counts": {"evidence": 2, "assertions": 1, "relations": 0, "preferences": 1},
+        "queue": {"queued": 3},
+        "metrics": {"counters": {"gate.promotions": 2, "gate.rollbacks": 1}},
+        "tripwires": {
+            "passed": False,
+            "open_contradictions": 1,
+            "gate_promotions": 2,
+            "gate_rollbacks": 1,
+        },
+    }
+
+    dashboard = render_ops_dashboard(report)
+
+    assert dashboard.startswith("<!doctype html>")
+    assert "Mnemosyne Ops Dashboard" in dashboard
+    assert "&lt;tenant&gt;" in dashboard
+    assert "<tenant>" not in dashboard
+    assert "ATTENTION" in dashboard
+    assert "Snapshot JSON" in dashboard
 
 
 def test_prefetch_gate_warms_only_predictable_safe_queries() -> None:

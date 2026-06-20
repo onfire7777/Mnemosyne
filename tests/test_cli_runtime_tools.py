@@ -25,6 +25,20 @@ def run_cli(store: Path, *args: str) -> dict:
     return json.loads(result.stdout)
 
 
+def run_packaged_cli(store: Path, *args: str) -> dict:
+    entrypoint = Path(sys.executable).with_name("mneme")
+    assert entrypoint.exists(), (
+        f"missing packaged entrypoint at {entrypoint}; run `python -m pip install -e .`"
+    )
+    result = subprocess.run(
+        [str(entrypoint), "--store", str(store), *args],
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+    return json.loads(result.stdout)
+
+
 def run_raw_cli(store: Path, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, "-m", "mnemosyne.cli", "--store", str(store), *args],
@@ -479,6 +493,24 @@ def test_cli_ops_report_exports_dashboard_snapshot(tmp_path: Path) -> None:
     assert report["learning"]["lesson_diversity"] == 1.0
     assert report["tripwires"]["proxy_true_gap"] == 0.30000000000000004
     assert report["tripwires"]["passed"] is False
+
+    dashboard_path = tmp_path / "dashboards" / "ops-dashboard.html"
+    dashboard = run_packaged_cli(
+        store,
+        "ops-report",
+        "--tenant",
+        TENANT,
+        "--dashboard-html",
+        str(dashboard_path),
+    )
+
+    dashboard_html = dashboard_path.read_text(encoding="utf-8")
+    assert dashboard["dashboard_path"] == str(dashboard_path)
+    assert dashboard["report"]["tenant_id"] == TENANT
+    assert dashboard["report"]["counts"]["evidence"] == 1
+    assert "Mnemosyne Ops Dashboard" in dashboard_html
+    assert TENANT in dashboard_html
+    assert "Snapshot JSON" in dashboard_html
 
 
 def test_cli_preference_write_requires_explicit_or_high_trust_source(tmp_path: Path) -> None:

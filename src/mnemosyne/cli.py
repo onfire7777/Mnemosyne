@@ -18,7 +18,7 @@ from mnemosyne.jobs import RuntimeJobHandlers
 from mnemosyne.media import CommandMediaTextExtractor, MediaTextExtractor, MetadataMediaTextExtractor
 from mnemosyne.mcp_tools import MemoryTools, TOOL_SPEC
 from mnemosyne.models import Hit
-from mnemosyne.observability import MetricsRegistry, build_ops_report
+from mnemosyne.observability import MetricsRegistry, build_ops_report, render_ops_dashboard
 from mnemosyne.parametric import ParametricArtifactStore, ParametricTier
 from mnemosyne.provenance import C2paToolVerifier, SignedProvenanceVerifier
 from mnemosyne.queue import InProcessQueue, QueueWorker
@@ -729,20 +729,25 @@ def cmd_ops_report(args: argparse.Namespace) -> None:
     runtime_state = load_runtime_state(args)
     queue = runtime_state.load_queue() if runtime_state else InProcessQueue()
     tools = load_tools(args, ingestion_queue=queue, runtime_state=runtime_state)
-    emit(
-        build_ops_report(
-            engine=tools.engine,
-            tenant_id=args.tenant,
-            queue_snapshot=queue.snapshot(),
-            learning=tools.learning,
-            metrics=tools.metrics.snapshot(),
-            proxy_score=args.proxy_score,
-            true_score=args.true_score,
-            min_diversity=args.min_diversity,
-            max_proxy_gap=args.max_proxy_gap,
-            max_open_contradictions=args.max_open_contradictions,
-        )
+    report = build_ops_report(
+        engine=tools.engine,
+        tenant_id=args.tenant,
+        queue_snapshot=queue.snapshot(),
+        learning=tools.learning,
+        metrics=tools.metrics.snapshot(),
+        proxy_score=args.proxy_score,
+        true_score=args.true_score,
+        min_diversity=args.min_diversity,
+        max_proxy_gap=args.max_proxy_gap,
+        max_open_contradictions=args.max_open_contradictions,
     )
+    if args.dashboard_html:
+        path = Path(args.dashboard_html).expanduser()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(render_ops_dashboard(report), encoding="utf-8")
+        emit({"dashboard_path": str(path), "report": report})
+        return
+    emit(report)
 
 
 def cmd_provider_check(args: argparse.Namespace) -> None:
@@ -1251,6 +1256,7 @@ def build_parser() -> argparse.ArgumentParser:
     ops_report.add_argument("--min-diversity", type=float, default=0.2)
     ops_report.add_argument("--max-proxy-gap", type=float, default=0.15)
     ops_report.add_argument("--max-open-contradictions", type=int, default=0)
+    ops_report.add_argument("--dashboard-html", help="Write a static HTML dashboard artifact to this path")
     ops_report.set_defaults(func=cmd_ops_report)
 
     provider_check = sub.add_parser("provider-check")
