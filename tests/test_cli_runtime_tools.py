@@ -9,10 +9,29 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from mnemosyne.cli import build_parser
+from mnemosyne.security import SessionIdentity, SessionTokenVerifier
 
 
 TENANT = "tenant-cli"
 USER = "user-cli"
+SESSION_SECRET = "mnemosyne-test-session-secret"
+
+
+def make_session_token(
+    *,
+    tenant: str = TENANT,
+    user: str = USER,
+    role: str = "operator",
+    source_trust_tier: int = 0,
+) -> str:
+    return SessionTokenVerifier(SESSION_SECRET).sign(
+        SessionIdentity(
+            tenant_id=tenant,
+            user_id=user,
+            role=role,  # type: ignore[arg-type]
+            source_trust_tier=source_trust_tier,
+        )
+    )
 
 
 def run_cli(store: Path, *args: str) -> dict:
@@ -774,6 +793,12 @@ def test_cli_assert_write_rejects_untrusted_source(tmp_path: Path) -> None:
 
 def test_cli_branch_write_requires_authorized_context(tmp_path: Path) -> None:
     store = tmp_path / "mnemosyne.json"
+    missing_context = run_raw_cli(
+        store,
+        "branch",
+        "--name",
+        "missing-auth-context",
+    )
     denied = run_raw_cli(
         store,
         "branch",
@@ -805,11 +830,100 @@ def test_cli_branch_write_requires_authorized_context(tmp_path: Path) -> None:
         "0",
     )
 
+    assert missing_context.returncode != 0
+    assert "branch requires --role and --source-trust-tier or --session-token." in missing_context.stderr
     assert denied.returncode != 0
     assert "branch denied" in denied.stderr
     assert allowed["security"]["allowed"] is True
     assert promotion_denied.returncode != 0
     assert "merge denied" in promotion_denied.stderr
+
+
+def test_cli_session_token_binds_identity_and_authority(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    token = make_session_token(role="operator", source_trust_tier=0)
+    asserted = run_cli(
+        store,
+        "--session-secret",
+        SESSION_SECRET,
+        "--session-token",
+        token,
+        "assert",
+        "--tenant",
+        TENANT,
+        "--subject",
+        "Session token",
+        "--predicate",
+        "authorizes",
+        "--object",
+        "trusted writes",
+        "--trust-tier",
+        "5",
+    )
+    fetched = run_cli(store, "get", "--tenant", TENANT, "--id", asserted["id"])
+    branched = run_cli(
+        store,
+        "--session-secret",
+        SESSION_SECRET,
+        "--session-token",
+        token,
+        "branch",
+        "--name",
+        "session-authorized",
+    )
+
+    assert asserted["security"]["allowed"] is True
+    assert asserted["security"]["required_role"] == "operator"
+    assert asserted["security"]["required_trust"] == 0
+    assert fetched["record"]["user_id"] == USER
+    assert branched["security"]["allowed"] is True
+    assert branched["tenant_id"] == TENANT
+
+
+def test_cli_session_token_rejects_tenant_mismatch(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    token = make_session_token(tenant="other-tenant")
+    result = run_raw_cli(
+        store,
+        "--session-secret",
+        SESSION_SECRET,
+        "--session-token",
+        token,
+        "assert",
+        "--tenant",
+        TENANT,
+        "--subject",
+        "Session token",
+        "--predicate",
+        "must match",
+        "--object",
+        "tenant",
+    )
+
+    assert result.returncode != 0
+    assert "session tenant mismatch" in result.stderr
+
+
+def test_cli_session_token_requires_secret(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    token = make_session_token()
+    result = run_raw_cli(
+        store,
+        "--session-token",
+        token,
+        "assert",
+        "--tenant",
+        TENANT,
+        "--subject",
+        "Session token",
+        "--predicate",
+        "requires",
+        "--object",
+        "secret",
+    )
+
+    assert result.returncode != 0
+    assert "--session-token requires --session-secret or MNEMOSYNE_SESSION_SECRET." in result.stderr
 
 
 def test_cli_forget_supports_hard_delete_erasure_mode(tmp_path: Path) -> None:

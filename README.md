@@ -25,7 +25,7 @@ The v2 blueprint controls implementation. The earlier design is lineage only unl
 - `src/mnemosyne/prefetch.py` — anticipatory prefetch with predictability gate.
 - `src/mnemosyne/parametric.py` — isolated parametric-tier artifact promotion boundary.
 - `src/mnemosyne/runtime_state.py` — JSON-backed local runtime state for CLI/MCP user-profile and learning-loop objects.
-- `src/mnemosyne/security.py` — trust tiers, capability mediation, fail-closed write authorization, and data-never-instruction sanitization.
+- `src/mnemosyne/security.py` — trust tiers, capability mediation, fail-closed write authorization, signed CLI session identity, and data-never-instruction sanitization.
 - `src/mnemosyne/lifecycle.py` — fidelity demotion and gist-risk abstention hooks.
 - `src/mnemosyne/gate.py` — promotion gate with protected regression cases and branch rollback.
 - `src/mnemosyne/consolidation.py` — warm-loop consolidation worker through the promotion gate.
@@ -77,6 +77,14 @@ python -m mnemosyne.cli --backend postgres \
   search --tenant tenant-a --query "preferred database"
 ```
 
+Signed CLI session tokens can bind tenant/user identity and write authority before a subcommand executes:
+
+```bash
+MNEMOSYNE_SESSION_SECRET="$SESSION_SECRET" \
+python -m mnemosyne.cli --session-token "$SIGNED_SESSION_TOKEN" \
+  assert --tenant tenant-a --subject Mnemosyne --predicate has --object "session-bound writes"
+```
+
 Encrypted local object storage is available for crypto-shred legal erasure:
 
 ```bash
@@ -112,7 +120,8 @@ Policy files can define global `trusted_issuers` or scoped `rules` such as `{"ru
 
 The repository has a verified local scaffold plus runtime parity extensions. Current checks:
 
-- `.venv/bin/python -m pytest -q` returns 117 passing tests and 12 skipped live-DB tests with the optional MCP SDK extra installed.
-- With Docker compose Postgres running, `MNEMOSYNE_POSTGRES_DSN=postgresql://... .venv/bin/python -m pytest -q tests/test_postgres_engine_live.py tests/test_shared_engine_contract.py` returns 15 passing live/shared adapter tests covering tenant RLS, SQL FTS, pgvector assertion search, dense evidence fallback, recursive graph/PPR, branch/discard, branch merge retrieval, bitemporal supersession, tenant isolation, tombstone and hard-delete forget modes, transitive derived-evidence erasure across assertions/preferences/relations, HTTP-configurable retrieval adapter wiring, CLI `--backend postgres`, shared local/Postgres evidence/retrieval/branch/as-of contracts, durable Postgres queue leasing/drain, asset-bound CLI file ingestion through the C2PA verifier adapter, externalized payload derived-text retrieval, async media extraction, and gated consolidation promotion on Postgres.
+- `uv run python -m compileall -q src tests` passes.
+- `uv run pytest -q` collects 136 tests and returns 124 passing tests plus 12 skipped live-DB tests with the optional MCP SDK extra installed.
+- With Docker compose Postgres running, `MNEMOSYNE_POSTGRES_DSN=postgresql://... uv run pytest -q tests/test_postgres_engine_live.py tests/test_shared_engine_contract.py` returns 15 passing live/shared adapter tests covering tenant RLS, SQL FTS, pgvector assertion search, dense evidence fallback, recursive graph/PPR, branch/discard, branch merge retrieval, bitemporal supersession, tenant isolation, tombstone and hard-delete forget modes, transitive derived-evidence erasure across assertions/preferences/relations, HTTP-configurable retrieval adapter wiring, CLI `--backend postgres`, shared local/Postgres evidence/retrieval/branch/as-of contracts, durable Postgres queue leasing/drain, asset-bound CLI file ingestion through the C2PA verifier adapter, externalized payload derived-text retrieval, async media extraction, gated consolidation promotion on Postgres, and shared local/Postgres contract parity.
 
 Exact 1:1 blueprint parity is still in progress. The controlling status artifact is `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md`.
