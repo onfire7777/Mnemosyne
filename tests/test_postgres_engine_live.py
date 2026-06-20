@@ -192,6 +192,53 @@ def test_postgres_engine_live_contract_smoke() -> None:
     assert exported["assertions"]
 
 
+def test_postgres_local_rank_fallback_uses_policy_sensitivity_live() -> None:
+    engine = PostgresEngine(live_dsn())
+    tenant = f"tenant-fallback-sensitivity-{uuid4()}"
+    user = "user-fallback-sensitivity"
+    visible = engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id=user,
+            actor="user",
+            source_type="fallback",
+            content="Fallback sensitivity contract visible token.",
+            trust_tier=0,
+            sensitivity=0,
+            access_policy={"tenant": tenant},
+        )
+    )
+    hidden = engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id=user,
+            actor="user",
+            source_type="fallback",
+            content="Fallback sensitivity contract hidden token.",
+            trust_tier=0,
+            sensitivity=9,
+            access_policy={"tenant": tenant},
+        )
+    )
+
+    default_hits = engine._local_rank(  # noqa: SLF001 - direct regression for fallback filter semantics.
+        "fallback sensitivity contract",
+        10,
+        {"tenant_id": tenant, "branch": "main"},
+        channel="fallback-regression",
+    )
+    override_hits = engine._local_rank(  # noqa: SLF001 - direct regression for fallback filter semantics.
+        "fallback sensitivity contract",
+        10,
+        {"tenant_id": tenant, "branch": "main", "max_sensitivity": 10},
+        channel="fallback-regression",
+    )
+
+    assert visible in {hit.id for hit in default_hits}
+    assert hidden not in {hit.id for hit in default_hits}
+    assert hidden in {hit.id for hit in override_hits}
+
+
 def test_postgres_engine_live_shared_contract_parity() -> None:
     engine = PostgresEngine(live_dsn())
     tenant = f"tenant-contract-live-{uuid4()}"

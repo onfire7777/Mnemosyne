@@ -81,6 +81,38 @@ def test_shared_engine_contract_explain_reports_channels_rails_and_provenance(en
     assert any(hit["id"] == cid and cid in hit["provenance"] for hit in explained["hits"])
 
 
+def test_shared_engine_contract_retrieval_records_assertion_access_and_activation(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, user = engine_bundle
+    cid = _append_evidence(engine, tenant, user, "Shared activation evidence backs retrieval telemetry.")
+    assertion_id = engine.upsert_assertion(
+        Assertion(
+            tenant_id=tenant,
+            user_id=user,
+            subject="Shared activation",
+            predicate="requires",
+            object="read telemetry",
+            confidence=0.95,
+            source_evidence_cids=[cid],
+            trust_tier=0,
+            access_policy={"tenant": tenant},
+        )
+    )
+    before = _exported_assertion(engine, tenant, assertion_id)
+
+    result = engine.retrieve("Shared activation requires read telemetry", tenant)
+    after = _exported_assertion(engine, tenant, assertion_id)
+    assertion_hit = next(hit for hit in result.hits if hit.kind == "assertion" and hit.id == assertion_id)
+
+    assert before["access_count"] == 0
+    assert after["access_count"] == 1
+    assert after["last_accessed"]
+    assert assertion_hit.metadata["activation"]["score"] > 0
+    assert result.explain["activation"]["applied"] is True
+    assert result.explain["read_marks"]["assertions"] >= 1
+
+
 def test_shared_engine_contract_branches_and_discards(engine_bundle: tuple[Any, str, str]) -> None:
     engine, tenant, user = engine_bundle
     _branch(engine, "candidate", tenant)
@@ -506,6 +538,13 @@ def _append_evidence(
             access_policy={"tenant": tenant},
         )
     )
+
+
+def _exported_assertion(engine: Any, tenant: str, assertion_id: str) -> dict[str, Any]:
+    for assertion in engine.export_tenant(tenant)["assertions"]:
+        if assertion["id"] == assertion_id:
+            return assertion
+    raise AssertionError(f"missing exported assertion {assertion_id}")
 
 
 def _branch(engine: Any, name: str, tenant: str) -> None:
