@@ -619,6 +619,80 @@ def test_cli_enforces_allowed_residency_on_ingest(tmp_path: Path) -> None:
     assert "not allowed by this runtime" in rejected.stderr
 
 
+def test_cli_enforces_cross_region_residency_transfer_policy(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    rejected = run_raw_cli(
+        store,
+        "--allowed-residency",
+        "eu",
+        "--allowed-residency",
+        "us",
+        "--runtime-residency",
+        "us",
+        "ingest",
+        "--tenant",
+        TENANT,
+        "--user",
+        USER,
+        "--actor",
+        "user",
+        "--source-type",
+        "chat",
+        "--content",
+        "EU data cannot process in US without explicit transfer.",
+        "--metadata",
+        json.dumps({"residency": "eu"}),
+        "--trust-tier",
+        "0",
+    )
+    accepted = run_cli(
+        store,
+        "--allowed-residency",
+        "eu",
+        "--allowed-residency",
+        "us",
+        "--runtime-residency",
+        "us",
+        "--allowed-residency-transfer",
+        "eu->us",
+        "ingest",
+        "--tenant",
+        TENANT,
+        "--user",
+        USER,
+        "--actor",
+        "user",
+        "--source-type",
+        "chat",
+        "--content",
+        "EU data can process in US with explicit transfer.",
+        "--metadata",
+        json.dumps({"residency": "eu"}),
+        "--trust-tier",
+        "0",
+    )
+    exported = run_cli(
+        store,
+        "--allowed-residency",
+        "eu",
+        "--allowed-residency",
+        "us",
+        "--runtime-residency",
+        "us",
+        "--allowed-residency-transfer",
+        "eu->us",
+        "export",
+        "--tenant",
+        TENANT,
+    )
+    evidence = next(item for item in exported["evidence"] if item["cid"] == accepted["cid"])
+
+    assert rejected.returncode != 0
+    assert "cross-region residency transfer" in rejected.stderr
+    assert evidence["access_policy"]["runtime_residency"] == "us"
+    assert evidence["access_policy"]["cross_region_transfer"] is True
+
+
 def test_cli_drains_media_extraction_job_with_command_provider(tmp_path: Path) -> None:
     store = tmp_path / "mnemosyne.json"
     objects = tmp_path / "objects"

@@ -60,3 +60,41 @@ def enforce_residency(residency: str, allowed: tuple[str, ...]) -> None:
     if normalized_allowed and residency not in normalized_allowed:
         allowed_text = ", ".join(normalized_allowed)
         raise ValueError(f"residency {residency!r} is not allowed by this runtime; allowed: {allowed_text}")
+
+
+def normalize_residency_transfer(value: str) -> tuple[str, str]:
+    if "->" in value:
+        source, target = value.split("->", 1)
+    elif ":" in value:
+        source, target = value.split(":", 1)
+    else:
+        raise ValueError(f"invalid residency transfer rule: {value!r}")
+    return normalize_residency(source), normalize_residency(target)
+
+
+def normalize_residency_transfers(values: tuple[str, ...]) -> tuple[str, ...]:
+    return tuple(
+        f"{source}->{target}"
+        for source, target in (normalize_residency_transfer(item) for item in values if item)
+    )
+
+
+def enforce_residency_transfer(
+    source_residency: str,
+    target_residency: str | None,
+    allowed_transfers: tuple[str, ...],
+) -> bool:
+    if target_residency is None:
+        return False
+    source = normalize_residency(source_residency)
+    target = normalize_residency(target_residency)
+    if source == target:
+        return False
+    normalized_transfers = {normalize_residency_transfer(item) for item in allowed_transfers if item}
+    if (source, target) not in normalized_transfers:
+        allowed_text = ", ".join(f"{left}->{right}" for left, right in sorted(normalized_transfers)) or "none"
+        raise ValueError(
+            f"cross-region residency transfer {source!r}->{target!r} is not allowed by this runtime; "
+            f"allowed transfers: {allowed_text}"
+        )
+    return True

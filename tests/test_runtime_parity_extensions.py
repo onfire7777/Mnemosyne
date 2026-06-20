@@ -451,6 +451,58 @@ def test_ingestion_enforces_configured_data_residency(tmp_path) -> None:
         raise AssertionError("disallowed residency should fail closed")
 
 
+def test_ingestion_denies_cross_region_transfer_without_allowlist(tmp_path) -> None:
+    denied_pipeline = IngestionPipeline(
+        LocalMemoryEngine(),
+        LocalObjectStore(tmp_path / "denied-objects"),
+        allowed_residencies=("eu", "us"),
+        runtime_residency="us",
+    )
+    try:
+        denied_pipeline.ingest(
+            IngestRequest(
+                tenant_id=TENANT,
+                user_id=USER,
+                actor="user",
+                source_type="chat",
+                content="EU data must not process in US without transfer policy.",
+                metadata={"residency": "eu"},
+                trust_tier=0,
+            )
+        )
+    except ValueError as exc:
+        assert "cross-region residency transfer" in str(exc)
+    else:
+        raise AssertionError("cross-region transfer should fail closed")
+
+    engine = LocalMemoryEngine()
+    allowed_pipeline = IngestionPipeline(
+        engine,
+        LocalObjectStore(tmp_path / "allowed-objects"),
+        allowed_residencies=("eu", "us"),
+        runtime_residency="us",
+        allowed_residency_transfers=("EU:US",),
+    )
+    accepted = allowed_pipeline.ingest(
+        IngestRequest(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="chat",
+            content="EU data may process in US with explicit transfer policy.",
+            metadata={"residency": "eu"},
+            trust_tier=0,
+        )
+    )
+    evidence = engine.get_evidence(TENANT, accepted.cid)
+
+    assert evidence is not None
+    assert evidence.access_policy["runtime_residency"] == "us"
+    assert evidence.access_policy["cross_region_transfer"] is True
+    assert evidence.metadata["privacy"]["cross_region_transfer"] is True
+    assert evidence.metadata["privacy"]["allowed_residency_transfers"] == ["eu->us"]
+
+
 def test_ingestion_indexes_multimodal_derived_text_without_inline_bytes(tmp_path) -> None:
     engine = LocalMemoryEngine()
     pipeline = IngestionPipeline(engine, LocalObjectStore(tmp_path / "objects"))

@@ -78,6 +78,11 @@ def default_allowed_residencies() -> list[str]:
     return [item.strip() for item in raw.split(",") if item.strip()]
 
 
+def default_allowed_residency_transfers() -> list[str]:
+    raw = os.environ.get("MNEMOSYNE_ALLOWED_RESIDENCY_TRANSFERS", "")
+    return [item.strip() for item in raw.split(",") if item.strip()]
+
+
 def apply_session_identity(args: argparse.Namespace) -> None:
     token = getattr(args, "session_token", None)
     if token:
@@ -300,6 +305,8 @@ def load_tools(
         provenance_verifier=load_provenance_verifier(args),
         queue=ingestion_queue,
         allowed_residencies=tuple(args.allowed_residency),
+        runtime_residency=args.runtime_residency,
+        allowed_residency_transfers=tuple(args.allowed_residency_transfer),
     )
     return MemoryTools(
         engine,
@@ -1135,6 +1142,17 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         default=default_allowed_residencies(),
         help="Allowed data residency label for ingestion; repeat or use MNEMOSYNE_ALLOWED_RESIDENCIES",
+    )
+    parser.add_argument(
+        "--runtime-residency",
+        default=os.environ.get("MNEMOSYNE_RUNTIME_RESIDENCY"),
+        help="Runtime processing residency; cross-region ingestion requires an allowed transfer",
+    )
+    parser.add_argument(
+        "--allowed-residency-transfer",
+        action="append",
+        default=default_allowed_residency_transfers(),
+        help="Allowed cross-region transfer in source->target form; repeat or use MNEMOSYNE_ALLOWED_RESIDENCY_TRANSFERS",
     )
     parser.add_argument("--embedding-provider", choices=["local", "http"], default=os.environ.get("MNEMOSYNE_EMBEDDING_PROVIDER", "local"))
     parser.add_argument("--embedding-url", default=os.environ.get("MNEMOSYNE_EMBEDDING_URL"))

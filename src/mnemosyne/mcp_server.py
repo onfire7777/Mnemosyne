@@ -65,6 +65,8 @@ class MnemosyneMcpServer:
         object_key_command: str | None = None,
         object_key_timeout: float | None = None,
         allowed_residencies: tuple[str, ...] | None = None,
+        runtime_residency: str | None = None,
+        allowed_residency_transfers: tuple[str, ...] | None = None,
         queue_backend: str | None = None,
         queue_tenant: str | None = None,
     ):
@@ -104,6 +106,12 @@ class MnemosyneMcpServer:
         self.object_key_command = object_key_command or os.environ.get("MNEMOSYNE_OBJECT_KEY_COMMAND")
         self.object_key_timeout = object_key_timeout or float(os.environ.get("MNEMOSYNE_OBJECT_KEY_TIMEOUT", "30"))
         self.allowed_residencies = allowed_residencies or _default_allowed_residencies()
+        self.runtime_residency = runtime_residency or os.environ.get("MNEMOSYNE_RUNTIME_RESIDENCY")
+        self.allowed_residency_transfers = (
+            allowed_residency_transfers
+            if allowed_residency_transfers is not None
+            else _default_allowed_residency_transfers()
+        )
         self.stateless = stateless
         self.auth_token = auth_token if auth_token is not None else os.environ.get("MNEMOSYNE_MCP_TOKEN")
         self.session_secret = (
@@ -167,6 +175,8 @@ class MnemosyneMcpServer:
             ),
             queue=queue,
             allowed_residencies=self.allowed_residencies,
+            runtime_residency=self.runtime_residency,
+            allowed_residency_transfers=self.allowed_residency_transfers,
         )
         parametric = ParametricTier(
             ParametricArtifactStore(_parametric_store_path(self.store_path, self.parametric_artifact_store)),
@@ -576,6 +586,11 @@ def _default_allowed_residencies() -> tuple[str, ...]:
     return tuple(item.strip() for item in raw.split(",") if item.strip())
 
 
+def _default_allowed_residency_transfers() -> tuple[str, ...]:
+    raw = os.environ.get("MNEMOSYNE_ALLOWED_RESIDENCY_TRANSFERS", "")
+    return tuple(item.strip() for item in raw.split(",") if item.strip())
+
+
 def _env_flag(name: str, *, default: bool = False) -> bool:
     raw = os.environ.get(name)
     if raw is None:
@@ -648,6 +663,17 @@ def main(argv: list[str] | None = None) -> None:
         action="append",
         default=list(_default_allowed_residencies()),
         help="Allowed data residency label for MCP ingestion; repeat or use MNEMOSYNE_ALLOWED_RESIDENCIES",
+    )
+    parser.add_argument(
+        "--runtime-residency",
+        default=os.environ.get("MNEMOSYNE_RUNTIME_RESIDENCY"),
+        help="Runtime processing residency for MCP ingestion; cross-region ingestion requires an allowed transfer",
+    )
+    parser.add_argument(
+        "--allowed-residency-transfer",
+        action="append",
+        default=list(_default_allowed_residency_transfers()),
+        help="Allowed MCP cross-region transfer in source->target form; repeat or use MNEMOSYNE_ALLOWED_RESIDENCY_TRANSFERS",
     )
     parser.add_argument("--parametric-artifact-store", default=os.environ.get("MNEMOSYNE_PARAMETRIC_ARTIFACT_STORE"))
     parser.add_argument(
@@ -736,6 +762,8 @@ def main(argv: list[str] | None = None) -> None:
         "object_key_command": args.object_key_command,
         "object_key_timeout": args.object_key_timeout,
         "allowed_residencies": tuple(args.allowed_residency),
+        "runtime_residency": args.runtime_residency,
+        "allowed_residency_transfers": tuple(args.allowed_residency_transfer),
         "parametric_artifact_store": args.parametric_artifact_store,
         "parametric_provider": args.parametric_provider,
         "parametric_command": args.parametric_command,
