@@ -928,7 +928,7 @@ class PostgresEngine:
                 )
                 preferences = [_row_to_preference(row, tenant_id).to_dict() for row in cur.fetchall()]
                 cur.execute("SELECT * FROM audit_log WHERE tenant_id = %s", (db_tenant_id,))
-                audit = [_json_safe(dict(row)) for row in cur.fetchall()]
+                audit = [_row_to_audit_log(row) for row in cur.fetchall()]
                 cur.execute("SELECT * FROM deletion_log WHERE tenant_id = %s", (db_tenant_id,))
                 deletion = [_json_safe(dict(row)) for row in cur.fetchall()]
         return {
@@ -1179,12 +1179,16 @@ class PostgresEngine:
         return sorted(candidates, key=lambda item: item.score, reverse=True)[:k]
 
     def _audit(self, cur: Any, tenant_id: str, actor: str, op: str, target_id: str | None, diff: dict[str, Any]) -> None:
+        target_uuid = _uuid_or_none(target_id)
+        audit_diff = dict(diff)
+        if target_id and not target_uuid:
+            audit_diff.setdefault("target_id", target_id)
         cur.execute(
             """
             INSERT INTO audit_log(tenant_id, actor, op, target_id, diff)
             VALUES (%s, %s, %s, %s, %s)
             """,
-            (tenant_id, actor, op, _uuid_or_none(target_id), self._jsonb(diff)),
+            (tenant_id, actor, op, target_uuid, self._jsonb(audit_diff)),
         )
 
     def _rrf(self, ranked_lists: list[list[Hit]], k: int) -> list[Hit]:
@@ -1305,6 +1309,14 @@ def _json_safe(value: Any) -> Any:
     if isinstance(value, dict):
         return {str(key): _json_safe(item) for key, item in value.items()}
     return value
+
+
+def _row_to_audit_log(row: Any) -> dict[str, Any]:
+    data = _json_safe(dict(row))
+    diff = data.get("diff")
+    if not data.get("target_id") and isinstance(diff, dict) and diff.get("target_id"):
+        data["target_id"] = diff["target_id"]
+    return data
 
 
 def _bytes_to_cid(value: bytes | memoryview) -> str:
