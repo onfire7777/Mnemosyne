@@ -9,7 +9,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from mnemosyne.security import SessionAuthError
+from mnemosyne.security import OidcAuthorizationPolicy, SessionAuthError
 
 
 def load_oidc_jwks(
@@ -64,6 +64,26 @@ def oidc_jwks_loader(
             max_bytes=max_bytes,
         )
     return None
+
+
+def load_oidc_authorization_policy(
+    *,
+    policy: str | None,
+    policy_file: str | None,
+) -> OidcAuthorizationPolicy | None:
+    sources = [bool(policy), bool(policy_file)]
+    if sum(sources) > 1:
+        raise SessionAuthError("OIDC authz policy requires at most one source")
+    if not any(sources):
+        return None
+    raw = policy if policy else Path(str(policy_file)).expanduser().read_text(encoding="utf-8")
+    try:
+        loaded = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise SessionAuthError("OIDC authz policy is not valid JSON") from exc
+    if not isinstance(loaded, dict):
+        raise SessionAuthError("OIDC authz policy must be a JSON object")
+    return OidcAuthorizationPolicy.from_mapping(loaded)
 
 
 def _read_file_bytes(path: Path, max_bytes: int) -> bytes:

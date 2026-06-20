@@ -1237,6 +1237,95 @@ def test_mcp_http_session_exchange_refreshes_file_jwks_rotation_on_unknown_kid(t
     assert auth_token not in encoded
 
 
+def test_mcp_http_session_exchange_maps_claims_through_authz_policy(tmp_path: Path) -> None:
+    auth_token = "http-session-exchange-policy-auth"
+    payload = oidc_payload(groups=["mnemosyne-operators"], scope="openid mnemosyne.write", azp="mcp-client")
+    payload.pop("mnemosyne_role")
+    payload.pop("mnemosyne_source_trust_tier")
+    jwks, idp_token = make_oidc_token(payload)
+    bad_payload = oidc_payload(groups=["mnemosyne-readers"], scope="openid", azp="mcp-client")
+    bad_jwks, bad_idp_token = make_oidc_token(bad_payload, kid="bad-policy-key")
+    jwks["keys"].extend(bad_jwks["keys"])
+    policy_file = tmp_path / "authz-policy.json"
+    policy_file.write_text(
+        json.dumps(
+            {
+                "allowed_client_ids": ["mcp-client"],
+                "rules": [
+                    {
+                        "tenant_ids": [TENANT],
+                        "claim_contains": {
+                            "groups": "mnemosyne-operators",
+                            "scope": "mnemosyne.write",
+                        },
+                        "role": "operator",
+                        "source_trust_tier": 0,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    server, thread, base = start_mcp_http_server(
+        store_path=tmp_path / "store.json",
+        auth_token=auth_token,
+        session_secret=MCP_SESSION_SECRET,
+        require_session=True,
+        idp_jwks=json.dumps(jwks),
+        idp_authz_policy_file=str(policy_file),
+        idp_issuer=IDP_ISSUER,
+        idp_audience=IDP_AUDIENCE,
+    )
+    try:
+        _, health = http_json("GET", f"{base}/healthz")
+        exchange_status, exchanged = http_json(
+            "POST",
+            f"{base}/session/exchange",
+            {"idp_token": idp_token},
+            headers={"Authorization": f"Bearer {auth_token}"},
+        )
+        bad_status, bad_exchange = http_json(
+            "POST",
+            f"{base}/session/exchange",
+            {"idp_token": bad_idp_token},
+            headers={"Authorization": f"Bearer {auth_token}"},
+        )
+        session_token = exchanged["session_token"] if exchanged else ""
+        call_status, call = http_json(
+            "POST",
+            f"{base}/mcp",
+            {
+                "jsonrpc": "2.0",
+                "id": 9,
+                "method": "tools/call",
+                "params": {"name": "residency_policy", "arguments": {}},
+            },
+            headers={"Authorization": f"Bearer {auth_token}", "X-Mnemosyne-Session-Token": str(session_token)},
+        )
+    finally:
+        stop_mcp_http_server(server, thread)
+
+    encoded = json.dumps([health, exchanged, bad_exchange, call])
+    assert health is not None
+    assert health["session_exchange_authz_policy_configured"] is True
+    assert exchange_status == 200
+    assert exchanged is not None
+    verified = SessionTokenVerifier(MCP_SESSION_SECRET).verify(exchanged["session_token"])
+    assert verified.tenant_id == TENANT
+    assert verified.user_id == USER
+    assert verified.role == "operator"
+    assert verified.source_trust_tier == 0
+    assert bad_status == 401
+    assert bad_exchange == {"error": "session exchange denied", "ok": False}
+    assert call_status == 200
+    assert call is not None
+    assert call["result"]["isError"] is False  # type: ignore[index]
+    assert idp_token not in encoded
+    assert bad_idp_token not in encoded
+    assert MCP_SESSION_SECRET not in encoded
+    assert auth_token not in encoded
+
+
 def test_mcp_http_transport_rejects_malformed_and_oversized_payloads(tmp_path: Path) -> None:
     server, thread, base = start_mcp_http_server(store_path=tmp_path / "store.json", max_body_bytes=128)
     try:

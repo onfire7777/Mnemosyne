@@ -204,6 +204,106 @@ def test_cli_session_exchange_refreshes_rotated_jwks_url_on_unknown_kid(tmp_path
     assert idp_token not in json.dumps(exchanged)
 
 
+def test_cli_session_exchange_maps_idp_claims_through_authz_policy(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    payload = oidc_payload(groups=["mnemosyne-operators"], scope="openid mnemosyne.write", azp="cli-client")
+    payload.pop("mnemosyne_role")
+    payload.pop("mnemosyne_source_trust_tier")
+    jwks, idp_token = make_oidc_token(payload)
+    jwks_file = tmp_path / "jwks.json"
+    jwks_file.write_text(json.dumps(jwks), encoding="utf-8")
+    policy_file = tmp_path / "authz-policy.json"
+    policy_file.write_text(
+        json.dumps(
+            {
+                "allowed_client_ids": ["cli-client"],
+                "rules": [
+                    {
+                        "tenant_ids": [TENANT],
+                        "claim_contains": {
+                            "groups": "mnemosyne-operators",
+                            "scope": "mnemosyne.write",
+                        },
+                        "role": "operator",
+                        "source_trust_tier": 0,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    exchanged = run_cli(
+        store,
+        "--session-secret",
+        SESSION_SECRET,
+        "session-exchange",
+        "--idp-token",
+        idp_token,
+        "--idp-jwks-file",
+        str(jwks_file),
+        "--idp-authz-policy-file",
+        str(policy_file),
+        "--idp-issuer",
+        IDP_ISSUER,
+        "--idp-audience",
+        IDP_AUDIENCE,
+    )
+    verified = SessionTokenVerifier(SESSION_SECRET).verify(exchanged["session_token"])
+
+    assert verified.tenant_id == TENANT
+    assert verified.user_id == USER
+    assert verified.role == "operator"
+    assert verified.source_trust_tier == 0
+    assert idp_token not in json.dumps(exchanged)
+
+
+def test_cli_session_exchange_authz_policy_miss_fails_closed(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    payload = oidc_payload(groups=["mnemosyne-readers"], scope="openid", azp="cli-client")
+    jwks, idp_token = make_oidc_token(payload)
+    jwks_file = tmp_path / "jwks.json"
+    jwks_file.write_text(json.dumps(jwks), encoding="utf-8")
+    policy_file = tmp_path / "authz-policy.json"
+    policy_file.write_text(
+        json.dumps(
+            {
+                "allowed_client_ids": ["cli-client"],
+                "rules": [
+                    {
+                        "tenant_ids": [TENANT],
+                        "claim_contains": {"groups": "mnemosyne-operators"},
+                        "role": "operator",
+                        "source_trust_tier": 0,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = run_raw_cli(
+        store,
+        "--session-secret",
+        SESSION_SECRET,
+        "session-exchange",
+        "--idp-token",
+        idp_token,
+        "--idp-jwks-file",
+        str(jwks_file),
+        "--idp-authz-policy-file",
+        str(policy_file),
+        "--idp-issuer",
+        IDP_ISSUER,
+        "--idp-audience",
+        IDP_AUDIENCE,
+    )
+
+    assert result.returncode == 1
+    assert "not authorized" in result.stderr
+    assert idp_token not in result.stderr
+
+
 def test_cli_session_exchange_fails_closed_on_invalid_idp_claims(tmp_path: Path) -> None:
     store = tmp_path / "mnemosyne.json"
     jwks, idp_token = make_oidc_token(oidc_payload(aud="wrong-audience"))
@@ -403,6 +503,8 @@ def test_cli_session_exchange_exposes_jwks_rotation_flags() -> None:
             "idp-token",
             "--idp-jwks-file",
             "jwks.json",
+            "--idp-authz-policy-file",
+            "authz-policy.json",
             "--idp-issuer",
             IDP_ISSUER,
             "--idp-audience",
@@ -418,6 +520,7 @@ def test_cli_session_exchange_exposes_jwks_rotation_flags() -> None:
     assert args.idp_jwks_max_bytes == 4096
     assert args.idp_jwks_cache_ttl_seconds == 0
     assert args.idp_disable_refresh_on_unknown_kid is True
+    assert args.idp_authz_policy_file == "authz-policy.json"
 
 
 def test_cli_provider_check_exercises_http_and_media_contracts(tmp_path: Path) -> None:

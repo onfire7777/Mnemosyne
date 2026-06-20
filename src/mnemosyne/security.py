@@ -257,6 +257,180 @@ def parse_session_revoke_list(raw: str | None) -> set[str]:
     return {item.strip() for item in raw.split(",") if item.strip()}
 
 
+def _value_tuple(value: Any) -> tuple[str, ...]:
+    if value is None or value == "":
+        return ()
+    if isinstance(value, str):
+        return (value,)
+    if isinstance(value, (list, tuple, set)):
+        return tuple(str(item) for item in value if item is not None and item != "")
+    return (str(value),)
+
+
+def _nonempty_tuple(value: tuple[str, ...], *, field: str, allow_empty: bool) -> tuple[str, ...]:
+    normalized = tuple(item.strip() for item in value if item and item.strip())
+    if not allow_empty and not normalized:
+        raise SessionAuthError(f"OIDC authz policy {field} is required")
+    return normalized
+
+
+def _normalize_matchers(value: Any, *, field: str) -> dict[str, tuple[str, ...]]:
+    if value in (None, ""):
+        return {}
+    if not isinstance(value, Mapping):
+        raise SessionAuthError(f"OIDC authz policy {field} must be an object")
+    normalized: dict[str, tuple[str, ...]] = {}
+    for claim, expected in value.items():
+        claim_name = str(claim).strip()
+        expected_values = _nonempty_tuple(_value_tuple(expected), field=f"{field}.{claim_name}", allow_empty=False)
+        if not claim_name:
+            raise SessionAuthError(f"OIDC authz policy {field} claim name is required")
+        normalized[claim_name] = expected_values
+    return normalized
+
+
+def _claim_values(value: Any) -> set[str]:
+    if value is None:
+        return set()
+    if isinstance(value, str):
+        return {value, *value.split()}
+    if isinstance(value, (list, tuple, set)):
+        return {str(item) for item in value if item is not None and item != ""}
+    return {str(value)}
+
+
+def _claim_equals(value: Any, expected: tuple[str, ...]) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, (list, tuple, set)):
+        values = {str(item) for item in value if item is not None and item != ""}
+        return values == set(expected)
+    else:
+        return str(value) in expected
+
+
+def _claim_contains(value: Any, expected: tuple[str, ...]) -> bool:
+    return bool(_claim_values(value).intersection(expected))
+
+
+class OidcAuthorizationPolicy:
+    """Map verified IdP claims to Mnemosyne authorization claims."""
+
+    def __init__(
+        self,
+        *,
+        rules: list[Mapping[str, Any]],
+        allowed_client_ids: tuple[str, ...] = (),
+        client_id_claims: tuple[str, ...] = ("azp", "client_id"),
+    ):
+        self.allowed_client_ids = _nonempty_tuple(allowed_client_ids, field="allowed_client_ids", allow_empty=False)
+        self.client_id_claims = _nonempty_tuple(client_id_claims, field="client_id_claims", allow_empty=False)
+        if not isinstance(rules, list) or not rules:
+            raise SessionAuthError("OIDC authz policy requires rules")
+        self.rules = [self._normalize_rule(rule) for rule in rules]
+
+    @classmethod
+    def from_mapping(cls, policy: Mapping[str, Any]) -> "OidcAuthorizationPolicy":
+        allowed_fields = {"version", "allowed_client_ids", "client_ids", "client_id_claims", "rules"}
+        unknown_fields = set(policy).difference(allowed_fields)
+        if unknown_fields:
+            raise SessionAuthError("OIDC authz policy contains unknown fields")
+        try:
+            version = int(policy.get("version", 1))
+        except (TypeError, ValueError) as exc:
+            raise SessionAuthError("OIDC authz policy version is invalid") from exc
+        if version != 1:
+            raise SessionAuthError("OIDC authz policy version is not supported")
+        allowed = policy.get("allowed_client_ids", policy.get("client_ids", ()))
+        client_claims = policy.get("client_id_claims", ("azp", "client_id"))
+        rules = policy.get("rules")
+        return cls(
+            rules=rules if isinstance(rules, list) else [],
+            allowed_client_ids=_value_tuple(allowed),
+            client_id_claims=_value_tuple(client_claims) or ("azp", "client_id"),
+        )
+
+    def authorize(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        tenant_id: str,
+        user_id: str,
+        expires_at: int | None,
+        session_id: str | None,
+    ) -> SessionIdentity:
+        self._verify_client(payload)
+        matches = [rule for rule in self.rules if self._rule_matches(rule, payload, tenant_id=tenant_id)]
+        if not matches:
+            raise SessionAuthError("OIDC token is not authorized")
+        if len(matches) > 1:
+            raise SessionAuthError("OIDC token matches multiple authorization rules")
+        rule = matches[0]
+        identity_payload: dict[str, Any] = {
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+            "role": rule["role"],
+            "source_trust_tier": rule["source_trust_tier"],
+            "exp": expires_at,
+        }
+        if session_id:
+            identity_payload["session_id"] = session_id
+        return SessionIdentity.from_payload(identity_payload)
+
+    def _verify_client(self, payload: Mapping[str, Any]) -> None:
+        if not self.allowed_client_ids:
+            return
+        token_client_ids = {
+            str(payload[claim])
+            for claim in self.client_id_claims
+            if payload.get(claim) is not None and payload.get(claim) != ""
+        }
+        if not token_client_ids.intersection(self.allowed_client_ids):
+            raise SessionAuthError("OIDC token client is not authorized")
+
+    @staticmethod
+    def _normalize_rule(rule: Mapping[str, Any]) -> dict[str, Any]:
+        if not isinstance(rule, Mapping):
+            raise SessionAuthError("OIDC authz rule must be an object")
+        allowed_fields = {"name", "tenant_ids", "tenants", "claim_equals", "claim_contains", "role", "source_trust_tier"}
+        if set(rule).difference(allowed_fields):
+            raise SessionAuthError("OIDC authz rule contains unknown fields")
+        role = rule.get("role")
+        if role not in _WRITE_ROLES:
+            raise SessionAuthError("OIDC authz rule role is not allowed")
+        try:
+            source_trust_tier = int(rule.get("source_trust_tier"))
+        except (TypeError, ValueError) as exc:
+            raise SessionAuthError("OIDC authz rule source_trust_tier is invalid") from exc
+        if source_trust_tier not in {int(item) for item in TrustTier}:
+            raise SessionAuthError("OIDC authz rule source_trust_tier is out of range")
+        tenant_ids = _nonempty_tuple(_value_tuple(rule.get("tenant_ids", rule.get("tenants", ()))), field="tenant_ids", allow_empty=True)
+        claim_equals = _normalize_matchers(rule.get("claim_equals", {}), field="claim_equals")
+        claim_contains = _normalize_matchers(rule.get("claim_contains", {}), field="claim_contains")
+        if not tenant_ids and not claim_equals and not claim_contains:
+            raise SessionAuthError("OIDC authz rule requires at least one matcher")
+        return {
+            "role": str(role),
+            "source_trust_tier": source_trust_tier,
+            "tenant_ids": tenant_ids,
+            "claim_equals": claim_equals,
+            "claim_contains": claim_contains,
+        }
+
+    @staticmethod
+    def _rule_matches(rule: Mapping[str, Any], payload: Mapping[str, Any], *, tenant_id: str) -> bool:
+        tenant_ids = rule["tenant_ids"]
+        if tenant_ids and tenant_id not in tenant_ids:
+            return False
+        for claim, expected in rule["claim_equals"].items():
+            if not _claim_equals(payload.get(claim), expected):
+                return False
+        for claim, expected in rule["claim_contains"].items():
+            if not _claim_contains(payload.get(claim), expected):
+                return False
+        return True
+
+
 class OidcJwtVerifier:
     """Verify production IdP JWTs against OIDC/JWKS policy and map them to session claims."""
 
@@ -290,6 +464,7 @@ class OidcJwtVerifier:
         jwks_loader: Callable[[], Mapping[str, Any]] | None = None,
         jwks_cache_ttl_seconds: int | None = None,
         refresh_on_unknown_kid: bool = True,
+        authorization_policy: OidcAuthorizationPolicy | None = None,
     ):
         if not issuer:
             raise SessionAuthError("OIDC issuer is required")
@@ -315,6 +490,7 @@ class OidcJwtVerifier:
         if self.jwks_cache_ttl_seconds is not None and self.jwks_cache_ttl_seconds < 0:
             raise SessionAuthError("OIDC JWKS cache TTL must be non-negative")
         self.refresh_on_unknown_kid = bool(refresh_on_unknown_kid)
+        self.authorization_policy = authorization_policy
         self._install_jwks(jwks, loaded_at=self._jwks_loaded_at)
 
     def _install_jwks(self, jwks: Mapping[str, Any], *, loaded_at: int) -> None:
@@ -497,16 +673,27 @@ class OidcJwtVerifier:
                 raise SessionAuthError("OIDC token issued-at is in the future")
 
     def _identity_from_claims(self, payload: Mapping[str, Any]) -> SessionIdentity:
+        tenant_id = str(self._required_claim(payload, self.tenant_claim))
+        user_id = str(self._required_claim(payload, self.user_claim))
+        session_id = payload.get(self.session_id_claim)
+        normalized_session_id = str(session_id) if session_id else None
+        if self.authorization_policy is not None:
+            return self.authorization_policy.authorize(
+                payload,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                expires_at=int(payload["exp"]),
+                session_id=normalized_session_id,
+            )
         identity_payload = {
-            "tenant_id": self._required_claim(payload, self.tenant_claim),
-            "user_id": self._required_claim(payload, self.user_claim),
+            "tenant_id": tenant_id,
+            "user_id": user_id,
             "role": self._required_claim(payload, self.role_claim),
             "source_trust_tier": self._required_claim(payload, self.trust_claim),
             "exp": payload["exp"],
         }
-        session_id = payload.get(self.session_id_claim)
-        if session_id:
-            identity_payload["session_id"] = str(session_id)
+        if normalized_session_id:
+            identity_payload["session_id"] = normalized_session_id
         return SessionIdentity.from_payload(identity_payload)
 
     @staticmethod
