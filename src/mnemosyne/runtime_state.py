@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from mnemosyne.learning import FailureAttribution, LearningSystem, Lesson, Procedure, Trajectory
+from mnemosyne.observability import MetricsRegistry
 from mnemosyne.queue import InProcessQueue
 from mnemosyne.user_model import LatentUserProfile, UserMemoryKind, UserModel, UserModelEntry
 
@@ -25,6 +26,7 @@ class RuntimeState:
             "user_model": {"entries": [], "latent_profiles": []},
             "learning": {"trajectories": [], "attributions": [], "lessons": [], "procedures": []},
             "queue": {"order": [], "jobs": []},
+            "metrics": {"counters": {}, "gauges": {}, "samples": {}},
         }
         if self.path.exists():
             self.data.update(json.loads(self.path.read_text(encoding="utf-8")))
@@ -84,4 +86,11 @@ class RuntimeState:
 
     def save_queue(self, queue: InProcessQueue) -> None:
         self.data["queue"] = queue.to_dict()
+        self.save()
+
+    def load_metrics(self) -> MetricsRegistry:
+        return MetricsRegistry(self.data.get("metrics"))
+
+    def save_metrics(self, metrics: MetricsRegistry) -> None:
+        self.data["metrics"] = metrics.snapshot().to_dict()
         self.save()

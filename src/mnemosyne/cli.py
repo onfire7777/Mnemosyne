@@ -717,6 +717,7 @@ def cmd_ops_report(args: argparse.Namespace) -> None:
             tenant_id=args.tenant,
             queue_snapshot=queue.snapshot(),
             learning=tools.learning,
+            metrics=tools.metrics.snapshot(),
             proxy_score=args.proxy_score,
             true_score=args.true_score,
             min_diversity=args.min_diversity,
