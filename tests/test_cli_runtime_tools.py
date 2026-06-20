@@ -389,9 +389,10 @@ def test_cli_ingest_can_run_one_consolidation_worker_cycle(tmp_path: Path) -> No
         "--source-type",
         "chat",
         "--content",
-        "Mnemosyne compiles raw experience through queue-backed consolidation.",
+        "Runtime consolidation target is local CLI.",
         "--run-consolidation-once",
     )
+    report = run_cli(store, "ops-report", "--tenant", TENANT)
 
     assert ingested["queued_jobs"][0]["kind"] == "consolidate_evidence"
     assert ingested["consolidation_worker"]["queue"]["complete"] == 1
@@ -399,6 +400,8 @@ def test_cli_ingest_can_run_one_consolidation_worker_cycle(tmp_path: Path) -> No
     assert job["status"] == "complete"
     assert job["result"]["source_evidence_cids"] == [ingested["cid"]]
     assert job["result"]["passes_run"][:3] == ["replayer", "extractor", "resolver"]
+    assert report["learning"]["lessons"] == 1
+    assert report["learning"]["procedures"] == 1
 
 
 def test_cli_persists_queue_between_ingest_and_worker_commands(tmp_path: Path) -> None:

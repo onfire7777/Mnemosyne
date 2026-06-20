@@ -41,13 +41,15 @@ class RuntimeJobHandlers:
         metrics: MetricsRegistry | None = None,
         object_store: LocalObjectStore | None = None,
         media_extractor: MediaTextExtractor | None = None,
+        learning: Any | None = None,
     ):
         self.engine = engine
         self.queue = queue
         self.metrics = metrics or MetricsRegistry()
         self.object_store = object_store or LocalObjectStore(".mnemosyne/objects")
         self.media_extractor = media_extractor or MetadataMediaTextExtractor()
-        self.consolidator = ConsolidationWorker(engine, gate_cases=[])
+        self.learning = learning
+        self.consolidator = ConsolidationWorker(engine, gate_cases=[], learning=learning)
 
     def handlers(self) -> dict[str, Any]:
         return {
