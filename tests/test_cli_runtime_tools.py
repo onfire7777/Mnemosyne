@@ -4,6 +4,7 @@ import json
 import subprocess
 import sys
 import threading
+from hashlib import sha256
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -150,14 +151,16 @@ def test_cli_provider_check_exercises_http_and_media_contracts(tmp_path: Path) -
 def test_cli_ingests_binary_file_with_c2pa_verifier(tmp_path: Path) -> None:
     store = tmp_path / "mnemosyne.json"
     asset = tmp_path / "capture.bin"
-    asset.write_bytes(b"binary camera capture")
+    payload = b"binary camera capture"
+    asset.write_bytes(payload)
+    asset_hash = sha256(payload).hexdigest()
     verifier_stub = tmp_path / "c2pa-ok.py"
     verifier_stub.write_text(
         "\n".join(
             [
                 "#!/usr/bin/env python3",
                 "import json",
-                "print(json.dumps({'active_manifest': 'manifest-1', 'claim_generator': 'issuer-a'}))",
+                f"print(json.dumps({{'active_manifest': 'manifest-1', 'claim_generator': 'issuer-a', 'asset_sha256': '{asset_hash}'}}))",
             ]
         ),
         encoding="utf-8",
@@ -202,10 +205,18 @@ def test_cli_ingests_binary_file_with_c2pa_verifier(tmp_path: Path) -> None:
     assert ingested["provenance"]["valid"] is True
     assert ingested["provenance"]["trusted"] is True
     assert ingested["provenance"]["manifest"]["c2pa"]["claim_generator"] == "issuer-a"
+    assert ingested["provenance"]["manifest"]["c2pa"]["asset_binding"] == {
+        "bound": True,
+        "method": "sha256",
+        "sha256": asset_hash,
+    }
     exported = run_cli(store, "export", "--tenant", TENANT)
     evidence = next(item for item in exported["evidence"] if item["cid"] == ingested["cid"])
     search = run_cli(store, "search", "--tenant", TENANT, "--query", "camera capture")
     assert evidence["content"] == "Binary camera capture."
+    assert "provenance-valid" in evidence["capability_tags"]
+    assert "provenance-verified" in evidence["capability_tags"]
+    assert "asset-bound-provenance" in evidence["capability_tags"]
     assert evidence["metadata"]["derived_text_sources"] == ["description"]
     assert search["hits"][0]["id"] == ingested["cid"]
 

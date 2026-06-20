@@ -86,8 +86,14 @@ class IngestionPipeline:
         base_trust_tier = request.trust_tier if request.trust_tier is not None else classification["trust_tier"]
         trust_tier = min(max(base_trust_tier + provenance.trust_delta, int(TrustTier.DIRECT_USER)), int(TrustTier.UNTRUSTED_EXTERNAL))
         capability_tags = sorted(set(request.capability_tags + classification["capability_tags"]))
+        if request.signed_provenance:
+            capability_tags.append("provenance-valid" if provenance.valid else "provenance-invalid")
+        if provenance.valid and _provenance_binds_asset(provenance.manifest):
+            capability_tags.append("asset-bound-provenance")
         if provenance.trusted:
             capability_tags.append("provenance-verified")
+        elif provenance.valid:
+            capability_tags.append("provenance-untrusted")
         metadata = {
             **request.metadata,
             "media_type": request.media_type,
@@ -305,6 +311,18 @@ def _classify_trust_tier(actor: str, source_type: str) -> int:
             return int(TrustTier.AUTHENTICATED)
         return int(TrustTier.UNTRUSTED_EXTERNAL)
     return int(TrustTier.NORMAL)
+
+
+def _provenance_binds_asset(manifest: dict[str, Any] | None) -> bool:
+    if not manifest:
+        return False
+    if manifest.get("sha256") or manifest.get("content_hash"):
+        return True
+    c2pa = manifest.get("c2pa")
+    if isinstance(c2pa, dict):
+        asset_binding = c2pa.get("asset_binding")
+        return isinstance(asset_binding, dict) and asset_binding.get("bound") is True
+    return False
 
 
 def _actor_tag(actor: str) -> str:
