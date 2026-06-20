@@ -675,33 +675,22 @@ class PostgresEngine:
 
         db_tenant_id = _stable_uuid("tenant", tenant_id)
         branch = branch or "main"
-        moment = None
-        if as_of:
-            moment = as_of.astimezone(UTC) if as_of.tzinfo else as_of.replace(tzinfo=UTC)
+        moment = as_of or utc_now()
+        moment = moment.astimezone(UTC) if moment.tzinfo else moment.replace(tzinfo=UTC)
         adjacency: dict[str, set[str]] = defaultdict(set)
         relation_by_pair: dict[tuple[str, str], dict[str, Any]] = {}
         with self.connect() as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
                 self._set_tenant(cur, db_tenant_id)
-                if moment:
-                    cur.execute(
-                        """
-                        SELECT *
-                        FROM relations
-                        WHERE tenant_id = %s AND branch = %s
-                          AND valid_from <= %s AND (valid_to IS NULL OR valid_to > %s)
-                        """,
-                        (db_tenant_id, branch, moment, moment),
-                    )
-                else:
-                    cur.execute(
-                        """
-                        SELECT *
-                        FROM relations
-                        WHERE tenant_id = %s AND branch = %s
-                        """,
-                        (db_tenant_id, branch),
-                    )
+                cur.execute(
+                    """
+                    SELECT *
+                    FROM relations
+                    WHERE tenant_id = %s AND branch = %s
+                      AND valid_from <= %s AND (valid_to IS NULL OR valid_to > %s)
+                    """,
+                    (db_tenant_id, branch, moment, moment),
+                )
                 for row in cur.fetchall():
                     source = row["source"].lower()
                     target = row["target"].lower()
