@@ -5,6 +5,7 @@ import json
 import subprocess
 import sys
 from datetime import UTC, datetime
+from hashlib import sha256
 from uuid import uuid4
 
 import pytest
@@ -370,14 +371,16 @@ def test_postgres_cli_ingests_file_with_c2pa_verifier(tmp_path) -> None:
     tenant = f"tenant-cli-c2pa-live-{uuid4()}"
     user = "user-cli-c2pa-live"
     asset = tmp_path / "capture.bin"
-    asset.write_bytes(b"postgres binary capture")
+    payload = b"postgres binary capture"
+    asset.write_bytes(payload)
+    asset_hash = sha256(payload).hexdigest()
     verifier_stub = tmp_path / "c2pa-ok.py"
     verifier_stub.write_text(
         "\n".join(
             [
                 "#!/usr/bin/env python3",
                 "import json",
-                "print(json.dumps({'active_manifest': 'manifest-1', 'claim_generator': 'issuer-a'}))",
+                f"print(json.dumps({{'active_manifest': 'manifest-1', 'claim_generator': 'issuer-a', 'asset_sha256': '{asset_hash}'}}))",
             ]
         ),
         encoding="utf-8",
@@ -416,10 +419,16 @@ def test_postgres_cli_ingests_file_with_c2pa_verifier(tmp_path) -> None:
     assert ingested["content_pointer"] is not None
     assert ingested["trust_tier"] == 3
     assert ingested["provenance"]["trusted"] is True
+    assert ingested["provenance"]["manifest"]["c2pa"]["asset_binding"] == {
+        "bound": True,
+        "method": "sha256",
+        "sha256": asset_hash,
+    }
     assert evidence["content_pointer"] == ingested["content_pointer"]
     assert evidence["content"] == "Postgres binary camera capture."
     assert evidence["metadata"]["derived_text_sources"] == ["description"]
     assert evidence["metadata"]["provenance_decision"]["manifest"]["c2pa"]["claim_generator"] == "issuer-a"
+    assert "asset-bound-provenance" in evidence["capability_tags"]
     assert search["hits"][0]["id"] == ingested["cid"]
 
 

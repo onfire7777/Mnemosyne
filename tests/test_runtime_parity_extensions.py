@@ -66,6 +66,7 @@ def test_signed_provenance_verifier_quarantines_digest_mismatch() -> None:
 
 def test_c2pa_tool_verifier_trusts_configured_issuer_and_quarantines_failures(tmp_path) -> None:
     payload = b"camera bytes"
+    asset_hash = sha256(payload).hexdigest()
     asset = tmp_path / "photo.jpg"
     asset.write_bytes(payload)
     verifier_stub = tmp_path / "c2pa-ok.py"
@@ -74,7 +75,7 @@ def test_c2pa_tool_verifier_trusts_configured_issuer_and_quarantines_failures(tm
             [
                 "#!/usr/bin/env python3",
                 "import json",
-                "print(json.dumps({'active_manifest': 'manifest-1', 'claim_generator': 'issuer-a'}))",
+                f"print(json.dumps({{'active_manifest': 'manifest-1', 'claim_generator': 'issuer-a', 'asset_sha256': '{asset_hash}'}}))",
             ]
         ),
         encoding="utf-8",
@@ -101,6 +102,11 @@ def test_c2pa_tool_verifier_trusts_configured_issuer_and_quarantines_failures(tm
     assert trusted.trust_delta == -2
     assert trusted.manifest is not None
     assert trusted.manifest["c2pa"]["claim_generator"] == "issuer-a"
+    assert trusted.manifest["c2pa"]["asset_binding"] == {
+        "bound": True,
+        "method": "sha256",
+        "sha256": asset_hash,
+    }
     assert untrusted.valid is True
     assert untrusted.trusted is False
     assert untrusted.trust_delta == -1
@@ -108,6 +114,66 @@ def test_c2pa_tool_verifier_trusts_configured_issuer_and_quarantines_failures(tm
     assert failed.trust_delta > 0
     assert invalid.quarantine is True
     assert invalid.reason == "c2pa verifier returned invalid json"
+
+
+def test_c2pa_tool_verifier_quarantines_asset_hash_mismatch(tmp_path) -> None:
+    payload = b"camera bytes"
+    wrong_hash = sha256(b"other").hexdigest()
+    asset = tmp_path / "photo.jpg"
+    asset.write_bytes(payload)
+    verifier_stub = tmp_path / "c2pa-mismatch.py"
+    verifier_stub.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env python3",
+                "import json",
+                f"print(json.dumps({{'active_manifest': 'manifest-1', 'claim_generator': 'issuer-a', 'asset_sha256': '{wrong_hash}'}}))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    verifier_stub.chmod(0o755)
+
+    decision = C2paToolVerifier(tool_path=str(verifier_stub), trusted_issuers=("issuer-a",)).verify(
+        payload, {"asset_path": str(asset)}
+    )
+
+    assert decision.valid is False
+    assert decision.trusted is False
+    assert decision.quarantine is True
+    assert decision.trust_delta > 0
+    assert decision.reason == "c2pa report asset hash mismatch"
+    assert decision.manifest is not None
+    assert decision.manifest["c2pa"]["asset_binding"]["bound"] is False
+
+
+def test_c2pa_tool_verifier_quarantines_unbound_reports(tmp_path) -> None:
+    payload = b"camera bytes"
+    asset = tmp_path / "photo.jpg"
+    asset.write_bytes(payload)
+    verifier_stub = tmp_path / "c2pa-unbound.py"
+    verifier_stub.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env python3",
+                "import json",
+                "print(json.dumps({'active_manifest': 'manifest-1', 'claim_generator': 'issuer-a'}))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    verifier_stub.chmod(0o755)
+
+    decision = C2paToolVerifier(tool_path=str(verifier_stub), trusted_issuers=("issuer-a",)).verify(
+        payload, {"asset_path": str(asset)}
+    )
+
+    assert decision.valid is False
+    assert decision.trusted is False
+    assert decision.quarantine is True
+    assert decision.reason == "c2pa report does not bind to asset"
+    assert decision.manifest is not None
+    assert decision.manifest["c2pa"]["asset_binding"] == {"bound": False, "method": "missing"}
 
 
 def test_ingestion_pipeline_externalizes_multimodal_bytes_and_quarantines_bad_provenance(tmp_path) -> None:
@@ -137,6 +203,10 @@ def test_ingestion_pipeline_externalizes_multimodal_bytes_and_quarantines_bad_pr
     assert evidence.modality == "image"
     assert evidence.content == "A whiteboard architecture diagram."
     assert evidence.metadata["quarantine_reason"] == "signed provenance digest mismatch"
+    assert "provenance-invalid" in evidence.capability_tags
+    assert "quarantined" in evidence.capability_tags
+    assert "data-only" in evidence.capability_tags
+    assert "no-write-authority" in evidence.capability_tags
     assert engine.retrieve("whiteboard architecture", TENANT).hits == []
     included = engine.retrieve("whiteboard architecture", TENANT, filt={"include_quarantined": True})
     assert included.hits[0].id == result.cid
