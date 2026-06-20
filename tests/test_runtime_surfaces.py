@@ -120,6 +120,52 @@ def test_http_embedding_and_reranker_adapters_use_json_provider_contract() -> No
     assert requests[1]["payload"]["model"] == "rank-model"
 
 
+def test_http_retrieval_adapters_fail_closed_on_malformed_provider_responses() -> None:
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:  # noqa: N802 - stdlib callback name.
+            if self.path == "/embed-zero":
+                body = {"embedding": [0.0, 0.0, 0.0]}
+            elif self.path == "/rerank-empty":
+                body = {"results": []}
+            else:
+                body = {"results": [{"index": 9, "score": 0.9}]}
+            encoded = json.dumps(body).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(encoded)))
+            self.end_headers()
+            self.wfile.write(encoded)
+
+        def log_message(self, format: str, *args: object) -> None:  # noqa: A002 - stdlib signature.
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_port}"
+    try:
+        with pytest.raises(ValueError, match="non-zero vector"):
+            HttpEmbeddingProvider(f"{base}/embed-zero", dims=3).embed("hello")
+        with pytest.raises(ValueError, match="at least one scored result"):
+            HttpReranker(f"{base}/rerank-empty").rerank(
+                "query",
+                [Hit("a", "evidence", TENANT, "main", "first", 0.1, "candidate")],
+                k=1,
+            )
+        with pytest.raises(ValueError, match="out of range"):
+            HttpReranker(f"{base}/rerank-oob").rerank(
+                "query",
+                [Hit("a", "evidence", TENANT, "main", "first", 0.1, "candidate")],
+                k=1,
+            )
+        with pytest.raises(ValueError, match="absolute HTTP or HTTPS"):
+            HttpEmbeddingProvider("file:///tmp/embed", dims=3).embed("hello")
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        server.server_close()
+
+
 def test_mcp_server_initializes_lists_tools_and_calls_capture_search(tmp_path: Path) -> None:
     server = MnemosyneMcpServer(store_path=tmp_path / "store.json")
     init = server.handle({"jsonrpc": "2.0", "id": 1, "method": "initialize"})

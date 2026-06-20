@@ -118,7 +118,7 @@ def test_cli_provider_check_exercises_http_and_media_contracts(tmp_path: Path) -
         def do_POST(self) -> None:  # noqa: N802 - stdlib callback name.
             length = int(self.headers.get("Content-Length", "0"))
             payload = json.loads(self.rfile.read(length).decode("utf-8"))
-            requests.append({"path": self.path, "payload": payload})
+            requests.append({"path": self.path, "payload": payload, "auth": self.headers.get("Authorization")})
             if self.path == "/embed":
                 body = {"data": [{"embedding": [3.0, 4.0, 0.0, 99.0]}]}
             else:
@@ -158,6 +158,8 @@ def test_cli_provider_check_exercises_http_and_media_contracts(tmp_path: Path) -
             f"{base}/embed",
             "--embedding-model",
             "embed-health",
+            "--embedding-api-key",
+            "embed-secret",
             "--embedding-dims",
             "3",
             "--reranker-provider",
@@ -166,6 +168,8 @@ def test_cli_provider_check_exercises_http_and_media_contracts(tmp_path: Path) -
             f"{base}/rerank",
             "--reranker-model",
             "rerank-health",
+            "--reranker-api-key",
+            "rank-secret",
             "--media-extractor-command",
             str(extractor),
             "provider-check",
@@ -179,6 +183,57 @@ def test_cli_provider_check_exercises_http_and_media_contracts(tmp_path: Path) -
     assert report["checks"]["media_extractor"]["provider"] == "command"
     assert report["checks"]["media_extractor"]["sources"] == ["probe"]
     assert [item["path"] for item in requests] == ["/embed", "/rerank"]
+    assert [item["auth"] for item in requests] == ["Bearer embed-secret", "Bearer rank-secret"]
+
+
+def test_cli_provider_check_returns_nonzero_for_malformed_http_provider(tmp_path: Path) -> None:
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:  # noqa: N802 - stdlib callback name.
+            if self.path == "/embed":
+                body = {"embedding": [3.0, 4.0, 0.0]}
+            else:
+                body = {"results": []}
+            encoded = json.dumps(body).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(encoded)))
+            self.end_headers()
+            self.wfile.write(encoded)
+
+        def log_message(self, format: str, *args: object) -> None:  # noqa: A002 - stdlib signature.
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_port}"
+    try:
+        result = run_raw_cli(
+            tmp_path / "mnemosyne.json",
+            "--embedding-provider",
+            "http",
+            "--embedding-url",
+            f"{base}/embed",
+            "--embedding-dims",
+            "3",
+            "--reranker-provider",
+            "http",
+            "--reranker-url",
+            f"{base}/rerank",
+            "provider-check",
+        )
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        server.server_close()
+
+    report = json.loads(result.stdout)
+    assert result.returncode == 1
+    assert report["ok"] is False
+    assert report["checks"]["embedding"]["ok"] is True
+    assert report["checks"]["reranker"]["ok"] is False
+    assert "at least one scored result" in report["checks"]["reranker"]["error"]
+    assert report["checks"]["media_extractor"]["ok"] is True
 
 
 def test_cli_ingests_binary_file_with_c2pa_verifier(tmp_path: Path) -> None:

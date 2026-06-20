@@ -77,6 +77,8 @@ python -m mnemosyne.cli --backend postgres \
   search --tenant tenant-a --query "preferred database"
 ```
 
+Use `provider-check` with the same flags for deployment smoke checks. It returns structured JSON and exits nonzero if any embedding, reranker, or media-extractor contract fails.
+
 Signed CLI session tokens can bind tenant/user identity and write authority before a subcommand executes:
 
 ```bash
@@ -123,7 +125,7 @@ Policy files can define global `trusted_issuers` or scoped `rules` such as `{"ru
 The repository has a verified local scaffold plus runtime parity extensions. Current checks:
 
 - `uv run python -m compileall -q src tests` passes.
-- `uv run pytest -q` collects 151 tests and returns 131 passing tests plus 20 skipped live-DB tests with the optional MCP SDK extra installed.
-- With Docker compose Postgres running, `MNEMOSYNE_POSTGRES_DSN=postgresql://... uv run pytest -q tests/test_postgres_engine_live.py tests/test_shared_engine_contract.py` returns 30 passing live/shared adapter tests covering tenant RLS, SQL FTS, pgvector assertion search, dense evidence fallback, recursive graph/PPR, branch/discard, branch merge retrieval, bitemporal supersession, tenant isolation, tombstone and hard-delete forget modes, transitive derived-evidence erasure across assertions/preferences/relations, retrieval trust/sensitivity/quarantine filtering, deep graph tenant/branch isolation, hard-delete audit export, HTTP-configurable retrieval adapter wiring, CLI `--backend postgres`, stateless MCP ingestion over tenant-scoped durable Postgres queues, shared local/Postgres evidence/retrieval/branch/as-of/relation/preference/correction/forget-propagation contracts, durable Postgres queue leasing/drain, asset-bound CLI file ingestion through the C2PA verifier adapter, externalized payload derived-text retrieval, async media extraction, gated consolidation promotion on Postgres, and shared local/Postgres contract parity.
+- `uv run pytest -q` collects 153 tests and returns 133 passing tests plus 20 skipped live-DB tests with the optional MCP SDK extra installed.
+- With Docker compose Postgres running, `MNEMOSYNE_POSTGRES_DSN=postgresql://... uv run pytest -q tests/test_postgres_engine_live.py tests/test_shared_engine_contract.py` returns 30 passing live/shared adapter tests covering tenant RLS, SQL FTS, pgvector assertion search, dense evidence fallback, recursive graph/PPR, branch/discard, branch merge retrieval, bitemporal supersession, tenant isolation, tombstone and hard-delete forget modes, transitive derived-evidence erasure across assertions/preferences/relations, retrieval trust/sensitivity/quarantine filtering, deep graph tenant/branch isolation, hard-delete audit export, HTTP-configurable retrieval adapter wiring with strict provider response validation, CLI `--backend postgres`, fail-closed CLI `provider-check`, stateless MCP ingestion over tenant-scoped durable Postgres queues, shared local/Postgres evidence/retrieval/branch/as-of/relation/preference/correction/forget-propagation contracts, durable Postgres queue leasing/drain, asset-bound CLI file ingestion through the C2PA verifier adapter, externalized payload derived-text retrieval, async media extraction, gated consolidation promotion on Postgres, and shared local/Postgres contract parity.
 
 Exact 1:1 blueprint parity is still in progress. The controlling status artifact is `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md`.

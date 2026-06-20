@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import math
 import os
+import urllib.error
+import urllib.parse
 import urllib.request
 from collections import Counter
 from dataclasses import dataclass
@@ -121,6 +123,8 @@ class HttpReranker:
     name: str = "http-reranker"
 
     def rerank(self, query: str, hits: Sequence[Hit], k: int) -> list[Hit]:
+        if k <= 0 or not hits:
+            return []
         documents = [hit.text for hit in hits]
         payload: dict[str, object] = {"query": query, "documents": documents, "top_n": k}
         if self.model:
@@ -128,9 +132,13 @@ class HttpReranker:
         response = _post_json(self.url, payload, self.api_key, self.timeout_seconds)
         scored = _extract_rerank_scores(response)
         ranked: list[Hit] = []
+        seen: set[int] = set()
         for index, score in scored:
             if index < 0 or index >= len(hits):
-                continue
+                raise ValueError(f"reranker response index {index} is out of range")
+            if index in seen:
+                raise ValueError(f"reranker response contains duplicate index {index}")
+            seen.add(index)
             hit = hits[index]
             ranked.append(
                 Hit(
@@ -234,21 +242,36 @@ def _required_env(name: str) -> str:
 
 
 def _post_json(url: str, payload: dict[str, object], api_key: str | None, timeout: float) -> dict[str, object]:
+    _validate_http_provider_config(url, timeout)
     body = json.dumps(payload).encode("utf-8")
     headers = {"Content-Type": "application/json", "Accept": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
     request = urllib.request.Request(url, data=body, headers=headers, method="POST")
-    with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310 - URL is operator-configured.
-        return json.loads(response.read().decode("utf-8"))
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310 - URL is operator-configured.
+            decoded = response.read().decode("utf-8")
+    except urllib.error.HTTPError as exc:
+        detail = exc.read(512).decode("utf-8", errors="replace").strip()
+        suffix = f": {detail}" if detail else ""
+        raise ValueError(f"provider returned HTTP {exc.code}{suffix}") from exc
+    except urllib.error.URLError as exc:
+        raise ValueError(f"provider request failed: {exc.reason}") from exc
+    try:
+        parsed = json.loads(decoded)
+    except json.JSONDecodeError as exc:
+        raise ValueError("provider response must be valid JSON") from exc
+    if not isinstance(parsed, dict):
+        raise ValueError("provider response must be a JSON object")
+    return parsed
 
 
 def _extract_embedding(response: dict[str, object]) -> list[float]:
     if isinstance(response.get("embedding"), list):
-        return [float(value) for value in response["embedding"]]  # type: ignore[index]
+        return _coerce_vector(response["embedding"], field="embedding")  # type: ignore[arg-type,index]
     data = response.get("data")
     if isinstance(data, list) and data and isinstance(data[0], dict) and isinstance(data[0].get("embedding"), list):
-        return [float(value) for value in data[0]["embedding"]]
+        return _coerce_vector(data[0]["embedding"], field="data[0].embedding")
     raise ValueError("embedding response must contain `embedding` or `data[0].embedding`")
 
 
@@ -259,19 +282,47 @@ def _extract_rerank_scores(response: dict[str, object]) -> list[tuple[int, float
     scored: list[tuple[int, float]] = []
     for item in results:
         if not isinstance(item, dict):
-            continue
+            raise ValueError("reranker results must be objects")
         index = item.get("index")
         score = item.get("score", item.get("relevance_score"))
-        if isinstance(index, int) and isinstance(score, (int, float)):
-            scored.append((index, float(score)))
+        if not isinstance(index, int) or isinstance(index, bool):
+            raise ValueError("reranker result index must be an integer")
+        scored.append((index, _finite_float(score, field="reranker score")))
+    if not scored:
+        raise ValueError("reranker response must contain at least one scored result")
     return scored
 
 
 def _normalize_vector(vector: Sequence[float], dims: int) -> list[float]:
+    if dims <= 0:
+        raise ValueError("embedding dimensions must be positive")
     adjusted = list(vector[:dims])
     if len(adjusted) < dims:
         adjusted.extend([0.0] * (dims - len(adjusted)))
     norm = math.sqrt(sum(value * value for value in adjusted))
     if norm == 0.0:
-        return adjusted
+        raise ValueError("embedding response must contain a non-zero vector")
     return [value / norm for value in adjusted]
+
+
+def _validate_http_provider_config(url: str, timeout: float) -> None:
+    if not math.isfinite(timeout) or timeout <= 0:
+        raise ValueError("retrieval provider timeout must be positive")
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError("retrieval provider URL must be absolute HTTP or HTTPS")
+
+
+def _coerce_vector(values: Sequence[object], *, field: str) -> list[float]:
+    if not values:
+        raise ValueError(f"{field} must contain at least one value")
+    return [_finite_float(value, field=field) for value in values]
+
+
+def _finite_float(value: object, *, field: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{field} values must be numeric")
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValueError(f"{field} values must be finite")
+    return number
