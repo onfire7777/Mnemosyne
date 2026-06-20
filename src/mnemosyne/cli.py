@@ -51,6 +51,11 @@ def default_object_key_store() -> str | None:
     return os.environ.get("MNEMOSYNE_OBJECT_KEY_STORE")
 
 
+def default_allowed_residencies() -> list[str]:
+    raw = os.environ.get("MNEMOSYNE_ALLOWED_RESIDENCIES", "local")
+    return [item.strip() for item in raw.split(",") if item.strip()]
+
+
 def load_retrieval_adapters(args: argparse.Namespace) -> RetrievalAdapters:
     dims = int(args.embedding_dims)
     timeout = float(args.retrieval_timeout)
@@ -153,6 +158,7 @@ def load_tools(
         object_store=load_object_store(args),
         provenance_verifier=load_provenance_verifier(args),
         queue=ingestion_queue,
+        allowed_residencies=tuple(args.allowed_residency),
     )
     return MemoryTools(
         engine,
@@ -828,6 +834,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--object-key-store",
         default=default_object_key_store(),
         help="Path to JSON key store for --object-store-encryption aesgcm",
+    )
+    parser.add_argument(
+        "--allowed-residency",
+        action="append",
+        default=default_allowed_residencies(),
+        help="Allowed data residency label for ingestion; repeat or use MNEMOSYNE_ALLOWED_RESIDENCIES",
     )
     parser.add_argument("--embedding-provider", choices=["local", "http"], default=os.environ.get("MNEMOSYNE_EMBEDDING_PROVIDER", "local"))
     parser.add_argument("--embedding-url", default=os.environ.get("MNEMOSYNE_EMBEDDING_URL"))

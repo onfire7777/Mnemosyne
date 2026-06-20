@@ -238,6 +238,49 @@ def test_ingestion_pipeline_externalizes_multimodal_bytes_and_quarantines_bad_pr
     assert included.hits[0].id == result.cid
 
 
+def test_ingestion_enforces_configured_data_residency(tmp_path) -> None:
+    engine = LocalMemoryEngine()
+    pipeline = IngestionPipeline(
+        engine,
+        LocalObjectStore(tmp_path / "objects"),
+        allowed_residencies=("local", "eu"),
+    )
+    accepted = pipeline.ingest(
+        IngestRequest(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="chat",
+            content="EU residency note.",
+            metadata={"residency": "eu"},
+            trust_tier=0,
+        )
+    )
+    evidence = engine.get_evidence(TENANT, accepted.cid)
+
+    assert evidence is not None
+    assert evidence.access_policy["residency"] == "eu"
+    assert evidence.access_policy["allowed_residencies"] == ["local", "eu"]
+    assert evidence.metadata["privacy"]["residency"] == "eu"
+    assert "residency:eu" in evidence.capability_tags
+    try:
+        pipeline.ingest(
+            IngestRequest(
+                tenant_id=TENANT,
+                user_id=USER,
+                actor="user",
+                source_type="chat",
+                content="US residency note.",
+                metadata={"residency": "us"},
+                trust_tier=0,
+            )
+        )
+    except ValueError as exc:
+        assert "not allowed by this runtime" in str(exc)
+    else:
+        raise AssertionError("disallowed residency should fail closed")
+
+
 def test_ingestion_indexes_multimodal_derived_text_without_inline_bytes(tmp_path) -> None:
     engine = LocalMemoryEngine()
     pipeline = IngestionPipeline(engine, LocalObjectStore(tmp_path / "objects"))

@@ -221,6 +221,56 @@ def test_cli_ingests_binary_file_with_c2pa_verifier(tmp_path: Path) -> None:
     assert search["hits"][0]["id"] == ingested["cid"]
 
 
+def test_cli_enforces_allowed_residency_on_ingest(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    accepted = run_cli(
+        store,
+        "--allowed-residency",
+        "eu",
+        "ingest",
+        "--tenant",
+        TENANT,
+        "--user",
+        USER,
+        "--actor",
+        "user",
+        "--source-type",
+        "chat",
+        "--content",
+        "EU residency CLI note.",
+        "--metadata",
+        json.dumps({"residency": "eu"}),
+        "--trust-tier",
+        "0",
+    )
+    rejected = run_raw_cli(
+        store,
+        "ingest",
+        "--tenant",
+        TENANT,
+        "--user",
+        USER,
+        "--actor",
+        "user",
+        "--source-type",
+        "chat",
+        "--content",
+        "EU residency should fail without policy.",
+        "--metadata",
+        json.dumps({"residency": "eu"}),
+        "--trust-tier",
+        "0",
+    )
+    exported = run_cli(store, "--allowed-residency", "eu", "export", "--tenant", TENANT)
+    evidence = next(item for item in exported["evidence"] if item["cid"] == accepted["cid"])
+
+    assert evidence["access_policy"]["residency"] == "eu"
+    assert evidence["metadata"]["privacy"]["residency"] == "eu"
+    assert "residency:eu" in evidence["capability_tags"]
+    assert rejected.returncode != 0
+    assert "not allowed by this runtime" in rejected.stderr
+
+
 def test_cli_drains_media_extraction_job_with_command_provider(tmp_path: Path) -> None:
     store = tmp_path / "mnemosyne.json"
     objects = tmp_path / "objects"

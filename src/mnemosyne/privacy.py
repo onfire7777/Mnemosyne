@@ -15,6 +15,7 @@ class ErasureMode(str, Enum):
 
 EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
 PHONE_RE = re.compile(r"\b(?:\+?1[-. ]?)?\(?\d{3}\)?[-. ]?\d{3}[-. ]?\d{4}\b")
+RESIDENCY_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
 
 
 @dataclass(slots=True)
@@ -41,3 +42,21 @@ def classify_privacy(text: str, residency: str = "local", legal_erasure: bool = 
         erasure_mode=ErasureMode.HARD_DELETE_LEGAL if legal_erasure else ErasureMode.TOMBSTONE_RECOMPUTE,
     )
 
+
+def normalize_residency(value: str | None) -> str:
+    if value is None:
+        residency = "local"
+    elif isinstance(value, str):
+        residency = value.strip().lower()
+    else:
+        raise ValueError(f"invalid residency label: {value!r}")
+    if not RESIDENCY_RE.fullmatch(residency):
+        raise ValueError(f"invalid residency label: {value!r}")
+    return residency
+
+
+def enforce_residency(residency: str, allowed: tuple[str, ...]) -> None:
+    normalized_allowed = tuple(normalize_residency(item) for item in allowed)
+    if normalized_allowed and residency not in normalized_allowed:
+        allowed_text = ", ".join(normalized_allowed)
+        raise ValueError(f"residency {residency!r} is not allowed by this runtime; allowed: {allowed_text}")
