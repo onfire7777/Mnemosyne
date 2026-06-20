@@ -13,6 +13,11 @@ from enum import IntEnum
 from collections.abc import Mapping
 from typing import Any, Literal
 
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import ec, padding, rsa
+from cryptography.hazmat.primitives.asymmetric.utils import encode_dss_signature
+
 
 class TrustTier(IntEnum):
     DIRECT_USER = 0
@@ -77,16 +82,23 @@ class SessionIdentity:
         user_id = str(payload.get("user_id") or payload.get("user") or "")
         if not tenant_id or not user_id:
             raise SessionAuthError("session tenant_id and user_id are required")
-        source_trust_tier = int(payload.get("source_trust_tier", payload.get("trust_tier", TrustTier.NORMAL)))
+        try:
+            source_trust_tier = int(payload.get("source_trust_tier", payload.get("trust_tier", TrustTier.NORMAL)))
+        except (TypeError, ValueError) as exc:
+            raise SessionAuthError("session source_trust_tier is invalid") from exc
         if source_trust_tier < int(TrustTier.DIRECT_USER) or source_trust_tier > int(TrustTier.UNTRUSTED_EXTERNAL):
             raise SessionAuthError("session source_trust_tier is out of range")
         expires_at = payload.get("exp", payload.get("expires_at"))
+        try:
+            parsed_expires_at = int(expires_at) if expires_at is not None else None
+        except (TypeError, ValueError) as exc:
+            raise SessionAuthError("session exp is invalid") from exc
         return cls(
             tenant_id=tenant_id,
             user_id=user_id,
             role=role,  # type: ignore[arg-type]
             source_trust_tier=source_trust_tier,
-            expires_at=int(expires_at) if expires_at is not None else None,
+            expires_at=parsed_expires_at,
             session_id=str(payload["session_id"]) if payload.get("session_id") else None,
         )
 
@@ -242,6 +254,248 @@ def parse_session_revoke_list(raw: str | None) -> set[str]:
     if not raw:
         return set()
     return {item.strip() for item in raw.split(",") if item.strip()}
+
+
+class OidcJwtVerifier:
+    """Verify production IdP JWTs against OIDC/JWKS policy and map them to session claims."""
+
+    _ALG_HASHES = {
+        "RS256": hashes.SHA256,
+        "RS384": hashes.SHA384,
+        "RS512": hashes.SHA512,
+        "ES256": hashes.SHA256,
+        "ES384": hashes.SHA384,
+        "ES512": hashes.SHA512,
+    }
+    _EC_CURVES = {
+        "P-256": ec.SECP256R1,
+        "P-384": ec.SECP384R1,
+        "P-521": ec.SECP521R1,
+    }
+
+    def __init__(
+        self,
+        jwks: Mapping[str, Any],
+        *,
+        issuer: str,
+        audience: str,
+        tenant_claim: str = "tenant_id",
+        user_claim: str = "sub",
+        role_claim: str = "mnemosyne_role",
+        trust_claim: str = "mnemosyne_source_trust_tier",
+        session_id_claim: str = "jti",
+        allowed_algorithms: tuple[str, ...] = ("RS256", "ES256"),
+        leeway_seconds: int = 60,
+    ):
+        if not issuer:
+            raise SessionAuthError("OIDC issuer is required")
+        if not audience:
+            raise SessionAuthError("OIDC audience is required")
+        self.issuer = issuer
+        self.audience = audience
+        self.tenant_claim = tenant_claim
+        self.user_claim = user_claim
+        self.role_claim = role_claim
+        self.trust_claim = trust_claim
+        self.session_id_claim = session_id_claim
+        self.allowed_algorithms = tuple(item for item in allowed_algorithms if item)
+        if not self.allowed_algorithms:
+            raise SessionAuthError("OIDC allowed algorithms are required")
+        self.leeway_seconds = int(leeway_seconds)
+        if self.leeway_seconds < 0:
+            raise SessionAuthError("OIDC leeway must be non-negative")
+        keys = jwks.get("keys")
+        if not isinstance(keys, list) or not keys:
+            raise SessionAuthError("OIDC JWKS must contain keys")
+        self.keys_by_id: dict[str, Mapping[str, Any]] = {}
+        for key in keys:
+            if not isinstance(key, Mapping):
+                continue
+            key_id = str(key.get("kid") or "")
+            if key_id:
+                if key_id in self.keys_by_id:
+                    raise SessionAuthError("OIDC JWKS contains duplicate kid")
+                if key.get("use") not in (None, "sig"):
+                    raise SessionAuthError("OIDC JWKS key use is not allowed")
+                key_ops = key.get("key_ops")
+                if key_ops is not None and (not isinstance(key_ops, list) or "verify" not in key_ops):
+                    raise SessionAuthError("OIDC JWKS key_ops must allow verify")
+                self.keys_by_id[key_id] = key
+        if not self.keys_by_id:
+            raise SessionAuthError("OIDC JWKS keys must include kid")
+
+    def verify(self, token: str, *, now: int | None = None) -> SessionIdentity:
+        header, payload, signing_input, signature = self._decode_compact_jwt(token)
+        algorithm = str(header.get("alg") or "")
+        if algorithm not in self.allowed_algorithms:
+            raise SessionAuthError("OIDC token alg is not allowed")
+        key_id = str(header.get("kid") or "")
+        if not key_id:
+            raise SessionAuthError("OIDC token kid is required")
+        key = self.keys_by_id.get(key_id)
+        if key is None:
+            raise SessionAuthError("OIDC token kid is unknown")
+        if str(key.get("alg") or algorithm) != algorithm:
+            raise SessionAuthError("OIDC JWKS key alg does not match token alg")
+        self._verify_signature(algorithm, key, signing_input, signature)
+        self._verify_registered_claims(payload, now=now)
+        return self._identity_from_claims(payload)
+
+    @staticmethod
+    def _decode_compact_jwt(token: str) -> tuple[dict[str, Any], dict[str, Any], bytes, bytes]:
+        parts = token.split(".")
+        if len(parts) != 3:
+            raise SessionAuthError("OIDC token must be header.payload.signature")
+        header_b64, payload_b64, signature_b64 = parts
+        try:
+            header = json.loads(_b64url_decode(header_b64).decode("utf-8"))
+            payload = json.loads(_b64url_decode(payload_b64).decode("utf-8"))
+            signature = _b64url_decode(signature_b64)
+        except (binascii.Error, UnicodeDecodeError, ValueError, json.JSONDecodeError) as exc:
+            raise SessionAuthError("OIDC token is malformed") from exc
+        if not isinstance(header, dict) or not isinstance(payload, dict):
+            raise SessionAuthError("OIDC token header and payload must be JSON objects")
+        return header, payload, f"{header_b64}.{payload_b64}".encode("ascii"), signature
+
+    def _verify_signature(self, algorithm: str, key: Mapping[str, Any], signing_input: bytes, signature: bytes) -> None:
+        try:
+            if algorithm.startswith("RS"):
+                public_key = self._rsa_public_key(key)
+                public_key.verify(signature, signing_input, padding.PKCS1v15(), self._ALG_HASHES[algorithm]())
+            elif algorithm.startswith("ES"):
+                public_key = self._ec_public_key(key, algorithm)
+                public_key.verify(
+                    self._ecdsa_der_signature(algorithm, signature),
+                    signing_input,
+                    ec.ECDSA(self._ALG_HASHES[algorithm]()),
+                )
+            else:  # pragma: no cover - guarded by the allowed algorithm check.
+                raise SessionAuthError("OIDC token alg is not allowed")
+        except InvalidSignature as exc:
+            raise SessionAuthError("OIDC token signature is invalid") from exc
+
+    @staticmethod
+    def _rsa_public_key(key: Mapping[str, Any]) -> rsa.RSAPublicKey:
+        if key.get("kty") != "RSA":
+            raise SessionAuthError("OIDC JWKS key type does not match RSA alg")
+        try:
+            n = int.from_bytes(_b64url_decode(str(key.get("n") or "")), "big")
+            e = int.from_bytes(_b64url_decode(str(key.get("e") or "")), "big")
+            public_key = rsa.RSAPublicNumbers(e=e, n=n).public_key()
+        except (binascii.Error, ValueError) as exc:
+            raise SessionAuthError("OIDC JWKS RSA key material is invalid") from exc
+        if public_key.key_size < 2048:
+            raise SessionAuthError("OIDC JWKS RSA key is too small")
+        return public_key
+
+    def _ec_public_key(self, key: Mapping[str, Any], algorithm: str) -> ec.EllipticCurvePublicKey:
+        if key.get("kty") != "EC":
+            raise SessionAuthError("OIDC JWKS key type does not match EC alg")
+        curve_name = str(key.get("crv") or "")
+        expected_curve = {"ES256": "P-256", "ES384": "P-384", "ES512": "P-521"}[algorithm]
+        if curve_name != expected_curve:
+            raise SessionAuthError("OIDC JWKS EC curve does not match token alg")
+        curve_factory = self._EC_CURVES.get(curve_name)
+        if curve_factory is None:
+            raise SessionAuthError("OIDC JWKS EC curve is not supported")
+        try:
+            x = int.from_bytes(_b64url_decode(str(key.get("x") or "")), "big")
+            y = int.from_bytes(_b64url_decode(str(key.get("y") or "")), "big")
+            return ec.EllipticCurvePublicNumbers(x=x, y=y, curve=curve_factory()).public_key()
+        except (binascii.Error, ValueError) as exc:
+            raise SessionAuthError("OIDC JWKS EC key material is invalid") from exc
+
+    @staticmethod
+    def _ecdsa_der_signature(algorithm: str, signature: bytes) -> bytes:
+        width = {"ES256": 32, "ES384": 48, "ES512": 66}[algorithm]
+        if len(signature) != width * 2:
+            raise SessionAuthError("OIDC ECDSA signature length is invalid")
+        r = int.from_bytes(signature[:width], "big")
+        s = int.from_bytes(signature[width:], "big")
+        return encode_dss_signature(r, s)
+
+    def _verify_registered_claims(self, payload: Mapping[str, Any], *, now: int | None) -> None:
+        now_ts = int(time.time()) if now is None else int(now)
+        if payload.get("iss") != self.issuer:
+            raise SessionAuthError("OIDC token issuer is not allowed")
+        aud = payload.get("aud")
+        if isinstance(aud, str):
+            audiences = {aud}
+        elif isinstance(aud, list) and all(isinstance(item, str) for item in aud):
+            audiences = set(aud)
+        else:
+            audiences = set()
+        if self.audience not in audiences:
+            raise SessionAuthError("OIDC token audience is not allowed")
+        exp = payload.get("exp")
+        if exp is None:
+            raise SessionAuthError("OIDC token exp is required")
+        try:
+            exp_ts = int(exp)
+        except (TypeError, ValueError) as exc:
+            raise SessionAuthError("OIDC token exp is invalid") from exc
+        if exp_ts < now_ts - self.leeway_seconds:
+            raise SessionAuthError("OIDC token is expired")
+        nbf = payload.get("nbf")
+        if nbf is not None:
+            try:
+                nbf_ts = int(nbf)
+            except (TypeError, ValueError) as exc:
+                raise SessionAuthError("OIDC token nbf is invalid") from exc
+            if nbf_ts > now_ts + self.leeway_seconds:
+                raise SessionAuthError("OIDC token is not yet valid")
+        iat = payload.get("iat")
+        if iat is not None:
+            try:
+                iat_ts = int(iat)
+            except (TypeError, ValueError) as exc:
+                raise SessionAuthError("OIDC token iat is invalid") from exc
+            if iat_ts > now_ts + self.leeway_seconds:
+                raise SessionAuthError("OIDC token issued-at is in the future")
+
+    def _identity_from_claims(self, payload: Mapping[str, Any]) -> SessionIdentity:
+        identity_payload = {
+            "tenant_id": self._required_claim(payload, self.tenant_claim),
+            "user_id": self._required_claim(payload, self.user_claim),
+            "role": self._required_claim(payload, self.role_claim),
+            "source_trust_tier": self._required_claim(payload, self.trust_claim),
+            "exp": payload["exp"],
+        }
+        session_id = payload.get(self.session_id_claim)
+        if session_id:
+            identity_payload["session_id"] = str(session_id)
+        return SessionIdentity.from_payload(identity_payload)
+
+    @staticmethod
+    def _required_claim(payload: Mapping[str, Any], claim: str) -> Any:
+        value = payload.get(claim)
+        if value is None or value == "":
+            raise SessionAuthError(f"OIDC token missing required claim: {claim}")
+        return value
+
+
+def issue_session_from_oidc(
+    *,
+    verifier: OidcJwtVerifier,
+    idp_token: str,
+    signer: SessionTokenVerifier,
+    max_ttl_seconds: int = 3600,
+    now: int | None = None,
+) -> tuple[str, SessionIdentity]:
+    if int(max_ttl_seconds) <= 0:
+        raise SessionAuthError("session max TTL must be positive")
+    identity = verifier.verify(idp_token, now=now)
+    now_ts = int(time.time()) if now is None else int(now)
+    max_exp = now_ts + int(max_ttl_seconds)
+    issued = SessionIdentity(
+        tenant_id=identity.tenant_id,
+        user_id=identity.user_id,
+        role=identity.role,
+        source_trust_tier=identity.source_trust_tier,
+        expires_at=min(identity.expires_at or max_exp, max_exp),
+        session_id=identity.session_id,
+    )
+    return signer.sign(issued), issued
 
 
 def _b64url_encode(data: bytes) -> str:
