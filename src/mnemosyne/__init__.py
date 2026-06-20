@@ -20,7 +20,13 @@ from mnemosyne.parametric import ParametricArtifact, ParametricPromotionDecision
 from mnemosyne.policy import OperatingPolicy
 from mnemosyne.prefetch import AnticipatoryPrefetcher, PredictabilityGate, PrefetchCandidate, PrefetchResult
 from mnemosyne.queue import InProcessQueue, QueueJob, QueueWorker
-from mnemosyne.retrieval import HashingEmbeddingProvider, LocalSimilarityReranker, RetrievalAdapters, semantic_entropy
+from mnemosyne.retrieval import (
+    CommandMediaEmbeddingProvider,
+    HashingEmbeddingProvider,
+    LocalSimilarityReranker,
+    RetrievalAdapters,
+    semantic_entropy,
+)
 from mnemosyne.privacy import PrivacyClassification
 from mnemosyne.provenance import ProvenanceDecision, SignedProvenanceVerifier
 from mnemosyne.security import SecurityPolicy, TrustTier
@@ -34,6 +40,7 @@ __all__ = [
     "BeliefRevisionCore",
     "CalibrationSet",
     "CALIBRATE_JOB",
+    "CommandMediaEmbeddingProvider",
     "Evidence",
     "EVAL_SUITE_JOB",
     "FidelityTier",

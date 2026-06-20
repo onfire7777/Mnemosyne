@@ -238,6 +238,21 @@ def test_cli_provider_check_exercises_http_and_media_contracts(tmp_path: Path) -
         encoding="utf-8",
     )
     extractor.chmod(0o755)
+    embedder = tmp_path / "media_embedder.py"
+    embedder.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env python3",
+                "import json, pathlib, sys",
+                "request = json.loads(sys.stdin.read())",
+                "assert pathlib.Path(sys.argv[1]).exists()",
+                "assert request['modality'] == 'image'",
+                "print(json.dumps({'embedding': [3.0, 4.0, 0.0]}))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    embedder.chmod(0o755)
     base = f"http://127.0.0.1:{server.server_port}"
     try:
         report = run_cli(
@@ -262,6 +277,12 @@ def test_cli_provider_check_exercises_http_and_media_contracts(tmp_path: Path) -
             "rank-secret",
             "--media-extractor-command",
             str(extractor),
+            "--media-embedding-provider",
+            "command",
+            "--media-embedding-command",
+            str(embedder),
+            "--media-embedding-dims",
+            "3",
             "provider-check",
         )
     finally:
@@ -272,6 +293,8 @@ def test_cli_provider_check_exercises_http_and_media_contracts(tmp_path: Path) -
     assert report["checks"]["reranker"]["top_id"] == "b"
     assert report["checks"]["media_extractor"]["provider"] == "command"
     assert report["checks"]["media_extractor"]["sources"] == ["probe"]
+    assert report["checks"]["media_embedding"]["ok"] is True
+    assert report["checks"]["media_embedding"]["dimensions"] == 3
     assert [item["path"] for item in requests] == ["/embed", "/rerank"]
     assert [item["auth"] for item in requests] == ["Bearer embed-secret", "Bearer rank-secret"]
 
