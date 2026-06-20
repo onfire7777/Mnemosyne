@@ -444,6 +444,19 @@ def cmd_session_exchange(args: argparse.Namespace) -> None:
     )
 
 
+def cmd_idp_authz_policy_check(args: argparse.Namespace) -> None:
+    try:
+        policy = load_oidc_authorization_policy(
+            policy=args.idp_authz_policy,
+            policy_file=args.idp_authz_policy_file,
+        )
+    except SessionAuthError as exc:
+        raise SystemExit(f"idp authz policy denied: {exc}") from exc
+    if policy is None:
+        raise SystemExit("idp-authz-policy-check requires --idp-authz-policy or --idp-authz-policy-file")
+    emit({"ok": True, "policy": policy.audit_summary()})
+
+
 def cmd_capture(args: argparse.Namespace) -> None:
     tools = load_tools(args)
     emit(
@@ -1611,6 +1624,14 @@ def build_parser() -> argparse.ArgumentParser:
     session_exchange.add_argument("--session-max-ttl-seconds", type=int, default=int(os.environ.get("MNEMOSYNE_SESSION_MAX_TTL_SECONDS", "3600")))
     session_exchange.set_defaults(func=cmd_session_exchange)
 
+    idp_authz_policy_check = sub.add_parser("idp-authz-policy-check")
+    idp_authz_policy_check.add_argument("--idp-authz-policy", default=os.environ.get("MNEMOSYNE_IDP_AUTHZ_POLICY"))
+    idp_authz_policy_check.add_argument(
+        "--idp-authz-policy-file",
+        default=os.environ.get("MNEMOSYNE_IDP_AUTHZ_POLICY_FILE"),
+    )
+    idp_authz_policy_check.set_defaults(func=cmd_idp_authz_policy_check)
+
     capture = sub.add_parser("capture")
     capture.add_argument("--tenant", required=True)
     capture.add_argument("--user", required=True)
@@ -2054,7 +2075,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    if args.command != "session-exchange":
+    if args.command not in {"session-exchange", "idp-authz-policy-check"}:
         apply_session_identity(args)
     args.func(args)
     return 0
