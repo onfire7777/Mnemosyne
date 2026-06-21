@@ -2850,6 +2850,61 @@ def test_cli_ingest_can_run_one_consolidation_worker_cycle(tmp_path: Path) -> No
     assert report["learning"]["procedures"] == 1
 
 
+def test_cli_projection_recompute_tracks_affected_projection_set(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    run_cli(
+        store,
+        "gate-case-add",
+        "--id",
+        "projection-recompute-case",
+        "--signature",
+        "runtime consolidation target",
+        "--query",
+        "runtime consolidation target",
+        "--expected-substring",
+        "local CLI",
+        "--protected",
+    )
+    ingested = run_cli(
+        store,
+        "ingest",
+        "--tenant",
+        TENANT,
+        "--user",
+        USER,
+        "--actor",
+        "user",
+        "--source-type",
+        "chat",
+        "--content",
+        "Runtime consolidation target is local CLI.",
+        "--run-consolidation-once",
+    )
+
+    recompute = run_cli(
+        store,
+        "projection-recompute-once",
+        "--tenant",
+        TENANT,
+        "--user",
+        USER,
+        "--cid",
+        ingested["cid"],
+    )
+    details = recompute["job"]["result"]["details"]
+
+    assert recompute["job"]["status"] == "complete"
+    assert details["changed_evidence_cids"] == [ingested["cid"]]
+    assert details["affected_evidence_cids"] == [ingested["cid"]]
+    assert details["affected_projection_counts"]["assertions"] == 1
+    assert details["affected_projection_counts"]["entities"] == 1
+    assert details["affected_projection_counts"]["preferences"] == 0
+    assert len(details["affected_projections"]["assertions"]) == 1
+    assert details["affected_projections"]["entities"] == ["runtime-consolidation-target"]
+    assert len(details["queued_consolidation_jobs"]) == 1
+    assert recompute["metrics"]["counters"]["projection_recompute.completed"] == 1
+
+
 def test_cli_persisted_gate_case_blocks_consolidation_promotion(tmp_path: Path) -> None:
     store = tmp_path / "mnemosyne.json"
     listed = run_cli(

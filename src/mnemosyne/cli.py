@@ -29,7 +29,7 @@ from mnemosyne.engine import LocalMemoryEngine, MemoryEngine
 from mnemosyne.eval import run_seed_suite
 from mnemosyne.gate import RegressionCase
 from mnemosyne.ingestion import IngestRequest, IngestionPipeline
-from mnemosyne.jobs import RuntimeJobHandlers
+from mnemosyne.jobs import PROJECTION_RECOMPUTE_JOB, RuntimeJobHandlers
 from mnemosyne.learning import Lesson, Procedure
 from mnemosyne.media import CommandMediaTextExtractor, MediaTextExtractor, MetadataMediaTextExtractor
 from mnemosyne.mcp_tools import MemoryTools, TOOL_SPEC
@@ -77,6 +77,7 @@ DEPLOYMENT_SOAK_COMMANDS = {
     "mcp-streamable-http-soak",
     "mcp-sse-soak",
     "worker-run",
+    "projection-recompute-once",
     "ops-report",
 }
 DEPLOYMENT_SOAK_GLOBAL_OPTIONS = {
@@ -1365,6 +1366,40 @@ def cmd_queue_enqueue(args: argparse.Namespace) -> None:
     if runtime_state and queue_uses_runtime_state(args):
         runtime_state.save_queue(queue)
     emit({"queue": queue.snapshot(), "job": job.to_dict()})
+
+
+def projection_recompute_payload(args: argparse.Namespace) -> dict[str, Any]:
+    return {
+        "tenant_id": args.tenant,
+        "user_id": args.user,
+        "branch": args.branch,
+        "changed_evidence_cids": list(args.cid),
+        "enqueue_consolidation": not bool(args.no_enqueue_consolidation),
+    }
+
+
+def cmd_projection_recompute_enqueue(args: argparse.Namespace) -> None:
+    runtime_state = load_runtime_state(args)
+    queue = load_queue(args, runtime_state)
+    job = queue.enqueue(PROJECTION_RECOMPUTE_JOB, projection_recompute_payload(args), max_attempts=args.max_attempts)
+    if runtime_state and queue_uses_runtime_state(args):
+        runtime_state.save_queue(queue)
+    emit({"queue": queue.snapshot(), "job": job.to_dict()})
+
+
+def cmd_projection_recompute_once(args: argparse.Namespace) -> None:
+    runtime_state, queue, tools, metrics, worker = _runtime_worker_components(args)
+    queued = queue.enqueue(PROJECTION_RECOMPUTE_JOB, projection_recompute_payload(args), max_attempts=args.max_attempts)
+    job = worker.run_once(PROJECTION_RECOMPUTE_JOB)
+    _persist_worker_state(args, runtime_state, queue, tools)
+    emit(
+        {
+            "queue": queue.snapshot(),
+            "enqueued_job": queued.to_dict(),
+            "job": job.to_dict() if job else None,
+            "metrics": metrics.snapshot().to_dict(),
+        }
+    )
 
 
 def _runtime_worker_components(
@@ -3974,6 +4009,24 @@ def build_parser() -> argparse.ArgumentParser:
     queue_enqueue.add_argument("--payload", default="{}")
     queue_enqueue.add_argument("--max-attempts", type=int, default=3)
     queue_enqueue.set_defaults(func=cmd_queue_enqueue)
+
+    projection_recompute_enqueue = sub.add_parser("projection-recompute-enqueue")
+    projection_recompute_enqueue.add_argument("--tenant", required=True)
+    projection_recompute_enqueue.add_argument("--user", default="system")
+    projection_recompute_enqueue.add_argument("--branch", default="main")
+    projection_recompute_enqueue.add_argument("--cid", action="append", required=True)
+    projection_recompute_enqueue.add_argument("--max-attempts", type=int, default=3)
+    projection_recompute_enqueue.add_argument("--no-enqueue-consolidation", action="store_true")
+    projection_recompute_enqueue.set_defaults(func=cmd_projection_recompute_enqueue)
+
+    projection_recompute_once = sub.add_parser("projection-recompute-once")
+    projection_recompute_once.add_argument("--tenant", required=True)
+    projection_recompute_once.add_argument("--user", default="system")
+    projection_recompute_once.add_argument("--branch", default="main")
+    projection_recompute_once.add_argument("--cid", action="append", required=True)
+    projection_recompute_once.add_argument("--max-attempts", type=int, default=3)
+    projection_recompute_once.add_argument("--no-enqueue-consolidation", action="store_true")
+    projection_recompute_once.set_defaults(func=cmd_projection_recompute_once)
 
     queue_drain = sub.add_parser("queue-drain")
     queue_drain.add_argument("--kind")
