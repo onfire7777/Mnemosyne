@@ -58,6 +58,8 @@ Latest checkpoint: Official MCP SDK StreamableHTTP local validation now exercise
 
 Latest checkpoint: Hosted HTTP JSON-RPC MCP `deep_search` and `explain` now have transport-level coverage for relation-only `summary-derived-gist` graph support, matching the in-process MCP safety rail for gist-derived graph abstention. The clean DSN run also exposed and fixed a Postgres relation-expiry edge case in `forget`: relation `valid_to` now uses `GREATEST(clock_timestamp(), valid_from + interval '1 microsecond')` so erasure propagation cannot violate the `valid_to > valid_from` schema check when app-generated `valid_from` is newer than the SQL transaction timestamp. Local verification now collects 356 tests with 301 passing tests plus 55 skipped live-DB tests, and the clean compose DSN run passes all 356 tests with `MNEMOSYNE_POSTGRES_DSN=postgresql://mnemosyne:<redacted>@127.0.0.1:54329/mnemosyne?connect_timeout=5`.
 
+Latest checkpoint: Direct retrieval primitive budget enforcement now has shared Local/Postgres contract coverage. A new primitive test seeds multiple matching evidence/assertion/relation rows and verifies `lexical_search`, `vector_search`, and `graph_ppr` each honor `k=1` while preserving tenant, branch, and backend channel metadata. Local verification now collects 358 tests with 302 passing tests plus 56 skipped live-DB tests, and the clean compose DSN run passes all 358 tests with `MNEMOSYNE_POSTGRES_DSN=postgresql://mnemosyne:<redacted>@127.0.0.1:54329/mnemosyne?connect_timeout=5`.
+
 Progress: [███████░░░] local scaffold verified; production parity gaps remain
 
 ## Performance Metrics

@@ -899,6 +899,65 @@ def test_shared_engine_contract_direct_search_primitives(engine_bundle: tuple[An
     assert all(hit.branch == "main" for hit in [*lexical, *dense, *graph])
 
 
+def test_shared_engine_contract_direct_primitives_honor_k_limit(engine_bundle: tuple[Any, str, str]) -> None:
+    engine, tenant, user = engine_bundle
+    cids = [
+        _append_evidence(
+            engine,
+            tenant,
+            user,
+            f"Shared primitive budget cap evidence {idx} repeats the jasper needle phrase.",
+        )
+        for idx in range(3)
+    ]
+    assertion_ids = [
+        engine.upsert_assertion(
+            Assertion(
+                tenant_id=tenant,
+                user_id=user,
+                subject=f"shared primitive budget subject {idx}",
+                predicate="mentions",
+                object="jasper needle",
+                confidence=0.9,
+                source_evidence_cids=[cids[idx]],
+                trust_tier=0,
+                access_policy={"tenant": tenant},
+            )
+        )
+        for idx in range(3)
+    ]
+    relation_ids = [
+        engine.add_relation(
+            Relation(
+                tenant_id=tenant,
+                source="shared primitive budget seed",
+                predicate=f"points_to_{idx}",
+                target=f"primitive budget target {idx}",
+                source_evidence_cids=[cids[idx]],
+                access_policy={"tenant": tenant},
+            )
+        )
+        for idx in range(3)
+    ]
+    filt = {"tenant_id": tenant, "branch": "main", "max_trust_tier": 3, "max_sensitivity": 2}
+
+    lexical = engine.lexical_search("jasper needle", 1, filt)
+    dense = engine.vector_search("jasper needle", 1, filt)
+    graph = engine.graph_ppr(["shared primitive budget seed"], 1, tenant_id=tenant, branch="main")
+
+    assert len(lexical) == 1
+    assert len(dense) == 1
+    assert len(graph) == 1
+    assert lexical[0].id in {*cids, *assertion_ids}
+    assert dense[0].id in {*cids, *assertion_ids}
+    assert graph[0].id in relation_ids
+    assert lexical[0].tenant_id == dense[0].tenant_id == graph[0].tenant_id == tenant
+    assert lexical[0].branch == dense[0].branch == graph[0].branch == "main"
+    assert lexical[0].channel in {"lexical", "postgres_fts"}
+    assert dense[0].channel in {"dense_hash", "postgres_pgvector"}
+    assert graph[0].channel in {"graph_ppr", "postgres_graph_ppr"}
+
+
 def test_shared_engine_contract_graph_ppr_skips_expired_relations_by_default(engine_bundle: tuple[Any, str, str]) -> None:
     engine, tenant, _user = engine_bundle
     now = datetime.now(UTC)
