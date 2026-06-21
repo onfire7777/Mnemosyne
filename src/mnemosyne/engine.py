@@ -164,7 +164,25 @@ class LocalMemoryEngine:
     def _branch_key(tenant_id: str, branch: str, item_id: str) -> str:
         return f"{tenant_id}:{branch}:{item_id}"
 
-    def _audit(self, tenant_id: str, actor: str, op: str, target_id: str | None, diff: dict[str, Any]) -> None:
+    def _audit(
+        self,
+        tenant_id: str,
+        actor: str,
+        op: str,
+        target_id: str | None,
+        diff: dict[str, Any],
+        *,
+        source: str | None = None,
+        trust_tier: int | None = None,
+        capability_tags: list[str] | None = None,
+    ) -> None:
+        normalized_tags = sorted(set(capability_tags or []))
+        audit_diff = dict(diff)
+        audit_diff.setdefault("source", source or actor)
+        if trust_tier is not None:
+            audit_diff.setdefault("trust_tier", trust_tier)
+        if normalized_tags:
+            audit_diff.setdefault("capability_tags", normalized_tags)
         self.audit_log.append(
             {
                 "id": new_id(),
@@ -172,7 +190,10 @@ class LocalMemoryEngine:
                 "actor": actor,
                 "op": op,
                 "target_id": target_id,
-                "diff": diff,
+                "source": source or actor,
+                "trust_tier": trust_tier,
+                "capability_tags": normalized_tags,
+                "diff": audit_diff,
                 "at": utc_now().isoformat(),
             }
         )
@@ -269,14 +290,32 @@ class LocalMemoryEngine:
             existing = self.evidence.get(key)
             if existing:
                 op = "append_evidence.blocked_erased_replay" if existing.erased else "append_evidence.noop_dedup"
-                self._audit(ev.tenant_id, ev.actor, op, cid, {"branch": branch})
+                self._audit(
+                    ev.tenant_id,
+                    ev.actor,
+                    op,
+                    cid,
+                    {"branch": branch, "source_type": ev.source_type, "source_identity": ev.source_identity},
+                    source=ev.source_type,
+                    trust_tier=ev.trust_tier,
+                    capability_tags=ev.capability_tags,
+                )
                 self._persist()
                 return cid
             stored = copy.deepcopy(ev)
             stored.cid = cid
             stored.branch = branch
             self.evidence[key] = stored
-            self._audit(ev.tenant_id, ev.actor, "append_evidence", cid, {"source_type": ev.source_type, "branch": branch})
+            self._audit(
+                ev.tenant_id,
+                ev.actor,
+                "append_evidence",
+                cid,
+                {"source_type": ev.source_type, "source_identity": ev.source_identity, "branch": branch},
+                source=ev.source_type,
+                trust_tier=ev.trust_tier,
+                capability_tags=ev.capability_tags,
+            )
             self._persist()
             return cid
 
@@ -312,7 +351,15 @@ class LocalMemoryEngine:
                 winner.source_evidence_cids = sorted(set(winner.source_evidence_cids + incoming.source_evidence_cids))
                 winner.trust_tier = more_trusted(winner.trust_tier, incoming.trust_tier)
                 winner.last_accessed = utc_now()
-                self._audit(winner.tenant_id, "engine", "upsert_assertion.noop_or_reinforce", winner.id, {"before": before, "after": winner.to_dict()})
+                self._audit(
+                    winner.tenant_id,
+                    "engine",
+                    "upsert_assertion.noop_or_reinforce",
+                    winner.id,
+                    {"before": before, "after": winner.to_dict(), "source_evidence_cids": winner.source_evidence_cids},
+                    source="assertion",
+                    trust_tier=winner.trust_tier,
+                )
                 self._persist()
                 return winner.id
 
@@ -336,11 +383,31 @@ class LocalMemoryEngine:
                     incoming.status = "superseded"
                     incoming.valid_to = current.valid_from
                     op = "upsert_assertion.historical_superseded"
-                self._audit(incoming.tenant_id, "engine", op, incoming.id, {"conflict_with": current.id})
+                self._audit(
+                    incoming.tenant_id,
+                    "engine",
+                    op,
+                    incoming.id,
+                    {"conflict_with": current.id, "source_evidence_cids": incoming.source_evidence_cids},
+                    source="assertion",
+                    trust_tier=incoming.trust_tier,
+                )
 
             key = self._branch_key(incoming.tenant_id, branch, incoming.id)
             self.assertions[key] = incoming
-            self._audit(incoming.tenant_id, "engine", "upsert_assertion", incoming.id, {"statement": incoming.statement(), "status": incoming.status})
+            self._audit(
+                incoming.tenant_id,
+                "engine",
+                "upsert_assertion",
+                incoming.id,
+                {
+                    "statement": incoming.statement(),
+                    "status": incoming.status,
+                    "source_evidence_cids": incoming.source_evidence_cids,
+                },
+                source="assertion",
+                trust_tier=incoming.trust_tier,
+            )
             self._persist()
             return incoming.id
 
@@ -356,7 +423,14 @@ class LocalMemoryEngine:
             item.branch = branch
             key = self._branch_key(item.tenant_id, branch, item.id)
             self.relations[key] = item
-            self._audit(item.tenant_id, "engine", "add_relation", item.id, {"source": item.source, "target": item.target})
+            self._audit(
+                item.tenant_id,
+                "engine",
+                "add_relation",
+                item.id,
+                {"relation_source": item.source, "target": item.target, "source_evidence_cids": item.source_evidence_cids},
+                source="relation",
+            )
             self._persist()
             return item.id
 
@@ -364,7 +438,18 @@ class LocalMemoryEngine:
         with self._lock:
             item = copy.deepcopy(justification)
             self.justifications[item.id] = item
-            self._audit(item.tenant_id, "engine", "add_justification", item.id, {"assertion_id": item.assertion_id, "dependencies": item.dependency_ids})
+            self._audit(
+                item.tenant_id,
+                "engine",
+                "add_justification",
+                item.id,
+                {
+                    "assertion_id": item.assertion_id,
+                    "evidence_cids": item.evidence_cids,
+                    "dependencies": item.dependency_ids,
+                },
+                source="justification",
+            )
             self._persist()
             return item.id
 
@@ -381,7 +466,14 @@ class LocalMemoryEngine:
             if existing:
                 return existing[0].id
             self.contradictions[item.id] = item
-            self._audit(item.tenant_id, "engine", "add_contradiction", item.id, {"a": item.a, "b": item.b})
+            self._audit(
+                item.tenant_id,
+                "engine",
+                "add_contradiction",
+                item.id,
+                {"a": item.a, "b": item.b},
+                source="contradiction",
+            )
             self._persist()
             return item.id
 
@@ -405,7 +497,15 @@ class LocalMemoryEngine:
                     else:
                         pref.status = "retracted"
             self.preferences[pref.id] = pref
-            self._audit(pref.tenant_id, "engine", "add_preference", pref.id, {"category": pref.category, "explicit": pref.explicit})
+            self._audit(
+                pref.tenant_id,
+                "engine",
+                "add_preference",
+                pref.id,
+                {"category": pref.category, "explicit": pref.explicit, "source_evidence_cids": pref.source_evidence_cids},
+                source="preference",
+                trust_tier=0 if pref.explicit else None,
+            )
             self._persist()
             return pref.id
 
@@ -800,7 +900,16 @@ class LocalMemoryEngine:
                 "at": utc_now().isoformat(),
             }
             self.deletion_log.append(entry)
-            self._audit(tenant_id, requested_by, "forget", cid, {**propagated, "erasure_mode": mode.value})
+            self._audit(
+                tenant_id,
+                requested_by,
+                "forget",
+                cid,
+                {**propagated, "erasure_mode": mode.value, "source_type": ev.source_type},
+                source=ev.source_type,
+                trust_tier=ev.trust_tier,
+                capability_tags=ev.capability_tags,
+            )
             self._persist()
             return {"erased": True, "cid": cid, "erasure_mode": mode.value, "propagated": propagated}
 

@@ -115,8 +115,9 @@ class LearningSystem:
         audit = getattr(self.engine, "_audit", None)
         if audit is None:
             return
-        if len(signature(audit).parameters) == 5:
-            audit(tenant_id, actor, op, target_id, diff)
+        params = signature(audit).parameters
+        if "cur" not in params:
+            audit(tenant_id, actor, op, target_id, diff, source="learning")
             return
         from mnemosyne.postgres_engine import _stable_uuid
 
@@ -124,7 +125,7 @@ class LearningSystem:
         with self.engine.connect() as conn:
             with conn.cursor() as cur:
                 self.engine._set_tenant(cur, db_tenant_id)
-                audit(cur, db_tenant_id, actor, op, target_id, diff)
+                audit(cur, db_tenant_id, actor, op, target_id, diff, source="learning")
 
     def attribute_failure(self, trajectory_id: str) -> FailureAttribution:
         trajectory = self.trajectories[trajectory_id]
