@@ -3169,10 +3169,19 @@ def test_cli_consolidation_uses_command_extractor_and_summarizer(tmp_path: Path)
     job = ingested["consolidation_worker"]["job"]
     extractor_result = job["result"]["pass_results"][1]
     summarizer_result = next(item for item in job["result"]["pass_results"] if item["name"] == "summarizer")
+    role_pipeline = job["result"]["role_pipeline"]
+    roles_by_pass = {item["pass"]: item for item in role_pipeline["roles"]}
     exported = run_cli(store, "export", "--tenant", TENANT)
 
     assert job["status"] == "complete"
     assert job["result"]["candidate_results"][0]["promoted"] is True
+    assert role_pipeline["owner_role"] == "consolidator"
+    assert role_pipeline["write_authorized"] is True
+    assert role_pipeline["model_backed_roles"] == ["candidate_extractor", "evidence_summarizer"]
+    assert roles_by_pass["extractor"]["provider"] == "command_candidate_extractor"
+    assert roles_by_pass["extractor"]["provider_type"] == "model_adapter"
+    assert roles_by_pass["summarizer"]["provider"] == "command_evidence_summarizer"
+    assert roles_by_pass["summarizer"]["provider_type"] == "model_adapter"
     assert extractor_result["details"]["strategy"] == "command_candidate_extractor"
     assert extractor_result["details"]["metadata"] == {"source": "test-extractor"}
     assert summarizer_result["details"]["strategy"] == "command_evidence_summarizer"
