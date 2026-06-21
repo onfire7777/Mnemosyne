@@ -32,6 +32,7 @@ from mnemosyne.retrieval import (
     RetrievalAdapters,
     activation_explain,
     apply_activation_scores,
+    gist_support_report,
     semantic_entropy,
 )
 from mnemosyne.security import TrustTier, trust_weight
@@ -674,7 +675,7 @@ class PostgresEngine:
                 cur.execute(
                     """
                     WITH q AS (SELECT plainto_tsquery('english', %s) AS query)
-                    SELECT e.cid, e.branch, e.content, e.trust_tier, e.sensitivity,
+                    SELECT e.cid, e.branch, e.content, e.metadata, e.trust_tier, e.sensitivity,
                       e.source_type, ts_rank_cd(to_tsvector('english', coalesce(e.content, '')), q.query) AS score
                     FROM evidence e, q
                     WHERE e.tenant_id = %s AND e.branch = %s AND e.erased = false
@@ -688,6 +689,12 @@ class PostgresEngine:
                 )
                 for row in cur.fetchall():
                     cid = _bytes_to_cid(row["cid"])
+                    metadata = dict(row["metadata"] or {})
+                    hit_metadata = {"source_type": row["source_type"], "backend": self.adapters.lexical_backend}
+                    if isinstance(metadata.get("summary"), dict):
+                        hit_metadata["summary"] = metadata["summary"]
+                    if isinstance(metadata.get("lifecycle"), dict):
+                        hit_metadata["lifecycle"] = metadata["lifecycle"]
                     hits.append(
                         Hit(
                             id=cid,
@@ -700,7 +707,7 @@ class PostgresEngine:
                             provenance=[cid],
                             trust_tier=row["trust_tier"],
                             sensitivity=row["sensitivity"],
-                            metadata={"source_type": row["source_type"], "backend": self.adapters.lexical_backend},
+                            metadata=hit_metadata,
                         )
                     )
                 cur.execute(
@@ -843,6 +850,10 @@ class PostgresEngine:
                     }
                     if isinstance(media_embedding, dict):
                         hit_metadata["media_embedding"] = media_embedding
+                    if isinstance(metadata.get("summary"), dict):
+                        hit_metadata["summary"] = metadata["summary"]
+                    if isinstance(metadata.get("lifecycle"), dict):
+                        hit_metadata["lifecycle"] = metadata["lifecycle"]
                     hits.append(
                         Hit(
                             id=cid,
@@ -860,7 +871,7 @@ class PostgresEngine:
                     )
                 cur.execute(
                     """
-                    SELECT cid, branch, content, content_pointer, modality, trust_tier, sensitivity, source_type
+                    SELECT cid, branch, content, content_pointer, modality, metadata, trust_tier, sensitivity, source_type
                     FROM evidence
                     WHERE tenant_id = %s AND branch = %s AND erased = false
                       AND trust_tier <= %s AND sensitivity <= %s
@@ -875,6 +886,18 @@ class PostgresEngine:
                     if score <= 0:
                         continue
                     cid = _bytes_to_cid(row["cid"])
+                    metadata = dict(row["metadata"] or {})
+                    hit_metadata = {
+                        "source_type": row["source_type"],
+                        "backend": self.adapters.embedding.name,
+                        "embedding_dims": self.adapters.embedding.dims,
+                        "stored_embedding": False,
+                        "source_table": "evidence",
+                    }
+                    if isinstance(metadata.get("summary"), dict):
+                        hit_metadata["summary"] = metadata["summary"]
+                    if isinstance(metadata.get("lifecycle"), dict):
+                        hit_metadata["lifecycle"] = metadata["lifecycle"]
                     hits.append(
                         Hit(
                             id=cid,
@@ -887,13 +910,7 @@ class PostgresEngine:
                             provenance=[cid],
                             trust_tier=row["trust_tier"],
                             sensitivity=row["sensitivity"],
-                            metadata={
-                                "source_type": row["source_type"],
-                                "backend": self.adapters.embedding.name,
-                                "embedding_dims": self.adapters.embedding.dims,
-                                "stored_embedding": False,
-                                "source_table": "evidence",
-                            },
+                            metadata=hit_metadata,
                         )
                     )
         return sorted(hits, key=lambda item: item.score, reverse=True)[:k]
@@ -1017,13 +1034,23 @@ class PostgresEngine:
         calibration = self._calibration_for(tenant_id, "fact")
         threshold = conformal_threshold(calibration) if calibration else self.policy.abstention_threshold
         entropy = semantic_entropy([hit.text for hit in budgeted])
-        abstained = confidence < threshold
+        gist_support = gist_support_report(budgeted)
+        gist_only = bool(gist_support["applied"])
+        if gist_only:
+            confidence = min(confidence, threshold * 0.95)
+        abstained = confidence < threshold or gist_only
+        if gist_only:
+            note = "Only gist-tier memory support was retrieved; inspect source evidence before answering."
+        elif abstained:
+            note = "Evidence is too thin, low-trust, or conflicting for a confident answer."
+        else:
+            note = None
         return RetrievalResult(
             query=query,
             hits=budgeted,
             confidence=confidence,
             abstained=abstained,
-            uncertainty_note="Evidence is too thin, low-trust, or conflicting for a confident answer." if abstained else None,
+            uncertainty_note=note,
             token_budget=self.policy.token_budget,
             used_tokens=used_tokens,
             explain={
@@ -1037,6 +1064,7 @@ class PostgresEngine:
                 "activation": activation_explain(budgeted, self.policy),
                 "calibration": self._calibration_explain(calibration, threshold),
                 "semantic_entropy": entropy,
+                "gist_support": gist_support,
                 "read_marks": {"assertions": read_marks},
                 "adapters": {
                     "embedding": self.adapters.embedding.name,
@@ -1831,7 +1859,7 @@ class PostgresEngine:
                 self._set_tenant(cur, db_tenant_id)
                 cur.execute(
                     """
-                    SELECT cid, tenant_id, branch, content, trust_tier, sensitivity, source_type
+                    SELECT cid, tenant_id, branch, content, metadata, trust_tier, sensitivity, source_type
                     FROM evidence
                     WHERE tenant_id = %s AND branch = %s AND erased = false
                       AND trust_tier <= %s AND sensitivity <= %s
@@ -1844,6 +1872,12 @@ class PostgresEngine:
                     score = lexical_score(query, text)
                     if score > 0:
                         cid = _bytes_to_cid(row["cid"])
+                        metadata = dict(row["metadata"] or {})
+                        hit_metadata = {"source_type": row["source_type"]}
+                        if isinstance(metadata.get("summary"), dict):
+                            hit_metadata["summary"] = metadata["summary"]
+                        if isinstance(metadata.get("lifecycle"), dict):
+                            hit_metadata["lifecycle"] = metadata["lifecycle"]
                         candidates.append(
                             Hit(
                                 id=cid,
@@ -1856,7 +1890,7 @@ class PostgresEngine:
                                 provenance=[cid],
                                 trust_tier=row["trust_tier"],
                                 sensitivity=row["sensitivity"],
-                                metadata={"source_type": row["source_type"]},
+                                metadata=hit_metadata,
                             )
                         )
                 cur.execute(

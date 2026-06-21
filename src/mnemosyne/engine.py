@@ -28,7 +28,7 @@ from mnemosyne.models import (
 )
 from mnemosyne.policy import OperatingPolicy
 from mnemosyne.privacy import ErasureMode
-from mnemosyne.retrieval import activation_explain, apply_activation_scores, semantic_entropy
+from mnemosyne.retrieval import activation_explain, apply_activation_scores, gist_support_report, semantic_entropy
 from mnemosyne.security import TrustTier, more_trusted, trust_weight
 from mnemosyne.text import approx_tokens, cosine, hashing_embedding, lexical_score, tokenize
 
@@ -689,9 +689,15 @@ class LocalMemoryEngine:
         calibration = self._calibration_for(tenant_id, "fact")
         threshold = conformal_threshold(calibration) if calibration else self.policy.abstention_threshold
         entropy = semantic_entropy([hit.text for hit in budgeted])
-        abstained = confidence < threshold
+        gist_support = gist_support_report(budgeted)
+        gist_only = bool(gist_support["applied"])
+        if gist_only:
+            confidence = min(confidence, threshold * 0.95)
+        abstained = confidence < threshold or gist_only
         note = None
-        if abstained:
+        if gist_only:
+            note = "Only gist-tier memory support was retrieved; inspect source evidence before answering."
+        elif abstained:
             note = "Evidence is too thin, low-trust, or conflicting for a confident answer."
         return RetrievalResult(
             query=query,
@@ -712,6 +718,7 @@ class LocalMemoryEngine:
                 "activation": activation_explain(budgeted, self.policy),
                 "calibration": self._calibration_explain(calibration, threshold),
                 "semantic_entropy": entropy,
+                "gist_support": gist_support,
                 "read_marks": {"assertions": read_marks},
                 "rails": self.policy.immutable_rails,
             },
@@ -1166,6 +1173,10 @@ class LocalMemoryEngine:
             }
             if isinstance(ev.metadata.get("media_embedding"), dict):
                 metadata["media_embedding"] = dict(ev.metadata["media_embedding"])
+            if isinstance(ev.metadata.get("summary"), dict):
+                metadata["summary"] = dict(ev.metadata["summary"])
+            if isinstance(ev.metadata.get("lifecycle"), dict):
+                metadata["lifecycle"] = dict(ev.metadata["lifecycle"])
             hits.append(
                 Hit(
                     id=ev.cid or "",

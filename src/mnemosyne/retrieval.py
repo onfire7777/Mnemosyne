@@ -322,6 +322,31 @@ def semantic_entropy(alternatives: Sequence[str]) -> float:
     return entropy / max_entropy if max_entropy else 0.0
 
 
+def gist_support_report(hits: Sequence[Hit]) -> dict[str, object]:
+    """Return whether retrieved support is only fidelity-demoted gist evidence."""
+
+    if not hits:
+        return {"applied": False, "gist_hit_ids": [], "hit_count": 0}
+    gist_ids = [hit.id for hit in hits if _is_gist_hit(hit)]
+    return {
+        "applied": len(gist_ids) == len(hits),
+        "gist_hit_ids": gist_ids,
+        "hit_count": len(hits),
+    }
+
+
+def _is_gist_hit(hit: Hit) -> bool:
+    metadata = hit.metadata if isinstance(hit.metadata, dict) else {}
+    summary = metadata.get("summary")
+    lifecycle = metadata.get("lifecycle")
+    source_type = str(metadata.get("source_type") or "")
+    return (
+        (isinstance(summary, dict) and summary.get("kind") == "abstractive_gist")
+        or (isinstance(lifecycle, dict) and lifecycle.get("tier") == "abstractive_gist")
+        or source_type == "consolidation-summary"
+    )
+
+
 def apply_activation_scores(hits: Sequence[Hit], policy: OperatingPolicy, *, now: datetime | None = None) -> list[Hit]:
     """Apply blueprint-style activation scoring to already retrieved hits."""
 
