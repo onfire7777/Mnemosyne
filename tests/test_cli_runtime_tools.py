@@ -878,7 +878,7 @@ def fake_parametric_command(tmp_path: Path) -> tuple[str, Path]:
                 "action = sys.argv[2]",
                 "request = json.load(sys.stdin)",
                 "data = json.loads(state.read_text()) if state.exists() else {'calls': []}",
-                "data.setdefault('calls', []).append({'action': action, 'tenant_id': request.get('tenant_id'), 'source_ids': request.get('source_ids')})",
+                "data.setdefault('calls', []).append({'action': action, 'tenant_id': request.get('tenant_id'), 'source_ids': request.get('source_ids'), 'protected_suite': request.get('protected_suite'), 'protected_cases': [case.get('id') for case in request.get('protected_cases', [])]})",
                 "state.write_text(json.dumps(data, sort_keys=True), encoding='utf-8')",
                 "if action == 'propose':",
                 "    print(json.dumps({'adapter_kind': 'lora-command-adapter', 'artifact_ref': 'provider://' + request['tenant_id'] + '/adapter', 'metrics': {'source_count': len(request['source_ids']), 'rail_count': len(request['immutable_rails'])}, 'metadata': {'lesson_count': len(request['lessons']), 'procedure_count': len(request['procedures'])}}))",
@@ -3612,6 +3612,21 @@ def test_cli_parametric_tier_can_use_command_provider(tmp_path: Path) -> None:
         ),
         *PARAMETRIC_AUTH,
     )
+    run_cli(
+        store,
+        "gate-case-add",
+        "--id",
+        "parametric-runtime-protected",
+        "--signature",
+        "parametric runtime protected",
+        "--query",
+        "parametric protected suite query",
+        "--expected-substring",
+        "protected",
+        "--tier",
+        "core",
+        "--protected",
+    )
     provider_args = (
         "--parametric-provider",
         "command",
@@ -3623,6 +3638,16 @@ def test_cli_parametric_tier_can_use_command_provider(tmp_path: Path) -> None:
     artifact = run_cli(store, *provider_args, "parametric-propose", "--tenant", TENANT, *PARAMETRIC_AUTH)
     artifact_path = store.with_suffix(store.suffix + ".parametric") / TENANT / f"{artifact['id']}.json"
     proposal_record = json.loads(artifact_path.read_text(encoding="utf-8"))
+    evaluated = run_cli(
+        store,
+        *provider_args,
+        "parametric-evaluate",
+        "--artifact-uri",
+        artifact["artifact_uri"],
+        "--protected-case-count",
+        "9",
+        *PARAMETRIC_AUTH,
+    )
     rolled_back = run_cli(
         store,
         *provider_args,
@@ -3641,10 +3666,18 @@ def test_cli_parametric_tier_can_use_command_provider(tmp_path: Path) -> None:
     assert artifact["metrics"]["source_count"] == 2.0
     assert proposal_record["payload"]["provider"]["artifact_ref"] == f"provider://{TENANT}/adapter"
     assert proposal_record["payload"]["provider"]["metadata"] == {"lesson_count": 1, "procedure_count": 1}
+    assert evaluated["protected_suite"]["source"] == "runtime_state"
+    assert evaluated["protected_suite"]["protected_case_ids"] == ["parametric-runtime-protected"]
+    assert evaluated["artifact"]["rail_report"]["protected_suite"]["tier_counts"] == {"core": 1}
     assert rolled_back["rollback_ref"] == f"provider-rollback-{artifact['id']}"
     assert rolled_back["metrics"]["provider_rolled_back"] == 1.0
+    assert rolled_back["metrics"]["rollback_protected_cases"] == 1.0
+    assert rolled_back["protected_suite"]["source"] == "runtime_state"
     assert rollback_record["payload"]["provider"]["rollback_ref"] == f"provider-rollback-{artifact['id']}"
+    assert rollback_record["payload"]["protected_suite"]["protected_case_ids"] == ["parametric-runtime-protected"]
     assert [call["action"] for call in calls] == ["propose", "rollback"]
+    assert calls[-1]["protected_cases"] == ["parametric-runtime-protected"]
+    assert calls[-1]["protected_suite"]["protected_case_count"] == 1
 
 
 def test_cli_parametric_commands_require_operator_authorization(tmp_path: Path) -> None:

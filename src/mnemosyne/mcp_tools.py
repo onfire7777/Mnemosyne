@@ -13,7 +13,7 @@ from mnemosyne.gate import GateResult, RegressionCase
 from mnemosyne.learning import LearningSystem, Trajectory, counterfactual_replay_score
 from mnemosyne.models import Assertion, Evidence, Preference, Relation, parse_dt
 from mnemosyne.observability import MetricsRegistry
-from mnemosyne.parametric import ParametricTier
+from mnemosyne.parametric import ParametricTier, protected_suite_report
 from mnemosyne.prefetch import AnticipatoryPrefetcher, PrefetchCandidate
 from mnemosyne.privacy import ErasureMode
 from mnemosyne.runtime_state import RuntimeState
@@ -260,13 +260,13 @@ TOOL_SPEC: list[dict[str, Any]] = [
     },
     {
         "name": "parametric_evaluate",
-        "description": "Evaluate a shadow parametric artifact against gate evidence.",
-        "arguments": ["artifact_uri", "role", "source_trust_tier"],
+        "description": "Evaluate a shadow parametric artifact against persisted protected gate evidence.",
+        "arguments": ["artifact_uri", "role", "source_trust_tier", "protected_case_count"],
     },
     {
         "name": "parametric_rollback",
-        "description": "Roll back a persisted isolated parametric artifact.",
-        "arguments": ["artifact_uri", "reason", "role", "source_trust_tier"],
+        "description": "Roll back a persisted isolated parametric artifact with protected-suite evidence.",
+        "arguments": ["artifact_uri", "reason", "role", "source_trust_tier", "protected_case_count"],
     },
 ]
 
@@ -1183,6 +1183,27 @@ class MemoryTools:
         result["security"] = security
         return result
 
+    def _parametric_protected_cases(self, protected_case_count: int) -> tuple[list[RegressionCase], str]:
+        if protected_case_count < 0:
+            raise ValueError("protected_case_count must be non-negative")
+        if self.runtime_state:
+            persisted = [case for case in self.runtime_state.load_gate_cases() if case.protected]
+            if persisted:
+                return persisted, "runtime_state"
+        return (
+            [
+                RegressionCase(
+                    id=f"parametric-protected-{index}",
+                    signature="parametric protected",
+                    query="parametric protected",
+                    expected_substring="protected",
+                    protected=True,
+                )
+                for index in range(protected_case_count)
+            ],
+            "synthetic",
+        )
+
     def parametric_evaluate(
         self,
         artifact_uri: str,
@@ -1201,16 +1222,7 @@ class MemoryTools:
             target_sink="safety_rail",
         )
         artifact = self.parametric.artifact_store.load_artifact(artifact_uri)
-        cases = [
-            RegressionCase(
-                id=f"parametric-protected-{index}",
-                signature="parametric protected",
-                query="parametric protected",
-                expected_substring="protected",
-                protected=True,
-            )
-            for index in range(protected_case_count)
-        ]
+        cases, suite_source = self._parametric_protected_cases(protected_case_count)
         gate = GateResult(
             candidate_id=artifact.id,
             promoted=gate_promoted,
@@ -1225,9 +1237,17 @@ class MemoryTools:
         self._save_metrics()
         result = decision.to_dict()
         result["security"] = security
+        result["protected_suite"] = {"source": suite_source, **protected_suite_report(cases)}
         return result
 
-    def parametric_rollback(self, artifact_uri: str, reason: str, role: WriteRole, source_trust_tier: int) -> dict[str, Any]:
+    def parametric_rollback(
+        self,
+        artifact_uri: str,
+        reason: str,
+        role: WriteRole,
+        source_trust_tier: int,
+        protected_case_count: int = 1,
+    ) -> dict[str, Any]:
         if not self.parametric.artifact_store:
             raise ValueError("parametric rollback requires an artifact store")
         security = self._authorize(
@@ -1238,11 +1258,13 @@ class MemoryTools:
             target_sink="safety_rail",
         )
         artifact = self.parametric.artifact_store.load_artifact(artifact_uri)
-        rolled_back = self.parametric.rollback(artifact, reason)
+        cases, suite_source = self._parametric_protected_cases(protected_case_count)
+        rolled_back = self.parametric.rollback(artifact, reason, protected_cases=cases)
         self.metrics.record_gate(promoted=False, rolled_back=True)
         self._save_metrics()
         result = rolled_back.to_dict()
         result["security"] = security
+        result["protected_suite"] = {"source": suite_source, **protected_suite_report(cases)}
         return result
 
     def _save_user_model(self) -> None:

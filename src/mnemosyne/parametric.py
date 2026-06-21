@@ -60,6 +60,24 @@ class ParametricPromotionDecision:
         return data
 
 
+def protected_suite_report(cases: Sequence[RegressionCase]) -> dict[str, Any]:
+    tier_counts: dict[str, int] = {}
+    case_ids: list[str] = []
+    protected_case_ids: list[str] = []
+    for case in cases:
+        case_ids.append(case.id)
+        tier_counts[case.tier] = tier_counts.get(case.tier, 0) + 1
+        if case.protected:
+            protected_case_ids.append(case.id)
+    return {
+        "case_count": len(case_ids),
+        "protected_case_count": len(protected_case_ids),
+        "case_ids": case_ids,
+        "protected_case_ids": protected_case_ids,
+        "tier_counts": dict(sorted(tier_counts.items())),
+    }
+
+
 class ParametricTrainer(Protocol):
     """Boundary for real LoRA/test-time-training adapter providers."""
 
@@ -74,7 +92,12 @@ class ParametricTrainer(Protocol):
         immutable_rails: list[str],
     ) -> dict[str, Any]: ...
 
-    def rollback(self, artifact: ParametricArtifact, reason: str) -> dict[str, Any]: ...
+    def rollback(
+        self,
+        artifact: ParametricArtifact,
+        reason: str,
+        protected_cases: Sequence[RegressionCase] | None = None,
+    ) -> dict[str, Any]: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,6 +180,7 @@ class ParametricInvariantRails:
                 "margin": gate_result.margin,
                 "min_gate_margin": self.min_gate_margin,
             },
+            "protected_suite": protected_suite_report(protected_cases),
         }
 
     @staticmethod
@@ -213,13 +237,21 @@ class CommandParametricTrainer:
             },
         )
 
-    def rollback(self, artifact: ParametricArtifact, reason: str) -> dict[str, Any]:
+    def rollback(
+        self,
+        artifact: ParametricArtifact,
+        reason: str,
+        protected_cases: Sequence[RegressionCase] | None = None,
+    ) -> dict[str, Any]:
+        protected_cases = protected_cases or []
         return self._call(
             "rollback",
             {
                 "tenant_id": artifact.tenant_id,
                 "artifact": artifact.to_dict(),
                 "reason": reason,
+                "protected_cases": [case.to_dict() for case in protected_cases],
+                "protected_suite": protected_suite_report(protected_cases),
             },
         )
 
@@ -339,16 +371,32 @@ class ParametricTier:
             )
         return ParametricPromotionDecision(True, "parametric artifact promoted in isolated tier", artifact, gate_result.to_dict())
 
-    def rollback(self, artifact: ParametricArtifact, reason: str) -> ParametricArtifact:
+    def rollback(
+        self,
+        artifact: ParametricArtifact,
+        reason: str,
+        protected_cases: Sequence[RegressionCase] | None = None,
+    ) -> ParametricArtifact:
+        protected_cases = protected_cases or []
         artifact.status = "rolled_back"
-        payload: dict[str, Any] = {"phase": "rolled_back", "reason": reason}
+        suite = protected_suite_report(protected_cases)
+        payload: dict[str, Any] = {"phase": "rolled_back", "reason": reason, "protected_suite": suite}
         provider: dict[str, Any] = {}
         if self.trainer:
-            provider = self.trainer.rollback(artifact, reason)
+            provider = self.trainer.rollback(artifact, reason, protected_cases=protected_cases)
             payload["provider"] = _provider_payload(provider)
             artifact.metrics.update(_provider_metrics(provider.get("metrics", {})))
         artifact.rollback_ref = str(provider.get("rollback_ref") or provider.get("rollbackRef") or f"rollback-{new_id()}")
         artifact.metrics["rolled_back"] = 1.0
+        artifact.metrics["rollback_protected_cases"] = float(suite["protected_case_count"])
+        artifact.rail_report = {
+            **artifact.rail_report,
+            "rollback": {
+                "reason": reason,
+                "rollback_ref": artifact.rollback_ref,
+                "protected_suite": suite,
+            },
+        }
         if self.artifact_store:
             self.artifact_store.write(artifact, payload)
         return artifact

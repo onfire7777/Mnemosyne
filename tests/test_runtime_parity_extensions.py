@@ -1241,7 +1241,7 @@ def test_parametric_invariant_rails_reject_provider_mutation_rate(tmp_path) -> N
         def propose(self, tenant_id, lessons, procedures, source_ids, immutable_rails):
             return {"metrics": {"mutation_rate": 0.5}, "metadata": {"reward_signal": "external_only"}}
 
-        def rollback(self, artifact, reason):
+        def rollback(self, artifact, reason, protected_cases=None):
             return {"rollback_ref": "bad-rollback"}
 
     tier = ParametricTier(ParametricArtifactStore(tmp_path / "parametric"), trainer=BadMutationTrainer())
