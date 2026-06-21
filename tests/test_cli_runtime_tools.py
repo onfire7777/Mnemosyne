@@ -3922,6 +3922,127 @@ def test_cli_calibration_tune_fails_closed_on_high_confidence_errors(tmp_path: P
     assert exported["calibrations"] == []
 
 
+def forgetting_policy_cases(*, wrong_demotion_expectation: bool = False) -> list[dict]:
+    return [
+        {
+            "id": "demote-low-utility",
+            "state": {
+                "item_id": "memory-low",
+                "tier": "verbatim",
+                "salience": 0.01,
+                "importance": 0.0,
+                "access_count": 0,
+                "last_accessed": "2020-01-01T00:00:00Z",
+            },
+            "expected": {
+                "tier": "extractive_summary",
+                "demoted": not wrong_demotion_expectation,
+                "rehearsed": False,
+            },
+        },
+        {
+            "id": "must-keep-rehearsal",
+            "state": {
+                "item_id": "memory-keep",
+                "tier": "verbatim",
+                "salience": 0.01,
+                "importance": 0.8,
+                "access_count": 1,
+                "last_accessed": "2025-12-01T00:00:00Z",
+                "must_keep": True,
+                "successful_rehearsals": 1,
+                "next_rehearsal_at": "2025-12-31T00:00:00Z",
+            },
+            "expected": {
+                "tier": "verbatim",
+                "demoted": False,
+                "rehearsed": True,
+            },
+        },
+        {
+            "id": "gist-risk-abstention",
+            "supporting_states": [
+                {
+                    "item_id": "memory-gist",
+                    "tier": "abstractive_gist",
+                    "salience": 0.4,
+                    "importance": 0.4,
+                    "access_count": 2,
+                    "last_accessed": "2026-01-01T00:00:00Z",
+                    "confabulation_risk": True,
+                }
+            ],
+            "expected": {"abstention_required": True},
+        },
+    ]
+
+
+def test_cli_forgetting_policy_check_validates_policy_suite(tmp_path: Path) -> None:
+    cases = tmp_path / "forgetting-policy.json"
+    cases.write_text(json.dumps(forgetting_policy_cases()), encoding="utf-8")
+
+    report = run_cli(
+        tmp_path / "mnemosyne.json",
+        "forgetting-policy-check",
+        "--cases",
+        str(cases),
+        "--now",
+        "2026-01-01T00:00:00Z",
+        "--require-case",
+        "demote-low-utility",
+        "--require-case",
+        "must-keep-rehearsal",
+        "--require-case",
+        "gist-risk-abstention",
+    )
+    acknowledged = run_cli(
+        tmp_path / "mnemosyne.json",
+        "forgetting-policy-check",
+        "--cases",
+        str(cases),
+        "--now",
+        "2026-01-01T00:00:00Z",
+        "--expected-fingerprint",
+        report["fingerprint"],
+    )
+
+    assert report["ok"] is True
+    assert len(report["fingerprint"]) == 64
+    assert report["summary"]["cases"] == 3
+    assert report["summary"]["passed"] == 3
+    assert acknowledged["ok"] is True
+    assert acknowledged["expected_fingerprint_present"] is True
+    actual_by_id = {item["id"]: item["actual"] for item in report["results"]}
+    assert actual_by_id["demote-low-utility"]["tier"] == "extractive_summary"
+    assert actual_by_id["must-keep-rehearsal"]["rehearsed"] is True
+    assert actual_by_id["gist-risk-abstention"]["abstention_required"] is True
+
+
+def test_cli_forgetting_policy_check_fails_closed_on_expectation_mismatch(tmp_path: Path) -> None:
+    cases = tmp_path / "bad-forgetting-policy.json"
+    cases.write_text(
+        json.dumps(forgetting_policy_cases(wrong_demotion_expectation=True)),
+        encoding="utf-8",
+    )
+
+    result = run_raw_cli(
+        tmp_path / "mnemosyne.json",
+        "forgetting-policy-check",
+        "--cases",
+        str(cases),
+        "--now",
+        "2026-01-01T00:00:00Z",
+    )
+    payload = json.loads(result.stdout)
+    findings = [finding for finding in payload["findings"] if finding["code"] == "expectation_mismatch"]
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert findings
+    assert findings[0]["case_id"] == "demote-low-utility"
+    assert findings[0]["field"] == "demoted"
+
+
 def test_cli_preference_write_requires_explicit_or_high_trust_source(tmp_path: Path) -> None:
     denied = run_raw_cli(
         tmp_path / "mnemosyne.json",

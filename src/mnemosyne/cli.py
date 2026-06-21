@@ -40,6 +40,7 @@ from mnemosyne.gate import RegressionCase
 from mnemosyne.ingestion import IngestionPipeline
 from mnemosyne.jobs import PROJECTION_RECOMPUTE_JOB, RuntimeJobHandlers
 from mnemosyne.learning import Lesson, Procedure
+from mnemosyne.lifecycle import parse_lifecycle_datetime, validate_forgetting_policy_cases
 from mnemosyne.media import CommandMediaTextExtractor, MediaTextExtractor, MetadataMediaTextExtractor
 from mnemosyne.mcp_tools import MemoryTools, TOOL_SPEC
 from mnemosyne.models import Evidence, Hit
@@ -78,6 +79,7 @@ from mnemosyne.storage import CommandKeyManager, EncryptedLocalObjectStore, Json
 
 DEPLOYMENT_SOAK_COMMANDS = {
     "calibration-tune",
+    "forgetting-policy-check",
     "provider-check",
     "idp-jwks-live-check",
     "idp-authz-policy-rollout-check",
@@ -101,6 +103,7 @@ DEPLOYMENT_SOAK_GLOBAL_OPTIONS = {
 }
 PRODUCTION_RELEASE_REQUIRED_COMMANDS = (
     "calibration-tune",
+    "forgetting-policy-check",
     "provider-check",
     "idp-jwks-live-check",
     "idp-authz-policy-rollout-check",
@@ -1177,6 +1180,43 @@ def cmd_calibration_tune(args: argparse.Namespace) -> None:
     report["dry_run"] = bool(args.dry_run)
     emit(report)
     if not tuning.ok:
+        raise SystemExit(1)
+
+
+def _load_forgetting_policy_cases(args: argparse.Namespace) -> list[Mapping[str, Any]]:
+    if bool(args.cases) == bool(args.cases_json):
+        raise SystemExit("forgetting-policy-check requires exactly one of --cases or --cases-json")
+    try:
+        loaded = json.loads(Path(args.cases).expanduser().read_text(encoding="utf-8")) if args.cases else json.loads(args.cases_json)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"forgetting policy cases denied: {exc}") from exc
+    if not isinstance(loaded, list):
+        raise SystemExit("forgetting policy cases must be a JSON array")
+    if not all(isinstance(item, Mapping) for item in loaded):
+        raise SystemExit("forgetting policy cases must contain JSON objects")
+    return loaded
+
+
+def cmd_forgetting_policy_check(args: argparse.Namespace) -> None:
+    now = parse_lifecycle_datetime(args.now) or datetime.now(UTC)
+    report = validate_forgetting_policy_cases(
+        _load_forgetting_policy_cases(args),
+        now=now,
+        utility_threshold=args.utility_threshold,
+        min_cases=args.min_cases,
+        required_case_ids=args.require_case,
+    )
+    report["expected_fingerprint_present"] = bool(args.expected_fingerprint)
+    if args.expected_fingerprint and args.expected_fingerprint.strip().lower() != report["fingerprint"]:
+        report["ok"] = False
+        report["findings"].append(
+            {
+                "code": "fingerprint_mismatch",
+                "message": "forgetting policy suite fingerprint mismatch",
+            }
+        )
+    emit(report)
+    if not report["ok"]:
         raise SystemExit(1)
 
 
@@ -4424,6 +4464,16 @@ def build_parser() -> argparse.ArgumentParser:
     calibration_tune.add_argument("--max-prediction-set-size", type=int, default=3)
     calibration_tune.add_argument("--dry-run", action="store_true")
     calibration_tune.set_defaults(func=cmd_calibration_tune)
+
+    forgetting_policy_check = sub.add_parser("forgetting-policy-check")
+    forgetting_policy_check.add_argument("--cases", help="Path to JSON array of forgetting policy cases")
+    forgetting_policy_check.add_argument("--cases-json", help="Inline JSON array of forgetting policy cases")
+    forgetting_policy_check.add_argument("--now", default=os.environ.get("MNEMOSYNE_FORGETTING_POLICY_NOW"))
+    forgetting_policy_check.add_argument("--utility-threshold", type=float, default=0.18)
+    forgetting_policy_check.add_argument("--min-cases", type=int, default=3)
+    forgetting_policy_check.add_argument("--require-case", action="append", default=[])
+    forgetting_policy_check.add_argument("--expected-fingerprint")
+    forgetting_policy_check.set_defaults(func=cmd_forgetting_policy_check)
 
     branch = sub.add_parser("branch")
     branch.add_argument("--name", required=True)

@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import math
+import json
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 from enum import Enum
+from hashlib import sha256
 from typing import Any
+from collections.abc import Mapping
 
 
 class FidelityTier(str, Enum):
@@ -111,6 +114,152 @@ def sole_support_requires_abstention(supporting_states: list[LifecycleState]) ->
         return False
     only = supporting_states[0]
     return only.tier in {FidelityTier.ABSTRACTIVE_GIST, FidelityTier.STATISTICAL_TRACE} and only.confabulation_risk
+
+
+def parse_lifecycle_datetime(value: str | datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.astimezone(UTC) if value.tzinfo else value.replace(tzinfo=UTC)
+    parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    return parsed.astimezone(UTC) if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+
+def lifecycle_state_from_dict(row: Mapping[str, Any]) -> LifecycleState:
+    return LifecycleState(
+        item_id=str(row["item_id"]),
+        tier=FidelityTier(str(row.get("tier", FidelityTier.VERBATIM.value))),
+        salience=float(row.get("salience", 0.5)),
+        importance=float(row.get("importance", 0.5)),
+        access_count=int(row.get("access_count", 0)),
+        last_accessed=parse_lifecycle_datetime(row.get("last_accessed")),
+        must_keep=bool(row.get("must_keep", False)),
+        successful_rehearsals=int(row.get("successful_rehearsals", 0)),
+        next_rehearsal_at=parse_lifecycle_datetime(row.get("next_rehearsal_at")),
+        last_rehearsed_at=parse_lifecycle_datetime(row.get("last_rehearsed_at")),
+        confabulation_risk=bool(row.get("confabulation_risk", False)),
+        protected=bool(row.get("protected", False)),
+    )
+
+
+def forgetting_policy_fingerprint(cases: list[Mapping[str, Any]], *, utility_threshold: float) -> str:
+    canonical = {
+        "cases": cases,
+        "utility_threshold": utility_threshold,
+    }
+    encoded = json.dumps(canonical, sort_keys=True, separators=(",", ":"), default=str)
+    return sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def validate_forgetting_policy_cases(
+    cases: list[Mapping[str, Any]],
+    *,
+    now: datetime,
+    utility_threshold: float = 0.18,
+    min_cases: int = 1,
+    required_case_ids: list[str] | None = None,
+) -> dict[str, Any]:
+    findings: list[dict[str, Any]] = []
+    results: list[dict[str, Any]] = []
+    required = sorted(set(required_case_ids or []))
+    seen_case_ids: set[str] = set()
+    if len(cases) < min_cases:
+        findings.append(
+            {
+                "code": "insufficient_cases",
+                "message": f"case count {len(cases)} is below required minimum {min_cases}",
+            }
+        )
+    for index, raw in enumerate(cases, start=1):
+        case_id = str(raw.get("id") or f"case-{index}")
+        seen_case_ids.add(case_id)
+        expected = raw.get("expected", {})
+        if not isinstance(expected, Mapping):
+            findings.append({"code": "invalid_expected", "message": f"{case_id} expected must be an object"})
+            continue
+        try:
+            result = _evaluate_forgetting_policy_case(
+                case_id,
+                raw,
+                expected=expected,
+                now=now,
+                utility_threshold=utility_threshold,
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            findings.append({"code": "invalid_case", "message": f"{case_id} denied: {exc}"})
+            continue
+        results.append(result)
+        if not result["ok"]:
+            findings.extend(result["findings"])
+    for case_id in required:
+        if case_id not in seen_case_ids:
+            findings.append({"code": "missing_required_case", "message": f"required case {case_id} is missing"})
+    return {
+        "ok": not findings,
+        "fingerprint": forgetting_policy_fingerprint(cases, utility_threshold=utility_threshold),
+        "summary": {
+            "cases": len(cases),
+            "passed": sum(1 for item in results if item["ok"]),
+            "failed": sum(1 for item in results if not item["ok"]),
+            "required_case_ids": required,
+        },
+        "results": results,
+        "findings": findings,
+    }
+
+
+def _evaluate_forgetting_policy_case(
+    case_id: str,
+    raw: Mapping[str, Any],
+    *,
+    expected: Mapping[str, Any],
+    now: datetime,
+    utility_threshold: float,
+) -> dict[str, Any]:
+    if "supporting_states" in raw:
+        supporting_states_raw = raw["supporting_states"]
+        if not isinstance(supporting_states_raw, list):
+            raise ValueError("supporting_states must be an array")
+        supporting_states = [lifecycle_state_from_dict(item) for item in supporting_states_raw]
+        actual: dict[str, Any] = {
+            "abstention_required": sole_support_requires_abstention(supporting_states),
+            "supporting_state_count": len(supporting_states),
+        }
+    else:
+        state_raw = raw.get("state")
+        if not isinstance(state_raw, Mapping):
+            raise ValueError("state must be an object")
+        state = lifecycle_state_from_dict(state_raw)
+        rehearsed_state, rehearsed = apply_rehearsal_schedule(state, now)
+        next_state, demoted = demotion_decision(rehearsed_state, now, utility_threshold=utility_threshold)
+        actual = {
+            "tier": next_state.tier.value,
+            "demoted": demoted,
+            "rehearsed": rehearsed,
+            "abstention_required": sole_support_requires_abstention([next_state]),
+            "state": next_state.to_dict(),
+        }
+    findings: list[dict[str, Any]] = []
+    for key, expected_value in expected.items():
+        actual_value = actual.get(str(key))
+        if actual_value != expected_value:
+            findings.append(
+                {
+                    "code": "expectation_mismatch",
+                    "case_id": case_id,
+                    "field": str(key),
+                    "expected": expected_value,
+                    "actual": actual_value,
+                    "message": f"{case_id} expected {key}={expected_value!r} but got {actual_value!r}",
+                }
+            )
+    return {
+        "id": case_id,
+        "ok": not findings,
+        "actual": actual,
+        "expected": dict(expected),
+        "findings": findings,
+    }
 
 
 def next_rehearsal_days(successful_rehearsals: int) -> int:
