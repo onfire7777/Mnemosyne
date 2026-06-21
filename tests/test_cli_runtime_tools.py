@@ -1926,6 +1926,19 @@ def test_cli_provider_check_uses_deployment_manifest(tmp_path: Path, monkeypatch
     embedder.chmod(0o755)
     kms_command, kms_state = fake_kms_command(tmp_path)
     parametric_command, parametric_state = fake_parametric_command(tmp_path)
+    resolver = tmp_path / "entity-resolver.py"
+    resolver.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env python3",
+                "import json, sys",
+                "request = json.load(sys.stdin)",
+                "candidate = request['candidates'][0]",
+                "print(json.dumps({'candidates': [{'signature': candidate['signature'], 'entity_key': 'provider-health-entity'}], 'entities': [{'key': 'provider-health-entity', 'label': 'Provider Health', 'aliases': [candidate['candidate_subject']], 'candidate_signatures': [candidate['signature']]}]}))",
+            ]
+        ),
+        encoding="utf-8",
+    )
     monkeypatch.setenv("MNEMOSYNE_TEST_EMBED_KEY", "embed-manifest-secret")
     monkeypatch.setenv("MNEMOSYNE_TEST_RERANK_KEY", "rank-manifest-secret")
     base = f"http://127.0.0.1:{server.server_port}"
@@ -1941,6 +1954,7 @@ def test_cli_provider_check_uses_deployment_manifest(tmp_path: Path, monkeypatch
                     "media_embedding",
                     "object_key_manager",
                     "parametric",
+                    "entity_resolver",
                     "residency_policy",
                 ],
                 "forbid_local": True,
@@ -1975,6 +1989,10 @@ def test_cli_provider_check_uses_deployment_manifest(tmp_path: Path, monkeypatch
                         "command": parametric_command,
                         "adapter_kind": "lora-command-adapter",
                     },
+                    "entity_resolver": {
+                        "provider": "command",
+                        "command": " ".join(shlex.quote(item) for item in (sys.executable, str(resolver))),
+                    },
                 },
             }
         ),
@@ -1998,6 +2016,7 @@ def test_cli_provider_check_uses_deployment_manifest(tmp_path: Path, monkeypatch
             "media_embedding",
             "object_key_manager",
             "parametric",
+            "entity_resolver",
             "residency_policy",
         ],
         "forbid_local": True,
@@ -2011,6 +2030,8 @@ def test_cli_provider_check_uses_deployment_manifest(tmp_path: Path, monkeypatch
     assert report["checks"]["object_key_manager"]["shredded"] is True
     assert report["checks"]["parametric"]["adapter_kind"] == "lora-command-adapter"
     assert report["checks"]["parametric"]["protected_suite"]["protected_case_ids"] == ["provider-health-protected"]
+    assert report["checks"]["entity_resolver"]["strategy"] == "command_entity_resolver"
+    assert report["checks"]["entity_resolver"]["entity_keys"] == ["provider-health-entity"]
     parametric_calls = json.loads(parametric_state.read_text(encoding="utf-8"))["calls"]
     assert parametric_calls[-1]["protected_cases"] == ["provider-health-protected"]
     assert parametric_calls[-1]["protected_suite"]["protected_case_count"] == 1
@@ -2761,8 +2782,42 @@ def test_cli_ingest_classifies_external_untrusted_content(tmp_path: Path) -> Non
 
 def test_cli_ingest_can_run_one_consolidation_worker_cycle(tmp_path: Path) -> None:
     store = tmp_path / "mnemosyne.json"
+    resolver_state = tmp_path / "resolver-state.json"
+    resolver_script = tmp_path / "entity-resolver.py"
+    resolver_script.write_text(
+        "\n".join(
+            [
+                "import json, sys",
+                "from pathlib import Path",
+                "state = Path(sys.argv[1])",
+                "request = json.load(sys.stdin)",
+                "candidate = request['candidates'][0]",
+                "state.write_text(json.dumps({'tenant_id': request['tenant_id'], 'signatures': [item['signature'] for item in request['candidates']]}, sort_keys=True), encoding='utf-8')",
+                "print(json.dumps({'candidates': [{'signature': candidate['signature'], 'entity_key': 'runtime-cli'}], 'entities': [{'key': 'runtime-cli', 'label': 'Runtime CLI', 'aliases': [candidate['candidate_subject']], 'candidate_signatures': [candidate['signature']]}]}))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    resolver_command = " ".join(shlex.quote(item) for item in (sys.executable, str(resolver_script), str(resolver_state)))
+    run_cli(
+        store,
+        "gate-case-add",
+        "--id",
+        "resolver-promotion-case",
+        "--signature",
+        "runtime consolidation target",
+        "--query",
+        "runtime consolidation target",
+        "--expected-substring",
+        "local CLI",
+        "--protected",
+    )
     ingested = run_cli(
         store,
+        "--entity-resolver-provider",
+        "command",
+        "--entity-resolver-command",
+        resolver_command,
         "ingest",
         "--tenant",
         TENANT,
@@ -2777,13 +2832,20 @@ def test_cli_ingest_can_run_one_consolidation_worker_cycle(tmp_path: Path) -> No
         "--run-consolidation-once",
     )
     report = run_cli(store, "ops-report", "--tenant", TENANT)
+    exported = run_cli(store, "export", "--tenant", TENANT)
 
     assert ingested["queued_jobs"][0]["kind"] == "consolidate_evidence"
     assert ingested["consolidation_worker"]["queue"]["complete"] == 1
     job = ingested["consolidation_worker"]["job"]
     assert job["status"] == "complete"
+    assert job["result"]["candidate_results"][0]["promoted"] is True
     assert job["result"]["source_evidence_cids"] == [ingested["cid"]]
     assert job["result"]["passes_run"][:3] == ["replayer", "extractor", "resolver"]
+    resolver_details = job["result"]["pass_results"][2]["details"]
+    assert resolver_details["strategy"] == "command_entity_resolver"
+    assert resolver_details["resolved_entities"][0]["key"] == "runtime-cli"
+    assert json.loads(resolver_state.read_text(encoding="utf-8"))["tenant_id"] == TENANT
+    assert exported["entities"][0]["canonical"] == "runtime-cli"
     assert report["learning"]["lessons"] == 1
     assert report["learning"]["procedures"] == 1
 
@@ -3783,6 +3845,37 @@ def test_cli_provider_check_fails_closed_on_bad_parametric_provider(tmp_path: Pa
     assert payload["ok"] is False
     assert payload["checks"]["parametric"]["ok"] is False
     assert "JSON object" in payload["checks"]["parametric"]["error"]
+
+
+def test_cli_provider_check_fails_closed_on_bad_entity_resolver(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    script = tmp_path / "bad-entity-resolver.py"
+    script.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env python3",
+                "import json",
+                "print(json.dumps({}))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    command = " ".join(shlex.quote(item) for item in (sys.executable, str(script)))
+
+    result = run_raw_cli(
+        store,
+        "--entity-resolver-provider",
+        "command",
+        "--entity-resolver-command",
+        command,
+        "provider-check",
+    )
+    payload = json.loads(result.stdout)
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert payload["checks"]["entity_resolver"]["ok"] is False
+    assert "requires candidates array" in payload["checks"]["entity_resolver"]["error"]
 
 
 def test_cli_profile_graph_learning_and_parametric_flows_persist(tmp_path: Path) -> None:

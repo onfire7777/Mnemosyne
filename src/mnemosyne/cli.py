@@ -24,7 +24,7 @@ from uuid import UUID
 
 from cryptography import x509
 
-from mnemosyne.consolidation import CONSOLIDATE_EVIDENCE_JOB
+from mnemosyne.consolidation import CONSOLIDATE_EVIDENCE_JOB, CommandEntityResolver, EntityResolver
 from mnemosyne.engine import LocalMemoryEngine, MemoryEngine
 from mnemosyne.eval import run_seed_suite
 from mnemosyne.gate import RegressionCase
@@ -367,6 +367,17 @@ def load_media_extractor(args: argparse.Namespace) -> MediaTextExtractor:
             timeout_seconds=float(args.media_extractor_timeout),
         )
     return MetadataMediaTextExtractor()
+
+
+def load_entity_resolver(args: argparse.Namespace) -> EntityResolver | None:
+    if args.entity_resolver_provider == "command":
+        if not args.entity_resolver_command:
+            raise SystemExit("--entity-resolver-provider command requires --entity-resolver-command.")
+        return CommandEntityResolver(
+            args.entity_resolver_command,
+            timeout_seconds=float(args.entity_resolver_timeout),
+        )
+    return None
 
 
 def load_parametric_tier(args: argparse.Namespace) -> ParametricTier:
@@ -853,6 +864,7 @@ def cmd_ingest(args: argparse.Namespace) -> None:
             media_extractor=load_media_extractor(args),
             learning=tools.learning,
             gate_cases=tools.runtime_state.load_gate_cases() if tools.runtime_state else [],
+            entity_resolver=load_entity_resolver(args),
         )
         worker = QueueWorker(ingestion_queue, handlers.handlers(), metrics=metrics)
         job = worker.run_once(CONSOLIDATE_EVIDENCE_JOB)
@@ -1370,6 +1382,7 @@ def _runtime_worker_components(
         media_extractor=load_media_extractor(args),
         learning=tools.learning,
         gate_cases=runtime_state.load_gate_cases() if runtime_state else [],
+        entity_resolver=load_entity_resolver(args),
     )
     worker = QueueWorker(queue, handlers.handlers(), metrics=metrics)
     return runtime_state, queue, tools, metrics, worker
@@ -2815,6 +2828,17 @@ def apply_provider_manifest(args: argparse.Namespace) -> dict[str, Any]:
                 "timeout_seconds": "parametric_timeout",
             },
         )
+    entity_resolver = providers.get("entity_resolver", {})
+    if isinstance(entity_resolver, dict):
+        _apply_manifest_fields(
+            args,
+            entity_resolver,
+            {
+                "provider": "entity_resolver_provider",
+                "command": "entity_resolver_command",
+                "timeout_seconds": "entity_resolver_timeout",
+            },
+        )
     session_secret = providers.get("session_secret", {})
     if isinstance(session_secret, dict):
         _apply_manifest_fields(
@@ -3033,6 +3057,37 @@ def cmd_provider_check(args: argparse.Namespace) -> None:
             checks["parametric"] = {"ok": False, "provider": "command", "error": str(exc)}
     else:
         checks["parametric"] = {"ok": True, "provider": "local", "skipped": True}
+
+    if args.entity_resolver_provider == "command":
+        try:
+            resolver = load_entity_resolver(args)
+            if resolver is None:
+                raise ValueError("command entity resolver was not configured")
+            sample = [
+                {
+                    "signature": "provider-health",
+                    "query": "provider health",
+                    "candidate_subject": "Provider Health",
+                    "candidate_predicate": "is",
+                    "candidate_object": "configured",
+                }
+            ]
+            resolved = resolver.resolve("provider-health", sample)
+            entity_keys = [str(item.get("entity_key") or "") for item in resolved["candidates"]]
+            if not entity_keys or not all(entity_keys):
+                raise ValueError("entity resolver did not return entity keys")
+            checks["entity_resolver"] = {
+                "ok": True,
+                "provider": "command",
+                "strategy": resolved["details"]["strategy"],
+                "entity_keys": entity_keys,
+                "resolved_entity_count": len(resolved["details"]["resolved_entities"]),
+            }
+        except Exception as exc:  # noqa: BLE001 - health checks return structured failures.
+            ok = False
+            checks["entity_resolver"] = {"ok": False, "provider": "command", "error": str(exc)}
+    else:
+        checks["entity_resolver"] = {"ok": True, "provider": "deterministic", "skipped": True}
 
     if args.object_store_encryption == "aesgcm":
         try:
@@ -3268,6 +3323,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--provenance-timeout", type=float, default=float(os.environ.get("MNEMOSYNE_PROVENANCE_TIMEOUT", "30")))
     parser.add_argument("--media-extractor-command", default=os.environ.get("MNEMOSYNE_MEDIA_EXTRACTOR_COMMAND"))
     parser.add_argument("--media-extractor-timeout", type=float, default=float(os.environ.get("MNEMOSYNE_MEDIA_EXTRACTOR_TIMEOUT", "30")))
+    parser.add_argument(
+        "--entity-resolver-provider",
+        choices=["deterministic", "command"],
+        default=os.environ.get("MNEMOSYNE_ENTITY_RESOLVER_PROVIDER", "deterministic"),
+        help="Consolidation entity resolver provider",
+    )
+    parser.add_argument("--entity-resolver-command", default=os.environ.get("MNEMOSYNE_ENTITY_RESOLVER_COMMAND"))
+    parser.add_argument(
+        "--entity-resolver-timeout",
+        type=float,
+        default=float(os.environ.get("MNEMOSYNE_ENTITY_RESOLVER_TIMEOUT", "30")),
+    )
     parser.add_argument(
         "--media-embedding-provider",
         choices=["none", "command"],
