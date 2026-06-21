@@ -935,6 +935,22 @@ def cmd_assert(args: argparse.Namespace) -> None:
     )
 
 
+def cmd_source_sync(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(
+        tools.source_sync(
+            tenant_id=args.tenant,
+            user_id=args.user,
+            root=args.root,
+            branch=args.branch,
+            apply=args.apply,
+            role=args.role,
+            source_trust_tier=args.source_trust_tier,
+            allow_dirty=args.allow_dirty,
+        )
+    )
+
+
 def cmd_relation(args: argparse.Namespace) -> None:
     tools = load_tools(args)
     emit(
@@ -3852,6 +3868,17 @@ def build_parser() -> argparse.ArgumentParser:
     assertion.add_argument("--role", default="agent", choices=["reader", "agent", "consolidator", "operator"])
     assertion.add_argument("--source-trust-tier", type=int)
     assertion.set_defaults(func=cmd_assert)
+
+    source_sync = sub.add_parser("source-sync")
+    source_sync.add_argument("--tenant", required=True)
+    source_sync.add_argument("--user", required=True)
+    source_sync.add_argument("--root", required=True)
+    source_sync.add_argument("--branch", default="main")
+    source_sync.add_argument("--apply", action="store_true")
+    source_sync.add_argument("--allow-dirty", action="store_true")
+    source_sync.add_argument("--role", default="operator", choices=["reader", "agent", "consolidator", "operator"])
+    source_sync.add_argument("--source-trust-tier", type=int, default=0)
+    source_sync.set_defaults(func=cmd_source_sync)
 
     relation = sub.add_parser("relation")
     relation.add_argument("--tenant", required=True)

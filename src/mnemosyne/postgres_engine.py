@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid5
 
@@ -316,7 +316,7 @@ class PostgresEngine:
                     WHERE tenant_id = %s AND branch = %s AND subject = %s
                       AND predicate = %s AND scope = %s
                       AND status IN ('active', 'contested')
-                    ORDER BY valid_from DESC
+                    ORDER BY trust_tier ASC, valid_from DESC
                     """,
                     (db_tenant_id, branch, incoming.subject, incoming.predicate, self._jsonb(incoming.scope)),
                 )
@@ -351,7 +351,23 @@ class PostgresEngine:
                 if conflicts:
                     current = conflicts[0]
                     current_valid_from = parse_dt(current["valid_from"]) or utc_now()
-                    if incoming.valid_from > current_valid_from:
+                    current_trust_tier = int(current["trust_tier"])
+                    if incoming.trust_tier < current_trust_tier:
+                        incoming.version = int(current["version"]) + 1
+                        incoming.status = "active"
+                        current_valid_to = (
+                            incoming.valid_from
+                            if incoming.valid_from > current_valid_from
+                            else current_valid_from + timedelta(microseconds=1)
+                        )
+                        cur.execute(
+                            "UPDATE assertions SET valid_to = %s, status = 'superseded', superseded_by = %s WHERE id = %s",
+                            (current_valid_to, incoming.id, current["id"]),
+                        )
+                    elif incoming.trust_tier > current_trust_tier:
+                        incoming.status = "superseded"
+                        incoming.superseded_by = str(current["id"])
+                    elif incoming.valid_from > current_valid_from:
                         incoming.version = int(current["version"]) + 1
                         incoming.status = "active"
                         cur.execute(
