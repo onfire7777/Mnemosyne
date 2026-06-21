@@ -54,6 +54,8 @@ Latest checkpoint: Hosted HTTP JSON-RPC MCP `search` now has transport-level pro
 
 Latest checkpoint: Deep retrieval now treats graph/PPR relation hits derived from generated gist summaries as gist-tier support. Local and Postgres `graph_ppr` hits now preserve relation source, predicate, target, confidence, and source evidence CIDs in metadata, and retrieval abstention classifies `summary-derived-gist` relations alongside generated summary evidence. Shared Local/Postgres coverage verifies deep-search abstention on summary-derived graph support, and MCP `deep_search` plus `explain` both preserve the abstention payload. Local verification now collects 355 tests with 300 passing tests plus 55 skipped live-DB tests, and the clean compose DSN run passes all 355 tests with `MNEMOSYNE_POSTGRES_DSN=postgresql://mnemosyne:<redacted>@127.0.0.1:54329/mnemosyne?connect_timeout=5`.
 
+Latest checkpoint: Official MCP SDK StreamableHTTP local validation now exercises the write/read tool path, not only tool discovery and read-only policy inspection. The in-process ASGI StreamableHTTP client initializes a session, lists tools, calls `residency_policy`, captures evidence, then searches for it and verifies provenance through the official MCP client surface. Local verification remains 355 collected tests with 300 passing tests plus 55 skipped live-DB tests, and the clean compose DSN run passes all 355 tests with `MNEMOSYNE_POSTGRES_DSN=postgresql://mnemosyne:<redacted>@127.0.0.1:54329/mnemosyne?connect_timeout=5`.
+
 Progress: [███████░░░] local scaffold verified; production parity gaps remain
 
 ## Performance Metrics

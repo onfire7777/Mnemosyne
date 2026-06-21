@@ -692,7 +692,7 @@ def test_official_mcp_sdk_adapter_lists_tools_and_calls_capture_search(tmp_path:
     asyncio.run(exercise())
 
 
-def test_official_mcp_sdk_streamable_http_adapter_lists_tools(tmp_path: Path) -> None:
+def test_official_mcp_sdk_streamable_http_adapter_lists_tools_and_calls_capture_search(tmp_path: Path) -> None:
     pytest.importorskip("mcp")
     httpx = pytest.importorskip("httpx")
     from mcp.client.session import ClientSession
@@ -716,10 +716,32 @@ def test_official_mcp_sdk_streamable_http_adapter_lists_tools(tmp_path: Path) ->
                         await session.initialize()
                         tools = await session.list_tools()
                         result = await session.call_tool("residency_policy", {})
+                        captured = await session.call_tool(
+                            "capture",
+                            {
+                                "tenant_id": TENANT,
+                                "user_id": USER,
+                                "actor": "user",
+                                "source_type": "streamable-http",
+                                "content": "Official StreamableHTTP MCP captures Mnemosyne memory.",
+                                "trust_tier": 3,
+                            },
+                        )
+                        searched = await session.call_tool(
+                            "search",
+                            {
+                                "tenant_id": TENANT,
+                                "query": "StreamableHTTP MCP captures Mnemosyne memory",
+                            },
+                        )
 
         assert len(tools.tools) == len(TOOL_SPEC)
         assert any(tool.name == "capture" for tool in tools.tools)
         assert result.isError is False
+        assert captured.isError is False
+        assert captured.structuredContent["cid"]
+        assert searched.isError is False
+        assert searched.structuredContent["hits"][0]["provenance"] == [captured.structuredContent["cid"]]
 
     asyncio.run(exercise())
 
