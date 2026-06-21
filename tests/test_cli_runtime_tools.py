@@ -2119,6 +2119,151 @@ def test_cli_provider_check_uses_deployment_manifest(tmp_path: Path, monkeypatch
     ]
 
 
+def test_cli_hosted_llm_check_validates_role_endpoints_without_leaking_auth(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    requests: list[dict] = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:  # noqa: N802 - stdlib callback name.
+            length = int(self.headers.get("Content-Length", "0"))
+            payload = json.loads(self.rfile.read(length).decode("utf-8"))
+            requests.append({"path": self.path, "payload": payload, "auth": self.headers.get("Authorization")})
+            if self.path == "/extract":
+                body = {
+                    "candidates": [
+                        {
+                            "signature": "hosted-provider-health",
+                            "query": "provider health",
+                            "candidate_subject": "Provider Health",
+                            "candidate_predicate": "is",
+                            "candidate_object": "hosted",
+                        }
+                    ]
+                }
+            elif self.path == "/summarize":
+                body = {"choices": [{"message": {"content": json.dumps({"summary": "Hosted provider summary"})}}]}
+            elif self.path == "/resolve":
+                body = {"candidates": [{"signature": "hosted-provider-health", "entity_key": "provider-health"}]}
+            else:
+                self.send_response(404)
+                self.end_headers()
+                return
+            encoded = json.dumps(body).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(encoded)))
+            self.end_headers()
+            self.wfile.write(encoded)
+
+        def log_message(self, format: str, *args: object) -> None:  # noqa: A002 - stdlib signature.
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    monkeypatch.setenv("MNEMOSYNE_HOSTED_LLM_TEST_KEY", "hosted-secret-value")
+    base = f"http://127.0.0.1:{server.server_port}"
+    manifest = tmp_path / "hosted-llm.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "name": "hosted-role-providers",
+                "required_roles": ["candidate_extractor", "summarizer", "entity_resolver"],
+                "providers": [
+                    {
+                        "name": "extractor",
+                        "role": "candidate_extractor",
+                        "url": f"{base}/extract",
+                        "api_key_env": "MNEMOSYNE_HOSTED_LLM_TEST_KEY",
+                    },
+                    {
+                        "name": "summarizer",
+                        "role": "summarizer",
+                        "protocol": "openai-chat-json",
+                        "url": f"{base}/summarize",
+                        "api_key_env": "MNEMOSYNE_HOSTED_LLM_TEST_KEY",
+                    },
+                    {
+                        "name": "resolver",
+                        "role": "entity_resolver",
+                        "url": f"{base}/resolve",
+                        "api_key_env": "MNEMOSYNE_HOSTED_LLM_TEST_KEY",
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    try:
+        report = run_cli(
+            tmp_path / "mnemosyne.json",
+            "hosted-llm-check",
+            "--hosted-llm-manifest",
+            str(manifest),
+            "--allow-insecure-localhost",
+        )
+        acknowledged = run_cli(
+            tmp_path / "mnemosyne.json",
+            "hosted-llm-check",
+            "--hosted-llm-manifest",
+            str(manifest),
+            "--allow-insecure-localhost",
+            "--expected-fingerprint",
+            report["fingerprint"],
+        )
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        server.server_close()
+
+    serialized = json.dumps(report)
+    assert report["ok"] is True
+    assert acknowledged["ok"] is True
+    assert acknowledged["expected_fingerprint_present"] is True
+    assert len(report["fingerprint"]) == 64
+    assert {item["role"] for item in report["checks"]} == {
+        "candidate_extractor",
+        "summarizer",
+        "entity_resolver",
+    }
+    assert report["checks"][0]["contract"]["candidate_count"] == 1
+    assert report["checks"][1]["contract"]["summary_length"] == len("Hosted provider summary")
+    assert report["checks"][2]["contract"]["entity_keys"] == ["provider-health"]
+    assert "hosted-secret-value" not in serialized
+    assert all(item["auth"] == "Bearer hosted-secret-value" for item in requests)
+
+
+def test_cli_hosted_llm_check_rejects_insecure_non_acknowledged_http(tmp_path: Path) -> None:
+    manifest = tmp_path / "hosted-llm-http.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "name": "bad-hosted-provider",
+                "required_roles": ["summarizer"],
+                "providers": [
+                    {
+                        "name": "bad-summarizer",
+                        "role": "summarizer",
+                        "url": "http://127.0.0.1:1/summarize",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = run_raw_cli(tmp_path / "mnemosyne.json", "hosted-llm-check", "--hosted-llm-manifest", str(manifest))
+    payload = json.loads(result.stdout)
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert "hosted provider checks require https" in payload["checks"][0]["error"]
+    assert "hosted-secret-value" not in result.stdout
+
+
 def test_cli_provider_check_validates_oidc_manifest_without_sensitive_values(tmp_path: Path) -> None:
     jwks, _ = make_oidc_token(oidc_payload())
     jwks_file = tmp_path / "jwks.json"

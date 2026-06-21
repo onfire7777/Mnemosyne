@@ -83,6 +83,7 @@ DEPLOYMENT_SOAK_COMMANDS = {
     "belief-revision-check",
     "calibration-tune",
     "forgetting-policy-check",
+    "hosted-llm-check",
     "policy-ops-check",
     "provider-check",
     "idp-jwks-live-check",
@@ -109,6 +110,7 @@ PRODUCTION_RELEASE_REQUIRED_COMMANDS = (
     "belief-revision-check",
     "calibration-tune",
     "forgetting-policy-check",
+    "hosted-llm-check",
     "policy-ops-check",
     "provider-check",
     "idp-jwks-live-check",
@@ -3613,6 +3615,289 @@ def enforce_provider_manifest_policy(
     return ok
 
 
+def _read_hosted_llm_manifest(path: str) -> dict[str, Any]:
+    try:
+        manifest = json.loads(Path(path).expanduser().read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"hosted LLM manifest denied: {exc}") from exc
+    if not isinstance(manifest, dict):
+        raise SystemExit("hosted LLM manifest must be a JSON object")
+    providers = manifest.get("providers")
+    if not isinstance(providers, list) or not providers:
+        raise SystemExit("hosted LLM manifest requires a non-empty providers array")
+    return manifest
+
+
+def _is_loopback_host(host: str | None) -> bool:
+    if not host:
+        return False
+    normalized = host.strip().lower()
+    if normalized == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(normalized).is_loopback
+    except ValueError:
+        return False
+
+
+def _validate_hosted_url(url: str, *, allow_insecure_localhost: bool) -> tuple[str, str]:
+    parsed = urlsplit(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise ValueError("provider url must be http(s) with a hostname")
+    if parsed.scheme != "https" and not (allow_insecure_localhost and _is_loopback_host(parsed.hostname)):
+        raise ValueError("hosted provider checks require https unless --allow-insecure-localhost is set")
+    if parsed.scheme == "https":
+        try:
+            host_ip = ipaddress.ip_address(parsed.hostname)
+        except ValueError:
+            pass
+        else:
+            if host_ip.is_private or host_ip.is_link_local or host_ip.is_loopback:
+                raise ValueError("https provider url must not target private, link-local, or loopback IPs")
+    port = f":{parsed.port}" if parsed.port else ""
+    origin = f"{parsed.scheme}://{parsed.hostname}{port}"
+    return origin, parsed.hostname
+
+
+def _hosted_provider_request(provider: Mapping[str, Any], *, default_timeout: float) -> tuple[dict[str, Any], float]:
+    request_payload = provider.get("request")
+    if request_payload is None:
+        request_payload = {
+            "tenant_id": "hosted-provider-health",
+            "payload": {"query": "Mnemosyne hosted provider health check"},
+            "evidence": [
+                {
+                    "cid": "health-cid",
+                    "content": "Provider Health is configured.",
+                    "source_type": "hosted-llm-check",
+                }
+            ],
+            "candidates": [
+                {
+                    "signature": "provider-health",
+                    "query": "provider health",
+                    "candidate_subject": "Provider Health",
+                    "candidate_predicate": "is",
+                    "candidate_object": "configured",
+                }
+            ],
+        }
+    if not isinstance(request_payload, Mapping):
+        raise ValueError("provider request must be a JSON object")
+    timeout = float(provider.get("timeout_seconds", default_timeout))
+    return dict(request_payload), timeout
+
+
+def _hosted_provider_api_key(provider: Mapping[str, Any]) -> tuple[str | None, str | None]:
+    if provider.get("api_key_env"):
+        env_name = str(provider["api_key_env"])
+        value = os.environ.get(env_name)
+        if not value:
+            raise ValueError(f"api key env {env_name} is not set")
+        return value, env_name
+    if provider.get("api_key"):
+        return str(provider["api_key"]), "inline"
+    return None, None
+
+
+def _extract_openai_chat_payload(raw: Mapping[str, Any], *, role: str) -> Mapping[str, Any]:
+    choices = raw.get("choices")
+    if not isinstance(choices, list) or not choices:
+        raise ValueError("openai-chat-json response requires choices array")
+    choice = choices[0]
+    if not isinstance(choice, Mapping):
+        raise ValueError("openai-chat-json choice must be an object")
+    message = choice.get("message")
+    content = message.get("content") if isinstance(message, Mapping) else choice.get("text")
+    if not isinstance(content, str) or not content.strip():
+        raise ValueError("openai-chat-json response requires message content")
+    try:
+        parsed = json.loads(content)
+    except json.JSONDecodeError:
+        if role == "summarizer":
+            return {"summary": content}
+        raise ValueError("openai-chat-json message content must be JSON for this role") from None
+    if not isinstance(parsed, Mapping):
+        raise ValueError("openai-chat-json message content must decode to a JSON object")
+    return parsed
+
+
+def _hosted_role_payload(raw: Mapping[str, Any], *, protocol: str, role: str) -> Mapping[str, Any]:
+    if protocol == "role-json":
+        return raw
+    if protocol == "openai-chat-json":
+        return _extract_openai_chat_payload(raw, role=role)
+    raise ValueError(f"unsupported hosted provider protocol {protocol}")
+
+
+def _validate_hosted_role_payload(role: str, payload: Mapping[str, Any]) -> dict[str, Any]:
+    if role == "candidate_extractor":
+        candidates = payload.get("candidates")
+        if not isinstance(candidates, list) or not candidates:
+            raise ValueError("candidate extractor response requires non-empty candidates array")
+        required = {"signature", "query", "candidate_subject", "candidate_predicate", "candidate_object"}
+        first = candidates[0]
+        if not isinstance(first, Mapping) or not required.issubset(first):
+            raise ValueError("candidate extractor candidate is missing required fields")
+        return {"candidate_count": len(candidates), "signatures": [str(item.get("signature")) for item in candidates[:5]]}
+    if role == "summarizer":
+        summary = payload.get("summary")
+        if not isinstance(summary, str) or not summary.strip():
+            raise ValueError("summarizer response requires non-empty summary")
+        return {"summary_length": len(summary)}
+    if role == "entity_resolver":
+        candidates = payload.get("candidates")
+        if not isinstance(candidates, list) or not candidates:
+            raise ValueError("entity resolver response requires non-empty candidates array")
+        entity_keys = [str(item.get("entity_key") or "") for item in candidates if isinstance(item, Mapping)]
+        if not entity_keys or not all(entity_keys):
+            raise ValueError("entity resolver response requires entity_key on every candidate")
+        return {"entity_count": len(entity_keys), "entity_keys": entity_keys[:5]}
+    raise ValueError(f"unsupported hosted provider role {role}")
+
+
+def _hosted_llm_fingerprint(report: Mapping[str, Any]) -> str:
+    stable = {
+        "manifest": report.get("manifest"),
+        "required_roles": report.get("required_roles"),
+        "checks": [
+            {
+                "name": item.get("name"),
+                "role": item.get("role"),
+                "protocol": item.get("protocol"),
+                "ok": item.get("ok"),
+                "provider_kind": item.get("provider_kind"),
+                "contract": item.get("contract"),
+            }
+            for item in report.get("checks", [])
+            if isinstance(item, Mapping)
+        ],
+    }
+    return sha256(json.dumps(stable, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def _run_hosted_provider_check(
+    provider: Mapping[str, Any],
+    *,
+    default_timeout: float,
+    allow_insecure_localhost: bool,
+) -> dict[str, Any]:
+    name = str(provider.get("name") or provider.get("role") or "hosted-provider")
+    role = str(provider["role"])
+    protocol = str(provider.get("protocol") or "role-json")
+    url = str(provider["url"])
+    request_payload, timeout = _hosted_provider_request(provider, default_timeout=default_timeout)
+    api_key, api_key_source = _hosted_provider_api_key(provider)
+    origin, host = _validate_hosted_url(url, allow_insecure_localhost=allow_insecure_localhost)
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "User-Agent": "mnemosyne-hosted-llm-check/1",
+    }
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    body = json.dumps(request_payload).encode("utf-8")
+    request = urlrequest.Request(url, data=body, headers=headers, method=str(provider.get("method") or "POST").upper())
+    started = time.monotonic()
+    with urlrequest.urlopen(request, timeout=timeout) as response:  # noqa: S310 - URL is policy-validated above.
+        status_code = int(getattr(response, "status", response.getcode()))
+        raw_bytes = response.read(int(provider.get("max_response_bytes", 65536)))
+    duration_ms = round((time.monotonic() - started) * 1000, 3)
+    raw = json.loads(raw_bytes.decode("utf-8"))
+    if not isinstance(raw, Mapping):
+        raise ValueError("hosted provider response must be a JSON object")
+    payload = _hosted_role_payload(raw, protocol=protocol, role=role)
+    contract = _validate_hosted_role_payload(role, payload)
+    return {
+        "name": name,
+        "role": role,
+        "ok": True,
+        "provider_kind": "hosted_http",
+        "protocol": protocol,
+        "origin": origin,
+        "host_sha256": sha256(host.encode("utf-8")).hexdigest()[:16],
+        "status_code": status_code,
+        "duration_ms": duration_ms,
+        "auth": {
+            "api_key_present": bool(api_key),
+            "api_key_source": api_key_source,
+            "authorization_redacted": bool(api_key),
+        },
+        "contract": contract,
+        "response_keys": sorted(str(key) for key in raw.keys()),
+    }
+
+
+def cmd_hosted_llm_check(args: argparse.Namespace) -> None:
+    manifest = _read_hosted_llm_manifest(args.hosted_llm_manifest)
+    required_roles = manifest.get("required_roles", ["candidate_extractor", "summarizer", "entity_resolver"])
+    if not isinstance(required_roles, list) or not all(isinstance(item, str) for item in required_roles):
+        raise SystemExit("hosted LLM manifest required_roles must be an array of strings")
+    checks: list[dict[str, Any]] = []
+    findings: list[dict[str, Any]] = []
+    for index, provider in enumerate(manifest["providers"], start=1):
+        if not isinstance(provider, Mapping):
+            checks.append({"index": index, "ok": False, "error": "provider must be a JSON object"})
+            continue
+        try:
+            check = _run_hosted_provider_check(
+                provider,
+                default_timeout=args.timeout,
+                allow_insecure_localhost=args.allow_insecure_localhost,
+            )
+            check["index"] = index
+        except Exception as exc:  # noqa: BLE001 - deployment checks return structured failures.
+            check = {
+                "index": index,
+                "name": str(provider.get("name") or provider.get("role") or f"provider-{index}"),
+                "role": str(provider.get("role") or ""),
+                "ok": False,
+                "provider_kind": "hosted_http",
+                "error": str(exc),
+            }
+        checks.append(check)
+    for check in checks:
+        if check.get("ok") is not True:
+            findings.append(
+                {
+                    "code": "provider_check_failed",
+                    "message": f"hosted provider {check.get('name') or check.get('index')} did not pass",
+                }
+            )
+    for role in required_roles:
+        role_checks = [item for item in checks if item.get("role") == role]
+        if not role_checks:
+            findings.append({"code": "missing_required_role", "message": f"hosted role {role} is missing"})
+        elif not any(item.get("ok") is True for item in role_checks):
+            findings.append({"code": "required_role_failed", "message": f"hosted role {role} did not pass"})
+    if manifest.get("forbid_local") is True and args.allow_insecure_localhost:
+        findings.append({"code": "local_provider_allowed", "message": "forbid_local manifest cannot allow insecure localhost"})
+    report = {
+        "ok": not findings,
+        "manifest": {
+            "name": manifest.get("name"),
+            "provider_count": len(manifest["providers"]),
+            "forbid_local": bool(manifest.get("forbid_local", False)),
+        },
+        "required_roles": sorted(required_roles),
+        "redaction": {
+            "authorization_header_redacted": True,
+            "request_body_omitted": True,
+            "response_body_omitted": True,
+        },
+        "checks": checks,
+        "findings": findings,
+    }
+    report["fingerprint"] = _hosted_llm_fingerprint(report)
+    report["expected_fingerprint_present"] = bool(args.expected_fingerprint)
+    if args.expected_fingerprint and args.expected_fingerprint.strip().lower() != report["fingerprint"]:
+        report["ok"] = False
+        report["findings"].append({"code": "fingerprint_mismatch", "message": "hosted LLM check fingerprint mismatch"})
+    emit(report)
+    if not report["ok"]:
+        raise SystemExit(1)
+
+
 def cmd_provider_check(args: argparse.Namespace) -> None:
     manifest = apply_provider_manifest(args)
     checks: dict[str, dict[str, Any]] = {}
@@ -4914,6 +5199,26 @@ def build_parser() -> argparse.ArgumentParser:
     provider_check = sub.add_parser("provider-check")
     provider_check.add_argument("--provider-manifest", help="JSON deployment manifest for provider health gates")
     provider_check.set_defaults(func=cmd_provider_check)
+
+    hosted_llm_check = sub.add_parser("hosted-llm-check")
+    hosted_llm_check.add_argument(
+        "--hosted-llm-manifest",
+        required=True,
+        help="JSON manifest of hosted LLM/provider role endpoints to validate",
+    )
+    hosted_llm_check.add_argument(
+        "--timeout",
+        type=float,
+        default=float(os.environ.get("MNEMOSYNE_HOSTED_LLM_CHECK_TIMEOUT", "30")),
+        help="Default per-provider timeout in seconds",
+    )
+    hosted_llm_check.add_argument(
+        "--allow-insecure-localhost",
+        action="store_true",
+        help="Allow http://localhost or 127.0.0.1 only for local validation tests",
+    )
+    hosted_llm_check.add_argument("--expected-fingerprint")
+    hosted_llm_check.set_defaults(func=cmd_hosted_llm_check)
 
     deployment_soak = sub.add_parser("deployment-soak")
     deployment_soak.add_argument(
