@@ -43,6 +43,14 @@ def _summary_source_fingerprint(source_cids: Sequence[str], *, level: int = 1) -
     return sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
 
 
+def _positive_int(value: object, *, default: int, minimum: int = 1) -> int:
+    try:
+        parsed = int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        parsed = default
+    return max(minimum, parsed)
+
+
 @dataclass(slots=True)
 class ConsolidationJob:
     tenant_id: str
@@ -204,9 +212,8 @@ class ConsolidationWorker:
             if pass_name in {"replayer", "extractor", "resolver", "belief_reviser"}:
                 continue
             if pass_name == "summarizer":
-                summary = self.summarizer.summarize(tenant_id, evidence)
+                summary = self._run_summarizer_pass(tenant_id, branch, evidence, payload)
                 if summary:
-                    summary = self._materialize_summary(tenant_id, branch, summary, evidence)
                     pass_results.append(PassResult(pass_name, "complete", summary))
                 else:
                     skipped.append("summarizer_no_evidence")
@@ -453,16 +460,150 @@ class ConsolidationWorker:
             "summary": summary,
         }
 
+    def _run_summarizer_pass(
+        self,
+        tenant_id: str,
+        branch: str,
+        evidence: list[Evidence],
+        payload: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        if not evidence:
+            return None
+        cluster_size = _positive_int(payload.get("raptor_cluster_size"), default=4)
+        max_levels = _positive_int(payload.get("raptor_max_levels"), default=2)
+        if max_levels <= 1 or len(evidence) <= cluster_size:
+            summary = self.summarizer.summarize(tenant_id, evidence)
+            if not summary:
+                return None
+            return self._materialize_summary(tenant_id, branch, summary, evidence, raptor_level=1)
+        return self._materialize_summary_hierarchy(
+            tenant_id,
+            branch,
+            evidence,
+            cluster_size=cluster_size,
+            max_levels=max_levels,
+        )
+
+    def _materialize_summary_hierarchy(
+        self,
+        tenant_id: str,
+        branch: str,
+        evidence: list[Evidence],
+        *,
+        cluster_size: int,
+        max_levels: int,
+    ) -> dict[str, Any] | None:
+        get_evidence = getattr(self.engine, "get_evidence", None)
+        if not callable(get_evidence):
+            summary = self.summarizer.summarize(tenant_id, evidence)
+            if not summary:
+                return None
+            return self._materialize_summary(tenant_id, branch, summary, evidence, raptor_level=1)
+
+        raw_source_cids = self._summary_transitive_source_cids(evidence)
+        current = list(evidence)
+        all_results: list[dict[str, Any]] = []
+        levels: list[dict[str, Any]] = []
+        all_relation_ids: list[str] = []
+
+        for level in range(1, max_levels + 1):
+            if len(current) <= 1 and level > 1:
+                break
+            clusters = [current] if level == max_levels or len(current) <= cluster_size else self._cluster_evidence(current, cluster_size)
+            next_level: list[Evidence] = []
+            level_summary_cids: list[str] = []
+            for cluster in clusters:
+                if not cluster:
+                    continue
+                summary = self.summarizer.summarize(tenant_id, cluster)
+                if not summary:
+                    continue
+                if level > 1:
+                    child_summary_cids = [item.cid for item in cluster if item.cid]
+                    summary = {
+                        **summary,
+                        "source_cids": self._summary_transitive_source_cids(cluster),
+                        "source_summary_cids": child_summary_cids,
+                        "relation_source_cids": child_summary_cids,
+                    }
+                result = self._materialize_summary(tenant_id, branch, summary, cluster, raptor_level=level)
+                if not result.get("materialized") or not result.get("summary_cid"):
+                    continue
+                summary_cid = str(result["summary_cid"])
+                materialized = get_evidence(tenant_id, summary_cid, branch)
+                if materialized is not None:
+                    next_level.append(materialized)
+                level_summary_cids.append(summary_cid)
+                all_relation_ids.extend(str(item) for item in result.get("derived_relation_ids", []))
+                all_results.append(result)
+
+            if not level_summary_cids:
+                break
+            levels.append({"level": level, "summary_cids": level_summary_cids, "summary_count": len(level_summary_cids)})
+            current = next_level
+            if len(current) <= 1:
+                break
+
+        if not all_results:
+            return None
+        root = dict(all_results[-1])
+        leaf_summary_cids = list(levels[0]["summary_cids"]) if levels else [str(root["summary_cid"])]
+        root["derived_relation_ids"] = all_relation_ids
+        root["hierarchy"] = {
+            "enabled": len(levels) > 1,
+            "strategy": "deterministic_raptor_tree",
+            "cluster_size": cluster_size,
+            "max_levels": max_levels,
+            "levels": levels,
+            "leaf_summary_cids": leaf_summary_cids,
+            "root_summary_cid": root.get("summary_cid"),
+            "summary_cids": [str(result["summary_cid"]) for result in all_results if result.get("summary_cid")],
+            "source_evidence_cids": raw_source_cids,
+        }
+        return root
+
+    @staticmethod
+    def _cluster_evidence(evidence: list[Evidence], cluster_size: int) -> list[list[Evidence]]:
+        clusters = [evidence[index : index + cluster_size] for index in range(0, len(evidence), cluster_size)]
+        if len(clusters) > 1 and len(clusters[-1]) == 1:
+            clusters[-2].extend(clusters.pop())
+        return clusters
+
+    @staticmethod
+    def _summary_transitive_source_cids(evidence: Sequence[Evidence]) -> list[str]:
+        source_cids: list[str] = []
+
+        def add(values: object) -> None:
+            if not isinstance(values, list):
+                return
+            for value in values:
+                cid = str(value)
+                if cid and cid not in source_cids:
+                    source_cids.append(cid)
+
+        for item in evidence:
+            metadata = item.metadata if isinstance(item.metadata, dict) else {}
+            summary = metadata.get("summary") if isinstance(metadata.get("summary"), dict) else {}
+            add(summary.get("source_evidence_cids") if isinstance(summary, dict) else None)
+            add(metadata.get("source_evidence_cids"))
+            if item.cid and not (isinstance(summary, dict) and summary.get("source_evidence_cids")) and not metadata.get("source_evidence_cids") and item.cid not in source_cids:
+                source_cids.append(item.cid)
+        return source_cids
+
     def _materialize_summary(
         self,
         tenant_id: str,
         branch: str,
         summary: dict[str, Any],
         evidence: list[Evidence],
+        *,
+        raptor_level: int = 1,
     ) -> dict[str, Any]:
         append_evidence = getattr(self.engine, "append_evidence", None)
         add_relation = getattr(self.engine, "add_relation", None)
-        source_cids = [item.cid for item in evidence if item.cid]
+        source_cids = [str(cid) for cid in summary.get("source_cids") or [item.cid for item in evidence if item.cid]]
+        relation_source_cids = [str(cid) for cid in summary.get("relation_source_cids") or [item.cid for item in evidence if item.cid]]
+        source_summary_cids = [str(cid) for cid in summary.get("source_summary_cids") or []]
         summary_text = str(summary.get("summary") or "").strip()
         if not callable(append_evidence) or not callable(add_relation) or not source_cids or not summary_text:
             return {**summary, "materialized": False}
@@ -474,16 +615,35 @@ class ConsolidationWorker:
                     "tenant_id": tenant_id,
                     "branch": branch,
                     "source_cids": source_cids,
+                    "source_summary_cids": source_summary_cids,
                     "summary": summary_text,
                     "strategy": summary.get("strategy"),
+                    "raptor_level": raptor_level,
                 },
                 sort_keys=True,
             ).encode("utf-8")
         ).hexdigest()
-        content = "Source evidence CIDs: " + ", ".join(source_cids) + "\n\n" + summary_text
+        content_lines = ["Source evidence CIDs: " + ", ".join(source_cids)]
+        if source_summary_cids:
+            content_lines.append("Source summary CIDs: " + ", ".join(source_summary_cids))
+        content = "\n".join(content_lines) + "\n\n" + summary_text
         first = evidence[0]
         generated_at = datetime.now(UTC).isoformat()
-        source_fingerprint = _summary_source_fingerprint(source_cids)
+        source_fingerprint = _summary_source_fingerprint(source_cids, level=raptor_level)
+        summary_metadata = {
+            "kind": "abstractive_gist",
+            "strategy": summary.get("strategy"),
+            "status": "active",
+            "generated_at": generated_at,
+            "source_fingerprint": source_fingerprint,
+            "confabulation_risk": True,
+            "source_evidence_cids": source_cids,
+            "raptor_level": raptor_level,
+            "source_count": len(source_cids),
+        }
+        if source_summary_cids:
+            summary_metadata["source_summary_cids"] = source_summary_cids
+            summary_metadata["child_summary_cids"] = source_summary_cids
         summary_cid = append_evidence(
             Evidence(
                 tenant_id=tenant_id,
@@ -494,18 +654,9 @@ class ConsolidationWorker:
                 content=content,
                 modality="text",
                 metadata={
-                    "summary": {
-                        "kind": "abstractive_gist",
-                        "strategy": summary.get("strategy"),
-                        "status": "active",
-                        "generated_at": generated_at,
-                        "source_fingerprint": source_fingerprint,
-                        "confabulation_risk": True,
-                        "source_evidence_cids": source_cids,
-                        "raptor_level": 1,
-                        "source_count": len(source_cids),
-                    },
+                    "summary": summary_metadata,
                     "source_evidence_cids": source_cids,
+                    **({"source_summary_cids": source_summary_cids} if source_summary_cids else {}),
                 },
                 trust_tier=trust_tier,
                 capability_tags=["derived-summary", "consolidation-gist", "source:consolidation"],
@@ -520,9 +671,10 @@ class ConsolidationWorker:
             source_cids,
             summary_cid,
             generated_at=generated_at,
+            raptor_level=raptor_level,
         )
         relation_ids: list[str] = []
-        for source_cid in source_cids:
+        for source_cid in relation_source_cids:
             relation_ids.append(
                 add_relation(
                     Relation(
@@ -546,6 +698,8 @@ class ConsolidationWorker:
             "source_fingerprint": source_fingerprint,
             "fidelity": "abstractive_gist",
             "trust_tier": trust_tier,
+            "raptor_level": raptor_level,
+            **({"source_summary_cids": source_summary_cids} if source_summary_cids else {}),
         }
 
     def _retire_superseded_summaries(
@@ -556,12 +710,13 @@ class ConsolidationWorker:
         new_summary_cid: str,
         *,
         generated_at: str,
+        raptor_level: int = 1,
     ) -> list[str]:
         export_tenant = getattr(self.engine, "export_tenant", None)
         update_metadata = getattr(self.engine, "update_evidence_metadata", None)
         if not callable(export_tenant) or not callable(update_metadata):
             return []
-        source_fingerprint = _summary_source_fingerprint(source_cids)
+        source_fingerprint = _summary_source_fingerprint(source_cids, level=raptor_level)
         try:
             snapshot = export_tenant(tenant_id)
         except Exception:
@@ -579,8 +734,13 @@ class ConsolidationWorker:
             if is_retired_summary_metadata(metadata):
                 continue
             summary_meta = metadata.get("summary") if isinstance(metadata.get("summary"), dict) else {}
+            existing_level = _positive_int(summary_meta.get("raptor_level"), default=1)
             existing_sources = summary_meta.get("source_evidence_cids") or metadata.get("source_evidence_cids") or []
-            if _summary_source_fingerprint([str(item) for item in existing_sources]) != source_fingerprint:
+            existing_fingerprint = str(summary_meta.get("source_fingerprint") or "")
+            if existing_fingerprint:
+                if existing_fingerprint != source_fingerprint:
+                    continue
+            elif _summary_source_fingerprint([str(item) for item in existing_sources], level=existing_level) != source_fingerprint:
                 continue
             retired_summary = {
                 **summary_meta,

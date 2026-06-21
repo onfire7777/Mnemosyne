@@ -40,6 +40,8 @@ Latest checkpoint: Projection recompute now schedules bounded one-level summary 
 
 Latest checkpoint: Retrieval abstention now treats sole statistical-trace or explicit confabulation-risk support as insufficient, not only `abstractive_gist` or `consolidation-summary` evidence. Materialized gist summaries now carry `confabulation_risk=true`, and shared Local/Postgres contracts cover both statistical traces and non-gist summaries flagged with confabulation risk. Local verification now collects 342 tests with 291 passing tests plus 51 skipped live-DB tests, and the compose DSN run passes all 342 tests.
 
+Latest checkpoint: Consolidation summarization now builds a deterministic multi-level RAPTOR-style hierarchy when the source set exceeds the configured cluster size. The worker materializes level-1 leaf summaries, then a level-2 root summary over child summary evidence; metadata records `raptor_level`, source fingerprints, `confabulation_risk=true`, transitive raw `source_evidence_cids`, and root `source_summary_cids`/`child_summary_cids`. Relations preserve raw-to-leaf and leaf-to-root `summary-derived-gist` lineage, and retrieval still abstains when the root summary is sole support. Local verification now collects 344 tests with 292 passing tests plus 52 skipped live-DB tests, and the clean compose DSN run passes all 344 tests with `MNEMOSYNE_POSTGRES_DSN=postgresql://mnemosyne:<redacted>@127.0.0.1:54329/mnemosyne?connect_timeout=5`.
+
 Progress: [███████░░░] local scaffold verified; production parity gaps remain
 
 ## Performance Metrics

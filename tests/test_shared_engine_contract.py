@@ -615,6 +615,89 @@ def test_shared_engine_contract_summary_refresh_retires_superseded_gist(
     assert second_cid in {hit.id for hit in active_retrieval.hits}
 
 
+def test_shared_engine_contract_builds_raptor_summary_hierarchy(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, user = engine_bundle
+    source_cids = [
+        engine.append_evidence(
+            Evidence(
+                tenant_id=tenant,
+                user_id=user,
+                actor="user",
+                source_type="chat",
+                content=f"Raptor hierarchy source {index} preserves raw evidence provenance.",
+                trust_tier=0,
+                access_policy={"tenant": tenant},
+            )
+        )
+        for index in range(4)
+    ]
+    worker = ConsolidationWorker(engine, gate_cases=[])
+
+    run = worker.run_queue_payload(
+        {
+            "tenant_id": tenant,
+            "branch": "main",
+            "source_evidence_cids": source_cids,
+            "passes": ["summarizer"],
+            "raptor_cluster_size": 2,
+            "raptor_max_levels": 2,
+        }
+    )
+    details = next(item for item in run.pass_results if item["name"] == "summarizer")["details"]
+    hierarchy = details["hierarchy"]
+    leaf_cids = hierarchy["levels"][0]["summary_cids"]
+    root_cid = hierarchy["root_summary_cid"]
+    exported = engine.export_tenant(tenant)
+    summaries = {
+        item["cid"]: item
+        for item in exported["evidence"]
+        if item["source_type"] == "consolidation-summary"
+    }
+    relation_edges = {
+        (item["source"], item["target"])
+        for item in exported["relations"]
+        if item["predicate"] == "summary-derived-gist"
+    }
+
+    assert details["materialized"] is True
+    assert hierarchy["enabled"] is True
+    assert hierarchy["source_evidence_cids"] == source_cids
+    assert [level["summary_count"] for level in hierarchy["levels"]] == [2, 1]
+    assert len(leaf_cids) == 2
+    assert root_cid == details["summary_cid"]
+    assert set(summaries) == {*leaf_cids, root_cid}
+
+    first_leaf_meta = summaries[leaf_cids[0]]["metadata"]["summary"]
+    second_leaf_meta = summaries[leaf_cids[1]]["metadata"]["summary"]
+    root_meta = summaries[root_cid]["metadata"]["summary"]
+
+    assert first_leaf_meta["raptor_level"] == 1
+    assert second_leaf_meta["raptor_level"] == 1
+    assert root_meta["raptor_level"] == 2
+    assert first_leaf_meta["source_evidence_cids"] == source_cids[:2]
+    assert second_leaf_meta["source_evidence_cids"] == source_cids[2:]
+    assert root_meta["source_evidence_cids"] == source_cids
+    assert root_meta["source_summary_cids"] == leaf_cids
+    assert root_meta["child_summary_cids"] == leaf_cids
+    assert root_meta["confabulation_risk"] is True
+
+    for leaf_cid in leaf_cids:
+        leaf_sources = summaries[leaf_cid]["metadata"]["summary"]["source_evidence_cids"]
+        assert all((source_cid, leaf_cid) in relation_edges for source_cid in leaf_sources)
+        assert (leaf_cid, root_cid) in relation_edges
+
+    root_retrieval = engine.retrieve(leaf_cids[0], tenant)
+    root_hit = next(hit for hit in root_retrieval.hits if hit.id == root_cid)
+
+    assert root_hit.metadata["summary"]["raptor_level"] == 2
+    assert root_hit.metadata["summary"]["source_evidence_cids"] == source_cids
+    assert root_hit.metadata["summary"]["source_summary_cids"] == leaf_cids
+    assert root_retrieval.abstained is True
+    assert root_cid in root_retrieval.explain["gist_support"]["gist_hit_ids"]
+
+
 def test_shared_engine_contract_forget_source_invalidates_summary_gist(
     engine_bundle: tuple[Any, str, str],
 ) -> None:
