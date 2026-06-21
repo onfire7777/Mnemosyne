@@ -16,6 +16,7 @@ from mnemosyne.gate import Candidate, GateResult, PromotionGate, RegressionCase
 from mnemosyne.learning import Lesson, Procedure
 from mnemosyne.lifecycle import FidelityTier, LifecycleState, demotion_decision
 from mnemosyne.models import Assertion, Evidence, Relation
+from mnemosyne.retrieval import is_retired_summary_metadata
 from mnemosyne.security import SecurityPolicy, TrustTier
 from mnemosyne.text import hashing_embedding
 from mnemosyne.user_model import LatentUserProfile, UserModel
@@ -34,6 +35,12 @@ DEFAULT_CONSOLIDATION_PASSES = [
     "promotion_gate",
     "user_model_updater",
 ]
+
+
+def _summary_source_fingerprint(source_cids: Sequence[str], *, level: int = 1) -> str:
+    normalized = sorted(str(cid) for cid in source_cids)
+    payload = {"raptor_level": level, "source_evidence_cids": normalized}
+    return sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
 
 
 @dataclass(slots=True)
@@ -475,6 +482,8 @@ class ConsolidationWorker:
         ).hexdigest()
         content = "Source evidence CIDs: " + ", ".join(source_cids) + "\n\n" + summary_text
         first = evidence[0]
+        generated_at = datetime.now(UTC).isoformat()
+        source_fingerprint = _summary_source_fingerprint(source_cids)
         summary_cid = append_evidence(
             Evidence(
                 tenant_id=tenant_id,
@@ -488,6 +497,9 @@ class ConsolidationWorker:
                     "summary": {
                         "kind": "abstractive_gist",
                         "strategy": summary.get("strategy"),
+                        "status": "active",
+                        "generated_at": generated_at,
+                        "source_fingerprint": source_fingerprint,
                         "source_evidence_cids": source_cids,
                         "raptor_level": 1,
                         "source_count": len(source_cids),
@@ -500,6 +512,13 @@ class ConsolidationWorker:
                 access_policy=dict(first.access_policy or {"tenant": tenant_id}),
             ),
             branch=branch,
+        )
+        retired_summary_cids = self._retire_superseded_summaries(
+            tenant_id,
+            branch,
+            source_cids,
+            summary_cid,
+            generated_at=generated_at,
         )
         relation_ids: list[str] = []
         for source_cid in source_cids:
@@ -522,9 +541,63 @@ class ConsolidationWorker:
             "materialized": True,
             "summary_cid": summary_cid,
             "derived_relation_ids": relation_ids,
+            "retired_summary_cids": retired_summary_cids,
+            "source_fingerprint": source_fingerprint,
             "fidelity": "abstractive_gist",
             "trust_tier": trust_tier,
         }
+
+    def _retire_superseded_summaries(
+        self,
+        tenant_id: str,
+        branch: str,
+        source_cids: list[str],
+        new_summary_cid: str,
+        *,
+        generated_at: str,
+    ) -> list[str]:
+        export_tenant = getattr(self.engine, "export_tenant", None)
+        update_metadata = getattr(self.engine, "update_evidence_metadata", None)
+        if not callable(export_tenant) or not callable(update_metadata):
+            return []
+        source_fingerprint = _summary_source_fingerprint(source_cids)
+        try:
+            snapshot = export_tenant(tenant_id)
+        except Exception:
+            return []
+        retired: list[str] = []
+        for row in snapshot.get("evidence", []):
+            if not isinstance(row, dict):
+                continue
+            cid = str(row.get("cid") or "")
+            if not cid or cid == new_summary_cid:
+                continue
+            if row.get("branch", branch) != branch or row.get("source_type") != "consolidation-summary":
+                continue
+            metadata = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
+            if is_retired_summary_metadata(metadata):
+                continue
+            summary_meta = metadata.get("summary") if isinstance(metadata.get("summary"), dict) else {}
+            existing_sources = summary_meta.get("source_evidence_cids") or metadata.get("source_evidence_cids") or []
+            if _summary_source_fingerprint([str(item) for item in existing_sources]) != source_fingerprint:
+                continue
+            retired_summary = {
+                **summary_meta,
+                "status": "retired",
+                "retired_at": generated_at,
+                "retired_by": "consolidation.summarizer",
+                "superseded_by": new_summary_cid,
+            }
+            if update_metadata(
+                tenant_id,
+                cid,
+                {"summary": retired_summary},
+                branch=branch,
+                actor="consolidation",
+                source="summary_refresh",
+            ):
+                retired.append(cid)
+        return retired
 
     def _embed_evidence(self, tenant_id: str, branch: str, evidence: list[Evidence]) -> dict[str, Any]:
         set_embedding = getattr(self.engine, "set_evidence_embedding", None)
