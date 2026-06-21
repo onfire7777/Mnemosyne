@@ -4698,6 +4698,118 @@ def test_cli_policy_ops_check_fails_closed_on_bad_shadow_bundle(tmp_path: Path) 
     assert "production_mutation_enabled" in codes
 
 
+def privacy_ops_bundle(*, local_kms: bool = False, incomplete_erasure: bool = False) -> dict:
+    return {
+        "name": "production-privacy-ops",
+        "required_cases": ["residency-allow", "residency-deny", "tombstone", "legal-delete"],
+        "kms": {
+            "provider": "aws-kms-prod" if not local_kms else "local-json",
+            "key_id_hash": "kms-key-sha256:abc123",
+            "key_lifecycle": {
+                "key_created": True,
+                "encrypt_roundtrip_verified": True,
+                "rotation_verified": True,
+                "key_shredded": True,
+                "post_shred_get_failed": True,
+                "post_shred_has_key_false": True,
+            },
+        },
+        "residency": {
+            "strict_runtime_residency": True,
+            "cases": [
+                {
+                    "id": "residency-allow",
+                    "source": "us",
+                    "target": "us",
+                    "expected_decision": "allow",
+                    "actual_decision": "allow",
+                    "enforced": True,
+                },
+                {
+                    "id": "residency-deny",
+                    "source": "eu",
+                    "target": "us",
+                    "expected_decision": "deny",
+                    "actual_decision": "deny",
+                    "enforced": True,
+                },
+            ],
+        },
+        "erasure": {
+            "cases": [
+                {
+                    "id": "tombstone",
+                    "mode": "tombstone_recompute",
+                    "cid_hash": "cid-sha256:aaa",
+                    "audit_event": True,
+                    "bytes_unreadable": True,
+                    "derived_evidence_removed": True,
+                    "tombstone_replay_blocked": not incomplete_erasure,
+                },
+                {
+                    "id": "legal-delete",
+                    "mode": "legal_hard_delete",
+                    "cid_hash": "cid-sha256:bbb",
+                    "audit_event": True,
+                    "bytes_unreadable": True,
+                    "derived_evidence_removed": True,
+                    "tombstone_replay_blocked": True,
+                },
+            ],
+        },
+    }
+
+
+def test_cli_privacy_ops_check_validates_kms_residency_erasure_bundle(tmp_path: Path) -> None:
+    bundle = tmp_path / "privacy-ops.json"
+    bundle.write_text(json.dumps(privacy_ops_bundle()), encoding="utf-8")
+
+    report = run_cli(
+        tmp_path / "mnemosyne.json",
+        "privacy-ops-check",
+        "--bundle",
+        str(bundle),
+        "--require-case",
+        "residency-allow",
+        "--require-case",
+        "legal-delete",
+    )
+    acknowledged = run_cli(
+        tmp_path / "mnemosyne.json",
+        "privacy-ops-check",
+        "--bundle",
+        str(bundle),
+        "--expected-fingerprint",
+        report["fingerprint"],
+    )
+
+    serialized = json.dumps(report)
+    assert report["ok"] is True
+    assert len(report["fingerprint"]) == 64
+    assert report["bundle"]["kms_provider"] == "aws-kms-prod"
+    assert {item["name"] for item in report["checks"]} == {"kms", "residency", "erasure"}
+    assert all(item["ok"] for item in report["checks"])
+    assert report["redaction"]["raw_key_material_omitted"] is True
+    assert report["redaction"]["raw_object_bytes_omitted"] is True
+    assert "raw-secret-key" not in serialized
+    assert acknowledged["ok"] is True
+    assert acknowledged["expected_fingerprint_present"] is True
+
+
+def test_cli_privacy_ops_check_fails_closed_on_local_kms_and_bad_erasure(tmp_path: Path) -> None:
+    bundle = tmp_path / "bad-privacy-ops.json"
+    bundle.write_text(json.dumps(privacy_ops_bundle(local_kms=True, incomplete_erasure=True)), encoding="utf-8")
+
+    result = run_raw_cli(tmp_path / "mnemosyne.json", "privacy-ops-check", "--bundle", str(bundle))
+    payload = json.loads(result.stdout)
+    codes = {finding["code"] for finding in payload["findings"]}
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert "kms_provider_local" in codes
+    assert "erasure_case_failed" in codes
+
+
 def test_cli_preference_write_requires_explicit_or_high_trust_source(tmp_path: Path) -> None:
     denied = run_raw_cli(
         tmp_path / "mnemosyne.json",

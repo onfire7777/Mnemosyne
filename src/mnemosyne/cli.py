@@ -85,6 +85,7 @@ DEPLOYMENT_SOAK_COMMANDS = {
     "forgetting-policy-check",
     "hosted-llm-check",
     "policy-ops-check",
+    "privacy-ops-check",
     "provenance-trust-check",
     "provider-check",
     "idp-jwks-live-check",
@@ -114,6 +115,7 @@ PRODUCTION_RELEASE_REQUIRED_COMMANDS = (
     "forgetting-policy-check",
     "hosted-llm-check",
     "policy-ops-check",
+    "privacy-ops-check",
     "provenance-trust-check",
     "provider-check",
     "idp-jwks-live-check",
@@ -1271,6 +1273,235 @@ def cmd_policy_ops_check(args: argparse.Namespace) -> None:
                 "message": "policy ops bundle fingerprint mismatch",
             }
         )
+    emit(report)
+    if not report["ok"]:
+        raise SystemExit(1)
+
+
+def _load_privacy_ops_bundle(args: argparse.Namespace) -> Mapping[str, Any]:
+    if bool(args.bundle) == bool(args.bundle_json):
+        raise SystemExit("privacy-ops-check requires exactly one of --bundle or --bundle-json")
+    try:
+        loaded = (
+            json.loads(Path(args.bundle).expanduser().read_text(encoding="utf-8"))
+            if args.bundle
+            else json.loads(args.bundle_json)
+        )
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"privacy ops bundle denied: {exc}") from exc
+    if not isinstance(loaded, Mapping):
+        raise SystemExit("privacy ops bundle must be a JSON object")
+    return loaded
+
+
+def _privacy_bool(value: Any, *, default: bool = False) -> bool:
+    return value if isinstance(value, bool) else default
+
+
+def _privacy_finding(code: str, message: str, *, case_id: str | None = None) -> dict[str, Any]:
+    finding: dict[str, Any] = {"code": code, "message": message}
+    if case_id:
+        finding["case_id"] = case_id
+    return finding
+
+
+def _privacy_ops_fingerprint(report: Mapping[str, Any]) -> str:
+    payload = {
+        "bundle": report.get("bundle"),
+        "requirements": report.get("requirements"),
+        "checks": report.get("checks"),
+        "findings": report.get("findings"),
+    }
+    return sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def _privacy_cases(raw: Any, *, section: str) -> list[Mapping[str, Any]]:
+    if raw is None:
+        return []
+    if not isinstance(raw, list) or not all(isinstance(item, Mapping) for item in raw):
+        raise SystemExit(f"privacy ops {section} cases must be an array of JSON objects")
+    return raw
+
+
+def cmd_privacy_ops_check(args: argparse.Namespace) -> None:
+    bundle = _load_privacy_ops_bundle(args)
+    findings: list[dict[str, Any]] = []
+    checks: list[dict[str, Any]] = []
+    raw_required_cases = bundle.get("required_cases") or []
+    if isinstance(raw_required_cases, str):
+        raw_required_cases = [raw_required_cases]
+    if not isinstance(raw_required_cases, list):
+        raise SystemExit("privacy ops required_cases must be a string or string array")
+    required_case_ids = list(dict.fromkeys([*raw_required_cases, *(args.require_case or [])]))
+    if not all(isinstance(item, str) for item in required_case_ids):
+        raise SystemExit("privacy ops required_cases must be string case IDs")
+    seen_case_ids: set[str] = set()
+
+    kms = bundle.get("kms")
+    if not isinstance(kms, Mapping):
+        findings.append(_privacy_finding("missing_kms_section", "privacy ops bundle requires kms section"))
+        kms = {}
+    provider = str(kms.get("provider") or "")
+    provider_kind = provider.strip().lower()
+    local_provider = provider_kind in {"", "local", "json", "local-json", "file", "filesystem"}
+    key_lifecycle = kms.get("key_lifecycle") if isinstance(kms.get("key_lifecycle"), Mapping) else {}
+    required_kms_flags = (
+        "key_created",
+        "encrypt_roundtrip_verified",
+        "rotation_verified",
+        "key_shredded",
+        "post_shred_get_failed",
+        "post_shred_has_key_false",
+    )
+    missing_kms_flags = [flag for flag in required_kms_flags if key_lifecycle.get(flag) is not True]
+    kms_ok = bool(provider) and not local_provider and not missing_kms_flags
+    if not provider:
+        findings.append(_privacy_finding("kms_provider_missing", "KMS provider identity is required"))
+    if local_provider:
+        findings.append(_privacy_finding("kms_provider_local", "production privacy evidence must use a non-local KMS provider"))
+    for flag in missing_kms_flags:
+        findings.append(_privacy_finding("kms_lifecycle_missing", f"KMS lifecycle flag {flag} is not proven"))
+    checks.append(
+        {
+            "name": "kms",
+            "ok": kms_ok,
+            "provider": provider,
+            "provider_local": local_provider,
+            "missing_lifecycle_flags": missing_kms_flags,
+            "key_id_hash_present": bool(kms.get("key_id_hash")),
+        }
+    )
+
+    residency = bundle.get("residency")
+    if not isinstance(residency, Mapping):
+        findings.append(_privacy_finding("missing_residency_section", "privacy ops bundle requires residency section"))
+        residency = {}
+    residency_cases = _privacy_cases(residency.get("cases"), section="residency")
+    expected_decisions = {str(case.get("expected_decision") or case.get("expected") or "") for case in residency_cases}
+    residency_case_reports: list[dict[str, Any]] = []
+    for index, case in enumerate(residency_cases, start=1):
+        case_id = str(case.get("id") or f"residency-{index}")
+        seen_case_ids.add(case_id)
+        expected = str(case.get("expected_decision") or case.get("expected") or "")
+        actual = str(case.get("actual_decision") or case.get("actual") or "")
+        enforced = case.get("enforced") is True
+        ok = expected in {"allow", "deny"} and actual == expected and enforced
+        if not ok:
+            findings.append(_privacy_finding("residency_case_failed", "residency decision case failed", case_id=case_id))
+        residency_case_reports.append(
+            {
+                "id": case_id,
+                "ok": ok,
+                "expected_decision": expected,
+                "actual_decision": actual,
+                "enforced": enforced,
+            }
+        )
+    residency_ok = (
+        residency.get("strict_runtime_residency") is True
+        and "allow" in expected_decisions
+        and "deny" in expected_decisions
+        and residency_case_reports
+        and all(item["ok"] for item in residency_case_reports)
+    )
+    if residency.get("strict_runtime_residency") is not True:
+        findings.append(_privacy_finding("runtime_residency_not_strict", "strict runtime residency enforcement is required"))
+    if "allow" not in expected_decisions or "deny" not in expected_decisions:
+        findings.append(_privacy_finding("residency_coverage_incomplete", "residency evidence requires allow and deny cases"))
+    checks.append(
+        {
+            "name": "residency",
+            "ok": residency_ok,
+            "strict_runtime_residency": residency.get("strict_runtime_residency") is True,
+            "case_count": len(residency_case_reports),
+            "cases": residency_case_reports,
+        }
+    )
+
+    erasure = bundle.get("erasure")
+    if not isinstance(erasure, Mapping):
+        findings.append(_privacy_finding("missing_erasure_section", "privacy ops bundle requires erasure section"))
+        erasure = {}
+    erasure_cases = _privacy_cases(erasure.get("cases"), section="erasure")
+    erasure_case_reports: list[dict[str, Any]] = []
+    erasure_modes: set[str] = set()
+    for index, case in enumerate(erasure_cases, start=1):
+        case_id = str(case.get("id") or f"erasure-{index}")
+        seen_case_ids.add(case_id)
+        mode = str(case.get("mode") or "")
+        erasure_modes.add(mode)
+        required_flags = (
+            "audit_event",
+            "bytes_unreadable",
+            "derived_evidence_removed",
+            "tombstone_replay_blocked",
+        )
+        missing_flags = [flag for flag in required_flags if case.get(flag) is not True]
+        ok = mode in {"tombstone_recompute", "legal_hard_delete"} and not missing_flags
+        if not ok:
+            findings.append(_privacy_finding("erasure_case_failed", "erasure safety case failed", case_id=case_id))
+        erasure_case_reports.append(
+            {
+                "id": case_id,
+                "ok": ok,
+                "mode": mode,
+                "missing_flags": missing_flags,
+                "cid_hash_present": bool(case.get("cid_hash")),
+            }
+        )
+    erasure_ok = (
+        {"tombstone_recompute", "legal_hard_delete"}.issubset(erasure_modes)
+        and erasure_case_reports
+        and all(item["ok"] for item in erasure_case_reports)
+    )
+    if not {"tombstone_recompute", "legal_hard_delete"}.issubset(erasure_modes):
+        findings.append(_privacy_finding("erasure_coverage_incomplete", "erasure evidence requires tombstone and legal hard-delete cases"))
+    checks.append(
+        {
+            "name": "erasure",
+            "ok": erasure_ok,
+            "case_count": len(erasure_case_reports),
+            "modes": sorted(erasure_modes),
+            "cases": erasure_case_reports,
+        }
+    )
+
+    if len(seen_case_ids) < args.min_cases:
+        findings.append(
+            _privacy_finding("insufficient_cases", f"privacy ops evidence requires at least {args.min_cases} cases")
+        )
+    for required in required_case_ids:
+        if required not in seen_case_ids:
+            findings.append(_privacy_finding("missing_required_case", f"required case {required} is missing"))
+
+    report: dict[str, Any] = {
+        "ok": not findings,
+        "bundle": {
+            "name": bundle.get("name"),
+            "case_count": len(seen_case_ids),
+            "kms_provider": provider,
+        },
+        "requirements": {
+            "min_cases": args.min_cases,
+            "required_case_ids": sorted(required_case_ids),
+            "non_local_kms": True,
+            "strict_runtime_residency": True,
+            "requires_allow_and_deny_residency": True,
+            "requires_tombstone_and_legal_delete": True,
+        },
+        "redaction": {
+            "raw_key_material_omitted": True,
+            "raw_object_bytes_omitted": True,
+            "raw_subject_identifiers_omitted": True,
+        },
+        "checks": checks,
+        "findings": findings,
+    }
+    report["fingerprint"] = _privacy_ops_fingerprint(report)
+    report["expected_fingerprint_present"] = bool(args.expected_fingerprint)
+    if args.expected_fingerprint and args.expected_fingerprint.strip().lower() != report["fingerprint"]:
+        report["ok"] = False
+        report["findings"].append(_privacy_finding("fingerprint_mismatch", "privacy ops bundle fingerprint mismatch"))
     emit(report)
     if not report["ok"]:
         raise SystemExit(1)
@@ -5340,6 +5571,14 @@ def build_parser() -> argparse.ArgumentParser:
     policy_ops_check.add_argument("--max-proxy-gap", type=float, default=0.15)
     policy_ops_check.add_argument("--expected-fingerprint")
     policy_ops_check.set_defaults(func=cmd_policy_ops_check)
+
+    privacy_ops_check = sub.add_parser("privacy-ops-check")
+    privacy_ops_check.add_argument("--bundle", help="Path to production privacy/KMS/residency evidence bundle")
+    privacy_ops_check.add_argument("--bundle-json", help="Inline production privacy/KMS/residency evidence bundle JSON")
+    privacy_ops_check.add_argument("--min-cases", type=int, default=4)
+    privacy_ops_check.add_argument("--require-case", action="append", default=[])
+    privacy_ops_check.add_argument("--expected-fingerprint")
+    privacy_ops_check.set_defaults(func=cmd_privacy_ops_check)
 
     belief_revision_check = sub.add_parser("belief-revision-check")
     belief_revision_check.add_argument("--cases", help="Path to JSON array of belief revision cases")
