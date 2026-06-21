@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import ipaddress
 import json
 import os
@@ -68,6 +69,7 @@ DEPLOYMENT_SOAK_COMMANDS = {
     "tls-cert-check",
     "tls-rotation-plan-check",
     "mcp-http-soak",
+    "mcp-streamable-http-soak",
     "mcp-sse-soak",
     "worker-run",
     "ops-report",
@@ -1992,6 +1994,159 @@ def cmd_mcp_http_soak(args: argparse.Namespace) -> None:
         raise SystemExit(1)
 
 
+async def _streamable_http_iteration(
+    *,
+    streamable_url: str,
+    headers: Mapping[str, str],
+    timeout_seconds: float,
+    read_only_tool: str,
+    tool_arguments: dict[str, Any],
+) -> dict[str, Any]:
+    try:
+        import httpx
+        from mcp.client.session import ClientSession
+        from mcp.client.streamable_http import streamable_http_client
+    except ImportError as exc:  # pragma: no cover - optional dependency failure is reported structurally.
+        return {"ok": False, "error": f"official MCP SDK StreamableHTTP client is unavailable: {exc}"}
+
+    started = time.monotonic()
+    try:
+        timeout = httpx.Timeout(timeout_seconds)
+        async with httpx.AsyncClient(headers=dict(headers), timeout=timeout) as client:
+            async with streamable_http_client(
+                streamable_url,
+                http_client=client,
+                terminate_on_close=False,
+            ) as streams:
+                async with ClientSession(streams[0], streams[1]) as session:
+                    initialized = await session.initialize()
+                    tools = await session.list_tools()
+                    tool_entries = list(getattr(tools, "tools", []) or [])
+                    contains_read_only_tool = any(getattr(tool, "name", None) == read_only_tool for tool in tool_entries)
+                    call_arguments = dict(tool_arguments)
+                    if headers.get("Authorization") and "auth_token" not in call_arguments:
+                        call_arguments["auth_token"] = headers["Authorization"].removeprefix("Bearer ").strip()
+                    tool_call = await session.call_tool(read_only_tool, call_arguments)
+                    tool_ok = getattr(tool_call, "isError", False) is False
+                    operation_ok = bool(contains_read_only_tool and tool_ok)
+                    return {
+                        "ok": operation_ok,
+                        "duration_ms": round((time.monotonic() - started) * 1000, 3),
+                        "initialize": {
+                            "ok": initialized is not None,
+                            "protocolVersion": getattr(initialized, "protocolVersion", None),
+                        },
+                        "tools_list": {
+                            "ok": contains_read_only_tool,
+                            "tool_count": len(tool_entries),
+                            "contains_read_only_tool": contains_read_only_tool,
+                        },
+                        "read_only_tool_call": {"ok": tool_ok},
+                        **({} if operation_ok else {"error": "streamable HTTP SDK operation failed"}),
+                    }
+    except Exception as exc:  # noqa: BLE001 - soak reports transport failures as structured JSON.
+        return {
+            "ok": False,
+            "duration_ms": round((time.monotonic() - started) * 1000, 3),
+            "error": str(exc),
+        }
+
+
+def cmd_mcp_streamable_http_soak(args: argparse.Namespace) -> None:
+    streamable_url = args.mcp_streamable_http_url or _join_endpoint(args.mcp_streamable_http_base_url, "/mcp")
+    health_url = args.mcp_streamable_http_health_url or _join_endpoint(args.mcp_streamable_http_base_url, "/healthz")
+    if not streamable_url or not health_url:
+        raise SystemExit("mcp-streamable-http-soak requires --base-url or both --streamable-url and --health-url.")
+    if args.iterations < 1:
+        raise SystemExit("--iterations must be at least 1.")
+    if args.timeout <= 0:
+        raise SystemExit("--timeout must be greater than 0.")
+    tool_arguments = parse_json_arg(args.tool_arguments, {})
+    if not isinstance(tool_arguments, dict):
+        raise SystemExit("--tool-arguments must be a JSON object.")
+
+    headers: dict[str, str] = {}
+    if args.auth_token:
+        headers["Authorization"] = f"Bearer {args.auth_token}"
+    if args.mcp_session_token:
+        headers["X-Mnemosyne-Session-Token"] = args.mcp_session_token
+
+    ok = True
+    health_probe = _http_json_probe(url=health_url, method="GET", headers=headers, timeout_seconds=args.timeout)
+    health_payload = health_probe.get("json") if isinstance(health_probe.get("json"), dict) else {}
+    health = {
+        "ok": bool(health_probe.get("ok") and health_payload.get("ok") is True),
+        "status": health_probe.get("status"),
+        "latency_ms": health_probe.get("latency_ms"),
+        "transport": health_payload.get("transport"),
+        "rpc_path": health_payload.get("rpc_path"),
+        "stateless": health_payload.get("stateless"),
+    }
+    if health_probe.get("error"):
+        health["error"] = health_probe["error"]
+    if not health["ok"]:
+        ok = False
+        health.setdefault("error", "health check failed")
+    if args.expected_transport and health.get("transport") != args.expected_transport:
+        ok = False
+        health["transport_mismatch"] = {
+            "expected": args.expected_transport,
+            "actual": health.get("transport"),
+        }
+
+    iterations: list[dict[str, Any]] = []
+    latencies: list[float] = [float(health_probe.get("latency_ms") or 0)]
+    failure_count = 0 if ok else 1
+    for index in range(1, args.iterations + 1):
+        result = asyncio.run(
+            _streamable_http_iteration(
+                streamable_url=streamable_url,
+                headers=headers,
+                timeout_seconds=args.timeout,
+                read_only_tool=args.read_only_tool,
+                tool_arguments=tool_arguments,
+            )
+        )
+        result["iteration"] = index
+        if not result.get("ok"):
+            ok = False
+            failure_count += 1
+        latencies.append(float(result.get("duration_ms") or 0))
+        iterations.append(result)
+
+    sorted_latencies = sorted(latencies)
+    p95_index = min(len(sorted_latencies) - 1, int(max(0, round(len(sorted_latencies) * 0.95) - 1)))
+    report = {
+        "ok": ok,
+        "target": {
+            "health_url": _display_url(health_url),
+            "streamable_url": _display_url(streamable_url),
+            "auth_token_configured": bool(args.auth_token),
+            "session_token_configured": bool(args.mcp_session_token),
+        },
+        "config": {
+            "iterations": args.iterations,
+            "timeout_seconds": args.timeout,
+            "read_only_tool": args.read_only_tool,
+            "tool_arguments_configured": bool(tool_arguments),
+            "expected_transport": args.expected_transport,
+        },
+        "health": health,
+        "iterations": iterations,
+        "summary": {
+            "iterations": args.iterations,
+            "requests": 1 + args.iterations * 3,
+            "failures": failure_count,
+            "avg_latency_ms": round(sum(latencies) / len(latencies), 3),
+            "p95_latency_ms": sorted_latencies[p95_index],
+            "max_latency_ms": max(latencies),
+        },
+    }
+    emit(report)
+    if not ok:
+        raise SystemExit(1)
+
+
 def _load_deployment_soak_manifest(path: str) -> dict[str, Any]:
     try:
         manifest = json.loads(Path(path).expanduser().read_text(encoding="utf-8"))
@@ -3879,6 +4034,65 @@ def build_parser() -> argparse.ArgumentParser:
         help="Fail unless /healthz reports stateless=true",
     )
     mcp_http_soak.set_defaults(func=cmd_mcp_http_soak)
+
+    mcp_streamable_http_soak = sub.add_parser("mcp-streamable-http-soak")
+    mcp_streamable_http_soak.add_argument(
+        "--base-url",
+        dest="mcp_streamable_http_base_url",
+        default=os.environ.get("MNEMOSYNE_MCP_STREAMABLE_HTTP_BASE_URL"),
+        help="Official SDK StreamableHTTP base URL; derives /healthz and /mcp when explicit URLs are omitted",
+    )
+    mcp_streamable_http_soak.add_argument(
+        "--health-url",
+        dest="mcp_streamable_http_health_url",
+        default=os.environ.get("MNEMOSYNE_MCP_STREAMABLE_HTTP_HEALTH_URL"),
+        help="Explicit SDK StreamableHTTP health URL",
+    )
+    mcp_streamable_http_soak.add_argument(
+        "--streamable-url",
+        dest="mcp_streamable_http_url",
+        default=os.environ.get("MNEMOSYNE_MCP_STREAMABLE_HTTP_URL"),
+        help="Explicit SDK StreamableHTTP MCP endpoint URL",
+    )
+    mcp_streamable_http_soak.add_argument(
+        "--auth-token",
+        default=os.environ.get("MNEMOSYNE_MCP_STREAMABLE_HTTP_AUTH_TOKEN") or os.environ.get("MNEMOSYNE_MCP_TOKEN"),
+        help="Bearer token for hosted StreamableHTTP gateway requests",
+    )
+    mcp_streamable_http_soak.add_argument(
+        "--mcp-session-token",
+        default=os.environ.get("MNEMOSYNE_MCP_STREAMABLE_HTTP_SESSION_TOKEN")
+        or os.environ.get("MNEMOSYNE_MCP_SESSION_TOKEN"),
+        help="Signed Mnemosyne session token forwarded to the hosted StreamableHTTP endpoint",
+    )
+    mcp_streamable_http_soak.add_argument(
+        "--iterations",
+        type=int,
+        default=int(os.environ.get("MNEMOSYNE_MCP_STREAMABLE_HTTP_SOAK_ITERATIONS", "3")),
+        help="Number of initialize/list/read-only-call StreamableHTTP loops to run",
+    )
+    mcp_streamable_http_soak.add_argument(
+        "--timeout",
+        type=float,
+        default=float(os.environ.get("MNEMOSYNE_MCP_STREAMABLE_HTTP_SOAK_TIMEOUT", "10")),
+        help="Per-request timeout in seconds",
+    )
+    mcp_streamable_http_soak.add_argument(
+        "--read-only-tool",
+        default=os.environ.get("MNEMOSYNE_MCP_STREAMABLE_HTTP_SOAK_TOOL", "residency_policy"),
+        help="Read-only MCP tool used for the repeated call check",
+    )
+    mcp_streamable_http_soak.add_argument(
+        "--tool-arguments",
+        default=os.environ.get("MNEMOSYNE_MCP_STREAMABLE_HTTP_SOAK_TOOL_ARGUMENTS", "{}"),
+        help="JSON object of read-only tool arguments",
+    )
+    mcp_streamable_http_soak.add_argument(
+        "--expected-transport",
+        default=os.environ.get("MNEMOSYNE_MCP_STREAMABLE_HTTP_EXPECTED_TRANSPORT", "mcp-sdk-streamable-http"),
+        help="Expected health transport value; pass an empty string to skip this check",
+    )
+    mcp_streamable_http_soak.set_defaults(func=cmd_mcp_streamable_http_soak)
 
     residency_policy = sub.add_parser("residency-policy")
     residency_policy.set_defaults(func=cmd_residency_policy)
