@@ -52,6 +52,7 @@ class Evidence:
     metadata: dict[str, Any] = field(default_factory=dict)
     content_pointer: str | None = None
     modality: Literal["text", "image", "audio", "video", "binary", "multimodal"] = "text"
+    embedding: list[float] | None = None
     signed_provenance: dict[str, Any] | None = None
     trust_tier: int = 0
     capability_tags: list[str] = field(default_factory=list)

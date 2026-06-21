@@ -275,6 +275,18 @@ def load_retrieval_adapters(args: argparse.Namespace) -> RetrievalAdapters:
     )
 
 
+def load_media_embedding_provider(args: argparse.Namespace) -> CommandMediaEmbeddingProvider | None:
+    if args.media_embedding_provider == "command":
+        if not args.media_embedding_command:
+            raise SystemExit("command media embedding provider requires --media-embedding-command.")
+        return CommandMediaEmbeddingProvider(
+            args.media_embedding_command,
+            dims=int(args.media_embedding_dims),
+            timeout_seconds=float(args.media_embedding_timeout),
+        )
+    return None
+
+
 def load_engine(args: argparse.Namespace) -> MemoryEngine:
     if args.backend == "postgres":
         dsn = args.postgres_dsn or default_postgres_dsn()
@@ -417,6 +429,7 @@ def load_tools(
         runtime_residency=args.runtime_residency,
         allowed_residency_transfers=tuple(args.allowed_residency_transfer),
         require_runtime_residency=args.require_runtime_residency,
+        media_embedding_provider=load_media_embedding_provider(args),
     )
     return MemoryTools(
         engine,

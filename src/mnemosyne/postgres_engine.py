@@ -129,7 +129,10 @@ class PostgresEngine:
             },
         )
         cid_bytes = _cid_to_bytes(cid)
-        embedding = _vector_literal(self.adapters.embedding.embed(ev.content)) if ev.content else None
+        if ev.embedding is not None:
+            embedding = _vector_literal(ev.embedding)
+        else:
+            embedding = _vector_literal(self.adapters.embedding.embed(ev.content)) if ev.content else None
         with self.connect() as conn:
             with conn.cursor() as cur:
                 self._set_tenant(cur, db_tenant_id)
@@ -632,7 +635,8 @@ class PostgresEngine:
                 self._ensure_evidence_vector_schema(cur)
                 cur.execute(
                     """
-                    SELECT cid, branch, content, trust_tier, sensitivity, source_type,
+                    SELECT cid, branch, content, content_pointer, modality, metadata,
+                      trust_tier, sensitivity, source_type,
                       1.0 - (embedding <=> %s::vector) AS score
                     FROM evidence
                     WHERE tenant_id = %s AND branch = %s AND erased = false
@@ -654,11 +658,25 @@ class PostgresEngine:
                     ),
                 )
                 for row in cur.fetchall():
-                    text = row["content"] or ""
+                    text = row["content"] or row["content_pointer"] or f"{row['modality']} evidence"
                     score = float(row["score"] or 0.0)
                     if score <= 0:
                         continue
                     cid = _bytes_to_cid(row["cid"])
+                    metadata = dict(row["metadata"] or {})
+                    media_embedding = metadata.get("media_embedding")
+                    hit_metadata = {
+                        "source_type": row["source_type"],
+                        "backend": self.adapters.embedding.name,
+                        "embedding_dims": self.adapters.embedding.dims,
+                        "stored_embedding": True,
+                        "stored_media_embedding": bool(media_embedding and row["modality"] != "text"),
+                        "source_table": "evidence",
+                        "modality": row["modality"],
+                        "content_pointer": row["content_pointer"],
+                    }
+                    if isinstance(media_embedding, dict):
+                        hit_metadata["media_embedding"] = media_embedding
                     hits.append(
                         Hit(
                             id=cid,
@@ -671,18 +689,12 @@ class PostgresEngine:
                             provenance=[cid],
                             trust_tier=row["trust_tier"],
                             sensitivity=row["sensitivity"],
-                            metadata={
-                                "source_type": row["source_type"],
-                                "backend": self.adapters.embedding.name,
-                                "embedding_dims": self.adapters.embedding.dims,
-                                "stored_embedding": True,
-                                "source_table": "evidence",
-                            },
+                            metadata=hit_metadata,
                         )
                     )
                 cur.execute(
                     """
-                    SELECT cid, branch, content, trust_tier, sensitivity, source_type
+                    SELECT cid, branch, content, content_pointer, modality, trust_tier, sensitivity, source_type
                     FROM evidence
                     WHERE tenant_id = %s AND branch = %s AND erased = false
                       AND trust_tier <= %s AND sensitivity <= %s
@@ -692,7 +704,7 @@ class PostgresEngine:
                     (db_tenant_id, branch, max_trust, max_sensitivity, include_quarantined),
                 )
                 for row in cur.fetchall():
-                    text = row["content"] or ""
+                    text = row["content"] or row["content_pointer"] or f"{row['modality']} evidence"
                     score = cosine(query_vec, self.adapters.embedding.embed(text))
                     if score <= 0:
                         continue
@@ -1885,6 +1897,21 @@ def _dedupe_hits(hits: list[Hit]) -> list[Hit]:
     return list(by_id.values())
 
 
+def _vector_from_db(value: Any) -> list[float] | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped or stripped == "[]":
+            return None
+        if stripped.startswith("[") and stripped.endswith("]"):
+            stripped = stripped[1:-1]
+        return [float(part) for part in stripped.split(",") if part]
+    if isinstance(value, (list, tuple)):
+        return [float(part) for part in value]
+    return None
+
+
 def _row_to_evidence(row: dict[str, Any], cid: str) -> Evidence:
     metadata = dict(row["metadata"] or {})
     return Evidence(
@@ -1898,6 +1925,7 @@ def _row_to_evidence(row: dict[str, Any], cid: str) -> Evidence:
         metadata=metadata,
         content_pointer=row["content_pointer"],
         modality=row["modality"],
+        embedding=_vector_from_db(row.get("embedding")),
         signed_provenance=dict(row["signed_provenance"]) if row["signed_provenance"] else None,
         trust_tier=row["trust_tier"],
         capability_tags=list(row["capability_tags"] or []),
