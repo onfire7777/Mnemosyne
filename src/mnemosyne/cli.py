@@ -3006,6 +3006,18 @@ def apply_provider_manifest(args: argparse.Namespace) -> dict[str, Any]:
     return {"name": manifest.get("name"), "required_checks": required, "forbid_local": forbid_local}
 
 
+def _is_local_retrieval_backend(name: str | None) -> bool:
+    normalized = str(name or "").strip().lower()
+    return normalized in {
+        "local",
+        "local-bm25-lite",
+        "local-fts",
+        "bm25-lite",
+        "local-ppr",
+        "ppr-lite",
+    } or normalized.startswith("local-")
+
+
 def enforce_provider_manifest_policy(
     checks: dict[str, dict[str, Any]],
     manifest: dict[str, Any],
@@ -3018,6 +3030,13 @@ def enforce_provider_manifest_policy(
                 check["ok"] = False
                 check["error"] = "provider manifest forbids local retrieval providers"
                 ok = False
+        backend_check = checks.get("retrieval_backends", {})
+        if backend_check.get("ok") and (
+            backend_check.get("lexical_local") or backend_check.get("graph_local")
+        ):
+            backend_check["ok"] = False
+            backend_check["error"] = "provider manifest forbids local retrieval backends"
+            ok = False
     for check_name in manifest.get("required_checks", []):
         check = checks.get(check_name)
         if check is None:
@@ -3087,6 +3106,19 @@ def cmd_provider_check(args: argparse.Namespace) -> None:
     except Exception as exc:  # noqa: BLE001 - health checks return structured failures.
         ok = False
         checks["reranker"] = {"ok": False, "provider": args.reranker_provider, "error": str(exc)}
+
+    lexical_backend = str(args.lexical_backend or "").strip()
+    graph_backend = str(args.graph_backend or "").strip()
+    checks["retrieval_backends"] = {
+        "ok": bool(lexical_backend and graph_backend),
+        "lexical_backend": lexical_backend,
+        "graph_backend": graph_backend,
+        "lexical_local": _is_local_retrieval_backend(lexical_backend),
+        "graph_local": _is_local_retrieval_backend(graph_backend),
+    }
+    if not checks["retrieval_backends"]["ok"]:
+        ok = False
+        checks["retrieval_backends"]["error"] = "retrieval backends require lexical and graph backend names"
 
     try:
         extracted = load_media_extractor(args).extract(

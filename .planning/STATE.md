@@ -92,6 +92,8 @@ Latest checkpoint: Live Postgres coverage now includes command-backed consolidat
 
 Latest checkpoint: The live Postgres command-backed consolidation provider test now also exercises the command entity resolver boundary. The resolver receives provider-produced candidates, returns explicit candidate-to-entity mappings and entity metadata, and the test verifies the resolver pass details plus the persisted Postgres entity canonical supplied by the resolver. This broadens live production-adapter parity for extraction, resolution, and summarization while real deployed resolver/model validation remains open.
 
+Latest checkpoint: Provider deployment manifests now have an explicit retrieval-backend health check for lexical and graph adapters. `provider-check` reports configured lexical/graph backend names and whether either is a local fallback; production manifests with `forbid_local` now fail closed on local lexical or graph backends, not only local embedding/reranker providers. Focused CLI tests cover a ParadeDB/AGE-style production manifest and a local BM25/PPR rejection path.
+
 ### Blockers/Concerns
 
 - Exact 1:1 blueprint parity is not yet achieved; `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md` is the controlling status artifact.
