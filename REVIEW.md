@@ -83,7 +83,7 @@ the code-contract level; the remaining items are production-grade provider integ
 - **CR-06 resolved (channel architecture):** `vector_search` performs real pgvector cosine
   retrieval (`embedding <=> %s::vector`, channel `postgres_pgvector`, with a deterministic
   `postgres_dense_fallback`) and `graph_ppr` is a real tenant-scoped seed-expansion over relations
-  rather than a `[]` stub. Remaining production work — external embedding/reranker providers,
+  rather than an empty-result fallback. Production hardening work — external embedding/reranker providers,
   ParadeDB/BM25, AGE/specialist graph adapters, cross-encoder reranking — is hardening, not a
   missing blueprint channel.
 - **CR-01 / CR-03 / WR-01 / WR-02 / WR-03** remain resolved as recorded above; `f75189b`
@@ -94,6 +94,8 @@ production-hardening and exact 1:1 blueprint parity are tracked in
 `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md`, not in this report.
 
 ## Summary
+
+Historical note: the findings below are preserved as the original review record; the resolved-status block above supersedes them for current implementation status.
 
 Reviewed the newly added runtime surfaces (`retrieval.py`, `postgres_engine.py`, `mcp_server.py`), the existing local engine/facade, schema, package entrypoints, and tests. The submitted runtime work is not ready to ship: deep graph retrieval leaks cross-tenant data, the Postgres adapter is not substitutable for the local engine or MCP facade, the MCP server does not return MCP-compliant tool results, and the current tests validate only in-process happy paths.
 
