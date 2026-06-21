@@ -419,44 +419,64 @@ def emit(value: Any) -> None:
     print(json.dumps(value, indent=2, sort_keys=True, default=json_default))
 
 
+def _oidc_verifier_components(
+    args: argparse.Namespace,
+) -> tuple[OidcJwtVerifier, dict[str, Any], OidcAuthorizationPolicy | None]:
+    jwks_document = load_oidc_jwks(
+        jwks=args.idp_jwks,
+        jwks_file=args.idp_jwks_file,
+        jwks_url=args.idp_jwks_url,
+        allow_insecure_url=args.idp_allow_insecure_jwks_url,
+        timeout=args.idp_timeout,
+        max_bytes=args.idp_jwks_max_bytes,
+    )
+    policy = load_oidc_authorization_policy(
+        policy=args.idp_authz_policy,
+        policy_file=args.idp_authz_policy_file,
+    )
+    verifier = OidcJwtVerifier(
+        jwks_document,
+        issuer=args.idp_issuer,
+        audience=args.idp_audience,
+        tenant_claim=args.idp_tenant_claim,
+        user_claim=args.idp_user_claim,
+        role_claim=args.idp_role_claim,
+        trust_claim=args.idp_trust_claim,
+        session_id_claim=args.idp_session_id_claim,
+        allowed_algorithms=tuple(args.idp_algorithm),
+        leeway_seconds=args.idp_leeway_seconds,
+        jwks_loader=oidc_jwks_loader(
+            jwks=args.idp_jwks,
+            jwks_file=args.idp_jwks_file,
+            jwks_url=args.idp_jwks_url,
+            allow_insecure_url=args.idp_allow_insecure_jwks_url,
+            timeout=args.idp_timeout,
+            max_bytes=args.idp_jwks_max_bytes,
+        ),
+        jwks_cache_ttl_seconds=args.idp_jwks_cache_ttl_seconds,
+        refresh_on_unknown_kid=not args.idp_disable_refresh_on_unknown_kid,
+        authorization_policy=policy,
+    )
+    return verifier, jwks_document, policy
+
+
+def _idp_jwks_source(args: argparse.Namespace) -> dict[str, Any]:
+    if args.idp_jwks_url:
+        return {"kind": "url", "url": _display_url(args.idp_jwks_url)}
+    if args.idp_jwks_file:
+        return {"kind": "file", "path": str(args.idp_jwks_file)}
+    if args.idp_jwks:
+        return {"kind": "inline"}
+    return {"kind": "unset"}
+
+
 def cmd_session_exchange(args: argparse.Namespace) -> None:
     if not args.idp_token:
         raise SystemExit("session-exchange requires --idp-token or MNEMOSYNE_IDP_TOKEN")
     try:
+        verifier, _jwks_document, _policy = _oidc_verifier_components(args)
         session_token, issued = issue_session_from_oidc(
-            verifier=OidcJwtVerifier(
-                load_oidc_jwks(
-                    jwks=args.idp_jwks,
-                    jwks_file=args.idp_jwks_file,
-                    jwks_url=args.idp_jwks_url,
-                    allow_insecure_url=args.idp_allow_insecure_jwks_url,
-                    timeout=args.idp_timeout,
-                    max_bytes=args.idp_jwks_max_bytes,
-                ),
-                issuer=args.idp_issuer,
-                audience=args.idp_audience,
-                tenant_claim=args.idp_tenant_claim,
-                user_claim=args.idp_user_claim,
-                role_claim=args.idp_role_claim,
-                trust_claim=args.idp_trust_claim,
-                session_id_claim=args.idp_session_id_claim,
-                allowed_algorithms=tuple(args.idp_algorithm),
-                leeway_seconds=args.idp_leeway_seconds,
-                jwks_loader=oidc_jwks_loader(
-                    jwks=args.idp_jwks,
-                    jwks_file=args.idp_jwks_file,
-                    jwks_url=args.idp_jwks_url,
-                    allow_insecure_url=args.idp_allow_insecure_jwks_url,
-                    timeout=args.idp_timeout,
-                    max_bytes=args.idp_jwks_max_bytes,
-                ),
-                jwks_cache_ttl_seconds=args.idp_jwks_cache_ttl_seconds,
-                refresh_on_unknown_kid=not args.idp_disable_refresh_on_unknown_kid,
-                authorization_policy=load_oidc_authorization_policy(
-                    policy=args.idp_authz_policy,
-                    policy_file=args.idp_authz_policy_file,
-                ),
-            ),
+            verifier=verifier,
             idp_token=args.idp_token,
             signer=_session_signer_from_args(args),
             max_ttl_seconds=args.session_max_ttl_seconds,
@@ -473,6 +493,68 @@ def cmd_session_exchange(args: argparse.Namespace) -> None:
             "expires_at": issued.expires_at,
         }
     )
+
+
+def cmd_idp_jwks_live_check(args: argparse.Namespace) -> None:
+    if not args.idp_token:
+        raise SystemExit("idp-jwks-live-check requires --idp-token or MNEMOSYNE_IDP_TOKEN")
+    started = time.monotonic()
+    try:
+        verifier, jwks_document, policy = _oidc_verifier_components(args)
+        header, _payload, _signing_input, _signature = verifier._decode_compact_jwt(args.idp_token)
+        identity = verifier.verify(args.idp_token)
+        keys = jwks_document.get("keys") if isinstance(jwks_document, dict) else None
+        if not isinstance(keys, list) or not keys:
+            raise SessionAuthError("OIDC JWKS must include at least one key")
+        now_ts = int(time.time())
+        expires_in = identity.expires_at - now_ts if identity.expires_at is not None else None
+        report: dict[str, Any] = {
+            "ok": True,
+            "latency_ms": round((time.monotonic() - started) * 1000, 3),
+            "issuer": args.idp_issuer,
+            "audience": args.idp_audience,
+            "jwks": {
+                "source": _idp_jwks_source(args),
+                "key_count": len(keys),
+                "allow_insecure_url": bool(args.idp_allow_insecure_jwks_url),
+                "max_bytes": args.idp_jwks_max_bytes,
+                "cache_ttl_seconds": args.idp_jwks_cache_ttl_seconds,
+                "refresh_on_unknown_kid": not args.idp_disable_refresh_on_unknown_kid,
+            },
+            "token": {
+                "configured": True,
+                "alg": header.get("alg"),
+                "kid_present": bool(header.get("kid")),
+                "kid_sha256": sha256(str(header.get("kid") or "").encode("utf-8")).hexdigest()[:16]
+                if header.get("kid")
+                else None,
+                "expires_in_seconds": expires_in,
+                "session_id_present": bool(identity.session_id),
+            },
+            "identity": {
+                "tenant_id": identity.tenant_id,
+                "user_id_sha256": sha256(identity.user_id.encode("utf-8")).hexdigest()[:16],
+                "role": identity.role,
+                "source_trust_tier": identity.source_trust_tier,
+            },
+            "authz_policy_configured": policy is not None,
+        }
+        if policy is not None:
+            report["authz_policy"] = policy.audit_summary()
+        emit(report)
+    except SessionAuthError as exc:
+        emit(
+            {
+                "ok": False,
+                "latency_ms": round((time.monotonic() - started) * 1000, 3),
+                "issuer": args.idp_issuer,
+                "audience": args.idp_audience,
+                "jwks": {"source": _idp_jwks_source(args)},
+                "token": {"configured": bool(args.idp_token)},
+                "error": str(exc),
+            }
+        )
+        raise SystemExit(1) from exc
 
 
 def cmd_idp_authz_policy_check(args: argparse.Namespace) -> None:
@@ -2612,6 +2694,80 @@ def build_parser() -> argparse.ArgumentParser:
     )
     session_exchange.add_argument("--session-max-ttl-seconds", type=int, default=int(os.environ.get("MNEMOSYNE_SESSION_MAX_TTL_SECONDS", "3600")))
     session_exchange.set_defaults(func=cmd_session_exchange)
+
+    idp_jwks_live_check = sub.add_parser("idp-jwks-live-check")
+    idp_jwks_live_check.add_argument("--idp-token", default=os.environ.get("MNEMOSYNE_IDP_TOKEN"))
+    idp_jwks_live_check.add_argument("--idp-jwks", default=os.environ.get("MNEMOSYNE_IDP_JWKS"))
+    idp_jwks_live_check.add_argument("--idp-jwks-file", default=os.environ.get("MNEMOSYNE_IDP_JWKS_FILE"))
+    idp_jwks_live_check.add_argument("--idp-jwks-url", default=os.environ.get("MNEMOSYNE_IDP_JWKS_URL"))
+    idp_jwks_live_check.add_argument(
+        "--idp-allow-insecure-jwks-url",
+        action="store_true",
+        default=env_flag("MNEMOSYNE_IDP_ALLOW_INSECURE_JWKS_URL", default=False),
+    )
+    idp_jwks_live_check.add_argument("--idp-authz-policy", default=os.environ.get("MNEMOSYNE_IDP_AUTHZ_POLICY"))
+    idp_jwks_live_check.add_argument(
+        "--idp-authz-policy-file",
+        default=os.environ.get("MNEMOSYNE_IDP_AUTHZ_POLICY_FILE"),
+    )
+    idp_jwks_live_check.add_argument(
+        "--idp-issuer",
+        required=not bool(os.environ.get("MNEMOSYNE_IDP_ISSUER")),
+        default=os.environ.get("MNEMOSYNE_IDP_ISSUER"),
+    )
+    idp_jwks_live_check.add_argument(
+        "--idp-audience",
+        required=not bool(os.environ.get("MNEMOSYNE_IDP_AUDIENCE")),
+        default=os.environ.get("MNEMOSYNE_IDP_AUDIENCE"),
+    )
+    idp_jwks_live_check.add_argument(
+        "--idp-tenant-claim",
+        default=os.environ.get("MNEMOSYNE_IDP_TENANT_CLAIM", "tenant_id"),
+    )
+    idp_jwks_live_check.add_argument("--idp-user-claim", default=os.environ.get("MNEMOSYNE_IDP_USER_CLAIM", "sub"))
+    idp_jwks_live_check.add_argument(
+        "--idp-role-claim",
+        default=os.environ.get("MNEMOSYNE_IDP_ROLE_CLAIM", "mnemosyne_role"),
+    )
+    idp_jwks_live_check.add_argument(
+        "--idp-trust-claim",
+        default=os.environ.get("MNEMOSYNE_IDP_TRUST_CLAIM", "mnemosyne_source_trust_tier"),
+    )
+    idp_jwks_live_check.add_argument(
+        "--idp-session-id-claim",
+        default=os.environ.get("MNEMOSYNE_IDP_SESSION_ID_CLAIM", "jti"),
+    )
+    idp_jwks_live_check.add_argument(
+        "--idp-algorithm",
+        action="append",
+        default=(os.environ.get("MNEMOSYNE_IDP_ALGORITHMS", "RS256,ES256").split(",")),
+    )
+    idp_jwks_live_check.add_argument(
+        "--idp-leeway-seconds",
+        type=int,
+        default=int(os.environ.get("MNEMOSYNE_IDP_LEEWAY_SECONDS", "60")),
+    )
+    idp_jwks_live_check.add_argument(
+        "--idp-timeout",
+        type=float,
+        default=float(os.environ.get("MNEMOSYNE_IDP_TIMEOUT", "10")),
+    )
+    idp_jwks_live_check.add_argument(
+        "--idp-jwks-max-bytes",
+        type=int,
+        default=int(os.environ.get("MNEMOSYNE_IDP_JWKS_MAX_BYTES", str(1024 * 1024))),
+    )
+    idp_jwks_live_check.add_argument(
+        "--idp-jwks-cache-ttl-seconds",
+        type=int,
+        default=int(os.environ.get("MNEMOSYNE_IDP_JWKS_CACHE_TTL_SECONDS", "300")),
+    )
+    idp_jwks_live_check.add_argument(
+        "--idp-disable-refresh-on-unknown-kid",
+        action="store_true",
+        default=env_flag("MNEMOSYNE_IDP_DISABLE_REFRESH_ON_UNKNOWN_KID", default=False),
+    )
+    idp_jwks_live_check.set_defaults(func=cmd_idp_jwks_live_check)
 
     idp_authz_policy_check = sub.add_parser("idp-authz-policy-check")
     idp_authz_policy_check.add_argument("--idp-authz-policy", default=os.environ.get("MNEMOSYNE_IDP_AUTHZ_POLICY"))
