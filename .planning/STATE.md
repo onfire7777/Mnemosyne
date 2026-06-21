@@ -56,6 +56,8 @@ Latest checkpoint: Deep retrieval now treats graph/PPR relation hits derived fro
 
 Latest checkpoint: Official MCP SDK StreamableHTTP local validation now exercises the write/read tool path, not only tool discovery and read-only policy inspection. The in-process ASGI StreamableHTTP client initializes a session, lists tools, calls `residency_policy`, captures evidence, then searches for it and verifies provenance through the official MCP client surface. Local verification remains 355 collected tests with 300 passing tests plus 55 skipped live-DB tests, and the clean compose DSN run passes all 355 tests with `MNEMOSYNE_POSTGRES_DSN=postgresql://mnemosyne:<redacted>@127.0.0.1:54329/mnemosyne?connect_timeout=5`.
 
+Latest checkpoint: Hosted HTTP JSON-RPC MCP `deep_search` and `explain` now have transport-level coverage for relation-only `summary-derived-gist` graph support, matching the in-process MCP safety rail for gist-derived graph abstention. The clean DSN run also exposed and fixed a Postgres relation-expiry edge case in `forget`: relation `valid_to` now uses `GREATEST(clock_timestamp(), valid_from + interval '1 microsecond')` so erasure propagation cannot violate the `valid_to > valid_from` schema check when app-generated `valid_from` is newer than the SQL transaction timestamp. Local verification now collects 356 tests with 301 passing tests plus 55 skipped live-DB tests, and the clean compose DSN run passes all 356 tests with `MNEMOSYNE_POSTGRES_DSN=postgresql://mnemosyne:<redacted>@127.0.0.1:54329/mnemosyne?connect_timeout=5`.
+
 Progress: [███████░░░] local scaffold verified; production parity gaps remain
 
 ## Performance Metrics
