@@ -21,7 +21,7 @@ from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
 from mnemosyne.cli import build_parser
-from mnemosyne.mcp_server import build_http_server, build_sdk_streamable_http_app
+from mnemosyne.mcp_server import MnemosyneMcpServer, build_http_server, build_sdk_streamable_http_app
 from mnemosyne.security import SessionIdentity, SessionTokenVerifier
 
 
@@ -928,6 +928,17 @@ def test_cli_tools_command_does_not_require_engine_backend(tmp_path: Path) -> No
     assert "search" in tools_by_name
     assert "inputSchema" in tools_by_name["search"]
     assert {"type": "null"} in tools_by_name["search"]["inputSchema"]["properties"]["max_sensitivity"]["anyOf"]
+
+
+def test_cli_tools_matches_mcp_tools_list_contract(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    result = run_raw_cli(store, "--backend", "postgres", "--postgres-dsn", "", "tools")
+
+    assert result.returncode == 0, result.stderr
+    listed = MnemosyneMcpServer(store_path=store).handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+
+    assert listed is not None
+    assert json.loads(result.stdout)["tools"] == listed["result"]["tools"]
 
 
 def test_cli_exposes_retrieval_provider_flags() -> None:

@@ -71,6 +71,7 @@
 - RAPTOR-aware projection recompute now has shared Local/Postgres contract coverage. Changing a raw source in a summary tree marks the raw source, its leaf summary, and root summary as affected, reports required summary lineage relations, and queues consolidation for surviving raw source evidence only.
 - Branch parity now covers explicit non-main source-branch inheritance in the shared Local/Postgres contract, including source-branch evidence/assertion/relation inheritance, child `from_branch` export metadata, and isolation of source-only rows from `main`.
 - MCP `search` now has direct JSON-RPC facade coverage for gist-only abstention propagation from engine retrieval, including the uncertainty note, abstractive-gist hit metadata, and `explain.gist_support`.
+- Hosted HTTP JSON-RPC MCP `search` now has transport-level coverage for gist-only abstention across capture persistence, consolidation summary materialization, server restart, and `/mcp` `tools/call` search. CLI `tools` output now has exact contract-parity coverage against MCP `tools/list`.
 
 ## Supersession Note
 

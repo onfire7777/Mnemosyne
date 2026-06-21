@@ -32,6 +32,7 @@ from mnemosyne.mcp_server import (
     run_self_test,
 )
 from mnemosyne.consolidation import ConsolidationWorker
+from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.mcp_tools import TOOL_SPEC
 from mnemosyne.models import Hit
 from mnemosyne.postgres_engine import PostgresEngine, _bytes_to_cid, _cid_to_bytes, _stable_uuid, _uuid_or_none, _vector_literal
@@ -1193,6 +1194,78 @@ def test_mcp_http_transport_health_lists_and_calls_capture_search(tmp_path: Path
     assert hits[0]["provenance"] == [captured_content["cid"]]
     assert notification_status == 204
     assert notification is None
+
+
+def test_mcp_http_transport_surfaces_gist_only_abstention(tmp_path: Path) -> None:
+    store = tmp_path / "store.json"
+    server, thread, base = start_mcp_http_server(store_path=store)
+    try:
+        capture_status, captured = http_json(
+            "POST",
+            f"{base}/mcp",
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {
+                    "name": "capture",
+                    "arguments": {
+                        "tenant_id": TENANT,
+                        "user_id": USER,
+                        "actor": "user",
+                        "source_type": "mcp",
+                        "content": (
+                            "Hosted MCP HTTP search abstention source should only support answers "
+                            "through generated gist metadata."
+                        ),
+                        "trust_tier": 0,
+                    },
+                },
+            },
+        )
+    finally:
+        stop_mcp_http_server(server, thread)
+
+    assert capture_status == 200
+    assert captured is not None
+    captured_content = captured["result"]["structuredContent"]  # type: ignore[index]
+    summary_run = ConsolidationWorker(LocalMemoryEngine(store_path=store), gate_cases=[]).run_queue_payload(
+        {
+            "tenant_id": TENANT,
+            "branch": "main",
+            "source_evidence_cids": [captured_content["cid"]],
+            "passes": ["summarizer"],
+        }
+    )
+    summary = next(item for item in summary_run.pass_results if item["name"] == "summarizer")["details"]
+
+    server, thread, base = start_mcp_http_server(store_path=store)
+    try:
+        search_status, searched = http_json(
+            "POST",
+            f"{base}/mcp",
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {
+                    "name": "search",
+                    "arguments": {"tenant_id": TENANT, "query": captured_content["cid"]},
+                },
+            },
+        )
+    finally:
+        stop_mcp_http_server(server, thread)
+
+    assert search_status == 200
+    assert searched is not None
+    body = searched["result"]["structuredContent"]  # type: ignore[index]
+    assert body["abstained"] is True
+    assert body["uncertainty_note"] == "Only gist-tier memory support was retrieved; inspect source evidence before answering."
+    assert body["hits"][0]["id"] == summary["summary_cid"]
+    assert body["hits"][0]["metadata"]["summary"]["kind"] == "abstractive_gist"
+    assert body["explain"]["gist_support"]["applied"] is True
+    assert body["explain"]["gist_support"]["gist_hit_ids"] == [summary["summary_cid"]]
 
 
 def test_mcp_http_transport_serves_tls_health(tmp_path: Path) -> None:
