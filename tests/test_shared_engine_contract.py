@@ -453,6 +453,40 @@ def test_shared_engine_contract_retrieval_uses_conformal_calibration(
     assert exported["calibrations"][0]["memory_type"] == "fact"
 
 
+def test_shared_engine_contract_abstains_when_only_gist_support_is_retrieved(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, user = engine_bundle
+    cid = engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id=user,
+            actor="system",
+            source_type="consolidation-summary",
+            source_identity="consolidation-summary:gist-only-contract",
+            content="Gist-only contract memory says deployment evidence requires original source inspection.",
+            metadata={
+                "summary": {
+                    "kind": "abstractive_gist",
+                    "source_evidence_cids": ["source-cid-for-gist-contract"],
+                }
+            },
+            trust_tier=2,
+            capability_tags=["consolidation-gist", "derived-summary"],
+            access_policy={"tenant": tenant},
+        )
+    )
+
+    result = engine.retrieve("gist-only contract deployment evidence", tenant)
+
+    assert result.hits
+    assert result.hits[0].id == cid
+    assert result.abstained is True
+    assert result.uncertainty_note == "Only gist-tier memory support was retrieved; inspect source evidence before answering."
+    assert result.explain["gist_support"]["applied"] is True
+    assert result.explain["gist_support"]["gist_hit_ids"] == [cid]
+
+
 def test_shared_engine_contract_direct_search_primitives(engine_bundle: tuple[Any, str, str]) -> None:
     engine, tenant, user = engine_bundle
     cid = _append_evidence(

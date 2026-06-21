@@ -32,6 +32,8 @@ Latest checkpoint: Markdown/git source truth is now a concrete compiler path ins
 
 Latest checkpoint: Consolidation summarizer now materializes a one-level derived gist instead of only returning a pass label. Local and command-backed summarizers append `consolidation-summary` evidence with `abstractive_gist` metadata, derived-trust tiering, and `derived-summary`/`consolidation-gist` capability tags, then link each source CID to the summary CID with `summary-derived-gist` relations. Focused local/CLI/live-Postgres summarizer tests, affected local runtime/CLI suites, the live Postgres engine suite, the full no-DSN suite, and the full compose Postgres suite pass; local verification remains 333 collected tests with 288 passing tests plus 45 skipped live-DB tests, and the compose DSN run passes all 333 tests.
 
+Latest checkpoint: Retrieval now treats sole gist support as insufficient for a confident answer. Local and Postgres retrieval preserve summary/lifecycle metadata on evidence hits, detect when every budgeted hit is `abstractive_gist`/`consolidation-summary` support, and force abstention with an explicit source-inspection note while exposing `explain.gist_support`. Focused local/Postgres gist-only retrieval tests, shared local/Postgres contract suites, the full no-DSN suite, and the full compose Postgres suite pass; local verification now collects 335 tests with 289 passing tests plus 46 skipped live-DB tests, and the compose DSN run passes all 335 tests.
+
 Progress: [███████░░░] local scaffold verified; production parity gaps remain
 
 ## Performance Metrics
