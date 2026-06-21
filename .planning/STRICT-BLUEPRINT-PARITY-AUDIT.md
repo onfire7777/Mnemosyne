@@ -87,6 +87,7 @@
 - The six-category user model is now explicitly covered for identity, hard instruction, explicit preference, inferred preference, situational preference, and temporary state, with authority ordering and scoped-context behavior verified.
 - REQ-015 rehearsal scheduling now persists through lifecycle metadata rather than existing only as an interval helper. Due must-keep/protected memories are rehearsed before demotion, `successful_rehearsals` and `next_rehearsal_at` round-trip through Local/Postgres evidence metadata, and local plus durable Postgres lifecycle sweeps report rehearsal counts.
 - REQ-018 now includes a contextual bandit learner for shadow policy variants. Logged policy outcomes are stored in the self-model store with rewards/context/metrics, UCB scoring selects future invariant-rail-safe variants, and the optimizer remains gate-bound before any policy promotion.
+- REQ-011 expanded-suite controls now require more than a protected-case count. `gate-suite-check` can enforce minimum total cases and required smoke/core/archive tier coverage, reports missing tiers, and fails closed before accepting expected fingerprints.
 
 ## Supersession Note
 

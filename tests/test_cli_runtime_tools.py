@@ -3257,14 +3257,61 @@ def test_cli_gate_suite_check_reports_fingerprint_and_fails_closed(tmp_path: Pat
         "--expected-substring",
         "local CLI",
     )
+    missing_archive = run_raw_cli(
+        store,
+        "gate-suite-check",
+        "--min-cases",
+        "3",
+        "--min-protected",
+        "2",
+        "--require-tier",
+        "archive",
+    )
+    missing_archive_payload = json.loads(missing_archive.stdout)
+    run_cli(
+        store,
+        "gate-case-add",
+        "--id",
+        "archive-suite-case",
+        "--signature",
+        "archive suite runtime target",
+        "--query",
+        "archive suite runtime target",
+        "--expected-substring",
+        "local CLI",
+        "--tier",
+        "archive",
+        "--protected",
+    )
 
-    checked = run_cli(store, "gate-suite-check", "--min-protected", "1")
+    checked = run_cli(
+        store,
+        "gate-suite-check",
+        "--min-cases",
+        "3",
+        "--min-protected",
+        "2",
+        "--require-tier",
+        "smoke",
+        "--require-tier",
+        "core",
+        "--require-tier",
+        "archive",
+    )
     fingerprint = checked["suite"]["fingerprint"]
     checked_with_cases = run_cli(
         store,
         "gate-suite-check",
+        "--min-cases",
+        "3",
         "--min-protected",
-        "1",
+        "2",
+        "--require-tier",
+        "smoke",
+        "--require-tier",
+        "core",
+        "--require-tier",
+        "archive",
         "--expected-fingerprint",
         fingerprint,
         "--include-cases",
@@ -3273,20 +3320,32 @@ def test_cli_gate_suite_check_reports_fingerprint_and_fails_closed(tmp_path: Pat
         store,
         "gate-suite-check",
         "--min-protected",
-        "1",
+        "2",
         "--expected-fingerprint",
         "0" * 64,
     )
     failed_payload = json.loads(failed.stdout)
 
+    assert missing_archive.returncode == 1
+    assert missing_archive_payload["ok"] is False
+    assert missing_archive_payload["suite"]["missing_required_tiers"] == ["archive"]
+    assert missing_archive_payload["failures"] == [
+        "case count 2 is below required minimum 3",
+        "protected case count 1 is below required minimum 2",
+        "required tier archive has no cases",
+    ]
     assert checked["ok"] is True
-    assert checked["suite"]["case_count"] == 2
-    assert checked["suite"]["protected_case_count"] == 1
-    assert checked["suite"]["protected_case_ids"] == ["protected-suite-case"]
-    assert checked["suite"]["tier_counts"] == {"core": 1, "smoke": 1}
+    assert checked["suite"]["case_count"] == 3
+    assert checked["suite"]["protected_case_count"] == 2
+    assert checked["suite"]["protected_case_ids"] == ["archive-suite-case", "protected-suite-case"]
+    assert checked["suite"]["tier_counts"] == {"archive": 1, "core": 1, "smoke": 1}
+    assert checked["suite"]["missing_required_tiers"] == []
+    assert checked["requirements"]["min_cases"] == 3
+    assert checked["requirements"]["required_tiers"] == ["archive", "core", "smoke"]
     assert len(fingerprint) == 64
     assert checked_with_cases["ok"] is True
     assert [case["id"] for case in checked_with_cases["suite"]["cases"]] == [
+        "archive-suite-case",
         "protected-suite-case",
         "unprotected-suite-case",
     ]
