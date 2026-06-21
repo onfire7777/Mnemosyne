@@ -94,6 +94,7 @@ DEPLOYMENT_SOAK_COMMANDS = {
     "mcp-http-soak",
     "mcp-streamable-http-soak",
     "mcp-sse-soak",
+    "ops-dashboard-check",
     "worker-run",
     "projection-recompute-once",
     "gate-suite-check",
@@ -123,6 +124,7 @@ PRODUCTION_RELEASE_REQUIRED_COMMANDS = (
     "mcp-streamable-http-soak",
     "gate-suite-check",
     "worker-run",
+    "ops-dashboard-check",
     "ops-report",
 )
 PRODUCTION_RELEASE_REQUIRED_PROVIDER_CHECKS = (
@@ -2175,6 +2177,206 @@ def cmd_ops_report(args: argparse.Namespace) -> None:
         emit(result)
         return
     emit(payload)
+
+
+def _ops_dashboard_finding(code: str, message: str) -> dict[str, str]:
+    return {"code": code, "message": message}
+
+
+def _ops_dashboard_fingerprint(report: Mapping[str, Any]) -> str:
+    payload = {
+        "mode": report.get("mode"),
+        "source": report.get("source"),
+        "checks": report.get("checks"),
+        "findings": report.get("findings"),
+    }
+    return sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def _read_dashboard_json(path: Path, *, label: str) -> Mapping[str, Any]:
+    try:
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"{label} json denied: {exc}") from exc
+    if not isinstance(loaded, Mapping):
+        raise ValueError(f"{label} must be a JSON object")
+    return loaded
+
+
+def _dashboard_html_check(html: str) -> dict[str, Any]:
+    return {
+        "marker_present": "Mnemosyne Ops Dashboard" in html,
+        "doctype_present": "<!doctype html" in html.lower(),
+        "bytes": len(html.encode("utf-8")),
+    }
+
+
+def _validate_ops_dashboard_package(package_dir: Path, *, expected_tenant: str | None) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
+    checks: list[dict[str, Any]] = []
+    findings: list[dict[str, str]] = []
+    manifest_path = package_dir / "manifest.json"
+    snapshot_path = package_dir / "ops-report.json"
+    dashboard_path = package_dir / "ops-dashboard.html"
+    try:
+        manifest = _read_dashboard_json(manifest_path, label="dashboard manifest")
+    except ValueError as exc:
+        manifest = {}
+        findings.append(_ops_dashboard_finding("manifest_invalid", str(exc)))
+    try:
+        snapshot = _read_dashboard_json(snapshot_path, label="dashboard snapshot")
+    except ValueError as exc:
+        snapshot = {}
+        findings.append(_ops_dashboard_finding("snapshot_invalid", str(exc)))
+    try:
+        html = dashboard_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        html = ""
+        findings.append(_ops_dashboard_finding("dashboard_html_missing", f"dashboard html denied: {exc}"))
+
+    manifest_files = manifest.get("files") if isinstance(manifest, Mapping) else None
+    tripwires = manifest.get("tripwires") if isinstance(manifest, Mapping) else None
+    snapshot_report = snapshot.get("report") if isinstance(snapshot, Mapping) else None
+    html_check = _dashboard_html_check(html)
+    manifest_ok = (
+        manifest.get("kind") == "mnemosyne.ops_dashboard_package"
+        and manifest.get("version") == 1
+        and isinstance(manifest_files, Mapping)
+        and manifest_files.get("dashboard_html") == dashboard_path.name
+        and manifest_files.get("snapshot_json") == snapshot_path.name
+    )
+    snapshot_ok = snapshot.get("ok") is True and isinstance(snapshot_report, Mapping)
+    tripwire_ok = isinstance(tripwires, Mapping) and tripwires.get("passed") is True
+    tenant_ok = expected_tenant is None or manifest.get("tenant_id") == expected_tenant
+    checks.extend(
+        [
+            {
+                "name": "manifest",
+                "ok": manifest_ok,
+                "kind": manifest.get("kind"),
+                "version": manifest.get("version"),
+                "tenant_id": manifest.get("tenant_id"),
+            },
+            {"name": "snapshot", "ok": snapshot_ok, "snapshot_ok": snapshot.get("ok") is True},
+            {"name": "tripwires", "ok": tripwire_ok, "passed": bool(tripwires.get("passed")) if isinstance(tripwires, Mapping) else False},
+            {"name": "dashboard_html", "ok": html_check["marker_present"] and html_check["doctype_present"], **html_check},
+            {"name": "tenant", "ok": tenant_ok, "expected_tenant": expected_tenant, "tenant_id": manifest.get("tenant_id")},
+        ]
+    )
+    if not manifest_ok:
+        findings.append(_ops_dashboard_finding("manifest_shape_invalid", "dashboard package manifest shape is invalid"))
+    if not snapshot_ok:
+        findings.append(_ops_dashboard_finding("snapshot_not_ok", "dashboard package snapshot is not ok"))
+    if not tripwire_ok:
+        findings.append(_ops_dashboard_finding("tripwires_not_passed", "dashboard package tripwires are not passing"))
+    if not checks[3]["ok"]:
+        findings.append(_ops_dashboard_finding("dashboard_marker_missing", "dashboard html marker is missing"))
+    if not tenant_ok:
+        findings.append(_ops_dashboard_finding("tenant_mismatch", "dashboard package tenant does not match expectation"))
+    return checks, findings
+
+
+def _fetch_dashboard_url(
+    url: str,
+    *,
+    allow_insecure_localhost: bool,
+    timeout: float,
+    max_bytes: int,
+) -> tuple[bytes, dict[str, Any]]:
+    _validate_hosted_url(url, allow_insecure_localhost=allow_insecure_localhost)
+    req = urlrequest.Request(url, headers={"User-Agent": "mnemosyne-ops-dashboard-check/1"})
+    with urlrequest.urlopen(req, timeout=timeout) as response:
+        body = response.read(max_bytes + 1)
+        if len(body) > max_bytes:
+            raise ValueError(f"dashboard response exceeded {max_bytes} bytes")
+        return body, {
+            "url": _display_url(url),
+            "status": getattr(response, "status", None),
+            "content_type": response.headers.get("Content-Type", ""),
+            "bytes": len(body),
+        }
+
+
+def cmd_ops_dashboard_check(args: argparse.Namespace) -> None:
+    if bool(args.dashboard_package_dir) == bool(args.dashboard_url):
+        raise SystemExit("ops-dashboard-check requires exactly one of --dashboard-package-dir or --dashboard-url")
+    findings: list[dict[str, str]] = []
+    checks: list[dict[str, Any]] = []
+    mode = "package" if args.dashboard_package_dir else "hosted_url"
+    source: dict[str, Any] = {"mode": mode}
+    if args.dashboard_package_dir:
+        package_dir = Path(args.dashboard_package_dir).expanduser()
+        source["package_dir"] = str(package_dir)
+        package_checks, package_findings = _validate_ops_dashboard_package(
+            package_dir,
+            expected_tenant=args.expected_tenant,
+        )
+        checks.extend(package_checks)
+        findings.extend(package_findings)
+    else:
+        try:
+            html_bytes, dashboard_meta = _fetch_dashboard_url(
+                args.dashboard_url,
+                allow_insecure_localhost=args.allow_insecure_localhost,
+                timeout=args.timeout,
+                max_bytes=args.max_bytes,
+            )
+            html = html_bytes.decode("utf-8", errors="replace")
+            html_check = _dashboard_html_check(html)
+            dashboard_ok = (
+                dashboard_meta.get("status") == 200
+                and html_check["marker_present"]
+                and html_check["doctype_present"]
+            )
+            checks.append({"name": "hosted_dashboard", "ok": dashboard_ok, **dashboard_meta, **html_check})
+            if not dashboard_ok:
+                findings.append(_ops_dashboard_finding("hosted_dashboard_invalid", "hosted dashboard check failed"))
+            source["dashboard_url"] = dashboard_meta["url"]
+        except (OSError, ValueError, urlerror.URLError) as exc:
+            checks.append({"name": "hosted_dashboard", "ok": False, "url": _display_url(args.dashboard_url)})
+            findings.append(_ops_dashboard_finding("hosted_dashboard_fetch_failed", f"hosted dashboard denied: {exc}"))
+        for label, url in (("manifest", args.manifest_url), ("snapshot", args.snapshot_url)):
+            if not url:
+                continue
+            try:
+                body, meta = _fetch_dashboard_url(
+                    url,
+                    allow_insecure_localhost=args.allow_insecure_localhost,
+                    timeout=args.timeout,
+                    max_bytes=args.max_bytes,
+                )
+                loaded = json.loads(body.decode("utf-8"))
+                ok = isinstance(loaded, Mapping)
+                if label == "manifest":
+                    ok = ok and loaded.get("kind") == "mnemosyne.ops_dashboard_package" and loaded.get("ok") is True
+                if label == "snapshot":
+                    ok = ok and loaded.get("ok") is True and isinstance(loaded.get("report"), Mapping)
+                checks.append({"name": f"hosted_{label}", "ok": ok, **meta})
+                if not ok:
+                    findings.append(_ops_dashboard_finding(f"hosted_{label}_invalid", f"hosted {label} check failed"))
+            except (OSError, ValueError, json.JSONDecodeError, urlerror.URLError) as exc:
+                checks.append({"name": f"hosted_{label}", "ok": False, "url": _display_url(url)})
+                findings.append(_ops_dashboard_finding(f"hosted_{label}_fetch_failed", f"hosted {label} denied: {exc}"))
+
+    report: dict[str, Any] = {
+        "ok": not findings,
+        "mode": mode,
+        "source": source,
+        "redaction": {
+            "raw_dashboard_html_omitted": True,
+            "raw_manifest_json_omitted": True,
+            "raw_snapshot_json_omitted": True,
+        },
+        "checks": checks,
+        "findings": findings,
+    }
+    report["fingerprint"] = _ops_dashboard_fingerprint(report)
+    report["expected_fingerprint_present"] = bool(args.expected_fingerprint)
+    if args.expected_fingerprint and args.expected_fingerprint.strip().lower() != report["fingerprint"]:
+        report["ok"] = False
+        report["findings"].append(_ops_dashboard_finding("fingerprint_mismatch", "ops dashboard fingerprint mismatch"))
+    emit(report)
+    if not report["ok"]:
+        raise SystemExit(1)
 
 
 def _display_url(url: str) -> str:
@@ -5494,6 +5696,30 @@ def build_parser() -> argparse.ArgumentParser:
         help="Write static dashboard HTML, JSON snapshot, and manifest files to this directory",
     )
     ops_report.set_defaults(func=cmd_ops_report)
+
+    ops_dashboard_check = sub.add_parser("ops-dashboard-check")
+    ops_dashboard_check.add_argument("--dashboard-package-dir", help="Path to an ops-report dashboard package directory")
+    ops_dashboard_check.add_argument("--dashboard-url", help="Hosted dashboard HTML URL to validate")
+    ops_dashboard_check.add_argument("--manifest-url", help="Optional hosted dashboard package manifest URL")
+    ops_dashboard_check.add_argument("--snapshot-url", help="Optional hosted dashboard snapshot JSON URL")
+    ops_dashboard_check.add_argument("--expected-tenant", help="Require dashboard package tenant_id to match this value")
+    ops_dashboard_check.add_argument(
+        "--allow-insecure-localhost",
+        action="store_true",
+        help="Allow http://localhost or 127.0.0.1 only for local hosted dashboard tests",
+    )
+    ops_dashboard_check.add_argument(
+        "--timeout",
+        type=float,
+        default=float(os.environ.get("MNEMOSYNE_OPS_DASHBOARD_CHECK_TIMEOUT", "10")),
+    )
+    ops_dashboard_check.add_argument(
+        "--max-bytes",
+        type=int,
+        default=int(os.environ.get("MNEMOSYNE_OPS_DASHBOARD_CHECK_MAX_BYTES", str(1024 * 1024))),
+    )
+    ops_dashboard_check.add_argument("--expected-fingerprint")
+    ops_dashboard_check.set_defaults(func=cmd_ops_dashboard_check)
 
     provider_check = sub.add_parser("provider-check")
     provider_check.add_argument("--provider-manifest", help="JSON deployment manifest for provider health gates")
