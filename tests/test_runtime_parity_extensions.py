@@ -16,6 +16,7 @@ from mnemosyne.jobs import (
     RuntimeJobHandlers,
 )
 from mnemosyne.learning import LearningSystem, Lesson, Procedure
+from mnemosyne.lifecycle import FidelityTier
 from mnemosyne.media import MEDIA_EXTRACT_JOB, MediaExtractionResult
 from mnemosyne.models import Assertion, Contradiction, Evidence, Preference, Relation
 from mnemosyne.observability import MetricsRegistry, build_ops_report, render_ops_dashboard
@@ -993,6 +994,51 @@ def test_consolidation_embedder_persists_missing_evidence_embeddings() -> None:
     assert "embedder_not_implemented" not in result.skipped
     assert after is not None
     assert after.embedding == hashing_embedding("Embedding pass should persist deterministic vectors.")
+
+
+def test_consolidation_forgetter_demotes_stale_low_utility_evidence_lifecycle() -> None:
+    engine = LocalMemoryEngine()
+    cid = engine.append_evidence(
+        Evidence(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="chat",
+            content="Stale low utility note should be demoted to gist.",
+            metadata={
+                "lifecycle": {
+                    "tier": FidelityTier.EXTRACTIVE_SUMMARY.value,
+                    "salience": 0.01,
+                    "importance": 0.01,
+                    "access_count": 0,
+                    "last_accessed": "2020-01-01T00:00:00Z",
+                }
+            },
+            trust_tier=0,
+            access_policy={"tenant": TENANT},
+        )
+    )
+
+    result = ConsolidationWorker(engine, gate_cases=[]).run_queue_payload(
+        {
+            "tenant_id": TENANT,
+            "user_id": USER,
+            "source_evidence_cids": [cid],
+            "passes": ["replayer", "forgetter"],
+            "now": "2026-06-21T00:00:00Z",
+            "utility_threshold": 0.18,
+        }
+    )
+    pass_results = {item["name"]: item for item in result.pass_results}
+    after = engine.get_evidence(TENANT, cid)
+
+    assert pass_results["forgetter"]["status"] == "complete"
+    assert pass_results["forgetter"]["details"]["demoted_cids"] == [cid]
+    assert "forgetter_not_implemented" not in result.skipped
+    assert after is not None
+    assert after.metadata["lifecycle"]["tier"] == FidelityTier.ABSTRACTIVE_GIST.value
+    assert after.metadata["lifecycle"]["demoted"] is True
+    assert after.metadata["lifecycle"]["updated_by"] == "consolidation.forgetter"
 
 
 def test_consolidation_worker_extracts_and_promotes_direct_user_fact_with_gate(tmp_path) -> None:

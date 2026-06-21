@@ -354,6 +354,41 @@ class LocalMemoryEngine:
             self._persist()
             return True
 
+    def update_evidence_metadata(
+        self,
+        tenant_id: str,
+        cid: str,
+        metadata_patch: dict[str, Any],
+        branch: str = "main",
+        *,
+        actor: str = "consolidation",
+        source: str = "metadata_update",
+    ) -> bool:
+        with self._lock:
+            ev = self.evidence.get(self._evidence_key(tenant_id, branch, cid))
+            if ev is None or ev.erased:
+                return False
+            before_keys = sorted(ev.metadata.keys())
+            ev.metadata = {**ev.metadata, **metadata_patch}
+            self._audit(
+                tenant_id,
+                actor,
+                "update_evidence_metadata",
+                cid,
+                {
+                    "branch": branch,
+                    "patch": metadata_patch,
+                    "before_keys": before_keys,
+                    "after_keys": sorted(ev.metadata.keys()),
+                    "source_type": ev.source_type,
+                },
+                source=source,
+                trust_tier=ev.trust_tier,
+                capability_tags=ev.capability_tags,
+            )
+            self._persist()
+            return True
+
     def upsert_assertion(self, assertion: Assertion, branch: str = "main") -> str:
         with self._lock:
             self._require_branch(branch)

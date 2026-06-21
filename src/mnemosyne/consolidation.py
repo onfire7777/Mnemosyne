@@ -7,11 +7,13 @@ import re
 import shlex
 import subprocess
 from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
 from typing import Any, Protocol, Sequence
 
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.gate import Candidate, GateResult, PromotionGate, RegressionCase
 from mnemosyne.learning import Lesson, Procedure
+from mnemosyne.lifecycle import FidelityTier, LifecycleState, demotion_decision
 from mnemosyne.models import Assertion, Evidence
 from mnemosyne.security import SecurityPolicy, TrustTier
 from mnemosyne.text import hashing_embedding
@@ -216,6 +218,14 @@ class ConsolidationWorker:
                     skipped.append("skill_inducer_no_candidates")
                     procedure_result["reason"] = "no_candidates_or_learning_store"
                 pass_results.append(PassResult(pass_name, status, procedure_result))
+                continue
+            if pass_name == "forgetter":
+                forgetter_result = self._run_forgetter(tenant_id, branch, payload, evidence)
+                status = "complete" if forgetter_result["backend_supported"] else "skipped"
+                if status == "skipped":
+                    skipped.append("forgetter_backend_unavailable")
+                    forgetter_result["reason"] = "engine_update_evidence_metadata_unavailable"
+                pass_results.append(PassResult(pass_name, status, forgetter_result))
                 continue
             if pass_name == "user_model_updater":
                 user_model_result = self._update_user_model(tenant_id, payload, evidence, candidates)
@@ -484,6 +494,111 @@ class ConsolidationWorker:
         except (TypeError, ValueError):
             value = 256
         return max(value, 1)
+
+    def _run_forgetter(
+        self,
+        tenant_id: str,
+        branch: str,
+        payload: dict[str, Any],
+        evidence: list[Evidence],
+    ) -> dict[str, Any]:
+        update_metadata = getattr(self.engine, "update_evidence_metadata", None)
+        if not callable(update_metadata):
+            return {"backend_supported": False, "evaluated": len(evidence), "demoted": 0}
+        now = self._parse_datetime(payload.get("now")) or datetime.now(UTC)
+        threshold = float(payload.get("utility_threshold", 0.18))
+        evaluated: list[dict[str, Any]] = []
+        demoted_cids: list[str] = []
+        failed_cids: list[str] = []
+        for item in evidence:
+            if not item.cid:
+                continue
+            lifecycle = item.metadata.get("lifecycle") if isinstance(item.metadata, dict) else None
+            state = self._lifecycle_state(item, lifecycle)
+            next_state, changed = demotion_decision(state, now, utility_threshold=threshold)
+            payload_patch = {
+                "lifecycle": {
+                    **next_state.to_dict(),
+                    "updated_by": "consolidation.forgetter",
+                    "utility_threshold": threshold,
+                    "demoted": changed,
+                }
+            }
+            updated = bool(
+                update_metadata(
+                    tenant_id,
+                    item.cid,
+                    payload_patch,
+                    branch=branch,
+                    actor="consolidation",
+                    source="forgetter",
+                )
+            )
+            if updated:
+                item.metadata = {**item.metadata, **payload_patch}
+                if changed:
+                    demoted_cids.append(item.cid)
+            else:
+                failed_cids.append(item.cid)
+            evaluated.append(
+                {
+                    "cid": item.cid,
+                    "from_tier": state.tier.value,
+                    "to_tier": next_state.tier.value,
+                    "salience": next_state.salience,
+                    "demoted": changed,
+                    "updated": updated,
+                }
+            )
+        return {
+            "backend_supported": True,
+            "evaluated": len(evaluated),
+            "demoted": len(demoted_cids),
+            "demoted_cids": demoted_cids,
+            "failed_cids": failed_cids,
+            "states": evaluated,
+        }
+
+    @staticmethod
+    def _lifecycle_state(item: Evidence, lifecycle: Any) -> LifecycleState:
+        data = lifecycle if isinstance(lifecycle, dict) else {}
+        tier_raw = str(data.get("tier") or FidelityTier.VERBATIM.value)
+        try:
+            tier = FidelityTier(tier_raw)
+        except ValueError:
+            tier = FidelityTier.VERBATIM
+        return LifecycleState(
+            item_id=item.cid or "",
+            tier=tier,
+            salience=ConsolidationWorker._safe_float(data.get("salience"), 0.1),
+            importance=ConsolidationWorker._safe_float(
+                data.get("importance", item.metadata.get("importance") if isinstance(item.metadata, dict) else None),
+                0.1,
+            ),
+            access_count=int(ConsolidationWorker._safe_float(data.get("access_count"), 0.0)),
+            last_accessed=ConsolidationWorker._parse_datetime(data.get("last_accessed")),
+            confabulation_risk=bool(data.get("confabulation_risk", False)),
+            protected=bool(data.get("protected", False)),
+        )
+
+    @staticmethod
+    def _safe_float(value: Any, default: float) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
+    def _parse_datetime(value: Any) -> datetime | None:
+        if isinstance(value, datetime):
+            return value
+        if not isinstance(value, str) or not value:
+            return None
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        return parsed.astimezone(UTC)
 
     @staticmethod
     def _contains_no_write_data(evidence: list[Evidence], payload: dict[str, Any]) -> bool:

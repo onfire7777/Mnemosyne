@@ -88,6 +88,40 @@ def test_shared_engine_contract_updates_evidence_embedding(engine_bundle: tuple[
     assert len(exported["embedding"]) == len(vector)
 
 
+def test_shared_engine_contract_updates_evidence_metadata(engine_bundle: tuple[Any, str, str]) -> None:
+    engine, tenant, user = engine_bundle
+    cid = engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id=user,
+            actor="user",
+            source_type="metadata-contract",
+            content="Shared metadata update contract.",
+            metadata={"existing": "kept"},
+            trust_tier=0,
+            access_policy={"tenant": tenant},
+        )
+    )
+
+    updated = engine.update_evidence_metadata(
+        tenant,
+        cid,
+        {"lifecycle": {"tier": "abstractive_gist", "salience": 0.05}},
+    )
+    recalled = engine.get_evidence(tenant, cid)
+    exported = next(item for item in engine.export_tenant(tenant)["evidence"] if item["cid"] == cid)
+    audit = [item for item in engine.export_tenant(tenant)["audit_log"] if item["op"] == "update_evidence_metadata"]
+
+    assert updated is True
+    assert recalled is not None
+    assert recalled.metadata["existing"] == "kept"
+    assert recalled.metadata["lifecycle"]["tier"] == "abstractive_gist"
+    assert exported["metadata"]["lifecycle"]["salience"] == 0.05
+    assert audit
+    assert audit[-1]["source"] == "metadata_update"
+    assert audit[-1]["diff"]["patch"]["lifecycle"]["tier"] == "abstractive_gist"
+
+
 def test_shared_engine_contract_preserves_lossless_evidence_envelope(
     engine_bundle: tuple[Any, str, str],
 ) -> None:

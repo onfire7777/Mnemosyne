@@ -26,6 +26,8 @@ Latest checkpoint: Consolidation `user_model_updater` now refreshes the latent u
 
 Latest checkpoint: Consolidation `embedder` now persists missing evidence embeddings instead of falling through as `embedder_not_implemented`. Local and Postgres engines expose `set_evidence_embedding`, audit the embedding update, and respect backend embedding dimensions; the consolidation pass uses deterministic hashing embeddings and reports provider/dimension/embedded-CID details. Focused local/Postgres embedding tests, `tests/test_runtime_parity_extensions.py`, `tests/test_shared_engine_contract.py`, the live Postgres engine suite, the full no-DSN suite, and the full compose Postgres suite pass; local verification now collects 327 tests with 283 passing tests plus 44 skipped live-DB tests, and the compose DSN run passes all 327 tests.
 
+Latest checkpoint: Consolidation `forgetter` now bridges into lifecycle demotion instead of falling through as `forgetter_not_implemented`. Local and Postgres engines expose audited evidence metadata updates; the forgetter computes lifecycle demotion with existing fidelity-tier utility rules, persists lifecycle metadata, and reports evaluated/demoted/failed CIDs. Focused local/Postgres metadata tests, `tests/test_runtime_parity_extensions.py`, `tests/test_shared_engine_contract.py`, the live Postgres engine suite, the full no-DSN suite, and the full compose Postgres suite pass; local verification now collects 330 tests with 286 passing tests plus 44 skipped live-DB tests, and the compose DSN run passes all 330 tests.
+
 Progress: [███████░░░] local scaffold verified; production parity gaps remain
 
 ## Performance Metrics
