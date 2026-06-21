@@ -4,8 +4,10 @@ import os
 import json
 import subprocess
 import sys
+import threading
 from datetime import UTC, datetime
 from hashlib import sha256
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from uuid import uuid4
 
 import pytest
@@ -32,14 +34,75 @@ def live_dsn() -> str:
     return dsn
 
 
-def run_postgres_cli(*args: str) -> dict:
-    result = subprocess.run(
+def run_postgres_cli_raw(*args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
         [sys.executable, "-m", "mnemosyne.cli", "--backend", "postgres", "--postgres-dsn", live_dsn(), *args],
-        check=True,
+        check=False,
         text=True,
         capture_output=True,
     )
+
+
+def run_postgres_cli(*args: str) -> dict:
+    result = run_postgres_cli_raw(*args)
+    result.check_returncode()
     return json.loads(result.stdout)
+
+
+def start_fake_retrieval_provider(*, malformed_embedding: bool = False) -> tuple[ThreadingHTTPServer, str, dict[str, list[dict]]]:
+    calls: dict[str, list[dict]] = {"embedding": [], "reranker": []}
+
+    def vector_for(text: str) -> list[float]:
+        vector = [0.0] * 1024
+        normalized = text.lower()
+        if "preferred by http reranker" in normalized:
+            vector[0] = 1.0
+        elif "baseline evidence" in normalized:
+            vector[1] = 1.0
+        else:
+            vector[0] = 0.8
+            vector[1] = 0.2
+        return vector
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler uses this method name.
+            length = int(self.headers.get("Content-Length", "0"))
+            payload = json.loads(self.rfile.read(length).decode("utf-8"))
+            authorization = self.headers.get("Authorization")
+            if self.path == "/embed":
+                calls["embedding"].append({"payload": payload, "authorization": authorization})
+                body = {"embedding": [0.0] * 1024} if malformed_embedding else {"data": [{"embedding": vector_for(str(payload.get("input", "")))}]}
+            elif self.path == "/rerank":
+                documents = payload.get("documents")
+                assert isinstance(documents, list)
+                calls["reranker"].append({"payload": payload, "authorization": authorization})
+                body = {
+                    "results": [
+                        {
+                            "index": index,
+                            "relevance_score": 50.0 if "preferred by http reranker" in str(document).lower() else 0.1,
+                        }
+                        for index, document in enumerate(documents)
+                    ]
+                }
+            else:
+                self.send_response(404)
+                self.end_headers()
+                return
+            encoded = json.dumps(body).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(encoded)))
+            self.end_headers()
+            self.wfile.write(encoded)
+
+        def log_message(self, _format: str, *args: object) -> None:
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server, f"http://127.0.0.1:{server.server_port}", calls
 
 
 def test_postgres_queue_lifecycle_and_tenant_isolation_live() -> None:
@@ -659,6 +722,161 @@ def test_postgres_cli_backend_live_smoke() -> None:
     assert hard_deleted["erasure_mode"] == "hard_delete_legal"
     assert all(item["cid"] != legal["cid"] for item in after_delete["evidence"])
     assert any(item["statement"] == "Prefer CLI-first memory workflows." for item in exported["preferences"])
+
+
+def test_postgres_cli_uses_http_retrieval_providers_live() -> None:
+    tenant = f"tenant-http-retrieval-live-{uuid4()}"
+    user = "user-http-retrieval-live"
+    server, base_url, calls = start_fake_retrieval_provider()
+    provider_args = (
+        "--embedding-provider",
+        "http",
+        "--embedding-url",
+        f"{base_url}/embed",
+        "--embedding-model",
+        "qwen3-embedding-live",
+        "--embedding-api-key",
+        "embed-live-token",
+        "--reranker-provider",
+        "http",
+        "--reranker-url",
+        f"{base_url}/rerank",
+        "--reranker-model",
+        "qwen3-reranker-live",
+        "--reranker-api-key",
+        "rank-live-token",
+    )
+    try:
+        baseline = run_postgres_cli(
+            *provider_args,
+            "capture",
+            "--tenant",
+            tenant,
+            "--user",
+            user,
+            "--source-type",
+            "http-provider-live",
+            "--content",
+            "Provider backed retrieval baseline evidence confirms HTTP embeddings reach Postgres.",
+            "--trust-tier",
+            "0",
+        )
+        preferred = run_postgres_cli(
+            *provider_args,
+            "capture",
+            "--tenant",
+            tenant,
+            "--user",
+            user,
+            "--source-type",
+            "http-provider-live",
+            "--content",
+            "Provider backed retrieval preferred by HTTP reranker confirms adapter parity.",
+            "--trust-tier",
+            "0",
+        )
+        search = run_postgres_cli(
+            *provider_args,
+            "search",
+            "--tenant",
+            tenant,
+            "--query",
+            "provider backed retrieval adapter parity",
+        )
+        explain = run_postgres_cli(
+            *provider_args,
+            "explain",
+            "--tenant",
+            tenant,
+            "--query",
+            "provider backed retrieval adapter parity",
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    db_tenant_id = _stable_uuid("tenant", tenant)
+    engine = PostgresEngine(live_dsn())
+    with engine.connect() as conn:
+        with conn.cursor() as cur:
+            engine._set_tenant(cur, db_tenant_id)  # noqa: SLF001 - live RLS contract assertion.
+            for cid in (baseline["cid"], preferred["cid"]):
+                cur.execute(
+                    """
+                    SELECT embedding IS NOT NULL
+                    FROM evidence
+                    WHERE tenant_id = %s AND branch = 'main' AND cid = %s
+                    """,
+                    (db_tenant_id, _cid_to_bytes(cid)),
+                )
+                assert cur.fetchone()[0] is True
+
+    assert calls["embedding"]
+    assert calls["reranker"]
+    assert all(call["authorization"] == "Bearer embed-live-token" for call in calls["embedding"])
+    assert all(call["authorization"] == "Bearer rank-live-token" for call in calls["reranker"])
+    assert any(call["payload"].get("model") == "qwen3-embedding-live" for call in calls["embedding"])
+    assert calls["reranker"][-1]["payload"]["model"] == "qwen3-reranker-live"
+    assert search["hits"][0]["id"] == preferred["cid"]
+    assert "rerank" in search["hits"][0]["channel"]
+    assert search["explain"]["channels"]["postgres_dense"] >= 2
+    assert search["explain"]["channels"]["postgres_lexical"] >= 1
+    assert search["explain"]["adapters"] == {
+        "embedding": "http-embedding",
+        "embedding_dims": 1024,
+        "reranker": "http-reranker",
+        "lexical_backend": "postgres-fts",
+        "graph_backend": "postgres-recursive-ppr",
+    }
+    assert explain["explain"]["adapters"]["embedding"] == "http-embedding"
+    assert "embed-live-token" not in json.dumps(search)
+    assert "rank-live-token" not in json.dumps(explain)
+
+
+def test_postgres_cli_http_embedding_provider_fails_closed_live() -> None:
+    tenant = f"tenant-bad-http-retrieval-live-{uuid4()}"
+    server, base_url, calls = start_fake_retrieval_provider(malformed_embedding=True)
+    result: subprocess.CompletedProcess[str]
+    try:
+        result = run_postgres_cli_raw(
+            "--embedding-provider",
+            "http",
+            "--embedding-url",
+            f"{base_url}/embed",
+            "capture",
+            "--tenant",
+            tenant,
+            "--user",
+            "user-bad-http-retrieval-live",
+            "--source-type",
+            "bad-http-provider-live",
+            "--content",
+            "Malformed provider output must not be silently hashed into Postgres.",
+            "--trust-tier",
+            "0",
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    assert result.returncode != 0
+    assert "embedding response must contain a non-zero vector" in result.stderr
+    assert calls["embedding"]
+
+    db_tenant_id = _stable_uuid("tenant", tenant)
+    engine = PostgresEngine(live_dsn())
+    with engine.connect() as conn:
+        with conn.cursor() as cur:
+            engine._set_tenant(cur, db_tenant_id)  # noqa: SLF001 - live RLS contract assertion.
+            cur.execute(
+                """
+                SELECT count(*)
+                FROM evidence
+                WHERE tenant_id = %s AND source_type = 'bad-http-provider-live'
+                """,
+                (db_tenant_id,),
+            )
+            assert cur.fetchone()[0] == 0
 
 
 def test_postgres_mcp_backend_live_smoke() -> None:
