@@ -172,7 +172,17 @@ class PostgresEngine:
                         ev.created_at,
                     ),
                 )
-                self._audit(cur, db_tenant_id, ev.actor, "append_evidence", cid, {"branch": branch})
+                self._audit(
+                    cur,
+                    db_tenant_id,
+                    ev.actor,
+                    "append_evidence",
+                    cid,
+                    {"branch": branch, "source_type": ev.source_type, "source_identity": ev.source_identity},
+                    source=ev.source_type,
+                    trust_tier=ev.trust_tier,
+                    capability_tags=ev.capability_tags,
+                )
         return cid
 
     def get_evidence(self, tenant_id: str, cid: str, branch: str = "main") -> Evidence | None:
@@ -230,7 +240,16 @@ class PostgresEngine:
                         """,
                         (merged_confidence, _cid_list_to_bytes(merged_sources), incoming.trust_tier, winner["id"]),
                     )
-                    self._audit(cur, db_tenant_id, "engine", "upsert_assertion.reinforce", str(winner["id"]), {})
+                    self._audit(
+                        cur,
+                        db_tenant_id,
+                        "engine",
+                        "upsert_assertion.reinforce",
+                        str(winner["id"]),
+                        {"source_evidence_cids": merged_sources},
+                        source="assertion",
+                        trust_tier=incoming.trust_tier,
+                    )
                     return str(winner["id"])
 
                 conflicts = [row for row in peers if row["object"] != incoming.object]
@@ -305,7 +324,16 @@ class PostgresEngine:
                         incoming.access_count,
                     ),
                 )
-                self._audit(cur, db_tenant_id, "engine", "upsert_assertion", incoming.id, {"branch": branch})
+                self._audit(
+                    cur,
+                    db_tenant_id,
+                    "engine",
+                    "upsert_assertion",
+                    incoming.id,
+                    {"branch": branch, "source_evidence_cids": incoming.source_evidence_cids},
+                    source="assertion",
+                    trust_tier=incoming.trust_tier,
+                )
         return incoming.id
 
     def add_relation(self, relation: Relation, branch: str = "main") -> str:
@@ -340,7 +368,15 @@ class PostgresEngine:
                         self._jsonb(relation.access_policy),
                     ),
                 )
-                self._audit(cur, db_tenant_id, "engine", "add_relation", relation.id, {"branch": branch})
+                self._audit(
+                    cur,
+                    db_tenant_id,
+                    "engine",
+                    "add_relation",
+                    relation.id,
+                    {"branch": branch, "source_evidence_cids": relation.source_evidence_cids},
+                    source="relation",
+                )
         return relation.id
 
     def add_justification(self, justification: Justification) -> str:
@@ -382,7 +418,12 @@ class PostgresEngine:
                     "engine",
                     "add_justification",
                     justification.id,
-                    {"assertion_id": justification.assertion_id},
+                    {
+                        "assertion_id": justification.assertion_id,
+                        "evidence_cids": justification.evidence_cids,
+                        "dependencies": justification.dependency_ids,
+                    },
+                    source="justification",
                 )
         return justification.id
 
@@ -427,6 +468,7 @@ class PostgresEngine:
                     "add_contradiction",
                     contradiction.id,
                     {"a": contradiction.a, "b": contradiction.b},
+                    source="contradiction",
                 )
         return contradiction.id
 
@@ -490,7 +532,20 @@ class PostgresEngine:
                         pref.status,
                     ),
                 )
-                self._audit(cur, db_tenant_id, "engine", "add_preference", pref.id, {"category": pref.category, "explicit": pref.explicit})
+                self._audit(
+                    cur,
+                    db_tenant_id,
+                    "engine",
+                    "add_preference",
+                    pref.id,
+                    {
+                        "category": pref.category,
+                        "explicit": pref.explicit,
+                        "source_evidence_cids": pref.source_evidence_cids,
+                    },
+                    source="preference",
+                    trust_tier=0 if pref.explicit else None,
+                )
         return pref.id
 
     def lexical_search(self, query: str, k: int, filt: dict[str, Any]) -> list[Hit]:
@@ -1117,13 +1172,14 @@ class PostgresEngine:
                 self._set_tenant(cur, db_tenant_id)
                 cur.execute(
                     """
-                    SELECT cid
+                    SELECT cid, source_type, trust_tier, capability_tags
                     FROM evidence
                     WHERE tenant_id = %s AND branch = %s AND cid = %s
                     """,
                     (db_tenant_id, branch, cid_bytes),
                 )
-                if not cur.fetchone():
+                evidence_row = cur.fetchone()
+                if not evidence_row:
                     return {"erased": False, "reason": "evidence_not_found", "cid": cid, "erasure_mode": mode.value}
                 cur.execute(
                     """
@@ -1253,7 +1309,17 @@ class PostgresEngine:
                     """,
                     (db_tenant_id, cid_bytes, requested_by, self._jsonb({**propagated, "erasure_mode": mode.value})),
                 )
-                self._audit(cur, db_tenant_id, requested_by, "forget", cid, {**propagated, "erasure_mode": mode.value})
+                self._audit(
+                    cur,
+                    db_tenant_id,
+                    requested_by,
+                    "forget",
+                    cid,
+                    {**propagated, "erasure_mode": mode.value, "source_type": evidence_row["source_type"]},
+                    source=evidence_row["source_type"],
+                    trust_tier=evidence_row["trust_tier"],
+                    capability_tags=list(evidence_row["capability_tags"] or []),
+                )
         return {"erased": True, "cid": cid, "erasure_mode": mode.value, "propagated": propagated}
 
     def export_tenant(self, tenant_id: str) -> dict[str, Any]:
@@ -1717,17 +1783,35 @@ class PostgresEngine:
                         )
         return sorted(candidates, key=lambda item: item.score, reverse=True)[:k]
 
-    def _audit(self, cur: Any, tenant_id: str, actor: str, op: str, target_id: str | None, diff: dict[str, Any]) -> None:
+    def _audit(
+        self,
+        cur: Any,
+        tenant_id: str,
+        actor: str,
+        op: str,
+        target_id: str | None,
+        diff: dict[str, Any],
+        *,
+        source: str | None = None,
+        trust_tier: int | None = None,
+        capability_tags: list[str] | None = None,
+    ) -> None:
         target_uuid = _uuid_or_none(target_id)
         audit_diff = dict(diff)
         if target_id and not target_uuid:
             audit_diff.setdefault("target_id", target_id)
+        normalized_tags = sorted(set(capability_tags or []))
+        audit_diff.setdefault("source", source or actor)
+        if trust_tier is not None:
+            audit_diff.setdefault("trust_tier", trust_tier)
+        if normalized_tags:
+            audit_diff.setdefault("capability_tags", normalized_tags)
         cur.execute(
             """
-            INSERT INTO audit_log(tenant_id, actor, op, target_id, diff)
-            VALUES (%s, %s, %s, %s, %s)
+            INSERT INTO audit_log(tenant_id, actor, op, target_id, trust_tier, capability_tags, diff)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
             """,
-            (tenant_id, actor, op, target_uuid, self._jsonb(audit_diff)),
+            (tenant_id, actor, op, target_uuid, trust_tier, normalized_tags, self._jsonb(audit_diff)),
         )
 
     def _rrf(self, ranked_lists: list[list[Hit]], k: int) -> list[Hit]:
@@ -1855,6 +1939,8 @@ def _row_to_audit_log(row: Any) -> dict[str, Any]:
     diff = data.get("diff")
     if not data.get("target_id") and isinstance(diff, dict) and diff.get("target_id"):
         data["target_id"] = diff["target_id"]
+    if isinstance(diff, dict) and "source" in diff:
+        data.setdefault("source", diff["source"])
     return data
 
 

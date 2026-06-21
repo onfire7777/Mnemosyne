@@ -1076,6 +1076,83 @@ def test_shared_engine_contract_hard_delete_records_audit_and_deletion_log(engin
     assert any(item["op"] == "forget" and item["target_id"] == cid for item in exported["audit_log"])
 
 
+def test_shared_audit_log_records_actor_source_tier_and_diff_for_every_write(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, user = engine_bundle
+    cid = engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id=user,
+            actor="tool",
+            source_type="workflow-log",
+            source_identity="git:memory-source-truth.md",
+            content="Shared audit contract records source tier and diff.",
+            trust_tier=2,
+            capability_tags=["tool-import", "signed"],
+            access_policy={"tenant": tenant},
+        )
+    )
+    assertion_id = engine.upsert_assertion(
+        Assertion(
+            tenant_id=tenant,
+            user_id=user,
+            subject="audit contract",
+            predicate="records",
+            object="source tier and diff",
+            confidence=0.91,
+            source_evidence_cids=[cid],
+            status="active",
+            trust_tier=2,
+            access_policy={"tenant": tenant},
+        )
+    )
+    preference_id = engine.add_preference(
+        Preference(
+            tenant_id=tenant,
+            user_id=user,
+            category="workflow",
+            statement="Audit writes must retain source tier and diff metadata.",
+            explicit=True,
+            source_evidence_cids=[cid],
+        )
+    )
+
+    engine.forget(tenant, cid, requested_by=user, erasure_mode=ErasureMode.HARD_DELETE_LEGAL)
+    audit_log = engine.export_tenant(tenant)["audit_log"]
+
+    assert audit_log
+    for item in audit_log:
+        assert "actor" in item
+        assert "source" in item
+        assert "trust_tier" in item
+        assert "capability_tags" in item
+        assert isinstance(item["diff"], dict)
+
+    evidence_audit = next(item for item in audit_log if item["op"] == "append_evidence" and item["target_id"] == cid)
+    assert evidence_audit["actor"] == "tool"
+    assert evidence_audit["source"] == "workflow-log"
+    assert evidence_audit["trust_tier"] == 2
+    assert sorted(evidence_audit["capability_tags"]) == ["signed", "tool-import"]
+    assert evidence_audit["diff"]["source_identity"] == "git:memory-source-truth.md"
+
+    assertion_audit = next(item for item in audit_log if item["op"] == "upsert_assertion" and item["target_id"] == assertion_id)
+    assert assertion_audit["source"] == "assertion"
+    assert assertion_audit["trust_tier"] == 2
+    assert assertion_audit["diff"]["source_evidence_cids"] == [cid]
+
+    preference_audit = next(item for item in audit_log if item["op"] == "add_preference" and item["target_id"] == preference_id)
+    assert preference_audit["source"] == "preference"
+    assert preference_audit["trust_tier"] == 0
+    assert preference_audit["diff"]["source_evidence_cids"] == [cid]
+
+    forget_audit = next(item for item in audit_log if item["op"] == "forget" and item["target_id"] == cid)
+    assert forget_audit["actor"] == user
+    assert forget_audit["source"] == "workflow-log"
+    assert forget_audit["trust_tier"] == 2
+    assert sorted(forget_audit["capability_tags"]) == ["signed", "tool-import"]
+
+
 def _append_evidence(
     engine: Any,
     tenant: str,
