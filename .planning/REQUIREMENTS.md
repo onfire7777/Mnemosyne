@@ -14,7 +14,7 @@
 | REQ-008 | User inspect, correct, export, and forget with transitive erasure behavior. | FR-8, §25 | Implemented and tested locally |
 | REQ-009 | Confidence and abstention when evidence is thin, conflicting, or below threshold. | FR-6, §26 | Implemented locally with conformal calibration, empty/oversized prediction-set abstention, and shared Local/Postgres retrieval coverage; production calibration dataset tuning remains required |
 | REQ-010 | Capability-mediated writes, audit log, data-never-instruction handling, and reversible destructive operations. | FR-7, §27 | Implemented locally; production role separation remains required |
-| REQ-011 | Private regression suite with protected cases, seed suite, shadow mode, promotion gate, and no-regression invariant. | §23.3, §33 | Implemented locally for seed and gate; expanded suite remains required |
+| REQ-011 | Private regression suite with protected cases, seed suite, shadow mode, promotion gate, and no-regression invariant. | §23.3, §33 | Implemented locally with seed/gate checks, protected cases, fingerprinted suite review, minimum-case/protected-count gates, and required smoke/core/archive tier coverage; production release-artifact validation remains required |
 
 ## P1 Should-Haves
 

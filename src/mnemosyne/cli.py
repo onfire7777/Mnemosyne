@@ -1427,8 +1427,14 @@ def cmd_gate_suite_check(args: argparse.Namespace) -> None:
     suite = protected_suite_report(cases)
     fingerprint = gate_suite_fingerprint(cases)
     failures: list[str] = []
+    required_tiers = sorted(set(args.require_tier or []))
+    missing_required_tiers = [tier for tier in required_tiers if suite["tier_counts"].get(tier, 0) == 0]
+    if suite["case_count"] < args.min_cases:
+        failures.append(f"case count {suite['case_count']} is below required minimum {args.min_cases}")
     if suite["protected_case_count"] < args.min_protected:
         failures.append(f"protected case count {suite['protected_case_count']} is below required minimum {args.min_protected}")
+    for tier in missing_required_tiers:
+        failures.append(f"required tier {tier} has no cases")
     if args.expected_fingerprint and fingerprint != args.expected_fingerprint:
         failures.append("protected suite fingerprint mismatch")
     report = {
@@ -1436,9 +1442,12 @@ def cmd_gate_suite_check(args: argparse.Namespace) -> None:
         "suite": {
             **suite,
             "fingerprint": fingerprint,
+            "missing_required_tiers": missing_required_tiers,
         },
         "requirements": {
+            "min_cases": args.min_cases,
             "min_protected": args.min_protected,
+            "required_tiers": required_tiers,
             "expected_fingerprint_present": bool(args.expected_fingerprint),
         },
         "failures": failures,
@@ -4268,7 +4277,9 @@ def build_parser() -> argparse.ArgumentParser:
     gate_case_list.set_defaults(func=cmd_gate_case_list)
 
     gate_suite_check = sub.add_parser("gate-suite-check")
+    gate_suite_check.add_argument("--min-cases", type=int, default=0)
     gate_suite_check.add_argument("--min-protected", type=int, default=1)
+    gate_suite_check.add_argument("--require-tier", choices=["smoke", "core", "archive"], action="append")
     gate_suite_check.add_argument("--expected-fingerprint")
     gate_suite_check.add_argument("--include-cases", action="store_true")
     gate_suite_check.set_defaults(func=cmd_gate_suite_check)
