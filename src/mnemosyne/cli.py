@@ -36,7 +36,7 @@ from mnemosyne.mcp_tools import MemoryTools, TOOL_SPEC
 from mnemosyne.models import Hit
 from mnemosyne.observability import MetricsRegistry, build_ops_report, render_ops_dashboard
 from mnemosyne.oidc_jwks import load_oidc_authorization_policy, load_oidc_jwks, oidc_jwks_loader
-from mnemosyne.parametric import CommandParametricTrainer, ParametricArtifactStore, ParametricTier
+from mnemosyne.parametric import CommandParametricTrainer, ParametricArtifactStore, ParametricTier, protected_suite_report
 from mnemosyne.provenance import C2paToolVerifier, ProvenanceTrustPolicy, SignedProvenanceVerifier
 from mnemosyne.queue import InProcessQueue, PostgresQueue, QueueWorker
 from mnemosyne.retrieval import (
@@ -2905,13 +2905,24 @@ def cmd_provider_check(args: argparse.Namespace) -> None:
                         )
                     ],
                 )
-                rolled_back = tier.rollback(artifact, "provider health rollback")
+                protected_cases = [
+                    RegressionCase(
+                        id="provider-health-protected",
+                        signature="parametric provider health",
+                        query="parametric provider health",
+                        expected_substring="provider health",
+                        tier="smoke",
+                        protected=True,
+                    )
+                ]
+                rolled_back = tier.rollback(artifact, "provider health rollback", protected_cases=protected_cases)
             checks["parametric"] = {
                 "ok": True,
                 "provider": "command",
                 "adapter_kind": artifact.adapter_kind,
                 "artifact_id": artifact.id,
                 "rollback_ref": rolled_back.rollback_ref,
+                "protected_suite": protected_suite_report(protected_cases),
             }
         except Exception as exc:  # noqa: BLE001 - health checks return structured failures.
             ok = False

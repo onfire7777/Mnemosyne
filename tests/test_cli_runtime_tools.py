@@ -2010,6 +2010,10 @@ def test_cli_provider_check_uses_deployment_manifest(tmp_path: Path, monkeypatch
     assert report["checks"]["object_key_manager"]["provider"] == "command"
     assert report["checks"]["object_key_manager"]["shredded"] is True
     assert report["checks"]["parametric"]["adapter_kind"] == "lora-command-adapter"
+    assert report["checks"]["parametric"]["protected_suite"]["protected_case_ids"] == ["provider-health-protected"]
+    parametric_calls = json.loads(parametric_state.read_text(encoding="utf-8"))["calls"]
+    assert parametric_calls[-1]["protected_cases"] == ["provider-health-protected"]
+    assert parametric_calls[-1]["protected_suite"]["protected_case_count"] == 1
     assert [item["path"] for item in requests] == ["/embed", "/rerank"]
     assert [item["auth"] for item in requests] == ["Bearer embed-manifest-secret", "Bearer rank-manifest-secret"]
     assert json.loads(kms_state.read_text(encoding="utf-8"))["keys"] == {}
