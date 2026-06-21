@@ -36,7 +36,7 @@ from mnemosyne.consolidation import (
 from mnemosyne.engine import LocalMemoryEngine, MemoryEngine
 from mnemosyne.eval import run_seed_suite
 from mnemosyne.gate import RegressionCase
-from mnemosyne.ingestion import IngestRequest, IngestionPipeline
+from mnemosyne.ingestion import IngestionPipeline
 from mnemosyne.jobs import PROJECTION_RECOMPUTE_JOB, RuntimeJobHandlers
 from mnemosyne.learning import Lesson, Procedure
 from mnemosyne.media import CommandMediaTextExtractor, MediaTextExtractor, MetadataMediaTextExtractor
@@ -2475,6 +2475,7 @@ def _write_deployment_soak_evidence(
                 "command": item["command"],
                 "ok": item["ok"],
                 "required": item["required"],
+                "evidence_class": item.get("evidence_class"),
                 "path": str(path),
             }
         )
@@ -2495,6 +2496,8 @@ def _write_deployment_soak_evidence(
         "created_at": datetime.now(UTC).isoformat(),
         "ok": report["ok"],
         "source_manifest": str(Path(source_manifest).expanduser()),
+        "validation_scope": report["validation_scope"],
+        "redaction": report["redaction"],
         "files": {
             "report": report_path.name,
             "checks_dir": checks_dir.name,
@@ -2547,6 +2550,12 @@ def cmd_deployment_soak(args: argparse.Namespace) -> None:
                 "name": spec["name"],
                 "command": spec["command"],
                 "required": spec["required"],
+                "evidence_class": "allowlisted_local_cli_check",
+                "redaction": {
+                    "raw_command_omitted": True,
+                    "stderr_omitted": True,
+                    "stdout_json_only": True,
+                },
                 "ok": child_ok,
                 "returncode": completed.returncode,
                 "duration_ms": round((time.monotonic() - started) * 1000, 3),
@@ -2566,6 +2575,12 @@ def cmd_deployment_soak(args: argparse.Namespace) -> None:
                 "name": spec["name"],
                 "command": spec["command"],
                 "required": spec["required"],
+                "evidence_class": "allowlisted_local_cli_check",
+                "redaction": {
+                    "raw_command_omitted": True,
+                    "stderr_omitted": True,
+                    "stdout_json_only": True,
+                },
                 "ok": False,
                 "returncode": None,
                 "duration_ms": round((time.monotonic() - started) * 1000, 3),
@@ -2583,6 +2598,16 @@ def cmd_deployment_soak(args: argparse.Namespace) -> None:
         "manifest": {
             "path": str(Path(args.soak_manifest).expanduser()),
             "check_count": len(manifest["checks"]),
+        },
+        "validation_scope": {
+            "surface": "local_cli_orchestrator",
+            "production_validated": False,
+            "note": "Allowlisted checks run as local CLI child processes; production claims require operator-run endpoint evidence.",
+        },
+        "redaction": {
+            "raw_command_omitted": True,
+            "stderr_omitted": True,
+            "stdout_json_only": True,
         },
         "allowed_commands": sorted(DEPLOYMENT_SOAK_COMMANDS),
         "checks": checks,

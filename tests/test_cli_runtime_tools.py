@@ -1510,9 +1510,14 @@ def test_cli_deployment_soak_runs_allowed_manifest_checks_without_leaking_tokens
 
     serialized = json.dumps(report, sort_keys=True)
     assert report["ok"] is True
+    assert report["validation_scope"]["surface"] == "local_cli_orchestrator"
+    assert report["validation_scope"]["production_validated"] is False
+    assert report["redaction"]["raw_command_omitted"] is True
     assert report["summary"]["required_failures"] == 0
     assert [item["command"] for item in report["checks"]] == ["mcp-http-soak", "mcp-sse-soak"]
     assert all(item["ok"] for item in report["checks"])
+    assert all(item["evidence_class"] == "allowlisted_local_cli_check" for item in report["checks"])
+    assert all(item["redaction"]["stderr_omitted"] is True for item in report["checks"])
     assert report["checks"][0]["stdout_json"]["summary"]["requests"] == 4
     assert report["checks"][1]["stdout_json"]["iterations"][0]["endpoint_data_present"] is True
     assert "soak-secret" not in serialized
@@ -3524,7 +3529,12 @@ def test_cli_deployment_soak_allows_ops_report_dashboard(tmp_path: Path) -> None
     assert json.loads((package_dir / "manifest.json").read_text(encoding="utf-8"))["tenant_id"] == TENANT
     assert evidence_manifest["kind"] == "mnemosyne.deployment_soak_evidence"
     assert evidence_manifest["summary"] == report["summary"]
+    assert evidence_manifest["validation_scope"] == report["validation_scope"]
+    assert evidence_manifest["redaction"] == report["redaction"]
+    assert evidence_manifest["checks"][0]["evidence_class"] == "allowlisted_local_cli_check"
     assert evidence_report["evidence_bundle"]["report_path"] == str(evidence_dir / "deployment-soak-report.json")
+    assert evidence_report["validation_scope"]["production_validated"] is False
+    assert check_record["redaction"]["raw_command_omitted"] is True
     assert check_record["stdout_json"]["dashboard_package"]["manifest_path"] == str(package_dir / "manifest.json")
     assert "Mnemosyne Ops Dashboard" in dashboard_html
 

@@ -83,6 +83,7 @@
 - Requirements status now reflects verified local/clean-DSN parity for conformal calibration, belief justification/cascade invalidation, and trajectory-driven learning, while preserving explicit production-validation gaps. Calibration coverage now includes oversized prediction-set abstention.
 - MCP behavioral parity now includes direct in-process JSON-RPC `tools/call` coverage for source sync, scoped profile aliases, graph timeline/as-of, trajectory attribution, lesson/procedure induction/search, and outcome evaluation, rather than relying only on `tools/list` schema parity.
 - Durable Postgres worker parity now covers maintenance handlers for calibration, lifecycle sweep, eval suite, observability snapshot, and projection recompute through `PostgresQueue` plus `QueueWorker`; the eval-suite handler now serializes dataclass outcomes correctly with `asdict`.
+- Deployment-soak evidence bundles now explicitly mark local CLI-orchestrator scope, `production_validated=false`, and raw-command/stderr redaction metadata so local harness evidence cannot be mistaken for real production endpoint/provider validation.
 
 ## Supersession Note
 
