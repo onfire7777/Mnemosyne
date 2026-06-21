@@ -123,6 +123,7 @@ PRODUCTION_RELEASE_REQUIRED_COMMANDS = (
     "mcp-http-soak",
     "mcp-streamable-http-soak",
     "gate-suite-check",
+    "projection-recompute-once",
     "worker-run",
     "ops-dashboard-check",
     "ops-report",
