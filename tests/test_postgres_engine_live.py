@@ -15,6 +15,7 @@ import pytest
 from mnemosyne.consolidation import (
     CONSOLIDATE_EVIDENCE_JOB,
     CommandCandidateExtractor,
+    CommandEntityResolver,
     CommandEvidenceSummarizer,
     ConsolidationWorker,
 )
@@ -1296,6 +1297,20 @@ def test_postgres_gated_consolidation_uses_command_providers_live(tmp_path) -> N
         ),
         encoding="utf-8",
     )
+    resolver_script = tmp_path / "entity_resolver.py"
+    resolver_script.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env python3",
+                "import json, sys",
+                "request = json.load(sys.stdin)",
+                "candidate = request['candidates'][0]",
+                "signature = candidate['signature']",
+                "print(json.dumps({'candidates': [{'signature': signature, 'entity_key': 'live-resolved-postgres-command-target'}], 'entities': [{'key': 'live-resolved-postgres-command-target', 'label': 'Live resolved Postgres command target', 'aliases': [candidate['candidate_subject']], 'candidate_signatures': [signature]}]}))",
+            ]
+        ),
+        encoding="utf-8",
+    )
     worker = QueueWorker(
         queue,
         {
@@ -1311,6 +1326,7 @@ def test_postgres_gated_consolidation_uses_command_providers_live(tmp_path) -> N
                     )
                 ],
                 candidate_extractor=CommandCandidateExtractor([sys.executable, str(extractor_script)]),
+                entity_resolver=CommandEntityResolver([sys.executable, str(resolver_script)]),
                 summarizer=CommandEvidenceSummarizer([sys.executable, str(summarizer_script)]),
             ).run_queue_payload
         },
@@ -1320,14 +1336,24 @@ def test_postgres_gated_consolidation_uses_command_providers_live(tmp_path) -> N
     assert job is not None
     exported = engine.export_tenant(tenant)
     extractor_result = job.result["pass_results"][1]
+    resolver_result = next(item for item in job.result["pass_results"] if item["name"] == "resolver")
     summarizer_result = next(item for item in job.result["pass_results"] if item["name"] == "summarizer")
 
     assert job.status == "complete"
     assert job.result["candidate_results"][0]["promoted"] is True
     assert extractor_result["details"]["strategy"] == "command_candidate_extractor"
     assert extractor_result["details"]["metadata"] == {"source": "live-test-extractor"}
+    assert resolver_result["details"]["strategy"] == "command_entity_resolver"
+    assert resolver_result["details"]["resolved_entities"] == [
+        {
+            "key": "live-resolved-postgres-command-target",
+            "label": "Live resolved Postgres command target",
+            "aliases": ["Postgres command target"],
+            "candidate_signatures": ["postgres command target local cli"],
+        }
+    ]
     assert summarizer_result["details"]["strategy"] == "command_evidence_summarizer"
     assert summarizer_result["details"]["summary"] == "Postgres command provider summary"
     assert exported["assertions"][0]["subject"] == "Postgres command target"
     assert exported["assertions"][0]["object"] == "local CLI"
-    assert exported["entities"][0]["canonical"] == "postgres-command-target"
+    assert exported["entities"][0]["canonical"] == "live-resolved-postgres-command-target"

@@ -90,6 +90,8 @@ Latest checkpoint: `gate-suite-check` now provides a deployment-control surface 
 
 Latest checkpoint: Live Postgres coverage now includes command-backed consolidation candidate extraction and summarization. The live test uses `PostgresEngine` with shell-free command provider adapters, promotes a non-deterministic evidence note through the protected gate, verifies command extractor/summarizer pass details, and confirms exported Postgres assertions/entities carry the provider-produced candidate. This broadens the shared Local/Postgres consolidation contract; it still requires `MNEMOSYNE_POSTGRES_DSN` to run.
 
+Latest checkpoint: The live Postgres command-backed consolidation provider test now also exercises the command entity resolver boundary. The resolver receives provider-produced candidates, returns explicit candidate-to-entity mappings and entity metadata, and the test verifies the resolver pass details plus the persisted Postgres entity canonical supplied by the resolver. This broadens live production-adapter parity for extraction, resolution, and summarization while real deployed resolver/model validation remains open.
+
 ### Blockers/Concerns
 
 - Exact 1:1 blueprint parity is not yet achieved; `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md` is the controlling status artifact.
