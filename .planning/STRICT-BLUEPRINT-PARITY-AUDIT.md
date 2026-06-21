@@ -76,6 +76,7 @@
 - Official MCP SDK StreamableHTTP local coverage now validates session initialize, tool listing, read-only policy calls, evidence capture, and search provenance through the official in-process client surface.
 - Hosted HTTP JSON-RPC MCP `deep_search` and `explain` now validate relation-only `summary-derived-gist` graph abstention over `/mcp`, and Postgres forget propagation now expires relations with a timestamp guaranteed to satisfy `valid_to > valid_from` even when SQL transaction time predates app-generated relation `valid_from`.
 - Shared Local/Postgres direct primitive coverage now verifies `lexical_search`, `vector_search`, and `graph_ppr` honor caller `k` result caps while preserving tenant/branch/channel metadata.
+- CLI `deep-search` and `explain` now have direct coverage for relation-only `summary-derived-gist` graph abstention, closing the CLI runtime analogue of the MCP/hosted HTTP safety-rail tests.
 
 ## Supersession Note
 

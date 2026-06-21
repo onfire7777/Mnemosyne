@@ -21,7 +21,9 @@ from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
 from mnemosyne.cli import build_parser
+from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.mcp_server import MnemosyneMcpServer, build_http_server, build_sdk_streamable_http_app
+from mnemosyne.models import Evidence, Relation
 from mnemosyne.security import SessionIdentity, SessionTokenVerifier
 
 
@@ -3009,6 +3011,55 @@ def test_cli_search_surfaces_gist_only_abstention(tmp_path: Path) -> None:
     assert result["hits"][0]["metadata"]["summary"]["kind"] == "abstractive_gist"
     assert result["explain"]["gist_support"]["applied"] is True
     assert result["explain"]["gist_support"]["gist_hit_ids"] == [summary["cid"]]
+
+
+def test_cli_deep_search_and_explain_surface_gist_derived_graph_abstention(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    source_key = "cli-deep-gist-source"
+    engine = LocalMemoryEngine(store_path=store)
+    summary_cid = engine.append_evidence(
+        Evidence(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="system",
+            source_type="consolidation-summary",
+            source_identity="consolidation-summary:cli-deep-gist",
+            content="CLI deep search generated summary support requires source inspection.",
+            metadata={
+                "summary": {
+                    "kind": "abstractive_gist",
+                    "source_evidence_cids": [source_key],
+                    "confabulation_risk": True,
+                }
+            },
+            trust_tier=2,
+            capability_tags=["consolidation-gist", "derived-summary"],
+            access_policy={"tenant": TENANT},
+        )
+    )
+    engine.add_relation(
+        Relation(
+            tenant_id=TENANT,
+            source=source_key,
+            predicate="summary-derived-gist",
+            target=summary_cid,
+            source_evidence_cids=[source_key],
+            access_policy={"tenant": TENANT},
+        )
+    )
+
+    deep_searched = run_cli(store, "deep-search", "--tenant", TENANT, "--query", source_key)
+    explained = run_cli(store, "explain", "--tenant", TENANT, "--query", source_key)
+
+    for result in (deep_searched, explained):
+        relation_hit = next(hit for hit in result["hits"] if hit["kind"] == "relation")
+        assert result["abstained"] is True
+        assert result["uncertainty_note"] == "Only gist-tier memory support was retrieved; inspect source evidence before answering."
+        assert relation_hit["metadata"]["predicate"] == "summary-derived-gist"
+        assert relation_hit["metadata"]["source"] == source_key
+        assert relation_hit["metadata"]["target"] == summary_cid
+        assert result["explain"]["gist_support"]["applied"] is True
+        assert result["explain"]["gist_support"]["gist_hit_ids"] == [relation_hit["id"]]
 
 
 def test_cli_consolidation_uses_command_extractor_and_summarizer(tmp_path: Path) -> None:
