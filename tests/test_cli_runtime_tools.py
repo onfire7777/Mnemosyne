@@ -233,6 +233,93 @@ def test_cli_session_exchange_validates_oidc_jwks_and_mints_session_token(tmp_pa
     assert idp_token not in json.dumps(exchanged)
 
 
+def test_cli_idp_jwks_live_check_validates_url_jwks_and_redacts_token(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    jwks, idp_token = make_oidc_token(oidc_payload())
+    requests: list[str] = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, format: str, *args: object) -> None:  # noqa: A002 - stdlib signature.
+            return
+
+        def do_GET(self) -> None:  # noqa: N802 - stdlib callback name.
+            requests.append(self.path)
+            encoded = json.dumps(jwks).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(encoded)))
+            self.end_headers()
+            self.wfile.write(encoded)
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        report = run_cli(
+            store,
+            "idp-jwks-live-check",
+            "--idp-token",
+            idp_token,
+            "--idp-jwks-url",
+            f"http://127.0.0.1:{server.server_port}/jwks.json",
+            "--idp-allow-insecure-jwks-url",
+            "--idp-issuer",
+            IDP_ISSUER,
+            "--idp-audience",
+            IDP_AUDIENCE,
+        )
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        server.server_close()
+
+    serialized = json.dumps(report, sort_keys=True)
+    assert report["ok"] is True
+    assert report["jwks"]["source"]["kind"] == "url"
+    assert report["jwks"]["key_count"] == 1
+    assert report["token"]["alg"] == "RS256"
+    assert report["token"]["kid_present"] is True
+    assert report["token"]["expires_in_seconds"] > 0
+    assert report["token"]["session_id_present"] is True
+    assert report["identity"]["tenant_id"] == TENANT
+    assert report["identity"]["user_id_sha256"] == sha256(USER.encode("utf-8")).hexdigest()[:16]
+    assert report["identity"]["role"] == "operator"
+    assert report["identity"]["source_trust_tier"] == 0
+    assert requests == ["/jwks.json"]
+    assert idp_token not in serialized
+    assert USER not in serialized
+    assert "cli-idp-session" not in serialized
+    assert "idp-key-1" not in serialized
+
+
+def test_cli_idp_jwks_live_check_fails_closed_on_invalid_token(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    jwks, idp_token = make_oidc_token(oidc_payload(aud="wrong-audience"))
+    jwks_file = tmp_path / "jwks.json"
+    jwks_file.write_text(json.dumps(jwks), encoding="utf-8")
+
+    result = run_raw_cli(
+        store,
+        "idp-jwks-live-check",
+        "--idp-token",
+        idp_token,
+        "--idp-jwks-file",
+        str(jwks_file),
+        "--idp-issuer",
+        IDP_ISSUER,
+        "--idp-audience",
+        IDP_AUDIENCE,
+    )
+
+    report = json.loads(result.stdout)
+    serialized = result.stdout + result.stderr
+    assert result.returncode == 1
+    assert report["ok"] is False
+    assert "audience" in report["error"]
+    assert idp_token not in serialized
+    assert USER not in serialized
+
+
 def test_cli_session_exchange_refreshes_rotated_jwks_url_on_unknown_kid(tmp_path: Path) -> None:
     store = tmp_path / "mnemosyne.json"
     old_jwks, _ = make_oidc_token(oidc_payload(), kid="old-idp-key")
