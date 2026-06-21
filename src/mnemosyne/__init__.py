@@ -30,7 +30,7 @@ from mnemosyne.retrieval import (
 from mnemosyne.privacy import PrivacyClassification
 from mnemosyne.provenance import ProvenanceDecision, SignedProvenanceVerifier
 from mnemosyne.security import SecurityPolicy, TrustTier
-from mnemosyne.self_optimization import SelfModelStore, ShadowPolicyOptimizer
+from mnemosyne.self_optimization import ContextualBanditLearner, PolicyOutcome, SelfModelStore, ShadowPolicyOptimizer
 from mnemosyne.storage import LocalObjectStore, ObjectRecord
 from mnemosyne.user_model import LatentUserProfile, UserMemoryKind, UserModel, UserModelEntry
 
@@ -41,6 +41,7 @@ __all__ = [
     "CalibrationSet",
     "CALIBRATE_JOB",
     "CommandMediaEmbeddingProvider",
+    "ContextualBanditLearner",
     "Evidence",
     "EVAL_SUITE_JOB",
     "FidelityTier",
@@ -64,6 +65,7 @@ __all__ = [
     "ParametricArtifact",
     "ParametricPromotionDecision",
     "ParametricTier",
+    "PolicyOutcome",
     "Preference",
     "PredictabilityGate",
     "PrefetchCandidate",

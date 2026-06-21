@@ -26,7 +26,7 @@
 | REQ-015 | Fidelity-tiered forgetting with salience decay, demotion ladder, gist-risk abstention, and spaced rehearsal. | I7, §25 | Implemented locally and under clean Postgres DSN with storage-backed lifecycle demotion, persisted must-keep rehearsal scheduling metadata, and gist-risk abstention; production forgetting-policy validation remains required |
 | REQ-016 | Warm-loop consolidation with society-of-roles extraction, incremental recompute, and gate-protected promotion. | §21, §30.5 | Deterministic consolidation worker implemented; LLM role pipeline remains required |
 | REQ-017 | Procedural and corrective learning with trajectory logging, lesson distillation, promotion gate, and rollback. | Phase 4 | Implemented with trajectory logging, failure attribution, lesson/procedure induction, promotion gates, rollback, CLI/MCP runtime persistence, and protected-suite checks; deployed protected-suite validation remains required |
-| REQ-018 | Profile-guided self-optimization for routing, activation weights, thresholds, and cadence in shadow mode. | Phase 5 | Shadow policy optimizer implemented; offline RL or bandit learner remains required |
+| REQ-018 | Profile-guided self-optimization for routing, activation weights, thresholds, and cadence in shadow mode. | Phase 5 | Shadow policy optimizer and contextual bandit learner implemented for logged policy-variant outcomes under invariant rails; broader offline-RL research and production policy-ops validation remain required |
 
 ## Non-Functional Requirements
 
