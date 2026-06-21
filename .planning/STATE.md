@@ -70,6 +70,8 @@ Latest checkpoint: The CLI runtime handler mention scan now reports 69 handlers 
 
 Latest checkpoint: Requirements status has been synchronized for calibrated confidence, justification/cascade belief revision, and trajectory-driven learning to distinguish implemented local/clean-DSN behavior from remaining production validation. The conformal calibration unit test now explicitly covers oversized prediction-set abstention in addition to below-threshold and empty-set abstention. Local verification still collects 362 tests with 306 passing tests plus 56 skipped live-DB tests, and the clean compose DSN run passes all 362 tests with `MNEMOSYNE_POSTGRES_DSN=postgresql://mnemosyne:<redacted>@127.0.0.1:54329/mnemosyne?connect_timeout=5`.
 
+Latest checkpoint: In-process MCP `tools/call` behavior now has direct parity coverage for blueprint aliases beyond schema/listing. The regression exercises `source_sync`, `profile_record_explicit`, `profile_propose_inference`, `profile_correct`, `profile_get_relevant`, `graph_timeline`, `graph_as_of`, `trajectory_log`, `trajectory_attribute`, `lesson_induce`, `procedure_induce`, `lesson_search`, `procedure_search`, and `outcome_evaluate` against persisted state. Local verification now collects 363 tests with 307 passing tests plus 56 skipped live-DB tests, and the clean compose DSN run passes all 363 tests with `MNEMOSYNE_POSTGRES_DSN=postgresql://mnemosyne:<redacted>@127.0.0.1:54329/mnemosyne?connect_timeout=5`.
+
 Progress: [███████░░░] local scaffold verified; production parity gaps remain
 
 ## Performance Metrics

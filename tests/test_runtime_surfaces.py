@@ -607,6 +607,156 @@ def test_mcp_server_initializes_lists_tools_and_calls_capture_search(tmp_path: P
     assert search_content["hits"][0]["provenance"] == [capture_content["cid"]]
 
 
+def test_mcp_server_calls_profile_graph_source_and_learning_aliases(tmp_path: Path) -> None:
+    source_repo = tmp_path / "source-repo"
+    source_repo.mkdir()
+
+    def git(*args: str) -> str:
+        result = subprocess.run(
+            ["git", "-C", str(source_repo), *args],
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        return result.stdout.strip()
+
+    git("init")
+    git("config", "user.email", "mnemosyne@example.test")
+    git("config", "user.name", "Mnemosyne Test")
+    (source_repo / "memory.md").write_text(
+        """# MCP Source Truth
+
+```mnemosyne-assertion
+id = "mcp-source-truth"
+subject = "MCP source truth"
+predicate = "prefers"
+object = "Markdown git"
+confidence = 0.99
+valid_from = "2026-06-20T00:00:00Z"
+```
+""",
+        encoding="utf-8",
+    )
+    git("add", "memory.md")
+    git("commit", "-m", "add mcp source truth")
+
+    server = MnemosyneMcpServer(store_path=tmp_path / "store.json")
+    synced = mcp_call(
+        server,
+        "source_sync",
+        {
+            "tenant_id": TENANT,
+            "user_id": USER,
+            "root": str(source_repo),
+            "apply": True,
+            **PARAMETRIC_AUTH,
+        },
+    )
+    mcp_call(
+        server,
+        "relation",
+        {
+            "tenant_id": TENANT,
+            "source": "MCP source truth",
+            "predicate": "links",
+            "target": "Markdown git",
+            "source_evidence_cids": synced["evidence_cids"],
+            **PARAMETRIC_AUTH,
+        },
+    )
+    timeline = mcp_call(server, "graph_timeline", {"tenant_id": TENANT, "entity": "MCP source truth"})
+    as_of = mcp_call(
+        server,
+        "graph_as_of",
+        {
+            "tenant_id": TENANT,
+            "subject": "MCP source truth",
+            "predicate": "prefers",
+            "time": "2026-06-21T00:00:00Z",
+        },
+    )
+
+    assert synced["discovered"] == 1
+    assert synced["applied"] == 1
+    assert synced["security"]["allowed"] is True
+    assert {event["kind"] for event in timeline["events"]} == {"assertion", "relation"}
+    assert as_of["assertions"][0]["object"] == "Markdown git"
+
+    scope = {"surface": "mcp", "project": "mnemosyne"}
+    explicit = mcp_call(
+        server,
+        "profile_record_explicit",
+        {
+            "tenant_id": TENANT,
+            "user_id": USER,
+            "statement": "Prefer direct MCP alias coverage.",
+            "scope": scope,
+            "confidence": 0.82,
+            "source_evidence_cids": synced["evidence_cids"],
+        },
+    )
+    inferred = mcp_call(
+        server,
+        "profile_propose_inference",
+        {
+            "tenant_id": TENANT,
+            "user_id": USER,
+            "statement": "Prefer inferred MCP alias coverage only.",
+            "context": scope,
+            "confidence": 0.51,
+        },
+    )
+    corrected = mcp_call(
+        server,
+        "profile_correct",
+        {
+            "tenant_id": TENANT,
+            "user_id": USER,
+            "id": inferred["id"],
+            "statement": "Prefer verified MCP alias coverage.",
+            "context": scope,
+            "confidence": 0.96,
+        },
+    )
+    relevant = mcp_call(
+        server,
+        "profile_get_relevant",
+        {"tenant_id": TENANT, "user_id": USER, "context": scope},
+    )
+
+    assert explicit["security"]["allowed"] is True
+    assert corrected["corrects"] == inferred["id"]
+    assert any(item["id"] == explicit["id"] for item in relevant["authoritative"])
+    assert any(item["statement"] == "Prefer verified MCP alias coverage." for item in relevant["authoritative"])
+
+    trajectory = mcp_call(
+        server,
+        "trajectory_log",
+        {
+            "tenant_id": TENANT,
+            "user_id": USER,
+            "session_id": "session-mcp-aliases",
+            "task": "MCP alias parity",
+            "steps": [{"name": "verify", "status": "failed", "error": "alias gap"}],
+            "outcome": "failure",
+            "reward": -1.0,
+            "memory_version": "v1",
+        },
+    )
+    attribution = mcp_call(server, "trajectory_attribute", {"trajectory_id": trajectory["id"]})
+    lesson = mcp_call(server, "lesson_induce", {"trajectory_id": trajectory["id"]})
+    procedure = mcp_call(server, "procedure_induce", {"lesson_id": lesson["id"]})
+    lesson_search = mcp_call(server, "lesson_search", {"tenant_id": TENANT, "signature": "alias-gap"})
+    procedure_search = mcp_call(server, "procedure_search", {"tenant_id": TENANT, "query": "alias-gap"})
+    outcome = mcp_call(server, "outcome_evaluate", {"trajectory_id": trajectory["id"]})
+
+    assert attribution["cause"] == "alias gap"
+    assert lesson_search["lessons"][0]["id"] == lesson["id"]
+    assert procedure_search["procedures"][0]["id"] == procedure["id"]
+    assert outcome["trajectory_id"] == trajectory["id"]
+    assert outcome["passed"] is False
+
+
 def test_official_mcp_sdk_adapter_lists_tools_and_calls_capture_search(tmp_path: Path) -> None:
     pytest.importorskip("mcp")
     from mcp import types
