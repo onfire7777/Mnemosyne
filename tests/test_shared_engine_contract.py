@@ -1025,6 +1025,34 @@ def test_shared_engine_contract_branch_names_are_tenant_scoped(engine_bundle: tu
     assert any(item["tenant_id"] == other_tenant and item["name"] == branch for item in branches_after_discard)
 
 
+def test_shared_engine_contract_branch_inherits_explicit_source_branch(engine_bundle: tuple[Any, str, str]) -> None:
+    engine, tenant, user = engine_bundle
+    source_branch = f"shared-source-branch-{uuid4()}"
+    child_branch = f"shared-child-branch-{uuid4()}"
+    main_cid = _append_evidence(engine, tenant, user, "Main evidence should flow into explicit source branch children.")
+    _branch(engine, source_branch, tenant)
+    source_only_cid = _append_evidence(
+        engine,
+        tenant,
+        user,
+        "Source branch evidence should flow only through explicit source branch inheritance.",
+        branch=source_branch,
+    )
+
+    _branch(engine, child_branch, tenant, frm=source_branch)
+    branches = engine.export_all()["branches"]
+
+    assert engine.get_evidence(tenant, main_cid, branch=child_branch) is not None
+    assert engine.get_evidence(tenant, source_only_cid, branch=child_branch) is not None
+    assert engine.get_evidence(tenant, source_only_cid, branch="main") is None
+    assert any(
+        item["tenant_id"] == tenant
+        and item["name"] == child_branch
+        and item.get("from_branch") == source_branch
+        for item in branches
+    )
+
+
 def test_shared_engine_contract_discard_prunes_branch_tms_rows(engine_bundle: tuple[Any, str, str]) -> None:
     engine, tenant, user = engine_bundle
     branch = f"shared-discard-tms-{uuid4()}"
@@ -1689,11 +1717,11 @@ def _exported_assertion(engine: Any, tenant: str, assertion_id: str) -> dict[str
     raise AssertionError(f"missing exported assertion {assertion_id}")
 
 
-def _branch(engine: Any, name: str, tenant: str) -> None:
+def _branch(engine: Any, name: str, tenant: str, *, frm: str = "main") -> None:
     try:
-        engine.branch(name, tenant_id=tenant)
+        engine.branch(name, frm=frm, tenant_id=tenant)
     except TypeError:
-        engine.branch(name)
+        engine.branch(name, frm=frm)
 
 
 def _merge(engine: Any, name: str, tenant: str) -> Any:
