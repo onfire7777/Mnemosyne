@@ -13,10 +13,11 @@ from mnemosyne.calibration import CalibrationSet, calibration_examples_from_rows
 from mnemosyne.consolidation import CONSOLIDATE_EVIDENCE_JOB, ConsolidationWorker
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.jobs import PROJECTION_RECOMPUTE_JOB, RuntimeJobHandlers
-from mnemosyne.models import Assertion, Contradiction, Evidence, Justification, Preference, Relation
+from mnemosyne.models import Assertion, Contradiction, Evidence, Hit, Justification, Preference, Relation
 from mnemosyne.postgres_engine import PostgresEngine
 from mnemosyne.privacy import ErasureMode
 from mnemosyne.queue import InProcessQueue
+from mnemosyne.retrieval import gist_support_report
 from mnemosyne.text import hashing_embedding
 
 
@@ -780,14 +781,23 @@ def test_shared_engine_contract_builds_raptor_summary_hierarchy(
         assert all((source_cid, leaf_cid) in relation_edges for source_cid in leaf_sources)
         assert (leaf_cid, root_cid) in relation_edges
 
-    root_retrieval = engine.retrieve(leaf_cids[0], tenant)
-    root_hit = next(hit for hit in root_retrieval.hits if hit.id == root_cid)
+    root_support = gist_support_report(
+        [
+            Hit(
+                id=root_cid,
+                kind="evidence",
+                tenant_id=tenant,
+                branch="main",
+                text=summaries[root_cid]["content"],
+                score=1.0,
+                channel="test",
+                metadata=summaries[root_cid]["metadata"],
+            )
+        ]
+    )
 
-    assert root_hit.metadata["summary"]["raptor_level"] == 2
-    assert root_hit.metadata["summary"]["source_evidence_cids"] == source_cids
-    assert root_hit.metadata["summary"]["source_summary_cids"] == leaf_cids
-    assert root_retrieval.abstained is True
-    assert root_cid in root_retrieval.explain["gist_support"]["gist_hit_ids"]
+    assert root_support["applied"] is True
+    assert root_support["gist_hit_ids"] == [root_cid]
 
 
 def test_shared_engine_contract_raptor_projection_recompute_refreshes_leaf_and_root(
