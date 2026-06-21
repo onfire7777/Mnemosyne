@@ -50,6 +50,8 @@ Latest checkpoint: Shared branch parity now covers explicit non-main source-bran
 
 Latest checkpoint: MCP `search` now has direct JSON-RPC facade proof that gist-only retrieval abstention is preserved outside the raw engine API. A stateful MCP server seeds a real consolidation summary and `tools/call` search verifies `abstained=true`, the source-inspection uncertainty note, abstractive-gist hit metadata, and `explain.gist_support`. Local verification now collects 348 tests with 296 passing tests plus 52 skipped live-DB tests, and the clean compose DSN run passes all 348 tests with `MNEMOSYNE_POSTGRES_DSN=postgresql://mnemosyne:<redacted>@127.0.0.1:54329/mnemosyne?connect_timeout=5`.
 
+Latest checkpoint: Hosted HTTP JSON-RPC MCP `search` now has transport-level proof that gist-only retrieval abstention survives capture persistence, consolidation summary materialization, server restart, and `tools/call` search over `/mcp`. CLI `tools` output is also pinned to the exact MCP `tools/list` contract so agent-facing tool names, schemas, required fields, defaults, nullability, and `additionalProperties` cannot drift between surfaces. Local verification now collects 352 tests with 298 passing tests plus 54 skipped live-DB tests, and the clean compose DSN run passes all 352 tests with `MNEMOSYNE_POSTGRES_DSN=postgresql://mnemosyne:<redacted>@127.0.0.1:54329/mnemosyne?connect_timeout=5`.
+
 Progress: [███████░░░] local scaffold verified; production parity gaps remain
 
 ## Performance Metrics
