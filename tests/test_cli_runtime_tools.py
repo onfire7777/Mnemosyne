@@ -1466,6 +1466,72 @@ def test_cli_deployment_soak_fails_closed_on_disallowed_command(tmp_path: Path) 
     assert "not allowed" in report["checks"][0]["error"]
 
 
+def test_cli_deployment_soak_places_allowed_global_args_before_child_command(tmp_path: Path) -> None:
+    manifest_path = tmp_path / "deployment-soak.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "checks": [
+                    {
+                        "name": "local-worker",
+                        "command": "worker-run",
+                        "global_args": [
+                            "--queue-backend",
+                            "local",
+                            "--queue-tenant",
+                            "deployment-tenant",
+                        ],
+                        "args": [
+                            "--max-cycles",
+                            "1",
+                            "--idle-exit-after",
+                            "1",
+                            "--poll-interval",
+                            "0",
+                        ],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = run_cli(tmp_path / "mnemosyne.json", "deployment-soak", "--soak-manifest", str(manifest_path))
+
+    assert report["ok"] is True
+    assert report["checks"][0]["command"] == "worker-run"
+    assert report["checks"][0]["ok"] is True
+    assert report["checks"][0]["stdout_json"]["summary"]["stopped_reason"] == "idle_exit"
+    assert "global_args" not in json.dumps(report, sort_keys=True)
+
+
+def test_cli_deployment_soak_rejects_unallowed_global_args(tmp_path: Path) -> None:
+    manifest_path = tmp_path / "deployment-soak.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "checks": [
+                    {
+                        "name": "bad-global",
+                        "command": "worker-run",
+                        "global_args": ["--session-secret", "inline-secret"],
+                        "args": ["--max-cycles", "1"],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = run_raw_cli(tmp_path / "mnemosyne.json", "deployment-soak", "--soak-manifest", str(manifest_path))
+    report = json.loads(result.stdout)
+
+    assert result.returncode == 1
+    assert report["ok"] is False
+    assert "global arg '--session-secret' is not allowed" in report["checks"][0]["error"]
+    assert "inline-secret" not in json.dumps(report, sort_keys=True)
+
+
 def test_cli_deployment_soak_allows_idp_authz_rollout_check(tmp_path: Path) -> None:
     store = tmp_path / "mnemosyne.json"
     current_policy_file = tmp_path / "current-authz-policy.json"
