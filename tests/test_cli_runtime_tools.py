@@ -1584,6 +1584,52 @@ def test_cli_tls_rotation_plan_check_validates_overlap_hostnames_and_thresholds(
     assert failed_report["checks"]["hostnames_valid"] is True
 
 
+def test_cli_deployment_soak_allows_tls_rotation_plan_check(tmp_path: Path) -> None:
+    current_dir = tmp_path / "current"
+    candidate_dir = tmp_path / "candidate"
+    current_dir.mkdir()
+    candidate_dir.mkdir()
+    _, current_cert, _ = write_tls_fixture(current_dir, server_days_valid=45)
+    _, candidate_cert, _ = write_tls_fixture(candidate_dir, server_days_valid=120)
+    manifest_path = tmp_path / "deployment-soak.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "checks": [
+                    {
+                        "name": "tls-rotation",
+                        "command": "tls-rotation-plan-check",
+                        "args": [
+                            "--current-cert-file",
+                            str(current_cert),
+                            "--candidate-cert-file",
+                            str(candidate_cert),
+                            "--hostname",
+                            "localhost",
+                            "--min-current-days-valid",
+                            "10",
+                            "--min-candidate-days-valid",
+                            "60",
+                            "--min-overlap-days",
+                            "10",
+                        ],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = run_cli(tmp_path / "mnemosyne.json", "deployment-soak", "--soak-manifest", str(manifest_path))
+
+    assert report["ok"] is True
+    assert "tls-rotation-plan-check" in report["allowed_commands"]
+    assert report["checks"][0]["command"] == "tls-rotation-plan-check"
+    assert report["checks"][0]["ok"] is True
+    assert report["checks"][0]["stdout_json"]["checks"]["overlap_valid"] is True
+    assert report["checks"][0]["stdout_json"]["rotation"]["candidate_hostname_checks"] == {"localhost": True}
+
+
 def test_cli_provider_check_uses_deployment_manifest(tmp_path: Path, monkeypatch) -> None:
     requests: list[dict[str, object]] = []
 
