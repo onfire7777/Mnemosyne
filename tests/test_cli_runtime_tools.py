@@ -1788,6 +1788,73 @@ def test_cli_provider_check_validates_oidc_manifest_without_sensitive_values(tmp
     assert "mnemosyne-operators" not in encoded
 
 
+def test_cli_provider_check_validates_session_secret_command_without_sensitive_values(tmp_path: Path) -> None:
+    command = fake_session_secret_command(
+        tmp_path,
+        {
+            "keyring": {
+                "current": "current-session-secret",
+                "candidate": "candidate-session-secret",
+            },
+            "active_key_id": "candidate",
+        },
+    )
+    manifest = tmp_path / "providers.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "name": "session-secret-provider-check",
+                "required_checks": ["session_secret"],
+                "providers": {"session_secret": {"command": command}},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = run_cli(tmp_path / "mnemosyne.json", "provider-check", "--provider-manifest", str(manifest))
+
+    check = report["checks"]["session_secret"]
+    assert report["ok"] is True
+    assert check["ok"] is True
+    assert check["provider"] == "command"
+    assert check["source"] == "keyring"
+    assert check["key_count"] == 2
+    assert check["active_key_id_present"] is True
+    assert check["roundtrip_verified"] is True
+    encoded = json.dumps(report, sort_keys=True)
+    assert "current-session-secret" not in encoded
+    assert "candidate-session-secret" not in encoded
+    assert "candidate" not in encoded
+
+
+def test_cli_provider_check_required_session_secret_fails_closed_on_bad_rotation(tmp_path: Path) -> None:
+    command = fake_session_secret_command(
+        tmp_path,
+        {"keyring": {"current": "current-session-secret"}, "active_key_id": "missing"},
+        name="bad-rotation-secret",
+    )
+    manifest = tmp_path / "providers.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "name": "bad-session-secret-provider-check",
+                "required_checks": ["session_secret"],
+                "providers": {"session_secret": {"command": command}},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = run_raw_cli(tmp_path / "mnemosyne.json", "provider-check", "--provider-manifest", str(manifest))
+    payload = json.loads(result.stdout)
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert payload["checks"]["session_secret"]["ok"] is False
+    assert "active session key id is unknown" in payload["checks"]["session_secret"]["error"]
+    assert "current-session-secret" not in json.dumps(payload, sort_keys=True)
+
+
 def test_cli_provider_check_required_oidc_fails_closed_without_issuer(tmp_path: Path) -> None:
     jwks, _ = make_oidc_token(oidc_payload())
     jwks_file = tmp_path / "jwks.json"

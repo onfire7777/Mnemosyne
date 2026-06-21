@@ -52,6 +52,7 @@ from mnemosyne.security import (
     OidcAuthorizationPolicy,
     OidcJwtVerifier,
     SessionAuthError,
+    SessionIdentity,
     SessionTokenVerifier,
     issue_session_from_oidc,
     load_session_secret_command,
@@ -2496,6 +2497,16 @@ def apply_provider_manifest(args: argparse.Namespace) -> dict[str, Any]:
                 "timeout_seconds": "parametric_timeout",
             },
         )
+    session_secret = providers.get("session_secret", {})
+    if isinstance(session_secret, dict):
+        _apply_manifest_fields(
+            args,
+            session_secret,
+            {
+                "command": "session_secret_command",
+                "timeout_seconds": "session_secret_command_timeout",
+            },
+        )
     oidc = providers.get("oidc", {})
     if isinstance(oidc, dict):
         _apply_manifest_fields(
@@ -2782,6 +2793,47 @@ def cmd_provider_check(args: argparse.Namespace) -> None:
             checks["oidc"] = {"ok": False, "error": str(exc)}
     else:
         checks["oidc"] = {"ok": True, "provider": "none", "skipped": True}
+
+    if getattr(args, "session_secret_command", None):
+        try:
+            material, active_key_id = load_session_secret_command(
+                args.session_secret_command,
+                timeout_seconds=float(getattr(args, "session_secret_command_timeout", 10.0)),
+            )
+            if isinstance(material, Mapping):
+                verifier = SessionTokenVerifier(material, active_key_id=active_key_id)
+                source = "keyring"
+                key_count = len(material)
+            else:
+                verifier = SessionTokenVerifier(material)
+                source = "secret"
+                key_count = 1
+            token = verifier.sign(
+                SessionIdentity(
+                    tenant_id="provider-health",
+                    user_id="provider-health",
+                    role="operator",
+                    source_trust_tier=0,
+                    expires_at=int(time.time()) + 300,
+                    session_id="provider-health",
+                )
+            )
+            identity = verifier.verify(token)
+            if identity.tenant_id != "provider-health" or identity.user_id != "provider-health":
+                raise ValueError("session secret provider failed signed-token round trip")
+            checks["session_secret"] = {
+                "ok": True,
+                "provider": "command",
+                "source": source,
+                "key_count": key_count,
+                "active_key_id_present": active_key_id is not None,
+                "roundtrip_verified": True,
+            }
+        except Exception as exc:  # noqa: BLE001 - health checks return structured failures.
+            ok = False
+            checks["session_secret"] = {"ok": False, "provider": "command", "error": str(exc)}
+    else:
+        checks["session_secret"] = {"ok": True, "provider": "none", "skipped": True}
 
     try:
         checks["residency_policy"] = {"ok": True, **load_tools(args).residency_policy()}
