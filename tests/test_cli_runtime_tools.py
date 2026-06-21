@@ -1975,6 +1975,7 @@ def test_cli_provider_check_uses_deployment_manifest(tmp_path: Path, monkeypatch
                 "required_checks": [
                     "embedding",
                     "reranker",
+                    "retrieval_backends",
                     "media_extractor",
                     "media_embedding",
                     "object_key_manager",
@@ -2000,6 +2001,8 @@ def test_cli_provider_check_uses_deployment_manifest(tmp_path: Path, monkeypatch
                             "model": "rerank-manifest",
                             "api_key": {"env": "MNEMOSYNE_TEST_RERANK_KEY"},
                         },
+                        "lexical_backend": "paradedb-bm25",
+                        "graph_backend": "apache-age",
                     },
                     "media": {
                         "extractor": {"command": str(extractor)},
@@ -2047,6 +2050,7 @@ def test_cli_provider_check_uses_deployment_manifest(tmp_path: Path, monkeypatch
         "required_checks": [
             "embedding",
             "reranker",
+            "retrieval_backends",
             "media_extractor",
             "media_embedding",
             "object_key_manager",
@@ -2061,6 +2065,13 @@ def test_cli_provider_check_uses_deployment_manifest(tmp_path: Path, monkeypatch
     assert report["checks"]["embedding"]["provider"] == "http"
     assert report["checks"]["embedding"]["dimensions"] == 3
     assert report["checks"]["reranker"]["top_id"] == "b"
+    assert report["checks"]["retrieval_backends"] == {
+        "ok": True,
+        "lexical_backend": "paradedb-bm25",
+        "graph_backend": "apache-age",
+        "lexical_local": False,
+        "graph_local": False,
+    }
     assert report["checks"]["media_extractor"]["sources"] == ["manifest-probe"]
     assert report["checks"]["media_embedding"]["dimensions"] == 3
     assert report["checks"]["object_key_manager"]["provider"] == "command"
@@ -2256,9 +2267,14 @@ def test_cli_provider_check_manifest_can_forbid_local_retrieval(tmp_path: Path) 
         json.dumps(
             {
                 "name": "remote-retrieval-required",
-                "required_checks": ["embedding", "reranker"],
+                "required_checks": ["embedding", "reranker", "retrieval_backends"],
                 "forbid_local": True,
-                "providers": {},
+                "providers": {
+                    "retrieval": {
+                        "lexical_backend": "local-bm25-lite",
+                        "graph_backend": "local-ppr",
+                    }
+                },
             }
         ),
         encoding="utf-8",
@@ -2271,8 +2287,10 @@ def test_cli_provider_check_manifest_can_forbid_local_retrieval(tmp_path: Path) 
     assert payload["ok"] is False
     assert payload["checks"]["embedding"]["ok"] is False
     assert payload["checks"]["reranker"]["ok"] is False
+    assert payload["checks"]["retrieval_backends"]["ok"] is False
     assert payload["checks"]["embedding"]["error"] == "provider manifest forbids local retrieval providers"
     assert payload["checks"]["reranker"]["error"] == "provider manifest forbids local retrieval providers"
+    assert payload["checks"]["retrieval_backends"]["error"] == "provider manifest forbids local retrieval backends"
 
 
 def test_cli_ingests_binary_file_with_c2pa_verifier(tmp_path: Path) -> None:
