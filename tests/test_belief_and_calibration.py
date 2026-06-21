@@ -94,6 +94,7 @@ def test_conformal_calibration_threshold_and_abstention() -> None:
     assert should_abstain(threshold - 0.01, calibration) is True
     assert should_abstain(threshold + 0.2, calibration) is False
     assert should_abstain(0.99, calibration, prediction_set_size=0) is True
+    assert should_abstain(0.99, calibration, prediction_set_size=4, max_set_size=3) is True
 
 
 def test_justifications_are_exported_with_evidence_links() -> None:
@@ -119,4 +120,3 @@ def test_justifications_are_exported_with_evidence_links() -> None:
 
     assert report.justification_id in justifications
     assert justifications[report.justification_id]["evidence_cids"] == [cid]
-

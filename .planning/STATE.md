@@ -68,6 +68,8 @@ Latest checkpoint: CLI `profile-record-explicit` and `trajectory-attribute` alia
 
 Latest checkpoint: The CLI runtime handler mention scan now reports 69 handlers with 0 unmentioned command surfaces in `tests/test_cli_runtime_tools.py`. Direct coverage was added for `prefetch`, `discard`, `trajectory-log`, `lesson-induce`, and `procedure-induce`, including prefetch execute/skip behavior, authorized candidate-branch discard with empty post-discard retrieval, and direct learning alias persistence. Local verification now collects 362 tests with 306 passing tests plus 56 skipped live-DB tests, and the clean compose DSN run passes all 362 tests with `MNEMOSYNE_POSTGRES_DSN=postgresql://mnemosyne:<redacted>@127.0.0.1:54329/mnemosyne?connect_timeout=5`.
 
+Latest checkpoint: Requirements status has been synchronized for calibrated confidence, justification/cascade belief revision, and trajectory-driven learning to distinguish implemented local/clean-DSN behavior from remaining production validation. The conformal calibration unit test now explicitly covers oversized prediction-set abstention in addition to below-threshold and empty-set abstention. Local verification still collects 362 tests with 306 passing tests plus 56 skipped live-DB tests, and the clean compose DSN run passes all 362 tests with `MNEMOSYNE_POSTGRES_DSN=postgresql://mnemosyne:<redacted>@127.0.0.1:54329/mnemosyne?connect_timeout=5`.
+
 Progress: [███████░░░] local scaffold verified; production parity gaps remain
 
 ## Performance Metrics
