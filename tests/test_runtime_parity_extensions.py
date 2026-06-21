@@ -733,6 +733,55 @@ def test_media_extract_job_appends_derived_evidence_without_mutating_source(tmp_
     assert recompute.details["queued_consolidation_jobs"] == []
 
 
+def test_projection_recompute_schedules_summary_refresh_for_affected_gist(tmp_path) -> None:
+    engine = LocalMemoryEngine()
+    queue = InProcessQueue()
+    cid = engine.append_evidence(
+        Evidence(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="chat",
+            content="Projection recompute source for a refreshable gist.",
+            trust_tier=0,
+            access_policy={"tenant": TENANT},
+        )
+    )
+    summary_run = ConsolidationWorker(engine, gate_cases=[]).run_queue_payload(
+        {
+            "tenant_id": TENANT,
+            "branch": "main",
+            "source_evidence_cids": [cid],
+            "passes": ["summarizer"],
+        }
+    )
+    summary = next(item for item in summary_run.pass_results if item["name"] == "summarizer")["details"]
+    summary_cid = summary["summary_cid"]
+    relation_id = summary["derived_relation_ids"][0]
+    handlers = RuntimeJobHandlers(engine, queue)
+
+    recompute = handlers.run_projection_recompute(
+        {
+            "tenant_id": TENANT,
+            "user_id": USER,
+            "branch": "main",
+            "changed_evidence_cids": [cid],
+            "passes": ["summarizer"],
+        }
+    )
+    jobs = list(queue.jobs.values())
+
+    assert recompute.kind == PROJECTION_RECOMPUTE_JOB
+    assert recompute.details["affected_evidence_cids"] == [cid, summary_cid]
+    assert recompute.details["affected_projections"]["relations"] == [relation_id]
+    assert recompute.details["queued_consolidation_jobs"] == [jobs[0].id]
+    assert len(jobs) == 1
+    assert jobs[0].kind == CONSOLIDATE_EVIDENCE_JOB
+    assert jobs[0].payload["source_evidence_cids"] == [cid]
+    assert jobs[0].payload["passes"] == ["summarizer"]
+    assert jobs[0].payload["trigger"] == PROJECTION_RECOMPUTE_JOB
+
+
 def test_forget_transitively_erases_media_derived_evidence_and_assertions(tmp_path) -> None:
     engine = LocalMemoryEngine()
     queue = InProcessQueue()

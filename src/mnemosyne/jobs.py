@@ -364,15 +364,15 @@ def _affected_evidence_cids(
                 continue
             cid = str(row.get("cid", ""))
             metadata = row.get("metadata") or {}
-            source_cid = str(metadata.get("source_evidence_cid", ""))
-            if cid and source_cid in affected and cid not in affected:
+            source_cids = _metadata_source_cids(metadata)
+            if cid and source_cids.intersection(affected) and cid not in affected:
                 affected.add(cid)
                 ordered.append(cid)
                 changed = True
         for row in snapshot.get("relations", []):
             if not _matches_tenant_branch(row, tenant_id, branch):
                 continue
-            if str(row.get("predicate", "")) != "media-derived-text":
+            if str(row.get("predicate", "")) not in {"media-derived-text", "summary-derived-gist"}:
                 continue
             source = str(row.get("source", ""))
             target = str(row.get("target", ""))
@@ -381,6 +381,22 @@ def _affected_evidence_cids(
                 ordered.append(target)
                 changed = True
     return ordered
+
+
+def _metadata_source_cids(metadata: dict[str, Any]) -> set[str]:
+    sources: set[str] = set()
+    single = metadata.get("source_evidence_cid")
+    if single:
+        sources.add(str(single))
+    values = metadata.get("source_evidence_cids")
+    if isinstance(values, list):
+        sources.update(str(item) for item in values if item)
+    summary = metadata.get("summary")
+    if isinstance(summary, dict):
+        summary_values = summary.get("source_evidence_cids")
+        if isinstance(summary_values, list):
+            sources.update(str(item) for item in summary_values if item)
+    return sources
 
 
 def _affected_projections(
@@ -410,7 +426,11 @@ def _surviving_evidence_cids(
         if not _matches_tenant_branch(row, tenant_id, branch):
             continue
         cid = str(row.get("cid", ""))
-        if cid in affected and not bool(row.get("erased", False)):
+        if (
+            cid in affected
+            and not bool(row.get("erased", False))
+            and str(row.get("source_type", "")) != "consolidation-summary"
+        ):
             surviving.append(cid)
     return surviving
 
