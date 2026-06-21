@@ -86,6 +86,7 @@ DEPLOYMENT_SOAK_COMMANDS = {
     "mcp-sse-soak",
     "worker-run",
     "projection-recompute-once",
+    "gate-suite-check",
     "ops-report",
 }
 DEPLOYMENT_SOAK_GLOBAL_OPTIONS = {
@@ -1389,6 +1390,46 @@ def cmd_gate_case_add(args: argparse.Namespace) -> None:
 def cmd_gate_case_list(args: argparse.Namespace) -> None:
     runtime_state = load_runtime_state(args)
     emit({"cases": [case.to_dict() for case in runtime_state.load_gate_cases()]})
+
+
+def gate_suite_fingerprint(cases: list[RegressionCase]) -> str:
+    canonical = [
+        case.to_dict()
+        for case in sorted(
+            cases,
+            key=lambda item: (item.id, item.signature, item.query, item.expected_substring),
+        )
+    ]
+    return sha256(json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def cmd_gate_suite_check(args: argparse.Namespace) -> None:
+    runtime_state = load_runtime_state(args)
+    cases = runtime_state.load_gate_cases()
+    suite = protected_suite_report(cases)
+    fingerprint = gate_suite_fingerprint(cases)
+    failures: list[str] = []
+    if suite["protected_case_count"] < args.min_protected:
+        failures.append(f"protected case count {suite['protected_case_count']} is below required minimum {args.min_protected}")
+    if args.expected_fingerprint and fingerprint != args.expected_fingerprint:
+        failures.append("protected suite fingerprint mismatch")
+    report = {
+        "ok": not failures,
+        "suite": {
+            **suite,
+            "fingerprint": fingerprint,
+        },
+        "requirements": {
+            "min_protected": args.min_protected,
+            "expected_fingerprint_present": bool(args.expected_fingerprint),
+        },
+        "failures": failures,
+    }
+    if args.include_cases:
+        report["suite"]["cases"] = [case.to_dict() for case in cases]
+    emit(report)
+    if failures:
+        raise SystemExit(1)
 
 
 def cmd_queue_enqueue(args: argparse.Namespace) -> None:
@@ -4136,6 +4177,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     gate_case_list = sub.add_parser("gate-case-list")
     gate_case_list.set_defaults(func=cmd_gate_case_list)
+
+    gate_suite_check = sub.add_parser("gate-suite-check")
+    gate_suite_check.add_argument("--min-protected", type=int, default=1)
+    gate_suite_check.add_argument("--expected-fingerprint")
+    gate_suite_check.add_argument("--include-cases", action="store_true")
+    gate_suite_check.set_defaults(func=cmd_gate_suite_check)
 
     queue_enqueue = sub.add_parser("queue-enqueue")
     queue_enqueue.add_argument("--kind", required=True)
