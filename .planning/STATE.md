@@ -94,6 +94,8 @@ Latest checkpoint: The live Postgres command-backed consolidation provider test 
 
 Latest checkpoint: Provider deployment manifests now have an explicit retrieval-backend health check for lexical and graph adapters. `provider-check` reports configured lexical/graph backend names and whether either is a local fallback; production manifests with `forbid_local` now fail closed on local lexical or graph backends, not only local embedding/reranker providers. Focused CLI tests cover a ParadeDB/AGE-style production manifest and a local BM25/PPR rejection path.
 
+Latest checkpoint: CLI Postgres DSN selection now treats an explicit empty `--postgres-dsn ""` as fail-closed instead of falling back to `MNEMOSYNE_POSTGRES_DSN`; runtime state and Postgres queue loading follow the same rule. The regression test sets an env DSN to prove the explicit-empty override is honored. The full test suite passes against the local compose pgvector DSN `postgresql://mnemosyne:<redacted>@127.0.0.1:54329/mnemosyne` after this fix.
+
 ### Blockers/Concerns
 
 - Exact 1:1 blueprint parity is not yet achieved; `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md` is the controlling status artifact.

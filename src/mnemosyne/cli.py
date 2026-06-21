@@ -304,7 +304,7 @@ def load_media_embedding_provider(args: argparse.Namespace) -> CommandMediaEmbed
 
 def load_engine(args: argparse.Namespace) -> MemoryEngine:
     if args.backend == "postgres":
-        dsn = args.postgres_dsn or default_postgres_dsn()
+        dsn = args.postgres_dsn
         if not dsn:
             raise SystemExit("Postgres backend requires --postgres-dsn or MNEMOSYNE_POSTGRES_DSN.")
         try:
@@ -437,7 +437,7 @@ def runtime_state_tenant(args: argparse.Namespace) -> str:
 
 def load_runtime_state(args: argparse.Namespace) -> RuntimeState | PostgresRuntimeState | None:
     if args.backend == "postgres":
-        dsn = args.postgres_dsn or os.environ.get("MNEMOSYNE_POSTGRES_DSN")
+        dsn = args.postgres_dsn
         if not dsn:
             raise SystemExit("--backend postgres requires --postgres-dsn or MNEMOSYNE_POSTGRES_DSN.")
         return PostgresRuntimeState(dsn, tenant_id=runtime_state_tenant(args))
@@ -449,7 +449,7 @@ def load_queue(
     runtime_state: RuntimeState | PostgresRuntimeState | None = None,
 ) -> InProcessQueue | PostgresQueue:
     if args.queue_backend == "postgres":
-        dsn = args.postgres_dsn or os.environ.get("MNEMOSYNE_POSTGRES_DSN")
+        dsn = args.postgres_dsn
         if not dsn:
             raise SystemExit("--queue-backend postgres requires --postgres-dsn or MNEMOSYNE_POSTGRES_DSN.")
         tenant_id = runtime_state_tenant(args)
