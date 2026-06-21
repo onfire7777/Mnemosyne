@@ -14,6 +14,7 @@ from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.models import Assertion, Contradiction, Evidence, Justification, Preference, Relation
 from mnemosyne.postgres_engine import PostgresEngine
 from mnemosyne.privacy import ErasureMode
+from mnemosyne.text import hashing_embedding
 
 
 def _live_dsn() -> str | None:
@@ -55,6 +56,36 @@ def test_shared_engine_contract_retrieves_and_exports_evidence(engine_bundle: tu
     assert recalled.content == "Shared engine contract stores the orchid retrieval fact."
     assert any(hit.id == cid for hit in retrieved.hits)
     assert any(item["cid"] == cid for item in exported["evidence"])
+
+
+def test_shared_engine_contract_updates_evidence_embedding(engine_bundle: tuple[Any, str, str]) -> None:
+    engine, tenant, user = engine_bundle
+    cid = engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id=user,
+            actor="tool",
+            source_type="embedding-contract",
+            content="",
+            content_pointer="objects/shared/embedding-contract.txt",
+            trust_tier=1,
+            access_policy={"tenant": tenant},
+        )
+    )
+    dims = int(getattr(getattr(getattr(engine, "adapters", None), "embedding", None), "dims", 256))
+    vector = hashing_embedding("shared embedding contract", dims=dims)
+
+    updated = engine.set_evidence_embedding(tenant, cid, vector)
+    recalled = engine.get_evidence(tenant, cid)
+    exported = next(item for item in engine.export_tenant(tenant)["evidence"] if item["cid"] == cid)
+
+    assert updated is True
+    assert recalled is not None
+    assert recalled.embedding is not None
+    assert len(recalled.embedding) == len(vector)
+    assert all(abs(left - right) < 0.000001 for left, right in zip(recalled.embedding, vector))
+    assert exported["embedding"] is not None
+    assert len(exported["embedding"]) == len(vector)
 
 
 def test_shared_engine_contract_preserves_lossless_evidence_envelope(

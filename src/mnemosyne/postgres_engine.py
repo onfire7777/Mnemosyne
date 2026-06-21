@@ -203,6 +203,46 @@ class PostgresEngine:
                 row = cur.fetchone()
         return _row_to_evidence(row, cid) if row else None
 
+    def set_evidence_embedding(
+        self,
+        tenant_id: str,
+        cid: str,
+        embedding: list[float],
+        branch: str = "main",
+        *,
+        actor: str = "consolidation",
+        source: str = "embedder",
+    ) -> bool:
+        db_tenant_id = _stable_uuid("tenant", tenant_id)
+        with self.connect() as conn:
+            with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                self._set_tenant(cur, db_tenant_id)
+                self._ensure_evidence_vector_schema(cur)
+                cur.execute(
+                    """
+                    UPDATE evidence
+                    SET embedding = %s::vector
+                    WHERE tenant_id = %s AND branch = %s AND cid = %s AND erased = false
+                    RETURNING source_type, trust_tier, capability_tags
+                    """,
+                    (_vector_literal(embedding), db_tenant_id, branch, _cid_to_bytes(cid)),
+                )
+                row = cur.fetchone()
+                if row is None:
+                    return False
+                self._audit(
+                    cur,
+                    db_tenant_id,
+                    actor,
+                    "set_evidence_embedding",
+                    cid,
+                    {"branch": branch, "embedding_dims": len(embedding), "source_type": row["source_type"]},
+                    source=source,
+                    trust_tier=row["trust_tier"],
+                    capability_tags=list(row["capability_tags"] or []),
+                )
+        return True
+
     def upsert_assertion(self, assertion: Assertion, branch: str = "main") -> str:
         self.ensure_tenant_and_branch(assertion.tenant_id, branch)
         incoming = Assertion.from_dict(assertion.to_dict())

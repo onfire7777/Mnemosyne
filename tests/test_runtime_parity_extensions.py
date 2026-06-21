@@ -958,6 +958,43 @@ def test_consolidation_updates_latent_user_model_profile() -> None:
     assert len(profile.embedding) == len(hashing_embedding(profile.summary))
 
 
+def test_consolidation_embedder_persists_missing_evidence_embeddings() -> None:
+    engine = LocalMemoryEngine()
+    cid = engine.append_evidence(
+        Evidence(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="chat",
+            content="Embedding pass should persist deterministic vectors.",
+            trust_tier=0,
+            access_policy={"tenant": TENANT},
+        )
+    )
+    before = engine.get_evidence(TENANT, cid)
+
+    result = ConsolidationWorker(engine, gate_cases=[]).run_queue_payload(
+        {
+            "tenant_id": TENANT,
+            "user_id": USER,
+            "source_evidence_cids": [cid],
+            "passes": ["replayer", "embedder"],
+        }
+    )
+    pass_results = {item["name"]: item for item in result.pass_results}
+    after = engine.get_evidence(TENANT, cid)
+
+    assert before is not None
+    assert before.embedding is None
+    assert pass_results["embedder"]["status"] == "complete"
+    assert pass_results["embedder"]["details"]["provider"] == "deterministic-hashing"
+    assert pass_results["embedder"]["details"]["embedding_dims"] == 256
+    assert pass_results["embedder"]["details"]["embedded_cids"] == [cid]
+    assert "embedder_not_implemented" not in result.skipped
+    assert after is not None
+    assert after.embedding == hashing_embedding("Embedding pass should persist deterministic vectors.")
+
+
 def test_consolidation_worker_extracts_and_promotes_direct_user_fact_with_gate(tmp_path) -> None:
     engine = LocalMemoryEngine()
     queue = InProcessQueue()

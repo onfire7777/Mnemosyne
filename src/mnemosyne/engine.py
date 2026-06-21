@@ -326,6 +326,34 @@ class LocalMemoryEngine:
                 return copy.deepcopy(ev)
             return None
 
+    def set_evidence_embedding(
+        self,
+        tenant_id: str,
+        cid: str,
+        embedding: list[float],
+        branch: str = "main",
+        *,
+        actor: str = "consolidation",
+        source: str = "embedder",
+    ) -> bool:
+        with self._lock:
+            ev = self.evidence.get(self._evidence_key(tenant_id, branch, cid))
+            if ev is None or ev.erased:
+                return False
+            ev.embedding = list(embedding)
+            self._audit(
+                tenant_id,
+                actor,
+                "set_evidence_embedding",
+                cid,
+                {"branch": branch, "embedding_dims": len(embedding), "source_type": ev.source_type},
+                source=source,
+                trust_tier=ev.trust_tier,
+                capability_tags=ev.capability_tags,
+            )
+            self._persist()
+            return True
+
     def upsert_assertion(self, assertion: Assertion, branch: str = "main") -> str:
         with self._lock:
             self._require_branch(branch)

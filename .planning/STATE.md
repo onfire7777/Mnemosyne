@@ -24,6 +24,8 @@ Latest checkpoint: Consolidation replayer is now a real prioritization pass inst
 
 Latest checkpoint: Consolidation `user_model_updater` now refreshes the latent user model from prioritized evidence and extracted candidates, writing a deterministic summary plus embedding through the existing `UserModel` API. Runtime job handlers and CLI worker paths pass and persist the user model alongside learning state. Focused runtime/CLI consolidation tests, `tests/test_runtime_parity_extensions.py`, the full no-DSN suite, and the full compose Postgres suite pass; local verification now collects 324 tests with 280 passing tests plus 44 skipped live-DB tests, and the compose DSN run passes all 324 tests.
 
+Latest checkpoint: Consolidation `embedder` now persists missing evidence embeddings instead of falling through as `embedder_not_implemented`. Local and Postgres engines expose `set_evidence_embedding`, audit the embedding update, and respect backend embedding dimensions; the consolidation pass uses deterministic hashing embeddings and reports provider/dimension/embedded-CID details. Focused local/Postgres embedding tests, `tests/test_runtime_parity_extensions.py`, `tests/test_shared_engine_contract.py`, the live Postgres engine suite, the full no-DSN suite, and the full compose Postgres suite pass; local verification now collects 327 tests with 283 passing tests plus 44 skipped live-DB tests, and the compose DSN run passes all 327 tests.
+
 Progress: [███████░░░] local scaffold verified; production parity gaps remain
 
 ## Performance Metrics
