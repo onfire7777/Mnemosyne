@@ -413,10 +413,10 @@ class LocalMemoryEngine:
         query_vec = hashing_embedding(query)
         hits: list[Hit] = []
         for hit in self._candidate_hits(filt):
-            score = cosine(query_vec, hashing_embedding(hit.text))
+            score = cosine(query_vec, self._embedding_for_hit(hit))
             if score > 0:
                 hit.score = score
-                hit.channel = "dense_hash"
+                hit.channel = "dense_media" if hit.metadata.get("stored_media_embedding") else "dense_hash"
                 hits.append(hit)
         return sorted(hits, key=lambda item: item.score, reverse=True)[:k]
 
@@ -971,19 +971,28 @@ class LocalMemoryEngine:
                 continue
             if not include_quarantined and ev.metadata.get("quarantine_reason"):
                 continue
+            metadata = {
+                "actor": ev.actor,
+                "source_type": ev.source_type,
+                "modality": ev.modality,
+                "content_pointer": ev.content_pointer,
+                "stored_media_embedding": bool(ev.embedding and ev.modality != "text"),
+            }
+            if isinstance(ev.metadata.get("media_embedding"), dict):
+                metadata["media_embedding"] = dict(ev.metadata["media_embedding"])
             hits.append(
                 Hit(
                     id=ev.cid or "",
                     kind="evidence",
                     tenant_id=ev.tenant_id,
                     branch=ev.branch,
-                    text=ev.content,
+                    text=ev.content or ev.content_pointer or f"{ev.modality} evidence",
                     score=0.0,
                     channel="candidate",
                     provenance=[ev.cid] if ev.cid else [],
                     trust_tier=ev.trust_tier,
                     sensitivity=ev.sensitivity,
-                    metadata={"actor": ev.actor, "source_type": ev.source_type},
+                    metadata=metadata,
                 )
             )
         for assertion in self.assertions.values():
@@ -1032,6 +1041,13 @@ class LocalMemoryEngine:
                 )
             )
         return hits
+
+    def _embedding_for_hit(self, hit: Hit) -> list[float]:
+        if hit.kind == "evidence":
+            ev = self.evidence.get(self._evidence_key(hit.tenant_id, hit.branch, hit.id))
+            if ev and ev.embedding:
+                return ev.embedding
+        return hashing_embedding(hit.text)
 
     def _rrf(self, ranked_lists: list[list[Hit]], k: int) -> list[Hit]:
         by_id: dict[tuple[str, str], Hit] = {}

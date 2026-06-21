@@ -21,6 +21,7 @@ from mnemosyne.privacy import (
 )
 from mnemosyne.provenance import SignedProvenanceVerifier
 from mnemosyne.queue import InProcessQueue, QueueJob
+from mnemosyne.retrieval import MediaEmbeddingProvider
 from mnemosyne.security import TrustTier
 from mnemosyne.storage import LocalObjectStore
 
@@ -83,6 +84,7 @@ class IngestionPipeline:
         runtime_residency: str | None = None,
         allowed_residency_transfers: tuple[str, ...] = (),
         require_runtime_residency: bool = False,
+        media_embedding_provider: MediaEmbeddingProvider | None = None,
     ):
         self.engine = engine
         self.object_store = object_store or LocalObjectStore(Path(".mnemosyne/objects"))
@@ -93,6 +95,7 @@ class IngestionPipeline:
         self.runtime_residency = normalize_residency(runtime_residency) if runtime_residency else None
         self.allowed_residency_transfers = normalize_residency_transfers(tuple(allowed_residency_transfers))
         self.require_runtime_residency = require_runtime_residency
+        self.media_embedding_provider = media_embedding_provider
 
     def ingest(self, request: IngestRequest, branch: str = "main") -> IngestResult:
         payload = request.payload_bytes()
@@ -177,6 +180,22 @@ class IngestionPipeline:
             resource = record.to_resource()
             metadata["resource"] = resource.to_dict()
 
+        embedding: list[float] | None = None
+        if should_externalize and request.modality != "text" and self.media_embedding_provider is not None:
+            embedding = self.media_embedding_provider.embed_media(
+                payload,
+                media_type=request.media_type,
+                modality=request.modality,
+                metadata=metadata,
+            )
+            metadata["media_embedding"] = {
+                "provider": self.media_embedding_provider.name,
+                "dims": self.media_embedding_provider.dims,
+                "source": "raw-externalized-media",
+            }
+            capability_tags.append("raw-media-embedding-indexed")
+            capability_tags = sorted(set(capability_tags))
+
         content = request.content or ""
         derived_text, derived_sources = extract_derived_text(metadata)
         if request.data is not None and request.modality != "text":
@@ -207,6 +226,7 @@ class IngestionPipeline:
                 content=content,
                 content_pointer=content_pointer,
                 modality=request.modality,
+                embedding=embedding,
                 metadata=metadata,
                 trust_tier=trust_tier,
                 capability_tags=capability_tags,

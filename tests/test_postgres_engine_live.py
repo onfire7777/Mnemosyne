@@ -1122,6 +1122,90 @@ def test_postgres_media_extract_job_appends_searchable_derived_evidence_live(tmp
     assert set(forgotten["propagated"]["expired_relations"]) == {relation_id, derived_relation_id}
 
 
+def test_postgres_cli_ingests_raw_media_embedding_for_vector_retrieval_live(tmp_path) -> None:
+    tenant = f"tenant-raw-media-vector-live-{uuid4()}"
+    user = "user-raw-media-vector-live"
+    media_path = tmp_path / "frame.png"
+    media_path.write_bytes(b"\x89PNG opaque raw media vector bytes")
+    embedder = tmp_path / "media_embedder.py"
+    embedder.write_text(
+        "\n".join(
+            [
+                "import json",
+                "import sys",
+                "from mnemosyne.text import hashing_embedding",
+                "request = json.load(sys.stdin)",
+                "assert request['media_type'] == 'image/png'",
+                "assert request['modality'] == 'image'",
+                "print(json.dumps({'embedding': hashing_embedding('raw visual memory beacon', dims=1024)}))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    ingested = run_postgres_cli(
+        "--object-store",
+        str(tmp_path / "objects"),
+        "--media-embedding-provider",
+        "command",
+        "--media-embedding-command",
+        f"{sys.executable} {embedder}",
+        "--media-embedding-dims",
+        "1024",
+        "ingest",
+        "--tenant",
+        tenant,
+        "--user",
+        user,
+        "--source-type",
+        "camera",
+        "--file",
+        str(media_path),
+        "--modality",
+        "image",
+        "--media-type",
+        "image/png",
+        "--trust-tier",
+        "0",
+        "--no-enqueue-consolidation",
+    )
+    search = run_postgres_cli(
+        "search",
+        "--tenant",
+        tenant,
+        "--query",
+        "raw visual memory beacon",
+    )
+
+    db_tenant_id = _stable_uuid("tenant", tenant)
+    engine = PostgresEngine(live_dsn())
+    with engine.connect() as conn:
+        with conn.cursor() as cur:
+            engine._set_tenant(cur, db_tenant_id)  # noqa: SLF001 - live RLS contract assertion.
+            cur.execute(
+                """
+                SELECT content, embedding IS NOT NULL, metadata, capability_tags
+                FROM evidence
+                WHERE tenant_id = %s AND branch = 'main' AND cid = %s
+                """,
+                (db_tenant_id, _cid_to_bytes(ingested["cid"])),
+            )
+            content, has_embedding, metadata, capability_tags = cur.fetchone()
+
+    assert ingested["content_pointer"].startswith("local-object://sha256/")
+    assert content == ""
+    assert has_embedding is True
+    assert metadata["media_embedding"] == {
+        "provider": "command-media-embedding",
+        "dims": 1024,
+        "source": "raw-externalized-media",
+    }
+    assert "raw-media-embedding-indexed" in capability_tags
+    assert search["hits"][0]["id"] == ingested["cid"]
+    assert search["hits"][0]["metadata"]["stored_media_embedding"] is True
+    assert search["hits"][0]["metadata"]["media_embedding"]["provider"] == "command-media-embedding"
+
+
 def test_postgres_gated_consolidation_promotes_direct_user_fact_live() -> None:
     engine = PostgresEngine(live_dsn())
     tenant = f"tenant-gate-live-{uuid4()}"

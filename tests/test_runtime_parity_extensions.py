@@ -18,6 +18,7 @@ from mnemosyne.prefetch import AnticipatoryPrefetcher, PrefetchCandidate
 from mnemosyne.provenance import C2paToolVerifier, ProvenanceTrustPolicy, SignedProvenanceVerifier
 from mnemosyne.queue import InProcessQueue, QueueWorker
 from mnemosyne.storage import EncryptedLocalObjectStore, JsonKeyManager, LocalObjectStore
+from mnemosyne.text import hashing_embedding
 
 
 TENANT = "tenant-runtime-extensions"
@@ -34,6 +35,26 @@ class StaticMediaExtractor:
             sources=["test_extractor"],
             metadata={"media_type": media_type, "modality": modality, "bytes": len(payload)},
         )
+
+
+class StaticMediaEmbeddingProvider:
+    name = "static-media-embedding"
+    dims = 256
+
+    def __init__(self, text: str):
+        self.text = text
+        self.calls: list[dict[str, object]] = []
+
+    def embed_media(self, payload: bytes, *, media_type: str, modality: str, metadata: dict) -> list[float]:
+        self.calls.append(
+            {
+                "payload": payload,
+                "media_type": media_type,
+                "modality": modality,
+                "metadata": metadata,
+            }
+        )
+        return hashing_embedding(self.text, dims=self.dims)
 
 
 def test_local_object_store_addresses_bytes_and_blocks_bad_uris(tmp_path) -> None:
@@ -606,6 +627,45 @@ def test_ingestion_indexes_multimodal_derived_text_without_inline_bytes(tmp_path
     assert evidence.metadata["derived_text_sources"] == ["ocr_text", "caption"]
     assert "derived-text-indexed" in evidence.capability_tags
     assert hits.hits[0].id == result.cid
+
+
+def test_ingestion_indexes_raw_media_embedding_before_extraction(tmp_path) -> None:
+    engine = LocalMemoryEngine()
+    media_embedding = StaticMediaEmbeddingProvider("visual memory signature")
+    pipeline = IngestionPipeline(
+        engine,
+        LocalObjectStore(tmp_path / "objects"),
+        media_embedding_provider=media_embedding,
+    )
+
+    result = pipeline.ingest(
+        IngestRequest(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="camera",
+            data=b"\x89PNG opaque screenshot bytes",
+            modality="image",
+            media_type="image/png",
+            metadata={"label": "non-text screenshot"},
+        )
+    )
+    evidence = engine.get_evidence(TENANT, result.cid)
+    hits = engine.retrieve("visual memory signature", TENANT)
+
+    assert evidence is not None
+    assert evidence.content == ""
+    assert evidence.embedding == hashing_embedding("visual memory signature", dims=media_embedding.dims)
+    assert evidence.metadata["media_embedding"] == {
+        "provider": "static-media-embedding",
+        "dims": 256,
+        "source": "raw-externalized-media",
+    }
+    assert "raw-media-embedding-indexed" in evidence.capability_tags
+    assert media_embedding.calls[0]["payload"] == b"\x89PNG opaque screenshot bytes"
+    assert hits.hits[0].id == result.cid
+    assert "dense_media" in hits.hits[0].channel
+    assert hits.hits[0].metadata["stored_media_embedding"] is True
 
 
 def test_media_extract_job_appends_derived_evidence_without_mutating_source(tmp_path) -> None:
