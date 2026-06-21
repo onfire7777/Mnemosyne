@@ -2303,6 +2303,65 @@ def _child_json(stdout: str) -> dict[str, Any] | None:
     return decoded if isinstance(decoded, dict) else None
 
 
+def _deployment_evidence_file_name(index: int, name: str) -> str:
+    slug = "".join(ch.lower() if ch.isalnum() else "-" for ch in name).strip("-")
+    slug = "-".join(part for part in slug.split("-") if part)
+    return f"{index:03d}-{slug or 'check'}.json"
+
+
+def _write_deployment_soak_evidence(
+    *,
+    evidence_dir: str,
+    source_manifest: str,
+    report: dict[str, Any],
+) -> dict[str, Any]:
+    package_dir = Path(evidence_dir).expanduser()
+    checks_dir = package_dir / "checks"
+    package_dir.mkdir(parents=True, exist_ok=True)
+    checks_dir.mkdir(parents=True, exist_ok=True)
+    check_files: list[dict[str, Any]] = []
+    for item in report["checks"]:
+        file_name = _deployment_evidence_file_name(int(item["index"]), str(item["name"]))
+        path = checks_dir / file_name
+        path.write_text(json.dumps(item, indent=2, sort_keys=True), encoding="utf-8")
+        check_files.append(
+            {
+                "index": item["index"],
+                "name": item["name"],
+                "command": item["command"],
+                "ok": item["ok"],
+                "required": item["required"],
+                "path": str(path),
+            }
+        )
+    report_path = package_dir / "deployment-soak-report.json"
+    manifest_path = package_dir / "manifest.json"
+    bundle = {
+        "dir": str(package_dir),
+        "report_path": str(report_path),
+        "manifest_path": str(manifest_path),
+        "checks_dir": str(checks_dir),
+        "check_files": check_files,
+    }
+    report["evidence_bundle"] = bundle
+    report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+    manifest = {
+        "kind": "mnemosyne.deployment_soak_evidence",
+        "version": 1,
+        "created_at": datetime.now(UTC).isoformat(),
+        "ok": report["ok"],
+        "source_manifest": str(Path(source_manifest).expanduser()),
+        "files": {
+            "report": report_path.name,
+            "checks_dir": checks_dir.name,
+        },
+        "summary": report["summary"],
+        "checks": check_files,
+    }
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+    return bundle
+
+
 def cmd_deployment_soak(args: argparse.Namespace) -> None:
     if args.check_timeout <= 0:
         raise SystemExit("--check-timeout must be greater than 0.")
@@ -2375,22 +2434,23 @@ def cmd_deployment_soak(args: argparse.Namespace) -> None:
         if spec["required"] and not item["ok"]:
             ok = False
 
-    emit(
-        {
-            "ok": ok,
-            "manifest": {
-                "path": str(Path(args.soak_manifest).expanduser()),
-                "check_count": len(manifest["checks"]),
-            },
-            "allowed_commands": sorted(DEPLOYMENT_SOAK_COMMANDS),
-            "checks": checks,
-            "summary": {
-                "checks": len(checks),
-                "required_failures": sum(1 for item in checks if item.get("required") and not item.get("ok")),
-                "optional_failures": sum(1 for item in checks if not item.get("required") and not item.get("ok")),
-            },
-        }
-    )
+    report = {
+        "ok": ok,
+        "manifest": {
+            "path": str(Path(args.soak_manifest).expanduser()),
+            "check_count": len(manifest["checks"]),
+        },
+        "allowed_commands": sorted(DEPLOYMENT_SOAK_COMMANDS),
+        "checks": checks,
+        "summary": {
+            "checks": len(checks),
+            "required_failures": sum(1 for item in checks if item.get("required") and not item.get("ok")),
+            "optional_failures": sum(1 for item in checks if not item.get("required") and not item.get("ok")),
+        },
+    }
+    if args.evidence_dir:
+        _write_deployment_soak_evidence(evidence_dir=args.evidence_dir, source_manifest=args.soak_manifest, report=report)
+    emit(report)
     if not ok:
         raise SystemExit(1)
 
@@ -3912,6 +3972,10 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=float(os.environ.get("MNEMOSYNE_DEPLOYMENT_SOAK_CHECK_TIMEOUT", "30")),
         help="Default per-check timeout in seconds",
+    )
+    deployment_soak.add_argument(
+        "--evidence-dir",
+        help="Write deployment-soak report, per-check JSON, and manifest evidence files to this directory",
     )
     deployment_soak.set_defaults(func=cmd_deployment_soak)
 
