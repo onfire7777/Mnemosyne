@@ -1446,9 +1446,15 @@ def test_postgres_gated_consolidation_uses_command_providers_live(tmp_path) -> N
     extractor_result = job.result["pass_results"][1]
     resolver_result = next(item for item in job.result["pass_results"] if item["name"] == "resolver")
     summarizer_result = next(item for item in job.result["pass_results"] if item["name"] == "summarizer")
+    role_pipeline = job.result["role_pipeline"]
+    roles_by_pass = {item["pass"]: item for item in role_pipeline["roles"]}
 
     assert job.status == "complete"
     assert job.result["candidate_results"][0]["promoted"] is True
+    assert role_pipeline["model_backed_roles"] == ["candidate_extractor", "entity_resolver", "evidence_summarizer"]
+    assert roles_by_pass["extractor"]["provider"] == "command_candidate_extractor"
+    assert roles_by_pass["resolver"]["provider"] == "command_entity_resolver"
+    assert roles_by_pass["summarizer"]["provider"] == "command_evidence_summarizer"
     assert extractor_result["details"]["strategy"] == "command_candidate_extractor"
     assert extractor_result["details"]["metadata"] == {"source": "live-test-extractor"}
     assert resolver_result["details"]["strategy"] == "command_entity_resolver"

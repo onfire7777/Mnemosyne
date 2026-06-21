@@ -84,6 +84,8 @@ Latest checkpoint: REQ-018 now has a concrete contextual bandit learner behind t
 
 Latest checkpoint: REQ-011 expanded-suite enforcement now goes beyond protected-case counting. CLI `gate-suite-check` can require a minimum total case count and explicit smoke/core/archive tier coverage; reports include missing required tiers and fail closed before release fingerprints are accepted. The regression suite proves missing archive coverage fails and a three-tier protected suite passes with stable fingerprint review. Local verification still collects 366 tests with 309 passing tests plus 57 skipped live-DB tests, and the clean compose DSN run passes all 366 tests with `MNEMOSYNE_POSTGRES_DSN=postgresql://mnemosyne:<redacted>@127.0.0.1:54329/mnemosyne?connect_timeout=5`.
 
+Latest checkpoint: REQ-016 consolidation now emits first-class society-of-roles provenance. `ConsolidationRunResult.role_pipeline` reports the consolidator owner, write authorization, per-pass role names, provider strategies, provider type, and status; CLI and live Postgres command-provider tests verify model-backed extractor/resolver/summarizer roles are visible in runtime results. Local verification still collects 366 tests with 309 passing tests plus 57 skipped live-DB tests, and the clean compose DSN run passes all 366 tests with `MNEMOSYNE_POSTGRES_DSN=postgresql://mnemosyne:<redacted>@127.0.0.1:54329/mnemosyne?connect_timeout=5`.
+
 Progress: [███████░░░] local scaffold verified; production parity gaps remain
 
 ## Performance Metrics

@@ -90,9 +90,25 @@ class ConsolidationRunResult:
     evidence_seen: int
     candidate_results: list[dict[str, Any]]
     skipped: list[str]
+    role_pipeline: dict[str, Any]
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+ROLE_NAMES = {
+    "replayer": "replay_prioritizer",
+    "extractor": "candidate_extractor",
+    "resolver": "entity_resolver",
+    "belief_reviser": "belief_reviser",
+    "lesson_distiller": "lesson_distiller",
+    "skill_inducer": "skill_inducer",
+    "summarizer": "evidence_summarizer",
+    "forgetter": "lifecycle_forgetter",
+    "embedder": "evidence_embedder",
+    "promotion_gate": "promotion_gate",
+    "user_model_updater": "user_model_updater",
+}
 
 
 class ConsolidationWorker:
@@ -276,6 +292,7 @@ class ConsolidationWorker:
             evidence_seen=evidence_seen,
             candidate_results=candidate_results,
             skipped=skipped,
+            role_pipeline=self._role_pipeline_report(pass_results),
         )
 
     def _load_evidence(self, tenant_id: str, source_evidence_cids: list[str], branch: str) -> tuple[list[Evidence], list[str]]:
@@ -291,6 +308,46 @@ class ConsolidationWorker:
             else:
                 evidence.append(item)
         return evidence, missing
+
+    def _role_pipeline_report(self, pass_results: list[PassResult]) -> dict[str, Any]:
+        roles = []
+        for item in pass_results:
+            provider = self._role_provider(item.name)
+            provider_type = "model_adapter" if provider.startswith("command_") else "deterministic_or_local"
+            roles.append(
+                {
+                    "pass": item.name,
+                    "role": ROLE_NAMES.get(item.name, item.name),
+                    "provider": provider,
+                    "provider_type": provider_type,
+                    "status": item.status,
+                }
+            )
+        return {
+            "owner_role": "consolidator",
+            "write_authorized": True,
+            "roles": roles,
+            "role_count": len(roles),
+            "model_backed_roles": [item["role"] for item in roles if item["provider_type"] == "model_adapter"],
+        }
+
+    def _role_provider(self, pass_name: str) -> str:
+        if pass_name == "extractor":
+            return str(getattr(self.candidate_extractor, "strategy", self.candidate_extractor.__class__.__name__))
+        if pass_name == "resolver":
+            return str(getattr(self.entity_resolver, "strategy", self.entity_resolver.__class__.__name__))
+        if pass_name == "summarizer":
+            return str(getattr(self.summarizer, "strategy", self.summarizer.__class__.__name__))
+        return {
+            "replayer": "deterministic_priority_replay",
+            "belief_reviser": "promotion_gate",
+            "lesson_distiller": "deterministic_lesson_distiller",
+            "skill_inducer": "deterministic_skill_inducer",
+            "forgetter": "fidelity_lifecycle_policy",
+            "embedder": "deterministic_hashing_embedding",
+            "promotion_gate": "protected_regression_gate",
+            "user_model_updater": "latent_user_model_updater",
+        }.get(pass_name, "local_pass")
 
     def _prioritize_replay(self, evidence: list[Evidence], payload: dict[str, Any]) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
