@@ -510,6 +510,47 @@ def test_shared_engine_contract_abstains_when_only_gist_support_is_retrieved(
     assert result.explain["gist_support"]["gist_hit_ids"] == [cid]
 
 
+def test_shared_engine_contract_deep_search_abstains_on_summary_derived_graph_support(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, user = engine_bundle
+    raw_cid = engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id=user,
+            actor="user",
+            source_type="chat",
+            source_identity="chat:deep-gist-derived-graph",
+            content="Deep retrieval graph abstention requires original source inspection for generated summaries.",
+            trust_tier=0,
+            access_policy={"tenant": tenant},
+        )
+    )
+    summary_run = ConsolidationWorker(engine, gate_cases=[]).run_queue_payload(
+        {
+            "tenant_id": tenant,
+            "branch": "main",
+            "source_evidence_cids": [raw_cid],
+            "passes": ["summarizer"],
+        }
+    )
+    summary = next(item for item in summary_run.pass_results if item["name"] == "summarizer")["details"]
+
+    result = engine.deep_search(raw_cid, tenant)
+    relation_hit = next(hit for hit in result.hits if hit.kind == "relation")
+
+    assert result.hits
+    assert any(hit.id == summary["summary_cid"] for hit in result.hits)
+    assert relation_hit.metadata["predicate"] == "summary-derived-gist"
+    assert relation_hit.metadata["source"] == raw_cid
+    assert relation_hit.metadata["target"] == summary["summary_cid"]
+    assert raw_cid in relation_hit.metadata["source_evidence_cids"]
+    assert result.abstained is True
+    assert result.uncertainty_note == "Only gist-tier memory support was retrieved; inspect source evidence before answering."
+    assert result.explain["gist_support"]["applied"] is True
+    assert set(result.explain["gist_support"]["gist_hit_ids"]) == {summary["summary_cid"], relation_hit.id}
+
+
 def test_shared_engine_contract_abstains_on_trace_or_confabulation_risk_support(
     engine_bundle: tuple[Any, str, str],
 ) -> None:

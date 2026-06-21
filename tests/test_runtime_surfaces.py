@@ -987,6 +987,45 @@ def test_mcp_search_surfaces_gist_only_abstention(tmp_path: Path) -> None:
     assert searched["explain"]["gist_support"]["gist_hit_ids"] == [summary["summary_cid"]]
 
 
+def test_mcp_deep_search_surfaces_gist_derived_graph_abstention(tmp_path: Path) -> None:
+    server = MnemosyneMcpServer(store_path=tmp_path / "store.json")
+    captured = mcp_call(
+        server,
+        "capture",
+        {
+            "tenant_id": TENANT,
+            "user_id": USER,
+            "actor": "user",
+            "source_type": "mcp",
+            "content": "MCP deep search graph abstention should require original source inspection for generated summaries.",
+            "trust_tier": 0,
+        },
+    )
+    summary_run = ConsolidationWorker(server.engine, gate_cases=[]).run_queue_payload(
+        {
+            "tenant_id": TENANT,
+            "branch": "main",
+            "source_evidence_cids": [captured["cid"]],
+            "passes": ["summarizer"],
+        }
+    )
+    summary = next(item for item in summary_run.pass_results if item["name"] == "summarizer")["details"]
+
+    deep_searched = mcp_call(server, "deep_search", {"tenant_id": TENANT, "query": captured["cid"]})
+    explained = mcp_call(server, "explain", {"tenant_id": TENANT, "query": captured["cid"]})
+
+    for result in (deep_searched, explained):
+        relation_hit = next(hit for hit in result["hits"] if hit["kind"] == "relation")
+        assert result["abstained"] is True
+        assert result["uncertainty_note"] == "Only gist-tier memory support was retrieved; inspect source evidence before answering."
+        assert any(hit["id"] == summary["summary_cid"] for hit in result["hits"])
+        assert relation_hit["metadata"]["predicate"] == "summary-derived-gist"
+        assert relation_hit["metadata"]["source"] == captured["cid"]
+        assert relation_hit["metadata"]["target"] == summary["summary_cid"]
+        assert result["explain"]["gist_support"]["applied"] is True
+        assert set(result["explain"]["gist_support"]["gist_hit_ids"]) == {summary["summary_cid"], relation_hit["id"]}
+
+
 def test_mcp_server_rejects_non_object_tool_arguments(tmp_path: Path) -> None:
     server = MnemosyneMcpServer(store_path=tmp_path / "store.json")
 

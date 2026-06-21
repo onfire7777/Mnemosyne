@@ -52,6 +52,8 @@ Latest checkpoint: MCP `search` now has direct JSON-RPC facade proof that gist-o
 
 Latest checkpoint: Hosted HTTP JSON-RPC MCP `search` now has transport-level proof that gist-only retrieval abstention survives capture persistence, consolidation summary materialization, server restart, and `tools/call` search over `/mcp`. CLI `tools` output is also pinned to the exact MCP `tools/list` contract so agent-facing tool names, schemas, required fields, defaults, nullability, and `additionalProperties` cannot drift between surfaces. Local verification now collects 352 tests with 298 passing tests plus 54 skipped live-DB tests, and the clean compose DSN run passes all 352 tests with `MNEMOSYNE_POSTGRES_DSN=postgresql://mnemosyne:<redacted>@127.0.0.1:54329/mnemosyne?connect_timeout=5`.
 
+Latest checkpoint: Deep retrieval now treats graph/PPR relation hits derived from generated gist summaries as gist-tier support. Local and Postgres `graph_ppr` hits now preserve relation source, predicate, target, confidence, and source evidence CIDs in metadata, and retrieval abstention classifies `summary-derived-gist` relations alongside generated summary evidence. Shared Local/Postgres coverage verifies deep-search abstention on summary-derived graph support, and MCP `deep_search` plus `explain` both preserve the abstention payload. Local verification now collects 355 tests with 300 passing tests plus 55 skipped live-DB tests, and the clean compose DSN run passes all 355 tests with `MNEMOSYNE_POSTGRES_DSN=postgresql://mnemosyne:<redacted>@127.0.0.1:54329/mnemosyne?connect_timeout=5`.
+
 Progress: [███████░░░] local scaffold verified; production parity gaps remain
 
 ## Performance Metrics
