@@ -1926,6 +1926,31 @@ def test_cli_provider_check_uses_deployment_manifest(tmp_path: Path, monkeypatch
     embedder.chmod(0o755)
     kms_command, kms_state = fake_kms_command(tmp_path)
     parametric_command, parametric_state = fake_parametric_command(tmp_path)
+    candidate_extractor = tmp_path / "candidate-extractor.py"
+    candidate_extractor.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env python3",
+                "import json, sys",
+                "request = json.load(sys.stdin)",
+                "evidence = request['evidence'][0]",
+                "print(json.dumps({'candidates': [{'signature': 'provider health configured', 'query': 'provider health', 'candidate_subject': 'Provider Health', 'candidate_predicate': 'is', 'candidate_object': 'configured', 'access_policy': evidence['access_policy']}], 'metadata': {'source': 'manifest-extractor'}}))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    summarizer = tmp_path / "summarizer.py"
+    summarizer.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env python3",
+                "import json, sys",
+                "request = json.load(sys.stdin)",
+                "print(json.dumps({'summary': 'Provider health summary', 'metadata': {'evidence_count': len(request['evidence'])}}))",
+            ]
+        ),
+        encoding="utf-8",
+    )
     resolver = tmp_path / "entity-resolver.py"
     resolver.write_text(
         "\n".join(
@@ -1954,6 +1979,8 @@ def test_cli_provider_check_uses_deployment_manifest(tmp_path: Path, monkeypatch
                     "media_embedding",
                     "object_key_manager",
                     "parametric",
+                    "candidate_extractor",
+                    "summarizer",
                     "entity_resolver",
                     "residency_policy",
                 ],
@@ -1989,6 +2016,14 @@ def test_cli_provider_check_uses_deployment_manifest(tmp_path: Path, monkeypatch
                         "command": parametric_command,
                         "adapter_kind": "lora-command-adapter",
                     },
+                    "candidate_extractor": {
+                        "provider": "command",
+                        "command": " ".join(shlex.quote(item) for item in (sys.executable, str(candidate_extractor))),
+                    },
+                    "summarizer": {
+                        "provider": "command",
+                        "command": " ".join(shlex.quote(item) for item in (sys.executable, str(summarizer))),
+                    },
                     "entity_resolver": {
                         "provider": "command",
                         "command": " ".join(shlex.quote(item) for item in (sys.executable, str(resolver))),
@@ -2016,6 +2051,8 @@ def test_cli_provider_check_uses_deployment_manifest(tmp_path: Path, monkeypatch
             "media_embedding",
             "object_key_manager",
             "parametric",
+            "candidate_extractor",
+            "summarizer",
             "entity_resolver",
             "residency_policy",
         ],
@@ -2030,6 +2067,10 @@ def test_cli_provider_check_uses_deployment_manifest(tmp_path: Path, monkeypatch
     assert report["checks"]["object_key_manager"]["shredded"] is True
     assert report["checks"]["parametric"]["adapter_kind"] == "lora-command-adapter"
     assert report["checks"]["parametric"]["protected_suite"]["protected_case_ids"] == ["provider-health-protected"]
+    assert report["checks"]["candidate_extractor"]["strategy"] == "command_candidate_extractor"
+    assert report["checks"]["candidate_extractor"]["signatures"] == ["provider health configured"]
+    assert report["checks"]["summarizer"]["strategy"] == "command_evidence_summarizer"
+    assert report["checks"]["summarizer"]["summary_length"] == len("Provider health summary")
     assert report["checks"]["entity_resolver"]["strategy"] == "command_entity_resolver"
     assert report["checks"]["entity_resolver"]["entity_keys"] == ["provider-health-entity"]
     parametric_calls = json.loads(parametric_state.read_text(encoding="utf-8"))["calls"]
@@ -2903,6 +2944,87 @@ def test_cli_projection_recompute_tracks_affected_projection_set(tmp_path: Path)
     assert details["affected_projections"]["entities"] == ["runtime-consolidation-target"]
     assert len(details["queued_consolidation_jobs"]) == 1
     assert recompute["metrics"]["counters"]["projection_recompute.completed"] == 1
+
+
+def test_cli_consolidation_uses_command_extractor_and_summarizer(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    extractor = tmp_path / "candidate-extractor.py"
+    extractor.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env python3",
+                "import json, sys",
+                "request = json.load(sys.stdin)",
+                "evidence = request['evidence'][0]",
+                "print(json.dumps({'candidates': [{'signature': 'model backed runtime target local cli', 'query': 'model backed runtime target', 'candidate_subject': 'Model backed runtime target', 'candidate_predicate': 'is', 'candidate_object': 'local CLI', 'confidence': 0.91, 'access_policy': evidence['access_policy']}], 'metadata': {'source': 'test-extractor'}}))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    summarizer = tmp_path / "summarizer.py"
+    summarizer.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env python3",
+                "import json, sys",
+                "request = json.load(sys.stdin)",
+                "print(json.dumps({'summary': 'Model-backed extraction identified the runtime target.', 'metadata': {'source': 'test-summarizer', 'evidence_count': len(request['evidence'])}}))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    extractor_command = " ".join(shlex.quote(item) for item in (sys.executable, str(extractor)))
+    summarizer_command = " ".join(shlex.quote(item) for item in (sys.executable, str(summarizer)))
+    run_cli(
+        store,
+        "gate-case-add",
+        "--id",
+        "command-extractor-case",
+        "--signature",
+        "model backed runtime target local cli",
+        "--query",
+        "model backed runtime target",
+        "--expected-substring",
+        "local CLI",
+        "--protected",
+    )
+
+    ingested = run_cli(
+        store,
+        "--candidate-extractor-provider",
+        "command",
+        "--candidate-extractor-command",
+        extractor_command,
+        "--summarizer-provider",
+        "command",
+        "--summarizer-command",
+        summarizer_command,
+        "ingest",
+        "--tenant",
+        TENANT,
+        "--user",
+        USER,
+        "--actor",
+        "user",
+        "--source-type",
+        "chat",
+        "--content",
+        "Meeting note: target/local CLI; not a deterministic is-fact sentence.",
+        "--run-consolidation-once",
+    )
+    job = ingested["consolidation_worker"]["job"]
+    extractor_result = job["result"]["pass_results"][1]
+    summarizer_result = next(item for item in job["result"]["pass_results"] if item["name"] == "summarizer")
+    exported = run_cli(store, "export", "--tenant", TENANT)
+
+    assert job["status"] == "complete"
+    assert job["result"]["candidate_results"][0]["promoted"] is True
+    assert extractor_result["details"]["strategy"] == "command_candidate_extractor"
+    assert extractor_result["details"]["metadata"] == {"source": "test-extractor"}
+    assert summarizer_result["details"]["strategy"] == "command_evidence_summarizer"
+    assert summarizer_result["details"]["summary"] == "Model-backed extraction identified the runtime target."
+    assert exported["assertions"][0]["subject"] == "Model backed runtime target"
+    assert exported["assertions"][0]["object"] == "local CLI"
 
 
 def test_cli_persisted_gate_case_blocks_consolidation_promotion(tmp_path: Path) -> None:
@@ -3931,6 +4053,68 @@ def test_cli_provider_check_fails_closed_on_bad_entity_resolver(tmp_path: Path) 
     assert payload["ok"] is False
     assert payload["checks"]["entity_resolver"]["ok"] is False
     assert "requires candidates array" in payload["checks"]["entity_resolver"]["error"]
+
+
+def test_cli_provider_check_fails_closed_on_bad_candidate_extractor(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    script = tmp_path / "bad-candidate-extractor.py"
+    script.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env python3",
+                "import json",
+                "print(json.dumps({}))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    command = " ".join(shlex.quote(item) for item in (sys.executable, str(script)))
+
+    result = run_raw_cli(
+        store,
+        "--candidate-extractor-provider",
+        "command",
+        "--candidate-extractor-command",
+        command,
+        "provider-check",
+    )
+    payload = json.loads(result.stdout)
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert payload["checks"]["candidate_extractor"]["ok"] is False
+    assert "requires candidates array" in payload["checks"]["candidate_extractor"]["error"]
+
+
+def test_cli_provider_check_fails_closed_on_bad_summarizer(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    script = tmp_path / "bad-summarizer.py"
+    script.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env python3",
+                "import json",
+                "print(json.dumps({'summary': ''}))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    command = " ".join(shlex.quote(item) for item in (sys.executable, str(script)))
+
+    result = run_raw_cli(
+        store,
+        "--summarizer-provider",
+        "command",
+        "--summarizer-command",
+        command,
+        "provider-check",
+    )
+    payload = json.loads(result.stdout)
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert payload["checks"]["summarizer"]["ok"] is False
+    assert "requires non-empty summary" in payload["checks"]["summarizer"]["error"]
 
 
 def test_cli_profile_graph_learning_and_parametric_flows_persist(tmp_path: Path) -> None:

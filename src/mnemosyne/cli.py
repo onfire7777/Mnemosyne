@@ -24,7 +24,15 @@ from uuid import UUID
 
 from cryptography import x509
 
-from mnemosyne.consolidation import CONSOLIDATE_EVIDENCE_JOB, CommandEntityResolver, EntityResolver
+from mnemosyne.consolidation import (
+    CONSOLIDATE_EVIDENCE_JOB,
+    CandidateExtractor,
+    CommandCandidateExtractor,
+    CommandEntityResolver,
+    CommandEvidenceSummarizer,
+    EntityResolver,
+    EvidenceSummarizer,
+)
 from mnemosyne.engine import LocalMemoryEngine, MemoryEngine
 from mnemosyne.eval import run_seed_suite
 from mnemosyne.gate import RegressionCase
@@ -33,7 +41,7 @@ from mnemosyne.jobs import PROJECTION_RECOMPUTE_JOB, RuntimeJobHandlers
 from mnemosyne.learning import Lesson, Procedure
 from mnemosyne.media import CommandMediaTextExtractor, MediaTextExtractor, MetadataMediaTextExtractor
 from mnemosyne.mcp_tools import MemoryTools, TOOL_SPEC
-from mnemosyne.models import Hit
+from mnemosyne.models import Evidence, Hit
 from mnemosyne.observability import MetricsRegistry, build_ops_report, render_ops_dashboard
 from mnemosyne.oidc_jwks import load_oidc_authorization_policy, load_oidc_jwks, oidc_jwks_loader
 from mnemosyne.parametric import (
@@ -377,6 +385,28 @@ def load_entity_resolver(args: argparse.Namespace) -> EntityResolver | None:
         return CommandEntityResolver(
             args.entity_resolver_command,
             timeout_seconds=float(args.entity_resolver_timeout),
+        )
+    return None
+
+
+def load_candidate_extractor(args: argparse.Namespace) -> CandidateExtractor | None:
+    if args.candidate_extractor_provider == "command":
+        if not args.candidate_extractor_command:
+            raise SystemExit("--candidate-extractor-provider command requires --candidate-extractor-command.")
+        return CommandCandidateExtractor(
+            args.candidate_extractor_command,
+            timeout_seconds=float(args.candidate_extractor_timeout),
+        )
+    return None
+
+
+def load_consolidation_summarizer(args: argparse.Namespace) -> EvidenceSummarizer | None:
+    if args.summarizer_provider == "command":
+        if not args.summarizer_command:
+            raise SystemExit("--summarizer-provider command requires --summarizer-command.")
+        return CommandEvidenceSummarizer(
+            args.summarizer_command,
+            timeout_seconds=float(args.summarizer_timeout),
         )
     return None
 
@@ -866,6 +896,8 @@ def cmd_ingest(args: argparse.Namespace) -> None:
             learning=tools.learning,
             gate_cases=tools.runtime_state.load_gate_cases() if tools.runtime_state else [],
             entity_resolver=load_entity_resolver(args),
+            candidate_extractor=load_candidate_extractor(args),
+            summarizer=load_consolidation_summarizer(args),
         )
         worker = QueueWorker(ingestion_queue, handlers.handlers(), metrics=metrics)
         job = worker.run_once(CONSOLIDATE_EVIDENCE_JOB)
@@ -1418,6 +1450,8 @@ def _runtime_worker_components(
         learning=tools.learning,
         gate_cases=runtime_state.load_gate_cases() if runtime_state else [],
         entity_resolver=load_entity_resolver(args),
+        candidate_extractor=load_candidate_extractor(args),
+        summarizer=load_consolidation_summarizer(args),
     )
     worker = QueueWorker(queue, handlers.handlers(), metrics=metrics)
     return runtime_state, queue, tools, metrics, worker
@@ -2874,6 +2908,28 @@ def apply_provider_manifest(args: argparse.Namespace) -> dict[str, Any]:
                 "timeout_seconds": "entity_resolver_timeout",
             },
         )
+    candidate_extractor = providers.get("candidate_extractor", {})
+    if isinstance(candidate_extractor, dict):
+        _apply_manifest_fields(
+            args,
+            candidate_extractor,
+            {
+                "provider": "candidate_extractor_provider",
+                "command": "candidate_extractor_command",
+                "timeout_seconds": "candidate_extractor_timeout",
+            },
+        )
+    summarizer = providers.get("summarizer", {})
+    if isinstance(summarizer, dict):
+        _apply_manifest_fields(
+            args,
+            summarizer,
+            {
+                "provider": "summarizer_provider",
+                "command": "summarizer_command",
+                "timeout_seconds": "summarizer_timeout",
+            },
+        )
     session_secret = providers.get("session_secret", {})
     if isinstance(session_secret, dict):
         _apply_manifest_fields(
@@ -3092,6 +3148,59 @@ def cmd_provider_check(args: argparse.Namespace) -> None:
             checks["parametric"] = {"ok": False, "provider": "command", "error": str(exc)}
     else:
         checks["parametric"] = {"ok": True, "provider": "local", "skipped": True}
+
+    sample_evidence = [
+        Evidence(
+            tenant_id="provider-health",
+            user_id="provider-health",
+            actor="user",
+            source_type="provider-check",
+            content="Provider Health is configured.",
+            trust_tier=0,
+        )
+    ]
+    if args.candidate_extractor_provider == "command":
+        try:
+            extractor = load_candidate_extractor(args)
+            if extractor is None:
+                raise ValueError("command candidate extractor was not configured")
+            extracted = extractor.extract("provider-health", {}, sample_evidence)
+            candidates = extracted["candidates"]
+            if not candidates:
+                raise ValueError("candidate extractor did not return candidates")
+            checks["candidate_extractor"] = {
+                "ok": True,
+                "provider": "command",
+                "strategy": extracted["details"]["strategy"],
+                "candidate_count": len(candidates),
+                "signatures": [str(item["signature"]) for item in candidates],
+            }
+        except Exception as exc:  # noqa: BLE001 - health checks return structured failures.
+            ok = False
+            checks["candidate_extractor"] = {"ok": False, "provider": "command", "error": str(exc)}
+    elif "candidate_extractor" in manifest.get("required_checks", []):
+        checks["candidate_extractor"] = {"ok": True, "provider": "deterministic", "skipped": True}
+
+    if args.summarizer_provider == "command":
+        try:
+            summarizer = load_consolidation_summarizer(args)
+            if summarizer is None:
+                raise ValueError("command summarizer was not configured")
+            summary = summarizer.summarize("provider-health", sample_evidence)
+            if not summary or not str(summary.get("summary") or "").strip():
+                raise ValueError("summarizer did not return a summary")
+            checks["summarizer"] = {
+                "ok": True,
+                "provider": "command",
+                "strategy": summary["strategy"],
+                "summary_length": len(str(summary["summary"])),
+                "evidence_count": summary["evidence_count"],
+            }
+        except Exception as exc:  # noqa: BLE001 - health checks return structured failures.
+            ok = False
+            checks["summarizer"] = {"ok": False, "provider": "command", "error": str(exc)}
+    elif "summarizer" in manifest.get("required_checks", []):
+        checks["summarizer"] = {"ok": True, "provider": "deterministic", "skipped": True}
 
     if args.entity_resolver_provider == "command":
         try:
@@ -3369,6 +3478,30 @@ def build_parser() -> argparse.ArgumentParser:
         "--entity-resolver-timeout",
         type=float,
         default=float(os.environ.get("MNEMOSYNE_ENTITY_RESOLVER_TIMEOUT", "30")),
+    )
+    parser.add_argument(
+        "--candidate-extractor-provider",
+        choices=["deterministic", "command"],
+        default=os.environ.get("MNEMOSYNE_CANDIDATE_EXTRACTOR_PROVIDER", "deterministic"),
+        help="Consolidation candidate extractor provider",
+    )
+    parser.add_argument("--candidate-extractor-command", default=os.environ.get("MNEMOSYNE_CANDIDATE_EXTRACTOR_COMMAND"))
+    parser.add_argument(
+        "--candidate-extractor-timeout",
+        type=float,
+        default=float(os.environ.get("MNEMOSYNE_CANDIDATE_EXTRACTOR_TIMEOUT", "30")),
+    )
+    parser.add_argument(
+        "--summarizer-provider",
+        choices=["deterministic", "command"],
+        default=os.environ.get("MNEMOSYNE_SUMMARIZER_PROVIDER", "deterministic"),
+        help="Consolidation summarizer provider",
+    )
+    parser.add_argument("--summarizer-command", default=os.environ.get("MNEMOSYNE_SUMMARIZER_COMMAND"))
+    parser.add_argument(
+        "--summarizer-timeout",
+        type=float,
+        default=float(os.environ.get("MNEMOSYNE_SUMMARIZER_TIMEOUT", "30")),
     )
     parser.add_argument(
         "--media-embedding-provider",

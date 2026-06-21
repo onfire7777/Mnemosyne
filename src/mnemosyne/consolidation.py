@@ -83,12 +83,16 @@ class ConsolidationWorker:
         security: SecurityPolicy | None = None,
         learning: Any | None = None,
         entity_resolver: "EntityResolver | None" = None,
+        candidate_extractor: "CandidateExtractor | None" = None,
+        summarizer: "EvidenceSummarizer | None" = None,
     ):
         self.engine = engine
         self.security = security or SecurityPolicy()
         self.gate = PromotionGate(engine, gate_cases)
         self.learning = learning
         self.entity_resolver = entity_resolver or DeterministicEntityResolver()
+        self.candidate_extractor = candidate_extractor or DeterministicCandidateExtractor()
+        self.summarizer = summarizer or DeterministicEvidenceSummarizer()
 
     def run_queue_payload(self, payload: dict[str, Any]) -> ConsolidationRunResult:
         decision = self.security.authorize_write(
@@ -125,9 +129,12 @@ class ConsolidationWorker:
             skipped.append("source_marked_data_only")
             pass_results.append(PassResult("extractor", "skipped", {"reason": "source_marked_data_only"}))
         else:
-            candidates = self._candidate_payloads(payload, evidence)
+            extractor_result = self.candidate_extractor.extract(tenant_id, payload, evidence)
+            candidates = extractor_result["candidates"]
             if candidates:
-                pass_results.append(PassResult("extractor", "complete", {"candidate_count": len(candidates)}))
+                extractor_details = dict(extractor_result["details"])
+                extractor_details["candidate_count"] = len(candidates)
+                pass_results.append(PassResult("extractor", "complete", extractor_details))
                 resolver_result = self.entity_resolver.resolve(tenant_id, candidates)
                 candidates = resolver_result["candidates"]
                 pass_results.append(
@@ -166,7 +173,7 @@ class ConsolidationWorker:
             if pass_name in {"replayer", "extractor", "resolver", "belief_reviser"}:
                 continue
             if pass_name == "summarizer":
-                summary = self._summarize_evidence(evidence)
+                summary = self.summarizer.summarize(tenant_id, evidence)
                 if summary:
                     pass_results.append(PassResult(pass_name, "complete", summary))
                 else:
@@ -221,54 +228,6 @@ class ConsolidationWorker:
             else:
                 evidence.append(item)
         return evidence, missing
-
-    def _candidate_payloads(self, payload: dict[str, Any], evidence: list[Evidence]) -> list[dict[str, Any]]:
-        required_candidate_fields = {
-            "signature",
-            "query",
-            "candidate_subject",
-            "candidate_predicate",
-            "candidate_object",
-        }
-        if required_candidate_fields <= set(payload):
-            return [dict(payload)]
-        candidates: list[dict[str, Any]] = []
-        for item in evidence:
-            fact = _extract_simple_fact(item.content)
-            if not fact:
-                continue
-            subject, predicate, object_value = fact
-            entity_label = _entity_label(subject)
-            entity_key = _entity_key(entity_label)
-            signature = f"{subject} {predicate} {object_value}".lower()
-            candidates.append(
-                {
-                    "signature": signature,
-                    "query": entity_label,
-                    "candidate_subject": entity_label,
-                    "candidate_predicate": predicate,
-                    "candidate_object": object_value,
-                    "entity_key": entity_key,
-                    "trust_tier": item.trust_tier,
-                    "sensitivity": item.sensitivity,
-                    "access_policy": item.access_policy,
-                }
-            )
-        return candidates
-
-    @staticmethod
-    def _summarize_evidence(evidence: list[Evidence]) -> dict[str, Any] | None:
-        if not evidence:
-            return None
-        combined = " ".join(item.content.strip() for item in evidence if item.content.strip())
-        first_sentence = re.split(r"(?<=[.!?])\s+", combined.strip())[0] if combined.strip() else ""
-        tokens = first_sentence.split()
-        summary = " ".join(tokens[:32])
-        return {
-            "evidence_count": len(evidence),
-            "summary": summary,
-            "source_cids": [item.cid for item in evidence if item.cid],
-        }
 
     def _distill_lessons(self, tenant_id: str, candidates: list[dict[str, Any]]) -> dict[str, Any]:
         if self.learning is None or not candidates:
@@ -446,6 +405,123 @@ def _entity_key(subject: str) -> str:
     return normalized or "unknown-entity"
 
 
+class CandidateExtractor(Protocol):
+    strategy: str
+
+    def extract(self, tenant_id: str, payload: dict[str, Any], evidence: Sequence[Evidence]) -> dict[str, Any]: ...
+
+
+class DeterministicCandidateExtractor:
+    strategy = "deterministic_fact_extractor"
+
+    def extract(self, tenant_id: str, payload: dict[str, Any], evidence: Sequence[Evidence]) -> dict[str, Any]:
+        candidates = _deterministic_candidates(payload, evidence)
+        return {
+            "candidates": candidates,
+            "details": {
+                "strategy": self.strategy,
+                "evidence_count": len(evidence),
+            },
+        }
+
+
+class CommandCandidateExtractor:
+    """Shell-free candidate extractor adapter for model-backed consolidation."""
+
+    strategy = "command_candidate_extractor"
+
+    def __init__(self, command: str | Sequence[str], *, timeout_seconds: float = 30.0):
+        self.command = _command_argv(command)
+        self.timeout_seconds = timeout_seconds
+
+    def extract(self, tenant_id: str, payload: dict[str, Any], evidence: Sequence[Evidence]) -> dict[str, Any]:
+        parsed = _run_json_command(
+            self.command,
+            {
+                "tenant_id": tenant_id,
+                "payload": payload,
+                "evidence": [item.to_dict() for item in evidence],
+            },
+            timeout_seconds=self.timeout_seconds,
+            provider_name="candidate extractor",
+        )
+        rows = parsed.get("candidates")
+        if not isinstance(rows, list):
+            raise ValueError("candidate extractor response requires candidates array")
+        candidates = [_normalize_candidate(row, evidence, payload) for row in rows]
+        metadata = parsed.get("metadata", {})
+        if metadata is not None and not isinstance(metadata, dict):
+            raise ValueError("candidate extractor metadata must be a JSON object")
+        return {
+            "candidates": candidates,
+            "details": {
+                "strategy": self.strategy,
+                "evidence_count": len(evidence),
+                "metadata": metadata or {},
+            },
+        }
+
+
+class EvidenceSummarizer(Protocol):
+    strategy: str
+
+    def summarize(self, tenant_id: str, evidence: Sequence[Evidence]) -> dict[str, Any] | None: ...
+
+
+class DeterministicEvidenceSummarizer:
+    strategy = "deterministic_first_sentence"
+
+    def summarize(self, tenant_id: str, evidence: Sequence[Evidence]) -> dict[str, Any] | None:
+        if not evidence:
+            return None
+        combined = " ".join(item.content.strip() for item in evidence if item.content.strip())
+        first_sentence = re.split(r"(?<=[.!?])\s+", combined.strip())[0] if combined.strip() else ""
+        tokens = first_sentence.split()
+        summary = " ".join(tokens[:32])
+        return {
+            "strategy": self.strategy,
+            "evidence_count": len(evidence),
+            "summary": summary,
+            "source_cids": [item.cid for item in evidence if item.cid],
+        }
+
+
+class CommandEvidenceSummarizer:
+    """Shell-free summarizer adapter for model-backed consolidation."""
+
+    strategy = "command_evidence_summarizer"
+
+    def __init__(self, command: str | Sequence[str], *, timeout_seconds: float = 30.0):
+        self.command = _command_argv(command)
+        self.timeout_seconds = timeout_seconds
+
+    def summarize(self, tenant_id: str, evidence: Sequence[Evidence]) -> dict[str, Any] | None:
+        if not evidence:
+            return None
+        parsed = _run_json_command(
+            self.command,
+            {
+                "tenant_id": tenant_id,
+                "evidence": [item.to_dict() for item in evidence],
+            },
+            timeout_seconds=self.timeout_seconds,
+            provider_name="evidence summarizer",
+        )
+        summary = str(parsed.get("summary") or "").strip()
+        if not summary:
+            raise ValueError("evidence summarizer response requires non-empty summary")
+        metadata = parsed.get("metadata", {})
+        if metadata is not None and not isinstance(metadata, dict):
+            raise ValueError("evidence summarizer metadata must be a JSON object")
+        return {
+            "strategy": self.strategy,
+            "evidence_count": len(evidence),
+            "summary": summary,
+            "source_cids": [item.cid for item in evidence if item.cid],
+            "metadata": metadata or {},
+        }
+
+
 class EntityResolver(Protocol):
     strategy: str
 
@@ -503,6 +579,109 @@ class CommandEntityResolver:
         if not isinstance(parsed, dict):
             raise ValueError("entity resolver response must be a JSON object")
         return _apply_resolver_response(candidates, parsed)
+
+
+def _deterministic_candidates(payload: dict[str, Any], evidence: Sequence[Evidence]) -> list[dict[str, Any]]:
+    required_candidate_fields = {
+        "signature",
+        "query",
+        "candidate_subject",
+        "candidate_predicate",
+        "candidate_object",
+    }
+    if required_candidate_fields <= set(payload):
+        return [dict(payload)]
+    candidates: list[dict[str, Any]] = []
+    for item in evidence:
+        fact = _extract_simple_fact(item.content)
+        if not fact:
+            continue
+        subject, predicate, object_value = fact
+        entity_label = _entity_label(subject)
+        entity_key = _entity_key(entity_label)
+        signature = f"{subject} {predicate} {object_value}".lower()
+        candidates.append(
+            {
+                "signature": signature,
+                "query": entity_label,
+                "candidate_subject": entity_label,
+                "candidate_predicate": predicate,
+                "candidate_object": object_value,
+                "entity_key": entity_key,
+                "trust_tier": item.trust_tier,
+                "sensitivity": item.sensitivity,
+                "access_policy": item.access_policy,
+            }
+        )
+    return candidates
+
+
+def _normalize_candidate(row: Any, evidence: Sequence[Evidence], payload: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(row, dict):
+        raise ValueError("candidate extractor candidates must be JSON objects")
+    required = ["signature", "query", "candidate_subject", "candidate_predicate", "candidate_object"]
+    candidate = {key: str(row.get(key) or "").strip() for key in required}
+    missing = [key for key, value in candidate.items() if not value]
+    if missing:
+        raise ValueError(f"candidate extractor candidate missing fields: {', '.join(missing)}")
+    candidate["confidence"] = float(row.get("confidence", payload.get("confidence", 0.72)))
+    candidate["trust_tier"] = int(row.get("trust_tier", payload.get("trust_tier", _max_evidence_trust(evidence))))
+    candidate["sensitivity"] = int(row.get("sensitivity", payload.get("sensitivity", _max_evidence_sensitivity(evidence))))
+    candidate["access_policy"] = row.get("access_policy") or payload.get("access_policy") or _first_access_policy(evidence)
+    entity_key = str(row.get("entity_key") or row.get("entityKey") or "").strip()
+    if entity_key:
+        candidate["entity_key"] = entity_key
+    return candidate
+
+
+def _max_evidence_trust(evidence: Sequence[Evidence]) -> int:
+    if not evidence:
+        return int(TrustTier.NORMAL)
+    return max(int(item.trust_tier) for item in evidence)
+
+
+def _max_evidence_sensitivity(evidence: Sequence[Evidence]) -> int:
+    if not evidence:
+        return 0
+    return max(int(item.sensitivity) for item in evidence)
+
+
+def _first_access_policy(evidence: Sequence[Evidence]) -> dict[str, Any] | None:
+    for item in evidence:
+        if item.access_policy:
+            return dict(item.access_policy)
+    return None
+
+
+def _run_json_command(
+    command: Sequence[str],
+    payload: dict[str, Any],
+    *,
+    timeout_seconds: float,
+    provider_name: str,
+) -> dict[str, Any]:
+    try:
+        completed = subprocess.run(
+            list(command),
+            input=json.dumps(payload),
+            text=True,
+            capture_output=True,
+            timeout=timeout_seconds,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise TimeoutError(f"{provider_name} timed out") from exc
+    if completed.returncode != 0:
+        detail = completed.stderr.strip()[:512]
+        suffix = f": {detail}" if detail else ""
+        raise ValueError(f"{provider_name} failed{suffix}")
+    try:
+        parsed = json.loads(completed.stdout or "{}")
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{provider_name} response must be valid JSON") from exc
+    if not isinstance(parsed, dict):
+        raise ValueError(f"{provider_name} response must be a JSON object")
+    return parsed
 
 
 def _resolved_entities(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
