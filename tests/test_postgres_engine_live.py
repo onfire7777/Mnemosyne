@@ -8,6 +8,7 @@ import threading
 from datetime import UTC, datetime
 from hashlib import sha256
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -21,7 +22,14 @@ from mnemosyne.consolidation import (
 )
 from mnemosyne.gate import RegressionCase
 from mnemosyne.ingestion import IngestRequest, IngestionPipeline
-from mnemosyne.jobs import CALIBRATE_JOB, RuntimeJobHandlers
+from mnemosyne.jobs import (
+    CALIBRATE_JOB,
+    EVAL_SUITE_JOB,
+    LIFECYCLE_SWEEP_JOB,
+    OBSERVABILITY_SNAPSHOT_JOB,
+    PROJECTION_RECOMPUTE_JOB,
+    RuntimeJobHandlers,
+)
 from mnemosyne.media import MEDIA_EXTRACT_JOB, MediaExtractionResult
 from mnemosyne.mcp_server import MnemosyneMcpServer
 from mnemosyne.models import Assertion, Evidence, Preference, Relation
@@ -178,6 +186,93 @@ def test_postgres_queue_cli_enqueue_and_drain_live() -> None:
     assert drained["jobs"][0]["result"]["kind"] == "calibrate"
     assert drained["jobs"][0]["result"]["details"]["tenant_id"] == tenant
     assert after["queue"]["complete"] == 1
+
+
+def test_postgres_queue_worker_drains_maintenance_handlers_live() -> None:
+    tenant = f"tenant-queue-maintenance-{uuid4()}"
+    user = f"user-queue-maintenance-{uuid4()}"
+    engine = PostgresEngine(live_dsn())
+    queue = PostgresQueue(live_dsn(), tenant_id=tenant)
+    handlers = RuntimeJobHandlers(engine, queue)
+    worker = QueueWorker(queue, handlers.handlers())
+    cid = engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id=user,
+            actor="user",
+            source_type="live-test",
+            content="Postgres queue projection recompute evidence.",
+            trust_tier=0,
+            access_policy={"tenant": tenant},
+        )
+    )
+    assertion_id = engine.upsert_assertion(
+        Assertion(
+            tenant_id=tenant,
+            user_id=user,
+            subject="Postgres queue maintenance",
+            predicate="covers",
+            object="projection recompute",
+            confidence=0.9,
+            source_evidence_cids=[cid],
+            trust_tier=0,
+            access_policy={"tenant": tenant},
+        )
+    )
+
+    queue.enqueue(
+        CALIBRATE_JOB,
+        {
+            "tenant_id": tenant,
+            "memory_type": "fact",
+            "scores": [0.2, 0.4, 0.8],
+            "confidence": 0.99,
+            "prediction_set_size": 4,
+        },
+    )
+    queue.enqueue(
+        LIFECYCLE_SWEEP_JOB,
+        {
+            "states": [
+                {
+                    "item_id": "postgres-memory-1",
+                    "tier": "verbatim",
+                    "salience": 0.01,
+                    "importance": 0.0,
+                    "access_count": 0,
+                    "last_accessed": "2020-01-01T00:00:00Z",
+                }
+            ],
+            "now": "2026-01-01T00:00:00Z",
+        },
+    )
+    queue.enqueue(EVAL_SUITE_JOB, {"suite": "seed"})
+    queue.enqueue(OBSERVABILITY_SNAPSHOT_JOB, {})
+    queue.enqueue(
+        PROJECTION_RECOMPUTE_JOB,
+        {
+            "tenant_id": tenant,
+            "user_id": user,
+            "branch": "main",
+            "changed_evidence_cids": [cid],
+            "enqueue_consolidation": False,
+        },
+    )
+
+    drained = worker.drain(limit=5)
+    persisted = {job.kind: job for job in queue.list_jobs()}
+
+    assert [job.status for job in drained] == ["complete", "complete", "complete", "complete", "complete"]
+    assert queue.snapshot()["complete"] == 5
+    assert persisted[CALIBRATE_JOB].result["details"]["abstain"] is True
+    assert persisted[LIFECYCLE_SWEEP_JOB].result["details"]["demoted"] == 1
+    assert persisted[EVAL_SUITE_JOB].result["details"]["passed"] is True
+    assert persisted[OBSERVABILITY_SNAPSHOT_JOB].result["details"]["metrics"]["counters"]["observability.snapshots"] == 1
+    recompute = persisted[PROJECTION_RECOMPUTE_JOB].result["details"]
+    assert recompute["affected_projection_counts"]["assertions"] == 1
+    assert recompute["affected_projections"]["assertions"] == [assertion_id]
+    assert recompute["queued_consolidation_jobs"] == []
+    assert engine.export_tenant(tenant)["calibrations"][0]["memory_type"] == "fact"
 
 
 class StaticMediaExtractor:

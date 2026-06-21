@@ -301,7 +301,7 @@ class RuntimeJobHandlers:
             {
                 "suite": str(payload.get("suite", "seed")),
                 "passed": failed == 0,
-                "outcomes": [item.__dict__ for item in outcomes],
+                "outcomes": [asdict(item) for item in outcomes],
             },
         )
 

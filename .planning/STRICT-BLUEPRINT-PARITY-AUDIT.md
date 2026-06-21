@@ -82,6 +82,7 @@
 - CLI runtime coverage now mentions all 69 `cmd_*` handlers in `tests/test_cli_runtime_tools.py`; direct coverage was added for `prefetch`, `discard`, `trajectory-log`, `lesson-induce`, and `procedure-induce` so the static handler scan has 0 unmentioned command surfaces.
 - Requirements status now reflects verified local/clean-DSN parity for conformal calibration, belief justification/cascade invalidation, and trajectory-driven learning, while preserving explicit production-validation gaps. Calibration coverage now includes oversized prediction-set abstention.
 - MCP behavioral parity now includes direct in-process JSON-RPC `tools/call` coverage for source sync, scoped profile aliases, graph timeline/as-of, trajectory attribution, lesson/procedure induction/search, and outcome evaluation, rather than relying only on `tools/list` schema parity.
+- Durable Postgres worker parity now covers maintenance handlers for calibration, lifecycle sweep, eval suite, observability snapshot, and projection recompute through `PostgresQueue` plus `QueueWorker`; the eval-suite handler now serializes dataclass outcomes correctly with `asdict`.
 
 ## Supersession Note
 
