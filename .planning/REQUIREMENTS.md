@@ -20,7 +20,7 @@
 
 | ID | Requirement | Blueprint Anchor | Current Status |
 |----|-------------|------------------|----------------|
-| REQ-012 | Typed explicit user model with six categories, scope, confidence, validity, and override behavior. | FR-5, §24 | Minimal explicit preference model implemented; full six-type UX remains required |
+| REQ-012 | Typed explicit user model with six categories, scope, confidence, validity, and override behavior. | FR-5, §24 | Implemented with six memory categories, scope/confidence/validity metadata, authority ordering, scope exceptions, latent advisory profile, and CLI/MCP/Postgres runtime persistence; dedicated product UX remains non-blocking |
 | REQ-013 | TMS and AGM belief revision with cascade invalidation and contested multi-hypothesis beliefs. | I2, §30.3 | Implemented locally with justification links, dependency cascade invalidation, contradictions, supersession, and contested probability surfacing; broader production parity remains required |
 | REQ-014 | Temporal entity graph with cached and live PPR. | Phase 2 | Local graph channel implemented; production AGE or specialist adapter remains required |
 | REQ-015 | Fidelity-tiered forgetting with salience decay, demotion ladder, gist-risk abstention, and spaced rehearsal. | I7, §25 | Lifecycle module implemented; storage integration and rehearsal scheduler remain required |

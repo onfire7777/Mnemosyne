@@ -35,6 +35,22 @@ def test_six_category_user_model_scope_and_authority_order() -> None:
         scope={"repo": "mnemosyne"},
         confidence=0.95,
     )
+    explicit = UserModelEntry(
+        tenant_id=TENANT,
+        user_id=USER,
+        kind=UserMemoryKind.EXPLICIT_PREFERENCE,
+        statement="Prefers verified implementation notes.",
+        scope={"repo": "mnemosyne"},
+        confidence=0.9,
+    )
+    situational = UserModelEntry(
+        tenant_id=TENANT,
+        user_id=USER,
+        kind=UserMemoryKind.SITUATIONAL_PREFERENCE,
+        statement="For this phase, prioritize parity evidence.",
+        scope={"repo": "mnemosyne", "phase": "3"},
+        confidence=0.85,
+    )
     temporary = UserModelEntry(
         tenant_id=TENANT,
         user_id=USER,
@@ -47,12 +63,21 @@ def test_six_category_user_model_scope_and_authority_order() -> None:
     model.add_entry(inferred)
     model.add_entry(hard)
     model.add_entry(identity)
+    model.add_entry(explicit)
+    model.add_entry(situational)
     model.add_entry(temporary)
     packet = model.context_packet(TENANT, USER, {"repo": "mnemosyne", "phase": "3"})
 
     authoritative = packet["authoritative"]
-    assert [item["kind"] for item in authoritative][:2] == ["hard_instruction", "identity"]
+    assert [item["kind"] for item in authoritative] == [
+        "hard_instruction",
+        "identity",
+        "explicit_preference",
+        "situational_preference",
+        "temporary_state",
+    ]
     assert model.entries[inferred.id].status == "superseded"
+    assert packet["inferred"] == []
     assert packet["rules"]["hard_instruction_outranks_inference"] is True
 
 
@@ -102,4 +127,3 @@ def test_no_degradation_guard_blocks_memory_below_baseline() -> None:
     assert passing.passed is True
     assert failing.passed is False
     assert "degraded" in failing.reason
-
