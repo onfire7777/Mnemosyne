@@ -1582,6 +1582,19 @@ class PostgresEngine:
                 audit = [_row_to_audit_log(row) for row in cur.fetchall()]
                 cur.execute("SELECT * FROM deletion_log WHERE tenant_id = %s", (db_tenant_id,))
                 deletion = [_json_safe(dict(row)) for row in cur.fetchall()]
+                cur.execute(
+                    "SELECT frm, into_, report, at FROM merges WHERE tenant_id = %s ORDER BY at",
+                    (db_tenant_id,),
+                )
+                merge_log = [
+                    {
+                        **dict(row["report"] or {}),
+                        "from_branch": row["frm"],
+                        "into_branch": row["into_"],
+                        "merged_at": dt_to_json(row["at"]),
+                    }
+                    for row in cur.fetchall()
+                ]
                 cur.execute("SELECT * FROM conformal_calibration WHERE tenant_id = %s", (db_tenant_id,))
                 calibrations = [
                     {
@@ -1631,6 +1644,7 @@ class PostgresEngine:
             "contradictions": contradictions,
             "audit_log": audit,
             "deletion_log": deletion,
+            "merge_log": merge_log,
         }
 
     def to_json(self) -> str:

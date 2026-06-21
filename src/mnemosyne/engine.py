@@ -1014,6 +1014,16 @@ class LocalMemoryEngine:
             "contradictions": [item.to_dict() for item in self.contradictions.values() if item.tenant_id == tenant_id],
             "audit_log": [item for item in self.audit_log if item.get("tenant_id") == tenant_id],
             "deletion_log": [item for item in self.deletion_log if item.get("tenant_id") == tenant_id],
+            "merge_log": [
+                item
+                for item in self.merge_log
+                if any(
+                    audit.get("op") == "merge"
+                    and audit.get("target_id") == item.get("from_branch")
+                    and audit.get("tenant_id") in {tenant_id, "*"}
+                    for audit in self.audit_log
+                )
+            ],
         }
 
     def branch(self, name: str, frm: str = "main", kind: str = "scratch", tenant_id: str | None = None) -> None:

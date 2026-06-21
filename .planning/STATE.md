@@ -86,6 +86,8 @@ Latest checkpoint: REQ-011 expanded-suite enforcement now goes beyond protected-
 
 Latest checkpoint: REQ-016 consolidation now emits first-class society-of-roles provenance. `ConsolidationRunResult.role_pipeline` reports the consolidator owner, write authorization, per-pass role names, provider strategies, provider type, and status; CLI and live Postgres command-provider tests verify model-backed extractor/resolver/summarizer roles are visible in runtime results. Local verification still collects 366 tests with 309 passing tests plus 57 skipped live-DB tests, and the clean compose DSN run passes all 366 tests with `MNEMOSYNE_POSTGRES_DSN=postgresql://mnemosyne:<redacted>@127.0.0.1:54329/mnemosyne?connect_timeout=5`.
 
+Latest checkpoint: REQ-002 merge audit is now visible in tenant exports, not only internal engine state. Local and Postgres `export_tenant` include `merge_log`; the shared Local/Postgres branch-merge contract verifies promoted evidence/assertions/relations and tenant-exported merge counters for the source/target branches. Local verification still collects 366 tests with 309 passing tests plus 57 skipped live-DB tests, and the clean compose DSN run passes all 366 tests with `MNEMOSYNE_POSTGRES_DSN=postgresql://mnemosyne:<redacted>@127.0.0.1:54329/mnemosyne?connect_timeout=5`.
+
 Progress: [███████░░░] local scaffold verified; production parity gaps remain
 
 ## Performance Metrics

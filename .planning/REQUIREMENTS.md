@@ -5,7 +5,7 @@
 | ID | Requirement | Blueprint Anchor | Current Status |
 |----|-------------|------------------|----------------|
 | REQ-001 | Append-only, content-addressed, verbatim evidence ledger with idempotent deduplication and byte retrieval. | FR-1, Phase 0 | Implemented and tested locally |
-| REQ-002 | Branchable memory with discard rollback and promotion via merge. | I3, Phase 0, Phase 4 | Implemented locally; production merge audit remains required |
+| REQ-002 | Branchable memory with discard rollback and promotion via merge. | I3, Phase 0, Phase 4 | Implemented locally and under clean Postgres DSN with branch/discard/merge promotion plus tenant-exported merge audit logs; broader production release audit remains required |
 | REQ-003 | Per-tenant and per-source isolation with trust tiers. | FR-7, Security §27 | Implemented locally; production auth/RLS remains required |
 | REQ-004 | Stable agent-facing MCP/CLI contract for capture, search, deep_search, explain, correct, forget, export. | FR-9, §30.7 | Implemented locally |
 | REQ-005 | Bitemporal assertion store with supersession, no destructive overwrite, and as-of queries. | FR-2, Phase 1 | Implemented and tested locally |
