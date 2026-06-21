@@ -3066,6 +3066,73 @@ def test_cli_persisted_gate_case_blocks_consolidation_promotion(tmp_path: Path) 
     assert candidate["protected_regressions"] == ["protected-sentinel"]
 
 
+def test_cli_gate_suite_check_reports_fingerprint_and_fails_closed(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    run_cli(
+        store,
+        "gate-case-add",
+        "--id",
+        "protected-suite-case",
+        "--signature",
+        "protected suite runtime target",
+        "--query",
+        "protected suite runtime target",
+        "--expected-substring",
+        "local CLI",
+        "--tier",
+        "core",
+        "--protected",
+    )
+    run_cli(
+        store,
+        "gate-case-add",
+        "--id",
+        "unprotected-suite-case",
+        "--signature",
+        "unprotected suite runtime target",
+        "--query",
+        "unprotected suite runtime target",
+        "--expected-substring",
+        "local CLI",
+    )
+
+    checked = run_cli(store, "gate-suite-check", "--min-protected", "1")
+    fingerprint = checked["suite"]["fingerprint"]
+    checked_with_cases = run_cli(
+        store,
+        "gate-suite-check",
+        "--min-protected",
+        "1",
+        "--expected-fingerprint",
+        fingerprint,
+        "--include-cases",
+    )
+    failed = run_raw_cli(
+        store,
+        "gate-suite-check",
+        "--min-protected",
+        "1",
+        "--expected-fingerprint",
+        "0" * 64,
+    )
+    failed_payload = json.loads(failed.stdout)
+
+    assert checked["ok"] is True
+    assert checked["suite"]["case_count"] == 2
+    assert checked["suite"]["protected_case_count"] == 1
+    assert checked["suite"]["protected_case_ids"] == ["protected-suite-case"]
+    assert checked["suite"]["tier_counts"] == {"core": 1, "smoke": 1}
+    assert len(fingerprint) == 64
+    assert checked_with_cases["ok"] is True
+    assert [case["id"] for case in checked_with_cases["suite"]["cases"]] == [
+        "protected-suite-case",
+        "unprotected-suite-case",
+    ]
+    assert failed.returncode == 1
+    assert failed_payload["ok"] is False
+    assert failed_payload["failures"] == ["protected suite fingerprint mismatch"]
+
+
 def test_cli_persists_queue_between_ingest_and_worker_commands(tmp_path: Path) -> None:
     store = tmp_path / "mnemosyne.json"
     ingested = run_cli(
