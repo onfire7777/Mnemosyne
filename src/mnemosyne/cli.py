@@ -24,6 +24,7 @@ from uuid import UUID
 
 from cryptography import x509
 
+from mnemosyne.belief import validate_belief_revision_cases
 from mnemosyne.calibration import calibration_examples_from_rows, tune_calibration_set
 from mnemosyne.consolidation import (
     CONSOLIDATE_EVIDENCE_JOB,
@@ -79,6 +80,7 @@ from mnemosyne.self_optimization import validate_policy_ops_bundle
 from mnemosyne.storage import CommandKeyManager, EncryptedLocalObjectStore, JsonKeyManager, LocalObjectStore
 
 DEPLOYMENT_SOAK_COMMANDS = {
+    "belief-revision-check",
     "calibration-tune",
     "forgetting-policy-check",
     "policy-ops-check",
@@ -104,6 +106,7 @@ DEPLOYMENT_SOAK_GLOBAL_OPTIONS = {
     "--parametric-artifact-store",
 }
 PRODUCTION_RELEASE_REQUIRED_COMMANDS = (
+    "belief-revision-check",
     "calibration-tune",
     "forgetting-policy-check",
     "policy-ops-check",
@@ -1259,6 +1262,40 @@ def cmd_policy_ops_check(args: argparse.Namespace) -> None:
             {
                 "code": "fingerprint_mismatch",
                 "message": "policy ops bundle fingerprint mismatch",
+            }
+        )
+    emit(report)
+    if not report["ok"]:
+        raise SystemExit(1)
+
+
+def _load_belief_revision_cases(args: argparse.Namespace) -> list[Mapping[str, Any]]:
+    if bool(args.cases) == bool(args.cases_json):
+        raise SystemExit("belief-revision-check requires exactly one of --cases or --cases-json")
+    try:
+        loaded = json.loads(Path(args.cases).expanduser().read_text(encoding="utf-8")) if args.cases else json.loads(args.cases_json)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"belief revision cases denied: {exc}") from exc
+    if not isinstance(loaded, list):
+        raise SystemExit("belief revision cases must be a JSON array")
+    if not all(isinstance(item, Mapping) for item in loaded):
+        raise SystemExit("belief revision cases must contain JSON objects")
+    return loaded
+
+
+def cmd_belief_revision_check(args: argparse.Namespace) -> None:
+    report = validate_belief_revision_cases(
+        _load_belief_revision_cases(args),
+        min_cases=args.min_cases,
+        required_case_ids=args.require_case,
+    )
+    report["expected_fingerprint_present"] = bool(args.expected_fingerprint)
+    if args.expected_fingerprint and args.expected_fingerprint.strip().lower() != report["fingerprint"]:
+        report["ok"] = False
+        report["findings"].append(
+            {
+                "code": "fingerprint_mismatch",
+                "message": "belief revision suite fingerprint mismatch",
             }
         )
     emit(report)
@@ -4535,6 +4572,14 @@ def build_parser() -> argparse.ArgumentParser:
     policy_ops_check.add_argument("--max-proxy-gap", type=float, default=0.15)
     policy_ops_check.add_argument("--expected-fingerprint")
     policy_ops_check.set_defaults(func=cmd_policy_ops_check)
+
+    belief_revision_check = sub.add_parser("belief-revision-check")
+    belief_revision_check.add_argument("--cases", help="Path to JSON array of belief revision cases")
+    belief_revision_check.add_argument("--cases-json", help="Inline JSON array of belief revision cases")
+    belief_revision_check.add_argument("--min-cases", type=int, default=3)
+    belief_revision_check.add_argument("--require-case", action="append", default=[])
+    belief_revision_check.add_argument("--expected-fingerprint")
+    belief_revision_check.set_defaults(func=cmd_belief_revision_check)
 
     branch = sub.add_parser("branch")
     branch.add_argument("--name", required=True)
