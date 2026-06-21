@@ -61,8 +61,8 @@ The earlier `.planning/v1.0-MILESTONE-AUDIT.md` remains useful as evidence that 
 
 ## Next Required Implementation Slice
 
-1. Continue expanding the live Docker/Postgres smoke into the full shared contract suite.
-2. Wire production embedding, cross-encoder, and image/audio embedding providers behind the existing adapter boundaries; run provider checks against real deployments.
-3. Extend the hosted HTTP JSON-RPC MCP surface into official streamable/SSE transport validation, real IdP/JWKS rotation validation, production certificate lifecycle validation, and broader production stateless soak tests.
+1. Keep the compose Docker/Postgres full-suite evidence current and expand it only when new engine/runtime surfaces are introduced.
+2. Run provider checks against real production embedding, cross-encoder, image/audio embedding, extractor, summarizer, and entity-resolver deployments plus calibration datasets.
+3. Run hosted HTTP JSON-RPC, official StreamableHTTP/SSE, IdP/JWKS rotation, certificate lifecycle, and stateless soak validation against real deployed endpoints.
 4. Validate real secret-manager-backed session-secret command deployment/rotation before making any production multi-tenant claim.
 5. Validate real isolated LoRA/test-time-training deployments behind the command-backed parametric provider boundary, including deployed protected-suite management and production rollback orchestration.
