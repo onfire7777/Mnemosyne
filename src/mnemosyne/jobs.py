@@ -7,7 +7,14 @@ from datetime import UTC, datetime
 from typing import Any
 
 from mnemosyne.calibration import CalibrationSet, conformal_threshold, should_abstain
-from mnemosyne.consolidation import CONSOLIDATE_EVIDENCE_JOB, DEFAULT_CONSOLIDATION_PASSES, ConsolidationWorker, EntityResolver
+from mnemosyne.consolidation import (
+    CONSOLIDATE_EVIDENCE_JOB,
+    DEFAULT_CONSOLIDATION_PASSES,
+    CandidateExtractor,
+    ConsolidationWorker,
+    EntityResolver,
+    EvidenceSummarizer,
+)
 from mnemosyne.eval import run_seed_suite
 from mnemosyne.gate import RegressionCase
 from mnemosyne.lifecycle import FidelityTier, LifecycleState, demotion_decision
@@ -46,6 +53,8 @@ class RuntimeJobHandlers:
         learning: Any | None = None,
         gate_cases: list[RegressionCase] | None = None,
         entity_resolver: EntityResolver | None = None,
+        candidate_extractor: CandidateExtractor | None = None,
+        summarizer: EvidenceSummarizer | None = None,
     ):
         self.engine = engine
         self.queue = queue
@@ -59,6 +68,8 @@ class RuntimeJobHandlers:
             gate_cases=self.gate_cases,
             learning=learning,
             entity_resolver=entity_resolver,
+            candidate_extractor=candidate_extractor,
+            summarizer=summarizer,
         )
 
     def handlers(self) -> dict[str, Any]:
