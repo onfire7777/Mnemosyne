@@ -347,6 +347,18 @@ def _is_gist_hit(hit: Hit) -> bool:
     )
 
 
+def is_retired_summary_metadata(metadata: object) -> bool:
+    if not isinstance(metadata, dict):
+        return False
+    summary = metadata.get("summary")
+    if not isinstance(summary, dict):
+        return False
+    status = str(summary.get("status") or "").lower()
+    return status in {"retired", "superseded", "stale"} or bool(
+        summary.get("retired_at") or summary.get("superseded_by")
+    )
+
+
 def apply_activation_scores(hits: Sequence[Hit], policy: OperatingPolicy, *, now: datetime | None = None) -> list[Hit]:
     """Apply blueprint-style activation scoring to already retrieved hits."""
 

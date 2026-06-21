@@ -33,6 +33,7 @@ from mnemosyne.retrieval import (
     activation_explain,
     apply_activation_scores,
     gist_support_report,
+    is_retired_summary_metadata,
     semantic_entropy,
 )
 from mnemosyne.security import TrustTier, trust_weight
@@ -681,6 +682,14 @@ class PostgresEngine:
                     WHERE e.tenant_id = %s AND e.branch = %s AND e.erased = false
                       AND e.trust_tier <= %s AND e.sensitivity <= %s
                       AND (%s OR NOT (e.metadata ? 'quarantine_reason'))
+                      AND NOT (
+                        e.metadata ? 'summary'
+                        AND (
+                          lower(coalesce(e.metadata->'summary'->>'status', '')) IN ('retired', 'superseded', 'stale')
+                          OR COALESCE((e.metadata->'summary') ? 'retired_at', false)
+                          OR COALESCE((e.metadata->'summary') ? 'superseded_by', false)
+                        )
+                      )
                       AND to_tsvector('english', coalesce(e.content, '')) @@ q.query
                     ORDER BY score DESC
                     LIMIT %s
@@ -690,6 +699,8 @@ class PostgresEngine:
                 for row in cur.fetchall():
                     cid = _bytes_to_cid(row["cid"])
                     metadata = dict(row["metadata"] or {})
+                    if is_retired_summary_metadata(metadata):
+                        continue
                     hit_metadata = {"source_type": row["source_type"], "backend": self.adapters.lexical_backend}
                     if isinstance(metadata.get("summary"), dict):
                         hit_metadata["summary"] = metadata["summary"]
@@ -815,6 +826,14 @@ class PostgresEngine:
                     WHERE tenant_id = %s AND branch = %s AND erased = false
                       AND trust_tier <= %s AND sensitivity <= %s
                       AND (%s OR NOT (metadata ? 'quarantine_reason'))
+                      AND NOT (
+                        metadata ? 'summary'
+                        AND (
+                          lower(coalesce(metadata->'summary'->>'status', '')) IN ('retired', 'superseded', 'stale')
+                          OR COALESCE((metadata->'summary') ? 'retired_at', false)
+                          OR COALESCE((metadata->'summary') ? 'superseded_by', false)
+                        )
+                      )
                       AND embedding IS NOT NULL
                     ORDER BY embedding <=> %s::vector
                     LIMIT %s
@@ -837,6 +856,8 @@ class PostgresEngine:
                         continue
                     cid = _bytes_to_cid(row["cid"])
                     metadata = dict(row["metadata"] or {})
+                    if is_retired_summary_metadata(metadata):
+                        continue
                     media_embedding = metadata.get("media_embedding")
                     hit_metadata = {
                         "source_type": row["source_type"],
@@ -876,6 +897,14 @@ class PostgresEngine:
                     WHERE tenant_id = %s AND branch = %s AND erased = false
                       AND trust_tier <= %s AND sensitivity <= %s
                       AND (%s OR NOT (metadata ? 'quarantine_reason'))
+                      AND NOT (
+                        metadata ? 'summary'
+                        AND (
+                          lower(coalesce(metadata->'summary'->>'status', '')) IN ('retired', 'superseded', 'stale')
+                          OR COALESCE((metadata->'summary') ? 'retired_at', false)
+                          OR COALESCE((metadata->'summary') ? 'superseded_by', false)
+                        )
+                      )
                       AND embedding IS NULL
                     """,
                     (db_tenant_id, branch, max_trust, max_sensitivity, include_quarantined),
@@ -887,6 +916,8 @@ class PostgresEngine:
                         continue
                     cid = _bytes_to_cid(row["cid"])
                     metadata = dict(row["metadata"] or {})
+                    if is_retired_summary_metadata(metadata):
+                        continue
                     hit_metadata = {
                         "source_type": row["source_type"],
                         "backend": self.adapters.embedding.name,
@@ -1322,19 +1353,31 @@ class PostgresEngine:
                     return {"erased": False, "reason": "evidence_not_found", "cid": cid, "erasure_mode": mode.value}
                 cur.execute(
                     """
-                    SELECT cid
+                    SELECT cid, metadata
                     FROM evidence
                     WHERE tenant_id = %s AND branch = %s
                       AND erased = false
-                      AND metadata->>'source_evidence_cid' = %s
                       AND cid <> %s
                     """,
-                    (db_tenant_id, branch, cid, cid_bytes),
+                    (db_tenant_id, branch, cid_bytes),
                 )
-                derived_cid_bytes = [bytes(row["cid"]) for row in cur.fetchall()]
-                derived_cids = [_bytes_to_cid(item) for item in derived_cid_bytes]
+                candidates = [(bytes(row["cid"]), dict(row["metadata"] or {})) for row in cur.fetchall()]
+                affected_cids = {cid}
+                derived_cid_bytes: list[bytes] = []
+                derived_cids: list[str] = []
+                changed = True
+                while changed:
+                    changed = False
+                    for candidate_bytes, metadata in candidates:
+                        candidate_cid = _bytes_to_cid(candidate_bytes)
+                        if candidate_cid in affected_cids:
+                            continue
+                        if affected_cids.intersection(_metadata_source_cids(metadata)):
+                            affected_cids.add(candidate_cid)
+                            derived_cid_bytes.append(candidate_bytes)
+                            derived_cids.append(candidate_cid)
+                            changed = True
                 affected_cid_bytes = [cid_bytes, *derived_cid_bytes]
-                affected_cids = {cid, *derived_cids}
                 propagated["erased_derived_evidence"] = derived_cids
                 if mode is ErasureMode.HARD_DELETE_LEGAL:
                     cur.execute(
@@ -1864,6 +1907,14 @@ class PostgresEngine:
                     WHERE tenant_id = %s AND branch = %s AND erased = false
                       AND trust_tier <= %s AND sensitivity <= %s
                       AND (%s OR NOT (metadata ? 'quarantine_reason'))
+                      AND NOT (
+                        metadata ? 'summary'
+                        AND (
+                          lower(coalesce(metadata->'summary'->>'status', '')) IN ('retired', 'superseded', 'stale')
+                          OR COALESCE((metadata->'summary') ? 'retired_at', false)
+                          OR COALESCE((metadata->'summary') ? 'superseded_by', false)
+                        )
+                      )
                     """,
                     (db_tenant_id, branch, max_trust, max_sensitivity, include_quarantined),
                 )
@@ -1873,6 +1924,8 @@ class PostgresEngine:
                     if score > 0:
                         cid = _bytes_to_cid(row["cid"])
                         metadata = dict(row["metadata"] or {})
+                        if is_retired_summary_metadata(metadata):
+                            continue
                         hit_metadata = {"source_type": row["source_type"]}
                         if isinstance(metadata.get("summary"), dict):
                             hit_metadata["summary"] = metadata["summary"]
@@ -2102,6 +2155,22 @@ def _bytes_list_to_cids(values: list[bytes] | None) -> list[str]:
     if not values:
         return []
     return [_bytes_to_cid(value) for value in values]
+
+
+def _metadata_source_cids(metadata: dict[str, Any]) -> set[str]:
+    sources: set[str] = set()
+    single = metadata.get("source_evidence_cid")
+    if single:
+        sources.add(str(single))
+    values = metadata.get("source_evidence_cids")
+    if isinstance(values, list):
+        sources.update(str(item) for item in values if item)
+    summary = metadata.get("summary")
+    if isinstance(summary, dict):
+        summary_values = summary.get("source_evidence_cids")
+        if isinstance(summary_values, list):
+            sources.update(str(item) for item in summary_values if item)
+    return sources
 
 
 def _uuid_or_none(value: str | None) -> str | None:

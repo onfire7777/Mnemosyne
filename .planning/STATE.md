@@ -34,6 +34,8 @@ Latest checkpoint: Consolidation summarizer now materializes a one-level derived
 
 Latest checkpoint: Retrieval now treats sole gist support as insufficient for a confident answer. Local and Postgres retrieval preserve summary/lifecycle metadata on evidence hits, detect when every budgeted hit is `abstractive_gist`/`consolidation-summary` support, and force abstention with an explicit source-inspection note while exposing `explain.gist_support`. Focused local/Postgres gist-only retrieval tests, shared local/Postgres contract suites, the full no-DSN suite, and the full compose Postgres suite pass; local verification now collects 335 tests with 289 passing tests plus 46 skipped live-DB tests, and the compose DSN run passes all 335 tests.
 
+Latest checkpoint: Consolidation summary refresh now versions one-level gist projections by source fingerprint. Rerunning the summarizer over the same source set creates a fresh active summary, retires the prior summary with `superseded_by`/`retired_by` metadata, and local/Postgres retrieval skip retired summary evidence. Forget now walks transitive derived-evidence provenance through `source_evidence_cid`, `source_evidence_cids`, and `summary.source_evidence_cids`, so source erasure invalidates derived gist evidence and expires summary relations. Focused local/Postgres summary-refresh and forget-invalidation tests pass; local verification now collects 339 tests with 289 passing tests plus 50 skipped live-DB tests, and the compose DSN run passes all 339 tests. Multi-level RAPTOR clustering and bounded summary refresh scheduling remain open.
+
 Progress: [███████░░░] local scaffold verified; production parity gaps remain
 
 ## Performance Metrics

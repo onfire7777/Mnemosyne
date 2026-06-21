@@ -28,7 +28,13 @@ from mnemosyne.models import (
 )
 from mnemosyne.policy import OperatingPolicy
 from mnemosyne.privacy import ErasureMode
-from mnemosyne.retrieval import activation_explain, apply_activation_scores, gist_support_report, semantic_entropy
+from mnemosyne.retrieval import (
+    activation_explain,
+    apply_activation_scores,
+    gist_support_report,
+    is_retired_summary_metadata,
+    semantic_entropy,
+)
 from mnemosyne.security import TrustTier, more_trusted, trust_weight
 from mnemosyne.text import approx_tokens, cosine, hashing_embedding, lexical_score, tokenize
 
@@ -886,15 +892,7 @@ class LocalMemoryEngine:
             ev = self.evidence.get(key)
             if not ev:
                 return {"erased": False, "reason": "evidence_not_found", "cid": cid, "erasure_mode": mode.value}
-            derived_cids = [
-                item.cid
-                for item in self.evidence.values()
-                if item.tenant_id == tenant_id
-                and item.branch == branch
-                and not item.erased
-                and item.metadata.get("source_evidence_cid") == cid
-                and item.cid != cid
-            ]
+            derived_cids = self._derived_evidence_cids_forget(tenant_id, branch, cid)
             affected_cids = {cid, *derived_cids}
             if mode is ErasureMode.HARD_DELETE_LEGAL:
                 self.evidence.pop(key, None)
@@ -1164,6 +1162,8 @@ class LocalMemoryEngine:
                 continue
             if not include_quarantined and ev.metadata.get("quarantine_reason"):
                 continue
+            if is_retired_summary_metadata(ev.metadata):
+                continue
             metadata = {
                 "actor": ev.actor,
                 "source_type": ev.source_type,
@@ -1322,6 +1322,44 @@ class LocalMemoryEngine:
             weighted += max(hit.score, 0.01) * trust * base
             total += max(hit.score, 0.01)
         return max(0.0, min(1.0, weighted / max(total, 0.01)))
+
+    @staticmethod
+    def _metadata_source_cids(metadata: dict[str, Any]) -> set[str]:
+        sources: set[str] = set()
+        single = metadata.get("source_evidence_cid")
+        if single:
+            sources.add(str(single))
+        values = metadata.get("source_evidence_cids")
+        if isinstance(values, list):
+            sources.update(str(item) for item in values if item)
+        summary = metadata.get("summary")
+        if isinstance(summary, dict):
+            summary_values = summary.get("source_evidence_cids")
+            if isinstance(summary_values, list):
+                sources.update(str(item) for item in summary_values if item)
+        return sources
+
+    def _derived_evidence_cids_forget(self, tenant_id: str, branch: str, cid: str) -> list[str]:
+        affected = {cid}
+        derived: list[str] = []
+        changed = True
+        while changed:
+            changed = False
+            for item in self.evidence.values():
+                item_cid = item.cid
+                if (
+                    item.tenant_id != tenant_id
+                    or item.branch != branch
+                    or item.erased
+                    or not item_cid
+                    or item_cid in affected
+                ):
+                    continue
+                if affected.intersection(self._metadata_source_cids(item.metadata)):
+                    affected.add(item_cid)
+                    derived.append(item_cid)
+                    changed = True
+        return derived
 
     @staticmethod
     def _valid_at(valid_from: datetime, valid_to: datetime | None, moment: datetime) -> bool:

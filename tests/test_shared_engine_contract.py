@@ -10,6 +10,7 @@ from uuid import uuid4
 import pytest
 
 from mnemosyne.calibration import CalibrationSet
+from mnemosyne.consolidation import ConsolidationWorker
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.models import Assertion, Contradiction, Evidence, Justification, Preference, Relation
 from mnemosyne.postgres_engine import PostgresEngine
@@ -19,6 +20,26 @@ from mnemosyne.text import hashing_embedding
 
 def _live_dsn() -> str | None:
     return os.environ.get("MNEMOSYNE_POSTGRES_DSN")
+
+
+class _RotatingSummarizer:
+    strategy = "test_rotating_summary_refresh"
+
+    def __init__(self, summaries: list[str]):
+        self.summaries = list(summaries)
+        self.calls = 0
+
+    def summarize(self, tenant_id: str, evidence: list[Evidence]) -> dict[str, Any] | None:
+        if not evidence:
+            return None
+        summary = self.summaries[self.calls]
+        self.calls += 1
+        return {
+            "strategy": self.strategy,
+            "evidence_count": len(evidence),
+            "summary": summary,
+            "source_cids": [item.cid for item in evidence if item.cid],
+        }
 
 
 @pytest.fixture(params=["local", "postgres"])
@@ -485,6 +506,112 @@ def test_shared_engine_contract_abstains_when_only_gist_support_is_retrieved(
     assert result.uncertainty_note == "Only gist-tier memory support was retrieved; inspect source evidence before answering."
     assert result.explain["gist_support"]["applied"] is True
     assert result.explain["gist_support"]["gist_hit_ids"] == [cid]
+
+
+def test_shared_engine_contract_summary_refresh_retires_superseded_gist(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, user = engine_bundle
+    source_cid = engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id=user,
+            actor="user",
+            source_type="chat",
+            content="Shared summary refresh source discusses durable consolidated memory.",
+            trust_tier=0,
+            access_policy={"tenant": tenant},
+        )
+    )
+    worker = ConsolidationWorker(
+        engine,
+        gate_cases=[],
+        summarizer=_RotatingSummarizer(["obsolete amber synopsis", "current amber synopsis"]),
+    )
+
+    first = worker.run_queue_payload(
+        {
+            "tenant_id": tenant,
+            "branch": "main",
+            "source_evidence_cids": [source_cid],
+            "passes": ["summarizer"],
+        }
+    )
+    first_summary = next(item for item in first.pass_results if item["name"] == "summarizer")["details"]
+    first_cid = first_summary["summary_cid"]
+    second = worker.run_queue_payload(
+        {
+            "tenant_id": tenant,
+            "branch": "main",
+            "source_evidence_cids": [source_cid],
+            "passes": ["summarizer"],
+        }
+    )
+    second_summary = next(item for item in second.pass_results if item["name"] == "summarizer")["details"]
+    second_cid = second_summary["summary_cid"]
+    exported = engine.export_tenant(tenant)
+    first_evidence = next(item for item in exported["evidence"] if item["cid"] == first_cid)
+    second_evidence = next(item for item in exported["evidence"] if item["cid"] == second_cid)
+
+    assert first_cid != second_cid
+    assert second_summary["retired_summary_cids"] == [first_cid]
+    assert first_evidence["metadata"]["summary"]["status"] == "retired"
+    assert first_evidence["metadata"]["summary"]["superseded_by"] == second_cid
+    assert first_evidence["metadata"]["summary"]["retired_by"] == "consolidation.summarizer"
+    assert second_evidence["metadata"]["summary"]["status"] == "active"
+    assert second_evidence["metadata"]["summary"]["source_fingerprint"] == second_summary["source_fingerprint"]
+
+    stale_retrieval = engine.retrieve("obsolete amber synopsis", tenant)
+    active_retrieval = engine.retrieve("current amber synopsis", tenant)
+
+    assert first_cid not in {hit.id for hit in stale_retrieval.hits}
+    assert second_cid in {hit.id for hit in active_retrieval.hits}
+
+
+def test_shared_engine_contract_forget_source_invalidates_summary_gist(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, user = engine_bundle
+    source_cid = engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id=user,
+            actor="user",
+            source_type="chat",
+            content="Shared derived forget source should not survive inside a gist.",
+            trust_tier=0,
+            access_policy={"tenant": tenant},
+        )
+    )
+    worker = ConsolidationWorker(
+        engine,
+        gate_cases=[],
+        summarizer=_RotatingSummarizer(["derived forget amber synopsis"]),
+    )
+
+    run = worker.run_queue_payload(
+        {
+            "tenant_id": tenant,
+            "branch": "main",
+            "source_evidence_cids": [source_cid],
+            "passes": ["summarizer"],
+        }
+    )
+    summary = next(item for item in run.pass_results if item["name"] == "summarizer")["details"]
+    summary_cid = summary["summary_cid"]
+    relation_ids = set(summary["derived_relation_ids"])
+
+    result = engine.forget(tenant, source_cid)
+    exported = engine.export_tenant(tenant)
+    retrieval = engine.retrieve("derived forget amber synopsis", tenant)
+
+    assert result["erased"] is True
+    assert summary_cid in result["propagated"]["erased_derived_evidence"]
+    assert summary_cid not in {hit.id for hit in retrieval.hits}
+    assert all(
+        item["id"] not in relation_ids or item.get("valid_to") is not None
+        for item in exported["relations"]
+    )
 
 
 def test_shared_engine_contract_direct_search_primitives(engine_bundle: tuple[Any, str, str]) -> None:
