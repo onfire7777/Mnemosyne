@@ -10,6 +10,7 @@ from mnemosyne.gate import GateResult, RegressionCase
 from mnemosyne.ingestion import IngestRequest, IngestionPipeline
 from mnemosyne.jobs import (
     CALIBRATE_JOB,
+    EVAL_SUITE_JOB,
     LIFECYCLE_SWEEP_JOB,
     OBSERVABILITY_SNAPSHOT_JOB,
     PROJECTION_RECOMPUTE_JOB,
@@ -1322,18 +1323,21 @@ def test_runtime_job_handlers_drain_calibration_lifecycle_and_observability_jobs
             "now": "2026-01-01T00:00:00Z",
         },
     )
+    queue.enqueue(EVAL_SUITE_JOB, {"suite": "seed"})
     queue.enqueue(OBSERVABILITY_SNAPSHOT_JOB, {})
 
-    jobs = worker.drain(limit=3)
+    jobs = worker.drain(limit=4)
 
-    assert [job.status for job in jobs] == ["complete", "complete", "complete"]
+    assert [job.status for job in jobs] == ["complete", "complete", "complete", "complete"]
     assert jobs[0].result["details"]["abstain"] is True
     assert jobs[1].result["details"]["demoted"] == 1
-    assert jobs[2].result["details"]["metrics"]["counters"]["observability.snapshots"] == 1
+    assert jobs[2].result["details"]["passed"] is True
+    assert jobs[3].result["details"]["metrics"]["counters"]["observability.snapshots"] == 1
     assert engine.export_tenant(TENANT)["calibrations"][0]["memory_type"] == "fact"
     snapshot = metrics.snapshot()
     assert snapshot.counters["queue.job.calibrate.complete"] == 1
     assert snapshot.counters["lifecycle.demotions"] == 1
+    assert snapshot.counters["eval.suites"] == 1
 
 
 def test_ops_report_flags_open_contradiction_backlog() -> None:
