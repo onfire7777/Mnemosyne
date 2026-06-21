@@ -3829,6 +3829,83 @@ def test_cli_ops_report_exports_dashboard_snapshot(tmp_path: Path) -> None:
     assert package_snapshot["report"]["counts"]["evidence"] == 1
 
 
+def test_cli_ops_dashboard_check_validates_dashboard_package(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    package_dir = tmp_path / "dashboard-package"
+    run_cli(
+        store,
+        "ops-report",
+        "--tenant",
+        TENANT,
+        "--dashboard-package-dir",
+        str(package_dir),
+    )
+
+    report = run_cli(
+        store,
+        "ops-dashboard-check",
+        "--dashboard-package-dir",
+        str(package_dir),
+        "--expected-tenant",
+        TENANT,
+    )
+    acknowledged = run_cli(
+        store,
+        "ops-dashboard-check",
+        "--dashboard-package-dir",
+        str(package_dir),
+        "--expected-tenant",
+        TENANT,
+        "--expected-fingerprint",
+        report["fingerprint"],
+    )
+
+    serialized = json.dumps(report)
+    assert report["ok"] is True
+    assert acknowledged["ok"] is True
+    assert acknowledged["expected_fingerprint_present"] is True
+    assert len(report["fingerprint"]) == 64
+    assert {item["name"] for item in report["checks"]} == {
+        "manifest",
+        "snapshot",
+        "tripwires",
+        "dashboard_html",
+        "tenant",
+    }
+    assert report["redaction"]["raw_dashboard_html_omitted"] is True
+    assert report["redaction"]["raw_manifest_json_omitted"] is True
+    assert report["checks"][3]["marker_present"] is True
+    assert "Mnemosyne Ops Dashboard" not in serialized
+    assert "Snapshot JSON" not in serialized
+
+
+def test_cli_ops_dashboard_check_rejects_wrong_tenant(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    package_dir = tmp_path / "dashboard-package"
+    run_cli(
+        store,
+        "ops-report",
+        "--tenant",
+        TENANT,
+        "--dashboard-package-dir",
+        str(package_dir),
+    )
+
+    result = run_raw_cli(
+        store,
+        "ops-dashboard-check",
+        "--dashboard-package-dir",
+        str(package_dir),
+        "--expected-tenant",
+        "other-tenant",
+    )
+    payload_json = json.loads(result.stdout)
+
+    assert result.returncode == 1
+    assert payload_json["ok"] is False
+    assert any(item["code"] == "tenant_mismatch" for item in payload_json["findings"])
+
+
 def test_cli_deployment_soak_allows_ops_report_dashboard(tmp_path: Path) -> None:
     store = tmp_path / "mnemosyne.json"
     run_cli(
