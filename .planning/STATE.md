@@ -60,6 +60,8 @@ Latest checkpoint: Hosted HTTP JSON-RPC MCP `deep_search` and `explain` now have
 
 Latest checkpoint: Direct retrieval primitive budget enforcement now has shared Local/Postgres contract coverage. A new primitive test seeds multiple matching evidence/assertion/relation rows and verifies `lexical_search`, `vector_search`, and `graph_ppr` each honor `k=1` while preserving tenant, branch, and backend channel metadata. Local verification now collects 358 tests with 302 passing tests plus 56 skipped live-DB tests, and the clean compose DSN run passes all 358 tests with `MNEMOSYNE_POSTGRES_DSN=postgresql://mnemosyne:<redacted>@127.0.0.1:54329/mnemosyne?connect_timeout=5`.
 
+Latest checkpoint: CLI `deep-search` and `explain` now have direct runtime coverage for relation-only `summary-derived-gist` graph support. The regression seeds generated summary evidence plus a gist-derived relation into the CLI store, runs both commands, and verifies `abstained=true`, the source-inspection uncertainty note, relation metadata, and `explain.gist_support`. Local verification now collects 359 tests with 303 passing tests plus 56 skipped live-DB tests, and the clean compose DSN run passes all 359 tests with `MNEMOSYNE_POSTGRES_DSN=postgresql://mnemosyne:<redacted>@127.0.0.1:54329/mnemosyne?connect_timeout=5`.
+
 Progress: [███████░░░] local scaffold verified; production parity gaps remain
 
 ## Performance Metrics
