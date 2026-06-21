@@ -887,6 +887,42 @@ def test_consolidation_queue_worker_runs_ordered_passes(tmp_path) -> None:
     assert "candidate_extraction_not_configured" in job.result["skipped"]
 
 
+def test_consolidation_replayer_prioritizes_importance_novelty_surprise_reward() -> None:
+    engine = LocalMemoryEngine()
+
+    def append(label: str, scores: dict[str, float]) -> str:
+        return engine.append_evidence(
+            Evidence(
+                tenant_id=TENANT,
+                user_id=USER,
+                actor="user",
+                source_type="chat",
+                content=f"Replay priority evidence {label}.",
+                metadata={"consolidation": scores},
+                trust_tier=0,
+                access_policy={"tenant": TENANT},
+            )
+        )
+
+    low = append("low", {"importance": 0.9, "novelty": 0.1, "surprise": 0.1, "reward": 0.1})
+    high = append("high", {"importance": 0.6, "novelty": 0.6, "surprise": 0.6, "reward": 0.6})
+    middle = append("middle", {"importance": 0.9, "novelty": 0.9, "surprise": 0.1, "reward": 0.9})
+
+    result = ConsolidationWorker(engine, gate_cases=[]).run_queue_payload(
+        {
+            "tenant_id": TENANT,
+            "source_evidence_cids": [low, high, middle],
+            "passes": ["replayer"],
+        }
+    )
+    replayer = result.pass_results[0]
+
+    assert replayer["name"] == "replayer"
+    assert replayer["details"]["formula"] == "importance*novelty*surprise*reward"
+    assert replayer["details"]["selected_cids"] == [high, middle, low]
+    assert [item["score"] for item in replayer["details"]["scores"]] == [0.1296, 0.0729, 0.0009]
+
+
 def test_consolidation_worker_extracts_and_promotes_direct_user_fact_with_gate(tmp_path) -> None:
     engine = LocalMemoryEngine()
     queue = InProcessQueue()

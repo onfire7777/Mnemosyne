@@ -112,13 +112,30 @@ class ConsolidationWorker:
             raise ValueError("consolidation payload requires source_evidence_cids")
 
         evidence, missing = self._load_evidence(tenant_id, source_evidence_cids, branch)
+        replay_rows = self._prioritize_replay(evidence, payload)
+        evidence = [row["evidence"] for row in replay_rows]
         evidence_seen = len(evidence)
         passes_run = [str(name) for name in payload.get("passes") or DEFAULT_CONSOLIDATION_PASSES]
         pass_results: list[PassResult] = [
             PassResult(
                 "replayer",
                 "complete",
-                {"selected_cids": [item.cid for item in evidence if item.cid], "missing_cids": missing},
+                {
+                    "formula": "importance*novelty*surprise*reward",
+                    "selected_cids": [item.cid for item in evidence if item.cid],
+                    "missing_cids": missing,
+                    "scores": [
+                        {
+                            "cid": row["cid"],
+                            "score": row["score"],
+                            "importance": row["importance"],
+                            "novelty": row["novelty"],
+                            "surprise": row["surprise"],
+                            "reward": row["reward"],
+                        }
+                        for row in replay_rows
+                    ],
+                },
             )
         ]
         candidate_results: list[dict[str, Any]] = []
@@ -228,6 +245,48 @@ class ConsolidationWorker:
             else:
                 evidence.append(item)
         return evidence, missing
+
+    def _prioritize_replay(self, evidence: list[Evidence], payload: dict[str, Any]) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        for index, item in enumerate(evidence):
+            factors = {
+                "importance": self._replay_factor(item, payload, "importance"),
+                "novelty": self._replay_factor(item, payload, "novelty"),
+                "surprise": self._replay_factor(item, payload, "surprise"),
+                "reward": self._replay_factor(item, payload, "reward"),
+            }
+            score = 1.0
+            for value in factors.values():
+                score *= value
+            rows.append(
+                {
+                    "evidence": item,
+                    "cid": item.cid,
+                    "score": round(score, 6),
+                    "index": index,
+                    **factors,
+                }
+            )
+        return sorted(rows, key=lambda row: (row["score"], -row["index"]), reverse=True)
+
+    @staticmethod
+    def _replay_factor(item: Evidence, payload: dict[str, Any], name: str) -> float:
+        cid_scores = {}
+        replay_scores = payload.get("replay_scores")
+        if isinstance(replay_scores, dict) and item.cid:
+            raw_scores = replay_scores.get(item.cid)
+            if isinstance(raw_scores, dict):
+                cid_scores = raw_scores
+        metadata = item.metadata if isinstance(item.metadata, dict) else {}
+        consolidation = metadata.get("consolidation")
+        if not isinstance(consolidation, dict):
+            consolidation = {}
+        raw = cid_scores.get(name, consolidation.get(name, metadata.get(name, 1.0)))
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            value = 1.0
+        return round(value, 6)
 
     def _distill_lessons(self, tenant_id: str, candidates: list[dict[str, Any]]) -> dict[str, Any]:
         if self.learning is None or not candidates:
