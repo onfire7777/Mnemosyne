@@ -349,7 +349,7 @@ def fake_parametric_command(tmp_path: Path) -> tuple[str, Path]:
                 "action = sys.argv[2]",
                 "request = json.load(sys.stdin)",
                 "data = json.loads(state.read_text()) if state.exists() else {'calls': []}",
-                "data.setdefault('calls', []).append({'action': action, 'tenant_id': request.get('tenant_id'), 'source_ids': request.get('source_ids')})",
+                "data.setdefault('calls', []).append({'action': action, 'tenant_id': request.get('tenant_id'), 'source_ids': request.get('source_ids'), 'protected_suite': request.get('protected_suite'), 'protected_cases': [case.get('id') for case in request.get('protected_cases', [])]})",
                 "state.write_text(json.dumps(data, sort_keys=True), encoding='utf-8')",
                 "if action == 'propose':",
                 "    print(json.dumps({'adapter_kind': 'test-time-command-adapter', 'artifact_ref': 'provider://' + request['tenant_id'] + '/adapter', 'metrics': {'source_count': len(request['source_ids']), 'rail_count': len(request['immutable_rails'])}, 'metadata': {'lesson_count': len(request['lessons']), 'procedure_count': len(request['procedures'])}}))",
@@ -1844,8 +1844,13 @@ def test_mcp_server_parametric_tier_can_use_command_provider(tmp_path: Path) -> 
     assert proposal_record["payload"]["provider"]["artifact_ref"] == f"provider://{TENANT}/adapter"
     assert rolled_back["rollback_ref"] == f"provider-rollback-{artifact['id']}"
     assert rolled_back["metrics"]["provider_rolled_back"] == 1.0
+    assert rolled_back["protected_suite"]["source"] == "synthetic"
+    assert rolled_back["protected_suite"]["protected_case_ids"] == ["parametric-protected-0"]
     assert rollback_record["payload"]["provider"]["rollback_ref"] == f"provider-rollback-{artifact['id']}"
+    assert rollback_record["payload"]["protected_suite"]["protected_case_ids"] == ["parametric-protected-0"]
     assert [call["action"] for call in calls] == ["propose", "rollback"]
+    assert calls[-1]["protected_cases"] == ["parametric-protected-0"]
+    assert calls[-1]["protected_suite"]["protected_case_count"] == 1
 
 
 def test_mcp_parametric_provider_requires_operator_authority(tmp_path: Path) -> None:

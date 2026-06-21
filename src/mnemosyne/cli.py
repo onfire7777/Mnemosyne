@@ -1252,7 +1252,15 @@ def cmd_parametric_evaluate(args: argparse.Namespace) -> None:
 
 def cmd_parametric_rollback(args: argparse.Namespace) -> None:
     tools = load_tools(args)
-    emit(tools.parametric_rollback(args.artifact_uri, args.reason, role=args.role, source_trust_tier=args.source_trust_tier))
+    emit(
+        tools.parametric_rollback(
+            args.artifact_uri,
+            args.reason,
+            role=args.role,
+            source_trust_tier=args.source_trust_tier,
+            protected_case_count=args.protected_case_count,
+        )
+    )
 
 
 def cmd_branch(args: argparse.Namespace) -> None:
@@ -3755,6 +3763,7 @@ def build_parser() -> argparse.ArgumentParser:
     parametric_rollback.add_argument("--reason", required=True)
     parametric_rollback.add_argument("--role", choices=["reader", "agent", "consolidator", "operator"])
     parametric_rollback.add_argument("--source-trust-tier", type=int)
+    parametric_rollback.add_argument("--protected-case-count", type=int, default=1)
     parametric_rollback.set_defaults(func=cmd_parametric_rollback)
 
     tools = sub.add_parser("tools")
