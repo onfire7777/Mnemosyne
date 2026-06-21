@@ -7,6 +7,8 @@ import json
 import os
 import socket
 import ssl
+import subprocess
+import sys
 import tempfile
 import time
 from collections.abc import Mapping
@@ -54,6 +56,15 @@ from mnemosyne.security import (
     parse_session_revoke_list,
 )
 from mnemosyne.storage import CommandKeyManager, EncryptedLocalObjectStore, JsonKeyManager, LocalObjectStore
+
+DEPLOYMENT_SOAK_COMMANDS = {
+    "provider-check",
+    "idp-jwks-live-check",
+    "tls-cert-check",
+    "mcp-http-soak",
+    "mcp-sse-soak",
+    "worker-run",
+}
 
 
 def default_store() -> Path:
@@ -1965,6 +1976,163 @@ def cmd_mcp_http_soak(args: argparse.Namespace) -> None:
         raise SystemExit(1)
 
 
+def _load_deployment_soak_manifest(path: str) -> dict[str, Any]:
+    try:
+        manifest = json.loads(Path(path).expanduser().read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"deployment-soak manifest denied: {exc}") from exc
+    if not isinstance(manifest, dict):
+        raise SystemExit("deployment-soak manifest must be a JSON object")
+    checks = manifest.get("checks")
+    if not isinstance(checks, list) or not checks:
+        raise SystemExit("deployment-soak manifest requires a non-empty checks array")
+    return manifest
+
+
+def _deployment_check_failure(index: int, raw: Any, error: str) -> dict[str, Any]:
+    name = raw.get("name") if isinstance(raw, dict) else None
+    command = raw.get("command") if isinstance(raw, dict) else None
+    return {
+        "index": index,
+        "name": name or f"check-{index}",
+        "command": command,
+        "required": True,
+        "ok": False,
+        "error": error,
+    }
+
+
+def _deployment_check_spec(index: int, raw: Any, *, default_timeout: float) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        raise ValueError("check must be an object")
+    name = str(raw.get("name") or f"check-{index}")
+    command = raw.get("command")
+    if not isinstance(command, str) or not command:
+        raise ValueError("check command must be a non-empty string")
+    if command not in DEPLOYMENT_SOAK_COMMANDS:
+        raise ValueError(f"check command {command!r} is not allowed")
+    check_args = raw.get("args", [])
+    if not isinstance(check_args, list) or not all(isinstance(item, str) for item in check_args):
+        raise ValueError("check args must be an array of strings")
+    timeout = raw.get("timeout", default_timeout)
+    try:
+        timeout_seconds = float(timeout)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("check timeout must be numeric") from exc
+    if timeout_seconds <= 0:
+        raise ValueError("check timeout must be greater than 0")
+    return {
+        "index": index,
+        "name": name,
+        "command": command,
+        "args": list(check_args),
+        "required": bool(raw.get("required", True)),
+        "timeout_seconds": timeout_seconds,
+    }
+
+
+def _child_json(stdout: str) -> dict[str, Any] | None:
+    stripped = stdout.strip()
+    if not stripped:
+        return None
+    try:
+        decoded = json.loads(stripped)
+    except json.JSONDecodeError:
+        return None
+    return decoded if isinstance(decoded, dict) else None
+
+
+def cmd_deployment_soak(args: argparse.Namespace) -> None:
+    if args.check_timeout <= 0:
+        raise SystemExit("--check-timeout must be greater than 0.")
+    manifest = _load_deployment_soak_manifest(args.soak_manifest)
+    checks: list[dict[str, Any]] = []
+    ok = True
+    for index, raw_check in enumerate(manifest["checks"], start=1):
+        try:
+            spec = _deployment_check_spec(index, raw_check, default_timeout=args.check_timeout)
+        except ValueError as exc:
+            item = _deployment_check_failure(index, raw_check, str(exc))
+            checks.append(item)
+            ok = False
+            continue
+
+        started = time.monotonic()
+        command_line = [
+            sys.executable,
+            "-m",
+            "mnemosyne.cli",
+            "--store",
+            str(args.store),
+            spec["command"],
+            *spec["args"],
+        ]
+        try:
+            completed = subprocess.run(
+                command_line,
+                check=False,
+                text=True,
+                capture_output=True,
+                timeout=spec["timeout_seconds"],
+            )
+            child_report = _child_json(completed.stdout)
+            child_ok = bool(completed.returncode == 0 and isinstance(child_report, dict) and child_report.get("ok") is True)
+            item = {
+                "index": index,
+                "name": spec["name"],
+                "command": spec["command"],
+                "required": spec["required"],
+                "ok": child_ok,
+                "returncode": completed.returncode,
+                "duration_ms": round((time.monotonic() - started) * 1000, 3),
+                "timeout_seconds": spec["timeout_seconds"],
+                "stdout_json": child_report,
+                "stderr_present": bool(completed.stderr.strip()),
+            }
+            if not isinstance(child_report, dict):
+                item["error"] = "check did not emit a JSON object"
+            elif child_report.get("error"):
+                item["error"] = child_report["error"]
+            elif not child_ok:
+                item["error"] = "check failed"
+        except subprocess.TimeoutExpired:
+            item = {
+                "index": index,
+                "name": spec["name"],
+                "command": spec["command"],
+                "required": spec["required"],
+                "ok": False,
+                "returncode": None,
+                "duration_ms": round((time.monotonic() - started) * 1000, 3),
+                "timeout_seconds": spec["timeout_seconds"],
+                "stdout_json": None,
+                "stderr_present": False,
+                "error": "check timed out",
+            }
+        checks.append(item)
+        if spec["required"] and not item["ok"]:
+            ok = False
+
+    emit(
+        {
+            "ok": ok,
+            "manifest": {
+                "path": str(Path(args.soak_manifest).expanduser()),
+                "check_count": len(manifest["checks"]),
+            },
+            "allowed_commands": sorted(DEPLOYMENT_SOAK_COMMANDS),
+            "checks": checks,
+            "summary": {
+                "checks": len(checks),
+                "required_failures": sum(1 for item in checks if item.get("required") and not item.get("ok")),
+                "optional_failures": sum(1 for item in checks if not item.get("required") and not item.get("ok")),
+            },
+        }
+    )
+    if not ok:
+        raise SystemExit(1)
+
+
 def _tls_target(args: argparse.Namespace) -> tuple[str, int, str]:
     if args.url:
         parsed = urlsplit(args.url)
@@ -3274,6 +3442,21 @@ def build_parser() -> argparse.ArgumentParser:
     provider_check = sub.add_parser("provider-check")
     provider_check.add_argument("--provider-manifest", help="JSON deployment manifest for provider health gates")
     provider_check.set_defaults(func=cmd_provider_check)
+
+    deployment_soak = sub.add_parser("deployment-soak")
+    deployment_soak.add_argument(
+        "--soak-manifest",
+        default=os.environ.get("MNEMOSYNE_DEPLOYMENT_SOAK_MANIFEST"),
+        required=not bool(os.environ.get("MNEMOSYNE_DEPLOYMENT_SOAK_MANIFEST")),
+        help="JSON manifest of allowed deployment preflight commands to run",
+    )
+    deployment_soak.add_argument(
+        "--check-timeout",
+        type=float,
+        default=float(os.environ.get("MNEMOSYNE_DEPLOYMENT_SOAK_CHECK_TIMEOUT", "30")),
+        help="Default per-check timeout in seconds",
+    )
+    deployment_soak.set_defaults(func=cmd_deployment_soak)
 
     tls_cert_check = sub.add_parser("tls-cert-check")
     tls_cert_check.add_argument("--url", default=os.environ.get("MNEMOSYNE_TLS_CHECK_URL"))
