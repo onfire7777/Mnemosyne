@@ -3042,6 +3042,14 @@ def test_cli_consolidation_uses_command_extractor_and_summarizer(tmp_path: Path)
     assert extractor_result["details"]["metadata"] == {"source": "test-extractor"}
     assert summarizer_result["details"]["strategy"] == "command_evidence_summarizer"
     assert summarizer_result["details"]["summary"] == "Model-backed extraction identified the runtime target."
+    assert summarizer_result["details"]["materialized"] is True
+    summary_evidence = next(item for item in exported["evidence"] if item["source_type"] == "consolidation-summary")
+    summary_relation = next(item for item in exported["relations"] if item["predicate"] == "summary-derived-gist")
+    assert summary_evidence["cid"] == summarizer_result["details"]["summary_cid"]
+    assert summary_evidence["metadata"]["summary"]["strategy"] == "command_evidence_summarizer"
+    assert summary_evidence["metadata"]["summary"]["source_evidence_cids"] == [ingested["cid"]]
+    assert summary_relation["source"] == ingested["cid"]
+    assert summary_relation["target"] == summary_evidence["cid"]
     assert exported["assertions"][0]["subject"] == "Model backed runtime target"
     assert exported["assertions"][0]["object"] == "local CLI"
 

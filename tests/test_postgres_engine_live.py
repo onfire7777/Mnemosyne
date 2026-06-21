@@ -1354,6 +1354,14 @@ def test_postgres_gated_consolidation_uses_command_providers_live(tmp_path) -> N
     ]
     assert summarizer_result["details"]["strategy"] == "command_evidence_summarizer"
     assert summarizer_result["details"]["summary"] == "Postgres command provider summary"
+    assert summarizer_result["details"]["materialized"] is True
+    summary_evidence = next(item for item in exported["evidence"] if item["source_type"] == "consolidation-summary")
+    summary_relation = next(item for item in exported["relations"] if item["predicate"] == "summary-derived-gist")
+    assert summary_evidence["cid"] == summarizer_result["details"]["summary_cid"]
+    assert summary_evidence["metadata"]["summary"]["strategy"] == "command_evidence_summarizer"
+    assert summary_evidence["metadata"]["summary"]["source_evidence_cids"] == [result.cid]
+    assert summary_relation["source"] == result.cid
+    assert summary_relation["target"] == summary_evidence["cid"]
     assert exported["assertions"][0]["subject"] == "Postgres command target"
     assert exported["assertions"][0]["object"] == "local CLI"
     assert exported["entities"][0]["canonical"] == "live-resolved-postgres-command-target"
