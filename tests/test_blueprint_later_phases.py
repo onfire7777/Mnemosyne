@@ -12,7 +12,7 @@ from mnemosyne.lifecycle import FidelityTier, LifecycleState, demotion_decision,
 from mnemosyne.mcp_tools import MemoryTools
 from mnemosyne.models import Assertion, Evidence, Relation
 from mnemosyne.security import SecurityPolicy, sanitize_retrieved_text
-from mnemosyne.self_optimization import PolicyVariant, ShadowPolicyOptimizer, within_invariant_rails
+from mnemosyne.self_optimization import PolicyVariant, SelfModelRecord, SelfModelStore, ShadowPolicyOptimizer, within_invariant_rails
 
 
 TENANT = "tenant-b"
@@ -398,6 +398,35 @@ def test_shadow_policy_optimizer_accepts_only_variants_inside_rails() -> None:
     assert within_invariant_rails(engine.policy, invalid) is False
     result = optimizer.evaluate_variant(TENANT, valid)
     assert result.promoted is True
+
+
+def test_shadow_policy_optimizer_uses_contextual_bandit_outcomes() -> None:
+    engine = LocalMemoryEngine()
+    self_model = SelfModelStore()
+    now = datetime(2026, 6, 21, tzinfo=UTC)
+    self_model.add(
+        SelfModelRecord(
+            tenant_id=TENANT,
+            metric="retrieval_quality",
+            policy_version="baseline",
+            value=0.52,
+            window_start=now - timedelta(days=1),
+            window_end=now,
+        )
+    )
+    optimizer = ShadowPolicyOptimizer(engine, [], self_model=self_model)
+    recall_id = "variant-retrieval_quality-recall"
+    stable_id = "variant-retrieval_quality-stable"
+
+    first = optimizer.propose_variant(TENANT)
+    optimizer.record_policy_outcome(TENANT, recall_id, 0.2, metrics={"helpful_retrieval_rate": 0.2})
+    optimizer.record_policy_outcome(TENANT, stable_id, 0.9, metrics={"helpful_retrieval_rate": 0.9})
+    second = optimizer.propose_variant(TENANT)
+
+    assert first.id == recall_id
+    assert second.id == stable_id
+    assert len(self_model.outcomes(TENANT, {"metric": "retrieval_quality"})) == 2
+    assert within_invariant_rails(engine.policy, second) is True
 
 
 def test_graph_adapter_benchmark_reports_latency_and_hits() -> None:
