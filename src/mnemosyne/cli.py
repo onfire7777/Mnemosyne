@@ -1491,6 +1491,231 @@ def _json_rpc_probe(
     }
 
 
+def _display_sse_data(value: str, *, max_chars: int = 200) -> str:
+    parsed = urlsplit(value)
+    if parsed.scheme or parsed.netloc or parsed.path.startswith("/"):
+        value = urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", ""))
+    return value[:max_chars]
+
+
+def _format_sse_event(event: dict[str, Any]) -> dict[str, Any]:
+    data = str(event.get("data") or "")
+    event_name = event.get("event") or "message"
+    formatted = {
+        "event": event_name,
+        "data_present": bool(data),
+        "data_bytes": len(data.encode("utf-8")),
+    }
+    if data and event_name == "endpoint":
+        formatted["data_preview"] = _display_sse_data(data)
+    if event.get("id"):
+        formatted["id_present"] = True
+    if event.get("retry"):
+        formatted["retry"] = event["retry"]
+    return formatted
+
+
+def _flush_sse_event(
+    events: list[dict[str, Any]],
+    *,
+    event_name: str | None,
+    data_lines: list[str],
+    event_id: str | None,
+    retry: str | None,
+) -> None:
+    if event_name is None and not data_lines and event_id is None and retry is None:
+        return
+    events.append(
+        {
+            "event": event_name or "message",
+            "data": "\n".join(data_lines),
+            "id": event_id,
+            "retry": retry,
+        }
+    )
+
+
+def _sse_probe(
+    *,
+    url: str,
+    headers: Mapping[str, str],
+    timeout_seconds: float,
+    max_bytes: int,
+    max_events: int,
+    expected_event: str | None,
+) -> dict[str, Any]:
+    request_headers = {"Accept": "text/event-stream", "Cache-Control": "no-cache", **dict(headers)}
+    request = urlrequest.Request(url, headers=request_headers, method="GET")
+    started = time.monotonic()
+    try:
+        with urlrequest.urlopen(request, timeout=timeout_seconds) as response:
+            status = int(response.status)
+            content_type = str(response.headers.get("Content-Type") or "")
+            events: list[dict[str, Any]] = []
+            event_name: str | None = None
+            event_id: str | None = None
+            retry: str | None = None
+            data_lines: list[str] = []
+            bytes_read = 0
+            while bytes_read <= max_bytes and len(events) < max_events:
+                raw_line = response.readline(max_bytes - bytes_read + 1)
+                if not raw_line:
+                    break
+                bytes_read += len(raw_line)
+                if bytes_read > max_bytes:
+                    break
+                line = raw_line.decode("utf-8", "replace").rstrip("\r\n")
+                if line == "":
+                    _flush_sse_event(
+                        events,
+                        event_name=event_name,
+                        data_lines=data_lines,
+                        event_id=event_id,
+                        retry=retry,
+                    )
+                    matched_expected = expected_event and any(event.get("event") == expected_event for event in events)
+                    event_name = None
+                    event_id = None
+                    retry = None
+                    data_lines = []
+                    if matched_expected and len(events) >= max_events:
+                        break
+                    continue
+                if line.startswith(":"):
+                    continue
+                field, separator, value = line.partition(":")
+                if separator and value.startswith(" "):
+                    value = value[1:]
+                if field == "event":
+                    event_name = value
+                elif field == "data":
+                    data_lines.append(value)
+                elif field == "id":
+                    event_id = value
+                elif field == "retry":
+                    retry = value
+            _flush_sse_event(
+                events,
+                event_name=event_name,
+                data_lines=data_lines,
+                event_id=event_id,
+                retry=retry,
+            )
+            contains_expected_event = (
+                True if expected_event is None else any(event.get("event") == expected_event for event in events)
+            )
+            endpoint_event = next((event for event in events if event.get("event") == "endpoint"), None)
+            content_type_ok = "text/event-stream" in content_type.lower()
+            return {
+                "ok": 200 <= status < 300 and content_type_ok and bool(events) and contains_expected_event,
+                "status": status,
+                "latency_ms": round((time.monotonic() - started) * 1000, 3),
+                "content_type": content_type,
+                "content_type_ok": content_type_ok,
+                "bytes_read": bytes_read,
+                "events": [_format_sse_event(event) for event in events],
+                "event_count": len(events),
+                "contains_expected_event": contains_expected_event,
+                "endpoint_data_present": bool(endpoint_event and endpoint_event.get("data")),
+                "truncated": bytes_read > max_bytes,
+            }
+    except urlerror.HTTPError as exc:
+        return {
+            "ok": False,
+            "status": int(exc.code),
+            "latency_ms": round((time.monotonic() - started) * 1000, 3),
+            "error": f"HTTP {exc.code}",
+        }
+    except (TimeoutError, urlerror.URLError, ValueError) as exc:
+        return {
+            "ok": False,
+            "status": None,
+            "latency_ms": round((time.monotonic() - started) * 1000, 3),
+            "error": str(exc),
+        }
+
+
+def cmd_mcp_sse_soak(args: argparse.Namespace) -> None:
+    sse_url = args.mcp_sse_url or _join_endpoint(args.mcp_sse_base_url, "/sse")
+    if not sse_url:
+        raise SystemExit("mcp-sse-soak requires --base-url or --sse-url.")
+    if args.iterations < 1:
+        raise SystemExit("--iterations must be at least 1.")
+    if args.timeout <= 0:
+        raise SystemExit("--timeout must be greater than 0.")
+    if args.max_bytes < 1:
+        raise SystemExit("--max-bytes must be positive.")
+    if args.min_events < 1:
+        raise SystemExit("--min-events must be at least 1.")
+    expected_event = args.expected_event or None
+
+    headers: dict[str, str] = {}
+    if args.auth_token:
+        headers["Authorization"] = f"Bearer {args.auth_token}"
+    if args.mcp_session_token:
+        headers["X-Mnemosyne-Session-Token"] = args.mcp_session_token
+
+    ok = True
+    failure_count = 0
+    probes: list[dict[str, Any]] = []
+    latencies: list[float] = []
+    for index in range(1, args.iterations + 1):
+        probe = _sse_probe(
+            url=sse_url,
+            headers=headers,
+            timeout_seconds=args.timeout,
+            max_bytes=args.max_bytes,
+            max_events=max(args.min_events, 1),
+            expected_event=expected_event,
+        )
+        probe_ok = bool(probe.get("ok"))
+        if probe.get("event_count", 0) < args.min_events:
+            probe_ok = False
+            probe["min_events_mismatch"] = {
+                "expected": args.min_events,
+                "actual": probe.get("event_count", 0),
+            }
+        if args.require_endpoint_data and not probe.get("endpoint_data_present"):
+            probe_ok = False
+            probe["endpoint_data_mismatch"] = {"expected": True, "actual": probe.get("endpoint_data_present")}
+        if not probe_ok:
+            ok = False
+            failure_count += 1
+        latencies.append(float(probe.get("latency_ms") or 0))
+        probes.append({"iteration": index, "ok": probe_ok, **probe})
+
+    sorted_latencies = sorted(latencies)
+    p95_index = min(len(sorted_latencies) - 1, int(max(0, round(len(sorted_latencies) * 0.95) - 1)))
+    report = {
+        "ok": ok,
+        "target": {
+            "sse_url": _display_url(sse_url),
+            "auth_token_configured": bool(args.auth_token),
+            "session_token_configured": bool(args.mcp_session_token),
+        },
+        "config": {
+            "iterations": args.iterations,
+            "timeout_seconds": args.timeout,
+            "min_events": args.min_events,
+            "max_bytes": args.max_bytes,
+            "expected_event": expected_event,
+            "require_endpoint_data": bool(args.require_endpoint_data),
+        },
+        "iterations": probes,
+        "summary": {
+            "iterations": args.iterations,
+            "requests": args.iterations,
+            "failures": failure_count,
+            "avg_latency_ms": round(sum(latencies) / len(latencies), 3),
+            "p95_latency_ms": sorted_latencies[p95_index],
+            "max_latency_ms": max(latencies),
+        },
+    }
+    emit(report)
+    if not ok:
+        raise SystemExit(1)
+
+
 def cmd_mcp_http_soak(args: argparse.Namespace) -> None:
     rpc_url = args.mcp_http_rpc_url or _join_endpoint(args.mcp_http_base_url, "/mcp")
     health_url = args.mcp_http_health_url or _join_endpoint(args.mcp_http_base_url, "/healthz")
@@ -2920,6 +3145,73 @@ def build_parser() -> argparse.ArgumentParser:
         default=os.environ.get("MNEMOSYNE_TLS_CHECK_MIN_TLS_VERSION", "TLSv1.2"),
     )
     tls_cert_check.set_defaults(func=cmd_tls_cert_check)
+
+    mcp_sse_soak = sub.add_parser("mcp-sse-soak")
+    mcp_sse_soak.add_argument(
+        "--base-url",
+        dest="mcp_sse_base_url",
+        default=os.environ.get("MNEMOSYNE_MCP_SSE_BASE_URL"),
+        help="Legacy MCP SSE base URL; derives /sse when --sse-url is omitted",
+    )
+    mcp_sse_soak.add_argument(
+        "--sse-url",
+        dest="mcp_sse_url",
+        default=os.environ.get("MNEMOSYNE_MCP_SSE_URL"),
+        help="Explicit legacy MCP SSE endpoint URL",
+    )
+    mcp_sse_soak.add_argument(
+        "--auth-token",
+        default=os.environ.get("MNEMOSYNE_MCP_SSE_AUTH_TOKEN") or os.environ.get("MNEMOSYNE_MCP_TOKEN"),
+        help="Bearer token for legacy SSE requests",
+    )
+    mcp_sse_soak.add_argument(
+        "--mcp-session-token",
+        default=os.environ.get("MNEMOSYNE_MCP_SSE_SESSION_TOKEN") or os.environ.get("MNEMOSYNE_MCP_SESSION_TOKEN"),
+        help="Signed Mnemosyne session token forwarded to the legacy SSE endpoint",
+    )
+    mcp_sse_soak.add_argument(
+        "--iterations",
+        type=int,
+        default=int(os.environ.get("MNEMOSYNE_MCP_SSE_SOAK_ITERATIONS", "3")),
+        help="Number of legacy SSE stream-open checks to run",
+    )
+    mcp_sse_soak.add_argument(
+        "--timeout",
+        type=float,
+        default=float(os.environ.get("MNEMOSYNE_MCP_SSE_SOAK_TIMEOUT", "10")),
+        help="Per-stream timeout in seconds",
+    )
+    mcp_sse_soak.add_argument(
+        "--min-events",
+        type=int,
+        default=int(os.environ.get("MNEMOSYNE_MCP_SSE_MIN_EVENTS", "1")),
+        help="Minimum SSE events each stream must emit",
+    )
+    mcp_sse_soak.add_argument(
+        "--max-bytes",
+        type=int,
+        default=int(os.environ.get("MNEMOSYNE_MCP_SSE_MAX_BYTES", "65536")),
+        help="Maximum bytes read from each SSE stream before failing closed",
+    )
+    mcp_sse_soak.add_argument(
+        "--expected-event",
+        default=os.environ.get("MNEMOSYNE_MCP_SSE_EXPECTED_EVENT", "endpoint"),
+        help="Required SSE event name; pass an empty string to skip this check",
+    )
+    mcp_sse_soak.add_argument(
+        "--require-endpoint-data",
+        action="store_true",
+        dest="require_endpoint_data",
+        default=env_flag("MNEMOSYNE_MCP_SSE_REQUIRE_ENDPOINT_DATA", default=True),
+        help="Fail unless an endpoint event carries non-empty data",
+    )
+    mcp_sse_soak.add_argument(
+        "--no-require-endpoint-data",
+        action="store_false",
+        dest="require_endpoint_data",
+        help="Allow streams without endpoint-event data",
+    )
+    mcp_sse_soak.set_defaults(func=cmd_mcp_sse_soak)
 
     mcp_http_soak = sub.add_parser("mcp-http-soak")
     mcp_http_soak.add_argument(

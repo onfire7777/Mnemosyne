@@ -1166,6 +1166,103 @@ def test_cli_mcp_http_soak_fails_closed_without_required_auth(tmp_path: Path) ->
     assert "soak-secret" not in result.stdout
 
 
+def test_cli_mcp_sse_soak_validates_legacy_sse_handshake(tmp_path: Path) -> None:
+    requests: list[dict[str, str | None]] = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802 - stdlib callback name.
+            requests.append(
+                {
+                    "path": self.path,
+                    "accept": self.headers.get("Accept"),
+                    "authorization": self.headers.get("Authorization"),
+                    "session": self.headers.get("X-Mnemosyne-Session-Token"),
+                }
+            )
+            if self.path != "/sse" or self.headers.get("Authorization") != "Bearer sse-secret":
+                self.send_response(401)
+                self.end_headers()
+                return
+            payload = b"event: endpoint\ndata: /messages?sessionId=private-session\n\n"
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.end_headers()
+            self.wfile.write(payload)
+            self.wfile.flush()
+
+        def log_message(self, *_args: object) -> None:
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        report = run_cli(
+            tmp_path / "mnemosyne.json",
+            "mcp-sse-soak",
+            "--base-url",
+            f"http://127.0.0.1:{server.server_port}",
+            "--auth-token",
+            "sse-secret",
+            "--mcp-session-token",
+            "signed-session",
+            "--iterations",
+            "2",
+        )
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        server.server_close()
+
+    serialized = json.dumps(report)
+    assert report["ok"] is True
+    assert report["summary"]["requests"] == 2
+    assert report["summary"]["failures"] == 0
+    assert report["target"]["auth_token_configured"] is True
+    assert report["target"]["session_token_configured"] is True
+    assert [request["path"] for request in requests] == ["/sse", "/sse"]
+    assert all(request["accept"] == "text/event-stream" for request in requests)
+    assert all(request["session"] == "signed-session" for request in requests)
+    assert all(item["content_type_ok"] for item in report["iterations"])
+    assert all(item["contains_expected_event"] for item in report["iterations"])
+    assert all(item["endpoint_data_present"] for item in report["iterations"])
+    assert report["iterations"][0]["events"][0]["data_preview"] == "/messages"
+    assert "sse-secret" not in serialized
+    assert "private-session" not in serialized
+
+
+def test_cli_mcp_sse_soak_fails_closed_on_non_sse_endpoint(tmp_path: Path) -> None:
+    server = build_http_server(
+        host="127.0.0.1",
+        port=0,
+        store_path=tmp_path / "mcp-store.json",
+        stateless=True,
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        result = run_raw_cli(
+            tmp_path / "mnemosyne.json",
+            "mcp-sse-soak",
+            "--base-url",
+            f"http://127.0.0.1:{server.server_port}",
+            "--iterations",
+            "1",
+        )
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        server.server_close()
+
+    report = json.loads(result.stdout)
+    assert result.returncode == 1
+    assert report["ok"] is False
+    assert report["summary"]["failures"] == 1
+    assert report["iterations"][0]["ok"] is False
+    assert report["iterations"][0]["status"] == 404
+
+
 def test_cli_tls_cert_check_validates_chain_hostname_and_expiry(tmp_path: Path) -> None:
     ca_path, cert_path, key_path = write_tls_fixture(tmp_path, server_days_valid=45)
     server = build_http_server(
