@@ -22,6 +22,8 @@ Latest checkpoint: Shared audit logs now record actor, source, trust tier, capab
 
 Latest checkpoint: Consolidation replayer is now a real prioritization pass instead of an input-order echo. The worker computes `importance*novelty*surprise*reward` from evidence metadata or payload replay-score overrides, feeds downstream consolidation passes in priority order, and reports per-CID factor scores in the pass result. Focused consolidation tests, `tests/test_runtime_parity_extensions.py`, the full no-DSN suite, and the full compose Postgres suite pass; local verification now collects 323 tests with 279 passing tests plus 44 skipped live-DB tests, and the compose DSN run passes all 323 tests.
 
+Latest checkpoint: Consolidation `user_model_updater` now refreshes the latent user model from prioritized evidence and extracted candidates, writing a deterministic summary plus embedding through the existing `UserModel` API. Runtime job handlers and CLI worker paths pass and persist the user model alongside learning state. Focused runtime/CLI consolidation tests, `tests/test_runtime_parity_extensions.py`, the full no-DSN suite, and the full compose Postgres suite pass; local verification now collects 324 tests with 280 passing tests plus 44 skipped live-DB tests, and the compose DSN run passes all 324 tests.
+
 Progress: [███████░░░] local scaffold verified; production parity gaps remain
 
 ## Performance Metrics

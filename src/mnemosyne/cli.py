@@ -895,6 +895,7 @@ def cmd_ingest(args: argparse.Namespace) -> None:
             object_store=load_object_store(args),
             media_extractor=load_media_extractor(args),
             learning=tools.learning,
+            user_model=tools.user_model,
             gate_cases=tools.runtime_state.load_gate_cases() if tools.runtime_state else [],
             entity_resolver=load_entity_resolver(args),
             candidate_extractor=load_candidate_extractor(args),
@@ -904,6 +905,7 @@ def cmd_ingest(args: argparse.Namespace) -> None:
         job = worker.run_once(CONSOLIDATE_EVIDENCE_JOB)
         if tools.runtime_state:
             tools.runtime_state.save_learning(tools.learning)
+            tools.runtime_state.save_user_model(tools.user_model)
         result["consolidation_worker"] = {
             "queue": ingestion_queue.snapshot(),
             "job": job.to_dict() if job else None,
@@ -1489,6 +1491,7 @@ def _runtime_worker_components(
         object_store=load_object_store(args),
         media_extractor=load_media_extractor(args),
         learning=tools.learning,
+        user_model=tools.user_model,
         gate_cases=runtime_state.load_gate_cases() if runtime_state else [],
         entity_resolver=load_entity_resolver(args),
         candidate_extractor=load_candidate_extractor(args),
@@ -1507,8 +1510,10 @@ def _persist_worker_state(
     if runtime_state and queue_uses_runtime_state(args):
         runtime_state.save_queue(queue)
         runtime_state.save_learning(tools.learning)
+        runtime_state.save_user_model(tools.user_model)
     elif runtime_state:
         runtime_state.save_learning(tools.learning)
+        runtime_state.save_user_model(tools.user_model)
 
 
 def cmd_consolidate_once(args: argparse.Namespace) -> None:

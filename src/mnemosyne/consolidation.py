@@ -14,6 +14,8 @@ from mnemosyne.gate import Candidate, GateResult, PromotionGate, RegressionCase
 from mnemosyne.learning import Lesson, Procedure
 from mnemosyne.models import Assertion, Evidence
 from mnemosyne.security import SecurityPolicy, TrustTier
+from mnemosyne.text import hashing_embedding
+from mnemosyne.user_model import LatentUserProfile, UserModel
 
 CONSOLIDATE_EVIDENCE_JOB = "consolidate_evidence"
 DEFAULT_CONSOLIDATION_PASSES = [
@@ -85,6 +87,7 @@ class ConsolidationWorker:
         entity_resolver: "EntityResolver | None" = None,
         candidate_extractor: "CandidateExtractor | None" = None,
         summarizer: "EvidenceSummarizer | None" = None,
+        user_model: UserModel | None = None,
     ):
         self.engine = engine
         self.security = security or SecurityPolicy()
@@ -93,6 +96,7 @@ class ConsolidationWorker:
         self.entity_resolver = entity_resolver or DeterministicEntityResolver()
         self.candidate_extractor = candidate_extractor or DeterministicCandidateExtractor()
         self.summarizer = summarizer or DeterministicEvidenceSummarizer()
+        self.user_model = user_model
 
     def run_queue_payload(self, payload: dict[str, Any]) -> ConsolidationRunResult:
         decision = self.security.authorize_write(
@@ -212,6 +216,14 @@ class ConsolidationWorker:
                     skipped.append("skill_inducer_no_candidates")
                     procedure_result["reason"] = "no_candidates_or_learning_store"
                 pass_results.append(PassResult(pass_name, status, procedure_result))
+                continue
+            if pass_name == "user_model_updater":
+                user_model_result = self._update_user_model(tenant_id, payload, evidence, candidates)
+                status = "complete" if user_model_result["updated"] else "skipped"
+                if status == "skipped":
+                    skipped.append("user_model_updater_unavailable")
+                    user_model_result["reason"] = "no_user_model_or_user"
+                pass_results.append(PassResult(pass_name, status, user_model_result))
                 continue
             if pass_name == "promotion_gate" and candidate_results:
                 promoted = sum(1 for item in candidate_results if item.get("promoted"))
@@ -366,6 +378,53 @@ class ConsolidationWorker:
             procedure_ids.append(procedure.id)
             created += 1
         return {"procedures": procedure_ids, "created": created, "reused": len(procedure_ids) - created}
+
+    def _update_user_model(
+        self,
+        tenant_id: str,
+        payload: dict[str, Any],
+        evidence: list[Evidence],
+        candidates: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        if self.user_model is None:
+            return {"updated": False}
+        user_id = str(payload.get("user_id") or "")
+        if not user_id and evidence:
+            user_id = evidence[0].user_id
+        if not user_id:
+            return {"updated": False}
+        selected_cids = [item.cid for item in evidence if item.cid]
+        candidate_statements = [
+            f"{item['candidate_subject']} {item['candidate_predicate']} {item['candidate_object']}"
+            for item in candidates
+        ]
+        evidence_preview = " ".join(item.content.strip() for item in evidence if item.content).strip()
+        if len(evidence_preview) > 240:
+            evidence_preview = evidence_preview[:237].rstrip() + "..."
+        summary_parts = [
+            f"Consolidated {len(evidence)} prioritized evidence item(s)",
+            f"source_cids={','.join(selected_cids)}" if selected_cids else "source_cids=none",
+        ]
+        if candidate_statements:
+            summary_parts.append("candidates=" + "; ".join(candidate_statements[:3]))
+        if evidence_preview:
+            summary_parts.append("evidence=" + evidence_preview)
+        summary = " | ".join(summary_parts)
+        self.user_model.set_latent_profile(
+            LatentUserProfile(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                embedding=hashing_embedding(summary),
+                summary=summary,
+            )
+        )
+        return {
+            "updated": True,
+            "user_id": user_id,
+            "source_cids": selected_cids,
+            "candidate_count": len(candidates),
+            "summary": summary,
+        }
 
     @staticmethod
     def _contains_no_write_data(evidence: list[Evidence], payload: dict[str, Any]) -> bool:
