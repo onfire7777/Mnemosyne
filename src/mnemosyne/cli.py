@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
 import os
 import socket
@@ -19,6 +20,8 @@ from typing import Any
 from urllib import error as urlerror, request as urlrequest
 from urllib.parse import urljoin, urlsplit, urlunsplit
 from uuid import UUID
+
+from cryptography import x509
 
 from mnemosyne.consolidation import CONSOLIDATE_EVIDENCE_JOB
 from mnemosyne.engine import LocalMemoryEngine, MemoryEngine
@@ -2254,6 +2257,134 @@ def cmd_tls_cert_check(args: argparse.Namespace) -> None:
         raise SystemExit(1)
 
 
+def _load_x509_certificate(path: str | Path) -> x509.Certificate:
+    try:
+        return x509.load_pem_x509_certificate(Path(path).expanduser().read_bytes())
+    except Exception as exc:  # noqa: BLE001 - deployment checks return structured failures.
+        raise ValueError(f"could not load certificate {path}: {exc}") from exc
+
+
+def _x509_time(certificate: x509.Certificate, attr: str) -> datetime:
+    utc_attr = f"{attr}_utc"
+    value = getattr(certificate, utc_attr, None)
+    if value is None:
+        value = getattr(certificate, attr)
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=UTC)
+    return value
+
+
+def _x509_sans(certificate: x509.Certificate) -> tuple[list[str], list[str]]:
+    try:
+        san = certificate.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
+    except x509.ExtensionNotFound:
+        return [], []
+    dns_names = [str(value) for value in san.get_values_for_type(x509.DNSName)]
+    ip_addresses = [str(value) for value in san.get_values_for_type(x509.IPAddress)]
+    return dns_names, ip_addresses
+
+
+def _x509_matches_hostname(certificate: x509.Certificate, hostname: str) -> bool:
+    dns_names, ip_addresses = _x509_sans(certificate)
+    try:
+        host_ip = ipaddress.ip_address(hostname)
+    except ValueError:
+        host_ip = None
+    if host_ip is not None:
+        return any(host_ip == ipaddress.ip_address(item) for item in ip_addresses)
+    normalized = hostname.rstrip(".").lower()
+    for pattern in dns_names:
+        candidate = pattern.rstrip(".").lower()
+        if candidate.startswith("*."):
+            suffix = candidate[1:]
+            if normalized.endswith(suffix) and normalized.count(".") == candidate.count("."):
+                return True
+        elif candidate == normalized:
+            return True
+    return False
+
+
+def _x509_report(certificate: x509.Certificate, *, now: datetime) -> dict[str, Any]:
+    not_before = _x509_time(certificate, "not_valid_before")
+    not_after = _x509_time(certificate, "not_valid_after")
+    dns_names, ip_addresses = _x509_sans(certificate)
+    return {
+        "subject": certificate.subject.rfc4514_string(),
+        "issuer": certificate.issuer.rfc4514_string(),
+        "serial_sha256": sha256(str(certificate.serial_number).encode("utf-8")).hexdigest()[:16],
+        "not_before": not_before.isoformat(),
+        "not_after": not_after.isoformat(),
+        "days_remaining": round((not_after - now).total_seconds() / 86400, 3),
+        "subject_alt_names": {
+            "dns": dns_names,
+            "ip": ip_addresses,
+        },
+    }
+
+
+def _hostname_checks(certificate: x509.Certificate, hostnames: list[str]) -> dict[str, bool]:
+    return {hostname: _x509_matches_hostname(certificate, hostname) for hostname in hostnames}
+
+
+def cmd_tls_rotation_plan_check(args: argparse.Namespace) -> None:
+    hostnames = [item.strip() for item in (args.hostname or []) for item in item.split(",") if item.strip()]
+    if not hostnames:
+        raise SystemExit("tls-rotation-plan-check requires --hostname or MNEMOSYNE_TLS_ROTATION_HOSTNAMES")
+    if args.min_current_days_valid < 0 or args.min_candidate_days_valid < 0 or args.min_overlap_days < 0:
+        raise SystemExit("TLS rotation day thresholds must be zero or greater.")
+
+    now = datetime.now(UTC)
+    try:
+        current = _load_x509_certificate(args.current_cert_file)
+        candidate = _load_x509_certificate(args.candidate_cert_file)
+    except ValueError as exc:
+        emit({"ok": False, "error": str(exc)})
+        raise SystemExit(1) from exc
+
+    current_not_before = _x509_time(current, "not_valid_before")
+    current_not_after = _x509_time(current, "not_valid_after")
+    candidate_not_before = _x509_time(candidate, "not_valid_before")
+    candidate_not_after = _x509_time(candidate, "not_valid_after")
+    overlap_start = max(now, current_not_before, candidate_not_before)
+    overlap_end = min(current_not_after, candidate_not_after)
+    overlap_days = max(0.0, (overlap_end - overlap_start).total_seconds() / 86400)
+    current_days = (current_not_after - now).total_seconds() / 86400
+    candidate_days = (candidate_not_after - now).total_seconds() / 86400
+    current_hostname_checks = _hostname_checks(current, hostnames)
+    candidate_hostname_checks = _hostname_checks(candidate, hostnames)
+    issuer_continuity = current.issuer == candidate.issuer
+    checks = {
+        "current_min_days_valid": current_days >= args.min_current_days_valid,
+        "candidate_min_days_valid": candidate_days >= args.min_candidate_days_valid,
+        "overlap_valid": overlap_days >= args.min_overlap_days,
+        "hostnames_valid": all(current_hostname_checks.values()) and all(candidate_hostname_checks.values()),
+        "issuer_continuity_valid": issuer_continuity or not args.require_issuer_continuity,
+    }
+    ok = all(checks.values())
+    report = {
+        "ok": ok,
+        "config": {
+            "hostnames": hostnames,
+            "min_current_days_valid": args.min_current_days_valid,
+            "min_candidate_days_valid": args.min_candidate_days_valid,
+            "min_overlap_days": args.min_overlap_days,
+            "require_issuer_continuity": bool(args.require_issuer_continuity),
+        },
+        "current": _x509_report(current, now=now),
+        "candidate": _x509_report(candidate, now=now),
+        "rotation": {
+            "overlap_days": round(overlap_days, 3),
+            "current_hostname_checks": current_hostname_checks,
+            "candidate_hostname_checks": candidate_hostname_checks,
+            "issuer_continuity": issuer_continuity,
+        },
+        "checks": checks,
+    }
+    emit(report)
+    if not ok:
+        raise SystemExit(1)
+
+
 def _read_provider_manifest(path: str | None) -> dict[str, Any]:
     if not path:
         return {}
@@ -3484,6 +3615,49 @@ def build_parser() -> argparse.ArgumentParser:
         default=os.environ.get("MNEMOSYNE_TLS_CHECK_MIN_TLS_VERSION", "TLSv1.2"),
     )
     tls_cert_check.set_defaults(func=cmd_tls_cert_check)
+
+    tls_rotation_plan_check = sub.add_parser("tls-rotation-plan-check")
+    tls_rotation_plan_check.add_argument(
+        "--current-cert-file",
+        default=os.environ.get("MNEMOSYNE_TLS_ROTATION_CURRENT_CERT_FILE"),
+        required=not bool(os.environ.get("MNEMOSYNE_TLS_ROTATION_CURRENT_CERT_FILE")),
+    )
+    tls_rotation_plan_check.add_argument(
+        "--candidate-cert-file",
+        default=os.environ.get("MNEMOSYNE_TLS_ROTATION_CANDIDATE_CERT_FILE"),
+        required=not bool(os.environ.get("MNEMOSYNE_TLS_ROTATION_CANDIDATE_CERT_FILE")),
+    )
+    tls_rotation_plan_check.add_argument(
+        "--hostname",
+        action="append",
+        default=(
+            os.environ.get("MNEMOSYNE_TLS_ROTATION_HOSTNAMES", "").split(",")
+            if os.environ.get("MNEMOSYNE_TLS_ROTATION_HOSTNAMES")
+            else []
+        ),
+        help="Hostname expected on both current and candidate certificates; repeat or comma-separate",
+    )
+    tls_rotation_plan_check.add_argument(
+        "--min-current-days-valid",
+        type=float,
+        default=float(os.environ.get("MNEMOSYNE_TLS_ROTATION_MIN_CURRENT_DAYS_VALID", "7")),
+    )
+    tls_rotation_plan_check.add_argument(
+        "--min-candidate-days-valid",
+        type=float,
+        default=float(os.environ.get("MNEMOSYNE_TLS_ROTATION_MIN_CANDIDATE_DAYS_VALID", "30")),
+    )
+    tls_rotation_plan_check.add_argument(
+        "--min-overlap-days",
+        type=float,
+        default=float(os.environ.get("MNEMOSYNE_TLS_ROTATION_MIN_OVERLAP_DAYS", "7")),
+    )
+    tls_rotation_plan_check.add_argument(
+        "--require-issuer-continuity",
+        action="store_true",
+        default=env_flag("MNEMOSYNE_TLS_ROTATION_REQUIRE_ISSUER_CONTINUITY", default=False),
+    )
+    tls_rotation_plan_check.set_defaults(func=cmd_tls_rotation_plan_check)
 
     mcp_sse_soak = sub.add_parser("mcp-sse-soak")
     mcp_sse_soak.add_argument(
