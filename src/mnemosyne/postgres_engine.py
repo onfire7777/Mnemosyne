@@ -1464,7 +1464,12 @@ class PostgresEngine:
                         propagated["trimmed_relations"].append(str(row["id"]))
                     else:
                         cur.execute(
-                            "UPDATE relations SET valid_to = now(), source_evidence_cids = %s WHERE id = %s",
+                            """
+                            UPDATE relations
+                            SET valid_to = GREATEST(clock_timestamp(), valid_from + interval '1 microsecond'),
+                                source_evidence_cids = %s
+                            WHERE id = %s
+                            """,
                             (_cid_list_to_bytes([]), row["id"]),
                         )
                         propagated["expired_relations"].append(str(row["id"]))

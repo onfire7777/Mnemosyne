@@ -74,6 +74,7 @@
 - Hosted HTTP JSON-RPC MCP `search` now has transport-level coverage for gist-only abstention across capture persistence, consolidation summary materialization, server restart, and `/mcp` `tools/call` search. CLI `tools` output now has exact contract-parity coverage against MCP `tools/list`.
 - Deep retrieval now classifies `summary-derived-gist` graph/PPR relation hits as gist-tier support after Local/Postgres graph hits preserve relation source, predicate, target, confidence, and source evidence metadata. Shared Local/Postgres coverage verifies deep-search abstention on generated-summary graph support, and MCP `deep_search`/`explain` preserve the same abstention payload.
 - Official MCP SDK StreamableHTTP local coverage now validates session initialize, tool listing, read-only policy calls, evidence capture, and search provenance through the official in-process client surface.
+- Hosted HTTP JSON-RPC MCP `deep_search` and `explain` now validate relation-only `summary-derived-gist` graph abstention over `/mcp`, and Postgres forget propagation now expires relations with a timestamp guaranteed to satisfy `valid_to > valid_from` even when SQL transaction time predates app-generated relation `valid_from`.
 
 ## Supersession Note
 

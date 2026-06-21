@@ -536,7 +536,7 @@ def test_shared_engine_contract_deep_search_abstains_on_summary_derived_graph_su
     )
     summary = next(item for item in summary_run.pass_results if item["name"] == "summarizer")["details"]
 
-    result = engine.deep_search(raw_cid, tenant)
+    result = engine.deep_search(raw_cid, tenant, filt={"min_trust_tier": 2})
     relation_hit = next(hit for hit in result.hits if hit.kind == "relation")
 
     assert result.hits

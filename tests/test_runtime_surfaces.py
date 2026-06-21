@@ -34,7 +34,7 @@ from mnemosyne.mcp_server import (
 from mnemosyne.consolidation import ConsolidationWorker
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.mcp_tools import TOOL_SPEC
-from mnemosyne.models import Hit
+from mnemosyne.models import Evidence, Hit, Relation
 from mnemosyne.postgres_engine import PostgresEngine, _bytes_to_cid, _cid_to_bytes, _stable_uuid, _uuid_or_none, _vector_literal
 from mnemosyne.retrieval import (
     CommandMediaEmbeddingProvider,
@@ -1011,41 +1011,50 @@ def test_mcp_search_surfaces_gist_only_abstention(tmp_path: Path) -> None:
 
 def test_mcp_deep_search_surfaces_gist_derived_graph_abstention(tmp_path: Path) -> None:
     server = MnemosyneMcpServer(store_path=tmp_path / "store.json")
-    captured = mcp_call(
-        server,
-        "capture",
-        {
-            "tenant_id": TENANT,
-            "user_id": USER,
-            "actor": "user",
-            "source_type": "mcp",
-            "content": "MCP deep search graph abstention should require original source inspection for generated summaries.",
-            "trust_tier": 0,
-        },
+    source_key = "mcp-deep-gist-source"
+    summary_cid = server.engine.append_evidence(
+        Evidence(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="system",
+            source_type="consolidation-summary",
+            source_identity="consolidation-summary:mcp-deep-gist",
+            content="MCP deep search generated summary support requires source inspection.",
+            metadata={
+                "summary": {
+                    "kind": "abstractive_gist",
+                    "source_evidence_cids": [source_key],
+                    "confabulation_risk": True,
+                }
+            },
+            trust_tier=2,
+            capability_tags=["consolidation-gist", "derived-summary"],
+            access_policy={"tenant": TENANT},
+        )
     )
-    summary_run = ConsolidationWorker(server.engine, gate_cases=[]).run_queue_payload(
-        {
-            "tenant_id": TENANT,
-            "branch": "main",
-            "source_evidence_cids": [captured["cid"]],
-            "passes": ["summarizer"],
-        }
+    server.engine.add_relation(
+        Relation(
+            tenant_id=TENANT,
+            source=source_key,
+            predicate="summary-derived-gist",
+            target=summary_cid,
+            source_evidence_cids=[source_key],
+            access_policy={"tenant": TENANT},
+        )
     )
-    summary = next(item for item in summary_run.pass_results if item["name"] == "summarizer")["details"]
 
-    deep_searched = mcp_call(server, "deep_search", {"tenant_id": TENANT, "query": captured["cid"]})
-    explained = mcp_call(server, "explain", {"tenant_id": TENANT, "query": captured["cid"]})
+    deep_searched = mcp_call(server, "deep_search", {"tenant_id": TENANT, "query": source_key})
+    explained = mcp_call(server, "explain", {"tenant_id": TENANT, "query": source_key})
 
     for result in (deep_searched, explained):
         relation_hit = next(hit for hit in result["hits"] if hit["kind"] == "relation")
         assert result["abstained"] is True
         assert result["uncertainty_note"] == "Only gist-tier memory support was retrieved; inspect source evidence before answering."
-        assert any(hit["id"] == summary["summary_cid"] for hit in result["hits"])
         assert relation_hit["metadata"]["predicate"] == "summary-derived-gist"
-        assert relation_hit["metadata"]["source"] == captured["cid"]
-        assert relation_hit["metadata"]["target"] == summary["summary_cid"]
+        assert relation_hit["metadata"]["source"] == source_key
+        assert relation_hit["metadata"]["target"] == summary_cid
         assert result["explain"]["gist_support"]["applied"] is True
-        assert set(result["explain"]["gist_support"]["gist_hit_ids"]) == {summary["summary_cid"], relation_hit["id"]}
+        assert result["explain"]["gist_support"]["gist_hit_ids"] == [relation_hit["id"]]
 
 
 def test_mcp_server_rejects_non_object_tool_arguments(tmp_path: Path) -> None:
@@ -1327,6 +1336,88 @@ def test_mcp_http_transport_surfaces_gist_only_abstention(tmp_path: Path) -> Non
     assert body["hits"][0]["metadata"]["summary"]["kind"] == "abstractive_gist"
     assert body["explain"]["gist_support"]["applied"] is True
     assert body["explain"]["gist_support"]["gist_hit_ids"] == [summary["summary_cid"]]
+
+
+def test_mcp_http_transport_surfaces_gist_derived_graph_abstention(tmp_path: Path) -> None:
+    store = tmp_path / "store.json"
+    source_key = "hosted-http-deep-gist-source"
+    engine = LocalMemoryEngine(store_path=store)
+    summary_cid = engine.append_evidence(
+        Evidence(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="system",
+            source_type="consolidation-summary",
+            source_identity="consolidation-summary:http-deep-gist",
+            content="Hosted MCP HTTP deep search generated summary support requires source inspection.",
+            metadata={
+                "summary": {
+                    "kind": "abstractive_gist",
+                    "source_evidence_cids": [source_key],
+                    "confabulation_risk": True,
+                }
+            },
+            trust_tier=2,
+            capability_tags=["consolidation-gist", "derived-summary"],
+            access_policy={"tenant": TENANT},
+        )
+    )
+    engine.add_relation(
+        Relation(
+            tenant_id=TENANT,
+            source=source_key,
+            predicate="summary-derived-gist",
+            target=summary_cid,
+            source_evidence_cids=[source_key],
+            access_policy={"tenant": TENANT},
+        )
+    )
+
+    server, thread, base = start_mcp_http_server(store_path=store)
+    try:
+        deep_status, deep_searched = http_json(
+            "POST",
+            f"{base}/mcp",
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {
+                    "name": "deep_search",
+                    "arguments": {"tenant_id": TENANT, "query": source_key},
+                },
+            },
+        )
+        explain_status, explained = http_json(
+            "POST",
+            f"{base}/mcp",
+            {
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "tools/call",
+                "params": {
+                    "name": "explain",
+                    "arguments": {"tenant_id": TENANT, "query": source_key},
+                },
+            },
+        )
+    finally:
+        stop_mcp_http_server(server, thread)
+
+    assert deep_status == 200
+    assert explain_status == 200
+    assert deep_searched is not None
+    assert explained is not None
+    for response in (deep_searched, explained):
+        body = response["result"]["structuredContent"]  # type: ignore[index]
+        relation_hit = next(hit for hit in body["hits"] if hit["kind"] == "relation")
+        assert body["abstained"] is True
+        assert body["uncertainty_note"] == "Only gist-tier memory support was retrieved; inspect source evidence before answering."
+        assert relation_hit["metadata"]["predicate"] == "summary-derived-gist"
+        assert relation_hit["metadata"]["source"] == source_key
+        assert relation_hit["metadata"]["target"] == summary_cid
+        assert body["explain"]["gist_support"]["applied"] is True
+        assert body["explain"]["gist_support"]["gist_hit_ids"] == [relation_hit["id"]]
 
 
 def test_mcp_http_transport_serves_tls_health(tmp_path: Path) -> None:
