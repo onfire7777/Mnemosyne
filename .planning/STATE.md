@@ -38,6 +38,8 @@ Latest checkpoint: Consolidation summary refresh now versions one-level gist pro
 
 Latest checkpoint: Projection recompute now schedules bounded one-level summary refreshes through the existing runtime queue. The affected-evidence walk follows summary source metadata and `summary-derived-gist` relations, reports affected summary evidence/relations, and queues consolidation only for surviving non-summary source evidence so old summaries do not recursively fan out refresh jobs. Focused runtime and CLI projection-recompute tests pass; local verification now collects 340 tests with 290 passing tests plus 50 skipped live-DB tests, and the compose DSN run passes all 340 tests.
 
+Latest checkpoint: Retrieval abstention now treats sole statistical-trace or explicit confabulation-risk support as insufficient, not only `abstractive_gist` or `consolidation-summary` evidence. Materialized gist summaries now carry `confabulation_risk=true`, and shared Local/Postgres contracts cover both statistical traces and non-gist summaries flagged with confabulation risk. Local verification now collects 342 tests with 291 passing tests plus 51 skipped live-DB tests, and the compose DSN run passes all 342 tests.
+
 Progress: [███████░░░] local scaffold verified; production parity gaps remain
 
 ## Performance Metrics

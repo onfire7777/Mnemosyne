@@ -340,10 +340,16 @@ def _is_gist_hit(hit: Hit) -> bool:
     summary = metadata.get("summary")
     lifecycle = metadata.get("lifecycle")
     source_type = str(metadata.get("source_type") or "")
+    summary_kind = str(summary.get("kind") or "").lower() if isinstance(summary, dict) else ""
+    lifecycle_tier = str(lifecycle.get("tier") or "").lower() if isinstance(lifecycle, dict) else ""
+    confabulation_risk = bool(metadata.get("confabulation_risk")) or (
+        isinstance(summary, dict) and bool(summary.get("confabulation_risk"))
+    ) or (isinstance(lifecycle, dict) and bool(lifecycle.get("confabulation_risk")))
     return (
-        (isinstance(summary, dict) and summary.get("kind") == "abstractive_gist")
-        or (isinstance(lifecycle, dict) and lifecycle.get("tier") == "abstractive_gist")
-        or source_type == "consolidation-summary"
+        summary_kind in {"abstractive_gist", "statistical_trace"}
+        or lifecycle_tier in {"abstractive_gist", "statistical_trace"}
+        or source_type in {"consolidation-summary", "statistical-trace"}
+        or confabulation_risk
     )
 
 

@@ -508,6 +508,53 @@ def test_shared_engine_contract_abstains_when_only_gist_support_is_retrieved(
     assert result.explain["gist_support"]["gist_hit_ids"] == [cid]
 
 
+def test_shared_engine_contract_abstains_on_trace_or_confabulation_risk_support(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, user = engine_bundle
+    risk_tenant = f"{tenant}-risk"
+    trace_cid = engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id=user,
+            actor="system",
+            source_type="statistical-trace",
+            source_identity="statistical-trace:contract-alpha",
+            content="Statistical trace contract alpha support requires source inspection.",
+            metadata={"lifecycle": {"tier": "statistical_trace"}},
+            trust_tier=2,
+            capability_tags=["statistical-trace"],
+            access_policy={"tenant": tenant},
+        )
+    )
+    risk_cid = engine.append_evidence(
+        Evidence(
+            tenant_id=risk_tenant,
+            user_id=user,
+            actor="system",
+            source_type="analysis-summary",
+            source_identity="analysis-summary:contract-beta",
+            content="Confabulation risk contract beta support requires source inspection.",
+            metadata={"summary": {"kind": "extractive_summary", "confabulation_risk": True}},
+            trust_tier=2,
+            capability_tags=["derived-summary"],
+            access_policy={"tenant": risk_tenant},
+        )
+    )
+
+    trace_result = engine.retrieve("statistical trace contract alpha", tenant)
+    risk_result = engine.retrieve("confabulation risk contract beta", risk_tenant)
+
+    assert trace_result.hits[0].id == trace_cid
+    assert trace_result.abstained is True
+    assert trace_result.explain["gist_support"]["applied"] is True
+    assert trace_result.explain["gist_support"]["gist_hit_ids"] == [trace_cid]
+    assert risk_result.hits[0].id == risk_cid
+    assert risk_result.abstained is True
+    assert risk_result.explain["gist_support"]["applied"] is True
+    assert risk_result.explain["gist_support"]["gist_hit_ids"] == [risk_cid]
+
+
 def test_shared_engine_contract_summary_refresh_retires_superseded_gist(
     engine_bundle: tuple[Any, str, str],
 ) -> None:
