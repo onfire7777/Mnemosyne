@@ -20,6 +20,8 @@ Latest checkpoint: CLI `deployment-soak --evidence-dir` now writes a durable evi
 
 Latest checkpoint: Shared audit logs now record actor, source, trust tier, capability tags, and diff metadata for local JSON and Postgres-backed write paths. Evidence append, assertion upsert, preference write, learning-store audit, and forget/delete audit entries now carry source/tier context, with Postgres exporting source from the audit diff while using the existing trust-tier/capability columns. Focused local/Postgres shared-contract tests, the live Postgres engine suite, the full no-DSN suite, and the full compose Postgres suite pass; local verification now collects 322 tests with 278 passing tests plus 44 skipped live-DB tests, and the compose DSN run passes all 322 tests.
 
+Latest checkpoint: Consolidation replayer is now a real prioritization pass instead of an input-order echo. The worker computes `importance*novelty*surprise*reward` from evidence metadata or payload replay-score overrides, feeds downstream consolidation passes in priority order, and reports per-CID factor scores in the pass result. Focused consolidation tests, `tests/test_runtime_parity_extensions.py`, the full no-DSN suite, and the full compose Postgres suite pass; local verification now collects 323 tests with 279 passing tests plus 44 skipped live-DB tests, and the compose DSN run passes all 323 tests.
+
 Progress: [███████░░░] local scaffold verified; production parity gaps remain
 
 ## Performance Metrics
