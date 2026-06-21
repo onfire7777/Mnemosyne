@@ -340,6 +340,7 @@ def _is_gist_hit(hit: Hit) -> bool:
     summary = metadata.get("summary")
     lifecycle = metadata.get("lifecycle")
     source_type = str(metadata.get("source_type") or "")
+    relation_predicate = str(metadata.get("predicate") or "").lower()
     summary_kind = str(summary.get("kind") or "").lower() if isinstance(summary, dict) else ""
     lifecycle_tier = str(lifecycle.get("tier") or "").lower() if isinstance(lifecycle, dict) else ""
     confabulation_risk = bool(metadata.get("confabulation_risk")) or (
@@ -349,6 +350,7 @@ def _is_gist_hit(hit: Hit) -> bool:
         summary_kind in {"abstractive_gist", "statistical_trace"}
         or lifecycle_tier in {"abstractive_gist", "statistical_trace"}
         or source_type in {"consolidation-summary", "statistical-trace"}
+        or (hit.kind == "relation" and relation_predicate == "summary-derived-gist")
         or confabulation_risk
     )
 

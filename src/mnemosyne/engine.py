@@ -7,7 +7,6 @@ import json
 import os
 import threading
 from collections import defaultdict
-from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Protocol
@@ -672,6 +671,13 @@ class LocalMemoryEngine:
                         score=score,
                         channel="graph_ppr",
                         provenance=rel.source_evidence_cids,
+                        metadata={
+                            "source": rel.source,
+                            "predicate": rel.predicate,
+                            "target": rel.target,
+                            "confidence": rel.confidence,
+                            "source_evidence_cids": list(rel.source_evidence_cids),
+                        },
                     )
                 )
             if len(hits) >= k:

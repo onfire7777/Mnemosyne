@@ -1016,7 +1016,11 @@ class PostgresEngine:
                     channel="postgres_graph_ppr",
                     provenance=_bytes_list_to_cids(rel["source_evidence_cids"]),
                     metadata={
+                        "source": rel["source"],
+                        "predicate": rel["predicate"],
+                        "target": rel["target"],
                         "confidence": float(rel["confidence"]),
+                        "source_evidence_cids": _bytes_list_to_cids(rel["source_evidence_cids"]),
                         "backend": self.adapters.graph_backend,
                     },
                 )
