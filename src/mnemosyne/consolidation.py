@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import re
+import shlex
+import subprocess
 from dataclasses import asdict, dataclass
-from typing import Any
+from typing import Any, Protocol, Sequence
 
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.gate import Candidate, GateResult, PromotionGate, RegressionCase
@@ -41,6 +44,7 @@ class ConsolidationJob:
     trust_tier: int = int(TrustTier.NORMAL)
     sensitivity: int = 0
     access_policy: dict[str, Any] | None = None
+    entity_key: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -78,11 +82,13 @@ class ConsolidationWorker:
         gate_cases: list[RegressionCase],
         security: SecurityPolicy | None = None,
         learning: Any | None = None,
+        entity_resolver: "EntityResolver | None" = None,
     ):
         self.engine = engine
         self.security = security or SecurityPolicy()
         self.gate = PromotionGate(engine, gate_cases)
         self.learning = learning
+        self.entity_resolver = entity_resolver or DeterministicEntityResolver()
 
     def run_queue_payload(self, payload: dict[str, Any]) -> ConsolidationRunResult:
         decision = self.security.authorize_write(
@@ -122,14 +128,13 @@ class ConsolidationWorker:
             candidates = self._candidate_payloads(payload, evidence)
             if candidates:
                 pass_results.append(PassResult("extractor", "complete", {"candidate_count": len(candidates)}))
+                resolver_result = self.entity_resolver.resolve(tenant_id, candidates)
+                candidates = resolver_result["candidates"]
                 pass_results.append(
                     PassResult(
                         "resolver",
                         "complete",
-                        {
-                            "strategy": "deterministic_entity_key",
-                            "resolved_entities": _resolved_entities(candidates),
-                        },
+                        resolver_result["details"],
                     )
                 )
                 for candidate in candidates:
@@ -146,6 +151,7 @@ class ConsolidationWorker:
                             trust_tier=int(candidate.get("trust_tier", payload.get("trust_tier", TrustTier.NORMAL))),
                             sensitivity=int(candidate.get("sensitivity", payload.get("sensitivity", 0))),
                             access_policy=candidate.get("access_policy") or payload.get("access_policy"),
+                            entity_key=str(candidate.get("entity_key") or "") or None,
                         )
                     )
                     candidate_results.append(result.to_dict())
@@ -399,7 +405,7 @@ class ConsolidationWorker:
 
         result = self.gate.evaluate(job.tenant_id, candidate, apply)
         if result.promoted and hasattr(self.engine, "register_entity"):
-            entity_key = _entity_key(job.candidate_subject)
+            entity_key = job.entity_key or _entity_key(job.candidate_subject)
             self.engine.register_entity(
                 job.tenant_id,
                 entity_key,
@@ -440,6 +446,65 @@ def _entity_key(subject: str) -> str:
     return normalized or "unknown-entity"
 
 
+class EntityResolver(Protocol):
+    strategy: str
+
+    def resolve(self, tenant_id: str, candidates: Sequence[dict[str, Any]]) -> dict[str, Any]: ...
+
+
+class DeterministicEntityResolver:
+    strategy = "deterministic_entity_key"
+
+    def resolve(self, tenant_id: str, candidates: Sequence[dict[str, Any]]) -> dict[str, Any]:
+        resolved = []
+        for candidate in candidates:
+            item = dict(candidate)
+            item["entity_key"] = str(item.get("entity_key") or _entity_key(str(item["candidate_subject"])))
+            resolved.append(item)
+        return {
+            "candidates": resolved,
+            "details": {
+                "strategy": self.strategy,
+                "resolved_entities": _resolved_entities(resolved),
+            },
+        }
+
+
+class CommandEntityResolver:
+    """Shell-free entity resolver adapter for production resolver services."""
+
+    strategy = "command_entity_resolver"
+
+    def __init__(self, command: str | Sequence[str], *, timeout_seconds: float = 30.0):
+        self.command = _command_argv(command)
+        self.timeout_seconds = timeout_seconds
+
+    def resolve(self, tenant_id: str, candidates: Sequence[dict[str, Any]]) -> dict[str, Any]:
+        payload = {"tenant_id": tenant_id, "candidates": [dict(candidate) for candidate in candidates]}
+        try:
+            completed = subprocess.run(
+                self.command,
+                input=json.dumps(payload),
+                text=True,
+                capture_output=True,
+                timeout=self.timeout_seconds,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise TimeoutError("entity resolver timed out") from exc
+        if completed.returncode != 0:
+            detail = completed.stderr.strip()[:512]
+            suffix = f": {detail}" if detail else ""
+            raise ValueError(f"entity resolver failed{suffix}")
+        try:
+            parsed = json.loads(completed.stdout or "{}")
+        except json.JSONDecodeError as exc:
+            raise ValueError("entity resolver response must be valid JSON") from exc
+        if not isinstance(parsed, dict):
+            raise ValueError("entity resolver response must be a JSON object")
+        return _apply_resolver_response(candidates, parsed)
+
+
 def _resolved_entities(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
     entities: dict[str, dict[str, Any]] = {}
     for candidate in candidates:
@@ -460,3 +525,74 @@ def _resolved_entities(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]
         if signature not in entity["candidate_signatures"]:
             entity["candidate_signatures"].append(signature)
     return list(entities.values())
+
+
+def _apply_resolver_response(candidates: Sequence[dict[str, Any]], response: dict[str, Any]) -> dict[str, Any]:
+    by_signature = {str(candidate["signature"]): dict(candidate) for candidate in candidates}
+    candidate_rows = response.get("candidates")
+    if not isinstance(candidate_rows, list):
+        raise ValueError("entity resolver response requires candidates array")
+    seen_signatures: set[str] = set()
+    for row in candidate_rows:
+        if not isinstance(row, dict):
+            raise ValueError("entity resolver candidates must be JSON objects")
+        signature = str(row.get("signature", ""))
+        if signature not in by_signature:
+            raise ValueError(f"entity resolver returned unknown candidate signature {signature!r}")
+        if signature in seen_signatures:
+            raise ValueError(f"entity resolver returned duplicate candidate signature {signature!r}")
+        entity_key = str(row.get("entity_key") or row.get("entityKey") or "").strip()
+        if not entity_key:
+            raise ValueError("entity resolver candidate mapping requires entity_key")
+        by_signature[signature]["entity_key"] = entity_key
+        seen_signatures.add(signature)
+    missing_signatures = sorted(set(by_signature) - seen_signatures)
+    if missing_signatures:
+        raise ValueError(f"entity resolver did not resolve candidate signatures: {', '.join(missing_signatures)}")
+
+    resolved = list(by_signature.values())
+
+    entities = response.get("entities")
+    if entities is None:
+        entities = _resolved_entities(resolved)
+    if not isinstance(entities, list):
+        raise ValueError("entity resolver entities must be an array")
+    normalized_entities = [_normalize_entity(row) for row in entities]
+    return {
+        "candidates": resolved,
+        "details": {
+            "strategy": "command_entity_resolver",
+            "resolved_entities": normalized_entities,
+        },
+    }
+
+
+def _normalize_entity(row: Any) -> dict[str, Any]:
+    if not isinstance(row, dict):
+        raise ValueError("entity resolver entity rows must be JSON objects")
+    key = str(row.get("key") or row.get("entity_key") or row.get("entityKey") or "").strip()
+    if not key:
+        raise ValueError("entity resolver entity requires key")
+    label = str(row.get("label") or key)
+    aliases = row.get("aliases", [])
+    signatures = row.get("candidate_signatures", row.get("candidateSignatures", []))
+    if not isinstance(aliases, list) or not all(isinstance(item, str) for item in aliases):
+        raise ValueError("entity resolver entity aliases must be strings")
+    if not isinstance(signatures, list) or not all(isinstance(item, str) for item in signatures):
+        raise ValueError("entity resolver entity candidate_signatures must be strings")
+    return {
+        "key": key,
+        "label": label,
+        "aliases": aliases,
+        "candidate_signatures": signatures,
+    }
+
+
+def _command_argv(command: str | Sequence[str]) -> list[str]:
+    if isinstance(command, str):
+        argv = shlex.split(command)
+    else:
+        argv = [str(item) for item in command]
+    if not argv:
+        raise ValueError("entity resolver command cannot be empty")
+    return argv
