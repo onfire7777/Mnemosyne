@@ -9,7 +9,7 @@ from uuid import uuid4
 
 import pytest
 
-from mnemosyne.calibration import CalibrationSet
+from mnemosyne.calibration import CalibrationSet, calibration_examples_from_rows, tune_calibration_set
 from mnemosyne.consolidation import CONSOLIDATE_EVIDENCE_JOB, ConsolidationWorker
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.jobs import PROJECTION_RECOMPUTE_JOB, RuntimeJobHandlers
@@ -487,6 +487,42 @@ def test_shared_engine_contract_retrieval_uses_conformal_calibration(
     assert result.explain["calibration"]["threshold"] == 0.95
     assert result.explain["semantic_entropy"] >= 0.0
     assert exported["calibrations"][0]["memory_type"] == "fact"
+
+
+def test_shared_engine_contract_tunes_calibration_dataset(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, user = engine_bundle
+    tuning = tune_calibration_set(
+        tenant_id=tenant,
+        memory_type="fact",
+        examples=calibration_examples_from_rows(
+            [
+                {"confidence": 0.82, "correct": True},
+                {"confidence": 0.85, "correct": True},
+                {"confidence": 0.9, "correct": True},
+                {"confidence": 0.97, "correct": True},
+                {"confidence": 0.2, "correct": False},
+                {"confidence": 0.3, "correct": False},
+            ]
+        ),
+        target_coverage=0.75,
+        min_examples=6,
+        min_correct=4,
+        min_incorrect=2,
+        max_false_accept_rate=0.0,
+    )
+    engine.set_calibration(tuning.calibration)
+    _append_evidence(engine, tenant, user, "Shared tuned calibration should drive abstention threshold.")
+
+    result = engine.retrieve("tuned calibration threshold", tenant)
+    exported = engine.export_tenant(tenant)
+
+    assert tuning.ok is True
+    assert tuning.threshold == 0.82
+    assert result.explain["calibration"]["source"] == "conformal"
+    assert result.explain["calibration"]["threshold"] == 0.82
+    assert exported["calibrations"][0]["scores"] == [0.82, 0.85, 0.9, 0.97]
 
 
 def test_shared_engine_contract_abstains_when_only_gist_support_is_retrieved(

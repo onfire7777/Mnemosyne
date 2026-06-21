@@ -24,6 +24,7 @@ from uuid import UUID
 
 from cryptography import x509
 
+from mnemosyne.calibration import calibration_examples_from_rows, tune_calibration_set
 from mnemosyne.consolidation import (
     CONSOLIDATE_EVIDENCE_JOB,
     CandidateExtractor,
@@ -76,6 +77,7 @@ from mnemosyne.security import (
 from mnemosyne.storage import CommandKeyManager, EncryptedLocalObjectStore, JsonKeyManager, LocalObjectStore
 
 DEPLOYMENT_SOAK_COMMANDS = {
+    "calibration-tune",
     "provider-check",
     "idp-jwks-live-check",
     "idp-authz-policy-rollout-check",
@@ -98,6 +100,7 @@ DEPLOYMENT_SOAK_GLOBAL_OPTIONS = {
     "--parametric-artifact-store",
 }
 PRODUCTION_RELEASE_REQUIRED_COMMANDS = (
+    "calibration-tune",
     "provider-check",
     "idp-jwks-live-check",
     "idp-authz-policy-rollout-check",
@@ -1132,6 +1135,49 @@ def parse_json_arg(value: str, default: Any) -> Any:
     if not value:
         return default
     return json.loads(value)
+
+
+def _load_calibration_dataset(args: argparse.Namespace) -> list[dict[str, Any]]:
+    if bool(args.dataset) == bool(args.dataset_json):
+        raise SystemExit("calibration-tune requires exactly one of --dataset or --dataset-json")
+    try:
+        loaded = json.loads(Path(args.dataset).expanduser().read_text(encoding="utf-8")) if args.dataset else json.loads(args.dataset_json)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"calibration dataset denied: {exc}") from exc
+    if not isinstance(loaded, list):
+        raise SystemExit("calibration dataset must be a JSON array")
+    if not all(isinstance(item, dict) for item in loaded):
+        raise SystemExit("calibration dataset entries must be JSON objects")
+    return loaded
+
+
+def cmd_calibration_tune(args: argparse.Namespace) -> None:
+    try:
+        examples = calibration_examples_from_rows(_load_calibration_dataset(args))
+        tuning = tune_calibration_set(
+            tenant_id=args.tenant,
+            memory_type=args.memory_type,
+            examples=examples,
+            target_coverage=args.target_coverage,
+            min_examples=args.min_examples,
+            min_correct=args.min_correct,
+            min_incorrect=args.min_incorrect,
+            min_empirical_coverage=args.min_empirical_coverage,
+            max_false_accept_rate=args.max_false_accept_rate,
+            max_prediction_set_size=args.max_prediction_set_size,
+        )
+    except ValueError as exc:
+        raise SystemExit(f"calibration dataset denied: {exc}") from exc
+    applied = False
+    if tuning.ok and not args.dry_run:
+        load_engine(args).set_calibration(tuning.calibration)
+        applied = True
+    report = tuning.to_dict()
+    report["applied"] = applied
+    report["dry_run"] = bool(args.dry_run)
+    emit(report)
+    if not tuning.ok:
+        raise SystemExit(1)
 
 
 def cmd_profile_add(args: argparse.Namespace) -> None:
@@ -4363,6 +4409,21 @@ def build_parser() -> argparse.ArgumentParser:
     export = sub.add_parser("export")
     export.add_argument("--tenant", required=True)
     export.set_defaults(func=cmd_export)
+
+    calibration_tune = sub.add_parser("calibration-tune")
+    calibration_tune.add_argument("--tenant", required=True)
+    calibration_tune.add_argument("--memory-type", default="fact")
+    calibration_tune.add_argument("--dataset", help="Path to JSON array of labeled calibration examples")
+    calibration_tune.add_argument("--dataset-json", help="Inline JSON array of labeled calibration examples")
+    calibration_tune.add_argument("--target-coverage", type=float, default=0.9)
+    calibration_tune.add_argument("--min-examples", type=int, default=20)
+    calibration_tune.add_argument("--min-correct", type=int, default=1)
+    calibration_tune.add_argument("--min-incorrect", type=int, default=1)
+    calibration_tune.add_argument("--min-empirical-coverage", type=float)
+    calibration_tune.add_argument("--max-false-accept-rate", type=float, default=0.1)
+    calibration_tune.add_argument("--max-prediction-set-size", type=int, default=3)
+    calibration_tune.add_argument("--dry-run", action="store_true")
+    calibration_tune.set_defaults(func=cmd_calibration_tune)
 
     branch = sub.add_parser("branch")
     branch.add_argument("--name", required=True)

@@ -1385,6 +1385,44 @@ def test_runtime_job_handlers_drain_calibration_lifecycle_and_observability_jobs
     assert snapshot.counters["eval.suites"] == 1
 
 
+def test_runtime_job_handlers_tune_calibration_from_labeled_examples() -> None:
+    engine = LocalMemoryEngine()
+    queue = InProcessQueue()
+    metrics = MetricsRegistry()
+    handlers = RuntimeJobHandlers(engine, queue, metrics=metrics)
+    worker = QueueWorker(queue, handlers.handlers(), metrics=metrics)
+    queue.enqueue(
+        CALIBRATE_JOB,
+        {
+            "tenant_id": TENANT,
+            "memory_type": "fact",
+            "target_coverage": 0.75,
+            "min_examples": 6,
+            "min_correct": 4,
+            "min_incorrect": 2,
+            "max_false_accept_rate": 0.0,
+            "examples": [
+                {"confidence": 0.82, "correct": True},
+                {"confidence": 0.85, "correct": True},
+                {"confidence": 0.9, "correct": True},
+                {"confidence": 0.97, "correct": True},
+                {"confidence": 0.2, "correct": False},
+                {"confidence": 0.3, "correct": False},
+            ],
+        },
+    )
+
+    job = worker.run_once(CALIBRATE_JOB)
+
+    assert job is not None
+    assert job.status == "complete"
+    assert job.result["details"]["ok"] is True
+    assert job.result["details"]["applied"] is True
+    assert job.result["details"]["threshold"] == 0.82
+    assert engine.export_tenant(TENANT)["calibrations"][0]["scores"] == [0.82, 0.85, 0.9, 0.97]
+    assert metrics.snapshot().gauges["calibration.fact.threshold"] == 0.82
+
+
 def test_ops_report_flags_open_contradiction_backlog() -> None:
     engine = LocalMemoryEngine()
     engine.add_contradiction(Contradiction(tenant_id=TENANT, a="fact-a", b="fact-b"))

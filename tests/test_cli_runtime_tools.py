@@ -3832,6 +3832,96 @@ def test_cli_release_audit_fails_closed_on_missing_and_local_evidence(tmp_path: 
     assert payload["provider"]["retrieval_backends"]["lexical_local"] is True
 
 
+def test_cli_calibration_tune_applies_labeled_dataset(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    dataset = tmp_path / "calibration.json"
+    dataset.write_text(
+        json.dumps(
+            [
+                {"confidence": 0.82, "correct": True},
+                {"confidence": 0.85, "correct": True},
+                {"confidence": 0.9, "correct": True},
+                {"confidence": 0.97, "correct": True},
+                {"confidence": 0.2, "correct": False},
+                {"confidence": 0.3, "correct": False},
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    report = run_cli(
+        store,
+        "calibration-tune",
+        "--tenant",
+        TENANT,
+        "--dataset",
+        str(dataset),
+        "--target-coverage",
+        "0.75",
+        "--min-examples",
+        "6",
+        "--min-correct",
+        "4",
+        "--min-incorrect",
+        "2",
+        "--max-false-accept-rate",
+        "0",
+    )
+    exported = run_cli(store, "export", "--tenant", TENANT)
+
+    assert report["ok"] is True
+    assert report["applied"] is True
+    assert report["threshold"] == 0.82
+    assert report["metrics"]["correct_coverage"] == 1.0
+    assert report["metrics"]["false_accept_rate"] == 0.0
+    assert exported["calibrations"][0]["scores"] == [0.82, 0.85, 0.9, 0.97]
+    assert exported["calibrations"][0]["target_coverage"] == 0.75
+
+
+def test_cli_calibration_tune_fails_closed_on_high_confidence_errors(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    dataset = tmp_path / "bad-calibration.json"
+    dataset.write_text(
+        json.dumps(
+            [
+                {"confidence": 0.7, "correct": True},
+                {"confidence": 0.8, "correct": True},
+                {"confidence": 0.95, "correct": False},
+                {"confidence": 0.99, "correct": False},
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = run_raw_cli(
+        store,
+        "calibration-tune",
+        "--tenant",
+        TENANT,
+        "--dataset",
+        str(dataset),
+        "--target-coverage",
+        "0.5",
+        "--min-examples",
+        "4",
+        "--min-correct",
+        "2",
+        "--min-incorrect",
+        "2",
+        "--max-false-accept-rate",
+        "0",
+    )
+    payload = json.loads(result.stdout)
+    exported = run_cli(store, "export", "--tenant", TENANT)
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert payload["applied"] is False
+    assert payload["metrics"]["false_accept_rate"] == 1.0
+    assert payload["failures"] == ["false accept rate 1.000000 exceeds allowed maximum 0.000000"]
+    assert exported["calibrations"] == []
+
+
 def test_cli_preference_write_requires_explicit_or_high_trust_source(tmp_path: Path) -> None:
     denied = run_raw_cli(
         tmp_path / "mnemosyne.json",
