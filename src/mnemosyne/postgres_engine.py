@@ -243,6 +243,61 @@ class PostgresEngine:
                 )
         return True
 
+    def update_evidence_metadata(
+        self,
+        tenant_id: str,
+        cid: str,
+        metadata_patch: dict[str, Any],
+        branch: str = "main",
+        *,
+        actor: str = "consolidation",
+        source: str = "metadata_update",
+    ) -> bool:
+        db_tenant_id = _stable_uuid("tenant", tenant_id)
+        with self.connect() as conn:
+            with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                self._set_tenant(cur, db_tenant_id)
+                cur.execute(
+                    """
+                    SELECT metadata, source_type, trust_tier, capability_tags
+                    FROM evidence
+                    WHERE tenant_id = %s AND branch = %s AND cid = %s AND erased = false
+                    """,
+                    (db_tenant_id, branch, _cid_to_bytes(cid)),
+                )
+                row = cur.fetchone()
+                if row is None:
+                    return False
+                metadata = dict(row["metadata"] or {})
+                before_keys = sorted(metadata.keys())
+                metadata.update(metadata_patch)
+                cur.execute(
+                    """
+                    UPDATE evidence
+                    SET metadata = %s
+                    WHERE tenant_id = %s AND branch = %s AND cid = %s AND erased = false
+                    """,
+                    (self._jsonb(metadata), db_tenant_id, branch, _cid_to_bytes(cid)),
+                )
+                self._audit(
+                    cur,
+                    db_tenant_id,
+                    actor,
+                    "update_evidence_metadata",
+                    cid,
+                    {
+                        "branch": branch,
+                        "patch": metadata_patch,
+                        "before_keys": before_keys,
+                        "after_keys": sorted(metadata.keys()),
+                        "source_type": row["source_type"],
+                    },
+                    source=source,
+                    trust_tier=row["trust_tier"],
+                    capability_tags=list(row["capability_tags"] or []),
+                )
+        return True
+
     def upsert_assertion(self, assertion: Assertion, branch: str = "main") -> str:
         self.ensure_tenant_and_branch(assertion.tenant_id, branch)
         incoming = Assertion.from_dict(assertion.to_dict())
