@@ -75,11 +75,13 @@ from mnemosyne.security import (
     parse_session_keyring,
     parse_session_revoke_list,
 )
+from mnemosyne.self_optimization import validate_policy_ops_bundle
 from mnemosyne.storage import CommandKeyManager, EncryptedLocalObjectStore, JsonKeyManager, LocalObjectStore
 
 DEPLOYMENT_SOAK_COMMANDS = {
     "calibration-tune",
     "forgetting-policy-check",
+    "policy-ops-check",
     "provider-check",
     "idp-jwks-live-check",
     "idp-authz-policy-rollout-check",
@@ -104,6 +106,7 @@ DEPLOYMENT_SOAK_GLOBAL_OPTIONS = {
 PRODUCTION_RELEASE_REQUIRED_COMMANDS = (
     "calibration-tune",
     "forgetting-policy-check",
+    "policy-ops-check",
     "provider-check",
     "idp-jwks-live-check",
     "idp-authz-policy-rollout-check",
@@ -1213,6 +1216,49 @@ def cmd_forgetting_policy_check(args: argparse.Namespace) -> None:
             {
                 "code": "fingerprint_mismatch",
                 "message": "forgetting policy suite fingerprint mismatch",
+            }
+        )
+    emit(report)
+    if not report["ok"]:
+        raise SystemExit(1)
+
+
+def _load_policy_ops_bundle(args: argparse.Namespace) -> Mapping[str, Any]:
+    if bool(args.bundle) == bool(args.bundle_json):
+        raise SystemExit("policy-ops-check requires exactly one of --bundle or --bundle-json")
+    try:
+        loaded = (
+            json.loads(Path(args.bundle).expanduser().read_text(encoding="utf-8"))
+            if args.bundle
+            else json.loads(args.bundle_json)
+        )
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"policy ops bundle denied: {exc}") from exc
+    if not isinstance(loaded, Mapping):
+        raise SystemExit("policy ops bundle must be a JSON object")
+    return loaded
+
+
+def cmd_policy_ops_check(args: argparse.Namespace) -> None:
+    report = validate_policy_ops_bundle(
+        _load_policy_ops_bundle(args),
+        min_variants=args.min_variants,
+        min_outcomes=args.min_outcomes,
+        min_tripwires=args.min_tripwires,
+        required_variant_ids=args.require_variant,
+        min_outcomes_per_required_variant=args.min_outcomes_per_required_variant,
+        min_cadence_window_hours=args.min_cadence_window_hours,
+        max_updates_per_day=args.max_updates_per_day,
+        min_diversity=args.min_diversity,
+        max_proxy_gap=args.max_proxy_gap,
+    )
+    report["expected_fingerprint_present"] = bool(args.expected_fingerprint)
+    if args.expected_fingerprint and args.expected_fingerprint.strip().lower() != report["fingerprint"]:
+        report["ok"] = False
+        report["findings"].append(
+            {
+                "code": "fingerprint_mismatch",
+                "message": "policy ops bundle fingerprint mismatch",
             }
         )
     emit(report)
@@ -4474,6 +4520,21 @@ def build_parser() -> argparse.ArgumentParser:
     forgetting_policy_check.add_argument("--require-case", action="append", default=[])
     forgetting_policy_check.add_argument("--expected-fingerprint")
     forgetting_policy_check.set_defaults(func=cmd_forgetting_policy_check)
+
+    policy_ops_check = sub.add_parser("policy-ops-check")
+    policy_ops_check.add_argument("--bundle", help="Path to policy ops validation bundle")
+    policy_ops_check.add_argument("--bundle-json", help="Inline policy ops validation bundle JSON")
+    policy_ops_check.add_argument("--min-variants", type=int, default=2)
+    policy_ops_check.add_argument("--min-outcomes", type=int, default=3)
+    policy_ops_check.add_argument("--min-tripwires", type=int, default=1)
+    policy_ops_check.add_argument("--require-variant", action="append", default=[])
+    policy_ops_check.add_argument("--min-outcomes-per-required-variant", type=int, default=1)
+    policy_ops_check.add_argument("--min-cadence-window-hours", type=float, default=1.0)
+    policy_ops_check.add_argument("--max-updates-per-day", type=int, default=4)
+    policy_ops_check.add_argument("--min-diversity", type=float, default=0.2)
+    policy_ops_check.add_argument("--max-proxy-gap", type=float, default=0.15)
+    policy_ops_check.add_argument("--expected-fingerprint")
+    policy_ops_check.set_defaults(func=cmd_policy_ops_check)
 
     branch = sub.add_parser("branch")
     branch.add_argument("--name", required=True)

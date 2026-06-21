@@ -4043,6 +4043,141 @@ def test_cli_forgetting_policy_check_fails_closed_on_expectation_mismatch(tmp_pa
     assert findings[0]["field"] == "demoted"
 
 
+def policy_ops_bundle(
+    *,
+    wrong_recommended_variant: bool = False,
+    failing_tripwire: bool = False,
+    production_mutation: bool = False,
+) -> dict:
+    return {
+        "tenant_id": TENANT,
+        "metric": "retrieval_quality",
+        "reward_source": "external_eval",
+        "base_policy": {
+            "top_k": 8,
+            "abstention_threshold": 0.45,
+            "activation_weights": {"base_level": 0.35, "semantic": 0.35, "importance": 0.2, "recency": 0.1},
+            "immutable_rails": {
+                "retrieved_text_is_data_not_instruction": True,
+                "writes_are_append_only_or_superseding": True,
+                "tenant_isolation_required": True,
+                "source_trust_filter_required": True,
+                "sensitive_and_destructive_writes_audited": True,
+                "branch_promotion_requires_gate": True,
+                "explicit_preferences_outrank_inferred": True,
+                "erasure_propagates_to_derived_indexes": True,
+            },
+        },
+        "variants": [
+            {
+                "id": "stable",
+                "activation_weights": {"base_level": 0.35, "semantic": 0.35, "importance": 0.2, "recency": 0.1},
+                "abstention_threshold": 0.45,
+                "top_k": 8,
+                "shadow_mode": True,
+            },
+            {
+                "id": "recall",
+                "activation_weights": {"base_level": 0.25, "semantic": 0.45, "importance": 0.2, "recency": 0.1},
+                "abstention_threshold": 0.5,
+                "top_k": 12,
+                "shadow_mode": True,
+            },
+        ],
+        "outcomes": [
+            {
+                "variant_id": "stable",
+                "reward": 0.4,
+                "context": {"metric": "retrieval_quality"},
+                "metrics": {"latency_ms": 90.0},
+            },
+            {
+                "variant_id": "recall",
+                "reward": 0.9,
+                "context": {"metric": "retrieval_quality"},
+                "metrics": {"latency_ms": 120.0},
+            },
+            {
+                "variant_id": "recall",
+                "reward": 0.8,
+                "context": {"metric": "retrieval_quality"},
+                "metrics": {"latency_ms": 118.0},
+            },
+        ],
+        "tripwires": [
+            {
+                "id": "proxy-true-score-gap",
+                "diversity": 0.48,
+                "proxy_score": 0.98 if failing_tripwire else 0.84,
+                "true_score": 0.7 if failing_tripwire else 0.8,
+            }
+        ],
+        "cadence": {"window_hours": 24, "max_updates_per_day": 1},
+        "promotion": {
+            "mode": "shadow",
+            "production_mutation": production_mutation,
+            "expected_recommended_variant_id": "stable" if wrong_recommended_variant else "recall",
+        },
+    }
+
+
+def test_cli_policy_ops_check_validates_shadow_bundle(tmp_path: Path) -> None:
+    bundle = tmp_path / "policy-ops.json"
+    bundle.write_text(json.dumps(policy_ops_bundle()), encoding="utf-8")
+
+    report = run_cli(
+        tmp_path / "mnemosyne.json",
+        "policy-ops-check",
+        "--bundle",
+        str(bundle),
+        "--require-variant",
+        "stable",
+        "--require-variant",
+        "recall",
+    )
+    acknowledged = run_cli(
+        tmp_path / "mnemosyne.json",
+        "policy-ops-check",
+        "--bundle",
+        str(bundle),
+        "--expected-fingerprint",
+        report["fingerprint"],
+    )
+
+    assert report["ok"] is True
+    assert len(report["fingerprint"]) == 64
+    assert report["summary"]["recommended_variant_id"] == "recall"
+    assert report["outcomes"]["counts_by_variant"] == {"stable": 1, "recall": 2}
+    assert all(item["rails_ok"] and item["shadow_mode"] for item in report["variants"])
+    assert report["tripwires"][0]["passed"] is True
+    assert acknowledged["ok"] is True
+    assert acknowledged["expected_fingerprint_present"] is True
+
+
+def test_cli_policy_ops_check_fails_closed_on_bad_shadow_bundle(tmp_path: Path) -> None:
+    bundle = tmp_path / "bad-policy-ops.json"
+    bundle.write_text(
+        json.dumps(
+            policy_ops_bundle(
+                wrong_recommended_variant=True,
+                failing_tripwire=True,
+                production_mutation=True,
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    result = run_raw_cli(tmp_path / "mnemosyne.json", "policy-ops-check", "--bundle", str(bundle))
+    payload = json.loads(result.stdout)
+    codes = {finding["code"] for finding in payload["findings"]}
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert "recommended_variant_mismatch" in codes
+    assert "tripwire_failed" in codes
+    assert "production_mutation_enabled" in codes
+
+
 def test_cli_preference_write_requires_explicit_or_high_trust_source(tmp_path: Path) -> None:
     denied = run_raw_cli(
         tmp_path / "mnemosyne.json",
