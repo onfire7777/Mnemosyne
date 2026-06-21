@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 import math
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
+from hashlib import sha256
 from typing import Any
 
 from mnemosyne.engine import LocalMemoryEngine
@@ -251,3 +253,257 @@ def tripwire_check(diversity: float, proxy_score: float, true_score: float, min_
     if gap > max_proxy_gap:
         return TripwireResult(False, "proxy score diverges from true score", diversity, gap)
     return TripwireResult(True, "tripwires clear", diversity, gap)
+
+
+def policy_variant_from_dict(row: Mapping[str, Any]) -> PolicyVariant:
+    weights = row.get("activation_weights")
+    if not isinstance(weights, Mapping):
+        raise ValueError("policy variant requires activation_weights object")
+    return PolicyVariant(
+        id=str(row["id"]),
+        activation_weights={str(key): float(value) for key, value in weights.items()},
+        abstention_threshold=float(row["abstention_threshold"]),
+        top_k=int(row["top_k"]),
+    )
+
+
+def policy_ops_fingerprint(bundle: Mapping[str, Any]) -> str:
+    encoded = json.dumps(bundle, sort_keys=True, separators=(",", ":"), default=str)
+    return sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def validate_policy_ops_bundle(
+    bundle: Mapping[str, Any],
+    *,
+    min_variants: int = 2,
+    min_outcomes: int = 3,
+    min_tripwires: int = 1,
+    required_variant_ids: list[str] | None = None,
+    min_outcomes_per_required_variant: int = 1,
+    min_cadence_window_hours: float = 1.0,
+    max_updates_per_day: int = 4,
+    min_diversity: float = 0.2,
+    max_proxy_gap: float = 0.15,
+) -> dict[str, Any]:
+    findings: list[dict[str, Any]] = []
+    required_ids = list(required_variant_ids or [])
+    tenant_id = str(bundle.get("tenant_id") or "")
+    metric = str(bundle.get("metric") or "retrieval_quality")
+    if not tenant_id:
+        findings.append({"code": "missing_tenant", "message": "policy ops bundle requires tenant_id"})
+
+    base_policy_raw = bundle.get("base_policy")
+    if base_policy_raw is not None and not isinstance(base_policy_raw, Mapping):
+        findings.append({"code": "invalid_base_policy", "message": "base_policy must be an object"})
+        base_policy = OperatingPolicy()
+    else:
+        base_policy = OperatingPolicy.from_dict(dict(base_policy_raw or {}))
+    if not all(base_policy.immutable_rails.values()):
+        findings.append({"code": "base_rail_disabled", "message": "base policy has disabled immutable rails"})
+
+    variants_raw = bundle.get("variants")
+    if not isinstance(variants_raw, list):
+        findings.append({"code": "invalid_variants", "message": "variants must be an array"})
+        variants_raw = []
+    variants: list[PolicyVariant] = []
+    variant_reports: list[dict[str, Any]] = []
+    for index, raw in enumerate(variants_raw, start=1):
+        if not isinstance(raw, Mapping):
+            findings.append({"code": "invalid_variant", "message": f"variant {index} must be an object"})
+            continue
+        variant_id = str(raw.get("id") or f"variant-{index}")
+        try:
+            variant = policy_variant_from_dict(raw)
+        except (KeyError, TypeError, ValueError) as exc:
+            findings.append({"code": "invalid_variant", "message": f"{variant_id}: {exc}"})
+            continue
+        rails_ok = within_invariant_rails(base_policy, variant)
+        shadow_mode = raw.get("shadow_mode") is True
+        variants.append(variant)
+        variant_reports.append(
+            {
+                "id": variant.id,
+                "rails_ok": rails_ok,
+                "shadow_mode": shadow_mode,
+                "top_k": variant.top_k,
+                "abstention_threshold": variant.abstention_threshold,
+            }
+        )
+        if not rails_ok:
+            findings.append({"code": "variant_rail_violation", "message": f"{variant.id} violates immutable rails"})
+        if not shadow_mode:
+            findings.append({"code": "variant_not_shadow", "message": f"{variant.id} is not explicitly shadow_mode=true"})
+
+    if len(variants) < min_variants:
+        findings.append(
+            {
+                "code": "insufficient_variants",
+                "message": f"variant count {len(variants)} is below required minimum {min_variants}",
+            }
+        )
+    variant_ids = {variant.id for variant in variants}
+    for variant_id in required_ids:
+        if variant_id not in variant_ids:
+            findings.append({"code": "missing_required_variant", "message": f"required variant {variant_id} is missing"})
+
+    store = SelfModelStore()
+    bandit = ContextualBanditLearner(store)
+    outcomes_raw = bundle.get("outcomes")
+    if not isinstance(outcomes_raw, list):
+        findings.append({"code": "invalid_outcomes", "message": "outcomes must be an array"})
+        outcomes_raw = []
+    outcome_counts = {variant.id: 0 for variant in variants}
+    for index, raw in enumerate(outcomes_raw, start=1):
+        if not isinstance(raw, Mapping):
+            findings.append({"code": "invalid_outcome", "message": f"outcome {index} must be an object"})
+            continue
+        variant_id = str(raw.get("variant_id") or "")
+        context = raw.get("context")
+        metrics = raw.get("metrics")
+        if variant_id not in variant_ids:
+            findings.append({"code": "unknown_outcome_variant", "message": f"outcome {index} references {variant_id}"})
+            continue
+        if context is not None and not isinstance(context, Mapping):
+            findings.append({"code": "invalid_outcome_context", "message": f"outcome {index} context must be an object"})
+            continue
+        if metrics is not None and not isinstance(metrics, Mapping):
+            findings.append({"code": "invalid_outcome_metrics", "message": f"outcome {index} metrics must be an object"})
+            continue
+        context_dict = dict(context or {"metric": metric})
+        if context_dict.get("metric") != metric:
+            findings.append({"code": "metric_context_mismatch", "message": f"outcome {index} metric context mismatch"})
+            continue
+        reward_source = str(raw.get("reward_source") or bundle.get("reward_source") or "")
+        if reward_source not in {"external_eval", "human_feedback", "protected_suite"}:
+            findings.append({"code": "invalid_reward_source", "message": f"outcome {index} lacks an external reward source"})
+            continue
+        try:
+            reward = float(raw["reward"])
+            bandit.record_outcome(
+                tenant_id,
+                variant_id,
+                reward,
+                context=context_dict,
+                metrics={str(key): float(value) for key, value in dict(metrics or {}).items()},
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            findings.append({"code": "invalid_outcome", "message": f"outcome {index}: {exc}"})
+            continue
+        outcome_counts[variant_id] += 1
+
+    if len(outcomes_raw) < min_outcomes:
+        findings.append(
+            {
+                "code": "insufficient_outcomes",
+                "message": f"outcome count {len(outcomes_raw)} is below required minimum {min_outcomes}",
+            }
+        )
+    for variant_id in required_ids:
+        if outcome_counts.get(variant_id, 0) < min_outcomes_per_required_variant:
+            findings.append(
+                {
+                    "code": "insufficient_required_variant_outcomes",
+                    "message": f"{variant_id} has fewer than {min_outcomes_per_required_variant} outcomes",
+                }
+            )
+
+    tripwires_raw = bundle.get("tripwires")
+    if not isinstance(tripwires_raw, list):
+        findings.append({"code": "invalid_tripwires", "message": "tripwires must be an array"})
+        tripwires_raw = []
+    tripwire_reports: list[dict[str, Any]] = []
+    for index, raw in enumerate(tripwires_raw, start=1):
+        if not isinstance(raw, Mapping):
+            findings.append({"code": "invalid_tripwire", "message": f"tripwire {index} must be an object"})
+            continue
+        tripwire_id = str(raw.get("id") or f"tripwire-{index}")
+        try:
+            result = tripwire_check(
+                diversity=float(raw["diversity"]),
+                proxy_score=float(raw["proxy_score"]),
+                true_score=float(raw["true_score"]),
+                min_diversity=min_diversity,
+                max_proxy_gap=max_proxy_gap,
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            findings.append({"code": "invalid_tripwire", "message": f"{tripwire_id}: {exc}"})
+            continue
+        report = {"id": tripwire_id, **result.to_dict()}
+        tripwire_reports.append(report)
+        if not result.passed:
+            findings.append({"code": "tripwire_failed", "message": f"{tripwire_id}: {result.reason}"})
+    if len(tripwire_reports) < min_tripwires:
+        findings.append(
+            {
+                "code": "insufficient_tripwires",
+                "message": f"tripwire count {len(tripwire_reports)} is below required minimum {min_tripwires}",
+            }
+        )
+
+    cadence = bundle.get("cadence")
+    if not isinstance(cadence, Mapping):
+        findings.append({"code": "invalid_cadence", "message": "cadence must be an object"})
+        cadence = {}
+    window_hours = float(cadence.get("window_hours", 0.0) or 0.0)
+    updates_per_day = int(cadence.get("max_updates_per_day", max_updates_per_day + 1) or 0)
+    if window_hours < min_cadence_window_hours:
+        findings.append(
+            {
+                "code": "cadence_window_too_short",
+                "message": f"cadence window {window_hours}h is below {min_cadence_window_hours}h",
+            }
+        )
+    if updates_per_day > max_updates_per_day:
+        findings.append(
+            {
+                "code": "cadence_updates_too_frequent",
+                "message": f"max_updates_per_day {updates_per_day} exceeds {max_updates_per_day}",
+            }
+        )
+
+    recommended_variant_id: str | None = None
+    if variants:
+        recommended_variant_id = bandit.choose_variant(tenant_id, variants, {"metric": metric}).id
+    promotion = bundle.get("promotion")
+    if not isinstance(promotion, Mapping):
+        findings.append({"code": "invalid_promotion", "message": "promotion must be an object"})
+        promotion = {}
+    if promotion.get("mode") != "shadow":
+        findings.append({"code": "promotion_not_shadow", "message": "policy ops validation requires shadow promotion mode"})
+    if promotion.get("production_mutation") is not False:
+        findings.append({"code": "production_mutation_enabled", "message": "shadow policy ops must not mutate production"})
+    expected_variant_id = promotion.get("expected_recommended_variant_id")
+    if expected_variant_id and expected_variant_id != recommended_variant_id:
+        findings.append(
+            {
+                "code": "recommended_variant_mismatch",
+                "message": "expected recommended variant does not match contextual bandit result",
+            }
+        )
+
+    return {
+        "ok": not findings,
+        "fingerprint": policy_ops_fingerprint(bundle),
+        "summary": {
+            "tenant_id": tenant_id,
+            "metric": metric,
+            "variants": len(variants),
+            "outcomes": len(outcomes_raw),
+            "tripwires": len(tripwire_reports),
+            "required_variant_ids": required_ids,
+            "recommended_variant_id": recommended_variant_id,
+        },
+        "variants": variant_reports,
+        "outcomes": {"counts_by_variant": outcome_counts},
+        "tripwires": tripwire_reports,
+        "cadence": {
+            "window_hours": window_hours,
+            "max_updates_per_day": updates_per_day,
+        },
+        "promotion": {
+            "mode": promotion.get("mode"),
+            "production_mutation": promotion.get("production_mutation"),
+            "expected_recommended_variant_id": expected_variant_id,
+        },
+        "findings": findings,
+    }
