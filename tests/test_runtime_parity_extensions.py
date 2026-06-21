@@ -1068,12 +1068,35 @@ def test_consolidation_forgetter_demotes_stale_low_utility_evidence_lifecycle() 
             access_policy={"tenant": TENANT},
         )
     )
+    must_keep_cid = engine.append_evidence(
+        Evidence(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="chat",
+            content="Must keep validated skill should be rehearsed instead of silently decaying.",
+            metadata={
+                "lifecycle": {
+                    "tier": FidelityTier.VERBATIM.value,
+                    "salience": 0.01,
+                    "importance": 0.7,
+                    "access_count": 1,
+                    "last_accessed": "2026-06-01T00:00:00Z",
+                    "must_keep": True,
+                    "successful_rehearsals": 1,
+                    "next_rehearsal_at": "2026-06-20T00:00:00Z",
+                }
+            },
+            trust_tier=0,
+            access_policy={"tenant": TENANT},
+        )
+    )
 
     result = ConsolidationWorker(engine, gate_cases=[]).run_queue_payload(
         {
             "tenant_id": TENANT,
             "user_id": USER,
-            "source_evidence_cids": [cid],
+            "source_evidence_cids": [cid, must_keep_cid],
             "passes": ["replayer", "forgetter"],
             "now": "2026-06-21T00:00:00Z",
             "utility_threshold": 0.18,
@@ -1081,14 +1104,21 @@ def test_consolidation_forgetter_demotes_stale_low_utility_evidence_lifecycle() 
     )
     pass_results = {item["name"]: item for item in result.pass_results}
     after = engine.get_evidence(TENANT, cid)
+    must_keep_after = engine.get_evidence(TENANT, must_keep_cid)
 
     assert pass_results["forgetter"]["status"] == "complete"
     assert pass_results["forgetter"]["details"]["demoted_cids"] == [cid]
     assert "forgetter_not_implemented" not in result.skipped
     assert after is not None
+    assert must_keep_after is not None
     assert after.metadata["lifecycle"]["tier"] == FidelityTier.ABSTRACTIVE_GIST.value
     assert after.metadata["lifecycle"]["demoted"] is True
     assert after.metadata["lifecycle"]["updated_by"] == "consolidation.forgetter"
+    assert must_keep_after.metadata["lifecycle"]["rehearsed"] is True
+    assert must_keep_after.metadata["lifecycle"]["demoted"] is False
+    assert must_keep_after.metadata["lifecycle"]["successful_rehearsals"] == 2
+    assert must_keep_after.metadata["lifecycle"]["next_rehearsal_at"] == "2026-06-28T00:00:00+00:00"
+    assert pass_results["forgetter"]["details"]["states"][1]["rehearsed"] is True
 
 
 def test_consolidation_worker_extracts_and_promotes_direct_user_fact_with_gate(tmp_path) -> None:
@@ -1318,6 +1348,17 @@ def test_runtime_job_handlers_drain_calibration_lifecycle_and_observability_jobs
                     "importance": 0.0,
                     "access_count": 0,
                     "last_accessed": "2020-01-01T00:00:00Z",
+                },
+                {
+                    "item_id": "memory-2",
+                    "tier": "verbatim",
+                    "salience": 0.01,
+                    "importance": 0.8,
+                    "access_count": 1,
+                    "last_accessed": "2026-06-01T00:00:00Z",
+                    "must_keep": True,
+                    "successful_rehearsals": 1,
+                    "next_rehearsal_at": "2025-12-31T00:00:00Z",
                 }
             ],
             "now": "2026-01-01T00:00:00Z",
@@ -1331,12 +1372,16 @@ def test_runtime_job_handlers_drain_calibration_lifecycle_and_observability_jobs
     assert [job.status for job in jobs] == ["complete", "complete", "complete", "complete"]
     assert jobs[0].result["details"]["abstain"] is True
     assert jobs[1].result["details"]["demoted"] == 1
+    assert jobs[1].result["details"]["rehearsed"] == 1
+    assert jobs[1].result["details"]["states"][1]["rehearsed"] is True
+    assert jobs[1].result["details"]["states"][1]["next_rehearsal_at"] == "2026-01-08T00:00:00+00:00"
     assert jobs[2].result["details"]["passed"] is True
     assert jobs[3].result["details"]["metrics"]["counters"]["observability.snapshots"] == 1
     assert engine.export_tenant(TENANT)["calibrations"][0]["memory_type"] == "fact"
     snapshot = metrics.snapshot()
     assert snapshot.counters["queue.job.calibrate.complete"] == 1
     assert snapshot.counters["lifecycle.demotions"] == 1
+    assert snapshot.counters["lifecycle.rehearsals"] == 1
     assert snapshot.counters["eval.suites"] == 1
 
 

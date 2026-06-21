@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from mnemosyne.guard import no_degradation_guard
-from mnemosyne.lifecycle import next_rehearsal_days
+from mnemosyne.lifecycle import FidelityTier, LifecycleState, apply_rehearsal_schedule, next_rehearsal_days
 from mnemosyne.user_model import LatentUserProfile, UserMemoryKind, UserModel, UserModelEntry
 
 
@@ -118,6 +120,30 @@ def test_rehearsal_schedule_expands_monotonically() -> None:
     assert intervals == sorted(intervals)
     assert intervals[0] == 1
     assert intervals[-1] == 240
+
+
+def test_rehearsal_scheduler_boosts_due_must_keep_memory() -> None:
+    now = datetime(2026, 6, 21, tzinfo=UTC)
+    state = LifecycleState(
+        item_id="memory-1",
+        tier=FidelityTier.VERBATIM,
+        salience=0.1,
+        importance=0.5,
+        access_count=2,
+        last_accessed=datetime(2026, 6, 1, tzinfo=UTC),
+        must_keep=True,
+        successful_rehearsals=1,
+        next_rehearsal_at=datetime(2026, 6, 20, tzinfo=UTC),
+    )
+
+    updated, rehearsed = apply_rehearsal_schedule(state, now)
+
+    assert rehearsed is True
+    assert updated.successful_rehearsals == 2
+    assert updated.access_count == 3
+    assert updated.last_rehearsed_at == now
+    assert updated.next_rehearsal_at == datetime(2026, 6, 28, tzinfo=UTC)
+    assert updated.salience > state.salience
 
 
 def test_no_degradation_guard_blocks_memory_below_baseline() -> None:

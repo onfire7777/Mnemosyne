@@ -14,7 +14,7 @@ from typing import Any, Protocol, Sequence
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.gate import Candidate, GateResult, PromotionGate, RegressionCase
 from mnemosyne.learning import Lesson, Procedure
-from mnemosyne.lifecycle import FidelityTier, LifecycleState, demotion_decision
+from mnemosyne.lifecycle import FidelityTier, LifecycleState, apply_rehearsal_schedule, demotion_decision
 from mnemosyne.models import Assertion, Evidence, Relation
 from mnemosyne.retrieval import is_retired_summary_metadata
 from mnemosyne.security import SecurityPolicy, TrustTier
@@ -831,13 +831,15 @@ class ConsolidationWorker:
                 continue
             lifecycle = item.metadata.get("lifecycle") if isinstance(item.metadata, dict) else None
             state = self._lifecycle_state(item, lifecycle)
-            next_state, changed = demotion_decision(state, now, utility_threshold=threshold)
+            scheduled_state, rehearsed = apply_rehearsal_schedule(state, now)
+            next_state, changed = demotion_decision(scheduled_state, now, utility_threshold=threshold)
             payload_patch = {
                 "lifecycle": {
                     **next_state.to_dict(),
                     "updated_by": "consolidation.forgetter",
                     "utility_threshold": threshold,
                     "demoted": changed,
+                    "rehearsed": rehearsed,
                 }
             }
             updated = bool(
@@ -863,6 +865,13 @@ class ConsolidationWorker:
                     "to_tier": next_state.tier.value,
                     "salience": next_state.salience,
                     "demoted": changed,
+                    "rehearsed": rehearsed,
+                    "successful_rehearsals": next_state.successful_rehearsals,
+                    "next_rehearsal_at": (
+                        next_state.next_rehearsal_at.astimezone(UTC).isoformat()
+                        if next_state.next_rehearsal_at
+                        else None
+                    ),
                     "updated": updated,
                 }
             )
@@ -893,6 +902,10 @@ class ConsolidationWorker:
             ),
             access_count=int(ConsolidationWorker._safe_float(data.get("access_count"), 0.0)),
             last_accessed=ConsolidationWorker._parse_datetime(data.get("last_accessed")),
+            must_keep=bool(data.get("must_keep", False)),
+            successful_rehearsals=int(ConsolidationWorker._safe_float(data.get("successful_rehearsals"), 0.0)),
+            next_rehearsal_at=ConsolidationWorker._parse_datetime(data.get("next_rehearsal_at")),
+            last_rehearsed_at=ConsolidationWorker._parse_datetime(data.get("last_rehearsed_at")),
             confabulation_risk=bool(data.get("confabulation_risk", False)),
             protected=bool(data.get("protected", False)),
         )

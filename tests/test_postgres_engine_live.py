@@ -241,6 +241,17 @@ def test_postgres_queue_worker_drains_maintenance_handlers_live() -> None:
                     "importance": 0.0,
                     "access_count": 0,
                     "last_accessed": "2020-01-01T00:00:00Z",
+                },
+                {
+                    "item_id": "postgres-memory-2",
+                    "tier": "verbatim",
+                    "salience": 0.01,
+                    "importance": 0.8,
+                    "access_count": 1,
+                    "last_accessed": "2025-12-01T00:00:00Z",
+                    "must_keep": True,
+                    "successful_rehearsals": 1,
+                    "next_rehearsal_at": "2025-12-31T00:00:00Z",
                 }
             ],
             "now": "2026-01-01T00:00:00Z",
@@ -266,6 +277,8 @@ def test_postgres_queue_worker_drains_maintenance_handlers_live() -> None:
     assert queue.snapshot()["complete"] == 5
     assert persisted[CALIBRATE_JOB].result["details"]["abstain"] is True
     assert persisted[LIFECYCLE_SWEEP_JOB].result["details"]["demoted"] == 1
+    assert persisted[LIFECYCLE_SWEEP_JOB].result["details"]["rehearsed"] == 1
+    assert persisted[LIFECYCLE_SWEEP_JOB].result["details"]["states"][1]["next_rehearsal_at"] == "2026-01-08T00:00:00+00:00"
     assert persisted[EVAL_SUITE_JOB].result["details"]["passed"] is True
     assert persisted[OBSERVABILITY_SNAPSHOT_JOB].result["details"]["metrics"]["counters"]["observability.snapshots"] == 1
     recompute = persisted[PROJECTION_RECOMPUTE_JOB].result["details"]
