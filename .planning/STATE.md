@@ -62,6 +62,8 @@ Latest checkpoint: Direct retrieval primitive budget enforcement now has shared 
 
 Latest checkpoint: CLI `deep-search` and `explain` now have direct runtime coverage for relation-only `summary-derived-gist` graph support. The regression seeds generated summary evidence plus a gist-derived relation into the CLI store, runs both commands, and verifies `abstained=true`, the source-inspection uncertainty note, relation metadata, and `explain.gist_support`. Local verification now collects 359 tests with 303 passing tests plus 56 skipped live-DB tests, and the clean compose DSN run passes all 359 tests with `MNEMOSYNE_POSTGRES_DSN=postgresql://mnemosyne:<redacted>@127.0.0.1:54329/mnemosyne?connect_timeout=5`.
 
+Latest checkpoint: CLI `projection-recompute-enqueue` now has direct runtime coverage for queue payload persistence. The regression verifies tenant/user/branch, multiple changed evidence CIDs, custom max attempts, and disabled consolidation enqueue semantics are emitted into the queued `projection_recompute` job. Local verification now collects 360 tests with 304 passing tests plus 56 skipped live-DB tests, and the clean compose DSN run passes all 360 tests with `MNEMOSYNE_POSTGRES_DSN=postgresql://mnemosyne:<redacted>@127.0.0.1:54329/mnemosyne?connect_timeout=5`.
+
 Progress: [███████░░░] local scaffold verified; production parity gaps remain
 
 ## Performance Metrics
