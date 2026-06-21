@@ -6,7 +6,7 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from mnemosyne.calibration import CalibrationSet, conformal_threshold, should_abstain
+from mnemosyne.calibration import CalibrationSet, calibration_examples_from_rows, conformal_threshold, should_abstain, tune_calibration_set
 from mnemosyne.consolidation import (
     CONSOLIDATE_EVIDENCE_JOB,
     DEFAULT_CONSOLIDATION_PASSES,
@@ -240,6 +240,37 @@ class RuntimeJobHandlers:
         )
 
     def run_calibration(self, payload: dict[str, Any]) -> RuntimeJobResult:
+        examples = payload.get("examples")
+        if isinstance(examples, list):
+            tuning = tune_calibration_set(
+                tenant_id=str(payload["tenant_id"]),
+                memory_type=str(payload.get("memory_type", "fact")),
+                examples=calibration_examples_from_rows(examples),
+                target_coverage=float(payload.get("target_coverage", 0.9)),
+                min_examples=int(payload.get("min_examples", 20)),
+                min_correct=int(payload.get("min_correct", 1)),
+                min_incorrect=int(payload.get("min_incorrect", 1)),
+                min_empirical_coverage=(
+                    float(payload["min_empirical_coverage"])
+                    if payload.get("min_empirical_coverage") is not None
+                    else None
+                ),
+                max_false_accept_rate=float(payload.get("max_false_accept_rate", 0.1)),
+                max_prediction_set_size=int(payload.get("max_prediction_set_size", 3)),
+            )
+            self.metrics.gauge(f"calibration.{tuning.calibration.memory_type}.threshold", tuning.threshold)
+            self.metrics.increment("calibration.jobs")
+            if tuning.metrics["abstention_rate"] > 0:
+                self.metrics.increment("calibration.abstentions")
+            if tuning.ok and hasattr(self.engine, "set_calibration"):
+                self.engine.set_calibration(tuning.calibration)
+            details = tuning.to_dict()
+            details["applied"] = bool(tuning.ok)
+            return RuntimeJobResult(
+                CALIBRATE_JOB,
+                "complete" if tuning.ok else "failed",
+                details,
+            )
         calibration = CalibrationSet(
             tenant_id=str(payload["tenant_id"]),
             memory_type=str(payload.get("memory_type", "fact")),
