@@ -53,7 +53,7 @@
 - Live Postgres command-backed consolidation now covers candidate extraction, entity resolution, and evidence summarization together, including resolver pass metadata and resolver-supplied entity canonical persistence.
 - Provider deployment manifests now emit `retrieval_backends` and fail closed on local lexical/graph backends when `forbid_local` is set; production-style `paradedb-bm25` and `apache-age` labels are covered by focused CLI tests.
 - CLI Postgres DSN handling now fails closed on explicit empty `--postgres-dsn ""` even when `MNEMOSYNE_POSTGRES_DSN` is set; backend, runtime-state, and queue loading share the parser-selected DSN behavior.
-- Full compose verification now passes all 347 collected tests with `MNEMOSYNE_POSTGRES_DSN=postgresql://mnemosyne:<redacted>@127.0.0.1:54329/mnemosyne?connect_timeout=5`; the no-DSN local run passes 295 tests and skips the 52 live-DB cases.
+- Full compose verification now passes all 348 collected tests with `MNEMOSYNE_POSTGRES_DSN=postgresql://mnemosyne:<redacted>@127.0.0.1:54329/mnemosyne?connect_timeout=5`; the no-DSN local run passes 296 tests and skips the 52 live-DB cases.
 - Local and Postgres audit logs now record source/tier provenance on write paths. Evidence appends, assertion upserts, preference writes, learning-store writes, and forget/delete audit rows expose `actor`, `source`, `trust_tier`, `capability_tags`, and structured `diff` metadata; Postgres writes the existing tier/tag columns and normalizes source during export. Focused shared-contract tests pass locally and against the compose DSN, and `tests/test_postgres_engine_live.py` remains green.
 - Consolidation replayer now performs priority replay by `importance*novelty*surprise*reward` using evidence metadata or payload replay-score overrides, orders the evidence stream before downstream passes, and reports per-CID factors/scores. Focused consolidation coverage verifies that priority order differs from input order.
 - Consolidation `user_model_updater` now refreshes the latent user profile from prioritized evidence/candidates using the existing deterministic embedding and user-model persistence path; CLI worker persistence saves user-model state alongside learning state.
@@ -70,6 +70,7 @@
 - CLI `search` now has direct coverage for gist-only abstention propagation from the engine result through the command facade, including the uncertainty note, abstractive-gist hit metadata, and `explain.gist_support`.
 - RAPTOR-aware projection recompute now has shared Local/Postgres contract coverage. Changing a raw source in a summary tree marks the raw source, its leaf summary, and root summary as affected, reports required summary lineage relations, and queues consolidation for surviving raw source evidence only.
 - Branch parity now covers explicit non-main source-branch inheritance in the shared Local/Postgres contract, including source-branch evidence/assertion/relation inheritance, child `from_branch` export metadata, and isolation of source-only rows from `main`.
+- MCP `search` now has direct JSON-RPC facade coverage for gist-only abstention propagation from engine retrieval, including the uncertainty note, abstractive-gist hit metadata, and `explain.gist_support`.
 
 ## Supersession Note
 

@@ -31,6 +31,7 @@ from mnemosyne.mcp_server import (
     build_sdk_streamable_http_app,
     run_self_test,
 )
+from mnemosyne.consolidation import ConsolidationWorker
 from mnemosyne.mcp_tools import TOOL_SPEC
 from mnemosyne.models import Hit
 from mnemosyne.postgres_engine import PostgresEngine, _bytes_to_cid, _cid_to_bytes, _stable_uuid, _uuid_or_none, _vector_literal
@@ -949,6 +950,40 @@ def test_mcp_server_can_use_command_key_provider_for_encrypted_objects(tmp_path:
     assert after_shred["keys"] == {}
     assert not (objects / ".keys.json").exists()
     assert forgotten["object_shred"]["crypto_shredded"] is True
+
+
+def test_mcp_search_surfaces_gist_only_abstention(tmp_path: Path) -> None:
+    server = MnemosyneMcpServer(store_path=tmp_path / "store.json")
+    captured = mcp_call(
+        server,
+        "capture",
+        {
+            "tenant_id": TENANT,
+            "user_id": USER,
+            "actor": "user",
+            "source_type": "mcp",
+            "content": "MCP search abstention source should only support answers through generated gist metadata.",
+            "trust_tier": 0,
+        },
+    )
+    summary_run = ConsolidationWorker(server.engine, gate_cases=[]).run_queue_payload(
+        {
+            "tenant_id": TENANT,
+            "branch": "main",
+            "source_evidence_cids": [captured["cid"]],
+            "passes": ["summarizer"],
+        }
+    )
+    summary = next(item for item in summary_run.pass_results if item["name"] == "summarizer")["details"]
+
+    searched = mcp_call(server, "search", {"tenant_id": TENANT, "query": captured["cid"]})
+
+    assert searched["abstained"] is True
+    assert searched["uncertainty_note"] == "Only gist-tier memory support was retrieved; inspect source evidence before answering."
+    assert searched["hits"][0]["id"] == summary["summary_cid"]
+    assert searched["hits"][0]["metadata"]["summary"]["kind"] == "abstractive_gist"
+    assert searched["explain"]["gist_support"]["applied"] is True
+    assert searched["explain"]["gist_support"]["gist_hit_ids"] == [summary["summary_cid"]]
 
 
 def test_mcp_server_rejects_non_object_tool_arguments(tmp_path: Path) -> None:
