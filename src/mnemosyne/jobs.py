@@ -22,6 +22,7 @@ CALIBRATE_JOB = "calibrate"
 LIFECYCLE_SWEEP_JOB = "lifecycle_sweep"
 EVAL_SUITE_JOB = "eval_suite"
 OBSERVABILITY_SNAPSHOT_JOB = "observability_snapshot"
+PROJECTION_RECOMPUTE_JOB = "projection_recompute"
 
 
 @dataclass(slots=True)
@@ -53,7 +54,12 @@ class RuntimeJobHandlers:
         self.media_extractor = media_extractor or MetadataMediaTextExtractor()
         self.learning = learning
         self.gate_cases = gate_cases or []
-        self.consolidator = ConsolidationWorker(engine, gate_cases=self.gate_cases, learning=learning, entity_resolver=entity_resolver)
+        self.consolidator = ConsolidationWorker(
+            engine,
+            gate_cases=self.gate_cases,
+            learning=learning,
+            entity_resolver=entity_resolver,
+        )
 
     def handlers(self) -> dict[str, Any]:
         return {
@@ -63,7 +69,48 @@ class RuntimeJobHandlers:
             EVAL_SUITE_JOB: self.run_eval_suite,
             OBSERVABILITY_SNAPSHOT_JOB: self.run_observability_snapshot,
             MEDIA_EXTRACT_JOB: self.run_media_extract,
+            PROJECTION_RECOMPUTE_JOB: self.run_projection_recompute,
         }
+
+    def run_projection_recompute(self, payload: dict[str, Any]) -> RuntimeJobResult:
+        tenant_id = str(payload["tenant_id"])
+        branch = str(payload.get("branch", "main"))
+        changed_cids = _payload_cids(payload)
+        if not changed_cids:
+            raise ValueError("projection recompute requires changed evidence CIDs")
+        snapshot = _tenant_snapshot(self.engine, tenant_id)
+        affected_cids = _affected_evidence_cids(snapshot, tenant_id, branch, changed_cids)
+        projections = _affected_projections(snapshot, tenant_id, branch, affected_cids)
+        queued_jobs = []
+        if bool(payload.get("enqueue_consolidation", True)):
+            passes = [str(name) for name in payload.get("passes") or DEFAULT_CONSOLIDATION_PASSES]
+            for cid in _surviving_evidence_cids(snapshot, tenant_id, branch, affected_cids):
+                job = self.queue.enqueue(
+                    CONSOLIDATE_EVIDENCE_JOB,
+                    {
+                        "tenant_id": tenant_id,
+                        "user_id": str(payload.get("user_id", "system")),
+                        "branch": branch,
+                        "source_evidence_cids": [cid],
+                        "trigger": PROJECTION_RECOMPUTE_JOB,
+                        "passes": passes,
+                    },
+                )
+                queued_jobs.append(job.id)
+        self.metrics.increment("projection_recompute.completed")
+        return RuntimeJobResult(
+            PROJECTION_RECOMPUTE_JOB,
+            "complete",
+            {
+                "tenant_id": tenant_id,
+                "branch": branch,
+                "changed_evidence_cids": changed_cids,
+                "affected_evidence_cids": affected_cids,
+                "affected_projection_counts": {key: len(value) for key, value in projections.items()},
+                "affected_projections": projections,
+                "queued_consolidation_jobs": queued_jobs,
+            },
+        )
 
     def run_media_extract(self, payload: dict[str, Any]) -> RuntimeJobResult:
         tenant_id = str(payload["tenant_id"])
@@ -255,6 +302,132 @@ class RuntimeJobHandlers:
                 "metrics": self.metrics.snapshot().to_dict(),
             },
         )
+
+
+def _payload_cids(payload: dict[str, Any]) -> list[str]:
+    raw = (
+        payload.get("changed_evidence_cids")
+        or payload.get("evidence_cids")
+        or payload.get("source_evidence_cids")
+        or payload.get("cid")
+    )
+    if isinstance(raw, str):
+        values = [raw]
+    else:
+        values = list(raw or [])
+    cids: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        cid = str(value)
+        if cid and cid not in seen:
+            cids.append(cid)
+            seen.add(cid)
+    return cids
+
+
+def _tenant_snapshot(engine: Any, tenant_id: str) -> dict[str, Any]:
+    export_tenant = getattr(engine, "export_tenant", None)
+    if not callable(export_tenant):
+        raise RuntimeError("projection recompute requires an engine with export_tenant")
+    snapshot = export_tenant(tenant_id)
+    if not isinstance(snapshot, dict):
+        raise RuntimeError("projection recompute export_tenant returned non-object snapshot")
+    return snapshot
+
+
+def _affected_evidence_cids(
+    snapshot: dict[str, Any],
+    tenant_id: str,
+    branch: str,
+    changed_cids: list[str],
+) -> list[str]:
+    affected = set(changed_cids)
+    ordered = list(changed_cids)
+    changed = True
+    while changed:
+        changed = False
+        for row in snapshot.get("evidence", []):
+            if not _matches_tenant_branch(row, tenant_id, branch):
+                continue
+            cid = str(row.get("cid", ""))
+            metadata = row.get("metadata") or {}
+            source_cid = str(metadata.get("source_evidence_cid", ""))
+            if cid and source_cid in affected and cid not in affected:
+                affected.add(cid)
+                ordered.append(cid)
+                changed = True
+        for row in snapshot.get("relations", []):
+            if not _matches_tenant_branch(row, tenant_id, branch):
+                continue
+            if str(row.get("predicate", "")) != "media-derived-text":
+                continue
+            source = str(row.get("source", ""))
+            target = str(row.get("target", ""))
+            if source in affected and target and target not in affected:
+                affected.add(target)
+                ordered.append(target)
+                changed = True
+    return ordered
+
+
+def _affected_projections(
+    snapshot: dict[str, Any],
+    tenant_id: str,
+    branch: str,
+    affected_cids: list[str],
+) -> dict[str, list[str]]:
+    affected = set(affected_cids)
+    return {
+        "assertions": _projection_ids(snapshot.get("assertions", []), tenant_id, branch, affected, "id"),
+        "preferences": _projection_ids(snapshot.get("preferences", []), tenant_id, branch, affected, "id"),
+        "relations": _projection_ids(snapshot.get("relations", []), tenant_id, branch, affected, "id"),
+        "entities": _projection_ids(snapshot.get("entities", []), tenant_id, branch, affected, "canonical"),
+    }
+
+
+def _surviving_evidence_cids(
+    snapshot: dict[str, Any],
+    tenant_id: str,
+    branch: str,
+    affected_cids: list[str],
+) -> list[str]:
+    affected = set(affected_cids)
+    surviving: list[str] = []
+    for row in snapshot.get("evidence", []):
+        if not _matches_tenant_branch(row, tenant_id, branch):
+            continue
+        cid = str(row.get("cid", ""))
+        if cid in affected and not bool(row.get("erased", False)):
+            surviving.append(cid)
+    return surviving
+
+
+def _projection_ids(
+    rows: list[dict[str, Any]],
+    tenant_id: str,
+    branch: str,
+    affected_cids: set[str],
+    key_field: str,
+) -> list[str]:
+    ids: list[str] = []
+    for row in rows:
+        if not _matches_tenant_branch(row, tenant_id, branch):
+            continue
+        sources = {str(cid) for cid in row.get("source_evidence_cids", [])}
+        if not sources.intersection(affected_cids):
+            continue
+        item_id = str(row.get(key_field) or row.get("id") or row.get("key") or "")
+        if item_id:
+            ids.append(item_id)
+    return sorted(set(ids))
+
+
+def _matches_tenant_branch(row: dict[str, Any], tenant_id: str, branch: str) -> bool:
+    if row.get("tenant_id") not in {None, tenant_id}:
+        return False
+    if row.get("branch") not in {None, branch}:
+        return False
+    return True
 
 
 def _parse_dt(value: str | datetime | None) -> datetime | None:

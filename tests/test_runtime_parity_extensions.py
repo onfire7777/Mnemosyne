@@ -8,7 +8,13 @@ from mnemosyne.consolidation import CONSOLIDATE_EVIDENCE_JOB, ConsolidationWorke
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.gate import GateResult, RegressionCase
 from mnemosyne.ingestion import IngestRequest, IngestionPipeline
-from mnemosyne.jobs import CALIBRATE_JOB, LIFECYCLE_SWEEP_JOB, OBSERVABILITY_SNAPSHOT_JOB, RuntimeJobHandlers
+from mnemosyne.jobs import (
+    CALIBRATE_JOB,
+    LIFECYCLE_SWEEP_JOB,
+    OBSERVABILITY_SNAPSHOT_JOB,
+    PROJECTION_RECOMPUTE_JOB,
+    RuntimeJobHandlers,
+)
 from mnemosyne.learning import LearningSystem, Lesson, Procedure
 from mnemosyne.media import MEDIA_EXTRACT_JOB, MediaExtractionResult
 from mnemosyne.models import Assertion, Contradiction, Evidence, Preference, Relation
@@ -711,6 +717,18 @@ def test_media_extract_job_appends_derived_evidence_without_mutating_source(tmp_
     assert "derived-from-media" in derived.capability_tags
     assert hits.hits[0].id == derived_cid
     assert queue.snapshot()["queued"] == 2
+    recompute = handlers.run_projection_recompute(
+        {
+            "tenant_id": TENANT,
+            "branch": "main",
+            "changed_evidence_cids": [result.cid],
+            "enqueue_consolidation": False,
+        }
+    )
+    assert recompute.kind == PROJECTION_RECOMPUTE_JOB
+    assert recompute.details["affected_evidence_cids"] == [result.cid, derived_cid]
+    assert recompute.details["affected_projection_counts"]["relations"] == 1
+    assert recompute.details["queued_consolidation_jobs"] == []
 
 
 def test_forget_transitively_erases_media_derived_evidence_and_assertions(tmp_path) -> None:
