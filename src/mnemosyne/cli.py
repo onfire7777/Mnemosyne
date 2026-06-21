@@ -85,6 +85,7 @@ DEPLOYMENT_SOAK_COMMANDS = {
     "forgetting-policy-check",
     "hosted-llm-check",
     "policy-ops-check",
+    "provenance-trust-check",
     "provider-check",
     "idp-jwks-live-check",
     "idp-authz-policy-rollout-check",
@@ -112,6 +113,7 @@ PRODUCTION_RELEASE_REQUIRED_COMMANDS = (
     "forgetting-policy-check",
     "hosted-llm-check",
     "policy-ops-check",
+    "provenance-trust-check",
     "provider-check",
     "idp-jwks-live-check",
     "idp-authz-policy-rollout-check",
@@ -1299,6 +1301,284 @@ def cmd_belief_revision_check(args: argparse.Namespace) -> None:
                 "code": "fingerprint_mismatch",
                 "message": "belief revision suite fingerprint mismatch",
             }
+        )
+    emit(report)
+    if not report["ok"]:
+        raise SystemExit(1)
+
+
+def _load_provenance_trust_suite(args: argparse.Namespace) -> Mapping[str, Any]:
+    if bool(args.suite) == bool(args.suite_json):
+        raise SystemExit("provenance-trust-check requires exactly one of --suite or --suite-json")
+    try:
+        loaded = (
+            json.loads(Path(args.suite).expanduser().read_text(encoding="utf-8"))
+            if args.suite
+            else json.loads(args.suite_json)
+        )
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"provenance trust suite denied: {exc}") from exc
+    if not isinstance(loaded, Mapping):
+        raise SystemExit("provenance trust suite must be a JSON object")
+    cases = loaded.get("cases")
+    if not isinstance(cases, list) or not all(isinstance(item, Mapping) for item in cases):
+        raise SystemExit("provenance trust suite requires cases array of JSON objects")
+    return loaded
+
+
+def _provenance_string_list(value: Any, *, field: str) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list | tuple) and all(isinstance(item, str) for item in value):
+        return list(dict.fromkeys(item for item in value if item))
+    raise SystemExit(f"provenance trust suite field {field} must be a string or string array")
+
+
+def _provenance_bool(value: Any, *, field: str, default: bool) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    raise SystemExit(f"provenance trust suite field {field} must be boolean")
+
+
+def _provenance_finding(code: str, message: str, *, case_id: str | None = None) -> dict[str, Any]:
+    finding: dict[str, Any] = {"code": code, "message": message}
+    if case_id:
+        finding["case_id"] = case_id
+    return finding
+
+
+def _provenance_trust_fingerprint(report: Mapping[str, Any]) -> str:
+    payload = {
+        "suite": report.get("suite"),
+        "required_case_ids": report.get("required_case_ids"),
+        "checks": report.get("checks"),
+        "findings": report.get("findings"),
+    }
+    return sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def cmd_provenance_trust_check(args: argparse.Namespace) -> None:
+    suite = _load_provenance_trust_suite(args)
+    cases = list(suite["cases"])
+    tool_path = str(args.c2pa_tool or suite.get("tool") or suite.get("c2pa_tool") or "").strip()
+    trusted_issuers = _provenance_string_list(
+        suite.get("trusted_issuers", suite.get("trustedIssuers")),
+        field="trusted_issuers",
+    )
+    trusted_roots = _provenance_string_list(
+        suite.get("trusted_roots", suite.get("trustedRoots")),
+        field="trusted_roots",
+    )
+    policy_raw = suite.get("trust_policy", suite.get("trustPolicy")) or {}
+    if not isinstance(policy_raw, Mapping):
+        raise SystemExit("provenance trust suite trust_policy must be a JSON object")
+    try:
+        trust_policy = ProvenanceTrustPolicy.from_dict(dict(policy_raw))
+    except ValueError as exc:
+        raise SystemExit(f"provenance trust policy denied: {exc}") from exc
+
+    required_case_ids = list(
+        dict.fromkeys(
+            [
+                *_provenance_string_list(
+                    suite.get("required_cases", suite.get("requiredCases")),
+                    field="required_cases",
+                ),
+                *(args.require_case or []),
+            ]
+        )
+    )
+    if not all(isinstance(item, str) for item in required_case_ids):
+        raise SystemExit("provenance trust suite required_cases must be string case IDs")
+
+    findings: list[dict[str, Any]] = []
+    if not tool_path:
+        findings.append(_provenance_finding("missing_c2pa_tool", "provenance trust suite requires a c2pa tool"))
+    if len(cases) < args.min_cases:
+        findings.append(
+            _provenance_finding(
+                "insufficient_cases",
+                f"provenance trust suite requires at least {args.min_cases} cases",
+            )
+        )
+    policy_issuers = {
+        item
+        for rule in trust_policy.rules
+        for item in rule.trusted_issuers
+    }
+    policy_roots = {
+        item
+        for rule in trust_policy.rules
+        for item in rule.trusted_roots
+    }
+    configured_issuer_count = len({*trusted_issuers, *trust_policy.trusted_issuers, *policy_issuers})
+    configured_root_count = len({*trusted_roots, *trust_policy.trusted_roots, *policy_roots})
+    if configured_issuer_count == 0:
+        findings.append(_provenance_finding("missing_trusted_issuer", "trusted provenance issuer is required"))
+    if configured_root_count == 0:
+        findings.append(_provenance_finding("missing_trusted_root", "trusted provenance certificate root is required"))
+
+    verifier = C2paToolVerifier(
+        tool_path=tool_path or "c2patool",
+        trusted_issuers=tuple(trusted_issuers),
+        trusted_roots=tuple(trusted_roots),
+        trust_policy=trust_policy,
+        timeout_seconds=args.timeout,
+        fallback=SignedProvenanceVerifier(),
+    )
+
+    checks: list[dict[str, Any]] = []
+    seen_case_ids: set[str] = set()
+    for index, raw_case in enumerate(cases, start=1):
+        case = dict(raw_case)
+        case_id = str(case.get("id") or f"case-{index}")
+        seen_case_ids.add(case_id)
+        case_findings: list[dict[str, Any]] = []
+        asset_path_raw = case.get("asset_path") or case.get("c2pa_asset_path")
+        asset_sha = None
+        decision_dict: dict[str, Any] | None = None
+        diagnostics_summary: dict[str, Any] = {}
+        if not isinstance(asset_path_raw, str) or not asset_path_raw:
+            case_findings.append(_provenance_finding("missing_asset_path", "case requires asset_path", case_id=case_id))
+            payload = b""
+        else:
+            asset_path = Path(asset_path_raw).expanduser()
+            try:
+                payload = asset_path.read_bytes()
+            except OSError as exc:
+                case_findings.append(
+                    _provenance_finding(
+                        "asset_read_failed",
+                        f"case asset could not be read: {exc}",
+                        case_id=case_id,
+                    )
+                )
+                payload = b""
+            asset_sha = sha256(payload).hexdigest() if payload else None
+            manifest_raw = case.get("manifest") or {}
+            if not isinstance(manifest_raw, Mapping):
+                raise SystemExit(f"provenance trust case {case_id} manifest must be a JSON object")
+            manifest = dict(manifest_raw)
+            manifest.setdefault("asset_path", str(asset_path))
+            if asset_sha and "sha256" not in manifest and "content_hash" not in manifest:
+                manifest["sha256"] = asset_sha
+            if payload and tool_path:
+                decision = verifier.verify(payload, manifest)
+                decision_dict = {
+                    "valid": decision.valid,
+                    "trusted": decision.trusted,
+                    "quarantine": decision.quarantine,
+                    "trust_delta": decision.trust_delta,
+                    "reason": decision.reason,
+                }
+                signer = decision.diagnostics.get("signer")
+                certificate_roots = [
+                    str(item) for item in (decision.diagnostics.get("certificate_roots") or []) if isinstance(item, str)
+                ]
+                effective_trusted_roots = [
+                    str(item) for item in (decision.diagnostics.get("trusted_roots") or trusted_roots) if isinstance(item, str)
+                ]
+                root_matches = sorted(set(certificate_roots).intersection(effective_trusted_roots))
+                diagnostics_summary = {
+                    "signer": signer,
+                    "certificate_root_count": len(certificate_roots),
+                    "trusted_issuer_count": len(decision.diagnostics.get("trusted_issuers") or trusted_issuers),
+                    "trusted_root_count": len(effective_trusted_roots),
+                    "trusted_root_matched": bool(root_matches),
+                    "asset_binding": decision.diagnostics.get("asset_binding"),
+                }
+                expected_valid = _provenance_bool(case.get("expect_valid"), field=f"{case_id}.expect_valid", default=True)
+                expected_trusted = _provenance_bool(
+                    case.get("expect_trusted"),
+                    field=f"{case_id}.expect_trusted",
+                    default=True,
+                )
+                expected_quarantine = _provenance_bool(
+                    case.get("expect_quarantine"),
+                    field=f"{case_id}.expect_quarantine",
+                    default=False,
+                )
+                if decision.valid is not expected_valid:
+                    case_findings.append(
+                        _provenance_finding("validity_mismatch", "provenance validity expectation failed", case_id=case_id)
+                    )
+                if decision.trusted is not expected_trusted:
+                    case_findings.append(
+                        _provenance_finding("trust_mismatch", "provenance trust expectation failed", case_id=case_id)
+                    )
+                if decision.quarantine is not expected_quarantine:
+                    case_findings.append(
+                        _provenance_finding(
+                            "quarantine_mismatch",
+                            "provenance quarantine expectation failed",
+                            case_id=case_id,
+                        )
+                    )
+                expected_signer = case.get("expect_signer", case.get("expected_signer"))
+                if expected_signer and signer != expected_signer:
+                    case_findings.append(
+                        _provenance_finding("signer_mismatch", "provenance signer expectation failed", case_id=case_id)
+                    )
+                expected_roots = _provenance_string_list(
+                    case.get("expect_root", case.get("expected_root")),
+                    field=f"{case_id}.expect_root",
+                )
+                missing_roots = [item for item in expected_roots if item not in certificate_roots]
+                if missing_roots:
+                    case_findings.append(
+                        _provenance_finding(
+                            "certificate_root_mismatch",
+                            "provenance certificate root expectation failed",
+                            case_id=case_id,
+                        )
+                    )
+        checks.append(
+            {
+                "id": case_id,
+                "ok": not case_findings,
+                "asset_sha256": asset_sha,
+                "decision": decision_dict,
+                "diagnostics": diagnostics_summary,
+                "findings": case_findings,
+            }
+        )
+        findings.extend(case_findings)
+
+    for required in required_case_ids:
+        if required not in seen_case_ids:
+            findings.append(_provenance_finding("missing_required_case", f"required case {required} is missing"))
+
+    report: dict[str, Any] = {
+        "ok": not findings,
+        "suite": {
+            "name": suite.get("name"),
+            "case_count": len(cases),
+            "tool_configured": bool(tool_path),
+            "trusted_issuer_count": configured_issuer_count,
+            "trusted_root_count": configured_root_count,
+            "requires_trusted_issuer": bool(trust_policy.require_trusted_issuer or trusted_issuers),
+            "requires_trusted_root": bool(trust_policy.require_trusted_root or trusted_roots),
+        },
+        "required_case_ids": sorted(required_case_ids),
+        "redaction": {
+            "asset_bytes_omitted": True,
+            "raw_manifest_omitted": True,
+            "raw_verifier_stdout_omitted": True,
+            "raw_verifier_stderr_omitted": True,
+        },
+        "checks": checks,
+        "findings": findings,
+    }
+    report["fingerprint"] = _provenance_trust_fingerprint(report)
+    report["expected_fingerprint_present"] = bool(args.expected_fingerprint)
+    if args.expected_fingerprint and args.expected_fingerprint.strip().lower() != report["fingerprint"]:
+        report["ok"] = False
+        report["findings"].append(
+            _provenance_finding("fingerprint_mismatch", "provenance trust suite fingerprint mismatch")
         )
     emit(report)
     if not report["ok"]:
@@ -4865,6 +5145,25 @@ def build_parser() -> argparse.ArgumentParser:
     belief_revision_check.add_argument("--require-case", action="append", default=[])
     belief_revision_check.add_argument("--expected-fingerprint")
     belief_revision_check.set_defaults(func=cmd_belief_revision_check)
+
+    provenance_trust_check = sub.add_parser("provenance-trust-check")
+    provenance_trust_check.add_argument("--suite", help="Path to provenance trust validation suite JSON")
+    provenance_trust_check.add_argument("--suite-json", help="Inline provenance trust validation suite JSON")
+    provenance_trust_check.add_argument(
+        "--c2pa-tool",
+        default=os.environ.get("MNEMOSYNE_C2PA_TOOL"),
+        help="Override c2patool-compatible verifier path for all suite cases",
+    )
+    provenance_trust_check.add_argument(
+        "--timeout",
+        type=float,
+        default=float(os.environ.get("MNEMOSYNE_PROVENANCE_TRUST_TIMEOUT", "30")),
+        help="Per-case verifier timeout in seconds",
+    )
+    provenance_trust_check.add_argument("--min-cases", type=int, default=1)
+    provenance_trust_check.add_argument("--require-case", action="append", default=[])
+    provenance_trust_check.add_argument("--expected-fingerprint")
+    provenance_trust_check.set_defaults(func=cmd_provenance_trust_check)
 
     branch = sub.add_parser("branch")
     branch.add_argument("--name", required=True)

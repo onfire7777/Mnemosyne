@@ -2681,6 +2681,146 @@ def test_cli_c2pa_verifier_uses_actual_file_over_manifest_asset_path(tmp_path: P
     assert ingested["provenance"]["manifest"]["c2pa"]["certificate_roots"] == [trusted_root]
 
 
+def test_cli_provenance_trust_check_validates_c2pa_roots(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    asset = tmp_path / "capture.bin"
+    payload = b"binary camera capture"
+    asset.write_bytes(payload)
+    asset_hash = sha256(payload).hexdigest()
+    trusted_root = "a" * 64
+    verifier_stub = tmp_path / "c2pa-ok.py"
+    verifier_stub.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env python3",
+                "import json",
+                "print(json.dumps({",
+                "  'active_manifest': 'manifest-1',",
+                "  'claim_generator': 'issuer-a',",
+                f"  'asset_sha256': '{asset_hash}',",
+                f"  'certificate_sha256': '{trusted_root}',",
+                "}))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    verifier_stub.chmod(0o755)
+    suite = tmp_path / "provenance-suite.json"
+    suite.write_text(
+        json.dumps(
+            {
+                "name": "production-c2pa",
+                "tool": str(verifier_stub),
+                "trusted_issuers": ["issuer-a"],
+                "trusted_roots": [trusted_root],
+                "trust_policy": {
+                    "require_trusted_issuer": True,
+                    "require_trusted_root": True,
+                },
+                "required_cases": ["asset-bound"],
+                "cases": [
+                    {
+                        "id": "asset-bound",
+                        "asset_path": str(asset),
+                        "manifest": {"asset_path": str(asset), "sha256": asset_hash},
+                        "expect_signer": "issuer-a",
+                        "expect_root": trusted_root,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = run_cli(store, "provenance-trust-check", "--suite", str(suite))
+    acknowledged = run_cli(
+        store,
+        "provenance-trust-check",
+        "--suite",
+        str(suite),
+        "--expected-fingerprint",
+        report["fingerprint"],
+    )
+
+    serialized = json.dumps(report)
+    assert report["ok"] is True
+    assert acknowledged["ok"] is True
+    assert acknowledged["expected_fingerprint_present"] is True
+    assert len(report["fingerprint"]) == 64
+    assert report["suite"]["trusted_issuer_count"] == 1
+    assert report["suite"]["trusted_root_count"] == 1
+    assert report["redaction"]["asset_bytes_omitted"] is True
+    assert report["redaction"]["raw_manifest_omitted"] is True
+    assert report["redaction"]["raw_verifier_stdout_omitted"] is True
+    assert report["checks"][0]["ok"] is True
+    assert report["checks"][0]["decision"]["trusted"] is True
+    assert report["checks"][0]["diagnostics"]["signer"] == "issuer-a"
+    assert report["checks"][0]["diagnostics"]["trusted_root_matched"] is True
+    assert "binary camera capture" not in serialized
+    assert str(asset) not in serialized
+
+
+def test_cli_provenance_trust_check_rejects_untrusted_root(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    asset = tmp_path / "capture.bin"
+    payload = b"binary camera capture"
+    asset.write_bytes(payload)
+    asset_hash = sha256(payload).hexdigest()
+    actual_root = "a" * 64
+    trusted_root = "b" * 64
+    verifier_stub = tmp_path / "c2pa-untrusted-root.py"
+    verifier_stub.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env python3",
+                "import json",
+                "print(json.dumps({",
+                "  'active_manifest': 'manifest-1',",
+                "  'claim_generator': 'issuer-a',",
+                f"  'asset_sha256': '{asset_hash}',",
+                f"  'certificate_sha256': '{actual_root}',",
+                "}))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    verifier_stub.chmod(0o755)
+    suite = tmp_path / "provenance-suite.json"
+    suite.write_text(
+        json.dumps(
+            {
+                "name": "production-c2pa",
+                "tool": str(verifier_stub),
+                "trusted_issuers": ["issuer-a"],
+                "trusted_roots": [trusted_root],
+                "trust_policy": {
+                    "require_trusted_issuer": True,
+                    "require_trusted_root": True,
+                },
+                "cases": [
+                    {
+                        "id": "asset-bound",
+                        "asset_path": str(asset),
+                        "manifest": {"asset_path": str(asset), "sha256": asset_hash},
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = run_raw_cli(store, "provenance-trust-check", "--suite", str(suite))
+    payload_json = json.loads(result.stdout)
+    finding_codes = {item["code"] for item in payload_json["findings"]}
+
+    assert result.returncode == 1
+    assert payload_json["ok"] is False
+    assert payload_json["checks"][0]["decision"]["trusted"] is False
+    assert payload_json["checks"][0]["diagnostics"]["trusted_root_matched"] is False
+    assert "trust_mismatch" in finding_codes
+    assert "quarantine_mismatch" in finding_codes
+
+
 def test_cli_enforces_allowed_residency_on_ingest(tmp_path: Path) -> None:
     store = tmp_path / "mnemosyne.json"
     accepted = run_cli(
