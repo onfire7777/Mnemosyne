@@ -76,6 +76,8 @@ Latest checkpoint: Durable Postgres queue parity now covers the runtime maintena
 
 Latest checkpoint: Deployment-soak reports and evidence bundles now explicitly label local-harness evidence scope. Reports and manifests include `validation_scope.surface=local_cli_orchestrator`, `production_validated=false`, and redaction metadata showing raw child commands and stderr are omitted while only structured child JSON is retained. Existing leak-guard and evidence-bundle tests now lock those fields. Local verification still collects 364 tests with 307 passing tests plus 57 skipped live-DB tests, and the clean compose DSN run passes all 364 tests with `MNEMOSYNE_POSTGRES_DSN=postgresql://mnemosyne:<redacted>@127.0.0.1:54329/mnemosyne?connect_timeout=5`.
 
+Latest checkpoint: The user-model guard test now actually covers all six blueprint memory categories: identity, hard instruction, explicit preference, inferred preference, situational preference, and temporary state. It verifies authority ordering, scope matching, and inferred supersession under higher-authority hard instructions. REQ-012 status has been updated to distinguish implemented model/runtime coverage from non-blocking product UX work. Local verification still collects 364 tests with 307 passing tests plus 57 skipped live-DB tests, and the clean compose DSN run passes all 364 tests with `MNEMOSYNE_POSTGRES_DSN=postgresql://mnemosyne:<redacted>@127.0.0.1:54329/mnemosyne?connect_timeout=5`.
+
 Progress: [███████░░░] local scaffold verified; production parity gaps remain
 
 ## Performance Metrics
