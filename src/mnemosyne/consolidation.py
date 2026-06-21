@@ -225,6 +225,14 @@ class ConsolidationWorker:
                     user_model_result["reason"] = "no_user_model_or_user"
                 pass_results.append(PassResult(pass_name, status, user_model_result))
                 continue
+            if pass_name == "embedder":
+                embedder_result = self._embed_evidence(tenant_id, branch, evidence)
+                status = "complete" if embedder_result["backend_supported"] else "skipped"
+                if status == "skipped":
+                    skipped.append("embedder_backend_unavailable")
+                    embedder_result["reason"] = "engine_set_evidence_embedding_unavailable"
+                pass_results.append(PassResult(pass_name, status, embedder_result))
+                continue
             if pass_name == "promotion_gate" and candidate_results:
                 promoted = sum(1 for item in candidate_results if item.get("promoted"))
                 pass_results.append(PassResult(pass_name, "complete", {"promoted": promoted, "evaluated": len(candidate_results)}))
@@ -425,6 +433,57 @@ class ConsolidationWorker:
             "candidate_count": len(candidates),
             "summary": summary,
         }
+
+    def _embed_evidence(self, tenant_id: str, branch: str, evidence: list[Evidence]) -> dict[str, Any]:
+        set_embedding = getattr(self.engine, "set_evidence_embedding", None)
+        if not callable(set_embedding):
+            return {"backend_supported": False, "evaluated": len(evidence), "embedded": 0, "already_embedded": 0}
+        embedded_cids: list[str] = []
+        failed_cids: list[str] = []
+        already_embedded = 0
+        dims = self._embedding_dims()
+        for item in evidence:
+            if not item.cid:
+                continue
+            if item.embedding is not None:
+                already_embedded += 1
+                continue
+            vector = hashing_embedding(item.content, dims=dims)
+            updated = bool(
+                set_embedding(
+                    tenant_id,
+                    item.cid,
+                    vector,
+                    branch=branch,
+                    actor="consolidation",
+                    source="embedder",
+                )
+            )
+            if updated:
+                item.embedding = vector
+                embedded_cids.append(item.cid)
+            else:
+                failed_cids.append(item.cid)
+        return {
+            "backend_supported": True,
+            "provider": "deterministic-hashing",
+            "embedding_dims": dims,
+            "evaluated": len(evidence),
+            "embedded": len(embedded_cids),
+            "already_embedded": already_embedded,
+            "embedded_cids": embedded_cids,
+            "failed_cids": failed_cids,
+        }
+
+    def _embedding_dims(self) -> int:
+        adapters = getattr(self.engine, "adapters", None)
+        embedding = getattr(adapters, "embedding", None)
+        dims = getattr(embedding, "dims", 256)
+        try:
+            value = int(dims)
+        except (TypeError, ValueError):
+            value = 256
+        return max(value, 1)
 
     @staticmethod
     def _contains_no_write_data(evidence: list[Evidence], payload: dict[str, Any]) -> bool:
