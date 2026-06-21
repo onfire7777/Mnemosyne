@@ -2358,11 +2358,19 @@ def test_cli_drains_media_extraction_job_with_command_provider(tmp_path: Path) -
         "media_extract",
     )
     search = run_cli(store, "search", "--tenant", TENANT, "--query", "Screenshot OCR")
+    exported = run_cli(store, "export", "--tenant", TENANT)
+    derived_cid = drained["jobs"][0]["result"]["details"]["derived_cid"]
+    relation_id = drained["jobs"][0]["result"]["details"]["relation_id"]
+    relation = next(item for item in exported["relations"] if item["id"] == relation_id)
 
     assert [job["kind"] for job in ingested["queued_jobs"]] == ["media_extract", "consolidate_evidence"]
     assert drained["jobs"][0]["result"]["details"]["source_evidence_cid"] == ingested["cid"]
     assert drained["jobs"][0]["result"]["details"]["derived_text_sources"] == ["ocr_text"]
     assert search["hits"][0]["text"] == "Screenshot OCR says Mnemosyne is distinct."
+    assert relation["source"] == ingested["cid"]
+    assert relation["predicate"] == "media-derived-text"
+    assert relation["target"] == derived_cid
+    assert relation["source_evidence_cids"] == [ingested["cid"], derived_cid]
 
 
 def test_cli_ingest_classifies_external_untrusted_content(tmp_path: Path) -> None:

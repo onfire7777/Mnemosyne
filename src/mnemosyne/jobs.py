@@ -12,7 +12,7 @@ from mnemosyne.eval import run_seed_suite
 from mnemosyne.gate import RegressionCase
 from mnemosyne.lifecycle import FidelityTier, LifecycleState, demotion_decision
 from mnemosyne.media import MEDIA_EXTRACT_JOB, MediaTextExtractor, MetadataMediaTextExtractor
-from mnemosyne.models import Evidence
+from mnemosyne.models import Evidence, Relation
 from mnemosyne.observability import MetricsRegistry
 from mnemosyne.queue import InProcessQueue
 from mnemosyne.security import TrustTier
@@ -137,6 +137,18 @@ class RuntimeJobHandlers:
             ),
             branch=branch,
         )
+        relation_id = self.engine.add_relation(
+            Relation(
+                tenant_id=tenant_id,
+                source=source_cid,
+                predicate="media-derived-text",
+                target=derived_cid,
+                confidence=1.0,
+                source_evidence_cids=[source_cid, derived_cid],
+                access_policy=dict(getattr(source, "access_policy", {}) or {"tenant": tenant_id}),
+            ),
+            branch=branch,
+        )
         self.queue.enqueue(
             CONSOLIDATE_EVIDENCE_JOB,
             {
@@ -161,6 +173,7 @@ class RuntimeJobHandlers:
             {
                 "source_evidence_cid": source_cid,
                 "derived_cid": derived_cid,
+                "relation_id": relation_id,
                 "derived_text_sources": extracted.sources,
             },
         )
