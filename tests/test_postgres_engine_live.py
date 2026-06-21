@@ -839,8 +839,11 @@ def test_postgres_media_extract_job_appends_searchable_derived_evidence_live(tmp
     assert [job["kind"] for job in result.queued_jobs] == [MEDIA_EXTRACT_JOB, CONSOLIDATE_EVIDENCE_JOB]
     job = worker.run_once(MEDIA_EXTRACT_JOB)
     derived_cid = job.result["details"]["derived_cid"]
+    derived_relation_id = job.result["details"]["relation_id"]
     search = engine.retrieve("quarterly planning moved", tenant)
     derived = engine.get_evidence(tenant, derived_cid)
+    before_forget = engine.export_tenant(tenant)
+    derived_relation = next(item for item in before_forget["relations"] if item["id"] == derived_relation_id)
     assertion_id = engine.upsert_assertion(
         Assertion(
             tenant_id=tenant,
@@ -876,11 +879,16 @@ def test_postgres_media_extract_job_appends_searchable_derived_evidence_live(tmp
     exported_assertion = next(item for item in exported["assertions"] if item["id"] == assertion_id)
     exported_preference = next(item for item in exported["preferences"] if item["id"] == preference_id)
     exported_relation = next(item for item in exported["relations"] if item["id"] == relation_id)
+    exported_derived_relation = next(item for item in exported["relations"] if item["id"] == derived_relation_id)
 
     assert job.status == "complete"
     assert derived is not None
     assert derived.metadata["source_evidence_cid"] == result.cid
     assert derived.metadata["derived_text_sources"] == ["test_extractor"]
+    assert derived_relation["source"] == result.cid
+    assert derived_relation["predicate"] == "media-derived-text"
+    assert derived_relation["target"] == derived_cid
+    assert derived_relation["source_evidence_cids"] == [result.cid, derived_cid]
     assert search.hits[0].id == derived_cid
     assert forgotten["propagated"]["erased_derived_evidence"] == [derived_cid]
     assert all(item["cid"] not in {result.cid, derived_cid} for item in exported["evidence"])
@@ -890,8 +898,10 @@ def test_postgres_media_extract_job_appends_searchable_derived_evidence_live(tmp
     assert exported_preference["source_evidence_cids"] == []
     assert exported_relation["valid_to"] is not None
     assert exported_relation["source_evidence_cids"] == []
+    assert exported_derived_relation["valid_to"] is not None
+    assert exported_derived_relation["source_evidence_cids"] == []
     assert forgotten["propagated"]["retracted_preferences"] == [preference_id]
-    assert forgotten["propagated"]["expired_relations"] == [relation_id]
+    assert set(forgotten["propagated"]["expired_relations"]) == {relation_id, derived_relation_id}
 
 
 def test_postgres_gated_consolidation_promotes_direct_user_fact_live() -> None:

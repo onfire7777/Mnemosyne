@@ -677,6 +677,7 @@ def test_forget_transitively_erases_media_derived_evidence_and_assertions(tmp_pa
     )
     job = QueueWorker(queue, handlers.handlers()).run_once(MEDIA_EXTRACT_JOB)
     derived_cid = job.result["details"]["derived_cid"]
+    derived_relation_id = job.result["details"]["relation_id"]
     assertion = Assertion(
         tenant_id=TENANT,
         subject="Mnemosyne",
@@ -713,6 +714,7 @@ def test_forget_transitively_erases_media_derived_evidence_and_assertions(tmp_pa
     retracted = next(item for item in engine.assertions.values() if item.id == assertion_id)
     preference = engine.preferences[preference_id]
     relation = next(item for item in engine.relations.values() if item.id == relation_id)
+    derived_relation = next(item for item in engine.relations.values() if item.id == derived_relation_id)
 
     assert forgotten["erased"] is True
     assert forgotten["propagated"]["erased_derived_evidence"] == [derived_cid]
@@ -724,8 +726,13 @@ def test_forget_transitively_erases_media_derived_evidence_and_assertions(tmp_pa
     assert preference.source_evidence_cids == []
     assert relation.valid_to is not None
     assert relation.source_evidence_cids == []
+    assert derived_relation.source == result.cid
+    assert derived_relation.predicate == "media-derived-text"
+    assert derived_relation.target == derived_cid
+    assert derived_relation.valid_to is not None
+    assert derived_relation.source_evidence_cids == []
     assert forgotten["propagated"]["retracted_preferences"] == [preference_id]
-    assert forgotten["propagated"]["expired_relations"] == [relation_id]
+    assert set(forgotten["propagated"]["expired_relations"]) == {relation_id, derived_relation_id}
 
 
 def test_ingestion_classifier_tags_untrusted_imperatives_and_pii(tmp_path) -> None:
