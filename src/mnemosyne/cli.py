@@ -64,6 +64,7 @@ from mnemosyne.storage import CommandKeyManager, EncryptedLocalObjectStore, Json
 DEPLOYMENT_SOAK_COMMANDS = {
     "provider-check",
     "idp-jwks-live-check",
+    "idp-authz-policy-rollout-check",
     "tls-cert-check",
     "tls-rotation-plan-check",
     "mcp-http-soak",

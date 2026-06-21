@@ -1466,6 +1466,73 @@ def test_cli_deployment_soak_fails_closed_on_disallowed_command(tmp_path: Path) 
     assert "not allowed" in report["checks"][0]["error"]
 
 
+def test_cli_deployment_soak_allows_idp_authz_rollout_check(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    current_policy_file = tmp_path / "current-authz-policy.json"
+    candidate_policy_file = tmp_path / "candidate-authz-policy.json"
+    policy = {
+        "allowed_client_ids": ["cli-client"],
+        "rules": [
+            {
+                "name": "operator-access",
+                "tenant_ids": [TENANT],
+                "claim_contains": {"groups": "mnemosyne-operators"},
+                "role": "operator",
+                "source_trust_tier": 0,
+            }
+        ],
+    }
+    current_policy_file.write_text(json.dumps(policy), encoding="utf-8")
+    candidate_policy_file.write_text(json.dumps(policy), encoding="utf-8")
+    current_fingerprint = run_cli(
+        store,
+        "idp-authz-policy-check",
+        "--idp-authz-policy-file",
+        str(current_policy_file),
+    )["policy"]["fingerprint"]
+    candidate_fingerprint = run_cli(
+        store,
+        "idp-authz-policy-check",
+        "--idp-authz-policy-file",
+        str(candidate_policy_file),
+    )["policy"]["fingerprint"]
+    manifest_path = tmp_path / "deployment-soak.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "checks": [
+                    {
+                        "name": "authz-rollout",
+                        "command": "idp-authz-policy-rollout-check",
+                        "args": [
+                            "--current-idp-authz-policy-file",
+                            str(current_policy_file),
+                            "--candidate-idp-authz-policy-file",
+                            str(candidate_policy_file),
+                            "--expected-current-fingerprint",
+                            current_fingerprint,
+                            "--expected-candidate-fingerprint",
+                            candidate_fingerprint,
+                        ],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = run_cli(store, "deployment-soak", "--soak-manifest", str(manifest_path))
+
+    assert report["ok"] is True
+    assert "idp-authz-policy-rollout-check" in report["allowed_commands"]
+    assert report["checks"][0]["command"] == "idp-authz-policy-rollout-check"
+    assert report["checks"][0]["ok"] is True
+    assert report["checks"][0]["stdout_json"]["rollout"]["simulation_change_count"] == 0
+    encoded = json.dumps(report, sort_keys=True)
+    assert "cli-client" not in encoded
+    assert "mnemosyne-operators" not in encoded
+
+
 def test_cli_tls_cert_check_validates_chain_hostname_and_expiry(tmp_path: Path) -> None:
     ca_path, cert_path, key_path = write_tls_fixture(tmp_path, server_days_valid=45)
     server = build_http_server(
