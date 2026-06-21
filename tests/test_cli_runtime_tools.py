@@ -2983,6 +2983,39 @@ def test_cli_projection_recompute_tracks_affected_projection_set(tmp_path: Path)
     assert recompute["metrics"]["counters"]["projection_recompute.completed"] == 1
 
 
+def test_cli_projection_recompute_enqueue_persists_payload(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    result = run_cli(
+        store,
+        "projection-recompute-enqueue",
+        "--tenant",
+        TENANT,
+        "--user",
+        USER,
+        "--branch",
+        "candidate-branch",
+        "--cid",
+        "cid-alpha",
+        "--cid",
+        "cid-beta",
+        "--max-attempts",
+        "5",
+        "--no-enqueue-consolidation",
+    )
+    job = result["job"]
+
+    assert result["queue"]["queued"] == 1
+    assert job["kind"] == "projection_recompute"
+    assert job["max_attempts"] == 5
+    assert job["payload"] == {
+        "tenant_id": TENANT,
+        "user_id": USER,
+        "branch": "candidate-branch",
+        "changed_evidence_cids": ["cid-alpha", "cid-beta"],
+        "enqueue_consolidation": False,
+    }
+
+
 def test_cli_search_surfaces_gist_only_abstention(tmp_path: Path) -> None:
     store = tmp_path / "mnemosyne.json"
     ingested = run_cli(
