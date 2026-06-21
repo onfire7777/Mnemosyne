@@ -1,0 +1,144 @@
+{
+  "realm": "mnemosyne",
+  "enabled": true,
+  "sslRequired": "none",
+  "accessTokenLifespan": 3600,
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "attributes": {
+    "frontendUrl": "http://localhost:8089"
+  },
+  "clientScopes": [
+    {
+      "name": "mnemosyne",
+      "description": "Mnemosyne authorization claims (tenant/role/trust).",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "false"
+      },
+      "protocolMappers": [
+        {
+          "name": "mnemosyne-tenant-id",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "tenant_id",
+            "claim.name": "tenant_id",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        },
+        {
+          "name": "mnemosyne-role",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "mnemosyne_role",
+            "claim.name": "mnemosyne_role",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        },
+        {
+          "name": "mnemosyne-source-trust-tier",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "mnemosyne_source_trust_tier",
+            "claim.name": "mnemosyne_source_trust_tier",
+            "jsonType.label": "int",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        },
+        {
+          "name": "mnemosyne-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.custom.audience": "mnemosyne",
+            "id.token.claim": "true",
+            "access.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "mnemosyne-cli",
+      "name": "Mnemosyne CLI / MCP session-exchange client",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "mnemosyne-cli-secret",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "redirectUris": ["http://localhost/*"],
+      "webOrigins": ["+"],
+      "fullScopeAllowed": true,
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "email",
+        "roles",
+        "mnemosyne"
+      ],
+      "optionalClientScopes": ["address", "phone", "offline_access"]
+    }
+  ],
+  "users": [
+    {
+      "username": "analyst-a",
+      "email": "analyst-a@mnemosyne.local",
+      "emailVerified": true,
+      "enabled": true,
+      "firstName": "Analyst",
+      "lastName": "A",
+      "attributes": {
+        "tenant_id": ["tenant-a"],
+        "mnemosyne_role": ["operator"],
+        "mnemosyne_source_trust_tier": ["0"]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "analyst-a-password",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "agent-a",
+      "email": "agent-a@mnemosyne.local",
+      "emailVerified": true,
+      "enabled": true,
+      "firstName": "Agent",
+      "lastName": "A",
+      "attributes": {
+        "tenant_id": ["tenant-a"],
+        "mnemosyne_role": ["agent"],
+        "mnemosyne_source_trust_tier": ["3"]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "agent-a-password",
+          "temporary": false
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,57 @@
+[
+  {
+    "id": "supersession-basic",
+    "tenant_id": "eval-belief-supersede",
+    "assertions": [
+      {"ref": "a1", "subject": "user", "predicate": "city", "object": "Paris", "confidence": 0.8, "valid_from": "2026-01-01T00:00:00Z"},
+      {"ref": "a2", "subject": "user", "predicate": "city", "object": "Berlin", "confidence": 0.9, "valid_from": "2026-03-01T00:00:00Z"}
+    ],
+    "expected": {
+      "operations": {"a1": "ADD", "a2": "SUPERSEDE"},
+      "statuses": {"a1": "superseded", "a2": "active"},
+      "superseded_by": {"a1": "a2"},
+      "min_contradictions": 1
+    }
+  },
+  {
+    "id": "cascade-invalidation",
+    "tenant_id": "eval-belief-cascade",
+    "assertions": [
+      {"ref": "base", "subject": "server", "predicate": "region", "object": "us-east-1", "confidence": 0.9, "valid_from": "2026-01-01T00:00:00Z"},
+      {"ref": "derived", "subject": "latency_budget", "predicate": "depends_on", "object": "us-east-1", "confidence": 0.85, "valid_from": "2026-01-02T00:00:00Z", "dependencies": ["base"], "rule": "derived"}
+    ],
+    "cascade": {"assertion_ref": "base", "reason": "base region retracted"},
+    "expected": {
+      "operations": {"base": "ADD", "derived": "ADD"},
+      "statuses": {"base": "retracted", "derived": "retracted"},
+      "invalidated": ["base", "derived"]
+    }
+  },
+  {
+    "id": "contested-multi-hypothesis",
+    "tenant_id": "eval-belief-contested",
+    "assertions": [
+      {"ref": "h1", "subject": "project", "predicate": "deadline", "object": "March", "confidence": 0.55, "valid_from": "2026-01-01T00:00:00Z"},
+      {"ref": "h2", "subject": "project", "predicate": "deadline", "object": "April", "confidence": 0.5, "valid_from": "2026-01-01T00:00:00Z"}
+    ],
+    "contested": {"subject": "project", "predicate": "deadline"},
+    "expected": {
+      "operations": {"h1": "ADD", "h2": "CONTEST"},
+      "statuses": {"h1": "contested", "h2": "contested"},
+      "contested": {"objects": ["April", "March"], "probability_sum": 1.0},
+      "min_contradictions": 1
+    }
+  },
+  {
+    "id": "noop-duplicate",
+    "tenant_id": "eval-belief-noop",
+    "assertions": [
+      {"ref": "n1", "subject": "user", "predicate": "language", "object": "Python", "confidence": 0.9, "valid_from": "2026-01-01T00:00:00Z"},
+      {"ref": "n2", "subject": "user", "predicate": "language", "object": "Python", "confidence": 0.7, "valid_from": "2026-02-01T00:00:00Z"}
+    ],
+    "expected": {
+      "operations": {"n1": "ADD", "n2": "NOOP"},
+      "statuses": {"n1": "active", "n2": "active"}
+    }
+  }
+]
