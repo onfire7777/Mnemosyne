@@ -1682,6 +1682,12 @@ def test_shared_engine_contract_merges_branch_evidence_assertions_and_relations(
     assert any(item["cid"] == cid and item["branch"] == "main" for item in exported["evidence"])
     assert any(item["id"] == assertion_id and item["branch"] == "main" for item in exported["assertions"])
     assert any(item["id"] == relation_id and item["branch"] == "main" for item in exported["relations"])
+    tenant_merge = exported["merge_log"][-1]
+    assert tenant_merge["from_branch"] == branch
+    assert tenant_merge["into_branch"] == "main"
+    assert tenant_merge["evidence_added"] >= 1
+    assert tenant_merge["assertions_added"] >= 1
+    assert tenant_merge["relations_added"] >= 1
     assert any(
         item["from_branch"] == branch
         and item["into_branch"] == "main"

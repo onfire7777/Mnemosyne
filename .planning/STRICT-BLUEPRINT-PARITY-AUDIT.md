@@ -89,6 +89,7 @@
 - REQ-018 now includes a contextual bandit learner for shadow policy variants. Logged policy outcomes are stored in the self-model store with rewards/context/metrics, UCB scoring selects future invariant-rail-safe variants, and the optimizer remains gate-bound before any policy promotion.
 - REQ-011 expanded-suite controls now require more than a protected-case count. `gate-suite-check` can enforce minimum total cases and required smoke/core/archive tier coverage, reports missing tiers, and fails closed before accepting expected fingerprints.
 - REQ-016 consolidation runs now emit a `role_pipeline` report that maps pass results to narrow society-of-roles names, provider strategies, provider types, and statuses. CLI and live Postgres command-provider tests verify model-backed extractor, resolver, and summarizer roles are auditable.
+- REQ-002 merge promotion audit is now exported per tenant. Local and Postgres `export_tenant` include `merge_log`, and the shared branch-merge contract verifies promoted projections plus exported merge counters.
 
 ## Supersession Note
 
