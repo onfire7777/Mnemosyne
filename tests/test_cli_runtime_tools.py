@@ -3043,10 +3043,15 @@ def test_cli_deployment_soak_allows_ops_report_dashboard(tmp_path: Path) -> None
         encoding="utf-8",
     )
 
-    report = run_cli(store, "deployment-soak", "--soak-manifest", str(manifest_path))
+    evidence_dir = tmp_path / "soak-evidence"
+    report = run_cli(store, "deployment-soak", "--soak-manifest", str(manifest_path), "--evidence-dir", str(evidence_dir))
 
     dashboard_html = dashboard_path.read_text(encoding="utf-8")
+    evidence_manifest = json.loads((evidence_dir / "manifest.json").read_text(encoding="utf-8"))
+    evidence_report = json.loads((evidence_dir / "deployment-soak-report.json").read_text(encoding="utf-8"))
+    check_record = json.loads((evidence_dir / "checks" / "001-ops-dashboard.json").read_text(encoding="utf-8"))
     assert report["ok"] is True
+    assert report["evidence_bundle"]["manifest_path"] == str(evidence_dir / "manifest.json")
     assert "ops-report" in report["allowed_commands"]
     assert report["checks"][0]["command"] == "ops-report"
     assert report["checks"][0]["ok"] is True
@@ -3054,6 +3059,10 @@ def test_cli_deployment_soak_allows_ops_report_dashboard(tmp_path: Path) -> None
     assert report["checks"][0]["stdout_json"]["dashboard_path"] == str(dashboard_path)
     assert report["checks"][0]["stdout_json"]["dashboard_package"]["manifest_path"] == str(package_dir / "manifest.json")
     assert json.loads((package_dir / "manifest.json").read_text(encoding="utf-8"))["tenant_id"] == TENANT
+    assert evidence_manifest["kind"] == "mnemosyne.deployment_soak_evidence"
+    assert evidence_manifest["summary"] == report["summary"]
+    assert evidence_report["evidence_bundle"]["report_path"] == str(evidence_dir / "deployment-soak-report.json")
+    assert check_record["stdout_json"]["dashboard_package"]["manifest_path"] == str(package_dir / "manifest.json")
     assert "Mnemosyne Ops Dashboard" in dashboard_html
 
 
