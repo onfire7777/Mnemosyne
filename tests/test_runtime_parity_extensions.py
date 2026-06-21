@@ -1123,6 +1123,7 @@ def test_consolidation_worker_distills_lessons_procedures_and_summary(tmp_path) 
     assert pass_results["resolver"]["details"]["resolved_entities"][0]["key"] == "deployment-target"
     assert pass_results["summarizer"]["status"] == "complete"
     assert pass_results["summarizer"]["details"]["source_cids"] == [result.cid]
+    assert pass_results["summarizer"]["details"]["materialized"] is True
     assert pass_results["lesson_distiller"]["status"] == "complete"
     assert pass_results["lesson_distiller"]["details"]["created"] == 1
     assert pass_results["skill_inducer"]["status"] == "complete"
@@ -1136,6 +1137,21 @@ def test_consolidation_worker_distills_lessons_procedures_and_summary(tmp_path) 
     assert "resolve entity `deployment-target`" in lesson.content
     assert procedure.kind == "consolidation-checklist"
     assert procedure.signature["entity_key"] == "deployment-target"
+    exported = engine.export_tenant(TENANT)
+    summary_evidence = next(item for item in exported["evidence"] if item["source_type"] == "consolidation-summary")
+    summary_relation = next(item for item in exported["relations"] if item["predicate"] == "summary-derived-gist")
+    assert summary_evidence["cid"] == pass_results["summarizer"]["details"]["summary_cid"]
+    assert summary_evidence["metadata"]["summary"]["kind"] == "abstractive_gist"
+    assert summary_evidence["metadata"]["summary"]["source_evidence_cids"] == [result.cid]
+    assert summary_evidence["trust_tier"] == 2
+    assert sorted(summary_evidence["capability_tags"]) == [
+        "consolidation-gist",
+        "derived-summary",
+        "source:consolidation",
+    ]
+    assert summary_relation["source"] == result.cid
+    assert summary_relation["target"] == summary_evidence["cid"]
+    assert summary_relation["source_evidence_cids"] == [result.cid, summary_evidence["cid"]]
 
     second = worker.run_once(CONSOLIDATE_EVIDENCE_JOB)
 

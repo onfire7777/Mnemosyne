@@ -8,13 +8,14 @@ import shlex
 import subprocess
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
+from hashlib import sha256
 from typing import Any, Protocol, Sequence
 
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.gate import Candidate, GateResult, PromotionGate, RegressionCase
 from mnemosyne.learning import Lesson, Procedure
 from mnemosyne.lifecycle import FidelityTier, LifecycleState, demotion_decision
-from mnemosyne.models import Assertion, Evidence
+from mnemosyne.models import Assertion, Evidence, Relation
 from mnemosyne.security import SecurityPolicy, TrustTier
 from mnemosyne.text import hashing_embedding
 from mnemosyne.user_model import LatentUserProfile, UserModel
@@ -198,6 +199,7 @@ class ConsolidationWorker:
             if pass_name == "summarizer":
                 summary = self.summarizer.summarize(tenant_id, evidence)
                 if summary:
+                    summary = self._materialize_summary(tenant_id, branch, summary, evidence)
                     pass_results.append(PassResult(pass_name, "complete", summary))
                 else:
                     skipped.append("summarizer_no_evidence")
@@ -442,6 +444,86 @@ class ConsolidationWorker:
             "source_cids": selected_cids,
             "candidate_count": len(candidates),
             "summary": summary,
+        }
+
+    def _materialize_summary(
+        self,
+        tenant_id: str,
+        branch: str,
+        summary: dict[str, Any],
+        evidence: list[Evidence],
+    ) -> dict[str, Any]:
+        append_evidence = getattr(self.engine, "append_evidence", None)
+        add_relation = getattr(self.engine, "add_relation", None)
+        source_cids = [item.cid for item in evidence if item.cid]
+        summary_text = str(summary.get("summary") or "").strip()
+        if not callable(append_evidence) or not callable(add_relation) or not source_cids or not summary_text:
+            return {**summary, "materialized": False}
+        source_trust = max((int(item.trust_tier) for item in evidence), default=int(TrustTier.NORMAL))
+        trust_tier = max(source_trust, int(TrustTier.AUTHENTICATED))
+        source_identity = "consolidation-summary:" + sha256(
+            json.dumps(
+                {
+                    "tenant_id": tenant_id,
+                    "branch": branch,
+                    "source_cids": source_cids,
+                    "summary": summary_text,
+                    "strategy": summary.get("strategy"),
+                },
+                sort_keys=True,
+            ).encode("utf-8")
+        ).hexdigest()
+        content = "Source evidence CIDs: " + ", ".join(source_cids) + "\n\n" + summary_text
+        first = evidence[0]
+        summary_cid = append_evidence(
+            Evidence(
+                tenant_id=tenant_id,
+                user_id=first.user_id,
+                actor="system",
+                source_type="consolidation-summary",
+                source_identity=source_identity,
+                content=content,
+                modality="text",
+                metadata={
+                    "summary": {
+                        "kind": "abstractive_gist",
+                        "strategy": summary.get("strategy"),
+                        "source_evidence_cids": source_cids,
+                        "raptor_level": 1,
+                        "source_count": len(source_cids),
+                    },
+                    "source_evidence_cids": source_cids,
+                },
+                trust_tier=trust_tier,
+                capability_tags=["derived-summary", "consolidation-gist", "source:consolidation"],
+                sensitivity=max((int(item.sensitivity) for item in evidence), default=0),
+                access_policy=dict(first.access_policy or {"tenant": tenant_id}),
+            ),
+            branch=branch,
+        )
+        relation_ids: list[str] = []
+        for source_cid in source_cids:
+            relation_ids.append(
+                add_relation(
+                    Relation(
+                        tenant_id=tenant_id,
+                        source=source_cid,
+                        predicate="summary-derived-gist",
+                        target=summary_cid,
+                        confidence=0.92,
+                        source_evidence_cids=[source_cid, summary_cid],
+                        access_policy=dict(first.access_policy or {"tenant": tenant_id}),
+                    ),
+                    branch=branch,
+                )
+            )
+        return {
+            **summary,
+            "materialized": True,
+            "summary_cid": summary_cid,
+            "derived_relation_ids": relation_ids,
+            "fidelity": "abstractive_gist",
+            "trust_tier": trust_tier,
         }
 
     def _embed_evidence(self, tenant_id: str, branch: str, evidence: list[Evidence]) -> dict[str, Any]:
