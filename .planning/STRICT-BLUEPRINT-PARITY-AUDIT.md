@@ -69,7 +69,7 @@
 - Consolidation summarization now builds a deterministic RAPTOR-style hierarchy for multi-cluster source sets. Shared Local/Postgres contract coverage verifies two leaf summaries plus a root summary, raw transitive `source_evidence_cids`, root `source_summary_cids`/`child_summary_cids`, raw-to-leaf and leaf-to-root `summary-derived-gist` relations, and root-summary retrieval abstention.
 - CLI `search` now has direct coverage for gist-only abstention propagation from the engine result through the command facade, including the uncertainty note, abstractive-gist hit metadata, and `explain.gist_support`.
 - RAPTOR-aware projection recompute now has shared Local/Postgres contract coverage. Changing a raw source in a summary tree marks the raw source, its leaf summary, and root summary as affected, reports required summary lineage relations, and queues consolidation for surviving raw source evidence only.
-- Branch parity now covers explicit non-main source-branch inheritance in the shared Local/Postgres contract, including child `from_branch` export metadata and isolation of source-only evidence from `main`.
+- Branch parity now covers explicit non-main source-branch inheritance in the shared Local/Postgres contract, including source-branch evidence/assertion/relation inheritance, child `from_branch` export metadata, and isolation of source-only rows from `main`.
 
 ## Supersession Note
 
