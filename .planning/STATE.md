@@ -74,6 +74,8 @@ Latest checkpoint: In-process MCP `tools/call` behavior now has direct parity co
 
 Latest checkpoint: Durable Postgres queue parity now covers the runtime maintenance job handlers, not only queue mechanics and single-job calibration. A live test drains `calibrate`, `lifecycle_sweep`, `eval_suite`, `observability_snapshot`, and `projection_recompute` through `PostgresQueue` plus `QueueWorker`, verifies persisted complete results, verifies projection recompute over a real Postgres assertion, and caught/fixed `eval_suite` result serialization by switching to dataclass `asdict`. Local verification now collects 364 tests with 307 passing tests plus 57 skipped live-DB tests, and the clean compose DSN run passes all 364 tests with `MNEMOSYNE_POSTGRES_DSN=postgresql://mnemosyne:<redacted>@127.0.0.1:54329/mnemosyne?connect_timeout=5`.
 
+Latest checkpoint: Deployment-soak reports and evidence bundles now explicitly label local-harness evidence scope. Reports and manifests include `validation_scope.surface=local_cli_orchestrator`, `production_validated=false`, and redaction metadata showing raw child commands and stderr are omitted while only structured child JSON is retained. Existing leak-guard and evidence-bundle tests now lock those fields. Local verification still collects 364 tests with 307 passing tests plus 57 skipped live-DB tests, and the clean compose DSN run passes all 364 tests with `MNEMOSYNE_POSTGRES_DSN=postgresql://mnemosyne:<redacted>@127.0.0.1:54329/mnemosyne?connect_timeout=5`.
+
 Progress: [███████░░░] local scaffold verified; production parity gaps remain
 
 ## Performance Metrics
