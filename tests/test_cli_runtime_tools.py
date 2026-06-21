@@ -911,7 +911,8 @@ def fake_broken_parametric_command(tmp_path: Path, output: str) -> str:
     return " ".join(shlex.quote(item) for item in (sys.executable, str(script), str(tmp_path / "broken-state.json")))
 
 
-def test_cli_backend_selection_requires_postgres_dsn(tmp_path: Path) -> None:
+def test_cli_backend_selection_requires_postgres_dsn(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("MNEMOSYNE_POSTGRES_DSN", "postgresql://env-dsn-should-not-mask-explicit-empty")
     result = run_raw_cli(tmp_path / "mnemosyne.json", "--backend", "postgres", "--postgres-dsn", "", "search", "--tenant", TENANT, "--query", "anything")
 
     assert result.returncode != 0
