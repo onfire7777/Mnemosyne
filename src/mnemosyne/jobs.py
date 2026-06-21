@@ -51,6 +51,7 @@ class RuntimeJobHandlers:
         object_store: LocalObjectStore | None = None,
         media_extractor: MediaTextExtractor | None = None,
         learning: Any | None = None,
+        user_model: Any | None = None,
         gate_cases: list[RegressionCase] | None = None,
         entity_resolver: EntityResolver | None = None,
         candidate_extractor: CandidateExtractor | None = None,
@@ -70,6 +71,7 @@ class RuntimeJobHandlers:
             entity_resolver=entity_resolver,
             candidate_extractor=candidate_extractor,
             summarizer=summarizer,
+            user_model=user_model,
         )
 
     def handlers(self) -> dict[str, Any]:

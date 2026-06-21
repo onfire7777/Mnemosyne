@@ -25,6 +25,7 @@ from mnemosyne.provenance import C2paToolVerifier, ProvenanceTrustPolicy, Signed
 from mnemosyne.queue import InProcessQueue, QueueWorker
 from mnemosyne.storage import EncryptedLocalObjectStore, JsonKeyManager, LocalObjectStore
 from mnemosyne.text import hashing_embedding
+from mnemosyne.user_model import UserModel
 
 
 TENANT = "tenant-runtime-extensions"
@@ -921,6 +922,40 @@ def test_consolidation_replayer_prioritizes_importance_novelty_surprise_reward()
     assert replayer["details"]["formula"] == "importance*novelty*surprise*reward"
     assert replayer["details"]["selected_cids"] == [high, middle, low]
     assert [item["score"] for item in replayer["details"]["scores"]] == [0.1296, 0.0729, 0.0009]
+
+
+def test_consolidation_updates_latent_user_model_profile() -> None:
+    engine = LocalMemoryEngine()
+    user_model = UserModel()
+    cid = engine.append_evidence(
+        Evidence(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="chat",
+            content="Preferred deployment target is local-first CLI.",
+            metadata={"consolidation": {"importance": 0.9, "novelty": 0.8, "surprise": 0.7, "reward": 0.6}},
+            trust_tier=0,
+            access_policy={"tenant": TENANT},
+        )
+    )
+
+    result = ConsolidationWorker(engine, gate_cases=[], user_model=user_model).run_queue_payload(
+        {
+            "tenant_id": TENANT,
+            "user_id": USER,
+            "source_evidence_cids": [cid],
+            "passes": ["replayer", "extractor", "resolver", "user_model_updater"],
+        }
+    )
+    pass_results = {item["name"]: item for item in result.pass_results}
+    profile = user_model.latent_profiles[(TENANT, USER)]
+
+    assert pass_results["user_model_updater"]["status"] == "complete"
+    assert pass_results["user_model_updater"]["details"]["source_cids"] == [cid]
+    assert pass_results["user_model_updater"]["details"]["candidate_count"] == 1
+    assert "Preferred deployment target is local-first CLI" in profile.summary
+    assert len(profile.embedding) == len(hashing_embedding(profile.summary))
 
 
 def test_consolidation_worker_extracts_and_promotes_direct_user_fact_with_gate(tmp_path) -> None:
