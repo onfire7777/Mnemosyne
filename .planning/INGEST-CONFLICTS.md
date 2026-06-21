@@ -14,14 +14,12 @@
 | Area | Variant A | Variant B | Current Choice |
 |------|-----------|-----------|----------------|
 | Local store | Embedded Postgres/PGlite | Deterministic JSON-backed local engine | JSON-backed engine for immediate verification; Postgres schema remains canonical |
-| Dense retrieval | Real embedding model | Deterministic hashing vector | Hashing vector locally; adapter remains required for production quality |
-| Graph | AGE or specialist graph | Local relation PPR | Local relation PPR for contract tests; production adapter later |
+| Dense retrieval | Real embedding model | Deterministic hashing vector + provider gate | Hashing vector remains the local deterministic baseline; `provider-check`, `hosted-llm-check`, and `release-audit` now gate production provider evidence. |
+| Graph | AGE or specialist graph | Local relation PPR + backend manifest gate | Local relation PPR covers deterministic contract tests; production manifests must name non-local graph backends before release evidence is accepted. |
 
-## Unresolved Blockers
+## Remaining Operator Evidence
 
-- PostgreSQL extension compatibility and production DDL execution are not yet verified.
-- Full conformal calibration and protected-suite thresholds are not yet implemented.
-- Full six-category user model and latent advisory profile are not yet implemented.
-- Full procedural learning and counterfactual replay are not yet implemented.
-- Full self-model store and diversity/proxy-divergence tripwires are not yet implemented.
-
+- Real production provider, graph-backend, and credential/endpoint evidence must still be captured through `deployment-soak` and `release-audit` before any production claim is accepted.
+- PostgreSQL extension compatibility is verified in the compose/live suite; production DDL execution still requires operator-run evidence against the target deployment.
+- Conformal calibration and protected-suite thresholds are implemented and gated through `calibration-tune`, `gate-suite-check`, and `release-audit`; production datasets still need operator-supplied evidence.
+- The six-category user model, latent advisory profile, procedural learning, rollback, self-model store, contextual bandit selection, and proxy-divergence tripwires are implemented locally and in Postgres-backed paths; release evidence is now gated by `policy-ops-check` and related production profiles.
