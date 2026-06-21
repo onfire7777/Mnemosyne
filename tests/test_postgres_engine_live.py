@@ -12,7 +12,12 @@ from uuid import uuid4
 
 import pytest
 
-from mnemosyne.consolidation import CONSOLIDATE_EVIDENCE_JOB, ConsolidationWorker
+from mnemosyne.consolidation import (
+    CONSOLIDATE_EVIDENCE_JOB,
+    CommandCandidateExtractor,
+    CommandEvidenceSummarizer,
+    ConsolidationWorker,
+)
 from mnemosyne.gate import RegressionCase
 from mnemosyne.ingestion import IngestRequest, IngestionPipeline
 from mnemosyne.jobs import CALIBRATE_JOB, RuntimeJobHandlers
@@ -1249,3 +1254,80 @@ def test_postgres_gated_consolidation_promotes_direct_user_fact_live() -> None:
     exported_entities = engine.export_tenant(tenant)["entities"]
     assert exported_entities[0]["canonical"] == "postgres-gate-fact"
     assert exported_entities[0]["source_evidence_cids"] == [result.cid]
+
+
+def test_postgres_gated_consolidation_uses_command_providers_live(tmp_path) -> None:
+    engine = PostgresEngine(live_dsn())
+    tenant = f"tenant-command-consolidation-live-{uuid4()}"
+    user = "user-command-consolidation-live"
+    queue = InProcessQueue()
+    pipeline = IngestionPipeline(engine, queue=queue)
+    result = pipeline.ingest(
+        IngestRequest(
+            tenant_id=tenant,
+            user_id=user,
+            actor="user",
+            source_type="chat",
+            content="Meeting note: pg target/local CLI; not a deterministic is-fact sentence.",
+        )
+    )
+    extractor_script = tmp_path / "candidate_extractor.py"
+    extractor_script.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env python3",
+                "import json, sys",
+                "request = json.load(sys.stdin)",
+                "evidence = request['evidence'][0]",
+                "print(json.dumps({'candidates': [{'signature': 'postgres command target local cli', 'query': 'postgres command target', 'candidate_subject': 'Postgres command target', 'candidate_predicate': 'is', 'candidate_object': 'local CLI', 'confidence': 0.93, 'access_policy': evidence['access_policy']}], 'metadata': {'source': 'live-test-extractor'}}))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    summarizer_script = tmp_path / "summarizer.py"
+    summarizer_script.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env python3",
+                "import json, sys",
+                "json.load(sys.stdin)",
+                "print(json.dumps({'summary': 'Postgres command provider summary', 'metadata': {'source': 'live-test-summarizer'}}))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    worker = QueueWorker(
+        queue,
+        {
+            CONSOLIDATE_EVIDENCE_JOB: ConsolidationWorker(
+                engine,
+                gate_cases=[
+                    RegressionCase(
+                        "postgres-command-provider-smoke",
+                        "postgres command target local cli",
+                        "postgres command target",
+                        "local CLI",
+                        protected=True,
+                    )
+                ],
+                candidate_extractor=CommandCandidateExtractor([sys.executable, str(extractor_script)]),
+                summarizer=CommandEvidenceSummarizer([sys.executable, str(summarizer_script)]),
+            ).run_queue_payload
+        },
+    )
+
+    job = worker.run_once(CONSOLIDATE_EVIDENCE_JOB)
+    assert job is not None
+    exported = engine.export_tenant(tenant)
+    extractor_result = job.result["pass_results"][1]
+    summarizer_result = next(item for item in job.result["pass_results"] if item["name"] == "summarizer")
+
+    assert job.status == "complete"
+    assert job.result["candidate_results"][0]["promoted"] is True
+    assert extractor_result["details"]["strategy"] == "command_candidate_extractor"
+    assert extractor_result["details"]["metadata"] == {"source": "live-test-extractor"}
+    assert summarizer_result["details"]["strategy"] == "command_evidence_summarizer"
+    assert summarizer_result["details"]["summary"] == "Postgres command provider summary"
+    assert exported["assertions"][0]["subject"] == "Postgres command target"
+    assert exported["assertions"][0]["object"] == "local CLI"
+    assert exported["entities"][0]["canonical"] == "postgres-command-target"

@@ -88,6 +88,8 @@ Latest checkpoint: Consolidation now has shell-free command provider boundaries 
 
 Latest checkpoint: `gate-suite-check` now provides a deployment-control surface for protected regression suites. It loads persisted gate cases from runtime state, reports case/protected/tier counts plus a stable canonical fingerprint, can include full cases for export/review, and exits nonzero when the protected count is below `--min-protected` or `--expected-fingerprint` does not match. The command is allowlisted for `deployment-soak`. CLI tests cover fingerprint acknowledgement and fail-closed mismatch behavior. This reduces protected-suite management risk while production release-artifact validation remains open.
 
+Latest checkpoint: Live Postgres coverage now includes command-backed consolidation candidate extraction and summarization. The live test uses `PostgresEngine` with shell-free command provider adapters, promotes a non-deterministic evidence note through the protected gate, verifies command extractor/summarizer pass details, and confirms exported Postgres assertions/entities carry the provider-produced candidate. This broadens the shared Local/Postgres consolidation contract; it still requires `MNEMOSYNE_POSTGRES_DSN` to run.
+
 ### Blockers/Concerns
 
 - Exact 1:1 blueprint parity is not yet achieved; `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md` is the controlling status artifact.
