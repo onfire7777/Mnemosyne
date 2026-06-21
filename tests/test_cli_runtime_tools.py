@@ -2970,6 +2970,36 @@ def test_cli_projection_recompute_tracks_affected_projection_set(tmp_path: Path)
     assert recompute["metrics"]["counters"]["projection_recompute.completed"] == 1
 
 
+def test_cli_search_surfaces_gist_only_abstention(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    ingested = run_cli(
+        store,
+        "ingest",
+        "--tenant",
+        TENANT,
+        "--user",
+        USER,
+        "--actor",
+        "user",
+        "--source-type",
+        "chat",
+        "--content",
+        "CLI search abstention source should only support answers through generated gist metadata.",
+        "--run-consolidation-once",
+    )
+    exported = run_cli(store, "export", "--tenant", TENANT)
+    summary = next(item for item in exported["evidence"] if item["source_type"] == "consolidation-summary")
+
+    result = run_cli(store, "search", "--tenant", TENANT, "--query", ingested["cid"])
+
+    assert result["abstained"] is True
+    assert result["uncertainty_note"] == "Only gist-tier memory support was retrieved; inspect source evidence before answering."
+    assert result["hits"][0]["id"] == summary["cid"]
+    assert result["hits"][0]["metadata"]["summary"]["kind"] == "abstractive_gist"
+    assert result["explain"]["gist_support"]["applied"] is True
+    assert result["explain"]["gist_support"]["gist_hit_ids"] == [summary["cid"]]
+
+
 def test_cli_consolidation_uses_command_extractor_and_summarizer(tmp_path: Path) -> None:
     store = tmp_path / "mnemosyne.json"
     extractor = tmp_path / "candidate-extractor.py"

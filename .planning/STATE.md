@@ -42,6 +42,8 @@ Latest checkpoint: Retrieval abstention now treats sole statistical-trace or exp
 
 Latest checkpoint: Consolidation summarization now builds a deterministic multi-level RAPTOR-style hierarchy when the source set exceeds the configured cluster size. The worker materializes level-1 leaf summaries, then a level-2 root summary over child summary evidence; metadata records `raptor_level`, source fingerprints, `confabulation_risk=true`, transitive raw `source_evidence_cids`, and root `source_summary_cids`/`child_summary_cids`. Relations preserve raw-to-leaf and leaf-to-root `summary-derived-gist` lineage, and retrieval still abstains when the root summary is sole support. Local verification now collects 344 tests with 292 passing tests plus 52 skipped live-DB tests, and the clean compose DSN run passes all 344 tests with `MNEMOSYNE_POSTGRES_DSN=postgresql://mnemosyne:<redacted>@127.0.0.1:54329/mnemosyne?connect_timeout=5`.
 
+Latest checkpoint: CLI `search` now has direct facade-level proof that gist-only retrieval abstention is preserved outside the raw engine API. A CLI ingest/consolidate/search regression isolates generated summary evidence by querying the raw source CID, then verifies `abstained=true`, the source-inspection uncertainty note, the abstractive-gist hit metadata, and `explain.gist_support`. Local verification now collects 345 tests with 293 passing tests plus 52 skipped live-DB tests, and the clean compose DSN run passes all 345 tests with `MNEMOSYNE_POSTGRES_DSN=postgresql://mnemosyne:<redacted>@127.0.0.1:54329/mnemosyne?connect_timeout=5`.
+
 Progress: [███████░░░] local scaffold verified; production parity gaps remain
 
 ## Performance Metrics
