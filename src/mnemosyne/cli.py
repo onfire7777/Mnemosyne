@@ -71,6 +71,14 @@ DEPLOYMENT_SOAK_COMMANDS = {
     "mcp-sse-soak",
     "worker-run",
 }
+DEPLOYMENT_SOAK_GLOBAL_OPTIONS = {
+    "--backend",
+    "--queue-backend",
+    "--queue-tenant",
+    "--runtime-state",
+    "--object-store",
+    "--parametric-artifact-store",
+}
 
 
 def default_store() -> Path:
@@ -2020,6 +2028,7 @@ def _deployment_check_spec(index: int, raw: Any, *, default_timeout: float) -> d
     check_args = raw.get("args", [])
     if not isinstance(check_args, list) or not all(isinstance(item, str) for item in check_args):
         raise ValueError("check args must be an array of strings")
+    global_args = _deployment_global_args(raw.get("global_args", []))
     timeout = raw.get("timeout", default_timeout)
     try:
         timeout_seconds = float(timeout)
@@ -2031,10 +2040,34 @@ def _deployment_check_spec(index: int, raw: Any, *, default_timeout: float) -> d
         "index": index,
         "name": name,
         "command": command,
+        "global_args": global_args,
         "args": list(check_args),
         "required": bool(raw.get("required", True)),
         "timeout_seconds": timeout_seconds,
     }
+
+
+def _deployment_global_args(raw: Any) -> list[str]:
+    if not isinstance(raw, list) or not all(isinstance(item, str) for item in raw):
+        raise ValueError("check global_args must be an array of strings")
+    normalized: list[str] = []
+    expects_value: str | None = None
+    for token in raw:
+        if expects_value is not None:
+            if token.startswith("--"):
+                raise ValueError(f"global arg {expects_value!r} requires a value")
+            normalized.append(token)
+            expects_value = None
+            continue
+        option, separator, _value = token.partition("=")
+        if option not in DEPLOYMENT_SOAK_GLOBAL_OPTIONS:
+            raise ValueError(f"global arg {option!r} is not allowed")
+        normalized.append(token)
+        if not separator:
+            expects_value = option
+    if expects_value is not None:
+        raise ValueError(f"global arg {expects_value!r} requires a value")
+    return normalized
 
 
 def _child_json(stdout: str) -> dict[str, Any] | None:
@@ -2070,6 +2103,7 @@ def cmd_deployment_soak(args: argparse.Namespace) -> None:
             "mnemosyne.cli",
             "--store",
             str(args.store),
+            *spec["global_args"],
             spec["command"],
             *spec["args"],
         ]
