@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import json
 from collections import defaultdict, deque
+from collections.abc import Mapping
+from hashlib import sha256
+from typing import Any
 
 from mnemosyne.engine import LocalMemoryEngine
-from mnemosyne.models import Assertion, BeliefRevisionReport, Contradiction, Justification
+from mnemosyne.models import Assertion, BeliefRevisionReport, Contradiction, Justification, parse_dt, utc_now
 
 
 class BeliefRevisionCore:
@@ -143,3 +147,261 @@ class BeliefRevisionCore:
             for item in sorted(alternatives, key=lambda row: row.confidence, reverse=True)
         ]
 
+
+def assertion_from_case(row: Mapping[str, Any], *, tenant_id: str, user_id: str | None, branch: str) -> Assertion:
+    valid_from = parse_dt(row.get("valid_from")) or utc_now()
+    return Assertion(
+        tenant_id=str(row.get("tenant_id") or tenant_id),
+        user_id=row.get("user_id") or user_id,
+        subject=str(row["subject"]),
+        predicate=str(row["predicate"]),
+        object=str(row["object"]),
+        branch=str(row.get("branch") or branch),
+        scope=dict(row.get("scope") or {}),
+        confidence=float(row.get("confidence", 0.7)),
+        valid_from=valid_from,
+        status=str(row.get("status", "active")),
+        source_evidence_cids=[str(item) for item in row.get("source_evidence_cids", [])],
+        trust_tier=int(row.get("trust_tier", 0)),
+        sensitivity=int(row.get("sensitivity", 0)),
+        access_policy=dict(row.get("access_policy") or {"tenant": tenant_id}),
+    )
+
+
+def belief_revision_fingerprint(cases: list[Mapping[str, Any]]) -> str:
+    encoded = json.dumps(cases, sort_keys=True, separators=(",", ":"), default=str)
+    return sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def validate_belief_revision_cases(
+    cases: list[Mapping[str, Any]],
+    *,
+    min_cases: int = 1,
+    required_case_ids: list[str] | None = None,
+) -> dict[str, Any]:
+    findings: list[dict[str, Any]] = []
+    results: list[dict[str, Any]] = []
+    required_ids = list(required_case_ids or [])
+    seen_case_ids: set[str] = set()
+    if len(cases) < min_cases:
+        findings.append(
+            {
+                "code": "insufficient_cases",
+                "message": f"case count {len(cases)} is below required minimum {min_cases}",
+            }
+        )
+    for index, raw in enumerate(cases, start=1):
+        case_id = str(raw.get("id") or f"case-{index}")
+        seen_case_ids.add(case_id)
+        try:
+            result = _evaluate_belief_revision_case(case_id, raw)
+        except (KeyError, TypeError, ValueError) as exc:
+            result = {
+                "id": case_id,
+                "ok": False,
+                "operation_by_ref": {},
+                "assertions": {},
+                "contradictions": [],
+                "invalidated": [],
+                "contested": [],
+                "findings": [{"code": "invalid_case", "message": str(exc), "case_id": case_id}],
+            }
+        results.append(result)
+        findings.extend(result["findings"])
+    for case_id in required_ids:
+        if case_id not in seen_case_ids:
+            findings.append({"code": "missing_required_case", "message": f"required case {case_id} is missing"})
+    return {
+        "ok": not findings,
+        "fingerprint": belief_revision_fingerprint(cases),
+        "summary": {
+            "cases": len(cases),
+            "passed": sum(1 for item in results if item["ok"]),
+            "failed": sum(1 for item in results if not item["ok"]),
+            "required_case_ids": required_ids,
+        },
+        "results": results,
+        "findings": findings,
+    }
+
+
+def _evaluate_belief_revision_case(case_id: str, raw: Mapping[str, Any]) -> dict[str, Any]:
+    tenant_id = str(raw.get("tenant_id") or f"tenant-{case_id}")
+    user_id = str(raw.get("user_id") or "belief-check")
+    branch = str(raw.get("branch") or "main")
+    engine = LocalMemoryEngine()
+    core = BeliefRevisionCore(engine)
+    refs: dict[str, str] = {}
+    operation_by_ref: dict[str, str] = {}
+    case_findings: list[dict[str, Any]] = []
+    assertions_raw = raw.get("assertions")
+    if not isinstance(assertions_raw, list) or not assertions_raw:
+        raise ValueError("belief revision case requires non-empty assertions array")
+    for op_index, assertion_raw in enumerate(assertions_raw, start=1):
+        if not isinstance(assertion_raw, Mapping):
+            raise ValueError(f"assertion {op_index} must be an object")
+        ref = str(assertion_raw.get("ref") or f"assertion-{op_index}")
+        assertion = assertion_from_case(assertion_raw, tenant_id=tenant_id, user_id=user_id, branch=branch)
+        dependencies = assertion_raw.get("dependencies", [])
+        if dependencies:
+            if not isinstance(dependencies, list):
+                raise ValueError(f"{ref} dependencies must be an array")
+            dependency_ids = [refs[str(item)] for item in dependencies]
+            report = core.add_derived_belief(
+                assertion,
+                dependency_ids=dependency_ids,
+                branch=branch,
+                rule=str(assertion_raw.get("rule") or "derived"),
+            )
+        else:
+            report = core.revise(assertion, branch=branch, rule=assertion_raw.get("rule"))
+        refs[ref] = report.assertion_id
+        operation_by_ref[ref] = report.operation
+
+    invalidated: list[str] = []
+    cascade = raw.get("cascade")
+    if isinstance(cascade, Mapping):
+        target_ref = str(cascade["assertion_ref"])
+        invalidated_ids = core.cascade_invalidate(
+            tenant_id,
+            refs[target_ref],
+            reason=str(cascade.get("reason") or "belief-check cascade"),
+        )
+        inverse_refs = {assertion_id: ref for ref, assertion_id in refs.items()}
+        invalidated = [inverse_refs[item] for item in invalidated_ids if item in inverse_refs]
+
+    exported = engine.export_tenant(tenant_id)
+    assertion_by_id = {item["id"]: item for item in exported["assertions"]}
+    assertions_by_ref = {
+        ref: {
+            "id": assertion_id,
+            "status": assertion_by_id[assertion_id]["status"],
+            "object": assertion_by_id[assertion_id]["object"],
+            "superseded_by": _ref_for_assertion_id(refs, assertion_by_id[assertion_id].get("superseded_by")),
+            "hypothesis_prob": assertion_by_id[assertion_id].get("calibration", {}).get("hypothesis_prob"),
+        }
+        for ref, assertion_id in refs.items()
+    }
+    contested_report: list[dict[str, object]] = []
+    contested = raw.get("contested")
+    if isinstance(contested, Mapping):
+        contested_report = core.contested_hypotheses(
+            tenant_id,
+            str(contested["subject"]),
+            str(contested["predicate"]),
+            branch=branch,
+        )
+
+    expected = raw.get("expected", {})
+    if not isinstance(expected, Mapping):
+        raise ValueError("expected must be an object when provided")
+    _compare_mapping_expectations(case_findings, case_id, operation_by_ref, expected.get("operations"), "operations")
+    _compare_mapping_expectations(
+        case_findings,
+        case_id,
+        {ref: item["status"] for ref, item in assertions_by_ref.items()},
+        expected.get("statuses"),
+        "statuses",
+    )
+    _compare_mapping_expectations(
+        case_findings,
+        case_id,
+        {ref: item["superseded_by"] for ref, item in assertions_by_ref.items()},
+        expected.get("superseded_by"),
+        "superseded_by",
+    )
+    expected_invalidated = expected.get("invalidated")
+    if expected_invalidated is not None and sorted(str(item) for item in expected_invalidated) != sorted(invalidated):
+        case_findings.append(
+            {
+                "code": "expectation_mismatch",
+                "case_id": case_id,
+                "field": "invalidated",
+                "expected": sorted(str(item) for item in expected_invalidated),
+                "actual": sorted(invalidated),
+            }
+        )
+    min_contradictions = int(expected.get("min_contradictions", 0) or 0)
+    contradictions = [item for item in exported["contradictions"] if item["status"] == "open"]
+    if len(contradictions) < min_contradictions:
+        case_findings.append(
+            {
+                "code": "expectation_mismatch",
+                "case_id": case_id,
+                "field": "min_contradictions",
+                "expected": min_contradictions,
+                "actual": len(contradictions),
+            }
+        )
+    contested_expected = expected.get("contested")
+    if isinstance(contested_expected, Mapping):
+        actual_objects = sorted(str(item["object"]) for item in contested_report)
+        expected_objects = sorted(str(item) for item in contested_expected.get("objects", []))
+        if expected_objects and actual_objects != expected_objects:
+            case_findings.append(
+                {
+                    "code": "expectation_mismatch",
+                    "case_id": case_id,
+                    "field": "contested.objects",
+                    "expected": expected_objects,
+                    "actual": actual_objects,
+                }
+            )
+        if contested_expected.get("probability_sum") is not None:
+            actual_sum = round(sum(float(item["probability"]) for item in contested_report), 6)
+            expected_sum = round(float(contested_expected["probability_sum"]), 6)
+            if actual_sum != expected_sum:
+                case_findings.append(
+                    {
+                        "code": "expectation_mismatch",
+                        "case_id": case_id,
+                        "field": "contested.probability_sum",
+                        "expected": expected_sum,
+                        "actual": actual_sum,
+                    }
+                )
+    return {
+        "id": case_id,
+        "ok": not case_findings,
+        "operation_by_ref": operation_by_ref,
+        "assertions": assertions_by_ref,
+        "contradictions": contradictions,
+        "invalidated": invalidated,
+        "contested": contested_report,
+        "findings": case_findings,
+    }
+
+
+def _ref_for_assertion_id(refs: Mapping[str, str], assertion_id: str | None) -> str | None:
+    if assertion_id is None:
+        return None
+    for ref, stored_id in refs.items():
+        if stored_id == assertion_id:
+            return ref
+    return assertion_id
+
+
+def _compare_mapping_expectations(
+    findings: list[dict[str, Any]],
+    case_id: str,
+    actual: Mapping[str, Any],
+    expected: Any,
+    field: str,
+) -> None:
+    if expected is None:
+        return
+    if not isinstance(expected, Mapping):
+        findings.append({"code": "invalid_expected", "case_id": case_id, "field": field, "message": "expected object"})
+        return
+    for key, expected_value in expected.items():
+        actual_value = actual.get(str(key))
+        if actual_value != expected_value:
+            findings.append(
+                {
+                    "code": "expectation_mismatch",
+                    "case_id": case_id,
+                    "field": f"{field}.{key}",
+                    "expected": expected_value,
+                    "actual": actual_value,
+                }
+            )

@@ -38,6 +38,7 @@ This checkpoint verified the deterministic local scaffold and initial GitHub pro
 - Media extraction jobs now append searchable derived-text evidence and a `media-derived-text` relation from the source asset evidence to the derived text evidence, so multimodal derivations participate in graph lineage and forget propagation.
 - CLI `provider-check` validates command-backed session-secret custody with a redacted signed-token round trip, key-count/active-key presence reporting, and fail-closed bad rotation handling.
 - CLI `calibration-tune` and queue-backed calibration jobs tune conformal thresholds from labeled eval datasets, report empirical coverage/false-accept/abstention metrics, and persist calibration only when sample-shape and safety gates pass.
+- CLI `belief-revision-check` validates fingerprinted TMS/AGM belief revision suites for supersession, contradiction creation, cascade invalidation, and contested hypothesis probability surfacing.
 - CLI `forgetting-policy-check` validates fingerprinted lifecycle policy suites for demotion, must-keep rehearsal, and gist-risk abstention expectations, and fails closed on missing required cases or expectation mismatches.
 - CLI `policy-ops-check` validates fingerprinted shadow policy-ops bundles for invariant-rail-safe variants, external reward outcomes, cadence bounds, tripwires, and contextual-bandit recommendation evidence.
 - CLI `worker-run` supervises bounded runtime-job cycles across queue handlers, emits cycle heartbeats/metrics, persists local queue progress, and can fail closed on dead jobs.

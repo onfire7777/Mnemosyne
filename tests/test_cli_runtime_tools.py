@@ -3922,6 +3922,164 @@ def test_cli_calibration_tune_fails_closed_on_high_confidence_errors(tmp_path: P
     assert exported["calibrations"] == []
 
 
+def belief_revision_cases(*, wrong_supersession_expectation: bool = False) -> list[dict]:
+    return [
+        {
+            "id": "supersession-contradiction",
+            "tenant_id": TENANT,
+            "user_id": USER,
+            "assertions": [
+                {
+                    "ref": "draft",
+                    "subject": "project status",
+                    "predicate": "is",
+                    "object": "draft",
+                    "confidence": 0.8,
+                    "valid_from": "2026-01-01T00:00:00Z",
+                    "trust_tier": 1,
+                    "access_policy": {"tenant": TENANT},
+                },
+                {
+                    "ref": "ready",
+                    "subject": "project status",
+                    "predicate": "is",
+                    "object": "ready",
+                    "confidence": 0.9,
+                    "valid_from": "2026-02-01T00:00:00Z",
+                    "trust_tier": 0,
+                    "access_policy": {"tenant": TENANT},
+                },
+            ],
+            "expected": {
+                "operations": {"draft": "ADD", "ready": "SUPERSEDE"},
+                "statuses": {
+                    "draft": "active" if wrong_supersession_expectation else "superseded",
+                    "ready": "active",
+                },
+                "superseded_by": {"draft": "ready"},
+                "min_contradictions": 1,
+            },
+        },
+        {
+            "id": "cascade-invalidation",
+            "tenant_id": TENANT,
+            "user_id": USER,
+            "assertions": [
+                {
+                    "ref": "source",
+                    "subject": "primary source",
+                    "predicate": "says",
+                    "object": "A",
+                    "valid_from": "2026-03-01T00:00:00Z",
+                    "access_policy": {"tenant": TENANT},
+                },
+                {
+                    "ref": "derived",
+                    "subject": "derived conclusion",
+                    "predicate": "is",
+                    "object": "A-dependent",
+                    "valid_from": "2026-03-02T00:00:00Z",
+                    "dependencies": ["source"],
+                    "rule": "if source then conclusion",
+                    "access_policy": {"tenant": TENANT},
+                },
+            ],
+            "cascade": {"assertion_ref": "source", "reason": "source retracted"},
+            "expected": {
+                "operations": {"source": "ADD", "derived": "ADD"},
+                "statuses": {"source": "retracted", "derived": "retracted"},
+                "invalidated": ["source", "derived"],
+            },
+        },
+        {
+            "id": "contested-hypotheses",
+            "tenant_id": TENANT,
+            "user_id": USER,
+            "assertions": [
+                {
+                    "ref": "june",
+                    "subject": "release date",
+                    "predicate": "is",
+                    "object": "June",
+                    "confidence": 0.55,
+                    "valid_from": "2026-04-01T00:00:00Z",
+                    "trust_tier": 2,
+                    "access_policy": {"tenant": TENANT},
+                },
+                {
+                    "ref": "july",
+                    "subject": "release date",
+                    "predicate": "is",
+                    "object": "July",
+                    "confidence": 0.45,
+                    "valid_from": "2026-04-01T00:00:00Z",
+                    "trust_tier": 2,
+                    "access_policy": {"tenant": TENANT},
+                },
+            ],
+            "contested": {"subject": "release date", "predicate": "is"},
+            "expected": {
+                "operations": {"june": "ADD", "july": "CONTEST"},
+                "statuses": {"june": "contested", "july": "contested"},
+                "min_contradictions": 1,
+                "contested": {"objects": ["June", "July"], "probability_sum": 1.0},
+            },
+        },
+    ]
+
+
+def test_cli_belief_revision_check_validates_revision_suite(tmp_path: Path) -> None:
+    cases = tmp_path / "belief-revision.json"
+    cases.write_text(json.dumps(belief_revision_cases()), encoding="utf-8")
+
+    report = run_cli(
+        tmp_path / "mnemosyne.json",
+        "belief-revision-check",
+        "--cases",
+        str(cases),
+        "--require-case",
+        "supersession-contradiction",
+        "--require-case",
+        "cascade-invalidation",
+        "--require-case",
+        "contested-hypotheses",
+    )
+    acknowledged = run_cli(
+        tmp_path / "mnemosyne.json",
+        "belief-revision-check",
+        "--cases",
+        str(cases),
+        "--expected-fingerprint",
+        report["fingerprint"],
+    )
+
+    assert report["ok"] is True
+    assert len(report["fingerprint"]) == 64
+    assert report["summary"]["cases"] == 3
+    assert report["summary"]["passed"] == 3
+    assert acknowledged["ok"] is True
+    assert acknowledged["expected_fingerprint_present"] is True
+    actual_by_id = {item["id"]: item for item in report["results"]}
+    assert actual_by_id["supersession-contradiction"]["assertions"]["draft"]["superseded_by"] == "ready"
+    assert actual_by_id["cascade-invalidation"]["invalidated"] == ["source", "derived"]
+    assert {item["object"] for item in actual_by_id["contested-hypotheses"]["contested"]} == {"June", "July"}
+
+
+def test_cli_belief_revision_check_fails_closed_on_expectation_mismatch(tmp_path: Path) -> None:
+    cases = tmp_path / "bad-belief-revision.json"
+    cases.write_text(json.dumps(belief_revision_cases(wrong_supersession_expectation=True)), encoding="utf-8")
+
+    result = run_raw_cli(tmp_path / "mnemosyne.json", "belief-revision-check", "--cases", str(cases))
+    payload = json.loads(result.stdout)
+    findings = [finding for finding in payload["findings"] if finding["code"] == "expectation_mismatch"]
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert findings
+    assert findings[0]["case_id"] == "supersession-contradiction"
+    assert findings[0]["field"] == "statuses.draft"
+
+
 def forgetting_policy_cases(*, wrong_demotion_expectation: bool = False) -> list[dict]:
     return [
         {
