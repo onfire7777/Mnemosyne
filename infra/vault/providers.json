@@ -1,0 +1,8 @@
+{
+  "object_key": {
+    "required": true,
+    "provider": "command",
+    "command": "infra/vault/vault-object-key-provider.py",
+    "timeout_seconds": 30
+  }
+}
