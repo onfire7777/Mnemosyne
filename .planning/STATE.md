@@ -46,6 +46,8 @@ Latest checkpoint: CLI `search` now has direct facade-level proof that gist-only
 
 Latest checkpoint: Projection recompute now has shared Local/Postgres coverage for RAPTOR hierarchy refresh. A changed raw source in a two-leaf/root summary tree marks the raw source, its leaf summary, and the root summary as affected, reports required raw-to-leaf and leaf-to-root summary lineage relations, and queues one consolidation refresh for the raw source only. Local verification now collects 346 tests with 294 passing tests plus 52 skipped live-DB tests, and the clean compose DSN run passes all 346 tests with `MNEMOSYNE_POSTGRES_DSN=postgresql://mnemosyne:<redacted>@127.0.0.1:54329/mnemosyne?connect_timeout=5`.
 
+Latest checkpoint: Shared branch parity now covers explicit non-main source-branch inheritance. Local and Postgres both copy main-inherited plus source-only evidence into a child branch created with `frm=<source_branch>`, keep source-only evidence isolated from `main`, and export `from_branch` metadata for the child branch. Local verification now collects 347 tests with 295 passing tests plus 52 skipped live-DB tests, and the clean compose DSN run passes all 347 tests with `MNEMOSYNE_POSTGRES_DSN=postgresql://mnemosyne:<redacted>@127.0.0.1:54329/mnemosyne?connect_timeout=5`.
+
 Progress: [███████░░░] local scaffold verified; production parity gaps remain
 
 ## Performance Metrics
