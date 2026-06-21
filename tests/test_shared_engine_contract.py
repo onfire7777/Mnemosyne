@@ -1038,13 +1038,66 @@ def test_shared_engine_contract_branch_inherits_explicit_source_branch(engine_bu
         "Source branch evidence should flow only through explicit source branch inheritance.",
         branch=source_branch,
     )
+    assertion_subject = f"source branch assertion {uuid4()}"
+    engine.upsert_assertion(
+        Assertion(
+            tenant_id=tenant,
+            user_id=user,
+            branch=source_branch,
+            subject=assertion_subject,
+            predicate="stays_on",
+            object="explicit source branch",
+            source_evidence_cids=[source_only_cid],
+            trust_tier=0,
+            access_policy={"tenant": tenant},
+            status="active",
+        ),
+        branch=source_branch,
+    )
+    engine.add_relation(
+        Relation(
+            tenant_id=tenant,
+            branch=source_branch,
+            source="explicit source branch seed",
+            predicate="inherits_to",
+            target="explicit source branch child",
+            source_evidence_cids=[source_only_cid],
+            access_policy={"tenant": tenant},
+        ),
+        branch=source_branch,
+    )
 
     _branch(engine, child_branch, tenant, frm=source_branch)
     branches = engine.export_all()["branches"]
+    exported = engine.export_tenant(tenant)
 
     assert engine.get_evidence(tenant, main_cid, branch=child_branch) is not None
     assert engine.get_evidence(tenant, source_only_cid, branch=child_branch) is not None
     assert engine.get_evidence(tenant, source_only_cid, branch="main") is None
+    assert any(
+        item["subject"] == assertion_subject
+        and item["predicate"] == "stays_on"
+        and item["object"] == "explicit source branch"
+        and item["branch"] == child_branch
+        and item["source_evidence_cids"] == [source_only_cid]
+        for item in exported["assertions"]
+    )
+    assert not any(
+        item["subject"] == assertion_subject and item["branch"] == "main"
+        for item in exported["assertions"]
+    )
+    assert any(
+        item["source"] == "explicit source branch seed"
+        and item["predicate"] == "inherits_to"
+        and item["target"] == "explicit source branch child"
+        and item["branch"] == child_branch
+        and item["source_evidence_cids"] == [source_only_cid]
+        for item in exported["relations"]
+    )
+    assert not any(
+        item["source"] == "explicit source branch seed" and item["branch"] == "main"
+        for item in exported["relations"]
+    )
     assert any(
         item["tenant_id"] == tenant
         and item["name"] == child_branch
