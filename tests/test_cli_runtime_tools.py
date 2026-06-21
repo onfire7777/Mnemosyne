@@ -2840,6 +2840,7 @@ def test_cli_ops_report_exports_dashboard_snapshot(tmp_path: Path) -> None:
         "0.6",
     )
 
+    assert report["ok"] is False
     assert report["counts"]["evidence"] == 1
     assert report["counts"]["audit_events"] >= 1
     assert report["queue"]["queued"] == 1
@@ -2862,6 +2863,7 @@ def test_cli_ops_report_exports_dashboard_snapshot(tmp_path: Path) -> None:
     )
 
     dashboard_html = dashboard_path.read_text(encoding="utf-8")
+    assert dashboard["ok"] is True
     assert dashboard["dashboard_path"] == str(dashboard_path)
     assert dashboard["report"]["tenant_id"] == TENANT
     assert dashboard["report"]["counts"]["evidence"] == 1
@@ -2870,6 +2872,54 @@ def test_cli_ops_report_exports_dashboard_snapshot(tmp_path: Path) -> None:
     assert "Retrieval" in dashboard_html
     assert "Calibration" in dashboard_html
     assert "Snapshot JSON" in dashboard_html
+
+
+def test_cli_deployment_soak_allows_ops_report_dashboard(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    run_cli(
+        store,
+        "capture",
+        "--tenant",
+        TENANT,
+        "--user",
+        USER,
+        "--source-type",
+        "ops",
+        "--content",
+        "Deployment soak should render observability dashboards.",
+    )
+    dashboard_path = tmp_path / "dashboards" / "ops-dashboard.html"
+    manifest_path = tmp_path / "deployment-soak.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "checks": [
+                    {
+                        "name": "ops-dashboard",
+                        "command": "ops-report",
+                        "args": [
+                            "--tenant",
+                            TENANT,
+                            "--dashboard-html",
+                            str(dashboard_path),
+                        ],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = run_cli(store, "deployment-soak", "--soak-manifest", str(manifest_path))
+
+    dashboard_html = dashboard_path.read_text(encoding="utf-8")
+    assert report["ok"] is True
+    assert "ops-report" in report["allowed_commands"]
+    assert report["checks"][0]["command"] == "ops-report"
+    assert report["checks"][0]["ok"] is True
+    assert report["checks"][0]["stdout_json"]["report"]["counts"]["evidence"] == 1
+    assert report["checks"][0]["stdout_json"]["dashboard_path"] == str(dashboard_path)
+    assert "Mnemosyne Ops Dashboard" in dashboard_html
 
 
 def test_cli_preference_write_requires_explicit_or_high_trust_source(tmp_path: Path) -> None:

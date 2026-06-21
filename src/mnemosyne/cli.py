@@ -70,6 +70,7 @@ DEPLOYMENT_SOAK_COMMANDS = {
     "mcp-http-soak",
     "mcp-sse-soak",
     "worker-run",
+    "ops-report",
 }
 DEPLOYMENT_SOAK_GLOBAL_OPTIONS = {
     "--backend",
@@ -1468,13 +1469,14 @@ def cmd_ops_report(args: argparse.Namespace) -> None:
         max_proxy_gap=args.max_proxy_gap,
         max_open_contradictions=args.max_open_contradictions,
     )
+    payload = {"ok": bool(report["tripwires"]["passed"]), **report}
     if args.dashboard_html:
         path = Path(args.dashboard_html).expanduser()
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(render_ops_dashboard(report), encoding="utf-8")
-        emit({"dashboard_path": str(path), "report": report})
+        emit({"ok": payload["ok"], "dashboard_path": str(path), "report": report})
         return
-    emit(report)
+    emit(payload)
 
 
 def _display_url(url: str) -> str:
