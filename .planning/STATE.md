@@ -48,6 +48,8 @@ Latest checkpoint: Projection recompute now has shared Local/Postgres coverage f
 
 Latest checkpoint: Shared branch parity now covers explicit non-main source-branch inheritance. Local and Postgres both copy main-inherited plus source-only evidence, source-branch assertions, and source-branch relations into a child branch created with `frm=<source_branch>`, keep source-only rows isolated from `main`, and export `from_branch` metadata for the child branch. Local verification now collects 347 tests with 295 passing tests plus 52 skipped live-DB tests, and the clean compose DSN run passes all 347 tests with `MNEMOSYNE_POSTGRES_DSN=postgresql://mnemosyne:<redacted>@127.0.0.1:54329/mnemosyne?connect_timeout=5`.
 
+Latest checkpoint: MCP `search` now has direct JSON-RPC facade proof that gist-only retrieval abstention is preserved outside the raw engine API. A stateful MCP server seeds a real consolidation summary and `tools/call` search verifies `abstained=true`, the source-inspection uncertainty note, abstractive-gist hit metadata, and `explain.gist_support`. Local verification now collects 348 tests with 296 passing tests plus 52 skipped live-DB tests, and the clean compose DSN run passes all 348 tests with `MNEMOSYNE_POSTGRES_DSN=postgresql://mnemosyne:<redacted>@127.0.0.1:54329/mnemosyne?connect_timeout=5`.
+
 Progress: [███████░░░] local scaffold verified; production parity gaps remain
 
 ## Performance Metrics
