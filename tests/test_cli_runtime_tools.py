@@ -4458,6 +4458,77 @@ def test_cli_provider_check_fails_closed_on_bad_summarizer(tmp_path: Path) -> No
     assert "requires non-empty summary" in payload["checks"]["summarizer"]["error"]
 
 
+def test_cli_profile_record_explicit_and_trajectory_attribute_aliases_persist(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+
+    profile = run_cli(
+        store,
+        "profile-record-explicit",
+        "--tenant",
+        TENANT,
+        "--user",
+        USER,
+        "--statement",
+        "Prefer deterministic CLI evidence.",
+        "--scope",
+        json.dumps({"surface": "cli", "project": "mnemosyne"}),
+        "--confidence",
+        "0.83",
+        "--evidence-cid",
+        "cid-explicit-a",
+        "--evidence-cid",
+        "cid-explicit-b",
+    )
+    profile_context = run_cli(
+        store,
+        "profile-context",
+        "--tenant",
+        TENANT,
+        "--user",
+        USER,
+        "--scope",
+        json.dumps({"surface": "cli", "project": "mnemosyne"}),
+    )
+    profile_entry = profile_context["authoritative"][0]
+
+    assert profile["id"]
+    assert profile["security"]["allowed"] is True
+    assert profile_entry["id"] == profile["id"]
+    assert profile_entry["kind"] == "explicit_preference"
+    assert profile_entry["statement"] == "Prefer deterministic CLI evidence."
+    assert profile_entry["scope"] == {"surface": "cli", "project": "mnemosyne"}
+    assert profile_entry["confidence"] == 0.83
+    assert profile_entry["source_evidence_cids"] == ["cid-explicit-a", "cid-explicit-b"]
+
+    trajectory = run_cli(
+        store,
+        "trajectory-record",
+        "--tenant",
+        TENANT,
+        "--user",
+        USER,
+        "--session",
+        "session-cli-aliases",
+        "--task",
+        "alias persistence check",
+        "--steps",
+        json.dumps([{"name": "attribute", "status": "failed", "error": "missing alias coverage"}]),
+        "--outcome",
+        "failure",
+        "--reward",
+        "-1",
+        "--memory-version",
+        "v1",
+    )
+    attribution = run_cli(store, "trajectory-attribute", "--trajectory-id", trajectory["id"])
+
+    assert attribution["trajectory_id"] == trajectory["id"]
+    assert attribution["cause"] == "missing alias coverage"
+    assert attribution["signature"] == "alias-persistence-check:missing-alias-coverage"
+    assert attribution["confidence"] == 0.75
+    assert "missing alias coverage" in attribution["evidence"][0]
+
+
 def test_cli_profile_graph_learning_and_parametric_flows_persist(tmp_path: Path) -> None:
     store = tmp_path / "mnemosyne.json"
 

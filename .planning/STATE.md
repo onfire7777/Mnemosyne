@@ -64,6 +64,8 @@ Latest checkpoint: CLI `deep-search` and `explain` now have direct runtime cover
 
 Latest checkpoint: CLI `projection-recompute-enqueue` now has direct runtime coverage for queue payload persistence. The regression verifies tenant/user/branch, multiple changed evidence CIDs, custom max attempts, and disabled consolidation enqueue semantics are emitted into the queued `projection_recompute` job. Local verification now collects 360 tests with 304 passing tests plus 56 skipped live-DB tests, and the clean compose DSN run passes all 360 tests with `MNEMOSYNE_POSTGRES_DSN=postgresql://mnemosyne:<redacted>@127.0.0.1:54329/mnemosyne?connect_timeout=5`.
 
+Latest checkpoint: CLI `profile-record-explicit` and `trajectory-attribute` aliases now have direct runtime persistence coverage. The regression verifies scoped explicit preference recording persists scope, confidence, evidence CIDs, authorization metadata, and scoped profile-context visibility; it also verifies trajectory failure attribution emits the expected cause, signature, confidence, and evidence. Local verification now collects 361 tests with 305 passing tests plus 56 skipped live-DB tests, and the clean compose DSN run passes all 361 tests with `MNEMOSYNE_POSTGRES_DSN=postgresql://mnemosyne:<redacted>@127.0.0.1:54329/mnemosyne?connect_timeout=5`.
+
 Progress: [███████░░░] local scaffold verified; production parity gaps remain
 
 ## Performance Metrics

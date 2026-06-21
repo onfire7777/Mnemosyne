@@ -78,6 +78,7 @@
 - Shared Local/Postgres direct primitive coverage now verifies `lexical_search`, `vector_search`, and `graph_ppr` honor caller `k` result caps while preserving tenant/branch/channel metadata.
 - CLI `deep-search` and `explain` now have direct coverage for relation-only `summary-derived-gist` graph abstention, closing the CLI runtime analogue of the MCP/hosted HTTP safety-rail tests.
 - CLI `projection-recompute-enqueue` now has direct coverage for durable queued `projection_recompute` payload shape, including tenant/user/branch, multi-CID input, max attempts, and disabled consolidation enqueue semantics.
+- CLI `profile-record-explicit` and `trajectory-attribute` now have direct runtime coverage for scoped explicit profile persistence and failed-trajectory attribution output, closing the focused profile/trajectory alias gaps from the static parity scan.
 
 ## Supersession Note
 
