@@ -79,6 +79,7 @@
 - CLI `deep-search` and `explain` now have direct coverage for relation-only `summary-derived-gist` graph abstention, closing the CLI runtime analogue of the MCP/hosted HTTP safety-rail tests.
 - CLI `projection-recompute-enqueue` now has direct coverage for durable queued `projection_recompute` payload shape, including tenant/user/branch, multi-CID input, max attempts, and disabled consolidation enqueue semantics.
 - CLI `profile-record-explicit` and `trajectory-attribute` now have direct runtime coverage for scoped explicit profile persistence and failed-trajectory attribution output, closing the focused profile/trajectory alias gaps from the static parity scan.
+- CLI runtime coverage now mentions all 69 `cmd_*` handlers in `tests/test_cli_runtime_tools.py`; direct coverage was added for `prefetch`, `discard`, `trajectory-log`, `lesson-induce`, and `procedure-induce` so the static handler scan has 0 unmentioned command surfaces.
 
 ## Supersession Note
 

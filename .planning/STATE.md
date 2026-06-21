@@ -66,6 +66,8 @@ Latest checkpoint: CLI `projection-recompute-enqueue` now has direct runtime cov
 
 Latest checkpoint: CLI `profile-record-explicit` and `trajectory-attribute` aliases now have direct runtime persistence coverage. The regression verifies scoped explicit preference recording persists scope, confidence, evidence CIDs, authorization metadata, and scoped profile-context visibility; it also verifies trajectory failure attribution emits the expected cause, signature, confidence, and evidence. Local verification now collects 361 tests with 305 passing tests plus 56 skipped live-DB tests, and the clean compose DSN run passes all 361 tests with `MNEMOSYNE_POSTGRES_DSN=postgresql://mnemosyne:<redacted>@127.0.0.1:54329/mnemosyne?connect_timeout=5`.
 
+Latest checkpoint: The CLI runtime handler mention scan now reports 69 handlers with 0 unmentioned command surfaces in `tests/test_cli_runtime_tools.py`. Direct coverage was added for `prefetch`, `discard`, `trajectory-log`, `lesson-induce`, and `procedure-induce`, including prefetch execute/skip behavior, authorized candidate-branch discard with empty post-discard retrieval, and direct learning alias persistence. Local verification now collects 362 tests with 306 passing tests plus 56 skipped live-DB tests, and the clean compose DSN run passes all 362 tests with `MNEMOSYNE_POSTGRES_DSN=postgresql://mnemosyne:<redacted>@127.0.0.1:54329/mnemosyne?connect_timeout=5`.
+
 Progress: [███████░░░] local scaffold verified; production parity gaps remain
 
 ## Performance Metrics
