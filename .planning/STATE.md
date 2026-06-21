@@ -16,7 +16,7 @@ Last activity: 2026-06-20 — Added CLI-first runtime coverage, selectable CLI P
 
 Latest checkpoint: `mneme-mcp --self-test` now provides local MCP deployment preflight coverage for initialize/list/schema/auth/session/read-only-call behavior with secret-redacted output; `mneme-mcp --http` hosts the same JSON-RPC facade with `/healthz` liveness, `/mcp`, bearer/session-header binding, optional TLS and client-certificate enforcement, body-size limits, malformed/non-object/unsupported-method rejection, locked facade access, and stateless restart durability tests; and CLI `provider-check` now fails command KMS providers that retain keys after claimed shred success. Official streamable/SSE transport validation, real IdP/JWKS deployment validation against live credentials, production certificate provisioning/rotation, production stateless soak testing, real provider deployments, and production KMS/residency operations remain open.
 
-Latest checkpoint: CLI `session-exchange` and hosted HTTP `/session/exchange` now validate OIDC/JWKS IdP tokens and mint bounded Mnemosyne signed-session tokens for CLI/MCP authorization. File and URL JWKS sources now fail closed on oversize/refresh errors and support cache TTL refresh plus refresh-on-unknown-`kid` rotation. Local verification collects 287 tests with 248 passing and 39 live-DB skips when `MNEMOSYNE_POSTGRES_DSN` is unset; the compose Postgres/shared suite passes 63 tests with `MNEMOSYNE_POSTGRES_DSN=postgresql://mnemosyne:...@127.0.0.1:54329/mnemosyne`. Exact parity still remains open for real IdP/JWKS deployment validation against live credentials, official streamable/SSE validation, production certificate lifecycle, and production stateless soak testing.
+Latest checkpoint: Official MCP SDK StreamableHTTP runtime/CLI soak coverage is implemented, and live CLI/Postgres HTTP retrieval-provider smoke now proves provider-generated 1024-dim pgvector evidence storage, adapter metadata in `search`/`explain`, HTTP reranker ordering, and fail-closed malformed embedding handling. Local verification collects 309 tests; the compose Postgres/shared suite remains green with `MNEMOSYNE_POSTGRES_DSN=postgresql://mnemosyne:...@127.0.0.1:54329/mnemosyne`. Exact parity still remains open for real provider deployment validation, real IdP/JWKS deployment validation against live credentials, production certificate lifecycle, hosted SSE/operator validation, and production stateless soak testing.
 
 Progress: [███████░░░] local scaffold verified; production parity gaps remain
 
@@ -77,7 +77,7 @@ Progress: [███████░░░] local scaffold verified; production p
 ### Pending Todos
 
 - Finish exact blueprint parity, starting with expanding the live PostgresEngine smoke into a full shared contract suite, official hosted MCP streamable/SSE validation, real IdP/JWKS validation, and remaining production adapter deployment checks.
-- Validate production embedding/reranker deployments behind the HTTP-compatible adapter boundary; add ParadeDB/BM25 where needed and AGE/specialist graph adapters where needed.
+- Validate real production embedding/reranker deployments behind the HTTP-compatible adapter boundary; add ParadeDB/BM25 where needed and AGE/specialist graph adapters where needed.
 - Add real secret-manager-backed session-secret command deployment/rotation validation, real IdP/JWKS deployment validation against live credentials, real KMS deployment validation behind the command key-provider boundary, real production C2PA trust-root validation, native image/audio embedding providers, production extractor deployment validation, real parametric trainer deployment validation behind the command provider boundary, production separation of immutable-rail service/credentials, production residency-policy operations, worker supervision/deployment operations, and deployment observability.
 
 ### Blockers/Concerns
@@ -92,7 +92,7 @@ Progress: [███████░░░] local scaffold verified; production p
 | Category | Item | Status | Deferred At |
 |----------|------|--------|-------------|
 | Production storage | Full PostgresEngine parity beyond schema initialization | Open | Strict parity audit |
-| Retrieval | Production embedding/BM25/graph/reranker adapters beyond deterministic Postgres assertion/evidence pgvector/FTS/PPR | Partial | Strict parity audit |
+| Retrieval | Production embedding/BM25/graph/reranker adapters beyond deterministic Postgres assertion/evidence pgvector/FTS/PPR and local HTTP provider live smoke | Partial | Strict parity audit |
 | Security | Auth/RLS, C2PA verifier, and expanded protected suite | Open | Strict parity audit |
 | Runtime | Full MCP protocol compatibility and complete tool surface | Open | Strict parity audit |
 
