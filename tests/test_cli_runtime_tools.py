@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import shlex
+import socket
 import subprocess
 import sys
 import threading
@@ -11,6 +12,7 @@ from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib import request as urlrequest
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes
@@ -19,7 +21,7 @@ from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
 from mnemosyne.cli import build_parser
-from mnemosyne.mcp_server import build_http_server
+from mnemosyne.mcp_server import build_http_server, build_sdk_streamable_http_app
 from mnemosyne.security import SessionIdentity, SessionTokenVerifier
 
 
@@ -196,6 +198,39 @@ def run_raw_cli(store: Path, *args: str) -> subprocess.CompletedProcess[str]:
         text=True,
         capture_output=True,
     )
+
+
+def start_streamable_http_server(tmp_path: Path) -> tuple[object, threading.Thread, str]:
+    import uvicorn
+
+    sock = socket.socket()
+    sock.bind(("127.0.0.1", 0))
+    port = int(sock.getsockname()[1])
+    sock.close()
+    app = build_sdk_streamable_http_app(store_path=tmp_path / "streamable-sdk-store.json")
+    server = uvicorn.Server(
+        uvicorn.Config(
+            app,
+            host="127.0.0.1",
+            port=port,
+            log_level="critical",
+            access_log=False,
+        )
+    )
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    base_url = f"http://127.0.0.1:{port}"
+    deadline = time.time() + 10
+    while time.time() < deadline:
+        try:
+            with urlrequest.urlopen(f"{base_url}/healthz", timeout=0.25) as response:
+                if response.status == 200:
+                    return server, thread, base_url
+        except Exception:
+            time.sleep(0.05)
+    server.should_exit = True
+    thread.join(timeout=5)
+    raise RuntimeError("streamable HTTP test server did not start")
 
 
 def test_cli_session_exchange_validates_oidc_jwks_and_mints_session_token(tmp_path: Path) -> None:
@@ -1253,6 +1288,33 @@ def test_cli_mcp_http_soak_fails_closed_without_required_auth(tmp_path: Path) ->
     assert "soak-secret" not in result.stdout
 
 
+def test_cli_mcp_streamable_http_soak_validates_official_sdk_transport(tmp_path: Path) -> None:
+    server, thread, base_url = start_streamable_http_server(tmp_path)
+    try:
+        report = run_cli(
+            tmp_path / "mnemosyne.json",
+            "mcp-streamable-http-soak",
+            "--base-url",
+            base_url,
+            "--iterations",
+            "2",
+        )
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+    assert report["ok"] is True
+    assert report["health"]["transport"] == "mcp-sdk-streamable-http"
+    assert report["health"]["stateless"] is True
+    assert report["summary"]["iterations"] == 2
+    assert report["summary"]["requests"] == 7
+    assert report["summary"]["failures"] == 0
+    assert report["target"]["auth_token_configured"] is False
+    assert [item["ok"] for item in report["iterations"]] == [True, True]
+    assert all(item["tools_list"]["contains_read_only_tool"] for item in report["iterations"])
+    assert all(item["read_only_tool_call"]["ok"] for item in report["iterations"])
+
+
 def test_cli_mcp_sse_soak_validates_legacy_sse_handshake(tmp_path: Path) -> None:
     requests: list[dict[str, str | None]] = []
 
@@ -1442,6 +1504,53 @@ def test_cli_deployment_soak_runs_allowed_manifest_checks_without_leaking_tokens
     assert "soak-secret" not in serialized
     assert "sse-secret" not in serialized
     assert "private-session" not in serialized
+
+
+def test_cli_deployment_soak_runs_streamable_http_check_without_leaking_tokens(tmp_path: Path) -> None:
+    server, thread, base_url = start_streamable_http_server(tmp_path)
+    try:
+        manifest_path = tmp_path / "deployment-soak.json"
+        manifest_path.write_text(
+            json.dumps(
+                {
+                    "checks": [
+                        {
+                            "name": "streamable-http",
+                            "command": "mcp-streamable-http-soak",
+                            "args": [
+                                "--base-url",
+                                base_url,
+                                "--auth-token",
+                                "stream-secret",
+                                "--iterations",
+                                "1",
+                            ],
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        report = run_cli(
+            tmp_path / "mnemosyne.json",
+            "deployment-soak",
+            "--soak-manifest",
+            str(manifest_path),
+            "--check-timeout",
+            "10",
+        )
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+    serialized = json.dumps(report, sort_keys=True)
+    assert report["ok"] is True
+    assert "mcp-streamable-http-soak" in report["allowed_commands"]
+    assert report["checks"][0]["command"] == "mcp-streamable-http-soak"
+    assert report["checks"][0]["ok"] is True
+    assert report["checks"][0]["stdout_json"]["health"]["transport"] == "mcp-sdk-streamable-http"
+    assert report["checks"][0]["stdout_json"]["iterations"][0]["read_only_tool_call"]["ok"] is True
+    assert "stream-secret" not in serialized
 
 
 def test_cli_deployment_soak_fails_closed_on_disallowed_command(tmp_path: Path) -> None:

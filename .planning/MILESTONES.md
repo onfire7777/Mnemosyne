@@ -29,6 +29,7 @@ This checkpoint verified the deterministic local scaffold and initial GitHub pro
 - `mneme-mcp --http` hosts the JSON-RPC MCP facade with health, bearer/session-header binding, body-size and malformed-request guards, and stateless restart durability coverage.
 - CLI `idp-jwks-live-check` validates operator-supplied IdP tokens against live JWKS URLs/files with the same OIDC/authz-policy verifier as session exchange, while redacting the token, user id, session id, and raw `kid`.
 - CLI `mcp-http-soak` validates hosted MCP health, stateless reporting, repeated `initialize`, `tools/list`, and read-only `tools/call` loops without echoing bearer/session tokens.
+- CLI `mcp-streamable-http-soak` validates the official MCP SDK StreamableHTTP transport with repeated SDK initialize/list/read-only call loops and deployment-soak orchestration without echoing bearer/session tokens.
 - CLI `mcp-sse-soak` validates legacy SSE stream handshakes, `text/event-stream` responses, `endpoint` event data, and secret-redacted event previews.
 - CLI `deployment-soak` runs allowlisted deployment preflight manifests, including IdP authz rollout, TLS rotation-plan, worker, and ops dashboard checks, through shell-free subprocesses, supports a narrow non-secret `global_args` allowlist for runtime placement flags, parses child JSON reports, omits command arguments, and fails closed on required failures/timeouts/non-JSON/disallowed commands.
 - CLI `tls-cert-check` validates live TLS endpoint CA chains, hostname matching, TLS protocol floor, and certificate expiry thresholds.
