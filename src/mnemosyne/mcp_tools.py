@@ -18,6 +18,7 @@ from mnemosyne.prefetch import AnticipatoryPrefetcher, PrefetchCandidate
 from mnemosyne.privacy import ErasureMode
 from mnemosyne.runtime_state import RuntimeState
 from mnemosyne.security import SecurityPolicy, TrustTier, WriteRole
+from mnemosyne.source_truth import apply_markdown_git_source
 from mnemosyne.user_model import UserMemoryKind, UserModel, UserModelEntry
 
 
@@ -47,6 +48,11 @@ TOOL_SPEC: list[dict[str, Any]] = [
         "name": "assert_fact",
         "description": "Upsert a typed assertion with evidence provenance.",
         "arguments": ["tenant_id", "subject", "predicate", "object_value", "source_evidence_cids"],
+    },
+    {
+        "name": "source_sync",
+        "description": "Compile committed Markdown/git source-of-truth assertion blocks into evidence-backed memory.",
+        "arguments": ["tenant_id", "user_id", "root"],
     },
     {
         "name": "relation",
@@ -408,6 +414,36 @@ class MemoryTools:
             branch=branch,
         )
         return {"id": assertion_id, "branch": branch, "security": decision}
+
+    def source_sync(
+        self,
+        tenant_id: str,
+        user_id: str,
+        root: str,
+        branch: str = "main",
+        apply: bool = False,
+        role: WriteRole = "operator",
+        source_trust_tier: int = int(TrustTier.USER_AUTHORED),
+        allow_dirty: bool = False,
+    ) -> dict[str, Any]:
+        decision = self._authorize(
+            "source_sync",
+            role=role,
+            source_trust_tier=source_trust_tier,
+            target_sink="belief_correction",
+        )
+        result = apply_markdown_git_source(
+            self.engine,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            root=root,
+            branch=branch,
+            apply=apply,
+            source_trust_tier=source_trust_tier,
+            require_clean_git=not allow_dirty,
+        ).to_dict()
+        result["security"] = decision
+        return result
 
     def relation(
         self,

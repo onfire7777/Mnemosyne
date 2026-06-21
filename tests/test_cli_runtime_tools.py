@@ -3463,6 +3463,123 @@ def test_cli_assert_write_rejects_untrusted_source(tmp_path: Path) -> None:
     assert allowed["security"]["allowed"] is True
 
 
+def test_cli_source_sync_applies_committed_markdown_git_assertion_as_source_truth(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    source_repo = tmp_path / "source-repo"
+    source_repo.mkdir()
+
+    def git(*args: str) -> str:
+        result = subprocess.run(
+            ["git", "-C", str(source_repo), *args],
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        return result.stdout.strip()
+
+    git("init")
+    git("config", "user.email", "mnemosyne@example.test")
+    git("config", "user.name", "Mnemosyne Test")
+    source_file = source_repo / "memory.md"
+    source_file.write_text(
+        """# Memory Source
+
+```mnemosyne-assertion
+id = "cli-source-truth"
+subject = "Mnemosyne source truth"
+predicate = "prefers"
+object = "Markdown git"
+confidence = 0.99
+valid_from = "2026-06-20T00:00:00Z"
+
+[metadata]
+reviewed_by = "human"
+```
+""",
+        encoding="utf-8",
+    )
+    git("add", "memory.md")
+    git("commit", "-m", "add source truth")
+    head = git("rev-parse", "HEAD")
+
+    machine = run_cli(
+        store,
+        "capture",
+        "--tenant",
+        TENANT,
+        "--user",
+        USER,
+        "--actor",
+        "assistant",
+        "--source-type",
+        "model",
+        "--content",
+        "Machine assertion says the source truth prefers generated memory.",
+        "--trust-tier",
+        "3",
+    )
+    run_cli(
+        store,
+        "assert",
+        "--tenant",
+        TENANT,
+        "--user",
+        USER,
+        "--subject",
+        "Mnemosyne source truth",
+        "--predicate",
+        "prefers",
+        "--object",
+        "generated memory",
+        "--evidence-cid",
+        machine["cid"],
+        "--trust-tier",
+        "3",
+        "--source-trust-tier",
+        "3",
+    )
+
+    synced = run_cli(
+        store,
+        "source-sync",
+        "--tenant",
+        TENANT,
+        "--user",
+        USER,
+        "--root",
+        str(source_repo),
+        "--apply",
+        "--role",
+        "operator",
+        "--source-trust-tier",
+        "0",
+    )
+    exported = run_cli(store, "export", "--tenant", TENANT)
+    synced_evidence = next(item for item in exported["evidence"] if item["cid"] == synced["evidence_cids"][0])
+    active = [
+        item
+        for item in exported["assertions"]
+        if item["subject"] == "Mnemosyne source truth" and item["predicate"] == "prefers" and item["status"] == "active"
+    ]
+    machine_assertion = next(item for item in exported["assertions"] if item["object"] == "generated memory")
+    evidence_audit = next(item for item in exported["audit_log"] if item["op"] == "append_evidence" and item["target_id"] == synced_evidence["cid"])
+
+    assert synced["discovered"] == 1
+    assert synced["applied"] == 1
+    assert synced["blocks"][0]["source_identity"] == f"git:memory.md@{head}#cli-source-truth"
+    assert active[0]["object"] == "Markdown git"
+    assert active[0]["source_evidence_cids"] == [synced_evidence["cid"]]
+    assert machine_assertion["status"] == "superseded"
+    assert synced_evidence["source_type"] == "markdown_git"
+    assert synced_evidence["source_identity"] == f"git:memory.md@{head}#cli-source-truth"
+    assert synced_evidence["trust_tier"] == 0
+    assert "human-source-truth" in synced_evidence["capability_tags"]
+    assert synced_evidence["metadata"]["source_truth"]["git_sha"] == head
+    assert evidence_audit["source"] == "markdown_git"
+    assert evidence_audit["trust_tier"] == 0
+    assert evidence_audit["capability_tags"] == ["human-source-truth"]
+
+
 def test_cli_branch_write_requires_authorized_context(tmp_path: Path) -> None:
     store = tmp_path / "mnemosyne.json"
     missing_context = run_raw_cli(

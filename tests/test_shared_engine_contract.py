@@ -351,6 +351,82 @@ def test_shared_engine_contract_retrieval_records_assertion_access_and_activatio
     assert result.explain["read_marks"]["assertions"] >= 1
 
 
+def test_shared_engine_contract_higher_trust_assertion_overrides_newer_machine_conflicts(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, user = engine_bundle
+    subject = f"shared source truth subject {uuid4()}"
+    machine_cid = _append_evidence(
+        engine,
+        tenant,
+        user,
+        "Machine-generated assertion about source truth.",
+        trust_tier=3,
+    )
+    machine_id = engine.upsert_assertion(
+        Assertion(
+            tenant_id=tenant,
+            user_id=user,
+            subject=subject,
+            predicate="prefers",
+            object="machine guess",
+            confidence=0.72,
+            valid_from=datetime(2026, 6, 21, tzinfo=UTC),
+            source_evidence_cids=[machine_cid],
+            status="active",
+            trust_tier=3,
+            access_policy={"tenant": tenant},
+        )
+    )
+    human_cid = _append_evidence(
+        engine,
+        tenant,
+        user,
+        "Committed Markdown/git source truth assertion.",
+        trust_tier=0,
+    )
+    human_id = engine.upsert_assertion(
+        Assertion(
+            tenant_id=tenant,
+            user_id=user,
+            subject=subject,
+            predicate="prefers",
+            object="human-authored markdown",
+            confidence=0.99,
+            valid_from=datetime(2026, 6, 20, tzinfo=UTC),
+            source_evidence_cids=[human_cid],
+            status="active",
+            trust_tier=0,
+            access_policy={"tenant": tenant},
+        )
+    )
+    later_machine_id = engine.upsert_assertion(
+        Assertion(
+            tenant_id=tenant,
+            user_id=user,
+            subject=subject,
+            predicate="prefers",
+            object="newer machine guess",
+            confidence=0.99,
+            valid_from=datetime(2026, 6, 22, tzinfo=UTC),
+            source_evidence_cids=[machine_cid],
+            status="active",
+            trust_tier=3,
+            access_policy={"tenant": tenant},
+        )
+    )
+    machine = _exported_assertion(engine, tenant, machine_id)
+    human = _exported_assertion(engine, tenant, human_id)
+    later_machine = _exported_assertion(engine, tenant, later_machine_id)
+
+    assert human["status"] == "active"
+    assert human["object"] == "human-authored markdown"
+    assert machine["status"] == "superseded"
+    assert machine["superseded_by"] == human_id
+    assert later_machine["status"] == "superseded"
+    assert later_machine["superseded_by"] == human_id
+
+
 def test_shared_engine_contract_retrieval_uses_conformal_calibration(
     engine_bundle: tuple[Any, str, str],
 ) -> None:

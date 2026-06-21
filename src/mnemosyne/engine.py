@@ -8,7 +8,7 @@ import os
 import threading
 from collections import defaultdict
 from dataclasses import asdict
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -428,8 +428,22 @@ class LocalMemoryEngine:
 
             conflicts = [item for item in peers if item.object != incoming.object]
             if conflicts:
-                current = max(conflicts, key=lambda item: item.valid_from)
-                if incoming.valid_from > current.valid_from:
+                current = min(conflicts, key=lambda item: (item.trust_tier, -item.valid_from.timestamp()))
+                if incoming.trust_tier < current.trust_tier:
+                    if incoming.valid_from > current.valid_from:
+                        current.valid_to = incoming.valid_from
+                    else:
+                        current.valid_to = current.valid_from + timedelta(microseconds=1)
+                    current.status = "superseded"
+                    current.superseded_by = incoming.id
+                    incoming.version = current.version + 1
+                    incoming.justification_id = new_id()
+                    op = "upsert_assertion.trust_supersede"
+                elif incoming.trust_tier > current.trust_tier:
+                    incoming.status = "superseded"
+                    incoming.superseded_by = current.id
+                    op = "upsert_assertion.trust_rejected"
+                elif incoming.valid_from > current.valid_from:
                     current.valid_to = incoming.valid_from
                     current.status = "superseded"
                     incoming.version = current.version + 1
