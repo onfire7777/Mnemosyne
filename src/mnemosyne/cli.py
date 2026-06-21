@@ -65,6 +65,7 @@ DEPLOYMENT_SOAK_COMMANDS = {
     "provider-check",
     "idp-jwks-live-check",
     "tls-cert-check",
+    "tls-rotation-plan-check",
     "mcp-http-soak",
     "mcp-sse-soak",
     "worker-run",
