@@ -10,11 +10,13 @@ from uuid import uuid4
 import pytest
 
 from mnemosyne.calibration import CalibrationSet
-from mnemosyne.consolidation import ConsolidationWorker
+from mnemosyne.consolidation import CONSOLIDATE_EVIDENCE_JOB, ConsolidationWorker
 from mnemosyne.engine import LocalMemoryEngine
+from mnemosyne.jobs import PROJECTION_RECOMPUTE_JOB, RuntimeJobHandlers
 from mnemosyne.models import Assertion, Contradiction, Evidence, Justification, Preference, Relation
 from mnemosyne.postgres_engine import PostgresEngine
 from mnemosyne.privacy import ErasureMode
+from mnemosyne.queue import InProcessQueue
 from mnemosyne.text import hashing_embedding
 
 
@@ -696,6 +698,74 @@ def test_shared_engine_contract_builds_raptor_summary_hierarchy(
     assert root_hit.metadata["summary"]["source_summary_cids"] == leaf_cids
     assert root_retrieval.abstained is True
     assert root_cid in root_retrieval.explain["gist_support"]["gist_hit_ids"]
+
+
+def test_shared_engine_contract_raptor_projection_recompute_refreshes_leaf_and_root(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, user = engine_bundle
+    source_cids = [
+        engine.append_evidence(
+            Evidence(
+                tenant_id=tenant,
+                user_id=user,
+                actor="user",
+                source_type="chat",
+                content=f"Raptor recompute source {index} participates in summary refresh.",
+                trust_tier=0,
+                access_policy={"tenant": tenant},
+            )
+        )
+        for index in range(4)
+    ]
+    run = ConsolidationWorker(engine, gate_cases=[]).run_queue_payload(
+        {
+            "tenant_id": tenant,
+            "branch": "main",
+            "source_evidence_cids": source_cids,
+            "passes": ["summarizer"],
+            "raptor_cluster_size": 2,
+            "raptor_max_levels": 2,
+        }
+    )
+    details = next(item for item in run.pass_results if item["name"] == "summarizer")["details"]
+    leaf_cids = details["hierarchy"]["levels"][0]["summary_cids"]
+    root_cid = details["hierarchy"]["root_summary_cid"]
+    exported = engine.export_tenant(tenant)
+    relation_ids = {
+        (item["source"], item["target"]): item["id"]
+        for item in exported["relations"]
+        if item["predicate"] == "summary-derived-gist"
+    }
+    changed_raw_cid = source_cids[0]
+    changed_leaf_cid = leaf_cids[0]
+    required_relation_ids = {
+        relation_ids[(changed_raw_cid, changed_leaf_cid)],
+        relation_ids[(changed_leaf_cid, root_cid)],
+    }
+    queue = InProcessQueue()
+    handlers = RuntimeJobHandlers(engine, queue)
+
+    recompute = handlers.run_projection_recompute(
+        {
+            "tenant_id": tenant,
+            "user_id": user,
+            "branch": "main",
+            "changed_evidence_cids": [changed_raw_cid],
+            "passes": ["summarizer"],
+        }
+    )
+    jobs = list(queue.jobs.values())
+
+    assert recompute.kind == PROJECTION_RECOMPUTE_JOB
+    assert {changed_raw_cid, changed_leaf_cid, root_cid}.issubset(recompute.details["affected_evidence_cids"])
+    assert required_relation_ids.issubset(recompute.details["affected_projections"]["relations"])
+    assert recompute.details["queued_consolidation_jobs"] == [jobs[0].id]
+    assert len(jobs) == 1
+    assert jobs[0].kind == CONSOLIDATE_EVIDENCE_JOB
+    assert jobs[0].payload["source_evidence_cids"] == [changed_raw_cid]
+    assert jobs[0].payload["passes"] == ["summarizer"]
+    assert jobs[0].payload["trigger"] == PROJECTION_RECOMPUTE_JOB
 
 
 def test_shared_engine_contract_forget_source_invalidates_summary_gist(
