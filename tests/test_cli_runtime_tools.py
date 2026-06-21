@@ -1350,6 +1350,122 @@ def test_cli_mcp_sse_soak_fails_closed_on_non_sse_endpoint(tmp_path: Path) -> No
     assert report["iterations"][0]["status"] == 404
 
 
+def test_cli_deployment_soak_runs_allowed_manifest_checks_without_leaking_tokens(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("MNEMOSYNE_MCP_HTTP_AUTH_TOKEN", "soak-secret")
+    monkeypatch.setenv("MNEMOSYNE_MCP_SSE_AUTH_TOKEN", "sse-secret")
+    http_server = build_http_server(
+        host="127.0.0.1",
+        port=0,
+        store_path=tmp_path / "mcp-store.json",
+        auth_token="soak-secret",
+        stateless=True,
+    )
+
+    class SseHandler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802 - stdlib callback name.
+            if self.path != "/sse" or self.headers.get("Authorization") != "Bearer sse-secret":
+                self.send_response(401)
+                self.end_headers()
+                return
+            payload = b"event: endpoint\ndata: /messages?sessionId=private-session\n\n"
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.end_headers()
+            self.wfile.write(payload)
+            self.wfile.flush()
+
+        def log_message(self, *_args: object) -> None:
+            return
+
+    sse_server = ThreadingHTTPServer(("127.0.0.1", 0), SseHandler)
+    http_thread = threading.Thread(target=http_server.serve_forever, daemon=True)
+    sse_thread = threading.Thread(target=sse_server.serve_forever, daemon=True)
+    http_thread.start()
+    sse_thread.start()
+    try:
+        manifest_path = tmp_path / "deployment-soak.json"
+        manifest_path.write_text(
+            json.dumps(
+                {
+                    "checks": [
+                        {
+                            "name": "hosted-http",
+                            "command": "mcp-http-soak",
+                            "args": [
+                                "--base-url",
+                                f"http://127.0.0.1:{http_server.server_port}",
+                                "--iterations",
+                                "1",
+                                "--require-stateless",
+                            ],
+                        },
+                        {
+                            "name": "legacy-sse",
+                            "command": "mcp-sse-soak",
+                            "args": [
+                                "--base-url",
+                                f"http://127.0.0.1:{sse_server.server_port}",
+                                "--iterations",
+                                "1",
+                            ],
+                        },
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        report = run_cli(
+            tmp_path / "mnemosyne.json",
+            "deployment-soak",
+            "--soak-manifest",
+            str(manifest_path),
+            "--check-timeout",
+            "10",
+        )
+    finally:
+        http_server.shutdown()
+        sse_server.shutdown()
+        http_thread.join(timeout=5)
+        sse_thread.join(timeout=5)
+        http_server.server_close()
+        sse_server.server_close()
+
+    serialized = json.dumps(report, sort_keys=True)
+    assert report["ok"] is True
+    assert report["summary"]["required_failures"] == 0
+    assert [item["command"] for item in report["checks"]] == ["mcp-http-soak", "mcp-sse-soak"]
+    assert all(item["ok"] for item in report["checks"])
+    assert report["checks"][0]["stdout_json"]["summary"]["requests"] == 4
+    assert report["checks"][1]["stdout_json"]["iterations"][0]["endpoint_data_present"] is True
+    assert "soak-secret" not in serialized
+    assert "sse-secret" not in serialized
+    assert "private-session" not in serialized
+
+
+def test_cli_deployment_soak_fails_closed_on_disallowed_command(tmp_path: Path) -> None:
+    manifest_path = tmp_path / "deployment-soak.json"
+    manifest_path.write_text(
+        json.dumps({"checks": [{"name": "bad", "command": "session-exchange", "args": []}]}),
+        encoding="utf-8",
+    )
+
+    result = run_raw_cli(
+        tmp_path / "mnemosyne.json",
+        "deployment-soak",
+        "--soak-manifest",
+        str(manifest_path),
+    )
+
+    report = json.loads(result.stdout)
+    assert result.returncode == 1
+    assert report["ok"] is False
+    assert report["summary"]["required_failures"] == 1
+    assert report["checks"][0]["command"] == "session-exchange"
+    assert "not allowed" in report["checks"][0]["error"]
+
+
 def test_cli_tls_cert_check_validates_chain_hostname_and_expiry(tmp_path: Path) -> None:
     ca_path, cert_path, key_path = write_tls_fixture(tmp_path, server_days_valid=45)
     server = build_http_server(
