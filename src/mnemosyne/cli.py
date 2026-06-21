@@ -36,7 +36,12 @@ from mnemosyne.mcp_tools import MemoryTools, TOOL_SPEC
 from mnemosyne.models import Hit
 from mnemosyne.observability import MetricsRegistry, build_ops_report, render_ops_dashboard
 from mnemosyne.oidc_jwks import load_oidc_authorization_policy, load_oidc_jwks, oidc_jwks_loader
-from mnemosyne.parametric import CommandParametricTrainer, ParametricArtifactStore, ParametricTier, protected_suite_report
+from mnemosyne.parametric import (
+    CommandParametricTrainer,
+    ParametricArtifactStore,
+    ParametricTier,
+    protected_suite_report,
+)
 from mnemosyne.provenance import C2paToolVerifier, ProvenanceTrustPolicy, SignedProvenanceVerifier
 from mnemosyne.queue import InProcessQueue, PostgresQueue, QueueWorker
 from mnemosyne.retrieval import (
@@ -1493,11 +1498,50 @@ def cmd_ops_report(args: argparse.Namespace) -> None:
         max_open_contradictions=args.max_open_contradictions,
     )
     payload = {"ok": bool(report["tripwires"]["passed"]), **report}
+    dashboard_html = render_ops_dashboard(report)
+    dashboard_path: Path | None = None
     if args.dashboard_html:
-        path = Path(args.dashboard_html).expanduser()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(render_ops_dashboard(report), encoding="utf-8")
-        emit({"ok": payload["ok"], "dashboard_path": str(path), "report": report})
+        dashboard_path = Path(args.dashboard_html).expanduser()
+        dashboard_path.parent.mkdir(parents=True, exist_ok=True)
+        dashboard_path.write_text(dashboard_html, encoding="utf-8")
+    dashboard_package: dict[str, Any] | None = None
+    if args.dashboard_package_dir:
+        package_dir = Path(args.dashboard_package_dir).expanduser()
+        package_dir.mkdir(parents=True, exist_ok=True)
+        package_dashboard = package_dir / "ops-dashboard.html"
+        package_snapshot = package_dir / "ops-report.json"
+        package_manifest = package_dir / "manifest.json"
+        package_dashboard.write_text(dashboard_html, encoding="utf-8")
+        package_snapshot.write_text(json.dumps({"ok": payload["ok"], "report": report}, indent=2, sort_keys=True), encoding="utf-8")
+        manifest = {
+            "kind": "mnemosyne.ops_dashboard_package",
+            "version": 1,
+            "created_at": datetime.now(UTC).isoformat(),
+            "tenant_id": report["tenant_id"],
+            "ok": payload["ok"],
+            "files": {
+                "dashboard_html": package_dashboard.name,
+                "snapshot_json": package_snapshot.name,
+            },
+            "counts": report["counts"],
+            "tripwires": report["tripwires"],
+        }
+        package_manifest.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+        dashboard_package = {
+            "dir": str(package_dir),
+            "dashboard_path": str(package_dashboard),
+            "snapshot_path": str(package_snapshot),
+            "manifest_path": str(package_manifest),
+        }
+        if dashboard_path is None:
+            dashboard_path = package_dashboard
+    if dashboard_path or dashboard_package:
+        result: dict[str, Any] = {"ok": payload["ok"], "report": report}
+        if dashboard_path:
+            result["dashboard_path"] = str(dashboard_path)
+        if dashboard_package:
+            result["dashboard_package"] = dashboard_package
+        emit(result)
         return
     emit(payload)
 
@@ -3846,6 +3890,10 @@ def build_parser() -> argparse.ArgumentParser:
     ops_report.add_argument("--max-proxy-gap", type=float, default=0.15)
     ops_report.add_argument("--max-open-contradictions", type=int, default=0)
     ops_report.add_argument("--dashboard-html", help="Write a static HTML dashboard artifact to this path")
+    ops_report.add_argument(
+        "--dashboard-package-dir",
+        help="Write static dashboard HTML, JSON snapshot, and manifest files to this directory",
+    )
     ops_report.set_defaults(func=cmd_ops_report)
 
     provider_check = sub.add_parser("provider-check")

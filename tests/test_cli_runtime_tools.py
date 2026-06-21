@@ -2985,6 +2985,23 @@ def test_cli_ops_report_exports_dashboard_snapshot(tmp_path: Path) -> None:
     assert "Retrieval" in dashboard_html
     assert "Calibration" in dashboard_html
     assert "Snapshot JSON" in dashboard_html
+    package_dir = tmp_path / "dashboard-package"
+    packaged = run_packaged_cli(
+        store,
+        "ops-report",
+        "--tenant",
+        TENANT,
+        "--dashboard-package-dir",
+        str(package_dir),
+    )
+    package_manifest = json.loads((package_dir / "manifest.json").read_text(encoding="utf-8"))
+    package_snapshot = json.loads((package_dir / "ops-report.json").read_text(encoding="utf-8"))
+    assert packaged["dashboard_path"] == str(package_dir / "ops-dashboard.html")
+    assert packaged["dashboard_package"]["manifest_path"] == str(package_dir / "manifest.json")
+    assert package_manifest["kind"] == "mnemosyne.ops_dashboard_package"
+    assert package_manifest["tenant_id"] == TENANT
+    assert package_manifest["files"] == {"dashboard_html": "ops-dashboard.html", "snapshot_json": "ops-report.json"}
+    assert package_snapshot["report"]["counts"]["evidence"] == 1
 
 
 def test_cli_deployment_soak_allows_ops_report_dashboard(tmp_path: Path) -> None:
@@ -3001,8 +3018,9 @@ def test_cli_deployment_soak_allows_ops_report_dashboard(tmp_path: Path) -> None
         "--content",
         "Deployment soak should render observability dashboards.",
     )
-    dashboard_path = tmp_path / "dashboards" / "ops-dashboard.html"
     manifest_path = tmp_path / "deployment-soak.json"
+    dashboard_path = tmp_path / "dashboards" / "ops-dashboard.html"
+    package_dir = tmp_path / "dashboard-package"
     manifest_path.write_text(
         json.dumps(
             {
@@ -3015,6 +3033,8 @@ def test_cli_deployment_soak_allows_ops_report_dashboard(tmp_path: Path) -> None
                             TENANT,
                             "--dashboard-html",
                             str(dashboard_path),
+                            "--dashboard-package-dir",
+                            str(package_dir),
                         ],
                     }
                 ]
@@ -3032,6 +3052,8 @@ def test_cli_deployment_soak_allows_ops_report_dashboard(tmp_path: Path) -> None
     assert report["checks"][0]["ok"] is True
     assert report["checks"][0]["stdout_json"]["report"]["counts"]["evidence"] == 1
     assert report["checks"][0]["stdout_json"]["dashboard_path"] == str(dashboard_path)
+    assert report["checks"][0]["stdout_json"]["dashboard_package"]["manifest_path"] == str(package_dir / "manifest.json")
+    assert json.loads((package_dir / "manifest.json").read_text(encoding="utf-8"))["tenant_id"] == TENANT
     assert "Mnemosyne Ops Dashboard" in dashboard_html
 
 
