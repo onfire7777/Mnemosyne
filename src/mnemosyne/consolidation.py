@@ -500,6 +500,7 @@ class ConsolidationWorker:
                         "status": "active",
                         "generated_at": generated_at,
                         "source_fingerprint": source_fingerprint,
+                        "confabulation_risk": True,
                         "source_evidence_cids": source_cids,
                         "raptor_level": 1,
                         "source_count": len(source_cids),
