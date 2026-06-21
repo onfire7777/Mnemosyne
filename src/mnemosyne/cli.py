@@ -97,6 +97,33 @@ DEPLOYMENT_SOAK_GLOBAL_OPTIONS = {
     "--object-store",
     "--parametric-artifact-store",
 }
+PRODUCTION_RELEASE_REQUIRED_COMMANDS = (
+    "provider-check",
+    "idp-jwks-live-check",
+    "idp-authz-policy-rollout-check",
+    "tls-cert-check",
+    "tls-rotation-plan-check",
+    "mcp-http-soak",
+    "mcp-streamable-http-soak",
+    "gate-suite-check",
+    "worker-run",
+    "ops-report",
+)
+PRODUCTION_RELEASE_REQUIRED_PROVIDER_CHECKS = (
+    "embedding",
+    "reranker",
+    "retrieval_backends",
+    "media_extractor",
+    "media_embedding",
+    "object_key_manager",
+    "parametric",
+    "candidate_extractor",
+    "summarizer",
+    "entity_resolver",
+    "oidc",
+    "session_secret",
+    "residency_policy",
+)
 
 
 def default_store() -> Path:
@@ -2518,6 +2545,32 @@ def _write_deployment_soak_evidence(
     return bundle
 
 
+def _deployment_validation_scope(manifest: Mapping[str, Any]) -> dict[str, Any]:
+    raw_scope = manifest.get("validation_scope")
+    scope = raw_scope if isinstance(raw_scope, Mapping) else {}
+    production_validated = bool(scope.get("production_validated", manifest.get("production_validated", False)))
+    target_environment = str(
+        scope.get("target_environment")
+        or manifest.get("target_environment")
+        or ("production" if production_validated else "local")
+    )
+    note = str(
+        scope.get("note")
+        or (
+            "Allowlisted checks run as local CLI child processes against operator-declared production targets."
+            if production_validated
+            else "Allowlisted checks run as local CLI child processes; production claims require operator-run endpoint evidence."
+        )
+    )
+    return {
+        "surface": "local_cli_orchestrator",
+        "production_validated": production_validated,
+        "target_environment": target_environment,
+        "operator_asserted": bool(raw_scope or manifest.get("production_validated") is not None),
+        "note": note,
+    }
+
+
 def cmd_deployment_soak(args: argparse.Namespace) -> None:
     if args.check_timeout <= 0:
         raise SystemExit("--check-timeout must be greater than 0.")
@@ -2609,9 +2662,7 @@ def cmd_deployment_soak(args: argparse.Namespace) -> None:
             "check_count": len(manifest["checks"]),
         },
         "validation_scope": {
-            "surface": "local_cli_orchestrator",
-            "production_validated": False,
-            "note": "Allowlisted checks run as local CLI child processes; production claims require operator-run endpoint evidence.",
+            **_deployment_validation_scope(manifest),
         },
         "redaction": {
             "raw_command_omitted": True,
@@ -2630,6 +2681,293 @@ def cmd_deployment_soak(args: argparse.Namespace) -> None:
         _write_deployment_soak_evidence(evidence_dir=args.evidence_dir, source_manifest=args.soak_manifest, report=report)
     emit(report)
     if not ok:
+        raise SystemExit(1)
+
+
+def _load_release_audit_report(args: argparse.Namespace) -> tuple[dict[str, Any], dict[str, Any]]:
+    if bool(args.soak_report) == bool(args.evidence_manifest):
+        raise SystemExit("release-audit requires exactly one of --soak-report or --evidence-manifest")
+    if args.evidence_manifest:
+        manifest_path = Path(args.evidence_manifest).expanduser()
+        try:
+            evidence_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise SystemExit(f"release evidence manifest denied: {exc}") from exc
+        if not isinstance(evidence_manifest, dict):
+            raise SystemExit("release evidence manifest must be a JSON object")
+        if evidence_manifest.get("kind") != "mnemosyne.deployment_soak_evidence":
+            raise SystemExit("release evidence manifest has unsupported kind")
+        report_name = evidence_manifest.get("files", {}).get("report") if isinstance(evidence_manifest.get("files"), dict) else None
+        if not isinstance(report_name, str) or not report_name:
+            raise SystemExit("release evidence manifest requires files.report")
+        report_path = manifest_path.parent / report_name
+        source = {
+            "kind": "evidence_manifest",
+            "manifest_path": str(manifest_path),
+            "report_path": str(report_path),
+        }
+    else:
+        report_path = Path(args.soak_report).expanduser()
+        source = {"kind": "soak_report", "report_path": str(report_path)}
+    try:
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"deployment-soak report denied: {exc}") from exc
+    if not isinstance(report, dict):
+        raise SystemExit("deployment-soak report must be a JSON object")
+    return report, source
+
+
+def _release_finding(code: str, message: str, *, severity: str = "critical") -> dict[str, Any]:
+    return {"code": code, "severity": severity, "message": message}
+
+
+def _normalize_release_fingerprint_value(value: Any) -> Any:
+    volatile_keys = {
+        "duration_ms",
+        "latency_ms",
+        "avg_latency_ms",
+        "p95_latency_ms",
+        "max_latency_ms",
+        "created_at",
+        "started_at",
+        "path",
+        "dir",
+        "report_path",
+        "manifest_path",
+        "checks_dir",
+    }
+    if isinstance(value, Mapping):
+        return {
+            str(key): _normalize_release_fingerprint_value(item)
+            for key, item in sorted(value.items(), key=lambda pair: str(pair[0]))
+            if str(key) not in volatile_keys
+        }
+    if isinstance(value, list):
+        return [_normalize_release_fingerprint_value(item) for item in value]
+    return value
+
+
+def _release_audit_fingerprint(report: Mapping[str, Any]) -> str:
+    fingerprint_payload = {
+        "ok": report.get("ok"),
+        "validation_scope": report.get("validation_scope"),
+        "redaction": report.get("redaction"),
+        "summary": report.get("summary"),
+        "checks": [
+            {
+                "index": check.get("index"),
+                "name": check.get("name"),
+                "command": check.get("command"),
+                "required": check.get("required"),
+                "ok": check.get("ok"),
+                "returncode": check.get("returncode"),
+                "stdout_json": check.get("stdout_json"),
+            }
+            for check in report.get("checks", [])
+            if isinstance(check, Mapping)
+        ],
+    }
+    canonical = _normalize_release_fingerprint_value(fingerprint_payload)
+    return sha256(json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def _release_redaction_ok(report: Mapping[str, Any]) -> bool:
+    redaction = report.get("redaction")
+    if not isinstance(redaction, Mapping):
+        return False
+    return (
+        redaction.get("raw_command_omitted") is True
+        and redaction.get("stderr_omitted") is True
+        and redaction.get("stdout_json_only") is True
+    )
+
+
+def _release_check_redaction_ok(check: Mapping[str, Any]) -> bool:
+    redaction = check.get("redaction")
+    if not isinstance(redaction, Mapping):
+        return False
+    return (
+        redaction.get("raw_command_omitted") is True
+        and redaction.get("stderr_omitted") is True
+        and redaction.get("stdout_json_only") is True
+    )
+
+
+def _release_provider_stdout(checks: list[Mapping[str, Any]]) -> Mapping[str, Any] | None:
+    for check in checks:
+        if check.get("command") != "provider-check" or check.get("ok") is not True:
+            continue
+        stdout_json = check.get("stdout_json")
+        if isinstance(stdout_json, Mapping):
+            return stdout_json
+    return None
+
+
+def _release_command_summary(checks: list[Mapping[str, Any]], required_commands: list[str]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for command in required_commands:
+        matching = [check for check in checks if check.get("command") == command]
+        rows.append(
+            {
+                "command": command,
+                "present": bool(matching),
+                "ok": any(check.get("ok") is True for check in matching),
+                "count": len(matching),
+            }
+        )
+    return rows
+
+
+def _release_provider_check_summary(
+    provider_report: Mapping[str, Any] | None,
+    required_provider_checks: list[str],
+) -> list[dict[str, Any]]:
+    provider_checks = provider_report.get("checks") if isinstance(provider_report, Mapping) else None
+    rows: list[dict[str, Any]] = []
+    for name in required_provider_checks:
+        check = provider_checks.get(name) if isinstance(provider_checks, Mapping) else None
+        rows.append(
+            {
+                "check": name,
+                "present": isinstance(check, Mapping),
+                "ok": isinstance(check, Mapping) and check.get("ok") is True,
+                "skipped": isinstance(check, Mapping) and check.get("skipped") is True,
+            }
+        )
+    return rows
+
+
+def cmd_release_audit(args: argparse.Namespace) -> None:
+    report, source = _load_release_audit_report(args)
+    checks_raw = report.get("checks")
+    if not isinstance(checks_raw, list):
+        raise SystemExit("deployment-soak report requires checks array")
+    checks = [item for item in checks_raw if isinstance(item, Mapping)]
+    required_commands = sorted(set(args.require_command or PRODUCTION_RELEASE_REQUIRED_COMMANDS))
+    required_provider_checks = sorted(set(args.require_provider_check or PRODUCTION_RELEASE_REQUIRED_PROVIDER_CHECKS))
+    fingerprint = _release_audit_fingerprint(report)
+    findings: list[dict[str, Any]] = []
+
+    if report.get("ok") is not True:
+        findings.append(_release_finding("soak_report_not_ok", "deployment-soak report is not ok"))
+    summary = report.get("summary")
+    if isinstance(summary, Mapping) and int(summary.get("required_failures") or 0) > 0:
+        findings.append(
+            _release_finding(
+                "required_soak_failures",
+                f"deployment-soak reported {summary.get('required_failures')} required failures",
+            )
+        )
+    if args.expected_fingerprint and args.expected_fingerprint.strip().lower() != fingerprint:
+        findings.append(_release_finding("fingerprint_mismatch", "release-audit fingerprint mismatch"))
+    if args.require_production_validated:
+        validation_scope = report.get("validation_scope")
+        if not isinstance(validation_scope, Mapping) or validation_scope.get("production_validated") is not True:
+            findings.append(
+                _release_finding(
+                    "production_validation_missing",
+                    "deployment-soak report was not marked as production validated",
+                )
+            )
+    if not _release_redaction_ok(report):
+        findings.append(_release_finding("report_redaction_missing", "deployment-soak report redaction flags are incomplete"))
+    for check in checks:
+        if not _release_check_redaction_ok(check):
+            findings.append(
+                _release_finding(
+                    "check_redaction_missing",
+                    f"check {check.get('name') or check.get('index')} redaction flags are incomplete",
+                )
+            )
+
+    command_summary = _release_command_summary(checks, required_commands)
+    for row in command_summary:
+        if not row["present"]:
+            findings.append(
+                _release_finding("missing_required_command", f"required deployment check {row['command']} is missing")
+            )
+        elif not row["ok"]:
+            findings.append(
+                _release_finding("required_command_failed", f"required deployment check {row['command']} did not pass")
+            )
+
+    provider_report = _release_provider_stdout(checks)
+    provider_manifest = provider_report.get("manifest") if isinstance(provider_report, Mapping) else None
+    provider_checks = provider_report.get("checks") if isinstance(provider_report, Mapping) else None
+    if provider_report is None:
+        findings.append(_release_finding("provider_check_missing", "provider-check did not pass in deployment evidence"))
+    else:
+        if args.require_provider_forbid_local:
+            if not isinstance(provider_manifest, Mapping) or provider_manifest.get("forbid_local") is not True:
+                findings.append(
+                    _release_finding(
+                        "provider_manifest_forbid_local_missing",
+                        "provider-check manifest must set forbid_local=true",
+                    )
+                )
+        retrieval = provider_checks.get("retrieval_backends") if isinstance(provider_checks, Mapping) else None
+        if isinstance(retrieval, Mapping):
+            if retrieval.get("lexical_local") or retrieval.get("graph_local"):
+                findings.append(
+                    _release_finding(
+                        "provider_check_local_retrieval_backend",
+                        "provider-check reported a local lexical or graph retrieval backend",
+                    )
+                )
+        elif "retrieval_backends" in required_provider_checks:
+            findings.append(
+                _release_finding(
+                    "provider_check_missing_retrieval_backends",
+                    "provider-check did not report retrieval_backends",
+                )
+            )
+    provider_check_summary = _release_provider_check_summary(provider_report, required_provider_checks)
+    for row in provider_check_summary:
+        if not row["present"]:
+            findings.append(
+                _release_finding("missing_required_provider_check", f"provider-check subcheck {row['check']} is missing")
+            )
+        elif row["skipped"]:
+            findings.append(
+                _release_finding("required_provider_check_skipped", f"provider-check subcheck {row['check']} was skipped")
+            )
+        elif not row["ok"]:
+            findings.append(
+                _release_finding("required_provider_check_failed", f"provider-check subcheck {row['check']} did not pass")
+            )
+
+    report_out = {
+        "ok": not findings,
+        "source": source,
+        "fingerprint": fingerprint,
+        "expected_fingerprint_present": bool(args.expected_fingerprint),
+        "requirements": {
+            "required_commands": required_commands,
+            "required_provider_checks": required_provider_checks,
+            "require_provider_forbid_local": bool(args.require_provider_forbid_local),
+            "require_production_validated": bool(args.require_production_validated),
+        },
+        "validation_scope": report.get("validation_scope"),
+        "summary": {
+            "checks": len(checks),
+            "required_command_count": len(required_commands),
+            "required_provider_check_count": len(required_provider_checks),
+            "findings": len(findings),
+        },
+        "commands": command_summary,
+        "provider": {
+            "provider_check_found": provider_report is not None,
+            "manifest": provider_manifest if isinstance(provider_manifest, Mapping) else None,
+            "checks": provider_check_summary,
+            "retrieval_backends": provider_checks.get("retrieval_backends")
+            if isinstance(provider_checks, Mapping)
+            else None,
+        },
+        "findings": findings,
+    }
+    emit(report_out)
+    if findings:
         raise SystemExit(1)
 
 
@@ -4378,6 +4716,46 @@ def build_parser() -> argparse.ArgumentParser:
         help="Write deployment-soak report, per-check JSON, and manifest evidence files to this directory",
     )
     deployment_soak.set_defaults(func=cmd_deployment_soak)
+
+    release_audit = sub.add_parser("release-audit")
+    release_audit.add_argument("--soak-report", help="Path to deployment-soak-report.json")
+    release_audit.add_argument(
+        "--evidence-manifest",
+        help="Path to a mnemosyne.deployment_soak_evidence manifest.json bundle",
+    )
+    release_audit.add_argument(
+        "--require-command",
+        action="append",
+        choices=sorted(DEPLOYMENT_SOAK_COMMANDS),
+        help="Required deployment-soak child command; defaults to the production release profile",
+    )
+    release_audit.add_argument(
+        "--require-provider-check",
+        action="append",
+        choices=sorted(PRODUCTION_RELEASE_REQUIRED_PROVIDER_CHECKS),
+        help="Required provider-check subcheck; defaults to the production release profile",
+    )
+    release_audit.add_argument(
+        "--require-provider-forbid-local",
+        action="store_true",
+        dest="require_provider_forbid_local",
+        default=True,
+        help="Require provider-check manifest forbid_local=true and non-local retrieval backends",
+    )
+    release_audit.add_argument(
+        "--allow-provider-local",
+        action="store_false",
+        dest="require_provider_forbid_local",
+        help="Allow local provider/retrieval evidence for non-production dry runs",
+    )
+    release_audit.add_argument(
+        "--require-production-validated",
+        action="store_true",
+        default=False,
+        help="Fail unless the deployment-soak report is explicitly marked production_validated",
+    )
+    release_audit.add_argument("--expected-fingerprint")
+    release_audit.set_defaults(func=cmd_release_audit)
 
     tls_cert_check = sub.add_parser("tls-cert-check")
     tls_cert_check.add_argument("--url", default=os.environ.get("MNEMOSYNE_TLS_CHECK_URL"))

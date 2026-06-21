@@ -20,7 +20,11 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
-from mnemosyne.cli import build_parser
+from mnemosyne.cli import (
+    PRODUCTION_RELEASE_REQUIRED_COMMANDS,
+    PRODUCTION_RELEASE_REQUIRED_PROVIDER_CHECKS,
+    build_parser,
+)
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.mcp_server import MnemosyneMcpServer, build_http_server, build_sdk_streamable_http_app
 from mnemosyne.models import Evidence, Relation
@@ -3605,6 +3609,227 @@ def test_cli_deployment_soak_allows_ops_report_dashboard(tmp_path: Path) -> None
     assert check_record["redaction"]["raw_command_omitted"] is True
     assert check_record["stdout_json"]["dashboard_package"]["manifest_path"] == str(package_dir / "manifest.json")
     assert "Mnemosyne Ops Dashboard" in dashboard_html
+
+
+def test_cli_deployment_soak_preserves_operator_production_scope(tmp_path: Path) -> None:
+    manifest_path = tmp_path / "deployment-soak.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "validation_scope": {
+                    "production_validated": True,
+                    "target_environment": "production",
+                    "note": "operator verified production endpoints",
+                },
+                "checks": [
+                    {
+                        "name": "local-worker",
+                        "command": "worker-run",
+                        "args": [
+                            "--max-cycles",
+                            "1",
+                            "--idle-exit-after",
+                            "1",
+                            "--poll-interval",
+                            "0",
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = run_cli(tmp_path / "mnemosyne.json", "deployment-soak", "--soak-manifest", str(manifest_path))
+
+    assert report["ok"] is True
+    assert report["validation_scope"]["surface"] == "local_cli_orchestrator"
+    assert report["validation_scope"]["production_validated"] is True
+    assert report["validation_scope"]["target_environment"] == "production"
+    assert report["validation_scope"]["operator_asserted"] is True
+    assert report["validation_scope"]["note"] == "operator verified production endpoints"
+
+
+def release_check(command: str, stdout_json: dict | None = None, *, ok: bool = True) -> dict:
+    return {
+        "index": 1,
+        "name": command,
+        "command": command,
+        "required": True,
+        "evidence_class": "allowlisted_local_cli_check",
+        "redaction": {
+            "raw_command_omitted": True,
+            "stderr_omitted": True,
+            "stdout_json_only": True,
+        },
+        "ok": ok,
+        "returncode": 0 if ok else 1,
+        "duration_ms": 12.5,
+        "timeout_seconds": 30,
+        "stdout_json": stdout_json or {"ok": ok},
+        "stderr_present": False,
+    }
+
+
+def production_provider_stdout(*, forbid_local: bool = True, local_retrieval: bool = False) -> dict:
+    checks = {
+        name: {"ok": True, "provider": "command"}
+        for name in PRODUCTION_RELEASE_REQUIRED_PROVIDER_CHECKS
+    }
+    checks["embedding"] = {"ok": True, "provider": "http", "dimensions": 1024}
+    checks["reranker"] = {"ok": True, "provider": "http", "top_id": "b"}
+    checks["retrieval_backends"] = {
+        "ok": True,
+        "lexical_backend": "local-bm25-lite" if local_retrieval else "paradedb-bm25",
+        "graph_backend": "local-ppr" if local_retrieval else "apache-age",
+        "lexical_local": local_retrieval,
+        "graph_local": local_retrieval,
+    }
+    checks["oidc"] = {
+        "ok": True,
+        "jwks_key_count": 2,
+        "issuer_configured": True,
+        "audience_configured": True,
+        "authz_policy_configured": True,
+    }
+    checks["session_secret"] = {
+        "ok": True,
+        "provider": "command",
+        "source": "keyring",
+        "key_count": 2,
+        "active_key_id_present": True,
+        "roundtrip_verified": True,
+    }
+    checks["residency_policy"] = {"ok": True, "allowed_residencies": ["us"], "runtime_residency": "us"}
+    return {
+        "ok": True,
+        "manifest": {
+            "name": "production-release-providers",
+            "required_checks": list(PRODUCTION_RELEASE_REQUIRED_PROVIDER_CHECKS),
+            "forbid_local": forbid_local,
+        },
+        "checks": checks,
+    }
+
+
+def write_release_report(
+    tmp_path: Path,
+    *,
+    commands: tuple[str, ...] = PRODUCTION_RELEASE_REQUIRED_COMMANDS,
+    provider_stdout: dict | None = None,
+    production_validated: bool = True,
+) -> tuple[Path, Path]:
+    evidence_dir = tmp_path / "release-evidence"
+    evidence_dir.mkdir()
+    provider_stdout = provider_stdout or production_provider_stdout()
+    checks = [
+        release_check(command, provider_stdout if command == "provider-check" else {"ok": True})
+        for command in commands
+    ]
+    for index, check in enumerate(checks, start=1):
+        check["index"] = index
+    report = {
+        "ok": True,
+        "manifest": {"path": str(tmp_path / "deployment-soak.json"), "check_count": len(checks)},
+        "validation_scope": {
+            "surface": "local_cli_orchestrator",
+            "production_validated": production_validated,
+            "target_environment": "production" if production_validated else "local",
+            "operator_asserted": production_validated,
+            "note": "test release evidence",
+        },
+        "redaction": {
+            "raw_command_omitted": True,
+            "stderr_omitted": True,
+            "stdout_json_only": True,
+        },
+        "allowed_commands": sorted(PRODUCTION_RELEASE_REQUIRED_COMMANDS),
+        "checks": checks,
+        "summary": {
+            "checks": len(checks),
+            "required_failures": 0,
+            "optional_failures": 0,
+        },
+    }
+    report_path = evidence_dir / "deployment-soak-report.json"
+    manifest_path = evidence_dir / "manifest.json"
+    report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "kind": "mnemosyne.deployment_soak_evidence",
+                "version": 1,
+                "files": {"report": report_path.name, "checks_dir": "checks"},
+                "summary": report["summary"],
+                "validation_scope": report["validation_scope"],
+                "redaction": report["redaction"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    return report_path, manifest_path
+
+
+def test_cli_release_audit_verifies_production_deployment_evidence(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    _report_path, manifest_path = write_release_report(tmp_path)
+
+    report = run_cli(
+        store,
+        "release-audit",
+        "--evidence-manifest",
+        str(manifest_path),
+        "--require-production-validated",
+    )
+    acknowledged = run_cli(
+        store,
+        "release-audit",
+        "--evidence-manifest",
+        str(manifest_path),
+        "--require-production-validated",
+        "--expected-fingerprint",
+        report["fingerprint"],
+    )
+
+    assert report["ok"] is True
+    assert len(report["fingerprint"]) == 64
+    assert acknowledged["ok"] is True
+    assert acknowledged["expected_fingerprint_present"] is True
+    assert set(item["command"] for item in report["commands"]) == set(PRODUCTION_RELEASE_REQUIRED_COMMANDS)
+    assert all(item["ok"] for item in report["commands"])
+    assert set(item["check"] for item in report["provider"]["checks"]) == set(PRODUCTION_RELEASE_REQUIRED_PROVIDER_CHECKS)
+    assert all(item["ok"] and not item["skipped"] for item in report["provider"]["checks"])
+    assert report["provider"]["manifest"]["forbid_local"] is True
+    assert report["provider"]["retrieval_backends"]["lexical_backend"] == "paradedb-bm25"
+    assert report["provider"]["retrieval_backends"]["graph_backend"] == "apache-age"
+    assert report["validation_scope"]["production_validated"] is True
+
+
+def test_cli_release_audit_fails_closed_on_missing_and_local_evidence(tmp_path: Path) -> None:
+    report_path, _manifest_path = write_release_report(
+        tmp_path,
+        commands=("provider-check",),
+        provider_stdout=production_provider_stdout(forbid_local=False, local_retrieval=True),
+        production_validated=False,
+    )
+
+    result = run_raw_cli(
+        tmp_path / "mnemosyne.json",
+        "release-audit",
+        "--soak-report",
+        str(report_path),
+        "--require-production-validated",
+    )
+    payload = json.loads(result.stdout)
+    codes = {finding["code"] for finding in payload["findings"]}
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert "production_validation_missing" in codes
+    assert "missing_required_command" in codes
+    assert "provider_manifest_forbid_local_missing" in codes
+    assert "provider_check_local_retrieval_backend" in codes
+    assert payload["provider"]["retrieval_backends"]["lexical_local"] is True
 
 
 def test_cli_preference_write_requires_explicit_or_high_trust_source(tmp_path: Path) -> None:
