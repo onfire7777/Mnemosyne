@@ -44,6 +44,8 @@ Latest checkpoint: Consolidation summarization now builds a deterministic multi-
 
 Latest checkpoint: CLI `search` now has direct facade-level proof that gist-only retrieval abstention is preserved outside the raw engine API. A CLI ingest/consolidate/search regression isolates generated summary evidence by querying the raw source CID, then verifies `abstained=true`, the source-inspection uncertainty note, the abstractive-gist hit metadata, and `explain.gist_support`. Local verification now collects 345 tests with 293 passing tests plus 52 skipped live-DB tests, and the clean compose DSN run passes all 345 tests with `MNEMOSYNE_POSTGRES_DSN=postgresql://mnemosyne:<redacted>@127.0.0.1:54329/mnemosyne?connect_timeout=5`.
 
+Latest checkpoint: Projection recompute now has shared Local/Postgres coverage for RAPTOR hierarchy refresh. A changed raw source in a two-leaf/root summary tree marks the raw source, its leaf summary, and the root summary as affected, reports required raw-to-leaf and leaf-to-root summary lineage relations, and queues one consolidation refresh for the raw source only. Local verification now collects 346 tests with 294 passing tests plus 52 skipped live-DB tests, and the clean compose DSN run passes all 346 tests with `MNEMOSYNE_POSTGRES_DSN=postgresql://mnemosyne:<redacted>@127.0.0.1:54329/mnemosyne?connect_timeout=5`.
+
 Progress: [███████░░░] local scaffold verified; production parity gaps remain
 
 ## Performance Metrics
