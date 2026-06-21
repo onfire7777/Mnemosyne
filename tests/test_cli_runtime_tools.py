@@ -4529,6 +4529,121 @@ def test_cli_profile_record_explicit_and_trajectory_attribute_aliases_persist(tm
     assert "missing alias coverage" in attribution["evidence"][0]
 
 
+def test_cli_prefetch_discard_and_learning_induce_aliases_persist(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    candidate_branch = "candidate-prefetch-discard"
+
+    branch = run_cli(
+        store,
+        "branch",
+        "--name",
+        candidate_branch,
+        "--from",
+        "main",
+        "--kind",
+        "scratch",
+        "--tenant",
+        TENANT,
+        *PARAMETRIC_AUTH,
+    )
+    captured = run_cli(
+        store,
+        "capture",
+        "--tenant",
+        TENANT,
+        "--user",
+        USER,
+        "--actor",
+        "user",
+        "--source-type",
+        "cli",
+        "--content",
+        "Prefetch target content for candidate branch discard.",
+        "--branch",
+        candidate_branch,
+        "--trust-tier",
+        "0",
+    )
+    prefetch = run_cli(
+        store,
+        "prefetch",
+        "--tenant",
+        TENANT,
+        "--branch",
+        candidate_branch,
+        "--candidates",
+        json.dumps(
+            [
+                {
+                    "query": "Prefetch target content",
+                    "probability": 0.91,
+                    "reason": "planned query",
+                    "metadata": {"surface": "cli"},
+                },
+                {"query": "too cold", "probability": 0.2, "reason": "low confidence"},
+            ]
+        ),
+    )
+
+    assert branch["branch"] == candidate_branch
+    assert branch["from"] == "main"
+    assert branch["kind"] == "scratch"
+    assert branch["security"]["allowed"] is True
+    assert prefetch["results"][0]["executed"] is True
+    assert prefetch["results"][0]["candidate"]["metadata"] == {"surface": "cli"}
+    assert prefetch["results"][0]["retrieval"]["hits"][0]["id"] == captured["cid"]
+    assert prefetch["results"][0]["retrieval"]["hits"][0]["branch"] == candidate_branch
+    assert prefetch["results"][1]["executed"] is False
+    assert prefetch["results"][1]["reason"] == "candidate below predictability threshold"
+
+    trajectory = run_cli(
+        store,
+        "trajectory-log",
+        "--tenant",
+        TENANT,
+        "--user",
+        USER,
+        "--session",
+        "session-cli-direct-aliases",
+        "--task",
+        "direct induce aliases",
+        "--steps",
+        json.dumps([{"name": "learn", "status": "failed", "error": "direct induce gap"}]),
+        "--outcome",
+        "failure",
+        "--reward",
+        "-1",
+        "--memory-version",
+        "v1",
+    )
+    lesson = run_cli(store, "lesson-induce", "--trajectory-id", trajectory["id"])
+    procedure = run_cli(store, "procedure-induce", "--lesson-id", lesson["id"])
+
+    assert trajectory["id"]
+    assert lesson["failure_signature"] == "direct-induce-aliases:direct-induce-gap"
+    assert "direct induce gap" in lesson["content"]
+    assert procedure["signature"] == {"failure_signature": lesson["failure_signature"]}
+    assert "Run a verification check" in procedure["body"]
+
+    discarded = run_cli(store, "discard", "--tenant", TENANT, "--branch", candidate_branch, *PARAMETRIC_AUTH)
+    after_discard = run_cli(
+        store,
+        "search",
+        "--tenant",
+        TENANT,
+        "--query",
+        "Prefetch target content",
+        "--branch",
+        candidate_branch,
+    )
+
+    assert discarded["discarded"] == candidate_branch
+    assert discarded["tenant_id"] == TENANT
+    assert discarded["security"]["allowed"] is True
+    assert after_discard["abstained"] is True
+    assert after_discard["hits"] == []
+
+
 def test_cli_profile_graph_learning_and_parametric_flows_persist(tmp_path: Path) -> None:
     store = tmp_path / "mnemosyne.json"
 
