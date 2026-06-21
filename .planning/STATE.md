@@ -78,6 +78,8 @@ Latest checkpoint: Deployment-soak reports and evidence bundles now explicitly l
 
 Latest checkpoint: The user-model guard test now actually covers all six blueprint memory categories: identity, hard instruction, explicit preference, inferred preference, situational preference, and temporary state. It verifies authority ordering, scope matching, and inferred supersession under higher-authority hard instructions. REQ-012 status has been updated to distinguish implemented model/runtime coverage from non-blocking product UX work. Local verification still collects 364 tests with 307 passing tests plus 57 skipped live-DB tests, and the clean compose DSN run passes all 364 tests with `MNEMOSYNE_POSTGRES_DSN=postgresql://mnemosyne:<redacted>@127.0.0.1:54329/mnemosyne?connect_timeout=5`.
 
+Latest checkpoint: REQ-015 rehearsal scheduling is now storage-backed instead of helper-only. `LifecycleState` carries must-keep rehearsal metadata, due must-keep/protected memories are rehearsed at expanding intervals before demotion, consolidation `forgetter` persists `successful_rehearsals`/`next_rehearsal_at` through audited evidence metadata updates, and runtime lifecycle sweeps report rehearsal counts through local and durable Postgres queue paths. Local verification now collects 365 tests with 308 passing tests plus 57 skipped live-DB tests, and the clean compose DSN run passes all 365 tests with `MNEMOSYNE_POSTGRES_DSN=postgresql://mnemosyne:<redacted>@127.0.0.1:54329/mnemosyne?connect_timeout=5`.
+
 Progress: [███████░░░] local scaffold verified; production parity gaps remain
 
 ## Performance Metrics

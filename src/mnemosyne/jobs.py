@@ -17,7 +17,7 @@ from mnemosyne.consolidation import (
 )
 from mnemosyne.eval import run_seed_suite
 from mnemosyne.gate import RegressionCase
-from mnemosyne.lifecycle import FidelityTier, LifecycleState, demotion_decision
+from mnemosyne.lifecycle import FidelityTier, LifecycleState, apply_rehearsal_schedule, demotion_decision
 from mnemosyne.media import MEDIA_EXTRACT_JOB, MediaTextExtractor, MetadataMediaTextExtractor
 from mnemosyne.models import Evidence, Relation
 from mnemosyne.observability import MetricsRegistry
@@ -273,19 +273,28 @@ class RuntimeJobHandlers:
         threshold = float(payload.get("utility_threshold", 0.18))
         updated: list[dict[str, Any]] = []
         demoted = 0
+        rehearsed = 0
         for row in payload.get("states", []):
             state = _lifecycle_state_from_dict(row)
-            next_state, changed = demotion_decision(state, now, utility_threshold=threshold)
+            scheduled_state, did_rehearse = apply_rehearsal_schedule(state, now)
+            next_state, changed = demotion_decision(scheduled_state, now, utility_threshold=threshold)
             if changed:
                 demoted += 1
-            updated.append(next_state.to_dict())
+            if did_rehearse:
+                rehearsed += 1
+            state_payload = next_state.to_dict()
+            state_payload["demoted"] = changed
+            state_payload["rehearsed"] = did_rehearse
+            updated.append(state_payload)
         self.metrics.increment("lifecycle.sweeps")
         self.metrics.increment("lifecycle.demotions", demoted)
+        self.metrics.increment("lifecycle.rehearsals", rehearsed)
         self.metrics.gauge("lifecycle.demotions.latest", float(demoted))
+        self.metrics.gauge("lifecycle.rehearsals.latest", float(rehearsed))
         return RuntimeJobResult(
             LIFECYCLE_SWEEP_JOB,
             "complete",
-            {"evaluated": len(updated), "demoted": demoted, "states": updated},
+            {"evaluated": len(updated), "demoted": demoted, "rehearsed": rehearsed, "states": updated},
         )
 
     def run_eval_suite(self, payload: dict[str, Any]) -> RuntimeJobResult:
@@ -480,6 +489,10 @@ def _lifecycle_state_from_dict(row: dict[str, Any]) -> LifecycleState:
         importance=float(row.get("importance", 0.5)),
         access_count=int(row.get("access_count", 0)),
         last_accessed=_parse_dt(row.get("last_accessed")),
+        must_keep=bool(row.get("must_keep", False)),
+        successful_rehearsals=int(row.get("successful_rehearsals", 0)),
+        next_rehearsal_at=_parse_dt(row.get("next_rehearsal_at")),
+        last_rehearsed_at=_parse_dt(row.get("last_rehearsed_at")),
         confabulation_risk=bool(row.get("confabulation_risk", False)),
         protected=bool(row.get("protected", False)),
     )

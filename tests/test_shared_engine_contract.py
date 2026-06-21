@@ -129,7 +129,16 @@ def test_shared_engine_contract_updates_evidence_metadata(engine_bundle: tuple[A
     updated = engine.update_evidence_metadata(
         tenant,
         cid,
-        {"lifecycle": {"tier": "abstractive_gist", "salience": 0.05}},
+        {
+            "lifecycle": {
+                "tier": "abstractive_gist",
+                "salience": 0.05,
+                "must_keep": True,
+                "successful_rehearsals": 2,
+                "next_rehearsal_at": "2026-06-28T00:00:00+00:00",
+                "rehearsal_interval_days": 7,
+            }
+        },
     )
     recalled = engine.get_evidence(tenant, cid)
     exported = next(item for item in engine.export_tenant(tenant)["evidence"] if item["cid"] == cid)
@@ -139,7 +148,11 @@ def test_shared_engine_contract_updates_evidence_metadata(engine_bundle: tuple[A
     assert recalled is not None
     assert recalled.metadata["existing"] == "kept"
     assert recalled.metadata["lifecycle"]["tier"] == "abstractive_gist"
+    assert recalled.metadata["lifecycle"]["must_keep"] is True
+    assert recalled.metadata["lifecycle"]["successful_rehearsals"] == 2
+    assert recalled.metadata["lifecycle"]["next_rehearsal_at"] == "2026-06-28T00:00:00+00:00"
     assert exported["metadata"]["lifecycle"]["salience"] == 0.05
+    assert exported["metadata"]["lifecycle"]["rehearsal_interval_days"] == 7
     assert audit
     assert audit[-1]["source"] == "metadata_update"
     assert audit[-1]["diff"]["patch"]["lifecycle"]["tier"] == "abstractive_gist"
