@@ -6985,8 +6985,14 @@ def test_cli_policy_ops_check_fails_closed_on_bad_shadow_bundle(tmp_path: Path) 
     assert "production_mutation_enabled" in codes
 
 
-def privacy_ops_bundle(*, local_kms: bool = False, incomplete_erasure: bool = False) -> dict:
-    return {
+def privacy_ops_bundle(
+    *,
+    local_kms: bool = False,
+    incomplete_erasure: bool = False,
+    missing_redaction: bool = False,
+    raw_secret: bool = False,
+) -> dict:
+    bundle = {
         "name": "production-privacy-ops",
         "required_cases": ["residency-allow", "residency-deny", "tombstone", "legal-delete"],
         "kms": {
@@ -7044,7 +7050,17 @@ def privacy_ops_bundle(*, local_kms: bool = False, incomplete_erasure: bool = Fa
                 },
             ],
         },
+        "redaction": {
+            "raw_key_material_omitted": not missing_redaction,
+            "raw_object_bytes_omitted": not missing_redaction,
+            "raw_subject_identifiers_omitted": not missing_redaction,
+            "raw_kms_responses_omitted": not missing_redaction,
+        },
     }
+    if raw_secret:
+        bundle["kms"]["raw_kms_response"] = {"key_material": "raw-secret-key"}
+        bundle["erasure"]["cases"][0]["subject_identifier"] = "subject@example.com"
+    return bundle
 
 
 def test_cli_privacy_ops_check_validates_kms_residency_erasure_bundle(tmp_path: Path) -> None:
@@ -7074,10 +7090,12 @@ def test_cli_privacy_ops_check_validates_kms_residency_erasure_bundle(tmp_path: 
     assert report["ok"] is True
     assert len(report["fingerprint"]) == 64
     assert report["bundle"]["kms_provider"] == "aws-kms-prod"
-    assert {item["name"] for item in report["checks"]} == {"kms", "residency", "erasure"}
+    assert {item["name"] for item in report["checks"]} == {"kms", "residency", "erasure", "redaction"}
     assert all(item["ok"] for item in report["checks"])
     assert report["redaction"]["raw_key_material_omitted"] is True
     assert report["redaction"]["raw_object_bytes_omitted"] is True
+    assert report["redaction"]["raw_kms_responses_omitted"] is True
+    assert report["redaction"]["forbidden_raw_fields_present"] is False
     assert "raw-secret-key" not in serialized
     assert acknowledged["ok"] is True
     assert acknowledged["expected_fingerprint_present"] is True
@@ -7095,6 +7113,25 @@ def test_cli_privacy_ops_check_fails_closed_on_local_kms_and_bad_erasure(tmp_pat
     assert payload["ok"] is False
     assert "kms_provider_local" in codes
     assert "erasure_case_failed" in codes
+
+
+def test_cli_privacy_ops_check_rejects_raw_privacy_material(tmp_path: Path) -> None:
+    bundle = tmp_path / "raw-privacy-ops.json"
+    bundle.write_text(json.dumps(privacy_ops_bundle(missing_redaction=True, raw_secret=True)), encoding="utf-8")
+
+    result = run_raw_cli(tmp_path / "mnemosyne.json", "privacy-ops-check", "--bundle", str(bundle))
+    payload = json.loads(result.stdout)
+    codes = {finding["code"] for finding in payload["findings"]}
+    redaction_check = next(item for item in payload["checks"] if item["name"] == "redaction")
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert "redaction_flag_missing" in codes
+    assert "redaction_raw_field_present" in codes
+    assert redaction_check["ok"] is False
+    assert payload["redaction"]["forbidden_raw_fields_present"] is True
+    assert "$.kms.raw_kms_response" in redaction_check["forbidden_raw_paths"]
+    assert "$.kms.raw_kms_response.key_material" in redaction_check["forbidden_raw_paths"]
 
 
 def parametric_trainer_bundle(
