@@ -14,6 +14,8 @@ from mnemosyne.consolidation import (
     ConsolidationWorker,
     EntityResolver,
     EvidenceSummarizer,
+    LessonDistiller,
+    ProcedureInducer,
 )
 from mnemosyne.eval import run_seed_suite
 from mnemosyne.gate import RegressionCase
@@ -56,6 +58,8 @@ class RuntimeJobHandlers:
         entity_resolver: EntityResolver | None = None,
         candidate_extractor: CandidateExtractor | None = None,
         summarizer: EvidenceSummarizer | None = None,
+        lesson_distiller: LessonDistiller | None = None,
+        procedure_inducer: ProcedureInducer | None = None,
     ):
         self.engine = engine
         self.queue = queue
@@ -71,6 +75,8 @@ class RuntimeJobHandlers:
             entity_resolver=entity_resolver,
             candidate_extractor=candidate_extractor,
             summarizer=summarizer,
+            lesson_distiller=lesson_distiller,
+            procedure_inducer=procedure_inducer,
             user_model=user_model,
         )
 

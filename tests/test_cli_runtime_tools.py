@@ -2133,6 +2133,44 @@ def test_cli_provider_check_uses_deployment_manifest(tmp_path: Path, monkeypatch
         ),
         encoding="utf-8",
     )
+    lesson_distiller = tmp_path / "lesson-distiller.py"
+    lesson_distiller.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env python3",
+                "import json, sys",
+                "request = json.load(sys.stdin)",
+                "candidate = request['candidates'][0]",
+                "response = {'lessons': [{",
+                "    'lesson_type': 'command-observation',",
+                "    'failure_signature': candidate['signature'],",
+                "    'content': 'Provider health lesson',",
+                "    'votes': 2,",
+                "}], 'metadata': {'candidate_count': len(request['candidates'])}}",
+                "print(json.dumps(response))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    skill_inducer = tmp_path / "skill-inducer.py"
+    skill_inducer.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env python3",
+                "import json, sys",
+                "request = json.load(sys.stdin)",
+                "candidate = request['candidates'][0]",
+                "response = {'procedures': [{",
+                "    'kind': 'command-skill',",
+                "    'name': 'Provider health command skill',",
+                "    'body': 'Check provider health through command adapters.',",
+                "    'signature': {'signature': candidate['signature']},",
+                "}], 'metadata': {'candidate_count': len(request['candidates'])}}",
+                "print(json.dumps(response))",
+            ]
+        ),
+        encoding="utf-8",
+    )
     monkeypatch.setenv("MNEMOSYNE_TEST_EMBED_KEY", "embed-manifest-secret")
     monkeypatch.setenv("MNEMOSYNE_TEST_RERANK_KEY", "rank-manifest-secret")
     base = f"http://127.0.0.1:{server.server_port}"
@@ -2152,6 +2190,8 @@ def test_cli_provider_check_uses_deployment_manifest(tmp_path: Path, monkeypatch
                     "candidate_extractor",
                     "summarizer",
                     "entity_resolver",
+                    "lesson_distiller",
+                    "skill_inducer",
                     "residency_policy",
                 ],
                 "forbid_local": True,
@@ -2200,6 +2240,14 @@ def test_cli_provider_check_uses_deployment_manifest(tmp_path: Path, monkeypatch
                         "provider": "command",
                         "command": " ".join(shlex.quote(item) for item in (sys.executable, str(resolver))),
                     },
+                    "lesson_distiller": {
+                        "provider": "command",
+                        "command": " ".join(shlex.quote(item) for item in (sys.executable, str(lesson_distiller))),
+                    },
+                    "skill_inducer": {
+                        "provider": "command",
+                        "command": " ".join(shlex.quote(item) for item in (sys.executable, str(skill_inducer))),
+                    },
                 },
             }
         ),
@@ -2227,6 +2275,8 @@ def test_cli_provider_check_uses_deployment_manifest(tmp_path: Path, monkeypatch
             "candidate_extractor",
             "summarizer",
             "entity_resolver",
+            "lesson_distiller",
+            "skill_inducer",
             "residency_policy",
         ],
         "forbid_local": True,
@@ -2255,6 +2305,12 @@ def test_cli_provider_check_uses_deployment_manifest(tmp_path: Path, monkeypatch
     assert report["checks"]["summarizer"]["summary_length"] == len("Provider health summary")
     assert report["checks"]["entity_resolver"]["strategy"] == "command_entity_resolver"
     assert report["checks"]["entity_resolver"]["entity_keys"] == ["provider-health-entity"]
+    assert report["checks"]["lesson_distiller"]["strategy"] == "command_lesson_distiller"
+    assert report["checks"]["lesson_distiller"]["lesson_count"] == 1
+    assert report["checks"]["lesson_distiller"]["failure_signatures"] == ["provider-health"]
+    assert report["checks"]["skill_inducer"]["strategy"] == "command_skill_inducer"
+    assert report["checks"]["skill_inducer"]["procedure_count"] == 1
+    assert report["checks"]["skill_inducer"]["procedure_names"] == ["Provider health command skill"]
     parametric_calls = json.loads(parametric_state.read_text(encoding="utf-8"))["calls"]
     assert parametric_calls[-1]["protected_cases"] == ["provider-health-protected"]
     assert parametric_calls[-1]["protected_suite"]["protected_case_count"] == 1
@@ -2294,6 +2350,28 @@ def test_cli_hosted_llm_check_validates_role_endpoints_without_leaking_auth(
                 body = {"choices": [{"message": {"content": json.dumps({"summary": "Hosted provider summary"})}}]}
             elif self.path == "/resolve":
                 body = {"candidates": [{"signature": "hosted-provider-health", "entity_key": "provider-health"}]}
+            elif self.path == "/lessons":
+                body = {
+                    "lessons": [
+                        {
+                            "lesson_type": "hosted-observation",
+                            "failure_signature": "hosted-provider-health",
+                            "content": "Hosted provider lesson",
+                            "votes": 1,
+                        }
+                    ]
+                }
+            elif self.path == "/skills":
+                body = {
+                    "procedures": [
+                        {
+                            "kind": "hosted-skill",
+                            "name": "Hosted provider skill",
+                            "body": "Use hosted provider health checks.",
+                            "signature": {"signature": "hosted-provider-health"},
+                        }
+                    ]
+                }
             else:
                 self.send_response(404)
                 self.end_headers()
@@ -2318,7 +2396,13 @@ def test_cli_hosted_llm_check_validates_role_endpoints_without_leaking_auth(
         json.dumps(
             {
                 "name": "hosted-role-providers",
-                "required_roles": ["candidate_extractor", "summarizer", "entity_resolver"],
+                "required_roles": [
+                    "candidate_extractor",
+                    "summarizer",
+                    "entity_resolver",
+                    "lesson_distiller",
+                    "skill_inducer",
+                ],
                 "providers": [
                     {
                         "name": "extractor",
@@ -2337,6 +2421,18 @@ def test_cli_hosted_llm_check_validates_role_endpoints_without_leaking_auth(
                         "name": "resolver",
                         "role": "entity_resolver",
                         "url": f"{base}/resolve",
+                        "api_key_env": "MNEMOSYNE_HOSTED_LLM_TEST_KEY",
+                    },
+                    {
+                        "name": "lesson-distiller",
+                        "role": "lesson_distiller",
+                        "url": f"{base}/lessons",
+                        "api_key_env": "MNEMOSYNE_HOSTED_LLM_TEST_KEY",
+                    },
+                    {
+                        "name": "skill-inducer",
+                        "role": "skill_inducer",
+                        "url": f"{base}/skills",
                         "api_key_env": "MNEMOSYNE_HOSTED_LLM_TEST_KEY",
                     },
                 ],
@@ -2376,10 +2472,16 @@ def test_cli_hosted_llm_check_validates_role_endpoints_without_leaking_auth(
         "candidate_extractor",
         "summarizer",
         "entity_resolver",
+        "lesson_distiller",
+        "skill_inducer",
     }
     assert report["checks"][0]["contract"]["candidate_count"] == 1
     assert report["checks"][1]["contract"]["summary_length"] == len("Hosted provider summary")
     assert report["checks"][2]["contract"]["entity_keys"] == ["provider-health"]
+    assert report["checks"][3]["contract"]["lesson_count"] == 1
+    assert report["checks"][3]["contract"]["failure_signatures"] == ["hosted-provider-health"]
+    assert report["checks"][4]["contract"]["procedure_count"] == 1
+    assert report["checks"][4]["contract"]["procedure_names"] == ["Hosted provider skill"]
     assert "hosted-secret-value" not in serialized
     assert all(item["auth"] == "Bearer hosted-secret-value" for item in requests)
 
@@ -7485,6 +7587,68 @@ def test_cli_provider_check_fails_closed_on_bad_summarizer(tmp_path: Path) -> No
     assert payload["ok"] is False
     assert payload["checks"]["summarizer"]["ok"] is False
     assert "requires non-empty summary" in payload["checks"]["summarizer"]["error"]
+
+
+def test_cli_provider_check_fails_closed_on_bad_lesson_distiller(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    script = tmp_path / "bad-lesson-distiller.py"
+    script.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env python3",
+                "import json",
+                "print(json.dumps({'lessons': []}))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    command = " ".join(shlex.quote(item) for item in (sys.executable, str(script)))
+
+    result = run_raw_cli(
+        store,
+        "--lesson-distiller-provider",
+        "command",
+        "--lesson-distiller-command",
+        command,
+        "provider-check",
+    )
+    payload = json.loads(result.stdout)
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert payload["checks"]["lesson_distiller"]["ok"] is False
+    assert "did not return lessons" in payload["checks"]["lesson_distiller"]["error"]
+
+
+def test_cli_provider_check_fails_closed_on_bad_skill_inducer(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    script = tmp_path / "bad-skill-inducer.py"
+    script.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env python3",
+                "import json",
+                "print(json.dumps({'procedures': [{'name': 'bad'}]}))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    command = " ".join(shlex.quote(item) for item in (sys.executable, str(script)))
+
+    result = run_raw_cli(
+        store,
+        "--skill-inducer-provider",
+        "command",
+        "--skill-inducer-command",
+        command,
+        "provider-check",
+    )
+    payload = json.loads(result.stdout)
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert payload["checks"]["skill_inducer"]["ok"] is False
+    assert "requires signature object" in payload["checks"]["skill_inducer"]["error"]
 
 
 def test_cli_profile_record_explicit_and_trajectory_attribute_aliases_persist(tmp_path: Path) -> None:

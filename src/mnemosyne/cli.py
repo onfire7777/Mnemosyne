@@ -33,8 +33,12 @@ from mnemosyne.consolidation import (
     CommandCandidateExtractor,
     CommandEntityResolver,
     CommandEvidenceSummarizer,
+    CommandLessonDistiller,
+    CommandProcedureInducer,
     EntityResolver,
     EvidenceSummarizer,
+    LessonDistiller,
+    ProcedureInducer,
 )
 from mnemosyne.engine import LocalMemoryEngine, MemoryEngine
 from mnemosyne.eval import run_seed_suite
@@ -163,6 +167,8 @@ PRODUCTION_RELEASE_REQUIRED_PROVIDER_CHECKS = (
     "candidate_extractor",
     "summarizer",
     "entity_resolver",
+    "lesson_distiller",
+    "skill_inducer",
     "oidc",
     "session_secret",
     "residency_policy",
@@ -527,6 +533,28 @@ def load_consolidation_summarizer(args: argparse.Namespace) -> EvidenceSummarize
         return CommandEvidenceSummarizer(
             args.summarizer_command,
             timeout_seconds=float(args.summarizer_timeout),
+        )
+    return None
+
+
+def load_lesson_distiller(args: argparse.Namespace) -> LessonDistiller | None:
+    if args.lesson_distiller_provider == "command":
+        if not args.lesson_distiller_command:
+            raise SystemExit("--lesson-distiller-provider command requires --lesson-distiller-command.")
+        return CommandLessonDistiller(
+            args.lesson_distiller_command,
+            timeout_seconds=float(args.lesson_distiller_timeout),
+        )
+    return None
+
+
+def load_procedure_inducer(args: argparse.Namespace) -> ProcedureInducer | None:
+    if args.skill_inducer_provider == "command":
+        if not args.skill_inducer_command:
+            raise SystemExit("--skill-inducer-provider command requires --skill-inducer-command.")
+        return CommandProcedureInducer(
+            args.skill_inducer_command,
+            timeout_seconds=float(args.skill_inducer_timeout),
         )
     return None
 
@@ -1019,6 +1047,8 @@ def cmd_ingest(args: argparse.Namespace) -> None:
             entity_resolver=load_entity_resolver(args),
             candidate_extractor=load_candidate_extractor(args),
             summarizer=load_consolidation_summarizer(args),
+            lesson_distiller=load_lesson_distiller(args),
+            procedure_inducer=load_procedure_inducer(args),
         )
         worker = QueueWorker(ingestion_queue, handlers.handlers(), metrics=metrics)
         job = worker.run_once(CONSOLIDATE_EVIDENCE_JOB)
@@ -6266,6 +6296,8 @@ def _runtime_worker_components(
         entity_resolver=load_entity_resolver(args),
         candidate_extractor=load_candidate_extractor(args),
         summarizer=load_consolidation_summarizer(args),
+        lesson_distiller=load_lesson_distiller(args),
+        procedure_inducer=load_procedure_inducer(args),
     )
     worker = QueueWorker(queue, handlers.handlers(), metrics=metrics)
     return runtime_state, queue, tools, metrics, worker
@@ -8371,6 +8403,28 @@ def apply_provider_manifest(args: argparse.Namespace) -> dict[str, Any]:
                 "timeout_seconds": "summarizer_timeout",
             },
         )
+    lesson_distiller = providers.get("lesson_distiller", {})
+    if isinstance(lesson_distiller, dict):
+        _apply_manifest_fields(
+            args,
+            lesson_distiller,
+            {
+                "provider": "lesson_distiller_provider",
+                "command": "lesson_distiller_command",
+                "timeout_seconds": "lesson_distiller_timeout",
+            },
+        )
+    skill_inducer = providers.get("skill_inducer", {})
+    if isinstance(skill_inducer, dict):
+        _apply_manifest_fields(
+            args,
+            skill_inducer,
+            {
+                "provider": "skill_inducer_provider",
+                "command": "skill_inducer_command",
+                "timeout_seconds": "skill_inducer_timeout",
+            },
+        )
     session_secret = providers.get("session_secret", {})
     if isinstance(session_secret, dict):
         _apply_manifest_fields(
@@ -8589,6 +8643,47 @@ def _validate_hosted_role_payload(role: str, payload: Mapping[str, Any]) -> dict
         if not entity_keys or not all(entity_keys):
             raise ValueError("entity resolver response requires entity_key on every candidate")
         return {"entity_count": len(entity_keys), "entity_keys": entity_keys[:5]}
+    if role == "lesson_distiller":
+        lessons = payload.get("lessons")
+        if not isinstance(lessons, list) or not lessons:
+            raise ValueError("lesson distiller response requires non-empty lessons array")
+        first = lessons[0]
+        if not isinstance(first, Mapping):
+            raise ValueError("lesson distiller lesson must be an object")
+        if not isinstance(first.get("content"), str) or not first["content"].strip():
+            raise ValueError("lesson distiller lesson requires non-empty content")
+        signature = first.get("failure_signature") or first.get("signature")
+        if not isinstance(signature, str) or not signature.strip():
+            raise ValueError("lesson distiller lesson requires failure_signature")
+        return {
+            "lesson_count": len(lessons),
+            "failure_signatures": [
+                str(item.get("failure_signature") or item.get("signature"))
+                for item in lessons[:5]
+                if isinstance(item, Mapping)
+            ],
+        }
+    if role == "skill_inducer":
+        procedures = payload.get("procedures")
+        if not isinstance(procedures, list) or not procedures:
+            raise ValueError("skill inducer response requires non-empty procedures array")
+        first = procedures[0]
+        if not isinstance(first, Mapping):
+            raise ValueError("skill inducer procedure must be an object")
+        if not isinstance(first.get("name"), str) or not first["name"].strip():
+            raise ValueError("skill inducer procedure requires non-empty name")
+        if not isinstance(first.get("body"), str) or not first["body"].strip():
+            raise ValueError("skill inducer procedure requires non-empty body")
+        if not isinstance(first.get("signature"), Mapping):
+            raise ValueError("skill inducer procedure requires signature object")
+        return {
+            "procedure_count": len(procedures),
+            "procedure_names": [
+                str(item.get("name"))
+                for item in procedures[:5]
+                if isinstance(item, Mapping)
+            ],
+        }
     raise ValueError(f"unsupported hosted provider role {role}")
 
 
@@ -8960,6 +9055,16 @@ def cmd_provider_check(args: argparse.Namespace) -> None:
             trust_tier=0,
         )
     ]
+    sample_candidates = [
+        {
+            "signature": "provider-health",
+            "query": "provider health",
+            "candidate_subject": "Provider Health",
+            "candidate_predicate": "is",
+            "candidate_object": "configured",
+            "entity_key": "provider-health",
+        }
+    ]
     if args.candidate_extractor_provider == "command":
         try:
             extractor = load_candidate_extractor(args)
@@ -9008,16 +9113,7 @@ def cmd_provider_check(args: argparse.Namespace) -> None:
             resolver = load_entity_resolver(args)
             if resolver is None:
                 raise ValueError("command entity resolver was not configured")
-            sample = [
-                {
-                    "signature": "provider-health",
-                    "query": "provider health",
-                    "candidate_subject": "Provider Health",
-                    "candidate_predicate": "is",
-                    "candidate_object": "configured",
-                }
-            ]
-            resolved = resolver.resolve("provider-health", sample)
+            resolved = resolver.resolve("provider-health", sample_candidates)
             entity_keys = [str(item.get("entity_key") or "") for item in resolved["candidates"]]
             if not entity_keys or not all(entity_keys):
                 raise ValueError("entity resolver did not return entity keys")
@@ -9033,6 +9129,62 @@ def cmd_provider_check(args: argparse.Namespace) -> None:
             checks["entity_resolver"] = {"ok": False, "provider": "command", "error": str(exc)}
     else:
         checks["entity_resolver"] = {"ok": True, "provider": "deterministic", "skipped": True}
+
+    if args.lesson_distiller_provider == "command":
+        try:
+            distiller = load_lesson_distiller(args)
+            if distiller is None:
+                raise ValueError("command lesson distiller was not configured")
+            distilled = distiller.distill("provider-health", sample_candidates)
+            lessons = distilled["lessons"]
+            if not lessons:
+                raise ValueError("lesson distiller did not return lessons")
+            for lesson in lessons:
+                if not str(lesson.get("content") or "").strip():
+                    raise ValueError("lesson distiller returned a lesson without content")
+                if not str(lesson.get("failure_signature") or "").strip():
+                    raise ValueError("lesson distiller returned a lesson without failure_signature")
+            checks["lesson_distiller"] = {
+                "ok": True,
+                "provider": "command",
+                "strategy": distilled["details"]["strategy"],
+                "lesson_count": len(lessons),
+                "failure_signatures": [str(item["failure_signature"]) for item in lessons[:5]],
+            }
+        except Exception as exc:  # noqa: BLE001 - health checks return structured failures.
+            ok = False
+            checks["lesson_distiller"] = {"ok": False, "provider": "command", "error": str(exc)}
+    elif "lesson_distiller" in manifest.get("required_checks", []):
+        checks["lesson_distiller"] = {"ok": True, "provider": "deterministic", "skipped": True}
+
+    if args.skill_inducer_provider == "command":
+        try:
+            inducer = load_procedure_inducer(args)
+            if inducer is None:
+                raise ValueError("command skill inducer was not configured")
+            induced = inducer.induce("provider-health", sample_candidates)
+            procedures = induced["procedures"]
+            if not procedures:
+                raise ValueError("skill inducer did not return procedures")
+            for procedure in procedures:
+                if not str(procedure.get("name") or "").strip():
+                    raise ValueError("skill inducer returned a procedure without name")
+                if not str(procedure.get("body") or "").strip():
+                    raise ValueError("skill inducer returned a procedure without body")
+                if not isinstance(procedure.get("signature"), dict):
+                    raise ValueError("skill inducer returned a procedure without signature object")
+            checks["skill_inducer"] = {
+                "ok": True,
+                "provider": "command",
+                "strategy": induced["details"]["strategy"],
+                "procedure_count": len(procedures),
+                "procedure_names": [str(item["name"]) for item in procedures[:5]],
+            }
+        except Exception as exc:  # noqa: BLE001 - health checks return structured failures.
+            ok = False
+            checks["skill_inducer"] = {"ok": False, "provider": "command", "error": str(exc)}
+    elif "skill_inducer" in manifest.get("required_checks", []):
+        checks["skill_inducer"] = {"ok": True, "provider": "deterministic", "skipped": True}
 
     if args.object_store_encryption == "aesgcm":
         try:
@@ -9317,6 +9469,30 @@ def build_parser() -> argparse.ArgumentParser:
         "--summarizer-timeout",
         type=float,
         default=float(os.environ.get("MNEMOSYNE_SUMMARIZER_TIMEOUT", "30")),
+    )
+    parser.add_argument(
+        "--lesson-distiller-provider",
+        choices=["deterministic", "command"],
+        default=os.environ.get("MNEMOSYNE_LESSON_DISTILLER_PROVIDER", "deterministic"),
+        help="Consolidation lesson distiller provider",
+    )
+    parser.add_argument("--lesson-distiller-command", default=os.environ.get("MNEMOSYNE_LESSON_DISTILLER_COMMAND"))
+    parser.add_argument(
+        "--lesson-distiller-timeout",
+        type=float,
+        default=float(os.environ.get("MNEMOSYNE_LESSON_DISTILLER_TIMEOUT", "30")),
+    )
+    parser.add_argument(
+        "--skill-inducer-provider",
+        choices=["deterministic", "command"],
+        default=os.environ.get("MNEMOSYNE_SKILL_INDUCER_PROVIDER", "deterministic"),
+        help="Consolidation skill/procedure inducer provider",
+    )
+    parser.add_argument("--skill-inducer-command", default=os.environ.get("MNEMOSYNE_SKILL_INDUCER_COMMAND"))
+    parser.add_argument(
+        "--skill-inducer-timeout",
+        type=float,
+        default=float(os.environ.get("MNEMOSYNE_SKILL_INDUCER_TIMEOUT", "30")),
     )
     parser.add_argument(
         "--media-embedding-provider",
