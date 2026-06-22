@@ -643,6 +643,73 @@ def test_memory_tools_direct_profile_graph_learning_facade_methods() -> None:
     assert replay["counterfactual_replay_score"] > 0
 
 
+def test_memory_tools_direct_source_sync_applies_committed_markdown_git_assertion(tmp_path: Path) -> None:
+    source_repo = tmp_path / "source-repo"
+    source_repo.mkdir()
+
+    def git(*args: str) -> str:
+        result = subprocess.run(
+            ["git", "-C", str(source_repo), *args],
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        return result.stdout.strip()
+
+    git("init")
+    git("config", "user.email", "mnemosyne@example.test")
+    git("config", "user.name", "Mnemosyne Test")
+    (source_repo / "memory.md").write_text(
+        """# Direct Source
+
+```mnemosyne-assertion
+id = "direct-source-truth"
+subject = "Direct source sync"
+predicate = "anchors"
+object = "MemoryTools facade"
+confidence = 0.98
+valid_from = "2026-06-20T00:00:00Z"
+
+[metadata]
+reviewed_by = "human"
+```
+""",
+        encoding="utf-8",
+    )
+    git("add", "memory.md")
+    git("commit", "-m", "add direct source truth")
+    head = git("rev-parse", "HEAD")
+    engine = LocalMemoryEngine()
+    tools = MemoryTools(engine)
+
+    synced = tools.source_sync(
+        TENANT,
+        USER,
+        str(source_repo),
+        apply=True,
+        role="operator",
+        source_trust_tier=0,
+    )
+    exported = engine.export_tenant(TENANT)
+    synced_evidence = next(item for item in exported["evidence"] if item["cid"] == synced["evidence_cids"][0])
+    active = [
+        item
+        for item in exported["assertions"]
+        if item["subject"] == "Direct source sync" and item["predicate"] == "anchors"
+    ]
+
+    assert synced["security"]["allowed"] is True
+    assert synced["discovered"] == 1
+    assert synced["applied"] == 1
+    assert synced["blocks"][0]["source_identity"] == f"git:memory.md@{head}#direct-source-truth"
+    assert active[0]["object"] == "MemoryTools facade"
+    assert active[0]["source_evidence_cids"] == [synced_evidence["cid"]]
+    assert synced_evidence["source_type"] == "markdown_git"
+    assert synced_evidence["trust_tier"] == 0
+    assert "human-source-truth" in synced_evidence["capability_tags"]
+    assert synced_evidence["metadata"]["source_truth"]["git_sha"] == head
+
+
 def test_mcp_server_initializes_lists_tools_and_calls_capture_search(tmp_path: Path) -> None:
     server = MnemosyneMcpServer(store_path=tmp_path / "store.json")
     init = server.handle({"jsonrpc": "2.0", "id": 1, "method": "initialize"})
