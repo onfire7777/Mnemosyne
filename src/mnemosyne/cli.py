@@ -98,6 +98,7 @@ DEPLOYMENT_SOAK_COMMANDS = {
     "mcp-ops-check",
     "mcp-streamable-http-soak",
     "mcp-sse-soak",
+    "consolidation-ops-check",
     "ops-dashboard-check",
     "parametric-trainer-check",
     "worker-run",
@@ -131,6 +132,7 @@ PRODUCTION_RELEASE_REQUIRED_COMMANDS = (
     "mcp-http-soak",
     "mcp-ops-check",
     "mcp-streamable-http-soak",
+    "consolidation-ops-check",
     "gate-suite-check",
     "projection-recompute-once",
     "worker-run",
@@ -3329,6 +3331,1016 @@ def cmd_mcp_ops_check(args: argparse.Namespace) -> None:
     if args.expected_fingerprint and args.expected_fingerprint.strip().lower() != report["fingerprint"]:
         report["ok"] = False
         report["findings"].append(_mcp_ops_finding("fingerprint_mismatch", "mcp ops bundle fingerprint mismatch"))
+    emit(report)
+    if not report["ok"]:
+        raise SystemExit(1)
+
+
+def _load_consolidation_ops_bundle(args: argparse.Namespace) -> Mapping[str, Any]:
+    if bool(args.bundle) == bool(args.bundle_json):
+        raise SystemExit("consolidation-ops-check requires exactly one of --bundle or --bundle-json")
+    try:
+        loaded = (
+            json.loads(Path(args.bundle).expanduser().read_text(encoding="utf-8"))
+            if args.bundle
+            else json.loads(args.bundle_json)
+        )
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"consolidation ops bundle denied: {exc}") from exc
+    if not isinstance(loaded, Mapping):
+        raise SystemExit("consolidation ops bundle must be a JSON object")
+    return loaded
+
+
+def _consolidation_finding(code: str, message: str) -> dict[str, str]:
+    return {"code": code, "message": message}
+
+
+def _consolidation_ops_fingerprint(report: Mapping[str, Any]) -> str:
+    payload = {
+        "bundle": report.get("bundle"),
+        "requirements": report.get("requirements"),
+        "checks": report.get("checks"),
+        "findings": report.get("findings"),
+    }
+    return sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def _consolidation_ops_int(
+    value: Any,
+    *,
+    default: int,
+    code: str,
+    message: str,
+    findings: list[dict[str, str]],
+) -> int:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        findings.append(_consolidation_finding(code, message))
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        findings.append(_consolidation_finding(code, message))
+        return default
+
+
+def _consolidation_provider_local(provider: Any) -> bool:
+    provider_kind = str(provider or "").strip().lower()
+    return provider_kind in {
+        "",
+        "deterministic",
+        "file",
+        "filesystem",
+        "hashing",
+        "in-memory",
+        "in_process",
+        "local",
+        "mock",
+        "none",
+        "test",
+    }
+
+
+def _consolidation_https_nonlocal(value: Any) -> bool:
+    text = str(value or "").strip()
+    if not text:
+        return False
+    parsed = urlsplit(text)
+    return parsed.scheme == "https" and bool(parsed.hostname) and not _is_loopback_host(parsed.hostname)
+
+
+def _consolidation_hash_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if isinstance(item, str) and item.strip()]
+
+
+def _consolidation_forbidden_raw_paths(value: Any, *, path: str = "$") -> list[str]:
+    forbidden_keys = {
+        "access_token",
+        "affected_evidence_cids",
+        "api_key",
+        "auth_token",
+        "authorization",
+        "bearer_token",
+        "changed_evidence_cids",
+        "content",
+        "contents",
+        "credential",
+        "credentials",
+        "document",
+        "documents",
+        "embedding_vector",
+        "embedding_vectors",
+        "embedding_values",
+        "evidence",
+        "evidences",
+        "headers",
+        "password",
+        "private_key",
+        "prompt",
+        "prompts",
+        "query",
+        "queries",
+        "raw_embedding",
+        "raw_embeddings",
+        "raw_evidence",
+        "raw_prompt",
+        "raw_prompts",
+        "raw_provider_request",
+        "raw_provider_requests",
+        "raw_provider_response",
+        "raw_provider_responses",
+        "request",
+        "raw_request",
+        "raw_requests",
+        "response",
+        "raw_response",
+        "raw_responses",
+        "requests",
+        "responses",
+        "request_body",
+        "response_body",
+        "secret",
+        "source_evidence_cids",
+        "tenant",
+        "tenant_id",
+        "token",
+        "user",
+        "user_id",
+    }
+    paths: list[str] = []
+    if isinstance(value, Mapping):
+        for key, child in value.items():
+            key_name = str(key)
+            child_path = f"{path}.{key_name}"
+            if key_name.lower() in forbidden_keys and child not in (None, "", [], {}):
+                paths.append(child_path)
+            paths.extend(_consolidation_forbidden_raw_paths(child, path=child_path))
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            paths.extend(_consolidation_forbidden_raw_paths(child, path=f"{path}[{index}]"))
+    return paths
+
+
+def _consolidation_hosted_check_rows(raw: Any) -> list[Mapping[str, Any]]:
+    if isinstance(raw, list):
+        return [item for item in raw if isinstance(item, Mapping)]
+    if isinstance(raw, Mapping):
+        return [item for item in raw.values() if isinstance(item, Mapping)]
+    return []
+
+
+def _consolidation_projection_details(section: Mapping[str, Any]) -> Mapping[str, Any]:
+    details = section.get("details")
+    if isinstance(details, Mapping):
+        return details
+    job = section.get("job")
+    if isinstance(job, Mapping):
+        result = job.get("result")
+        if isinstance(result, Mapping):
+            nested = result.get("details")
+            if isinstance(nested, Mapping):
+                return nested
+    return section
+
+
+def cmd_consolidation_ops_check(args: argparse.Namespace) -> None:
+    bundle = _load_consolidation_ops_bundle(args)
+    findings: list[dict[str, str]] = []
+    checks: list[dict[str, Any]] = []
+
+    validation_scope = bundle.get("validation_scope")
+    if not isinstance(validation_scope, Mapping):
+        findings.append(
+            _consolidation_finding(
+                "validation_scope_missing",
+                "consolidation ops bundle requires validation_scope section",
+            )
+        )
+        validation_scope = {}
+    validation_scope_ok = (
+        validation_scope.get("production_validated") is True
+        and validation_scope.get("target_environment") == "production"
+        and validation_scope.get("operator_asserted") is True
+        and bool(validation_scope.get("run_id"))
+        and bool(validation_scope.get("started_at"))
+        and bool(validation_scope.get("completed_at"))
+    )
+    if validation_scope.get("production_validated") is not True:
+        findings.append(
+            _consolidation_finding(
+                "production_validation_missing",
+                "consolidation ops bundle must be production validated",
+            )
+        )
+    if validation_scope.get("target_environment") != "production":
+        findings.append(
+            _consolidation_finding(
+                "target_environment_not_production",
+                "consolidation ops target environment must be production",
+            )
+        )
+    if validation_scope.get("operator_asserted") is not True:
+        findings.append(
+            _consolidation_finding(
+                "operator_assertion_missing",
+                "operator production assertion is required",
+            )
+        )
+    for field in ("run_id", "started_at", "completed_at"):
+        if not validation_scope.get(field):
+            findings.append(
+                _consolidation_finding(
+                    "validation_scope_field_missing",
+                    f"validation_scope.{field} is required",
+                )
+            )
+    checks.append(
+        {
+            "name": "validation_scope",
+            "ok": validation_scope_ok,
+            "production_validated": validation_scope.get("production_validated") is True,
+            "target_environment": validation_scope.get("target_environment"),
+            "operator_asserted": validation_scope.get("operator_asserted") is True,
+        }
+    )
+
+    worker = bundle.get("worker") or bundle.get("worker_run")
+    if not isinstance(worker, Mapping):
+        findings.append(_consolidation_finding("worker_missing", "consolidation ops bundle requires worker section"))
+        worker = {}
+    worker_summary = worker.get("summary") if isinstance(worker.get("summary"), Mapping) else {}
+    worker_queue = worker.get("queue") if isinstance(worker.get("queue"), Mapping) else {}
+    worker_backend = str(worker.get("backend") or worker.get("queue_backend") or worker_queue.get("backend") or "").strip().lower()
+    worker_cycles = _consolidation_ops_int(
+        worker.get("cycles", worker_summary.get("cycles")),
+        default=0,
+        code="worker_cycles_invalid",
+        message="worker cycles must be numeric",
+        findings=findings,
+    )
+    processed_jobs = _consolidation_ops_int(
+        worker.get("processed_jobs", worker.get("processed", worker_summary.get("processed"))),
+        default=0,
+        code="worker_processed_invalid",
+        message="worker processed_jobs must be numeric",
+        findings=findings,
+    )
+    dead_jobs = _consolidation_ops_int(
+        worker.get("dead_jobs", worker_queue.get("dead", worker_summary.get("dead_jobs", 0))),
+        default=0,
+        code="worker_dead_jobs_invalid",
+        message="worker dead_jobs must be numeric",
+        findings=findings,
+    )
+    jobs_raw = worker.get("jobs") if isinstance(worker.get("jobs"), list) else []
+    processed_kinds = set(_consolidation_hash_list(worker.get("processed_kinds")))
+    for job in jobs_raw:
+        if isinstance(job, Mapping) and job.get("kind"):
+            processed_kinds.add(str(job.get("kind")))
+    worker_kind = str(worker.get("kind") or worker.get("job_kind") or "").strip()
+    if worker_kind:
+        processed_kinds.add(worker_kind)
+    required_worker_kinds = sorted(
+        set(
+            args.require_worker_kind
+            or [
+                CONSOLIDATE_EVIDENCE_JOB,
+                PROJECTION_RECOMPUTE_JOB,
+                "calibrate",
+                "lifecycle_sweep",
+                "observability_snapshot",
+            ]
+        )
+    )
+    missing_worker_kinds = [kind for kind in required_worker_kinds if kind not in processed_kinds]
+    heartbeat = worker.get("heartbeat") if isinstance(worker.get("heartbeat"), Mapping) else {}
+    worker_ok = (
+        worker.get("ok") is True
+        and worker_backend in {"postgres", "postgresql"}
+        and worker_cycles >= args.min_worker_cycles
+        and processed_jobs >= args.min_processed_jobs
+        and dead_jobs <= args.max_dead_jobs
+        and not missing_worker_kinds
+        and worker.get("fail_on_dead") is True
+        and worker.get("supervised") is True
+        and bool(worker.get("tenant_hash"))
+        and (worker.get("heartbeat_verified") is True or heartbeat.get("ok") is True)
+    )
+    if worker.get("ok") is not True:
+        findings.append(_consolidation_finding("worker_not_ok", "worker evidence must be ok"))
+    if worker_backend not in {"postgres", "postgresql"}:
+        findings.append(_consolidation_finding("worker_backend_not_postgres", "consolidation worker queue backend must be postgres"))
+    for kind in missing_worker_kinds:
+        findings.append(_consolidation_finding("worker_job_kind_missing", f"worker must process {kind} jobs"))
+    if worker_cycles < args.min_worker_cycles:
+        findings.append(_consolidation_finding("worker_cycles_too_low", "worker cycles are below threshold"))
+    if processed_jobs < args.min_processed_jobs:
+        findings.append(_consolidation_finding("worker_processed_too_low", "worker processed job count is below threshold"))
+    if dead_jobs > args.max_dead_jobs:
+        findings.append(_consolidation_finding("worker_dead_jobs_present", "worker evidence contains dead jobs"))
+    if worker.get("fail_on_dead") is not True:
+        findings.append(_consolidation_finding("worker_fail_on_dead_missing", "worker must run with fail_on_dead=true"))
+    if worker.get("supervised") is not True:
+        findings.append(_consolidation_finding("worker_supervision_missing", "worker supervision proof is required"))
+    if not worker.get("tenant_hash"):
+        findings.append(_consolidation_finding("worker_tenant_hash_missing", "worker tenant identity must be hashed"))
+    if worker.get("heartbeat_verified") is not True and heartbeat.get("ok") is not True:
+        findings.append(_consolidation_finding("worker_heartbeat_missing", "worker heartbeat evidence is required"))
+    checks.append(
+        {
+            "name": "worker",
+            "ok": worker_ok,
+            "backend": worker_backend,
+            "cycles": worker_cycles,
+            "processed_jobs": processed_jobs,
+            "dead_jobs": dead_jobs,
+            "processed_kinds": sorted(processed_kinds),
+            "missing_kinds": missing_worker_kinds,
+            "tenant_hash_present": bool(worker.get("tenant_hash")),
+        }
+    )
+
+    provider_check = bundle.get("provider_check")
+    if not isinstance(provider_check, Mapping):
+        findings.append(
+            _consolidation_finding(
+                "provider_check_missing",
+                "consolidation ops bundle requires provider_check section",
+            )
+        )
+        provider_check = {}
+    provider_manifest = provider_check.get("manifest") if isinstance(provider_check.get("manifest"), Mapping) else {}
+    provider_checks = provider_check.get("checks") if isinstance(provider_check.get("checks"), Mapping) else {}
+    required_provider_checks = sorted(
+        set(args.require_provider_check or ["candidate_extractor", "embedding", "entity_resolver", "summarizer"])
+    )
+    provider_rows: list[dict[str, Any]] = []
+    if provider_check.get("ok") is not True:
+        findings.append(_consolidation_finding("provider_check_not_ok", "provider_check evidence must be ok"))
+    if provider_manifest.get("forbid_local") is not True:
+        findings.append(
+            _consolidation_finding(
+                "provider_manifest_forbid_local_missing",
+                "provider_check manifest must set forbid_local=true",
+            )
+        )
+    for check_name in required_provider_checks:
+        raw_check = provider_checks.get(check_name)
+        present = isinstance(raw_check, Mapping)
+        provider = raw_check.get("provider") if present else None
+        local_provider = _consolidation_provider_local(provider) if present else True
+        check_ok = present and raw_check.get("ok") is True and not local_provider
+        if not present:
+            findings.append(_consolidation_finding("provider_check_required_missing", f"provider_check missing {check_name}"))
+        elif raw_check.get("ok") is not True:
+            findings.append(_consolidation_finding("provider_check_required_failed", f"provider_check {check_name} did not pass"))
+        elif local_provider:
+            findings.append(_consolidation_finding("provider_check_local_provider", f"provider_check {check_name} uses a local provider"))
+        provider_rows.append(
+            {
+                "check": check_name,
+                "present": present,
+                "ok": check_ok,
+                "provider": provider,
+                "local_provider": local_provider,
+            }
+        )
+    provider_ok = provider_check.get("ok") is True and provider_manifest.get("forbid_local") is True and all(
+        row["ok"] for row in provider_rows
+    )
+    checks.append(
+        {
+            "name": "provider_check",
+            "ok": provider_ok,
+            "forbid_local": provider_manifest.get("forbid_local") is True,
+            "required_checks": required_provider_checks,
+            "checks": provider_rows,
+        }
+    )
+
+    hosted = bundle.get("hosted_providers") or bundle.get("hosted_llm")
+    if not isinstance(hosted, Mapping):
+        findings.append(_consolidation_finding("hosted_providers_missing", "consolidation ops bundle requires hosted_providers section"))
+        hosted = {}
+    manifest = hosted.get("manifest") if isinstance(hosted.get("manifest"), Mapping) else {}
+    role_source = args.require_hosted_role or manifest.get("required_roles") or ["candidate_extractor", "entity_resolver", "summarizer"]
+    if not isinstance(role_source, list) or not all(isinstance(item, str) and item for item in role_source):
+        findings.append(_consolidation_finding("hosted_roles_invalid", "hosted required roles must be strings"))
+        required_roles = ["candidate_extractor", "entity_resolver", "summarizer"]
+    else:
+        required_roles = sorted(set(role_source))
+    hosted_rows = _consolidation_hosted_check_rows(hosted.get("checks"))
+    hosted_role_rows: list[dict[str, Any]] = []
+    if manifest.get("forbid_local") is not True:
+        findings.append(_consolidation_finding("hosted_manifest_forbid_local_missing", "hosted provider manifest must set forbid_local=true"))
+    for role in required_roles:
+        role_checks = [item for item in hosted_rows if item.get("role") == role]
+        role_ok = False
+        for item in role_checks:
+            endpoint = item.get("origin") or item.get("base_url") or item.get("url")
+            endpoint_ok = _consolidation_https_nonlocal(endpoint)
+            provider_kind = item.get("provider_kind") or item.get("provider")
+            provider_local = _consolidation_provider_local(provider_kind)
+            contract = item.get("contract")
+            row_ok = (
+                item.get("ok") is True
+                and str(provider_kind or "") == "hosted_http"
+                and endpoint_ok
+                and not provider_local
+                and isinstance(contract, Mapping)
+                and bool(contract)
+            )
+            role_ok = role_ok or row_ok
+            hosted_role_rows.append(
+                {
+                    "role": role,
+                    "ok": row_ok,
+                    "provider_kind": provider_kind,
+                    "endpoint_present": bool(endpoint),
+                    "endpoint_https_nonlocal": endpoint_ok,
+                    "contract_present": isinstance(contract, Mapping) and bool(contract),
+                }
+            )
+        if not role_checks:
+            findings.append(_consolidation_finding("hosted_role_missing", f"hosted role {role} is missing"))
+        elif not role_ok:
+            findings.append(_consolidation_finding("hosted_role_failed", f"hosted role {role} did not pass production checks"))
+    hosted_ok = bool(hosted_rows) and manifest.get("forbid_local") is True and all(
+        any(row["role"] == role and row["ok"] for row in hosted_role_rows) for role in required_roles
+    )
+    checks.append(
+        {
+            "name": "hosted_providers",
+            "ok": hosted_ok,
+            "forbid_local": manifest.get("forbid_local") is True,
+            "required_roles": required_roles,
+            "provider_count": len(hosted_rows),
+            "roles": hosted_role_rows,
+        }
+    )
+
+    projection = bundle.get("projection_recompute")
+    if not isinstance(projection, Mapping):
+        findings.append(
+            _consolidation_finding("projection_recompute_missing", "consolidation ops bundle requires projection_recompute section")
+        )
+        projection = {}
+    projection_details = _consolidation_projection_details(projection)
+    projection_backend = str(projection.get("backend") or projection.get("queue_backend") or "").strip().lower()
+    projection_status = str(
+        projection.get("status")
+        or projection.get("job_status")
+        or (projection.get("job", {}).get("status") if isinstance(projection.get("job"), Mapping) else "")
+    )
+    changed_hashes = _consolidation_hash_list(
+        projection.get("changed_evidence_cid_hashes") or projection_details.get("changed_evidence_cid_hashes")
+    )
+    changed_count = _consolidation_ops_int(
+        projection.get("changed_evidence_count", projection_details.get("changed_evidence_count", len(changed_hashes))),
+        default=len(changed_hashes),
+        code="projection_changed_count_invalid",
+        message="projection changed evidence count must be numeric",
+        findings=findings,
+    )
+    affected_counts = projection.get("affected_projection_counts") or projection_details.get("affected_projection_counts")
+    if not isinstance(affected_counts, Mapping):
+        affected_counts = {}
+        findings.append(
+            _consolidation_finding("projection_affected_counts_missing", "projection recompute affected_projection_counts are required")
+        )
+    queued_consolidation_jobs = _consolidation_ops_int(
+        projection.get(
+            "queued_consolidation_jobs_count",
+            projection_details.get(
+                "queued_consolidation_jobs_count",
+                len(projection_details.get("queued_consolidation_jobs", []))
+                if isinstance(projection_details.get("queued_consolidation_jobs"), list)
+                else 0,
+            ),
+        ),
+        default=0,
+        code="projection_queued_count_invalid",
+        message="projection queued consolidation job count must be numeric",
+        findings=findings,
+    )
+    enqueue_consolidation = projection.get("enqueue_consolidation")
+    if enqueue_consolidation is None:
+        payload = projection.get("payload") if isinstance(projection.get("payload"), Mapping) else {}
+        enqueue_consolidation = payload.get("enqueue_consolidation")
+    projection_counts_ok = (
+        int(affected_counts.get("assertions") or 0) >= args.min_affected_assertions
+        and int(affected_counts.get("entities") or 0) >= args.min_affected_entities
+        and int(affected_counts.get("relations") or 0) >= args.min_affected_relations
+    )
+    projection_ok = (
+        projection.get("ok", True) is True
+        and projection_backend in {"postgres", "postgresql"}
+        and projection.get("production_validated") is True
+        and projection_status == "complete"
+        and changed_count >= args.min_projection_cases
+        and bool(changed_hashes)
+        and projection_counts_ok
+        and enqueue_consolidation is True
+        and queued_consolidation_jobs >= 1
+    )
+    if projection.get("ok", True) is not True:
+        findings.append(_consolidation_finding("projection_recompute_not_ok", "projection recompute evidence must be ok"))
+    if projection_backend not in {"postgres", "postgresql"}:
+        findings.append(_consolidation_finding("projection_backend_not_postgres", "projection recompute backend must be postgres"))
+    if projection.get("production_validated") is not True:
+        findings.append(_consolidation_finding("projection_production_validation_missing", "projection recompute must be production validated"))
+    if projection_status != "complete":
+        findings.append(_consolidation_finding("projection_job_incomplete", "projection recompute job must be complete"))
+    if changed_count < args.min_projection_cases or not changed_hashes:
+        findings.append(_consolidation_finding("projection_changed_cases_too_low", "projection recompute changed evidence proof is too low"))
+    if not projection_counts_ok:
+        findings.append(_consolidation_finding("projection_affected_counts_too_low", "projection recompute affected projection counts are too low"))
+    if enqueue_consolidation is not True or queued_consolidation_jobs < 1:
+        findings.append(_consolidation_finding("projection_consolidation_not_enqueued", "projection recompute must re-enqueue consolidation"))
+    checks.append(
+        {
+            "name": "projection_recompute",
+            "ok": projection_ok,
+            "backend": projection_backend,
+            "status": projection_status,
+            "changed_evidence_count": changed_count,
+            "changed_hash_count": len(changed_hashes),
+            "affected_projection_counts": dict(affected_counts),
+            "queued_consolidation_jobs_count": queued_consolidation_jobs,
+        }
+    )
+
+    suite_section = bundle.get("protected_suite") or bundle.get("gate_suite")
+    if not isinstance(suite_section, Mapping):
+        findings.append(_consolidation_finding("protected_suite_missing", "consolidation ops bundle requires protected_suite section"))
+        suite_section = {}
+    suite = suite_section.get("suite") if isinstance(suite_section.get("suite"), Mapping) else suite_section
+    case_hashes = _consolidation_hash_list(suite.get("case_hashes"))
+    protected_hashes = _consolidation_hash_list(suite.get("protected_case_hashes"))
+    suite_case_count = _consolidation_ops_int(
+        suite.get("case_count", len(case_hashes)),
+        default=len(case_hashes),
+        code="protected_suite_case_count_invalid",
+        message="protected suite case_count must be numeric",
+        findings=findings,
+    )
+    protected_count = _consolidation_ops_int(
+        suite.get("protected_case_count", len(protected_hashes)),
+        default=len(protected_hashes),
+        code="protected_suite_protected_count_invalid",
+        message="protected suite protected_case_count must be numeric",
+        findings=findings,
+    )
+    tier_counts = suite.get("tier_counts") if isinstance(suite.get("tier_counts"), Mapping) else {}
+    required_tiers = sorted(set(args.require_tier or ["archive", "core", "smoke"]))
+    missing_tiers = [tier for tier in required_tiers if int(tier_counts.get(tier) or 0) <= 0]
+    source = str(suite.get("source") or "").strip().lower()
+    suite_source_ok = bool(source) and source not in {"synthetic", "mock", "test", "generated"}
+    suite_counts_match = (not case_hashes or len(case_hashes) == suite_case_count) and (
+        not protected_hashes or len(protected_hashes) == protected_count
+    )
+    suite_ok = (
+        suite_case_count >= args.min_gate_cases
+        and protected_count >= args.min_protected
+        and not missing_tiers
+        and suite_source_ok
+        and bool(suite.get("fingerprint"))
+        and suite_counts_match
+    )
+    if suite_case_count < args.min_gate_cases:
+        findings.append(_consolidation_finding("protected_suite_case_count_too_low", "protected suite case count is too low"))
+    if protected_count < args.min_protected:
+        findings.append(_consolidation_finding("protected_suite_protected_count_too_low", "protected suite protected count is too low"))
+    for tier in missing_tiers:
+        findings.append(_consolidation_finding("protected_suite_tier_missing", f"protected suite missing required tier {tier}"))
+    if not suite_source_ok:
+        findings.append(_consolidation_finding("protected_suite_source_synthetic", "protected suite source must be non-synthetic"))
+    if not suite.get("fingerprint"):
+        findings.append(_consolidation_finding("protected_suite_fingerprint_missing", "protected suite fingerprint is required"))
+    if not suite_counts_match:
+        findings.append(_consolidation_finding("protected_suite_case_hash_mismatch", "protected suite hash counts must match declared counts"))
+    checks.append(
+        {
+            "name": "protected_suite",
+            "ok": suite_ok,
+            "case_count": suite_case_count,
+            "protected_case_count": protected_count,
+            "source": source,
+            "missing_tiers": missing_tiers,
+            "fingerprint_present": bool(suite.get("fingerprint")),
+        }
+    )
+
+    embedding = bundle.get("embedding")
+    if not isinstance(embedding, Mapping):
+        findings.append(_consolidation_finding("embedding_missing", "consolidation ops bundle requires embedding section"))
+        embedding = {}
+    embedding_provider = embedding.get("provider") or embedding.get("provider_kind")
+    embedding_local = _consolidation_provider_local(embedding_provider)
+    dimensions = _consolidation_ops_int(
+        embedding.get("dimensions"),
+        default=0,
+        code="embedding_dimensions_invalid",
+        message="embedding dimensions must be numeric",
+        findings=findings,
+    )
+    embedded_hashes = _consolidation_hash_list(embedding.get("cid_hashes") or embedding.get("embedded_cid_hashes"))
+    embedded_count = _consolidation_ops_int(
+        embedding.get("embedded_cid_hash_count", len(embedded_hashes)),
+        default=len(embedded_hashes),
+        code="embedding_count_invalid",
+        message="embedded CID hash count must be numeric",
+        findings=findings,
+    )
+    embedding_ok = (
+        embedding.get("ok") is True
+        and not embedding_local
+        and dimensions >= args.min_embedding_dimensions
+        and embedded_count >= args.min_embedding_cids
+        and bool(embedding.get("model"))
+    )
+    if embedding.get("ok") is not True:
+        findings.append(_consolidation_finding("embedding_not_ok", "embedding evidence must be ok"))
+    if embedding_local:
+        findings.append(_consolidation_finding("embedding_provider_local", "embedding provider must be hosted or external"))
+    if dimensions < args.min_embedding_dimensions:
+        findings.append(_consolidation_finding("embedding_dimensions_too_low", "embedding dimensions are below threshold"))
+    if embedded_count < args.min_embedding_cids:
+        findings.append(_consolidation_finding("embedding_count_too_low", "embedded CID hash count is below threshold"))
+    if not embedding.get("model"):
+        findings.append(_consolidation_finding("embedding_model_missing", "embedding model identifier is required"))
+    checks.append(
+        {
+            "name": "embedding",
+            "ok": embedding_ok,
+            "provider": embedding_provider,
+            "provider_local": embedding_local,
+            "dimensions": dimensions,
+            "embedded_cid_hash_count": embedded_count,
+            "model_present": bool(embedding.get("model")),
+        }
+    )
+
+    consolidation_run = bundle.get("consolidation_run")
+    if not isinstance(consolidation_run, Mapping):
+        findings.append(
+            _consolidation_finding(
+                "consolidation_run_missing",
+                "consolidation ops bundle requires consolidation_run section",
+            )
+        )
+        consolidation_run = {}
+    role_pipeline = consolidation_run.get("role_pipeline") if isinstance(consolidation_run.get("role_pipeline"), Mapping) else {}
+    pass_results_raw = consolidation_run.get("pass_results")
+    pass_results = [item for item in pass_results_raw if isinstance(item, Mapping)] if isinstance(pass_results_raw, list) else []
+    passes_run = _consolidation_hash_list(consolidation_run.get("passes_run"))
+    required_passes = sorted(set(args.require_consolidation_pass or ["extractor", "resolver", "summarizer"]))
+    pass_statuses: dict[str, str] = {}
+    for item in pass_results:
+        name = str(item.get("name") or item.get("pass") or item.get("role") or "")
+        if name:
+            pass_statuses[name] = str(item.get("status") or ("complete" if item.get("ok") is True else "failed"))
+    missing_passes = [name for name in required_passes if name not in passes_run and name not in pass_statuses]
+    incomplete_passes = [name for name in required_passes if pass_statuses.get(name, "complete") != "complete" and name in pass_statuses]
+    candidate_results = (
+        consolidation_run.get("candidate_results")
+        if isinstance(consolidation_run.get("candidate_results"), Mapping)
+        else {}
+    )
+    promoted_candidates = _consolidation_ops_int(
+        candidate_results.get("promoted", consolidation_run.get("promoted_candidate_count")),
+        default=0,
+        code="consolidation_promoted_invalid",
+        message="consolidation promoted candidate count must be numeric",
+        findings=findings,
+    )
+    evaluated_candidates = _consolidation_ops_int(
+        candidate_results.get("evaluated", consolidation_run.get("evaluated_candidate_count")),
+        default=0,
+        code="consolidation_evaluated_invalid",
+        message="consolidation evaluated candidate count must be numeric",
+        findings=findings,
+    )
+    consolidation_hashes = _consolidation_hash_list(consolidation_run.get("source_evidence_cid_hashes"))
+    role_pipeline_ok = (
+        consolidation_run.get("ok") is True
+        and role_pipeline.get("owner_role") == "consolidator"
+        and role_pipeline.get("write_authorized") is True
+        and role_pipeline.get("candidate_extractor") == "hosted_http"
+        and role_pipeline.get("entity_resolver") == "hosted_http"
+        and role_pipeline.get("summarizer") == "hosted_http"
+        and bool(consolidation_run.get("tenant_hash"))
+        and bool(consolidation_hashes)
+        and not missing_passes
+        and not incomplete_passes
+        and evaluated_candidates >= args.min_evaluated_candidates
+        and promoted_candidates >= args.min_promoted_candidates
+    )
+    if consolidation_run.get("ok") is not True:
+        findings.append(_consolidation_finding("consolidation_run_not_ok", "consolidation run evidence must be ok"))
+    if role_pipeline.get("owner_role") != "consolidator":
+        findings.append(_consolidation_finding("role_pipeline_owner_invalid", "role pipeline owner_role must be consolidator"))
+    if role_pipeline.get("write_authorized") is not True:
+        findings.append(_consolidation_finding("role_pipeline_write_not_authorized", "role pipeline must prove write authorization"))
+    for role in ("candidate_extractor", "entity_resolver", "summarizer"):
+        if role_pipeline.get(role) != "hosted_http":
+            findings.append(_consolidation_finding("role_pipeline_not_hosted", f"role pipeline {role} must use hosted_http"))
+    for name in missing_passes:
+        findings.append(_consolidation_finding("consolidation_pass_missing", f"consolidation pass {name} is missing"))
+    for name in incomplete_passes:
+        findings.append(_consolidation_finding("consolidation_pass_incomplete", f"consolidation pass {name} is incomplete"))
+    if not consolidation_run.get("tenant_hash"):
+        findings.append(_consolidation_finding("consolidation_tenant_hash_missing", "consolidation tenant identity must be hashed"))
+    if not consolidation_hashes:
+        findings.append(
+            _consolidation_finding(
+                "consolidation_source_hashes_missing",
+                "consolidation source evidence CID hashes are required",
+            )
+        )
+    if evaluated_candidates < args.min_evaluated_candidates:
+        findings.append(_consolidation_finding("consolidation_evaluated_too_low", "evaluated candidate count is too low"))
+    if promoted_candidates < args.min_promoted_candidates:
+        findings.append(_consolidation_finding("consolidation_promoted_too_low", "promoted candidate count is too low"))
+    checks.append(
+        {
+            "name": "consolidation_run",
+            "ok": role_pipeline_ok,
+            "owner_role": role_pipeline.get("owner_role"),
+            "write_authorized": role_pipeline.get("write_authorized") is True,
+            "required_passes": required_passes,
+            "missing_passes": missing_passes,
+            "incomplete_passes": incomplete_passes,
+            "source_hash_count": len(consolidation_hashes),
+            "evaluated_candidates": evaluated_candidates,
+            "promoted_candidates": promoted_candidates,
+        }
+    )
+
+    calibration = bundle.get("calibration")
+    if not isinstance(calibration, Mapping):
+        findings.append(_consolidation_finding("calibration_missing", "consolidation ops bundle requires calibration section"))
+        calibration = {}
+    calibration_examples = _consolidation_ops_int(
+        calibration.get("example_count"),
+        default=0,
+        code="calibration_examples_invalid",
+        message="calibration example count must be numeric",
+        findings=findings,
+    )
+    calibration_correct = _consolidation_ops_int(
+        calibration.get("correct_count"),
+        default=0,
+        code="calibration_correct_invalid",
+        message="calibration correct count must be numeric",
+        findings=findings,
+    )
+    calibration_incorrect = _consolidation_ops_int(
+        calibration.get("incorrect_count"),
+        default=0,
+        code="calibration_incorrect_invalid",
+        message="calibration incorrect count must be numeric",
+        findings=findings,
+    )
+    try:
+        correct_coverage = float(calibration.get("correct_coverage", calibration.get("empirical_coverage", 0.0)))
+    except (TypeError, ValueError):
+        correct_coverage = 0.0
+        findings.append(_consolidation_finding("calibration_coverage_invalid", "calibration coverage must be numeric"))
+    try:
+        false_accept_rate = float(calibration.get("false_accept_rate", 1.0))
+    except (TypeError, ValueError):
+        false_accept_rate = 1.0
+        findings.append(_consolidation_finding("calibration_false_accept_invalid", "calibration false accept rate must be numeric"))
+    dataset_fingerprint = str(calibration.get("dataset_fingerprint") or "")
+    calibration_ok = (
+        calibration.get("ok") is True
+        and calibration.get("applied") is True
+        and "sha256:" in dataset_fingerprint.lower()
+        and calibration.get("threshold") is not None
+        and calibration_examples >= args.min_calibration_examples
+        and calibration_correct >= args.min_calibration_correct
+        and calibration_incorrect >= args.min_calibration_incorrect
+        and correct_coverage >= args.min_calibration_coverage
+        and false_accept_rate <= args.max_calibration_false_accept_rate
+    )
+    if calibration.get("ok") is not True:
+        findings.append(_consolidation_finding("calibration_not_ok", "calibration evidence must be ok"))
+    if calibration.get("applied") is not True:
+        findings.append(_consolidation_finding("calibration_not_applied", "calibration must be applied"))
+    if "sha256:" not in dataset_fingerprint.lower():
+        findings.append(_consolidation_finding("calibration_fingerprint_missing", "calibration dataset fingerprint is required"))
+    if calibration.get("threshold") is None:
+        findings.append(_consolidation_finding("calibration_threshold_missing", "calibration threshold is required"))
+    if calibration_examples < args.min_calibration_examples:
+        findings.append(_consolidation_finding("calibration_examples_too_low", "calibration examples are below threshold"))
+    if calibration_correct < args.min_calibration_correct:
+        findings.append(_consolidation_finding("calibration_correct_too_low", "calibration correct examples are below threshold"))
+    if calibration_incorrect < args.min_calibration_incorrect:
+        findings.append(_consolidation_finding("calibration_incorrect_too_low", "calibration incorrect examples are below threshold"))
+    if correct_coverage < args.min_calibration_coverage:
+        findings.append(_consolidation_finding("calibration_coverage_too_low", "calibration coverage is below threshold"))
+    if false_accept_rate > args.max_calibration_false_accept_rate:
+        findings.append(_consolidation_finding("calibration_false_accept_too_high", "calibration false accept rate exceeds threshold"))
+    checks.append(
+        {
+            "name": "calibration",
+            "ok": calibration_ok,
+            "example_count": calibration_examples,
+            "correct_count": calibration_correct,
+            "incorrect_count": calibration_incorrect,
+            "correct_coverage": correct_coverage,
+            "false_accept_rate": false_accept_rate,
+            "dataset_fingerprint_present": "sha256:" in dataset_fingerprint.lower(),
+        }
+    )
+
+    lifecycle = bundle.get("lifecycle")
+    if not isinstance(lifecycle, Mapping):
+        findings.append(_consolidation_finding("lifecycle_missing", "consolidation ops bundle requires lifecycle section"))
+        lifecycle = {}
+    lifecycle_evaluated = _consolidation_ops_int(
+        lifecycle.get("evaluated"),
+        default=0,
+        code="lifecycle_evaluated_invalid",
+        message="lifecycle evaluated count must be numeric",
+        findings=findings,
+    )
+    failed_hashes = _consolidation_hash_list(lifecycle.get("failed_cid_hashes") or lifecycle.get("failed_cids"))
+    lifecycle_ok = (
+        lifecycle.get("status") == "complete"
+        and lifecycle_evaluated >= args.min_lifecycle_evaluated
+        and "demoted" in lifecycle
+        and "rehearsed" in lifecycle
+        and not failed_hashes
+    )
+    if lifecycle.get("status") != "complete":
+        findings.append(_consolidation_finding("lifecycle_not_complete", "lifecycle status must be complete"))
+    if lifecycle_evaluated < args.min_lifecycle_evaluated:
+        findings.append(_consolidation_finding("lifecycle_evaluated_too_low", "lifecycle evaluated count is too low"))
+    for field in ("demoted", "rehearsed"):
+        if field not in lifecycle:
+            findings.append(_consolidation_finding("lifecycle_count_missing", f"lifecycle {field} count is required"))
+    if failed_hashes:
+        findings.append(_consolidation_finding("lifecycle_failed_cids_present", "lifecycle must not report failed CIDs"))
+    checks.append(
+        {
+            "name": "lifecycle",
+            "ok": lifecycle_ok,
+            "status": lifecycle.get("status"),
+            "evaluated": lifecycle_evaluated,
+            "failed_cid_hash_count": len(failed_hashes),
+        }
+    )
+
+    ops_report = bundle.get("ops_report")
+    if not isinstance(ops_report, Mapping):
+        findings.append(_consolidation_finding("ops_report_missing", "consolidation ops bundle requires ops_report section"))
+        ops_report = {}
+    tripwires = ops_report.get("tripwires") if isinstance(ops_report.get("tripwires"), Mapping) else {}
+    ops_queue = ops_report.get("queue") if isinstance(ops_report.get("queue"), Mapping) else {}
+    ops_metrics = ops_report.get("metrics") if isinstance(ops_report.get("metrics"), Mapping) else {}
+    ops_counters = ops_metrics.get("counters") if isinstance(ops_metrics.get("counters"), Mapping) else {}
+    ops_dead_jobs = _consolidation_ops_int(
+        ops_queue.get("dead", ops_report.get("dead_jobs")),
+        default=0,
+        code="ops_dead_jobs_invalid",
+        message="ops report dead job count must be numeric",
+        findings=findings,
+    )
+    required_counters = sorted(
+        set(args.require_ops_counter or ["calibration.tuned", "lifecycle.sweeps", "observability.snapshots"])
+    )
+    missing_counters = [name for name in required_counters if name not in ops_counters]
+    contradiction_backlog = _consolidation_ops_int(
+        ops_report.get("contradiction_backlog", 0),
+        default=0,
+        code="ops_contradiction_backlog_invalid",
+        message="ops contradiction backlog must be numeric",
+        findings=findings,
+    )
+    ops_report_ok = (
+        ops_report.get("ok") is True
+        and tripwires.get("passed") is True
+        and ops_dead_jobs == 0
+        and not missing_counters
+        and contradiction_backlog <= args.max_contradiction_backlog
+    )
+    if ops_report.get("ok") is not True:
+        findings.append(_consolidation_finding("ops_report_not_ok", "ops report evidence must be ok"))
+    if tripwires.get("passed") is not True:
+        findings.append(_consolidation_finding("ops_tripwires_failed", "ops report tripwires must pass"))
+    if ops_dead_jobs != 0:
+        findings.append(_consolidation_finding("ops_dead_jobs_present", "ops report must show zero dead jobs"))
+    for name in missing_counters:
+        findings.append(_consolidation_finding("ops_counter_missing", f"ops report missing counter {name}"))
+    if contradiction_backlog > args.max_contradiction_backlog:
+        findings.append(_consolidation_finding("ops_contradiction_backlog_open", "ops report contradiction backlog exceeds threshold"))
+    checks.append(
+        {
+            "name": "ops_report",
+            "ok": ops_report_ok,
+            "tripwires_passed": tripwires.get("passed") is True,
+            "dead_jobs": ops_dead_jobs,
+            "missing_counters": missing_counters,
+            "contradiction_backlog": contradiction_backlog,
+        }
+    )
+
+    redaction = bundle.get("redaction") if isinstance(bundle.get("redaction"), Mapping) else {}
+    redaction_flags = {
+        "raw_prompts_omitted": redaction.get("raw_prompts_omitted") is True,
+        "raw_provider_requests_omitted": redaction.get("raw_provider_requests_omitted") is True
+        or redaction.get("raw_llm_requests_omitted") is True,
+        "raw_provider_responses_omitted": redaction.get("raw_provider_responses_omitted") is True
+        or redaction.get("raw_llm_responses_omitted") is True,
+        "raw_evidence_omitted": redaction.get("raw_evidence_omitted") is True,
+        "raw_credentials_omitted": redaction.get("raw_credentials_omitted") is True,
+        "raw_embeddings_omitted": redaction.get("raw_embeddings_omitted") is True,
+        "raw_cids_omitted": redaction.get("raw_cids_omitted") is True,
+        "raw_tenant_user_values_omitted": redaction.get("raw_tenant_user_values_omitted") is True,
+    }
+    missing_redaction_flags = [flag for flag, ok in redaction_flags.items() if not ok]
+    for flag in missing_redaction_flags:
+        findings.append(_consolidation_finding("redaction_flag_missing", f"redaction flag {flag} must be true"))
+    forbidden_raw_paths = _consolidation_forbidden_raw_paths(bundle)
+    if forbidden_raw_paths:
+        findings.append(_consolidation_finding("redaction_raw_field_present", "bundle contains raw prompts, evidence, credentials, or CIDs"))
+    checks.append(
+        {
+            "name": "redaction",
+            "ok": not missing_redaction_flags and not forbidden_raw_paths,
+            **redaction_flags,
+            "forbidden_raw_paths": forbidden_raw_paths,
+        }
+    )
+
+    report = {
+        "ok": not findings,
+        "bundle": {
+            "name": bundle.get("name"),
+            "production_validated": validation_scope.get("production_validated") is True,
+            "worker_backend": worker_backend,
+            "worker_processed_jobs": processed_jobs,
+            "provider_check_count": len(provider_rows),
+            "hosted_required_roles": required_roles,
+            "projection_changed_evidence_count": changed_count,
+            "protected_suite_case_count": suite_case_count,
+            "protected_suite_protected_count": protected_count,
+            "embedding_provider": embedding_provider,
+            "embedding_dimensions": dimensions,
+            "consolidation_source_hash_count": len(consolidation_hashes),
+            "calibration_dataset_fingerprint_present": "sha256:" in dataset_fingerprint.lower(),
+            "lifecycle_evaluated": lifecycle_evaluated,
+            "ops_tripwires_passed": tripwires.get("passed") is True,
+        },
+        "requirements": {
+            "production_validated": True,
+            "target_environment": "production",
+            "operator_asserted": True,
+            "worker_backend": "postgres",
+            "worker_job_kinds": required_worker_kinds,
+            "min_worker_cycles": args.min_worker_cycles,
+            "min_processed_jobs": args.min_processed_jobs,
+            "max_dead_jobs": args.max_dead_jobs,
+            "required_provider_checks": required_provider_checks,
+            "hosted_forbid_local": True,
+            "required_hosted_roles": required_roles,
+            "projection_backend": "postgres",
+            "min_projection_cases": args.min_projection_cases,
+            "min_affected_assertions": args.min_affected_assertions,
+            "min_affected_entities": args.min_affected_entities,
+            "min_affected_relations": args.min_affected_relations,
+            "min_gate_cases": args.min_gate_cases,
+            "min_protected": args.min_protected,
+            "required_tiers": required_tiers,
+            "min_embedding_dimensions": args.min_embedding_dimensions,
+            "min_embedding_cids": args.min_embedding_cids,
+            "required_consolidation_passes": required_passes,
+            "min_evaluated_candidates": args.min_evaluated_candidates,
+            "min_promoted_candidates": args.min_promoted_candidates,
+            "min_calibration_examples": args.min_calibration_examples,
+            "min_calibration_correct": args.min_calibration_correct,
+            "min_calibration_incorrect": args.min_calibration_incorrect,
+            "min_calibration_coverage": args.min_calibration_coverage,
+            "max_calibration_false_accept_rate": args.max_calibration_false_accept_rate,
+            "min_lifecycle_evaluated": args.min_lifecycle_evaluated,
+            "required_ops_counters": required_counters,
+            "max_contradiction_backlog": args.max_contradiction_backlog,
+        },
+        "redaction": {**redaction_flags, "forbidden_raw_fields_present": bool(forbidden_raw_paths)},
+        "checks": checks,
+        "findings": findings,
+    }
+    report["fingerprint"] = _consolidation_ops_fingerprint(report)
+    report["expected_fingerprint_present"] = bool(args.expected_fingerprint)
+    if args.expected_fingerprint and args.expected_fingerprint.strip().lower() != report["fingerprint"]:
+        report["ok"] = False
+        report["findings"].append(_consolidation_finding("fingerprint_mismatch", "consolidation ops fingerprint mismatch"))
     emit(report)
     if not report["ok"]:
         raise SystemExit(1)
@@ -7468,6 +8480,38 @@ def build_parser() -> argparse.ArgumentParser:
     mcp_ops_check.add_argument("--allow-localhost", action="store_true")
     mcp_ops_check.add_argument("--expected-fingerprint")
     mcp_ops_check.set_defaults(func=cmd_mcp_ops_check)
+
+    consolidation_ops_check = sub.add_parser("consolidation-ops-check")
+    consolidation_ops_check.add_argument("--bundle", help="Path to production consolidation evidence bundle")
+    consolidation_ops_check.add_argument("--bundle-json", help="Inline production consolidation evidence bundle JSON")
+    consolidation_ops_check.add_argument("--min-worker-cycles", type=int, default=3)
+    consolidation_ops_check.add_argument("--min-processed-jobs", type=int, default=5)
+    consolidation_ops_check.add_argument("--max-dead-jobs", type=int, default=0)
+    consolidation_ops_check.add_argument("--require-worker-kind", action="append", default=[])
+    consolidation_ops_check.add_argument("--require-provider-check", action="append", default=[])
+    consolidation_ops_check.add_argument("--require-hosted-role", action="append", default=[])
+    consolidation_ops_check.add_argument("--min-projection-cases", type=int, default=1)
+    consolidation_ops_check.add_argument("--min-affected-assertions", type=int, default=1)
+    consolidation_ops_check.add_argument("--min-affected-entities", type=int, default=1)
+    consolidation_ops_check.add_argument("--min-affected-relations", type=int, default=1)
+    consolidation_ops_check.add_argument("--min-gate-cases", type=int, default=3)
+    consolidation_ops_check.add_argument("--min-protected", type=int, default=1)
+    consolidation_ops_check.add_argument("--require-tier", choices=["smoke", "core", "archive"], action="append")
+    consolidation_ops_check.add_argument("--min-embedding-dimensions", type=int, default=512)
+    consolidation_ops_check.add_argument("--min-embedding-cids", type=int, default=1)
+    consolidation_ops_check.add_argument("--require-consolidation-pass", action="append", default=[])
+    consolidation_ops_check.add_argument("--min-evaluated-candidates", type=int, default=1)
+    consolidation_ops_check.add_argument("--min-promoted-candidates", type=int, default=1)
+    consolidation_ops_check.add_argument("--min-calibration-examples", type=int, default=20)
+    consolidation_ops_check.add_argument("--min-calibration-correct", type=int, default=1)
+    consolidation_ops_check.add_argument("--min-calibration-incorrect", type=int, default=1)
+    consolidation_ops_check.add_argument("--min-calibration-coverage", type=float, default=0.9)
+    consolidation_ops_check.add_argument("--max-calibration-false-accept-rate", type=float, default=0.1)
+    consolidation_ops_check.add_argument("--min-lifecycle-evaluated", type=int, default=1)
+    consolidation_ops_check.add_argument("--require-ops-counter", action="append", default=[])
+    consolidation_ops_check.add_argument("--max-contradiction-backlog", type=int, default=0)
+    consolidation_ops_check.add_argument("--expected-fingerprint")
+    consolidation_ops_check.set_defaults(func=cmd_consolidation_ops_check)
 
     belief_revision_check = sub.add_parser("belief-revision-check")
     belief_revision_check.add_argument("--cases", help="Path to JSON array of belief revision cases")

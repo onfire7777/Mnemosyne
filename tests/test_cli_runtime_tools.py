@@ -4530,6 +4530,300 @@ def test_cli_mcp_ops_check_fails_closed_on_weak_transport_bundle(tmp_path: Path)
     assert "redaction_raw_field_present" in codes
 
 
+def consolidation_ops_bundle(
+    *,
+    local_worker: bool = False,
+    local_providers: bool = False,
+    bad_projection: bool = False,
+    bad_gate_suite: bool = False,
+    bad_role_pipeline: bool = False,
+    bad_calibration: bool = False,
+    bad_lifecycle: bool = False,
+    bad_ops: bool = False,
+    raw_secret: bool = False,
+) -> dict:
+    hosted_origin = "http://127.0.0.1:8787" if local_providers else "https://llm.example.com"
+    provider_kind = "local" if local_providers else "hosted_http"
+    provider_name = "local" if local_providers else "http"
+    bundle = {
+        "name": "production-consolidation-ops",
+        "validation_scope": {
+            "production_validated": not local_worker,
+            "target_environment": "local" if local_worker else "production",
+            "operator_asserted": not local_worker,
+            "run_id": "run-sha256:consolidation-001",
+            "started_at": "2026-06-21T12:00:00Z",
+            "completed_at": "2026-06-21T12:05:00Z",
+        },
+        "worker_run": {
+            "ok": not local_worker,
+            "backend": "inprocess" if local_worker else "postgres",
+            "tenant_hash": "tenant-sha256:aaa111",
+            "processed_kinds": ["calibrate", "consolidate_evidence", "lifecycle_sweep", "observability_snapshot", "projection_recompute"]
+            if not local_worker
+            else ["consolidate_evidence"],
+            "processed_jobs": 5 if not local_worker else 1,
+            "cycles": 4 if not local_worker else 1,
+            "dead_jobs": 0 if not local_worker else 2,
+            "fail_on_dead": not local_worker,
+            "supervised": not local_worker,
+            "heartbeat_verified": not local_worker,
+            "queue": {"backend": "postgres" if not local_worker else "inprocess", "dead": 0 if not local_worker else 2},
+        },
+        "provider_check": {
+            "ok": not local_providers,
+            "manifest": {
+                "name": "production-consolidation-providers",
+                "forbid_local": not local_providers,
+                "required_checks": ["candidate_extractor", "embedding", "entity_resolver", "summarizer"],
+            },
+            "checks": {
+                "candidate_extractor": {"ok": True, "provider": provider_name},
+                "summarizer": {"ok": True, "provider": provider_name},
+                "entity_resolver": {"ok": True, "provider": provider_name},
+                "embedding": {"ok": True, "provider": provider_name, "dimensions": 1024, "model": "prod-embedding-v1"},
+            },
+        },
+        "hosted_llm": {
+            "ok": not local_providers,
+            "manifest": {
+                "name": "production-hosted-consolidation",
+                "forbid_local": not local_providers,
+                "required_roles": ["candidate_extractor", "entity_resolver", "summarizer"],
+            },
+            "checks": [
+                {
+                    "ok": not local_providers,
+                    "role": "candidate_extractor",
+                    "provider_kind": provider_kind,
+                    "origin": hosted_origin,
+                    "contract": {"candidate_count": 3},
+                },
+                {
+                    "ok": not local_providers,
+                    "role": "entity_resolver",
+                    "provider_kind": provider_kind,
+                    "origin": hosted_origin,
+                    "contract": {"entity_count": 2},
+                },
+                {
+                    "ok": not local_providers,
+                    "role": "summarizer",
+                    "provider_kind": provider_kind,
+                    "origin": hosted_origin,
+                    "contract": {"summary_length": 128},
+                },
+            ],
+        },
+        "projection_recompute": {
+            "ok": not bad_projection,
+            "backend": "local" if bad_projection else "postgres",
+            "production_validated": not bad_projection,
+            "status": "failed" if bad_projection else "complete",
+            "changed_evidence_cid_hashes": [] if bad_projection else ["cid-sha256:source-a"],
+            "changed_evidence_count": 0 if bad_projection else 1,
+            "affected_projection_counts": {
+                "assertions": 0 if bad_projection else 2,
+                "entities": 0 if bad_projection else 1,
+                "relations": 0 if bad_projection else 1,
+                "preferences": 0,
+            },
+            "enqueue_consolidation": not bad_projection,
+            "queued_consolidation_jobs_count": 0 if bad_projection else 1,
+        },
+        "gate_suite": {
+            "ok": not bad_gate_suite,
+            "case_count": 4 if not bad_gate_suite else 1,
+            "protected_case_count": 2 if not bad_gate_suite else 0,
+            "case_hashes": ["case-sha256:smoke", "case-sha256:core", "case-sha256:archive", "case-sha256:protected"]
+            if not bad_gate_suite
+            else ["case-sha256:smoke"],
+            "protected_case_hashes": ["case-sha256:core", "case-sha256:protected"] if not bad_gate_suite else [],
+            "source": "runtime-state" if not bad_gate_suite else "synthetic",
+            "fingerprint": "gate-sha256:consolidation-suite" if not bad_gate_suite else "",
+            "tier_counts": {"smoke": 1, "core": 2, "archive": 1} if not bad_gate_suite else {"smoke": 1},
+        },
+        "embedding": {
+            "ok": not local_providers,
+            "provider": provider_name,
+            "dimensions": 1024 if not local_providers else 128,
+            "model": "prod-embedding-v1" if not local_providers else "",
+            "cid_hashes": ["cid-sha256:source-a"],
+            "embedded_cid_hash_count": 1 if not local_providers else 0,
+        },
+        "consolidation_run": {
+            "ok": not bad_role_pipeline,
+            "tenant_hash": "tenant-sha256:aaa111",
+            "source_evidence_cid_hashes": ["cid-sha256:source-a"],
+            "passes_run": ["extractor", "resolver", "summarizer"],
+            "pass_results": [
+                {"name": "extractor", "status": "complete"},
+                {"name": "resolver", "status": "complete"},
+                {"name": "summarizer", "status": "failed" if bad_role_pipeline else "complete"},
+            ],
+            "role_pipeline": {
+                "owner_role": "reader" if bad_role_pipeline else "consolidator",
+                "write_authorized": not bad_role_pipeline,
+                "candidate_extractor": "local" if bad_role_pipeline else "hosted_http",
+                "entity_resolver": "hosted_http",
+                "summarizer": "hosted_http",
+            },
+            "candidate_results": {"evaluated": 3 if not bad_role_pipeline else 0, "promoted": 1 if not bad_role_pipeline else 0},
+        },
+        "calibration": {
+            "ok": not bad_calibration,
+            "applied": not bad_calibration,
+            "dataset_fingerprint": "sha256:calibration-dataset" if not bad_calibration else "",
+            "threshold": 0.62 if not bad_calibration else None,
+            "example_count": 80 if not bad_calibration else 2,
+            "correct_count": 60 if not bad_calibration else 0,
+            "incorrect_count": 20 if not bad_calibration else 0,
+            "correct_coverage": 0.94 if not bad_calibration else 0.25,
+            "false_accept_rate": 0.03 if not bad_calibration else 0.5,
+        },
+        "lifecycle": {
+            "status": "failed" if bad_lifecycle else "complete",
+            "evaluated": 4 if not bad_lifecycle else 0,
+            "demoted": 1,
+            "rehearsed": 2,
+            "failed_cid_hashes": ["cid-sha256:failed"] if bad_lifecycle else [],
+        },
+        "ops_report": {
+            "ok": not bad_ops,
+            "tripwires": {"passed": not bad_ops},
+            "queue": {"dead": 0 if not bad_ops else 1},
+            "metrics": {
+                "counters": {
+                    "calibration.tuned": 1,
+                    "lifecycle.sweeps": 1,
+                    "observability.snapshots": 1,
+                }
+                if not bad_ops
+                else {"calibration.tuned": 1}
+            },
+            "contradiction_backlog": 0 if not bad_ops else 2,
+        },
+        "redaction": {
+            "raw_prompts_omitted": True,
+            "raw_llm_requests_omitted": True,
+            "raw_llm_responses_omitted": True,
+            "raw_evidence_omitted": True,
+            "raw_credentials_omitted": True,
+            "raw_embeddings_omitted": True,
+            "raw_cids_omitted": True,
+            "raw_tenant_user_values_omitted": True,
+        },
+    }
+    if raw_secret:
+        bundle["raw_prompt"] = "please expose tenant-cli user-cli"
+        bundle["token"] = "raw-secret-token"
+    return bundle
+
+
+def test_cli_consolidation_ops_check_validates_production_bundle(tmp_path: Path) -> None:
+    bundle = tmp_path / "consolidation-ops.json"
+    bundle.write_text(json.dumps(consolidation_ops_bundle()), encoding="utf-8")
+
+    report = run_cli(
+        tmp_path / "mnemosyne.json",
+        "consolidation-ops-check",
+        "--bundle",
+        str(bundle),
+        "--min-processed-jobs",
+        "5",
+        "--min-gate-cases",
+        "4",
+        "--min-protected",
+        "2",
+    )
+    acknowledged = run_cli(
+        tmp_path / "mnemosyne.json",
+        "consolidation-ops-check",
+        "--bundle",
+        str(bundle),
+        "--min-processed-jobs",
+        "5",
+        "--min-gate-cases",
+        "4",
+        "--min-protected",
+        "2",
+        "--expected-fingerprint",
+        report["fingerprint"],
+    )
+
+    serialized = json.dumps(report)
+    assert report["ok"] is True
+    assert len(report["fingerprint"]) == 64
+    assert {item["name"] for item in report["checks"]} == {
+        "validation_scope",
+        "worker",
+        "provider_check",
+        "hosted_providers",
+        "projection_recompute",
+        "protected_suite",
+        "embedding",
+        "consolidation_run",
+        "calibration",
+        "lifecycle",
+        "ops_report",
+        "redaction",
+    }
+    assert all(item["ok"] for item in report["checks"])
+    assert report["bundle"]["production_validated"] is True
+    assert report["bundle"]["worker_backend"] == "postgres"
+    assert report["bundle"]["provider_check_count"] == 4
+    assert report["bundle"]["consolidation_source_hash_count"] == 1
+    assert report["redaction"]["raw_provider_requests_omitted"] is True
+    assert report["redaction"]["raw_tenant_user_values_omitted"] is True
+    assert report["redaction"]["forbidden_raw_fields_present"] is False
+    assert "tenant-cli" not in serialized
+    assert "raw-secret-token" not in serialized
+    assert acknowledged["ok"] is True
+    assert acknowledged["expected_fingerprint_present"] is True
+
+
+def test_cli_consolidation_ops_check_fails_closed_on_bad_bundle(tmp_path: Path) -> None:
+    bundle = tmp_path / "bad-consolidation-ops.json"
+    bundle.write_text(
+        json.dumps(
+            consolidation_ops_bundle(
+                local_worker=True,
+                local_providers=True,
+                bad_projection=True,
+                bad_gate_suite=True,
+                bad_role_pipeline=True,
+                bad_calibration=True,
+                bad_lifecycle=True,
+                bad_ops=True,
+                raw_secret=True,
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    result = run_raw_cli(tmp_path / "mnemosyne.json", "consolidation-ops-check", "--bundle", str(bundle))
+    payload = json.loads(result.stdout)
+    codes = {finding["code"] for finding in payload["findings"]}
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert "production_validation_missing" in codes
+    assert "worker_backend_not_postgres" in codes
+    assert "worker_job_kind_missing" in codes
+    assert "provider_manifest_forbid_local_missing" in codes
+    assert "provider_check_local_provider" in codes
+    assert "hosted_role_failed" in codes
+    assert "projection_backend_not_postgres" in codes
+    assert "projection_consolidation_not_enqueued" in codes
+    assert "protected_suite_source_synthetic" in codes
+    assert "embedding_provider_local" in codes
+    assert "role_pipeline_not_hosted" in codes
+    assert "calibration_not_applied" in codes
+    assert "lifecycle_not_complete" in codes
+    assert "ops_tripwires_failed" in codes
+    assert "redaction_raw_field_present" in codes
+
+
 def retrieval_ops_bundle(
     *,
     local_provider: bool = False,
