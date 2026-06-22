@@ -3239,7 +3239,10 @@ def _mcp_transport_check(
         "health_ok": evidence.get("health_ok") is True or checks.get("health_ok") is True,
         "initialize_ok": evidence.get("initialize_ok") is True or checks.get("initialize_ok") is True,
         "tools_list_ok": evidence.get("tools_list_ok") is True or checks.get("tools_list_ok") is True,
+        "tool_contract_ok": evidence.get("tool_contract_ok") is True or checks.get("tool_contract_ok") is True,
         "read_only_call_ok": evidence.get("read_only_call_ok") is True or checks.get("read_only_call_ok") is True,
+        "structured_tool_call_ok": evidence.get("structured_tool_call_ok") is True
+        or checks.get("structured_tool_call_ok") is True,
         "stateless_verified": evidence.get("stateless_verified") is True or checks.get("stateless_verified") is True,
     }
     missing_flags = [flag for flag, ok in required_flags.items() if not ok]
@@ -6687,6 +6690,69 @@ def _join_endpoint(base_url: str | None, path: str) -> str | None:
     return urljoin(base_url.rstrip("/") + "/", path.lstrip("/"))
 
 
+def _maybe_model_dump(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return value
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        return model_dump(by_alias=True)
+    return value
+
+
+def _field(value: Any, name: str, default: Any = None) -> Any:
+    if isinstance(value, Mapping):
+        return value.get(name, default)
+    return getattr(value, name, default)
+
+
+def _mcp_tool_contract(tool_entries: list[Any], read_only_tool: str) -> dict[str, Any]:
+    tool = next((item for item in tool_entries if _field(item, "name") == read_only_tool), None)
+    if tool is None:
+        return {
+            "ok": False,
+            "tool_name": read_only_tool,
+            "tool_present": False,
+            "schema_present": False,
+            "error": f"tools/list did not include {read_only_tool}",
+        }
+    schema = _maybe_model_dump(_field(tool, "inputSchema") or _field(tool, "input_schema"))
+    properties = schema.get("properties") if isinstance(schema, Mapping) else None
+    required = schema.get("required") if isinstance(schema, Mapping) else None
+    schema_ok = (
+        isinstance(schema, Mapping)
+        and schema.get("type") == "object"
+        and isinstance(properties, Mapping)
+        and isinstance(required, list)
+    )
+    return {
+        "ok": schema_ok,
+        "tool_name": read_only_tool,
+        "tool_present": True,
+        "schema_present": isinstance(schema, Mapping),
+        "input_schema_type": schema.get("type") if isinstance(schema, Mapping) else None,
+        "property_count": len(properties) if isinstance(properties, Mapping) else 0,
+        "required": [str(item) for item in required] if isinstance(required, list) else [],
+        **({} if schema_ok else {"error": f"{read_only_tool} tool schema is invalid"}),
+    }
+
+
+def _mcp_tool_call_contract(result: Any) -> dict[str, Any]:
+    result = _maybe_model_dump(result)
+    content = _field(result, "content", [])
+    structured = _field(result, "structuredContent", _field(result, "structured_content"))
+    is_error = _field(result, "isError", _field(result, "is_error"))
+    content_ok = isinstance(content, list) and bool(content)
+    structured_ok = isinstance(structured, Mapping)
+    ok = is_error is False and content_ok and structured_ok
+    return {
+        "ok": ok,
+        "is_error": is_error,
+        "content_item_count": len(content) if isinstance(content, list) else 0,
+        "structured_content_present": structured_ok,
+        **({} if ok else {"error": "tools/call did not return structured non-error content"}),
+    }
+
+
 def _bounded_json_body(response: Any, *, max_bytes: int = 1_048_576) -> dict[str, Any]:
     raw = response.read(max_bytes + 1)
     if len(raw) > max_bytes:
@@ -7110,16 +7176,16 @@ def cmd_mcp_http_soak(args: argparse.Namespace) -> None:
         tool_entries = []
         if isinstance(tools_list.get("result"), dict) and isinstance(tools_list["result"].get("tools"), list):
             tool_entries = tools_list["result"]["tools"]
-        contains_read_only_tool = any(
-            isinstance(item, dict) and item.get("name") == args.read_only_tool for item in tool_entries
-        )
-        if not tools_list.get("ok") or not contains_read_only_tool:
+        tool_contract = _mcp_tool_contract(tool_entries, args.read_only_tool)
+        contains_read_only_tool = tool_contract["tool_present"]
+        if not tools_list.get("ok") or not tool_contract["ok"]:
             tools_list["ok"] = False
-            tools_list.setdefault("error", f"tools/list did not include {args.read_only_tool}")
+            tools_list.setdefault("error", tool_contract.get("error", f"tools/list did not include {args.read_only_tool}"))
         tool_result = tool_call.get("result")
-        if not isinstance(tool_result, dict) or tool_result.get("isError") is not False:
+        tool_call_contract = _mcp_tool_call_contract(tool_result)
+        if not tool_call_contract["ok"]:
             tool_call["ok"] = False
-            tool_call.setdefault("error", "read-only tool call failed")
+            tool_call.setdefault("error", tool_call_contract.get("error", "read-only tool call failed"))
 
         operation_ok = bool(initialize.get("ok") and tools_list.get("ok") and tool_call.get("ok"))
         if not operation_ok:
@@ -7144,12 +7210,14 @@ def cmd_mcp_http_soak(args: argparse.Namespace) -> None:
                     "latency_ms": tools_list.get("latency_ms"),
                     "tool_count": len(tool_entries),
                     "contains_read_only_tool": contains_read_only_tool,
+                    "tool_contract": tool_contract,
                     **({"error": tools_list["error"]} if tools_list.get("error") else {}),
                 },
                 "read_only_tool_call": {
                     "ok": tool_call.get("ok"),
                     "status": tool_call.get("status"),
                     "latency_ms": tool_call.get("latency_ms"),
+                    "tool_call_contract": tool_call_contract,
                     **({"error": tool_call["error"]} if tool_call.get("error") else {}),
                 },
             }
@@ -7217,13 +7285,14 @@ async def _streamable_http_iteration(
                     initialized = await session.initialize()
                     tools = await session.list_tools()
                     tool_entries = list(getattr(tools, "tools", []) or [])
-                    contains_read_only_tool = any(getattr(tool, "name", None) == read_only_tool for tool in tool_entries)
+                    tool_contract = _mcp_tool_contract(tool_entries, read_only_tool)
+                    contains_read_only_tool = tool_contract["tool_present"]
                     call_arguments = dict(tool_arguments)
                     if headers.get("Authorization") and "auth_token" not in call_arguments:
                         call_arguments["auth_token"] = headers["Authorization"].removeprefix("Bearer ").strip()
                     tool_call = await session.call_tool(read_only_tool, call_arguments)
-                    tool_ok = getattr(tool_call, "isError", False) is False
-                    operation_ok = bool(contains_read_only_tool and tool_ok)
+                    tool_call_contract = _mcp_tool_call_contract(tool_call)
+                    operation_ok = bool(tool_contract["ok"] and tool_call_contract["ok"])
                     return {
                         "ok": operation_ok,
                         "duration_ms": round((time.monotonic() - started) * 1000, 3),
@@ -7232,11 +7301,15 @@ async def _streamable_http_iteration(
                             "protocolVersion": getattr(initialized, "protocolVersion", None),
                         },
                         "tools_list": {
-                            "ok": contains_read_only_tool,
+                            "ok": tool_contract["ok"],
                             "tool_count": len(tool_entries),
                             "contains_read_only_tool": contains_read_only_tool,
+                            "tool_contract": tool_contract,
                         },
-                        "read_only_tool_call": {"ok": tool_ok},
+                        "read_only_tool_call": {
+                            "ok": tool_call_contract["ok"],
+                            "tool_call_contract": tool_call_contract,
+                        },
                         **({} if operation_ok else {"error": "streamable HTTP SDK operation failed"}),
                     }
     except Exception as exc:  # noqa: BLE001 - soak reports transport failures as structured JSON.
