@@ -2763,6 +2763,7 @@ def multimodal_ops_bundle(
     bad_embedding: bool = False,
     bad_retrieval: bool = False,
     bad_jobs: bool = False,
+    bad_deployment: bool = False,
     raw_secret: bool = False,
 ) -> dict:
     provider_name = "metadata" if local_providers else "command"
@@ -2881,6 +2882,22 @@ def multimodal_ops_bundle(
             "dead_jobs": 0 if not bad_jobs else 2,
             "processed_kinds": ["media_extract"] if not bad_jobs else ["unknown_job"],
         },
+        "deployment": {
+            "production_validated": not bad_deployment,
+            "extraction_service_supervised": not bad_deployment,
+            "embedding_service_supervised": not bad_deployment,
+            "object_store_monitoring": not bad_deployment,
+            "media_job_worker_supervised": not bad_deployment,
+            "retrieval_probe_verified": not bad_deployment,
+            "alert_route_configured": not bad_deployment,
+            "execution_fingerprint": "" if bad_deployment else "sha256:multimodal-run",
+            "object_asset_hash_count": 99 if bad_deployment else 3,
+            "extraction_case_count": 99 if bad_deployment else 3,
+            "embedding_hash_count": 99 if bad_deployment else 3,
+            "retrieval_case_count": 99 if bad_deployment else 3,
+            "media_job_complete_count": 99 if bad_deployment else 3,
+            "latency_ms": 5000 if bad_deployment else 410,
+        },
         "redaction": {
             "raw_media_omitted": True,
             "raw_asset_bytes_omitted": True,
@@ -2922,6 +2939,7 @@ def test_cli_multimodal_ops_check_validates_production_bundle(tmp_path: Path) ->
         "media_embedding",
         "retrieval",
         "media_jobs",
+        "deployment",
         "redaction",
     }
     assert all(item["ok"] for item in report["checks"])
@@ -2992,6 +3010,7 @@ def test_cli_multimodal_ops_check_fails_closed_on_bad_bundle(tmp_path: Path) -> 
                 bad_embedding=True,
                 bad_retrieval=True,
                 bad_jobs=True,
+                bad_deployment=True,
                 raw_secret=True,
             )
         ),
@@ -3017,6 +3036,14 @@ def test_cli_multimodal_ops_check_fails_closed_on_bad_bundle(tmp_path: Path) -> 
     assert "retrieval_backend_not_postgres" in codes
     assert "media_jobs_backend_not_postgres" in codes
     assert "media_jobs_dead_present" in codes
+    assert "deployment_control_missing" in codes
+    assert "deployment_execution_fingerprint_missing" in codes
+    assert "deployment_latency_too_high" in codes
+    assert "deployment_asset_hash_count_mismatch" in codes
+    assert "deployment_extraction_case_count_mismatch" in codes
+    assert "deployment_embedding_hash_count_mismatch" in codes
+    assert "deployment_retrieval_case_count_mismatch" in codes
+    assert "deployment_media_job_count_mismatch" in codes
     assert "redaction_raw_field_present" in codes
 
 

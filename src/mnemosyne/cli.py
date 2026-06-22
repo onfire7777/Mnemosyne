@@ -6575,6 +6575,111 @@ def cmd_multimodal_ops_check(args: argparse.Namespace) -> None:
         }
     )
 
+    deployment = bundle.get("deployment")
+    if not isinstance(deployment, Mapping):
+        findings.append(_multimodal_finding("deployment_missing", "multimodal ops bundle requires deployment section"))
+        deployment = {}
+    deployment_flags = {
+        "production_validated": deployment.get("production_validated") is True,
+        "extraction_service_supervised": deployment.get("extraction_service_supervised") is True,
+        "embedding_service_supervised": deployment.get("embedding_service_supervised") is True,
+        "object_store_monitoring": deployment.get("object_store_monitoring") is True,
+        "media_job_worker_supervised": deployment.get("media_job_worker_supervised") is True,
+        "retrieval_probe_verified": deployment.get("retrieval_probe_verified") is True,
+        "alert_route_configured": deployment.get("alert_route_configured") is True,
+    }
+    deployment_latency_ms = _multimodal_ops_int(
+        deployment.get("latency_ms"),
+        default=int(args.max_deployment_latency_ms) + 1,
+        code="deployment_latency_invalid",
+        message="deployment latency_ms must be numeric",
+        findings=findings,
+    )
+    execution_fingerprint = str(deployment.get("execution_fingerprint") or "").strip()
+    deployment_asset_hash_count = _multimodal_ops_int(
+        deployment.get("object_asset_hash_count"),
+        default=-1,
+        code="deployment_asset_hash_count_invalid",
+        message="deployment object_asset_hash_count must be numeric",
+        findings=findings,
+    )
+    deployment_extraction_case_count = _multimodal_ops_int(
+        deployment.get("extraction_case_count"),
+        default=-1,
+        code="deployment_extraction_case_count_invalid",
+        message="deployment extraction_case_count must be numeric",
+        findings=findings,
+    )
+    deployment_embedding_hash_count = _multimodal_ops_int(
+        deployment.get("embedding_hash_count"),
+        default=-1,
+        code="deployment_embedding_hash_count_invalid",
+        message="deployment embedding_hash_count must be numeric",
+        findings=findings,
+    )
+    deployment_retrieval_case_count = _multimodal_ops_int(
+        deployment.get("retrieval_case_count"),
+        default=-1,
+        code="deployment_retrieval_case_count_invalid",
+        message="deployment retrieval_case_count must be numeric",
+        findings=findings,
+    )
+    deployment_media_job_complete_count = _multimodal_ops_int(
+        deployment.get("media_job_complete_count"),
+        default=-1,
+        code="deployment_media_job_complete_count_invalid",
+        message="deployment media_job_complete_count must be numeric",
+        findings=findings,
+    )
+    execution_fingerprint_present = "sha256:" in execution_fingerprint.lower()
+    asset_hash_count_matches = deployment_asset_hash_count == object_hash_count
+    extraction_case_count_matches = deployment_extraction_case_count == len(extraction_cases)
+    embedding_hash_count_matches = deployment_embedding_hash_count == len(embedded_hashes)
+    retrieval_case_count_matches = deployment_retrieval_case_count == len(retrieval_cases)
+    media_job_count_matches = deployment_media_job_complete_count == complete_jobs
+    missing_deployment_flags = [name for name, ok in deployment_flags.items() if not ok]
+    deployment_ok = (
+        not missing_deployment_flags
+        and execution_fingerprint_present
+        and deployment_latency_ms <= args.max_deployment_latency_ms
+        and asset_hash_count_matches
+        and extraction_case_count_matches
+        and embedding_hash_count_matches
+        and retrieval_case_count_matches
+        and media_job_count_matches
+    )
+    for flag in missing_deployment_flags:
+        findings.append(_multimodal_finding("deployment_control_missing", f"deployment control {flag} is required"))
+    if not execution_fingerprint_present:
+        findings.append(_multimodal_finding("deployment_execution_fingerprint_missing", "deployment execution_fingerprint must be SHA-256"))
+    if deployment_latency_ms > args.max_deployment_latency_ms:
+        findings.append(_multimodal_finding("deployment_latency_too_high", "deployment latency exceeds threshold"))
+    if not asset_hash_count_matches:
+        findings.append(_multimodal_finding("deployment_asset_hash_count_mismatch", "deployment object_asset_hash_count must match object store asset hashes"))
+    if not extraction_case_count_matches:
+        findings.append(_multimodal_finding("deployment_extraction_case_count_mismatch", "deployment extraction_case_count must match extraction evidence"))
+    if not embedding_hash_count_matches:
+        findings.append(_multimodal_finding("deployment_embedding_hash_count_mismatch", "deployment embedding_hash_count must match media embedding evidence"))
+    if not retrieval_case_count_matches:
+        findings.append(_multimodal_finding("deployment_retrieval_case_count_mismatch", "deployment retrieval_case_count must match retrieval evidence"))
+    if not media_job_count_matches:
+        findings.append(_multimodal_finding("deployment_media_job_count_mismatch", "deployment media_job_complete_count must match media job evidence"))
+    checks.append(
+        {
+            "name": "deployment",
+            "ok": deployment_ok,
+            "latency_ms": deployment_latency_ms,
+            "max_latency_ms": args.max_deployment_latency_ms,
+            "missing_controls": missing_deployment_flags,
+            "execution_fingerprint_present": execution_fingerprint_present,
+            "asset_hash_count_matches": asset_hash_count_matches,
+            "extraction_case_count_matches": extraction_case_count_matches,
+            "embedding_hash_count_matches": embedding_hash_count_matches,
+            "retrieval_case_count_matches": retrieval_case_count_matches,
+            "media_job_count_matches": media_job_count_matches,
+        }
+    )
+
     redaction = bundle.get("redaction") if isinstance(bundle.get("redaction"), Mapping) else {}
     redaction_flags = {
         "raw_media_omitted": redaction.get("raw_media_omitted") is True,
@@ -6625,6 +6730,7 @@ def cmd_multimodal_ops_check(args: argparse.Namespace) -> None:
             "min_vector_cases": args.min_vector_cases,
             "min_derived_text_cases": args.min_derived_text_cases,
             "max_dead_jobs": args.max_dead_jobs,
+            "max_deployment_latency_ms": args.max_deployment_latency_ms,
         },
         "redaction": {**redaction_flags, "forbidden_raw_fields_present": bool(forbidden_raw_paths)},
         "checks": checks,
@@ -11521,6 +11627,7 @@ def build_parser() -> argparse.ArgumentParser:
     multimodal_ops_check.add_argument("--min-vector-cases", type=int, default=1)
     multimodal_ops_check.add_argument("--min-derived-text-cases", type=int, default=1)
     multimodal_ops_check.add_argument("--max-dead-jobs", type=int, default=0)
+    multimodal_ops_check.add_argument("--max-deployment-latency-ms", type=float, default=2000.0)
     multimodal_ops_check.add_argument("--require-provider-check", action="append", default=[])
     multimodal_ops_check.add_argument("--require-modality", choices=["image", "audio", "video", "binary", "multimodal"], action="append")
     multimodal_ops_check.add_argument("--expected-fingerprint")
