@@ -88,6 +88,7 @@ DEPLOYMENT_SOAK_COMMANDS = {
     "privacy-ops-check",
     "provenance-trust-check",
     "provider-check",
+    "retrieval-ops-check",
     "idp-jwks-live-check",
     "idp-authz-policy-rollout-check",
     "tls-cert-check",
@@ -119,6 +120,7 @@ PRODUCTION_RELEASE_REQUIRED_COMMANDS = (
     "privacy-ops-check",
     "provenance-trust-check",
     "provider-check",
+    "retrieval-ops-check",
     "idp-jwks-live-check",
     "idp-authz-policy-rollout-check",
     "tls-cert-check",
@@ -2025,6 +2027,441 @@ def cmd_parametric_trainer_check(args: argparse.Namespace) -> None:
         report["findings"].append(
             _parametric_finding("fingerprint_mismatch", "parametric trainer bundle fingerprint mismatch")
         )
+    emit(report)
+    if not report["ok"]:
+        raise SystemExit(1)
+
+
+def _load_retrieval_ops_bundle(args: argparse.Namespace) -> Mapping[str, Any]:
+    if bool(args.bundle) == bool(args.bundle_json):
+        raise SystemExit("retrieval-ops-check requires exactly one of --bundle or --bundle-json")
+    try:
+        loaded = (
+            json.loads(Path(args.bundle).expanduser().read_text(encoding="utf-8"))
+            if args.bundle
+            else json.loads(args.bundle_json)
+        )
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"retrieval ops bundle denied: {exc}") from exc
+    if not isinstance(loaded, Mapping):
+        raise SystemExit("retrieval ops bundle must be a JSON object")
+    return loaded
+
+
+def _retrieval_ops_finding(code: str, message: str) -> dict[str, str]:
+    return {"code": code, "message": message}
+
+
+def _retrieval_ops_fingerprint(report: Mapping[str, Any]) -> str:
+    payload = {
+        "bundle": report.get("bundle"),
+        "requirements": report.get("requirements"),
+        "checks": report.get("checks"),
+        "findings": report.get("findings"),
+    }
+    return sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def _retrieval_ops_number(
+    value: Any,
+    *,
+    default: float,
+    code: str,
+    message: str,
+    findings: list[dict[str, str]],
+) -> float:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        findings.append(_retrieval_ops_finding(code, message))
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        findings.append(_retrieval_ops_finding(code, message))
+        return default
+
+
+def _retrieval_ops_int(
+    value: Any,
+    *,
+    default: int,
+    code: str,
+    message: str,
+    findings: list[dict[str, str]],
+) -> int:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        findings.append(_retrieval_ops_finding(code, message))
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        findings.append(_retrieval_ops_finding(code, message))
+        return default
+
+
+def _retrieval_ops_forbidden_raw_paths(value: Any, *, path: str = "$") -> list[str]:
+    forbidden_keys = {
+        "query",
+        "queries",
+        "document",
+        "documents",
+        "embedding_vector",
+        "embedding_vectors",
+        "embedding_values",
+        "raw_query",
+        "raw_queries",
+        "raw_embedding",
+        "raw_embeddings",
+        "raw_document",
+        "raw_documents",
+        "raw_result",
+        "raw_results",
+        "credential",
+        "credentials",
+        "secret",
+        "token",
+        "private_key",
+    }
+    paths: list[str] = []
+    if isinstance(value, Mapping):
+        for key, child in value.items():
+            key_name = str(key)
+            child_path = f"{path}.{key_name}"
+            if key_name.lower() in forbidden_keys and child not in (None, "", [], {}):
+                paths.append(child_path)
+            paths.extend(_retrieval_ops_forbidden_raw_paths(child, path=child_path))
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            paths.extend(_retrieval_ops_forbidden_raw_paths(child, path=f"{path}[{index}]"))
+    return paths
+
+
+def _retrieval_provider_local(provider: Any) -> bool:
+    provider_kind = str(provider or "").strip().lower()
+    return provider_kind in {"", "local", "mock", "test", "filesystem", "deterministic", "hashing"}
+
+
+def cmd_retrieval_ops_check(args: argparse.Namespace) -> None:
+    bundle = _load_retrieval_ops_bundle(args)
+    findings: list[dict[str, str]] = []
+    checks: list[dict[str, Any]] = []
+
+    provider_check = bundle.get("provider_check")
+    if not isinstance(provider_check, Mapping):
+        findings.append(_retrieval_ops_finding("missing_provider_check", "retrieval ops bundle requires provider_check section"))
+        provider_check = {}
+    provider_manifest = provider_check.get("manifest") if isinstance(provider_check.get("manifest"), Mapping) else {}
+    provider_checks = provider_check.get("checks") if isinstance(provider_check.get("checks"), Mapping) else {}
+    required_provider_checks = sorted(set(args.require_provider_check or ("embedding", "reranker", "retrieval_backends")))
+    provider_rows: list[dict[str, Any]] = []
+    for check_name in required_provider_checks:
+        check = provider_checks.get(check_name) if isinstance(provider_checks, Mapping) else None
+        present = isinstance(check, Mapping)
+        ok = present and check.get("ok") is True
+        provider = check.get("provider") if present else None
+        local_provider = _retrieval_provider_local(provider) if check_name in {"embedding", "reranker"} else False
+        if not present:
+            findings.append(_retrieval_ops_finding("provider_check_missing", f"provider_check missing {check_name}"))
+        elif not ok:
+            findings.append(_retrieval_ops_finding("provider_check_failed", f"provider_check {check_name} did not pass"))
+        if local_provider:
+            findings.append(_retrieval_ops_finding("provider_check_local_provider", f"provider_check {check_name} uses a local provider"))
+        provider_rows.append(
+            {
+                "check": check_name,
+                "present": present,
+                "ok": ok,
+                "provider": provider,
+                "local_provider": local_provider,
+            }
+        )
+    if provider_manifest.get("forbid_local") is not True:
+        findings.append(_retrieval_ops_finding("provider_manifest_forbid_local_missing", "provider_check manifest must set forbid_local=true"))
+    retrieval_backends = provider_checks.get("retrieval_backends") if isinstance(provider_checks, Mapping) else None
+    lexical_backend = ""
+    graph_backend = ""
+    lexical_local = True
+    graph_local = True
+    retrieval_backend_ok = False
+    if isinstance(retrieval_backends, Mapping):
+        lexical_backend = str(retrieval_backends.get("lexical_backend") or "").strip()
+        graph_backend = str(retrieval_backends.get("graph_backend") or "").strip()
+        lexical_local = bool(retrieval_backends.get("lexical_local")) or _is_local_retrieval_backend(lexical_backend)
+        graph_local = bool(retrieval_backends.get("graph_local")) or _is_local_retrieval_backend(graph_backend)
+        retrieval_backend_ok = retrieval_backends.get("ok") is True and bool(lexical_backend) and bool(graph_backend) and not lexical_local and not graph_local
+    else:
+        findings.append(_retrieval_ops_finding("retrieval_backends_missing", "provider_check missing retrieval_backends"))
+    if not lexical_backend:
+        findings.append(_retrieval_ops_finding("lexical_backend_missing", "production lexical retrieval backend name is required"))
+    if not graph_backend:
+        findings.append(_retrieval_ops_finding("graph_backend_missing", "production graph retrieval backend name is required"))
+    if lexical_local or graph_local:
+        findings.append(_retrieval_ops_finding("local_retrieval_backend", "retrieval evidence must not use local lexical or graph backends"))
+    checks.append(
+        {
+            "name": "provider_check",
+            "ok": provider_manifest.get("forbid_local") is True and all(row["ok"] and not row["local_provider"] for row in provider_rows) and retrieval_backend_ok,
+            "required_provider_checks": required_provider_checks,
+            "forbid_local": provider_manifest.get("forbid_local") is True,
+            "provider_rows": provider_rows,
+            "retrieval_backends": {
+                "lexical_backend": lexical_backend,
+                "graph_backend": graph_backend,
+                "lexical_local": lexical_local,
+                "graph_local": graph_local,
+            },
+        }
+    )
+
+    retrieval = bundle.get("retrieval")
+    if not isinstance(retrieval, Mapping):
+        findings.append(_retrieval_ops_finding("missing_retrieval_section", "retrieval ops bundle requires retrieval section"))
+        retrieval = {}
+    cases_raw = retrieval.get("cases")
+    cases = [item for item in cases_raw if isinstance(item, Mapping)] if isinstance(cases_raw, list) else []
+    if not isinstance(cases_raw, list):
+        findings.append(_retrieval_ops_finding("retrieval_cases_invalid", "retrieval cases must be an array"))
+    if retrieval.get("production_validated") is not True:
+        findings.append(_retrieval_ops_finding("retrieval_production_validation_missing", "retrieval evidence must be marked production_validated"))
+    if str(retrieval.get("backend") or "").strip().lower() != "postgres":
+        findings.append(_retrieval_ops_finding("retrieval_backend_not_postgres", "retrieval evidence must target the Postgres backend"))
+    if len(cases) < args.min_cases:
+        findings.append(_retrieval_ops_finding("insufficient_retrieval_cases", "retrieval evidence has too few cases"))
+    lexical_cases = 0
+    vector_cases = 0
+    graph_cases = 0
+    reranked_cases = 0
+    calibrated_cases = 0
+    case_rows: list[dict[str, Any]] = []
+    for index, case in enumerate(cases):
+        case_id = str(case.get("id") or f"case-{index + 1}")
+        query_hash = str(case.get("query_hash") or "").strip()
+        tenant_hash = str(case.get("tenant_hash") or "").strip()
+        lexical_hits = _retrieval_ops_int(
+            case.get("lexical_hit_count"),
+            default=0,
+            code="retrieval_case_count_invalid",
+            message=f"retrieval case {case_id} lexical_hit_count must be numeric",
+            findings=findings,
+        )
+        vector_hits = _retrieval_ops_int(
+            case.get("vector_hit_count"),
+            default=0,
+            code="retrieval_case_count_invalid",
+            message=f"retrieval case {case_id} vector_hit_count must be numeric",
+            findings=findings,
+        )
+        graph_hits = _retrieval_ops_int(
+            case.get("graph_hit_count"),
+            default=0,
+            code="retrieval_case_count_invalid",
+            message=f"retrieval case {case_id} graph_hit_count must be numeric",
+            findings=findings,
+        )
+        reranked_hits = _retrieval_ops_int(
+            case.get("reranked_hit_count"),
+            default=0,
+            code="retrieval_case_count_invalid",
+            message=f"retrieval case {case_id} reranked_hit_count must be numeric",
+            findings=findings,
+        )
+        calibrated = case.get("calibrated") is True
+        if not query_hash or "sha256:" not in query_hash.lower():
+            findings.append(_retrieval_ops_finding("retrieval_case_query_hash_missing", f"retrieval case {case_id} requires a SHA-256 query hash"))
+        if not tenant_hash or "sha256:" not in tenant_hash.lower():
+            findings.append(_retrieval_ops_finding("retrieval_case_tenant_hash_missing", f"retrieval case {case_id} requires a SHA-256 tenant hash"))
+        if lexical_hits > 0:
+            lexical_cases += 1
+        if vector_hits > 0:
+            vector_cases += 1
+        if graph_hits > 0:
+            graph_cases += 1
+        if reranked_hits > 0:
+            reranked_cases += 1
+        if calibrated:
+            calibrated_cases += 1
+        case_rows.append(
+            {
+                "id": case_id,
+                "query_hash_present": bool(query_hash),
+                "tenant_hash_present": bool(tenant_hash),
+                "lexical_hit_count": lexical_hits,
+                "vector_hit_count": vector_hits,
+                "graph_hit_count": graph_hits,
+                "reranked_hit_count": reranked_hits,
+                "calibrated": calibrated,
+            }
+        )
+    if lexical_cases < args.min_lexical_cases:
+        findings.append(_retrieval_ops_finding("insufficient_lexical_cases", "retrieval evidence has too few lexical-hit cases"))
+    if vector_cases < args.min_vector_cases:
+        findings.append(_retrieval_ops_finding("insufficient_vector_cases", "retrieval evidence has too few vector-hit cases"))
+    if graph_cases < args.min_graph_cases:
+        findings.append(_retrieval_ops_finding("insufficient_graph_cases", "retrieval evidence has too few graph-hit cases"))
+    if reranked_cases < args.min_reranked_cases:
+        findings.append(_retrieval_ops_finding("insufficient_reranked_cases", "retrieval evidence has too few reranked cases"))
+    if calibrated_cases < len(cases):
+        findings.append(_retrieval_ops_finding("retrieval_case_uncalibrated", "all retrieval evidence cases must be calibrated"))
+    checks.append(
+        {
+            "name": "retrieval",
+            "ok": (
+                retrieval.get("production_validated") is True
+                and str(retrieval.get("backend") or "").strip().lower() == "postgres"
+                and len(cases) >= args.min_cases
+                and lexical_cases >= args.min_lexical_cases
+                and vector_cases >= args.min_vector_cases
+                and graph_cases >= args.min_graph_cases
+                and reranked_cases >= args.min_reranked_cases
+                and calibrated_cases == len(cases)
+            ),
+            "backend": retrieval.get("backend"),
+            "case_count": len(cases),
+            "lexical_cases": lexical_cases,
+            "vector_cases": vector_cases,
+            "graph_cases": graph_cases,
+            "reranked_cases": reranked_cases,
+            "calibrated_cases": calibrated_cases,
+            "cases": case_rows,
+        }
+    )
+
+    calibration = bundle.get("calibration")
+    if not isinstance(calibration, Mapping):
+        findings.append(_retrieval_ops_finding("missing_calibration_section", "retrieval ops bundle requires calibration section"))
+        calibration = {}
+    calibration_examples = _retrieval_ops_int(
+        calibration.get("example_count"),
+        default=0,
+        code="calibration_count_invalid",
+        message="calibration example_count must be numeric",
+        findings=findings,
+    )
+    calibration_correct = _retrieval_ops_int(
+        calibration.get("correct_count"),
+        default=0,
+        code="calibration_count_invalid",
+        message="calibration correct_count must be numeric",
+        findings=findings,
+    )
+    calibration_incorrect = _retrieval_ops_int(
+        calibration.get("incorrect_count"),
+        default=0,
+        code="calibration_count_invalid",
+        message="calibration incorrect_count must be numeric",
+        findings=findings,
+    )
+    empirical_coverage = _retrieval_ops_number(
+        calibration.get("empirical_coverage"),
+        default=-1.0,
+        code="calibration_metric_invalid",
+        message="calibration empirical_coverage must be numeric",
+        findings=findings,
+    )
+    false_accept_rate = _retrieval_ops_number(
+        calibration.get("false_accept_rate"),
+        default=1.0,
+        code="calibration_metric_invalid",
+        message="calibration false_accept_rate must be numeric",
+        findings=findings,
+    )
+    dataset_fingerprint = str(calibration.get("dataset_fingerprint") or "").strip()
+    calibration_ok = (
+        calibration.get("production_dataset") is True
+        and "sha256:" in dataset_fingerprint.lower()
+        and calibration_examples >= args.min_calibration_examples
+        and calibration_correct >= args.min_calibration_correct
+        and calibration_incorrect >= args.min_calibration_incorrect
+        and empirical_coverage >= args.min_empirical_coverage
+        and false_accept_rate <= args.max_false_accept_rate
+        and calibration.get("threshold") is not None
+    )
+    if calibration.get("production_dataset") is not True:
+        findings.append(_retrieval_ops_finding("calibration_not_production_dataset", "calibration evidence must use a production dataset"))
+    if "sha256:" not in dataset_fingerprint.lower():
+        findings.append(_retrieval_ops_finding("calibration_fingerprint_missing", "calibration dataset_fingerprint must be SHA-256"))
+    if calibration_examples < args.min_calibration_examples:
+        findings.append(_retrieval_ops_finding("insufficient_calibration_examples", "calibration dataset has too few examples"))
+    if calibration_correct < args.min_calibration_correct:
+        findings.append(_retrieval_ops_finding("insufficient_calibration_correct", "calibration dataset has too few correct examples"))
+    if calibration_incorrect < args.min_calibration_incorrect:
+        findings.append(_retrieval_ops_finding("insufficient_calibration_incorrect", "calibration dataset has too few incorrect examples"))
+    if empirical_coverage < args.min_empirical_coverage:
+        findings.append(_retrieval_ops_finding("calibration_coverage_too_low", "calibration empirical coverage is too low"))
+    if false_accept_rate > args.max_false_accept_rate:
+        findings.append(_retrieval_ops_finding("calibration_false_accept_too_high", "calibration false accept rate is too high"))
+    if calibration.get("threshold") is None:
+        findings.append(_retrieval_ops_finding("calibration_threshold_missing", "calibration threshold is required"))
+    checks.append(
+        {
+            "name": "calibration",
+            "ok": calibration_ok,
+            "production_dataset": calibration.get("production_dataset") is True,
+            "dataset_fingerprint_present": "sha256:" in dataset_fingerprint.lower(),
+            "example_count": calibration_examples,
+            "correct_count": calibration_correct,
+            "incorrect_count": calibration_incorrect,
+            "empirical_coverage": empirical_coverage,
+            "false_accept_rate": false_accept_rate,
+            "threshold_present": calibration.get("threshold") is not None,
+        }
+    )
+
+    redaction = bundle.get("redaction")
+    if not isinstance(redaction, Mapping):
+        findings.append(_retrieval_ops_finding("missing_redaction_section", "retrieval ops bundle requires redaction section"))
+        redaction = {}
+    redaction_flags = {
+        "raw_queries_omitted": redaction.get("raw_queries_omitted") is True,
+        "raw_embeddings_omitted": redaction.get("raw_embeddings_omitted") is True,
+        "raw_documents_omitted": redaction.get("raw_documents_omitted") is True,
+        "raw_credentials_omitted": redaction.get("raw_credentials_omitted") is True,
+    }
+    forbidden_raw_paths = _retrieval_ops_forbidden_raw_paths(bundle)
+    missing_redaction_flags = [name for name, ok in redaction_flags.items() if not ok]
+    for flag in missing_redaction_flags:
+        findings.append(_retrieval_ops_finding("redaction_flag_missing", f"redaction flag {flag} is not proven"))
+    if forbidden_raw_paths:
+        findings.append(_retrieval_ops_finding("redaction_raw_field_present", "retrieval ops bundle contains raw query/document/credential fields"))
+    redaction_ok = not missing_redaction_flags and not forbidden_raw_paths
+    checks.append({"name": "redaction", "ok": redaction_ok, **redaction_flags, "forbidden_raw_paths": forbidden_raw_paths})
+
+    report: dict[str, Any] = {
+        "ok": not findings,
+        "bundle": {
+            "name": bundle.get("name"),
+            "lexical_backend": lexical_backend,
+            "graph_backend": graph_backend,
+            "retrieval_case_count": len(cases),
+            "calibration_dataset_fingerprint_present": "sha256:" in dataset_fingerprint.lower(),
+        },
+        "requirements": {
+            "required_provider_checks": required_provider_checks,
+            "provider_forbid_local": True,
+            "backend": "postgres",
+            "min_cases": args.min_cases,
+            "min_lexical_cases": args.min_lexical_cases,
+            "min_vector_cases": args.min_vector_cases,
+            "min_graph_cases": args.min_graph_cases,
+            "min_reranked_cases": args.min_reranked_cases,
+            "min_calibration_examples": args.min_calibration_examples,
+            "min_calibration_correct": args.min_calibration_correct,
+            "min_calibration_incorrect": args.min_calibration_incorrect,
+            "min_empirical_coverage": args.min_empirical_coverage,
+            "max_false_accept_rate": args.max_false_accept_rate,
+        },
+        "redaction": {**redaction_flags, "forbidden_raw_fields_present": bool(forbidden_raw_paths)},
+        "checks": checks,
+        "findings": findings,
+    }
+    report["fingerprint"] = _retrieval_ops_fingerprint(report)
+    report["expected_fingerprint_present"] = bool(args.expected_fingerprint)
+    if args.expected_fingerprint and args.expected_fingerprint.strip().lower() != report["fingerprint"]:
+        report["ok"] = False
+        report["findings"].append(_retrieval_ops_finding("fingerprint_mismatch", "retrieval ops bundle fingerprint mismatch"))
     emit(report)
     if not report["ok"]:
         raise SystemExit(1)
@@ -6114,6 +6551,23 @@ def build_parser() -> argparse.ArgumentParser:
     parametric_trainer_check.add_argument("--max-sink-score", type=float, default=0.05)
     parametric_trainer_check.add_argument("--expected-fingerprint")
     parametric_trainer_check.set_defaults(func=cmd_parametric_trainer_check)
+
+    retrieval_ops_check = sub.add_parser("retrieval-ops-check")
+    retrieval_ops_check.add_argument("--bundle", help="Path to production retrieval evidence bundle")
+    retrieval_ops_check.add_argument("--bundle-json", help="Inline production retrieval evidence bundle JSON")
+    retrieval_ops_check.add_argument("--require-provider-check", action="append", default=[])
+    retrieval_ops_check.add_argument("--min-cases", type=int, default=3)
+    retrieval_ops_check.add_argument("--min-lexical-cases", type=int, default=1)
+    retrieval_ops_check.add_argument("--min-vector-cases", type=int, default=1)
+    retrieval_ops_check.add_argument("--min-graph-cases", type=int, default=1)
+    retrieval_ops_check.add_argument("--min-reranked-cases", type=int, default=1)
+    retrieval_ops_check.add_argument("--min-calibration-examples", type=int, default=20)
+    retrieval_ops_check.add_argument("--min-calibration-correct", type=int, default=1)
+    retrieval_ops_check.add_argument("--min-calibration-incorrect", type=int, default=1)
+    retrieval_ops_check.add_argument("--min-empirical-coverage", type=float, default=0.9)
+    retrieval_ops_check.add_argument("--max-false-accept-rate", type=float, default=0.1)
+    retrieval_ops_check.add_argument("--expected-fingerprint")
+    retrieval_ops_check.set_defaults(func=cmd_retrieval_ops_check)
 
     belief_revision_check = sub.add_parser("belief-revision-check")
     belief_revision_check.add_argument("--cases", help="Path to JSON array of belief revision cases")
