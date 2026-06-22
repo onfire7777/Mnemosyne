@@ -1,0 +1,944 @@
+{
+  "dataset_id": "retrieval_v2",
+  "description": "Large curated, trusted, held-out retrieval set (blueprint §33 / FR-3). A distractor-rich corpus (near-duplicate docs per domain) so recall@k and nDCG@k are discriminating rather than saturated. Internal-only; never a public benchmark (§9 / §12 N3). Generated deterministically by generate_v2.py.",
+  "tenant": "eval-retrieval-v2",
+  "user": "eval-user",
+  "k": 5,
+  "seed": 1107,
+  "corpus": [
+    {
+      "doc_id": "con_backup_frequency_right",
+      "content": "Updated policy effective 2026-02-01: the backup frequency now requires hourly.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "con_backup_frequency_wrong",
+      "content": "Earlier policy: the backup frequency requires weekly (noted 2025-09-01).",
+      "trust_tier": 3
+    },
+    {
+      "doc_id": "con_data_retention_window_right",
+      "content": "Updated policy effective 2026-03-01: the data retention window now requires thirty days.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "con_data_retention_window_wrong",
+      "content": "Earlier policy: the data retention window requires ninety days (noted 2025-08-01).",
+      "trust_tier": 3
+    },
+    {
+      "doc_id": "con_deploy_approval_right",
+      "content": "Updated policy effective 2026-04-01: the deploy approval now requires two operators.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "con_deploy_approval_wrong",
+      "content": "Earlier policy: the deploy approval requires any engineer (noted 2025-10-01).",
+      "trust_tier": 3
+    },
+    {
+      "doc_id": "con_incident_severity_floor_right",
+      "content": "Updated policy effective 2026-05-01: the incident severity floor now requires SEV2.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "con_incident_severity_floor_wrong",
+      "content": "Earlier policy: the incident severity floor requires SEV3 (noted 2025-12-01).",
+      "trust_tier": 3
+    },
+    {
+      "doc_id": "fil_00",
+      "content": "The user prefers local-first single-binary deployments with Postgres parity.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "fil_01",
+      "content": "Quarterly planning happens on the first Thursday and runs for ninety minutes.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "fil_02",
+      "content": "The design review checklist requires an accessibility pass before sign-off.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "fil_03",
+      "content": "Staging mirrors production topology but at one tenth the instance count.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "fil_04",
+      "content": "Secrets are rotated automatically every thirty days by the platform tooling.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "fil_05",
+      "content": "The incident retro template asks for a timeline, impact, and three actions.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "fil_06",
+      "content": "Feature flags default to off and are enabled per-tenant after a canary.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "fil_07",
+      "content": "The data catalog tags every table with an owner and a sensitivity class.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "fil_08",
+      "content": "Nightly backups are verified by a restore drill into an isolated account.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "fil_09",
+      "content": "The style guide bans heavyweight frameworks in favor of small libraries.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "fil_10",
+      "content": "Documentation is kept in-repo and rendered from Markdown on every push.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "fil_11",
+      "content": "The cost dashboard alerts when a service exceeds its monthly budget by ten percent.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "ppl_Mara_city",
+      "content": "Mara is based in Lisbon.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "ppl_Mara_mgr",
+      "content": "Mara reports to Devi.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "ppl_Mara_proj",
+      "content": "Mara is assigned to project Helios.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "ppl_Mara_role",
+      "content": "Mara works as a staff engineer.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "ppl_Nikolai_city",
+      "content": "Nikolai is based in Tallinn.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "ppl_Nikolai_mgr",
+      "content": "Nikolai reports to Owen.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "ppl_Nikolai_proj",
+      "content": "Nikolai is assigned to project Helios.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "ppl_Nikolai_role",
+      "content": "Nikolai works as a product manager.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "ppl_Priya_city",
+      "content": "Priya is based in Pune.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "ppl_Priya_mgr",
+      "content": "Priya reports to Devi.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "ppl_Priya_proj",
+      "content": "Priya is assigned to project Aurora.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "ppl_Priya_role",
+      "content": "Priya works as a data scientist.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "ppl_Quincy_city",
+      "content": "Quincy is based in Lagos.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "ppl_Quincy_mgr",
+      "content": "Quincy reports to Reza.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "ppl_Quincy_proj",
+      "content": "Quincy is assigned to project Aurora.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "ppl_Quincy_role",
+      "content": "Quincy works as a designer.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "ppl_Sora_city",
+      "content": "Sora is based in Kyoto.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "ppl_Sora_mgr",
+      "content": "Sora reports to Owen.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "ppl_Sora_proj",
+      "content": "Sora is assigned to project Borealis.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "ppl_Sora_role",
+      "content": "Sora works as a staff engineer.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "ppl_Tomas_city",
+      "content": "Tomas is based in Bogota.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "ppl_Tomas_mgr",
+      "content": "Tomas reports to Reza.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "ppl_Tomas_proj",
+      "content": "Tomas is assigned to project Borealis.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "ppl_Tomas_role",
+      "content": "Tomas works as a analyst.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "prj_Aurora_budget",
+      "content": "Project Aurora is budgeted at 90k for the year.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "prj_Aurora_deadline",
+      "content": "Project Aurora has a delivery deadline of Q4 2026.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "prj_Aurora_lead",
+      "content": "Project Aurora is led by Reza.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "prj_Borealis_budget",
+      "content": "Project Borealis is budgeted at 150k for the year.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "prj_Borealis_deadline",
+      "content": "Project Borealis has a delivery deadline of Q2 2026.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "prj_Borealis_lead",
+      "content": "Project Borealis is led by Owen.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "prj_Helios_budget",
+      "content": "Project Helios is budgeted at 120k for the year.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "prj_Helios_deadline",
+      "content": "Project Helios has a delivery deadline of Q3 2026.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "prj_Helios_lead",
+      "content": "Project Helios is led by Devi.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "svc_atlas_db",
+      "content": "Service atlas stores its state in a PostgreSQL database.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "svc_atlas_oncall",
+      "content": "On-call for service atlas rotates and starts on Monday.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "svc_atlas_region",
+      "content": "Service atlas runs primarily in region us-east-1.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "svc_atlas_slo",
+      "content": "Service atlas targets a p95 latency SLO of 250 milliseconds.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "svc_atlas_team",
+      "content": "The platform team owns and operates service atlas.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "svc_borealis_db",
+      "content": "Service borealis stores its state in a MySQL database.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "svc_borealis_oncall",
+      "content": "On-call for service borealis rotates and starts on Tuesday.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "svc_borealis_region",
+      "content": "Service borealis runs primarily in region eu-west-1.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "svc_borealis_slo",
+      "content": "Service borealis targets a p95 latency SLO of 300 milliseconds.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "svc_borealis_team",
+      "content": "The ingest team owns and operates service borealis.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "svc_cirrus_db",
+      "content": "Service cirrus stores its state in a PostgreSQL database.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "svc_cirrus_oncall",
+      "content": "On-call for service cirrus rotates and starts on Wednesday.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "svc_cirrus_region",
+      "content": "Service cirrus runs primarily in region us-west-2.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "svc_cirrus_slo",
+      "content": "Service cirrus targets a p95 latency SLO of 180 milliseconds.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "svc_cirrus_team",
+      "content": "The search team owns and operates service cirrus.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "svc_dynamo_db",
+      "content": "Service dynamo stores its state in a Cassandra database.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "svc_dynamo_oncall",
+      "content": "On-call for service dynamo rotates and starts on Thursday.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "svc_dynamo_region",
+      "content": "Service dynamo runs primarily in region ap-south-1.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "svc_dynamo_slo",
+      "content": "Service dynamo targets a p95 latency SLO of 400 milliseconds.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "svc_dynamo_team",
+      "content": "The ledger team owns and operates service dynamo.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "svc_everest_db",
+      "content": "Service everest stores its state in a PostgreSQL database.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "svc_everest_oncall",
+      "content": "On-call for service everest rotates and starts on Friday.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "svc_everest_region",
+      "content": "Service everest runs primarily in region eu-central-1.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "svc_everest_slo",
+      "content": "Service everest targets a p95 latency SLO of 220 milliseconds.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "svc_everest_team",
+      "content": "The billing team owns and operates service everest.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "svc_fjord_db",
+      "content": "Service fjord stores its state in a MongoDB database.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "svc_fjord_oncall",
+      "content": "On-call for service fjord rotates and starts on Monday.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "svc_fjord_region",
+      "content": "Service fjord runs primarily in region us-east-2.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "svc_fjord_slo",
+      "content": "Service fjord targets a p95 latency SLO of 350 milliseconds.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "svc_fjord_team",
+      "content": "The media team owns and operates service fjord.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "svc_gale_db",
+      "content": "Service gale stores its state in a MySQL database.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "svc_gale_oncall",
+      "content": "On-call for service gale rotates and starts on Tuesday.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "svc_gale_region",
+      "content": "Service gale runs primarily in region sa-east-1.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "svc_gale_slo",
+      "content": "Service gale targets a p95 latency SLO of 275 milliseconds.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "svc_gale_team",
+      "content": "The auth team owns and operates service gale.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "svc_harbor_db",
+      "content": "Service harbor stores its state in a PostgreSQL database.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "svc_harbor_oncall",
+      "content": "On-call for service harbor rotates and starts on Wednesday.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "svc_harbor_region",
+      "content": "Service harbor runs primarily in region ca-central-1.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "svc_harbor_slo",
+      "content": "Service harbor targets a p95 latency SLO of 200 milliseconds.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "svc_harbor_team",
+      "content": "The platform team owns and operates service harbor.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "tmp_default_cloud_0",
+      "content": "As of 2023-07-01, the default cloud provider was set to AWS.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "tmp_default_cloud_1",
+      "content": "As of 2025-01-01, the default cloud provider was set to GCP.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "tmp_default_cloud_2",
+      "content": "As of 2026-05-01, the default cloud provider was set to Azure.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "tmp_on-call_tool_0",
+      "content": "As of 2024-02-01, the on-call tool vendor was set to PagerDuty.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "tmp_on-call_tool_1",
+      "content": "As of 2025-11-01, the on-call tool vendor was set to Opsgenie.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "tmp_on-call_tool_2",
+      "content": "As of 2026-03-01, the on-call tool vendor was set to Grafana OnCall.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "tmp_primary_datacenter_0",
+      "content": "As of 2024-01-01, the primary datacenter location was set to Frankfurt.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "tmp_primary_datacenter_1",
+      "content": "As of 2025-06-01, the primary datacenter location was set to Dublin.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "tmp_primary_datacenter_2",
+      "content": "As of 2026-02-01, the primary datacenter location was set to Stockholm.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "tmp_release_cadence_0",
+      "content": "As of 2024-03-01, the release cadence schedule was set to monthly.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "tmp_release_cadence_1",
+      "content": "As of 2025-09-01, the release cadence schedule was set to biweekly.",
+      "trust_tier": 0
+    },
+    {
+      "doc_id": "tmp_release_cadence_2",
+      "content": "As of 2026-04-01, the release cadence schedule was set to weekly.",
+      "trust_tier": 0
+    }
+  ],
+  "queries": [
+    {
+      "qid": "q_svc_atlas_region",
+      "query": "which region does service atlas run in",
+      "relevant_doc_ids": [
+        "svc_atlas_region"
+      ],
+      "gold_answer": "us-east-1",
+      "answerable": true
+    },
+    {
+      "qid": "q_svc_atlas_db",
+      "query": "what database does service atlas use",
+      "relevant_doc_ids": [
+        "svc_atlas_db"
+      ],
+      "gold_answer": "PostgreSQL",
+      "answerable": true
+    },
+    {
+      "qid": "q_svc_borealis_region",
+      "query": "which region does service borealis run in",
+      "relevant_doc_ids": [
+        "svc_borealis_region"
+      ],
+      "gold_answer": "eu-west-1",
+      "answerable": true
+    },
+    {
+      "qid": "q_svc_borealis_db",
+      "query": "what database does service borealis use",
+      "relevant_doc_ids": [
+        "svc_borealis_db"
+      ],
+      "gold_answer": "MySQL",
+      "answerable": true
+    },
+    {
+      "qid": "q_svc_cirrus_region",
+      "query": "which region does service cirrus run in",
+      "relevant_doc_ids": [
+        "svc_cirrus_region"
+      ],
+      "gold_answer": "us-west-2",
+      "answerable": true
+    },
+    {
+      "qid": "q_svc_cirrus_db",
+      "query": "what database does service cirrus use",
+      "relevant_doc_ids": [
+        "svc_cirrus_db"
+      ],
+      "gold_answer": "PostgreSQL",
+      "answerable": true
+    },
+    {
+      "qid": "q_svc_dynamo_region",
+      "query": "which region does service dynamo run in",
+      "relevant_doc_ids": [
+        "svc_dynamo_region"
+      ],
+      "gold_answer": "ap-south-1",
+      "answerable": true
+    },
+    {
+      "qid": "q_svc_dynamo_db",
+      "query": "what database does service dynamo use",
+      "relevant_doc_ids": [
+        "svc_dynamo_db"
+      ],
+      "gold_answer": "Cassandra",
+      "answerable": true
+    },
+    {
+      "qid": "q_svc_everest_region",
+      "query": "which region does service everest run in",
+      "relevant_doc_ids": [
+        "svc_everest_region"
+      ],
+      "gold_answer": "eu-central-1",
+      "answerable": true
+    },
+    {
+      "qid": "q_svc_everest_db",
+      "query": "what database does service everest use",
+      "relevant_doc_ids": [
+        "svc_everest_db"
+      ],
+      "gold_answer": "PostgreSQL",
+      "answerable": true
+    },
+    {
+      "qid": "q_svc_fjord_region",
+      "query": "which region does service fjord run in",
+      "relevant_doc_ids": [
+        "svc_fjord_region"
+      ],
+      "gold_answer": "us-east-2",
+      "answerable": true
+    },
+    {
+      "qid": "q_svc_fjord_db",
+      "query": "what database does service fjord use",
+      "relevant_doc_ids": [
+        "svc_fjord_db"
+      ],
+      "gold_answer": "MongoDB",
+      "answerable": true
+    },
+    {
+      "qid": "q_svc_gale_region",
+      "query": "which region does service gale run in",
+      "relevant_doc_ids": [
+        "svc_gale_region"
+      ],
+      "gold_answer": "sa-east-1",
+      "answerable": true
+    },
+    {
+      "qid": "q_svc_gale_db",
+      "query": "what database does service gale use",
+      "relevant_doc_ids": [
+        "svc_gale_db"
+      ],
+      "gold_answer": "MySQL",
+      "answerable": true
+    },
+    {
+      "qid": "q_svc_harbor_region",
+      "query": "which region does service harbor run in",
+      "relevant_doc_ids": [
+        "svc_harbor_region"
+      ],
+      "gold_answer": "ca-central-1",
+      "answerable": true
+    },
+    {
+      "qid": "q_svc_harbor_db",
+      "query": "what database does service harbor use",
+      "relevant_doc_ids": [
+        "svc_harbor_db"
+      ],
+      "gold_answer": "PostgreSQL",
+      "answerable": true
+    },
+    {
+      "qid": "q_svc_atlas_team",
+      "query": "which team owns service atlas",
+      "relevant_doc_ids": [
+        "svc_atlas_team"
+      ],
+      "gold_answer": "platform",
+      "answerable": true
+    },
+    {
+      "qid": "q_svc_atlas_oncall",
+      "query": "what day does on-call for atlas start",
+      "relevant_doc_ids": [
+        "svc_atlas_oncall"
+      ],
+      "gold_answer": "Monday",
+      "answerable": true
+    },
+    {
+      "qid": "q_svc_atlas_slo",
+      "query": "what is the p95 latency SLO for service atlas",
+      "relevant_doc_ids": [
+        "svc_atlas_slo"
+      ],
+      "gold_answer": "250",
+      "answerable": true
+    },
+    {
+      "qid": "q_svc_borealis_team",
+      "query": "which team owns service borealis",
+      "relevant_doc_ids": [
+        "svc_borealis_team"
+      ],
+      "gold_answer": "ingest",
+      "answerable": true
+    },
+    {
+      "qid": "q_svc_borealis_oncall",
+      "query": "what day does on-call for borealis start",
+      "relevant_doc_ids": [
+        "svc_borealis_oncall"
+      ],
+      "gold_answer": "Tuesday",
+      "answerable": true
+    },
+    {
+      "qid": "q_svc_borealis_slo",
+      "query": "what is the p95 latency SLO for service borealis",
+      "relevant_doc_ids": [
+        "svc_borealis_slo"
+      ],
+      "gold_answer": "300",
+      "answerable": true
+    },
+    {
+      "qid": "q_svc_cirrus_team",
+      "query": "which team owns service cirrus",
+      "relevant_doc_ids": [
+        "svc_cirrus_team"
+      ],
+      "gold_answer": "search",
+      "answerable": true
+    },
+    {
+      "qid": "q_svc_cirrus_oncall",
+      "query": "what day does on-call for cirrus start",
+      "relevant_doc_ids": [
+        "svc_cirrus_oncall"
+      ],
+      "gold_answer": "Wednesday",
+      "answerable": true
+    },
+    {
+      "qid": "q_svc_cirrus_slo",
+      "query": "what is the p95 latency SLO for service cirrus",
+      "relevant_doc_ids": [
+        "svc_cirrus_slo"
+      ],
+      "gold_answer": "180",
+      "answerable": true
+    },
+    {
+      "qid": "q_svc_dynamo_team",
+      "query": "which team owns service dynamo",
+      "relevant_doc_ids": [
+        "svc_dynamo_team"
+      ],
+      "gold_answer": "ledger",
+      "answerable": true
+    },
+    {
+      "qid": "q_svc_dynamo_oncall",
+      "query": "what day does on-call for dynamo start",
+      "relevant_doc_ids": [
+        "svc_dynamo_oncall"
+      ],
+      "gold_answer": "Thursday",
+      "answerable": true
+    },
+    {
+      "qid": "q_svc_dynamo_slo",
+      "query": "what is the p95 latency SLO for service dynamo",
+      "relevant_doc_ids": [
+        "svc_dynamo_slo"
+      ],
+      "gold_answer": "400",
+      "answerable": true
+    },
+    {
+      "qid": "q_ppl_Mara_city",
+      "query": "where is Mara based",
+      "relevant_doc_ids": [
+        "ppl_Mara_city"
+      ],
+      "gold_answer": "Lisbon",
+      "answerable": true
+    },
+    {
+      "qid": "q_ppl_Mara_mgr",
+      "query": "who does Mara report to",
+      "relevant_doc_ids": [
+        "ppl_Mara_mgr"
+      ],
+      "gold_answer": "Devi",
+      "answerable": true
+    },
+    {
+      "qid": "q_ppl_Nikolai_city",
+      "query": "where is Nikolai based",
+      "relevant_doc_ids": [
+        "ppl_Nikolai_city"
+      ],
+      "gold_answer": "Tallinn",
+      "answerable": true
+    },
+    {
+      "qid": "q_ppl_Nikolai_mgr",
+      "query": "who does Nikolai report to",
+      "relevant_doc_ids": [
+        "ppl_Nikolai_mgr"
+      ],
+      "gold_answer": "Owen",
+      "answerable": true
+    },
+    {
+      "qid": "q_ppl_Priya_city",
+      "query": "where is Priya based",
+      "relevant_doc_ids": [
+        "ppl_Priya_city"
+      ],
+      "gold_answer": "Pune",
+      "answerable": true
+    },
+    {
+      "qid": "q_ppl_Priya_mgr",
+      "query": "who does Priya report to",
+      "relevant_doc_ids": [
+        "ppl_Priya_mgr"
+      ],
+      "gold_answer": "Devi",
+      "answerable": true
+    },
+    {
+      "qid": "q_ppl_Quincy_city",
+      "query": "where is Quincy based",
+      "relevant_doc_ids": [
+        "ppl_Quincy_city"
+      ],
+      "gold_answer": "Lagos",
+      "answerable": true
+    },
+    {
+      "qid": "q_ppl_Quincy_mgr",
+      "query": "who does Quincy report to",
+      "relevant_doc_ids": [
+        "ppl_Quincy_mgr"
+      ],
+      "gold_answer": "Reza",
+      "answerable": true
+    },
+    {
+      "qid": "q_prj_Helios_lead",
+      "query": "who leads project Helios",
+      "relevant_doc_ids": [
+        "prj_Helios_lead"
+      ],
+      "gold_answer": "Devi",
+      "answerable": true
+    },
+    {
+      "qid": "q_prj_Helios_budget",
+      "query": "what is the budget for project Helios",
+      "relevant_doc_ids": [
+        "prj_Helios_budget"
+      ],
+      "gold_answer": "120k",
+      "answerable": true
+    },
+    {
+      "qid": "q_prj_Aurora_lead",
+      "query": "who leads project Aurora",
+      "relevant_doc_ids": [
+        "prj_Aurora_lead"
+      ],
+      "gold_answer": "Reza",
+      "answerable": true
+    },
+    {
+      "qid": "q_prj_Aurora_budget",
+      "query": "what is the budget for project Aurora",
+      "relevant_doc_ids": [
+        "prj_Aurora_budget"
+      ],
+      "gold_answer": "90k",
+      "answerable": true
+    },
+    {
+      "qid": "q_prj_Borealis_lead",
+      "query": "who leads project Borealis",
+      "relevant_doc_ids": [
+        "prj_Borealis_lead"
+      ],
+      "gold_answer": "Owen",
+      "answerable": true
+    },
+    {
+      "qid": "q_prj_Borealis_budget",
+      "query": "what is the budget for project Borealis",
+      "relevant_doc_ids": [
+        "prj_Borealis_budget"
+      ],
+      "gold_answer": "150k",
+      "answerable": true
+    },
+    {
+      "qid": "q_multi_postgres_services",
+      "query": "which services use a PostgreSQL database",
+      "relevant_doc_ids": [
+        "svc_atlas_db",
+        "svc_cirrus_db",
+        "svc_everest_db",
+        "svc_harbor_db"
+      ],
+      "gold_answer": "PostgreSQL",
+      "answerable": true
+    },
+    {
+      "qid": "q_multi_platform_team",
+      "query": "what does the platform team own",
+      "relevant_doc_ids": [
+        "svc_atlas_team",
+        "svc_harbor_team"
+      ],
+      "gold_answer": "platform",
+      "answerable": true
+    },
+    {
+      "qid": "q_unanswerable_v2",
+      "query": "what is the launch date of the orbital tourism program in this corpus",
+      "relevant_doc_ids": [],
+      "gold_answer": null,
+      "answerable": false
+    }
+  ]
+}
