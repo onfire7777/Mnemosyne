@@ -2253,6 +2253,35 @@ def test_cli_deployment_soak_allows_tls_rotation_plan_check(tmp_path: Path) -> N
     assert report["checks"][0]["stdout_json"]["rotation"]["candidate_hostname_checks"] == {"localhost": True}
 
 
+def test_cli_deployment_soak_allows_tls_lifecycle_ops_check(tmp_path: Path) -> None:
+    bundle = tmp_path / "tls-lifecycle.json"
+    bundle.write_text(json.dumps(tls_lifecycle_ops_bundle()), encoding="utf-8")
+    manifest_path = tmp_path / "deployment-soak.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "checks": [
+                    {
+                        "name": "tls-lifecycle",
+                        "command": "tls-lifecycle-ops-check",
+                        "args": ["--bundle", str(bundle)],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = run_cli(tmp_path / "mnemosyne.json", "deployment-soak", "--soak-manifest", str(manifest_path))
+
+    assert report["ok"] is True
+    assert "tls-lifecycle-ops-check" in report["allowed_commands"]
+    assert report["checks"][0]["command"] == "tls-lifecycle-ops-check"
+    assert report["checks"][0]["ok"] is True
+    assert report["checks"][0]["stdout_json"]["checks"][0]["name"] == "validation_scope"
+    assert report["checks"][0]["stdout_json"]["checks"][3]["name"] == "deployment"
+
+
 def test_cli_provider_check_uses_deployment_manifest(tmp_path: Path, monkeypatch) -> None:
     requests: list[dict[str, object]] = []
 
