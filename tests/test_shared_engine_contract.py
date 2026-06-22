@@ -98,11 +98,20 @@ def test_shared_engine_contract_updates_evidence_embedding(engine_bundle: tuple[
     )
     dims = int(getattr(getattr(getattr(engine, "adapters", None), "embedding", None), "dims", 256))
     vector = hashing_embedding("shared embedding contract", dims=dims)
+    missing_cid = "cidv1:" + "00" * 32
 
+    missing_updated = engine.set_evidence_embedding(tenant, missing_cid, vector)
     updated = engine.set_evidence_embedding(tenant, cid, vector)
     recalled = engine.get_evidence(tenant, cid)
-    exported = next(item for item in engine.export_tenant(tenant)["evidence"] if item["cid"] == cid)
+    tenant_export = engine.export_tenant(tenant)
+    exported = next(item for item in tenant_export["evidence"] if item["cid"] == cid)
+    audit_rows = [
+        item
+        for item in tenant_export["audit_log"]
+        if item["op"] == "set_evidence_embedding" and item["target_id"] == cid
+    ]
 
+    assert missing_updated is False
     assert updated is True
     assert recalled is not None
     assert recalled.embedding is not None
@@ -110,6 +119,11 @@ def test_shared_engine_contract_updates_evidence_embedding(engine_bundle: tuple[
     assert all(abs(left - right) < 0.000001 for left, right in zip(recalled.embedding, vector))
     assert exported["embedding"] is not None
     assert len(exported["embedding"]) == len(vector)
+    assert len(audit_rows) == 1
+    assert audit_rows[0]["source"] == "embedder"
+    assert audit_rows[0]["trust_tier"] == 1
+    assert audit_rows[0]["diff"]["embedding_dims"] == len(vector)
+    assert audit_rows[0]["diff"]["source_type"] == "embedding-contract"
 
 
 def test_shared_engine_contract_updates_evidence_metadata(engine_bundle: tuple[Any, str, str]) -> None:
