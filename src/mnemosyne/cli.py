@@ -87,6 +87,7 @@ DEPLOYMENT_SOAK_COMMANDS = {
     "hosted-llm-check",
     "policy-ops-check",
     "privacy-ops-check",
+    "provenance-ops-check",
     "provenance-trust-check",
     "provider-check",
     "retrieval-ops-check",
@@ -122,6 +123,7 @@ PRODUCTION_RELEASE_REQUIRED_COMMANDS = (
     "hosted-llm-check",
     "policy-ops-check",
     "privacy-ops-check",
+    "provenance-ops-check",
     "provenance-trust-check",
     "provider-check",
     "retrieval-ops-check",
@@ -4658,6 +4660,572 @@ def cmd_provenance_trust_check(args: argparse.Namespace) -> None:
         raise SystemExit(1)
 
 
+def _load_provenance_ops_bundle(args: argparse.Namespace) -> Mapping[str, Any]:
+    if bool(args.bundle) == bool(args.bundle_json):
+        raise SystemExit("provenance-ops-check requires exactly one of --bundle or --bundle-json")
+    try:
+        loaded = (
+            json.loads(Path(args.bundle).expanduser().read_text(encoding="utf-8"))
+            if args.bundle
+            else json.loads(args.bundle_json)
+        )
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"provenance ops bundle denied: {exc}") from exc
+    if not isinstance(loaded, Mapping):
+        raise SystemExit("provenance ops bundle must be a JSON object")
+    return loaded
+
+
+def _provenance_ops_fingerprint(report: Mapping[str, Any]) -> str:
+    payload = {
+        "bundle": report.get("bundle"),
+        "requirements": report.get("requirements"),
+        "checks": report.get("checks"),
+        "findings": report.get("findings"),
+    }
+    return sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def _provenance_ops_int(
+    value: Any,
+    *,
+    default: int,
+    code: str,
+    message: str,
+    findings: list[dict[str, Any]],
+) -> int:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        findings.append(_provenance_finding(code, message))
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        findings.append(_provenance_finding(code, message))
+        return default
+
+
+def _provenance_ops_number(
+    value: Any,
+    *,
+    default: float,
+    code: str,
+    message: str,
+    findings: list[dict[str, Any]],
+) -> float:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        findings.append(_provenance_finding(code, message))
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        findings.append(_provenance_finding(code, message))
+        return default
+
+
+def _provenance_ops_string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if isinstance(item, str) and item.strip()]
+
+
+def _provenance_ops_provider_local(provider: Any) -> bool:
+    provider_kind = str(provider or "").strip().lower()
+    return provider_kind in {"", "deterministic", "local", "mock", "none", "test"}
+
+
+def _provenance_ops_forbidden_raw_paths(value: Any, *, path: str = "$") -> list[str]:
+    forbidden_keys = {
+        "access_token",
+        "api_key",
+        "asset_bytes",
+        "auth_token",
+        "certificate",
+        "certificates",
+        "credential",
+        "credentials",
+        "manifest",
+        "manifests",
+        "password",
+        "private_key",
+        "raw_asset",
+        "raw_assets",
+        "raw_certificate",
+        "raw_certificates",
+        "raw_claim",
+        "raw_claims",
+        "raw_manifest",
+        "raw_manifests",
+        "raw_report",
+        "raw_reports",
+        "raw_stderr",
+        "raw_stdout",
+        "raw_verifier_stderr",
+        "raw_verifier_stdout",
+        "secret",
+        "stderr",
+        "stdout",
+        "token",
+        "verifier_stderr",
+        "verifier_stdout",
+    }
+    paths: list[str] = []
+    if isinstance(value, Mapping):
+        for key, child in value.items():
+            key_name = str(key)
+            child_path = f"{path}.{key_name}"
+            if key_name.lower() in forbidden_keys and child not in (None, "", [], {}):
+                paths.append(child_path)
+            paths.extend(_provenance_ops_forbidden_raw_paths(child, path=child_path))
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            paths.extend(_provenance_ops_forbidden_raw_paths(child, path=f"{path}[{index}]"))
+    return paths
+
+
+def cmd_provenance_ops_check(args: argparse.Namespace) -> None:
+    bundle = _load_provenance_ops_bundle(args)
+    findings: list[dict[str, Any]] = []
+    checks: list[dict[str, Any]] = []
+
+    validation_scope = bundle.get("validation_scope")
+    if not isinstance(validation_scope, Mapping):
+        findings.append(_provenance_finding("validation_scope_missing", "provenance ops bundle requires validation_scope section"))
+        validation_scope = {}
+    validation_scope_ok = (
+        validation_scope.get("production_validated") is True
+        and validation_scope.get("target_environment") == "production"
+        and validation_scope.get("operator_asserted") is True
+        and bool(validation_scope.get("run_id"))
+        and bool(validation_scope.get("started_at"))
+        and bool(validation_scope.get("completed_at"))
+    )
+    if validation_scope.get("production_validated") is not True:
+        findings.append(_provenance_finding("production_validation_missing", "provenance ops bundle must be production validated"))
+    if validation_scope.get("target_environment") != "production":
+        findings.append(_provenance_finding("target_environment_not_production", "provenance ops target environment must be production"))
+    if validation_scope.get("operator_asserted") is not True:
+        findings.append(_provenance_finding("operator_assertion_missing", "operator production assertion is required"))
+    for field in ("run_id", "started_at", "completed_at"):
+        if not validation_scope.get(field):
+            findings.append(_provenance_finding("validation_scope_field_missing", f"validation_scope.{field} is required"))
+    checks.append(
+        {
+            "name": "validation_scope",
+            "ok": validation_scope_ok,
+            "production_validated": validation_scope.get("production_validated") is True,
+            "target_environment": validation_scope.get("target_environment"),
+            "operator_asserted": validation_scope.get("operator_asserted") is True,
+        }
+    )
+
+    verifier = bundle.get("c2pa_verifier") or bundle.get("verifier")
+    if not isinstance(verifier, Mapping):
+        findings.append(_provenance_finding("verifier_missing", "provenance ops bundle requires c2pa_verifier section"))
+        verifier = {}
+    verifier_provider = verifier.get("provider") or verifier.get("provider_kind")
+    verifier_local = _provenance_ops_provider_local(verifier_provider)
+    timeout_seconds = _provenance_ops_number(
+        verifier.get("timeout_seconds"),
+        default=args.max_verifier_timeout_seconds + 1.0,
+        code="verifier_timeout_invalid",
+        message="verifier timeout must be numeric",
+        findings=findings,
+    )
+    verifier_ok = (
+        verifier.get("ok") is True
+        and not verifier_local
+        and bool(verifier.get("tool_version"))
+        and bool(verifier.get("tool_path_hash") or verifier.get("tool_digest"))
+        and verifier.get("command_isolated") is True
+        and verifier.get("no_shell") is True
+        and verifier.get("asset_file_preferred") is True
+        and timeout_seconds <= args.max_verifier_timeout_seconds
+    )
+    if verifier.get("ok") is not True:
+        findings.append(_provenance_finding("verifier_not_ok", "C2PA verifier evidence must be ok"))
+    if verifier_local:
+        findings.append(_provenance_finding("verifier_provider_local", "C2PA verifier provider must be command, container, or hosted"))
+    if not verifier.get("tool_version"):
+        findings.append(_provenance_finding("verifier_version_missing", "C2PA verifier tool version is required"))
+    if not (verifier.get("tool_path_hash") or verifier.get("tool_digest")):
+        findings.append(_provenance_finding("verifier_tool_hash_missing", "C2PA verifier tool path/digest hash is required"))
+    for field in ("command_isolated", "no_shell", "asset_file_preferred"):
+        if verifier.get(field) is not True:
+            findings.append(_provenance_finding("verifier_control_missing", f"C2PA verifier control {field} is required"))
+    if timeout_seconds > args.max_verifier_timeout_seconds:
+        findings.append(_provenance_finding("verifier_timeout_too_high", "C2PA verifier timeout exceeds threshold"))
+    checks.append(
+        {
+            "name": "c2pa_verifier",
+            "ok": verifier_ok,
+            "provider": verifier_provider,
+            "provider_local": verifier_local,
+            "tool_version_present": bool(verifier.get("tool_version")),
+            "tool_hash_present": bool(verifier.get("tool_path_hash") or verifier.get("tool_digest")),
+            "timeout_seconds": timeout_seconds,
+        }
+    )
+
+    trust_roots = bundle.get("trust_roots")
+    if not isinstance(trust_roots, Mapping):
+        findings.append(_provenance_finding("trust_roots_missing", "provenance ops bundle requires trust_roots section"))
+        trust_roots = {}
+    issuer_count = _provenance_ops_int(
+        trust_roots.get("trusted_issuer_count"),
+        default=len(_provenance_ops_string_list(trust_roots.get("trusted_issuer_hashes"))),
+        code="trusted_issuer_count_invalid",
+        message="trusted issuer count must be numeric",
+        findings=findings,
+    )
+    root_fingerprints = _provenance_ops_string_list(trust_roots.get("root_fingerprints") or trust_roots.get("trusted_root_hashes"))
+    root_count = _provenance_ops_int(
+        trust_roots.get("trusted_root_count"),
+        default=len(root_fingerprints),
+        code="trusted_root_count_invalid",
+        message="trusted root count must be numeric",
+        findings=findings,
+    )
+    policy_fingerprint = str(trust_roots.get("policy_fingerprint") or "")
+    trust_roots_ok = (
+        trust_roots.get("ok") is True
+        and issuer_count >= args.min_trusted_issuers
+        and root_count >= args.min_trusted_roots
+        and "sha256:" in policy_fingerprint.lower()
+        and len(root_fingerprints) >= args.min_trusted_roots
+        and trust_roots.get("rotation_verified") is True
+        and trust_roots.get("stale_roots_rejected") is True
+        and trust_roots.get("untrusted_issuer_quarantined") is True
+        and trust_roots.get("asset_scope_enforced") is True
+    )
+    if trust_roots.get("ok") is not True:
+        findings.append(_provenance_finding("trust_roots_not_ok", "trust-roots evidence must be ok"))
+    if issuer_count < args.min_trusted_issuers:
+        findings.append(_provenance_finding("trusted_issuer_count_too_low", "trusted issuer count is below threshold"))
+    if root_count < args.min_trusted_roots or len(root_fingerprints) < args.min_trusted_roots:
+        findings.append(_provenance_finding("trusted_root_count_too_low", "trusted root count is below threshold"))
+    if "sha256:" not in policy_fingerprint.lower():
+        findings.append(_provenance_finding("trust_policy_fingerprint_missing", "trust policy fingerprint is required"))
+    for field in ("rotation_verified", "stale_roots_rejected", "untrusted_issuer_quarantined", "asset_scope_enforced"):
+        if trust_roots.get(field) is not True:
+            findings.append(_provenance_finding("trust_root_control_missing", f"trust-root control {field} is required"))
+    checks.append(
+        {
+            "name": "trust_roots",
+            "ok": trust_roots_ok,
+            "trusted_issuer_count": issuer_count,
+            "trusted_root_count": root_count,
+            "root_fingerprint_count": len(root_fingerprints),
+            "policy_fingerprint_present": "sha256:" in policy_fingerprint.lower(),
+        }
+    )
+
+    trust_check = bundle.get("provenance_trust") or bundle.get("provenance_trust_check")
+    if not isinstance(trust_check, Mapping):
+        findings.append(
+            _provenance_finding("provenance_trust_missing", "provenance ops bundle requires provenance_trust section")
+        )
+        trust_check = {}
+    suite_summary = trust_check.get("suite") if isinstance(trust_check.get("suite"), Mapping) else {}
+    suite_case_count = _provenance_ops_int(
+        suite_summary.get("case_count", trust_check.get("case_count")),
+        default=0,
+        code="provenance_trust_case_count_invalid",
+        message="provenance trust case count must be numeric",
+        findings=findings,
+    )
+    suite_issuer_count = _provenance_ops_int(
+        suite_summary.get("trusted_issuer_count", trust_check.get("trusted_issuer_count")),
+        default=0,
+        code="provenance_trust_issuer_count_invalid",
+        message="provenance trust issuer count must be numeric",
+        findings=findings,
+    )
+    suite_root_count = _provenance_ops_int(
+        suite_summary.get("trusted_root_count", trust_check.get("trusted_root_count")),
+        default=0,
+        code="provenance_trust_root_count_invalid",
+        message="provenance trust root count must be numeric",
+        findings=findings,
+    )
+    trust_redaction = trust_check.get("redaction") if isinstance(trust_check.get("redaction"), Mapping) else {}
+    provenance_trust_ok = (
+        trust_check.get("ok") is True
+        and bool(trust_check.get("fingerprint"))
+        and suite_case_count >= args.min_cases
+        and suite_issuer_count >= args.min_trusted_issuers
+        and suite_root_count >= args.min_trusted_roots
+        and trust_redaction.get("asset_bytes_omitted") is True
+        and trust_redaction.get("raw_manifest_omitted") is True
+        and trust_redaction.get("raw_verifier_stdout_omitted") is True
+        and trust_redaction.get("raw_verifier_stderr_omitted") is True
+    )
+    if trust_check.get("ok") is not True:
+        findings.append(_provenance_finding("provenance_trust_not_ok", "provenance-trust evidence must be ok"))
+    if not trust_check.get("fingerprint"):
+        findings.append(_provenance_finding("provenance_trust_fingerprint_missing", "provenance-trust fingerprint is required"))
+    if suite_case_count < args.min_cases:
+        findings.append(_provenance_finding("provenance_trust_cases_too_low", "provenance-trust case count is below threshold"))
+    if suite_issuer_count < args.min_trusted_issuers:
+        findings.append(_provenance_finding("provenance_trust_issuers_too_low", "provenance-trust issuer count is below threshold"))
+    if suite_root_count < args.min_trusted_roots:
+        findings.append(_provenance_finding("provenance_trust_roots_too_low", "provenance-trust root count is below threshold"))
+    for field in ("asset_bytes_omitted", "raw_manifest_omitted", "raw_verifier_stdout_omitted", "raw_verifier_stderr_omitted"):
+        if trust_redaction.get(field) is not True:
+            findings.append(_provenance_finding("provenance_trust_redaction_missing", f"provenance-trust redaction {field} is required"))
+    checks.append(
+        {
+            "name": "provenance_trust",
+            "ok": provenance_trust_ok,
+            "case_count": suite_case_count,
+            "trusted_issuer_count": suite_issuer_count,
+            "trusted_root_count": suite_root_count,
+            "fingerprint_present": bool(trust_check.get("fingerprint")),
+        }
+    )
+
+    asset_bound = bundle.get("asset_bound_cases")
+    if not isinstance(asset_bound, Mapping):
+        findings.append(_provenance_finding("asset_bound_cases_missing", "provenance ops bundle requires asset_bound_cases section"))
+        asset_bound = {}
+    cases_raw = asset_bound.get("cases")
+    asset_cases = [item for item in cases_raw if isinstance(item, Mapping)] if isinstance(cases_raw, list) else []
+    trusted_cases = 0
+    quarantine_cases = 0
+    case_rows: list[dict[str, Any]] = []
+    for index, case in enumerate(asset_cases, start=1):
+        case_id = str(case.get("id") or f"case-{index}")
+        expected = str(case.get("expected") or case.get("expected_decision") or "").lower()
+        asset_hash_present = "sha256:" in str(case.get("asset_sha256") or "").lower()
+        manifest_hash_present = "sha256:" in str(case.get("manifest_sha256") or "").lower()
+        asset_binding_matched = case.get("asset_binding_matched") is True
+        valid = case.get("valid") is True
+        trusted = case.get("trusted") is True
+        quarantined = case.get("quarantined") is True
+        if expected == "trusted":
+            trusted_cases += 1 if valid and trusted and asset_binding_matched and not quarantined else 0
+        if expected in {"quarantine", "quarantined", "reject"}:
+            quarantine_cases += 1 if quarantined else 0
+        row_ok = (
+            asset_hash_present
+            and manifest_hash_present
+            and (
+                (expected == "trusted" and valid and trusted and asset_binding_matched and not quarantined)
+                or (expected in {"quarantine", "quarantined", "reject"} and quarantined)
+            )
+        )
+        if not row_ok:
+            findings.append(_provenance_finding("asset_bound_case_failed", "asset-bound provenance case failed", case_id=case_id))
+        case_rows.append(
+            {
+                "id": case_id,
+                "ok": row_ok,
+                "expected": expected,
+                "asset_hash_present": asset_hash_present,
+                "manifest_hash_present": manifest_hash_present,
+                "asset_binding_matched": asset_binding_matched,
+                "valid": valid,
+                "trusted": trusted,
+                "quarantined": quarantined,
+            }
+        )
+    asset_bound_ok = (
+        asset_bound.get("ok") is True
+        and len(asset_cases) >= args.min_cases
+        and trusted_cases >= args.min_trusted_cases
+        and quarantine_cases >= args.min_quarantine_cases
+        and all(row["ok"] for row in case_rows)
+    )
+    if asset_bound.get("ok") is not True:
+        findings.append(_provenance_finding("asset_bound_cases_not_ok", "asset-bound cases evidence must be ok"))
+    if len(asset_cases) < args.min_cases:
+        findings.append(_provenance_finding("asset_bound_cases_too_low", "asset-bound case count is below threshold"))
+    if trusted_cases < args.min_trusted_cases:
+        findings.append(_provenance_finding("trusted_asset_cases_too_low", "trusted asset case count is below threshold"))
+    if quarantine_cases < args.min_quarantine_cases:
+        findings.append(_provenance_finding("quarantine_asset_cases_too_low", "quarantine asset case count is below threshold"))
+    checks.append(
+        {
+            "name": "asset_bound_cases",
+            "ok": asset_bound_ok,
+            "case_count": len(asset_cases),
+            "trusted_cases": trusted_cases,
+            "quarantine_cases": quarantine_cases,
+            "cases": case_rows,
+        }
+    )
+
+    quarantine = bundle.get("quarantine")
+    if not isinstance(quarantine, Mapping):
+        findings.append(_provenance_finding("quarantine_missing", "provenance ops bundle requires quarantine section"))
+        quarantine = {}
+    quarantine_case_count = _provenance_ops_int(
+        quarantine.get("case_count", quarantine_cases),
+        default=quarantine_cases,
+        code="quarantine_case_count_invalid",
+        message="quarantine case count must be numeric",
+        findings=findings,
+    )
+    quarantine_ok = (
+        quarantine.get("ok") is True
+        and quarantine.get("untrusted_signer_quarantined") is True
+        and quarantine.get("untrusted_root_quarantined") is True
+        and quarantine.get("digest_mismatch_quarantined") is True
+        and quarantine.get("hidden_from_default_retrieval") is True
+        and quarantine.get("default_retrieval_exclusion_verified") is True
+        and quarantine_case_count >= args.min_quarantine_cases
+    )
+    if quarantine.get("ok") is not True:
+        findings.append(_provenance_finding("quarantine_not_ok", "quarantine evidence must be ok"))
+    for field in (
+        "untrusted_signer_quarantined",
+        "untrusted_root_quarantined",
+        "digest_mismatch_quarantined",
+        "hidden_from_default_retrieval",
+        "default_retrieval_exclusion_verified",
+    ):
+        if quarantine.get(field) is not True:
+            findings.append(_provenance_finding("quarantine_control_missing", f"quarantine control {field} is required"))
+    if quarantine_case_count < args.min_quarantine_cases:
+        findings.append(_provenance_finding("quarantine_cases_too_low", "quarantine case count is below threshold"))
+    checks.append(
+        {
+            "name": "quarantine",
+            "ok": quarantine_ok,
+            "case_count": quarantine_case_count,
+            "hidden_from_default_retrieval": quarantine.get("hidden_from_default_retrieval") is True,
+        }
+    )
+
+    ingestion = bundle.get("ingestion")
+    if not isinstance(ingestion, Mapping):
+        findings.append(_provenance_finding("ingestion_missing", "provenance ops bundle requires ingestion section"))
+        ingestion = {}
+    ingestion_backend = str(ingestion.get("backend") or "").strip().lower()
+    evidence_hashes = _provenance_ops_string_list(ingestion.get("evidence_cid_hashes"))
+    capability_tags = set(_provenance_ops_string_list(ingestion.get("capability_tags")))
+    trusted_ingests = _provenance_ops_int(
+        ingestion.get("trusted_ingest_count"),
+        default=0,
+        code="ingestion_trusted_count_invalid",
+        message="trusted ingest count must be numeric",
+        findings=findings,
+    )
+    quarantined_ingests = _provenance_ops_int(
+        ingestion.get("quarantined_ingest_count"),
+        default=0,
+        code="ingestion_quarantined_count_invalid",
+        message="quarantined ingest count must be numeric",
+        findings=findings,
+    )
+    required_tags = {"asset-bound-provenance", "provenance-valid", "provenance-verified", "quarantined"}
+    missing_tags = sorted(required_tags - capability_tags)
+    ingestion_ok = (
+        ingestion.get("ok") is True
+        and ingestion_backend in {"postgres", "postgresql"}
+        and ingestion.get("production_validated") is True
+        and bool(ingestion.get("tenant_hash"))
+        and len(evidence_hashes) >= args.min_cases
+        and trusted_ingests >= args.min_trusted_cases
+        and quarantined_ingests >= args.min_quarantine_cases
+        and not missing_tags
+    )
+    if ingestion.get("ok") is not True:
+        findings.append(_provenance_finding("ingestion_not_ok", "provenance ingestion evidence must be ok"))
+    if ingestion_backend not in {"postgres", "postgresql"}:
+        findings.append(_provenance_finding("ingestion_backend_not_postgres", "provenance ingestion backend must be postgres"))
+    if ingestion.get("production_validated") is not True:
+        findings.append(_provenance_finding("ingestion_production_validation_missing", "provenance ingestion must be production validated"))
+    if not ingestion.get("tenant_hash"):
+        findings.append(_provenance_finding("ingestion_tenant_hash_missing", "provenance ingestion tenant identity must be hashed"))
+    if len(evidence_hashes) < args.min_cases:
+        findings.append(_provenance_finding("ingestion_evidence_hashes_too_low", "provenance ingestion evidence hash count is too low"))
+    if trusted_ingests < args.min_trusted_cases:
+        findings.append(_provenance_finding("ingestion_trusted_too_low", "trusted provenance ingest count is too low"))
+    if quarantined_ingests < args.min_quarantine_cases:
+        findings.append(_provenance_finding("ingestion_quarantined_too_low", "quarantined provenance ingest count is too low"))
+    for tag in missing_tags:
+        findings.append(_provenance_finding("ingestion_capability_tag_missing", f"ingestion capability tag {tag} is missing"))
+    checks.append(
+        {
+            "name": "ingestion",
+            "ok": ingestion_ok,
+            "backend": ingestion_backend,
+            "evidence_hash_count": len(evidence_hashes),
+            "trusted_ingest_count": trusted_ingests,
+            "quarantined_ingest_count": quarantined_ingests,
+            "missing_tags": missing_tags,
+        }
+    )
+
+    redaction = bundle.get("redaction") if isinstance(bundle.get("redaction"), Mapping) else {}
+    redaction_flags = {
+        "asset_bytes_omitted": redaction.get("asset_bytes_omitted") is True,
+        "raw_manifests_omitted": redaction.get("raw_manifests_omitted") is True
+        or redaction.get("raw_manifest_omitted") is True,
+        "raw_verifier_stdout_omitted": redaction.get("raw_verifier_stdout_omitted") is True,
+        "raw_verifier_stderr_omitted": redaction.get("raw_verifier_stderr_omitted") is True,
+        "raw_certificates_omitted": redaction.get("raw_certificates_omitted") is True,
+        "raw_credentials_omitted": redaction.get("raw_credentials_omitted") is True,
+    }
+    missing_redaction_flags = [flag for flag, ok in redaction_flags.items() if not ok]
+    for flag in missing_redaction_flags:
+        findings.append(_provenance_finding("redaction_flag_missing", f"redaction flag {flag} must be true"))
+    forbidden_raw_paths = _provenance_ops_forbidden_raw_paths(bundle)
+    if forbidden_raw_paths:
+        findings.append(_provenance_finding("redaction_raw_field_present", "bundle contains raw assets, manifests, verifier output, certificates, or credentials"))
+    checks.append(
+        {
+            "name": "redaction",
+            "ok": not missing_redaction_flags and not forbidden_raw_paths,
+            **redaction_flags,
+            "forbidden_raw_paths": forbidden_raw_paths,
+        }
+    )
+
+    report = {
+        "ok": not findings,
+        "bundle": {
+            "name": bundle.get("name"),
+            "production_validated": validation_scope.get("production_validated") is True,
+            "verifier_provider": verifier_provider,
+            "trusted_issuer_count": issuer_count,
+            "trusted_root_count": root_count,
+            "asset_case_count": len(asset_cases),
+            "trusted_asset_cases": trusted_cases,
+            "quarantine_asset_cases": quarantine_cases,
+            "ingestion_backend": ingestion_backend,
+            "ingestion_evidence_hash_count": len(evidence_hashes),
+        },
+        "requirements": {
+            "production_validated": True,
+            "target_environment": "production",
+            "operator_asserted": True,
+            "min_cases": args.min_cases,
+            "min_trusted_cases": args.min_trusted_cases,
+            "min_quarantine_cases": args.min_quarantine_cases,
+            "min_trusted_roots": args.min_trusted_roots,
+            "min_trusted_issuers": args.min_trusted_issuers,
+            "max_verifier_timeout_seconds": args.max_verifier_timeout_seconds,
+            "ingestion_backend": "postgres",
+        },
+        "redaction": {**redaction_flags, "forbidden_raw_fields_present": bool(forbidden_raw_paths)},
+        "checks": checks,
+        "findings": findings,
+    }
+    report["fingerprint"] = _provenance_ops_fingerprint(report)
+    report["expected_fingerprint_present"] = bool(args.expected_fingerprint)
+    if args.expected_fingerprint and args.expected_fingerprint.strip().lower() != report["fingerprint"]:
+        report["ok"] = False
+        report["findings"].append(_provenance_finding("fingerprint_mismatch", "provenance ops fingerprint mismatch"))
+    emit(report)
+    if not report["ok"]:
+        raise SystemExit(1)
+
+
 def cmd_profile_add(args: argparse.Namespace) -> None:
     tools = load_tools(args)
     emit(
@@ -8539,6 +9107,18 @@ def build_parser() -> argparse.ArgumentParser:
     provenance_trust_check.add_argument("--require-case", action="append", default=[])
     provenance_trust_check.add_argument("--expected-fingerprint")
     provenance_trust_check.set_defaults(func=cmd_provenance_trust_check)
+
+    provenance_ops_check = sub.add_parser("provenance-ops-check")
+    provenance_ops_check.add_argument("--bundle", help="Path to production provenance operations evidence bundle")
+    provenance_ops_check.add_argument("--bundle-json", help="Inline production provenance operations evidence bundle JSON")
+    provenance_ops_check.add_argument("--min-cases", type=int, default=3)
+    provenance_ops_check.add_argument("--min-trusted-cases", type=int, default=1)
+    provenance_ops_check.add_argument("--min-quarantine-cases", type=int, default=1)
+    provenance_ops_check.add_argument("--min-trusted-roots", type=int, default=1)
+    provenance_ops_check.add_argument("--min-trusted-issuers", type=int, default=1)
+    provenance_ops_check.add_argument("--max-verifier-timeout-seconds", type=float, default=30.0)
+    provenance_ops_check.add_argument("--expected-fingerprint")
+    provenance_ops_check.set_defaults(func=cmd_provenance_ops_check)
 
     branch = sub.add_parser("branch")
     branch.add_argument("--name", required=True)
