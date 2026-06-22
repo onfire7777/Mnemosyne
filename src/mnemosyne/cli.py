@@ -115,6 +115,7 @@ DEPLOYMENT_SOAK_COMMANDS = {
     "multimodal-ops-check",
     "ops-dashboard-check",
     "parametric-trainer-check",
+    "worker-ops-check",
     "worker-run",
     "projection-recompute-once",
     "gate-suite-check",
@@ -154,6 +155,7 @@ PRODUCTION_RELEASE_REQUIRED_COMMANDS = (
     "worker-run",
     "ops-dashboard-check",
     "parametric-trainer-check",
+    "worker-ops-check",
     "ops-report",
 )
 PRODUCTION_RELEASE_REQUIRED_PROVIDER_CHECKS = (
@@ -199,6 +201,7 @@ RELEASE_AUDIT_REQUIRED_OUTPUT_KEYS: dict[str, tuple[str, ...]] = {
     "worker-run": ("worker", "summary", "queue", "cycles", "jobs", "metrics"),
     "ops-dashboard-check": ("mode", "source", "checks", "findings"),
     "parametric-trainer-check": ("bundle", "requirements", "checks", "findings"),
+    "worker-ops-check": ("bundle", "requirements", "checks", "findings"),
 }
 
 
@@ -3469,6 +3472,410 @@ def cmd_mcp_ops_check(args: argparse.Namespace) -> None:
     if args.expected_fingerprint and args.expected_fingerprint.strip().lower() != report["fingerprint"]:
         report["ok"] = False
         report["findings"].append(_mcp_ops_finding("fingerprint_mismatch", "mcp ops bundle fingerprint mismatch"))
+    emit(report)
+    if not report["ok"]:
+        raise SystemExit(1)
+
+
+def _load_worker_ops_bundle(args: argparse.Namespace) -> Mapping[str, Any]:
+    if bool(args.bundle) == bool(args.bundle_json):
+        raise SystemExit("worker-ops-check requires exactly one of --bundle or --bundle-json")
+    try:
+        loaded = json.loads(Path(args.bundle).read_text(encoding="utf-8")) if args.bundle else json.loads(args.bundle_json)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"worker ops bundle is not valid JSON: {exc}") from exc
+    if not isinstance(loaded, Mapping):
+        raise SystemExit("worker ops bundle must be a JSON object")
+    return loaded
+
+
+def _worker_ops_finding(code: str, message: str) -> dict[str, str]:
+    return {"code": code, "message": message}
+
+
+def _worker_ops_fingerprint(report: Mapping[str, Any]) -> str:
+    stable = {
+        "bundle": report.get("bundle"),
+        "requirements": report.get("requirements"),
+        "checks": report.get("checks"),
+        "findings": report.get("findings"),
+    }
+    return sha256(json.dumps(stable, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def _worker_ops_number(
+    value: Any,
+    *,
+    default: float,
+    code: str,
+    message: str,
+    findings: list[dict[str, str]],
+) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        findings.append(_worker_ops_finding(code, message))
+        return default
+
+
+def _worker_ops_int(
+    value: Any,
+    *,
+    default: int,
+    code: str,
+    message: str,
+    findings: list[dict[str, str]],
+) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        findings.append(_worker_ops_finding(code, message))
+        return default
+
+
+def _worker_ops_string_set(
+    value: Any,
+    *,
+    code: str,
+    message: str,
+    findings: list[dict[str, str]],
+) -> set[str]:
+    if value is None:
+        return set()
+    if not isinstance(value, list):
+        findings.append(_worker_ops_finding(code, message))
+        return set()
+    return {str(item) for item in value if str(item)}
+
+
+def _worker_ops_forbidden_raw_paths(value: Any, *, path: str = "$") -> list[str]:
+    paths: list[str] = []
+    if isinstance(value, Mapping):
+        for key, child in value.items():
+            key_text = str(key)
+            child_path = f"{path}.{key_text}"
+            if child_path.startswith("$.redaction."):
+                continue
+            lowered = key_text.lower()
+            if any(
+                token in lowered
+                for token in (
+                    "token",
+                    "secret",
+                    "password",
+                    "dsn",
+                    "connection_string",
+                    "database_url",
+                    "raw_env",
+                    "queue_payload",
+                    "worker_log",
+                    "stdout",
+                    "stderr",
+                )
+            ):
+                paths.append(child_path)
+            paths.extend(_worker_ops_forbidden_raw_paths(child, path=child_path))
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            paths.extend(_worker_ops_forbidden_raw_paths(child, path=f"{path}[{index}]"))
+    return paths
+
+
+def cmd_worker_ops_check(args: argparse.Namespace) -> None:
+    bundle = _load_worker_ops_bundle(args)
+    findings: list[dict[str, str]] = []
+    checks: list[dict[str, Any]] = []
+
+    deployment_raw = bundle.get("deployment")
+    deployment_present = isinstance(deployment_raw, Mapping)
+    deployment = deployment_raw if deployment_present else {}
+    production_scope_ok = (
+        args.allow_non_production
+        or (
+            deployment.get("environment") == "production"
+            and deployment.get("operator_asserted") is True
+            and bool(deployment.get("run_id"))
+            and bool(deployment.get("started_at"))
+            and bool(deployment.get("completed_at"))
+        )
+    )
+    if not args.allow_non_production:
+        if deployment.get("environment") != "production":
+            findings.append(_worker_ops_finding("target_environment_not_production", "worker deployment environment must be production"))
+        if deployment.get("operator_asserted") is not True:
+            findings.append(_worker_ops_finding("operator_assertion_missing", "worker deployment requires operator assertion"))
+        for field in ("run_id", "started_at", "completed_at"):
+            if not deployment.get(field):
+                findings.append(_worker_ops_finding("deployment_field_missing", f"deployment.{field} is required"))
+    checks.append(
+        {
+            "name": "deployment_scope",
+            "ok": production_scope_ok,
+            "environment": deployment.get("environment"),
+            "operator_asserted": deployment.get("operator_asserted") is True,
+        }
+    )
+
+    supervisor_raw = bundle.get("supervisor")
+    supervisor_present = isinstance(supervisor_raw, Mapping)
+    supervisor = supervisor_raw if supervisor_present else {}
+    restart_policy = supervisor.get("restart_policy") if isinstance(supervisor.get("restart_policy"), Mapping) else {}
+    process_count = _worker_ops_int(
+        supervisor.get("process_count"),
+        default=0,
+        code="worker_process_count_invalid",
+        message="supervisor.process_count must be numeric",
+        findings=findings,
+    )
+    desired_processes = _worker_ops_int(
+        supervisor.get("desired_processes", process_count),
+        default=0,
+        code="worker_desired_processes_invalid",
+        message="supervisor.desired_processes must be numeric",
+        findings=findings,
+    )
+    max_restart_seconds = _worker_ops_number(
+        restart_policy.get("max_restart_seconds"),
+        default=args.max_restart_seconds + 1.0,
+        code="worker_restart_seconds_invalid",
+        message="restart_policy.max_restart_seconds must be numeric",
+        findings=findings,
+    )
+    supervisor_type = str(supervisor.get("type") or "").strip().lower()
+    supervisor_ok = (
+        supervisor.get("ok") is True
+        and supervisor_type not in {"", "none", "manual", "local"}
+        and process_count >= args.min_processes
+        and desired_processes >= args.min_processes
+        and restart_policy.get("enabled") is True
+        and restart_policy.get("backoff_configured") is True
+        and max_restart_seconds <= args.max_restart_seconds
+    )
+    if supervisor.get("ok") is not True:
+        findings.append(_worker_ops_finding("worker_supervisor_not_ok", "supervisor evidence must be ok"))
+    if supervisor_type in {"", "none", "manual", "local"}:
+        findings.append(_worker_ops_finding("worker_supervisor_invalid", "worker supervisor must be an external process manager"))
+    if process_count < args.min_processes or desired_processes < args.min_processes:
+        findings.append(_worker_ops_finding("worker_process_count_too_low", "worker process count is below threshold"))
+    if restart_policy.get("enabled") is not True:
+        findings.append(_worker_ops_finding("worker_restart_policy_missing", "restart policy must be enabled"))
+    if restart_policy.get("backoff_configured") is not True:
+        findings.append(_worker_ops_finding("worker_restart_backoff_missing", "restart policy must prove backoff configuration"))
+    if max_restart_seconds > args.max_restart_seconds:
+        findings.append(_worker_ops_finding("worker_restart_window_too_high", "restart window exceeds threshold"))
+    checks.append(
+        {
+            "name": "supervisor",
+            "ok": supervisor_ok,
+            "type": supervisor.get("type"),
+            "process_count": process_count,
+            "desired_processes": desired_processes,
+            "max_restart_seconds": max_restart_seconds,
+        }
+    )
+
+    heartbeat_raw = bundle.get("heartbeat")
+    heartbeat_present = isinstance(heartbeat_raw, Mapping)
+    heartbeat = heartbeat_raw if heartbeat_present else {}
+    last_seen_age = _worker_ops_number(
+        heartbeat.get("last_seen_age_seconds", heartbeat.get("age_seconds")),
+        default=args.max_heartbeat_age_seconds + 1.0,
+        code="worker_heartbeat_age_invalid",
+        message="heartbeat last_seen_age_seconds must be numeric",
+        findings=findings,
+    )
+    heartbeat_ok = heartbeat.get("ok") is True and heartbeat.get("fresh") is True and last_seen_age <= args.max_heartbeat_age_seconds
+    if heartbeat.get("ok") is not True or heartbeat.get("fresh") is not True:
+        findings.append(_worker_ops_finding("worker_heartbeat_not_fresh", "worker heartbeat must be fresh"))
+    if last_seen_age > args.max_heartbeat_age_seconds:
+        findings.append(_worker_ops_finding("worker_heartbeat_stale", "worker heartbeat age exceeds threshold"))
+    checks.append({"name": "heartbeat", "ok": heartbeat_ok, "last_seen_age_seconds": last_seen_age})
+
+    queue_raw = bundle.get("queue")
+    queue_present = isinstance(queue_raw, Mapping)
+    queue = queue_raw if queue_present else {}
+    queue_backend = str(queue.get("backend") or "").strip().lower()
+    backlog = _worker_ops_int(
+        queue.get("backlog", queue.get("pending")),
+        default=args.max_backlog + 1,
+        code="worker_queue_backlog_invalid",
+        message="queue backlog must be numeric",
+        findings=findings,
+    )
+    dead_jobs = _worker_ops_int(
+        queue.get("dead_jobs", queue.get("dead", 0)),
+        default=args.max_dead_jobs + 1,
+        code="worker_queue_dead_invalid",
+        message="queue dead_jobs must be numeric",
+        findings=findings,
+    )
+    oldest_pending_age = _worker_ops_number(
+        queue.get("oldest_pending_age_seconds", 0),
+        default=args.max_oldest_pending_age_seconds + 1.0,
+        code="worker_queue_age_invalid",
+        message="queue oldest_pending_age_seconds must be numeric",
+        findings=findings,
+    )
+    queue_ok = (
+        queue.get("ok") is True
+        and queue_backend in {"postgres", "postgresql"}
+        and queue.get("tenant_scoped") is True
+        and backlog <= args.max_backlog
+        and dead_jobs <= args.max_dead_jobs
+        and oldest_pending_age <= args.max_oldest_pending_age_seconds
+    )
+    if queue.get("ok") is not True:
+        findings.append(_worker_ops_finding("worker_queue_not_ok", "queue evidence must be ok"))
+    if queue_backend not in {"postgres", "postgresql"}:
+        findings.append(_worker_ops_finding("worker_queue_backend_not_postgres", "worker queue backend must be postgres"))
+    if queue.get("tenant_scoped") is not True:
+        findings.append(_worker_ops_finding("worker_queue_tenant_scope_missing", "worker queue must prove tenant scoping"))
+    if backlog > args.max_backlog:
+        findings.append(_worker_ops_finding("worker_queue_backlog_too_high", "worker queue backlog exceeds threshold"))
+    if dead_jobs > args.max_dead_jobs:
+        findings.append(_worker_ops_finding("worker_dead_jobs_present", "worker queue contains dead jobs"))
+    if oldest_pending_age > args.max_oldest_pending_age_seconds:
+        findings.append(_worker_ops_finding("worker_queue_oldest_pending_stale", "oldest pending job age exceeds threshold"))
+    checks.append(
+        {
+            "name": "queue",
+            "ok": queue_ok,
+            "backend": queue_backend,
+            "tenant_scoped": queue.get("tenant_scoped") is True,
+            "backlog": backlog,
+            "dead_jobs": dead_jobs,
+            "oldest_pending_age_seconds": oldest_pending_age,
+        }
+    )
+
+    jobs_raw = bundle.get("jobs")
+    jobs_present = isinstance(jobs_raw, Mapping)
+    jobs = jobs_raw if jobs_present else {}
+    handled_kinds = _worker_ops_string_set(
+        jobs.get("handled_kinds"),
+        code="worker_handled_kinds_invalid",
+        message="jobs.handled_kinds must be a list",
+        findings=findings,
+    )
+    bundle_required_kinds = _worker_ops_string_set(
+        jobs.get("required_kinds"),
+        code="worker_required_kinds_invalid",
+        message="jobs.required_kinds must be a list",
+        findings=findings,
+    )
+    default_required_kinds = {
+        CONSOLIDATE_EVIDENCE_JOB,
+        PROJECTION_RECOMPUTE_JOB,
+        "calibrate",
+        "lifecycle_sweep",
+        "eval_suite",
+        "observability_snapshot",
+        "media_extract",
+    }
+    required_kinds = sorted(set(args.require_job_kind) or bundle_required_kinds or default_required_kinds)
+    missing_kinds = [kind for kind in required_kinds if kind not in handled_kinds]
+    failed_cycle_count = _worker_ops_int(
+        jobs.get("failed_cycle_count", 0),
+        default=1,
+        code="worker_failed_cycles_invalid",
+        message="jobs.failed_cycle_count must be numeric",
+        findings=findings,
+    )
+    jobs_dead_count = _worker_ops_int(
+        jobs.get("dead_job_count", 0),
+        default=args.max_dead_jobs + 1,
+        code="worker_dead_job_count_invalid",
+        message="jobs.dead_job_count must be numeric",
+        findings=findings,
+    )
+    jobs_ok = jobs.get("ok") is True and not missing_kinds and failed_cycle_count == 0 and jobs_dead_count <= args.max_dead_jobs
+    if jobs.get("ok") is not True:
+        findings.append(_worker_ops_finding("worker_jobs_not_ok", "job handler evidence must be ok"))
+    for kind in missing_kinds:
+        findings.append(_worker_ops_finding("worker_job_kind_missing", f"worker must handle {kind} jobs"))
+    if failed_cycle_count:
+        findings.append(_worker_ops_finding("worker_failed_cycles_present", "worker evidence contains failed cycles"))
+    if jobs_dead_count > args.max_dead_jobs:
+        findings.append(_worker_ops_finding("worker_jobs_dead_present", "worker job evidence contains dead jobs"))
+    checks.append(
+        {
+            "name": "jobs",
+            "ok": jobs_ok,
+            "handled_kinds": sorted(handled_kinds),
+            "missing_kinds": missing_kinds,
+            "failed_cycle_count": failed_cycle_count,
+            "dead_job_count": jobs_dead_count,
+        }
+    )
+
+    observability_raw = bundle.get("observability")
+    observability = observability_raw if isinstance(observability_raw, Mapping) else {}
+    observability_flags = {
+        "metrics_exported": observability.get("metrics_exported") is True,
+        "cycle_heartbeats": observability.get("cycle_heartbeats") is True,
+        "alerts_configured": observability.get("alerts_configured") is True,
+        "restart_alerts": observability.get("restart_alerts") is True,
+    }
+    missing_observability = [name for name, ok in observability_flags.items() if not ok]
+    observability_ok = observability.get("ok") is True and not missing_observability
+    if observability.get("ok") is not True:
+        findings.append(_worker_ops_finding("worker_observability_not_ok", "observability evidence must be ok"))
+    for flag in missing_observability:
+        findings.append(_worker_ops_finding("worker_observability_missing", f"observability flag {flag} is not proven"))
+    checks.append({"name": "observability", "ok": observability_ok, **observability_flags})
+
+    redaction_raw = bundle.get("redaction")
+    redaction = redaction_raw if isinstance(redaction_raw, Mapping) else {}
+    redaction_flags = {
+        "raw_env_omitted": redaction.get("raw_env_omitted") is True,
+        "raw_connection_strings_omitted": redaction.get("raw_connection_strings_omitted") is True,
+        "raw_queue_payloads_omitted": redaction.get("raw_queue_payloads_omitted") is True,
+        "raw_worker_logs_omitted": redaction.get("raw_worker_logs_omitted") is True,
+    }
+    forbidden_raw_paths = _worker_ops_forbidden_raw_paths(bundle)
+    missing_redaction = [name for name, ok in redaction_flags.items() if not ok]
+    for flag in missing_redaction:
+        findings.append(_worker_ops_finding("redaction_flag_missing", f"redaction flag {flag} is not proven"))
+    if forbidden_raw_paths:
+        findings.append(_worker_ops_finding("redaction_raw_field_present", "worker ops bundle contains raw secret/env/payload/log fields"))
+    checks.append(
+        {
+            "name": "redaction",
+            "ok": not missing_redaction and not forbidden_raw_paths,
+            **redaction_flags,
+            "forbidden_raw_paths": forbidden_raw_paths,
+        }
+    )
+
+    report: dict[str, Any] = {
+        "ok": not findings,
+        "bundle": {
+            "name": bundle.get("name"),
+            "deployment_present": deployment_present,
+            "supervisor_present": supervisor_present,
+            "heartbeat_present": heartbeat_present,
+            "queue_present": queue_present,
+            "jobs_present": jobs_present,
+        },
+        "requirements": {
+            "min_processes": args.min_processes,
+            "max_restart_seconds": args.max_restart_seconds,
+            "max_heartbeat_age_seconds": args.max_heartbeat_age_seconds,
+            "max_backlog": args.max_backlog,
+            "max_dead_jobs": args.max_dead_jobs,
+            "max_oldest_pending_age_seconds": args.max_oldest_pending_age_seconds,
+            "required_job_kinds": required_kinds,
+            "allow_non_production": bool(args.allow_non_production),
+        },
+        "redaction": {**redaction_flags, "forbidden_raw_fields_present": bool(forbidden_raw_paths)},
+        "checks": checks,
+        "findings": findings,
+    }
+    report["fingerprint"] = _worker_ops_fingerprint(report)
+    report["expected_fingerprint_present"] = bool(args.expected_fingerprint)
+    if args.expected_fingerprint and args.expected_fingerprint.strip().lower() != report["fingerprint"]:
+        report["ok"] = False
+        report["findings"].append(_worker_ops_finding("fingerprint_mismatch", "worker ops bundle fingerprint mismatch"))
     emit(report)
     if not report["ok"]:
         raise SystemExit(1)
@@ -10071,6 +10478,20 @@ def build_parser() -> argparse.ArgumentParser:
     mcp_ops_check.add_argument("--allow-localhost", action="store_true")
     mcp_ops_check.add_argument("--expected-fingerprint")
     mcp_ops_check.set_defaults(func=cmd_mcp_ops_check)
+
+    worker_ops_check = sub.add_parser("worker-ops-check")
+    worker_ops_check.add_argument("--bundle", help="Path to production worker deployment evidence bundle")
+    worker_ops_check.add_argument("--bundle-json", help="Inline production worker deployment evidence bundle JSON")
+    worker_ops_check.add_argument("--min-processes", type=int, default=1)
+    worker_ops_check.add_argument("--max-restart-seconds", type=float, default=120.0)
+    worker_ops_check.add_argument("--max-heartbeat-age-seconds", type=float, default=120.0)
+    worker_ops_check.add_argument("--max-backlog", type=int, default=1000)
+    worker_ops_check.add_argument("--max-dead-jobs", type=int, default=0)
+    worker_ops_check.add_argument("--max-oldest-pending-age-seconds", type=float, default=300.0)
+    worker_ops_check.add_argument("--require-job-kind", action="append", default=[])
+    worker_ops_check.add_argument("--allow-non-production", action="store_true")
+    worker_ops_check.add_argument("--expected-fingerprint")
+    worker_ops_check.set_defaults(func=cmd_worker_ops_check)
 
     consolidation_ops_check = sub.add_parser("consolidation-ops-check")
     consolidation_ops_check.add_argument("--bundle", help="Path to production consolidation evidence bundle")

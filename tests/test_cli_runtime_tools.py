@@ -4922,6 +4922,7 @@ def production_release_stdout(command: str, provider_stdout: dict) -> dict:
     if command in {
         "auth-ops-check",
         "mcp-ops-check",
+        "worker-ops-check",
         "retrieval-ops-check",
         "consolidation-ops-check",
         "multimodal-ops-check",
@@ -5468,6 +5469,150 @@ def test_cli_mcp_ops_check_fails_closed_on_weak_transport_bundle(tmp_path: Path)
     assert "mcp_tls_not_ok" in codes
     assert "mcp_tls_days_too_low" in codes
     assert "redaction_raw_field_present" in codes
+
+
+def worker_ops_bundle(*, weak_supervision: bool = False, raw_payload: bool = False) -> dict:
+    handled_kinds = [
+        "consolidate_evidence",
+        "projection_recompute",
+        "calibrate",
+        "lifecycle_sweep",
+        "eval_suite",
+        "observability_snapshot",
+        "media_extract",
+    ]
+    bundle = {
+        "name": "production-worker-ops",
+        "deployment": {
+            "environment": "production" if not weak_supervision else "local",
+            "operator_asserted": not weak_supervision,
+            "run_id": "worker-ops-run-1" if not weak_supervision else "",
+            "started_at": "2026-06-22T10:00:00Z",
+            "completed_at": "2026-06-22T10:05:00Z",
+        },
+        "supervisor": {
+            "ok": not weak_supervision,
+            "type": "systemd" if not weak_supervision else "manual",
+            "process_count": 2 if not weak_supervision else 0,
+            "desired_processes": 2 if not weak_supervision else 0,
+            "restart_policy": {
+                "enabled": not weak_supervision,
+                "backoff_configured": not weak_supervision,
+                "max_restart_seconds": 30 if not weak_supervision else 600,
+            },
+        },
+        "heartbeat": {
+            "ok": not weak_supervision,
+            "fresh": not weak_supervision,
+            "last_seen_age_seconds": 15 if not weak_supervision else 900,
+        },
+        "queue": {
+            "ok": not weak_supervision,
+            "backend": "postgres" if not weak_supervision else "inprocess",
+            "tenant_scoped": not weak_supervision,
+            "backlog": 3 if not weak_supervision else 5000,
+            "dead_jobs": 0 if not weak_supervision else 2,
+            "oldest_pending_age_seconds": 20 if not weak_supervision else 900,
+        },
+        "jobs": {
+            "ok": not weak_supervision,
+            "required_kinds": handled_kinds,
+            "handled_kinds": handled_kinds if not weak_supervision else ["consolidate_evidence"],
+            "failed_cycle_count": 0 if not weak_supervision else 2,
+            "dead_job_count": 0 if not weak_supervision else 2,
+        },
+        "observability": {
+            "ok": not weak_supervision,
+            "metrics_exported": not weak_supervision,
+            "cycle_heartbeats": not weak_supervision,
+            "alerts_configured": not weak_supervision,
+            "restart_alerts": not weak_supervision,
+        },
+        "redaction": {
+            "raw_env_omitted": True,
+            "raw_connection_strings_omitted": True,
+            "raw_queue_payloads_omitted": True,
+            "raw_worker_logs_omitted": True,
+        },
+    }
+    if raw_payload:
+        bundle["queue_payload"] = {"tenant_id": "tenant-a", "secret": "raw-worker-secret"}
+    return bundle
+
+
+def test_cli_worker_ops_check_validates_production_supervision_bundle(tmp_path: Path) -> None:
+    bundle = tmp_path / "worker-ops.json"
+    bundle.write_text(json.dumps(worker_ops_bundle()), encoding="utf-8")
+
+    report = run_cli(tmp_path / "mnemosyne.json", "worker-ops-check", "--bundle", str(bundle))
+    acknowledged = run_cli(
+        tmp_path / "mnemosyne.json",
+        "worker-ops-check",
+        "--bundle",
+        str(bundle),
+        "--expected-fingerprint",
+        report["fingerprint"],
+    )
+
+    serialized = json.dumps(report)
+    assert report["ok"] is True
+    assert len(report["fingerprint"]) == 64
+    assert {item["name"] for item in report["checks"]} == {
+        "deployment_scope",
+        "supervisor",
+        "heartbeat",
+        "queue",
+        "jobs",
+        "observability",
+        "redaction",
+    }
+    assert all(item["ok"] for item in report["checks"])
+    assert report["checks"][1]["type"] == "systemd"
+    assert report["checks"][3]["backend"] == "postgres"
+    assert report["checks"][4]["missing_kinds"] == []
+    assert report["redaction"]["forbidden_raw_fields_present"] is False
+    assert "raw-worker-secret" not in serialized
+    assert acknowledged["ok"] is True
+    assert acknowledged["expected_fingerprint_present"] is True
+
+
+def test_cli_worker_ops_check_fails_closed_on_weak_supervision_bundle(tmp_path: Path) -> None:
+    bundle = tmp_path / "bad-worker-ops.json"
+    bundle.write_text(json.dumps(worker_ops_bundle(weak_supervision=True, raw_payload=True)), encoding="utf-8")
+
+    result = run_raw_cli(tmp_path / "mnemosyne.json", "worker-ops-check", "--bundle", str(bundle))
+    payload = json.loads(result.stdout)
+    codes = {finding["code"] for finding in payload["findings"]}
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert "target_environment_not_production" in codes
+    assert "worker_supervisor_invalid" in codes
+    assert "worker_restart_policy_missing" in codes
+    assert "worker_heartbeat_stale" in codes
+    assert "worker_queue_backend_not_postgres" in codes
+    assert "worker_dead_jobs_present" in codes
+    assert "worker_job_kind_missing" in codes
+    assert "worker_observability_missing" in codes
+    assert "redaction_raw_field_present" in codes
+
+
+def test_cli_worker_ops_check_rejects_malformed_job_kind_lists(tmp_path: Path) -> None:
+    payload = worker_ops_bundle()
+    payload["jobs"]["handled_kinds"] = "calibrate"
+    payload["jobs"]["required_kinds"] = {"kind": "calibrate"}
+    bundle = tmp_path / "malformed-worker-ops.json"
+    bundle.write_text(json.dumps(payload), encoding="utf-8")
+
+    result = run_raw_cli(tmp_path / "mnemosyne.json", "worker-ops-check", "--bundle", str(bundle))
+    report = json.loads(result.stdout)
+    codes = {finding["code"] for finding in report["findings"]}
+
+    assert result.returncode == 1
+    assert "worker_handled_kinds_invalid" in codes
+    assert "worker_required_kinds_invalid" in codes
+    assert "worker_job_kind_missing" in codes
+    assert report["bundle"]["jobs_present"] is True
 
 
 def consolidation_ops_bundle(
