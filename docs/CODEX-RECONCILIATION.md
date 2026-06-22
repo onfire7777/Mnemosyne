@@ -13,12 +13,12 @@ byte-identical when inactive** — none require new infra, new deps, or a rewrit
 
 ---
 
-## Codex progress snapshot (audited against `origin/main` @ `14353d1`, 2026-06-21)
-The reconciliation tracker re-audited every item against Codex's latest committed `src`:
+## Codex progress snapshot (re-audited against `origin/main` @ `8be6dab`, 2026-06-21)
+Wave-6 re-audit: **Codex has closed NO new items since the `14353d1` snapshot — the list below is stable and accurate.** The completion forcing-functions confirm the still-open items via xfail (rails 5 xfail, erasure 1 xfail; all other suites fully green).
 
 **✅ Already LANDED by Codex — close these:**
 - **Rail 6 `untrusted_to_system_prompt`** — live capability check in `authorize_write` (`security.py:903`), wired into consolidation + mcp_tools.
-- **OQ6 corroborated-erasure split** — `engine.py:928-976` forget now computes `surviving_sources` → retain-with-updated-provenance vs retract sole-source (the exact OQ6 default).
+- **OQ6 corroborated-erasure split (PROJECTIONS only)** — `engine.py:931-976` forget computes `surviving_sources` → retain vs retract for assertions/preferences/relations/entities. **STILL ABSENT: the derived-evidence cascade (`engine.py:909-914`) blanket-zeroes every transitively-derived row** — the FR-8 cascade extension is not yet built (corroboration-aware split needed there too).
 - **Deletion-trigger param** — `erasure_mode` on both forget signatures distinguishes legal vs operator deletion.
 
 **◐ PARTIAL:**
