@@ -167,6 +167,33 @@ PRODUCTION_RELEASE_REQUIRED_PROVIDER_CHECKS = (
     "session_secret",
     "residency_policy",
 )
+RELEASE_AUDIT_REQUIRED_OUTPUT_KEYS: dict[str, tuple[str, ...]] = {
+    "belief-revision-check": ("fingerprint", "summary", "results", "findings"),
+    "auth-ops-check": ("bundle", "requirements", "checks", "findings"),
+    "calibration-tune": ("calibration", "threshold", "metrics", "failures"),
+    "forgetting-policy-check": ("fingerprint", "summary", "results", "findings"),
+    "hosted-llm-check": ("manifest", "required_roles", "checks", "findings"),
+    "policy-ops-check": ("bundle", "requirements", "checks", "findings"),
+    "privacy-ops-check": ("bundle", "requirements", "checks", "findings"),
+    "provenance-ops-check": ("bundle", "requirements", "checks", "findings"),
+    "provenance-trust-check": ("suite", "required_case_ids", "checks", "findings"),
+    "provider-check": ("manifest", "checks"),
+    "retrieval-ops-check": ("bundle", "requirements", "checks", "findings"),
+    "idp-jwks-live-check": ("issuer", "audience", "jwks", "token", "identity"),
+    "idp-authz-policy-rollout-check": ("rollout",),
+    "tls-cert-check": ("target", "tls", "certificate", "checks"),
+    "tls-rotation-plan-check": ("config", "current", "candidate", "rotation", "checks"),
+    "mcp-http-soak": ("target", "config", "health", "iterations", "summary"),
+    "mcp-ops-check": ("bundle", "requirements", "checks", "findings"),
+    "mcp-streamable-http-soak": ("target", "config", "health", "iterations", "summary"),
+    "consolidation-ops-check": ("bundle", "requirements", "checks", "findings"),
+    "multimodal-ops-check": ("bundle", "requirements", "checks", "findings"),
+    "gate-suite-check": ("suite", "requirements", "failures"),
+    "projection-recompute-once": ("queue", "enqueued_job", "job", "metrics"),
+    "worker-run": ("worker", "summary", "queue", "cycles", "jobs", "metrics"),
+    "ops-dashboard-check": ("mode", "source", "checks", "findings"),
+    "parametric-trainer-check": ("bundle", "requirements", "checks", "findings"),
+}
 
 
 def default_store() -> Path:
@@ -7710,6 +7737,45 @@ def _release_command_summary(checks: list[Mapping[str, Any]], required_commands:
     return rows
 
 
+def _release_command_output_findings(check: Mapping[str, Any]) -> list[dict[str, Any]]:
+    command = check.get("command")
+    if not isinstance(command, str) or command not in RELEASE_AUDIT_REQUIRED_OUTPUT_KEYS:
+        return []
+    if check.get("ok") is not True:
+        return []
+    stdout_json = check.get("stdout_json")
+    if not isinstance(stdout_json, Mapping):
+        return [
+            _release_finding(
+                "required_command_output_missing",
+                f"required deployment check {command} did not emit structured JSON evidence",
+            )
+        ]
+    if command == "ops-report":
+        report = stdout_json.get("report")
+        if isinstance(report, Mapping):
+            return []
+        missing_ops_report = [key for key in ("counts", "tripwires") if key not in stdout_json]
+        if not missing_ops_report:
+            return []
+        return [
+            _release_finding(
+                "required_command_output_incomplete",
+                f"required deployment check {command} is missing output sections: {', '.join(missing_ops_report)}",
+            )
+        ]
+    required_keys = RELEASE_AUDIT_REQUIRED_OUTPUT_KEYS[command]
+    missing = [key for key in required_keys if key not in stdout_json]
+    if not missing:
+        return []
+    return [
+        _release_finding(
+            "required_command_output_incomplete",
+            f"required deployment check {command} is missing output sections: {', '.join(missing)}",
+        )
+    ]
+
+
 def _release_provider_check_summary(
     provider_report: Mapping[str, Any] | None,
     required_provider_checks: list[str],
@@ -7795,6 +7861,10 @@ def cmd_release_audit(args: argparse.Namespace) -> None:
             )
 
     command_summary = _release_command_summary(checks, required_commands)
+    required_command_set = set(required_commands)
+    for check in checks:
+        if check.get("command") in required_command_set:
+            findings.extend(_release_command_output_findings(check))
     for row in command_summary:
         if not row["present"]:
             findings.append(
