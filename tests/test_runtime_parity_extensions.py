@@ -1438,6 +1438,163 @@ def test_runtime_state_round_trips_local_and_postgres_parity(tmp_path) -> None:
     assert local_snapshot == postgres_snapshot
 
 
+def test_postgres_runtime_state_isolates_tenant_side_state() -> None:
+    dsn = os.environ.get("MNEMOSYNE_POSTGRES_DSN")
+    if not dsn:
+        pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+    from mnemosyne.postgres_runtime_state import PostgresRuntimeState
+
+    tenant_a = f"{TENANT}-runtime-isolation-a-{uuid4()}"
+    tenant_b = f"{TENANT}-runtime-isolation-b-{uuid4()}"
+    user_a = f"{USER}-a"
+    user_b = f"{USER}-b"
+    cid_a = f"cidv1:{sha256(tenant_a.encode('utf-8')).hexdigest()}"
+    cid_b = f"cidv1:{sha256(tenant_b.encode('utf-8')).hexdigest()}"
+    model = UserModel()
+    for tenant, user, cid, statement in [
+        (tenant_a, user_a, cid_a, "Tenant A prefers isolated runtime state."),
+        (tenant_b, user_b, cid_b, "Tenant B prefers isolated runtime state."),
+    ]:
+        model.add_entry(
+            UserModelEntry(
+                tenant_id=tenant,
+                user_id=user,
+                kind=UserMemoryKind.EXPLICIT_PREFERENCE,
+                statement=statement,
+                scope={"surface": "runtime-isolation"},
+                confidence=0.91,
+                source_evidence_cids=[cid],
+            )
+        )
+        model.set_latent_profile(
+            LatentUserProfile(
+                tenant_id=tenant,
+                user_id=user,
+                embedding=[0.1, 0.2, 0.3] if tenant == tenant_a else [0.4, 0.5, 0.6],
+                summary=f"{tenant} latent profile",
+            )
+        )
+
+    learning = LearningSystem(LocalMemoryEngine())
+    for tenant, user, label in [(tenant_a, user_a, "tenant-a"), (tenant_b, user_b, "tenant-b")]:
+        trajectory = Trajectory(
+            tenant_id=tenant,
+            user_id=user,
+            session_id=f"{label}-session",
+            task=f"{label} runtime isolation",
+            steps=[{"status": "failed", "error": f"{label}-failure"}],
+            outcome="failure",
+            reward=-1.0,
+            memory_version=f"{label}-v1",
+        )
+        learning.log_trajectory(trajectory)
+        attribution = learning.attribute_failure(trajectory.id)
+        lesson = learning.induce_lesson(attribution)
+        learning.induce_procedure(lesson)
+
+    queue_a = InProcessQueue()
+    queue_a.enqueue("tenant-a-job", {"tenant_id": tenant_a}, max_attempts=2)
+    queue_b = InProcessQueue()
+    queue_b.enqueue("tenant-b-job", {"tenant_id": tenant_b}, max_attempts=2)
+    metrics_a = MetricsRegistry()
+    metrics_a.increment("runtime.isolation", 1)
+    metrics_b = MetricsRegistry()
+    metrics_b.increment("runtime.isolation", 2)
+    gate_a = [
+        RegressionCase(
+            str(uuid4()),
+            "tenant-a-gate",
+            "tenant a query",
+            "tenant a",
+            tier="core",
+            protected=True,
+        )
+    ]
+    gate_b = [
+        RegressionCase(
+            str(uuid4()),
+            "tenant-b-gate",
+            "tenant b query",
+            "tenant b",
+            tier="core",
+            protected=True,
+        )
+    ]
+    state_a = PostgresRuntimeState(dsn, tenant_id=tenant_a)
+    state_b = PostgresRuntimeState(dsn, tenant_id=tenant_b)
+
+    state_a.save_user_model(model)
+    state_b.save_user_model(model)
+    state_a.save_learning(learning)
+    state_b.save_learning(learning)
+    state_a.save_queue(queue_a)
+    state_b.save_queue(queue_b)
+    state_a.save_metrics(metrics_a)
+    state_b.save_metrics(metrics_b)
+    state_a.save_gate_cases(gate_a)
+    state_b.save_gate_cases(gate_b)
+
+    loaded_a_model = state_a.load_user_model()
+    loaded_b_model = state_b.load_user_model()
+    packet_a = loaded_a_model.context_packet(tenant_a, user_a, {"surface": "runtime-isolation"})
+    packet_b = loaded_b_model.context_packet(tenant_b, user_b, {"surface": "runtime-isolation"})
+    loaded_a_learning = state_a.load_learning(LearningSystem(LocalMemoryEngine()))
+    loaded_b_learning = state_b.load_learning(LearningSystem(LocalMemoryEngine()))
+
+    assert [item["statement"] for item in packet_a["authoritative"]] == [
+        "Tenant A prefers isolated runtime state."
+    ]
+    assert [item["statement"] for item in packet_b["authoritative"]] == [
+        "Tenant B prefers isolated runtime state."
+    ]
+    assert {item.tenant_id for item in loaded_a_learning.trajectories.values()} == {tenant_a}
+    assert {item.tenant_id for item in loaded_b_learning.trajectories.values()} == {tenant_b}
+    assert {item.tenant_id for item in loaded_a_learning.lessons.values()} == {tenant_a}
+    assert {item.tenant_id for item in loaded_b_learning.lessons.values()} == {tenant_b}
+    assert state_a.load_queue().to_dict()["jobs"][0]["kind"] == "tenant-a-job"
+    assert state_b.load_queue().to_dict()["jobs"][0]["kind"] == "tenant-b-job"
+    assert state_a.load_metrics().snapshot().counters["runtime.isolation"] == 1
+    assert state_b.load_metrics().snapshot().counters["runtime.isolation"] == 2
+    assert [case.signature for case in state_a.load_gate_cases()] == ["tenant-a-gate"]
+    assert [case.signature for case in state_b.load_gate_cases()] == ["tenant-b-gate"]
+
+    def mirror_counts(state: PostgresRuntimeState) -> dict[str, int]:
+        with state.connect() as conn:
+            with conn.cursor() as cur:
+                state._set_tenant(cur)
+                counts: dict[str, int] = {}
+                for name, sql in {
+                    "runtime_state": "SELECT count(*) FROM runtime_state WHERE tenant_id = %s",
+                    "preferences": (
+                        "SELECT count(*) FROM preferences "
+                        "WHERE tenant_id = %s AND scope ? '_mnemosyne_runtime'"
+                    ),
+                    "user_latent": "SELECT count(*) FROM user_latent WHERE tenant_id = %s",
+                    "trajectories": "SELECT count(*) FROM trajectories WHERE tenant_id = %s",
+                    "lessons": "SELECT count(*) FROM lessons WHERE tenant_id = %s",
+                    "procedures": "SELECT count(*) FROM procedures WHERE tenant_id = %s",
+                    "eval_cases": (
+                        "SELECT count(*) FROM eval_cases "
+                        "WHERE tenant_id = %s AND origin = 'runtime_state'"
+                    ),
+                }.items():
+                    cur.execute(sql, (state.db_tenant_id,))
+                    counts[name] = int(cur.fetchone()[0])
+        return counts
+
+    expected_counts = {
+        "runtime_state": 5,
+        "preferences": 1,
+        "user_latent": 1,
+        "trajectories": 1,
+        "lessons": 1,
+        "procedures": 1,
+        "eval_cases": 1,
+    }
+    assert mirror_counts(state_a) == expected_counts
+    assert mirror_counts(state_b) == expected_counts
+
+
 def test_runtime_job_handler_public_methods_return_structured_results() -> None:
     engine = LocalMemoryEngine()
     queue = InProcessQueue()
