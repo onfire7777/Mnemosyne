@@ -982,6 +982,23 @@ def test_cli_tools_matches_mcp_tools_list_contract(tmp_path: Path) -> None:
     assert json.loads(result.stdout)["tools"] == listed["result"]["tools"]
 
 
+def test_cli_eval_reports_seed_suite_outcomes_without_backend(tmp_path: Path) -> None:
+    result = run_raw_cli(tmp_path / "mnemosyne.json", "--backend", "postgres", "--postgres-dsn", "", "eval")
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["passed"] is True
+    assert [item["name"] for item in payload["outcomes"]] == [
+        "retrieval_returns_provenance",
+        "untrusted_instruction_filtered",
+        "thin_evidence_abstains",
+        "forget_retracts_dependent_assertion",
+    ]
+    assert all(item["passed"] is True for item in payload["outcomes"])
+    assert all(isinstance(item["detail"], str) and item["detail"] for item in payload["outcomes"])
+    assert all(set(item) == {"name", "passed", "detail"} for item in payload["outcomes"])
+
+
 def test_cli_exposes_retrieval_provider_flags() -> None:
     args = build_parser().parse_args(
         [

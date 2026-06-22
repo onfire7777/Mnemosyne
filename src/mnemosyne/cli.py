@@ -14,6 +14,7 @@ import sys
 import tempfile
 import time
 from collections.abc import Mapping
+from dataclasses import asdict
 from datetime import UTC, datetime
 from hashlib import sha256
 from pathlib import Path
@@ -6096,7 +6097,7 @@ def cmd_tools(args: argparse.Namespace) -> None:
 
 def cmd_eval(args: argparse.Namespace) -> None:
     outcomes = run_seed_suite()
-    emit({"passed": all(item.passed for item in outcomes), "outcomes": [item.__dict__ for item in outcomes]})
+    emit({"passed": all(item.passed for item in outcomes), "outcomes": [asdict(item) for item in outcomes]})
 
 
 def cmd_queue_snapshot(args: argparse.Namespace) -> None:
