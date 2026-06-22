@@ -83,6 +83,8 @@ Use `provider-check` with the same flags, or `provider-check --provider-manifest
 
 Use `privacy-ops-check --bundle ./privacy-ops.json --require-case residency-deny --require-case legal-delete` to validate production privacy evidence bundles for non-local KMS lifecycle/rotation/shred, strict residency allow/deny enforcement, tombstone recompute safety, legal hard-delete safety, redacted key/object/subject evidence, and stable fingerprints.
 
+Use `parametric-trainer-check --bundle ./parametric-trainer.json --min-cases 5 --min-protected 2` to validate production parametric trainer evidence bundles. The bundle must include `trainer` evidence with a non-local provider plus immutable `artifact_uri`/`artifact_uri_hash`, `protected_suite` evidence with `case_count`, `protected_case_count`, `case_ids`, `protected_case_ids`, non-synthetic `source`, `fingerprint`, and smoke/core/archive `tier_counts`, `gate` evidence with matching `artifact_id`/`candidate_id`, passed protected cases, margin, and no rollback branch, `rail_report` evidence for external reward, monotonic trust, non-negative trust delta, no system-prompt sink, and no eval/source overlap, plus `rollback`, `metrics`, and verified `redaction` sections with stable fingerprints.
+
 Signed CLI session tokens can bind tenant/user identity and write authority before a subcommand executes:
 
 ```bash
@@ -142,7 +144,7 @@ python -m mnemosyne.cli \
 
 For production key custody, use `--object-key-provider command --object-key-command "<kms-wrapper>"`. Mnemosyne invokes the command without a shell, passes JSON on stdin, and expects JSON on stdout for `get_or_create_key`, `get_key`, `has_key`, and `shred_key`.
 
-For isolated parametric adapter custody, use `--parametric-provider command --parametric-command "<trainer-wrapper>"`. Mnemosyne invokes the command without a shell, passes JSON on stdin for `propose` and `rollback`, requires operator-grade role/trust authorization before trainer calls, enforces local mutation-rate/reward/sink/gate rails, and persists provider metrics/payloads with rollback metadata.
+For isolated parametric adapter custody, use `--parametric-provider command --parametric-command "<trainer-wrapper>"`. Mnemosyne invokes the command without a shell, passes JSON on stdin for `propose` and `rollback`, requires operator-grade role/trust authorization before trainer calls, enforces local mutation-rate/reward/sink/gate rails, persists provider metrics/payloads with rollback metadata, and routes production trainer deployment evidence through `parametric-trainer-check`.
 
 For model-backed consolidation, use `--candidate-extractor-provider command --candidate-extractor-command "<extractor-wrapper>"` and `--summarizer-provider command --summarizer-command "<summarizer-wrapper>"`. Mnemosyne invokes each command without a shell. The extractor receives `{"tenant_id":"...","payload":{...},"evidence":[...]}` and must return `{"candidates":[...]}` rows containing `signature`, `query`, `candidate_subject`, `candidate_predicate`, and `candidate_object`; malformed or empty required fields fail closed before promotion. The summarizer receives `{"tenant_id":"...","evidence":[...]}` and must return a non-empty `summary`. Neither provider can bypass data-only/quarantine skips or the protected promotion gate.
 

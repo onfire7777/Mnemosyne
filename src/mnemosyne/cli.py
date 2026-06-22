@@ -96,6 +96,7 @@ DEPLOYMENT_SOAK_COMMANDS = {
     "mcp-streamable-http-soak",
     "mcp-sse-soak",
     "ops-dashboard-check",
+    "parametric-trainer-check",
     "worker-run",
     "projection-recompute-once",
     "gate-suite-check",
@@ -128,6 +129,7 @@ PRODUCTION_RELEASE_REQUIRED_COMMANDS = (
     "projection-recompute-once",
     "worker-run",
     "ops-dashboard-check",
+    "parametric-trainer-check",
     "ops-report",
 )
 PRODUCTION_RELEASE_REQUIRED_PROVIDER_CHECKS = (
@@ -1502,6 +1504,527 @@ def cmd_privacy_ops_check(args: argparse.Namespace) -> None:
     if args.expected_fingerprint and args.expected_fingerprint.strip().lower() != report["fingerprint"]:
         report["ok"] = False
         report["findings"].append(_privacy_finding("fingerprint_mismatch", "privacy ops bundle fingerprint mismatch"))
+    emit(report)
+    if not report["ok"]:
+        raise SystemExit(1)
+
+
+def _load_parametric_trainer_bundle(args: argparse.Namespace) -> Mapping[str, Any]:
+    if bool(args.bundle) == bool(args.bundle_json):
+        raise SystemExit("parametric-trainer-check requires exactly one of --bundle or --bundle-json")
+    try:
+        loaded = (
+            json.loads(Path(args.bundle).expanduser().read_text(encoding="utf-8"))
+            if args.bundle
+            else json.loads(args.bundle_json)
+        )
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"parametric trainer bundle denied: {exc}") from exc
+    if not isinstance(loaded, Mapping):
+        raise SystemExit("parametric trainer bundle must be a JSON object")
+    return loaded
+
+
+def _parametric_finding(code: str, message: str) -> dict[str, str]:
+    return {"code": code, "message": message}
+
+
+def _parametric_trainer_fingerprint(report: Mapping[str, Any]) -> str:
+    payload = {
+        "bundle": report.get("bundle"),
+        "requirements": report.get("requirements"),
+        "checks": report.get("checks"),
+        "findings": report.get("findings"),
+    }
+    return sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def _parametric_number(
+    value: Any,
+    *,
+    default: float,
+    code: str,
+    message: str,
+    findings: list[dict[str, str]],
+) -> float:
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        findings.append(_parametric_finding(code, message))
+        return default
+
+
+def _parametric_int(
+    value: Any,
+    *,
+    default: int,
+    code: str,
+    message: str,
+    findings: list[dict[str, str]],
+) -> int:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        findings.append(_parametric_finding(code, message))
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        findings.append(_parametric_finding(code, message))
+        return default
+
+
+def _parametric_string_list(
+    value: Any,
+    *,
+    code: str,
+    message: str,
+    findings: list[dict[str, str]],
+) -> list[str]:
+    if not isinstance(value, list) or not all(isinstance(item, str) and item for item in value):
+        findings.append(_parametric_finding(code, message))
+        return []
+    return list(value)
+
+
+def _parametric_forbidden_raw_paths(value: Any, *, path: str = "$") -> list[str]:
+    forbidden_keys = {
+        "raw_training_data",
+        "raw_credentials",
+        "artifact_bytes",
+        "secret",
+        "token",
+        "private_key",
+    }
+    paths: list[str] = []
+    if isinstance(value, Mapping):
+        for key, child in value.items():
+            key_name = str(key)
+            child_path = f"{path}.{key_name}"
+            if key_name.lower() in forbidden_keys and child not in (None, "", [], {}):
+                paths.append(child_path)
+            paths.extend(_parametric_forbidden_raw_paths(child, path=child_path))
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            paths.extend(_parametric_forbidden_raw_paths(child, path=f"{path}[{index}]"))
+    return paths
+
+
+def cmd_parametric_trainer_check(args: argparse.Namespace) -> None:
+    bundle = _load_parametric_trainer_bundle(args)
+    findings: list[dict[str, str]] = []
+    checks: list[dict[str, Any]] = []
+
+    trainer = bundle.get("trainer")
+    if not isinstance(trainer, Mapping):
+        findings.append(_parametric_finding("missing_trainer_section", "parametric trainer bundle requires trainer section"))
+        trainer = {}
+    provider = str(trainer.get("provider") or "")
+    provider_kind = provider.strip().lower()
+    local_provider = provider_kind in {"", "local", "mock", "test", "filesystem"}
+    trainer_flags = {
+        "immutable_rail_service": trainer.get("immutable_rail_service") is True,
+        "credentials_isolated": trainer.get("credentials_isolated") is True,
+        "artifact_uri_immutable": trainer.get("artifact_uri_immutable") is True,
+        "promotion_requires_gate": trainer.get("promotion_requires_gate") is True,
+        "production_mutation_disabled": trainer.get("production_mutation_disabled") is True,
+    }
+    artifact_uri = str(trainer.get("artifact_uri") or "").strip()
+    artifact_uri_hash = str(trainer.get("artifact_uri_hash") or "").strip()
+    artifact_hash_ok = bool(artifact_uri_hash) and "sha256:" in artifact_uri_hash.lower()
+    missing_trainer_flags = [name for name, ok in trainer_flags.items() if not ok]
+    trainer_ok = bool(provider) and not local_provider and not missing_trainer_flags and bool(artifact_uri) and artifact_hash_ok
+    if not provider:
+        findings.append(_parametric_finding("trainer_provider_missing", "trainer provider identity is required"))
+    if local_provider:
+        findings.append(_parametric_finding("trainer_provider_local", "trainer evidence must use a non-local provider"))
+    for flag in missing_trainer_flags:
+        findings.append(_parametric_finding("trainer_control_missing", f"trainer control {flag} is not proven"))
+    if not artifact_uri:
+        findings.append(_parametric_finding("artifact_uri_missing", "trainer artifact_uri is required"))
+    if not artifact_hash_ok:
+        findings.append(_parametric_finding("artifact_uri_hash_missing", "trainer artifact_uri_hash must prove a stable SHA-256 artifact reference"))
+    checks.append(
+        {
+            "name": "trainer",
+            "ok": trainer_ok,
+            "provider": provider,
+            "provider_local": local_provider,
+            "missing_controls": missing_trainer_flags,
+            "artifact_uri_present": bool(artifact_uri),
+            "artifact_uri_hash_present": bool(artifact_uri_hash),
+        }
+    )
+
+    protected_suite = bundle.get("protected_suite")
+    if not isinstance(protected_suite, Mapping):
+        findings.append(
+            _parametric_finding("missing_protected_suite", "parametric trainer bundle requires protected_suite section")
+        )
+        protected_suite = {}
+    tier_counts = protected_suite.get("tier_counts") if isinstance(protected_suite.get("tier_counts"), Mapping) else {}
+    required_tiers = {"smoke", "core", "archive"}
+    tier_values = {
+        tier: _parametric_int(
+            tier_counts.get(tier),
+            default=0,
+            code="suite_tier_count_invalid",
+            message=f"protected suite tier {tier} count must be numeric",
+            findings=findings,
+        )
+        for tier in required_tiers
+    }
+    missing_tiers = sorted(tier for tier, count in tier_values.items() if count <= 0)
+    case_count = _parametric_int(
+        protected_suite.get("case_count"),
+        default=0,
+        code="suite_case_count_invalid",
+        message="protected suite case_count must be numeric",
+        findings=findings,
+    )
+    protected_case_count = _parametric_int(
+        protected_suite.get("protected_case_count"),
+        default=0,
+        code="suite_protected_case_count_invalid",
+        message="protected suite protected_case_count must be numeric",
+        findings=findings,
+    )
+    case_ids = _parametric_string_list(
+        protected_suite.get("case_ids"),
+        code="suite_case_ids_invalid",
+        message="protected suite case_ids must be a non-empty string array",
+        findings=findings,
+    )
+    protected_case_ids = _parametric_string_list(
+        protected_suite.get("protected_case_ids"),
+        code="suite_protected_case_ids_invalid",
+        message="protected suite protected_case_ids must be a non-empty string array",
+        findings=findings,
+    )
+    source = str(protected_suite.get("source") or "").strip()
+    synthetic_override = (
+        protected_suite.get("synthetic_operator_override") is True
+        or bundle.get("synthetic_protected_suite_operator_override") is True
+    )
+    source_ok = bool(source) and (source.lower() != "synthetic" or synthetic_override)
+    case_id_counts_ok = len(case_ids) == case_count and len(protected_case_ids) == protected_case_count
+    protected_ids_subset_ok = set(protected_case_ids).issubset(set(case_ids))
+    suite_ok = (
+        case_count >= args.min_cases
+        and protected_case_count >= args.min_protected
+        and bool(protected_suite.get("fingerprint"))
+        and not missing_tiers
+        and source_ok
+        and case_id_counts_ok
+        and protected_ids_subset_ok
+    )
+    if case_count < args.min_cases:
+        findings.append(_parametric_finding("insufficient_suite_cases", "protected suite case count is too low"))
+    if protected_case_count < args.min_protected:
+        findings.append(_parametric_finding("insufficient_protected_cases", "protected suite protected-case count is too low"))
+    if not protected_suite.get("fingerprint"):
+        findings.append(_parametric_finding("suite_fingerprint_missing", "protected suite fingerprint is required"))
+    if missing_tiers:
+        findings.append(_parametric_finding("suite_tier_missing", f"protected suite missing tiers: {', '.join(missing_tiers)}"))
+    if not source:
+        findings.append(_parametric_finding("suite_source_missing", "protected suite source is required"))
+    if source.lower() == "synthetic" and not synthetic_override:
+        findings.append(_parametric_finding("suite_source_synthetic", "production protected suite cannot be synthetic without operator override"))
+    if len(case_ids) != case_count:
+        findings.append(_parametric_finding("suite_case_ids_mismatch", "protected suite case_ids count must match case_count"))
+    if len(protected_case_ids) != protected_case_count:
+        findings.append(
+            _parametric_finding("suite_protected_case_ids_mismatch", "protected_suite protected_case_ids count must match protected_case_count")
+        )
+    if not protected_ids_subset_ok:
+        findings.append(_parametric_finding("suite_protected_ids_not_in_cases", "protected_case_ids must be contained in case_ids"))
+    checks.append(
+        {
+            "name": "protected_suite",
+            "ok": suite_ok,
+            "case_count": case_count,
+            "protected_case_count": protected_case_count,
+            "source": source,
+            "synthetic_override": synthetic_override,
+            "missing_tiers": missing_tiers,
+            "fingerprint_present": bool(protected_suite.get("fingerprint")),
+            "case_id_count_matches": case_id_counts_ok,
+        }
+    )
+
+    gate = bundle.get("gate")
+    if not isinstance(gate, Mapping):
+        findings.append(_parametric_finding("missing_gate_section", "parametric trainer bundle requires gate section"))
+        gate = {}
+    artifact_id = str(gate.get("artifact_id") or "").strip()
+    candidate_id = str(gate.get("candidate_id") or "").strip()
+    protected_regressions = _parametric_string_list(
+        gate.get("protected_regressions"),
+        code="gate_protected_regressions_invalid",
+        message="gate protected_regressions must be a string array",
+        findings=findings,
+    )
+    failed_cases = _parametric_string_list(
+        gate.get("failed_cases"),
+        code="gate_failed_cases_invalid",
+        message="gate failed_cases must be a string array",
+        findings=findings,
+    )
+    passed_cases = _parametric_string_list(
+        gate.get("passed_cases"),
+        code="gate_passed_cases_invalid",
+        message="gate passed_cases must be a string array",
+        findings=findings,
+    )
+    gate_margin = _parametric_number(
+        gate.get("margin"),
+        default=args.min_gate_margin - 1.0,
+        code="gate_margin_invalid",
+        message="gate margin must be numeric",
+        findings=findings,
+    )
+    gate_min_margin = _parametric_number(
+        gate.get("min_gate_margin"),
+        default=args.min_gate_margin,
+        code="gate_min_margin_invalid",
+        message="gate min_gate_margin must be numeric",
+        findings=findings,
+    )
+    gate_margin_floor = max(args.min_gate_margin, gate_min_margin)
+    gate_rollback_branch = gate.get("rollback_branch")
+    passed_protected_ids = set(protected_case_ids).issubset(set(passed_cases))
+    gate_ok = (
+        bool(artifact_id)
+        and bool(candidate_id)
+        and artifact_id == candidate_id
+        and gate.get("promoted") is True
+        and not protected_regressions
+        and not failed_cases
+        and passed_protected_ids
+        and gate_margin > gate_margin_floor
+        and not gate_rollback_branch
+    )
+    if not artifact_id:
+        findings.append(_parametric_finding("gate_artifact_id_missing", "gate artifact_id is required"))
+    if not candidate_id:
+        findings.append(_parametric_finding("gate_candidate_id_missing", "gate candidate_id is required"))
+    if artifact_id and candidate_id and artifact_id != candidate_id:
+        findings.append(_parametric_finding("gate_candidate_mismatch", "gate candidate_id must match artifact_id"))
+    if gate.get("promoted") is not True:
+        findings.append(_parametric_finding("gate_not_promoted", "production parametric trainer evidence must show promoted gate result"))
+    if protected_regressions:
+        findings.append(_parametric_finding("gate_protected_regressions", "gate protected_regressions must be empty"))
+    if failed_cases:
+        findings.append(_parametric_finding("gate_failed_cases", "gate failed_cases must be empty"))
+    if not passed_protected_ids:
+        findings.append(_parametric_finding("gate_protected_cases_missing", "gate passed_cases must include all protected_case_ids"))
+    if gate_margin <= gate_margin_floor:
+        findings.append(_parametric_finding("gate_margin_too_low", "gate margin must exceed the enforced min_gate_margin"))
+    if gate_rollback_branch:
+        findings.append(_parametric_finding("gate_rollback_branch_present", "promoted gate evidence must not carry rollback_branch"))
+    checks.append(
+        {
+            "name": "gate",
+            "ok": gate_ok,
+            "artifact_id_present": bool(artifact_id),
+            "candidate_id_present": bool(candidate_id),
+            "promoted": gate.get("promoted") is True,
+            "protected_regression_count": len(protected_regressions),
+            "failed_case_count": len(failed_cases),
+            "passed_protected_cases": passed_protected_ids,
+            "margin": gate_margin,
+            "min_gate_margin": gate_margin_floor,
+        }
+    )
+
+    rollback = bundle.get("rollback")
+    if not isinstance(rollback, Mapping):
+        findings.append(_parametric_finding("missing_rollback_section", "parametric trainer bundle requires rollback section"))
+        rollback = {}
+    rollback_flags = {
+        "rollback_verified": rollback.get("rollback_verified") is True,
+        "same_artifact_uri_verified": rollback.get("same_artifact_uri_verified") is True,
+        "protected_suite_passed": rollback.get("protected_suite_passed") is True,
+        "rollback_provider_authorized": rollback.get("rollback_provider_authorized") is True,
+    }
+    missing_rollback_flags = [name for name, ok in rollback_flags.items() if not ok]
+    rollback_ok = not missing_rollback_flags and bool(rollback.get("rollback_fingerprint"))
+    for flag in missing_rollback_flags:
+        findings.append(_parametric_finding("rollback_control_missing", f"rollback control {flag} is not proven"))
+    if not rollback.get("rollback_fingerprint"):
+        findings.append(_parametric_finding("rollback_fingerprint_missing", "rollback fingerprint is required"))
+    checks.append(
+        {
+            "name": "rollback",
+            "ok": rollback_ok,
+            "missing_controls": missing_rollback_flags,
+            "rollback_fingerprint_present": bool(rollback.get("rollback_fingerprint")),
+        }
+    )
+
+    rail_report = bundle.get("rail_report")
+    if not isinstance(rail_report, Mapping):
+        findings.append(_parametric_finding("missing_rail_report", "parametric trainer bundle requires rail_report section"))
+        rail_report = {}
+    trust_tier_delta = _parametric_number(
+        rail_report.get("trust_tier_delta"),
+        default=-1.0,
+        code="rail_trust_tier_delta_invalid",
+        message="rail_report trust_tier_delta must be numeric",
+        findings=findings,
+    )
+    rail_provider_metadata_checked = rail_report.get("provider_metadata_checked") is True
+    rail_reward_ok = rail_report.get("reward_signal") == "external_only"
+    rail_monotonic_ok = rail_report.get("monotonic_trust") is True
+    rail_trust_ok = trust_tier_delta >= 0
+    rail_sink_ok = str(rail_report.get("target_sink") or "") != "system_prompt" and bool(rail_report.get("target_sink"))
+    rail_prompt_ok = rail_report.get("untrusted_to_system_prompt") in {"forbidden", False}
+    rail_overlap_ok = rail_report.get("eval_source_overlap") is False
+    rail_ok = (
+        rail_provider_metadata_checked
+        and rail_reward_ok
+        and rail_monotonic_ok
+        and rail_trust_ok
+        and rail_sink_ok
+        and rail_prompt_ok
+        and rail_overlap_ok
+    )
+    if not rail_provider_metadata_checked:
+        findings.append(_parametric_finding("rail_provider_metadata_unchecked", "rail_report must prove provider metadata was checked"))
+    if not rail_reward_ok:
+        findings.append(_parametric_finding("rail_reward_signal_invalid", "rail_report reward_signal must be external_only"))
+    if not rail_monotonic_ok:
+        findings.append(_parametric_finding("rail_monotonic_trust_invalid", "rail_report monotonic_trust must be true"))
+    if not rail_trust_ok:
+        findings.append(_parametric_finding("rail_trust_tier_delta_invalid", "rail_report trust_tier_delta must be non-negative"))
+    if not rail_sink_ok:
+        findings.append(_parametric_finding("rail_target_sink_invalid", "rail_report must prove target_sink is not system_prompt"))
+    if not rail_prompt_ok:
+        findings.append(_parametric_finding("rail_system_prompt_sink_invalid", "rail_report must forbid untrusted_to_system_prompt"))
+    if not rail_overlap_ok:
+        findings.append(_parametric_finding("rail_eval_overlap_invalid", "rail_report eval_source_overlap must be false"))
+    checks.append(
+        {
+            "name": "rail_report",
+            "ok": rail_ok,
+            "provider_metadata_checked": rail_provider_metadata_checked,
+            "reward_signal": rail_report.get("reward_signal"),
+            "monotonic_trust": rail_report.get("monotonic_trust") is True,
+            "trust_tier_delta": trust_tier_delta,
+            "target_sink": rail_report.get("target_sink"),
+            "eval_source_overlap": rail_report.get("eval_source_overlap"),
+        }
+    )
+
+    metrics = bundle.get("metrics") if isinstance(bundle.get("metrics"), Mapping) else {}
+    mutation_rate = _parametric_number(
+        metrics.get("mutation_rate"),
+        default=args.max_mutation_rate + 1.0,
+        code="mutation_rate_invalid",
+        message="trainer mutation rate must be numeric",
+        findings=findings,
+    )
+    reward = _parametric_number(
+        metrics.get("reward"),
+        default=args.min_reward - 1.0,
+        code="reward_invalid",
+        message="trainer reward must be numeric",
+        findings=findings,
+    )
+    sink_score = _parametric_number(
+        metrics.get("sink_score"),
+        default=args.max_sink_score + 1.0,
+        code="sink_score_invalid",
+        message="trainer sink score must be numeric",
+        findings=findings,
+    )
+    metrics_ok = mutation_rate <= args.max_mutation_rate and reward >= args.min_reward and sink_score <= args.max_sink_score
+    if mutation_rate > args.max_mutation_rate:
+        findings.append(_parametric_finding("mutation_rate_too_high", "trainer mutation rate exceeds release threshold"))
+    if reward < args.min_reward:
+        findings.append(_parametric_finding("reward_too_low", "trainer reward is below release threshold"))
+    if sink_score > args.max_sink_score:
+        findings.append(_parametric_finding("sink_score_too_high", "trainer sink score exceeds release threshold"))
+    checks.append(
+        {
+            "name": "metrics",
+            "ok": metrics_ok,
+            "mutation_rate": mutation_rate,
+            "max_mutation_rate": args.max_mutation_rate,
+            "reward": reward,
+            "min_reward": args.min_reward,
+            "sink_score": sink_score,
+            "max_sink_score": args.max_sink_score,
+        }
+    )
+
+    redaction = bundle.get("redaction")
+    if not isinstance(redaction, Mapping):
+        findings.append(_parametric_finding("missing_redaction_section", "parametric trainer bundle requires redaction section"))
+        redaction = {}
+    redaction_flags = {
+        "raw_training_data_omitted": redaction.get("raw_training_data_omitted") is True,
+        "raw_credentials_omitted": redaction.get("raw_credentials_omitted") is True,
+        "raw_artifact_bytes_omitted": redaction.get("raw_artifact_bytes_omitted") is True,
+    }
+    forbidden_raw_paths = _parametric_forbidden_raw_paths(bundle)
+    missing_redaction_flags = [name for name, ok in redaction_flags.items() if not ok]
+    redaction_ok = not missing_redaction_flags and not forbidden_raw_paths
+    for flag in missing_redaction_flags:
+        findings.append(_parametric_finding("redaction_flag_missing", f"redaction flag {flag} is not proven"))
+    if forbidden_raw_paths:
+        findings.append(_parametric_finding("redaction_raw_field_present", "parametric trainer bundle contains raw secret/training/artifact fields"))
+    checks.append(
+        {
+            "name": "redaction",
+            "ok": redaction_ok,
+            **redaction_flags,
+            "forbidden_raw_paths": forbidden_raw_paths,
+        }
+    )
+
+    report: dict[str, Any] = {
+        "ok": not findings,
+        "bundle": {
+            "name": bundle.get("name"),
+            "trainer_provider": provider,
+            "protected_suite_fingerprint_present": bool(protected_suite.get("fingerprint")),
+            "protected_suite_source": source,
+        },
+        "requirements": {
+            "non_local_trainer_provider": True,
+            "immutable_rail_service": True,
+            "credentials_isolated": True,
+            "artifact_uri_hash": True,
+            "min_cases": args.min_cases,
+            "min_protected": args.min_protected,
+            "required_tiers": sorted(required_tiers),
+            "protected_suite_source_non_synthetic": True,
+            "gate_candidate_matches_artifact": True,
+            "min_gate_margin": args.min_gate_margin,
+            "external_reward_signal": "external_only",
+            "monotonic_trust": True,
+            "eval_source_overlap": False,
+            "max_mutation_rate": args.max_mutation_rate,
+            "min_reward": args.min_reward,
+            "max_sink_score": args.max_sink_score,
+        },
+        "redaction": {
+            **redaction_flags,
+            "forbidden_raw_fields_present": bool(forbidden_raw_paths),
+        },
+        "checks": checks,
+        "findings": findings,
+    }
+    report["fingerprint"] = _parametric_trainer_fingerprint(report)
+    report["expected_fingerprint_present"] = bool(args.expected_fingerprint)
+    if args.expected_fingerprint and args.expected_fingerprint.strip().lower() != report["fingerprint"]:
+        report["ok"] = False
+        report["findings"].append(
+            _parametric_finding("fingerprint_mismatch", "parametric trainer bundle fingerprint mismatch")
+        )
     emit(report)
     if not report["ok"]:
         raise SystemExit(1)
@@ -5579,6 +6102,18 @@ def build_parser() -> argparse.ArgumentParser:
     privacy_ops_check.add_argument("--require-case", action="append", default=[])
     privacy_ops_check.add_argument("--expected-fingerprint")
     privacy_ops_check.set_defaults(func=cmd_privacy_ops_check)
+
+    parametric_trainer_check = sub.add_parser("parametric-trainer-check")
+    parametric_trainer_check.add_argument("--bundle", help="Path to production parametric trainer evidence bundle")
+    parametric_trainer_check.add_argument("--bundle-json", help="Inline production parametric trainer evidence bundle JSON")
+    parametric_trainer_check.add_argument("--min-cases", type=int, default=3)
+    parametric_trainer_check.add_argument("--min-protected", type=int, default=1)
+    parametric_trainer_check.add_argument("--min-gate-margin", type=float, default=0.01)
+    parametric_trainer_check.add_argument("--max-mutation-rate", type=float, default=0.05)
+    parametric_trainer_check.add_argument("--min-reward", type=float, default=0.0)
+    parametric_trainer_check.add_argument("--max-sink-score", type=float, default=0.05)
+    parametric_trainer_check.add_argument("--expected-fingerprint")
+    parametric_trainer_check.set_defaults(func=cmd_parametric_trainer_check)
 
     belief_revision_check = sub.add_parser("belief-revision-check")
     belief_revision_check.add_argument("--cases", help="Path to JSON array of belief revision cases")

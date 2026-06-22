@@ -4810,6 +4810,179 @@ def test_cli_privacy_ops_check_fails_closed_on_local_kms_and_bad_erasure(tmp_pat
     assert "erasure_case_failed" in codes
 
 
+def parametric_trainer_bundle(
+    *,
+    local_provider: bool = False,
+    bad_rollback: bool = False,
+    high_mutation: bool = False,
+    bad_gate: bool = False,
+    bad_rail: bool = False,
+    raw_secret: bool = False,
+) -> dict:
+    case_ids = [
+        "smoke-canary",
+        "core-memory",
+        "core-protected",
+        "core-mcp",
+        "archive-regression",
+        "archive-protected",
+    ]
+    protected_case_ids = ["core-protected", "archive-protected"]
+    bundle = {
+        "name": "production-parametric-trainer",
+        "trainer": {
+            "provider": "vertex-ai-training-prod" if not local_provider else "local",
+            "artifact_uri": "gs://mnemosyne-prod-trainers/rail/v17/model.safetensors",
+            "artifact_uri_hash": "artifact-sha256:abc123",
+            "immutable_rail_service": True,
+            "credentials_isolated": True,
+            "artifact_uri_immutable": True,
+            "promotion_requires_gate": True,
+            "production_mutation_disabled": True,
+        },
+        "protected_suite": {
+            "case_count": 6,
+            "protected_case_count": 2,
+            "case_ids": case_ids,
+            "protected_case_ids": protected_case_ids,
+            "source": "runtime-state",
+            "fingerprint": "protected-suite-sha256:def456",
+            "tier_counts": {
+                "smoke": 1,
+                "core": 3,
+                "archive": 2,
+            },
+        },
+        "gate": {
+            "artifact_id": "artifact-v17",
+            "candidate_id": "candidate-v17" if bad_gate else "artifact-v17",
+            "promoted": True,
+            "protected_regressions": ["core-protected"] if bad_gate else [],
+            "failed_cases": ["archive-protected"] if bad_gate else [],
+            "passed_cases": ["smoke-canary", "core-memory", "core-mcp", "archive-regression"]
+            if bad_gate
+            else case_ids,
+            "margin": 0.001 if bad_gate else 0.08,
+            "min_gate_margin": 0.01,
+            "rollback_branch": "canary-rollback" if bad_gate else None,
+        },
+        "rollback": {
+            "rollback_verified": not bad_rollback,
+            "same_artifact_uri_verified": True,
+            "protected_suite_passed": True,
+            "rollback_provider_authorized": True,
+            "rollback_fingerprint": "" if bad_rollback else "rollback-sha256:789abc",
+        },
+        "rail_report": {
+            "provider_metadata_checked": True,
+            "reward_signal": "internal_proxy" if bad_rail else "external_only",
+            "monotonic_trust": not bad_rail,
+            "trust_tier_delta": -1 if bad_rail else 0,
+            "target_sink": "system_prompt" if bad_rail else "parametric_adapter",
+            "untrusted_to_system_prompt": True if bad_rail else "forbidden",
+            "eval_source_overlap": bad_rail,
+        },
+        "metrics": {
+            "mutation_rate": 0.01 if not high_mutation else 0.2,
+            "reward": 0.83,
+            "sink_score": 0.01,
+        },
+        "redaction": {
+            "raw_training_data_omitted": True,
+            "raw_credentials_omitted": True,
+            "raw_artifact_bytes_omitted": True,
+        },
+    }
+    if raw_secret:
+        bundle["token"] = "raw-secret-token"
+    return bundle
+
+
+def test_cli_parametric_trainer_check_validates_deployment_bundle(tmp_path: Path) -> None:
+    bundle = tmp_path / "parametric-trainer.json"
+    bundle.write_text(json.dumps(parametric_trainer_bundle()), encoding="utf-8")
+
+    report = run_cli(
+        tmp_path / "mnemosyne.json",
+        "parametric-trainer-check",
+        "--bundle",
+        str(bundle),
+        "--min-cases",
+        "5",
+        "--min-protected",
+        "2",
+    )
+    acknowledged = run_cli(
+        tmp_path / "mnemosyne.json",
+        "parametric-trainer-check",
+        "--bundle",
+        str(bundle),
+        "--min-cases",
+        "5",
+        "--min-protected",
+        "2",
+        "--expected-fingerprint",
+        report["fingerprint"],
+    )
+
+    serialized = json.dumps(report)
+    assert report["ok"] is True
+    assert len(report["fingerprint"]) == 64
+    assert report["bundle"]["trainer_provider"] == "vertex-ai-training-prod"
+    assert {item["name"] for item in report["checks"]} == {
+        "trainer",
+        "protected_suite",
+        "gate",
+        "rollback",
+        "rail_report",
+        "metrics",
+        "redaction",
+    }
+    assert all(item["ok"] for item in report["checks"])
+    assert report["bundle"]["protected_suite_source"] == "runtime-state"
+    assert report["redaction"]["raw_training_data_omitted"] is True
+    assert report["redaction"]["raw_credentials_omitted"] is True
+    assert report["redaction"]["raw_artifact_bytes_omitted"] is True
+    assert report["redaction"]["forbidden_raw_fields_present"] is False
+    assert "raw-secret-token" not in serialized
+    assert acknowledged["ok"] is True
+    assert acknowledged["expected_fingerprint_present"] is True
+
+
+def test_cli_parametric_trainer_check_fails_closed_on_bad_bundle(tmp_path: Path) -> None:
+    bundle = tmp_path / "bad-parametric-trainer.json"
+    bundle.write_text(
+        json.dumps(
+            parametric_trainer_bundle(
+                local_provider=True,
+                bad_rollback=True,
+                high_mutation=True,
+                bad_gate=True,
+                bad_rail=True,
+                raw_secret=True,
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    result = run_raw_cli(tmp_path / "mnemosyne.json", "parametric-trainer-check", "--bundle", str(bundle))
+    payload = json.loads(result.stdout)
+    codes = {finding["code"] for finding in payload["findings"]}
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert "trainer_provider_local" in codes
+    assert "rollback_control_missing" in codes
+    assert "rollback_fingerprint_missing" in codes
+    assert "mutation_rate_too_high" in codes
+    assert "gate_candidate_mismatch" in codes
+    assert "gate_protected_regressions" in codes
+    assert "gate_failed_cases" in codes
+    assert "gate_margin_too_low" in codes
+    assert "rail_eval_overlap_invalid" in codes
+    assert "redaction_raw_field_present" in codes
+
+
 def test_cli_preference_write_requires_explicit_or_high_trust_source(tmp_path: Path) -> None:
     denied = run_raw_cli(
         tmp_path / "mnemosyne.json",
