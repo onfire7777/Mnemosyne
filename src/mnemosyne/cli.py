@@ -42,7 +42,12 @@ from mnemosyne.ingestion import IngestionPipeline
 from mnemosyne.jobs import PROJECTION_RECOMPUTE_JOB, RuntimeJobHandlers
 from mnemosyne.learning import Lesson, Procedure
 from mnemosyne.lifecycle import parse_lifecycle_datetime, validate_forgetting_policy_cases
-from mnemosyne.media import CommandMediaTextExtractor, MediaTextExtractor, MetadataMediaTextExtractor
+from mnemosyne.media import (
+    MEDIA_EXTRACT_JOB,
+    CommandMediaTextExtractor,
+    MediaTextExtractor,
+    MetadataMediaTextExtractor,
+)
 from mnemosyne.mcp_tools import MemoryTools, TOOL_SPEC
 from mnemosyne.models import Evidence, Hit
 from mnemosyne.observability import MetricsRegistry, build_ops_report, render_ops_dashboard
@@ -100,6 +105,7 @@ DEPLOYMENT_SOAK_COMMANDS = {
     "mcp-streamable-http-soak",
     "mcp-sse-soak",
     "consolidation-ops-check",
+    "multimodal-ops-check",
     "ops-dashboard-check",
     "parametric-trainer-check",
     "worker-run",
@@ -135,6 +141,7 @@ PRODUCTION_RELEASE_REQUIRED_COMMANDS = (
     "mcp-ops-check",
     "mcp-streamable-http-soak",
     "consolidation-ops-check",
+    "multimodal-ops-check",
     "gate-suite-check",
     "projection-recompute-once",
     "worker-run",
@@ -5226,6 +5233,529 @@ def cmd_provenance_ops_check(args: argparse.Namespace) -> None:
         raise SystemExit(1)
 
 
+def _load_multimodal_ops_bundle(args: argparse.Namespace) -> Mapping[str, Any]:
+    if bool(args.bundle) == bool(args.bundle_json):
+        raise SystemExit("multimodal-ops-check requires exactly one of --bundle or --bundle-json")
+    try:
+        loaded = (
+            json.loads(Path(args.bundle).expanduser().read_text(encoding="utf-8"))
+            if args.bundle
+            else json.loads(args.bundle_json)
+        )
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"multimodal ops bundle denied: {exc}") from exc
+    if not isinstance(loaded, Mapping):
+        raise SystemExit("multimodal ops bundle must be a JSON object")
+    return loaded
+
+
+def _multimodal_finding(code: str, message: str) -> dict[str, str]:
+    return {"code": code, "message": message}
+
+
+def _multimodal_ops_fingerprint(report: Mapping[str, Any]) -> str:
+    payload = {
+        "bundle": report.get("bundle"),
+        "requirements": report.get("requirements"),
+        "checks": report.get("checks"),
+        "findings": report.get("findings"),
+    }
+    return sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def _multimodal_ops_int(
+    value: Any,
+    *,
+    default: int,
+    code: str,
+    message: str,
+    findings: list[dict[str, str]],
+) -> int:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        findings.append(_multimodal_finding(code, message))
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        findings.append(_multimodal_finding(code, message))
+        return default
+
+
+def _multimodal_string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if isinstance(item, str) and item.strip()]
+
+
+def _multimodal_provider_local(provider: Any) -> bool:
+    provider_kind = str(provider or "").strip().lower()
+    return provider_kind in {"", "deterministic", "local", "metadata", "mock", "none", "test"}
+
+
+def _multimodal_forbidden_raw_paths(value: Any, *, path: str = "$") -> list[str]:
+    forbidden_keys = {
+        "access_token",
+        "api_key",
+        "asset_bytes",
+        "auth_token",
+        "content",
+        "contents",
+        "credential",
+        "credentials",
+        "derived_text",
+        "document",
+        "documents",
+        "embedding_vector",
+        "embedding_vectors",
+        "embedding_values",
+        "media_bytes",
+        "password",
+        "private_key",
+        "raw_asset",
+        "raw_assets",
+        "raw_audio",
+        "raw_caption",
+        "raw_captions",
+        "raw_derived_text",
+        "raw_document",
+        "raw_documents",
+        "raw_embedding",
+        "raw_embeddings",
+        "raw_extractor_request",
+        "raw_extractor_response",
+        "raw_image",
+        "raw_images",
+        "raw_media",
+        "raw_media_bytes",
+        "raw_request",
+        "raw_requests",
+        "raw_response",
+        "raw_responses",
+        "raw_text",
+        "raw_transcript",
+        "raw_transcripts",
+        "raw_video",
+        "raw_videos",
+        "request_body",
+        "response_body",
+        "secret",
+        "token",
+    }
+    paths: list[str] = []
+    if isinstance(value, Mapping):
+        for key, child in value.items():
+            key_name = str(key)
+            child_path = f"{path}.{key_name}"
+            if key_name.lower() in forbidden_keys and child not in (None, "", [], {}):
+                paths.append(child_path)
+            paths.extend(_multimodal_forbidden_raw_paths(child, path=child_path))
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            paths.extend(_multimodal_forbidden_raw_paths(child, path=f"{path}[{index}]"))
+    return paths
+
+
+def cmd_multimodal_ops_check(args: argparse.Namespace) -> None:
+    bundle = _load_multimodal_ops_bundle(args)
+    findings: list[dict[str, str]] = []
+    checks: list[dict[str, Any]] = []
+
+    validation_scope = bundle.get("validation_scope")
+    if not isinstance(validation_scope, Mapping):
+        findings.append(_multimodal_finding("validation_scope_missing", "multimodal ops bundle requires validation_scope section"))
+        validation_scope = {}
+    validation_scope_ok = (
+        validation_scope.get("production_validated") is True
+        and validation_scope.get("target_environment") == "production"
+        and validation_scope.get("operator_asserted") is True
+        and bool(validation_scope.get("run_id"))
+        and bool(validation_scope.get("started_at"))
+        and bool(validation_scope.get("completed_at"))
+    )
+    if validation_scope.get("production_validated") is not True:
+        findings.append(_multimodal_finding("production_validation_missing", "multimodal ops bundle must be production validated"))
+    if validation_scope.get("target_environment") != "production":
+        findings.append(_multimodal_finding("target_environment_not_production", "multimodal ops target environment must be production"))
+    if validation_scope.get("operator_asserted") is not True:
+        findings.append(_multimodal_finding("operator_assertion_missing", "operator production assertion is required"))
+    for field in ("run_id", "started_at", "completed_at"):
+        if not validation_scope.get(field):
+            findings.append(_multimodal_finding("validation_scope_field_missing", f"validation_scope.{field} is required"))
+    checks.append(
+        {
+            "name": "validation_scope",
+            "ok": validation_scope_ok,
+            "production_validated": validation_scope.get("production_validated") is True,
+            "target_environment": validation_scope.get("target_environment"),
+            "operator_asserted": validation_scope.get("operator_asserted") is True,
+        }
+    )
+
+    provider_check = bundle.get("provider_check")
+    if not isinstance(provider_check, Mapping):
+        findings.append(_multimodal_finding("provider_check_missing", "multimodal ops bundle requires provider_check section"))
+        provider_check = {}
+    provider_manifest = provider_check.get("manifest") if isinstance(provider_check.get("manifest"), Mapping) else {}
+    provider_checks = provider_check.get("checks") if isinstance(provider_check.get("checks"), Mapping) else {}
+    required_provider_checks = sorted(set(args.require_provider_check or ["media_embedding", "media_extractor"]))
+    provider_rows: list[dict[str, Any]] = []
+    if provider_check.get("ok") is not True:
+        findings.append(_multimodal_finding("provider_check_not_ok", "provider_check evidence must be ok"))
+    if provider_manifest.get("forbid_local") is not True:
+        findings.append(_multimodal_finding("provider_manifest_forbid_local_missing", "provider_check manifest must set forbid_local=true"))
+    for check_name in required_provider_checks:
+        raw_check = provider_checks.get(check_name)
+        present = isinstance(raw_check, Mapping)
+        provider = raw_check.get("provider") if present else None
+        local_provider = _multimodal_provider_local(provider) if present else True
+        skipped = present and raw_check.get("skipped") is True
+        check_ok = present and raw_check.get("ok") is True and not local_provider and not skipped
+        if not present:
+            findings.append(_multimodal_finding("provider_check_required_missing", f"provider_check missing {check_name}"))
+        elif raw_check.get("ok") is not True:
+            findings.append(_multimodal_finding("provider_check_required_failed", f"provider_check {check_name} did not pass"))
+        elif skipped:
+            findings.append(_multimodal_finding("provider_check_skipped", f"provider_check {check_name} was skipped"))
+        elif local_provider:
+            findings.append(_multimodal_finding("provider_check_local_provider", f"provider_check {check_name} uses a local provider"))
+        provider_rows.append(
+            {
+                "check": check_name,
+                "present": present,
+                "ok": check_ok,
+                "provider": provider,
+                "local_provider": local_provider,
+                "skipped": skipped,
+            }
+        )
+    provider_ok = provider_check.get("ok") is True and provider_manifest.get("forbid_local") is True and all(
+        row["ok"] for row in provider_rows
+    )
+    checks.append(
+        {
+            "name": "provider_check",
+            "ok": provider_ok,
+            "forbid_local": provider_manifest.get("forbid_local") is True,
+            "required_checks": required_provider_checks,
+            "checks": provider_rows,
+        }
+    )
+
+    object_store = bundle.get("object_store")
+    if not isinstance(object_store, Mapping):
+        findings.append(_multimodal_finding("object_store_missing", "multimodal ops bundle requires object_store section"))
+        object_store = {}
+    object_store_provider = object_store.get("provider") or object_store.get("backend")
+    object_store_local = str(object_store_provider or "").strip().lower() in {"", "local", "filesystem", "file", "none", "test"}
+    object_hash_count = _multimodal_ops_int(
+        object_store.get("asset_hash_count"),
+        default=len(_multimodal_string_list(object_store.get("asset_hashes"))),
+        code="object_store_hash_count_invalid",
+        message="object store asset hash count must be numeric",
+        findings=findings,
+    )
+    object_store_ok = (
+        object_store.get("ok") is True
+        and not object_store_local
+        and object_store.get("encrypted") is True
+        and object_store.get("key_provider") in {"command", "kms", "vault", "hsm"}
+        and object_store.get("externalized_payloads") is True
+        and object_hash_count >= args.min_media_cases
+    )
+    if object_store.get("ok") is not True:
+        findings.append(_multimodal_finding("object_store_not_ok", "object-store evidence must be ok"))
+    if object_store_local:
+        findings.append(_multimodal_finding("object_store_local", "object-store provider must be non-local for production"))
+    if object_store.get("encrypted") is not True:
+        findings.append(_multimodal_finding("object_store_encryption_missing", "object-store encryption is required"))
+    if object_store.get("key_provider") not in {"command", "kms", "vault", "hsm"}:
+        findings.append(_multimodal_finding("object_store_key_provider_invalid", "object-store key provider must be externalized"))
+    if object_store.get("externalized_payloads") is not True:
+        findings.append(_multimodal_finding("object_store_externalization_missing", "raw media payloads must be externalized"))
+    if object_hash_count < args.min_media_cases:
+        findings.append(_multimodal_finding("object_store_hash_count_too_low", "object-store asset hash count is below threshold"))
+    checks.append(
+        {
+            "name": "object_store",
+            "ok": object_store_ok,
+            "provider": object_store_provider,
+            "provider_local": object_store_local,
+            "encrypted": object_store.get("encrypted") is True,
+            "asset_hash_count": object_hash_count,
+        }
+    )
+
+    extraction = bundle.get("extraction")
+    if not isinstance(extraction, Mapping):
+        findings.append(_multimodal_finding("extraction_missing", "multimodal ops bundle requires extraction section"))
+        extraction = {}
+    extractor_provider = extraction.get("provider") or extraction.get("provider_kind")
+    extractor_local = _multimodal_provider_local(extractor_provider)
+    extraction_modalities = set(_multimodal_string_list(extraction.get("modalities")))
+    required_modalities = sorted(set(args.require_modality or ["audio", "image", "video"]))
+    missing_modalities = [modality for modality in required_modalities if modality not in extraction_modalities]
+    extraction_cases_raw = extraction.get("cases")
+    extraction_cases = [item for item in extraction_cases_raw if isinstance(item, Mapping)] if isinstance(extraction_cases_raw, list) else []
+    derived_relation_cases = 0
+    searchable_cases = 0
+    for case in extraction_cases:
+        if case.get("media_derived_relation") is True:
+            derived_relation_cases += 1
+        if case.get("derived_text_searchable") is True:
+            searchable_cases += 1
+        if "sha256:" not in str(case.get("asset_sha256") or "").lower():
+            findings.append(_multimodal_finding("extraction_asset_hash_missing", "extraction case asset hash is required"))
+        if "sha256:" not in str(case.get("derived_cid_hash") or "").lower():
+            findings.append(_multimodal_finding("extraction_derived_hash_missing", "extraction case derived CID hash is required"))
+    extraction_ok = (
+        extraction.get("ok") is True
+        and not extractor_local
+        and extraction.get("contract_checked") is True
+        and not missing_modalities
+        and len(extraction_cases) >= args.min_media_cases
+        and derived_relation_cases >= args.min_media_cases
+        and searchable_cases >= args.min_media_cases
+    )
+    if extraction.get("ok") is not True:
+        findings.append(_multimodal_finding("extraction_not_ok", "media extraction evidence must be ok"))
+    if extractor_local:
+        findings.append(_multimodal_finding("extractor_provider_local", "media extractor provider must be command, container, or hosted"))
+    if extraction.get("contract_checked") is not True:
+        findings.append(_multimodal_finding("extractor_contract_missing", "media extractor contract evidence is required"))
+    for modality in missing_modalities:
+        findings.append(_multimodal_finding("extractor_modality_missing", f"media extractor missing modality {modality}"))
+    if len(extraction_cases) < args.min_media_cases:
+        findings.append(_multimodal_finding("extraction_cases_too_low", "media extraction case count is below threshold"))
+    if derived_relation_cases < args.min_media_cases:
+        findings.append(_multimodal_finding("media_derived_relation_missing", "media-derived relation proof is below threshold"))
+    if searchable_cases < args.min_media_cases:
+        findings.append(_multimodal_finding("derived_text_searchable_missing", "derived text search proof is below threshold"))
+    checks.append(
+        {
+            "name": "extraction",
+            "ok": extraction_ok,
+            "provider": extractor_provider,
+            "provider_local": extractor_local,
+            "modalities": sorted(extraction_modalities),
+            "missing_modalities": missing_modalities,
+            "case_count": len(extraction_cases),
+            "derived_relation_cases": derived_relation_cases,
+            "searchable_cases": searchable_cases,
+        }
+    )
+
+    embedding = bundle.get("media_embedding") or bundle.get("embedding")
+    if not isinstance(embedding, Mapping):
+        findings.append(_multimodal_finding("media_embedding_missing", "multimodal ops bundle requires media_embedding section"))
+        embedding = {}
+    embedding_provider = embedding.get("provider") or embedding.get("provider_kind")
+    embedding_local = _multimodal_provider_local(embedding_provider)
+    dimensions = _multimodal_ops_int(
+        embedding.get("dimensions"),
+        default=0,
+        code="media_embedding_dimensions_invalid",
+        message="media embedding dimensions must be numeric",
+        findings=findings,
+    )
+    embedding_modalities = set(_multimodal_string_list(embedding.get("modalities")))
+    missing_embedding_modalities = [modality for modality in required_modalities if modality not in embedding_modalities]
+    embedded_hashes = _multimodal_string_list(embedding.get("embedded_cid_hashes") or embedding.get("cid_hashes"))
+    embedding_ok = (
+        embedding.get("ok") is True
+        and not embedding_local
+        and dimensions >= args.min_embedding_dimensions
+        and len(embedded_hashes) >= args.min_media_cases
+        and not missing_embedding_modalities
+        and embedding.get("contract_checked") is True
+        and embedding.get("raw_media_embedding_indexed") is True
+    )
+    if embedding.get("ok") is not True:
+        findings.append(_multimodal_finding("media_embedding_not_ok", "media embedding evidence must be ok"))
+    if embedding_local:
+        findings.append(_multimodal_finding("media_embedding_provider_local", "media embedding provider must be command, container, or hosted"))
+    if dimensions < args.min_embedding_dimensions:
+        findings.append(_multimodal_finding("media_embedding_dimensions_too_low", "media embedding dimensions are below threshold"))
+    if len(embedded_hashes) < args.min_media_cases:
+        findings.append(_multimodal_finding("media_embedding_hash_count_too_low", "media embedding hash count is below threshold"))
+    for modality in missing_embedding_modalities:
+        findings.append(_multimodal_finding("media_embedding_modality_missing", f"media embedding missing modality {modality}"))
+    if embedding.get("contract_checked") is not True:
+        findings.append(_multimodal_finding("media_embedding_contract_missing", "media embedding contract evidence is required"))
+    if embedding.get("raw_media_embedding_indexed") is not True:
+        findings.append(_multimodal_finding("raw_media_embedding_not_indexed", "raw media embedding indexing proof is required"))
+    checks.append(
+        {
+            "name": "media_embedding",
+            "ok": embedding_ok,
+            "provider": embedding_provider,
+            "provider_local": embedding_local,
+            "dimensions": dimensions,
+            "embedded_hash_count": len(embedded_hashes),
+            "missing_modalities": missing_embedding_modalities,
+        }
+    )
+
+    retrieval = bundle.get("retrieval")
+    if not isinstance(retrieval, Mapping):
+        findings.append(_multimodal_finding("retrieval_missing", "multimodal ops bundle requires retrieval section"))
+        retrieval = {}
+    retrieval_backend = str(retrieval.get("backend") or "").strip().lower()
+    retrieval_cases_raw = retrieval.get("cases")
+    retrieval_cases = [item for item in retrieval_cases_raw if isinstance(item, Mapping)] if isinstance(retrieval_cases_raw, list) else []
+    vector_cases = 0
+    derived_text_cases = 0
+    for case in retrieval_cases:
+        vector_cases += 1 if int(case.get("vector_hit_count") or 0) > 0 and case.get("stored_media_embedding") is True else 0
+        derived_text_cases += 1 if int(case.get("derived_text_hit_count") or 0) > 0 else 0
+        if "sha256:" not in str(case.get("query_hash") or "").lower():
+            findings.append(_multimodal_finding("retrieval_query_hash_missing", "retrieval case query hash is required"))
+    retrieval_ok = (
+        retrieval.get("ok") is True
+        and retrieval_backend in {"postgres", "postgresql"}
+        and retrieval.get("production_validated") is True
+        and len(retrieval_cases) >= args.min_media_cases
+        and vector_cases >= args.min_vector_cases
+        and derived_text_cases >= args.min_derived_text_cases
+    )
+    if retrieval.get("ok") is not True:
+        findings.append(_multimodal_finding("retrieval_not_ok", "multimodal retrieval evidence must be ok"))
+    if retrieval_backend not in {"postgres", "postgresql"}:
+        findings.append(_multimodal_finding("retrieval_backend_not_postgres", "multimodal retrieval backend must be postgres"))
+    if retrieval.get("production_validated") is not True:
+        findings.append(_multimodal_finding("retrieval_production_validation_missing", "multimodal retrieval must be production validated"))
+    if len(retrieval_cases) < args.min_media_cases:
+        findings.append(_multimodal_finding("retrieval_cases_too_low", "multimodal retrieval case count is below threshold"))
+    if vector_cases < args.min_vector_cases:
+        findings.append(_multimodal_finding("retrieval_vector_cases_too_low", "media vector retrieval cases are below threshold"))
+    if derived_text_cases < args.min_derived_text_cases:
+        findings.append(_multimodal_finding("retrieval_derived_text_cases_too_low", "derived text retrieval cases are below threshold"))
+    checks.append(
+        {
+            "name": "retrieval",
+            "ok": retrieval_ok,
+            "backend": retrieval_backend,
+            "case_count": len(retrieval_cases),
+            "vector_cases": vector_cases,
+            "derived_text_cases": derived_text_cases,
+        }
+    )
+
+    media_jobs = bundle.get("media_jobs")
+    if not isinstance(media_jobs, Mapping):
+        findings.append(_multimodal_finding("media_jobs_missing", "multimodal ops bundle requires media_jobs section"))
+        media_jobs = {}
+    queue_backend = str(media_jobs.get("queue_backend") or media_jobs.get("backend") or "").strip().lower()
+    complete_jobs = _multimodal_ops_int(
+        media_jobs.get("complete_jobs"),
+        default=0,
+        code="media_jobs_complete_invalid",
+        message="media jobs complete count must be numeric",
+        findings=findings,
+    )
+    dead_jobs = _multimodal_ops_int(
+        media_jobs.get("dead_jobs"),
+        default=0,
+        code="media_jobs_dead_invalid",
+        message="media jobs dead count must be numeric",
+        findings=findings,
+    )
+    media_jobs_ok = (
+        media_jobs.get("ok") is True
+        and queue_backend in {"postgres", "postgresql"}
+        and media_jobs.get("fail_on_dead") is True
+        and complete_jobs >= args.min_media_cases
+        and dead_jobs <= args.max_dead_jobs
+        and MEDIA_EXTRACT_JOB in set(_multimodal_string_list(media_jobs.get("processed_kinds")))
+    )
+    if media_jobs.get("ok") is not True:
+        findings.append(_multimodal_finding("media_jobs_not_ok", "media job evidence must be ok"))
+    if queue_backend not in {"postgres", "postgresql"}:
+        findings.append(_multimodal_finding("media_jobs_backend_not_postgres", "media job queue backend must be postgres"))
+    if media_jobs.get("fail_on_dead") is not True:
+        findings.append(_multimodal_finding("media_jobs_fail_on_dead_missing", "media jobs must run with fail_on_dead=true"))
+    if complete_jobs < args.min_media_cases:
+        findings.append(_multimodal_finding("media_jobs_complete_too_low", "completed media jobs are below threshold"))
+    if dead_jobs > args.max_dead_jobs:
+        findings.append(_multimodal_finding("media_jobs_dead_present", "media job evidence contains dead jobs"))
+    if MEDIA_EXTRACT_JOB not in set(_multimodal_string_list(media_jobs.get("processed_kinds"))):
+        findings.append(_multimodal_finding("media_extract_job_missing", f"media jobs must process {MEDIA_EXTRACT_JOB}"))
+    checks.append(
+        {
+            "name": "media_jobs",
+            "ok": media_jobs_ok,
+            "queue_backend": queue_backend,
+            "complete_jobs": complete_jobs,
+            "dead_jobs": dead_jobs,
+        }
+    )
+
+    redaction = bundle.get("redaction") if isinstance(bundle.get("redaction"), Mapping) else {}
+    redaction_flags = {
+        "raw_media_omitted": redaction.get("raw_media_omitted") is True,
+        "raw_asset_bytes_omitted": redaction.get("raw_asset_bytes_omitted") is True
+        or redaction.get("asset_bytes_omitted") is True,
+        "raw_extractor_requests_omitted": redaction.get("raw_extractor_requests_omitted") is True,
+        "raw_extractor_responses_omitted": redaction.get("raw_extractor_responses_omitted") is True,
+        "raw_embeddings_omitted": redaction.get("raw_embeddings_omitted") is True,
+        "raw_documents_omitted": redaction.get("raw_documents_omitted") is True,
+        "raw_credentials_omitted": redaction.get("raw_credentials_omitted") is True,
+    }
+    missing_redaction_flags = [flag for flag, ok in redaction_flags.items() if not ok]
+    for flag in missing_redaction_flags:
+        findings.append(_multimodal_finding("redaction_flag_missing", f"redaction flag {flag} must be true"))
+    forbidden_raw_paths = _multimodal_forbidden_raw_paths(bundle)
+    if forbidden_raw_paths:
+        findings.append(_multimodal_finding("redaction_raw_field_present", "bundle contains raw media, text, vectors, provider payloads, or credentials"))
+    checks.append(
+        {
+            "name": "redaction",
+            "ok": not missing_redaction_flags and not forbidden_raw_paths,
+            **redaction_flags,
+            "forbidden_raw_paths": forbidden_raw_paths,
+        }
+    )
+
+    report = {
+        "ok": not findings,
+        "bundle": {
+            "name": bundle.get("name"),
+            "production_validated": validation_scope.get("production_validated") is True,
+            "provider_check_count": len(provider_rows),
+            "object_store_provider": object_store_provider,
+            "extractor_provider": extractor_provider,
+            "media_embedding_provider": embedding_provider,
+            "extraction_case_count": len(extraction_cases),
+            "retrieval_case_count": len(retrieval_cases),
+            "media_job_complete_count": complete_jobs,
+        },
+        "requirements": {
+            "production_validated": True,
+            "target_environment": "production",
+            "operator_asserted": True,
+            "required_provider_checks": required_provider_checks,
+            "required_modalities": required_modalities,
+            "min_media_cases": args.min_media_cases,
+            "min_embedding_dimensions": args.min_embedding_dimensions,
+            "min_vector_cases": args.min_vector_cases,
+            "min_derived_text_cases": args.min_derived_text_cases,
+            "max_dead_jobs": args.max_dead_jobs,
+        },
+        "redaction": {**redaction_flags, "forbidden_raw_fields_present": bool(forbidden_raw_paths)},
+        "checks": checks,
+        "findings": findings,
+    }
+    report["fingerprint"] = _multimodal_ops_fingerprint(report)
+    report["expected_fingerprint_present"] = bool(args.expected_fingerprint)
+    if args.expected_fingerprint and args.expected_fingerprint.strip().lower() != report["fingerprint"]:
+        report["ok"] = False
+        report["findings"].append(_multimodal_finding("fingerprint_mismatch", "multimodal ops fingerprint mismatch"))
+    emit(report)
+    if not report["ok"]:
+        raise SystemExit(1)
+
+
 def cmd_profile_add(args: argparse.Namespace) -> None:
     tools = load_tools(args)
     emit(
@@ -9119,6 +9649,19 @@ def build_parser() -> argparse.ArgumentParser:
     provenance_ops_check.add_argument("--max-verifier-timeout-seconds", type=float, default=30.0)
     provenance_ops_check.add_argument("--expected-fingerprint")
     provenance_ops_check.set_defaults(func=cmd_provenance_ops_check)
+
+    multimodal_ops_check = sub.add_parser("multimodal-ops-check")
+    multimodal_ops_check.add_argument("--bundle", help="Path to production multimodal retrieval evidence bundle")
+    multimodal_ops_check.add_argument("--bundle-json", help="Inline production multimodal retrieval evidence bundle JSON")
+    multimodal_ops_check.add_argument("--min-media-cases", type=int, default=3)
+    multimodal_ops_check.add_argument("--min-embedding-dimensions", type=int, default=512)
+    multimodal_ops_check.add_argument("--min-vector-cases", type=int, default=1)
+    multimodal_ops_check.add_argument("--min-derived-text-cases", type=int, default=1)
+    multimodal_ops_check.add_argument("--max-dead-jobs", type=int, default=0)
+    multimodal_ops_check.add_argument("--require-provider-check", action="append", default=[])
+    multimodal_ops_check.add_argument("--require-modality", choices=["image", "audio", "video", "binary", "multimodal"], action="append")
+    multimodal_ops_check.add_argument("--expected-fingerprint")
+    multimodal_ops_check.set_defaults(func=cmd_multimodal_ops_check)
 
     branch = sub.add_parser("branch")
     branch.add_argument("--name", required=True)
