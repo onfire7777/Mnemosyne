@@ -7754,13 +7754,35 @@ def cmd_release_audit(args: argparse.Namespace) -> None:
         findings.append(_release_finding("fingerprint_mismatch", "release-audit fingerprint mismatch"))
     if args.require_production_validated:
         validation_scope = report.get("validation_scope")
-        if not isinstance(validation_scope, Mapping) or validation_scope.get("production_validated") is not True:
+        if not isinstance(validation_scope, Mapping):
             findings.append(
                 _release_finding(
                     "production_validation_missing",
                     "deployment-soak report was not marked as production validated",
                 )
             )
+        else:
+            if validation_scope.get("production_validated") is not True:
+                findings.append(
+                    _release_finding(
+                        "production_validation_missing",
+                        "deployment-soak report was not marked as production validated",
+                    )
+                )
+            if validation_scope.get("target_environment") != "production":
+                findings.append(
+                    _release_finding(
+                        "production_target_missing",
+                        "deployment-soak report did not target production",
+                    )
+                )
+            if validation_scope.get("operator_asserted") is not True:
+                findings.append(
+                    _release_finding(
+                        "operator_attestation_missing",
+                        "deployment-soak report is missing operator production attestation",
+                    )
+                )
     if not _release_redaction_ok(report):
         findings.append(_release_finding("report_redaction_missing", "deployment-soak report redaction flags are incomplete"))
     for check in checks:
