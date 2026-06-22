@@ -4194,6 +4194,179 @@ def test_cli_release_audit_fails_closed_on_missing_and_local_evidence(tmp_path: 
     assert payload["provider"]["retrieval_backends"]["lexical_local"] is True
 
 
+def retrieval_ops_bundle(
+    *,
+    local_provider: bool = False,
+    local_backends: bool = False,
+    missing_graph: bool = False,
+    bad_calibration: bool = False,
+    raw_secret: bool = False,
+) -> dict:
+    cases = [
+        {
+            "id": "lexical-vector-graph-case",
+            "tenant_hash": "tenant-sha256:aaa111",
+            "query_hash": "query-sha256:bbb222",
+            "lexical_hit_count": 4,
+            "vector_hit_count": 3,
+            "graph_hit_count": 2 if not missing_graph else 0,
+            "reranked_hit_count": 3 if not missing_graph else 0,
+            "calibrated": True,
+        },
+        {
+            "id": "vector-calibration-case",
+            "tenant_hash": "tenant-sha256:ccc333",
+            "query_hash": "query-sha256:ddd444",
+            "lexical_hit_count": 2,
+            "vector_hit_count": 5,
+            "graph_hit_count": 1 if not missing_graph else 0,
+            "reranked_hit_count": 4 if not missing_graph else 0,
+            "calibrated": True,
+        },
+        {
+            "id": "graph-neighbor-case",
+            "tenant_hash": "tenant-sha256:eee555",
+            "query_hash": "query-sha256:fff666",
+            "lexical_hit_count": 1,
+            "vector_hit_count": 2,
+            "graph_hit_count": 3 if not missing_graph else 0,
+            "reranked_hit_count": 2 if not missing_graph else 0,
+            "calibrated": True,
+        },
+    ]
+    bundle = {
+        "name": "production-retrieval-ops",
+        "provider_check": {
+            "manifest": {
+                "name": "production-release-providers",
+                "forbid_local": not local_backends,
+                "required_checks": ["embedding", "reranker", "retrieval_backends"],
+            },
+            "checks": {
+                "embedding": {
+                    "ok": True,
+                    "provider": "http" if not local_provider else "local",
+                    "dimensions": 1024,
+                    "model": "prod-embedding-v1",
+                },
+                "reranker": {
+                    "ok": True,
+                    "provider": "http" if not local_provider else "mock",
+                    "model": "prod-reranker-v1",
+                    "top_id": "evidence-a",
+                },
+                "retrieval_backends": {
+                    "ok": True,
+                    "lexical_backend": "paradedb-bm25" if not local_backends else "local-bm25-lite",
+                    "graph_backend": "apache-age" if not local_backends else "local-ppr",
+                    "lexical_local": local_backends,
+                    "graph_local": local_backends,
+                },
+            },
+        },
+        "retrieval": {
+            "backend": "postgres",
+            "production_validated": True,
+            "cases": cases,
+        },
+        "calibration": {
+            "production_dataset": not bad_calibration,
+            "dataset_fingerprint": "calibration-sha256:123abc" if not bad_calibration else "",
+            "example_count": 100 if not bad_calibration else 2,
+            "correct_count": 70 if not bad_calibration else 0,
+            "incorrect_count": 30 if not bad_calibration else 0,
+            "empirical_coverage": 0.94 if not bad_calibration else 0.4,
+            "false_accept_rate": 0.03 if not bad_calibration else 0.5,
+            "threshold": 0.62 if not bad_calibration else None,
+        },
+        "redaction": {
+            "raw_queries_omitted": True,
+            "raw_embeddings_omitted": True,
+            "raw_documents_omitted": True,
+            "raw_credentials_omitted": True,
+        },
+    }
+    if raw_secret:
+        bundle["token"] = "raw-secret-token"
+    return bundle
+
+
+def test_cli_retrieval_ops_check_validates_production_evidence_bundle(tmp_path: Path) -> None:
+    bundle = tmp_path / "retrieval-ops.json"
+    bundle.write_text(json.dumps(retrieval_ops_bundle()), encoding="utf-8")
+
+    report = run_cli(
+        tmp_path / "mnemosyne.json",
+        "retrieval-ops-check",
+        "--bundle",
+        str(bundle),
+        "--min-cases",
+        "3",
+        "--min-calibration-examples",
+        "50",
+    )
+    acknowledged = run_cli(
+        tmp_path / "mnemosyne.json",
+        "retrieval-ops-check",
+        "--bundle",
+        str(bundle),
+        "--min-cases",
+        "3",
+        "--min-calibration-examples",
+        "50",
+        "--expected-fingerprint",
+        report["fingerprint"],
+    )
+
+    serialized = json.dumps(report)
+    assert report["ok"] is True
+    assert len(report["fingerprint"]) == 64
+    assert report["bundle"]["lexical_backend"] == "paradedb-bm25"
+    assert report["bundle"]["graph_backend"] == "apache-age"
+    assert {item["name"] for item in report["checks"]} == {"provider_check", "retrieval", "calibration", "redaction"}
+    assert all(item["ok"] for item in report["checks"])
+    assert report["redaction"]["raw_queries_omitted"] is True
+    assert report["redaction"]["raw_embeddings_omitted"] is True
+    assert report["redaction"]["raw_documents_omitted"] is True
+    assert report["redaction"]["forbidden_raw_fields_present"] is False
+    assert "raw-secret-token" not in serialized
+    assert acknowledged["ok"] is True
+    assert acknowledged["expected_fingerprint_present"] is True
+
+
+def test_cli_retrieval_ops_check_fails_closed_on_local_and_bad_calibration(tmp_path: Path) -> None:
+    bundle = tmp_path / "bad-retrieval-ops.json"
+    bundle.write_text(
+        json.dumps(
+            retrieval_ops_bundle(
+                local_provider=True,
+                local_backends=True,
+                missing_graph=True,
+                bad_calibration=True,
+                raw_secret=True,
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    result = run_raw_cli(tmp_path / "mnemosyne.json", "retrieval-ops-check", "--bundle", str(bundle))
+    payload = json.loads(result.stdout)
+    codes = {finding["code"] for finding in payload["findings"]}
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert "provider_manifest_forbid_local_missing" in codes
+    assert "provider_check_local_provider" in codes
+    assert "local_retrieval_backend" in codes
+    assert "insufficient_graph_cases" in codes
+    assert "insufficient_reranked_cases" in codes
+    assert "calibration_not_production_dataset" in codes
+    assert "calibration_fingerprint_missing" in codes
+    assert "calibration_coverage_too_low" in codes
+    assert "calibration_false_accept_too_high" in codes
+    assert "redaction_raw_field_present" in codes
+
+
 def test_cli_calibration_tune_applies_labeled_dataset(tmp_path: Path) -> None:
     store = tmp_path / "mnemosyne.json"
     dataset = tmp_path / "calibration.json"
