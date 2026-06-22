@@ -1430,6 +1430,44 @@ def _privacy_cases(raw: Any, *, section: str) -> list[Mapping[str, Any]]:
     return raw
 
 
+def _privacy_forbidden_raw_paths(value: Any, *, path: str = "$") -> list[str]:
+    forbidden_keys = {
+        "raw_key",
+        "raw_keys",
+        "key_material",
+        "plaintext_key",
+        "private_key",
+        "raw_object",
+        "raw_objects",
+        "object_bytes",
+        "raw_subject",
+        "raw_subjects",
+        "subject_id",
+        "subject_identifier",
+        "email",
+        "raw_claims",
+        "raw_kms_response",
+        "raw_kms_responses",
+        "credential",
+        "credentials",
+        "secret",
+        "token",
+        "password",
+    }
+    paths: list[str] = []
+    if isinstance(value, Mapping):
+        for key, child in value.items():
+            key_name = str(key)
+            child_path = f"{path}.{key_name}"
+            if key_name.lower() in forbidden_keys and child not in (None, "", [], {}):
+                paths.append(child_path)
+            paths.extend(_privacy_forbidden_raw_paths(child, path=child_path))
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            paths.extend(_privacy_forbidden_raw_paths(child, path=f"{path}[{index}]"))
+    return paths
+
+
 def cmd_privacy_ops_check(args: argparse.Namespace) -> None:
     bundle = _load_privacy_ops_bundle(args)
     findings: list[dict[str, Any]] = []
@@ -1581,6 +1619,32 @@ def cmd_privacy_ops_check(args: argparse.Namespace) -> None:
         if required not in seen_case_ids:
             findings.append(_privacy_finding("missing_required_case", f"required case {required} is missing"))
 
+    redaction = bundle.get("redaction")
+    if not isinstance(redaction, Mapping):
+        findings.append(_privacy_finding("missing_redaction_section", "privacy ops bundle requires redaction section"))
+        redaction = {}
+    redaction_flags = {
+        "raw_key_material_omitted": redaction.get("raw_key_material_omitted") is True,
+        "raw_object_bytes_omitted": redaction.get("raw_object_bytes_omitted") is True,
+        "raw_subject_identifiers_omitted": redaction.get("raw_subject_identifiers_omitted") is True,
+        "raw_kms_responses_omitted": redaction.get("raw_kms_responses_omitted") is True,
+    }
+    missing_redaction_flags = [name for name, ok in redaction_flags.items() if not ok]
+    for flag in missing_redaction_flags:
+        findings.append(_privacy_finding("redaction_flag_missing", f"redaction flag {flag} is not proven"))
+    forbidden_raw_paths = _privacy_forbidden_raw_paths(bundle)
+    if forbidden_raw_paths:
+        findings.append(_privacy_finding("redaction_raw_field_present", "privacy ops bundle contains raw key/object/subject/KMS fields"))
+    redaction_ok = not missing_redaction_flags and not forbidden_raw_paths
+    checks.append(
+        {
+            "name": "redaction",
+            "ok": redaction_ok,
+            **redaction_flags,
+            "forbidden_raw_paths": forbidden_raw_paths,
+        }
+    )
+
     report: dict[str, Any] = {
         "ok": not findings,
         "bundle": {
@@ -1596,11 +1660,7 @@ def cmd_privacy_ops_check(args: argparse.Namespace) -> None:
             "requires_allow_and_deny_residency": True,
             "requires_tombstone_and_legal_delete": True,
         },
-        "redaction": {
-            "raw_key_material_omitted": True,
-            "raw_object_bytes_omitted": True,
-            "raw_subject_identifiers_omitted": True,
-        },
+        "redaction": {**redaction_flags, "forbidden_raw_fields_present": bool(forbidden_raw_paths)},
         "checks": checks,
         "findings": findings,
     }
