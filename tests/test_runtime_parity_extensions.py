@@ -1438,6 +1438,85 @@ def test_runtime_state_round_trips_local_and_postgres_parity(tmp_path) -> None:
     assert local_snapshot == postgres_snapshot
 
 
+def test_runtime_job_handler_public_methods_return_structured_results() -> None:
+    engine = LocalMemoryEngine()
+    queue = InProcessQueue()
+    metrics = MetricsRegistry()
+    handlers = RuntimeJobHandlers(engine, queue, metrics=metrics)
+    source_cid = engine.append_evidence(
+        Evidence(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="direct-media",
+            content="image bytes are externalized elsewhere",
+            modality="image",
+            metadata={"media_type": "image/png"},
+            trust_tier=1,
+            access_policy={"tenant": TENANT},
+        )
+    )
+
+    media_result = handlers.run_media_extract(
+        {"tenant_id": TENANT, "source_evidence_cid": source_cid}
+    )
+    calibration_result = handlers.run_calibration(
+        {"tenant_id": TENANT, "memory_type": "fact", "scores": [0.2, 0.4, 0.8], "confidence": 0.1}
+    )
+    lifecycle_result = handlers.run_lifecycle_sweep(
+        {
+            "states": [
+                {
+                    "item_id": "direct-memory-1",
+                    "tier": "verbatim",
+                    "salience": 0.01,
+                    "importance": 0.0,
+                    "access_count": 0,
+                    "last_accessed": "2020-01-01T00:00:00Z",
+                },
+                {
+                    "item_id": "direct-memory-2",
+                    "tier": "verbatim",
+                    "salience": 0.01,
+                    "importance": 0.8,
+                    "access_count": 1,
+                    "last_accessed": "2026-06-01T00:00:00Z",
+                    "must_keep": True,
+                    "successful_rehearsals": 1,
+                    "next_rehearsal_at": "2025-12-31T00:00:00Z",
+                },
+            ],
+            "now": "2026-01-01T00:00:00Z",
+        }
+    )
+    eval_result = handlers.run_eval_suite({"suite": "direct"})
+    observability_result = handlers.run_observability_snapshot({})
+
+    assert media_result.kind == MEDIA_EXTRACT_JOB
+    assert media_result.status == "skipped"
+    assert media_result.details["reason"] == "missing_content_pointer"
+    assert calibration_result.kind == CALIBRATE_JOB
+    assert calibration_result.status == "complete"
+    assert calibration_result.details["abstain"] is True
+    assert lifecycle_result.kind == LIFECYCLE_SWEEP_JOB
+    assert lifecycle_result.details["demoted"] == 1
+    assert lifecycle_result.details["rehearsed"] == 1
+    assert (
+        lifecycle_result.details["states"][1]["next_rehearsal_at"]
+        == "2026-01-08T00:00:00+00:00"
+    )
+    assert eval_result.kind == EVAL_SUITE_JOB
+    assert eval_result.status == "complete"
+    assert eval_result.details["suite"] == "direct"
+    assert eval_result.details["passed"] is True
+    assert observability_result.kind == OBSERVABILITY_SNAPSHOT_JOB
+    assert observability_result.details["metrics"]["counters"]["media_extract.skipped"] == 1
+    assert observability_result.details["metrics"]["counters"]["calibration.jobs"] == 1
+    assert observability_result.details["metrics"]["counters"]["lifecycle.sweeps"] == 1
+    assert observability_result.details["metrics"]["counters"]["eval.suites"] == 1
+    assert observability_result.details["metrics"]["counters"]["observability.snapshots"] == 1
+
+
 def test_runtime_job_handlers_drain_calibration_lifecycle_and_observability_jobs() -> None:
     engine = LocalMemoryEngine()
     queue = InProcessQueue()
