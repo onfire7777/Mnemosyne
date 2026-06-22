@@ -1759,6 +1759,17 @@ def _parametric_forbidden_raw_paths(value: Any, *, path: str = "$") -> list[str]
         "raw_training_data",
         "raw_credentials",
         "artifact_bytes",
+        "raw_logs",
+        "raw_request",
+        "raw_response",
+        "raw_stdout",
+        "raw_stderr",
+        "stdout",
+        "stderr",
+        "env",
+        "environment",
+        "command",
+        "command_args",
         "secret",
         "token",
         "private_key",
@@ -2029,6 +2040,68 @@ def cmd_parametric_trainer_check(args: argparse.Namespace) -> None:
         }
     )
 
+    deployment = bundle.get("deployment")
+    if not isinstance(deployment, Mapping):
+        findings.append(_parametric_finding("missing_deployment_section", "parametric trainer bundle requires deployment section"))
+        deployment = {}
+    deployment_flags = {
+        "production_validated": deployment.get("production_validated") is True,
+        "supervised_deployment": deployment.get("supervised_deployment") is True,
+        "health_check_passed": deployment.get("health_check_passed") is True,
+        "canary_passed": deployment.get("canary_passed") is True,
+        "rollback_drill_verified": deployment.get("rollback_drill_verified") is True,
+        "alert_route_configured": deployment.get("alert_route_configured") is True,
+    }
+    endpoint_url = str(deployment.get("endpoint_url") or "").strip()
+    endpoint_https = endpoint_url.startswith("https://")
+    deployment_latency_ms = _parametric_number(
+        deployment.get("latency_ms"),
+        default=-1.0,
+        code="deployment_latency_invalid",
+        message="deployment latency_ms must be numeric",
+        findings=findings,
+    )
+    deployment_suite_fingerprint = str(deployment.get("protected_suite_fingerprint") or "").strip()
+    deployment_artifact_hash = str(deployment.get("artifact_uri_hash") or "").strip()
+    deployment_rollback_fingerprint = str(deployment.get("rollback_fingerprint") or "").strip()
+    deployment_suite_matches = bool(deployment_suite_fingerprint) and deployment_suite_fingerprint == str(protected_suite.get("fingerprint") or "")
+    deployment_artifact_matches = bool(deployment_artifact_hash) and deployment_artifact_hash == artifact_uri_hash
+    deployment_rollback_matches = bool(deployment_rollback_fingerprint) and deployment_rollback_fingerprint == str(rollback.get("rollback_fingerprint") or "")
+    missing_deployment_flags = [name for name, ok in deployment_flags.items() if not ok]
+    deployment_ok = (
+        not missing_deployment_flags
+        and endpoint_https
+        and 0 <= deployment_latency_ms <= args.max_deployment_latency_ms
+        and deployment_suite_matches
+        and deployment_artifact_matches
+        and deployment_rollback_matches
+    )
+    for flag in missing_deployment_flags:
+        findings.append(_parametric_finding("deployment_control_missing", f"deployment control {flag} is not proven"))
+    if not endpoint_https:
+        findings.append(_parametric_finding("deployment_endpoint_not_https", "deployment endpoint_url must use HTTPS"))
+    if deployment_latency_ms < 0 or deployment_latency_ms > args.max_deployment_latency_ms:
+        findings.append(_parametric_finding("deployment_latency_too_high", "deployment latency exceeds release threshold"))
+    if not deployment_suite_matches:
+        findings.append(_parametric_finding("deployment_suite_fingerprint_mismatch", "deployment protected_suite_fingerprint must match protected suite fingerprint"))
+    if not deployment_artifact_matches:
+        findings.append(_parametric_finding("deployment_artifact_hash_mismatch", "deployment artifact_uri_hash must match trainer artifact hash"))
+    if not deployment_rollback_matches:
+        findings.append(_parametric_finding("deployment_rollback_fingerprint_mismatch", "deployment rollback_fingerprint must match rollback evidence"))
+    checks.append(
+        {
+            "name": "deployment",
+            "ok": deployment_ok,
+            "endpoint_https": endpoint_https,
+            "latency_ms": deployment_latency_ms,
+            "max_latency_ms": args.max_deployment_latency_ms,
+            "missing_controls": missing_deployment_flags,
+            "protected_suite_fingerprint_matches": deployment_suite_matches,
+            "artifact_uri_hash_matches": deployment_artifact_matches,
+            "rollback_fingerprint_matches": deployment_rollback_matches,
+        }
+    )
+
     rail_report = bundle.get("rail_report")
     if not isinstance(rail_report, Mapping):
         findings.append(_parametric_finding("missing_rail_report", "parametric trainer bundle requires rail_report section"))
@@ -2169,6 +2242,7 @@ def cmd_parametric_trainer_check(args: argparse.Namespace) -> None:
             "protected_suite_source_non_synthetic": True,
             "gate_candidate_matches_artifact": True,
             "min_gate_margin": args.min_gate_margin,
+            "max_deployment_latency_ms": args.max_deployment_latency_ms,
             "external_reward_signal": "external_only",
             "monotonic_trust": True,
             "eval_source_overlap": False,
@@ -11224,6 +11298,7 @@ def build_parser() -> argparse.ArgumentParser:
     parametric_trainer_check.add_argument("--min-cases", type=int, default=3)
     parametric_trainer_check.add_argument("--min-protected", type=int, default=1)
     parametric_trainer_check.add_argument("--min-gate-margin", type=float, default=0.01)
+    parametric_trainer_check.add_argument("--max-deployment-latency-ms", type=float, default=2000.0)
     parametric_trainer_check.add_argument("--max-mutation-rate", type=float, default=0.05)
     parametric_trainer_check.add_argument("--min-reward", type=float, default=0.0)
     parametric_trainer_check.add_argument("--max-sink-score", type=float, default=0.05)

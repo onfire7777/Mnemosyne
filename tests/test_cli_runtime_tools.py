@@ -7138,6 +7138,7 @@ def parametric_trainer_bundle(
     *,
     local_provider: bool = False,
     bad_rollback: bool = False,
+    bad_deployment: bool = False,
     high_mutation: bool = False,
     bad_gate: bool = False,
     bad_rail: bool = False,
@@ -7196,6 +7197,19 @@ def parametric_trainer_bundle(
             "protected_suite_passed": True,
             "rollback_provider_authorized": True,
             "rollback_fingerprint": "" if bad_rollback else "rollback-sha256:789abc",
+        },
+        "deployment": {
+            "production_validated": not bad_deployment,
+            "supervised_deployment": not bad_deployment,
+            "health_check_passed": not bad_deployment,
+            "canary_passed": not bad_deployment,
+            "rollback_drill_verified": not bad_deployment,
+            "alert_route_configured": not bad_deployment,
+            "endpoint_url": "http://trainer.local/canary" if bad_deployment else "https://trainer.mnemosyne.example.com/canary",
+            "latency_ms": 5000 if bad_deployment else 320,
+            "protected_suite_fingerprint": "mismatch" if bad_deployment else "protected-suite-sha256:def456",
+            "artifact_uri_hash": "mismatch" if bad_deployment else "artifact-sha256:abc123",
+            "rollback_fingerprint": "mismatch" if bad_deployment else "rollback-sha256:789abc",
         },
         "rail_report": {
             "provider_metadata_checked": True,
@@ -7258,6 +7272,7 @@ def test_cli_parametric_trainer_check_validates_deployment_bundle(tmp_path: Path
         "protected_suite",
         "gate",
         "rollback",
+        "deployment",
         "rail_report",
         "metrics",
         "redaction",
@@ -7280,6 +7295,7 @@ def test_cli_parametric_trainer_check_fails_closed_on_bad_bundle(tmp_path: Path)
             parametric_trainer_bundle(
                 local_provider=True,
                 bad_rollback=True,
+                bad_deployment=True,
                 high_mutation=True,
                 bad_gate=True,
                 bad_rail=True,
@@ -7298,6 +7314,12 @@ def test_cli_parametric_trainer_check_fails_closed_on_bad_bundle(tmp_path: Path)
     assert "trainer_provider_local" in codes
     assert "rollback_control_missing" in codes
     assert "rollback_fingerprint_missing" in codes
+    assert "deployment_control_missing" in codes
+    assert "deployment_endpoint_not_https" in codes
+    assert "deployment_latency_too_high" in codes
+    assert "deployment_suite_fingerprint_mismatch" in codes
+    assert "deployment_artifact_hash_mismatch" in codes
+    assert "deployment_rollback_fingerprint_mismatch" in codes
     assert "mutation_rate_too_high" in codes
     assert "gate_candidate_mismatch" in codes
     assert "gate_protected_regressions" in codes
