@@ -4400,6 +4400,136 @@ def test_cli_auth_ops_check_fails_closed_on_weak_auth_bundle(tmp_path: Path) -> 
     assert "redaction_raw_field_present" in codes
 
 
+def mcp_ops_bundle(*, bad_transport: bool = False, weak_tls: bool = False, raw_payload: bool = False) -> dict:
+    def transport(name: str, transport_name: str) -> dict:
+        return {
+            "ok": not bad_transport,
+            "transport": transport_name if not bad_transport else "local-stdio",
+            "base_url": f"https://mnemosyne.example.com/{name}" if not bad_transport else "http://127.0.0.1:8765/mcp",
+            "loop_count": 4 if not bad_transport else 1,
+            "avg_latency_ms": 120.0 if not bad_transport else 900.0,
+            "p95_latency_ms": 250.0 if not bad_transport else 2000.0,
+            "auth_token_configured": not bad_transport,
+            "session_token_configured": not bad_transport,
+            "checks": {
+                "health_ok": not bad_transport,
+                "initialize_ok": not bad_transport,
+                "tools_list_ok": not bad_transport,
+                "read_only_call_ok": not bad_transport,
+                "stateless_verified": not bad_transport,
+            },
+        }
+
+    bundle = {
+        "name": "production-mcp-ops",
+        "http_json_rpc": transport("mcp", "http-json-rpc"),
+        "streamable_http": transport("streamable", "mcp-sdk-streamable-http"),
+        "legacy_sse": {
+            "ok": not bad_transport,
+            "transport": "legacy-sse" if not bad_transport else "json",
+            "base_url": "https://mnemosyne.example.com/sse" if not bad_transport else "http://127.0.0.1:8765/sse",
+            "event_count": 3 if not bad_transport else 0,
+            "endpoint_data_present": not bad_transport,
+            "auth_token_configured": not bad_transport,
+            "session_token_configured": not bad_transport,
+        },
+        "tls": {
+            "ok": not weak_tls,
+            "client_certificate_required": True,
+            "certificate": {
+                "days_remaining": 90 if not weak_tls else 5,
+                "serial_number_sha256": "serial-sha256:mcp",
+            },
+            "checks": {
+                "chain_valid": not weak_tls,
+                "hostname_valid": not weak_tls,
+                "min_days_valid": not weak_tls,
+                "min_tls_version_valid": not weak_tls,
+            },
+        },
+        "redaction": {
+            "raw_tokens_omitted": True,
+            "raw_session_tokens_omitted": True,
+            "raw_requests_omitted": True,
+            "raw_responses_omitted": True,
+        },
+    }
+    if raw_payload:
+        bundle["request_body"] = {"auth_token": "raw-secret-token"}
+    return bundle
+
+
+def test_cli_mcp_ops_check_validates_hosted_transport_bundle(tmp_path: Path) -> None:
+    bundle = tmp_path / "mcp-ops.json"
+    bundle.write_text(json.dumps(mcp_ops_bundle()), encoding="utf-8")
+
+    report = run_cli(
+        tmp_path / "mnemosyne.json",
+        "mcp-ops-check",
+        "--bundle",
+        str(bundle),
+        "--require-legacy-sse",
+        "--require-client-cert",
+    )
+    acknowledged = run_cli(
+        tmp_path / "mnemosyne.json",
+        "mcp-ops-check",
+        "--bundle",
+        str(bundle),
+        "--require-legacy-sse",
+        "--require-client-cert",
+        "--expected-fingerprint",
+        report["fingerprint"],
+    )
+
+    serialized = json.dumps(report)
+    assert report["ok"] is True
+    assert len(report["fingerprint"]) == 64
+    assert {item["name"] for item in report["checks"]} == {
+        "http_json_rpc",
+        "streamable_http",
+        "legacy_sse",
+        "tls",
+        "redaction",
+    }
+    assert all(item["ok"] for item in report["checks"])
+    assert report["bundle"]["http_transport_present"] is True
+    assert report["bundle"]["streamable_transport_present"] is True
+    assert report["redaction"]["forbidden_raw_fields_present"] is False
+    assert "raw-secret-token" not in serialized
+    assert acknowledged["ok"] is True
+    assert acknowledged["expected_fingerprint_present"] is True
+
+
+def test_cli_mcp_ops_check_fails_closed_on_weak_transport_bundle(tmp_path: Path) -> None:
+    bundle = tmp_path / "bad-mcp-ops.json"
+    bundle.write_text(json.dumps(mcp_ops_bundle(bad_transport=True, weak_tls=True, raw_payload=True)), encoding="utf-8")
+
+    result = run_raw_cli(
+        tmp_path / "mnemosyne.json",
+        "mcp-ops-check",
+        "--bundle",
+        str(bundle),
+        "--require-legacy-sse",
+        "--require-client-cert",
+    )
+    payload = json.loads(result.stdout)
+    codes = {finding["code"] for finding in payload["findings"]}
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert "mcp_transport_not_ok" in codes
+    assert "mcp_transport_mismatch" in codes
+    assert "mcp_url_not_production_https" in codes
+    assert "mcp_loop_count_too_low" in codes
+    assert "mcp_auth_token_missing" in codes
+    assert "mcp_transport_control_missing" in codes
+    assert "mcp_sse_not_ok" in codes
+    assert "mcp_tls_not_ok" in codes
+    assert "mcp_tls_days_too_low" in codes
+    assert "redaction_raw_field_present" in codes
+
+
 def retrieval_ops_bundle(
     *,
     local_provider: bool = False,
