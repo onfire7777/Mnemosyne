@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import json
+import shlex
 import subprocess
 import sys
 import threading
@@ -61,6 +62,33 @@ def run_postgres_cli(*args: str) -> dict:
     result = run_postgres_cli_raw(*args)
     result.check_returncode()
     return json.loads(result.stdout)
+
+
+def fake_command_retrieval_provider(tmp_path: Path) -> tuple[str, Path]:
+    script = tmp_path / "command-retrieval-provider.py"
+    state = tmp_path / "command-retrieval-requests.json"
+    script.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env python3",
+                "import json, pathlib, sys",
+                "state = pathlib.Path(sys.argv[1])",
+                "request = json.loads(sys.stdin.read())",
+                "requests = json.loads(state.read_text()) if state.exists() else []",
+                "requests.append(request)",
+                "state.write_text(json.dumps(requests, sort_keys=True))",
+                "role = request.get('role')",
+                "if role == 'graph_ppr':",
+                "    hit = {'id': 'graph-hit-live', 'kind': 'relation', 'text': 'command graph retrieval reached Apache AGE wrapper', 'score': 0.93, 'channel': 'command_graph_ppr', 'metadata': {'source': 'Command graph', 'predicate': 'uses', 'target': 'Apache AGE'}}",
+                "else:",
+                "    hit = {'id': 'lexical-hit-live', 'kind': 'evidence', 'text': 'command lexical retrieval reached ParadeDB BM25 wrapper', 'score': 0.91, 'channel': 'command_lexical', 'metadata': {'source_type': 'command-lexical'}}",
+                "print(json.dumps({'hits': [hit]}))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+    return " ".join(shlex.quote(item) for item in (sys.executable, str(script), str(state))), state
 
 
 def start_fake_retrieval_provider(*, malformed_embedding: bool = False) -> tuple[ThreadingHTTPServer, str, dict[str, list[dict]]]:
@@ -945,6 +973,41 @@ def test_postgres_cli_uses_http_retrieval_providers_live() -> None:
     assert explain["explain"]["adapters"]["embedding"] == "http-embedding"
     assert "embed-live-token" not in json.dumps(search)
     assert "rank-live-token" not in json.dumps(explain)
+
+
+def test_postgres_cli_uses_command_retrieval_adapters_live(tmp_path: Path) -> None:
+    tenant = f"tenant-command-retrieval-live-{uuid4()}"
+    command, state = fake_command_retrieval_provider(tmp_path)
+    provider_args = (
+        "--lexical-provider",
+        "command",
+        "--lexical-command",
+        command,
+        "--lexical-backend",
+        "paradedb-bm25",
+        "--graph-provider",
+        "command",
+        "--graph-command",
+        command,
+        "--graph-backend",
+        "apache-age",
+    )
+
+    search = run_postgres_cli(*provider_args, "search", "--tenant", tenant, "--query", "command lexical retrieval")
+    deep = run_postgres_cli(*provider_args, "deep-search", "--tenant", tenant, "--query", "command graph retrieval")
+    requests = json.loads(state.read_text(encoding="utf-8"))
+
+    assert any(hit["id"] == "lexical-hit-live" for hit in search["hits"])
+    assert any(hit["metadata"]["backend"] == "paradedb-bm25" for hit in search["hits"])
+    assert any(hit["id"] == "graph-hit-live" for hit in deep["hits"])
+    assert any(hit["metadata"]["backend"] == "apache-age" for hit in deep["hits"])
+    assert search["explain"]["channels"]["postgres_lexical"] == 1
+    assert deep["explain"]["channels"]["postgres_graph_ppr"] == 1
+    assert search["explain"]["adapters"]["lexical_backend"] == "paradedb-bm25"
+    assert deep["explain"]["adapters"]["graph_backend"] == "apache-age"
+    assert [item["role"] for item in requests].count("lexical_search") == 2
+    assert [item["role"] for item in requests].count("graph_ppr") == 1
+    assert all(item["tenant_id"] == tenant for item in requests)
 
 
 def test_postgres_cli_http_embedding_provider_fails_closed_live() -> None:
