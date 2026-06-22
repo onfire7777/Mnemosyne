@@ -5982,6 +5982,75 @@ def cmd_provenance_ops_check(args: argparse.Namespace) -> None:
         }
     )
 
+    deployment = bundle.get("deployment")
+    if not isinstance(deployment, Mapping):
+        findings.append(_provenance_finding("deployment_missing", "provenance ops bundle requires deployment section"))
+        deployment = {}
+    deployment_flags = {
+        "production_validated": deployment.get("production_validated") is True,
+        "supervised_verifier": deployment.get("supervised_verifier") is True,
+        "health_check_passed": deployment.get("health_check_passed") is True,
+        "trust_root_refresh_verified": deployment.get("trust_root_refresh_verified") is True,
+        "quarantine_drill_verified": deployment.get("quarantine_drill_verified") is True,
+        "ingestion_pipeline_supervised": deployment.get("ingestion_pipeline_supervised") is True,
+        "alert_route_configured": deployment.get("alert_route_configured") is True,
+    }
+    deployment_surface = str(deployment.get("surface") or "").strip().lower()
+    deployment_surface_ok = deployment_surface in {"command", "container", "hosted"}
+    deployment_latency_ms = _provenance_ops_number(
+        deployment.get("latency_ms"),
+        default=args.max_deployment_latency_ms + 1.0,
+        code="deployment_latency_invalid",
+        message="deployment latency_ms must be numeric",
+        findings=findings,
+    )
+    execution_fingerprint = str(deployment.get("execution_fingerprint") or "").strip()
+    deployment_policy_fingerprint = str(deployment.get("policy_fingerprint") or "").strip()
+    deployment_ingestion_hash_count = _provenance_ops_int(
+        deployment.get("ingestion_evidence_hash_count"),
+        default=0,
+        code="deployment_ingestion_hash_count_invalid",
+        message="deployment ingestion_evidence_hash_count must be numeric",
+        findings=findings,
+    )
+    policy_fingerprint_matches = bool(deployment_policy_fingerprint) and deployment_policy_fingerprint == policy_fingerprint
+    ingestion_hash_count_matches = deployment_ingestion_hash_count == len(evidence_hashes)
+    execution_fingerprint_present = "sha256:" in execution_fingerprint.lower()
+    missing_deployment_flags = [name for name, ok in deployment_flags.items() if not ok]
+    deployment_ok = (
+        not missing_deployment_flags
+        and deployment_surface_ok
+        and execution_fingerprint_present
+        and policy_fingerprint_matches
+        and ingestion_hash_count_matches
+        and deployment_latency_ms <= args.max_deployment_latency_ms
+    )
+    for flag in missing_deployment_flags:
+        findings.append(_provenance_finding("deployment_control_missing", f"deployment control {flag} is required"))
+    if not deployment_surface_ok:
+        findings.append(_provenance_finding("deployment_surface_invalid", "deployment surface must be command, container, or hosted"))
+    if not execution_fingerprint_present:
+        findings.append(_provenance_finding("deployment_execution_fingerprint_missing", "deployment execution_fingerprint must be SHA-256"))
+    if not policy_fingerprint_matches:
+        findings.append(_provenance_finding("deployment_policy_fingerprint_mismatch", "deployment policy_fingerprint must match trust-roots policy fingerprint"))
+    if not ingestion_hash_count_matches:
+        findings.append(_provenance_finding("deployment_ingestion_hash_count_mismatch", "deployment ingestion_evidence_hash_count must match ingestion evidence hash count"))
+    if deployment_latency_ms > args.max_deployment_latency_ms:
+        findings.append(_provenance_finding("deployment_latency_too_high", "deployment latency exceeds threshold"))
+    checks.append(
+        {
+            "name": "deployment",
+            "ok": deployment_ok,
+            "surface": deployment_surface,
+            "latency_ms": deployment_latency_ms,
+            "max_latency_ms": args.max_deployment_latency_ms,
+            "missing_controls": missing_deployment_flags,
+            "execution_fingerprint_present": execution_fingerprint_present,
+            "policy_fingerprint_matches": policy_fingerprint_matches,
+            "ingestion_hash_count_matches": ingestion_hash_count_matches,
+        }
+    )
+
     redaction = bundle.get("redaction") if isinstance(bundle.get("redaction"), Mapping) else {}
     redaction_flags = {
         "asset_bytes_omitted": redaction.get("asset_bytes_omitted") is True,
@@ -6031,6 +6100,7 @@ def cmd_provenance_ops_check(args: argparse.Namespace) -> None:
             "min_trusted_roots": args.min_trusted_roots,
             "min_trusted_issuers": args.min_trusted_issuers,
             "max_verifier_timeout_seconds": args.max_verifier_timeout_seconds,
+            "max_deployment_latency_ms": args.max_deployment_latency_ms,
             "ingestion_backend": "postgres",
         },
         "redaction": {**redaction_flags, "forbidden_raw_fields_present": bool(forbidden_raw_paths)},
@@ -11439,6 +11509,7 @@ def build_parser() -> argparse.ArgumentParser:
     provenance_ops_check.add_argument("--min-trusted-roots", type=int, default=1)
     provenance_ops_check.add_argument("--min-trusted-issuers", type=int, default=1)
     provenance_ops_check.add_argument("--max-verifier-timeout-seconds", type=float, default=30.0)
+    provenance_ops_check.add_argument("--max-deployment-latency-ms", type=float, default=2000.0)
     provenance_ops_check.add_argument("--expected-fingerprint")
     provenance_ops_check.set_defaults(func=cmd_provenance_ops_check)
 
