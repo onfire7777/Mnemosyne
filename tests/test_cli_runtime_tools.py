@@ -3623,6 +3623,7 @@ def provenance_ops_bundle(
     bad_asset_cases: bool = False,
     bad_quarantine: bool = False,
     bad_ingestion: bool = False,
+    bad_deployment: bool = False,
     raw_secret: bool = False,
 ) -> dict:
     bundle = {
@@ -3727,6 +3728,20 @@ def provenance_ops_bundle(
             if not bad_ingestion
             else ["provenance-valid"],
         },
+        "deployment": {
+            "production_validated": not bad_deployment,
+            "surface": "local" if bad_deployment else "command",
+            "supervised_verifier": not bad_deployment,
+            "health_check_passed": not bad_deployment,
+            "trust_root_refresh_verified": not bad_deployment,
+            "quarantine_drill_verified": not bad_deployment,
+            "ingestion_pipeline_supervised": not bad_deployment,
+            "alert_route_configured": not bad_deployment,
+            "execution_fingerprint": "" if bad_deployment else "sha256:provenance-run",
+            "policy_fingerprint": "mismatch" if bad_deployment else "sha256:trust-policy",
+            "ingestion_evidence_hash_count": 99 if bad_deployment else 3,
+            "latency_ms": 5000 if bad_deployment else 250,
+        },
         "redaction": {
             "asset_bytes_omitted": True,
             "raw_manifests_omitted": True,
@@ -3767,6 +3782,7 @@ def test_cli_provenance_ops_check_validates_production_bundle(tmp_path: Path) ->
         "asset_bound_cases",
         "quarantine",
         "ingestion",
+        "deployment",
         "redaction",
     }
     assert all(item["ok"] for item in report["checks"])
@@ -3793,6 +3809,7 @@ def test_cli_provenance_ops_check_fails_closed_on_bad_bundle(tmp_path: Path) -> 
                 bad_asset_cases=True,
                 bad_quarantine=True,
                 bad_ingestion=True,
+                bad_deployment=True,
                 raw_secret=True,
             )
         ),
@@ -3816,6 +3833,12 @@ def test_cli_provenance_ops_check_fails_closed_on_bad_bundle(tmp_path: Path) -> 
     assert "quarantine_control_missing" in codes
     assert "ingestion_backend_not_postgres" in codes
     assert "ingestion_capability_tag_missing" in codes
+    assert "deployment_control_missing" in codes
+    assert "deployment_surface_invalid" in codes
+    assert "deployment_execution_fingerprint_missing" in codes
+    assert "deployment_policy_fingerprint_mismatch" in codes
+    assert "deployment_ingestion_hash_count_mismatch" in codes
+    assert "deployment_latency_too_high" in codes
     assert "redaction_raw_field_present" in codes
 
 
