@@ -2821,6 +2821,210 @@ def test_cli_provenance_trust_check_rejects_untrusted_root(tmp_path: Path) -> No
     assert "quarantine_mismatch" in finding_codes
 
 
+def provenance_ops_bundle(
+    *,
+    local_verifier: bool = False,
+    bad_trust_roots: bool = False,
+    bad_trust_suite: bool = False,
+    bad_asset_cases: bool = False,
+    bad_quarantine: bool = False,
+    bad_ingestion: bool = False,
+    raw_secret: bool = False,
+) -> dict:
+    bundle = {
+        "name": "production-provenance-ops",
+        "validation_scope": {
+            "production_validated": not bad_ingestion,
+            "target_environment": "local" if bad_ingestion else "production",
+            "operator_asserted": not bad_ingestion,
+            "run_id": "run-sha256:provenance-001",
+            "started_at": "2026-06-21T13:00:00Z",
+            "completed_at": "2026-06-21T13:03:00Z",
+        },
+        "c2pa_verifier": {
+            "ok": not local_verifier,
+            "provider": "local" if local_verifier else "command",
+            "tool_version": "" if local_verifier else "c2patool 1.0.0",
+            "tool_path_hash": "" if local_verifier else "sha256:c2pa-tool-path",
+            "command_isolated": not local_verifier,
+            "no_shell": not local_verifier,
+            "asset_file_preferred": not local_verifier,
+            "timeout_seconds": 120 if local_verifier else 10,
+        },
+        "trust_roots": {
+            "ok": not bad_trust_roots,
+            "trusted_issuer_count": 0 if bad_trust_roots else 1,
+            "trusted_root_count": 0 if bad_trust_roots else 1,
+            "root_fingerprints": [] if bad_trust_roots else ["sha256:root-a"],
+            "policy_fingerprint": "" if bad_trust_roots else "sha256:trust-policy",
+            "rotation_verified": not bad_trust_roots,
+            "stale_roots_rejected": not bad_trust_roots,
+            "untrusted_issuer_quarantined": not bad_trust_roots,
+            "asset_scope_enforced": not bad_trust_roots,
+        },
+        "provenance_trust": {
+            "ok": not bad_trust_suite,
+            "fingerprint": "" if bad_trust_suite else "abc123def456",
+            "suite": {
+                "case_count": 1 if bad_trust_suite else 3,
+                "trusted_issuer_count": 0 if bad_trust_suite else 1,
+                "trusted_root_count": 0 if bad_trust_suite else 1,
+            },
+            "redaction": {
+                "asset_bytes_omitted": not bad_trust_suite,
+                "raw_manifest_omitted": not bad_trust_suite,
+                "raw_verifier_stdout_omitted": not bad_trust_suite,
+                "raw_verifier_stderr_omitted": not bad_trust_suite,
+            },
+        },
+        "asset_bound_cases": {
+            "ok": not bad_asset_cases,
+            "cases": [
+                {
+                    "id": "trusted-asset",
+                    "expected": "trusted",
+                    "asset_sha256": "sha256:asset-a",
+                    "manifest_sha256": "sha256:manifest-a",
+                    "asset_binding_matched": not bad_asset_cases,
+                    "valid": not bad_asset_cases,
+                    "trusted": not bad_asset_cases,
+                    "quarantined": bad_asset_cases,
+                },
+                {
+                    "id": "untrusted-root",
+                    "expected": "quarantine",
+                    "asset_sha256": "sha256:asset-b",
+                    "manifest_sha256": "sha256:manifest-b",
+                    "asset_binding_matched": True,
+                    "valid": True,
+                    "trusted": False,
+                    "quarantined": not bad_asset_cases,
+                },
+                {
+                    "id": "digest-mismatch",
+                    "expected": "quarantine",
+                    "asset_sha256": "sha256:asset-c",
+                    "manifest_sha256": "sha256:manifest-c",
+                    "asset_binding_matched": False,
+                    "valid": False,
+                    "trusted": False,
+                    "quarantined": not bad_asset_cases,
+                },
+            ],
+        },
+        "quarantine": {
+            "ok": not bad_quarantine,
+            "case_count": 2 if not bad_quarantine else 0,
+            "untrusted_signer_quarantined": not bad_quarantine,
+            "untrusted_root_quarantined": not bad_quarantine,
+            "digest_mismatch_quarantined": not bad_quarantine,
+            "hidden_from_default_retrieval": not bad_quarantine,
+            "default_retrieval_exclusion_verified": not bad_quarantine,
+        },
+        "ingestion": {
+            "ok": not bad_ingestion,
+            "backend": "local" if bad_ingestion else "postgres",
+            "production_validated": not bad_ingestion,
+            "tenant_hash": "tenant-sha256:aaa111" if not bad_ingestion else "",
+            "evidence_cid_hashes": ["cid-sha256:a", "cid-sha256:b", "cid-sha256:c"] if not bad_ingestion else [],
+            "trusted_ingest_count": 1 if not bad_ingestion else 0,
+            "quarantined_ingest_count": 2 if not bad_ingestion else 0,
+            "capability_tags": ["asset-bound-provenance", "provenance-valid", "provenance-verified", "quarantined"]
+            if not bad_ingestion
+            else ["provenance-valid"],
+        },
+        "redaction": {
+            "asset_bytes_omitted": True,
+            "raw_manifests_omitted": True,
+            "raw_verifier_stdout_omitted": True,
+            "raw_verifier_stderr_omitted": True,
+            "raw_certificates_omitted": True,
+            "raw_credentials_omitted": True,
+        },
+    }
+    if raw_secret:
+        bundle["raw_manifest"] = {"claim": "raw certificate data"}
+        bundle["secret"] = "raw-secret-token"
+    return bundle
+
+
+def test_cli_provenance_ops_check_validates_production_bundle(tmp_path: Path) -> None:
+    bundle = tmp_path / "provenance-ops.json"
+    bundle.write_text(json.dumps(provenance_ops_bundle()), encoding="utf-8")
+
+    report = run_cli(tmp_path / "mnemosyne.json", "provenance-ops-check", "--bundle", str(bundle))
+    acknowledged = run_cli(
+        tmp_path / "mnemosyne.json",
+        "provenance-ops-check",
+        "--bundle",
+        str(bundle),
+        "--expected-fingerprint",
+        report["fingerprint"],
+    )
+
+    serialized = json.dumps(report)
+    assert report["ok"] is True
+    assert len(report["fingerprint"]) == 64
+    assert {item["name"] for item in report["checks"]} == {
+        "validation_scope",
+        "c2pa_verifier",
+        "trust_roots",
+        "provenance_trust",
+        "asset_bound_cases",
+        "quarantine",
+        "ingestion",
+        "redaction",
+    }
+    assert all(item["ok"] for item in report["checks"])
+    assert report["bundle"]["production_validated"] is True
+    assert report["bundle"]["trusted_root_count"] == 1
+    assert report["bundle"]["trusted_asset_cases"] == 1
+    assert report["bundle"]["quarantine_asset_cases"] == 2
+    assert report["bundle"]["ingestion_backend"] == "postgres"
+    assert report["redaction"]["forbidden_raw_fields_present"] is False
+    assert "raw-secret-token" not in serialized
+    assert "raw certificate data" not in serialized
+    assert acknowledged["ok"] is True
+    assert acknowledged["expected_fingerprint_present"] is True
+
+
+def test_cli_provenance_ops_check_fails_closed_on_bad_bundle(tmp_path: Path) -> None:
+    bundle = tmp_path / "bad-provenance-ops.json"
+    bundle.write_text(
+        json.dumps(
+            provenance_ops_bundle(
+                local_verifier=True,
+                bad_trust_roots=True,
+                bad_trust_suite=True,
+                bad_asset_cases=True,
+                bad_quarantine=True,
+                bad_ingestion=True,
+                raw_secret=True,
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    result = run_raw_cli(tmp_path / "mnemosyne.json", "provenance-ops-check", "--bundle", str(bundle))
+    payload = json.loads(result.stdout)
+    codes = {finding["code"] for finding in payload["findings"]}
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert "production_validation_missing" in codes
+    assert "verifier_provider_local" in codes
+    assert "trust_roots_not_ok" in codes
+    assert "trusted_root_count_too_low" in codes
+    assert "trust_root_control_missing" in codes
+    assert "provenance_trust_not_ok" in codes
+    assert "asset_bound_case_failed" in codes
+    assert "trusted_asset_cases_too_low" in codes
+    assert "quarantine_control_missing" in codes
+    assert "ingestion_backend_not_postgres" in codes
+    assert "ingestion_capability_tag_missing" in codes
+    assert "redaction_raw_field_present" in codes
+
+
 def test_cli_enforces_allowed_residency_on_ingest(tmp_path: Path) -> None:
     store = tmp_path / "mnemosyne.json"
     accepted = run_cli(
