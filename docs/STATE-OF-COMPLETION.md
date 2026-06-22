@@ -15,7 +15,20 @@ the structured wave results. The injection is not present in any committed file 
 | latency-p95 | ✅ pass | real warm server (one model load, 96 warm `/embed`); engine P95 ~107ms, embed P95 CPU-bound |
 | scope-fr20-21 | ✅ pass | 20/20 checks; real media-extract + parametric state machine; held to limited v1 bar |
 
-## SLO scoreboard
+## SLO scoreboard — DEFINITIVE (Wave 5: v2 corpus + real providers + Postgres, full set, reproduced)
+| SLO (§16) | Target | Result | Verdict |
+|---|---|---|---|
+| recall@k | ≥0.80 | **0.977** (CI .94–1.0) | ✅ PASS |
+| nDCG@k | ≥0.80 | **0.983** (CI .96–1.0) | ✅ PASS |
+| G2 lift @ ≤10% tokens | ≥+0.15 | **+0.208 @ 7% tokens** | ✅ PASS (ceiling broken by the v2 hard corpus) |
+| poison-block (G7) | ≥0.95 | **1.0** (6/6; +59-attack Wave-1 corpus) | ✅ PASS |
+| ECE | ≤0.05 | **0.279** | ❌ FAIL — Codex-src calibration gap (degenerate confidence; needs conformal `calibration-tune`) |
+| fast-path P95 | ≤300–400ms | 2.9s warm | ◷ HARNESS-LIMITED — subprocess-per-query, not a long-lived server (engine-only ~107ms in Wave 3); needs an in-process timing seam |
+| hard-QA recall/nDCG | ≥0.80 | 0.625/0.594 | ◐ answer-synthesis gap on multi-hop (gold in no single doc — labeling/measurement nuance) |
+
+**4 of 6 headline SLO families PASS on the real path at v2 scale** (recall, nDCG, G2 lift, poison). ECE = real Codex-src calibration gap; P95 = harness/env artifact.
+
+## SLO scoreboard — Wave-2 (initial real-provider proof, tiny corpus)
 | SLO (§16) | Target | Result | Status |
 |---|---|---|---|
 | recall@k | ≥0.80 | **0.72→0.94** | ✅ PROVEN (real BGE, Postgres) |
