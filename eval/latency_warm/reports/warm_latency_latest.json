@@ -1,0 +1,178 @@
+{
+  "bench": "warm_server_fast_path_latency_postgres",
+  "generated_at": "2026-06-22T05:14:29.124198+00:00",
+  "blueprint_refs": [
+    "\u00a715 fast-path P95 NFR",
+    "FR-3",
+    "\u00a716 SLO"
+  ],
+  "fixes_prior_artifact": {
+    "subprocess_per_query": "ELIMINATED: engine built ONCE per client via cli.build_parser->load_tools->MemoryTools; queries run in-process (no per-query python -m mnemosyne.cli).",
+    "cold_model_roundtrip_per_query": "ELIMINATED: real embedding service started ONCE on the specified port, models loaded ONCE, warmed before measurement.",
+    "prior_bench_reference": "eval/latency/bench.py (local backend) + Wave-2 fast_path suite"
+  },
+  "config": {
+    "backend": "postgres",
+    "postgres_dsn_host": "127.0.0.1:54329/mnemosyne",
+    "tenant": "warm-latency-eval-cae210d7",
+    "tenant_uuid": "ba4b0ff4-44e7-5bd4-b62a-d6159a042719",
+    "distinct_tenant_prefix": "warm-latency-eval",
+    "shared_tables_truncated": false,
+    "clients": 8,
+    "queries_per_client": 25,
+    "total_calls": 200,
+    "embedding_url": "http://127.0.0.1:8099/embed",
+    "reranker_url": "http://127.0.0.1:8099/rerank",
+    "embedding_model": "BAAI/bge-small-en-v1.5",
+    "reranker_model": "cross-encoder/ms-marco-MiniLM-L-6-v2",
+    "embedding_dims": 1024,
+    "lexical_provider": "postgres",
+    "graph_provider": "postgres",
+    "force_fallback": false,
+    "dataset": "eval/datasets/retrieval_curated.json",
+    "n_corpus_docs": 12,
+    "n_unique_queries": 9,
+    "venv": "/Users/admin/Projects/Mnemosyne-completion/.venv-eval/bin/python"
+  },
+  "warm_costs_paid_once_ms": {
+    "engine_build_and_corpus_capture": 1750.02,
+    "embedding_service_start_and_model_load": 13201.05,
+    "note": "Paid ONCE for a long-lived server, NOT per request."
+  },
+  "embedding_service": {
+    "backend": "sentence-transformers",
+    "reranker_backend": "cross-encoder",
+    "is_real_model": true,
+    "health": {
+      "status": "ok",
+      "embedding": {
+        "model": "BAAI/bge-small-en-v1.5",
+        "dimensions": 1024,
+        "backend": "sentence-transformers"
+      },
+      "reranker": {
+        "model": "cross-encoder/ms-marco-MiniLM-L-6-v2",
+        "backend": "cross-encoder"
+      }
+    },
+    "request_counters": {
+      "GET /health": 2,
+      "POST /embed": 440,
+      "POST /rerank": 208
+    },
+    "proved_wired_embed": true,
+    "proved_wired_rerank": true
+  },
+  "wall_clock_ms": 17035.09,
+  "throughput_qps": 11.74,
+  "components": {
+    "embed_call_only": {
+      "label": "embed_call_only",
+      "p50_ms": 174.98,
+      "p95_ms": 250.52,
+      "p99_ms": 298.56,
+      "mean_ms": 182.02,
+      "max_ms": 348.5,
+      "min_ms": 87.95,
+      "p95_ci": {
+        "point": 250.5235,
+        "ci_low": 235.2171,
+        "ci_high": 269.964,
+        "ci_method": "bootstrap-pctl"
+      },
+      "p50_ci": {
+        "point": 174.98,
+        "ci_low": 169.9784,
+        "ci_high": 182.2157,
+        "ci_method": "bootstrap-pctl"
+      }
+    },
+    "engine_fast_path_total": {
+      "label": "engine_fast_path_total",
+      "p50_ms": 491.82,
+      "p95_ms": 606.16,
+      "p99_ms": 686.61,
+      "mean_ms": 494.26,
+      "max_ms": 704.08,
+      "min_ms": 246.41,
+      "p95_ci": {
+        "point": 606.1597,
+        "ci_low": 578.9686,
+        "ci_high": 661.7001,
+        "ci_method": "bootstrap-pctl"
+      },
+      "p50_ci": {
+        "point": 491.8207,
+        "ci_low": 477.6471,
+        "ci_high": 498.9631,
+        "ci_method": "bootstrap-pctl"
+      }
+    },
+    "engine_minus_embed": {
+      "label": "engine_minus_embed",
+      "p50_ms": 311.28,
+      "p95_ms": 442.84,
+      "p99_ms": 512.78,
+      "mean_ms": 312.25,
+      "max_ms": 523.89,
+      "min_ms": 58.79,
+      "p95_ci": {
+        "point": 442.8423,
+        "ci_low": 410.3101,
+        "ci_high": 463.9505,
+        "ci_method": "bootstrap-pctl"
+      },
+      "p50_ci": {
+        "point": 311.279,
+        "ci_low": 293.1606,
+        "ci_high": 322.53,
+        "ci_method": "bootstrap-pctl"
+      }
+    }
+  },
+  "verdicts": [
+    {
+      "name": "engine_fast_path_total_p95",
+      "p95_ms": 606.16,
+      "target_ms_loose": 400.0,
+      "target_ms_tight": 300.0,
+      "op": "<=",
+      "pass_loose": false,
+      "pass_tight": false,
+      "p95_ci": {
+        "point": 606.1597,
+        "ci_low": 578.9686,
+        "ci_high": 661.7001,
+        "ci_method": "bootstrap-pctl"
+      }
+    },
+    {
+      "name": "embed_call_only_p95",
+      "p95_ms": 250.52,
+      "target_ms_loose": 400.0,
+      "target_ms_tight": 300.0,
+      "op": "<=",
+      "pass_loose": true,
+      "pass_tight": true,
+      "p95_ci": {
+        "point": 250.5235,
+        "ci_low": 235.2171,
+        "ci_high": 269.964,
+        "ci_method": "bootstrap-pctl"
+      }
+    }
+  ],
+  "tenant_cleanup": {
+    "assertions": 0,
+    "relations": 0,
+    "justifications": 0,
+    "contradictions": 0,
+    "preferences": 0,
+    "evidence": 12,
+    "runtime_state": 0,
+    "branches": 1,
+    "tenants": 1
+  },
+  "errors": [],
+  "n_errors": 0
+}
