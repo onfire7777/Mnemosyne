@@ -36,6 +36,7 @@ from mnemosyne.mcp_server import MnemosyneMcpServer
 from mnemosyne.models import Assertion, Evidence, Preference, Relation
 from mnemosyne.postgres_engine import PostgresEngine, _cid_to_bytes, _stable_uuid
 from mnemosyne.queue import InProcessQueue, PostgresQueue, QueueWorker
+from mnemosyne.runtime_state import RuntimeState
 from mnemosyne.storage import LocalObjectStore
 
 
@@ -174,6 +175,43 @@ def test_postgres_queue_lifecycle_and_tenant_isolation_live() -> None:
     assert jobs[leased.id].result == {"ok": True}
     assert queue.snapshot()["complete"] == 1
     assert other_queue.snapshot() == {}
+
+
+def test_postgres_runtime_helper_public_paths_live(tmp_path) -> None:
+    tenant = f"tenant-runtime-helper-{uuid4()}"
+    other_tenant = f"tenant-runtime-helper-other-{uuid4()}"
+    branch = f"helper-{uuid4()}"
+    dsn = live_dsn()
+    engine = PostgresEngine(dsn)
+
+    engine.ensure_tenant_and_branch(tenant, branch=branch, kind="scratch")
+    engine.ensure_tenant_and_branch(tenant, branch=branch, kind="scratch")
+    matching_branches = [
+        row
+        for row in engine.export_all()["branches"]
+        if row["tenant_id"] == tenant and row["name"] == branch
+    ]
+    assert len(matching_branches) == 1
+    assert matching_branches[0]["kind"] == "scratch"
+    assert matching_branches[0]["from_branch"] is None
+
+    queue = PostgresQueue(dsn, tenant_id=tenant)
+    other_queue = PostgresQueue(dsn, tenant_id=other_tenant)
+    queue.ensure_schema()
+    first = queue.enqueue("runtime-helper-a", {"tenant_id": tenant, "order": 1})
+    second = queue.enqueue("runtime-helper-b", {"tenant_id": tenant, "order": 2})
+    listed = {job.id: job for job in queue.list_jobs()}
+
+    assert set(listed) == {first.id, second.id}
+    assert listed[first.id].payload["order"] == 1
+    assert listed[second.id].payload["order"] == 2
+    assert other_queue.list_jobs() == []
+
+    store_path = tmp_path / "mnemosyne.json"
+    runtime_state = RuntimeState.from_store_path(store_path)
+    assert runtime_state is not None
+    assert runtime_state.path == tmp_path / "mnemosyne.json.runtime.json"
+    assert RuntimeState.from_store_path(None) is None
 
 
 def test_postgres_queue_cli_enqueue_and_drain_live() -> None:
