@@ -106,6 +106,7 @@ DEPLOYMENT_SOAK_COMMANDS = {
     "idp-jwks-live-check",
     "idp-authz-policy-rollout-check",
     "tls-cert-check",
+    "tls-lifecycle-ops-check",
     "tls-rotation-plan-check",
     "mcp-http-soak",
     "mcp-ops-check",
@@ -144,6 +145,7 @@ PRODUCTION_RELEASE_REQUIRED_COMMANDS = (
     "idp-jwks-live-check",
     "idp-authz-policy-rollout-check",
     "tls-cert-check",
+    "tls-lifecycle-ops-check",
     "tls-rotation-plan-check",
     "mcp-http-soak",
     "mcp-ops-check",
@@ -190,6 +192,7 @@ RELEASE_AUDIT_REQUIRED_OUTPUT_KEYS: dict[str, tuple[str, ...]] = {
     "idp-jwks-live-check": ("issuer", "audience", "jwks", "token", "identity"),
     "idp-authz-policy-rollout-check": ("rollout",),
     "tls-cert-check": ("target", "tls", "certificate", "checks"),
+    "tls-lifecycle-ops-check": ("bundle", "requirements", "checks", "findings"),
     "tls-rotation-plan-check": ("config", "current", "candidate", "rotation", "checks"),
     "mcp-http-soak": ("target", "config", "health", "iterations", "summary"),
     "mcp-ops-check": ("bundle", "requirements", "checks", "findings"),
@@ -8715,6 +8718,392 @@ def cmd_tls_rotation_plan_check(args: argparse.Namespace) -> None:
         raise SystemExit(1)
 
 
+def _load_tls_lifecycle_ops_bundle(args: argparse.Namespace) -> Mapping[str, Any]:
+    if bool(args.bundle) == bool(args.bundle_json):
+        raise SystemExit("tls-lifecycle-ops-check requires exactly one of --bundle or --bundle-json")
+    try:
+        loaded = (
+            json.loads(Path(args.bundle).expanduser().read_text(encoding="utf-8"))
+            if args.bundle
+            else json.loads(args.bundle_json)
+        )
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"TLS lifecycle ops bundle is not valid JSON: {exc}") from exc
+    if not isinstance(loaded, Mapping):
+        raise SystemExit("TLS lifecycle ops bundle must be a JSON object")
+    return loaded
+
+
+def _tls_lifecycle_finding(code: str, message: str) -> dict[str, str]:
+    return {"code": code, "message": message}
+
+
+def _tls_lifecycle_fingerprint(report: Mapping[str, Any]) -> str:
+    stable = {
+        "bundle": report.get("bundle"),
+        "requirements": report.get("requirements"),
+        "checks": report.get("checks"),
+        "findings": report.get("findings"),
+    }
+    return sha256(json.dumps(stable, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def _tls_lifecycle_number(
+    value: Any,
+    *,
+    default: float,
+    code: str,
+    message: str,
+    findings: list[dict[str, str]],
+) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        findings.append(_tls_lifecycle_finding(code, message))
+        return default
+
+
+def _tls_lifecycle_hash_present(value: Any) -> bool:
+    return "sha256:" in str(value or "").lower()
+
+
+def _tls_lifecycle_hostnames(raw: Any, findings: list[dict[str, str]]) -> list[str]:
+    if not isinstance(raw, list):
+        findings.append(_tls_lifecycle_finding("tls_hostnames_invalid", "issuance.hostnames must be a list"))
+        return []
+    return [str(item).strip() for item in raw if str(item).strip()]
+
+
+def _tls_lifecycle_forbidden_raw_paths(value: Any, *, path: str = "$") -> list[str]:
+    paths: list[str] = []
+    if isinstance(value, Mapping):
+        for key, child in value.items():
+            key_text = str(key)
+            child_path = f"{path}.{key_text}"
+            if child_path.startswith("$.redaction."):
+                continue
+            lowered = key_text.lower()
+            if any(
+                token in lowered
+                for token in (
+                    "raw_private_key",
+                    "private_key_pem",
+                    "acme_account_key",
+                    "key_pem",
+                    "tls_key",
+                    "token",
+                    "password",
+                    "credential",
+                    "raw_cert",
+                    "certificate_pem",
+                    "fullchain_pem",
+                    "csr_pem",
+                    "raw_pem",
+                    "pem_block",
+                    "raw_log",
+                    "stdout",
+                    "stderr",
+                )
+            ):
+                paths.append(child_path)
+            paths.extend(_tls_lifecycle_forbidden_raw_paths(child, path=child_path))
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            paths.extend(_tls_lifecycle_forbidden_raw_paths(child, path=f"{path}[{index}]"))
+    return paths
+
+
+def cmd_tls_lifecycle_ops_check(args: argparse.Namespace) -> None:
+    bundle = _load_tls_lifecycle_ops_bundle(args)
+    findings: list[dict[str, str]] = []
+    checks: list[dict[str, Any]] = []
+
+    validation_raw = bundle.get("validation_scope")
+    validation_present = isinstance(validation_raw, Mapping)
+    validation = validation_raw if validation_present else {}
+    validation_ok = (
+        args.allow_non_production
+        or (
+            validation.get("production_validated") is True
+            and validation.get("target_environment") == "production"
+            and validation.get("operator_asserted") is True
+            and bool(validation.get("run_id"))
+            and bool(validation.get("started_at"))
+            and bool(validation.get("completed_at"))
+        )
+    )
+    if not args.allow_non_production:
+        if validation.get("production_validated") is not True:
+            findings.append(_tls_lifecycle_finding("production_validation_missing", "TLS lifecycle evidence must be production validated"))
+        if validation.get("target_environment") != "production":
+            findings.append(_tls_lifecycle_finding("production_target_missing", "TLS lifecycle target environment must be production"))
+        if validation.get("operator_asserted") is not True:
+            findings.append(_tls_lifecycle_finding("operator_attestation_missing", "TLS lifecycle evidence requires operator attestation"))
+        for field in ("run_id", "started_at", "completed_at"):
+            if not validation.get(field):
+                findings.append(_tls_lifecycle_finding("validation_field_missing", f"validation_scope.{field} is required"))
+    checks.append(
+        {
+            "name": "validation_scope",
+            "ok": validation_ok,
+            "production_validated": validation.get("production_validated") is True,
+            "target_environment": validation.get("target_environment"),
+            "operator_asserted": validation.get("operator_asserted") is True,
+        }
+    )
+
+    issuance_raw = bundle.get("issuance")
+    issuance_present = isinstance(issuance_raw, Mapping)
+    issuance = issuance_raw if issuance_present else {}
+    hostnames = _tls_lifecycle_hostnames(issuance.get("hostnames"), findings)
+    issuer = str(issuance.get("provider") or issuance.get("issuer") or "").strip().lower()
+    issuer_local = issuer in {"", "local", "self-signed", "self_signed", "test", "manual", "none"}
+    issuance_ok = (
+        issuance.get("ok") is True
+        and not issuer_local
+        and len(hostnames) >= args.min_hostnames
+        and issuance.get("self_signed") is not True
+        and _tls_lifecycle_hash_present(issuance.get("order_id_sha256") or issuance.get("request_id_sha256"))
+        and _tls_lifecycle_hash_present(issuance.get("certificate_serial_sha256"))
+        and _tls_lifecycle_hash_present(issuance.get("chain_sha256"))
+    )
+    if not issuance_present:
+        findings.append(_tls_lifecycle_finding("missing_issuance_section", "TLS lifecycle bundle requires issuance section"))
+    if issuance.get("ok") is not True:
+        findings.append(_tls_lifecycle_finding("tls_issuance_not_ok", "issuance evidence must be ok"))
+    if issuer_local:
+        findings.append(_tls_lifecycle_finding("tls_issuer_local", "production TLS issuance must use a non-local CA/ACME provider"))
+    if issuance.get("self_signed") is True:
+        findings.append(_tls_lifecycle_finding("tls_self_signed", "production TLS certificate must not be self-signed"))
+    if len(hostnames) < args.min_hostnames:
+        findings.append(_tls_lifecycle_finding("tls_hostname_coverage_low", "TLS issuance hostname coverage is below threshold"))
+    if not _tls_lifecycle_hash_present(issuance.get("order_id_sha256") or issuance.get("request_id_sha256")):
+        findings.append(_tls_lifecycle_finding("tls_order_hash_missing", "TLS issuance requires hashed CA/ACME order or request id"))
+    if not _tls_lifecycle_hash_present(issuance.get("certificate_serial_sha256")):
+        findings.append(_tls_lifecycle_finding("tls_certificate_serial_missing", "TLS issuance requires hashed certificate serial"))
+    if not _tls_lifecycle_hash_present(issuance.get("chain_sha256")):
+        findings.append(_tls_lifecycle_finding("tls_chain_hash_missing", "TLS issuance requires certificate-chain hash"))
+    checks.append(
+        {
+            "name": "issuance",
+            "ok": issuance_ok,
+            "provider": issuance.get("provider"),
+            "hostnames": hostnames,
+            "certificate_serial_sha256_present": _tls_lifecycle_hash_present(issuance.get("certificate_serial_sha256")),
+            "chain_sha256_present": _tls_lifecycle_hash_present(issuance.get("chain_sha256")),
+        }
+    )
+
+    renewal_raw = bundle.get("renewal")
+    renewal_present = isinstance(renewal_raw, Mapping)
+    renewal = renewal_raw if renewal_present else {}
+    current_days = _tls_lifecycle_number(
+        renewal.get("current_days_remaining"),
+        default=0.0,
+        code="tls_current_days_invalid",
+        message="renewal.current_days_remaining must be numeric",
+        findings=findings,
+    )
+    candidate_days = _tls_lifecycle_number(
+        renewal.get("candidate_days_remaining"),
+        default=0.0,
+        code="tls_candidate_days_invalid",
+        message="renewal.candidate_days_remaining must be numeric",
+        findings=findings,
+    )
+    overlap_days = _tls_lifecycle_number(
+        renewal.get("overlap_days"),
+        default=0.0,
+        code="tls_overlap_days_invalid",
+        message="renewal.overlap_days must be numeric",
+        findings=findings,
+    )
+    renewal_ok = (
+        renewal.get("ok") is True
+        and renewal.get("automation_enabled") is True
+        and renewal.get("renewal_executed") is True
+        and renewal.get("next_renewal_scheduled") is True
+        and renewal.get("dry_run_passed") is True
+        and current_days >= args.min_current_days_valid
+        and candidate_days >= args.min_candidate_days_valid
+        and overlap_days >= args.min_overlap_days
+    )
+    if not renewal_present:
+        findings.append(_tls_lifecycle_finding("missing_renewal_section", "TLS lifecycle bundle requires renewal section"))
+    for flag in ("automation_enabled", "renewal_executed", "next_renewal_scheduled", "dry_run_passed"):
+        if renewal.get(flag) is not True:
+            findings.append(_tls_lifecycle_finding("tls_renewal_control_missing", f"renewal.{flag} is not proven"))
+    if current_days < args.min_current_days_valid:
+        findings.append(_tls_lifecycle_finding("tls_current_validity_low", "current certificate validity is below threshold"))
+    if candidate_days < args.min_candidate_days_valid:
+        findings.append(_tls_lifecycle_finding("tls_candidate_validity_low", "candidate certificate validity is below threshold"))
+    if overlap_days < args.min_overlap_days:
+        findings.append(_tls_lifecycle_finding("tls_overlap_low", "certificate overlap is below threshold"))
+    checks.append(
+        {
+            "name": "renewal",
+            "ok": renewal_ok,
+            "current_days_remaining": current_days,
+            "candidate_days_remaining": candidate_days,
+            "overlap_days": overlap_days,
+            "automation_enabled": renewal.get("automation_enabled") is True,
+            "renewal_executed": renewal.get("renewal_executed") is True,
+        }
+    )
+
+    deployment_raw = bundle.get("deployment")
+    deployment_present = isinstance(deployment_raw, Mapping)
+    deployment = deployment_raw if deployment_present else {}
+    endpoint = str(deployment.get("endpoint_url") or deployment.get("url") or "")
+    endpoint_local = any(token in endpoint.lower() for token in ("localhost", "127.0.0.1", "[::1]"))
+    deployed_serial = str(deployment.get("deployed_serial_sha256") or "")
+    candidate_serial = str(deployment.get("candidate_serial_sha256") or issuance.get("certificate_serial_sha256") or "")
+    deployment_ok = (
+        deployment.get("ok") is True
+        and endpoint.startswith("https://")
+        and (args.allow_localhost or not endpoint_local)
+        and _tls_lifecycle_hash_present(deployed_serial)
+        and deployed_serial == candidate_serial
+        and deployment.get("chain_verified") is True
+        and deployment.get("hostname_verified") is True
+        and deployment.get("reload_verified") is True
+        and deployment.get("zero_downtime_reload") is True
+    )
+    if not deployment_present:
+        findings.append(_tls_lifecycle_finding("missing_deployment_section", "TLS lifecycle bundle requires deployment section"))
+    if deployment.get("ok") is not True:
+        findings.append(_tls_lifecycle_finding("tls_deployment_not_ok", "deployment evidence must be ok"))
+    if not endpoint.startswith("https://"):
+        findings.append(_tls_lifecycle_finding("tls_endpoint_not_https", "deployed TLS endpoint must be HTTPS"))
+    if endpoint_local and not args.allow_localhost:
+        findings.append(_tls_lifecycle_finding("tls_endpoint_local", "production TLS endpoint must be non-local"))
+    if not _tls_lifecycle_hash_present(deployed_serial) or deployed_serial != candidate_serial:
+        findings.append(_tls_lifecycle_finding("tls_deployed_serial_mismatch", "deployed certificate serial must match issued candidate hash"))
+    for flag in ("chain_verified", "hostname_verified", "reload_verified", "zero_downtime_reload"):
+        if deployment.get(flag) is not True:
+            findings.append(_tls_lifecycle_finding("tls_deployment_control_missing", f"deployment.{flag} is not proven"))
+    checks.append(
+        {
+            "name": "deployment",
+            "ok": deployment_ok,
+            "endpoint_https": endpoint.startswith("https://"),
+            "endpoint_local": endpoint_local,
+            "deployed_serial_matches_candidate": bool(deployed_serial) and deployed_serial == candidate_serial,
+            "reload_verified": deployment.get("reload_verified") is True,
+        }
+    )
+
+    secret_raw = bundle.get("secret_distribution")
+    secret_present = isinstance(secret_raw, Mapping)
+    secret_distribution = secret_raw if secret_present else {}
+    key_source = str(secret_distribution.get("private_key_source") or secret_distribution.get("source") or "").strip().lower()
+    key_source_local = key_source in {"", "local", "file", "filesystem", "env", "test", "none"}
+    secret_ok = (
+        secret_distribution.get("ok") is True
+        and not key_source_local
+        and _tls_lifecycle_hash_present(secret_distribution.get("deployed_key_id_sha256"))
+        and secret_distribution.get("private_key_material_omitted") is True
+        and secret_distribution.get("least_privilege_permissions") is True
+        and secret_distribution.get("key_rotation_supported") is True
+        and secret_distribution.get("rollback_key_revocation_ready") is True
+    )
+    if not secret_present:
+        findings.append(_tls_lifecycle_finding("missing_secret_distribution_section", "TLS lifecycle bundle requires secret_distribution section"))
+    if secret_distribution.get("ok") is not True:
+        findings.append(_tls_lifecycle_finding("tls_secret_distribution_not_ok", "secret distribution evidence must be ok"))
+    if key_source_local:
+        findings.append(_tls_lifecycle_finding("tls_key_source_local", "TLS private key custody must use non-local secret manager custody"))
+    if not _tls_lifecycle_hash_present(secret_distribution.get("deployed_key_id_sha256")):
+        findings.append(_tls_lifecycle_finding("tls_key_id_hash_missing", "secret distribution requires hashed deployed key id"))
+    for flag in (
+        "private_key_material_omitted",
+        "least_privilege_permissions",
+        "key_rotation_supported",
+        "rollback_key_revocation_ready",
+    ):
+        if secret_distribution.get(flag) is not True:
+            findings.append(_tls_lifecycle_finding("tls_secret_control_missing", f"secret_distribution.{flag} is not proven"))
+    checks.append(
+        {
+            "name": "secret_distribution",
+            "ok": secret_ok,
+            "private_key_source": secret_distribution.get("private_key_source") or secret_distribution.get("source"),
+            "key_source_local": key_source_local,
+            "deployed_key_id_hash_present": _tls_lifecycle_hash_present(secret_distribution.get("deployed_key_id_sha256")),
+        }
+    )
+
+    monitoring_raw = bundle.get("monitoring")
+    monitoring = monitoring_raw if isinstance(monitoring_raw, Mapping) else {}
+    monitoring_flags = {
+        "expiry_alert_configured": monitoring.get("expiry_alert_configured") is True,
+        "renewal_failure_alert_configured": monitoring.get("renewal_failure_alert_configured") is True,
+        "cert_mismatch_alert_configured": monitoring.get("cert_mismatch_alert_configured") is True,
+        "revocation_checked": monitoring.get("revocation_checked") is True,
+    }
+    missing_monitoring = [flag for flag, ok in monitoring_flags.items() if not ok]
+    monitoring_ok = monitoring.get("ok") is True and not missing_monitoring
+    if monitoring.get("ok") is not True:
+        findings.append(_tls_lifecycle_finding("tls_monitoring_not_ok", "TLS lifecycle monitoring evidence must be ok"))
+    for flag in missing_monitoring:
+        findings.append(_tls_lifecycle_finding("tls_monitoring_missing", f"monitoring.{flag} is not proven"))
+    checks.append({"name": "monitoring", "ok": monitoring_ok, **monitoring_flags})
+
+    redaction_raw = bundle.get("redaction")
+    redaction = redaction_raw if isinstance(redaction_raw, Mapping) else {}
+    redaction_flags = {
+        "raw_private_keys_omitted": redaction.get("raw_private_keys_omitted") is True,
+        "raw_certificate_pem_omitted": redaction.get("raw_certificate_pem_omitted") is True,
+        "raw_acme_tokens_omitted": redaction.get("raw_acme_tokens_omitted") is True,
+        "raw_deployment_logs_omitted": redaction.get("raw_deployment_logs_omitted") is True,
+    }
+    missing_redaction = [flag for flag, ok in redaction_flags.items() if not ok]
+    forbidden_raw_paths = _tls_lifecycle_forbidden_raw_paths(bundle)
+    for flag in missing_redaction:
+        findings.append(_tls_lifecycle_finding("tls_redaction_flag_missing", f"redaction.{flag} is not proven"))
+    if forbidden_raw_paths:
+        findings.append(_tls_lifecycle_finding("tls_raw_field_present", "TLS lifecycle bundle contains raw private key/cert/token/log fields"))
+    checks.append(
+        {
+            "name": "redaction",
+            "ok": not missing_redaction and not forbidden_raw_paths,
+            **redaction_flags,
+            "forbidden_raw_paths": forbidden_raw_paths,
+        }
+    )
+
+    report: dict[str, Any] = {
+        "ok": not findings,
+        "bundle": {
+            "name": bundle.get("name"),
+            "validation_scope_present": validation_present,
+            "issuance_present": issuance_present,
+            "renewal_present": renewal_present,
+            "deployment_present": deployment_present,
+            "secret_distribution_present": secret_present,
+        },
+        "requirements": {
+            "min_hostnames": args.min_hostnames,
+            "min_current_days_valid": args.min_current_days_valid,
+            "min_candidate_days_valid": args.min_candidate_days_valid,
+            "min_overlap_days": args.min_overlap_days,
+            "allow_non_production": bool(args.allow_non_production),
+            "allow_localhost": bool(args.allow_localhost),
+        },
+        "redaction": {**redaction_flags, "forbidden_raw_fields_present": bool(forbidden_raw_paths)},
+        "checks": checks,
+        "findings": findings,
+    }
+    report["fingerprint"] = _tls_lifecycle_fingerprint(report)
+    report["expected_fingerprint_present"] = bool(args.expected_fingerprint)
+    if args.expected_fingerprint and args.expected_fingerprint.strip().lower() != report["fingerprint"]:
+        report["ok"] = False
+        report["findings"].append(_tls_lifecycle_finding("fingerprint_mismatch", "TLS lifecycle ops bundle fingerprint mismatch"))
+    emit(report)
+    if not report["ok"]:
+        raise SystemExit(1)
+
+
 def _read_provider_manifest(path: str | None) -> dict[str, Any]:
     if not path:
         return {}
@@ -11083,6 +11472,18 @@ def build_parser() -> argparse.ArgumentParser:
         default=env_flag("MNEMOSYNE_TLS_ROTATION_REQUIRE_ISSUER_CONTINUITY", default=False),
     )
     tls_rotation_plan_check.set_defaults(func=cmd_tls_rotation_plan_check)
+
+    tls_lifecycle_ops_check = sub.add_parser("tls-lifecycle-ops-check")
+    tls_lifecycle_ops_check.add_argument("--bundle", help="Path to production TLS lifecycle evidence bundle")
+    tls_lifecycle_ops_check.add_argument("--bundle-json", help="Inline production TLS lifecycle evidence bundle JSON")
+    tls_lifecycle_ops_check.add_argument("--min-hostnames", type=int, default=1)
+    tls_lifecycle_ops_check.add_argument("--min-current-days-valid", type=float, default=7.0)
+    tls_lifecycle_ops_check.add_argument("--min-candidate-days-valid", type=float, default=30.0)
+    tls_lifecycle_ops_check.add_argument("--min-overlap-days", type=float, default=7.0)
+    tls_lifecycle_ops_check.add_argument("--allow-non-production", action="store_true")
+    tls_lifecycle_ops_check.add_argument("--allow-localhost", action="store_true")
+    tls_lifecycle_ops_check.add_argument("--expected-fingerprint")
+    tls_lifecycle_ops_check.set_defaults(func=cmd_tls_lifecycle_ops_check)
 
     mcp_sse_soak = sub.add_parser("mcp-sse-soak")
     mcp_sse_soak.add_argument(
