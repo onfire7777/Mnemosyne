@@ -6170,6 +6170,8 @@ def retrieval_ops_bundle(
     local_backends: bool = False,
     missing_graph: bool = False,
     missing_probes: bool = False,
+    missing_adapter_probes: bool = False,
+    bad_adapter_probe: bool = False,
     bad_calibration: bool = False,
     raw_secret: bool = False,
 ) -> dict:
@@ -6205,6 +6207,83 @@ def retrieval_ops_bundle(
             "calibrated": True,
         },
     ]
+    adapter_probes = [
+        {
+            "id": "lexical-paradedb-smoke",
+            "adapter": "lexical",
+            "backend": "paradedb-bm25",
+            "provider": "command",
+            "production_validated": True,
+            "command_fingerprint": "sha256:cmd111",
+            "source_snapshot_fingerprint": "sha256:snapshot111",
+            "tenant_hash": "sha256:tenant111",
+            "query_hash": "sha256:query111",
+            "result_fingerprint": "sha256:result111",
+            "top_id_hash": "sha256:top111",
+            "hit_count": 4,
+            "latency_ms": 41.0,
+        },
+        {
+            "id": "vector-pgvector-smoke",
+            "adapter": "vector",
+            "backend": "pgvector",
+            "provider": "postgres",
+            "production_validated": True,
+            "command_fingerprint": "sha256:cmd222",
+            "source_snapshot_fingerprint": "sha256:snapshot222",
+            "tenant_hash": "sha256:tenant222",
+            "query_hash": "sha256:query222",
+            "result_fingerprint": "sha256:result222",
+            "top_id_hash": "sha256:top222",
+            "hit_count": 5,
+            "latency_ms": 33.0,
+        },
+        {
+            "id": "graph-age-smoke",
+            "adapter": "graph",
+            "backend": "apache-age",
+            "provider": "command",
+            "production_validated": True,
+            "command_fingerprint": "sha256:cmd333",
+            "source_snapshot_fingerprint": "sha256:snapshot333",
+            "tenant_hash": "sha256:tenant333",
+            "query_hash": "sha256:query333",
+            "result_fingerprint": "sha256:result333",
+            "top_id_hash": "sha256:top333",
+            "hit_count": 3,
+            "latency_ms": 58.0,
+        },
+        {
+            "id": "reranker-http-smoke",
+            "adapter": "reranker",
+            "backend": "prod-reranker-v1",
+            "provider": "http",
+            "production_validated": True,
+            "command_fingerprint": "sha256:cmd444",
+            "source_snapshot_fingerprint": "sha256:snapshot444",
+            "tenant_hash": "sha256:tenant444",
+            "query_hash": "sha256:query444",
+            "result_fingerprint": "sha256:result444",
+            "top_id_hash": "sha256:top444",
+            "hit_count": 2,
+            "latency_ms": 47.0,
+        },
+    ]
+    if bad_adapter_probe:
+        adapter_probes[0].update(
+            {
+                "backend": "local-bm25-lite",
+                "provider": "local",
+                "production_validated": False,
+                "command_fingerprint": "",
+                "result_fingerprint": "",
+                "source_snapshot_fingerprint": "",
+                "top_id_hash": "",
+                "hit_count": 0,
+                "latency_ms": 5000.0,
+                "raw_stdout": "raw retrieval command output with token",
+            }
+        )
     bundle = {
         "name": "production-retrieval-ops",
         "provider_check": {
@@ -6244,6 +6323,7 @@ def retrieval_ops_bundle(
             "production_validated": True,
             "cases": cases,
         },
+        "adapter_probes": [] if missing_adapter_probes else adapter_probes,
         "calibration": {
             "production_dataset": not bad_calibration,
             "dataset_fingerprint": "calibration-sha256:123abc" if not bad_calibration else "",
@@ -6298,8 +6378,12 @@ def test_cli_retrieval_ops_check_validates_production_evidence_bundle(tmp_path: 
     assert len(report["fingerprint"]) == 64
     assert report["bundle"]["lexical_backend"] == "paradedb-bm25"
     assert report["bundle"]["graph_backend"] == "apache-age"
-    assert {item["name"] for item in report["checks"]} == {"provider_check", "retrieval", "calibration", "redaction"}
+    assert report["bundle"]["adapter_probe_count"] == 4
+    assert {item["name"] for item in report["checks"]} == {"provider_check", "retrieval", "adapter_probes", "calibration", "redaction"}
     assert all(item["ok"] for item in report["checks"])
+    adapter_check = next(item for item in report["checks"] if item["name"] == "adapter_probes")
+    assert adapter_check["required_adapters"] == ["graph", "lexical", "reranker", "vector"]
+    assert adapter_check["ok_probe_count"] == 4
     assert report["redaction"]["raw_queries_omitted"] is True
     assert report["redaction"]["raw_embeddings_omitted"] is True
     assert report["redaction"]["raw_documents_omitted"] is True
@@ -6356,6 +6440,45 @@ def test_cli_retrieval_ops_check_requires_nonlocal_backend_probes(tmp_path: Path
     assert "graph_probe_missing" in codes
     assert payload["checks"][0]["retrieval_backends"]["lexical_probe_required"] is True
     assert payload["checks"][0]["retrieval_backends"]["graph_probe_required"] is True
+
+
+def test_cli_retrieval_ops_check_requires_specialist_adapter_probes(tmp_path: Path) -> None:
+    bundle = tmp_path / "missing-adapter-probes-retrieval-ops.json"
+    bundle.write_text(json.dumps(retrieval_ops_bundle(missing_adapter_probes=True)), encoding="utf-8")
+
+    result = run_raw_cli(tmp_path / "mnemosyne.json", "retrieval-ops-check", "--bundle", str(bundle))
+    payload = json.loads(result.stdout)
+    codes = {finding["code"] for finding in payload["findings"]}
+    adapter_check = next(item for item in payload["checks"] if item["name"] == "adapter_probes")
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert "adapter_probe_missing" in codes
+    assert adapter_check["ok"] is False
+    assert adapter_check["missing_adapters"] == ["graph", "lexical", "reranker", "vector"]
+
+
+def test_cli_retrieval_ops_check_rejects_weak_adapter_probe(tmp_path: Path) -> None:
+    bundle = tmp_path / "bad-adapter-probe-retrieval-ops.json"
+    bundle.write_text(json.dumps(retrieval_ops_bundle(bad_adapter_probe=True)), encoding="utf-8")
+
+    result = run_raw_cli(tmp_path / "mnemosyne.json", "retrieval-ops-check", "--bundle", str(bundle))
+    payload = json.loads(result.stdout)
+    codes = {finding["code"] for finding in payload["findings"]}
+    adapter_check = next(item for item in payload["checks"] if item["name"] == "adapter_probes")
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert "adapter_probe_local_backend" in codes
+    assert "adapter_probe_local_provider" in codes
+    assert "adapter_probe_production_validation_missing" in codes
+    assert "adapter_probe_hash_missing" in codes
+    assert "adapter_probe_top_id_hash_missing" in codes
+    assert "adapter_probe_hit_count_nonpositive" in codes
+    assert "adapter_probe_latency_too_high" in codes
+    assert "redaction_raw_field_present" in codes
+    assert adapter_check["ok"] is False
+    assert adapter_check["ok_probe_count"] == 3
 
 
 def test_cli_calibration_tune_applies_labeled_dataset(tmp_path: Path) -> None:

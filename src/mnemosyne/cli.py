@@ -2222,6 +2222,16 @@ def _retrieval_ops_forbidden_raw_paths(value: Any, *, path: str = "$") -> list[s
         "raw_documents",
         "raw_result",
         "raw_results",
+        "raw_stdout",
+        "raw_stderr",
+        "stdout",
+        "stderr",
+        "command",
+        "command_args",
+        "env",
+        "environment",
+        "api_key",
+        "password",
         "credential",
         "credentials",
         "secret",
@@ -2259,6 +2269,10 @@ def _retrieval_probe_ok(probe: Any) -> bool:
         return int(hit_count) > 0
     except (TypeError, ValueError):
         return False
+
+
+def _retrieval_ops_sha256_present(value: Any) -> bool:
+    return "sha256:" in str(value or "").strip().lower()
 
 
 def cmd_retrieval_ops_check(args: argparse.Namespace) -> None:
@@ -2476,6 +2490,130 @@ def cmd_retrieval_ops_check(args: argparse.Namespace) -> None:
         }
     )
 
+    required_adapter_probes = sorted(set(args.require_adapter_probe or ("graph", "lexical", "reranker", "vector")))
+    adapter_probes_raw = bundle.get("adapter_probes")
+    adapter_probes = [item for item in adapter_probes_raw if isinstance(item, Mapping)] if isinstance(adapter_probes_raw, list) else []
+    if not isinstance(adapter_probes_raw, list):
+        findings.append(_retrieval_ops_finding("adapter_probes_invalid", "adapter_probes must be an array"))
+    probes_by_adapter: dict[str, list[Mapping[str, Any]]] = {}
+    adapter_rows: list[dict[str, Any]] = []
+    for index, probe in enumerate(adapter_probes):
+        adapter = str(probe.get("adapter") or probe.get("kind") or "").strip().lower()
+        backend = str(probe.get("backend") or "").strip()
+        provider = str(probe.get("provider") or "").strip().lower()
+        probe_id = str(probe.get("id") or f"adapter-probe-{index + 1}")
+        command_fingerprint_present = _retrieval_ops_sha256_present(probe.get("command_fingerprint"))
+        query_hash_present = _retrieval_ops_sha256_present(probe.get("query_hash"))
+        tenant_hash_present = _retrieval_ops_sha256_present(probe.get("tenant_hash"))
+        result_fingerprint_present = _retrieval_ops_sha256_present(probe.get("result_fingerprint"))
+        top_id_hash_present = _retrieval_ops_sha256_present(probe.get("top_id_hash"))
+        source_snapshot_fingerprint_present = _retrieval_ops_sha256_present(probe.get("source_snapshot_fingerprint"))
+        hit_count = _retrieval_ops_int(
+            probe.get("hit_count"),
+            default=0,
+            code="adapter_probe_hit_count_invalid",
+            message=f"adapter probe {probe_id} hit_count must be numeric",
+            findings=findings,
+        )
+        latency_ms = _retrieval_ops_number(
+            probe.get("latency_ms"),
+            default=-1.0,
+            code="adapter_probe_latency_invalid",
+            message=f"adapter probe {probe_id} latency_ms must be numeric",
+            findings=findings,
+        )
+        backend_local = _is_local_retrieval_backend(backend)
+        provider_local = _retrieval_provider_local(provider)
+        production_validated = probe.get("production_validated") is True
+        if not adapter:
+            findings.append(_retrieval_ops_finding("adapter_probe_adapter_missing", f"adapter probe {probe_id} requires an adapter name"))
+        else:
+            probes_by_adapter.setdefault(adapter, []).append(probe)
+        if not backend:
+            findings.append(_retrieval_ops_finding("adapter_probe_backend_missing", f"adapter probe {probe_id} requires a backend name"))
+        if backend_local:
+            findings.append(_retrieval_ops_finding("adapter_probe_local_backend", f"adapter probe {probe_id} uses a local backend"))
+        if provider_local:
+            findings.append(_retrieval_ops_finding("adapter_probe_local_provider", f"adapter probe {probe_id} uses a local provider"))
+        if not production_validated:
+            findings.append(_retrieval_ops_finding("adapter_probe_production_validation_missing", f"adapter probe {probe_id} must be production_validated"))
+        missing_hashes = [
+            name
+            for name, present in (
+                ("command_fingerprint", command_fingerprint_present),
+                ("query_hash", query_hash_present),
+                ("tenant_hash", tenant_hash_present),
+                ("result_fingerprint", result_fingerprint_present),
+                ("source_snapshot_fingerprint", source_snapshot_fingerprint_present),
+            )
+            if not present
+        ]
+        if missing_hashes:
+            joined = ", ".join(missing_hashes)
+            findings.append(_retrieval_ops_finding("adapter_probe_hash_missing", f"adapter probe {probe_id} missing SHA-256 {joined}"))
+        if not top_id_hash_present:
+            findings.append(_retrieval_ops_finding("adapter_probe_top_id_hash_missing", f"adapter probe {probe_id} requires a SHA-256 top_id_hash"))
+        if hit_count <= 0:
+            findings.append(_retrieval_ops_finding("adapter_probe_hit_count_nonpositive", f"adapter probe {probe_id} must report at least one hit"))
+        if latency_ms < 0 or latency_ms > args.max_adapter_latency_ms:
+            findings.append(_retrieval_ops_finding("adapter_probe_latency_too_high", f"adapter probe {probe_id} exceeds latency requirements"))
+        row_ok = (
+            bool(adapter)
+            and bool(backend)
+            and not backend_local
+            and not provider_local
+            and production_validated
+            and command_fingerprint_present
+            and query_hash_present
+            and tenant_hash_present
+            and result_fingerprint_present
+            and source_snapshot_fingerprint_present
+            and top_id_hash_present
+            and hit_count > 0
+            and 0 <= latency_ms <= args.max_adapter_latency_ms
+        )
+        adapter_rows.append(
+            {
+                "id": probe_id,
+                "adapter": adapter,
+                "backend": backend,
+                "provider": provider,
+                "ok": row_ok,
+                "production_validated": production_validated,
+                "backend_local": backend_local,
+                "provider_local": provider_local,
+                "command_fingerprint_present": command_fingerprint_present,
+                "query_hash_present": query_hash_present,
+                "tenant_hash_present": tenant_hash_present,
+                "result_fingerprint_present": result_fingerprint_present,
+                "source_snapshot_fingerprint_present": source_snapshot_fingerprint_present,
+                "top_id_hash_present": top_id_hash_present,
+                "hit_count": hit_count,
+                "latency_ms": latency_ms,
+            }
+        )
+    missing_adapter_probes = [adapter for adapter in required_adapter_probes if not probes_by_adapter.get(adapter)]
+    for adapter in missing_adapter_probes:
+        findings.append(_retrieval_ops_finding("adapter_probe_missing", f"missing production adapter probe for {adapter}"))
+    adapter_probes_ok = (
+        isinstance(adapter_probes_raw, list)
+        and not missing_adapter_probes
+        and bool(adapter_rows)
+        and all(row["ok"] for row in adapter_rows)
+    )
+    checks.append(
+        {
+            "name": "adapter_probes",
+            "ok": adapter_probes_ok,
+            "required_adapters": required_adapter_probes,
+            "missing_adapters": missing_adapter_probes,
+            "probe_count": len(adapter_rows),
+            "ok_probe_count": sum(1 for row in adapter_rows if row["ok"]),
+            "max_adapter_latency_ms": args.max_adapter_latency_ms,
+            "probes": adapter_rows,
+        }
+    )
+
     calibration = bundle.get("calibration")
     if not isinstance(calibration, Mapping):
         findings.append(_retrieval_ops_finding("missing_calibration_section", "retrieval ops bundle requires calibration section"))
@@ -2583,6 +2721,7 @@ def cmd_retrieval_ops_check(args: argparse.Namespace) -> None:
             "lexical_backend": lexical_backend,
             "graph_backend": graph_backend,
             "retrieval_case_count": len(cases),
+            "adapter_probe_count": len(adapter_rows),
             "calibration_dataset_fingerprint_present": "sha256:" in dataset_fingerprint.lower(),
         },
         "requirements": {
@@ -2599,6 +2738,8 @@ def cmd_retrieval_ops_check(args: argparse.Namespace) -> None:
             "min_calibration_incorrect": args.min_calibration_incorrect,
             "min_empirical_coverage": args.min_empirical_coverage,
             "max_false_accept_rate": args.max_false_accept_rate,
+            "required_adapter_probes": required_adapter_probes,
+            "max_adapter_latency_ms": args.max_adapter_latency_ms,
         },
         "redaction": {**redaction_flags, "forbidden_raw_fields_present": bool(forbidden_raw_paths)},
         "checks": checks,
@@ -11033,11 +11174,13 @@ def build_parser() -> argparse.ArgumentParser:
     retrieval_ops_check.add_argument("--bundle", help="Path to production retrieval evidence bundle")
     retrieval_ops_check.add_argument("--bundle-json", help="Inline production retrieval evidence bundle JSON")
     retrieval_ops_check.add_argument("--require-provider-check", action="append", default=[])
+    retrieval_ops_check.add_argument("--require-adapter-probe", action="append", choices=("graph", "lexical", "reranker", "vector"), default=[])
     retrieval_ops_check.add_argument("--min-cases", type=int, default=3)
     retrieval_ops_check.add_argument("--min-lexical-cases", type=int, default=1)
     retrieval_ops_check.add_argument("--min-vector-cases", type=int, default=1)
     retrieval_ops_check.add_argument("--min-graph-cases", type=int, default=1)
     retrieval_ops_check.add_argument("--min-reranked-cases", type=int, default=1)
+    retrieval_ops_check.add_argument("--max-adapter-latency-ms", type=float, default=1000.0)
     retrieval_ops_check.add_argument("--min-calibration-examples", type=int, default=20)
     retrieval_ops_check.add_argument("--min-calibration-correct", type=int, default=1)
     retrieval_ops_check.add_argument("--min-calibration-incorrect", type=int, default=1)
