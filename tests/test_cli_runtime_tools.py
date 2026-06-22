@@ -2264,6 +2264,271 @@ def test_cli_hosted_llm_check_rejects_insecure_non_acknowledged_http(tmp_path: P
     assert "hosted-secret-value" not in result.stdout
 
 
+def multimodal_ops_bundle(
+    *,
+    local_providers: bool = False,
+    bad_object_store: bool = False,
+    bad_extraction: bool = False,
+    bad_embedding: bool = False,
+    bad_retrieval: bool = False,
+    bad_jobs: bool = False,
+    raw_secret: bool = False,
+) -> dict:
+    provider_name = "metadata" if local_providers else "command"
+    embedding_provider = "none" if local_providers else "command"
+    modalities = ["image", "audio", "video"]
+    bundle = {
+        "name": "production-multimodal-ops",
+        "validation_scope": {
+            "production_validated": not local_providers,
+            "target_environment": "local" if local_providers else "production",
+            "operator_asserted": not local_providers,
+            "run_id": "run-sha256:multimodal-001",
+            "started_at": "2026-06-21T14:00:00Z",
+            "completed_at": "2026-06-21T14:04:00Z",
+        },
+        "provider_check": {
+            "ok": not local_providers,
+            "manifest": {
+                "name": "production-multimodal-providers",
+                "forbid_local": not local_providers,
+                "required_checks": ["media_extractor", "media_embedding"],
+            },
+            "checks": {
+                "media_extractor": {"ok": True, "provider": provider_name, "text_length": 32, "sources": ["ocr_text"]},
+                "media_embedding": {
+                    "ok": True,
+                    "provider": embedding_provider,
+                    "dimensions": 1024 if not local_providers else 0,
+                    "skipped": local_providers,
+                },
+            },
+        },
+        "object_store": {
+            "ok": not bad_object_store,
+            "provider": "filesystem" if bad_object_store else "s3",
+            "encrypted": not bad_object_store,
+            "key_provider": "json" if bad_object_store else "kms",
+            "externalized_payloads": not bad_object_store,
+            "asset_hash_count": 3 if not bad_object_store else 0,
+            "asset_hashes": ["sha256:asset-image", "sha256:asset-audio", "sha256:asset-video"] if not bad_object_store else [],
+        },
+        "extraction": {
+            "ok": not bad_extraction,
+            "provider": "metadata" if bad_extraction else "command",
+            "contract_checked": not bad_extraction,
+            "modalities": modalities if not bad_extraction else ["image"],
+            "cases": [
+                {
+                    "id": "image-ocr",
+                    "modality": "image",
+                    "asset_sha256": "sha256:asset-image",
+                    "derived_cid_hash": "sha256:derived-image",
+                    "media_derived_relation": not bad_extraction,
+                    "derived_text_searchable": not bad_extraction,
+                },
+                {
+                    "id": "audio-transcript",
+                    "modality": "audio",
+                    "asset_sha256": "sha256:asset-audio",
+                    "derived_cid_hash": "sha256:derived-audio",
+                    "media_derived_relation": not bad_extraction,
+                    "derived_text_searchable": not bad_extraction,
+                },
+                {
+                    "id": "video-caption",
+                    "modality": "video",
+                    "asset_sha256": "sha256:asset-video",
+                    "derived_cid_hash": "sha256:derived-video",
+                    "media_derived_relation": not bad_extraction,
+                    "derived_text_searchable": not bad_extraction,
+                },
+            ],
+        },
+        "media_embedding": {
+            "ok": not bad_embedding and not local_providers,
+            "provider": embedding_provider,
+            "dimensions": 1024 if not bad_embedding and not local_providers else 128,
+            "modalities": modalities if not bad_embedding else ["image"],
+            "embedded_cid_hashes": ["sha256:asset-image", "sha256:asset-audio", "sha256:asset-video"] if not bad_embedding else [],
+            "contract_checked": not bad_embedding,
+            "raw_media_embedding_indexed": not bad_embedding,
+        },
+        "retrieval": {
+            "ok": not bad_retrieval,
+            "backend": "local" if bad_retrieval else "postgres",
+            "production_validated": not bad_retrieval,
+            "cases": [
+                {
+                    "id": "image-vector",
+                    "query_hash": "sha256:query-image",
+                    "vector_hit_count": 2 if not bad_retrieval else 0,
+                    "stored_media_embedding": not bad_retrieval,
+                    "derived_text_hit_count": 1,
+                },
+                {
+                    "id": "audio-text",
+                    "query_hash": "sha256:query-audio",
+                    "vector_hit_count": 1,
+                    "stored_media_embedding": True,
+                    "derived_text_hit_count": 2 if not bad_retrieval else 0,
+                },
+                {
+                    "id": "video-caption",
+                    "query_hash": "sha256:query-video",
+                    "vector_hit_count": 1,
+                    "stored_media_embedding": True,
+                    "derived_text_hit_count": 1 if not bad_retrieval else 0,
+                },
+            ],
+        },
+        "media_jobs": {
+            "ok": not bad_jobs,
+            "queue_backend": "local" if bad_jobs else "postgres",
+            "fail_on_dead": not bad_jobs,
+            "complete_jobs": 3 if not bad_jobs else 0,
+            "dead_jobs": 0 if not bad_jobs else 2,
+            "processed_kinds": ["media_extract"] if not bad_jobs else ["unknown_job"],
+        },
+        "redaction": {
+            "raw_media_omitted": True,
+            "raw_asset_bytes_omitted": True,
+            "raw_extractor_requests_omitted": True,
+            "raw_extractor_responses_omitted": True,
+            "raw_embeddings_omitted": True,
+            "raw_documents_omitted": True,
+            "raw_credentials_omitted": True,
+        },
+    }
+    if raw_secret:
+        bundle["raw_media"] = "binary camera bytes"
+        bundle["token"] = "raw-secret-token"
+    return bundle
+
+
+def test_cli_multimodal_ops_check_validates_production_bundle(tmp_path: Path) -> None:
+    bundle = tmp_path / "multimodal-ops.json"
+    bundle.write_text(json.dumps(multimodal_ops_bundle()), encoding="utf-8")
+
+    report = run_cli(tmp_path / "mnemosyne.json", "multimodal-ops-check", "--bundle", str(bundle))
+    acknowledged = run_cli(
+        tmp_path / "mnemosyne.json",
+        "multimodal-ops-check",
+        "--bundle",
+        str(bundle),
+        "--expected-fingerprint",
+        report["fingerprint"],
+    )
+
+    serialized = json.dumps(report)
+    assert report["ok"] is True
+    assert len(report["fingerprint"]) == 64
+    assert {item["name"] for item in report["checks"]} == {
+        "validation_scope",
+        "provider_check",
+        "object_store",
+        "extraction",
+        "media_embedding",
+        "retrieval",
+        "media_jobs",
+        "redaction",
+    }
+    assert all(item["ok"] for item in report["checks"])
+    assert report["bundle"]["production_validated"] is True
+    assert report["bundle"]["provider_check_count"] == 2
+    assert report["bundle"]["extraction_case_count"] == 3
+    assert report["bundle"]["retrieval_case_count"] == 3
+    assert report["redaction"]["forbidden_raw_fields_present"] is False
+    assert "binary camera bytes" not in serialized
+    assert "raw-secret-token" not in serialized
+    assert acknowledged["ok"] is True
+    assert acknowledged["expected_fingerprint_present"] is True
+
+
+def test_cli_deployment_soak_allows_multimodal_ops_check(tmp_path: Path) -> None:
+    bundle = tmp_path / "multimodal-ops.json"
+    bundle.write_text(json.dumps(multimodal_ops_bundle()), encoding="utf-8")
+    manifest_path = tmp_path / "deployment-soak.json"
+    evidence_dir = tmp_path / "evidence"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "validation_scope": {
+                    "production_validated": True,
+                    "target_environment": "production",
+                    "operator_asserted": True,
+                },
+                "checks": [
+                    {
+                        "name": "multimodal-production-ops",
+                        "command": "multimodal-ops-check",
+                        "args": ["--bundle", str(bundle)],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = run_cli(
+        tmp_path / "mnemosyne.json",
+        "deployment-soak",
+        "--soak-manifest",
+        str(manifest_path),
+        "--evidence-dir",
+        str(evidence_dir),
+    )
+    check_files = sorted((evidence_dir / "checks").glob("*.json"))
+    assert len(check_files) == 1
+    check_record = json.loads(check_files[0].read_text(encoding="utf-8"))
+
+    assert report["ok"] is True
+    assert report["checks"][0]["command"] == "multimodal-ops-check"
+    assert report["checks"][0]["stdout_json"]["bundle"]["production_validated"] is True
+    assert report["checks"][0]["stdout_json"]["bundle"]["retrieval_case_count"] == 3
+    assert check_record["stdout_json"]["checks"][0]["name"] == "validation_scope"
+    assert check_record["stdout_json"]["redaction"]["forbidden_raw_fields_present"] is False
+
+
+def test_cli_multimodal_ops_check_fails_closed_on_bad_bundle(tmp_path: Path) -> None:
+    bundle = tmp_path / "bad-multimodal-ops.json"
+    bundle.write_text(
+        json.dumps(
+            multimodal_ops_bundle(
+                local_providers=True,
+                bad_object_store=True,
+                bad_extraction=True,
+                bad_embedding=True,
+                bad_retrieval=True,
+                bad_jobs=True,
+                raw_secret=True,
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    result = run_raw_cli(tmp_path / "mnemosyne.json", "multimodal-ops-check", "--bundle", str(bundle))
+    payload = json.loads(result.stdout)
+    codes = {finding["code"] for finding in payload["findings"]}
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert "production_validation_missing" in codes
+    assert "provider_manifest_forbid_local_missing" in codes
+    assert "provider_check_local_provider" in codes
+    assert "provider_check_skipped" in codes
+    assert "object_store_local" in codes
+    assert "object_store_encryption_missing" in codes
+    assert "extractor_provider_local" in codes
+    assert "extractor_modality_missing" in codes
+    assert "media_embedding_provider_local" in codes
+    assert "media_embedding_dimensions_too_low" in codes
+    assert "retrieval_backend_not_postgres" in codes
+    assert "media_jobs_backend_not_postgres" in codes
+    assert "media_jobs_dead_present" in codes
+    assert "redaction_raw_field_present" in codes
+
+
 def test_cli_provider_check_validates_oidc_manifest_without_sensitive_values(tmp_path: Path) -> None:
     jwks, _ = make_oidc_token(oidc_payload())
     jwks_file = tmp_path / "jwks.json"
