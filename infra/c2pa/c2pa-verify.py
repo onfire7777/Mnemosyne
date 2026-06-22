@@ -41,6 +41,26 @@ from pathlib import Path
 
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 
+# c2patool 0.9.x exits 0 even when the C2PA hard binding is broken (e.g. a
+# byte-tampered asset); the failure surfaces in `validation_status`. Treat any
+# error-severity status as a verification failure so Mnemosyne quarantines.
+_FAILURE_CODE_HINTS = ("mismatch", "invalid", "missing", "untrusted", "failure", "notvalidated")
+
+
+def _validation_failures(report: object) -> list[dict]:
+    if not isinstance(report, dict):
+        return []
+    failures: list[dict] = []
+    statuses = report.get("validation_status")
+    if isinstance(statuses, list):
+        for entry in statuses:
+            if not isinstance(entry, dict):
+                continue
+            code = str(entry.get("code", "")).lower()
+            if any(hint in code for hint in _FAILURE_CODE_HINTS):
+                failures.append(entry)
+    return failures
+
 
 def _sha256_file(path: str) -> str:
     digest = hashlib.sha256()
@@ -78,8 +98,10 @@ def main(argv: list[str]) -> int:
     c2patool = os.environ.get("C2PATOOL_BIN", "c2patool")
 
     try:
+        # c2patool 0.9.12 prints the JSON report by default and rejects the
+        # legacy `--json` flag ("unexpected argument '--json'"). Invoke bare.
         completed = subprocess.run(
-            [c2patool, asset_path, "--json"],
+            [c2patool, asset_path],
             check=False,
             text=True,
             capture_output=True,
@@ -101,6 +123,16 @@ def main(argv: list[str]) -> int:
         return 4
     if not isinstance(report, dict):
         report = {"c2patool": report}
+
+    # Fail closed on a broken hard binding / untrusted chain reported in
+    # validation_status even though c2patool exited 0.
+    failures = _validation_failures(report)
+    if failures:
+        print(
+            json.dumps({"error": "c2pa validation failed", "validation_status": failures}),
+            file=sys.stderr,
+        )
+        return 5
 
     asset_sha256 = _sha256_file(asset_path)
 

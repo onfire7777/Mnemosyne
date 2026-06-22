@@ -26,6 +26,13 @@ path "transit/keys/mnemosyne-objects/rotate" {
   capabilities = ["update"]
 }
 
+# Rewrap previously wrapped ciphertext to the latest KEK version after a
+# rotate. Required so the object-key provider's `rotate` action can advance
+# and re-seal the stored DEK without exposing plaintext key material.
+path "transit/rewrap/mnemosyne-objects" {
+  capabilities = ["update"]
+}
+
 # Read non-sensitive key metadata (latest version, type, deletion_allowed).
 path "transit/keys/mnemosyne-objects" {
   capabilities = ["read"]
@@ -43,6 +50,11 @@ path "transit/encrypt/mnemosyne-object-*" {
 }
 
 path "transit/decrypt/mnemosyne-object-*" {
+  capabilities = ["update"]
+}
+
+# Rewrap per-object wrapped DEKs to the latest key version on rotate.
+path "transit/rewrap/mnemosyne-object-*" {
   capabilities = ["update"]
 }
 

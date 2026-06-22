@@ -1,0 +1,20 @@
+{
+  "keys": [
+    {
+      "kid": "Oq1cQcIOQ-5yMY7RxyVWEiUasYfn78lrwQho1G8iFnU",
+      "kty": "RSA",
+      "use": "sig",
+      "alg": "RS256",
+      "n": "kKHHF5oCc51Dw2ln...<342 b64 chars>",
+      "e": "AQAB"
+    },
+    {
+      "kid": "6ffEf-DKuWtuchbRISjBTgfebvXjJuYm0vhHRLlQiVU",
+      "kty": "RSA",
+      "use": "enc",
+      "alg": "RSA-OAEP",
+      "n": "sUJvuxzBi9Jjsn1A...<342 b64 chars>",
+      "e": "AQAB"
+    }
+  ]
+}

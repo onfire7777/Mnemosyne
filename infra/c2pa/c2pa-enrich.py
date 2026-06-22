@@ -31,6 +31,29 @@ from pathlib import Path
 
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 
+# c2patool 0.9.x reports a broken C2PA hard binding (e.g. byte-tampered asset)
+# as an entry in `validation_status` while still exiting 0. We must treat those
+# as verification failures so Mnemosyne quarantines. Codes that begin with these
+# prefixes (or contain "mismatch"/"invalid") are error-severity per the C2PA
+# spec's status code namespace.
+_FAILURE_CODE_HINTS = ("mismatch", "invalid", "missing", "untrusted", "failure", "notvalidated")
+
+
+def _validation_failures(report: object) -> list[dict]:
+    """Return error-severity validation_status entries from a c2patool report."""
+    if not isinstance(report, dict):
+        return []
+    failures: list[dict] = []
+    statuses = report.get("validation_status")
+    if isinstance(statuses, list):
+        for entry in statuses:
+            if not isinstance(entry, dict):
+                continue
+            code = str(entry.get("code", "")).lower()
+            if any(hint in code for hint in _FAILURE_CODE_HINTS):
+                failures.append(entry)
+    return failures
+
 
 def _sha256_file(path: str) -> str:
     digest = hashlib.sha256()
@@ -64,6 +87,17 @@ def main() -> int:
         return 4
     if not isinstance(report, dict):
         report = {"c2patool": report}
+
+    # Fail closed on a broken C2PA hard binding / untrusted chain. c2patool
+    # 0.9.x exits 0 but records the failure in validation_status; propagate it
+    # as a nonzero exit so the verify wrapper -> Mnemosyne quarantines.
+    failures = _validation_failures(report)
+    if failures:
+        print(
+            json.dumps({"error": "c2pa validation failed", "validation_status": failures}),
+            file=sys.stderr,
+        )
+        return 5
 
     asset_path = os.environ.get("ASSET_PATH", "")
     if asset_path and os.path.exists(asset_path):
