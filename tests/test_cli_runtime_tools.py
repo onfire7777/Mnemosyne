@@ -4849,6 +4849,30 @@ def test_cli_release_audit_fails_closed_on_missing_and_local_evidence(tmp_path: 
     assert payload["provider"]["retrieval_backends"]["lexical_local"] is True
 
 
+def test_cli_release_audit_requires_production_scope_attestation(tmp_path: Path) -> None:
+    report_path, _manifest_path = write_release_report(tmp_path, production_validated=True)
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    report["validation_scope"]["target_environment"] = "local"
+    report["validation_scope"]["operator_asserted"] = False
+    report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+
+    result = run_raw_cli(
+        tmp_path / "mnemosyne.json",
+        "release-audit",
+        "--soak-report",
+        str(report_path),
+        "--require-production-validated",
+    )
+    payload = json.loads(result.stdout)
+    codes = {finding["code"] for finding in payload["findings"]}
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert "production_validation_missing" not in codes
+    assert "production_target_missing" in codes
+    assert "operator_attestation_missing" in codes
+
+
 def auth_ops_bundle(
     *,
     insecure_jwks: bool = False,
