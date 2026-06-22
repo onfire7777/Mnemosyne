@@ -7,6 +7,7 @@ import json
 import os
 import shlex
 import subprocess
+import tempfile
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Protocol, Sequence
@@ -45,6 +46,28 @@ class ObjectRecord:
         )
 
 
+def _atomic_write_bytes(path: Path, data: bytes) -> None:
+    """Write ``data`` to ``path`` atomically via a per-writer unique temp file.
+
+    The content-addressed object stores can be written concurrently by several
+    processes targeting the same CID (e.g. a test runner alongside a background
+    consolidation session, both materialising ``.mnemosyne/objects``). A shared
+    ``<cid>.tmp`` name made the second ``os.replace`` raise ``FileNotFoundError``
+    once the first writer consumed the temp; a unique temp per writer keeps each
+    replace independent and idempotent — whichever writer wins, the bytes are
+    identical because the name is the content hash.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), prefix=f"{path.name}.", suffix=".tmp")
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+        tmp.replace(path)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
 class LocalObjectStore:
     """Content-addressed filesystem object store.
 
@@ -70,9 +93,7 @@ class LocalObjectStore:
         path = self._path_for_cid(cid)
         path.parent.mkdir(parents=True, exist_ok=True)
         if not path.exists():
-            tmp = path.with_suffix(path.suffix + ".tmp")
-            tmp.write_bytes(data)
-            tmp.replace(path)
+            _atomic_write_bytes(path, data)
         return ObjectRecord(
             tenant_id=tenant_id,
             cid=cid,
@@ -297,9 +318,7 @@ class EncryptedLocalObjectStore(LocalObjectStore):
             "nonce": _b64encode(nonce),
             "ciphertext": _b64encode(ciphertext),
         }
-        tmp = path.with_suffix(path.suffix + ".tmp")
-        tmp.write_text(json.dumps(envelope, sort_keys=True), encoding="utf-8")
-        tmp.replace(path)
+        _atomic_write_bytes(path, json.dumps(envelope, sort_keys=True).encode("utf-8"))
         return ObjectRecord(
             tenant_id=tenant_id,
             cid=cid,
