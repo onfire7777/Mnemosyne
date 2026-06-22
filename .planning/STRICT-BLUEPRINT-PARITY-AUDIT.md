@@ -32,6 +32,7 @@
 - Promotion gates now route branch, merge, and discard through tenant-aware engine calls when available, with live Postgres coverage for gated direct-user fact promotion.
 - Externalized multimodal evidence now indexes metadata-derived `derived_text`, OCR text, transcripts, captions, alt text, and descriptions while keeping raw bytes in object storage. When derived text is absent, ingest queues an async `media_extract` job; the worker reads object-store bytes through an operator-configured command extractor, appends derived evidence, and queues consolidation for the derived row. A shell-free command media embedding provider boundary accepts image/audio/video bytes through a temp file plus JSON stdin, requires strict JSON embedding output, normalizes vector dimensions, and is covered by direct adapter and CLI `provider-check` tests. Ingestion can now attach command media embeddings to raw externalized media evidence, LocalMemoryEngine and PostgresEngine use those stored vectors for dense retrieval before extraction, and local plus live CLI/Postgres tests verify raw-media retrieval without derived text.
 - CLI `ops-report` now emits a tenant dashboard snapshot with memory counts, audit/deletion counts, queue state including running jobs, learning lesson diversity, proxy-vs-true gap, and tripwire status; `--dashboard-html` writes the snapshot as a static HTML dashboard artifact with retrieval, calibration, learning, and gate/eval sections; and `--dashboard-package-dir` writes a deployable local bundle with HTML, JSON snapshot, and manifest files.
+- CLI `tls-lifecycle-ops-check` now validates fingerprinted production TLS lifecycle evidence for non-local CA/ACME issuance, renewal execution, current/candidate overlap, deployed serial/chain match, reload verification, non-local private-key custody, monitoring alerts, and raw key/cert/token/log redaction; release-audit requires this output shape in the production command profile.
 
 ## Remaining Exact-Parity Gaps
 
@@ -101,6 +102,6 @@ The earlier `.planning/v1.0-MILESTONE-AUDIT.md` remains useful as evidence that 
 
 1. Keep the compose Docker/Postgres full-suite evidence current and expand it only when new engine/runtime surfaces are introduced.
 2. Run provider checks against real production embedding, cross-encoder, image/audio embedding, extractor, summarizer, and entity-resolver deployments plus calibration datasets.
-3. Run hosted HTTP JSON-RPC, official StreamableHTTP/SSE, IdP/JWKS rotation, certificate lifecycle, and stateless soak validation against real deployed endpoints.
+3. Run hosted HTTP JSON-RPC, official StreamableHTTP/SSE, IdP/JWKS rotation, `tls-lifecycle-ops-check`, and stateless soak validation against real deployed endpoints.
 4. Validate real secret-manager-backed session-secret command deployment/rotation before making any production multi-tenant claim.
 5. Validate real isolated LoRA/test-time-training deployments behind the command-backed parametric provider boundary, including deployed protected-suite management and production rollback orchestration.

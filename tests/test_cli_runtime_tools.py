@@ -2080,6 +2080,133 @@ def test_cli_tls_rotation_plan_check_validates_overlap_hostnames_and_thresholds(
     assert failed_report["checks"]["hostnames_valid"] is True
 
 
+def tls_lifecycle_ops_bundle(*, weak: bool = False, raw_secret: bool = False) -> dict:
+    bundle = {
+        "name": "production-tls-lifecycle",
+        "validation_scope": {
+            "production_validated": not weak,
+            "target_environment": "production" if not weak else "local",
+            "operator_asserted": not weak,
+            "run_id": "tls-lifecycle-run-1" if not weak else "",
+            "started_at": "2026-06-22T10:00:00Z",
+            "completed_at": "2026-06-22T10:03:00Z",
+        },
+        "issuance": {
+            "ok": not weak,
+            "provider": "acme",
+            "ca": "Example CA",
+            "order_id_sha256": "sha256:order123",
+            "certificate_serial_sha256": "sha256:cert123",
+            "chain_sha256": "sha256:chain123",
+            "hostnames": ["mnemosyne.example.com"],
+            "self_signed": weak,
+        },
+        "renewal": {
+            "ok": not weak,
+            "automation_enabled": not weak,
+            "renewal_executed": not weak,
+            "next_renewal_scheduled": not weak,
+            "dry_run_passed": not weak,
+            "current_days_remaining": 45 if not weak else 1,
+            "candidate_days_remaining": 120 if not weak else 2,
+            "overlap_days": 30 if not weak else 1,
+        },
+        "deployment": {
+            "ok": not weak,
+            "endpoint_url": "https://mnemosyne.example.com" if not weak else "http://127.0.0.1:8787",
+            "deployed_serial_sha256": "sha256:cert123" if not weak else "sha256:old",
+            "candidate_serial_sha256": "sha256:cert123",
+            "chain_verified": not weak,
+            "hostname_verified": not weak,
+            "reload_verified": not weak,
+            "zero_downtime_reload": not weak,
+        },
+        "secret_distribution": {
+            "ok": not weak,
+            "private_key_source": "vault" if not weak else "file",
+            "deployed_key_id_sha256": "sha256:key123" if not weak else "",
+            "private_key_material_omitted": not weak,
+            "least_privilege_permissions": not weak,
+            "key_rotation_supported": not weak,
+            "rollback_key_revocation_ready": not weak,
+        },
+        "monitoring": {
+            "ok": not weak,
+            "expiry_alert_configured": not weak,
+            "renewal_failure_alert_configured": not weak,
+            "cert_mismatch_alert_configured": not weak,
+            "revocation_checked": not weak,
+        },
+        "redaction": {
+            "raw_private_keys_omitted": True,
+            "raw_certificate_pem_omitted": True,
+            "raw_acme_tokens_omitted": True,
+            "raw_deployment_logs_omitted": True,
+        },
+    }
+    if raw_secret:
+        bundle["private_key_pem"] = "redacted-test-private-key-material"
+    return bundle
+
+
+def test_cli_tls_lifecycle_ops_check_validates_production_evidence_bundle(tmp_path: Path) -> None:
+    bundle = tmp_path / "tls-lifecycle.json"
+    bundle.write_text(json.dumps(tls_lifecycle_ops_bundle()), encoding="utf-8")
+
+    report = run_cli(tmp_path / "mnemosyne.json", "tls-lifecycle-ops-check", "--bundle", str(bundle))
+    acknowledged = run_cli(
+        tmp_path / "mnemosyne.json",
+        "tls-lifecycle-ops-check",
+        "--bundle",
+        str(bundle),
+        "--expected-fingerprint",
+        report["fingerprint"],
+    )
+
+    serialized = json.dumps(report)
+    assert report["ok"] is True
+    assert len(report["fingerprint"]) == 64
+    assert {item["name"] for item in report["checks"]} == {
+        "validation_scope",
+        "issuance",
+        "renewal",
+        "deployment",
+        "secret_distribution",
+        "monitoring",
+        "redaction",
+    }
+    assert all(item["ok"] for item in report["checks"])
+    assert report["checks"][1]["provider"] == "acme"
+    assert report["checks"][3]["deployed_serial_matches_candidate"] is True
+    assert report["checks"][4]["private_key_source"] == "vault"
+    assert report["redaction"]["forbidden_raw_fields_present"] is False
+    assert "raw-secret" not in serialized
+    assert acknowledged["ok"] is True
+    assert acknowledged["expected_fingerprint_present"] is True
+
+
+def test_cli_tls_lifecycle_ops_check_fails_closed_on_weak_evidence(tmp_path: Path) -> None:
+    bundle = tmp_path / "bad-tls-lifecycle.json"
+    bundle.write_text(json.dumps(tls_lifecycle_ops_bundle(weak=True, raw_secret=True)), encoding="utf-8")
+
+    result = run_raw_cli(tmp_path / "mnemosyne.json", "tls-lifecycle-ops-check", "--bundle", str(bundle))
+    report = json.loads(result.stdout)
+    codes = {finding["code"] for finding in report["findings"]}
+
+    assert result.returncode == 1
+    assert report["ok"] is False
+    assert "production_validation_missing" in codes
+    assert "tls_issuer_local" not in codes
+    assert "tls_self_signed" in codes
+    assert "tls_renewal_control_missing" in codes
+    assert "tls_endpoint_not_https" in codes
+    assert "tls_endpoint_local" in codes
+    assert "tls_deployed_serial_mismatch" in codes
+    assert "tls_key_source_local" in codes
+    assert "tls_monitoring_missing" in codes
+    assert "tls_raw_field_present" in codes
+
+
 def test_cli_deployment_soak_allows_tls_rotation_plan_check(tmp_path: Path) -> None:
     current_dir = tmp_path / "current"
     candidate_dir = tmp_path / "candidate"
@@ -4923,6 +5050,7 @@ def production_release_stdout(command: str, provider_stdout: dict) -> dict:
         "auth-ops-check",
         "mcp-ops-check",
         "worker-ops-check",
+        "tls-lifecycle-ops-check",
         "retrieval-ops-check",
         "consolidation-ops-check",
         "multimodal-ops-check",
