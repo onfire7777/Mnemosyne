@@ -170,6 +170,8 @@ Latest checkpoint: CLI Postgres DSN selection now treats an explicit empty `--po
 
 Latest checkpoint: CLI `tls-lifecycle-ops-check` now validates production TLS lifecycle evidence for CA/ACME issuance, renewal execution, current/candidate overlap, deployed serial/chain match, reload verification, non-local private-key custody, monitoring alerts, and raw key/cert/token/log redaction. The command is part of `deployment-soak` and the production `release-audit` output-shape profile; actual production TLS evidence remains operator-run.
 
+Latest checkpoint: CLI `ops-dashboard-check` now accepts optional production dashboard operations evidence in addition to fingerprinted dashboard packages or hosted URLs. The gate validates production scope, refresh freshness, source snapshot fingerprinting, access controls, alert delivery, tenant binding, and raw snapshot/token/user-data redaction without storing raw dashboard payloads. Focused dashboard/release-audit coverage passes in `/tmp/mnemosyne-dashboard-ops-focused.xml` with 4 tests, the full local suite passes in `/tmp/mnemosyne-dashboard-ops-full-local.xml` with 431 tests, 0 failures/errors, and 63 live-DB skips, and the compose Postgres DSN suite passes in `/tmp/mnemosyne-dashboard-ops-full-postgres.xml` with 431 tests, 0 failures/errors, and 0 skips. Actual hosted production dashboard evidence remains operator-run.
+
 ### Blockers/Concerns
 
 - Exact 1:1 blueprint parity is not yet achieved; `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md` is the controlling status artifact.

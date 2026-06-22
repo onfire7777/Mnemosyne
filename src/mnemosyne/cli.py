@@ -7006,6 +7006,204 @@ def _fetch_dashboard_url(
         }
 
 
+def _load_ops_dashboard_ops_bundle(args: argparse.Namespace) -> Mapping[str, Any] | None:
+    if bool(args.ops_bundle) and bool(args.ops_bundle_json):
+        raise SystemExit("ops-dashboard-check accepts at most one of --ops-bundle or --ops-bundle-json")
+    if not args.ops_bundle and not args.ops_bundle_json:
+        return None
+    try:
+        loaded = (
+            json.loads(Path(args.ops_bundle).expanduser().read_text(encoding="utf-8"))
+            if args.ops_bundle
+            else json.loads(args.ops_bundle_json)
+        )
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"ops dashboard operations bundle is not valid JSON: {exc}") from exc
+    if not isinstance(loaded, Mapping):
+        raise SystemExit("ops dashboard operations bundle must be a JSON object")
+    return loaded
+
+
+def _ops_dashboard_number(
+    value: Any,
+    *,
+    default: float,
+    code: str,
+    message: str,
+    findings: list[dict[str, str]],
+) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        findings.append(_ops_dashboard_finding(code, message))
+        return default
+
+
+def _ops_dashboard_forbidden_raw_paths(value: Any, *, path: str = "$") -> list[str]:
+    paths: list[str] = []
+    if isinstance(value, Mapping):
+        for key, child in value.items():
+            key_text = str(key)
+            child_path = f"{path}.{key_text}"
+            if child_path.startswith("$.redaction."):
+                continue
+            lowered = key_text.lower()
+            if any(
+                token in lowered
+                for token in (
+                    "token",
+                    "secret",
+                    "password",
+                    "credential",
+                    "raw_html",
+                    "raw_snapshot",
+                    "raw_manifest",
+                    "raw_user",
+                    "email",
+                    "stdout",
+                    "stderr",
+                )
+            ):
+                paths.append(child_path)
+            paths.extend(_ops_dashboard_forbidden_raw_paths(child, path=child_path))
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            paths.extend(_ops_dashboard_forbidden_raw_paths(child, path=f"{path}[{index}]"))
+    return paths
+
+
+def _validate_ops_dashboard_operations(
+    bundle: Mapping[str, Any],
+    *,
+    max_refresh_age_seconds: float,
+    max_refresh_interval_seconds: float,
+    allow_non_production: bool,
+) -> tuple[list[dict[str, Any]], list[dict[str, str]], dict[str, bool]]:
+    findings: list[dict[str, str]] = []
+    checks: list[dict[str, Any]] = []
+
+    validation = bundle.get("validation_scope") if isinstance(bundle.get("validation_scope"), Mapping) else {}
+    validation_ok = (
+        allow_non_production
+        or (
+            validation.get("production_validated") is True
+            and validation.get("target_environment") == "production"
+            and validation.get("operator_asserted") is True
+            and bool(validation.get("run_id"))
+        )
+    )
+    if not allow_non_production:
+        if validation.get("production_validated") is not True:
+            findings.append(_ops_dashboard_finding("dashboard_production_validation_missing", "dashboard operations evidence must be production validated"))
+        if validation.get("target_environment") != "production":
+            findings.append(_ops_dashboard_finding("dashboard_production_target_missing", "dashboard operations target must be production"))
+        if validation.get("operator_asserted") is not True:
+            findings.append(_ops_dashboard_finding("dashboard_operator_attestation_missing", "dashboard operations requires operator attestation"))
+        if not validation.get("run_id"):
+            findings.append(_ops_dashboard_finding("dashboard_run_id_missing", "dashboard operations validation_scope.run_id is required"))
+    checks.append(
+        {
+            "name": "dashboard_operations_scope",
+            "ok": validation_ok,
+            "production_validated": validation.get("production_validated") is True,
+            "target_environment": validation.get("target_environment"),
+        }
+    )
+
+    refresh = bundle.get("refresh") if isinstance(bundle.get("refresh"), Mapping) else {}
+    refresh_age = _ops_dashboard_number(
+        refresh.get("last_refresh_age_seconds"),
+        default=max_refresh_age_seconds + 1.0,
+        code="dashboard_refresh_age_invalid",
+        message="refresh.last_refresh_age_seconds must be numeric",
+        findings=findings,
+    )
+    refresh_interval = _ops_dashboard_number(
+        refresh.get("interval_seconds"),
+        default=max_refresh_interval_seconds + 1.0,
+        code="dashboard_refresh_interval_invalid",
+        message="refresh.interval_seconds must be numeric",
+        findings=findings,
+    )
+    refresh_ok = (
+        refresh.get("ok") is True
+        and refresh.get("job_supervised") is True
+        and refresh.get("source_snapshot_fingerprint_present") is True
+        and refresh_age <= max_refresh_age_seconds
+        and refresh_interval <= max_refresh_interval_seconds
+    )
+    if refresh.get("ok") is not True:
+        findings.append(_ops_dashboard_finding("dashboard_refresh_not_ok", "dashboard refresh evidence must be ok"))
+    if refresh.get("job_supervised") is not True:
+        findings.append(_ops_dashboard_finding("dashboard_refresh_not_supervised", "dashboard refresh job must be supervised"))
+    if refresh.get("source_snapshot_fingerprint_present") is not True:
+        findings.append(_ops_dashboard_finding("dashboard_snapshot_fingerprint_missing", "dashboard source snapshot fingerprint is required"))
+    if refresh_age > max_refresh_age_seconds:
+        findings.append(_ops_dashboard_finding("dashboard_refresh_stale", "dashboard last refresh age exceeds threshold"))
+    if refresh_interval > max_refresh_interval_seconds:
+        findings.append(_ops_dashboard_finding("dashboard_refresh_interval_too_high", "dashboard refresh interval exceeds threshold"))
+    checks.append(
+        {
+            "name": "dashboard_refresh",
+            "ok": refresh_ok,
+            "last_refresh_age_seconds": refresh_age,
+            "interval_seconds": refresh_interval,
+            "job_supervised": refresh.get("job_supervised") is True,
+        }
+    )
+
+    access = bundle.get("access_control") if isinstance(bundle.get("access_control"), Mapping) else {}
+    access_flags = {
+        "auth_required": access.get("auth_required") is True,
+        "tenant_binding": access.get("tenant_binding") is True,
+        "admin_only_mutation": access.get("admin_only_mutation") is True,
+        "public_snapshot_disabled": access.get("public_snapshot_disabled") is True,
+    }
+    missing_access = [name for name, ok in access_flags.items() if not ok]
+    if access.get("ok") is not True:
+        findings.append(_ops_dashboard_finding("dashboard_access_not_ok", "dashboard access-control evidence must be ok"))
+    for flag in missing_access:
+        findings.append(_ops_dashboard_finding("dashboard_access_control_missing", f"access_control.{flag} is not proven"))
+    checks.append({"name": "dashboard_access_control", "ok": access.get("ok") is True and not missing_access, **access_flags})
+
+    alerts = bundle.get("alerts") if isinstance(bundle.get("alerts"), Mapping) else {}
+    alert_flags = {
+        "tripwire_alerts": alerts.get("tripwire_alerts") is True,
+        "freshness_alerts": alerts.get("freshness_alerts") is True,
+        "delivery_verified": alerts.get("delivery_verified") is True,
+        "oncall_route_present": alerts.get("oncall_route_present") is True,
+    }
+    missing_alerts = [name for name, ok in alert_flags.items() if not ok]
+    if alerts.get("ok") is not True:
+        findings.append(_ops_dashboard_finding("dashboard_alerts_not_ok", "dashboard alert evidence must be ok"))
+    for flag in missing_alerts:
+        findings.append(_ops_dashboard_finding("dashboard_alert_missing", f"alerts.{flag} is not proven"))
+    checks.append({"name": "dashboard_alerts", "ok": alerts.get("ok") is True and not missing_alerts, **alert_flags})
+
+    redaction = bundle.get("redaction") if isinstance(bundle.get("redaction"), Mapping) else {}
+    redaction_flags = {
+        "raw_html_omitted": redaction.get("raw_html_omitted") is True,
+        "raw_snapshot_omitted": redaction.get("raw_snapshot_omitted") is True,
+        "raw_tokens_omitted": redaction.get("raw_tokens_omitted") is True,
+        "raw_user_data_omitted": redaction.get("raw_user_data_omitted") is True,
+    }
+    missing_redaction = [name for name, ok in redaction_flags.items() if not ok]
+    forbidden_raw_paths = _ops_dashboard_forbidden_raw_paths(bundle)
+    for flag in missing_redaction:
+        findings.append(_ops_dashboard_finding("dashboard_redaction_missing", f"redaction.{flag} is not proven"))
+    if forbidden_raw_paths:
+        findings.append(_ops_dashboard_finding("dashboard_raw_field_present", "dashboard operations bundle contains raw HTML/snapshot/token/user fields"))
+    checks.append(
+        {
+            "name": "dashboard_operations_redaction",
+            "ok": not missing_redaction and not forbidden_raw_paths,
+            **redaction_flags,
+            "forbidden_raw_paths": forbidden_raw_paths,
+        }
+    )
+    return checks, findings, redaction_flags
+
+
 def cmd_ops_dashboard_check(args: argparse.Namespace) -> None:
     if bool(args.dashboard_package_dir) == bool(args.dashboard_url):
         raise SystemExit("ops-dashboard-check requires exactly one of --dashboard-package-dir or --dashboard-url")
@@ -7067,6 +7265,18 @@ def cmd_ops_dashboard_check(args: argparse.Namespace) -> None:
                 checks.append({"name": f"hosted_{label}", "ok": False, "url": _display_url(url)})
                 findings.append(_ops_dashboard_finding(f"hosted_{label}_fetch_failed", f"hosted {label} denied: {exc}"))
 
+    operations_bundle = _load_ops_dashboard_ops_bundle(args)
+    operations_redaction: dict[str, bool] = {}
+    if operations_bundle is not None:
+        operations_checks, operations_findings, operations_redaction = _validate_ops_dashboard_operations(
+            operations_bundle,
+            max_refresh_age_seconds=args.max_refresh_age_seconds,
+            max_refresh_interval_seconds=args.max_refresh_interval_seconds,
+            allow_non_production=args.allow_non_production,
+        )
+        checks.extend(operations_checks)
+        findings.extend(operations_findings)
+
     report: dict[str, Any] = {
         "ok": not findings,
         "mode": mode,
@@ -7075,6 +7285,7 @@ def cmd_ops_dashboard_check(args: argparse.Namespace) -> None:
             "raw_dashboard_html_omitted": True,
             "raw_manifest_json_omitted": True,
             "raw_snapshot_json_omitted": True,
+            **operations_redaction,
         },
         "checks": checks,
         "findings": findings,
@@ -11301,6 +11512,8 @@ def build_parser() -> argparse.ArgumentParser:
     ops_dashboard_check.add_argument("--dashboard-url", help="Hosted dashboard HTML URL to validate")
     ops_dashboard_check.add_argument("--manifest-url", help="Optional hosted dashboard package manifest URL")
     ops_dashboard_check.add_argument("--snapshot-url", help="Optional hosted dashboard snapshot JSON URL")
+    ops_dashboard_check.add_argument("--ops-bundle", help="Path to production dashboard operations evidence bundle")
+    ops_dashboard_check.add_argument("--ops-bundle-json", help="Inline production dashboard operations evidence bundle JSON")
     ops_dashboard_check.add_argument("--expected-tenant", help="Require dashboard package tenant_id to match this value")
     ops_dashboard_check.add_argument(
         "--allow-insecure-localhost",
@@ -11317,6 +11530,9 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=int(os.environ.get("MNEMOSYNE_OPS_DASHBOARD_CHECK_MAX_BYTES", str(1024 * 1024))),
     )
+    ops_dashboard_check.add_argument("--max-refresh-age-seconds", type=float, default=300.0)
+    ops_dashboard_check.add_argument("--max-refresh-interval-seconds", type=float, default=300.0)
+    ops_dashboard_check.add_argument("--allow-non-production", action="store_true")
     ops_dashboard_check.add_argument("--expected-fingerprint")
     ops_dashboard_check.set_defaults(func=cmd_ops_dashboard_check)
 
