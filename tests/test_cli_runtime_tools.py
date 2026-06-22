@@ -1411,6 +1411,11 @@ def test_cli_mcp_http_soak_validates_stateless_hosted_server(tmp_path: Path) -> 
     assert report["summary"]["failures"] == 0
     assert [item["ok"] for item in report["iterations"]] == [True, True]
     assert all(item["tools_list"]["contains_read_only_tool"] for item in report["iterations"])
+    assert all(item["tools_list"]["tool_contract"]["ok"] for item in report["iterations"])
+    assert all(
+        item["read_only_tool_call"]["tool_call_contract"]["structured_content_present"]
+        for item in report["iterations"]
+    )
     assert report["target"]["auth_token_configured"] is True
     assert "soak-secret" not in serialized
 
@@ -1452,6 +1457,81 @@ def test_cli_mcp_http_soak_fails_closed_without_required_auth(tmp_path: Path) ->
     assert "soak-secret" not in result.stdout
 
 
+def test_cli_mcp_http_soak_fails_closed_on_invalid_tool_schema(tmp_path: Path) -> None:
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802 - stdlib callback name.
+            if self.path != "/healthz":
+                self.send_response(404)
+                self.end_headers()
+                return
+            self._write_json(
+                {
+                    "ok": True,
+                    "transport": "http-json-rpc",
+                    "stateless": True,
+                    "auth_token_required": False,
+                }
+            )
+
+        def do_POST(self) -> None:  # noqa: N802 - stdlib callback name.
+            length = int(self.headers.get("Content-Length", "0"))
+            payload = json.loads(self.rfile.read(length).decode("utf-8"))
+            method = payload.get("method")
+            if method == "initialize":
+                result = {"protocolVersion": "2024-11-05", "capabilities": {}, "serverInfo": {"name": "bad"}}
+            elif method == "tools/list":
+                result = {"tools": [{"name": "residency_policy", "description": "missing schema"}]}
+            elif method == "tools/call":
+                result = {
+                    "content": [{"type": "text", "text": "{}"}],
+                    "structuredContent": {"tenant_id": "tenant-a"},
+                    "isError": False,
+                }
+            else:
+                self.send_response(404)
+                self.end_headers()
+                return
+            self._write_json({"jsonrpc": "2.0", "id": payload.get("id"), "result": result})
+
+        def _write_json(self, payload: dict) -> None:
+            encoded = json.dumps(payload).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(encoded)))
+            self.end_headers()
+            self.wfile.write(encoded)
+
+        def log_message(self, format: str, *args: object) -> None:  # noqa: A002 - stdlib signature.
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        result = run_raw_cli(
+            tmp_path / "mnemosyne.json",
+            "mcp-http-soak",
+            "--base-url",
+            f"http://127.0.0.1:{server.server_port}",
+            "--iterations",
+            "1",
+            "--require-stateless",
+        )
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        server.server_close()
+
+    report = json.loads(result.stdout)
+
+    assert result.returncode == 1
+    assert report["ok"] is False
+    assert report["iterations"][0]["tools_list"]["tool_contract"]["tool_present"] is True
+    assert report["iterations"][0]["tools_list"]["tool_contract"]["schema_present"] is False
+    assert report["iterations"][0]["tools_list"]["ok"] is False
+    assert "tool schema is invalid" in report["iterations"][0]["tools_list"]["error"]
+
+
 def test_cli_mcp_streamable_http_soak_validates_official_sdk_transport(tmp_path: Path) -> None:
     server, thread, base_url = start_streamable_http_server(tmp_path)
     try:
@@ -1476,6 +1556,11 @@ def test_cli_mcp_streamable_http_soak_validates_official_sdk_transport(tmp_path:
     assert report["target"]["auth_token_configured"] is False
     assert [item["ok"] for item in report["iterations"]] == [True, True]
     assert all(item["tools_list"]["contains_read_only_tool"] for item in report["iterations"])
+    assert all(item["tools_list"]["tool_contract"]["ok"] for item in report["iterations"])
+    assert all(
+        item["read_only_tool_call"]["tool_call_contract"]["structured_content_present"]
+        for item in report["iterations"]
+    )
     assert all(item["read_only_tool_call"]["ok"] for item in report["iterations"])
 
 
@@ -5268,7 +5353,9 @@ def mcp_ops_bundle(*, bad_transport: bool = False, weak_tls: bool = False, raw_p
                 "health_ok": not bad_transport,
                 "initialize_ok": not bad_transport,
                 "tools_list_ok": not bad_transport,
+                "tool_contract_ok": not bad_transport,
                 "read_only_call_ok": not bad_transport,
+                "structured_tool_call_ok": not bad_transport,
                 "stateless_verified": not bad_transport,
             },
         }
