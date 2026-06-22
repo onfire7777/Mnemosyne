@@ -121,6 +121,8 @@ class ConsolidationWorker:
         entity_resolver: "EntityResolver | None" = None,
         candidate_extractor: "CandidateExtractor | None" = None,
         summarizer: "EvidenceSummarizer | None" = None,
+        lesson_distiller: "LessonDistiller | None" = None,
+        procedure_inducer: "ProcedureInducer | None" = None,
         user_model: UserModel | None = None,
     ):
         self.engine = engine
@@ -130,6 +132,8 @@ class ConsolidationWorker:
         self.entity_resolver = entity_resolver or DeterministicEntityResolver()
         self.candidate_extractor = candidate_extractor or DeterministicCandidateExtractor()
         self.summarizer = summarizer or DeterministicEvidenceSummarizer()
+        self.lesson_distiller = lesson_distiller or DeterministicLessonDistiller()
+        self.procedure_inducer = procedure_inducer or DeterministicProcedureInducer()
         self.user_model = user_model
 
     def run_queue_payload(self, payload: dict[str, Any]) -> ConsolidationRunResult:
@@ -338,11 +342,13 @@ class ConsolidationWorker:
             return str(getattr(self.entity_resolver, "strategy", self.entity_resolver.__class__.__name__))
         if pass_name == "summarizer":
             return str(getattr(self.summarizer, "strategy", self.summarizer.__class__.__name__))
+        if pass_name == "lesson_distiller":
+            return str(getattr(self.lesson_distiller, "strategy", self.lesson_distiller.__class__.__name__))
+        if pass_name == "skill_inducer":
+            return str(getattr(self.procedure_inducer, "strategy", self.procedure_inducer.__class__.__name__))
         return {
             "replayer": "deterministic_priority_replay",
             "belief_reviser": "promotion_gate",
-            "lesson_distiller": "deterministic_lesson_distiller",
-            "skill_inducer": "deterministic_skill_inducer",
             "forgetter": "fidelity_lifecycle_policy",
             "embedder": "deterministic_hashing_embedding",
             "promotion_gate": "protected_regression_gate",
@@ -394,10 +400,13 @@ class ConsolidationWorker:
     def _distill_lessons(self, tenant_id: str, candidates: list[dict[str, Any]]) -> dict[str, Any]:
         if self.learning is None or not candidates:
             return {"lessons": []}
+        distilled = self.lesson_distiller.distill(tenant_id, candidates)
+        lesson_rows = distilled["lessons"]
+        details = distilled.get("details", {})
         lesson_ids: list[str] = []
         created = 0
-        for candidate in candidates:
-            signature = f"consolidation:{candidate['signature']}"
+        for row in lesson_rows:
+            signature = str(row["failure_signature"])
             existing = next(
                 (
                     item
@@ -409,35 +418,35 @@ class ConsolidationWorker:
             if existing:
                 lesson_ids.append(existing.id)
                 continue
-            content = (
-                f"Evidence supports `{candidate['candidate_subject']} "
-                f"{candidate['candidate_predicate']} {candidate['candidate_object']}`; "
-                f"resolve entity `{candidate.get('entity_key', candidate['candidate_subject'])}`, "
-                "preserve source CIDs, and promote only through the gate."
-            )
             lesson = Lesson(
                 tenant_id=tenant_id,
-                lesson_type="observed-pattern",
+                lesson_type=str(row.get("lesson_type") or "observed-pattern"),
                 failure_signature=signature,
-                content=content,
-                votes=1,
+                content=str(row["content"]),
+                votes=int(row.get("votes", 1)),
+                status=str(row.get("status") or "candidate"),
             )
             self.learning.lessons[lesson.id] = lesson
             lesson_ids.append(lesson.id)
             created += 1
-        return {"lessons": lesson_ids, "created": created, "reused": len(lesson_ids) - created}
+        return {
+            "lessons": lesson_ids,
+            "created": created,
+            "reused": len(lesson_ids) - created,
+            "provider": details.get("strategy", getattr(self.lesson_distiller, "strategy", "lesson_distiller")),
+            "metadata": details.get("metadata", {}),
+        }
 
     def _induce_procedures(self, tenant_id: str, candidates: list[dict[str, Any]]) -> dict[str, Any]:
         if self.learning is None or not candidates:
             return {"procedures": []}
+        induced = self.procedure_inducer.induce(tenant_id, candidates)
+        procedure_rows = induced["procedures"]
+        details = induced.get("details", {})
         procedure_ids: list[str] = []
         created = 0
-        for candidate in candidates:
-            signature = {
-                "source": "consolidation",
-                "candidate_signature": candidate["signature"],
-                "entity_key": candidate.get("entity_key"),
-            }
+        for row in procedure_rows:
+            signature = dict(row["signature"])
             existing = next(
                 (
                     item
@@ -449,26 +458,24 @@ class ConsolidationWorker:
             if existing:
                 procedure_ids.append(existing.id)
                 continue
-            name = f"Consolidate {candidate['candidate_subject']}"
-            body = (
-                "1. Re-read source evidence CIDs\n"
-                f"2. Verify `{candidate['candidate_subject']} "
-                f"{candidate['candidate_predicate']} {candidate['candidate_object']}`\n"
-                f"3. Resolve entity key `{candidate.get('entity_key', 'n/a')}`\n"
-                "4. Check trust tier, sensitivity, and access policy\n"
-                "5. Promote only through protected gate evaluation"
-            )
             procedure = Procedure(
                 tenant_id=tenant_id,
-                kind="consolidation-checklist",
-                name=name,
-                body=body,
+                kind=str(row.get("kind") or "consolidation-checklist"),
+                name=str(row["name"]),
+                body=str(row["body"]),
                 signature=signature,
+                status=str(row.get("status") or "candidate"),
             )
             self.learning.procedures[procedure.id] = procedure
             procedure_ids.append(procedure.id)
             created += 1
-        return {"procedures": procedure_ids, "created": created, "reused": len(procedure_ids) - created}
+        return {
+            "procedures": procedure_ids,
+            "created": created,
+            "reused": len(procedure_ids) - created,
+            "provider": details.get("strategy", getattr(self.procedure_inducer, "strategy", "procedure_inducer")),
+            "metadata": details.get("metadata", {}),
+        }
 
     def _update_user_model(
         self,
@@ -1200,6 +1207,139 @@ class CommandEvidenceSummarizer:
         }
 
 
+class LessonDistiller(Protocol):
+    strategy: str
+
+    def distill(self, tenant_id: str, candidates: Sequence[dict[str, Any]]) -> dict[str, Any]: ...
+
+
+class DeterministicLessonDistiller:
+    strategy = "deterministic_lesson_distiller"
+
+    def distill(self, tenant_id: str, candidates: Sequence[dict[str, Any]]) -> dict[str, Any]:
+        lessons = []
+        for candidate in candidates:
+            content = (
+                f"Evidence supports `{candidate['candidate_subject']} "
+                f"{candidate['candidate_predicate']} {candidate['candidate_object']}`; "
+                f"resolve entity `{candidate.get('entity_key', candidate['candidate_subject'])}`, "
+                "preserve source CIDs, and promote only through the gate."
+            )
+            lessons.append(
+                {
+                    "lesson_type": "observed-pattern",
+                    "failure_signature": f"consolidation:{candidate['signature']}",
+                    "content": content,
+                    "votes": 1,
+                }
+            )
+        return {
+            "lessons": lessons,
+            "details": {"strategy": self.strategy, "candidate_count": len(candidates)},
+        }
+
+
+class CommandLessonDistiller:
+    """Shell-free lesson distiller adapter for model-backed consolidation."""
+
+    strategy = "command_lesson_distiller"
+
+    def __init__(self, command: str | Sequence[str], *, timeout_seconds: float = 30.0):
+        self.command = _command_argv(command)
+        self.timeout_seconds = timeout_seconds
+
+    def distill(self, tenant_id: str, candidates: Sequence[dict[str, Any]]) -> dict[str, Any]:
+        parsed = _run_json_command(
+            self.command,
+            {"tenant_id": tenant_id, "candidates": [dict(candidate) for candidate in candidates]},
+            timeout_seconds=self.timeout_seconds,
+            provider_name="lesson distiller",
+        )
+        rows = parsed.get("lessons")
+        if not isinstance(rows, list):
+            raise ValueError("lesson distiller response requires lessons array")
+        metadata = parsed.get("metadata", {})
+        if metadata is not None and not isinstance(metadata, dict):
+            raise ValueError("lesson distiller metadata must be a JSON object")
+        return {
+            "lessons": [_normalize_lesson_row(row) for row in rows],
+            "details": {
+                "strategy": self.strategy,
+                "candidate_count": len(candidates),
+                "metadata": metadata or {},
+            },
+        }
+
+
+class ProcedureInducer(Protocol):
+    strategy: str
+
+    def induce(self, tenant_id: str, candidates: Sequence[dict[str, Any]]) -> dict[str, Any]: ...
+
+
+class DeterministicProcedureInducer:
+    strategy = "deterministic_skill_inducer"
+
+    def induce(self, tenant_id: str, candidates: Sequence[dict[str, Any]]) -> dict[str, Any]:
+        procedures = []
+        for candidate in candidates:
+            procedures.append(
+                {
+                    "kind": "consolidation-checklist",
+                    "name": f"Consolidate {candidate['candidate_subject']}",
+                    "body": (
+                        "1. Re-read source evidence CIDs\n"
+                        f"2. Verify `{candidate['candidate_subject']} "
+                        f"{candidate['candidate_predicate']} {candidate['candidate_object']}`\n"
+                        f"3. Resolve entity key `{candidate.get('entity_key', 'n/a')}`\n"
+                        "4. Check trust tier, sensitivity, and access policy\n"
+                        "5. Promote only through protected gate evaluation"
+                    ),
+                    "signature": {
+                        "source": "consolidation",
+                        "candidate_signature": candidate["signature"],
+                        "entity_key": candidate.get("entity_key"),
+                    },
+                }
+            )
+        return {
+            "procedures": procedures,
+            "details": {"strategy": self.strategy, "candidate_count": len(candidates)},
+        }
+
+
+class CommandProcedureInducer:
+    """Shell-free procedure/skill inducer adapter for model-backed consolidation."""
+
+    strategy = "command_skill_inducer"
+
+    def __init__(self, command: str | Sequence[str], *, timeout_seconds: float = 30.0):
+        self.command = _command_argv(command)
+        self.timeout_seconds = timeout_seconds
+
+    def induce(self, tenant_id: str, candidates: Sequence[dict[str, Any]]) -> dict[str, Any]:
+        parsed = _run_json_command(
+            self.command,
+            {"tenant_id": tenant_id, "candidates": [dict(candidate) for candidate in candidates]},
+            timeout_seconds=self.timeout_seconds,
+            provider_name="skill inducer",
+        )
+        rows = parsed.get("procedures")
+        if not isinstance(rows, list):
+            raise ValueError("skill inducer response requires procedures array")
+        metadata = parsed.get("metadata", {})
+        if metadata is not None and not isinstance(metadata, dict):
+            raise ValueError("skill inducer metadata must be a JSON object")
+        return {
+            "procedures": [_normalize_procedure_row(row) for row in rows],
+            "details": {
+                "strategy": self.strategy,
+                "candidate_count": len(candidates),
+                "metadata": metadata or {},
+            },
+        }
+
+
 class EntityResolver(Protocol):
     strategy: str
 
@@ -1310,6 +1450,50 @@ def _normalize_candidate(row: Any, evidence: Sequence[Evidence], payload: dict[s
     if entity_key:
         candidate["entity_key"] = entity_key
     return candidate
+
+
+def _normalize_lesson_row(row: Any) -> dict[str, Any]:
+    if not isinstance(row, dict):
+        raise ValueError("lesson distiller lesson rows must be JSON objects")
+    content = str(row.get("content") or "").strip()
+    failure_signature = str(row.get("failure_signature") or row.get("signature") or "").strip()
+    if not content:
+        raise ValueError("lesson distiller lesson requires content")
+    if not failure_signature:
+        raise ValueError("lesson distiller lesson requires failure_signature")
+    votes_raw = row.get("votes", 1)
+    try:
+        votes = int(votes_raw)
+    except (TypeError, ValueError):
+        raise ValueError("lesson distiller lesson votes must be an integer") from None
+    return {
+        "lesson_type": str(row.get("lesson_type") or row.get("type") or "observed-pattern"),
+        "failure_signature": failure_signature,
+        "content": content,
+        "votes": max(1, votes),
+        "status": str(row.get("status") or "candidate"),
+    }
+
+
+def _normalize_procedure_row(row: Any) -> dict[str, Any]:
+    if not isinstance(row, dict):
+        raise ValueError("skill inducer procedure rows must be JSON objects")
+    name = str(row.get("name") or "").strip()
+    body = str(row.get("body") or "").strip()
+    signature = row.get("signature")
+    if not isinstance(signature, dict):
+        raise ValueError("skill inducer procedure requires signature object")
+    if not name:
+        raise ValueError("skill inducer procedure requires name")
+    if not body:
+        raise ValueError("skill inducer procedure requires body")
+    return {
+        "kind": str(row.get("kind") or "consolidation-checklist"),
+        "name": name,
+        "body": body,
+        "signature": dict(signature),
+        "status": str(row.get("status") or "candidate"),
+    }
 
 
 def _max_evidence_trust(evidence: Sequence[Evidence]) -> int:

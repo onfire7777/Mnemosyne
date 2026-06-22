@@ -1,12 +1,19 @@
 from __future__ import annotations
 
 import os
+import shlex
+import sys
 from hashlib import sha256
 from uuid import uuid4
 
 import pytest
 
-from mnemosyne.consolidation import CONSOLIDATE_EVIDENCE_JOB, ConsolidationWorker
+from mnemosyne.consolidation import (
+    CONSOLIDATE_EVIDENCE_JOB,
+    CommandLessonDistiller,
+    CommandProcedureInducer,
+    ConsolidationWorker,
+)
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.gate import GateResult, RegressionCase
 from mnemosyne.ingestion import IngestRequest, IngestionPipeline
@@ -1239,6 +1246,94 @@ def test_consolidation_worker_distills_lessons_procedures_and_summary(tmp_path) 
     second = worker.run_once(CONSOLIDATE_EVIDENCE_JOB)
 
     assert second is None
+
+
+def test_consolidation_worker_uses_command_lesson_and_skill_providers(tmp_path) -> None:
+    engine = LocalMemoryEngine()
+    learning = LearningSystem(engine)
+    queue = InProcessQueue()
+    pipeline = IngestionPipeline(engine, LocalObjectStore(tmp_path / "objects"), queue=queue)
+    pipeline.ingest(
+        IngestRequest(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="chat",
+            content="Provider Health is configured.",
+        )
+    )
+    lesson_script = tmp_path / "lesson-distiller.py"
+    lesson_script.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env python3",
+                "import json, sys",
+                "request = json.load(sys.stdin)",
+                "candidate = request['candidates'][0]",
+                "response = {'lessons': [{",
+                "    'lesson_type': 'command-observation',",
+                "    'failure_signature': candidate['signature'],",
+                "    'content': 'Provider health lesson from command',",
+                "    'votes': 2,",
+                "}], 'metadata': {'candidate_count': len(request['candidates'])}}",
+                "print(json.dumps(response))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    procedure_script = tmp_path / "skill-inducer.py"
+    procedure_script.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env python3",
+                "import json, sys",
+                "request = json.load(sys.stdin)",
+                "candidate = request['candidates'][0]",
+                "response = {'procedures': [{",
+                "    'kind': 'command-skill',",
+                "    'name': 'Provider health command skill',",
+                "    'body': 'Use command-backed provider lessons.',",
+                "    'signature': {'signature': candidate['signature'], 'source': 'command'},",
+                "}], 'metadata': {'candidate_count': len(request['candidates'])}}",
+                "print(json.dumps(response))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    lesson_command = " ".join(shlex.quote(item) for item in (sys.executable, str(lesson_script)))
+    procedure_command = " ".join(shlex.quote(item) for item in (sys.executable, str(procedure_script)))
+    worker = QueueWorker(
+        queue,
+        {
+            CONSOLIDATE_EVIDENCE_JOB: ConsolidationWorker(
+                engine,
+                gate_cases=[],
+                learning=learning,
+                lesson_distiller=CommandLessonDistiller(lesson_command),
+                procedure_inducer=CommandProcedureInducer(procedure_command),
+            ).run_queue_payload
+        },
+    )
+
+    job = worker.run_once(CONSOLIDATE_EVIDENCE_JOB)
+
+    assert job is not None
+    assert job.status == "complete"
+    pass_results = {item["name"]: item for item in job.result["pass_results"]}
+    assert pass_results["lesson_distiller"]["details"]["provider"] == "command_lesson_distiller"
+    assert pass_results["lesson_distiller"]["details"]["created"] == 1
+    assert pass_results["skill_inducer"]["details"]["provider"] == "command_skill_inducer"
+    assert pass_results["skill_inducer"]["details"]["created"] == 1
+    assert {"lesson_distiller", "skill_inducer"}.issubset(set(job.result["role_pipeline"]["model_backed_roles"]))
+    lesson = next(iter(learning.lessons.values()))
+    procedure = next(iter(learning.procedures.values()))
+    assert lesson.lesson_type == "command-observation"
+    assert lesson.failure_signature == "provider health is configured"
+    assert lesson.content == "Provider health lesson from command"
+    assert lesson.votes == 2
+    assert procedure.kind == "command-skill"
+    assert procedure.name == "Provider health command skill"
+    assert procedure.signature == {"signature": "provider health is configured", "source": "command"}
 
 
 def test_consolidation_worker_does_not_promote_untrusted_data_only_fact(tmp_path) -> None:
