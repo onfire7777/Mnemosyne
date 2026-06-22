@@ -13,6 +13,25 @@ byte-identical when inactive** — none require new infra, new deps, or a rewrit
 
 ---
 
+## Codex progress snapshot (audited against `origin/main` @ `14353d1`, 2026-06-21)
+The reconciliation tracker re-audited every item against Codex's latest committed `src`:
+
+**✅ Already LANDED by Codex — close these:**
+- **Rail 6 `untrusted_to_system_prompt`** — live capability check in `authorize_write` (`security.py:903`), wired into consolidation + mcp_tools.
+- **OQ6 corroborated-erasure split** — `engine.py:928-976` forget now computes `surviving_sources` → retain-with-updated-provenance vs retract sole-source (the exact OQ6 default).
+- **Deletion-trigger param** — `erasure_mode` on both forget signatures distinguishes legal vs operator deletion.
+
+**◐ PARTIAL:**
+- `sanitize_retrieved_text` — defined (`security.py:921`) but **0 call sites** in the retrieval/assembly path.
+- **Rails 1 & 3** (`max_supersession_rate` 0.05 / `max_prune_fraction_per_pass` 0.02) — constants in `parametric.py` but enforced only as soft post-hoc checks in the trainer path; **no live per-pass clamp** in consolidation.
+- Recompute (`jobs.py:run_projection_recompute`) — already dirty-driven/incremental, but no content-fingerprint memo to skip unchanged passes.
+- `command backend adapters` (`14353d1`) — added adapter *types* in `retrieval.py`, but did **not** wire providers into the LOCAL engine seam.
+
+**✗ Still ABSENT (the real remaining gaps):**
+- `min_corroboration_for_delete` rail (0 matches in src) · Rail 7 `consolidation_cadence_bounds [5_steps,24h]` · LocalMemoryEngine embedding seam (`cli.py:409` still no `adapters=`) · cf-term in `gate.py` PromotionGate.evaluate (pure regression margin) · `RegressionCase.origin` / `PromotionGate.ignition_status` · ACT-R demotion (`lifecycle.decayed_salience` still `exp(-age/45)`; `retrieval` base_level frequency-only) · cached PPR column.
+
+---
+
 ## 0. LAND FIRST — coordinated immutable-rails block (3 items)
 Downstream gate/validator logic depends on these, so sequence them first.
 1. **`min_corroboration_for_delete = 2`** (§31 rail #2) — **ABSENT from `src` entirely** (grep: 0 hits). Add to `OperatingPolicy` immutable rails; gate operator/consolidation deletion. [FR-8, G7, OQ6, Wave-1 rail-2]
@@ -45,6 +64,12 @@ The completion line's `tests/completion/rails/` proves these **fail today** (str
 - **FR-19 (optional hardening) — `provenance._find_first` (~line 334)** surfaces `claim_generator` as the signer instead of the leaf signer; and `ProvenanceTrustRule.from_dict` defaults an omitted `require_trusted_issuer` to True (foot-gun the Wave-2 infra fix worked around config-side). Optional: extract the real signer field and/or use a sentinel default. Not a correctness bug — the config fix already makes the positive path trust correctly.
 - **Eval/latency note (completion-additive, not src):** P95 failed only because the harness uses subprocess-per-call + per-call HTTP model round-trips, not a long-lived server. The completion line will add a long-lived-server P95 bench; no src change implied.
 - **Infra: Keycloak validate had 1/3 checks fail** (Vault + c2patool PASS) — investigate in the completion infra layer (additive).
+
+---
+## 5. WAVE-4 new findings (the additive corpora surfaced these)
+- **`cli.py` argparse `--object` ambiguity (real bug, affects Codex `main`).** `propose`/`supersede`/`assert --object` is now an ambiguous prefix of the newer top-level globals `--object-store`/`--object-store-encryption`/`--object-key-*`, so `... propose --object X` errors `ambiguous option: --object`. Fix: `allow_abbrev=False` on those subparsers (or rename the globals). Breaks 1/26 harness tests + blocks `assert`/`propose` from eval.
+- **FR-6 — local engine confidence is degenerate.** On `--backend local`, `search` returns a constant **0.7** confidence and **never abstains** (nonsense/hard-negative/poison all `abstained=False`), so ECE can't reach §16 ≤0.05 (measured **0.155**). Codex must give the local retrieval path varied, calibrated confidence + working abstention. The Wave-4 calibration set re-runs unchanged once fixed.
+- **Minor:** `eval/run_eval.py` hardcodes `DATASETS = _EVAL_DIR/'datasets'` — a 1-line env shim (`os.environ.get('MNEMO_EVAL_DATASET_DIR', …)`) lets the stock runner select v2 (default unchanged). `models.Preference` lacks the `access_policy` field that Evidence/Assertion/Relation have (asymmetry note).
 
 ---
 **Safety contract:** every change above preserves current default routing/outputs exactly (memo
