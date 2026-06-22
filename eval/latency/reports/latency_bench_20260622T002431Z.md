@@ -1,0 +1,57 @@
+# Wave-3 Long-Lived-Server Fast-Path P95 Latency Bench
+
+Generated: 2026-06-22T00:24:31.580337+00:00
+Blueprint: §15 fast-path P95 NFR, FR-3, §16 SLO
+
+## What this fixes (Wave-2 artifact)
+
+Wave-2's latency suite charged **per-process Python cold-start (~200-300 ms)** and a **cold per-call model HTTP round-trip** to every single request. Those are startup costs a long-lived server pays ONCE. This bench pays them once and measures warm per-request latency under concurrent load.
+
+- Confound 1 (subprocess/call): ELIMINATED: engine built once in-process via cli.load_tools (no per-call python startup)
+- Confound 2 (cold model round-trip/call): ELIMINATED: embedding service started once, models loaded once, warmed before measurement; embed-call latency measured in isolation
+
+## Warm-server setup (paid once, NOT per request)
+
+- Engine build + corpus capture: **357.38 ms** (once)
+- Embedding service start + model load: **19677.37 ms** (once)
+- Embedding backend: **sentence-transformers** (REAL model)
+- Wired path proved (POST /embed counted): **True** (counters: {"GET /health": 2, "POST /embed": 96})
+
+## Load
+
+- 8 concurrent clients x 10 queries = **80 calls**
+- Corpus: 12 docs, 9 unique queries (`eval/datasets/retrieval_curated.json`)
+- Throughput: **23.5 qps** over 3404.96 ms wall
+- Errors: 0
+
+## Results — warm per-request latency (ms)
+
+| component | P50 | P95 | P99 | mean | max | P95 95% CI |
+|---|---|---|---|---|---|---|
+| embed_call_only | 280.56 | 434.82 | 516.96 | 297.7 | 527.4 | [404.5749, 514.1824] |
+| engine_only | 31.06 | 68.01 | 93.76 | 33.65 | 102.69 | [52.3919, 91.3897] |
+| fast_path_total | 317.1 | 462.32 | 548.73 | 331.35 | 553.15 | [452.0379, 547.553] |
+
+Component meaning:
+- **embed_call_only** — isolated warm HTTP round-trip to the real embedding service (model-inference cost), via the production `HttpEmbeddingProvider`.
+- **engine_only** — one warm in-process `MemoryTools.search()` (pure engine fast path: hybrid retrieve + fuse + MMR + calibrate + budget). No subprocess, no per-call model round-trip.
+- **fast_path_total** — `embed + engine`: the intended long-lived fast path.
+
+## Verdict vs §15/§16 budget (P95 <= 300-400 ms)
+
+**fast_path_total P95 = 462.32 ms -> FAIL (> 400 ms budget) / FAIL (>300 ms)**
+
+- engine_only P95 = 68.01 ms (<= 400 ms)
+- embed_call_only P95 = 434.82 ms (> 400 ms)
+
+## Honest reading + what would close the gap
+
+The **engine fast path alone is within budget** (P95 68.01 ms <= 400 ms) once warm and in-process — this is the real Wave-2 correction: the multi-second Wave-2 'engine-only' number was per-process Python startup, not the engine.
+
+The **warm embed call** (real BGE/cross-encoder model) is the dominant cost at P95 434.82 ms (> 400 ms) even warm: each query still pays a full model-inference HTTP round-trip per request.
+
+**fast_path_total P95 462.32 ms still exceeds the 300-400 ms budget** even warm. This is reported honestly: a per-request synchronous model-inference round-trip does not fit a 300-400 ms fast-path budget on this hardware. Gap-closers, in priority order:
+  1. **Local engine embedding seam (the keystone src fix).** `LocalMemoryEngine` ignores HTTP adapters today (`load_engine` passes no `adapters=`; `vector_search`/`_mmr` hardwire `hashing_embedding`). Wiring an in-process embedding provider removes the HTTP hop entirely for the local backend and lets the engine cache doc embeddings at capture time so reads embed only the query.
+  2. **Embedding cache.** Cache query->vector (and persist doc vectors at capture) so repeat/near-repeat queries skip the model entirely — turns the embed P95 into a cache-hit P95 of single-digit ms.
+  3. **Batching / in-process model.** Co-locate the embedder in the server process (no HTTP/JSON serialization hop) and batch concurrent queries into one forward pass; for a server with a GPU, BGE-small query embedding is sub-10 ms in-process vs the HTTP round-trip measured here.
+  4. **ANN prefilter, rerank only top-N.** Keep the cross-encoder off the hot path: ANN dense recall + lexical, rerank only a small candidate set, so model cost scales with N not corpus size.

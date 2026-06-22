@@ -1,0 +1,185 @@
+{
+  "meta": {
+    "generated_at": "2026-06-22T00:21:47.437211+00:00",
+    "component": "scope-conformance/FR-20+FR-21",
+    "measures": "current src/mnemosyne against the INTENTIONALLY-LIMITED v1 bar",
+    "blueprint_refs": [
+      "FR-20 multimodal (N5 post-v1)",
+      "FR-21 parametric (N2 optional advanced tier)",
+      "\u00a723.5 immutable invariant",
+      "\u00a723.6 optional parametric tier"
+    ]
+  },
+  "overall": {
+    "passed": 20,
+    "total": 20,
+    "all_pass": true
+  },
+  "frs": {
+    "FR-20": {
+      "passed": 7,
+      "total": 7,
+      "checks": [
+        {
+          "name": "model_accepts_image_audio_modalities",
+          "bar": "v1 bar: Evidence/IngestRequest model image+audio as first-class enum values.",
+          "passed": true,
+          "note": "Evidence/IngestRequest modality enum = ['audio', 'binary', 'image', 'multimodal', 'text', 'video']",
+          "error": ""
+        },
+        {
+          "name": "single_extraction_interface_modality_agnostic",
+          "bar": "v1 bar: one MediaTextExtractor Protocol; modality is a parameter, not a fork.",
+          "passed": true,
+          "note": "MediaTextExtractor.extract(payload, *, media_type, modality, metadata)",
+          "error": ""
+        },
+        {
+          "name": "metadata_extractor_image_audio_identical",
+          "bar": "v1 bar: default extractor handles image(OCR/caption)+audio(transcript) via one call.",
+          "passed": true,
+          "note": "image(ocr/caption) + audio(transcript) -> same MediaExtractionResult",
+          "error": ""
+        },
+        {
+          "name": "command_extractor_modality_agnostic_boundary",
+          "bar": "v1 bar: the real-model extension point is one shell-free command boundary.",
+          "passed": true,
+          "note": "CommandMediaTextExtractor: one shell-free boundary for any modality",
+          "error": ""
+        },
+        {
+          "name": "embedding_boundary_single_protocol",
+          "bar": "v1 bar: MediaEmbeddingProvider is one boundary taking modality as a param.",
+          "passed": true,
+          "note": "MediaEmbeddingProvider.embed_media(payload, *, media_type, modality, metadata)",
+          "error": ""
+        },
+        {
+          "name": "substrate_extends_via_media_extract_job",
+          "bar": "v1 bar (N5 keystone): image ingest WITHOUT caller text enqueues+runs media_extract onto the SAME ledger.",
+          "passed": true,
+          "note": "image ingest -> evidence(modality=image) -> media_extract job -> derived text evidence(modality=text) on the SAME ledger (3 jobs run)",
+          "error": ""
+        },
+        {
+          "name": "substrate_indexes_caller_derived_text_inline",
+          "bar": "v1 bar: audio + caller transcript is indexed inline on the text substrate (no redundant job).",
+          "passed": true,
+          "note": "audio + caller transcript -> indexed inline on the text substrate (no redundant job)",
+          "error": ""
+        }
+      ],
+      "deferred_real_deployment_validation": [
+        "Real OCR/ASR/vision model: ship a CommandMediaTextExtractor wrapping a real image-caption / OCR / speech-to-text binary and measure derived-text quality (WER/CER, caption faithfulness) on a labelled image+audio corpus. v1 ships only MetadataMediaTextExtractor (indexes caller-provided derived text) + the command boundary \u2014 no model is bundled.",
+        "Perceptual media embeddings: wire a real CLIP/CLAP-style MediaEmbeddingProvider and prove cross-modal recall@k on a multimodal retrieval suite. v1 only proves the boundary is honoured (Protocol + CommandMediaEmbeddingProvider), not retrieval lift.",
+        "Cross-modal answer quality: extend eval/harness suites with image/audio QA cases and judge end-to-end answers, vs. v1 which only proves the modality plumbing.",
+        "Large-binary externalization SLOs: object-store throughput / residency for GB-scale media payloads under load (the substrate externalizes raw bytes today, but the SLOs are unmeasured for media at scale)."
+      ]
+    },
+    "FR-21": {
+      "passed": 13,
+      "total": 13,
+      "checks": [
+        {
+          "name": "propose_requires_operator_role",
+          "bar": "v1 bar: parametric_propose is operator-only (reader/agent/consolidator refused).",
+          "passed": true,
+          "note": "reader/agent/consolidator all refused; parametric_propose is operator-only",
+          "error": ""
+        },
+        {
+          "name": "propose_requires_operator_trust_tier",
+          "bar": "v1 bar: operator role still needs operator-tier SOURCE trust.",
+          "passed": true,
+          "note": "operator role + sub-operator source trust correctly refused",
+          "error": ""
+        },
+        {
+          "name": "operator_can_propose_shadow_artifact",
+          "bar": "v1 bar: a true operator proposes an ISOLATED shadow adapter (no GPU).",
+          "passed": true,
+          "note": "operator proposes isolated SHADOW local-shadow-adapter (no GPU)",
+          "error": ""
+        },
+        {
+          "name": "rail_bounds_match_blueprint",
+          "bar": "v1 bar: structural rail constants equal \u00a723.5/\u00a731 blueprint values.",
+          "passed": true,
+          "note": "rail bounds = blueprint (superseding 0.05 / prune 0.02 / external_only / monotonic / sink-forbidden)",
+          "error": ""
+        },
+        {
+          "name": "rails_reject_each_widening_attempt",
+          "bar": "v1 bar: mutation-rate/reward/sink/trust/eval-overlap widening all structurally refused.",
+          "passed": true,
+          "note": "all 9 rail-widening attempts structurally refused: monotonic_trust(disabled), mutation-rate(prune), mutation-rate(source_mutation), mutation-rate(supersession), reward(self_generated), sink(system_prompt), sink(untrusted_flag), teach-to-the-test(eval_overlap), trust_tier(widened)",
+          "error": ""
+        },
+        {
+          "name": "at_limit_values_allowed",
+          "bar": "v1 bar: at-limit metrics allowed (rails are bounds, not false-positives).",
+          "passed": true,
+          "note": "at-limit metrics + external_only reward allowed (rails are bounds, not zero-tolerance)",
+          "error": ""
+        },
+        {
+          "name": "promotion_blocked_on_protected_regression",
+          "bar": "v1 bar: a protected regression keeps the adapter SHADOW (never promoted).",
+          "passed": true,
+          "note": "protected regression -> NOT promoted (status=rejected)",
+          "error": ""
+        },
+        {
+          "name": "promotion_clears_only_on_clean_protected_gate",
+          "bar": "v1 bar: promotion needs a clean protected gate with margin>noise.",
+          "passed": true,
+          "note": "clean protected gate (2 cases, margin>noise) -> promoted in the ISOLATED tier",
+          "error": ""
+        },
+        {
+          "name": "rollback_is_reversible_with_evidence",
+          "bar": "v1 bar: a promoted adapter rolls back to a reversible state with ref + evidence.",
+          "passed": true,
+          "note": "promoted -> rolled_back with ref=rollback-a19158a6-... + protected-suite evidence",
+          "error": ""
+        },
+        {
+          "name": "rollback_requires_operator_authority",
+          "bar": "v1 bar: rollback is destructive + operator-gated.",
+          "passed": true,
+          "note": "rollback refused for non-operator (destructive + operator-gated)",
+          "error": ""
+        },
+        {
+          "name": "trainer_boundary_is_injected_subprocess_no_gpu",
+          "bar": "v1 bar: real trainer is an injected shell-free subprocess seam (exercised, no GPU).",
+          "passed": true,
+          "note": "CommandParametricTrainer subprocess seam exercised (no GPU); proposal stays shadow",
+          "error": ""
+        },
+        {
+          "name": "default_tier_is_shadow_only_without_trainer",
+          "bar": "v1 bar: default tier is shadow-only with no trainer/GPU and carries rail labels.",
+          "passed": true,
+          "note": "default ParametricTier() = shadow-only, no trainer/GPU, carries immutable rail labels",
+          "error": ""
+        },
+        {
+          "name": "artifact_store_is_path_isolated",
+          "bar": "v1 bar: adapter artifact store is path-fenced (isolated).",
+          "passed": true,
+          "note": "ParametricArtifactStore rejects path-escape segments (isolated adapter store)",
+          "error": ""
+        }
+      ],
+      "deferred_real_deployment_validation": [
+        "Real LoRA/test-time-training run: implement a ParametricTrainer (e.g. wrap a PEFT/LoRA fine-tune as a CommandParametricTrainer subprocess) and prove a validated-lesson adapter actually changes served behaviour. v1 ships only the boundary + a local shadow adapter; no weights are trained and no GPU is required.",
+        "Catastrophic-forgetting bound: measure the protected-regression suite on the SERVED adapter over many promotion cycles (the \u00a723.6 anti-forgetting claim). v1 only proves the gate refuses promotion on protected regressions in-process.",
+        "Base-model isolation at serve time: prove the adapter never mutates base weights or the invariant in a real inference stack. v1 proves isolation structurally (separate artifact store + immutable rail labels), not at a live serving layer.",
+        "GPU/throughput SLOs + distillation cadence: training cost, periodic-distillation scheduling, and adapter-store scale are unmeasured in v1.",
+        "Operator credential separation as a SEPARATE service/credentials (\u00a723.5): v1 enforces operator authority in-process via SecurityPolicy; production must split the rail-enforcing surface into its own credentialed service."
+      ]
+    }
+  }
+}
