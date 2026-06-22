@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 from hashlib import sha256
+from uuid import uuid4
 
 import pytest
 
@@ -16,7 +18,7 @@ from mnemosyne.jobs import (
     PROJECTION_RECOMPUTE_JOB,
     RuntimeJobHandlers,
 )
-from mnemosyne.learning import LearningSystem, Lesson, Procedure
+from mnemosyne.learning import LearningSystem, Lesson, Procedure, Trajectory
 from mnemosyne.lifecycle import FidelityTier
 from mnemosyne.media import MEDIA_EXTRACT_JOB, MediaExtractionResult
 from mnemosyne.models import Assertion, Contradiction, Evidence, Preference, Relation
@@ -25,9 +27,10 @@ from mnemosyne.parametric import ParametricArtifactStore, ParametricTier
 from mnemosyne.prefetch import AnticipatoryPrefetcher, PrefetchCandidate
 from mnemosyne.provenance import C2paToolVerifier, ProvenanceTrustPolicy, SignedProvenanceVerifier
 from mnemosyne.queue import InProcessQueue, QueueWorker
+from mnemosyne.runtime_state import RuntimeState
 from mnemosyne.storage import EncryptedLocalObjectStore, JsonKeyManager, LocalObjectStore
 from mnemosyne.text import hashing_embedding
-from mnemosyne.user_model import UserModel
+from mnemosyne.user_model import LatentUserProfile, UserMemoryKind, UserModel, UserModelEntry
 
 
 TENANT = "tenant-runtime-extensions"
@@ -1328,6 +1331,111 @@ def test_in_process_queue_retries_and_completes_jobs() -> None:
     assert job.status == "complete"
     assert job.attempts == 2
     assert queue.snapshot()["complete"] == 1
+
+
+def test_runtime_state_round_trips_local_and_postgres_parity(tmp_path) -> None:
+    dsn = os.environ.get("MNEMOSYNE_POSTGRES_DSN")
+    if not dsn:
+        pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+    from mnemosyne.postgres_runtime_state import PostgresRuntimeState
+
+    tenant = f"{TENANT}-runtime-state-{uuid4()}"
+    source_cid = f"cidv1:{sha256(b'runtime-state-evidence').hexdigest()}"
+    model = UserModel()
+    model.add_entry(
+        UserModelEntry(
+            tenant_id=tenant,
+            user_id=USER,
+            kind=UserMemoryKind.HARD_INSTRUCTION,
+            statement="Prefer CLI-first runtime verification.",
+            scope={"surface": "cli"},
+            confidence=0.93,
+            source_evidence_cids=[source_cid],
+        )
+    )
+    model.set_latent_profile(
+        LatentUserProfile(
+            tenant_id=tenant,
+            user_id=USER,
+            embedding=[0.1, 0.2, 0.3],
+            summary="Runtime state parity profile",
+        )
+    )
+
+    learning = LearningSystem(LocalMemoryEngine())
+    trajectory = Trajectory(
+        tenant_id=tenant,
+        user_id=USER,
+        session_id="runtime-parity-session",
+        task="runtime state parity",
+        steps=[{"status": "failed", "description": "verify runtime state", "error": "missing persisted probe"}],
+        outcome="failure",
+        reward=-1.0,
+        memory_version="runtime-parity-v1",
+    )
+    learning.log_trajectory(trajectory)
+    attribution = learning.attribute_failure(trajectory.id)
+    lesson = learning.induce_lesson(attribution)
+    procedure = learning.induce_procedure(lesson)
+    assert procedure.tenant_id == tenant
+
+    queue = InProcessQueue()
+    queue.enqueue("runtime-parity", {"tenant_id": tenant, "lesson_id": lesson.id}, max_attempts=2)
+    metrics = MetricsRegistry()
+    metrics.increment("runtime.parity", 2)
+    metrics.gauge("runtime.queue.depth", 1)
+    metrics.observe("runtime.latency_ms", 12.0)
+    gate_cases = [
+        RegressionCase(
+            str(uuid4()),
+            "runtime parity",
+            "runtime state parity",
+            "CLI-first runtime verification",
+            tier="core",
+            protected=True,
+        )
+    ]
+
+    def save_all(state) -> None:
+        state.save_user_model(model)
+        state.save_learning(learning)
+        state.save_queue(queue)
+        state.save_metrics(metrics)
+        state.save_gate_cases(gate_cases)
+
+    def snapshot(state) -> dict:
+        loaded_model = state.load_user_model()
+        loaded_learning = state.load_learning(LearningSystem(LocalMemoryEngine()))
+        loaded_queue = state.load_queue()
+        loaded_metrics = state.load_metrics()
+        loaded_cases = state.load_gate_cases()
+        return {
+            "user_model": loaded_model.context_packet(tenant, USER, {"surface": "cli"}),
+            "learning": {
+                "trajectories": sorted((item.to_dict() for item in loaded_learning.trajectories.values()), key=lambda item: item["id"]),
+                "attributions": sorted(
+                    (item.to_dict() for item in loaded_learning.attributions.values()),
+                    key=lambda item: item["trajectory_id"],
+                ),
+                "lessons": sorted((item.to_dict() for item in loaded_learning.lessons.values()), key=lambda item: item["id"]),
+                "procedures": sorted(
+                    (item.to_dict() for item in loaded_learning.procedures.values()),
+                    key=lambda item: item["id"],
+                ),
+            },
+            "queue": loaded_queue.to_dict(),
+            "metrics": loaded_metrics.snapshot().to_dict(),
+            "gate_cases": [case.to_dict() for case in loaded_cases],
+        }
+
+    local_state_path = tmp_path / "runtime.json"
+    save_all(RuntimeState(local_state_path))
+    save_all(PostgresRuntimeState(dsn, tenant_id=tenant))
+
+    local_snapshot = snapshot(RuntimeState(local_state_path))
+    postgres_snapshot = snapshot(PostgresRuntimeState(dsn, tenant_id=tenant))
+
+    assert local_snapshot == postgres_snapshot
 
 
 def test_runtime_job_handlers_drain_calibration_lifecycle_and_observability_jobs() -> None:
