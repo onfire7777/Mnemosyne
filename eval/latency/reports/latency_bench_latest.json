@@ -1,7 +1,7 @@
 {
   "bench": "long_lived_fast_path_latency",
   "wave": 3,
-  "generated_at": "2026-06-22T00:24:31.580337+00:00",
+  "generated_at": "2026-06-22T03:43:51.393596+00:00",
   "blueprint_refs": [
     "\u00a715 fast-path P95 NFR",
     "FR-3",
@@ -13,109 +13,109 @@
     "wave2_reference": "eval/reports/KEYSTONE_PROOF.md (Latency caveat)"
   },
   "config": {
-    "clients": 8,
-    "queries_per_client": 10,
-    "total_calls": 80,
+    "clients": 4,
+    "queries_per_client": 8,
+    "total_calls": 32,
     "store_backend": "local (in-process LocalMemoryEngine)",
     "concurrency_model": "one warm engine + store + corpus per client (local single-file backend is single-writer: every search persists runtime metrics via atomic-replace, so a shared engine races; a production server uses Postgres runtime state or per-tenant serialization). The embedding SERVICE is a single shared concurrent-safe server.",
-    "embedding_url": "http://127.0.0.1:50087/embed",
+    "embedding_url": "http://127.0.0.1:52991/embed",
     "embedding_model": "BAAI/bge-small-en-v1.5",
     "embedding_dims": 1024,
-    "force_fallback": false,
+    "force_fallback": true,
     "reuse_service": null,
     "dataset": "eval/datasets/retrieval_curated.json",
     "n_corpus_docs": 12,
     "n_unique_queries": 9
   },
   "warm_costs_paid_once_ms": {
-    "engine_build_and_corpus_capture": 357.38,
-    "embedding_service_start_and_model_load": 19677.37,
+    "engine_build_and_corpus_capture": 144.26,
+    "embedding_service_start_and_model_load": 1065.16,
     "note": "These are paid ONCE for a long-lived server, NOT per request \u2014 exactly what Wave-2 wrongly charged to every call."
   },
   "embedding_service": {
-    "backend": "sentence-transformers",
-    "is_real_model": true,
+    "backend": "fallback",
+    "is_real_model": false,
     "health": {
       "status": "ok",
       "embedding": {
         "model": "BAAI/bge-small-en-v1.5",
         "dimensions": 1024,
-        "backend": "sentence-transformers"
+        "backend": "fallback"
       },
       "reranker": {
         "model": "cross-encoder/ms-marco-MiniLM-L-6-v2",
-        "backend": "cross-encoder"
+        "backend": "fallback"
       }
     },
     "request_counters": {
-      "GET /health": 2,
-      "POST /embed": 96
+      "GET /health": 1,
+      "POST /embed": 44
     },
     "proved_wired": true
   },
-  "wall_clock_ms": 3404.96,
-  "throughput_qps": 23.5,
+  "wall_clock_ms": 506.49,
+  "throughput_qps": 63.18,
   "components": {
     "embed_call_only": {
       "label": "embed_call_only",
-      "p50_ms": 280.56,
-      "p95_ms": 434.82,
-      "p99_ms": 516.96,
-      "mean_ms": 297.7,
-      "max_ms": 527.4,
-      "min_ms": 134.46,
+      "p50_ms": 28.45,
+      "p95_ms": 51.36,
+      "p99_ms": 58.99,
+      "mean_ms": 30.47,
+      "max_ms": 61.53,
+      "min_ms": 9.32,
       "p95_ci": {
-        "point": 434.8234,
-        "ci_low": 404.5749,
-        "ci_high": 514.1824,
+        "point": 51.3604,
+        "ci_low": 43.0912,
+        "ci_high": 61.53,
         "ci_method": "bootstrap-pctl"
       },
       "p50_ci": {
-        "point": 280.5606,
-        "ci_low": 267.1028,
-        "ci_high": 294.2416,
+        "point": 28.4527,
+        "ci_low": 22.8855,
+        "ci_high": 36.453,
         "ci_method": "bootstrap-pctl"
       }
     },
     "engine_only": {
       "label": "engine_only",
-      "p50_ms": 31.06,
-      "p95_ms": 68.01,
-      "p99_ms": 93.76,
-      "mean_ms": 33.65,
-      "max_ms": 102.69,
-      "min_ms": 2.95,
+      "p50_ms": 25.64,
+      "p95_ms": 57.16,
+      "p99_ms": 65.27,
+      "mean_ms": 29.49,
+      "max_ms": 66.15,
+      "min_ms": 3.03,
       "p95_ci": {
-        "point": 68.0142,
-        "ci_low": 52.3919,
-        "ci_high": 91.3897,
+        "point": 57.1634,
+        "ci_low": 44.3926,
+        "ci_high": 66.1537,
         "ci_method": "bootstrap-pctl"
       },
       "p50_ci": {
-        "point": 31.0627,
-        "ci_low": 27.4079,
-        "ci_high": 37.0595,
+        "point": 25.6352,
+        "ci_low": 20.633,
+        "ci_high": 36.243,
         "ci_method": "bootstrap-pctl"
       }
     },
     "fast_path_total": {
       "label": "fast_path_total",
-      "p50_ms": 317.1,
-      "p95_ms": 462.32,
-      "p99_ms": 548.73,
-      "mean_ms": 331.35,
-      "max_ms": 553.15,
-      "min_ms": 148.54,
+      "p50_ms": 62.79,
+      "p95_ms": 92.1,
+      "p99_ms": 95.38,
+      "mean_ms": 59.96,
+      "max_ms": 96.42,
+      "min_ms": 22.53,
       "p95_ci": {
-        "point": 462.3201,
-        "ci_low": 452.0379,
-        "ci_high": 547.553,
+        "point": 92.1008,
+        "ci_low": 73.508,
+        "ci_high": 96.4184,
         "ci_method": "bootstrap-pctl"
       },
       "p50_ci": {
-        "point": 317.0972,
-        "ci_low": 301.7748,
-        "ci_high": 322.1705,
+        "point": 62.7866,
+        "ci_low": 49.5229,
+        "ci_high": 67.0577,
         "ci_method": "bootstrap-pctl"
       }
     }
@@ -123,46 +123,46 @@
   "verdicts": [
     {
       "name": "fast_path_total_p95",
-      "p95_ms": 462.32,
-      "target_ms_loose": 400.0,
-      "target_ms_tight": 300.0,
-      "op": "<=",
-      "pass_loose": false,
-      "pass_tight": false,
-      "p95_ci": {
-        "point": 462.3201,
-        "ci_low": 452.0379,
-        "ci_high": 547.553,
-        "ci_method": "bootstrap-pctl"
-      }
-    },
-    {
-      "name": "engine_only_p95",
-      "p95_ms": 68.01,
+      "p95_ms": 92.1,
       "target_ms_loose": 400.0,
       "target_ms_tight": 300.0,
       "op": "<=",
       "pass_loose": true,
       "pass_tight": true,
       "p95_ci": {
-        "point": 68.0142,
-        "ci_low": 52.3919,
-        "ci_high": 91.3897,
+        "point": 92.1008,
+        "ci_low": 73.508,
+        "ci_high": 96.4184,
+        "ci_method": "bootstrap-pctl"
+      }
+    },
+    {
+      "name": "engine_only_p95",
+      "p95_ms": 57.16,
+      "target_ms_loose": 400.0,
+      "target_ms_tight": 300.0,
+      "op": "<=",
+      "pass_loose": true,
+      "pass_tight": true,
+      "p95_ci": {
+        "point": 57.1634,
+        "ci_low": 44.3926,
+        "ci_high": 66.1537,
         "ci_method": "bootstrap-pctl"
       }
     },
     {
       "name": "embed_call_only_p95",
-      "p95_ms": 434.82,
+      "p95_ms": 51.36,
       "target_ms_loose": 400.0,
       "target_ms_tight": 300.0,
       "op": "<=",
-      "pass_loose": false,
-      "pass_tight": false,
+      "pass_loose": true,
+      "pass_tight": true,
       "p95_ci": {
-        "point": 434.8234,
-        "ci_low": 404.5749,
-        "ci_high": 514.1824,
+        "point": 51.3604,
+        "ci_low": 43.0912,
+        "ci_high": 61.53,
         "ci_method": "bootstrap-pctl"
       }
     }
