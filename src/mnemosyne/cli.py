@@ -61,6 +61,8 @@ from mnemosyne.parametric import (
 from mnemosyne.provenance import C2paToolVerifier, ProvenanceTrustPolicy, SignedProvenanceVerifier
 from mnemosyne.queue import InProcessQueue, PostgresQueue, QueueWorker
 from mnemosyne.retrieval import (
+    CommandGraphRetriever,
+    CommandLexicalRetriever,
     CommandMediaEmbeddingProvider,
     HashingEmbeddingProvider,
     HttpEmbeddingProvider,
@@ -349,11 +351,33 @@ def load_retrieval_adapters(args: argparse.Namespace) -> RetrievalAdapters:
     else:
         reranker = LocalSimilarityReranker(embedding_provider=embedding)
 
+    lexical_retriever = None
+    if args.lexical_provider == "command":
+        if not args.lexical_command:
+            raise SystemExit("command lexical provider requires --lexical-command or MNEMOSYNE_LEXICAL_COMMAND.")
+        lexical_retriever = CommandLexicalRetriever(
+            args.lexical_command,
+            backend=args.lexical_backend,
+            timeout_seconds=timeout,
+        )
+
+    graph_retriever = None
+    if args.graph_provider == "command":
+        if not args.graph_command:
+            raise SystemExit("command graph provider requires --graph-command or MNEMOSYNE_GRAPH_COMMAND.")
+        graph_retriever = CommandGraphRetriever(
+            args.graph_command,
+            backend=args.graph_backend,
+            timeout_seconds=timeout,
+        )
+
     return RetrievalAdapters(
         embedding=embedding,
         reranker=reranker,
         lexical_backend=args.lexical_backend,
         graph_backend=args.graph_backend,
+        lexical_retriever=lexical_retriever,
+        graph_retriever=graph_retriever,
     )
 
 
@@ -2159,6 +2183,20 @@ def _retrieval_provider_local(provider: Any) -> bool:
     return provider_kind in {"", "local", "mock", "test", "filesystem", "deterministic", "hashing"}
 
 
+def _retrieval_probe_ok(probe: Any) -> bool:
+    if not isinstance(probe, Mapping):
+        return False
+    if not str(probe.get("top_id") or "").strip():
+        return False
+    hit_count = probe.get("hit_count")
+    if isinstance(hit_count, bool):
+        return False
+    try:
+        return int(hit_count) > 0
+    except (TypeError, ValueError):
+        return False
+
+
 def cmd_retrieval_ops_check(args: argparse.Namespace) -> None:
     bundle = _load_retrieval_ops_bundle(args)
     findings: list[dict[str, str]] = []
@@ -2198,15 +2236,35 @@ def cmd_retrieval_ops_check(args: argparse.Namespace) -> None:
     retrieval_backends = provider_checks.get("retrieval_backends") if isinstance(provider_checks, Mapping) else None
     lexical_backend = ""
     graph_backend = ""
+    lexical_provider = ""
+    graph_provider = ""
     lexical_local = True
     graph_local = True
+    lexical_probe_required = False
+    graph_probe_required = False
+    lexical_probe_present = False
+    graph_probe_present = False
     retrieval_backend_ok = False
     if isinstance(retrieval_backends, Mapping):
+        lexical_provider = str(retrieval_backends.get("lexical_provider") or "").strip().lower()
+        graph_provider = str(retrieval_backends.get("graph_provider") or "").strip().lower()
         lexical_backend = str(retrieval_backends.get("lexical_backend") or "").strip()
         graph_backend = str(retrieval_backends.get("graph_backend") or "").strip()
         lexical_local = bool(retrieval_backends.get("lexical_local")) or _is_local_retrieval_backend(lexical_backend)
         graph_local = bool(retrieval_backends.get("graph_local")) or _is_local_retrieval_backend(graph_backend)
-        retrieval_backend_ok = retrieval_backends.get("ok") is True and bool(lexical_backend) and bool(graph_backend) and not lexical_local and not graph_local
+        lexical_probe_required = lexical_provider == "command" or (bool(lexical_backend) and not lexical_local)
+        graph_probe_required = graph_provider == "command" or (bool(graph_backend) and not graph_local)
+        lexical_probe_present = _retrieval_probe_ok(retrieval_backends.get("lexical_probe"))
+        graph_probe_present = _retrieval_probe_ok(retrieval_backends.get("graph_probe"))
+        retrieval_backend_ok = (
+            retrieval_backends.get("ok") is True
+            and bool(lexical_backend)
+            and bool(graph_backend)
+            and not lexical_local
+            and not graph_local
+            and (not lexical_probe_required or lexical_probe_present)
+            and (not graph_probe_required or graph_probe_present)
+        )
     else:
         findings.append(_retrieval_ops_finding("retrieval_backends_missing", "provider_check missing retrieval_backends"))
     if not lexical_backend:
@@ -2215,6 +2273,10 @@ def cmd_retrieval_ops_check(args: argparse.Namespace) -> None:
         findings.append(_retrieval_ops_finding("graph_backend_missing", "production graph retrieval backend name is required"))
     if lexical_local or graph_local:
         findings.append(_retrieval_ops_finding("local_retrieval_backend", "retrieval evidence must not use local lexical or graph backends"))
+    if lexical_probe_required and not lexical_probe_present:
+        findings.append(_retrieval_ops_finding("lexical_probe_missing", "non-local lexical backend requires provider-check lexical_probe evidence"))
+    if graph_probe_required and not graph_probe_present:
+        findings.append(_retrieval_ops_finding("graph_probe_missing", "non-local graph backend requires provider-check graph_probe evidence"))
     checks.append(
         {
             "name": "provider_check",
@@ -2223,8 +2285,14 @@ def cmd_retrieval_ops_check(args: argparse.Namespace) -> None:
             "forbid_local": provider_manifest.get("forbid_local") is True,
             "provider_rows": provider_rows,
             "retrieval_backends": {
+                "lexical_provider": lexical_provider,
                 "lexical_backend": lexical_backend,
+                "lexical_probe_required": lexical_probe_required,
+                "lexical_probe_present": lexical_probe_present,
+                "graph_provider": graph_provider,
                 "graph_backend": graph_backend,
+                "graph_probe_required": graph_probe_required,
+                "graph_probe_present": graph_probe_present,
                 "lexical_local": lexical_local,
                 "graph_local": graph_local,
             },
@@ -8103,8 +8171,32 @@ def apply_provider_manifest(args: argparse.Namespace) -> dict[str, Any]:
             args,
             retrieval,
             {
+                "lexical_provider": "lexical_provider",
+                "lexical_command": "lexical_command",
                 "lexical_backend": "lexical_backend",
+                "graph_provider": "graph_provider",
+                "graph_command": "graph_command",
                 "graph_backend": "graph_backend",
+            },
+        )
+        _apply_manifest_fields(
+            args,
+            retrieval.get("lexical", {}) if isinstance(retrieval.get("lexical", {}), dict) else {},
+            {
+                "provider": "lexical_provider",
+                "command": "lexical_command",
+                "backend": "lexical_backend",
+                "timeout_seconds": "retrieval_timeout",
+            },
+        )
+        _apply_manifest_fields(
+            args,
+            retrieval.get("graph", {}) if isinstance(retrieval.get("graph", {}), dict) else {},
+            {
+                "provider": "graph_provider",
+                "command": "graph_command",
+                "backend": "graph_backend",
+                "timeout_seconds": "retrieval_timeout",
             },
         )
     media = providers.get("media", {})
@@ -8607,16 +8699,61 @@ def cmd_provider_check(args: argparse.Namespace) -> None:
 
     lexical_backend = str(args.lexical_backend or "").strip()
     graph_backend = str(args.graph_backend or "").strip()
+    retrieval_backend_ok = bool(lexical_backend and graph_backend)
+    lexical_probe: dict[str, Any] | None = None
+    graph_probe: dict[str, Any] | None = None
+    retrieval_errors: list[str] = []
+    if args.lexical_provider == "command":
+        try:
+            if adapters is None or adapters.lexical_retriever is None:
+                raise ValueError("command lexical provider was not configured")
+            lexical_hits = adapters.lexical_retriever.search(
+                "provider health",
+                tenant_id="provider-health",
+                branch="main",
+                k=1,
+                filt={"tenant_id": "provider-health", "branch": "main"},
+            )
+            if not lexical_hits:
+                raise ValueError("command lexical provider returned no health-check hits")
+            lexical_probe = {"hit_count": len(lexical_hits), "top_id": lexical_hits[0].id}
+        except Exception as exc:  # noqa: BLE001 - health checks return structured failures.
+            retrieval_backend_ok = False
+            retrieval_errors.append(f"lexical provider failed: {exc}")
+    if args.graph_provider == "command":
+        try:
+            if adapters is None or adapters.graph_retriever is None:
+                raise ValueError("command graph provider was not configured")
+            graph_hits = adapters.graph_retriever.search(
+                ["provider", "health"],
+                tenant_id="provider-health",
+                branch="main",
+                k=1,
+            )
+            if not graph_hits:
+                raise ValueError("command graph provider returned no health-check hits")
+            graph_probe = {"hit_count": len(graph_hits), "top_id": graph_hits[0].id}
+        except Exception as exc:  # noqa: BLE001 - health checks return structured failures.
+            retrieval_backend_ok = False
+            retrieval_errors.append(f"graph provider failed: {exc}")
     checks["retrieval_backends"] = {
-        "ok": bool(lexical_backend and graph_backend),
+        "ok": retrieval_backend_ok,
+        "lexical_provider": args.lexical_provider,
         "lexical_backend": lexical_backend,
+        "lexical_command_configured": bool(args.lexical_command),
+        "lexical_probe": lexical_probe,
+        "graph_provider": args.graph_provider,
         "graph_backend": graph_backend,
+        "graph_command_configured": bool(args.graph_command),
+        "graph_probe": graph_probe,
         "lexical_local": _is_local_retrieval_backend(lexical_backend),
         "graph_local": _is_local_retrieval_backend(graph_backend),
     }
     if not checks["retrieval_backends"]["ok"]:
         ok = False
-        checks["retrieval_backends"]["error"] = "retrieval backends require lexical and graph backend names"
+        checks["retrieval_backends"]["error"] = (
+            "; ".join(retrieval_errors) if retrieval_errors else "retrieval backends require lexical and graph backend names"
+        )
 
     try:
         extracted = load_media_extractor(args).extract(
@@ -9029,7 +9166,21 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--reranker-model", default=os.environ.get("MNEMOSYNE_RERANKER_MODEL"))
     parser.add_argument("--reranker-api-key", default=os.environ.get("MNEMOSYNE_RERANKER_API_KEY"))
     parser.add_argument("--retrieval-timeout", type=float, default=float(os.environ.get("MNEMOSYNE_RETRIEVAL_TIMEOUT", "30")))
+    parser.add_argument(
+        "--lexical-provider",
+        choices=["postgres", "command"],
+        default=os.environ.get("MNEMOSYNE_LEXICAL_PROVIDER", "postgres"),
+        help="Lexical retrieval provider for Postgres backend",
+    )
+    parser.add_argument("--lexical-command", default=os.environ.get("MNEMOSYNE_LEXICAL_COMMAND"))
     parser.add_argument("--lexical-backend", default=os.environ.get("MNEMOSYNE_LEXICAL_BACKEND", "postgres-fts"))
+    parser.add_argument(
+        "--graph-provider",
+        choices=["postgres", "command"],
+        default=os.environ.get("MNEMOSYNE_GRAPH_PROVIDER", "postgres"),
+        help="Graph retrieval provider for Postgres backend",
+    )
+    parser.add_argument("--graph-command", default=os.environ.get("MNEMOSYNE_GRAPH_COMMAND"))
     parser.add_argument("--graph-backend", default=os.environ.get("MNEMOSYNE_GRAPH_BACKEND", "postgres-recursive-ppr"))
     parser.add_argument("--c2pa-tool", default=os.environ.get("MNEMOSYNE_C2PA_TOOL"))
     parser.add_argument("--trusted-provenance-issuer", action="append", default=os.environ.get("MNEMOSYNE_TRUSTED_PROVENANCE_ISSUERS", "").split(",") if os.environ.get("MNEMOSYNE_TRUSTED_PROVENANCE_ISSUERS") else [])

@@ -14,7 +14,7 @@ import urllib.request
 from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Protocol, Sequence
+from typing import Any, Mapping, Protocol, Sequence
 
 from mnemosyne.models import Hit, parse_dt, utc_now
 from mnemosyne.policy import OperatingPolicy
@@ -61,6 +61,161 @@ class Reranker(Protocol):
 
     def rerank(self, query: str, hits: Sequence[Hit], k: int) -> list[Hit]:
         """Return the top-k hits after reranking."""
+
+
+class LexicalRetriever(Protocol):
+    """Boundary for production lexical/BM25 retrieval backends."""
+
+    name: str
+
+    def search(
+        self,
+        query: str,
+        *,
+        tenant_id: str,
+        branch: str,
+        k: int,
+        filt: Mapping[str, object] | None = None,
+    ) -> list[Hit]:
+        """Return lexical hits for a tenant-scoped query."""
+
+
+class GraphRetriever(Protocol):
+    """Boundary for production graph/PPR retrieval backends."""
+
+    name: str
+
+    def search(
+        self,
+        seeds: Sequence[str],
+        *,
+        tenant_id: str,
+        branch: str,
+        k: int,
+        as_of: datetime | None = None,
+    ) -> list[Hit]:
+        """Return graph hits for tenant-scoped seed terms."""
+
+
+def _run_json_command(
+    command: Sequence[str],
+    payload: Mapping[str, object],
+    *,
+    timeout_seconds: float,
+    role: str,
+) -> Mapping[str, Any]:
+    try:
+        completed = subprocess.run(
+            list(command),
+            input=json.dumps(payload),
+            check=True,
+            text=True,
+            capture_output=True,
+            timeout=timeout_seconds,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise ValueError(f"{role} command timed out") from exc
+    except subprocess.CalledProcessError as exc:
+        detail = (exc.stderr or exc.stdout or "").strip()[:512]
+        suffix = f": {detail}" if detail else ""
+        raise ValueError(f"{role} command failed{suffix}") from exc
+    output = completed.stdout.strip()
+    if not output:
+        raise ValueError(f"{role} command returned no JSON")
+    if len(output.encode("utf-8")) > 1_048_576:
+        raise ValueError(f"{role} command response exceeded 1 MiB")
+    try:
+        parsed = json.loads(output)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{role} command response must be valid JSON") from exc
+    if not isinstance(parsed, Mapping):
+        raise ValueError(f"{role} command response must be a JSON object")
+    return parsed
+
+
+def _command_int(value: object, *, default: int, field: str) -> int:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        raise ValueError(f"hit field {field} must be an integer")
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"hit field {field} must be an integer") from exc
+
+
+def _command_provenance(value: object) -> list[str]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ValueError("hit field provenance must be an array")
+    return [str(item) for item in value if str(item)]
+
+
+def _command_hit(
+    item: object,
+    *,
+    tenant_id: str,
+    branch: str,
+    default_channel: str,
+    backend: str,
+) -> Hit:
+    if not isinstance(item, Mapping):
+        raise ValueError("retrieval command hits must contain JSON objects")
+    hit_id = str(item.get("id") or "").strip()
+    text = str(item.get("text") or "").strip()
+    if not hit_id:
+        raise ValueError("retrieval command hit requires id")
+    if not text:
+        raise ValueError("retrieval command hit requires text")
+    kind = str(item.get("kind") or "evidence")
+    if kind not in {"evidence", "assertion", "relation", "preference"}:
+        raise ValueError(f"retrieval command hit kind {kind!r} is not supported")
+    score_raw = item.get("score")
+    if isinstance(score_raw, bool):
+        raise ValueError("retrieval command hit score must be numeric")
+    try:
+        score = float(score_raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("retrieval command hit score must be numeric") from exc
+    if not math.isfinite(score):
+        raise ValueError("retrieval command hit score must be finite")
+    metadata_raw = item.get("metadata")
+    metadata = dict(metadata_raw) if isinstance(metadata_raw, Mapping) else {}
+    metadata.setdefault("backend", backend)
+    metadata["command_retrieval"] = True
+    return Hit(
+        id=hit_id,
+        kind=kind,  # type: ignore[arg-type]
+        tenant_id=str(item.get("tenant_id") or tenant_id),
+        branch=str(item.get("branch") or branch),
+        text=text,
+        score=score,
+        channel=str(item.get("channel") or default_channel),
+        provenance=_command_provenance(item.get("provenance")),
+        trust_tier=_command_int(item.get("trust_tier"), default=0, field="trust_tier"),
+        sensitivity=_command_int(item.get("sensitivity"), default=0, field="sensitivity"),
+        metadata=metadata,
+    )
+
+
+def _command_hits(
+    parsed: Mapping[str, Any],
+    *,
+    tenant_id: str,
+    branch: str,
+    k: int,
+    default_channel: str,
+    backend: str,
+) -> list[Hit]:
+    raw_hits = parsed.get("hits")
+    if not isinstance(raw_hits, list):
+        raise ValueError("retrieval command response requires hits array")
+    hits = [
+        _command_hit(item, tenant_id=tenant_id, branch=branch, default_channel=default_channel, backend=backend)
+        for item in raw_hits
+    ]
+    return sorted(hits, key=lambda item: item.score, reverse=True)[: max(k, 0)]
 
 
 @dataclass(frozen=True, slots=True)
@@ -196,6 +351,119 @@ class CommandMediaEmbeddingProvider:
         return _normalize_vector(_extract_embedding(parsed), self.dims)
 
 
+class CommandLexicalRetriever:
+    """Shell-free command adapter for production lexical/BM25 retrieval.
+
+    The command receives a JSON request on stdin and must return
+    `{"hits": [...]}`. Deployments can back the command with ParadeDB BM25,
+    another Postgres extension, or a managed lexical retrieval service without
+    changing the Mnemosyne engine contract.
+    """
+
+    name = "command-lexical-retriever"
+
+    def __init__(
+        self,
+        command: str | Sequence[str],
+        *,
+        backend: str = "command-lexical",
+        timeout_seconds: float = 30.0,
+    ):
+        self.command = shlex.split(command) if isinstance(command, str) else list(command)
+        if not self.command:
+            raise ValueError("lexical retrieval command must not be empty")
+        if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
+            raise ValueError("lexical retrieval timeout must be positive")
+        self.backend = backend
+        self.timeout_seconds = timeout_seconds
+
+    def search(
+        self,
+        query: str,
+        *,
+        tenant_id: str,
+        branch: str,
+        k: int,
+        filt: Mapping[str, object] | None = None,
+    ) -> list[Hit]:
+        payload: dict[str, object] = {
+            "role": "lexical_search",
+            "query": query,
+            "tenant_id": tenant_id,
+            "branch": branch,
+            "k": k,
+            "filter": dict(filt or {}),
+        }
+        parsed = _run_json_command(
+            self.command,
+            payload,
+            timeout_seconds=self.timeout_seconds,
+            role="lexical retrieval",
+        )
+        return _command_hits(
+            parsed,
+            tenant_id=tenant_id,
+            branch=branch,
+            k=k,
+            default_channel="command_lexical",
+            backend=self.backend,
+        )
+
+
+class CommandGraphRetriever:
+    """Shell-free command adapter for production specialist graph retrieval."""
+
+    name = "command-graph-retriever"
+
+    def __init__(
+        self,
+        command: str | Sequence[str],
+        *,
+        backend: str = "command-graph",
+        timeout_seconds: float = 30.0,
+    ):
+        self.command = shlex.split(command) if isinstance(command, str) else list(command)
+        if not self.command:
+            raise ValueError("graph retrieval command must not be empty")
+        if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
+            raise ValueError("graph retrieval timeout must be positive")
+        self.backend = backend
+        self.timeout_seconds = timeout_seconds
+
+    def search(
+        self,
+        seeds: Sequence[str],
+        *,
+        tenant_id: str,
+        branch: str,
+        k: int,
+        as_of: datetime | None = None,
+    ) -> list[Hit]:
+        payload: dict[str, object] = {
+            "role": "graph_ppr",
+            "seeds": [str(seed) for seed in seeds],
+            "tenant_id": tenant_id,
+            "branch": branch,
+            "k": k,
+        }
+        if as_of is not None:
+            payload["as_of"] = as_of.isoformat()
+        parsed = _run_json_command(
+            self.command,
+            payload,
+            timeout_seconds=self.timeout_seconds,
+            role="graph retrieval",
+        )
+        return _command_hits(
+            parsed,
+            tenant_id=tenant_id,
+            branch=branch,
+            k=k,
+            default_channel="command_graph_ppr",
+            backend=self.backend,
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class HttpReranker:
     """HTTP JSON reranker for cross-encoder-style providers.
@@ -254,6 +522,8 @@ class RetrievalAdapters:
     reranker: Reranker = LocalSimilarityReranker()
     lexical_backend: str = "local-bm25-lite"
     graph_backend: str = "local-ppr"
+    lexical_retriever: LexicalRetriever | None = None
+    graph_retriever: GraphRetriever | None = None
 
 
 def retrieval_adapters_from_env(prefix: str = "MNEMOSYNE") -> RetrievalAdapters:
@@ -262,10 +532,14 @@ def retrieval_adapters_from_env(prefix: str = "MNEMOSYNE") -> RetrievalAdapters:
     Supported provider values:
     - `{prefix}_EMBEDDING_PROVIDER=local|http`
     - `{prefix}_RERANKER_PROVIDER=local|http`
+    - `{prefix}_LEXICAL_PROVIDER=postgres|command`
+    - `{prefix}_GRAPH_PROVIDER=postgres|command`
     """
 
     embedding_provider = os.environ.get(f"{prefix}_EMBEDDING_PROVIDER", "local").lower()
     reranker_provider = os.environ.get(f"{prefix}_RERANKER_PROVIDER", "local").lower()
+    lexical_provider = os.environ.get(f"{prefix}_LEXICAL_PROVIDER", "postgres").lower()
+    graph_provider = os.environ.get(f"{prefix}_GRAPH_PROVIDER", "postgres").lower()
     dims = int(os.environ.get(f"{prefix}_EMBEDDING_DIMS", "1024"))
     timeout = float(os.environ.get(f"{prefix}_RETRIEVAL_TIMEOUT", "30"))
     if embedding_provider == "http":
@@ -293,11 +567,37 @@ def retrieval_adapters_from_env(prefix: str = "MNEMOSYNE") -> RetrievalAdapters:
     else:
         raise ValueError(f"unsupported reranker provider: {reranker_provider}")
 
+    lexical_backend = os.environ.get(f"{prefix}_LEXICAL_BACKEND", "postgres-fts")
+    graph_backend = os.environ.get(f"{prefix}_GRAPH_BACKEND", "postgres-recursive-ppr")
+    if lexical_provider == "command":
+        lexical_retriever: LexicalRetriever | None = CommandLexicalRetriever(
+            _required_env(f"{prefix}_LEXICAL_COMMAND"),
+            backend=lexical_backend,
+            timeout_seconds=timeout,
+        )
+    elif lexical_provider in {"postgres", "native"}:
+        lexical_retriever = None
+    else:
+        raise ValueError(f"unsupported lexical provider: {lexical_provider}")
+
+    if graph_provider == "command":
+        graph_retriever: GraphRetriever | None = CommandGraphRetriever(
+            _required_env(f"{prefix}_GRAPH_COMMAND"),
+            backend=graph_backend,
+            timeout_seconds=timeout,
+        )
+    elif graph_provider in {"postgres", "native"}:
+        graph_retriever = None
+    else:
+        raise ValueError(f"unsupported graph provider: {graph_provider}")
+
     return RetrievalAdapters(
         embedding=embedding,
         reranker=reranker,
-        lexical_backend=os.environ.get(f"{prefix}_LEXICAL_BACKEND", "postgres-fts"),
-        graph_backend=os.environ.get(f"{prefix}_GRAPH_BACKEND", "postgres-recursive-ppr"),
+        lexical_backend=lexical_backend,
+        graph_backend=graph_backend,
+        lexical_retriever=lexical_retriever,
+        graph_retriever=graph_retriever,
     )
 
 

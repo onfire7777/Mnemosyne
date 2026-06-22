@@ -663,8 +663,16 @@ class PostgresEngine:
 
     def lexical_search(self, query: str, k: int, filt: dict[str, Any]) -> list[Hit]:
         tenant_id = filt["tenant_id"]
-        db_tenant_id = _stable_uuid("tenant", tenant_id)
         branch = filt.get("branch", "main")
+        if self.adapters.lexical_retriever is not None:
+            return self.adapters.lexical_retriever.search(
+                query,
+                tenant_id=tenant_id,
+                branch=branch,
+                k=k,
+                filt=filt,
+            )
+        db_tenant_id = _stable_uuid("tenant", tenant_id)
         include_quarantined = bool(filt.get("include_quarantined", False))
         default_max_trust = int(TrustTier.UNTRUSTED_EXTERNAL) if include_quarantined else self.policy.max_trust_tier
         max_trust = int(filt.get("max_trust_tier", filt.get("min_trust_tier", default_max_trust)))
@@ -961,10 +969,18 @@ class PostgresEngine:
             node_lower = node.lower()
             return node_lower in seed_set or bool(set(tokenize(node_lower)) & seed_set)
 
-        db_tenant_id = _stable_uuid("tenant", tenant_id)
         branch = branch or "main"
         moment = as_of or utc_now()
         moment = moment.astimezone(UTC) if moment.tzinfo else moment.replace(tzinfo=UTC)
+        if self.adapters.graph_retriever is not None:
+            return self.adapters.graph_retriever.search(
+                seeds,
+                tenant_id=tenant_id,
+                branch=branch,
+                k=k,
+                as_of=moment,
+            )
+        db_tenant_id = _stable_uuid("tenant", tenant_id)
         adjacency: dict[str, set[str]] = defaultdict(set)
         relation_by_pair: dict[tuple[str, str], dict[str, Any]] = {}
         with self.connect() as conn:

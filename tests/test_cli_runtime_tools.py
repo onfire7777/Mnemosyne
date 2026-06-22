@@ -28,6 +28,14 @@ from mnemosyne.cli import (
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.mcp_server import MnemosyneMcpServer, build_http_server, build_sdk_streamable_http_app
 from mnemosyne.models import Evidence, Relation
+from mnemosyne.postgres_engine import PostgresEngine
+from mnemosyne.retrieval import (
+    CommandGraphRetriever,
+    CommandLexicalRetriever,
+    HashingEmbeddingProvider,
+    LocalSimilarityReranker,
+    RetrievalAdapters,
+)
 from mnemosyne.security import SessionIdentity, SessionTokenVerifier
 
 
@@ -204,6 +212,33 @@ def run_raw_cli(store: Path, *args: str) -> subprocess.CompletedProcess[str]:
         text=True,
         capture_output=True,
     )
+
+
+def fake_retrieval_command(tmp_path: Path, *, name: str = "retrieval-provider") -> tuple[str, Path]:
+    script = tmp_path / f"{name}.py"
+    state = tmp_path / f"{name}-requests.json"
+    script.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env python3",
+                "import json, pathlib, sys",
+                "state = pathlib.Path(sys.argv[1])",
+                "request = json.loads(sys.stdin.read())",
+                "requests = json.loads(state.read_text()) if state.exists() else []",
+                "requests.append(request)",
+                "state.write_text(json.dumps(requests, sort_keys=True))",
+                "role = request.get('role')",
+                "kind = 'relation' if role == 'graph_ppr' else 'evidence'",
+                "channel = 'external_graph' if role == 'graph_ppr' else 'external_lexical'",
+                "hit_id = 'graph-hit' if role == 'graph_ppr' else 'lexical-hit'",
+                "text = 'graph provider health relation' if role == 'graph_ppr' else 'lexical provider health evidence'",
+                "print(json.dumps({'hits': [{'id': hit_id, 'kind': kind, 'text': text, 'score': 0.91, 'channel': channel, 'provenance': ['sha256:provider-health'], 'metadata': {'role': role}}]}))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+    return " ".join(shlex.quote(item) for item in (sys.executable, str(script), str(state))), state
 
 
 def start_streamable_http_server(tmp_path: Path) -> tuple[object, threading.Thread, str]:
@@ -1178,6 +1213,100 @@ def test_cli_provider_check_exercises_http_and_media_contracts(tmp_path: Path) -
     assert [item["auth"] for item in requests] == ["Bearer embed-secret", "Bearer rank-secret"]
 
 
+def test_cli_provider_check_exercises_command_retrieval_adapters(tmp_path: Path) -> None:
+    retrieval_command, state = fake_retrieval_command(tmp_path, name="retrieval-adapter")
+
+    report = run_cli(
+        tmp_path / "mnemosyne.json",
+        "--lexical-provider",
+        "command",
+        "--lexical-command",
+        retrieval_command,
+        "--lexical-backend",
+        "paradedb-bm25",
+        "--graph-provider",
+        "command",
+        "--graph-command",
+        retrieval_command,
+        "--graph-backend",
+        "apache-age",
+        "provider-check",
+    )
+    requests = json.loads(state.read_text(encoding="utf-8"))
+
+    assert report["ok"] is True
+    assert report["checks"]["retrieval_backends"]["ok"] is True
+    assert report["checks"]["retrieval_backends"]["lexical_provider"] == "command"
+    assert report["checks"]["retrieval_backends"]["lexical_probe"]["top_id"] == "lexical-hit"
+    assert report["checks"]["retrieval_backends"]["graph_provider"] == "command"
+    assert report["checks"]["retrieval_backends"]["graph_probe"]["top_id"] == "graph-hit"
+    assert [item["role"] for item in requests] == ["lexical_search", "graph_ppr"]
+    assert requests[0]["query"] == "provider health"
+    assert requests[1]["seeds"] == ["provider", "health"]
+
+
+def test_cli_provider_check_fails_closed_on_bad_command_retrieval_adapter(tmp_path: Path) -> None:
+    script = tmp_path / "bad-retrieval-adapter.py"
+    script.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env python3",
+                "import json",
+                "print(json.dumps({'hits': [{'id': 'missing-text', 'score': 0.1}]}))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+    command = " ".join(shlex.quote(item) for item in (sys.executable, str(script)))
+
+    result = run_raw_cli(
+        tmp_path / "mnemosyne.json",
+        "--lexical-provider",
+        "command",
+        "--lexical-command",
+        command,
+        "--lexical-backend",
+        "paradedb-bm25",
+        "provider-check",
+    )
+    payload = json.loads(result.stdout)
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert payload["checks"]["retrieval_backends"]["ok"] is False
+    assert "lexical provider failed" in payload["checks"]["retrieval_backends"]["error"]
+    assert "requires text" in payload["checks"]["retrieval_backends"]["error"]
+
+
+def test_postgres_engine_delegates_to_command_retrieval_adapters(tmp_path: Path) -> None:
+    retrieval_command, state = fake_retrieval_command(tmp_path, name="engine-retrieval-adapter")
+    embedding = HashingEmbeddingProvider(dims=16)
+    engine = PostgresEngine(
+        "postgresql://unused",
+        adapters=RetrievalAdapters(
+            embedding=embedding,
+            reranker=LocalSimilarityReranker(embedding_provider=embedding),
+            lexical_backend="paradedb-bm25",
+            graph_backend="apache-age",
+            lexical_retriever=CommandLexicalRetriever(retrieval_command, backend="paradedb-bm25"),
+            graph_retriever=CommandGraphRetriever(retrieval_command, backend="apache-age"),
+        ),
+    )
+
+    lexical_hits = engine.lexical_search("operator facts", 1, {"tenant_id": TENANT, "branch": "main"})
+    graph_hits = engine.graph_ppr(["operator"], 1, tenant_id=TENANT, branch="main")
+    requests = json.loads(state.read_text(encoding="utf-8"))
+
+    assert lexical_hits[0].id == "lexical-hit"
+    assert lexical_hits[0].metadata["backend"] == "paradedb-bm25"
+    assert graph_hits[0].id == "graph-hit"
+    assert graph_hits[0].metadata["backend"] == "apache-age"
+    assert [item["role"] for item in requests] == ["lexical_search", "graph_ppr"]
+    assert requests[0]["tenant_id"] == TENANT
+    assert requests[1]["tenant_id"] == TENANT
+
+
 def test_cli_provider_check_returns_nonzero_for_malformed_http_provider(tmp_path: Path) -> None:
     class Handler(BaseHTTPRequestHandler):
         def do_POST(self) -> None:  # noqa: N802 - stdlib callback name.
@@ -2088,13 +2217,15 @@ def test_cli_provider_check_uses_deployment_manifest(tmp_path: Path, monkeypatch
     assert report["checks"]["embedding"]["provider"] == "http"
     assert report["checks"]["embedding"]["dimensions"] == 3
     assert report["checks"]["reranker"]["top_id"] == "b"
-    assert report["checks"]["retrieval_backends"] == {
-        "ok": True,
-        "lexical_backend": "paradedb-bm25",
-        "graph_backend": "apache-age",
-        "lexical_local": False,
-        "graph_local": False,
-    }
+    assert report["checks"]["retrieval_backends"]["ok"] is True
+    assert report["checks"]["retrieval_backends"]["lexical_provider"] == "postgres"
+    assert report["checks"]["retrieval_backends"]["lexical_backend"] == "paradedb-bm25"
+    assert report["checks"]["retrieval_backends"]["lexical_local"] is False
+    assert report["checks"]["retrieval_backends"]["lexical_probe"] is None
+    assert report["checks"]["retrieval_backends"]["graph_provider"] == "postgres"
+    assert report["checks"]["retrieval_backends"]["graph_backend"] == "apache-age"
+    assert report["checks"]["retrieval_backends"]["graph_local"] is False
+    assert report["checks"]["retrieval_backends"]["graph_probe"] is None
     assert report["checks"]["media_extractor"]["sources"] == ["manifest-probe"]
     assert report["checks"]["media_embedding"]["dimensions"] == 3
     assert report["checks"]["object_key_manager"]["provider"] == "command"
@@ -2724,6 +2855,44 @@ def test_cli_provider_check_manifest_can_forbid_local_retrieval(tmp_path: Path) 
     assert payload["checks"]["embedding"]["error"] == "provider manifest forbids local retrieval providers"
     assert payload["checks"]["reranker"]["error"] == "provider manifest forbids local retrieval providers"
     assert payload["checks"]["retrieval_backends"]["error"] == "provider manifest forbids local retrieval backends"
+
+
+def test_cli_provider_check_manifest_configures_command_retrieval_adapters(tmp_path: Path) -> None:
+    retrieval_command, state = fake_retrieval_command(tmp_path, name="manifest-retrieval-adapter")
+    manifest = tmp_path / "providers.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "name": "specialist-retrieval",
+                "required_checks": ["retrieval_backends"],
+                "providers": {
+                    "retrieval": {
+                        "lexical": {
+                            "provider": "command",
+                            "command": retrieval_command,
+                            "backend": "paradedb-bm25",
+                        },
+                        "graph": {
+                            "provider": "command",
+                            "command": retrieval_command,
+                            "backend": "apache-age",
+                        },
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = run_cli(tmp_path / "mnemosyne.json", "provider-check", "--provider-manifest", str(manifest))
+    requests = json.loads(state.read_text(encoding="utf-8"))
+
+    assert report["ok"] is True
+    assert report["checks"]["retrieval_backends"]["lexical_backend"] == "paradedb-bm25"
+    assert report["checks"]["retrieval_backends"]["graph_backend"] == "apache-age"
+    assert report["checks"]["retrieval_backends"]["lexical_probe"]["top_id"] == "lexical-hit"
+    assert report["checks"]["retrieval_backends"]["graph_probe"]["top_id"] == "graph-hit"
+    assert [item["role"] for item in requests] == ["lexical_search", "graph_ppr"]
 
 
 def test_cli_ingests_binary_file_with_c2pa_verifier(tmp_path: Path) -> None:
@@ -5298,6 +5467,7 @@ def retrieval_ops_bundle(
     local_provider: bool = False,
     local_backends: bool = False,
     missing_graph: bool = False,
+    missing_probes: bool = False,
     bad_calibration: bool = False,
     raw_secret: bool = False,
 ) -> dict:
@@ -5356,8 +5526,12 @@ def retrieval_ops_bundle(
                 },
                 "retrieval_backends": {
                     "ok": True,
+                    "lexical_provider": "postgres" if local_backends else "command",
                     "lexical_backend": "paradedb-bm25" if not local_backends else "local-bm25-lite",
+                    "lexical_probe": None if missing_probes or local_backends else {"hit_count": 1, "top_id": "lexical-hit"},
+                    "graph_provider": "postgres" if local_backends else "command",
                     "graph_backend": "apache-age" if not local_backends else "local-ppr",
+                    "graph_probe": None if missing_probes or local_backends else {"hit_count": 1, "top_id": "graph-hit"},
                     "lexical_local": local_backends,
                     "graph_local": local_backends,
                 },
@@ -5464,6 +5638,22 @@ def test_cli_retrieval_ops_check_fails_closed_on_local_and_bad_calibration(tmp_p
     assert "calibration_coverage_too_low" in codes
     assert "calibration_false_accept_too_high" in codes
     assert "redaction_raw_field_present" in codes
+
+
+def test_cli_retrieval_ops_check_requires_nonlocal_backend_probes(tmp_path: Path) -> None:
+    bundle = tmp_path / "missing-probe-retrieval-ops.json"
+    bundle.write_text(json.dumps(retrieval_ops_bundle(missing_probes=True)), encoding="utf-8")
+
+    result = run_raw_cli(tmp_path / "mnemosyne.json", "retrieval-ops-check", "--bundle", str(bundle))
+    payload = json.loads(result.stdout)
+    codes = {finding["code"] for finding in payload["findings"]}
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert "lexical_probe_missing" in codes
+    assert "graph_probe_missing" in codes
+    assert payload["checks"][0]["retrieval_backends"]["lexical_probe_required"] is True
+    assert payload["checks"][0]["retrieval_backends"]["graph_probe_required"] is True
 
 
 def test_cli_calibration_tune_applies_labeled_dataset(tmp_path: Path) -> None:
