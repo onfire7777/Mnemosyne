@@ -48,15 +48,23 @@ INGEST="$( cd "${REPO_DIR}" && "${MN[@]}" \
 echo "${INGEST}" | jq '.' 2>/dev/null | head -60 || echo "${INGEST}" | head -c 800
 
 echo
-echo "==> Asserting the manifest verified and was NOT quarantined ..."
+echo "==> Asserting the manifest verified, was TRUSTED, and NOT quarantined ..."
 # IngestionResult exposes top-level `quarantined` and a `provenance` decision.
+# `provenance.trusted == true` is load-bearing: the emitted trust policy must
+# accept the signer string Mnemosyne actually surfaces (the report's
+# claim_generator, selected by provenance._find_first) AND must not let the
+# camera-binary-tenant-a rule's defaulted require_trusted_issuer (from_dict
+# defaults missing → true, then OR-merged in for_context) force issuer trust on.
+# If `trusted` is false the asset is quarantined; assert it positively here so a
+# regression of the trust path is caught, not silently downgraded.
 echo "${INGEST}" | jq -e '
   .quarantined == false
   and .provenance.valid == true
+  and .provenance.trusted == true
   and .provenance.quarantine == false
 ' >/dev/null \
-  && echo "    OK: real C2PA manifest verified and bound to the asset bytes." \
-  || { echo "    FAIL: signed asset did not verify as expected." >&2; echo "${INGEST}" | jq '.provenance // .'; exit 1; }
+  && echo "    OK: real C2PA manifest verified, trusted, and bound to the asset bytes." \
+  || { echo "    FAIL: signed asset did not verify as valid+trusted+not-quarantined." >&2; echo "${INGEST}" | jq '.provenance // .'; exit 1; }
 
 echo "==> Provenance trust decision:"
 echo "${INGEST}" | jq '{quarantined, valid: .provenance.valid, trusted: .provenance.trusted, reason: .provenance.reason}'

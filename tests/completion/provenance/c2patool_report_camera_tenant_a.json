@@ -1,0 +1,40 @@
+{
+  "active_manifest": "urn:uuid:7f3c2c1a-0e2b-4a9a-9f1d-c2pa-test",
+  "manifests": {
+    "urn:uuid:7f3c2c1a-0e2b-4a9a-9f1d-c2pa-test": {
+      "claim_generator": "Mnemosyne-Test-Signer/1.0 c2patool/0.9.12",
+      "title": "Mnemosyne C2PA Test Asset",
+      "format": "image/jpeg",
+      "signature_info": {
+        "issuer": "Mnemosyne Test Root CA",
+        "common_name": "mnemosyne-test-signer",
+        "cert_serial_number": "1",
+        "time": "2026-06-21T00:00:00Z"
+      },
+      "assertions": [
+        {
+          "label": "c2pa.actions",
+          "data": {
+            "actions": [
+              {
+                "action": "c2pa.created",
+                "softwareAgent": "Mnemosyne-Test-Signer/1.0",
+                "digitalSourceType": "http://cv.iptc.org/newscodes/digitalsourcetype/digitalCapture"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "validation_status": [],
+  "asset": {
+    "path": "__ASSET_PATH__",
+    "sha256": "__ASSET_SHA256__"
+  },
+  "asset_sha256": "__ASSET_SHA256__",
+  "certificate_roots": ["__ROOT_FPR__"],
+  "trust": {
+    "root_sha256": "__ROOT_FPR__"
+  }
+}

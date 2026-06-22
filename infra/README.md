@@ -223,9 +223,35 @@ cert-named key. `c2pa-verify-host.sh` (what `MNEMOSYNE_C2PA_TOOL` points at):
 2. enriches the verified report (`c2pa-enrich.py`) with the asset SHA-256 and the
    trust-root DER SHA-256 fingerprint so it binds to the Mnemosyne contract.
 
-This was proven against the real `C2paToolVerifier`: a correctly signed asset
-returns `valid + trusted` (root + issuer matched), and a single flipped byte
-quarantines on asset-binding mismatch.
+Trust is decided by `mnemosyne.provenance.ProvenanceTrustPolicy`. Two subtleties
+of that production code drive how the emitted `trust-policy.json` must be shaped,
+and getting them wrong **quarantines a correctly signed asset**:
+
+- **The signer string is the report's `claim_generator`, not the leaf CN.**
+  `C2paToolVerifier` selects the signer via `provenance._find_first` over
+  `{issuer, signer, claim_generator, claimGenerator, common_name, commonName}` in
+  insertion order, and a real c2patool report exposes the active manifest's
+  `claim_generator` first (e.g. `Mnemosyne-Test-Signer/1.0 c2patool/<ver>`). So
+  `setup-c2pa.sh` extracts that exact surfaced string from the report it just
+  produced and writes it into `trusted_issuers` — listing only the leaf CN
+  `mnemosyne-test-signer` would never match.
+- **`require_trusted_issuer` defaults to `true` per rule and is OR-merged.**
+  `ProvenanceTrustRule.from_dict` defaults a missing `require_trusted_issuer` to
+  `true`, and `for_context` OR-merges rule flags into the scoped policy. The
+  `camera-binary-tenant-a` rule therefore sets `require_trusted_issuer: false`
+  **explicitly** — it trusts by certificate **root**
+  (`require_trusted_root: true`); an omitted flag would silently force issuer
+  trust on for that scope and quarantine.
+
+With those two corrections in the emitted policy, the signed asset returns
+`valid + trusted` (root matched, and the surfaced signer is also in
+`trusted_issuers`), and a single flipped byte quarantines on asset-binding
+mismatch. This is proven hermetically against the real `ProvenanceTrustPolicy` /
+`C2paToolVerifier` in `tests/completion/provenance/test_c2pa_infra_trust_policy.py`
+(no Docker, no c2patool binary required). The end-to-end run through the live
+c2patool **container** additionally requires building the c2patool image
+(`infra/c2pa/Dockerfile`), which compiles c2patool from crates.io and needs
+network plus a working Rust/OpenSSL toolchain on first build.
 
 ### Use it with Mnemosyne
 
@@ -262,8 +288,14 @@ Docker:
 - **KMS**: the Vault provider drives `CommandKeyManager` through a full
   wrap/unwrap/has_key/shred lifecycle; the unwrapped key is byte-identical
   across calls and unrecoverable after shred.
-- **C2PA**: `c2pa-enrich.py` output makes `C2paToolVerifier` return
-  `valid + trusted`; a tampered payload quarantines.
+- **C2PA**: with the emitted `trust-policy.json` (surfaced-`claim_generator`
+  issuer + explicit `require_trusted_issuer: false` on the root-trusted rule),
+  the `c2pa-enrich.py` report shape makes `C2paToolVerifier` return
+  `valid + trusted`; a tampered payload or an unknown certificate root
+  quarantines. Proven hermetically in
+  `tests/completion/provenance/test_c2pa_infra_trust_policy.py`. (The live
+  c2patool container path is documented above and depends on a successful
+  c2patool image build.)
 
 ## Troubleshooting
 

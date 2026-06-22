@@ -80,6 +80,14 @@ def make_llm_judge(command: str) -> Judge:
     This is the real, strict-judge path (blueprint §33 methodology guardrails).
     """
 
+    # Per-call timeout for the external judge. Defaults to 60s (the original
+    # behavior); raise via MNEMO_EVAL_JUDGE_TIMEOUT_S for slower judges such as a
+    # local LLM-CLI (e.g. `claude -p`) whose process cold-start can exceed 60s.
+    try:
+        judge_timeout = float(os.environ.get("MNEMO_EVAL_JUDGE_TIMEOUT_S", "60"))
+    except (TypeError, ValueError):
+        judge_timeout = 60.0
+
     def _judge(question: str, context: str, gold: str) -> float:
         payload = json.dumps({"question": question, "context": context, "gold": gold})
         proc = subprocess.run(
@@ -87,7 +95,7 @@ def make_llm_judge(command: str) -> Judge:
             input=payload,
             capture_output=True,
             text=True,
-            timeout=60,
+            timeout=judge_timeout,
         )
         if proc.returncode != 0:
             raise RuntimeError(f"llm judge failed: {proc.stderr[-500:]}")

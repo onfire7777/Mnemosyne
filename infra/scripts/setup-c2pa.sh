@@ -64,37 +64,65 @@ printf '%s\n' "${ROOT_FPR}" > "${OUT_DIR}/root.fingerprint.sha256"
 echo "    root SHA-256: ${ROOT_FPR}"
 
 echo "==> Creating a deterministic test asset ..."
-# A tiny valid JPEG so c2patool has a real asset to embed a manifest into.
-python3 - "${OUT_DIR}/asset.jpg" <<'PY'
+# A real baseline JPEG so c2patool has a valid asset to embed a manifest into.
+# The previous hand-rolled hex blob was not a parseable JPEG and c2patool 0.9.12
+# rejected it ("Could not parse input JPEG"). Generate a real one with Pillow
+# when available; otherwise fall back to a vetted minimal baseline JPEG.
+if python3 -c "import PIL" >/dev/null 2>&1; then
+  python3 - "${OUT_DIR}/asset.jpg" <<'PY'
 import sys
-# Smallest viable baseline JPEG (1x1 white). c2patool embeds the C2PA manifest.
-data = bytes.fromhex(
-    "ffd8ffe000104a46494600010100000100010000ffdb004300080606070605080707"
-    "07090908"+"0a"*0+"0c140d0c0b0b0c1912130f141d1a1f1e1d1a1c1c20242e2720222c"
-    "231c1c2837292c30313434341f27393d38323c2e333432ffc0000b080001000101011100"
-    "ffc4001f0000010501010101010100000000000000000102030405060708090a0bffc400"
-    "b5100002010303020403050504040000017d01020300041105122131410613516107227"
-    "1143281a1ffda0008010100003f00d2cf20ffd9"
-)
-with open(sys.argv[1], "wb") as fh:
-    fh.write(data)
+from PIL import Image
+img = Image.new("RGB", (64, 64), (200, 120, 40))
+for x in range(64):
+    for y in range(64):
+        if (x // 8 + y // 8) % 2 == 0:
+            img.putpixel((x, y), (40, 90, 160))
+img.save(sys.argv[1], "JPEG", quality=90)
 PY
+else
+  python3 - "${OUT_DIR}/asset.jpg" <<'PY'
+import base64, sys
+# Vetted minimal 16x16 baseline JPEG (valid, parseable by c2patool 0.9.12).
+JPEG_B64 = (
+    "/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRof"
+    "Hh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAAQABABAREA/8QAHwAA"
+    "AQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQR"
+    "BRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RF"
+    "RkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ip"
+    "qrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/9oACAEB"
+    "AAA/APf6KKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK"
+    "KKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK"
+    "KKKKKKKKKKKKKKKKKKKKKKKK/9k="
+)
+open(sys.argv[1], "wb").write(base64.b64decode(JPEG_B64))
+PY
+fi
 
 echo "==> Signing the asset with the real c2patool ..."
-# Run c2patool inside the image. Manifest + signer material are visible under
-# /work/config (ro) and /work/out (rw). The signed asset lands in out/.
+# c2patool 0.9.12 takes the signing material from the manifest definition
+# (`private_key` / `sign_cert` path fields), NOT the legacy C2PA_PRIVATE_KEY /
+# C2PA_SIGN_CERT environment variables (those now yield "Invalid certification
+# data ... No supported data to decode"). Inject the signer paths into a copy of
+# the manifest so the real signer chain is used.
+python3 - "${C2PA_DIR}/manifest.json" "${OUT_DIR}/manifest.signed.json" <<'PY'
+import json, sys
+manifest = json.load(open(sys.argv[1]))
+manifest["private_key"] = "/work/out/signer.key.pem"
+manifest["sign_cert"] = "/work/out/signer.cert.pem"
+json.dump(manifest, open(sys.argv[2], "w"), indent=2)
+PY
 ${RUN} sh -c '
   set -e
-  C2PA_PRIVATE_KEY=/work/out/signer.key.pem \
-  C2PA_SIGN_CERT=/work/out/signer.cert.pem \
   c2patool /work/out/asset.jpg \
-    --manifest /work/config/manifest.json \
+    --manifest /work/out/manifest.signed.json \
     --output /work/out/asset.signed.jpg \
     --force
 '
 
 echo "==> Verifying the signed asset with the real c2patool ..."
-${RUN} c2patool /work/out/asset.signed.jpg --json > "${OUT_DIR}/c2patool-report.json" || {
+# c2patool 0.9.12 prints the JSON report by default; the legacy `--json` flag
+# was removed. Invoke without it.
+${RUN} c2patool /work/out/asset.signed.jpg > "${OUT_DIR}/c2patool-report.json" || {
   echo "ERROR: c2patool verification of the signed asset failed." >&2
   exit 1
 }
@@ -103,10 +131,77 @@ echo "    c2patool report written to ${OUT_DIR}/c2patool-report.json"
 ASSET_SHA="$(openssl dgst -sha256 -r "${OUT_DIR}/asset.signed.jpg" | awk '{print $1}')"
 echo "    signed-asset SHA-256: ${ASSET_SHA}"
 
+echo "==> Discovering the signer string the real c2patool report surfaces ..."
+# Mnemosyne's C2paToolVerifier picks the signer via provenance._find_first over
+# the keys {issuer, signer, claim_generator, claimGenerator, common_name,
+# commonName} in *insertion order*. In a real c2patool --json report the active
+# manifest's "claim_generator" is encountered before the signature_info issuer/
+# common_name, so the signer string Mnemosyne actually evaluates against
+# trusted_issuers is the claim_generator (e.g. "Mnemosyne-Test-Signer/1.0
+# c2patool/<ver>"), NOT the leaf CN "mnemosyne-test-signer". We extract that
+# exact string from the report this run produced so issuer trust matches reality.
+SURFACED_SIGNER="$(
+  C2PA_REPORT="${OUT_DIR}/c2patool-report.json" python3 - <<'PY'
+import json, os
+keys = {"issuer", "signer", "claim_generator", "claimGenerator", "common_name", "commonName"}
+def find_first(value):
+    if isinstance(value, dict):
+        for k, v in value.items():
+            if k in keys and v:
+                return v
+        for v in value.values():
+            r = find_first(v)
+            if r:
+                return r
+    elif isinstance(value, list):
+        for v in value:
+            r = find_first(v)
+            if r:
+                return r
+    return None
+try:
+    report = json.load(open(os.environ["C2PA_REPORT"], encoding="utf-8"))
+except Exception:
+    report = {}
+print(find_first(report) or "")
+PY
+)"
+# The container path enriches via c2pa-enrich.py, which only injects a fallback
+# "signer" when none of {issuer, signer, common_name} are already present. If the
+# real report exposed nothing, c2pa-enrich falls back to the active_manifest id
+# or the literal "Mnemosyne-Test-Signer"; mirror that fallback here so the policy
+# still matches when the report is sparse.
+if [ -z "${SURFACED_SIGNER}" ]; then
+  SURFACED_SIGNER="$(
+    C2PA_REPORT="${OUT_DIR}/c2patool-report.json" python3 - <<'PY'
+import json, os
+try:
+    report = json.load(open(os.environ["C2PA_REPORT"], encoding="utf-8"))
+except Exception:
+    report = {}
+print(report.get("active_manifest") or report.get("activeManifest") or "Mnemosyne-Test-Signer")
+PY
+  )"
+fi
+echo "    surfaced signer: ${SURFACED_SIGNER}"
+
 echo "==> Writing Mnemosyne trust policy ..."
+# Trust-path correctness (P0 fix):
+#   * trusted_issuers MUST contain the signer string Mnemosyne actually surfaces
+#     (the claim_generator, captured above as SURFACED_SIGNER) -- the old policy
+#     listed only "mnemosyne-test-signer"/"Mnemosyne-Test-Signer", which the
+#     verifier never sees, so the positive path quarantined.
+#   * The camera-binary-tenant-a rule MUST set require_trusted_issuer:false
+#     EXPLICITLY. provenance.ProvenanceTrustRule.from_dict defaults a missing
+#     require_trusted_issuer to TRUE, and for_context() OR-merges rule flags into
+#     the scoped policy -- so an omitted flag silently forces issuer trust ON for
+#     this scope (defeating the top-level false) and quarantines. This rule trusts
+#     by certificate ROOT (require_trusted_root:true); issuer trust is not required
+#     for it. Belt-and-suspenders: SURFACED_SIGNER also satisfies issuer trust if
+#     ever evaluated.
 cat > "${OUT_DIR}/trust-policy.json" <<EOF
 {
-  "trusted_issuers": ["mnemosyne-test-signer", "Mnemosyne-Test-Signer"],
+  "trusted_issuers": ["${SURFACED_SIGNER}", "mnemosyne-test-signer", "Mnemosyne-Test-Signer"],
   "trusted_roots": ["${ROOT_FPR}"],
   "require_trusted_issuer": false,
   "require_trusted_root": false,
@@ -114,7 +209,9 @@ cat > "${OUT_DIR}/trust-policy.json" <<EOF
     {
       "name": "camera-binary-tenant-a",
       "scope": {"tenant_id": "tenant-a", "source_type": "camera", "modality": "binary"},
+      "trusted_issuers": ["${SURFACED_SIGNER}"],
       "trusted_roots": ["${ROOT_FPR}"],
+      "require_trusted_issuer": false,
       "require_trusted_root": true
     }
   ]

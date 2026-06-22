@@ -35,8 +35,10 @@ ASSET_ABS="$(cd "$(dirname "${ASSET_PATH}")" && pwd)/$(basename "${ASSET_PATH}")
 ASSET_DIR="$(dirname "${ASSET_ABS}")"
 ASSET_NAME="$(basename "${ASSET_ABS}")"
 
+# c2patool 0.9.12 prints the JSON report by default; the legacy `--json` flag
+# was removed (it now errors "unexpected argument '--json'"). Invoke without it.
 RAW_REPORT="$(docker run --rm -v "${ASSET_DIR}:/asset:ro" -w /asset "${IMAGE}" \
-  c2patool "/asset/${ASSET_NAME}" --json)"
+  c2patool "/asset/${ASSET_NAME}")"
 RC=$?
 if [ ${RC} -ne 0 ]; then
   echo "${RAW_REPORT}" >&2

@@ -8,9 +8,15 @@
 # Pinned c2patool version for reproducibility; bump deliberately.
 FROM rust:1.81-slim-bookworm AS build
 ARG C2PATOOL_VERSION=0.9.12
+# pkg-config + libssl-dev let openssl-sys link the system OpenSSL. perl (full,
+# for FindBin.pm) + make are the fallback toolchain if any crate still vendors
+# OpenSSL from source. OPENSSL_NO_VENDOR forces the system-lib path so the
+# slow/fragile vendored build is avoided on the slim base image.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends pkg-config libssl-dev ca-certificates \
+ && apt-get install -y --no-install-recommends \
+      pkg-config libssl-dev ca-certificates perl make \
  && rm -rf /var/lib/apt/lists/*
+ENV OPENSSL_NO_VENDOR=1
 RUN cargo install c2patool --version "${C2PATOOL_VERSION}" --locked --root /usr/local
 
 FROM debian:bookworm-slim
