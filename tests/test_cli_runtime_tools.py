@@ -4729,6 +4729,52 @@ def production_provider_stdout(*, forbid_local: bool = True, local_retrieval: bo
     }
 
 
+def production_release_stdout(command: str, provider_stdout: dict) -> dict:
+    if command == "provider-check":
+        return provider_stdout
+    if command in {
+        "auth-ops-check",
+        "mcp-ops-check",
+        "retrieval-ops-check",
+        "consolidation-ops-check",
+        "multimodal-ops-check",
+        "privacy-ops-check",
+        "parametric-trainer-check",
+        "provenance-ops-check",
+        "policy-ops-check",
+    }:
+        return {"ok": True, "bundle": {"name": command}, "requirements": {}, "checks": [], "findings": []}
+    if command in {"belief-revision-check", "forgetting-policy-check"}:
+        return {"ok": True, "fingerprint": f"{command}-fingerprint", "summary": {}, "results": [], "findings": []}
+    if command == "calibration-tune":
+        return {"ok": True, "calibration": {}, "threshold": 0.2, "metrics": {}, "failures": []}
+    if command == "hosted-llm-check":
+        return {"ok": True, "manifest": {}, "required_roles": [], "checks": [], "findings": []}
+    if command == "provenance-trust-check":
+        return {"ok": True, "suite": {}, "required_case_ids": [], "checks": [], "findings": []}
+    if command == "idp-jwks-live-check":
+        return {"ok": True, "issuer": "https://idp.example.com/", "audience": "mnemosyne", "jwks": {}, "token": {}, "identity": {}}
+    if command == "idp-authz-policy-rollout-check":
+        return {"ok": True, "rollout": {"simulation_change_count": 0}}
+    if command == "tls-cert-check":
+        return {"ok": True, "target": {}, "tls": {}, "certificate": {}, "checks": {}}
+    if command == "tls-rotation-plan-check":
+        return {"ok": True, "config": {}, "current": {}, "candidate": {}, "rotation": {}, "checks": {}}
+    if command in {"mcp-http-soak", "mcp-streamable-http-soak"}:
+        return {"ok": True, "target": {}, "config": {}, "health": {}, "iterations": [], "summary": {}}
+    if command == "gate-suite-check":
+        return {"ok": True, "suite": {}, "requirements": {}, "failures": []}
+    if command == "projection-recompute-once":
+        return {"ok": True, "queue": {}, "enqueued_job": {}, "job": {}, "metrics": {}}
+    if command == "worker-run":
+        return {"ok": True, "worker": {}, "summary": {}, "queue": {}, "cycles": [], "jobs": [], "metrics": {}}
+    if command == "ops-dashboard-check":
+        return {"ok": True, "mode": "package", "source": {}, "checks": [], "findings": []}
+    if command == "ops-report":
+        return {"ok": True, "counts": {}, "tripwires": {"passed": True}}
+    return {"ok": True}
+
+
 def write_release_report(
     tmp_path: Path,
     *,
@@ -4740,7 +4786,7 @@ def write_release_report(
     evidence_dir.mkdir()
     provider_stdout = provider_stdout or production_provider_stdout()
     checks = [
-        release_check(command, provider_stdout if command == "provider-check" else {"ok": True})
+        release_check(command, production_release_stdout(command, provider_stdout))
         for command in commands
     ]
     for index, check in enumerate(checks, start=1):
@@ -4847,6 +4893,32 @@ def test_cli_release_audit_fails_closed_on_missing_and_local_evidence(tmp_path: 
     assert "provider_manifest_forbid_local_missing" in codes
     assert "provider_check_local_retrieval_backend" in codes
     assert payload["provider"]["retrieval_backends"]["lexical_local"] is True
+
+
+def test_cli_release_audit_rejects_placeholder_required_command_output(tmp_path: Path) -> None:
+    report_path, _manifest_path = write_release_report(tmp_path)
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    auth_check = next(check for check in report["checks"] if check["command"] == "auth-ops-check")
+    auth_check["stdout_json"] = {"ok": True}
+    report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+
+    result = run_raw_cli(
+        tmp_path / "mnemosyne.json",
+        "release-audit",
+        "--soak-report",
+        str(report_path),
+        "--require-production-validated",
+    )
+    payload = json.loads(result.stdout)
+    output_findings = [
+        finding for finding in payload["findings"] if finding["code"] == "required_command_output_incomplete"
+    ]
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert len(output_findings) == 1
+    assert "auth-ops-check" in output_findings[0]["message"]
+    assert "bundle" in output_findings[0]["message"]
 
 
 def test_cli_release_audit_requires_production_scope_attestation(tmp_path: Path) -> None:
