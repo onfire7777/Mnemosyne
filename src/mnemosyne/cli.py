@@ -81,6 +81,7 @@ from mnemosyne.storage import CommandKeyManager, EncryptedLocalObjectStore, Json
 
 DEPLOYMENT_SOAK_COMMANDS = {
     "belief-revision-check",
+    "auth-ops-check",
     "calibration-tune",
     "forgetting-policy-check",
     "hosted-llm-check",
@@ -113,6 +114,7 @@ DEPLOYMENT_SOAK_GLOBAL_OPTIONS = {
 }
 PRODUCTION_RELEASE_REQUIRED_COMMANDS = (
     "belief-revision-check",
+    "auth-ops-check",
     "calibration-tune",
     "forgetting-policy-check",
     "hosted-llm-check",
@@ -2462,6 +2464,494 @@ def cmd_retrieval_ops_check(args: argparse.Namespace) -> None:
     if args.expected_fingerprint and args.expected_fingerprint.strip().lower() != report["fingerprint"]:
         report["ok"] = False
         report["findings"].append(_retrieval_ops_finding("fingerprint_mismatch", "retrieval ops bundle fingerprint mismatch"))
+    emit(report)
+    if not report["ok"]:
+        raise SystemExit(1)
+
+
+def _load_auth_ops_bundle(args: argparse.Namespace) -> Mapping[str, Any]:
+    if bool(args.bundle) == bool(args.bundle_json):
+        raise SystemExit("auth-ops-check requires exactly one of --bundle or --bundle-json")
+    try:
+        loaded = (
+            json.loads(Path(args.bundle).expanduser().read_text(encoding="utf-8"))
+            if args.bundle
+            else json.loads(args.bundle_json)
+        )
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"auth ops bundle denied: {exc}") from exc
+    if not isinstance(loaded, Mapping):
+        raise SystemExit("auth ops bundle must be a JSON object")
+    return loaded
+
+
+def _auth_ops_finding(code: str, message: str) -> dict[str, str]:
+    return {"code": code, "message": message}
+
+
+def _auth_ops_fingerprint(report: Mapping[str, Any]) -> str:
+    payload = {
+        "bundle": report.get("bundle"),
+        "requirements": report.get("requirements"),
+        "checks": report.get("checks"),
+        "findings": report.get("findings"),
+    }
+    return sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def _auth_ops_int(
+    value: Any,
+    *,
+    default: int,
+    code: str,
+    message: str,
+    findings: list[dict[str, str]],
+) -> int:
+    if value is None or isinstance(value, bool):
+        findings.append(_auth_ops_finding(code, message))
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        findings.append(_auth_ops_finding(code, message))
+        return default
+
+
+def _auth_ops_number(
+    value: Any,
+    *,
+    default: float,
+    code: str,
+    message: str,
+    findings: list[dict[str, str]],
+) -> float:
+    if value is None or isinstance(value, bool):
+        findings.append(_auth_ops_finding(code, message))
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        findings.append(_auth_ops_finding(code, message))
+        return default
+
+
+def _auth_ops_forbidden_raw_paths(value: Any, *, path: str = "$") -> list[str]:
+    forbidden_keys = {
+        "idp_token",
+        "access_token",
+        "refresh_token",
+        "raw_token",
+        "jwt",
+        "raw_claims",
+        "raw_jwks",
+        "private_key",
+        "secret",
+        "password",
+        "key_material",
+        "certificate_pem",
+        "current_cert_pem",
+        "candidate_cert_pem",
+        "client_private_key",
+    }
+    paths: list[str] = []
+    if isinstance(value, Mapping):
+        for key, child in value.items():
+            key_name = str(key)
+            child_path = f"{path}.{key_name}"
+            if key_name.lower() in forbidden_keys and child not in (None, "", [], {}):
+                paths.append(child_path)
+            paths.extend(_auth_ops_forbidden_raw_paths(child, path=child_path))
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            paths.extend(_auth_ops_forbidden_raw_paths(child, path=f"{path}[{index}]"))
+    return paths
+
+
+def cmd_auth_ops_check(args: argparse.Namespace) -> None:
+    bundle = _load_auth_ops_bundle(args)
+    findings: list[dict[str, str]] = []
+    checks: list[dict[str, Any]] = []
+
+    idp = bundle.get("idp_jwks")
+    if not isinstance(idp, Mapping):
+        findings.append(_auth_ops_finding("missing_idp_jwks", "auth ops bundle requires idp_jwks section"))
+        idp = {}
+    jwks = idp.get("jwks") if isinstance(idp.get("jwks"), Mapping) else {}
+    token = idp.get("token") if isinstance(idp.get("token"), Mapping) else {}
+    identity = idp.get("identity") if isinstance(idp.get("identity"), Mapping) else {}
+    rotation = idp.get("rotation") if isinstance(idp.get("rotation"), Mapping) else {}
+    jwks_key_count = _auth_ops_int(
+        jwks.get("key_count"),
+        default=0,
+        code="jwks_key_count_invalid",
+        message="idp_jwks.jwks.key_count must be numeric",
+        findings=findings,
+    )
+    token_ttl = _auth_ops_int(
+        token.get("expires_in_seconds"),
+        default=0,
+        code="token_ttl_invalid",
+        message="idp_jwks.token.expires_in_seconds must be numeric",
+        findings=findings,
+    )
+    trust_tier = _auth_ops_int(
+        identity.get("source_trust_tier"),
+        default=-1,
+        code="identity_trust_tier_invalid",
+        message="idp_jwks.identity.source_trust_tier must be numeric",
+        findings=findings,
+    )
+    current_kid = str(rotation.get("current_kid_sha256") or "").strip()
+    next_kid = str(rotation.get("next_kid_sha256") or "").strip()
+    idp_ok = (
+        idp.get("ok") is True
+        and bool(idp.get("issuer"))
+        and bool(idp.get("audience"))
+        and jwks_key_count >= args.min_jwks_keys
+        and jwks.get("allow_insecure_url") is not True
+        and jwks.get("refresh_on_unknown_kid") is True
+        and token.get("kid_present") is True
+        and str(token.get("alg") or "").lower() not in {"", "none"}
+        and token_ttl >= args.min_token_ttl_seconds
+        and token.get("session_id_present") is True
+        and bool(identity.get("tenant_hash") or identity.get("tenant_id_hash"))
+        and bool(identity.get("user_hash") or identity.get("user_id_sha256"))
+        and bool(identity.get("role"))
+        and trust_tier >= args.min_source_trust_tier
+        and idp.get("authz_policy_configured") is True
+        and "sha256:" in current_kid.lower()
+        and "sha256:" in next_kid.lower()
+        and rotation.get("rotation_verified") is True
+        and rotation.get("refresh_on_unknown_kid_verified") is True
+        and rotation.get("previous_kid_rejected") is True
+    )
+    if idp.get("ok") is not True:
+        findings.append(_auth_ops_finding("idp_jwks_not_ok", "idp_jwks evidence must be ok"))
+    if not idp.get("issuer") or not idp.get("audience"):
+        findings.append(_auth_ops_finding("idp_issuer_audience_missing", "idp issuer and audience are required"))
+    if jwks_key_count < args.min_jwks_keys:
+        findings.append(_auth_ops_finding("jwks_key_count_too_low", "JWKS key count is too low"))
+    if jwks.get("allow_insecure_url") is True:
+        findings.append(_auth_ops_finding("jwks_insecure_url_allowed", "JWKS evidence must not allow insecure URLs"))
+    if jwks.get("refresh_on_unknown_kid") is not True:
+        findings.append(_auth_ops_finding("jwks_refresh_disabled", "JWKS refresh-on-unknown-kid must be enabled"))
+    if token.get("kid_present") is not True or str(token.get("alg") or "").lower() in {"", "none"}:
+        findings.append(_auth_ops_finding("token_header_invalid", "validated token must include kid and safe alg"))
+    if token_ttl < args.min_token_ttl_seconds:
+        findings.append(_auth_ops_finding("token_ttl_too_low", "validated token TTL is below release threshold"))
+    if token.get("session_id_present") is not True:
+        findings.append(_auth_ops_finding("token_session_id_missing", "validated token must bind a session id"))
+    if not (identity.get("tenant_hash") or identity.get("tenant_id_hash")) or not (
+        identity.get("user_hash") or identity.get("user_id_sha256")
+    ):
+        findings.append(_auth_ops_finding("identity_hash_missing", "identity evidence must use tenant/user hashes"))
+    if trust_tier < args.min_source_trust_tier:
+        findings.append(_auth_ops_finding("identity_trust_tier_too_low", "identity source trust tier is below threshold"))
+    if idp.get("authz_policy_configured") is not True:
+        findings.append(_auth_ops_finding("authz_policy_missing", "IdP evidence must prove authz policy is configured"))
+    if "sha256:" not in current_kid.lower() or "sha256:" not in next_kid.lower():
+        findings.append(_auth_ops_finding("jwks_rotation_kid_hash_missing", "JWKS rotation evidence requires current and next kid hashes"))
+    for flag in ("rotation_verified", "refresh_on_unknown_kid_verified", "previous_kid_rejected"):
+        if rotation.get(flag) is not True:
+            findings.append(_auth_ops_finding("jwks_rotation_control_missing", f"JWKS rotation control {flag} is not proven"))
+    checks.append(
+        {
+            "name": "idp_jwks",
+            "ok": idp_ok,
+            "issuer_present": bool(idp.get("issuer")),
+            "audience_present": bool(idp.get("audience")),
+            "jwks_key_count": jwks_key_count,
+            "token_ttl_seconds": token_ttl,
+            "identity_trust_tier": trust_tier,
+            "rotation_verified": rotation.get("rotation_verified") is True,
+        }
+    )
+
+    rollout = bundle.get("authz_rollout")
+    if not isinstance(rollout, Mapping):
+        findings.append(_auth_ops_finding("missing_authz_rollout", "auth ops bundle requires authz_rollout section"))
+        rollout = {}
+    simulation_change_count = _auth_ops_int(
+        rollout.get("simulation_change_count"),
+        default=args.max_authz_simulation_changes + 1,
+        code="authz_simulation_count_invalid",
+        message="authz_rollout.simulation_change_count must be numeric",
+        findings=findings,
+    )
+    allowed_cases = _auth_ops_int(
+        rollout.get("allowed_case_count"),
+        default=0,
+        code="authz_case_count_invalid",
+        message="authz_rollout.allowed_case_count must be numeric",
+        findings=findings,
+    )
+    denied_cases = _auth_ops_int(
+        rollout.get("denied_case_count"),
+        default=0,
+        code="authz_case_count_invalid",
+        message="authz_rollout.denied_case_count must be numeric",
+        findings=findings,
+    )
+    current_policy_fp = str(rollout.get("current_fingerprint") or "").strip()
+    candidate_policy_fp = str(rollout.get("candidate_fingerprint") or "").strip()
+    rollout_ok = (
+        rollout.get("ok") is True
+        and "sha256:" in current_policy_fp.lower()
+        and "sha256:" in candidate_policy_fp.lower()
+        and rollout.get("expected_current_fingerprint_present") is True
+        and rollout.get("expected_candidate_fingerprint_present") is True
+        and simulation_change_count <= args.max_authz_simulation_changes
+        and allowed_cases >= args.min_authz_allowed_cases
+        and denied_cases >= args.min_authz_denied_cases
+        and rollout.get("tenant_rules_verified") is True
+        and rollout.get("ambiguous_matches_rejected") is True
+    )
+    if rollout.get("ok") is not True:
+        findings.append(_auth_ops_finding("authz_rollout_not_ok", "authz rollout evidence must be ok"))
+    if "sha256:" not in current_policy_fp.lower() or "sha256:" not in candidate_policy_fp.lower():
+        findings.append(_auth_ops_finding("authz_policy_fingerprint_missing", "authz rollout requires current and candidate fingerprints"))
+    if rollout.get("expected_current_fingerprint_present") is not True or rollout.get("expected_candidate_fingerprint_present") is not True:
+        findings.append(_auth_ops_finding("authz_expected_fingerprint_missing", "authz rollout must acknowledge expected fingerprints"))
+    if simulation_change_count > args.max_authz_simulation_changes:
+        findings.append(_auth_ops_finding("authz_simulation_changes", "authz simulation changes exceed threshold"))
+    if allowed_cases < args.min_authz_allowed_cases:
+        findings.append(_auth_ops_finding("authz_allowed_cases_too_low", "authz rollout has too few allowed simulation cases"))
+    if denied_cases < args.min_authz_denied_cases:
+        findings.append(_auth_ops_finding("authz_denied_cases_too_low", "authz rollout has too few denied simulation cases"))
+    if rollout.get("tenant_rules_verified") is not True:
+        findings.append(_auth_ops_finding("authz_tenant_rules_missing", "authz rollout must prove tenant rules"))
+    if rollout.get("ambiguous_matches_rejected") is not True:
+        findings.append(_auth_ops_finding("authz_ambiguous_matches_not_rejected", "authz rollout must reject ambiguous matches"))
+    checks.append(
+        {
+            "name": "authz_rollout",
+            "ok": rollout_ok,
+            "simulation_change_count": simulation_change_count,
+            "allowed_case_count": allowed_cases,
+            "denied_case_count": denied_cases,
+        }
+    )
+
+    session_secret = bundle.get("session_secret")
+    if not isinstance(session_secret, Mapping):
+        findings.append(_auth_ops_finding("missing_session_secret", "auth ops bundle requires session_secret section"))
+        session_secret = {}
+    key_count = _auth_ops_int(
+        session_secret.get("key_count"),
+        default=0,
+        code="session_secret_key_count_invalid",
+        message="session_secret.key_count must be numeric",
+        findings=findings,
+    )
+    secret_source = str(session_secret.get("source") or "").strip().lower()
+    source_local = secret_source in {"", "none", "env", "file", "local", "test"}
+    secret_ok = (
+        session_secret.get("ok") is True
+        and session_secret.get("provider") == "command"
+        and not source_local
+        and key_count >= args.min_session_secret_keys
+        and session_secret.get("active_key_id_present") is True
+        and session_secret.get("roundtrip_verified") is True
+        and session_secret.get("rotation_verified") is True
+        and session_secret.get("revoked_key_rejected") is True
+        and session_secret.get("previous_key_rejected") is True
+    )
+    if session_secret.get("ok") is not True:
+        findings.append(_auth_ops_finding("session_secret_not_ok", "session_secret evidence must be ok"))
+    if session_secret.get("provider") != "command" or source_local:
+        findings.append(_auth_ops_finding("session_secret_provider_not_external", "session_secret must use external command-backed custody"))
+    if key_count < args.min_session_secret_keys:
+        findings.append(_auth_ops_finding("session_secret_key_count_too_low", "session_secret key count is too low"))
+    for flag in ("active_key_id_present", "roundtrip_verified", "rotation_verified", "revoked_key_rejected", "previous_key_rejected"):
+        if session_secret.get(flag) is not True:
+            findings.append(_auth_ops_finding("session_secret_control_missing", f"session_secret control {flag} is not proven"))
+    checks.append(
+        {
+            "name": "session_secret",
+            "ok": secret_ok,
+            "provider": session_secret.get("provider"),
+            "source": session_secret.get("source"),
+            "key_count": key_count,
+        }
+    )
+
+    tls = bundle.get("tls")
+    if not isinstance(tls, Mapping):
+        findings.append(_auth_ops_finding("missing_tls", "auth ops bundle requires tls section"))
+        tls = {}
+    cert = tls.get("certificate") if isinstance(tls.get("certificate"), Mapping) else {}
+    cert_checks = tls.get("checks") if isinstance(tls.get("checks"), Mapping) else {}
+    rotation_plan = tls.get("rotation") if isinstance(tls.get("rotation"), Mapping) else {}
+    rotation_checks = rotation_plan.get("checks") if isinstance(rotation_plan.get("checks"), Mapping) else {}
+    days_remaining = _auth_ops_number(
+        cert.get("days_remaining"),
+        default=0.0,
+        code="tls_days_remaining_invalid",
+        message="tls.certificate.days_remaining must be numeric",
+        findings=findings,
+    )
+    overlap_days = _auth_ops_number(
+        rotation_plan.get("overlap_days"),
+        default=0.0,
+        code="tls_overlap_days_invalid",
+        message="tls.rotation.overlap_days must be numeric",
+        findings=findings,
+    )
+    tls_ok = (
+        tls.get("ok") is True
+        and days_remaining >= args.min_cert_days
+        and cert_checks.get("chain_valid") is True
+        and cert_checks.get("hostname_valid") is True
+        and cert_checks.get("min_days_valid") is True
+        and rotation_plan.get("ok") is True
+        and overlap_days >= args.min_cert_overlap_days
+        and rotation_checks.get("current_min_days_valid") is True
+        and rotation_checks.get("candidate_min_days_valid") is True
+        and rotation_checks.get("overlap_valid") is True
+        and rotation_checks.get("hostnames_valid") is True
+    )
+    if tls.get("ok") is not True:
+        findings.append(_auth_ops_finding("tls_cert_not_ok", "TLS certificate evidence must be ok"))
+    if days_remaining < args.min_cert_days:
+        findings.append(_auth_ops_finding("tls_cert_days_too_low", "TLS certificate days remaining is too low"))
+    for flag in ("chain_valid", "hostname_valid", "min_days_valid"):
+        if cert_checks.get(flag) is not True:
+            findings.append(_auth_ops_finding("tls_cert_control_missing", f"TLS certificate check {flag} is not proven"))
+    if rotation_plan.get("ok") is not True:
+        findings.append(_auth_ops_finding("tls_rotation_not_ok", "TLS rotation evidence must be ok"))
+    if overlap_days < args.min_cert_overlap_days:
+        findings.append(_auth_ops_finding("tls_overlap_too_low", "TLS rotation overlap days are too low"))
+    for flag in ("current_min_days_valid", "candidate_min_days_valid", "overlap_valid", "hostnames_valid"):
+        if rotation_checks.get(flag) is not True:
+            findings.append(_auth_ops_finding("tls_rotation_control_missing", f"TLS rotation check {flag} is not proven"))
+    checks.append(
+        {
+            "name": "tls",
+            "ok": tls_ok,
+            "days_remaining": days_remaining,
+            "overlap_days": overlap_days,
+        }
+    )
+
+    tenant_isolation = bundle.get("tenant_isolation")
+    if not isinstance(tenant_isolation, Mapping):
+        findings.append(_auth_ops_finding("missing_tenant_isolation", "auth ops bundle requires tenant_isolation section"))
+        tenant_isolation = {}
+    tenant_count = _auth_ops_int(
+        tenant_isolation.get("tenant_count"),
+        default=0,
+        code="tenant_count_invalid",
+        message="tenant_isolation.tenant_count must be numeric",
+        findings=findings,
+    )
+    cases_raw = tenant_isolation.get("cases")
+    tenant_cases = [item for item in cases_raw if isinstance(item, Mapping)] if isinstance(cases_raw, list) else []
+    if not isinstance(cases_raw, list):
+        findings.append(_auth_ops_finding("tenant_cases_invalid", "tenant isolation cases must be an array"))
+    denied_count = 0
+    allowed_count = 0
+    for index, case in enumerate(tenant_cases):
+        case_id = str(case.get("id") or f"tenant-case-{index + 1}")
+        if "sha256:" not in str(case.get("tenant_hash") or "").lower():
+            findings.append(_auth_ops_finding("tenant_case_hash_missing", f"tenant case {case_id} requires tenant_hash"))
+        expected = str(case.get("expected_decision") or "")
+        actual = str(case.get("actual_decision") or "")
+        if expected != actual or case.get("enforced") is not True:
+            findings.append(_auth_ops_finding("tenant_case_failed", f"tenant case {case_id} was not enforced"))
+        if actual == "deny":
+            denied_count += 1
+        if actual == "allow":
+            allowed_count += 1
+    tenant_ok = (
+        tenant_isolation.get("postgres_rls_enabled") is True
+        and tenant_isolation.get("cross_tenant_read_denied") is True
+        and tenant_isolation.get("cross_tenant_write_denied") is True
+        and tenant_isolation.get("signed_session_tenant_binding") is True
+        and tenant_count >= args.min_tenants
+        and len(tenant_cases) >= args.min_tenant_cases
+        and denied_count >= args.min_tenant_denied_cases
+        and allowed_count >= args.min_tenant_allowed_cases
+    )
+    for flag in ("postgres_rls_enabled", "cross_tenant_read_denied", "cross_tenant_write_denied", "signed_session_tenant_binding"):
+        if tenant_isolation.get(flag) is not True:
+            findings.append(_auth_ops_finding("tenant_isolation_control_missing", f"tenant isolation control {flag} is not proven"))
+    if tenant_count < args.min_tenants:
+        findings.append(_auth_ops_finding("tenant_count_too_low", "tenant isolation evidence has too few tenants"))
+    if len(tenant_cases) < args.min_tenant_cases:
+        findings.append(_auth_ops_finding("tenant_cases_too_few", "tenant isolation evidence has too few cases"))
+    if denied_count < args.min_tenant_denied_cases:
+        findings.append(_auth_ops_finding("tenant_denied_cases_too_few", "tenant isolation evidence has too few denied cases"))
+    if allowed_count < args.min_tenant_allowed_cases:
+        findings.append(_auth_ops_finding("tenant_allowed_cases_too_few", "tenant isolation evidence has too few allowed cases"))
+    checks.append(
+        {
+            "name": "tenant_isolation",
+            "ok": tenant_ok,
+            "tenant_count": tenant_count,
+            "case_count": len(tenant_cases),
+            "allowed_cases": allowed_count,
+            "denied_cases": denied_count,
+        }
+    )
+
+    redaction = bundle.get("redaction")
+    if not isinstance(redaction, Mapping):
+        findings.append(_auth_ops_finding("missing_redaction_section", "auth ops bundle requires redaction section"))
+        redaction = {}
+    redaction_flags = {
+        "raw_tokens_omitted": redaction.get("raw_tokens_omitted") is True,
+        "raw_claims_omitted": redaction.get("raw_claims_omitted") is True,
+        "raw_secrets_omitted": redaction.get("raw_secrets_omitted") is True,
+        "raw_cert_private_keys_omitted": redaction.get("raw_cert_private_keys_omitted") is True,
+    }
+    forbidden_raw_paths = _auth_ops_forbidden_raw_paths(bundle)
+    missing_redaction_flags = [name for name, ok in redaction_flags.items() if not ok]
+    for flag in missing_redaction_flags:
+        findings.append(_auth_ops_finding("redaction_flag_missing", f"redaction flag {flag} is not proven"))
+    if forbidden_raw_paths:
+        findings.append(_auth_ops_finding("redaction_raw_field_present", "auth ops bundle contains raw token/secret/certificate fields"))
+    checks.append(
+        {
+            "name": "redaction",
+            "ok": not missing_redaction_flags and not forbidden_raw_paths,
+            **redaction_flags,
+            "forbidden_raw_paths": forbidden_raw_paths,
+        }
+    )
+
+    report: dict[str, Any] = {
+        "ok": not findings,
+        "bundle": {
+            "name": bundle.get("name"),
+            "issuer_present": bool(idp.get("issuer")),
+            "jwks_key_count": jwks_key_count,
+            "session_secret_provider": session_secret.get("provider"),
+            "tenant_isolation_case_count": len(tenant_cases),
+        },
+        "requirements": {
+            "min_jwks_keys": args.min_jwks_keys,
+            "min_token_ttl_seconds": args.min_token_ttl_seconds,
+            "min_source_trust_tier": args.min_source_trust_tier,
+            "max_authz_simulation_changes": args.max_authz_simulation_changes,
+            "min_authz_allowed_cases": args.min_authz_allowed_cases,
+            "min_authz_denied_cases": args.min_authz_denied_cases,
+            "min_session_secret_keys": args.min_session_secret_keys,
+            "min_cert_days": args.min_cert_days,
+            "min_cert_overlap_days": args.min_cert_overlap_days,
+            "min_tenants": args.min_tenants,
+            "min_tenant_cases": args.min_tenant_cases,
+            "min_tenant_allowed_cases": args.min_tenant_allowed_cases,
+            "min_tenant_denied_cases": args.min_tenant_denied_cases,
+        },
+        "redaction": {**redaction_flags, "forbidden_raw_fields_present": bool(forbidden_raw_paths)},
+        "checks": checks,
+        "findings": findings,
+    }
+    report["fingerprint"] = _auth_ops_fingerprint(report)
+    report["expected_fingerprint_present"] = bool(args.expected_fingerprint)
+    if args.expected_fingerprint and args.expected_fingerprint.strip().lower() != report["fingerprint"]:
+        report["ok"] = False
+        report["findings"].append(_auth_ops_finding("fingerprint_mismatch", "auth ops bundle fingerprint mismatch"))
     emit(report)
     if not report["ok"]:
         raise SystemExit(1)
@@ -6568,6 +7058,25 @@ def build_parser() -> argparse.ArgumentParser:
     retrieval_ops_check.add_argument("--max-false-accept-rate", type=float, default=0.1)
     retrieval_ops_check.add_argument("--expected-fingerprint")
     retrieval_ops_check.set_defaults(func=cmd_retrieval_ops_check)
+
+    auth_ops_check = sub.add_parser("auth-ops-check")
+    auth_ops_check.add_argument("--bundle", help="Path to production auth evidence bundle")
+    auth_ops_check.add_argument("--bundle-json", help="Inline production auth evidence bundle JSON")
+    auth_ops_check.add_argument("--min-jwks-keys", type=int, default=2)
+    auth_ops_check.add_argument("--min-token-ttl-seconds", type=int, default=60)
+    auth_ops_check.add_argument("--min-source-trust-tier", type=int, default=1)
+    auth_ops_check.add_argument("--max-authz-simulation-changes", type=int, default=0)
+    auth_ops_check.add_argument("--min-authz-allowed-cases", type=int, default=1)
+    auth_ops_check.add_argument("--min-authz-denied-cases", type=int, default=1)
+    auth_ops_check.add_argument("--min-session-secret-keys", type=int, default=2)
+    auth_ops_check.add_argument("--min-cert-days", type=float, default=30.0)
+    auth_ops_check.add_argument("--min-cert-overlap-days", type=float, default=7.0)
+    auth_ops_check.add_argument("--min-tenants", type=int, default=2)
+    auth_ops_check.add_argument("--min-tenant-cases", type=int, default=2)
+    auth_ops_check.add_argument("--min-tenant-allowed-cases", type=int, default=1)
+    auth_ops_check.add_argument("--min-tenant-denied-cases", type=int, default=1)
+    auth_ops_check.add_argument("--expected-fingerprint")
+    auth_ops_check.set_defaults(func=cmd_auth_ops_check)
 
     belief_revision_check = sub.add_parser("belief-revision-check")
     belief_revision_check.add_argument("--cases", help="Path to JSON array of belief revision cases")

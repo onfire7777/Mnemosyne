@@ -4194,6 +4194,212 @@ def test_cli_release_audit_fails_closed_on_missing_and_local_evidence(tmp_path: 
     assert payload["provider"]["retrieval_backends"]["lexical_local"] is True
 
 
+def auth_ops_bundle(
+    *,
+    insecure_jwks: bool = False,
+    bad_rollout: bool = False,
+    local_secret: bool = False,
+    bad_tls: bool = False,
+    bad_tenant: bool = False,
+    raw_secret: bool = False,
+) -> dict:
+    bundle = {
+        "name": "production-auth-ops",
+        "idp_jwks": {
+            "ok": True,
+            "issuer": "https://idp.example.com/",
+            "audience": "mnemosyne",
+            "jwks": {
+                "source": "https://idp.example.com/.well-known/jwks.json",
+                "key_count": 2 if not insecure_jwks else 1,
+                "allow_insecure_url": insecure_jwks,
+                "cache_ttl_seconds": 300,
+                "refresh_on_unknown_kid": not insecure_jwks,
+            },
+            "token": {
+                "configured": True,
+                "alg": "RS256",
+                "kid_present": not insecure_jwks,
+                "expires_in_seconds": 600 if not insecure_jwks else 10,
+                "session_id_present": not insecure_jwks,
+            },
+            "identity": {
+                "tenant_hash": "tenant-sha256:aaa111",
+                "user_hash": "user-sha256:bbb222",
+                "role": "operator",
+                "source_trust_tier": 2,
+            },
+            "authz_policy_configured": True,
+            "rotation": {
+                "current_kid_sha256": "kid-sha256:current",
+                "next_kid_sha256": "kid-sha256:next",
+                "rotation_verified": not insecure_jwks,
+                "refresh_on_unknown_kid_verified": not insecure_jwks,
+                "previous_kid_rejected": not insecure_jwks,
+            },
+        },
+        "authz_rollout": {
+            "ok": not bad_rollout,
+            "current_fingerprint": "policy-sha256:current",
+            "candidate_fingerprint": "policy-sha256:candidate",
+            "expected_current_fingerprint_present": not bad_rollout,
+            "expected_candidate_fingerprint_present": not bad_rollout,
+            "simulation_change_count": 0 if not bad_rollout else 2,
+            "allowed_case_count": 2 if not bad_rollout else 0,
+            "denied_case_count": 2 if not bad_rollout else 0,
+            "tenant_rules_verified": not bad_rollout,
+            "ambiguous_matches_rejected": not bad_rollout,
+        },
+        "session_secret": {
+            "ok": True,
+            "provider": "command" if not local_secret else "none",
+            "source": "vault" if not local_secret else "env",
+            "key_count": 2 if not local_secret else 1,
+            "active_key_id_present": not local_secret,
+            "roundtrip_verified": not local_secret,
+            "rotation_verified": not local_secret,
+            "revoked_key_rejected": not local_secret,
+            "previous_key_rejected": not local_secret,
+        },
+        "tls": {
+            "ok": not bad_tls,
+            "certificate": {
+                "days_remaining": 90 if not bad_tls else 5,
+                "issuer": "Example CA",
+                "serial_number_sha256": "serial-sha256:aaa",
+            },
+            "checks": {
+                "chain_valid": not bad_tls,
+                "hostname_valid": not bad_tls,
+                "min_days_valid": not bad_tls,
+            },
+            "rotation": {
+                "ok": not bad_tls,
+                "overlap_days": 14 if not bad_tls else 1,
+                "checks": {
+                    "current_min_days_valid": not bad_tls,
+                    "candidate_min_days_valid": not bad_tls,
+                    "overlap_valid": not bad_tls,
+                    "hostnames_valid": not bad_tls,
+                },
+            },
+        },
+        "tenant_isolation": {
+            "postgres_rls_enabled": not bad_tenant,
+            "cross_tenant_read_denied": not bad_tenant,
+            "cross_tenant_write_denied": not bad_tenant,
+            "signed_session_tenant_binding": not bad_tenant,
+            "tenant_count": 2 if not bad_tenant else 1,
+            "cases": [
+                {
+                    "id": "tenant-allow",
+                    "tenant_hash": "tenant-sha256:aaa111",
+                    "operation": "same-tenant-read",
+                    "expected_decision": "allow",
+                    "actual_decision": "allow",
+                    "enforced": True,
+                },
+                {
+                    "id": "tenant-deny",
+                    "tenant_hash": "tenant-sha256:ccc333",
+                    "operation": "cross-tenant-read",
+                    "expected_decision": "deny",
+                    "actual_decision": "allow" if bad_tenant else "deny",
+                    "enforced": not bad_tenant,
+                },
+            ],
+        },
+        "redaction": {
+            "raw_tokens_omitted": True,
+            "raw_claims_omitted": True,
+            "raw_secrets_omitted": True,
+            "raw_cert_private_keys_omitted": True,
+        },
+    }
+    if raw_secret:
+        bundle["access_token"] = "raw-secret-token"
+    return bundle
+
+
+def test_cli_auth_ops_check_validates_production_evidence_bundle(tmp_path: Path) -> None:
+    bundle = tmp_path / "auth-ops.json"
+    bundle.write_text(json.dumps(auth_ops_bundle()), encoding="utf-8")
+
+    report = run_cli(
+        tmp_path / "mnemosyne.json",
+        "auth-ops-check",
+        "--bundle",
+        str(bundle),
+        "--min-token-ttl-seconds",
+        "300",
+    )
+    acknowledged = run_cli(
+        tmp_path / "mnemosyne.json",
+        "auth-ops-check",
+        "--bundle",
+        str(bundle),
+        "--min-token-ttl-seconds",
+        "300",
+        "--expected-fingerprint",
+        report["fingerprint"],
+    )
+
+    serialized = json.dumps(report)
+    assert report["ok"] is True
+    assert len(report["fingerprint"]) == 64
+    assert {item["name"] for item in report["checks"]} == {
+        "idp_jwks",
+        "authz_rollout",
+        "session_secret",
+        "tls",
+        "tenant_isolation",
+        "redaction",
+    }
+    assert all(item["ok"] for item in report["checks"])
+    assert report["bundle"]["jwks_key_count"] == 2
+    assert report["bundle"]["session_secret_provider"] == "command"
+    assert report["redaction"]["raw_tokens_omitted"] is True
+    assert report["redaction"]["forbidden_raw_fields_present"] is False
+    assert "raw-secret-token" not in serialized
+    assert acknowledged["ok"] is True
+    assert acknowledged["expected_fingerprint_present"] is True
+
+
+def test_cli_auth_ops_check_fails_closed_on_weak_auth_bundle(tmp_path: Path) -> None:
+    bundle = tmp_path / "bad-auth-ops.json"
+    bundle.write_text(
+        json.dumps(
+            auth_ops_bundle(
+                insecure_jwks=True,
+                bad_rollout=True,
+                local_secret=True,
+                bad_tls=True,
+                bad_tenant=True,
+                raw_secret=True,
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    result = run_raw_cli(tmp_path / "mnemosyne.json", "auth-ops-check", "--bundle", str(bundle))
+    payload = json.loads(result.stdout)
+    codes = {finding["code"] for finding in payload["findings"]}
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert "jwks_insecure_url_allowed" in codes
+    assert "jwks_refresh_disabled" in codes
+    assert "token_ttl_too_low" in codes
+    assert "authz_rollout_not_ok" in codes
+    assert "authz_simulation_changes" in codes
+    assert "session_secret_provider_not_external" in codes
+    assert "tls_cert_not_ok" in codes
+    assert "tls_rotation_not_ok" in codes
+    assert "tenant_isolation_control_missing" in codes
+    assert "tenant_case_failed" in codes
+    assert "redaction_raw_field_present" in codes
+
+
 def retrieval_ops_bundle(
     *,
     local_provider: bool = False,
