@@ -177,6 +177,44 @@ def test_postgres_queue_lifecycle_and_tenant_isolation_live() -> None:
     assert other_queue.snapshot() == {}
 
 
+def test_postgres_queue_worker_persists_retry_and_dead_failures_live() -> None:
+    tenant = f"tenant-queue-failure-{uuid4()}"
+    other_tenant = f"tenant-queue-failure-other-{uuid4()}"
+    kind = "always-fails"
+    queue = PostgresQueue(live_dsn(), tenant_id=tenant)
+    other_queue = PostgresQueue(live_dsn(), tenant_id=other_tenant)
+    worker = QueueWorker(
+        queue,
+        {kind: lambda payload: (_ for _ in ()).throw(RuntimeError(f"boom {payload['case']}"))},
+    )
+    enqueued = queue.enqueue(kind, {"tenant_id": tenant, "case": "retry-dead"}, max_attempts=2)
+
+    first = worker.run_once(kind)
+    after_retry = {job.id: job for job in queue.list_jobs()}[enqueued.id]
+
+    assert first is not None
+    assert first.id == enqueued.id
+    assert first.status == "retry"
+    assert after_retry.status == "retry"
+    assert after_retry.attempts == 1
+    assert after_retry.last_error == "boom retry-dead"
+    assert queue.snapshot()["retry"] == 1
+    assert other_queue.snapshot() == {}
+    assert other_queue.lease(kind) is None
+
+    second = worker.run_once(kind)
+    after_dead = {job.id: job for job in queue.list_jobs()}[enqueued.id]
+
+    assert second is not None
+    assert second.id == enqueued.id
+    assert second.status == "dead"
+    assert after_dead.status == "dead"
+    assert after_dead.attempts == 2
+    assert after_dead.last_error == "boom retry-dead"
+    assert queue.snapshot()["dead"] == 1
+    assert queue.lease(kind) is None
+
+
 def test_postgres_runtime_helper_public_paths_live(tmp_path) -> None:
     tenant = f"tenant-runtime-helper-{uuid4()}"
     other_tenant = f"tenant-runtime-helper-other-{uuid4()}"
