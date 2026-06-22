@@ -33,8 +33,8 @@ from mnemosyne.mcp_server import (
 )
 from mnemosyne.consolidation import ConsolidationWorker
 from mnemosyne.engine import LocalMemoryEngine
-from mnemosyne.mcp_tools import TOOL_SPEC
-from mnemosyne.models import Evidence, Hit, Relation
+from mnemosyne.mcp_tools import MemoryTools, TOOL_SPEC
+from mnemosyne.models import Assertion, Evidence, Hit, Relation
 from mnemosyne.postgres_engine import PostgresEngine, _bytes_to_cid, _cid_to_bytes, _stable_uuid, _uuid_or_none, _vector_literal
 from mnemosyne.retrieval import (
     CommandMediaEmbeddingProvider,
@@ -523,6 +523,124 @@ def test_command_media_embedding_provider_validates_json_contract(tmp_path: Path
     )
 
     assert vector == [0.6, 0.8, 0.0]
+
+
+def test_memory_tools_direct_profile_graph_learning_facade_methods() -> None:
+    engine = LocalMemoryEngine()
+    tools = MemoryTools(engine)
+    cid = engine.append_evidence(
+        Evidence(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="direct-facade",
+            content="Direct facade coverage links profile, graph, and learning.",
+            trust_tier=1,
+            access_policy={"tenant": TENANT},
+        )
+    )
+    engine.upsert_assertion(
+        Assertion(
+            tenant_id=TENANT,
+            user_id=USER,
+            subject="Direct facade",
+            predicate="covers",
+            object="wrapper behavior",
+            confidence=0.92,
+            source_evidence_cids=[cid],
+            status="active",
+            trust_tier=1,
+            access_policy={"tenant": TENANT},
+        )
+    )
+    engine.add_relation(
+        Relation(
+            tenant_id=TENANT,
+            source="Direct facade",
+            predicate="related_to",
+            target="Wrapper behavior",
+            confidence=0.88,
+            source_evidence_cids=[cid],
+            access_policy={"tenant": TENANT},
+        )
+    )
+
+    recorded = tools.profile_record_explicit(
+        TENANT,
+        USER,
+        "Prefer direct facade regression tests.",
+        scope={"surface": "mcp-tools"},
+    )
+    inferred = tools.profile_propose_inference(
+        TENANT,
+        USER,
+        "Likely values wrapper-level tests.",
+        context={"surface": "mcp-tools"},
+    )
+    corrected = tools.profile_correct(
+        TENANT,
+        USER,
+        recorded["id"],
+        "Prefer direct facade and transport tests together.",
+        context={"surface": "mcp-tools"},
+    )
+    profile = tools.profile_get_relevant(TENANT, USER, {"surface": "mcp-tools"})
+    neighbors = tools.graph_neighbors(TENANT, ["direct"], k=4)
+    graph_query = tools.graph_query(TENANT, ["direct"], hops=2, k=4)
+    timeline = tools.graph_timeline(TENANT, "Direct facade")
+    graph_as_of = tools.graph_as_of(
+        TENANT,
+        "Direct facade",
+        "covers",
+        "2999-01-01T00:00:00Z",
+    )
+    trajectory = tools.trajectory_log(
+        TENANT,
+        USER,
+        "direct-facade-session",
+        "direct facade coverage",
+        [{"status": "failed", "error": "wrapper drift"}],
+        "failure",
+        -1.0,
+        "direct-facade-v1",
+    )
+    attribution = tools.trajectory_attribute(trajectory["id"])
+    lesson = tools.lesson_induce(trajectory["id"])
+    procedure = tools.procedure_induce(lesson["id"])
+    validated = tools.procedure_validate(
+        procedure["id"],
+        role="operator",
+        source_trust_tier=0,
+    )
+    promoted = tools.procedure_promote(
+        procedure["id"],
+        role="operator",
+        source_trust_tier=0,
+    )
+    rolled_back = tools.procedure_rollback(
+        procedure["id"],
+        role="operator",
+        source_trust_tier=0,
+    )
+    outcome = tools.outcome_evaluate(trajectory_id=trajectory["id"])
+    replay = tools.outcome_evaluate(before_successes=1, after_successes=3, total_cases=4)
+
+    assert recorded["security"]["allowed"] is True
+    assert inferred["security"]["allowed"] is True
+    assert corrected["corrects"] == recorded["id"]
+    assert any("facade" in item["statement"] for item in profile["authoritative"])
+    assert neighbors["hits"]
+    assert graph_query["hops"] == 2
+    assert {event["kind"] for event in timeline["events"]} == {"assertion", "relation"}
+    assert graph_as_of["assertions"][0]["object"] == "wrapper behavior"
+    assert attribution["trajectory_id"] == trajectory["id"]
+    assert lesson["failure_signature"] == attribution["signature"]
+    assert procedure["signature"]["failure_signature"] == lesson["failure_signature"]
+    assert validated["status"] == "validated"
+    assert promoted["status"] == "promoted"
+    assert rolled_back["status"] == "rolled_back"
+    assert outcome["outcome"] == "failure"
+    assert replay["counterfactual_replay_score"] > 0
 
 
 def test_mcp_server_initializes_lists_tools_and_calls_capture_search(tmp_path: Path) -> None:
