@@ -4877,6 +4877,104 @@ def test_cli_ops_dashboard_check_validates_dashboard_package(tmp_path: Path) -> 
     assert "Snapshot JSON" not in serialized
 
 
+def dashboard_operations_bundle(*, weak: bool = False, raw_payload: bool = False) -> dict:
+    bundle = {
+        "validation_scope": {
+            "production_validated": not weak,
+            "target_environment": "production" if not weak else "local",
+            "operator_asserted": not weak,
+            "run_id": "dashboard-ops-run-1" if not weak else "",
+        },
+        "refresh": {
+            "ok": not weak,
+            "last_refresh_age_seconds": 30 if not weak else 900,
+            "interval_seconds": 120 if not weak else 900,
+            "job_supervised": not weak,
+            "source_snapshot_fingerprint_present": not weak,
+        },
+        "access_control": {
+            "ok": not weak,
+            "auth_required": not weak,
+            "tenant_binding": not weak,
+            "admin_only_mutation": not weak,
+            "public_snapshot_disabled": not weak,
+        },
+        "alerts": {
+            "ok": not weak,
+            "tripwire_alerts": not weak,
+            "freshness_alerts": not weak,
+            "delivery_verified": not weak,
+            "oncall_route_present": not weak,
+        },
+        "redaction": {
+            "raw_html_omitted": True,
+            "raw_snapshot_omitted": True,
+            "raw_tokens_omitted": True,
+            "raw_user_data_omitted": True,
+        },
+    }
+    if raw_payload:
+        bundle["raw_snapshot_json"] = {"token": "redacted-test-dashboard-token"}
+    return bundle
+
+
+def test_cli_ops_dashboard_check_validates_operations_bundle(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    package_dir = tmp_path / "dashboard-package"
+    ops_bundle = tmp_path / "dashboard-ops.json"
+    run_cli(store, "ops-report", "--tenant", TENANT, "--dashboard-package-dir", str(package_dir))
+    ops_bundle.write_text(json.dumps(dashboard_operations_bundle()), encoding="utf-8")
+
+    report = run_cli(
+        store,
+        "ops-dashboard-check",
+        "--dashboard-package-dir",
+        str(package_dir),
+        "--expected-tenant",
+        TENANT,
+        "--ops-bundle",
+        str(ops_bundle),
+    )
+
+    check_names = {item["name"] for item in report["checks"]}
+    assert report["ok"] is True
+    assert "dashboard_operations_scope" in check_names
+    assert "dashboard_refresh" in check_names
+    assert "dashboard_access_control" in check_names
+    assert "dashboard_alerts" in check_names
+    assert report["redaction"]["raw_tokens_omitted"] is True
+    assert report["redaction"]["raw_user_data_omitted"] is True
+
+
+def test_cli_ops_dashboard_check_rejects_weak_operations_bundle(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    package_dir = tmp_path / "dashboard-package"
+    ops_bundle = tmp_path / "bad-dashboard-ops.json"
+    run_cli(store, "ops-report", "--tenant", TENANT, "--dashboard-package-dir", str(package_dir))
+    ops_bundle.write_text(json.dumps(dashboard_operations_bundle(weak=True, raw_payload=True)), encoding="utf-8")
+
+    result = run_raw_cli(
+        store,
+        "ops-dashboard-check",
+        "--dashboard-package-dir",
+        str(package_dir),
+        "--expected-tenant",
+        TENANT,
+        "--ops-bundle",
+        str(ops_bundle),
+    )
+    payload = json.loads(result.stdout)
+    codes = {finding["code"] for finding in payload["findings"]}
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert "dashboard_production_validation_missing" in codes
+    assert "dashboard_refresh_stale" in codes
+    assert "dashboard_access_control_missing" in codes
+    assert "dashboard_alert_missing" in codes
+    assert "dashboard_raw_field_present" in codes
+
+
 def test_cli_ops_dashboard_check_rejects_wrong_tenant(tmp_path: Path) -> None:
     store = tmp_path / "mnemosyne.json"
     package_dir = tmp_path / "dashboard-package"
