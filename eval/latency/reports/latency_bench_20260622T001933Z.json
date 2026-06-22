@@ -1,0 +1,172 @@
+{
+  "bench": "long_lived_fast_path_latency",
+  "wave": 3,
+  "generated_at": "2026-06-22T00:19:33.218603+00:00",
+  "blueprint_refs": [
+    "\u00a715 fast-path P95 NFR",
+    "FR-3",
+    "\u00a716 SLO"
+  ],
+  "fixes_wave2_artifact": {
+    "confound_1_subprocess_per_call": "ELIMINATED: engine built once in-process via cli.load_tools (no per-call python startup)",
+    "confound_2_per_call_model_roundtrip_cold": "ELIMINATED: embedding service started once, models loaded once, warmed before measurement; embed-call latency measured in isolation",
+    "wave2_reference": "eval/reports/KEYSTONE_PROOF.md (Latency caveat)"
+  },
+  "config": {
+    "clients": 8,
+    "queries_per_client": 25,
+    "total_calls": 200,
+    "store_backend": "local (in-process LocalMemoryEngine)",
+    "concurrency_model": "one warm engine + store + corpus per client (local single-file backend is single-writer: every search persists runtime metrics via atomic-replace, so a shared engine races; a production server uses Postgres runtime state or per-tenant serialization). The embedding SERVICE is a single shared concurrent-safe server.",
+    "embedding_url": "http://127.0.0.1:64670/embed",
+    "embedding_model": "BAAI/bge-small-en-v1.5",
+    "embedding_dims": 1024,
+    "force_fallback": false,
+    "reuse_service": null,
+    "dataset": "eval/datasets/retrieval_curated.json",
+    "n_corpus_docs": 12,
+    "n_unique_queries": 9
+  },
+  "warm_costs_paid_once_ms": {
+    "engine_build_and_corpus_capture": 317.71,
+    "embedding_service_start_and_model_load": 19380.95,
+    "note": "These are paid ONCE for a long-lived server, NOT per request \u2014 exactly what Wave-2 wrongly charged to every call."
+  },
+  "embedding_service": {
+    "backend": "sentence-transformers",
+    "is_real_model": true,
+    "health": {
+      "status": "ok",
+      "embedding": {
+        "model": "BAAI/bge-small-en-v1.5",
+        "dimensions": 1024,
+        "backend": "sentence-transformers"
+      },
+      "reranker": {
+        "model": "cross-encoder/ms-marco-MiniLM-L-6-v2",
+        "backend": "cross-encoder"
+      }
+    },
+    "request_counters": {
+      "GET /health": 2,
+      "POST /embed": 216
+    },
+    "proved_wired": true
+  },
+  "wall_clock_ms": 12441.16,
+  "throughput_qps": 16.08,
+  "components": {
+    "embed_call_only": {
+      "label": "embed_call_only",
+      "p50_ms": 417.16,
+      "p95_ms": 797.57,
+      "p99_ms": 1225.29,
+      "mean_ms": 465.22,
+      "max_ms": 1296.37,
+      "min_ms": 164.13,
+      "p95_ci": {
+        "point": 797.5688,
+        "ci_low": 703.9938,
+        "ci_high": 1034.7293,
+        "ci_method": "bootstrap-pctl"
+      },
+      "p50_ci": {
+        "point": 417.155,
+        "ci_low": 401.3029,
+        "ci_high": 436.1032,
+        "ci_method": "bootstrap-pctl"
+      }
+    },
+    "engine_only": {
+      "label": "engine_only",
+      "p50_ms": 23.29,
+      "p95_ms": 67.79,
+      "p99_ms": 99.33,
+      "mean_ms": 29.06,
+      "max_ms": 151.42,
+      "min_ms": 2.74,
+      "p95_ci": {
+        "point": 67.79,
+        "ci_low": 56.9739,
+        "ci_high": 84.9231,
+        "ci_method": "bootstrap-pctl"
+      },
+      "p50_ci": {
+        "point": 23.2918,
+        "ci_low": 20.8678,
+        "ci_high": 26.1352,
+        "ci_method": "bootstrap-pctl"
+      }
+    },
+    "fast_path_total": {
+      "label": "fast_path_total",
+      "p50_ms": 449.54,
+      "p95_ms": 848.93,
+      "p99_ms": 1258.49,
+      "mean_ms": 494.29,
+      "max_ms": 1322.06,
+      "min_ms": 168.3,
+      "p95_ci": {
+        "point": 848.9323,
+        "ci_low": 749.5374,
+        "ci_high": 1050.3309,
+        "ci_method": "bootstrap-pctl"
+      },
+      "p50_ci": {
+        "point": 449.5406,
+        "ci_low": 436.1719,
+        "ci_high": 462.5452,
+        "ci_method": "bootstrap-pctl"
+      }
+    }
+  },
+  "verdicts": [
+    {
+      "name": "fast_path_total_p95",
+      "p95_ms": 848.93,
+      "target_ms_loose": 400.0,
+      "target_ms_tight": 300.0,
+      "op": "<=",
+      "pass_loose": false,
+      "pass_tight": false,
+      "p95_ci": {
+        "point": 848.9323,
+        "ci_low": 749.5374,
+        "ci_high": 1050.3309,
+        "ci_method": "bootstrap-pctl"
+      }
+    },
+    {
+      "name": "engine_only_p95",
+      "p95_ms": 67.79,
+      "target_ms_loose": 400.0,
+      "target_ms_tight": 300.0,
+      "op": "<=",
+      "pass_loose": true,
+      "pass_tight": true,
+      "p95_ci": {
+        "point": 67.79,
+        "ci_low": 56.9739,
+        "ci_high": 84.9231,
+        "ci_method": "bootstrap-pctl"
+      }
+    },
+    {
+      "name": "embed_call_only_p95",
+      "p95_ms": 797.57,
+      "target_ms_loose": 400.0,
+      "target_ms_tight": 300.0,
+      "op": "<=",
+      "pass_loose": false,
+      "pass_tight": false,
+      "p95_ci": {
+        "point": 797.5688,
+        "ci_low": 703.9938,
+        "ci_high": 1034.7293,
+        "ci_method": "bootstrap-pctl"
+      }
+    }
+  ],
+  "errors": [],
+  "n_errors": 0
+}
