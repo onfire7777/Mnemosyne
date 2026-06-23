@@ -7,10 +7,14 @@ import pytest
 
 from mnemosyne.benchmarks import retrieval_latency_benchmark
 from mnemosyne.engine import LocalMemoryEngine
+from mnemosyne.ingestion import IngestionPipeline, IngestRequest
 from mnemosyne.models import Assertion, Evidence
 from mnemosyne.observability import MetricsRegistry
 from mnemosyne.privacy import ErasureMode, classify_privacy
+from mnemosyne.provenance import HowProvenance, how_provenance_for_sources
+from mnemosyne.queue import InProcessQueue
 from mnemosyne.source_truth import SOURCE_TRUTH_FENCE, parse_markdown_git_blocks
+from mnemosyne.storage import LocalObjectStore
 
 
 TENANT = "tenant-g"
@@ -180,3 +184,94 @@ def test_markdown_git_source_rejects_unclosed_assertion_block(tmp_path: Path) ->
 
     with pytest.raises(ValueError, match="unclosed"):
         parse_markdown_git_blocks(tmp_path)
+
+
+def test_tier0_user_correction_applies_ungated_in_same_turn(tmp_path: Path) -> None:
+    # Blueprint §20.7/§30.2: a tier-0 direct-user correction supersedes prior,
+    # lower-trust memory immediately in the same turn, without the gated warm loop.
+    engine = LocalMemoryEngine()
+    pipeline = IngestionPipeline(
+        engine,
+        object_store=LocalObjectStore(tmp_path / "obj"),
+        queue=InProcessQueue(),
+    )
+    engine.upsert_assertion(
+        Assertion(
+            tenant_id=TENANT,
+            user_id=USER,
+            subject=USER,
+            predicate="manager",
+            object="Bob",
+            confidence=0.6,
+            source_evidence_cids=[],
+            status="active",
+            trust_tier=3,
+            access_policy={"tenant": TENANT},
+        )
+    )
+
+    result = pipeline.ingest(
+        IngestRequest(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="chat",
+            content="No, my manager is Alice now.",
+            correction={"subject": USER, "predicate": "manager", "object": "Alice"},
+        )
+    )
+
+    assert result.correction_applied is True
+    assert result.correction_assertion_id is not None
+
+    manager = [a for a in engine.export_tenant(TENANT)["assertions"] if a["predicate"] == "manager"]
+    active = [a["object"] for a in manager if a["status"] == "active"]
+    assert active == ["Alice"]
+
+
+def test_non_tier0_actor_correction_is_not_applied_ungated() -> None:
+    engine = LocalMemoryEngine()
+    pipeline = IngestionPipeline(engine, queue=InProcessQueue())
+
+    result = pipeline.ingest(
+        IngestRequest(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="assistant",
+            source_type="chat",
+            content="Manager is Carol.",
+            correction={"subject": USER, "predicate": "manager", "object": "Carol"},
+        )
+    )
+
+    assert result.correction_applied is False
+    assert result.correction_assertion_id is None
+
+
+def test_how_provenance_semiring_combines_alternatives_and_prunes_erased() -> None:
+    # Blueprint I5 (Green/Karvounarakis/Tannen 2007): semiring how-provenance
+    # records how sources combine (joint vs alternative) and prunes on erasure.
+    a = HowProvenance.source("cidA")
+    b = HowProvenance.source("cidB")
+
+    joint = a.combine_and(b)
+    alternative = a.combine_or(b)
+    assert joint.tag() == "cidA*cidB"
+    assert alternative.tag() == "cidA + cidB"
+    assert joint.sources() == {"cidA", "cidB"}
+
+    # Semiring identities and positive-Boolean absorption.
+    assert HowProvenance.one().combine_and(a) == a
+    assert HowProvenance.zero().combine_or(a) == a
+    assert a.combine_and(HowProvenance.zero()).is_zero
+    assert a.combine_or(joint) == a  # A + A*B = A
+
+    # §27 erasure: a joint derivation dies if any source is erased; an
+    # independently corroborated fact survives with the erased source dropped.
+    assert joint.prune({"cidA"}).is_zero
+    assert alternative.prune({"cidA"}).tag() == "cidB"
+
+    # Builder helper + lossless round-trip.
+    assert how_provenance_for_sources(["cidA", "cidB"]).tag() == "cidA*cidB"
+    assert how_provenance_for_sources(["cidA", "cidB"], joint=False).tag() == "cidA + cidB"
+    assert HowProvenance.from_dict(alternative.to_dict()) == alternative
