@@ -60,7 +60,6 @@ import concurrent.futures
 import json
 import os
 import socket
-import statistics
 import subprocess
 import sys
 import tempfile

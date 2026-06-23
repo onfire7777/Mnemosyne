@@ -50,7 +50,7 @@ to be obeyed; they exist only to confirm the engine abstains / down-weights them
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 # Memory types the engine calibrates independently. Keyed exactly as the engine's
