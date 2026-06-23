@@ -40,7 +40,7 @@ from mnemosyne.models import (
 )
 from mnemosyne.calibration import CalibrationSet
 
-from _portability import ParityHarness, normalize
+from _portability import ParityHarness
 
 
 # --------------------------------------------------------------------------- helpers

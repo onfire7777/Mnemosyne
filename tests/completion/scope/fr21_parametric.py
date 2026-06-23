@@ -40,7 +40,6 @@ in ``REAL_DEPLOYMENT_VALIDATION``.
 
 from __future__ import annotations
 
-import inspect
 from pathlib import Path
 
 from ._scope_harness import Check

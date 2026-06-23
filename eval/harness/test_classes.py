@@ -16,12 +16,11 @@ Every class is deterministic and isolated to its own tenant + temp store.
 
 from __future__ import annotations
 
-import json
 import tempfile
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from .cli_driver import MnemoCLI
 
