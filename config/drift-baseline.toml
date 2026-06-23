@@ -40,6 +40,15 @@ required = [
   "erasure_propagates_to_derived_indexes",
 ]
 
+[rails.numeric]
+# §31/§23.5 immutable mutation-rate rails. The cold loop tunes WITHIN these and can
+# never widen them, so their VALUES (not just names) are drift-critical. These are
+# the blueprint values; CC-LS exposes them as live constants on OperatingPolicy
+# (parity item #22) and the drift test then pins live == declared.
+max_supersession_rate = 0.05        # fraction of active facts supersedable per pass
+min_corroboration_for_delete = 2    # independent sources before hard delete
+max_prune_fraction_per_pass = 0.02  # fraction of memory prunable per pass
+
 [tunables]
 # Knobs that may move WITHIN rails (§31). Each name must exist on OperatingPolicy.
 # The authoritative tuning range lives in §31; the defaults below snapshot the
