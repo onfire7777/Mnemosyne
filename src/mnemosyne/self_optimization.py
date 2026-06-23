@@ -23,6 +23,14 @@ from mnemosyne.ids import new_id
 from mnemosyne.learning import counterfactual_replay_score
 from mnemosyne.policy import OperatingPolicy
 
+# Single source of truth for the proxy-vs-true gap rail (blueprint §23.5/OQ2).
+# The tripwire monitor, the policy-ops validator, and the default cold-loop
+# counterfactual scorer all bind to this one threshold so they cannot drift apart.
+OQ2_PROXY_TRUE_GAP = 0.15
+# Minimum number of real (predicted, observed) replay pairs before the cold-loop
+# counterfactual proxy is authorized to act on a promotion (OQ2 forcing function).
+OQ2_MIN_REPLAY_WINDOW = 50
+
 
 @dataclass(slots=True)
 class PolicyVariant:
@@ -87,10 +95,38 @@ class TripwireResult:
         return asdict(self)
 
 
+@dataclass(slots=True)
+class ReplayPair:
+    """A paired (replay-predicted lift, observed real lift) sample (I12/OQ2).
+
+    The cold loop records one of these after a promoted self-modification: the
+    lift the counterfactual replay *predicted* and the lift actually *observed*
+    in production. The OQ2 fidelity gate scores these pairs to decide whether the
+    replay proxy is trustworthy enough to gate self-modifications.
+    """
+
+    tenant_id: str
+    variant_id: str
+    predicted_lift: float
+    observed_lift: float
+    id: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.id:
+            self.id = new_id()
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
 class SelfModelStore:
     def __init__(self) -> None:
         self.records: dict[str, SelfModelRecord] = {}
         self.policy_outcomes: dict[str, PolicyOutcome] = {}
+        # Paired (predicted, observed) lift samples for the OQ2 replay-fidelity
+        # gate. Kept separate from bandit ``policy_outcomes`` so recording a pair
+        # never perturbs contextual-bandit scoring.
+        self._replay_pairs: list[ReplayPair] = []
 
     def add(self, record: SelfModelRecord) -> str:
         self.records[record.id] = record
@@ -112,6 +148,31 @@ class SelfModelStore:
         if not matches:
             return None
         return max(matches, key=lambda item: item.window_end)
+
+    def record_replay_pair(
+        self,
+        tenant_id: str,
+        variant_id: str,
+        predicted_lift: float,
+        observed_lift: float,
+    ) -> str:
+        """Record a paired (predicted, observed) lift sample for OQ2 fidelity."""
+        pair = ReplayPair(
+            tenant_id=tenant_id,
+            variant_id=variant_id,
+            predicted_lift=float(predicted_lift),
+            observed_lift=float(observed_lift),
+        )
+        self._replay_pairs.append(pair)
+        return pair.id
+
+    def replay_pairs(self, tenant_id: str) -> list[tuple[float, float]]:
+        """Return the (predicted_lift, observed_lift) pairs for a tenant.
+
+        This is the first-class source of paired data the OQ2 replay-fidelity
+        gate scores (blueprint §30.6 / FR-17).
+        """
+        return [(pair.predicted_lift, pair.observed_lift) for pair in self._replay_pairs if pair.tenant_id == tenant_id]
 
 
 def within_invariant_rails(base: OperatingPolicy, variant: PolicyVariant) -> bool:
@@ -207,7 +268,14 @@ class ShadowPolicyOptimizer:
             branch=f"canary-policy-{variant.id}",
             source_evidence_cids=[],
         )
-        gate = PromotionGate(self.engine, self.cases, counterfactual_hook=counterfactual_hook)
+        # The cold loop consumes the counterfactual replay proxy by default: when
+        # no explicit hook is supplied, attach the default scorer over recorded
+        # replay pairs (veto-only, abstains until proven — blueprint I12/§30.6).
+        gate = PromotionGate(
+            self.engine,
+            self.cases,
+            counterfactual_hook=counterfactual_hook or default_counterfactual_hook(self.self_model),
+        )
 
         def apply(engine: LocalMemoryEngine, branch: str) -> None:
             if not within_invariant_rails(engine.policy, variant):
@@ -287,7 +355,7 @@ class ShadowPolicyOptimizer:
         }
 
 
-def tripwire_check(diversity: float, proxy_score: float, true_score: float, min_diversity: float = 0.2, max_proxy_gap: float = 0.15) -> TripwireResult:
+def tripwire_check(diversity: float, proxy_score: float, true_score: float, min_diversity: float = 0.2, max_proxy_gap: float = OQ2_PROXY_TRUE_GAP) -> TripwireResult:
     gap = abs(proxy_score - true_score)
     if diversity < min_diversity:
         return TripwireResult(False, "diversity below rail", diversity, gap)
@@ -369,6 +437,62 @@ def make_counterfactual_hook(
     return hook
 
 
+def default_counterfactual_hook(
+    self_model: SelfModelStore,
+    *,
+    min_window: int = OQ2_MIN_REPLAY_WINDOW,
+    max_gap: float = OQ2_PROXY_TRUE_GAP,
+) -> CounterfactualHook:
+    """Default cold-loop counterfactual scorer over recorded replay pairs (I12/§30.6).
+
+    This is attached to the promotion gate by default so the cold loop *consumes*
+    the counterfactual replay term on every self-modification decision. It is
+    deterministic and strictly **veto-only**, and it honours the OQ2 forcing
+    function: the proxy is only authorized to act once it has proven fidelity on
+    enough real paired data.
+
+    * Below ``min_window`` recorded pairs, or when the mean proxy-vs-true gap
+      exceeds ``max_gap``, the proxy is unproven -> it ABSTAINS (``passed=True``):
+      it never vetoes on an untrusted proxy, so the regression-suite margin alone
+      decides (the loop stays correctly in shadow).
+    * Once fidelity holds, it vetoes any candidate whose mean predicted lift is
+      negative (a self-modification predicted to regress historical task success).
+    """
+
+    def hook(
+        tenant_id: str,
+        candidate: Candidate,
+        engine: LocalMemoryEngine,
+        passed: list[str],
+        failed: list[str],
+    ) -> CounterfactualVerdict:
+        pairs = self_model.replay_pairs(tenant_id)
+        window = len(pairs)
+        if window < min_window:
+            return CounterfactualVerdict(
+                passed=True,
+                predicted_lift=0.0,
+                reason=f"cf proxy abstains (shadow): {window} replay pairs < window {min_window}",
+            )
+        mean_gap = sum(abs(predicted - observed) for predicted, observed in pairs) / window
+        mean_predicted = sum(predicted for predicted, _ in pairs) / window
+        if mean_gap > max_gap:
+            return CounterfactualVerdict(
+                passed=True,
+                predicted_lift=mean_predicted,
+                reason=f"cf proxy abstains (shadow): fidelity gap {mean_gap:.3f} > {max_gap}",
+            )
+        non_inferior = mean_predicted >= 0.0
+        reason = (
+            "cf proxy authorized: mean predicted lift non-negative"
+            if non_inferior
+            else f"cf proxy vetoes: mean predicted lift {mean_predicted:.3f} < 0"
+        )
+        return CounterfactualVerdict(passed=non_inferior, predicted_lift=mean_predicted, reason=reason)
+
+    return hook
+
+
 def counterfactual_replay(
     engine: LocalMemoryEngine,
     variant: PolicyVariant,
@@ -444,7 +568,7 @@ def validate_policy_ops_bundle(
     min_cadence_window_hours: float = 1.0,
     max_updates_per_day: int = 4,
     min_diversity: float = 0.2,
-    max_proxy_gap: float = 0.15,
+    max_proxy_gap: float = OQ2_PROXY_TRUE_GAP,
 ) -> dict[str, Any]:
     findings: list[dict[str, Any]] = []
     required_ids = list(required_variant_ids or [])
