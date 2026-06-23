@@ -25,6 +25,12 @@ class OperatingPolicy:
     max_trust_tier: int = 4
     max_sensitivity: int = 3
     decay: float = 0.5
+    # §23.5 / §31 immutable mutation-rate rails (numeric). The self-optimization
+    # cold loop may tune *within* these bounds but must never widen them; they are
+    # mirrored by config/drift-baseline.toml and enforced structurally.
+    max_supersession_rate: float = 0.05
+    min_corroboration_for_delete: int = 2
+    max_prune_fraction_per_pass: float = 0.02
     activation_weights: dict[str, float] = field(
         default_factory=lambda: {
             "base_level": 0.35,
