@@ -303,4 +303,27 @@ The code seam exists and the deterministic local behavior is correct and tested;
 
 ---
 
+## 13. Remaining open parity checklist (authoritative — AUX-XREF, from completion-tree `xfail(strict)` markers)
+
+The only blueprint gaps still genuinely open (suite otherwise green; operator-evidence excluded). Each has a built-in acceptance signal: wire the `src` enforcement and the strict-xfail flips to **XPASS** (then remove the xfail note). Owning lane in brackets — these are *not* AUX-DOCS items; this matrix tracks them.
+
+| Open item | Rail / ref | Wire (src) — lane | Acceptance marker |
+|---|---|---|---|
+| `min_corroboration_for_delete=2` gate on hard-delete | §31 RAIL-2 / FR-8 / OQ6 | `engine.forget` + `postgres_engine.forget` HARD_DELETE_LEGAL — [CC-RT/B1 + CC-PG/B4] | `tests/completion/erasure/test_corroborated_erasure.py` + `tests/completion/rails` |
+| consolidation cadence bound (≤5 steps OR 24h) | §21 | `consolidation` — [CC-BC/B12] | `tests/completion/rails/test_consolidation_cadence_bounds.py` |
+| supersession-rate 0.05 pass-level rail | §31 | belief/consolidation — [CC-BC/B12] | `tests/completion/rails/test_supersession_rate.py` |
+| recompute memo / dirty-check substrate (memo_hit_rate=0) | I6 / OQ3 | consolidation/belief — [CC-BC/B12] | `eval/benches/bench_oq3` |
+| ACT-R power-law demotion (currently `exp(-age/45)`) | OQ4 (low-pri) | `lifecycle.py` — [CC-BC/B12] | — |
+| untrusted→system_prompt pass-level rail | §27 / I11 | `security` — [CC-SEC/B10] | `tests/completion/rails/test_untrusted_to_system_prompt.py` |
+| JWKS `enc`-key rejection (real `src` bug) | §27 (live-evidence deferred) | `oidc_jwks.py` — [CC-SEC/B10] | `infra` `validate-keycloak.sh` fails-closed |
+| counterfactual-replay scorer attached to gate hook by default | I12 / §30.6 | self_optimization/gate — [CC-LS/B2] | OQ2 'cf term wired into gate' → True |
+
+**2 headline SLOs unmet on the deterministic engine (decision: wire or formally defer):**
+- **ECE ≈0.20 vs ≤0.05** — needs discriminative confidence (CC-BC/CC-R via the FR-3 embedding seam).
+- **G2 answer-quality lift = 0.0 under `substring_judge`** — needs a real LLM judge command (`eval/judge_claude.py`). This is an `eval/` run-config choice in the completion tree, **not** in AUX-DOCS `config/`; decision owner is the Coordinator/CC-LS, not AUX-DOCS.
+
+Re-verification: ping Builder 7 to re-check any item once its enforcement is wired.
+
+---
+
 *Update protocol: AUX-DOCS refreshes this matrix as lanes report `worker_done`. Source of truth for any disputed status is the cited file, not this synthesis.*
