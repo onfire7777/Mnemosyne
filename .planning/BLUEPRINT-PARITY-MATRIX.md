@@ -143,7 +143,7 @@ several carry production-evidence gates (release-audit / provider-check / OIDC-J
 ## 6. NFRs (§15) & success metrics (§16)
 
 - **NFRs:** reliability / privacy / portability / observability ✅. Latency 🟡 (P95<300ms proven only on small in-memory seed, not at 10⁵ scale). Scale/cost 🟡 (no volume/cost benchmark) → 🔒 scale benchmarks.
-- **Success metrics (§16):** all 🟡 — P95 / abstention-rate / contradiction-backlog are measured, but **recall@k, nDCG, ECE, poison-block-rate%, TTL-lift-slope are not yet computed** (#10, #21). Harnesses exist; the numbers do not. Closing these is measurement work, not new features.
+- **Success metrics (§16):** the measurement cluster is now **implemented-in-`eval/`** (see §11) — recall@k / nDCG / ECE / poison-block-rate / latency-SLO are real and computable (`eval/harness/metrics.py`, `eval/calibration/`, `eval/latency/`). AUX-QA (B6) confirms at-target by running them; prod-scale SLO at volume stays 🔒 (§8). *(Pre-completion snapshot read 🟡 "harnesses exist, numbers do not"; that is now closed structurally.)*
 
 ---
 
@@ -251,6 +251,28 @@ The `completion/blueprint-parity` bundle landed on `main` (`70f34dd`; additive �
 | #29/#30 | CC-RT `route()` + long-horizon anti-degradation (§30.4/§25) | `28decd7` |
 
 Both formerly-missing **features** (#23 tier-0 correction, #24 learn-from-mistakes) are now implemented, collapsing the AUX-XREF "2 ❌ features" headline to 0. Remaining toward Phase-6 done: residual depth items in §7 not listed above, the final no-DSN gate (AUX-QA), genuinely-cloud 🔒 evidence (§8), and the CC-SYNC origin push. The §2–§7 status cells above are the pre-completion audit snapshot; this section is the current overlay.
+
+---
+
+## 11. Completion-tree (`eval/`) audit — folded from AUX-XREF section H
+
+The §2–§7 audit was `src/mnemosyne/`-scoped. Builder 7's re-verification pass over the merged completion tree (behavior-read of function bodies, not name-matching) closes the dominant 🟡 **measurement** cluster with real `eval/` implementations:
+
+| §16/§33 metric | Status | Implementation (AUX-XREF-verified) |
+|---|---|---|
+| recall@k + nDCG@k (#10/#21) | ✅ implemented-in-`eval/` | `eval/harness/metrics.py:recall_at_k / dcg_at_k / ndcg_at_k` (real DCG/IDCG) |
+| ECE / calibration (#21) | ✅ implemented-in-`eval/` | `metrics.py:expected_calibration_error`; `eval/calibration/runner.py` drives the real engine → ECE + Brier + reliability table |
+| answer-quality vs full-context (G2) | ✅ implemented-in-`eval/` | `eval/harness/answer_quality.py` (≥+15% quality at ≤10% tokens; tiktoken + substring/LLM judge) |
+| poison-block-rate (#21) | ✅ implemented-in-`eval/` | `eval/harness/suites.py:poison_suite_eval` + `poison_block_rate_g7` ≥0.95 gate, asserted in `eval/tests/test_harness_integration.py` |
+| latency SLO (NFR-latency) | ✅ implemented-in-`eval/` | `eval/latency/bench.py` + `metrics.py:percentile/latency_summary` (p50/p95), `eval/latency_warm/`, `eval/datasets/v2/run_slo_v2_definitive.py`; Wilson / bootstrap intervals |
+| regression-ignition (OQ) | ✅ implemented-in-`eval/` | `eval/ignition_seed/` (cases.json + loader + ignition_status) |
+| OQ3 recompute-amplification / OQ7 capability-overhead | ✅ benched | `eval/benches/bench_oq3_*` + `bench_oq7_*` |
+
+Also verified-closed by AUX-XREF on the merged baseline (`@67cbf6c`): **#23** tier-0 correction (`ingestion.py:is_tier0_user_correction`→ungated `upsert_assertion`, `c582e82`), **#24** user-mistake support strategy (`user_model.py:record_user_mistake`→scoped `SupportStrategy`, `1dc9141`), **#25** semiring how-provenance (`provenance.py:HowProvenance` combine_or/and/prune, `c82cb77`).
+
+**Caveat (AUX-QA owns):** these harnesses target the deterministic local engine; "green / at-target" is confirmed by AUX-QA (B6) *running* them, not asserted here.
+
+**Explicit DEFERRED (🔒 operator-run — NOT closed by `eval/`):** prod-scale SLO at volume (10⁵ local / 10⁸ prod); real C2PA signature / certificate-chain; real LoRA / test-time-training trainer; live IdP/JWKS + KMS/Vault rotation. FR-16 latent embedding stays an accepted deterministic local default (`hashing_embedding`) behind the existing HTTP embedding boundary — not a defect.
 
 ---
 
