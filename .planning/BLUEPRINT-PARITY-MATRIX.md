@@ -296,8 +296,9 @@ The code seam exists and the deterministic local behavior is correct and tested;
 - **salience → activation behavioral wiring** — the column is present (12.1); wiring it into the activation scorer is an opt-in seam.
 - **FR-16 latent learned embedding** — the HTTP embedding boundary exists; the deterministic `hashing_embedding` is the intended local-mode default, not a stand-in to "fix."
 
-### 12.3 DEFERRED-OPERATOR — 🔒 not codeable in this environment (requires real infrastructure an operator runs)
+### 12.3 DEFERRED-OPERATOR — 🔒 not codeable in this environment (requires real infrastructure / a real model an operator runs)
 - Prod-scale SLO at volume (10⁵ local / 10⁸ prod); real C2PA signature / certificate-chain; real LoRA / test-time-training trainer deployment; live IdP/JWKS + KMS/Vault + TLS rotation; production ParadeDB/BM25, Apache AGE, and hosted reranker adapters. The provider boundaries already exist in code.
+- **ECE ≈0.20 vs ≤0.05** and **G2 answer-quality lift = 0.0** — **FORMALLY DEFERRED-operator** (Coordinator ruling): both are model-dependent and unreachable by the deterministic local engine. ECE needs discriminative *real* embeddings; G2 needs a *real* LLM judge command (the deterministic `substring_judge` cannot show lift). The harnesses + seams exist (`eval/calibration/`, `eval/harness/answer_quality.py`, `eval/judge_claude.py`); only the real model backend is deferred. This is exactly the limit the blueprint **§11.13 honesty map** predicts for a deterministic local scaffold — not a code defect or a fabricated metric.
 
 **Honest "complete":** 12.1 is done; 12.2 is a rationale-backed scope boundary (seams present, deterministic local behavior correct + tested); 12.3 is the operator's deployment surface with boundaries already in place.
 
@@ -318,9 +319,9 @@ The only blueprint gaps still genuinely open (suite otherwise green; operator-ev
 | JWKS `enc`-key rejection (real `src` bug) | §27 (live-evidence deferred) | `oidc_jwks.py` — [CC-SEC/B10] | `infra` `validate-keycloak.sh` fails-closed |
 | counterfactual-replay scorer attached to gate hook by default | I12 / §30.6 | self_optimization/gate — [CC-LS/B2] | OQ2 'cf term wired into gate' → True |
 
-**2 headline SLOs unmet on the deterministic engine (decision: wire or formally defer):**
-- **ECE ≈0.20 vs ≤0.05** — needs discriminative confidence (CC-BC/CC-R via the FR-3 embedding seam).
-- **G2 answer-quality lift = 0.0 under `substring_judge`** — needs a real LLM judge command (`eval/judge_claude.py`). This is an `eval/` run-config choice in the completion tree, **not** in AUX-DOCS `config/`; decision owner is the Coordinator/CC-LS, not AUX-DOCS.
+**2 headline SLOs — FORMALLY DEFERRED-operator** (Coordinator ruling; see §12.3): both are model-dependent and the deterministic local engine cannot meet them — consistent with the blueprint **§11.13 honesty map**. The eval harness + seams are present; only the real model backend is deferred.
+- **ECE ≈0.20 vs ≤0.05** — needs discriminative *real* embeddings (the FR-3 embedding seam exists; the real model is deferred).
+- **G2 answer-quality lift = 0.0 under `substring_judge`** — needs a *real* LLM judge command (`eval/judge_claude.py`); the deterministic substring judge cannot show lift. Not an AUX-DOCS `config/` item.
 
 Re-verification: ping Builder 7 to re-check any item once its enforcement is wired.
 
