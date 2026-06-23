@@ -58,9 +58,12 @@ CREATE TABLE IF NOT EXISTS assertions (
   scope JSONB NOT NULL DEFAULT '{}'::jsonb,
   confidence REAL NOT NULL CHECK (confidence >= 0 AND confidence <= 1),
   calibration JSONB NOT NULL DEFAULT '{}'::jsonb,
+  calibrated_confidence REAL CHECK (calibrated_confidence IS NULL OR (calibrated_confidence >= 0 AND calibrated_confidence <= 1)),
+  salience REAL NOT NULL DEFAULT 0.5,
   valid_from TIMESTAMPTZ NOT NULL DEFAULT now(),
   valid_to TIMESTAMPTZ,
   transaction_time TIMESTAMPTZ NOT NULL DEFAULT now(),
+  recorded_time TIMESTAMPTZ NOT NULL DEFAULT now(),
   expired_at TIMESTAMPTZ,
   justification_id UUID,
   source_evidence_cids BYTEA[] NOT NULL DEFAULT '{}',
@@ -125,8 +128,13 @@ CREATE TABLE IF NOT EXISTS relations (
   predicate TEXT NOT NULL,
   target TEXT NOT NULL,
   confidence REAL NOT NULL DEFAULT 0.7 CHECK (confidence >= 0 AND confidence <= 1),
+  weight REAL NOT NULL DEFAULT 1.0,
   valid_from TIMESTAMPTZ NOT NULL DEFAULT now(),
   valid_to TIMESTAMPTZ,
+  recorded_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  expired_at TIMESTAMPTZ,
+  justification_id UUID,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'superseded', 'retracted')),
   source_evidence_cids BYTEA[] NOT NULL DEFAULT '{}',
   access_policy JSONB NOT NULL DEFAULT '{}'::jsonb,
   FOREIGN KEY (tenant_id, branch) REFERENCES branches(tenant_id, name),
@@ -186,7 +194,8 @@ CREATE TABLE IF NOT EXISTS preferences (
   source_evidence_cids BYTEA[] NOT NULL DEFAULT '{}',
   valid_from TIMESTAMPTZ NOT NULL DEFAULT now(),
   valid_to TIMESTAMPTZ,
-  status TEXT NOT NULL DEFAULT 'active'
+  status TEXT NOT NULL DEFAULT 'active',
+  superseded_by UUID
 );
 
 CREATE TABLE IF NOT EXISTS user_latent (
@@ -468,3 +477,30 @@ DROP POLICY IF EXISTS runtime_state_tenant_isolation ON runtime_state;
 CREATE POLICY runtime_state_tenant_isolation ON runtime_state
   USING (tenant_id = mnemosyne_current_tenant())
   WITH CHECK (tenant_id = mnemosyne_current_tenant());
+
+-- ===========================================================================
+-- Additive blueprint-parity columns (idempotent migration).
+-- These are declared inline in the CREATE TABLE statements above for fresh
+-- loads; the ADD COLUMN IF NOT EXISTS statements below bring pre-existing
+-- deployments up to the canonical structure without a full reload. They are
+-- additive-only (nullable or defaulted), so existing rows and the engine's
+-- row->model converters (which read columns explicitly) are unaffected.
+-- Rollback is a corresponding DROP COLUMN; no data is destroyed by adding.
+-- ===========================================================================
+
+-- assertions: I4 activation salience, I8 calibrated confidence, explicit recorded (transaction) time.
+ALTER TABLE assertions ADD COLUMN IF NOT EXISTS salience REAL NOT NULL DEFAULT 0.5;
+ALTER TABLE assertions ADD COLUMN IF NOT EXISTS calibrated_confidence REAL
+  CHECK (calibrated_confidence IS NULL OR (calibrated_confidence >= 0 AND calibrated_confidence <= 1));
+ALTER TABLE assertions ADD COLUMN IF NOT EXISTS recorded_time TIMESTAMPTZ NOT NULL DEFAULT now();
+
+-- relations: edge weight, bitemporal recorded/expired time, belief-core link, lifecycle status.
+ALTER TABLE relations ADD COLUMN IF NOT EXISTS weight REAL NOT NULL DEFAULT 1.0;
+ALTER TABLE relations ADD COLUMN IF NOT EXISTS recorded_at TIMESTAMPTZ NOT NULL DEFAULT now();
+ALTER TABLE relations ADD COLUMN IF NOT EXISTS expired_at TIMESTAMPTZ;
+ALTER TABLE relations ADD COLUMN IF NOT EXISTS justification_id UUID;
+ALTER TABLE relations ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active'
+  CHECK (status IN ('active', 'superseded', 'retracted'));
+
+-- preferences: supersession pointer for revised preferences.
+ALTER TABLE preferences ADD COLUMN IF NOT EXISTS superseded_by UUID;
