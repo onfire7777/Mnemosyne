@@ -389,3 +389,50 @@ def test_deep_search_graph_channel_respects_tenant_and_branch_isolation() -> Non
 
 def test_seed_regression_suite_passes() -> None:
     assert_seed_suite_passes()
+
+
+def test_memory_engine_protocol_is_runtime_checkable_and_local_engine_conforms() -> None:
+    """WR-03: the runtime engine surface is a runtime-checkable substitutability contract.
+
+    The blueprint requires the runtime (CLI/MCP) to bind either the deterministic
+    local engine or the Postgres adapter behind a single promoted protocol. A
+    ``@runtime_checkable`` ``MemoryEngine`` lets callers assert substitutability at
+    runtime, not only under a static type checker.
+    """
+    from mnemosyne.engine import MemoryEngine
+
+    engine = LocalMemoryEngine()
+    assert isinstance(engine, MemoryEngine)
+
+
+def test_memory_engine_protocol_is_publicly_exported() -> None:
+    """WR-03: the substitutability contract is part of the public package API.
+
+    Promoting the protocol means downstream runtime code and alternative engine
+    implementations can import ``MemoryEngine`` from the package root and type
+    against it without reaching into ``mnemosyne.engine`` internals.
+    """
+    import mnemosyne
+
+    assert "MemoryEngine" in mnemosyne.__all__
+    assert mnemosyne.MemoryEngine is mnemosyne.engine.MemoryEngine
+
+
+def test_local_engine_implements_full_runtime_protocol_surface() -> None:
+    """WR-03: every method declared on the protocol is callable on the local engine.
+
+    Guarantees drop-in substitutability: the runtime can dispatch any protocol
+    method against ``LocalMemoryEngine`` without an ``AttributeError``.
+    """
+    from mnemosyne.engine import MemoryEngine
+
+    protocol_methods = {
+        name
+        for name in dir(MemoryEngine)
+        if not name.startswith("_") and callable(getattr(MemoryEngine, name, None))
+    }
+    assert protocol_methods, "MemoryEngine protocol declared no methods"
+
+    engine = LocalMemoryEngine()
+    missing = sorted(name for name in protocol_methods if not callable(getattr(engine, name, None)))
+    assert not missing, f"LocalMemoryEngine is missing protocol methods: {missing}"

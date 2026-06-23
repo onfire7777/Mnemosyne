@@ -1,6 +1,6 @@
 """Mnemosyne memory compiler package."""
 
-from mnemosyne.engine import LocalMemoryEngine
+from mnemosyne.engine import LocalMemoryEngine, MemoryEngine
 from mnemosyne.belief import BeliefRevisionCore
 from mnemosyne.benchmarks import LatencyBenchmarkResult
 from mnemosyne.calibration import CalibrationSet
@@ -58,6 +58,7 @@ __all__ = [
     "LatencyBenchmarkResult",
     "LearningSystem",
     "LIFECYCLE_SWEEP_JOB",
+    "MemoryEngine",
     "NoDegradationResult",
     "OBSERVABILITY_SNAPSHOT_JOB",
     "OperatingPolicy",
