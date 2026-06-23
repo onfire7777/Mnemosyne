@@ -1618,3 +1618,66 @@ def test_postgres_gated_consolidation_uses_command_providers_live(tmp_path) -> N
     assert exported["assertions"][0]["subject"] == "Postgres command target"
     assert exported["assertions"][0]["object"] == "local CLI"
     assert exported["entities"][0]["canonical"] == "live-resolved-postgres-command-target"
+
+
+def test_schema_sql_persists_every_field_of_core_models() -> None:
+    """Schema-drift guard for the Postgres backend.
+
+    Every field on the canonical (frozen) ``models.py`` dataclasses must have a
+    matching column in ``sql/schema.sql`` for its table. This pins the
+    model<->schema parity verified during the CC-PG blueprint audit and fails
+    loudly on silent renames (e.g. a model field or column renamed on only one
+    side) so the Postgres engine never drops persisted state. The check is pure
+    introspection plus a DDL parse and needs no live database.
+    """
+    import dataclasses
+    import re
+
+    from mnemosyne.models import (
+        Assertion,
+        Contradiction,
+        Evidence,
+        Justification,
+        Preference,
+        Relation,
+    )
+
+    schema_sql = (Path(__file__).resolve().parents[1] / "sql" / "schema.sql").read_text(encoding="utf-8")
+
+    def columns_for(table: str) -> set[str]:
+        match = re.search(
+            rf"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?{table}\s*\((.*?)\n\);",
+            schema_sql,
+            re.IGNORECASE | re.DOTALL,
+        )
+        assert match is not None, f"table {table!r} missing from sql/schema.sql"
+        columns: set[str] = set()
+        for line in match.group(1).splitlines():
+            stripped = line.strip().rstrip(",")
+            if not stripped:
+                continue
+            if re.match(
+                r"(primary\s+key|foreign\s+key|unique|constraint|check|exclude|like)\b",
+                stripped,
+                re.IGNORECASE,
+            ):
+                continue
+            column = re.match(r'"?([a-zA-Z_]\w*)"?\s', stripped)
+            if column:
+                columns.add(column.group(1).lower())
+        return columns
+
+    model_to_table = {
+        Assertion: "assertions",
+        Relation: "relations",
+        Preference: "preferences",
+        Evidence: "evidence",
+        Justification: "justifications",
+        Contradiction: "contradictions",
+    }
+    for model, table in model_to_table.items():
+        fields = {field.name.lower() for field in dataclasses.fields(model)}
+        missing = sorted(fields - columns_for(table))
+        assert not missing, (
+            f"{model.__name__} fields not persisted by schema.sql table {table!r}: {missing}"
+        )
