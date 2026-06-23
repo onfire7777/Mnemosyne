@@ -1022,3 +1022,64 @@ class QuarantineBoundary:
             int(TrustTier.UNTRUSTED_EXTERNAL),
             operation,
         )
+
+
+#: Sinks whose content is treated as *instruction* and must never receive
+#: untrusted/retrieved data (blueprint §27/I11 RAIL-6, the MemoryTrap fix).
+INSTRUCTION_SINKS: frozenset[str] = frozenset({"system_prompt", "policy", "safety_rail"})
+
+
+def is_safe_for_system_prompt(trust_tier: int, capability_tags: Sequence[str] | None = None) -> bool:
+    """Whether a retrieved item may be routed into an instruction sink.
+
+    Per §27/I11 RAIL-6, untrusted-external/low-trust or sanitized/quarantined
+    data is *data, never instruction*, so it must never enter the system prompt.
+    Returns ``True`` only for non-tainted items whose trust tier is above the
+    low/untrusted band (tiers 0–3); tainted or tier 4–5 items are refused.
+    """
+
+    if is_write_tainted(capability_tags):
+        return False
+    return int(trust_tier) < int(TrustTier.LOW)
+
+
+class SystemPromptSinkError(PermissionError):
+    """Raised when untrusted/sanitized retrieved data is routed into an instruction sink."""
+
+
+def assemble_system_prompt(
+    hits: object,
+    *,
+    sink: str = "system_prompt",
+    base_instructions: str | None = None,
+) -> str:
+    """Assemble an instruction-sink prompt, refusing untrusted/sanitized hits.
+
+    Structurally enforces RAIL-6 at serve time (§27/I11): when ``sink`` is an
+    instruction sink, any retrieval hit that is untrusted or carries no-write
+    taint tags raises :class:`SystemPromptSinkError`, so the
+    ``retrieved_text_is_data_not_instruction`` rail is an enforced boundary
+    rather than a declared convention. Hits are duck-typed (``.trust_tier``,
+    ``.metadata`` mapping with optional ``capability_tags``, ``.text``) so this
+    module needs no dependency on the engine/model layer. Non-instruction sinks
+    are assembled without the guard (retrieved data is legitimately placed into
+    the data/context portion of a prompt).
+    """
+
+    parts: list[str] = []
+    if base_instructions:
+        parts.append(str(base_instructions))
+    guarded = sink in INSTRUCTION_SINKS
+    for hit in hits:  # type: ignore[attr-defined]
+        trust_tier = int(getattr(hit, "trust_tier", int(TrustTier.UNTRUSTED_EXTERNAL)))
+        metadata = getattr(hit, "metadata", None)
+        tags = metadata.get("capability_tags") if isinstance(metadata, Mapping) else None
+        if guarded and not is_safe_for_system_prompt(trust_tier, tags):
+            raise SystemPromptSinkError(
+                "untrusted or sanitized retrieved data may not enter the "
+                f"{sink!r} sink (data is not instruction)"
+            )
+        text = getattr(hit, "text", "")
+        if text:
+            parts.append(str(text))
+    return "\n".join(parts)
