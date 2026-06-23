@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import math
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from hashlib import sha256
@@ -13,6 +13,7 @@ from typing import Any
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.gate import Candidate, GateResult, PromotionGate, RegressionCase
 from mnemosyne.ids import new_id
+from mnemosyne.learning import counterfactual_replay_score
 from mnemosyne.policy import OperatingPolicy
 
 
@@ -245,6 +246,30 @@ class ShadowPolicyOptimizer:
             metrics=metrics,
         )
 
+    def counterfactual_evaluate(
+        self,
+        tenant_id: str,
+        variant: PolicyVariant,
+        sessions: Sequence[ReplaySession],
+    ) -> dict[str, Any]:
+        """Cold-loop promotion decision gated by the §23.3 suite AND I12 replay.
+
+        Runs the relevance-scoped regression-suite gate ([[evaluate_variant]])
+        and counterfactual replay of historical ``sessions`` against the
+        candidate. The variant is promoted only when the gate clears *and* the
+        replay is non-inferior — exactly §23.3 step 3 ("non-inferior and no
+        protected-case regression"). This is the seam that wires
+        :func:`mnemosyne.learning.counterfactual_replay_score` into promotion.
+        """
+        gate_result = self.evaluate_variant(tenant_id, variant)
+        replay = counterfactual_replay(self.engine, variant, sessions)
+        promoted = bool(gate_result.promoted) and replay.non_inferior
+        return {
+            "promoted": promoted,
+            "gate": gate_result.to_dict(),
+            "replay": replay.to_dict(),
+        }
+
 
 def tripwire_check(diversity: float, proxy_score: float, true_score: float, min_diversity: float = 0.2, max_proxy_gap: float = 0.15) -> TripwireResult:
     gap = abs(proxy_score - true_score)
@@ -253,6 +278,88 @@ def tripwire_check(diversity: float, proxy_score: float, true_score: float, min_
     if gap > max_proxy_gap:
         return TripwireResult(False, "proxy score diverges from true score", diversity, gap)
     return TripwireResult(True, "tripwires clear", diversity, gap)
+
+
+@dataclass(slots=True)
+class ReplaySession:
+    """A historical session replayed against a candidate memory state (I12)."""
+
+    tenant_id: str
+    query: str
+    expected_substring: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(slots=True)
+class CounterfactualReplayReport:
+    """Result of counterfactual replay (blueprint I12 / §23.3 step 2)."""
+
+    before_successes: int
+    after_successes: int
+    total: int
+    lift: float
+    non_inferior: bool
+    sessions: list[dict[str, Any]] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+def _session_succeeds(engine: LocalMemoryEngine, session: ReplaySession) -> bool:
+    # Mirror the promotion gate's success criterion exactly (gate.py): the
+    # expected answer must surface in retrieved hit text and not be abstained.
+    result = engine.retrieve(session.query, session.tenant_id)
+    rendered = "\n".join(getattr(hit, "text", "") for hit in result.hits)
+    return session.expected_substring.lower() in rendered.lower() and not getattr(result, "abstained", False)
+
+
+def counterfactual_replay(
+    engine: LocalMemoryEngine,
+    variant: PolicyVariant,
+    sessions: Sequence[ReplaySession],
+) -> CounterfactualReplayReport:
+    """Replay historical sessions against a candidate policy (blueprint I12 / §30.6).
+
+    Measures *would-it-have-helped*: every session is scored against the current
+    (baseline) policy and then against ``variant`` applied to the engine, then
+    the engine policy is restored. This is a pure shadow evaluation — it never
+    mutates production state. Cold-loop promotion (§23.3 step 3) requires the
+    returned report to be ``non_inferior`` (no historical regression).
+    """
+    baseline = engine.policy
+    if not within_invariant_rails(baseline, variant):
+        raise ValueError("counterfactual replay variant violates invariant rails")
+    before = 0
+    after = 0
+    details: list[dict[str, Any]] = []
+    try:
+        for session in sessions:
+            engine.policy = baseline
+            baseline_hit = _session_succeeds(engine, session)
+            candidate_policy = OperatingPolicy.from_dict(baseline.to_dict())
+            candidate_policy.activation_weights = dict(variant.activation_weights)
+            candidate_policy.abstention_threshold = variant.abstention_threshold
+            candidate_policy.top_k = variant.top_k
+            engine.policy = candidate_policy
+            candidate_hit = _session_succeeds(engine, session)
+            before += int(baseline_hit)
+            after += int(candidate_hit)
+            details.append(
+                {"query": session.query, "baseline": baseline_hit, "candidate": candidate_hit}
+            )
+    finally:
+        engine.policy = baseline
+    total = len(sessions)
+    return CounterfactualReplayReport(
+        before_successes=before,
+        after_successes=after,
+        total=total,
+        lift=counterfactual_replay_score(before, after, total),
+        non_inferior=after >= before,
+        sessions=details,
+    )
 
 
 def policy_variant_from_dict(row: Mapping[str, Any]) -> PolicyVariant:
