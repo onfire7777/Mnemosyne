@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install ruff
+        run: python -m pip install --upgrade pip ruff
+      - name: ruff check
+        run: ruff check .
+
+  test:
+    name: Unit + drift checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install package and test deps
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[mcp]' pytest
+      - name: Run test suite (local backend; live-Postgres tests self-skip)
+        run: python -m pytest
+      - name: Drift checks only (explicit gate)
+        run: python -m pytest tests/test_config_drift.py -q
+
+  postgres:
+    name: Postgres integration
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: mnemosyne
+          POSTGRES_USER: mnemosyne
+          POSTGRES_PASSWORD: mnemosyne-local-dev
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U mnemosyne -d mnemosyne"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      MNEMOSYNE_POSTGRES_DSN: postgresql://mnemosyne:mnemosyne-local-dev@localhost:5432/mnemosyne
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install package with Postgres + MCP extras
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[mcp,postgres]' pytest
+      - name: Load canonical schema
+        run: psql "$MNEMOSYNE_POSTGRES_DSN" -f sql/schema.sql
+      - name: Run Postgres-backed live tests
+        run: python -m pytest tests/test_postgres_engine_live.py -q
