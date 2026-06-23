@@ -1,0 +1,22 @@
+# Mnemosyne embedding + cross-encoder reranker microservice.
+#
+# The service RUNS with zero third-party packages (stdlib http.server +
+# deterministic contract-correct fallback encoder). Installing the packages
+# below activates the REAL model path:
+#
+#   * FastAPI + uvicorn  -> production ASGI HTTP layer (auto-detected at startup)
+#   * sentence-transformers / torch -> real dense embeddings (BAAI/bge-small-en-v1.5
+#     or sentence-transformers/all-MiniLM-L6-v2) and the real cross-encoder
+#     reranker (cross-encoder/ms-marco-MiniLM-L-6-v2)
+#
+# Pin ranges are intentionally loose; pin exactly for a reproducible deploy.
+
+# --- HTTP layer (real path) ---
+fastapi>=0.110
+uvicorn[standard]>=0.29
+
+# --- Real models (real path) ---
+# torch is a large download; install the build matching your platform/accelerator.
+# See https://pytorch.org/get-started/locally/ for CUDA/MPS/CPU wheels.
+torch>=2.1
+sentence-transformers>=2.7

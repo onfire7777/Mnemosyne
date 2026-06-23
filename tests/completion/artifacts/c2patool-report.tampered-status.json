@@ -1,0 +1,9 @@
+{
+  "validation_status": [
+    {
+      "code": "assertion.dataHash.mismatch",
+      "url": "self#jumbf=/c2pa/urn:uuid:5d44131c-64a8-404c-84df-19ad1bd29e01/c2pa.assertions/c2pa.hash.data",
+      "explanation": "asset hash error, name: jumbf manifest, error: hash verification( Hashes do not match )"
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "ignition_n": 40,
+  "suite_size": 41,
+  "mode": "ACTIVE",
+  "updated_at": "2026-06-21T23:51:07.699762+00:00",
+  "history": [
+    {
+      "at": "2026-06-21T23:51:07.699762+00:00",
+      "suite_size": 41,
+      "ignition_n": 40,
+      "mode": "ACTIVE",
+      "note": "backend=postgres quick=False"
+    }
+  ]
+}

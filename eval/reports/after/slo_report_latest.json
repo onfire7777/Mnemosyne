@@ -1,0 +1,1042 @@
+{
+  "meta": {
+    "generated_at": "2026-06-21T23:36:02.892306+00:00",
+    "backend": "local",
+    "embedding_path": "external service (flags forwarded)",
+    "global_flags": [
+      "--embedding-provider",
+      "http",
+      "--embedding-url",
+      "http://127.0.0.1:8000/embed",
+      "--reranker-provider",
+      "http",
+      "--reranker-url",
+      "http://127.0.0.1:8000/rerank"
+    ],
+    "quick": false,
+    "harness_version": "1.0"
+  },
+  "ignition": {
+    "ignition_n": 40,
+    "suite_size": 41,
+    "mode": "ACTIVE",
+    "updated_at": "2026-06-21T23:36:02.889904+00:00",
+    "history": [
+      {
+        "at": "2026-06-21T23:36:02.889904+00:00",
+        "suite_size": 41,
+        "ignition_n": 40,
+        "mode": "ACTIVE",
+        "note": "backend=local quick=False"
+      }
+    ]
+  },
+  "overall": {
+    "passed": 8,
+    "total": 15,
+    "all_pass": false
+  },
+  "slo_suites": [
+    {
+      "suite": "retrieval",
+      "k": 5,
+      "n_queries": 9,
+      "recall_at_k": {
+        "mean": 0.7222,
+        "point": 0.7222,
+        "ci_low": 0.4444,
+        "ci_high": 0.9444,
+        "ci_method": "bootstrap"
+      },
+      "ndcg_at_k": {
+        "mean": 0.6667,
+        "point": 0.6667,
+        "ci_low": 0.3763,
+        "ci_high": 0.914,
+        "ci_method": "bootstrap"
+      },
+      "abstention": {
+        "unanswerable_cases": 1,
+        "correctly_abstained": 0,
+        "precision": 0.0
+      },
+      "verdicts": [
+        {
+          "name": "recall@k",
+          "value": 0.7222,
+          "target": 0.8,
+          "op": ">=",
+          "pass": false,
+          "ci": {
+            "point": 0.7222,
+            "ci_low": 0.4444,
+            "ci_high": 0.9444,
+            "ci_method": "bootstrap"
+          }
+        },
+        {
+          "name": "nDCG@k",
+          "value": 0.6667,
+          "target": 0.8,
+          "op": ">=",
+          "pass": false,
+          "ci": {
+            "point": 0.6667,
+            "ci_low": 0.3763,
+            "ci_high": 0.914,
+            "ci_method": "bootstrap"
+          }
+        }
+      ],
+      "per_query": [
+        {
+          "qid": "q_capital_france",
+          "recall_at_k": 1.0,
+          "ndcg_at_k": 1.0,
+          "retrieved": [
+            "d_paris",
+            "d_tokyo",
+            "d_berlin",
+            "d_seine_len",
+            "d_meeting"
+          ],
+          "relevant": [
+            "d_paris"
+          ]
+        },
+        {
+          "qid": "q_capital_germany",
+          "recall_at_k": 1.0,
+          "ndcg_at_k": 1.0,
+          "retrieved": [
+            "d_berlin",
+            "d_tokyo",
+            "d_paris",
+            "d_madrid",
+            "d_rome"
+          ],
+          "relevant": [
+            "d_berlin"
+          ]
+        },
+        {
+          "qid": "q_capital_japan",
+          "recall_at_k": 1.0,
+          "ndcg_at_k": 1.0,
+          "retrieved": [
+            "d_tokyo",
+            "d_madrid",
+            "d_rome",
+            "d_paris",
+            "d_berlin"
+          ],
+          "relevant": [
+            "d_tokyo"
+          ]
+        },
+        {
+          "qid": "q_db_pref",
+          "recall_at_k": 0.5,
+          "ndcg_at_k": 0.6131,
+          "retrieved": [
+            "d_pref_db",
+            "d_budget",
+            "d_rome",
+            "d_meeting",
+            "d_oncall"
+          ],
+          "relevant": [
+            "d_pref_db",
+            "d_deploy"
+          ]
+        },
+        {
+          "qid": "q_lang_pref",
+          "recall_at_k": 0.0,
+          "ndcg_at_k": 0.0,
+          "retrieved": [
+            "d_pref_db",
+            "d_madrid",
+            "d_rome",
+            "d_budget",
+            "d_oncall"
+          ],
+          "relevant": [
+            "d_pref_lang"
+          ]
+        },
+        {
+          "qid": "q_meeting_day",
+          "recall_at_k": 1.0,
+          "ndcg_at_k": 1.0,
+          "retrieved": [
+            "d_meeting",
+            "d_paris",
+            "d_rome",
+            "d_seine_len",
+            "d_deploy"
+          ],
+          "relevant": [
+            "d_meeting"
+          ]
+        },
+        {
+          "qid": "q_budget",
+          "recall_at_k": 1.0,
+          "ndcg_at_k": 1.0,
+          "retrieved": [
+            "d_budget",
+            "d_rome",
+            "d_tokyo",
+            "d_deploy",
+            "d_meeting"
+          ],
+          "relevant": [
+            "d_budget"
+          ]
+        },
+        {
+          "qid": "q_oncall",
+          "recall_at_k": 1.0,
+          "ndcg_at_k": 0.3869,
+          "retrieved": [
+            "d_madrid",
+            "d_rome",
+            "d_meeting",
+            "d_seine_len",
+            "d_oncall"
+          ],
+          "relevant": [
+            "d_oncall"
+          ]
+        },
+        {
+          "qid": "q_seine",
+          "recall_at_k": 0.0,
+          "ndcg_at_k": 0.0,
+          "retrieved": [
+            "d_paris",
+            "d_madrid",
+            "d_pref_db",
+            "d_meeting",
+            "d_deploy"
+          ],
+          "relevant": [
+            "d_seine_len"
+          ]
+        },
+        {
+          "qid": "q_unanswerable",
+          "answerable": false,
+          "abstained": false
+        }
+      ]
+    },
+    {
+      "suite": "retrieval",
+      "k": 5,
+      "n_queries": 16,
+      "recall_at_k": {
+        "mean": 0.875,
+        "point": 0.875,
+        "ci_low": 0.6875,
+        "ci_high": 1.0,
+        "ci_method": "bootstrap"
+      },
+      "ndcg_at_k": {
+        "mean": 0.875,
+        "point": 0.875,
+        "ci_low": 0.6875,
+        "ci_high": 1.0,
+        "ci_method": "bootstrap"
+      },
+      "abstention": {
+        "unanswerable_cases": 0,
+        "correctly_abstained": 0,
+        "precision": null
+      },
+      "verdicts": [
+        {
+          "name": "recall@k",
+          "value": 0.875,
+          "target": 0.8,
+          "op": ">=",
+          "pass": true,
+          "ci": {
+            "point": 0.875,
+            "ci_low": 0.6875,
+            "ci_high": 1.0,
+            "ci_method": "bootstrap"
+          }
+        },
+        {
+          "name": "nDCG@k",
+          "value": 0.875,
+          "target": 0.8,
+          "op": ">=",
+          "pass": true,
+          "ci": {
+            "point": 0.875,
+            "ci_low": 0.6875,
+            "ci_high": 1.0,
+            "ci_method": "bootstrap"
+          }
+        }
+      ],
+      "per_query": [
+        {
+          "qid": "syn_ep_vault_0",
+          "recall_at_k": 0.0,
+          "ndcg_at_k": 0.0,
+          "retrieved": [
+            "ep_trust"
+          ],
+          "relevant": [
+            "ep_vault"
+          ]
+        },
+        {
+          "qid": "syn_ep_vault_1",
+          "recall_at_k": 0.0,
+          "ndcg_at_k": 0.0,
+          "retrieved": [
+            "ep_trust"
+          ],
+          "relevant": [
+            "ep_vault"
+          ]
+        },
+        {
+          "qid": "syn_ep_bitemporal_0",
+          "recall_at_k": 1.0,
+          "ndcg_at_k": 1.0,
+          "retrieved": [
+            "ep_bitemporal",
+            "ep_rrf",
+            "ep_branch"
+          ],
+          "relevant": [
+            "ep_bitemporal"
+          ]
+        },
+        {
+          "qid": "syn_ep_bitemporal_1",
+          "recall_at_k": 1.0,
+          "ndcg_at_k": 1.0,
+          "retrieved": [
+            "ep_bitemporal",
+            "ep_rrf"
+          ],
+          "relevant": [
+            "ep_bitemporal"
+          ]
+        },
+        {
+          "qid": "syn_ep_rrf_0",
+          "recall_at_k": 1.0,
+          "ndcg_at_k": 1.0,
+          "retrieved": [
+            "ep_rrf"
+          ],
+          "relevant": [
+            "ep_rrf"
+          ]
+        },
+        {
+          "qid": "syn_ep_rrf_1",
+          "recall_at_k": 1.0,
+          "ndcg_at_k": 1.0,
+          "retrieved": [
+            "ep_rrf"
+          ],
+          "relevant": [
+            "ep_rrf"
+          ]
+        },
+        {
+          "qid": "syn_ep_calib_0",
+          "recall_at_k": 1.0,
+          "ndcg_at_k": 1.0,
+          "retrieved": [
+            "ep_calib",
+            "ep_trust"
+          ],
+          "relevant": [
+            "ep_calib"
+          ]
+        },
+        {
+          "qid": "syn_ep_calib_1",
+          "recall_at_k": 1.0,
+          "ndcg_at_k": 1.0,
+          "retrieved": [
+            "ep_calib",
+            "ep_trust"
+          ],
+          "relevant": [
+            "ep_calib"
+          ]
+        },
+        {
+          "qid": "syn_ep_belief_0",
+          "recall_at_k": 1.0,
+          "ndcg_at_k": 1.0,
+          "retrieved": [
+            "ep_belief"
+          ],
+          "relevant": [
+            "ep_belief"
+          ]
+        },
+        {
+          "qid": "syn_ep_belief_1",
+          "recall_at_k": 1.0,
+          "ndcg_at_k": 1.0,
+          "retrieved": [
+            "ep_belief",
+            "ep_trust"
+          ],
+          "relevant": [
+            "ep_belief"
+          ]
+        },
+        {
+          "qid": "syn_ep_branch_0",
+          "recall_at_k": 1.0,
+          "ndcg_at_k": 1.0,
+          "retrieved": [
+            "ep_branch",
+            "ep_bitemporal",
+            "ep_forget"
+          ],
+          "relevant": [
+            "ep_branch"
+          ]
+        },
+        {
+          "qid": "syn_ep_branch_1",
+          "recall_at_k": 1.0,
+          "ndcg_at_k": 1.0,
+          "retrieved": [
+            "ep_branch",
+            "ep_bitemporal",
+            "ep_forget"
+          ],
+          "relevant": [
+            "ep_branch"
+          ]
+        },
+        {
+          "qid": "syn_ep_trust_0",
+          "recall_at_k": 1.0,
+          "ndcg_at_k": 1.0,
+          "retrieved": [
+            "ep_trust",
+            "ep_rrf",
+            "ep_branch"
+          ],
+          "relevant": [
+            "ep_trust"
+          ]
+        },
+        {
+          "qid": "syn_ep_trust_1",
+          "recall_at_k": 1.0,
+          "ndcg_at_k": 1.0,
+          "retrieved": [
+            "ep_trust"
+          ],
+          "relevant": [
+            "ep_trust"
+          ]
+        },
+        {
+          "qid": "syn_ep_forget_0",
+          "recall_at_k": 1.0,
+          "ndcg_at_k": 1.0,
+          "retrieved": [
+            "ep_forget"
+          ],
+          "relevant": [
+            "ep_forget"
+          ]
+        },
+        {
+          "qid": "syn_ep_forget_1",
+          "recall_at_k": 1.0,
+          "ndcg_at_k": 1.0,
+          "retrieved": [
+            "ep_forget",
+            "ep_trust"
+          ],
+          "relevant": [
+            "ep_forget"
+          ]
+        }
+      ]
+    },
+    {
+      "suite": "calibration",
+      "n": 10,
+      "ece": 0.2,
+      "bins": [
+        {
+          "lo": 0.0,
+          "hi": 0.1,
+          "count": 0,
+          "accuracy": null,
+          "confidence": null,
+          "gap": null
+        },
+        {
+          "lo": 0.1,
+          "hi": 0.2,
+          "count": 0,
+          "accuracy": null,
+          "confidence": null,
+          "gap": null
+        },
+        {
+          "lo": 0.2,
+          "hi": 0.3,
+          "count": 0,
+          "accuracy": null,
+          "confidence": null,
+          "gap": null
+        },
+        {
+          "lo": 0.3,
+          "hi": 0.4,
+          "count": 0,
+          "accuracy": null,
+          "confidence": null,
+          "gap": null
+        },
+        {
+          "lo": 0.4,
+          "hi": 0.5,
+          "count": 0,
+          "accuracy": null,
+          "confidence": null,
+          "gap": null
+        },
+        {
+          "lo": 0.5,
+          "hi": 0.6,
+          "count": 0,
+          "accuracy": null,
+          "confidence": null,
+          "gap": null
+        },
+        {
+          "lo": 0.6,
+          "hi": 0.7,
+          "count": 10,
+          "accuracy": 0.9,
+          "confidence": 0.6999999999999998,
+          "gap": 0.20000000000000018
+        },
+        {
+          "lo": 0.7,
+          "hi": 0.8,
+          "count": 0,
+          "accuracy": null,
+          "confidence": null,
+          "gap": null
+        },
+        {
+          "lo": 0.8,
+          "hi": 0.9,
+          "count": 0,
+          "accuracy": null,
+          "confidence": null,
+          "gap": null
+        },
+        {
+          "lo": 0.9,
+          "hi": 1.0,
+          "count": 0,
+          "accuracy": null,
+          "confidence": null,
+          "gap": null
+        }
+      ],
+      "accuracy": {
+        "value": 0.9,
+        "point": 0.9,
+        "ci_low": 0.5958,
+        "ci_high": 0.9821,
+        "ci_method": "wilson"
+      },
+      "calibration_tune_crosscheck": {
+        "threshold": 0.6999999999999997,
+        "metrics": {
+          "abstention_rate": 0.0,
+          "accepted": 10,
+          "accepted_correct": 9,
+          "accepted_incorrect": 1,
+          "correct_coverage": 1.0,
+          "correct_examples": 9,
+          "examples": 10,
+          "false_accept_rate": 1.0,
+          "incorrect_examples": 1,
+          "max_false_accept_rate": 0.1,
+          "max_prediction_set_size": 3,
+          "min_empirical_coverage": 0.85,
+          "target_coverage": 0.9
+        },
+        "ok": false
+      },
+      "verdicts": [
+        {
+          "name": "ece",
+          "value": 0.2,
+          "target": 0.05,
+          "op": "<=",
+          "pass": false,
+          "ci": null
+        }
+      ],
+      "rows": [
+        {
+          "qid": "q_capital_france",
+          "confidence": 0.7,
+          "correct": true,
+          "abstained": false
+        },
+        {
+          "qid": "q_capital_germany",
+          "confidence": 0.7,
+          "correct": true,
+          "abstained": false
+        },
+        {
+          "qid": "q_capital_japan",
+          "confidence": 0.7,
+          "correct": true,
+          "abstained": false
+        },
+        {
+          "qid": "q_db_pref",
+          "confidence": 0.7,
+          "correct": true,
+          "abstained": false
+        },
+        {
+          "qid": "q_lang_pref",
+          "confidence": 0.7,
+          "correct": true,
+          "abstained": false
+        },
+        {
+          "qid": "q_meeting_day",
+          "confidence": 0.7,
+          "correct": true,
+          "abstained": false
+        },
+        {
+          "qid": "q_budget",
+          "confidence": 0.7,
+          "correct": true,
+          "abstained": false
+        },
+        {
+          "qid": "q_oncall",
+          "confidence": 0.7,
+          "correct": true,
+          "abstained": false
+        },
+        {
+          "qid": "q_seine",
+          "confidence": 0.7,
+          "correct": true,
+          "abstained": false
+        },
+        {
+          "qid": "q_unanswerable",
+          "confidence": 0.7,
+          "correct": false,
+          "abstained": false
+        }
+      ]
+    },
+    {
+      "suite": "answer_quality_g2",
+      "judge": "llm_judge:/Users/admin/Projects/Mnemosyne-completion/.venv-eval/bin/python",
+      "n": 9,
+      "full_corpus_tokens": 148,
+      "token_budget": 14,
+      "full_context_answer_rate": 1.0,
+      "memory_answer_rate": 0.6667,
+      "absolute_lift": -0.3333,
+      "relative_lift": -0.3333,
+      "mean_token_fraction": 0.0803,
+      "within_token_budget": true,
+      "lift_ci": {
+        "point": -0.3333,
+        "ci_low": -0.6667,
+        "ci_high": -0.1083,
+        "ci_method": "bootstrap"
+      },
+      "memory_rate_ci": {
+        "point": 0.6667,
+        "ci_low": 0.3333,
+        "ci_high": 0.8917,
+        "ci_method": "bootstrap"
+      },
+      "verdicts": [
+        {
+          "name": "g2_answer_quality_lift",
+          "value": -0.3333,
+          "target": 0.15,
+          "op": ">=",
+          "pass": false,
+          "note": "absolute lift vs full context at token-fraction 0.0803; under the deterministic substring judge full-context is a 1.0 ceiling so this is a FLOOR \u2014 set MNEMO_EVAL_JUDGE_CMD for the real signal",
+          "ci": {
+            "point": -0.3333,
+            "ci_low": -0.6667,
+            "ci_high": -0.1083,
+            "ci_method": "bootstrap"
+          }
+        },
+        {
+          "name": "g2_token_efficiency",
+          "value": 0.6667,
+          "target": 0.95,
+          "op": ">=",
+          "pass": false,
+          "note": "answer-rate parity (within 5pp of full-context 1.0) using \u226410% of tokens (mean 0.0803)",
+          "ci": {
+            "point": 0.6667,
+            "ci_low": 0.3333,
+            "ci_high": 0.8917,
+            "ci_method": "bootstrap"
+          }
+        }
+      ],
+      "per_query": [
+        {
+          "qid": "q_capital_france",
+          "full": 1.0,
+          "memory": 1.0,
+          "token_fraction": 0.0878,
+          "within_budget": true
+        },
+        {
+          "qid": "q_capital_germany",
+          "full": 1.0,
+          "memory": 1.0,
+          "token_fraction": 0.0676,
+          "within_budget": true
+        },
+        {
+          "qid": "q_capital_japan",
+          "full": 1.0,
+          "memory": 1.0,
+          "token_fraction": 0.0811,
+          "within_budget": true
+        },
+        {
+          "qid": "q_db_pref",
+          "full": 1.0,
+          "memory": 1.0,
+          "token_fraction": 0.0743,
+          "within_budget": true
+        },
+        {
+          "qid": "q_lang_pref",
+          "full": 1.0,
+          "memory": 0.0,
+          "token_fraction": 0.0743,
+          "within_budget": true
+        },
+        {
+          "qid": "q_meeting_day",
+          "full": 1.0,
+          "memory": 1.0,
+          "token_fraction": 0.0878,
+          "within_budget": true
+        },
+        {
+          "qid": "q_budget",
+          "full": 1.0,
+          "memory": 1.0,
+          "token_fraction": 0.0878,
+          "within_budget": true
+        },
+        {
+          "qid": "q_oncall",
+          "full": 1.0,
+          "memory": 0.0,
+          "token_fraction": 0.0743,
+          "within_budget": true
+        },
+        {
+          "qid": "q_seine",
+          "full": 1.0,
+          "memory": 0.0,
+          "token_fraction": 0.0878,
+          "within_budget": true
+        }
+      ]
+    },
+    {
+      "suite": "poison_block_rate_g7",
+      "total_attacks": 6,
+      "blocked": 6,
+      "block_rate": 1.0,
+      "block_rate_ci": {
+        "point": 1.0,
+        "ci_low": 0.6097,
+        "ci_high": 1.0,
+        "ci_method": "wilson"
+      },
+      "verdicts": [
+        {
+          "name": "poison_block_rate",
+          "value": 1.0,
+          "target": 0.95,
+          "op": ">=",
+          "pass": true,
+          "ci": {
+            "point": 1.0,
+            "ci_low": 0.6097,
+            "ci_high": 1.0,
+            "ci_method": "wilson"
+          }
+        }
+      ],
+      "rows": [
+        {
+          "attack_id": "minja_ignore_prev",
+          "family": "MINJA",
+          "blocked": true,
+          "injected_trust_tier": 5
+        },
+        {
+          "attack_id": "minja_system_override",
+          "family": "MINJA",
+          "blocked": true,
+          "injected_trust_tier": 5
+        },
+        {
+          "attack_id": "agentpoison_trigger",
+          "family": "AgentPoison",
+          "blocked": true,
+          "injected_trust_tier": 4
+        },
+        {
+          "attack_id": "agentpoison_backdoor",
+          "family": "AgentPoison",
+          "blocked": true,
+          "injected_trust_tier": 4
+        },
+        {
+          "attack_id": "minja_tool_redirect",
+          "family": "MINJA",
+          "blocked": true,
+          "injected_trust_tier": 5
+        },
+        {
+          "attack_id": "agentpoison_pref_poison",
+          "family": "AgentPoison",
+          "blocked": true,
+          "injected_trust_tier": 3
+        }
+      ]
+    },
+    {
+      "suite": "fast_path_latency",
+      "measurement": "subprocess wall time; raw includes per-process interpreter+import startup",
+      "concurrency": 8,
+      "concurrency_model": "local: per-worker cloned pre-warmed store (single-file backend is single-writer by design)",
+      "total_calls": 48,
+      "startup_baseline_ms": 348.35,
+      "raw": {
+        "p50_ms": 704.08,
+        "p95_ms": 1806.05,
+        "p99_ms": 1987.9,
+        "mean_ms": 826.26,
+        "max_ms": 2014.31,
+        "p95_ci": {
+          "point": 1806.0465,
+          "ci_low": 1362.7352,
+          "ci_high": 1994.645,
+          "ci_method": "bootstrap-pctl"
+        }
+      },
+      "startup_adjusted": {
+        "p50_ms": 355.73,
+        "p95_ms": 1457.7,
+        "p99_ms": 1639.55,
+        "p95_ci": {
+          "point": 1457.6963,
+          "ci_low": 1014.3851,
+          "ci_high": 1646.2949,
+          "ci_method": "bootstrap-pctl"
+        },
+        "note": "engine-only estimate = raw - median(startup baseline); this is what a long-lived server backend would expose. The raw P95 is a CLI-cold-start upper bound."
+      },
+      "p50_ms": 704.08,
+      "p95_ms": 1806.05,
+      "p99_ms": 1987.9,
+      "mean_ms": 826.26,
+      "max_ms": 2014.31,
+      "p95_ci": {
+        "point": 1806.0465,
+        "ci_low": 1362.7352,
+        "ci_high": 1994.645,
+        "ci_method": "bootstrap-pctl"
+      },
+      "verdicts": [
+        {
+          "name": "fast_path_p95_ms_raw",
+          "value": 1806.0465,
+          "target": 400.0,
+          "op": "<=",
+          "pass": false,
+          "ci": {
+            "point": 1806.0465,
+            "ci_low": 1362.7352,
+            "ci_high": 1994.645,
+            "ci_method": "bootstrap-pctl"
+          }
+        },
+        {
+          "name": "fast_path_p95_ms_engine_only",
+          "value": 1457.6963,
+          "target": 400.0,
+          "op": "<=",
+          "pass": false,
+          "ci": {
+            "point": 1457.6963,
+            "ci_low": 1014.3851,
+            "ci_high": 1646.2949,
+            "ci_method": "bootstrap-pctl"
+          }
+        }
+      ]
+    }
+  ],
+  "mandatory_classes": [
+    {
+      "name": "rollback_crossing_supersession",
+      "passed": true,
+      "detail": "scratch supersession across the Paris->Berlin edge is discarded with main left bit-identical",
+      "evidence": {
+        "main_before": [
+          [
+            "Berlin",
+            "active"
+          ],
+          [
+            "Paris",
+            "superseded"
+          ]
+        ],
+        "main_after": [
+          [
+            "Berlin",
+            "active"
+          ],
+          [
+            "Paris",
+            "superseded"
+          ]
+        ],
+        "branch_had_tokyo": true,
+        "tokyo_gone_from_main": true
+      }
+    },
+    {
+      "name": "erasure_with_without_corroboration",
+      "passed": true,
+      "detail": "single-source erasure retracts; corroborated assertion survives erasure of one source (trimmed)",
+      "evidence": {
+        "without_corroboration_retracted": true,
+        "with_corroboration_survived": true,
+        "trimmed": [
+          "a3cc3018-d3bf-42ae-8143-418bcd0530a4"
+        ],
+        "retracted_on_corroborated_forget": []
+      }
+    },
+    {
+      "name": "contested_belief_multi_hypothesis",
+      "passed": true,
+      "detail": "contested belief surfaces 2 hypotheses ['April', 'March'] with probabilities summing to 1.0",
+      "evidence": {
+        "objects": [
+          "April",
+          "March"
+        ],
+        "probability_sum": 1.0,
+        "hypotheses": [
+          {
+            "assertion_id": "cb96e129-14fe-49da-b039-c3ff99cfb6d1",
+            "object": "March",
+            "probability": 0.5238095238095238,
+            "source_evidence_cids": [],
+            "status": "contested"
+          },
+          {
+            "assertion_id": "c001a346-86e6-4cad-b2c9-a791894a430a",
+            "object": "April",
+            "probability": 0.47619047619047616,
+            "source_evidence_cids": [],
+            "status": "contested"
+          }
+        ]
+      }
+    },
+    {
+      "name": "untrusted_instruction_never_executed",
+      "passed": true,
+      "detail": "low-trust injected instruction is filtered from reads and the data-not-instruction rail is enforced",
+      "evidence": {
+        "leaked_under_filter": false,
+        "data_not_instruction_rail": true,
+        "poison_cid": "c542a6592c77c2c7f141fe736d17452ce9136915112a7bd3299636373b1ecc2e"
+      }
+    },
+    {
+      "name": "no_degradation_vs_no_memory",
+      "passed": true,
+      "detail": "memory-backed answer rate stays at or above the no-memory baseline at every checkpoint and strictly improves at full horizon",
+      "evidence": {
+        "series": [
+          {
+            "fraction_loaded": 0.25,
+            "docs_loaded": 3,
+            "memory_correct": 3,
+            "baseline_correct": 0,
+            "total": 9
+          },
+          {
+            "fraction_loaded": 0.5,
+            "docs_loaded": 6,
+            "memory_correct": 4,
+            "baseline_correct": 0,
+            "total": 9
+          },
+          {
+            "fraction_loaded": 0.75,
+            "docs_loaded": 9,
+            "memory_correct": 6,
+            "baseline_correct": 0,
+            "total": 9
+          },
+          {
+            "fraction_loaded": 1.0,
+            "docs_loaded": 12,
+            "memory_correct": 9,
+            "baseline_correct": 0,
+            "total": 9
+          }
+        ],
+        "never_below_baseline": true,
+        "final_improves": true
+      }
+    }
+  ]
+}

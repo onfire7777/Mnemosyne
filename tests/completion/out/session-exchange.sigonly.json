@@ -1,0 +1,15 @@
+{
+  "audience": "mnemosyne",
+  "expires_at": 1782087047,
+  "identity": {
+    "exp": 1782087047,
+    "role": "agent",
+    "session_id": "51400ffa-9077-4ba7-8874-aebe91500cc7",
+    "source_trust_tier": 3,
+    "tenant_id": "tenant-a",
+    "user_id": "848469cd-302e-4d61-aaa1-e29388f33546"
+  },
+  "issuer": "http://localhost:8089/realms/mnemosyne",
+  "ok": true,
+  "session_token": "eyJleHAiOjE3ODIwODcwNDcsInJvbGUiOiJhZ2VudCIsInNlc3Npb25faWQiOiI1MTQwMGZmYS05MDc3LTRiYTctODg3NC1hZWJlOTE1MDBjYzciLCJzb3VyY2VfdHJ1c3RfdGllciI6MywidGVuYW50X2lkIjoidGVuYW50LWEiLCJ1c2VyX2lkIjoiODQ4NDY5Y2QtMzAyZS00ZDYxLWFhYTEtZTI5Mzg4ZjMzNTQ2In0.rAz64IZOH9Y_V8helf1U4u5Xkh1biidGtXAAwdGSO5g"
+}

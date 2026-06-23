@@ -1,0 +1,33 @@
+{
+  "dataset_id": "retrieval_curated_v1",
+  "description": "Curated, trusted, held-out retrieval cases (blueprint §33 seed suite). Each corpus item is captured as evidence; each query has labelled relevant ids (the doc_id of the gold evidence) and a gold answer span for answer-quality scoring. Per §9 these are internal-only and never reported as a public benchmark (§12 N3).",
+  "tenant": "eval-retrieval-curated",
+  "user": "eval-user",
+  "k": 5,
+  "corpus": [
+    {"doc_id": "d_paris", "content": "The capital of France is Paris, located on the river Seine.", "trust_tier": 0},
+    {"doc_id": "d_berlin", "content": "Berlin is the capital and largest city of Germany.", "trust_tier": 0},
+    {"doc_id": "d_tokyo", "content": "Tokyo is the capital of Japan and its most populous metropolis.", "trust_tier": 0},
+    {"doc_id": "d_rome", "content": "Rome is the capital city of Italy and the Lazio region.", "trust_tier": 0},
+    {"doc_id": "d_madrid", "content": "Madrid is the capital of Spain on the Manzanares river.", "trust_tier": 0},
+    {"doc_id": "d_pref_db", "content": "The user prefers PostgreSQL as the primary production database backend.", "trust_tier": 0},
+    {"doc_id": "d_pref_lang", "content": "The user writes services primarily in Python and dislikes heavyweight frameworks.", "trust_tier": 0},
+    {"doc_id": "d_deploy", "content": "Deployment preference is local-first single binary with Postgres parity for production.", "trust_tier": 0},
+    {"doc_id": "d_meeting", "content": "The quarterly planning meeting was moved from Monday to Thursday at 3pm.", "trust_tier": 0},
+    {"doc_id": "d_budget", "content": "The infrastructure budget for next quarter is capped at forty thousand dollars.", "trust_tier": 0},
+    {"doc_id": "d_oncall", "content": "On-call rotations switch every Wednesday morning between the two backend engineers.", "trust_tier": 0},
+    {"doc_id": "d_seine_len", "content": "The river Seine is roughly seven hundred and seventy seven kilometres long.", "trust_tier": 0}
+  ],
+  "queries": [
+    {"qid": "q_capital_france", "query": "What is the capital of France?", "relevant_doc_ids": ["d_paris"], "gold_answer": "Paris", "answerable": true},
+    {"qid": "q_capital_germany", "query": "capital city of Germany", "relevant_doc_ids": ["d_berlin"], "gold_answer": "Berlin", "answerable": true},
+    {"qid": "q_capital_japan", "query": "Japan capital most populous", "relevant_doc_ids": ["d_tokyo"], "gold_answer": "Tokyo", "answerable": true},
+    {"qid": "q_db_pref", "query": "which database does the user prefer for production", "relevant_doc_ids": ["d_pref_db", "d_deploy"], "gold_answer": "PostgreSQL", "answerable": true},
+    {"qid": "q_lang_pref", "query": "what programming language does the user use", "relevant_doc_ids": ["d_pref_lang"], "gold_answer": "Python", "answerable": true},
+    {"qid": "q_meeting_day", "query": "when was the planning meeting rescheduled to", "relevant_doc_ids": ["d_meeting"], "gold_answer": "Thursday", "answerable": true},
+    {"qid": "q_budget", "query": "what is next quarter infrastructure budget cap", "relevant_doc_ids": ["d_budget"], "gold_answer": "forty thousand", "answerable": true},
+    {"qid": "q_oncall", "query": "when does the on-call rotation change", "relevant_doc_ids": ["d_oncall"], "gold_answer": "Wednesday", "answerable": true},
+    {"qid": "q_seine", "query": "how long is the river Seine", "relevant_doc_ids": ["d_seine_len"], "gold_answer": "seven hundred and seventy seven kilometres", "answerable": true},
+    {"qid": "q_unanswerable", "query": "what is the airspeed velocity of an unladen swallow in this corpus", "relevant_doc_ids": [], "gold_answer": null, "answerable": false}
+  ]
+}
