@@ -642,3 +642,126 @@ def _report_summary(report: dict[str, Any], *, binding: dict[str, Any] | None = 
         "certificate_roots": sorted(_collect_certificate_fingerprints(report)),
         "asset_binding": dict((binding or {}).get("summary") or {"bound": False, "method": "unchecked"}),
     }
+
+
+def _minimize_monomials(monomials: frozenset[frozenset[str]]) -> frozenset[frozenset[str]]:
+    """Drop non-minimal monomials (positive-Boolean absorption).
+
+    A derivation that strictly contains another derivation's sources adds no
+    independent support, so it is absorbed. This keeps the provenance polynomial
+    compact (blueprint §27 guard: store a compact semiring tag, not full copies).
+    """
+    items = {frozenset(monomial) for monomial in monomials}
+    return frozenset(
+        monomial
+        for monomial in items
+        if not any(other != monomial and other <= monomial for other in items)
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class HowProvenance:
+    """Semiring how-provenance for a derived fact (Green/Karvounarakis/Tannen,
+    PODS 2007; blueprint I5).
+
+    A provenance polynomial over source-evidence CIDs in the positive-Boolean
+    provenance semiring: a set of *monomials*, each a set of CIDs that are
+    jointly required (``*`` / AND within a monomial), combined as alternative
+    derivations (``+`` / OR across monomials). It records not just *which*
+    sources supported a fact but *how* they combined. ``zero`` is the empty
+    polynomial (unsupported); ``one`` is the single empty monomial (trivially
+    true). Polynomials are kept in canonical minimal form for compactness.
+    """
+
+    monomials: frozenset[frozenset[str]] = field(default_factory=frozenset)
+
+    def __post_init__(self) -> None:
+        minimized = _minimize_monomials(self.monomials)
+        if minimized != self.monomials:
+            object.__setattr__(self, "monomials", minimized)
+
+    @classmethod
+    def zero(cls) -> "HowProvenance":
+        return cls(frozenset())
+
+    @classmethod
+    def one(cls) -> "HowProvenance":
+        return cls(frozenset({frozenset()}))
+
+    @classmethod
+    def source(cls, cid: str) -> "HowProvenance":
+        """A base fact attributed to a single source CID."""
+        return cls(frozenset({frozenset({cid})}))
+
+    @property
+    def is_zero(self) -> bool:
+        return not self.monomials
+
+    @property
+    def is_one(self) -> bool:
+        return self.monomials == frozenset({frozenset()})
+
+    def combine_or(self, other: "HowProvenance") -> "HowProvenance":
+        """Alternative derivations (semiring ``+``): support from either input."""
+        return HowProvenance(self.monomials | other.monomials)
+
+    def combine_and(self, other: "HowProvenance") -> "HowProvenance":
+        """Joint derivation (semiring ``*``): both inputs are required together."""
+        if self.is_zero or other.is_zero:
+            return HowProvenance.zero()
+        return HowProvenance(
+            frozenset(left | right for left in self.monomials for right in other.monomials)
+        )
+
+    def sources(self) -> frozenset[str]:
+        """Every source CID referenced by any derivation."""
+        return frozenset(cid for monomial in self.monomials for cid in monomial)
+
+    def prune(self, erased_cids: Any) -> "HowProvenance":
+        """Drop derivations that depend on an erased source (blueprint §27/§25).
+
+        Monomials referencing an erased CID are invalidated; derivations with
+        surviving independent corroboration are retained with the erased source
+        removed from provenance. Returns ``zero`` when every derivation depended
+        on erased evidence.
+        """
+        erased = set(erased_cids)
+        return HowProvenance(
+            frozenset(monomial for monomial in self.monomials if not (monomial & erased))
+        )
+
+    def tag(self) -> str:
+        """A compact, deterministic string tag for storage/inspection."""
+        if self.is_zero:
+            return "0"
+        if self.is_one:
+            return "1"
+        return " + ".join(
+            sorted("*".join(sorted(monomial)) for monomial in self.monomials)
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"monomials": sorted(sorted(monomial) for monomial in self.monomials)}
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "HowProvenance":
+        raw = data.get("monomials", [])
+        if not isinstance(raw, (list, tuple)):
+            raise ValueError("how-provenance 'monomials' must be a list")
+        return cls(frozenset(frozenset(str(cid) for cid in monomial) for monomial in raw))
+
+
+def how_provenance_for_sources(cids: Any, *, joint: bool = True) -> HowProvenance:
+    """Build a :class:`HowProvenance` from a derived fact's source CIDs.
+
+    ``joint=True`` (default) treats all sources as jointly required (a single
+    AND monomial) — the common case for a fact distilled from several inputs.
+    ``joint=False`` treats each source as an independent alternative derivation
+    (corroboration), so erasing one leaves the others intact.
+    """
+    unique = [cid for cid in dict.fromkeys(str(cid) for cid in cids) if cid]
+    if not unique:
+        return HowProvenance.zero()
+    if joint:
+        return HowProvenance(frozenset({frozenset(unique)}))
+    return HowProvenance(frozenset(frozenset({cid}) for cid in unique))
