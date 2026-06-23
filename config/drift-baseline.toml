@@ -1,0 +1,132 @@
+# Drift-detection baseline — the "Declared" view (see ../CONFIG-DRIFT-CHECKS.md).
+#
+# This file records the EXPECTED SHAPE of configuration so the drift checks in
+# tests/test_config_drift.py can compare the running code surface against it. It
+# does NOT define rail/guardrail VALUES, tuning ranges, or schemas — those remain
+# owned by the v2 blueprint (§19, §31, §23.5) and src/mnemosyne/policy.py /
+# src/mnemosyne/security.py.
+#
+# Mirror discipline: when the code intentionally changes a rail, tunable, store,
+# or authority contract, update this baseline in the SAME commit. An un-mirrored
+# change is exactly what the drift checks catch.
+
+schema_version = 1
+
+[policy]
+module = "mnemosyne.policy"
+object = "OperatingPolicy"
+
+[rails]
+# Boolean invariant rails. Every name must exist on OperatingPolicy.immutable_rails
+# and be enabled (True). Semantics/ownership: §31, §23.5.
+required = [
+  "retrieved_text_is_data_not_instruction",
+  "writes_are_append_only_or_superseding",
+  "tenant_isolation_required",
+  "source_trust_filter_required",
+  "sensitive_and_destructive_writes_audited",
+  "branch_promotion_requires_gate",
+  "explicit_preferences_outrank_inferred",
+  "erasure_propagates_to_derived_indexes",
+]
+
+[rails.security]
+# Security-mediated subset enforced by SecurityPolicy.immutable_rails.
+required = [
+  "tenant_isolation_required",
+  "retrieved_text_is_data_not_instruction",
+  "source_trust_filter_required",
+  "branch_promotion_requires_gate",
+  "erasure_propagates_to_derived_indexes",
+]
+
+[tunables]
+# Knobs that may move WITHIN rails (§31). Each name must exist on OperatingPolicy.
+# The authoritative tuning range lives in §31; the defaults below snapshot the
+# current shipped values so the checks detect an un-mirrored default change.
+names = [
+  "top_k",
+  "deep_top_k",
+  "token_budget",
+  "rrf_k",
+  "rerank_width",
+  "mmr_lambda",
+  "abstention_threshold",
+  "max_trust_tier",
+  "max_sensitivity",
+  "decay",
+  "activation_weights",
+]
+
+[tunables.defaults]
+top_k = 8
+deep_top_k = 24
+token_budget = 4096
+rrf_k = 60
+rerank_width = 32
+mmr_lambda = 0.72
+abstention_threshold = 0.45
+max_trust_tier = 4
+max_sensitivity = 3
+decay = 0.5
+
+[tunables.activation_weights]
+base_level = 0.35
+semantic = 0.35
+importance = 0.20
+recency = 0.10
+
+[authority]
+# Write authority is mediated. These operations require the consolidator/operator
+# role (SecurityPolicy.consolidator_only_ops). Names mirror the code contract.
+consolidator_only_ops = [
+  "run_consolidation_passes",
+  "promote_candidate",
+  "prune_memory",
+  "demote_fidelity",
+  "write_inferred_preference",
+  "write_policy_variant",
+]
+# Sinks only an operator may write — encodes "untrusted_to_system_prompt: forbidden" (§31).
+operator_only_sinks = ["policy", "system_prompt", "safety_rail"]
+
+[reward]
+# reward_signal: external_only (§31). The reward sources self-optimization accepts.
+external_sources = ["external_eval", "human_feedback", "protected_suite"]
+
+[topology]
+# Selects which backing-service expectations apply (§32). Default is local-first.
+default_backend = "local"
+backend_env = "MNEME_BACKEND"
+postgres_dsn_env = "MNEMOSYNE_POSTGRES_DSN"
+backends = ["local", "postgres"]
+
+[schema]
+# Stores the system depends on must exist in sql/schema.sql (§19). Drift = a
+# renamed or dropped store. This lists table NAMES only; column/type definitions
+# stay in sql/schema.sql.
+required_tables = [
+  "tenants",
+  "branches",
+  "evidence",
+  "assertions",
+  "justifications",
+  "entities",
+  "entity_aliases",
+  "relations",
+  "contradictions",
+  "procedures",
+  "lessons",
+  "preferences",
+  "user_latent",
+  "trajectories",
+  "self_model",
+  "eval_cases",
+  "resources",
+  "merges",
+  "deletion_log",
+  "conformal_calibration",
+  "audit_log",
+  "runtime_jobs",
+  "runtime_state",
+]
