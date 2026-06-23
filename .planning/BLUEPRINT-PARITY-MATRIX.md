@@ -1,0 +1,227 @@
+# Mnemosyne — Blueprint Parity Matrix
+
+**Maintained by:** AUX-DOCS lane (traceability synthesis). **This is a read-and-track artifact, not a spec.**
+**Date:** 2026-06-23 · **Repo:** `~/Projects/Mnemosyne` (canonical) → `github.com/onfire7777/Mnemosyne`.
+**Goal it serves:** exact 1:1 parity with `Mnemosyne-v2-Build-Blueprint.md` (§1–§38 + Appendices A–E).
+
+## Purpose & method
+
+This matrix maps every blueprint surface to the module that implements it, the test that
+proves it, and a parity status. It is a **synthesis of existing authoritative sources**, not a
+re-derivation — when a status is disputed, the cited source wins:
+
+- **`Mnemosyne-v2-Build-Blueprint.md`** — the spec (scope source).
+- **`.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md`** — the standing parity audit ("gaps remain; exact 1:1 parity not complete").
+- **AUX-XREF traceability audit (Builder 7)** — 6-auditor read-of-source verification of innovations, FRs, NFRs, DDL, ABI, tests. Folded into §2–§6 below.
+- **`.planning/ROADMAP.md`** + **`.planning/REQUIREMENTS.md`** — phase/requirement decomposition and per-REQ status.
+
+**Status legend:** ✅ implemented + tested matching blueprint · 🟡 partial / deterministic stand-in / under-tested · ❌ missing · 🔒 deferred (operator-run deployment evidence — *not* a code defect; do not fabricate).
+**Gap legend (for the actionable list, §7):** `[C]` codeable now behind existing boundaries · `[T]` test-only · `[D]` deferred-operator.
+
+> **Module/test names below are verified to exist in `src/mnemosyne/` and `tests/` as of this commit.** New parity tests assigned to lanes (e.g. `test_parity_mcp.py`, `test_parity_retrieval.py`, `test_parity_security.py`) and the `providers/**` package are landing during the active completion effort; rows referencing them are marked *(new, lane)* until merged.
+
+---
+
+## 1. Phase parity (ROADMAP Phase 0–6)
+
+| Phase | Title | Requirements | Status | Notes |
+|---|---|---|---|---|
+| 0 | Foundations & Contracts | REQ-001/002/003/004/011 | ✅ | Evidence ledger, branches, isolation, MCP/CLI skeleton, seed regression suite. |
+| 1 | Lossless Memory & Hybrid Retrieval | REQ-005/006/007/008/009 | ✅ | Bitemporal assertions, provenance, hybrid retrieval, explain, correct, export, forget. |
+| 2 | Belief Core, Graph, Confidence | REQ-013/014/009 | ✅ (🟡 depth) | TMS/AGM cascade, graph adapter, conformal calibration, multi-hypothesis. Depth gaps: I2/I8 (§7). |
+| 3 | Personalization & Consolidation | REQ-012/015/016 | ✅ (🟡 depth) | Six-category user model, latent advisory, warm-loop consolidation, fidelity lifecycle, anti-degradation. |
+| 4 | Procedural & Corrective Learning | REQ-017/010/011 | ✅ (🟡 depth) | Trajectory logging, failure attribution, lesson induction, promotion gate, branch promote/rollback, capability-secured writes. Depth: I12 (§7). |
+| 5 | Profile-Guided Self-Optimization | REQ-018/011/NFR-005 | ✅ (🟡 depth) | Shadow-first policy optimization, self-model store, canary branches, diversity tripwire, parametric tier. |
+| 6 | **Exact Blueprint Runtime Parity** | FR-3/7/9/12/18/19/20/21, production NFRs | 🟡 **in progress** | The active completion effort. Closes the depth-gaps in §2–§7 behind existing provider boundaries + production-evidence rows (🔒). |
+
+Phases 0–5 are checked complete in the roadmap; **Phase 6 is the open milestone** this matrix tracks.
+
+---
+
+## 2. The Twelve Innovations (§11) — I1–I12
+
+| Ref | Innovation | Module(s) | Test(s) | Status | Gap → §7 item | Lane |
+|---|---|---|---|---|---|---|
+| I1 | Self-optimizing compiler / PGO frame | `self_optimization`, `engine`, `gate` | `test_self_optimization` | ✅ | — | CC-LS |
+| I2 | TMS justifications + AGM minimal-change | `belief`, `models` | `test_belief_and_calibration` | 🟡 | #13 explicit AGM ops + ATMS labels | CC-BC |
+| I3 | Content-addressed branchable memory | `storage`, `engine`, `ids` | `test_engine_contract` | ✅ | (merge = replica-upsert, not 3-way — by design) | CC-PG |
+| I4 | Unified associative substrate | `retrieval`, `engine`, `graph`, schema | `test_engine_contract` | ✅ | #1 `assertions.salience` column | CC-R/CC-PG |
+| I5 | Bitemporal facts + queryable provenance | `provenance`, `models`, `engine` | `test_engine_contract` | 🟡 | #25 semiring how-provenance (named "genuine opening") | CC-UPS |
+| I6 | Incremental view maintenance | `consolidation`, `belief`, `jobs` | `test_cli_runtime_tools` | 🟡 | #11 real dirty-set/memoization (currently full replay) | CC-BC |
+| I7 | Graduated forgetting fidelity tiers | `lifecycle` | `test_blueprint_later_phases` | 🟡 | #14 enforce `must_keep` + pointer-to-original | CC-BC |
+| I8 | Confidence + conformal abstention | `calibration`, `engine` | `test_belief_and_calibration` | 🟡 | #12 per-example nonconformity | CC-BC |
+| I9 | Latent-advisory + explicit-authoritative model | `user_model` | `test_user_model_and_guards` | ✅ | (`latent_never_overrides_explicit` enforced) | CC-UPS |
+| I10 | Speculative anticipatory prefetch | `prefetch` | `test_runtime_parity_extensions` | 🟡 | learned predictor + hit-rate metric | CC-R |
+| I11 | Capability-secured writes + signed provenance | `security`, `provenance` | `test_runtime_parity_extensions`, `test_security_sessions` | 🟡 | #27 taint labels + propagation | CC-SEC |
+| I12 | PGO self-opt + counterfactual replay eval | `self_optimization`, `gate`, `learning`, `eval` | `test_self_optimization` | 🟡 | #19 implement + wire `counterfactual_replay_score()` | CC-LS |
+
+§11.13 honesty map (doc-only): the three self-flagged "genuine openings" (semiring/IVM/capability ≈ I5/I6/I11) are exactly the thinnest code areas — consistent with the audit.
+
+---
+
+## 3. Functional Requirements (§14) — FR-1…FR-21
+
+| Ref | Requirement | Module | Status | Gap → §7 | Lane |
+|---|---|---|---|---|---|
+| FR-1 | Append-only content-addressed ledger | `engine`/`ingestion`/`storage` | ✅ | — | CC-RT |
+| FR-2 | Bitemporal + supersession, no overwrite | `belief`/`engine` | ✅ | — | CC-BC |
+| FR-3 | Hybrid dense+lexical+graph, RRF, rerank, MMR, U-curve, budget | `engine`/`retrieval` | 🟡 | #6 fast-path cached graph signal | CC-R |
+| FR-4 | Provenance links + explain attribution | `provenance`/`engine` | ✅ | — | CC-UPS |
+| FR-5 | Six typed prefs, authority order | `user_model` | ✅ | — | CC-UPS |
+| FR-6 | Calibrated confidence + conformal abstention | `calibration`/`engine` | ✅ (🟡 I8) | #12 | CC-BC |
+| FR-7 | Tenant/source isolation, trust tiers, gated writes, audit | `security`/`engine`/`ingestion` | ✅ | — | CC-SEC |
+| FR-8 | Inspect/correct/export/forget transitive crypto-shred | `privacy`/`storage`/`engine` | ✅ | — | CC-SEC |
+| FR-9 | Stable MCP/CLI tool contract | `mcp_tools`/`mcp_server`/`cli` | ✅ | — | CC-MCP |
+| FR-10 | Belief-revision TMS+AGM, cascade, contested | `belief`/`engine` | ✅ (🟡 I2) | #13 | CC-BC |
+| FR-11 | Temporal graph + PPR (deep) + cached signal (fast) | `graph`/`engine` | 🟡 | #6 | CC-BC/CC-R |
+| FR-12 | Consolidation warm loop | `consolidation` | ✅ | #16 cadence-bound | CC-BC |
+| FR-13 | Fidelity-tiered forgetting | `lifecycle`/`consolidation` | ✅ | #14 | CC-BC |
+| FR-14 | Procedural/corrective learning, gated | `learning`/`gate` | ✅ | #20 CRITIC loop | CC-LS |
+| FR-15 | Branchable memory; rollback = discard | `engine`/`gate` | ✅ | — | CC-RT |
+| FR-16 | Latent advisory user embedding | `user_model`/`consolidation` | 🟡 | #26 beyond hashing stand-in | CC-UPS |
+| FR-17 | Profile-guided self-opt cold loop, shadow-only | `self_optimization` | 🟡 | #19 | CC-LS |
+| FR-18 | Anticipatory prefetch w/ predictability gate | `prefetch` | ✅ (🟡 I10) | — | CC-R |
+| FR-19 | Signed C2PA provenance ingestion | `provenance` | ✅ | real cert-chain 🔒 | CC-UPS/CC-SEC |
+| FR-20 | Multimodal memory behind same interface | `media`/`ingestion` | ✅ | — | CC-UPS |
+| FR-21 | Parametric tier (LoRA), isolated + gated | `parametric` | ✅ | real trainer 🔒 | CC-LS |
+
+---
+
+## 4. Requirements ledger (REQ-001…REQ-018)
+
+Status mirrors `.planning/REQUIREMENTS.md` (P0/P1) — all P0 must-haves implemented and tested locally;
+several carry production-evidence gates (release-audit / provider-check / OIDC-JWKS) that are 🔒 until operator-run.
+
+| ID | Blueprint anchor | Status |
+|---|---|---|
+| REQ-001 evidence ledger | FR-1, Phase 0 | ✅ local |
+| REQ-002 branchable memory + merge promotion | I3, Phase 0/4 | ✅ local + clean-DSN; deploy evidence via `release-audit` 🔒 |
+| REQ-003 tenant/source isolation + trust tiers | FR-7, §27 | ✅ local + RLS live; prod auth via OIDC/JWKS gates 🔒 |
+| REQ-004 stable MCP/CLI contract | FR-9, §30.7 | ✅ local |
+| REQ-005 bitemporal store + as-of | FR-2, Phase 1 | ✅ local |
+| REQ-006 hybrid retrieval (lexical/dense/graph, RRF, MMR, budget, provenance, trust) | FR-3, §22, §30.4 | ✅ local (🟡 depth #6–#9); prod embedding/reranker/backends via provider-check 🔒 |
+| REQ-007 explainability facts→evidence→channels | FR-4 | ✅ local |
+| REQ-008 inspect/correct/export/forget transitive | FR-8, §25 | ✅ local |
+| REQ-009 confidence + abstention | FR-6, §26 | ✅ local; `calibration-tune` for prod thresholds 🔒 |
+| REQ-010 capability-mediated writes + audit + reversibility | FR-7, §27 | ✅ local; prod role/auth via release-audit 🔒 |
+| REQ-011 private regression suite + protected cases + shadow + gate | §23.3, §33 | ✅ local; release-audit artifact validation 🔒 |
+| REQ-012 user model / personalization | Phase 3 | ✅ model/runtime (dedicated UX out of blocking path) |
+| REQ-013 belief core / TMS / contested | Phase 2 | ✅ (🟡 I2) |
+| REQ-014 graph + PPR | Phase 2 | ✅ (🟡 fast-path #6) |
+| REQ-015 fidelity lifecycle + spaced rehearsal | Phase 3 | ✅ storage-backed; `forgetting-policy-check` 🔒 |
+| REQ-016 warm-loop consolidation (society of roles) | Phase 3 | ✅ role-pipeline provenance; `hosted-llm-check` 🔒 |
+| REQ-017 procedural/corrective learning | Phase 4 | ✅ |
+| REQ-018 profile-guided self-optimization (bandit, shadow) | Phase 5 | ✅ contextual-bandit + UCB; `policy-ops-check` 🔒 |
+
+---
+
+## 5. Blueprint implementation sections (§18–§33, §30.x, App A/B)
+
+| Blueprint area | Module(s) | Status | Notes / gap → §7 |
+|---|---|---|---|
+| §18–19 substrate / data model (DDL) | `models`, `storage`, `sql/schema.sql` | ✅ (🟡 columns) | All 20 tables exist; RLS verified. DDL column gaps #1–#4. |
+| §20 ingestion (hot path) | `ingestion`, `engine` | 🟡 | ❌ §20.7 tier-0 correction shortcut (#23) — highest-value missing feature. |
+| §21 consolidation (society of roles) | `consolidation` | ✅ | 11-pass; cadence-bound anti-thrash missing (#16). |
+| §22 retrieval | `retrieval`, `engine`, `graph` | 🟡 | #6 fast-graph, #7 spreading term, #8 channels, #9 marginal-gain cutoff. |
+| §23 self-improvement (hot/cold loops) | `learning`, `self_optimization`, `gate` | 🟡 | #17 corroboration gate, #19 counterfactual replay, #20 CRITIC loop. |
+| §24 learn-from-user-mistakes | `user_model` | ❌ | #24 scoped support strategy entirely missing. |
+| §25 forgetting / metacognition | `lifecycle`, `guard` | 🟡 | #14 must_keep + pointer, #30 long-horizon anti-degradation. |
+| §26 confidence / abstention | `calibration`, `engine` | 🟡 | #18 persist+fuse `calibrated_confidence`. |
+| §27 security & governance | `security`, `privacy`, `oidc_jwks` | ✅ (🟡) | #27 taint labels, #28 quarantine component; C2PA cert-chain 🔒. |
+| §30.1 engine contract | `engine` | ✅ | Full `MemoryEngine(Protocol)`, Local+Postgres impls, substitutability suite. |
+| §30.2 ingestion shortcut | `ingestion`, `belief` | ❌ | tier-0 correction (#23 + #15) — pairs CC-UPS/CC-BC. |
+| §30.3 belief revision | `belief` | ✅ | ADD/UPDATE/SUPERSEDE/NOOP/CONTEST + TMS cascade. |
+| §30.4 retrieval fast path | `retrieval`, `engine` | 🟡 | #29 cheap classifier `route()` vs hardcoded `deep` bool. |
+| §30.5 consolidation worker | `consolidation` | ✅ | candidate-until-gate; `projection_recompute`. |
+| §30.6 promotion gate + branches | `gate`, `engine` | ✅ (🟡) | #19 counterfactual replay not wired into gate. |
+| §30.7 agent-facing API / MCP tools | `mcp_tools`, `mcp_server`, `cli` | ✅ | Every blueprint-named tool in TOOL_SPEC; CLI parity. **No parity gaps (CC-MCP).** |
+| §31 configuration & invariant rails | `policy`, `security`, `config/drift-baseline.toml` | 🟡 | #22 pin §31 numeric rail VALUES as live config-drift constants (AUX-DOCS×CC-LS). |
+| §33 testing & eval harness | `eval`, `benchmarks`, `tests/` | 🟡 | #10 recall@k/nDCG, #21 ECE/poison-block/TTL-lift metrics. |
+
+---
+
+## 6. NFRs (§15) & success metrics (§16)
+
+- **NFRs:** reliability / privacy / portability / observability ✅. Latency 🟡 (P95<300ms proven only on small in-memory seed, not at 10⁵ scale). Scale/cost 🟡 (no volume/cost benchmark) → 🔒 scale benchmarks.
+- **Success metrics (§16):** all 🟡 — P95 / abstention-rate / contradiction-backlog are measured, but **recall@k, nDCG, ECE, poison-block-rate%, TTL-lift-slope are not yet computed** (#10, #21). Harnesses exist; the numbers do not. Closing these is measurement work, not new features.
+
+---
+
+## 7. Actionable parity gap list (folds AUX-XREF §G, Builder 7)
+
+Lane-routed. Status tracked here; owning lane commits only its own files. Cross-lane pairs agree an interface, each committing its own side.
+
+### CC-PG (B4) — schema parity (migration-safe additive)
+1. `[C]` add `assertions.salience` (I4 activation) + populate. ❌→
+2. `[C]` restore bitemporal `evidence.event_time`+`recorded_time` (or document the collapse w/ test). 🟡
+3. `[C]` `relations.{weight,recorded_at,expired_at,justification_id,status}`. 🟡
+4. `[C]` `preferences.superseded_by`. 🟡
+5. `[C/T]` column-level schema-drift test (catch `gold→expected`, `parent→from_branch`, `window→metric_window`, `calibrated_confidence→calibration` renames). *(coordinate AUX-DOCS `test_config_drift`)*
+
+### CC-R (B11) — retrieval depth + metrics
+6. `[C]` fast-path cached graph signal (PPR/1-hop) so fast `retrieve()` fuses graph without `deep=True` (§22.5). *(coordinate CC-BC precompute)*
+7. `[C]` add `w_s·spreading(m,q)` term to activation score (§22.4).
+8. `[C]` add preference/procedure/lesson channels to `retrieve()` (§22.2).
+9. `[C]` expected-marginal-gain top-k cutoff (ACT-R `C>pG`) (§22.4).
+10. `[C/T]` recall@k / nDCG benchmark in `benchmarks.py`; latency SLO at larger seed.
+
+### CC-BC (B12) — belief/calibration/consolidation/lifecycle
+11. `[C]` real IVM dirty-set/memoization + auto-trigger (I6).
+12. `[C]` per-example conformal nonconformity (I8).
+13. `[C]` explicit AGM expansion/revision/contraction + ATMS labels (I2).
+14. `[C]` enforce `must_keep` in lifecycle demotion + pointer-to-original (I7/§25).
+15. `[C]` tier-0 correction → same-turn supersession in belief core (pairs #23). + `[T]`.
+16. `[C]` cadence-bound consolidation anti-thrash (§21).
+17. `[C]` gate fact-candidates by external corroboration (§23.3).
+18. `[C]` persist + compute per-memory `calibrated_confidence`, fuse signals (§26). *(needs CC-PG column)*
+
+### CC-LS (B2) — learning/self-opt/eval
+19. `[C]` implement counterfactual replay + wire dead `counterfactual_replay_score()` into gate/eval (I12/§30.6).
+20. `[C]` hot-loop CRITIC verify-with-tools → candidate-lesson (§23.1). *(in progress — see commit `f7e4180`)*
+21. `[C/T]` `eval.py` recall@k/nDCG + ECE + poison-block-rate% + TTL-lift + shadow-mode harness.
+22. `[C/T]` pin numeric invariant-rail VALUES (`max_supersession_rate`≈0.05, `min_corroboration`≈2, `max_prune_fraction`) as live constants tested by config-drift (§31). *(CC-LS adds constants on `OperatingPolicy`; AUX-DOCS pins them in `config/drift-baseline.toml` + `test_config_drift.py`.)*
+
+### CC-UPS (B3) — user-model/ingestion/provenance
+23. `[C]` **tier-0 user-correction hot-path shortcut** (`is_tier0_user_correction`→ungated apply) (§20.7/§30.2) — **highest-value missing feature** (pairs #15).
+24. `[C]` §24 learn-from-user-mistakes → scoped support strategy. ❌→
+25. `[C]` semiring how-provenance tags + combine operators (I5) *(or document deferred-by-design)*.
+26. `[C]` latent user embedding beyond `hashing_embedding` stand-in where codeable (FR-16).
+
+### CC-SEC (B10) — security
+27. `[C]` taint labels + propagation blocking on data≠instruction (I11) + write-path tests.
+28. `[C]` distinct no-write quarantine component (§27). C2PA real cert-chain = 🔒.
+
+### CC-RT (B1) — engine/gate/guard
+29. `[C]` cheap classifier `route()` for fast-vs-deep instead of hardcoded bool (§30.4). *(coordinate CC-R)*
+30. `[C]` deepen `guard.py` anti-degradation to long-horizon tracked metric (§25) + gate hook for #19.
+
+### Cross-lane pairs (agree interface; each commits only its own files)
+- **tier-0 correction:** CC-UPS #23 (`ingestion.py`) + CC-BC #15 (`belief.py`).
+- **calibrated_confidence:** CC-BC #18 (compute) + CC-PG (column).
+- **fast-graph:** CC-R #6 + CC-BC precompute.
+- **route():** CC-RT #29 + CC-R.
+- **numeric rail pins:** CC-LS #22 (constants) + AUX-DOCS (`drift-baseline.toml` + `test_config_drift.py`).
+
+---
+
+## 8. Deferred (🔒 operator deployment evidence — NOT code defects, do not fabricate)
+
+The provider boundaries already exist in code; these require real infrastructure an operator runs:
+
+- Production ParadeDB/BM25 lexical, Apache AGE graph, pgvector-at-scale adapters.
+- Real IdP/JWKS rotation, KMS/HSM/Vault secret manager, TLS lifecycle, hosted MCP soak.
+- Real LoRA / test-time-training behind the `parametric` provider boundary.
+- Real C2PA signature / certificate-chain verification.
+- Scale benchmarks (10⁵ local / 10⁸ prod) and numeric SLO proof at volume.
+
+Local infra now available for *some* of these (Postgres :54329, Vault :8211, Keycloak :8089) — where a live check closes a parity row (e.g. OIDC via Keycloak, secrets via Vault), the owning lane pursues it; genuinely-cloud evidence stays 🔒.
+
+---
+
+## 9. Headline
+
+No innovation is a total ❌. The only two genuinely-missing **features** are **§20.7 tier-0 correction shortcut** (#23/#15) and **§24 learn-from-user-mistakes strategy** (#24). The dominant 🟡 cluster is **(a) measurement** (success metrics coded as harnesses but not computed) and **(b) the three self-flagged "genuine openings"** — semiring provenance (I5), true IVM (I6), counterfactual replay (I12) + taint tracking (I11) — exactly where §11.13's honesty map predicted the code would be thinnest. Closing §7 + landing the 🔒 evidence where locally satisfiable = Phase 6 done.
+
+---
+
+*Update protocol: AUX-DOCS refreshes this matrix as lanes report `worker_done`. Source of truth for any disputed status is the cited file, not this synthesis.*
