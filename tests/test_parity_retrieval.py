@@ -31,9 +31,16 @@ from mnemosyne.benchmarks import (
     RetrievalQualityBenchmarkResult,
     retrieval_quality_benchmark,
 )
+from mnemosyne import providers as providers_pkg
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.models import Assertion, Evidence, Hit
 from mnemosyne.policy import OperatingPolicy
+from mnemosyne.providers import (
+    ProviderRegistry,
+    build_adapters_from_config,
+    default_registry,
+)
+from mnemosyne import retrieval as retrieval_mod
 from mnemosyne.retrieval import (
     CommandGraphRetriever,
     CommandLexicalRetriever,
@@ -614,3 +621,100 @@ def test_retrieval_quality_runs_against_real_local_engine() -> None:
         assert 0.0 <= metric <= 1.0
     assert result.per_query[0]["query"] == "deployment runbook"
     assert result.to_dict()["k"] == 8
+
+
+# --------------------------------------------------------------------------- #
+# Provider package: organized surface + pluggable registry
+# --------------------------------------------------------------------------- #
+
+
+def test_providers_reexport_is_identical_to_retrieval() -> None:
+    # The package must expose the *same* objects as the retrieval home, not copies.
+    for name in (
+        "EmbeddingProvider",
+        "Reranker",
+        "HashingEmbeddingProvider",
+        "LocalSimilarityReranker",
+        "HttpEmbeddingProvider",
+        "HttpReranker",
+        "CommandLexicalRetriever",
+        "CommandGraphRetriever",
+        "CommandMediaEmbeddingProvider",
+        "RetrievalAdapters",
+        "retrieval_adapters_from_env",
+    ):
+        assert getattr(providers_pkg, name) is getattr(retrieval_mod, name)
+
+
+def test_registry_default_build_matches_env_builder() -> None:
+    # Config-driven default construction must align with the env-driven path so
+    # the two entry points never diverge in their built-in provider selection.
+    from_config = build_adapters_from_config({})
+    from_env = retrieval_mod.retrieval_adapters_from_env(prefix="PARITYRX")
+    assert type(from_config.embedding) is type(from_env.embedding)
+    assert type(from_config.reranker) is type(from_env.reranker)
+    assert from_config.lexical_retriever is None and from_env.lexical_retriever is None
+    assert from_config.graph_retriever is None and from_env.graph_retriever is None
+    assert from_config.lexical_backend == "postgres-fts"
+
+
+def test_registry_builds_http_and_command_providers() -> None:
+    adapters = build_adapters_from_config(
+        {
+            "embedding_provider": "http",
+            "embedding_url": "https://embed.test/v1",
+            "embedding_dims": 16,
+            "reranker_provider": "http",
+            "reranker_url": "https://rr.test/v1",
+            "lexical_provider": "command",
+            "lexical_command": "/usr/bin/true",
+            "graph_provider": "command",
+            "graph_command": "/usr/bin/true",
+        }
+    )
+    assert isinstance(adapters.embedding, providers_pkg.HttpEmbeddingProvider)
+    assert adapters.embedding.dims == 16
+    assert isinstance(adapters.reranker, providers_pkg.HttpReranker)
+    assert isinstance(adapters.lexical_retriever, providers_pkg.CommandLexicalRetriever)
+    assert isinstance(adapters.graph_retriever, providers_pkg.CommandGraphRetriever)
+
+
+def test_local_reranker_binds_constructed_embedding() -> None:
+    adapters = build_adapters_from_config(
+        {"embedding_provider": "http", "embedding_url": "https://e.test", "reranker_provider": "local"}
+    )
+    assert isinstance(adapters.reranker, providers_pkg.LocalSimilarityReranker)
+    assert adapters.reranker.embedding_provider is adapters.embedding
+
+
+@pytest.mark.parametrize(
+    ("config", "match"),
+    [
+        ({"embedding_provider": "bogus"}, "unsupported embedding provider"),
+        ({"reranker_provider": "bogus"}, "unsupported reranker provider"),
+        ({"lexical_provider": "bogus"}, "unsupported lexical provider"),
+        ({"graph_provider": "bogus"}, "unsupported graph provider"),
+        ({"embedding_provider": "http"}, "embedding_url is required"),
+        ({"lexical_provider": "command"}, "lexical_command is required"),
+    ],
+)
+def test_registry_rejects_bad_config(config: dict[str, object], match: str) -> None:
+    with pytest.raises(ValueError, match=match):
+        build_adapters_from_config(config)
+
+
+def test_registry_supports_custom_provider_registration() -> None:
+    registry = default_registry()
+    sentinel = providers_pkg.HashingEmbeddingProvider(dims=8)
+    registry.register_embedding_provider("sentinel", lambda _config: sentinel)
+    adapters = build_adapters_from_config({"embedding_provider": "sentinel"}, registry=registry)
+    assert adapters.embedding is sentinel
+    # A fresh default registry must NOT see the custom registration (no shared mutable state).
+    assert "sentinel" not in default_registry().embedding
+
+
+def test_provider_registry_is_constructible_empty() -> None:
+    empty = ProviderRegistry()
+    assert empty.embedding == {} and empty.reranker == {}
+    with pytest.raises(ValueError, match="unsupported embedding provider"):
+        build_adapters_from_config({"embedding_provider": "local"}, registry=empty)
