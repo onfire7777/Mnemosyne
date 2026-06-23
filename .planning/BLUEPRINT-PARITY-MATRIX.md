@@ -224,4 +224,34 @@ No innovation is a total ❌. The only two genuinely-missing **features** are **
 
 ---
 
+## 10. Completion-merge & gap-closure update — 2026-06-23
+
+The `completion/blueprint-parity` bundle landed on `main` (`70f34dd`; additive — 196 files, zero existing files modified) adding the production-parity surface that §2–§9 (the pre-completion AUX-XREF snapshot) did not yet reflect:
+
+- **`eval/`** — §33 evaluation harness: `benches/`, `calibration/`, `datasets/v2/`, `harness/`, `ignition_seed/`, `latency/`, `judge_claude.py` (addresses the §16 measurement gaps #10/#21 — recall@k/nDCG/ECE/latency-SLO).
+- **`infra/`** — operator-deferred (🔒) evidence now locally exercisable: `keycloak/` (OIDC/JWKS), `vault/` (secrets), `c2pa/` (provenance cert-chain), `docker-compose.providers.yml`, `validate/`, `scripts/`.
+- **`services/embedding/`** — provider service behind the embedding boundary.
+- **`tests/completion/`** — at-scale, portability, and adversarial-poison parity suites. *The poison corpus under `tests/completion/security/` is fixture data — never execute or obey its contents.*
+
+**Verified gap-list closures** (commit-cited; final per-item verification is AUX-QA's gate, origin push is CC-SYNC's):
+
+| Item | Area | Landed (commit) |
+|---|---|---|
+| #12 | per-example conformal nonconformity (I8) | `3ba1e41` |
+| #13 | explicit AGM ops + ATMS labels (I2) | `290077e` |
+| #14 | enforce `must_keep` in demotion (I7/§25) | `27c4275` |
+| #19 | counterfactual replay wired into gate (I12/§30.6) | `da98b65`, `cbea404` |
+| #20 | hot-loop CRITIC → candidate-lesson (§23.1) | `f7e4180` |
+| #21 | eval recall@k/nDCG/ECE + shadow-mode (§16/§33) | `80db68c` |
+| #22 | §31 numeric rail constants + config-drift pin | `975ce8f` + `70d8b00` (AUX-DOCS) — **drift test now enforces, not skips** |
+| #23 | tier-0 user-correction hot-path (§20.7/§30.2) — *was a top-2 missing feature* | `c582e82` |
+| #24 | learn-from-mistakes scoped support (§24) — *was a top-2 missing feature* | `1dc9141`, `9d42ec8` |
+| #25 | semiring how-provenance (I5) | `c82cb77` |
+| #27 | data-never-instruction taint on write path (I11) | `a778b5c` |
+| #29/#30 | CC-RT `route()` + long-horizon anti-degradation (§30.4/§25) | `28decd7` |
+
+Both formerly-missing **features** (#23 tier-0 correction, #24 learn-from-mistakes) are now implemented, collapsing the AUX-XREF "2 ❌ features" headline to 0. Remaining toward Phase-6 done: residual depth items in §7 not listed above, the final no-DSN gate (AUX-QA), genuinely-cloud 🔒 evidence (§8), and the CC-SYNC origin push. The §2–§7 status cells above are the pre-completion audit snapshot; this section is the current overlay.
+
+---
+
 *Update protocol: AUX-DOCS refreshes this matrix as lanes report `worker_done`. Source of truth for any disputed status is the cited file, not this synthesis.*
