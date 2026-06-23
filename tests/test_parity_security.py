@@ -32,10 +32,13 @@ from mnemosyne.privacy import (
     normalize_residency,
 )
 from mnemosyne.security import (
+    NO_WRITE_TAINT_TAGS,
+    SANITIZED_DATA_TAGS,
     SecurityPolicy,
     SessionAuthError,
     SessionIdentity,
     TrustTier,
+    is_write_tainted,
     less_trusted,
     meets_trust,
     more_trusted,
@@ -173,6 +176,45 @@ def test_sanitize_retrieved_text_marks_content_as_data_never_instruction() -> No
     assert sanitized["trust_tier"] == int(TrustTier.UNTRUSTED_EXTERNAL)
     # Content is preserved losslessly (data is kept, not executed).
     assert sanitized["content"] == poisoned
+    # The no-write taint tags propagate so downstream write gating sees data-only.
+    assert set(sanitized["capability_tags"]) == set(SANITIZED_DATA_TAGS)
+    assert is_write_tainted(sanitized["capability_tags"]) is True
+
+
+def test_tainted_data_carries_no_write_authority_regardless_of_role_or_trust() -> None:
+    """I11/§27: quarantined / data-only content can never author a write."""
+
+    policy = SecurityPolicy()
+    # Even the strongest principal (operator, top trust) is denied when the
+    # source data is tainted — taint is not overridden by role or trust.
+    for tag in NO_WRITE_TAINT_TAGS:
+        decision = policy.authorize_write(
+            "write_preference",
+            "operator",
+            int(TrustTier.DIRECT_USER),
+            target_sink="preference",
+            source_capability_tags=[tag],
+        )
+        assert decision.allowed is False, tag
+        assert "no write authority" in decision.reason
+
+    # Untainted writes on the same path remain allowed (no behavior regression).
+    assert policy.authorize_write(
+        "write_preference", "operator", int(TrustTier.DIRECT_USER), target_sink="preference"
+    ).allowed is True
+    assert policy.authorize_write(
+        "write_preference", "agent", int(TrustTier.DIRECT_USER), target_sink="preference", source_capability_tags=["benign"]
+    ).allowed is True
+
+
+def test_taint_vocabulary_matches_pipeline_capability_tags() -> None:
+    """The security taint set stays aligned with ingestion/consolidation tags."""
+
+    assert NO_WRITE_TAINT_TAGS == {"data-only", "no-write-authority", "sanitize-as-data", "quarantined"}
+    assert set(SANITIZED_DATA_TAGS) <= NO_WRITE_TAINT_TAGS
+    assert is_write_tainted(None) is False
+    assert is_write_tainted([]) is False
+    assert is_write_tainted(["unrelated", "quarantined"]) is True
 
 
 # ---------------------------------------------------------------------------
