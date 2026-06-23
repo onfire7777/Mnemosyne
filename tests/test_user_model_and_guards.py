@@ -4,7 +4,13 @@ from datetime import UTC, datetime
 
 from mnemosyne.guard import no_degradation_guard
 from mnemosyne.lifecycle import FidelityTier, LifecycleState, apply_rehearsal_schedule, next_rehearsal_days
-from mnemosyne.user_model import LatentUserProfile, UserMemoryKind, UserModel, UserModelEntry
+from mnemosyne.user_model import (
+    LatentUserProfile,
+    UserMemoryKind,
+    UserMistakeEvent,
+    UserModel,
+    UserModelEntry,
+)
 
 
 TENANT = "tenant-d"
@@ -241,3 +247,75 @@ def test_authority_order_matches_blueprint_precedence() -> None:
         > authority_of(UserMemoryKind.TEMPORARY_STATE)
         > authority_of(UserMemoryKind.INFERRED_PREFERENCE)
     )
+
+
+def test_single_user_slip_creates_no_support_strategy() -> None:
+    # Blueprint §24: a single user slip never becomes a durable judgment or
+    # support strategy.
+    model = UserModel()
+    result = model.record_user_mistake(
+        UserMistakeEvent(
+            tenant_id=TENANT,
+            user_id=USER,
+            pattern="date-math-before-deploy",
+            description="Off-by-one on the deploy window.",
+            scope={"task": "deploy"},
+        )
+    )
+
+    assert result["promoted"] is False
+    assert result["strategy_id"] is None
+    assert result["similar_count"] == 1
+    assert model.context_packet(TENANT, USER, {"task": "deploy"})["support_strategies"] == []
+
+
+def test_repeated_user_mistakes_promote_scoped_reversible_support_strategy() -> None:
+    # Blueprint §24: only repeated similar events yield a scoped, assistance-
+    # framed, reversible support strategy.
+    model = UserModel()
+    for description in ("Off-by-one on the deploy window.", "Wrong timezone in the deploy cutoff."):
+        result = model.record_user_mistake(
+            UserMistakeEvent(
+                tenant_id=TENANT,
+                user_id=USER,
+                pattern="date-math-before-deploy",
+                description=description,
+                scope={"task": "deploy"},
+            ),
+            suggestion="Offer to double-check date math before deploys.",
+        )
+
+    assert result["promoted"] is True
+    assert result["similar_count"] == 2
+
+    packet = model.context_packet(TENANT, USER, {"task": "deploy"})
+    assert [item["suggestion"] for item in packet["support_strategies"]] == [
+        "Offer to double-check date math before deploys."
+    ]
+    # Scoped: a non-matching scope does not surface the strategy.
+    assert model.context_packet(TENANT, USER, {"task": "review"})["support_strategies"] == []
+
+    # Reversible: retiring removes it from the advisory packet.
+    strategy_id = packet["support_strategies"][0]["id"]
+    assert model.retire_support_strategy(strategy_id) is True
+    assert model.context_packet(TENANT, USER, {"task": "deploy"})["support_strategies"] == []
+    assert model.retire_support_strategy(strategy_id) is False
+
+
+def test_repeated_user_mistakes_do_not_duplicate_strategy() -> None:
+    model = UserModel()
+    strategy_ids = set()
+    for _ in range(4):
+        result = model.record_user_mistake(
+            UserMistakeEvent(
+                tenant_id=TENANT,
+                user_id=USER,
+                pattern="forgets-changelog-entry",
+                description="No changelog entry added.",
+            )
+        )
+        if result["strategy_id"]:
+            strategy_ids.add(result["strategy_id"])
+
+    assert len(strategy_ids) == 1
+    assert len(model.support_strategies) == 1
