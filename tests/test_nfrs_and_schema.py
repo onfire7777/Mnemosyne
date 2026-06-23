@@ -3,11 +3,14 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import pytest
+
 from mnemosyne.benchmarks import retrieval_latency_benchmark
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.models import Assertion, Evidence
 from mnemosyne.observability import MetricsRegistry
 from mnemosyne.privacy import ErasureMode, classify_privacy
+from mnemosyne.source_truth import SOURCE_TRUTH_FENCE, parse_markdown_git_blocks
 
 
 TENANT = "tenant-g"
@@ -137,3 +140,43 @@ def test_compose_file_mounts_schema_for_postgres_parity() -> None:
 
     assert "pgvector/pgvector:pg16" in compose
     assert "./sql/schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro" in compose
+
+
+def test_markdown_git_source_blocks_parse_with_provenance_fields(tmp_path: Path) -> None:
+    # Human-authored source-of-truth blocks must parse losslessly with the
+    # subject/predicate/object triple and stable git-line provenance identity.
+    doc = tmp_path / "notes.md"
+    doc.write_text(
+        "# Notes\n\n"
+        f"```{SOURCE_TRUTH_FENCE}\n"
+        'id = "fact-1"\n'
+        'subject = "user"\n'
+        'predicate = "prefers"\n'
+        'object = "concise updates"\n'
+        "confidence = 0.9\n"
+        "```\n",
+        encoding="utf-8",
+    )
+
+    blocks = parse_markdown_git_blocks(tmp_path)
+
+    assert len(blocks) == 1
+    block = blocks[0]
+    assert (block.subject, block.predicate, block.object_value) == (
+        "user",
+        "prefers",
+        "concise updates",
+    )
+    assert block.confidence == 0.9
+    assert block.relative_path == "notes.md"
+    assert block.source_identity("abc123") == "git:notes.md@abc123#fact-1"
+
+
+def test_markdown_git_source_rejects_unclosed_assertion_block(tmp_path: Path) -> None:
+    (tmp_path / "broken.md").write_text(
+        f"```{SOURCE_TRUTH_FENCE}\nsubject = \"user\"\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="unclosed"):
+        parse_markdown_git_blocks(tmp_path)
