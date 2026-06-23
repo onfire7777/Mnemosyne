@@ -26,7 +26,13 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from mnemosyne.models import Hit
+from mnemosyne.benchmarks import (
+    LabeledQuery,
+    RetrievalQualityBenchmarkResult,
+    retrieval_quality_benchmark,
+)
+from mnemosyne.engine import LocalMemoryEngine
+from mnemosyne.models import Assertion, Evidence, Hit
 from mnemosyne.policy import OperatingPolicy
 from mnemosyne.retrieval import (
     CommandGraphRetriever,
@@ -501,3 +507,110 @@ def test_post_json_success_and_errors(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("urllib.request.urlopen", _url_error)
     with pytest.raises(ValueError, match="request failed"):
         _post_json("https://p.test", {}, None, 5.0)
+
+
+# --------------------------------------------------------------------------- #
+# Retrieval-quality benchmark (blueprint §16: recall@k / nDCG@k / precision / MRR)
+# --------------------------------------------------------------------------- #
+
+
+class _FakeResult:
+    def __init__(self, hits: list[Hit]) -> None:
+        self.hits = hits
+
+
+class _RankingEngine:
+    """A duck-typed engine returning a fixed ranked id list per query."""
+
+    def __init__(self, ranking: dict[str, list[str]]) -> None:
+        self._ranking = ranking
+
+    def retrieve(self, query: str, *, tenant_id: str, branch: str, deep: bool) -> _FakeResult:
+        ids = self._ranking.get(query, [])
+        return _FakeResult([_hit(hid, hid, score=1.0, tenant_id=tenant_id, branch=branch) for hid in ids])
+
+
+def test_retrieval_quality_metric_math_is_exact() -> None:
+    engine = _RankingEngine({"q-second": ["d1", "d2", "d3", "d4"], "q-first": ["d1", "d2", "d3", "d4"]})
+    result = retrieval_quality_benchmark(
+        engine,  # type: ignore[arg-type]
+        "tenant-a",
+        [LabeledQuery("q-second", ("d2",)), LabeledQuery("q-first", ("d1",))],
+        k=4,
+    )
+    assert result.query_count == 2
+    assert result.recall_at_k == pytest.approx(1.0)
+    assert result.precision_at_k == pytest.approx(0.25)
+    # MRR: relevant at rank 2 (1/2) and rank 1 (1/1) -> mean 0.75
+    assert result.mrr == pytest.approx(0.75)
+    # nDCG: (1/log2(3) + 1/log2(2)) / 2
+    expected_ndcg = ((1.0 / math.log2(3)) + 1.0) / 2
+    assert result.ndcg_at_k == pytest.approx(expected_ndcg)
+
+
+def test_retrieval_quality_counts_labeled_misses_but_skips_unlabeled() -> None:
+    engine = _RankingEngine({"hit": ["d1"], "miss": ["d9"], "unlabeled": ["d1"]})
+    result = retrieval_quality_benchmark(
+        engine,  # type: ignore[arg-type]
+        "tenant-a",
+        [
+            LabeledQuery("hit", ("d1",)),
+            LabeledQuery("miss", ("d2",)),  # labeled but not retrieved -> scored 0
+            LabeledQuery("unlabeled", ()),  # no labels -> skipped entirely
+        ],
+        k=4,
+    )
+    assert result.query_count == 2  # unlabeled skipped
+    assert result.recall_at_k == pytest.approx(0.5)  # (1.0 + 0.0) / 2
+
+
+def test_retrieval_quality_empty_and_invalid_inputs() -> None:
+    engine = _RankingEngine({})
+    empty = retrieval_quality_benchmark(engine, "tenant-a", [], k=4)  # type: ignore[arg-type]
+    assert isinstance(empty, RetrievalQualityBenchmarkResult)
+    assert empty.query_count == 0
+    assert empty.recall_at_k == 0.0
+    with pytest.raises(ValueError, match="k must be positive"):
+        retrieval_quality_benchmark(engine, "tenant-a", [], k=0)  # type: ignore[arg-type]
+
+
+def test_retrieval_quality_runs_against_real_local_engine() -> None:
+    engine = LocalMemoryEngine()
+    tenant = "tenant-bench"
+    cid = engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id="user-bench",
+            actor="user",
+            source_type="seed",
+            content="The deployment runbook lives in the operations wiki.",
+            trust_tier=2,
+            access_policy={"tenant": tenant},
+        )
+    )
+    engine.upsert_assertion(
+        Assertion(
+            tenant_id=tenant,
+            subject="deployment runbook",
+            predicate="lives in",
+            object="operations wiki",
+            confidence=0.9,
+            source_evidence_cids=[cid],
+            status="active",
+            trust_tier=2,
+            access_policy={"tenant": tenant},
+        )
+    )
+    probe = engine.retrieve("deployment runbook", tenant_id=tenant, branch="main", deep=False)
+    relevant_ids = tuple(hit.id for hit in probe.hits[:1])
+    result = retrieval_quality_benchmark(
+        engine,
+        tenant,
+        [LabeledQuery("deployment runbook", relevant_ids)],
+        k=8,
+    )
+    assert result.query_count == 1
+    for metric in (result.recall_at_k, result.precision_at_k, result.ndcg_at_k, result.mrr):
+        assert 0.0 <= metric <= 1.0
+    assert result.per_query[0]["query"] == "deployment runbook"
+    assert result.to_dict()["k"] == 8

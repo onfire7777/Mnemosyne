@@ -153,3 +153,91 @@ def test_no_degradation_guard_blocks_memory_below_baseline() -> None:
     assert passing.passed is True
     assert failing.passed is False
     assert "degraded" in failing.reason
+
+
+def test_user_model_entry_serialization_round_trips() -> None:
+    # Durable runtime-state parity (local <-> Postgres) depends on lossless
+    # to_dict()/from_dict() for every populated field, including valid_to=None.
+    entry = UserModelEntry(
+        tenant_id=TENANT,
+        user_id=USER,
+        kind=UserMemoryKind.EXPLICIT_PREFERENCE,
+        statement="Prefer concise summaries.",
+        scope={"repo": "mnemosyne"},
+        confidence=0.88,
+        exceptions={"medium": "voice"},
+        source_evidence_cids=["cid-1", "cid-2"],
+    )
+
+    serialized = entry.to_dict()
+    restored = UserModelEntry.from_dict(serialized)
+
+    assert restored.to_dict() == serialized
+    assert serialized["kind"] == "explicit_preference"
+    assert serialized["valid_to"] is None
+    assert restored.id == entry.id
+    assert restored.exceptions == {"medium": "voice"}
+    assert restored.source_evidence_cids == ["cid-1", "cid-2"]
+
+
+def test_latent_user_profile_serialization_round_trips() -> None:
+    profile = LatentUserProfile(
+        tenant_id=TENANT,
+        user_id=USER,
+        embedding=[0.1, 0.2, 0.3],
+        summary="Advisory latent profile only.",
+    )
+
+    restored = LatentUserProfile.from_dict(profile.to_dict())
+
+    assert restored.to_dict() == profile.to_dict()
+    assert restored.embedding == [0.1, 0.2, 0.3]
+    assert restored.summary == "Advisory latent profile only."
+
+
+def test_lower_authority_entry_never_supersedes_higher_and_stays_inferred() -> None:
+    # Inverse of the supersession test: a later, lower-authority inferred
+    # preference must NOT displace an active hard instruction it conflicts with,
+    # and it surfaces only in the advisory "inferred" bucket.
+    model = UserModel()
+    hard = UserModelEntry(
+        tenant_id=TENANT,
+        user_id=USER,
+        kind=UserMemoryKind.HARD_INSTRUCTION,
+        statement="Use concise operational updates.",
+        scope={"repo": "mnemosyne"},
+        confidence=1.0,
+    )
+    inferred = UserModelEntry(
+        tenant_id=TENANT,
+        user_id=USER,
+        kind=UserMemoryKind.INFERRED_PREFERENCE,
+        statement="Prefers long narrative updates.",
+        scope={"repo": "mnemosyne"},
+        confidence=0.6,
+    )
+
+    model.add_entry(hard)
+    model.add_entry(inferred)
+
+    assert model.entries[hard.id].status == "active"
+    assert model.entries[inferred.id].status == "active"
+
+    packet = model.context_packet(TENANT, USER, {"repo": "mnemosyne"})
+    assert [item["kind"] for item in packet["authoritative"]] == ["hard_instruction"]
+    assert [item["kind"] for item in packet["inferred"]] == ["inferred_preference"]
+    assert packet["rules"]["latent_never_overrides_explicit"] is True
+
+
+def test_authority_order_matches_blueprint_precedence() -> None:
+    def authority_of(kind: UserMemoryKind) -> int:
+        return UserModelEntry(tenant_id=TENANT, user_id=USER, kind=kind, statement="x").authority()
+
+    assert (
+        authority_of(UserMemoryKind.HARD_INSTRUCTION)
+        > authority_of(UserMemoryKind.IDENTITY)
+        > authority_of(UserMemoryKind.EXPLICIT_PREFERENCE)
+        > authority_of(UserMemoryKind.SITUATIONAL_PREFERENCE)
+        > authority_of(UserMemoryKind.TEMPORARY_STATE)
+        > authority_of(UserMemoryKind.INFERRED_PREFERENCE)
+    )
