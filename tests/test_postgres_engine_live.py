@@ -1681,3 +1681,16 @@ def test_schema_sql_persists_every_field_of_core_models() -> None:
         assert not missing, (
             f"{model.__name__} fields not persisted by schema.sql table {table!r}: {missing}"
         )
+
+    # Positive blueprint-parity guard: additive columns required by the blueprint
+    # (Appendix A) that are not (yet) carried on the frozen model dataclasses must
+    # still exist in the schema so production deployments and future model wiring
+    # have a stable target. Catches accidental removal of a parity column.
+    blueprint_parity_columns = {
+        "assertions": {"salience", "calibrated_confidence", "recorded_time"},
+        "relations": {"weight", "recorded_at", "expired_at", "justification_id", "status"},
+        "preferences": {"superseded_by"},
+    }
+    for table, required in blueprint_parity_columns.items():
+        absent = sorted(required - columns_for(table))
+        assert not absent, f"blueprint-parity columns absent from schema.sql table {table!r}: {absent}"
