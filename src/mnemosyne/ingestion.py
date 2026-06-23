@@ -11,7 +11,7 @@ from mnemosyne.consolidation import CONSOLIDATE_EVIDENCE_JOB, DEFAULT_CONSOLIDAT
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.ids import content_cid
 from mnemosyne.media import MEDIA_EXTRACT_JOB, extract_derived_text
-from mnemosyne.models import Evidence, Resource
+from mnemosyne.models import Assertion, Evidence, Resource
 from mnemosyne.privacy import (
     classify_privacy,
     enforce_residency,
@@ -45,6 +45,7 @@ class IngestRequest:
     trust_tier: int | None = None
     capability_tags: list[str] = field(default_factory=list)
     sensitivity: int = 0
+    correction: dict[str, Any] | None = None
 
     def payload_bytes(self) -> bytes:
         if self.data is not None:
@@ -63,6 +64,8 @@ class IngestResult:
     provenance: dict[str, Any]
     resource: Resource | None = None
     queued_jobs: list[dict[str, Any]] = field(default_factory=list)
+    correction_applied: bool = False
+    correction_assertion_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -236,6 +239,23 @@ class IngestionPipeline:
             ),
             branch=branch,
         )
+        # Tier-0 user-correction fast path (blueprint §20.7 / §30.2): the
+        # highest-trust signal is applied immediately as an active supersession
+        # in the same turn, bypassing the gated consolidation warm loop. Only
+        # derived/inferred memory takes the candidate -> gate path.
+        correction_applied = False
+        correction_assertion_id: str | None = None
+        if not already_present and is_tier0_user_correction(request, trust_tier):
+            correction_assertion_id = self._apply_tier0_correction(
+                request=request,
+                cid=cid,
+                branch=branch,
+                trust_tier=trust_tier,
+                sensitivity=sensitivity,
+                access_policy=access_policy,
+            )
+            correction_applied = correction_assertion_id is not None
+
         queued_jobs: list[dict[str, Any]] = []
         if self.queue and not already_present:
             if should_externalize and request.modality != "text" and not derived_sources:
@@ -270,7 +290,45 @@ class IngestionPipeline:
             provenance=provenance.to_dict(),
             resource=resource,
             queued_jobs=queued_jobs,
+            correction_applied=correction_applied,
+            correction_assertion_id=correction_assertion_id,
         )
+
+    def _apply_tier0_correction(
+        self,
+        *,
+        request: IngestRequest,
+        cid: str,
+        branch: str,
+        trust_tier: int,
+        sensitivity: int,
+        access_policy: dict[str, Any],
+    ) -> str | None:
+        """Apply a tier-0 user correction immediately as an active assertion.
+
+        Routes through ``engine.upsert_assertion`` so the belief core performs
+        trust-tier-precedence supersession in the same turn (ungated), realizing
+        the §20.7 fast-path correction shortcut. Returns the assertion id, or
+        ``None`` if the request carries no well-formed correction triple.
+        """
+        triple = _correction_triple(request)
+        if triple is None:
+            return None
+        assertion = Assertion(
+            tenant_id=request.tenant_id,
+            user_id=request.user_id,
+            subject=triple["subject"],
+            predicate=triple["predicate"],
+            object=triple["object"],
+            confidence=triple["confidence"],
+            scope=triple["scope"],
+            source_evidence_cids=[cid],
+            status="active",
+            trust_tier=trust_tier,
+            sensitivity=sensitivity,
+            access_policy=dict(access_policy),
+        )
+        return self.engine.upsert_assertion(assertion, branch=branch)
 
     def residency_policy(self) -> dict[str, object]:
         warnings: list[str] = []
@@ -376,6 +434,52 @@ def classify_request(request: IngestRequest, payload: bytes) -> dict[str, Any]:
         "sensitivity": sensitivity,
         "sanitize_as_data": "sanitize-as-data" in capability_tags or trust_tier >= int(TrustTier.UNTRUSTED_EXTERNAL),
         "pii_detected": sorted(pii_tags),
+    }
+
+
+def is_tier0_user_correction(request: IngestRequest, trust_tier: int) -> bool:
+    """Return True for a tier-0 direct-user correction (blueprint §20.7).
+
+    A tier-0 correction is the highest-trust signal and is applied immediately
+    rather than via the gated warm loop. Detection requires the highest trust
+    tier (``DIRECT_USER``), a direct-user actor, and a well-formed structured
+    correction triple. Quarantined or lower-trust evidence never qualifies
+    because its final ``trust_tier`` is no longer ``DIRECT_USER``.
+    """
+    if trust_tier != int(TrustTier.DIRECT_USER):
+        return False
+    if request.actor != "user":
+        return False
+    return _correction_triple(request) is not None
+
+
+def _correction_triple(request: IngestRequest) -> dict[str, Any] | None:
+    raw = request.correction
+    if not isinstance(raw, dict):
+        flagged = request.metadata.get("correction")
+        raw = flagged if isinstance(flagged, dict) else None
+    if not isinstance(raw, dict):
+        return None
+    subject = raw.get("subject")
+    predicate = raw.get("predicate")
+    obj = raw.get("object", raw.get("object_value", raw.get("value")))
+    if not (
+        isinstance(subject, str)
+        and subject.strip()
+        and isinstance(predicate, str)
+        and predicate.strip()
+        and isinstance(obj, str)
+        and obj.strip()
+    ):
+        return None
+    scope = raw.get("scope")
+    confidence = raw.get("confidence")
+    return {
+        "subject": subject.strip(),
+        "predicate": predicate.strip(),
+        "object": obj.strip(),
+        "scope": dict(scope) if isinstance(scope, dict) else {},
+        "confidence": float(confidence) if isinstance(confidence, (int, float)) else 0.99,
     }
 
 
