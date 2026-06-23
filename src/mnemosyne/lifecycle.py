@@ -41,6 +41,7 @@ class LifecycleState:
     last_rehearsed_at: datetime | None = None
     confabulation_risk: bool = False
     protected: bool = False
+    verbatim_pointer: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -112,6 +113,7 @@ def demotion_decision(state: LifecycleState, now: datetime, utility_threshold: f
             last_rehearsed_at=state.last_rehearsed_at,
             confabulation_risk=state.confabulation_risk,
             protected=state.protected,
+            verbatim_pointer=state.verbatim_pointer,
         )
         return updated, False
     new_tier = next_fidelity_tier(state.tier)
@@ -128,6 +130,9 @@ def demotion_decision(state: LifecycleState, now: datetime, utility_threshold: f
         last_rehearsed_at=state.last_rehearsed_at,
         confabulation_risk=new_tier in {FidelityTier.ABSTRACTIVE_GIST, FidelityTier.STATISTICAL_TRACE},
         protected=state.protected,
+        # I7/§25: keep the pointer to the verbatim original so a demoted gist can
+        # be reconstructed from raw evidence (the documented confabulation guard).
+        verbatim_pointer=state.verbatim_pointer,
     )
     return updated, True
 
@@ -169,6 +174,7 @@ def lifecycle_state_from_dict(row: Mapping[str, Any]) -> LifecycleState:
         last_rehearsed_at=parse_lifecycle_datetime(row.get("last_rehearsed_at")),
         confabulation_risk=bool(row.get("confabulation_risk", False)),
         protected=bool(row.get("protected", False)),
+        verbatim_pointer=(str(row["verbatim_pointer"]) if row.get("verbatim_pointer") is not None else None),
     )
 
 
@@ -341,6 +347,7 @@ def apply_rehearsal_schedule(state: LifecycleState, now: datetime) -> tuple[Life
             last_rehearsed_at=now,
             confabulation_risk=state.confabulation_risk,
             protected=state.protected,
+            verbatim_pointer=state.verbatim_pointer,
         ),
         True,
     )
