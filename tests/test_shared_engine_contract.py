@@ -600,6 +600,18 @@ def test_shared_engine_contract_deep_search_abstains_on_summary_derived_graph_su
     )
     summary = next(item for item in summary_run.pass_results if item["name"] == "summarizer")["details"]
 
+    # Withhold the raw source so only the generated gist summary and its
+    # summary-derived-gist provenance relation remain reachable. This is the
+    # exact condition the abstention rail guards: when the original source is
+    # unavailable and only gist-tier support is retrievable, deep_search must
+    # abstain. The trust filter alone does not exclude the tier-0 raw source
+    # (min_trust_tier maps to max_trust, which keeps it), so without withholding
+    # it the raw source stays retrievable and can non-deterministically win a
+    # context-budget slot, making the rail fire only by luck.
+    engine.update_evidence_metadata(
+        tenant, raw_cid, {"quarantine_reason": "source-withheld-for-gist-contract"}
+    )
+
     result = engine.deep_search(raw_cid, tenant, filt={"min_trust_tier": 2})
     relation_hit = next(hit for hit in result.hits if hit.kind == "relation")
 
