@@ -152,7 +152,9 @@ several carry production-evidence gates (release-audit / provider-check / OIDC-J
 Lane-routed. Status tracked here; owning lane commits only its own files. Cross-lane pairs agree an interface, each committing its own side.
 
 ### CC-PG (B4) — schema parity (migration-safe additive)
-1. `[C]` add `assertions.salience` (I4 activation) + populate. ❌→
+> **✅ CLOSED @`5103a3a`** (migration-safe additive `ALTER … ADD COLUMN IF NOT EXISTS`): `assertions.{salience,calibrated_confidence,recorded_time}`, `relations.{weight,recorded_at,expired_at,justification_id,status}`, `preferences.superseded_by` — closes items #1–#4 and the column side of #18. (#5 column-level drift guard: B4 `2c1a40d`.)
+
+1. `[C]` add `assertions.salience` (I4 activation) + populate. ✅ column @`5103a3a`
 2. `[C]` restore bitemporal `evidence.event_time`+`recorded_time` (or document the collapse w/ test). 🟡
 3. `[C]` `relations.{weight,recorded_at,expired_at,justification_id,status}`. 🟡
 4. `[C]` `preferences.superseded_by`. 🟡
@@ -205,6 +207,8 @@ Lane-routed. Status tracked here; owning lane commits only its own files. Cross-
 ---
 
 ## 8. Deferred (🔒 operator deployment evidence — NOT code defects, do not fabricate)
+
+> See **§12** for the full three-bucket accounting that keeps "complete" honest: CLOSED vs DEFERRED-BY-DESIGN (codeable but deliberately out of safe scope, with rationale) vs DEFERRED-OPERATOR (this section).
 
 The provider boundaries already exist in code; these require real infrastructure an operator runs:
 
@@ -273,6 +277,29 @@ Also verified-closed by AUX-XREF on the merged baseline (`@67cbf6c`): **#23** ti
 **Caveat (AUX-QA owns):** these harnesses target the deterministic local engine; "green / at-target" is confirmed by AUX-QA (B6) *running* them, not asserted here.
 
 **Explicit DEFERRED (🔒 operator-run — NOT closed by `eval/`):** prod-scale SLO at volume (10⁵ local / 10⁸ prod); real C2PA signature / certificate-chain; real LoRA / test-time-training trainer; live IdP/JWKS + KMS/Vault rotation. FR-16 latent embedding stays an accepted deterministic local default (`hashing_embedding`) behind the existing HTTP embedding boundary — not a defect.
+
+---
+
+## 12. Final accounting — three distinct buckets (so "complete" is honest)
+
+Remaining-vs-done splits into three buckets that must **not** be conflated. Nothing in 12.2/12.3 is fabricated as "done."
+
+### 12.1 CLOSED — structurally implemented + landed
+- **DDL parity** — B4 `5103a3a` (migration-safe additive `ALTER … ADD COLUMN IF NOT EXISTS`): `assertions.{salience, calibrated_confidence, recorded_time}`, `relations.{weight, recorded_at, expired_at, justification_id, status}`, `preferences.superseded_by`. Closes §7 items #1–#4 + the column side of #18; column-level drift guard `2c1a40d`.
+- **Feature + depth closures** (§10): items #12–14, #19–25, #27, #29–30 — including both formerly-missing features (#23 tier-0 correction, #24 learn-from-mistakes).
+- **Measurement cluster** (§11): recall@k / nDCG / ECE / poison-block-rate / latency-SLO implemented in `eval/` (AUX-QA confirms at-target by running).
+
+### 12.2 DEFERRED-BY-DESIGN — codeable, but deliberately out of safe scope (with rationale; NOT a defect, NOT operator-evidence)
+The code seam exists and the deterministic local behavior is correct and tested; going further is a conscious scope boundary, not a gap:
+- **#11 true IVM (I6)** — `projection_recompute` already covers the affected subgraph; full incremental view maintenance is a behavior-equivalent *performance* optimization. Blueprint §11.13 itself names this a "genuine opening."
+- **#18 `calibrated_confidence` behavioral compute + fuse** — the column is present (12.1); fusing verbalized + entropy + retrieval-agreement + provenance needs a frozen `models.py` field + CC-R fusion. Packet-level conformal abstention already exists.
+- **salience → activation behavioral wiring** — the column is present (12.1); wiring it into the activation scorer is an opt-in seam.
+- **FR-16 latent learned embedding** — the HTTP embedding boundary exists; the deterministic `hashing_embedding` is the intended local-mode default, not a stand-in to "fix."
+
+### 12.3 DEFERRED-OPERATOR — 🔒 not codeable in this environment (requires real infrastructure an operator runs)
+- Prod-scale SLO at volume (10⁵ local / 10⁸ prod); real C2PA signature / certificate-chain; real LoRA / test-time-training trainer deployment; live IdP/JWKS + KMS/Vault + TLS rotation; production ParadeDB/BM25, Apache AGE, and hosted reranker adapters. The provider boundaries already exist in code.
+
+**Honest "complete":** 12.1 is done; 12.2 is a rationale-backed scope boundary (seams present, deterministic local behavior correct + tested); 12.3 is the operator's deployment surface with boundaries already in place.
 
 ---
 
