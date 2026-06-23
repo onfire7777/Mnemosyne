@@ -14,7 +14,7 @@ import urllib.request
 from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, Mapping, Protocol, Sequence
+from typing import Any, Callable, Mapping, Protocol, Sequence
 
 from mnemosyne.models import Hit, parse_dt, utc_now
 from mnemosyne.policy import OperatingPolicy
@@ -676,6 +676,13 @@ def apply_activation_scores(hits: Sequence[Hit], policy: OperatingPolicy, *, now
     max_relevance = max((max(hit.score, 0.0) for hit in hits), default=0.0)
     weights = dict(policy.activation_weights)
     total_weight = max(sum(max(float(value), 0.0) for value in weights.values()), 0.01)
+    # ACT-R spreading activation (blueprint §22.4: the `w_s · spreading(m, q)` term).
+    # It is opt-in via a `spreading` activation weight so the default policy — and
+    # the config-drift baseline that pins it — stay byte-identical. When enabled,
+    # each memory gains activation from the co-retrieved memories it is associated
+    # with (shared provenance / entities), with an explicit per-hit override.
+    include_spreading = "spreading" in weights
+    spreading_by_id = _spreading_activation(hits) if include_spreading else {}
     activated: list[Hit] = []
     for hit in hits:
         semantic = max(hit.score, 0.0) / max(max_relevance, 0.01)
@@ -684,22 +691,28 @@ def apply_activation_scores(hits: Sequence[Hit], policy: OperatingPolicy, *, now
         base_level = min(1.0, math.log1p(access_count) / math.log(11))
         recency = _recency_score(hit.metadata.get("last_accessed"), moment, policy.decay)
         importance = confidence * trust_weight(hit.trust_tier)
-        activation = (
+        activation_numerator = (
             max(weights.get("base_level", 0.0), 0.0) * base_level
             + max(weights.get("semantic", 0.0), 0.0) * semantic
             + max(weights.get("importance", 0.0), 0.0) * importance
             + max(weights.get("recency", 0.0), 0.0) * recency
-        ) / total_weight
+        )
+        components = {
+            "base_level": round(base_level, 6),
+            "semantic": round(semantic, 6),
+            "importance": round(importance, 6),
+            "recency": round(recency, 6),
+        }
+        if include_spreading:
+            spreading = spreading_by_id.get(hit.id, 0.0)
+            activation_numerator += max(weights.get("spreading", 0.0), 0.0) * spreading
+            components["spreading"] = round(spreading, 6)
+        activation = activation_numerator / total_weight
         metadata = {
             **hit.metadata,
             "activation": {
                 "score": round(max(0.0, min(1.0, activation)), 6),
-                "components": {
-                    "base_level": round(base_level, 6),
-                    "semantic": round(semantic, 6),
-                    "importance": round(importance, 6),
-                    "recency": round(recency, 6),
-                },
+                "components": components,
             },
         }
         activated.append(
@@ -734,6 +747,193 @@ def activation_explain(hits: Sequence[Hit], policy: OperatingPolicy) -> dict[str
             for hit in hits
         ],
     }
+
+
+def _spreading_activation(hits: Sequence[Hit]) -> dict[str, float]:
+    """Deterministic ACT-R associative spreading signal per hit id (§22.4).
+
+    Spreading is estimated as the fraction of *other* retrieved hits that share
+    an association cue (provenance id, subject/object/predicate, or an entity
+    link) with the hit — co-activation within the retrieved set. An explicit
+    ``metadata['spreading_activation']`` (e.g. a graph-precomputed signal, see
+    :class:`GraphSignalCache`) overrides the derived estimate.
+    """
+
+    cue_sets: list[set[str]] = []
+    for hit in hits:
+        cues = {str(item).lower() for item in hit.provenance if str(item)}
+        meta = hit.metadata if isinstance(hit.metadata, dict) else {}
+        for key in ("subject", "object", "predicate", "entity"):
+            value = meta.get(key)
+            if isinstance(value, str) and value:
+                cues.add(value.lower())
+        entities = meta.get("entities")
+        if isinstance(entities, (list, tuple)):
+            cues.update(str(item).lower() for item in entities if str(item))
+        cue_sets.append(cues)
+    total = len(hits)
+    signals: dict[str, float] = {}
+    for index, hit in enumerate(hits):
+        meta = hit.metadata if isinstance(hit.metadata, dict) else {}
+        override = meta.get("spreading_activation")
+        if override is not None:
+            signals[hit.id] = _bounded_float(override, default=0.0)
+            continue
+        if total <= 1 or not cue_sets[index]:
+            signals[hit.id] = 0.0
+            continue
+        shared = sum(1 for other in range(total) if other != index and cue_sets[index] & cue_sets[other])
+        signals[hit.id] = shared / (total - 1)
+    return signals
+
+
+def marginal_gain_cutoff(
+    hits: Sequence[Hit],
+    *,
+    token_budget: int,
+    cost: float = 0.05,
+    redundancy_lambda: float = 0.5,
+    token_estimator: Callable[[Hit], int] | None = None,
+) -> tuple[list[Hit], int]:
+    """Assemble context by expected marginal gain (ACT-R "retrieve while C < pG").
+
+    Walks hits in rank order, admitting each while its expected marginal gain —
+    relevance discounted by lexical redundancy with the already-selected set —
+    exceeds ``cost`` and the running token estimate stays within ``token_budget``
+    (blueprint §22.4 marginal-gain / context-budget assembly). Returns the
+    selected hits plus the estimated tokens used. Deterministic and side-effect
+    free, so an engine can swap it in for a fixed top-k truncation.
+    """
+
+    if token_budget < 0:
+        raise ValueError("token_budget must be non-negative")
+    estimate = token_estimator or (lambda hit: max(1, len(hit.text.split())))
+    max_score = max((max(hit.score, 0.0) for hit in hits), default=0.0) or 1.0
+    selected: list[Hit] = []
+    used = 0
+    for hit in hits:
+        tokens = estimate(hit)
+        if used + tokens > token_budget:
+            break
+        relevance = max(hit.score, 0.0) / max_score
+        redundancy = max((lexical_score(hit.text, chosen.text) for chosen in selected), default=0.0)
+        marginal = relevance - redundancy_lambda * redundancy
+        if selected and marginal < cost:
+            break
+        selected.append(hit)
+        used += tokens
+    return selected, used
+
+
+class GraphSignalCache:
+    """Cache of graph-channel signals for fast-path fusion (blueprint §22.2).
+
+    The deep path runs a live PPR traversal; the fast path must fuse a graph
+    signal without paying that cost. Deep retrieval (or a consolidation job)
+    calls :meth:`put` to cache the graph hits for a tenant/branch, and the fast
+    path calls :meth:`fast_signal` to fold the cached signal into RRF fusion.
+    Cached hits carry ``metadata['graph_signal_cached'] = True`` so downstream
+    scoring can distinguish cached graph evidence from a live traversal.
+    """
+
+    def __init__(self) -> None:
+        self._store: dict[tuple[str, str], list[Hit]] = {}
+
+    def put(self, tenant_id: str, branch: str, hits: Sequence[Hit]) -> None:
+        cached = [
+            Hit(
+                id=hit.id,
+                kind=hit.kind,
+                tenant_id=hit.tenant_id,
+                branch=hit.branch,
+                text=hit.text,
+                score=hit.score,
+                channel=hit.channel,
+                provenance=list(hit.provenance),
+                trust_tier=hit.trust_tier,
+                sensitivity=hit.sensitivity,
+                metadata={**hit.metadata, "graph_signal_cached": True},
+            )
+            for hit in hits
+        ]
+        self._store[(tenant_id, branch)] = sorted(cached, key=lambda item: item.score, reverse=True)
+
+    def fast_signal(
+        self,
+        tenant_id: str,
+        branch: str,
+        k: int,
+        *,
+        seeds: Sequence[str] | None = None,
+    ) -> list[Hit]:
+        if k <= 0:
+            return []
+        cached = self._store.get((tenant_id, branch), [])
+        if seeds:
+            seed_terms = {term.lower() for term in seeds if term}
+            filtered = [hit for hit in cached if seed_terms & set(tokenize(hit.text))]
+            cached = filtered or cached
+        return cached[: max(k, 0)]
+
+    def invalidate(self, tenant_id: str, branch: str) -> None:
+        self._store.pop((tenant_id, branch), None)
+
+    def clear(self) -> None:
+        self._store.clear()
+
+
+def build_channel_hits(
+    items: Sequence[Mapping[str, object]],
+    *,
+    channel: str,
+    tenant_id: str,
+    branch: str,
+    kind: str = "assertion",
+    default_trust_tier: int = 0,
+) -> list[Hit]:
+    """Build channel-tagged hits for the preference/procedure/lesson channels.
+
+    Blueprint §22.2 fuses preference, procedure, and lesson channels alongside
+    exact/lexical/dense/graph — "what make this *memory*, not document RAG". Those
+    channels read from engine-owned stores, so the engine passes already-loaded
+    records as mappings and this helper normalizes them into uniformly-shaped,
+    channel-tagged :class:`Hit` objects ready for RRF fusion. ``channel`` should
+    be one of ``preference`` / ``procedure`` / ``lesson``.
+    """
+
+    hits: list[Hit] = []
+    for item in items:
+        if not isinstance(item, Mapping):
+            raise ValueError(f"{channel} channel items must be mappings")
+        hit_id = str(item.get("id") or "").strip()
+        text = str(item.get("text") or "").strip()
+        if not hit_id or not text:
+            raise ValueError(f"{channel} channel item requires id and text")
+        score_raw = item.get("score", 0.0)
+        if isinstance(score_raw, bool):
+            raise ValueError(f"{channel} channel item score must be numeric")
+        try:
+            score = float(score_raw)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{channel} channel item score must be numeric") from exc
+        metadata = dict(item.get("metadata") or {})  # type: ignore[arg-type]
+        metadata.setdefault("channel_source", channel)
+        hits.append(
+            Hit(
+                id=hit_id,
+                kind=kind,  # type: ignore[arg-type]
+                tenant_id=str(item.get("tenant_id") or tenant_id),
+                branch=str(item.get("branch") or branch),
+                text=text,
+                score=score,
+                channel=channel,
+                provenance=[str(value) for value in (item.get("provenance") or []) if str(value)],  # type: ignore[union-attr]
+                trust_tier=int(item.get("trust_tier", default_trust_tier)),  # type: ignore[arg-type]
+                sensitivity=int(item.get("sensitivity", 0)),  # type: ignore[arg-type]
+                metadata=metadata,
+            )
+        )
+    return sorted(hits, key=lambda item: item.score, reverse=True)
 
 
 def _recency_score(value: object, now: datetime, decay: float) -> float:

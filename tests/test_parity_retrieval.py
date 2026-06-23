@@ -45,6 +45,7 @@ from mnemosyne.retrieval import (
     CommandGraphRetriever,
     CommandLexicalRetriever,
     CommandMediaEmbeddingProvider,
+    GraphSignalCache,
     HashingEmbeddingProvider,
     HttpEmbeddingProvider,
     HttpReranker,
@@ -52,8 +53,10 @@ from mnemosyne.retrieval import (
     RetrievalAdapters,
     activation_explain,
     apply_activation_scores,
+    build_channel_hits,
     gist_support_report,
     is_retired_summary_metadata,
+    marginal_gain_cutoff,
     retrieval_adapters_from_env,
     semantic_entropy,
 )
@@ -62,6 +65,7 @@ from mnemosyne.retrieval import (
     _finite_float,
     _normalize_vector,
     _post_json,
+    _spreading_activation,
     _validate_http_provider_config,
 )
 
@@ -718,3 +722,123 @@ def test_provider_registry_is_constructible_empty() -> None:
     assert empty.embedding == {} and empty.reranker == {}
     with pytest.raises(ValueError, match="unsupported embedding provider"):
         build_adapters_from_config({"embedding_provider": "local"}, registry=empty)
+
+
+# --------------------------------------------------------------------------- #
+# §22.4 spreading activation · marginal-gain cutoff · §22.2 graph cache + channels
+# --------------------------------------------------------------------------- #
+
+
+def test_spreading_activation_signal_from_shared_cues() -> None:
+    hits = [
+        _hit("a", "alpha", score=0.9, provenance=["ev1"], metadata={"subject": "postgres"}),
+        _hit("b", "beta", score=0.8, provenance=["ev1"], metadata={"subject": "redis"}),
+        _hit("c", "gamma", score=0.7, metadata={"subject": "kafka"}),
+    ]
+    signals = _spreading_activation(hits)
+    assert signals["a"] == pytest.approx(0.5)  # shares ev1 with b -> 1 of 2 others
+    assert signals["b"] == pytest.approx(0.5)
+    assert signals["c"] == 0.0  # shares nothing
+
+
+def test_spreading_activation_respects_metadata_override() -> None:
+    hits = [_hit("a", "x", score=0.5, metadata={"spreading_activation": 0.77})]
+    assert _spreading_activation(hits)["a"] == pytest.approx(0.77)
+
+
+def test_activation_default_output_has_no_spreading_component() -> None:
+    # Regression guard: the default policy (the config-drift baseline) must yield
+    # exactly the original four components — spreading is strictly opt-in.
+    activated = apply_activation_scores([_hit("a", "fact", score=0.5)], OperatingPolicy())
+    assert set(activated[0].metadata["activation"]["components"]) == {
+        "base_level",
+        "semantic",
+        "importance",
+        "recency",
+    }
+
+
+def test_activation_includes_spreading_when_weighted() -> None:
+    policy = OperatingPolicy(
+        activation_weights={
+            "base_level": 0.3,
+            "semantic": 0.3,
+            "importance": 0.2,
+            "recency": 0.1,
+            "spreading": 0.1,
+        }
+    )
+    hits = [
+        _hit("a", "alpha", score=0.9, provenance=["ev1"]),
+        _hit("b", "beta", score=0.8, provenance=["ev1"]),
+    ]
+    activated = apply_activation_scores(hits, policy)
+    for hit in activated:
+        components = hit.metadata["activation"]["components"]
+        assert "spreading" in components
+        assert components["spreading"] == pytest.approx(1.0)  # both share ev1
+        assert 0.0 <= hit.metadata["activation"]["score"] <= 1.0
+
+
+def test_marginal_gain_cutoff_respects_budget_and_redundancy() -> None:
+    hits = [
+        _hit("a", "alpha beta gamma", score=1.0),
+        _hit("b", "alpha beta gamma", score=0.95),  # near-duplicate of a
+        _hit("c", "totally different words here", score=0.9),
+    ]
+    selected, used = marginal_gain_cutoff(hits, token_budget=100, cost=0.4, redundancy_lambda=1.0)
+    ids = [hit.id for hit in selected]
+    assert ids[0] == "a"
+    assert "b" not in ids  # redundant -> marginal gain below cost -> stop
+    assert used > 0
+
+
+def test_marginal_gain_cutoff_token_budget_and_validation() -> None:
+    hits = [_hit("a", "one two three four five", score=1.0), _hit("b", "six seven eight", score=0.9)]
+    selected, used = marginal_gain_cutoff(hits, token_budget=5, cost=0.0)
+    assert [hit.id for hit in selected] == ["a"]
+    assert used == 5
+    assert marginal_gain_cutoff([], token_budget=10) == ([], 0)
+    with pytest.raises(ValueError, match="non-negative"):
+        marginal_gain_cutoff(hits, token_budget=-1)
+
+
+def test_graph_signal_cache_roundtrip_and_filtering() -> None:
+    cache = GraphSignalCache()
+    assert cache.fast_signal("t", "main", 5) == []
+    cache.put(
+        "t",
+        "main",
+        [_hit("g1", "postgres replication", score=0.6), _hit("g2", "kafka streams", score=0.9)],
+    )
+    top = cache.fast_signal("t", "main", 5)
+    assert [hit.id for hit in top] == ["g2", "g1"]  # sorted by score desc
+    assert all(hit.metadata["graph_signal_cached"] is True for hit in top)
+    assert cache.fast_signal("t", "main", 0) == []
+    seeded = cache.fast_signal("t", "main", 5, seeds=["postgres"])
+    assert [hit.id for hit in seeded] == ["g1"]
+    cache.invalidate("t", "main")
+    assert cache.fast_signal("t", "main", 5) == []
+
+
+def test_build_channel_hits_tags_and_validates() -> None:
+    hits = build_channel_hits(
+        [
+            {"id": "p1", "text": "prefers dark mode", "score": 0.7},
+            {"id": "p2", "text": "uses metric units", "score": 0.9},
+        ],
+        channel="preference",
+        tenant_id="t",
+        branch="main",
+    )
+    assert [hit.id for hit in hits] == ["p2", "p1"]  # sorted by score
+    assert all(hit.channel == "preference" for hit in hits)
+    assert all(hit.metadata["channel_source"] == "preference" for hit in hits)
+    with pytest.raises(ValueError, match="requires id and text"):
+        build_channel_hits([{"id": "x"}], channel="lesson", tenant_id="t", branch="main")
+    with pytest.raises(ValueError, match="score must be numeric"):
+        build_channel_hits(
+            [{"id": "x", "text": "y", "score": "nan-ish"}], channel="lesson", tenant_id="t", branch="main"
+        )
+    with pytest.raises(ValueError, match="must be mappings"):
+        build_channel_hits(["not-a-mapping"], channel="lesson", tenant_id="t", branch="main")
