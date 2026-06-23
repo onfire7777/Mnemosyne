@@ -11,12 +11,46 @@ from typing import Any
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.models import Assertion, BeliefRevisionReport, Contradiction, Justification, parse_dt, utc_now
 
+# AGM theory-change operation for each belief-core classification.
+# ADD/UPDATE add a belief consistent with the current set (expansion);
+# SUPERSEDE replaces a contradicted belief under minimal change (revision);
+# CONTEST retains a competing hypothesis without forcing a single conclusion;
+# NOOP leaves the belief set unchanged.
+AGM_OPERATIONS: dict[str, str] = {
+    "ADD": "expansion",
+    "UPDATE": "expansion",
+    "NOOP": "none",
+    "SUPERSEDE": "revision",
+    "CONTEST": "expansion",
+}
+
+
+def agm_operation(classification: str) -> str:
+    """Map a belief-core classification (ADD/UPDATE/...) to its AGM operation."""
+    return AGM_OPERATIONS.get(classification, "expansion")
+
 
 class BeliefRevisionCore:
+    """Truth-maintenance + AGM-style belief revision over the engine's store.
+
+    Maintains "current truth" under contradiction: new assertions are
+    classified and applied with minimal change (ADD/UPDATE/NOOP/SUPERSEDE/
+    CONTEST), justifications and contradictions are recorded, dependent beliefs
+    cascade-invalidate when their support is retracted, and contested facts are
+    retained as competing hypotheses with normalised probabilities (FR-10).
+    """
+
     def __init__(self, engine: LocalMemoryEngine):
         self.engine = engine
 
     def classify(self, assertion: Assertion, branch: str = "main") -> str:
+        """Classify an incoming assertion against current peers on ``branch``.
+
+        Returns one of ``ADD`` (no peer), ``UPDATE`` (same object, stronger
+        confidence or new evidence), ``NOOP`` (same object, nothing new),
+        ``SUPERSEDE`` (different object, strictly newer valid time), or
+        ``CONTEST`` (different object, not newer) — the AGM minimal-change rule.
+        """
         peers = [
             item
             for item in self.engine.assertions.values()
@@ -41,6 +75,14 @@ class BeliefRevisionCore:
         return "CONTEST"
 
     def revise(self, assertion: Assertion, branch: str = "main", rule: str | None = None) -> BeliefRevisionReport:
+        """Apply an assertion through the belief core and record its provenance.
+
+        Upserts the assertion, attaches a supporting :class:`Justification`, and
+        opens contradictions against differing peers on SUPERSEDE/CONTEST.
+        Returns a :class:`BeliefRevisionReport` with the operation, new
+        assertion/justification ids, the affected assertion ids, and any opened
+        contradiction ids.
+        """
         operation = self.classify(assertion, branch)
         before = {
             item.id: item
@@ -88,6 +130,12 @@ class BeliefRevisionCore:
         branch: str = "main",
         rule: str = "derived",
     ) -> BeliefRevisionReport:
+        """Revise a derived belief and link it to the beliefs it depends on.
+
+        Behaves like :meth:`revise` but records ``dependency_ids`` on the new
+        justification so that :meth:`cascade_invalidate` can retract this belief
+        when any of its supports is retracted.
+        """
         report = self.revise(assertion, branch=branch, rule=rule)
         if report.justification_id:
             justification = self.engine.justifications[report.justification_id]
@@ -96,6 +144,13 @@ class BeliefRevisionCore:
         return report
 
     def cascade_invalidate(self, tenant_id: str, assertion_id: str, reason: str = "dependency invalidated") -> list[str]:
+        """Retract an assertion and every belief transitively derived from it.
+
+        Walks the justification dependency graph breadth-first from
+        ``assertion_id``, marking each reachable assertion ``retracted`` with the
+        given ``reason``, then audits and persists. Returns the list of
+        invalidated assertion ids (including the root).
+        """
         dependencies: dict[str, list[str]] = defaultdict(list)
         for justification in self.engine.justifications.values():
             if justification.tenant_id != tenant_id:
@@ -124,6 +179,13 @@ class BeliefRevisionCore:
         return invalidated
 
     def contested_hypotheses(self, tenant_id: str, subject: str, predicate: str, branch: str = "main") -> list[dict[str, object]]:
+        """Return competing hypotheses for a subject/predicate with probabilities.
+
+        Keeps multiple live hypotheses instead of forcing a single answer:
+        returns the active/contested alternatives ordered by confidence
+        (descending), each annotated with a confidence-normalised probability so
+        the set sums to 1.0 (the multi-hypothesis side of I8).
+        """
         alternatives = [
             item
             for item in self.engine.assertions.values()
@@ -146,6 +208,40 @@ class BeliefRevisionCore:
             }
             for item in sorted(alternatives, key=lambda row: row.confidence, reverse=True)
         ]
+
+    def atms_label(self, tenant_id: str, assertion_id: str, branch: str = "main") -> str:
+        """Return the ATMS belief label for an assertion: ``"in"`` or ``"out"``.
+
+        An assumption-based truth-maintenance label: an assertion is ``"in"``
+        (currently believed) when it is active/contested and either has no
+        derivation (a directly asserted premise) or has at least one
+        justification whose dependencies are not themselves retracted. It is
+        ``"out"`` when retracted/superseded, missing, or every justification is
+        undermined by a retracted dependency.
+        """
+        target: Assertion | None = None
+        for item in self.engine.assertions.values():
+            if item.tenant_id == tenant_id and item.id == assertion_id and item.branch == branch:
+                target = item
+                break
+        if target is None or target.status not in {"active", "contested"}:
+            return "out"
+        status_by_id = {
+            item.id: item.status
+            for item in self.engine.assertions.values()
+            if item.tenant_id == tenant_id
+        }
+        justifications = [
+            justification
+            for justification in self.engine.justifications.values()
+            if justification.tenant_id == tenant_id and justification.assertion_id == assertion_id
+        ]
+        if not justifications:
+            return "in"
+        for justification in justifications:
+            if all(status_by_id.get(dep) != "retracted" for dep in justification.dependency_ids):
+                return "in"
+        return "out"
 
 
 def assertion_from_case(row: Mapping[str, Any], *, tenant_id: str, user_id: str | None, branch: str) -> Assertion:
