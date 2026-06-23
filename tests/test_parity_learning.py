@@ -33,7 +33,7 @@ from mnemosyne.eval import (
     shadow_eval_report,
     ttl_lift,
 )
-from mnemosyne.gate import RegressionCase
+from mnemosyne.gate import Candidate, RegressionCase
 from mnemosyne.learning import (
     Lesson,
     LearningSystem,
@@ -57,6 +57,7 @@ from mnemosyne.self_optimization import (
     SelfModelStore,
     ShadowPolicyOptimizer,
     counterfactual_replay,
+    make_counterfactual_hook,
     policy_ops_fingerprint,
     policy_variant_from_dict,
     validate_policy_ops_bundle,
@@ -459,8 +460,28 @@ def test_counterfactual_evaluate_requires_gate_and_replay() -> None:
     )
     decision = optimizer.counterfactual_evaluate(TENANT, variant, [ReplaySession(TENANT, "immutable rails", "immutable rails")])
     assert decision["promoted"] is True
-    assert decision["replay"]["non_inferior"] is True
+    # replay verdict comes through the gate's §30.6 counterfactual seam
+    assert decision["replay"]["passed"] is True
     assert decision["gate"]["promoted"] is True
+    assert decision["gate"]["counterfactual"]["passed"] is True
+
+
+def test_counterfactual_hook_vetoes_a_regressing_candidate() -> None:
+    engine = _replay_engine()
+    candidate = Candidate(
+        id="v", kind="policy", signature="s", description="d", branch="main", source_evidence_cids=[]
+    )
+    # baseline succeeded once but the candidate state cannot satisfy the session
+    regressing = [ReplaySession(TENANT, "immutable rails", "answer-that-never-appears")]
+    veto = make_counterfactual_hook(regressing, baseline_successes=1)(TENANT, candidate, engine, [], [])
+    assert veto.passed is False
+    assert veto.predicted_lift < 0
+    # a non-inferior session passes
+    keep = make_counterfactual_hook(
+        [ReplaySession(TENANT, "immutable rails", "immutable rails")], baseline_successes=1
+    )(TENANT, candidate, engine, [], [])
+    assert keep.passed is True
+    assert keep.predicted_lift == pytest.approx(0.0)
 
 
 # --------------------------------------------------------------------------- #
@@ -529,3 +550,12 @@ def test_operating_policy_immutable_rails_are_pinned() -> None:
         "erasure_propagates_to_derived_indexes",
     }
     assert all(rails.values())
+
+
+def test_operating_policy_numeric_mutation_rate_rails_pinned() -> None:
+    # §23.5/§31 numeric mutation-rate rails — mirrored by config/drift-baseline.toml
+    # (AUX-DOCS test_numeric_invariant_rails_mirror_policy enforces live==declared).
+    policy = OperatingPolicy()
+    assert policy.max_supersession_rate == pytest.approx(0.05)
+    assert policy.min_corroboration_for_delete == 2
+    assert policy.max_prune_fraction_per_pass == pytest.approx(0.02)
