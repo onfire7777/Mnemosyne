@@ -9,13 +9,13 @@ import subprocess
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from hashlib import sha256
-from typing import Any, Protocol, Sequence
+from typing import Any, Callable, Protocol, Sequence
 
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.gate import Candidate, GateResult, PromotionGate, RegressionCase
 from mnemosyne.learning import Lesson, Procedure
 from mnemosyne.lifecycle import FidelityTier, LifecycleState, apply_rehearsal_schedule, demotion_decision
-from mnemosyne.models import Assertion, Evidence, Relation
+from mnemosyne.models import Assertion, Evidence, Relation, utc_now
 from mnemosyne.retrieval import is_retired_summary_metadata
 from mnemosyne.security import SecurityPolicy, TrustTier
 from mnemosyne.text import hashing_embedding
@@ -125,6 +125,8 @@ class ConsolidationWorker:
         procedure_inducer: "ProcedureInducer | None" = None,
         user_model: UserModel | None = None,
         min_corroboration: int = 1,
+        consolidation_min_interval_seconds: float = 0.0,
+        clock: "Callable[[], datetime] | None" = None,
     ):
         self.engine = engine
         self.security = security or SecurityPolicy()
@@ -136,6 +138,14 @@ class ConsolidationWorker:
         self.lesson_distiller = lesson_distiller or DeterministicLessonDistiller()
         self.procedure_inducer = procedure_inducer or DeterministicProcedureInducer()
         self.user_model = user_model
+        # §21: minimum wall-clock interval between consolidations of the same
+        # (tenant, signature). 0.0 disables throttling (behaviour-preserving
+        # default); a positive value bounds re-consolidation cadence to prevent
+        # the warm loop from thrashing on a hot signature. ``clock`` is injectable
+        # for deterministic testing.
+        self.consolidation_min_interval_seconds = max(0.0, float(consolidation_min_interval_seconds))
+        self._clock: "Callable[[], datetime]" = clock or utc_now
+        self._last_consolidation_at: dict[tuple[str, str], datetime] = {}
         # §23.3: minimum number of distinct corroborating evidence sources a fact
         # candidate must carry before it is allowed through the promotion gate.
         # Defaults to 1 (no extra corroboration required), so existing single-
@@ -1010,12 +1020,14 @@ class ConsolidationWorker:
         return any(value >= int(TrustTier.UNTRUSTED_EXTERNAL) for value in trust_values)
 
     def run_job(self, job: ConsolidationJob) -> GateResult:
-        """Promote a single fact candidate through authorization, corroboration, and the gate.
+        """Promote a single fact candidate through authorization, cadence, corroboration, and the gate.
 
-        Fails closed when the consolidator write is not authorized, when the
+        Fails closed when the consolidator write is not authorized, when the same
+        signature was consolidated within the anti-thrash interval (§21), when the
         candidate lacks the required number of distinct corroborating evidence
         sources (§23.3), or when a protected regression case would break; only a
-        fully authorized, corroborated, regression-clean candidate is promoted.
+        fully authorized, non-throttled, corroborated, regression-clean candidate
+        is promoted.
         """
         decision = self.security.authorize_write(
             operation="promote_candidate",
@@ -1034,6 +1046,26 @@ class ConsolidationWorker:
                 margin=0.0,
                 rollback_branch=None,
             )
+        # §21: cadence-bound anti-thrash — skip re-consolidating the same
+        # (tenant, signature) within the configured minimum interval.
+        if self.consolidation_min_interval_seconds > 0.0:
+            cadence_key = (job.tenant_id, job.signature)
+            now = self._clock()
+            last = self._last_consolidation_at.get(cadence_key)
+            if last is not None and (now - last).total_seconds() < self.consolidation_min_interval_seconds:
+                return GateResult(
+                    candidate_id=f"candidate-{job.signature}",
+                    promoted=False,
+                    protected_regressions=[],
+                    failed_cases=[
+                        "throttled: re-consolidation within "
+                        f"{self.consolidation_min_interval_seconds}s anti-thrash window (§21)"
+                    ],
+                    passed_cases=[],
+                    margin=0.0,
+                    rollback_branch=None,
+                )
+            self._last_consolidation_at[cadence_key] = now
         # §23.3: gate fact candidates on external corroboration before the
         # promotion gate runs — a fact must be backed by at least
         # ``min_corroboration`` distinct evidence sources.
