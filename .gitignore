@@ -24,3 +24,6 @@ venv/
 credentials.json
 service-account.json
 secrets.json
+
+# volatile eval test scratch output (regenerated with a fresh timestamp each run)
+eval/reports/replay_fidelity_test_tmp/

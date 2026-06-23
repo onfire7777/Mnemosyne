@@ -1,6 +1,6 @@
 # FR-17 Cold-Loop Replay-Fidelity Check (OQ2)
 
-- **Generated:** 2026-06-22T00:21:48.311653+00:00
+- **Generated:** 2026-06-23T22:43:43.202393+00:00
 - **Mode:** `require-wired`
 - **Blueprint refs:** OQ2, FR-17 cold-loop gate, §23.3, §30.6
 - **OQ2 bar:** rho>=0.6 & CI-lower>0.3, sign>=0.8, gap<=0.15, window>=50, coverage>=0.8
