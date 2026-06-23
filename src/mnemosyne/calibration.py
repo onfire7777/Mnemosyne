@@ -65,6 +65,13 @@ class CalibrationTuneResult:
 
 
 def conformal_threshold(calibration: CalibrationSet) -> float:
+    """Return the split-conformal accept threshold for a calibration set.
+
+    Computes the lower ``alpha``-quantile (``alpha = 1 - target_coverage``) of
+    the calibration scores so that at least ``target_coverage`` of correctly
+    answered memories clear the bar. An empty calibration set returns ``1.0``,
+    which makes the system abstain on everything (fail-closed metacognition).
+    """
     if not calibration.scores:
         return 1.0
     bounded = sorted(max(0.0, min(1.0, score)) for score in calibration.scores)
@@ -74,9 +81,63 @@ def conformal_threshold(calibration: CalibrationSet) -> float:
 
 
 def should_abstain(confidence: float, calibration: CalibrationSet, prediction_set_size: int = 1, max_set_size: int = 3) -> bool:
+    """Decide whether to abstain rather than answer from this memory.
+
+    Abstains when the conformal prediction set is empty or larger than
+    ``max_set_size`` (the evidence is too thin or too ambiguous), or when the
+    calibrated ``confidence`` falls below :func:`conformal_threshold`.
+    """
     if prediction_set_size == 0 or prediction_set_size > max_set_size:
         return True
     return confidence < conformal_threshold(calibration)
+
+
+def nonconformity_score(confidence: float) -> float:
+    """Conformal nonconformity score for a calibrated confidence.
+
+    Uses ``1 - confidence`` so that a more confident memory is *less*
+    nonconforming. This is the per-example score the conformal prediction set is
+    thresholded against.
+    """
+    return 1.0 - max(0.0, min(1.0, confidence))
+
+
+def conformal_prediction_set(
+    scored_labels: list[tuple[str, float]],
+    calibration: CalibrationSet,
+) -> list[str]:
+    """Build the conformal prediction set for one query's candidate labels.
+
+    Keeps every candidate whose :func:`nonconformity_score` is within the
+    calibrated quantile — equivalently, whose confidence clears
+    :func:`conformal_threshold` — ordered by descending confidence. An empty set
+    signals that no candidate is supported strongly enough, so the caller should
+    abstain rather than guess.
+    """
+    cutoff = nonconformity_score(conformal_threshold(calibration))
+    chosen = [
+        (label, max(0.0, min(1.0, confidence)))
+        for label, confidence in scored_labels
+        if nonconformity_score(confidence) <= cutoff
+    ]
+    chosen.sort(key=lambda row: row[1], reverse=True)
+    return [label for label, _ in chosen]
+
+
+def conformal_should_abstain(
+    scored_labels: list[tuple[str, float]],
+    calibration: CalibrationSet,
+    max_set_size: int = 3,
+) -> bool:
+    """Abstain when the computed conformal prediction set is empty or too large.
+
+    Unlike :func:`should_abstain`, which takes a pre-computed prediction-set
+    size, this derives the set from the candidate labels via
+    :func:`conformal_prediction_set` and abstains when it is empty (evidence too
+    thin) or larger than ``max_set_size`` (too ambiguous to answer).
+    """
+    prediction_set = conformal_prediction_set(scored_labels, calibration)
+    return not prediction_set or len(prediction_set) > max_set_size
 
 
 def calibration_examples_from_rows(rows: list[dict[str, Any]]) -> list[CalibrationExample]:
@@ -96,6 +157,15 @@ def tune_calibration_set(
     max_false_accept_rate: float = 0.1,
     max_prediction_set_size: int = 3,
 ) -> CalibrationTuneResult:
+    """Fit a calibration set from labelled examples and gate its quality.
+
+    Builds the calibration scores from the correctly answered examples, derives
+    the conformal threshold, and validates the resulting accept/abstain policy
+    against minimum sample sizes, an empirical-coverage floor, and a
+    false-accept ceiling. The returned :class:`CalibrationTuneResult` is
+    ``ok`` only when every gate passes, so an under-powered or poorly separated
+    calibration set fails closed instead of silently shipping.
+    """
     target_coverage = max(0.0, min(1.0, target_coverage))
     min_empirical_coverage = (
         max(0.0, target_coverage - 0.05)
