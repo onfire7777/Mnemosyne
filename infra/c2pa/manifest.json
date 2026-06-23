@@ -1,0 +1,39 @@
+{
+  "alg": "ps256",
+  "ta_url": "http://timestamp.digicert.com",
+  "claim_generator": "Mnemosyne-Test-Signer/1.0",
+  "claim_generator_info": [
+    {
+      "name": "Mnemosyne Test Signer",
+      "version": "1.0"
+    }
+  ],
+  "title": "Mnemosyne C2PA Test Asset",
+  "assertions": [
+    {
+      "label": "c2pa.actions",
+      "data": {
+        "actions": [
+          {
+            "action": "c2pa.created",
+            "softwareAgent": "Mnemosyne-Test-Signer/1.0",
+            "digitalSourceType": "http://cv.iptc.org/newscodes/digitalsourcetype/digitalCapture"
+          }
+        ]
+      }
+    },
+    {
+      "label": "stds.schema-org.CreativeWork",
+      "data": {
+        "@context": "https://schema.org",
+        "@type": "CreativeWork",
+        "author": [
+          {
+            "@type": "Organization",
+            "name": "Mnemosyne Test Root CA"
+          }
+        ]
+      }
+    }
+  ]
+}

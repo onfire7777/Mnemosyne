@@ -1,0 +1,8 @@
+# Generated provider material — secrets, certs, tokens, wrapped keys. Never commit.
+keycloak/out/
+vault/out/
+c2pa/out/
+**/wrapped-keys/
+*.tmp
+__pycache__/
+*.pyc

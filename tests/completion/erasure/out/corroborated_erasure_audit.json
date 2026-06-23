@@ -1,0 +1,124 @@
+{
+  "audit": "corroborated_erasure",
+  "blueprint_refs": [
+    "OQ6",
+    "FR-8",
+    "\u00a731 RAIL 2 (min_corroboration_for_delete)"
+  ],
+  "cases": [
+    {
+      "blueprint_ref": "OQ6 / FR-8",
+      "expected": "Erasing ONE of two corroborating sources RETAINS the projection (active) with provenance trimmed to the surviving CID only (erased CID removed, not blanket-zeroed).",
+      "missing_enforcement": null,
+      "name": "a_corroborated_retain_and_trim",
+      "observed": {
+        "after_cids": [
+          "fcb59876c41a94d72442d33e4bf30d6cab9bd53fdacec69b0c965ea7638e4d9c"
+        ],
+        "after_status": "active",
+        "before_cids": [
+          "926bd7d257b30b8330adc7c48db12193b72288472abf9ff0ebf5b74f197c2a85",
+          "fcb59876c41a94d72442d33e4bf30d6cab9bd53fdacec69b0c965ea7638e4d9c"
+        ],
+        "before_status": "active",
+        "erased_cid": "926bd7d257b30b8330adc7c48db12193b72288472abf9ff0ebf5b74f197c2a85",
+        "forget_propagated": {
+          "erased_derived_evidence": [],
+          "expired_relations": [],
+          "removed_entities": [],
+          "retracted_assertions": [],
+          "retracted_preferences": [],
+          "trimmed_assertions": [
+            "777c8328-7005-4762-9890-158c48a2bda4"
+          ],
+          "trimmed_entities": [],
+          "trimmed_preferences": [],
+          "trimmed_relations": []
+        },
+        "surviving_cid": "fcb59876c41a94d72442d33e4bf30d6cab9bd53fdacec69b0c965ea7638e4d9c"
+      },
+      "passed": true,
+      "status": "ok"
+    },
+    {
+      "blueprint_ref": "OQ6 / FR-8",
+      "expected": "Erasing the SOLE source of a projection RETRACTS/tombstones it (status=retracted, source_evidence_cids=[]).",
+      "missing_enforcement": null,
+      "name": "b_sole_source_retract_tombstone",
+      "observed": {
+        "after_cids": [],
+        "after_status": "retracted",
+        "erased_cid": "3dacea5277f5c57163f8eaf86bb71dd8b6653c5687ba8b880ab3bda1b27f24b5",
+        "forget_propagated": {
+          "erased_derived_evidence": [],
+          "expired_relations": [],
+          "removed_entities": [],
+          "retracted_assertions": [
+            "4ab70241-8647-4eea-a335-b0adbd251af9"
+          ],
+          "retracted_preferences": [],
+          "trimmed_assertions": [],
+          "trimmed_entities": [],
+          "trimmed_preferences": [],
+          "trimmed_relations": []
+        }
+      },
+      "passed": true,
+      "status": "ok"
+    },
+    {
+      "blueprint_ref": "\u00a731 RAIL 2 (min_corroboration_for_delete >= 2)",
+      "expected": "Operator deletion of a SOLE, uncorroborated source backing an active assertion must be REFUSED (forget returns erased=False or raises) by a min_corroboration_for_delete>=2 gate.",
+      "missing_enforcement": "NO min_corroboration_for_delete gate exists. Add a corroboration count to the HARD_DELETE_LEGAL branch of LocalMemoryEngine.forget (src/mnemosyne/engine.py:903) and PostgresMemoryEngine.forget (src/mnemosyne/postgres_engine.py:~1328): before popping evidence, for every active assertion that would lose ALL support, count its DISTINCT independent source_evidence_cids; if < 2 (constant min_corroboration_for_delete=2, which is absent from src/mnemosyne entirely), refuse the delete (return {'erased': False, 'reason': 'min_corroboration_for_delete'} or raise PermissionError). Mirror the OperatingPolicy.immutable_rails entry. The facade MemoryTools.forget (mcp_tools.py:711) must surface the refusal.",
+      "name": "c_operator_delete_sole_uncorroborated_blocked",
+      "observed": {
+        "assertion_after_status": "retracted",
+        "erasure_mode": "hard_delete_legal",
+        "forget_erased": true,
+        "refused_by_corroboration_gate": false,
+        "sole_source_cid": "ccc535609e1702b1141d60e3ebc3186fd7771199ddef3152079946bba4db836b"
+      },
+      "passed": false,
+      "status": "breach_unenforced"
+    },
+    {
+      "blueprint_ref": "FR-8 (legal erasure) / privacy.ErasureMode.HARD_DELETE_LEGAL",
+      "expected": "Legal/right-to-be-forgotten erasure is corroboration-blind: it hard-deletes the evidence row regardless of corroboration count AND invokes object_store.shred on any externalized payload (object_shred report present).",
+      "missing_enforcement": null,
+      "name": "d_legal_corroboration_blind_and_shreds",
+      "observed": {
+        "d1_corroboration_blind": {
+          "erased_evidence_row_gone_from_export": true,
+          "legal_erased": true,
+          "projection_after_cids": [
+            "d38c22ab97fa0b1a8c5d325416319611d7a143c15dac5c9ea5772ad1a65644d4"
+          ],
+          "projection_after_status": "active"
+        },
+        "d2_shred": {
+          "evidence_row_gone_from_export": true,
+          "had_externalized_payload": true,
+          "ingest_content_pointer": "local-object://sha256/df04b9f8318f11739c276f716a05a7446e9dcd05d12d77512a64cc7942c0ebd2",
+          "legal_erased": true,
+          "object_shred_report": {
+            "crypto_shredded": false,
+            "reason": "unencrypted_object_store_has_no_key",
+            "shredded": false
+          }
+        }
+      },
+      "passed": true,
+      "status": "ok"
+    }
+  ],
+  "cli_object_flag_collision": "mneme {assert,propose} --object <v> -> argparse 'ambiguous option: --object' (collides with global --object-store/--object-key-* registered in cli.py:~4319). Assertion creation falls back to the public MemoryTools.assert_fact facade (== cmd_assert dispatch target); all other steps stay on the CLI subprocess.",
+  "public_surface": "python -m mnemosyne.cli (subprocess) + MemoryTools facade fallback",
+  "summary": {
+    "all_enforced_invariants_hold": true,
+    "breach_unenforced": 1,
+    "enforced_pass": 3,
+    "errors": 0,
+    "total": 4
+  },
+  "trust_tier_scale": "INVERTED: 0=DIRECT_USER/OPERATOR strongest, 5=UNTRUSTED weakest"
+}

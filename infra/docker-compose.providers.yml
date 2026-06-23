@@ -1,0 +1,108 @@
+# Real-services local stack for Mnemosyne production dependencies.
+#
+# Brings up three real services that satisfy Mnemosyne's existing contracts:
+#
+#   keycloak  -> real OIDC/JWKS identity provider for `session-exchange`
+#                and `idp-jwks-live-check` (FR-7 / FR-9 auth).
+#   vault     -> HashiCorp Vault transit secrets engine, fronted by a
+#                command-backed object-key provider that performs real KMS
+#                wrap / unwrap / rotate / shred behind Mnemosyne's
+#                `CommandKeyManager` contract (KMS / crypto-erase).
+#   c2pa      -> builder image that produces a real c2patool binary, a test
+#                certificate root, and a signed asset for the
+#                `C2paToolVerifier` contract (FR-19 provenance).
+#
+# Nothing here mutates the application source tree; every service is
+# self-contained under infra/. Setup scripts seed each service to satisfy
+# the exact request/response shapes Mnemosyne expects. See README.md.
+#
+# Usage:
+#   docker compose -f infra/docker-compose.providers.yml up -d keycloak vault
+#   ./infra/scripts/setup-keycloak.sh
+#   ./infra/scripts/setup-vault.sh
+#   ./infra/scripts/setup-c2pa.sh
+#   ./infra/validate/validate-all.sh
+#
+# All ports are deliberately offset from defaults to avoid clashing with any
+# locally running Keycloak/Vault and with the Mnemosyne Postgres compose.
+
+name: mnemosyne-providers
+
+services:
+  # ----------------------------------------------------------------------
+  # Keycloak: real OIDC provider. Exposes a JWKS endpoint and signs RS256
+  # ID tokens whose claims map 1:1 onto Mnemosyne's OIDC verifier defaults
+  # (tenant_id, sub, mnemosyne_role, mnemosyne_source_trust_tier, jti).
+  # ----------------------------------------------------------------------
+  keycloak:
+    image: quay.io/keycloak/keycloak:25.0
+    command: ["start-dev", "--http-port=8080", "--hostname-strict=false"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      # Back-compat for <26 images that read the older variable names.
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+      KC_HEALTH_ENABLED: "true"
+    ports:
+      - "8089:8080"
+    healthcheck:
+      # start-dev exposes the management port at 9000 (/health/ready).
+      test:
+        - CMD-SHELL
+        - >-
+          exec 3<>/dev/tcp/localhost/9000 &&
+          printf 'GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 &&
+          grep -q '"status": "UP"' <&3
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 40s
+    volumes:
+      - mnemosyne-keycloak:/opt/keycloak/data
+
+  # ----------------------------------------------------------------------
+  # Vault: real KMS via the transit engine. Runs in dev mode with a fixed
+  # root token for turnkey local testing only. The transit engine performs
+  # real encrypt / decrypt / rotate / key-deletion that the command-backed
+  # object-key provider maps onto Mnemosyne's wrap/unwrap/rotate/shred.
+  # ----------------------------------------------------------------------
+  vault:
+    image: hashicorp/vault:1.17
+    cap_add:
+      - IPC_LOCK
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: mnemosyne-dev-root
+      VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+      VAULT_ADDR: http://127.0.0.1:8200
+    ports:
+      - "8211:8200"
+    healthcheck:
+      test: ["CMD", "vault", "status", "-address=http://127.0.0.1:8200"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+
+  # ----------------------------------------------------------------------
+  # c2pa: a builder/runtime image carrying a real c2patool binary plus
+  # openssl for certificate generation. It is not a long-running service;
+  # the setup script execs into it (or runs it as a one-shot) to mint the
+  # test cert root and a signed asset. Kept idle with `tail -f` so it can be
+  # exec'd repeatedly during a session.
+  # ----------------------------------------------------------------------
+  c2pa:
+    build:
+      context: ./c2pa
+      dockerfile: Dockerfile
+    image: mnemosyne-c2patool:local
+    command: ["tail", "-f", "/dev/null"]
+    working_dir: /work
+    volumes:
+      - ./c2pa:/work/config:ro
+      - ./c2pa/out:/work/out
+    profiles:
+      - c2pa
+
+volumes:
+  mnemosyne-keycloak:

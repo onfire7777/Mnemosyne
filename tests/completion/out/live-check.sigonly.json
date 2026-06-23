@@ -1,0 +1,32 @@
+{
+  "audience": "mnemosyne",
+  "authz_policy_configured": false,
+  "identity": {
+    "role": "agent",
+    "source_trust_tier": 3,
+    "tenant_id": "tenant-a",
+    "user_id_sha256": "f28d870114a486f5"
+  },
+  "issuer": "http://localhost:8089/realms/mnemosyne",
+  "jwks": {
+    "allow_insecure_url": false,
+    "cache_ttl_seconds": 300,
+    "key_count": 1,
+    "max_bytes": 1048576,
+    "refresh_on_unknown_kid": true,
+    "source": {
+      "kind": "file",
+      "path": "tests/completion/out/jwks.sig-only.json"
+    }
+  },
+  "latency_ms": 15.304,
+  "ok": true,
+  "token": {
+    "alg": "RS256",
+    "configured": true,
+    "expires_in_seconds": 3599,
+    "kid_present": true,
+    "kid_sha256": "75c00bb2c8872119",
+    "session_id_present": true
+  }
+}
