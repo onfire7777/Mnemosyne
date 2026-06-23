@@ -50,6 +50,7 @@ from mnemosyne.lifecycle import (
     decayed_salience,
     demotion_decision,
     forgetting_policy_fingerprint,
+    lifecycle_state_from_dict,
     next_fidelity_tier,
     next_rehearsal_days,
     rehearsal_due,
@@ -319,6 +320,26 @@ def test_atms_label_tracks_support_and_retraction() -> None:
     assert core.atms_label(TENANT, "missing-id") == "out"
 
 
+def test_tier0_correction_supersedes_lower_trust_in_same_turn() -> None:
+    engine = LocalMemoryEngine()
+    core = BeliefRevisionCore(engine)
+    # A lower-trust machine-inferred memory is established first.
+    machine = mk_assertion("preferred db", "is", "MySQL", confidence=0.6)
+    machine.trust_tier = 3
+    core.revise(machine)
+    # A tier-0 user correction in the SAME turn (same valid_from) must override it
+    # immediately, not merely contest it.
+    correction = mk_assertion("preferred db", "is", "Postgres", confidence=0.9)
+    report = core.apply_tier0_correction(correction)
+
+    assert report.operation == "SUPERSEDE"
+    statuses = {item["object"]: item["status"] for item in engine.export_tenant(TENANT)["assertions"]}
+    assert statuses["MySQL"] == "superseded"
+    assert statuses["Postgres"] == "active"
+    # Current truth surfaces only the correction, not the superseded memory.
+    assert {row["object"] for row in core.contested_hypotheses(TENANT, "preferred db", "is")} == {"Postgres"}
+
+
 # --------------------------------------------------------------------------- #
 # Lifecycle (§25 — graduated forgetting + rehearsal)
 # --------------------------------------------------------------------------- #
@@ -371,6 +392,28 @@ def test_must_keep_memory_is_never_demoted_even_when_cold() -> None:
     state, demoted = demotion_decision(keep, now, utility_threshold=0.2)
     assert demoted is False
     assert state.tier == FidelityTier.EXTRACTIVE_SUMMARY
+
+
+def test_verbatim_pointer_survives_demotion_and_round_trips() -> None:
+    now = datetime(2026, 6, 1, tzinfo=UTC)
+    state = LifecycleState(
+        "with-pointer",
+        FidelityTier.EXTRACTIVE_SUMMARY,
+        salience=0.02,
+        importance=0.0,
+        access_count=0,
+        last_accessed=now - timedelta(days=200),
+        verbatim_pointer="cid-verbatim-1",
+    )
+    demoted, changed = demotion_decision(state, now, utility_threshold=0.2)
+    assert changed is True
+    assert demoted.tier == FidelityTier.ABSTRACTIVE_GIST
+    # I7/§25: the pointer to the verbatim original survives demotion so a gist
+    # can always be reconstructed from raw evidence.
+    assert demoted.verbatim_pointer == "cid-verbatim-1"
+    assert demoted.to_dict()["verbatim_pointer"] == "cid-verbatim-1"
+    restored = lifecycle_state_from_dict(demoted.to_dict())
+    assert restored.verbatim_pointer == "cid-verbatim-1"
 
 
 def test_sole_low_fidelity_support_requires_abstention() -> None:
@@ -538,3 +581,93 @@ def test_consolidation_worker_blocks_promotion_on_unsatisfiable_protected_case()
     # The protected regression can never retrieve "must survive", so the gate
     # must refuse to promote the candidate.
     assert result.promoted is False
+
+
+def test_consolidation_corroboration_gate_requires_distinct_sources() -> None:
+    engine = LocalMemoryEngine()
+    cid = engine.append_evidence(
+        Evidence(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="episode",
+            content="The deploy window is Friday.",
+            trust_tier=0,
+            access_policy={"tenant": TENANT},
+        )
+    )
+    gate_case = RegressionCase(
+        id="deploy-window",
+        signature="deploy-window",
+        query="deploy window",
+        expected_substring="Friday",
+        protected=True,
+    )
+    worker = ConsolidationWorker(engine, [gate_case], min_corroboration=2)
+
+    def job(cids: list[str]) -> ConsolidationJob:
+        return ConsolidationJob(
+            tenant_id=TENANT,
+            signature="deploy-window",
+            query="deploy window",
+            candidate_subject="deploy window",
+            candidate_predicate="is",
+            candidate_object="Friday",
+            source_evidence_cids=cids,
+        )
+
+    # A single source does not corroborate -> gate refuses to promote.
+    single = worker.run_job(job([cid]))
+    assert single.promoted is False
+    assert any("corroboration" in failure for failure in single.failed_cases)
+
+    # A second independent source satisfies §23.3 corroboration -> promotes.
+    cid2 = engine.append_evidence(
+        Evidence(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="chat",
+            content="Deploy is confirmed for Friday.",
+            trust_tier=0,
+            access_policy={"tenant": TENANT},
+        )
+    )
+    corroborated = worker.run_job(job([cid, cid2]))
+    assert corroborated.promoted is True
+
+
+def test_consolidation_default_corroboration_is_single_source() -> None:
+    # Default min_corroboration=1 keeps single-source promotion working.
+    engine = LocalMemoryEngine()
+    cid = engine.append_evidence(
+        Evidence(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="episode",
+            content="The cache TTL is sixty seconds.",
+            trust_tier=0,
+            access_policy={"tenant": TENANT},
+        )
+    )
+    gate_case = RegressionCase(
+        id="cache-ttl",
+        signature="cache-ttl",
+        query="cache ttl",
+        expected_substring="sixty seconds",
+        protected=True,
+    )
+    worker = ConsolidationWorker(engine, [gate_case])
+    result = worker.run_job(
+        ConsolidationJob(
+            tenant_id=TENANT,
+            signature="cache-ttl",
+            query="cache ttl",
+            candidate_subject="cache ttl",
+            candidate_predicate="is",
+            candidate_object="sixty seconds",
+            source_evidence_cids=[cid],
+        )
+    )
+    assert result.promoted is True
