@@ -4,6 +4,7 @@ import base64
 import hashlib
 import hmac
 import json
+import os
 
 import pytest
 from cryptography.hazmat.primitives import hashes
@@ -322,20 +323,73 @@ def test_oidc_jwt_verifier_rejects_missing_or_malformed_claims(payload_overrides
         OidcJwtVerifier(jwks, issuer=ISSUER, audience=AUDIENCE).verify(token, now=1_900_000_000)
 
 
+def test_oidc_jwt_verifier_selects_signing_key_from_mixed_jwks() -> None:
+    """Real IdPs (Keycloak, Auth0, Azure AD) publish encryption keys alongside
+    the signing key in one JWKS. The verifier must select the ``use:sig`` key
+    and ignore non-signing keys rather than rejecting the whole document."""
+
+    jwks, token = signed_oidc_token(oidc_payload())
+    sig_key = jwks["keys"][0]
+    enc_key = {**sig_key, "kid": "idp-enc-key", "use": "enc", "alg": "RSA-OAEP"}
+    sign_only_key = {**sig_key, "kid": "idp-sign-only", "key_ops": ["sign"]}
+    mixed = {"keys": [enc_key, sign_only_key, sig_key]}
+
+    identity = OidcJwtVerifier(mixed, issuer=ISSUER, audience=AUDIENCE).verify(token, now=1_900_000_000)
+
+    assert identity.tenant_id == "tenant-a"
+    assert identity.user_id == "user-a"
+
+
 def test_oidc_jwt_verifier_rejects_unsafe_jwks_metadata() -> None:
     jwks, _ = signed_oidc_token(oidc_payload())
     duplicate = {"keys": [jwks["keys"][0], dict(jwks["keys"][0])]}
-    wrong_use = {"keys": [{**jwks["keys"][0], "use": "enc"}]}
-    wrong_ops = {"keys": [{**jwks["keys"][0], "key_ops": ["sign"]}]}
+    only_enc = {"keys": [{**jwks["keys"][0], "use": "enc"}]}
+    only_sign_ops = {"keys": [{**jwks["keys"][0], "key_ops": ["sign"]}]}
 
     with pytest.raises(SessionAuthError, match="duplicate kid"):
         OidcJwtVerifier(duplicate, issuer=ISSUER, audience=AUDIENCE)
-    with pytest.raises(SessionAuthError, match="key use"):
-        OidcJwtVerifier(wrong_use, issuer=ISSUER, audience=AUDIENCE)
-    with pytest.raises(SessionAuthError, match="key_ops"):
-        OidcJwtVerifier(wrong_ops, issuer=ISSUER, audience=AUDIENCE)
+    # A JWKS whose only key cannot verify signatures leaves nothing usable.
+    with pytest.raises(SessionAuthError, match="no usable signing key"):
+        OidcJwtVerifier(only_enc, issuer=ISSUER, audience=AUDIENCE)
+    with pytest.raises(SessionAuthError, match="no usable signing key"):
+        OidcJwtVerifier(only_sign_ops, issuer=ISSUER, audience=AUDIENCE)
     with pytest.raises(SessionAuthError, match="allowed algorithms"):
         OidcJwtVerifier(jwks, issuer=ISSUER, audience=AUDIENCE, allowed_algorithms=())
+
+
+@pytest.mark.skipif(
+    not os.environ.get("MNEMOSYNE_OIDC_JWKS_URL"),
+    reason="live IdP JWKS test requires MNEMOSYNE_OIDC_JWKS_URL (e.g. a local Keycloak certs endpoint)",
+)
+def test_oidc_jwt_verifier_loads_real_idp_jwks_live() -> None:
+    """Operator-run evidence: load a real IdP's JWKS (mixed sig+enc keyset) and
+    confirm the verifier installs at least one usable signing key.
+
+    Enable with, e.g.::
+
+        MNEMOSYNE_OIDC_JWKS_URL=http://127.0.0.1:8089/realms/master/protocol/openid-connect/certs \\
+        MNEMOSYNE_OIDC_ISSUER=http://127.0.0.1:8089/realms/master uv run pytest \\
+        tests/test_security_sessions.py -k real_idp_jwks_live
+    """
+
+    from mnemosyne.oidc_jwks import load_oidc_jwks
+
+    jwks_url = os.environ["MNEMOSYNE_OIDC_JWKS_URL"]
+    issuer = os.environ.get("MNEMOSYNE_OIDC_ISSUER", jwks_url)
+    jwks = load_oidc_jwks(
+        jwks=None,
+        jwks_file=None,
+        jwks_url=jwks_url,
+        allow_insecure_url=True,
+        timeout=10.0,
+        max_bytes=1_000_000,
+    )
+    assert isinstance(jwks.get("keys"), list) and jwks["keys"]
+
+    verifier = OidcJwtVerifier(jwks, issuer=issuer, audience="mnemosyne")
+    # The real keyset installed at least one verifiable signing key.
+    assert verifier.keys_by_id
+    assert all(key.get("use", "sig") == "sig" for key in verifier.keys_by_id.values())
 
 
 def test_oidc_jwt_verifier_refreshes_jwks_for_unknown_kid() -> None:
