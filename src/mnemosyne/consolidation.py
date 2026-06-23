@@ -126,6 +126,7 @@ class ConsolidationWorker:
         user_model: UserModel | None = None,
         min_corroboration: int = 1,
         consolidation_min_interval_seconds: float = 0.0,
+        consolidation_min_steps: int = 0,
         clock: "Callable[[], datetime] | None" = None,
     ):
         self.engine = engine
@@ -146,6 +147,15 @@ class ConsolidationWorker:
         self.consolidation_min_interval_seconds = max(0.0, float(consolidation_min_interval_seconds))
         self._clock: "Callable[[], datetime]" = clock or utc_now
         self._last_consolidation_at: dict[tuple[str, str], datetime] = {}
+        # §21 RAIL-7: lower-bound step cadence on full consolidation passes. A
+        # positive value makes run_queue_payload refuse a pass for a tenant until
+        # this many pass-steps have elapsed since the last allowed pass (the
+        # blueprint's <=5-steps lower bound). 0 disables it (behaviour-preserving
+        # default) — kept opt-in because the shared summary-rotation contract runs
+        # back-to-back passes; see escalation to the Coordinator on default-on.
+        self.consolidation_min_steps = max(0, int(consolidation_min_steps))
+        self._tenant_pass_calls: dict[str, int] = {}
+        self._tenant_last_pass_call: dict[str, int] = {}
         # §23.3: minimum number of distinct corroborating evidence sources a fact
         # candidate must carry before it is allowed through the promotion gate.
         # Defaults to 1 (no extra corroboration required), so existing single-
@@ -168,6 +178,21 @@ class ConsolidationWorker:
         source_evidence_cids = [str(cid) for cid in payload.get("source_evidence_cids", [])]
         if not source_evidence_cids:
             raise ValueError("consolidation payload requires source_evidence_cids")
+
+        # §21 RAIL-7: bound the per-tenant consolidation-pass cadence. When enabled
+        # (consolidation_min_steps > 0), a pass is refused until at least that many
+        # pass-steps have elapsed for the tenant since the last allowed pass,
+        # preventing runaway back-to-back self-editing.
+        if self.consolidation_min_steps > 0:
+            call_index = self._tenant_pass_calls.get(tenant_id, 0) + 1
+            self._tenant_pass_calls[tenant_id] = call_index
+            last_pass = self._tenant_last_pass_call.get(tenant_id)
+            if last_pass is not None and (call_index - last_pass) < self.consolidation_min_steps:
+                raise RuntimeError(
+                    f"consolidation pass refused: {call_index - last_pass} step(s) since last pass "
+                    f"< {self.consolidation_min_steps}-step §21 cadence lower bound"
+                )
+            self._tenant_last_pass_call[tenant_id] = call_index
 
         evidence, missing = self._load_evidence(tenant_id, source_evidence_cids, branch)
         replay_rows = self._prioritize_replay(evidence, payload)
