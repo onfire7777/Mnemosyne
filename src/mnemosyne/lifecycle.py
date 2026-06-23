@@ -57,6 +57,13 @@ class LifecycleState:
 
 
 def decayed_salience(state: LifecycleState, now: datetime) -> float:
+    """Estimate a memory's current utility from recency, importance and use.
+
+    Combines an exponential recency decay (45-day time constant) with the
+    item's intrinsic importance and a bounded access-frequency boost, clamped
+    to ``[0, 1]``. This is the predicted-future-utility signal that
+    :func:`demotion_decision` uses to govern fidelity-tier forgetting.
+    """
     if state.last_accessed is None:
         age_days = 30.0
     else:
@@ -67,15 +74,31 @@ def decayed_salience(state: LifecycleState, now: datetime) -> float:
 
 
 def next_fidelity_tier(current: FidelityTier) -> FidelityTier:
+    """Return the next-lower fidelity tier, saturating at statistical trace.
+
+    Follows the blueprint's graduated forgetting order
+    verbatim -> extractive summary -> abstractive gist -> statistical trace.
+    """
     index = FIDELITY_ORDER.index(current)
     return FIDELITY_ORDER[min(index + 1, len(FIDELITY_ORDER) - 1)]
 
 
 def demotion_decision(state: LifecycleState, now: datetime, utility_threshold: float = 0.18) -> tuple[LifecycleState, bool]:
+    """Apply graduated forgetting to one memory and report whether it demoted.
+
+    Protected memories are never demoted. Otherwise the item keeps its tier
+    while its predicted utility stays above ``utility_threshold``; once utility
+    drops below it the item falls one fidelity tier (and is flagged
+    ``confabulation_risk`` on the gist/statistical-trace tiers per fuzzy-trace
+    theory). Returns ``(updated_state, demoted)``.
+    """
     if state.protected:
         return state, False
     utility = decayed_salience(state, now)
-    if utility > utility_threshold or state.tier == FidelityTier.STATISTICAL_TRACE:
+    # I7: must-keep memories are never demoted even when their decayed utility
+    # falls below the threshold (e.g. when not yet due for rehearsal); they keep
+    # their fidelity tier while their salience estimate is refreshed.
+    if state.must_keep or utility > utility_threshold or state.tier == FidelityTier.STATISTICAL_TRACE:
         updated = LifecycleState(
             item_id=state.item_id,
             tier=state.tier,
@@ -110,6 +133,13 @@ def demotion_decision(state: LifecycleState, now: datetime, utility_threshold: f
 
 
 def sole_support_requires_abstention(supporting_states: list[LifecycleState]) -> bool:
+    """Return ``True`` when a claim rests solely on a confabulation-risky trace.
+
+    Implements the fuzzy-trace confabulation guard: if the only support for a
+    claim is a single low-fidelity (gist or statistical-trace) memory flagged
+    ``confabulation_risk``, the system should abstain rather than answer from a
+    trace that may have drifted away from the verbatim original.
+    """
     if len(supporting_states) != 1:
         return False
     only = supporting_states[0]
@@ -263,12 +293,18 @@ def _evaluate_forgetting_policy_case(
 
 
 def next_rehearsal_days(successful_rehearsals: int) -> int:
+    """Return the spaced-repetition interval (days) for the next rehearsal.
+
+    Intervals expand with each successful rehearsal (1, 3, 7, 14, 30, 60, 120,
+    240 days), saturating at the final interval.
+    """
     intervals = [1, 3, 7, 14, 30, 60, 120, 240]
     index = min(max(successful_rehearsals, 0), len(intervals) - 1)
     return intervals[index]
 
 
 def rehearsal_due(state: LifecycleState, now: datetime) -> bool:
+    """Return whether a must-keep/protected memory is due for rehearsal now."""
     if not (state.must_keep or state.protected):
         return False
     if state.next_rehearsal_at is None:
@@ -277,6 +313,13 @@ def rehearsal_due(state: LifecycleState, now: datetime) -> bool:
 
 
 def apply_rehearsal_schedule(state: LifecycleState, now: datetime) -> tuple[LifecycleState, bool]:
+    """Rehearse a due must-keep/protected memory before any demotion runs.
+
+    When the item is due, this records the rehearsal (advancing the
+    spaced-repetition interval, boosting salience, and stamping access/rehearsal
+    times) so that durable memories survive the forgetting sweep. Returns
+    ``(updated_state, rehearsed)``; ordinary memories pass through unchanged.
+    """
     if not (state.must_keep or state.protected):
         return state, False
     if not rehearsal_due(state, now):
