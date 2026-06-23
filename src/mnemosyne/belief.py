@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 from collections import defaultdict, deque
 from collections.abc import Mapping
@@ -69,6 +70,14 @@ class BeliefRevisionCore:
             if assertion.confidence > best.confidence or set(assertion.source_evidence_cids) - set(best.source_evidence_cids):
                 return "UPDATE"
             return "NOOP"
+        # Trust-based supersession: a strictly more-trusted assertion (lower tier
+        # number; tier 0 = direct user) supersedes a less-trusted conflicting
+        # peer regardless of valid time — the belief-core analogue of the
+        # engine's trust supersession, so a tier-0 user correction wins the same
+        # turn instead of being recorded as merely contested.
+        most_trusted_peer = min(peers, key=lambda item: item.trust_tier)
+        if assertion.trust_tier < most_trusted_peer.trust_tier:
+            return "SUPERSEDE"
         newest = max(peers, key=lambda item: item.valid_from)
         if assertion.valid_from > newest.valid_from:
             return "SUPERSEDE"
@@ -122,6 +131,28 @@ class BeliefRevisionCore:
         )
         self.engine._persist()
         return BeliefRevisionReport(operation, assertion_id, justification_id, affected, contradictions)
+
+    def apply_tier0_correction(self, assertion: Assertion, branch: str = "main") -> BeliefRevisionReport:
+        """Apply a tier-0 (direct-user) correction as an immediate supersession.
+
+        The belief-core entry point for the human-correction hot path
+        (§20.7/§30.2): the ingestion layer detects a tier-0 user correction and
+        calls this to apply it synchronously through the belief core — bypassing
+        the asynchronous consolidation candidate gate — while still recording a
+        justification for provenance. The correction is forced to trust tier 0
+        (highest trust) and ``active``, so it supersedes any conflicting
+        lower-trust memory in the same turn regardless of valid time. Returns the
+        :class:`BeliefRevisionReport` (operation ``SUPERSEDE`` when it overrides a
+        conflicting peer).
+
+        This is the CC-BC side of the tier-0 correction seam shared with the
+        ingestion lane, which owns detecting ``is_tier0_user_correction``; this
+        method owns the belief-state effect and never mutates the caller's input.
+        """
+        correction = copy.deepcopy(assertion)
+        correction.trust_tier = 0
+        correction.status = "active"
+        return self.revise(correction, branch=branch, rule="tier0_user_correction")
 
     def add_derived_belief(
         self,
