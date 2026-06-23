@@ -671,3 +671,52 @@ def test_consolidation_default_corroboration_is_single_source() -> None:
         )
     )
     assert result.promoted is True
+
+
+def test_consolidation_cadence_throttles_rapid_resignature() -> None:
+    engine = LocalMemoryEngine()
+    cid = engine.append_evidence(
+        Evidence(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="episode",
+            content="The build server is online.",
+            trust_tier=0,
+            access_policy={"tenant": TENANT},
+        )
+    )
+    gate_case = RegressionCase(
+        id="build-server",
+        signature="build-server",
+        query="build server",
+        expected_substring="online",
+        protected=True,
+    )
+    now = [datetime(2026, 6, 1, 12, 0, 0, tzinfo=UTC)]
+    worker = ConsolidationWorker(
+        engine,
+        [gate_case],
+        consolidation_min_interval_seconds=60.0,
+        clock=lambda: now[0],
+    )
+    job = ConsolidationJob(
+        tenant_id=TENANT,
+        signature="build-server",
+        query="build server",
+        candidate_subject="build server",
+        candidate_predicate="is",
+        candidate_object="online",
+        source_evidence_cids=[cid],
+    )
+
+    first = worker.run_job(job)
+    assert first.promoted is True
+    # A second run inside the anti-thrash window is throttled, not re-promoted.
+    second = worker.run_job(job)
+    assert second.promoted is False
+    assert any("anti-thrash" in failure for failure in second.failed_cases)
+    # Once the interval elapses, consolidation runs again.
+    now[0] = now[0] + timedelta(seconds=61)
+    third = worker.run_job(job)
+    assert third.promoted is True
