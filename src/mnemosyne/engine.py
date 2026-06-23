@@ -9,7 +9,7 @@ import threading
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, runtime_checkable
 
 from mnemosyne.calibration import CalibrationSet, conformal_threshold
 from mnemosyne.ids import content_cid, new_id
@@ -38,7 +38,18 @@ from mnemosyne.security import TrustTier, more_trusted, trust_weight
 from mnemosyne.text import approx_tokens, cosine, hashing_embedding, lexical_score, tokenize
 
 
+@runtime_checkable
 class MemoryEngine(Protocol):
+    """Promoted runtime engine contract shared by every backend.
+
+    Both :class:`LocalMemoryEngine` and the Postgres adapter are substitutable
+    behind this protocol, so the CLI/MCP runtime can bind either implementation
+    by type. Marked ``@runtime_checkable`` so callers can assert substitutability
+    at runtime (``isinstance(engine, MemoryEngine)``) in addition to static
+    type-checking. Method bodies raise :class:`NotImplementedError` because the
+    class is a structural contract, never instantiated directly.
+    """
+
     def append_evidence(self, ev: Evidence, branch: str = "main") -> str:
         raise NotImplementedError
 
