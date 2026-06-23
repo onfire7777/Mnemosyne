@@ -124,6 +124,7 @@ class ConsolidationWorker:
         lesson_distiller: "LessonDistiller | None" = None,
         procedure_inducer: "ProcedureInducer | None" = None,
         user_model: UserModel | None = None,
+        min_corroboration: int = 1,
     ):
         self.engine = engine
         self.security = security or SecurityPolicy()
@@ -135,6 +136,11 @@ class ConsolidationWorker:
         self.lesson_distiller = lesson_distiller or DeterministicLessonDistiller()
         self.procedure_inducer = procedure_inducer or DeterministicProcedureInducer()
         self.user_model = user_model
+        # §23.3: minimum number of distinct corroborating evidence sources a fact
+        # candidate must carry before it is allowed through the promotion gate.
+        # Defaults to 1 (no extra corroboration required), so existing single-
+        # source promotion behaviour is unchanged unless a deployment opts in.
+        self.min_corroboration = max(1, int(min_corroboration))
 
     def run_queue_payload(self, payload: dict[str, Any]) -> ConsolidationRunResult:
         decision = self.security.authorize_write(
@@ -1004,6 +1010,13 @@ class ConsolidationWorker:
         return any(value >= int(TrustTier.UNTRUSTED_EXTERNAL) for value in trust_values)
 
     def run_job(self, job: ConsolidationJob) -> GateResult:
+        """Promote a single fact candidate through authorization, corroboration, and the gate.
+
+        Fails closed when the consolidator write is not authorized, when the
+        candidate lacks the required number of distinct corroborating evidence
+        sources (§23.3), or when a protected regression case would break; only a
+        fully authorized, corroborated, regression-clean candidate is promoted.
+        """
         decision = self.security.authorize_write(
             operation="promote_candidate",
             role="consolidator",
@@ -1017,6 +1030,23 @@ class ConsolidationWorker:
                 promoted=False,
                 protected_regressions=[],
                 failed_cases=[decision.reason],
+                passed_cases=[],
+                margin=0.0,
+                rollback_branch=None,
+            )
+        # §23.3: gate fact candidates on external corroboration before the
+        # promotion gate runs — a fact must be backed by at least
+        # ``min_corroboration`` distinct evidence sources.
+        distinct_sources = len({cid for cid in job.source_evidence_cids if cid})
+        if distinct_sources < self.min_corroboration:
+            return GateResult(
+                candidate_id=f"candidate-{job.signature}",
+                promoted=False,
+                protected_regressions=[],
+                failed_cases=[
+                    f"insufficient corroboration: {distinct_sources} distinct source(s) "
+                    f"< required {self.min_corroboration}"
+                ],
                 passed_cases=[],
                 margin=0.0,
                 rollback_branch=None,
