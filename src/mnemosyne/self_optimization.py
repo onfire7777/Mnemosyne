@@ -11,7 +11,14 @@ from hashlib import sha256
 from typing import Any
 
 from mnemosyne.engine import LocalMemoryEngine
-from mnemosyne.gate import Candidate, GateResult, PromotionGate, RegressionCase
+from mnemosyne.gate import (
+    Candidate,
+    CounterfactualHook,
+    CounterfactualVerdict,
+    GateResult,
+    PromotionGate,
+    RegressionCase,
+)
 from mnemosyne.ids import new_id
 from mnemosyne.learning import counterfactual_replay_score
 from mnemosyne.policy import OperatingPolicy
@@ -185,7 +192,13 @@ class ShadowPolicyOptimizer:
         self.self_model = self_model or SelfModelStore()
         self.bandit = bandit or ContextualBanditLearner(self.self_model)
 
-    def evaluate_variant(self, tenant_id: str, variant: PolicyVariant) -> GateResult:
+    def evaluate_variant(
+        self,
+        tenant_id: str,
+        variant: PolicyVariant,
+        *,
+        counterfactual_hook: CounterfactualHook | None = None,
+    ) -> GateResult:
         candidate = Candidate(
             id=variant.id,
             kind="policy",
@@ -194,7 +207,7 @@ class ShadowPolicyOptimizer:
             branch=f"canary-policy-{variant.id}",
             source_evidence_cids=[],
         )
-        gate = PromotionGate(self.engine, self.cases)
+        gate = PromotionGate(self.engine, self.cases, counterfactual_hook=counterfactual_hook)
 
         def apply(engine: LocalMemoryEngine, branch: str) -> None:
             if not within_invariant_rails(engine.policy, variant):
@@ -252,22 +265,25 @@ class ShadowPolicyOptimizer:
         variant: PolicyVariant,
         sessions: Sequence[ReplaySession],
     ) -> dict[str, Any]:
-        """Cold-loop promotion decision gated by the §23.3 suite AND I12 replay.
+        """Cold-loop promotion gated by the §23.3 suite AND I12 replay.
 
-        Runs the relevance-scoped regression-suite gate ([[evaluate_variant]])
-        and counterfactual replay of historical ``sessions`` against the
-        candidate. The variant is promoted only when the gate clears *and* the
-        replay is non-inferior — exactly §23.3 step 3 ("non-inferior and no
-        protected-case regression"). This is the seam that wires
-        :func:`mnemosyne.learning.counterfactual_replay_score` into promotion.
+        Wires :func:`mnemosyne.learning.counterfactual_replay_score` into the
+        promotion gate through the §30.6 ``counterfactual_hook`` seam (gate.py):
+        the candidate is promoted only when the relevance-scoped regression suite
+        clears *and* counterfactual replay of historical ``sessions`` is
+        non-inferior (§23.3 step 3). The baseline success count is measured under
+        the current policy before the candidate is applied. Replay never rescues
+        a candidate the suite already failed — it can only veto.
         """
-        gate_result = self.evaluate_variant(tenant_id, variant)
-        replay = counterfactual_replay(self.engine, variant, sessions)
-        promoted = bool(gate_result.promoted) and replay.non_inferior
+        baseline_successes = sum(
+            1 for session in sessions if session.tenant_id == tenant_id and _session_succeeds(self.engine, session)
+        )
+        hook = make_counterfactual_hook(sessions, baseline_successes=baseline_successes)
+        gate_result = self.evaluate_variant(tenant_id, variant, counterfactual_hook=hook)
         return {
-            "promoted": promoted,
+            "promoted": gate_result.promoted,
             "gate": gate_result.to_dict(),
-            "replay": replay.to_dict(),
+            "replay": gate_result.counterfactual,
         }
 
 
@@ -307,12 +323,50 @@ class CounterfactualReplayReport:
         return asdict(self)
 
 
-def _session_succeeds(engine: LocalMemoryEngine, session: ReplaySession) -> bool:
+def _session_succeeds(engine: LocalMemoryEngine, session: ReplaySession, *, branch: str = "main") -> bool:
     # Mirror the promotion gate's success criterion exactly (gate.py): the
     # expected answer must surface in retrieved hit text and not be abstained.
-    result = engine.retrieve(session.query, session.tenant_id)
+    result = engine.retrieve(session.query, session.tenant_id, branch=branch)
     rendered = "\n".join(getattr(hit, "text", "") for hit in result.hits)
     return session.expected_substring.lower() in rendered.lower() and not getattr(result, "abstained", False)
+
+
+def make_counterfactual_hook(
+    sessions: Sequence[ReplaySession],
+    *,
+    baseline_successes: int,
+) -> CounterfactualHook:
+    """Build a gate counterfactual-replay hook (blueprint §30.6).
+
+    The returned closure matches ``gate.CounterfactualHook``: it replays the
+    historical ``sessions`` against the candidate memory state (on the gate's
+    canary branch) and reports a verdict. ``baseline_successes`` is the success
+    count under the pre-candidate policy. The candidate is vetoed when it would
+    *regress* historical task success (predicted lift < 0); a non-inferior
+    candidate passes. The gate only ever uses this to veto, never to rescue a
+    candidate the regression suite already failed.
+    """
+
+    def hook(
+        tenant_id: str,
+        candidate: Candidate,
+        engine: LocalMemoryEngine,
+        passed: list[str],
+        failed: list[str],
+    ) -> CounterfactualVerdict:
+        relevant = [session for session in sessions if session.tenant_id == tenant_id]
+        after = sum(1 for session in relevant if _session_succeeds(engine, session, branch=candidate.branch))
+        total = len(relevant)
+        lift = counterfactual_replay_score(baseline_successes, after, total)
+        non_inferior = after >= baseline_successes
+        reason = (
+            "counterfactual replay non-inferior"
+            if non_inferior
+            else f"counterfactual regression: {baseline_successes}->{after} over {total} sessions"
+        )
+        return CounterfactualVerdict(passed=non_inferior, predicted_lift=lift, reason=reason)
+
+    return hook
 
 
 def counterfactual_replay(
