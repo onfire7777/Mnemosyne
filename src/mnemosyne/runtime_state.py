@@ -10,7 +10,7 @@ from mnemosyne.gate import RegressionCase
 from mnemosyne.learning import FailureAttribution, LearningSystem, Lesson, Procedure, Trajectory
 from mnemosyne.observability import MetricsRegistry
 from mnemosyne.queue import InProcessQueue
-from mnemosyne.user_model import LatentUserProfile, UserMemoryKind, UserModel, UserModelEntry
+from mnemosyne.user_model import LatentUserProfile, UserModel, UserModelEntry
 
 
 class RuntimeState:
