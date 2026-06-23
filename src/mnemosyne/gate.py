@@ -41,6 +41,29 @@ class Candidate:
 
 
 @dataclass(slots=True)
+class CounterfactualVerdict:
+    """Verdict from a counterfactual-replay hook (§30.6).
+
+    Produced by the CC-LS counterfactual-replay scorer: replaying a historical
+    session against the candidate predicts whether the change actually lifts task
+    success. ``passed`` False vetoes promotion even when the point-check
+    regression suite is green.
+    """
+
+    passed: bool
+    predicted_lift: float
+    reason: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+# A counterfactual-replay hook receives the gate decision context and returns a
+# verdict. Owned/implemented by CC-LS; the gate only provides the seam.
+CounterfactualHook = Callable[[str, "Candidate", LocalMemoryEngine, list[str], list[str]], CounterfactualVerdict]
+
+
+@dataclass(slots=True)
 class GateResult:
     candidate_id: str
     promoted: bool
@@ -49,16 +72,26 @@ class GateResult:
     passed_cases: list[str]
     margin: float
     rollback_branch: str | None
+    counterfactual: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
 class PromotionGate:
-    def __init__(self, engine: LocalMemoryEngine, cases: list[RegressionCase], noise_margin: float = 0.01):
+    def __init__(
+        self,
+        engine: LocalMemoryEngine,
+        cases: list[RegressionCase],
+        noise_margin: float = 0.01,
+        counterfactual_hook: CounterfactualHook | None = None,
+    ):
         self.engine = engine
         self.cases = cases
         self.noise_margin = noise_margin
+        # Optional §30.6 seam: when set, a counterfactual-replay verdict can veto an
+        # otherwise-promotable candidate. Default ``None`` preserves prior behaviour.
+        self.counterfactual_hook = counterfactual_hook
 
     def relevant_cases(self, candidate: Candidate) -> list[RegressionCase]:
         signature_terms = set(candidate.signature.lower().split())
@@ -95,13 +128,21 @@ class PromotionGate:
         total = max(len(passed) + len(failed), 1)
         margin = len(passed) / total - self.noise_margin
         promoted = not protected_regressions and not failed and margin > 0
+        counterfactual: dict[str, Any] | None = None
+        if self.counterfactual_hook is not None:
+            verdict = self.counterfactual_hook(tenant_id, candidate, self.engine, passed, failed)
+            counterfactual = verdict.to_dict()
+            # Counterfactual replay can veto an otherwise-promotable candidate, but
+            # never rescues one the regression suite already failed.
+            if promoted and not verdict.passed:
+                promoted = False
         rollback_branch = None
         if promoted:
             self._merge(branch, tenant_id)
         else:
             rollback_branch = branch
             self._discard(branch, tenant_id)
-        return GateResult(candidate.id, promoted, protected_regressions, failed, passed, margin, rollback_branch)
+        return GateResult(candidate.id, promoted, protected_regressions, failed, passed, margin, rollback_branch, counterfactual)
 
     def _reset_branch(self, branch: str, tenant_id: str) -> None:
         branches = getattr(self.engine, "branches", None)

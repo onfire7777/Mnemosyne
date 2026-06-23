@@ -1,12 +1,16 @@
 """Mnemosyne memory compiler package."""
 
-from mnemosyne.engine import LocalMemoryEngine, MemoryEngine
+from mnemosyne.engine import LocalMemoryEngine, MemoryEngine, RoutePlan, route
 from mnemosyne.belief import BeliefRevisionCore
 from mnemosyne.benchmarks import LatencyBenchmarkResult
 from mnemosyne.calibration import CalibrationSet
 from mnemosyne.lifecycle import FidelityTier, LifecycleState
 from mnemosyne.graph import GraphBenchmarkResult, LocalRelationGraphAdapter
-from mnemosyne.guard import NoDegradationResult
+from mnemosyne.guard import (
+    LongHorizonDegradationResult,
+    LongHorizonNoDegradationTracker,
+    NoDegradationResult,
+)
 from mnemosyne.jobs import (
     CALIBRATE_JOB,
     EVAL_SUITE_JOB,
@@ -58,6 +62,8 @@ __all__ = [
     "LatencyBenchmarkResult",
     "LearningSystem",
     "LIFECYCLE_SWEEP_JOB",
+    "LongHorizonDegradationResult",
+    "LongHorizonNoDegradationTracker",
     "MemoryEngine",
     "NoDegradationResult",
     "OBSERVABILITY_SNAPSHOT_JOB",
@@ -77,6 +83,7 @@ __all__ = [
     "QueueWorker",
     "Relation",
     "RetrievalAdapters",
+    "RoutePlan",
     "RuntimeJobHandlers",
     "SecurityPolicy",
     "SignedProvenanceVerifier",
@@ -87,5 +94,6 @@ __all__ = [
     "UserMemoryKind",
     "UserModel",
     "UserModelEntry",
+    "route",
     "semantic_entropy",
 ]
