@@ -7,9 +7,10 @@ import json
 import os
 import threading
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Literal, Protocol, runtime_checkable
 
 from mnemosyne.calibration import CalibrationSet, conformal_threshold
 from mnemosyne.ids import content_cid, new_id
@@ -36,6 +37,84 @@ from mnemosyne.retrieval import (
 )
 from mnemosyne.security import TrustTier, more_trusted, trust_weight
 from mnemosyne.text import approx_tokens, cosine, hashing_embedding, lexical_score, tokenize
+
+
+@dataclass(slots=True)
+class RoutePlan:
+    """Result of the cheap fast-vs-deep retrieval router (§22.1 / §30.4)."""
+
+    mode: Literal["fast", "deep"]
+    reason: str
+    signals: dict[str, Any]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"mode": self.mode, "reason": self.reason, "signals": dict(self.signals)}
+
+
+# Lexical markers that signal a query needs exhaustive deep retrieval
+# (reconstruction, multi-hop history, decision tracing) rather than the fast
+# current-truth path. Kept as a cheap substring heuristic — never an LLM call.
+_DEEP_ROUTE_MARKERS: tuple[str, ...] = (
+    "why",
+    "histor",
+    "reconstruct",
+    "trace",
+    "timeline",
+    "as of",
+    "as-of",
+    "originally",
+    "evolve",
+    "evolution",
+    "decision",
+    "how did",
+    "what changed",
+    "root cause",
+    "over time",
+    "across sessions",
+    "back then",
+)
+
+
+def route(query: str, ctx: dict[str, Any] | None = None) -> RoutePlan:
+    """Cheap fast-vs-deep retrieval router (§22.1 plan step / §30.4 fast path).
+
+    A deterministic heuristic — explicitly *not* an LLM call on the fast path —
+    that decides whether a query needs the exhaustive deep path (LLM planning,
+    live PPR multi-hop, exhaustive evidence traversal) or the fast current-truth
+    path. ``ctx`` may carry an explicit ``mode`` override, a ``required_accuracy``
+    hint, or an ``as_of`` timestamp. This replaces the hardcoded ``deep`` boolean:
+    callers ``route(q, ctx)`` then dispatch ``engine.deep_search`` vs
+    ``engine.retrieve`` on any :class:`MemoryEngine`, so routing stays decoupled
+    from the backend.
+    """
+    ctx = ctx or {}
+    override = ctx.get("mode")
+    if override in ("fast", "deep"):
+        return RoutePlan(override, f"explicit mode override -> {override}", {"override": override})
+
+    normalized = query.lower().strip()
+    tokens = normalized.split()
+    matched_markers = [marker for marker in _DEEP_ROUTE_MARKERS if marker in normalized]
+    long_query = len(tokens) >= 12
+    exhaustive = ctx.get("required_accuracy") == "exhaustive"
+    as_of_requested = bool(ctx.get("as_of"))
+    signals: dict[str, Any] = {
+        "deep_markers": matched_markers,
+        "token_count": len(tokens),
+        "long_query": long_query,
+        "required_accuracy": ctx.get("required_accuracy"),
+        "as_of": as_of_requested,
+    }
+
+    if matched_markers:
+        return RoutePlan("deep", f"deep markers fired: {', '.join(matched_markers)}", signals)
+    if exhaustive:
+        return RoutePlan("deep", "caller requested exhaustive accuracy", signals)
+    if as_of_requested:
+        return RoutePlan("deep", "historical as-of reconstruction requested", signals)
+    if long_query:
+        return RoutePlan("deep", "long multi-clause query suggests decomposition", signals)
+    return RoutePlan("fast", "current-truth fast path; no deep signals", signals)
 
 
 @runtime_checkable

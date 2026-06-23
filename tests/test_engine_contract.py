@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+import pytest
+
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.eval import assert_seed_suite_passes
 from mnemosyne.mcp_tools import MemoryTools
@@ -436,3 +438,146 @@ def test_local_engine_implements_full_runtime_protocol_surface() -> None:
     engine = LocalMemoryEngine()
     missing = sorted(name for name in protocol_methods if not callable(getattr(engine, name, None)))
     assert not missing, f"LocalMemoryEngine is missing protocol methods: {missing}"
+
+
+def test_long_horizon_no_degradation_tracker_passes_when_memory_stays_superior() -> None:
+    """§25: the anti-degradation guard is a long-horizon tracked metric, not just a
+    point-check. Over many evaluations memory must never drop below the no-memory
+    baseline (the explicit anti-"Useful-Memories-Become-Faulty" metric)."""
+    from mnemosyne.guard import LongHorizonNoDegradationTracker
+
+    tracker = LongHorizonNoDegradationTracker(minimum_margin=0.0)
+    for memory_score, baseline in [(0.70, 0.60), (0.74, 0.60), (0.80, 0.62)]:
+        step = tracker.record(memory_score, baseline)
+        assert step.passed is True
+
+    result = tracker.evaluate()
+    assert result.passed is True
+    assert result.samples == 3
+    assert result.breaches == []
+    assert result.first_breach is None
+    assert result.worst_margin == pytest.approx(0.10)
+    assert result.trend >= 0.0  # improving (or at least non-degrading) horizon
+    assert result.to_dict()["passed"] is True
+
+
+def test_long_horizon_no_degradation_tracker_flags_horizon_breach() -> None:
+    """§25: a single drop below the no-memory baseline over the horizon fails the
+    guard and pinpoints when degradation first occurred."""
+    from mnemosyne.guard import LongHorizonNoDegradationTracker
+
+    tracker = LongHorizonNoDegradationTracker(minimum_margin=0.0)
+    tracker.record(0.71, 0.60)   # +0.11 healthy
+    tracker.record(0.58, 0.60)   # -0.02 degraded below no-memory baseline
+    tracker.record(0.69, 0.60)   # recovered, but the horizon already breached
+
+    result = tracker.evaluate()
+    assert result.passed is False
+    assert result.first_breach == 1
+    assert result.breaches == [1]
+    assert result.worst_margin == pytest.approx(-0.02)
+    assert "below" in result.reason.lower()
+
+
+def test_promotion_gate_counterfactual_hook_can_veto_promotion() -> None:
+    """§30.6: a counterfactual-replay hook (owned by CC-LS) can gate promotion.
+
+    The point-check regression suite may pass while a historical-session replay
+    predicts negative lift. The gate exposes an optional hook so that replay can
+    veto an otherwise-promotable candidate; absent a hook, behaviour is unchanged.
+    """
+    from mnemosyne.gate import Candidate, CounterfactualVerdict, PromotionGate, RegressionCase
+
+    engine = LocalMemoryEngine()
+    tools = MemoryTools(engine)
+    cid = tools.capture(
+        tenant_id=TENANT,
+        user_id=USER,
+        actor="user",
+        source_type="chat",
+        content="Mnemosyne cites evidence on every retrieval.",
+        trust_tier=0,
+    )["cid"]
+    case = RegressionCase(
+        id="cites-evidence",
+        signature="evidence citation",
+        query="evidence",
+        expected_substring="cites evidence",
+        tier="smoke",
+    )
+    candidate = Candidate(
+        id="cand-1",
+        kind="lesson",
+        signature="evidence citation",
+        description="reinforce evidence citation",
+        branch="cand-branch",
+        source_evidence_cids=[cid],
+    )
+
+    def apply(_engine: LocalMemoryEngine, _branch: str) -> None:
+        return None
+
+    # Without a hook the candidate promotes on the passing regression case.
+    baseline = PromotionGate(engine, [case]).evaluate(TENANT, candidate, apply)
+    assert baseline.promoted is True
+    assert baseline.counterfactual is None
+
+    # A vetoing counterfactual hook blocks promotion and records the verdict.
+    def veto_hook(tenant_id, cand, _engine, passed, failed):  # noqa: ANN001 - test stub
+        return CounterfactualVerdict(passed=False, predicted_lift=-0.2, reason="replay predicts regression")
+
+    gated = PromotionGate(engine, [case], counterfactual_hook=veto_hook).evaluate(TENANT, candidate, apply)
+    assert gated.promoted is False
+    assert gated.counterfactual["passed"] is False
+    assert gated.counterfactual["predicted_lift"] == pytest.approx(-0.2)
+
+
+def test_route_classifier_picks_fast_vs_deep_without_an_llm() -> None:
+    """§30.4/§22.1: a cheap heuristic ``route()`` classifies fast-vs-deep retrieval
+    (never an LLM call on the fast path), replacing a hardcoded ``deep`` bool."""
+    from mnemosyne.engine import RoutePlan, route
+
+    fast = route("what is the deployment target")
+    assert isinstance(fast, RoutePlan)
+    assert fast.mode == "fast"
+
+    deep = route("why did we originally choose Postgres and how did that decision evolve")
+    assert deep.mode == "deep"
+    assert deep.signals  # exposes the heuristic signals it fired on
+
+    # Explicit override always wins, cheaply.
+    forced = route("trivial", ctx={"mode": "deep"})
+    assert forced.mode == "deep"
+    assert "override" in forced.reason.lower()
+
+
+def test_route_plan_composes_with_any_engine_retrieval_path() -> None:
+    """``route()`` is engine-agnostic: its plan drives either retrieval path on any
+    ``MemoryEngine`` implementation, so the runtime routes without backend coupling."""
+    from mnemosyne.engine import route
+
+    engine = LocalMemoryEngine()
+    tools = MemoryTools(engine)
+    tools.assert_fact(
+        tenant_id=TENANT,
+        user_id=USER,
+        subject="Mnemosyne",
+        predicate="uses",
+        object_value="Postgres",
+        source_evidence_cids=[
+            tools.capture(
+                tenant_id=TENANT,
+                user_id=USER,
+                actor="user",
+                source_type="chat",
+                content="Mnemosyne uses Postgres for durable storage.",
+                trust_tier=0,
+            )["cid"]
+        ],
+        confidence=0.9,
+        trust_tier=0,
+    )
+
+    plan = route("why does Mnemosyne use Postgres historically")
+    result = engine.deep_search("Mnemosyne", TENANT) if plan.mode == "deep" else engine.retrieve("Mnemosyne", TENANT)
+    assert result is not None
