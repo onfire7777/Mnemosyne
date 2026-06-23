@@ -968,3 +968,57 @@ def sanitize_retrieved_text(text: str, trust_tier: int) -> dict[str, Any]:
         "capability_tags": list(SANITIZED_DATA_TAGS),
         "content": text,
     }
+
+
+@dataclass(frozen=True, slots=True)
+class QuarantineBoundary:
+    """A no-write quarantine for untrusted content (blueprint I11/§27).
+
+    Implements the dual-LLM / CaMeL quarantine pattern: untrusted content is
+    processed in isolation and emitted as **data only**. The boundary holds no
+    write tools — ``can_write`` is always ``False`` and ``authorize_write``
+    denies every operation — so nothing routed through quarantine can author a
+    memory write or determine control flow. The emitted ``capability_tags``
+    (``quarantined`` plus the sanitized data-only tags) are exactly what
+    ``SecurityPolicy.authorize_write`` and consolidation refuse downstream, so
+    the no-write property holds even if the quarantined payload is later handed
+    to a privileged policy. Sharing ``SecurityPolicy``'s ``authorize_write``
+    signature lets the boundary be substituted wherever a write policy is
+    expected, failing closed by construction.
+    """
+
+    trust_tier: int = int(TrustTier.UNTRUSTED_EXTERNAL)
+
+    @property
+    def can_write(self) -> bool:
+        """The quarantine boundary never holds write authority."""
+
+        return False
+
+    def quarantine(self, text: str) -> dict[str, Any]:
+        """Return untrusted ``text`` as isolated, quarantined, no-write data."""
+
+        payload = sanitize_retrieved_text(text, self.trust_tier)
+        payload["kind"] = "quarantined_data"
+        payload["quarantined"] = True
+        payload["capability_tags"] = [*SANITIZED_DATA_TAGS, "quarantined"]
+        return payload
+
+    def authorize_write(
+        self,
+        operation: str,
+        role: WriteRole = "reader",
+        source_trust_tier: int = int(TrustTier.UNTRUSTED_EXTERNAL),
+        destructive: bool = False,
+        target_sink: str | None = None,
+        source_capability_tags: Sequence[str] | None = None,
+    ) -> CapabilityDecision:
+        """Quarantined content has no write authority — every write is denied."""
+
+        return CapabilityDecision(
+            False,
+            "quarantine boundary holds no write tools (data is not instruction)",
+            "reader",
+            int(TrustTier.UNTRUSTED_EXTERNAL),
+            operation,
+        )
