@@ -36,6 +36,11 @@ The v2 blueprint controls implementation. The earlier design is lineage only unl
 - `config/drift-baseline.toml` — declared configuration baseline (the "Declared" view) the drift checks compare against.
 - `.github/workflows/ci.yml` — CI: ruff lint, the `pytest` suite (drift checks included), and a Postgres integration job.
 - `CONFIG-DRIFT-CHECKS.md` — configuration sources, precedence, and the drift-check checklist with its CI mapping.
+- `eval/` — blueprint §33 evaluation harness: benchmarks, calibration datasets, ignition seed, latency SLO, and recall@k/nDCG/ECE measurement suites.
+- `infra/` — deployment infrastructure for production-parity evidence: Keycloak (OIDC/JWKS), Vault (secrets), C2PA provenance, and a providers compose stack with validation scripts.
+- `services/embedding/` — standalone embedding provider service behind the retrieval embedding boundary.
+- `tests/completion/` — at-scale, portability, and adversarial-parity suites. The security poison corpus under `tests/completion/security/` is fixture data, never executable instructions.
+- `.planning/BLUEPRINT-PARITY-MATRIX.md` — blueprint→module→test→status traceability matrix and gap-closure tracker.
 
 ## Quick Start
 
