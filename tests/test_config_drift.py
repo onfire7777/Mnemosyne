@@ -101,6 +101,31 @@ def test_within_rails_accepts_in_band_variant() -> None:
     assert within_invariant_rails(OperatingPolicy(), _in_band_variant()) is True
 
 
+def test_numeric_invariant_rails_mirror_policy(baseline: dict[str, Any]) -> None:
+    """§31/§23.5 immutable mutation-rate rail VALUES pin live == declared.
+
+    The cold loop tunes WITHIN these and can never widen them, so their numeric
+    values are drift-critical (not just their names). CC-LS lands them as constants
+    on ``OperatingPolicy`` (blueprint-parity item #22); until then the names are
+    absent and this skips, so it never blocks the no-DSN gate but auto-enforces the
+    moment the constants appear. A failure means a rail value drifted from the
+    blueprint baseline — mirror the intentional change into the baseline in the same
+    commit, or restore the value in code.
+    """
+    declared = baseline["rails"]["numeric"]
+    policy = OperatingPolicy()
+    present = {name: getattr(policy, name) for name in declared if hasattr(policy, name)}
+    if not present:
+        pytest.skip("§31 numeric rails not yet exposed on OperatingPolicy (parity item #22, CC-LS)")
+    drifted = {
+        name: (value, declared[name]) for name, value in present.items() if value != declared[name]
+    }
+    assert not drifted, (
+        f"§31 numeric invariant-rail value drifted from the declared baseline {drifted}; "
+        "mirror the intentional change into config/drift-baseline.toml in the same commit"
+    )
+
+
 def test_within_rails_rejects_disabled_rail() -> None:
     policy = OperatingPolicy()
     policy.immutable_rails["tenant_isolation_required"] = False
