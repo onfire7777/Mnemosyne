@@ -618,17 +618,24 @@ class OidcJwtVerifier:
             if not isinstance(key, Mapping):
                 continue
             key_id = str(key.get("kid") or "")
-            if key_id:
-                if key_id in keys_by_id:
-                    raise SessionAuthError("OIDC JWKS contains duplicate kid")
-                if key.get("use") not in (None, "sig"):
-                    raise SessionAuthError("OIDC JWKS key use is not allowed")
-                key_ops = key.get("key_ops")
-                if key_ops is not None and (not isinstance(key_ops, list) or "verify" not in key_ops):
-                    raise SessionAuthError("OIDC JWKS key_ops must allow verify")
-                keys_by_id[key_id] = key
+            if not key_id:
+                continue
+            # Select signature-verification keys only. Production IdPs (Keycloak,
+            # Auth0, Azure AD) publish encryption (`use:"enc"`) and other
+            # non-signing keys in the same JWKS document; those are ignored here
+            # rather than rejecting the whole keyset, while keys explicitly scoped
+            # away from verification (`use` != "sig", or `key_ops` without
+            # "verify") are never used to validate a token.
+            if key.get("use") not in (None, "sig"):
+                continue
+            key_ops = key.get("key_ops")
+            if key_ops is not None and (not isinstance(key_ops, list) or "verify" not in key_ops):
+                continue
+            if key_id in keys_by_id:
+                raise SessionAuthError("OIDC JWKS contains duplicate kid")
+            keys_by_id[key_id] = key
         if not keys_by_id:
-            raise SessionAuthError("OIDC JWKS keys must include kid")
+            raise SessionAuthError("OIDC JWKS has no usable signing key")
         with self._jwks_lock:
             self.keys_by_id = keys_by_id
             self._jwks_loaded_at = loaded_at
