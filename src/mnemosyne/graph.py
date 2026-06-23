@@ -12,6 +12,12 @@ from mnemosyne.models import Hit
 
 
 class GraphAdapter(Protocol):
+    """Pluggable Personalized-PageRank seam over the typed relation graph.
+
+    Lets a specialist graph backend (e.g. an AGE/graph-store adapter) be
+    swapped in for the local implementation behind a single ``ppr`` contract.
+    """
+
     name: str
 
     def ppr(
@@ -22,10 +28,13 @@ class GraphAdapter(Protocol):
         tenant_id: str | None = None,
         branch: str | None = None,
     ) -> list[Hit]:
+        """Return up to ``k`` PPR hits seeded from ``seeds`` (HippoRAG-style)."""
         raise NotImplementedError
 
 
 class LocalRelationGraphAdapter:
+    """Default :class:`GraphAdapter` backed by the engine's relation graph."""
+
     name = "local-relation-ppr"
 
     def __init__(self, engine: LocalMemoryEngine):
@@ -39,6 +48,7 @@ class LocalRelationGraphAdapter:
         tenant_id: str | None = None,
         branch: str | None = None,
     ) -> list[Hit]:
+        """Delegate Personalized PageRank to the local engine's graph index."""
         return self.engine.graph_ppr(seeds, k, as_of=as_of, tenant_id=tenant_id, branch=branch)
 
 
@@ -56,6 +66,11 @@ class GraphBenchmarkResult:
 
 
 def benchmark_graph_adapter(adapter: GraphAdapter, queries: list[list[str]], k: int = 8) -> GraphBenchmarkResult:
+    """Measure p50/p95/max PPR latency and total hits for a graph adapter.
+
+    Runs each seed list in ``queries`` through ``adapter.ppr`` and returns a
+    :class:`GraphBenchmarkResult`; an empty query set yields an all-zero result.
+    """
     durations: list[float] = []
     total_hits = 0
     for seeds in queries:
