@@ -51,15 +51,19 @@ from mnemosyne.parametric import (
 )
 from mnemosyne.policy import OperatingPolicy
 from mnemosyne.self_optimization import (
+    OQ2_MIN_REPLAY_WINDOW,
+    OQ2_PROXY_TRUE_GAP,
     ContextualBanditLearner,
     PolicyVariant,
     ReplaySession,
     SelfModelStore,
     ShadowPolicyOptimizer,
     counterfactual_replay,
+    default_counterfactual_hook,
     make_counterfactual_hook,
     policy_ops_fingerprint,
     policy_variant_from_dict,
+    tripwire_check,
     validate_policy_ops_bundle,
     within_invariant_rails,
 )
@@ -464,6 +468,89 @@ def test_counterfactual_evaluate_requires_gate_and_replay() -> None:
     assert decision["replay"]["passed"] is True
     assert decision["gate"]["promoted"] is True
     assert decision["gate"]["counterfactual"]["passed"] is True
+
+
+def test_self_model_replay_pairs_roundtrip() -> None:
+    store = SelfModelStore()
+    store.record_replay_pair(TENANT, "v1", predicted_lift=0.2, observed_lift=0.18)
+    store.record_replay_pair(TENANT, "v1", predicted_lift=-0.1, observed_lift=-0.12)
+    store.record_replay_pair("other-tenant", "v1", predicted_lift=0.5, observed_lift=0.5)
+    pairs = store.replay_pairs(TENANT)
+    assert pairs == [(0.2, 0.18), (-0.1, -0.12)]
+    # recording pairs must not perturb bandit policy-outcome scoring
+    assert store.outcomes(TENANT) == []
+
+
+def test_default_cf_hook_abstains_until_window_then_gates() -> None:
+    candidate = Candidate(
+        id="v", kind="policy", signature="s", description="d", branch="main", source_evidence_cids=[]
+    )
+    engine = LocalMemoryEngine()
+
+    # (1) below the OQ2 window the proxy is unproven -> abstains (never vetoes)
+    sparse = SelfModelStore()
+    sparse.record_replay_pair(TENANT, "v", 0.5, -0.5)  # bad fidelity, but too few pairs
+    verdict = default_counterfactual_hook(sparse)(TENANT, candidate, engine, [], [])
+    assert verdict.passed is True and "abstains" in verdict.reason
+
+    # (2) enough faithful pairs with non-negative mean predicted lift -> authorized pass
+    good = SelfModelStore()
+    for _ in range(OQ2_MIN_REPLAY_WINDOW):
+        good.record_replay_pair(TENANT, "v", 0.10, 0.11)
+    ok = default_counterfactual_hook(good)(TENANT, candidate, engine, [], [])
+    assert ok.passed is True and "authorized" in ok.reason
+
+    # (3) enough faithful pairs but negative mean predicted lift -> veto
+    bad = SelfModelStore()
+    for _ in range(OQ2_MIN_REPLAY_WINDOW):
+        bad.record_replay_pair(TENANT, "v", -0.10, -0.11)
+    veto = default_counterfactual_hook(bad)(TENANT, candidate, engine, [], [])
+    assert veto.passed is False and "vetoes" in veto.reason
+
+    # (4) enough pairs but the proxy is unfaithful (gap too large) -> abstains (shadow)
+    noisy = SelfModelStore()
+    for _ in range(OQ2_MIN_REPLAY_WINDOW):
+        noisy.record_replay_pair(TENANT, "v", 0.9, -0.9)
+    drift = default_counterfactual_hook(noisy)(TENANT, candidate, engine, [], [])
+    assert drift.passed is True and "gap" in drift.reason
+
+
+def test_evaluate_variant_consumes_cf_proxy_by_default() -> None:
+    engine = _replay_engine()
+    optimizer = ShadowPolicyOptimizer(
+        engine,
+        [
+            RegressionCase(
+                id="case-default-cf",
+                signature="policy retrieval activation confidence",
+                query="immutable rails",
+                expected_substring="immutable rails",
+                protected=True,
+            )
+        ],
+    )
+    variant = PolicyVariant(
+        "safe", {"base_level": 0.35, "semantic": 0.35, "importance": 0.20, "recency": 0.10}, 0.45, 8
+    )
+    # No explicit hook: the cold loop attaches the default cf scorer, so the gate
+    # result carries a counterfactual verdict (abstaining in shadow with no pairs)
+    # and promotion is unaffected because the proxy never vetoes when unproven.
+    result = optimizer.evaluate_variant(TENANT, variant)
+    assert result.counterfactual is not None
+    assert result.counterfactual["passed"] is True
+    assert result.promoted is True
+
+
+def test_oq2_gap_threshold_is_the_single_source_of_truth() -> None:
+    # tripwire monitor and the OQ2 cf gap rail must share one threshold
+    assert OQ2_PROXY_TRUE_GAP == pytest.approx(0.15)
+    # tripwire_check default max_proxy_gap is bound to the shared 0.15 constant:
+    # a 0.14 gap passes, a 0.16 gap fails (brackets the threshold without hitting
+    # the exact-boundary float edge).
+    under = tripwire_check(diversity=0.5, proxy_score=0.50, true_score=0.36)  # gap 0.14
+    over = tripwire_check(diversity=0.5, proxy_score=0.50, true_score=0.34)  # gap 0.16
+    assert under.passed is True
+    assert over.passed is False
 
 
 def test_counterfactual_hook_vetoes_a_regressing_candidate() -> None:
