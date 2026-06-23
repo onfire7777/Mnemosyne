@@ -59,6 +59,27 @@ def trust_weight(trust_tier: int) -> float:
     return 1.0 - (bounded / float(TrustTier.UNTRUSTED_EXTERNAL))
 
 
+# Taint vocabulary for the data-never-instruction invariant (blueprint I11/§27).
+# Untrusted or sanitized content is tagged ``data-only``/``no-write-authority``
+# (and ``quarantined`` when isolated at ingest); any of these tags strips write
+# authority so taint cannot determine control flow or mutate preferences/policy.
+# Kept identical to the pipeline vocabulary in ``ingestion``/``consolidation``.
+SANITIZED_DATA_TAGS: tuple[str, ...] = ("data-only", "no-write-authority", "sanitize-as-data")
+NO_WRITE_TAINT_TAGS: frozenset[str] = frozenset(SANITIZED_DATA_TAGS) | {"quarantined"}
+
+
+def is_write_tainted(capability_tags: Sequence[str] | None) -> bool:
+    """True when capability tags mark content as data-only / quarantined.
+
+    Per I11 (data ≠ instruction), tainted content can never author a write or
+    determine control flow, regardless of role or trust tier.
+    """
+
+    if not capability_tags:
+        return False
+    return bool({str(tag) for tag in capability_tags} & NO_WRITE_TAINT_TAGS)
+
+
 WriteRole = Literal["reader", "agent", "consolidator", "operator"]
 _WRITE_ROLES = {"reader", "agent", "consolidator", "operator"}
 
@@ -904,7 +925,14 @@ class SecurityPolicy:
         source_trust_tier: int,
         destructive: bool = False,
         target_sink: str | None = None,
+        source_capability_tags: Sequence[str] | None = None,
     ) -> CapabilityDecision:
+        # Data-never-instruction (I11/§27): tainted or quarantined content has no
+        # write authority on any sink, regardless of role or trust tier. This is
+        # checked first so untrusted-derived data can never reach a privileged
+        # write path even if it carries an elevated role/trust claim.
+        if is_write_tainted(source_capability_tags):
+            return CapabilityDecision(False, "tainted data carries no write authority (data is not instruction)", role, source_trust_tier, operation)
         if operation in self.consolidator_only_ops and role not in {"consolidator", "operator"}:
             return CapabilityDecision(False, "operation requires consolidator write authority", "consolidator", 0, operation)
         if target_sink in {"policy", "system_prompt", "safety_rail"}:
@@ -926,9 +954,17 @@ class SecurityPolicy:
 
 
 def sanitize_retrieved_text(text: str, trust_tier: int) -> dict[str, Any]:
+    """Present retrieved memory as data, never instruction (blueprint I11/§27).
+
+    The result carries the ``data-only``/``no-write-authority`` taint tags so the
+    no-write invariant propagates to downstream write gating (``authorize_write``)
+    and consolidation, which already key on the same capability-tag vocabulary.
+    """
+
     return {
         "kind": "retrieved_memory_data",
         "trust_tier": trust_tier,
         "instruction_authority": "none",
+        "capability_tags": list(SANITIZED_DATA_TAGS),
         "content": text,
     }
