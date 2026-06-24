@@ -1428,6 +1428,102 @@ def test_in_process_queue_retries_and_completes_jobs() -> None:
     assert queue.snapshot()["complete"] == 1
 
 
+def test_runtime_state_round_trips_local_side_state_without_postgres(tmp_path) -> None:
+    store_path = tmp_path / "memory.json"
+    tenant = f"{TENANT}-local-runtime-state-{uuid4()}"
+    source_cid = f"cidv1:{sha256(b'local-runtime-state-evidence').hexdigest()}"
+    state = RuntimeState.from_store_path(store_path)
+    assert state is not None
+    assert state.path == store_path.with_suffix(store_path.suffix + ".runtime.json")
+
+    model = UserModel()
+    model.add_entry(
+        UserModelEntry(
+            tenant_id=tenant,
+            user_id=USER,
+            kind=UserMemoryKind.HARD_INSTRUCTION,
+            statement="Prefer local runtime-state verification even without Postgres.",
+            scope={"surface": "local-runtime"},
+            confidence=0.94,
+            source_evidence_cids=[source_cid],
+        )
+    )
+    model.set_latent_profile(
+        LatentUserProfile(
+            tenant_id=tenant,
+            user_id=USER,
+            embedding=[0.2, 0.4, 0.6],
+            summary="Local runtime state profile",
+        )
+    )
+
+    learning = LearningSystem(LocalMemoryEngine())
+    trajectory = Trajectory(
+        tenant_id=tenant,
+        user_id=USER,
+        session_id="local-runtime-state-session",
+        task="local runtime state parity",
+        steps=[{"status": "failed", "description": "verify local runtime state", "error": "missing probe"}],
+        outcome="failure",
+        reward=-1.0,
+        memory_version="local-runtime-state-v1",
+    )
+    learning.log_trajectory(trajectory)
+    attribution = learning.attribute_failure(trajectory.id)
+    lesson = learning.induce_lesson(attribution)
+    procedure = learning.induce_procedure(lesson)
+
+    queue = InProcessQueue()
+    job = queue.enqueue("local-runtime-state", {"tenant_id": tenant, "lesson_id": lesson.id}, max_attempts=2)
+    metrics = MetricsRegistry()
+    metrics.increment("runtime.local_state", 3)
+    metrics.gauge("runtime.local_state.queue_depth", 1)
+    metrics.observe("runtime.local_state.latency_ms", 9.0)
+    gate_cases = [
+        RegressionCase(
+            str(uuid4()),
+            "local runtime state",
+            "local runtime state parity",
+            "local runtime-state verification",
+            tier="core",
+            protected=True,
+        )
+    ]
+
+    state.save_user_model(model)
+    state.save_learning(learning)
+    state.save_queue(queue)
+    state.save_metrics(metrics)
+    state.save_gate_cases(gate_cases)
+
+    reloaded = RuntimeState.from_store_path(store_path)
+    assert reloaded is not None
+    loaded_model = reloaded.load_user_model()
+    loaded_learning = reloaded.load_learning(LearningSystem(LocalMemoryEngine()))
+    loaded_queue = reloaded.load_queue()
+    loaded_metrics = reloaded.load_metrics()
+    loaded_cases = reloaded.load_gate_cases()
+    context = loaded_model.context_packet(tenant, USER, {"surface": "local-runtime"})
+    metric_snapshot = loaded_metrics.snapshot().to_dict()
+
+    assert reloaded.path.exists()
+    assert context["authoritative"][0]["statement"] == "Prefer local runtime-state verification even without Postgres."
+    assert context["authoritative"][0]["source_evidence_cids"] == [source_cid]
+    assert context["latent_advisory"]["summary"] == "Local runtime state profile"
+    assert sorted(loaded_learning.trajectories) == [trajectory.id]
+    assert sorted(loaded_learning.attributions) == [trajectory.id]
+    assert sorted(loaded_learning.lessons) == [lesson.id]
+    assert sorted(loaded_learning.procedures) == [procedure.id]
+    assert loaded_learning.procedures[procedure.id].signature == {"failure_signature": lesson.failure_signature}
+    assert loaded_queue.to_dict() == queue.to_dict()
+    assert loaded_queue.jobs[job.id].payload == {"tenant_id": tenant, "lesson_id": lesson.id}
+    assert metric_snapshot["counters"]["runtime.local_state"] == 3
+    assert metric_snapshot["gauges"]["runtime.local_state.queue_depth"] == 1
+    assert metric_snapshot["gauges"]["runtime.local_state.latency_ms.p95"] == 9.0
+    assert metric_snapshot["samples"]["runtime.local_state.latency_ms"] == [9.0]
+    assert [case.to_dict() for case in loaded_cases] == [case.to_dict() for case in gate_cases]
+
+
 def test_runtime_state_round_trips_local_and_postgres_parity(tmp_path) -> None:
     dsn = os.environ.get("MNEMOSYNE_POSTGRES_DSN")
     if not dsn:
