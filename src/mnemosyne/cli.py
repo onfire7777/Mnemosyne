@@ -9199,6 +9199,12 @@ def _release_worker_run_evidence_findings(stdout_json: Mapping[str, Any]) -> lis
         except (TypeError, ValueError):
             return None
 
+    def as_float(value: Any) -> float | None:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
     worker = stdout_json.get("worker")
     summary = stdout_json.get("summary")
     queue = stdout_json.get("queue")
@@ -9241,6 +9247,37 @@ def _release_worker_run_evidence_findings(stdout_json: Mapping[str, Any]) -> lis
             _release_finding(
                 "required_worker_runtime_evidence_incomplete",
                 "worker-run summary must prove at least one processed job",
+            )
+        )
+    worker_max_cycles = as_int(worker.get("max_cycles")) if isinstance(worker, Mapping) else None
+    worker_idle_exit_after = as_int(worker.get("idle_exit_after")) if isinstance(worker, Mapping) else None
+    worker_poll_interval = as_float(worker.get("poll_interval")) if isinstance(worker, Mapping) else None
+    if worker_max_cycles is None or worker_max_cycles < 2:
+        findings.append(
+            _release_finding(
+                "required_worker_runtime_evidence_incomplete",
+                "worker-run cadence must prove supervised multi-cycle operation",
+            )
+        )
+    if worker_idle_exit_after is None or worker_idle_exit_after < 1:
+        findings.append(
+            _release_finding(
+                "required_worker_runtime_evidence_incomplete",
+                "worker-run cadence must include an idle-exit threshold",
+            )
+        )
+    if worker_poll_interval is None or worker_poll_interval <= 0:
+        findings.append(
+            _release_finding(
+                "required_worker_runtime_evidence_incomplete",
+                "worker-run cadence must include a nonzero poll interval",
+            )
+        )
+    if not isinstance(worker, Mapping) or worker.get("fail_on_dead") is not True:
+        findings.append(
+            _release_finding(
+                "required_worker_runtime_evidence_incomplete",
+                "worker-run cadence must fail closed on dead jobs",
             )
         )
     if not isinstance(cycles, list) or not any(

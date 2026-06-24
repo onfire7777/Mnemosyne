@@ -5316,12 +5316,17 @@ def production_release_stdout(command: str, provider_stdout: dict) -> dict:
                 "tenant": "tenant-a",
                 "kind": "any",
                 "limit": 1,
-                "max_cycles": 1,
+                "max_cycles": 3,
+                "idle_exit_after": 2,
+                "poll_interval": 0.25,
                 "fail_on_dead": True,
             },
-            "summary": {"cycles": 1, "processed": 1, "idle_cycles": 0, "stopped_reason": "max_cycles"},
+            "summary": {"cycles": 2, "processed": 1, "idle_cycles": 1, "stopped_reason": "idle_exit"},
             "queue": queue,
-            "cycles": [{"cycle": 1, "processed": 1, "idle": False, "queue": queue, "jobs": [job]}],
+            "cycles": [
+                {"cycle": 1, "processed": 1, "idle": False, "queue": queue, "jobs": [job]},
+                {"cycle": 2, "processed": 0, "idle": True, "queue": queue, "jobs": []},
+            ],
             "jobs": [job],
             "metrics": {"worker": {"processed_jobs": 1}},
         }
@@ -5513,6 +5518,39 @@ def test_cli_release_audit_rejects_empty_worker_runtime_evidence(tmp_path: Path)
     assert "worker-run evidence has empty runtime sections" in output_findings[0]["message"]
     assert "cycles" in output_findings[0]["message"]
     assert "jobs" in output_findings[0]["message"]
+
+
+def test_cli_release_audit_rejects_placeholder_worker_cadence(tmp_path: Path) -> None:
+    report_path, _manifest_path = write_release_report(tmp_path)
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    worker_check = next(check for check in report["checks"] if check["command"] == "worker-run")
+    worker_check["stdout_json"]["worker"]["max_cycles"] = 1
+    worker_check["stdout_json"]["worker"]["idle_exit_after"] = 0
+    worker_check["stdout_json"]["worker"]["poll_interval"] = 0
+    worker_check["stdout_json"]["worker"]["fail_on_dead"] = False
+    report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+
+    result = run_raw_cli(
+        tmp_path / "mnemosyne.json",
+        "release-audit",
+        "--soak-report",
+        str(report_path),
+        "--require-production-validated",
+    )
+    payload = json.loads(result.stdout)
+    output_findings = [
+        finding
+        for finding in payload["findings"]
+        if finding["code"] == "required_worker_runtime_evidence_incomplete"
+    ]
+    messages = "\n".join(finding["message"] for finding in output_findings)
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert "worker-run cadence must prove supervised multi-cycle operation" in messages
+    assert "worker-run cadence must include an idle-exit threshold" in messages
+    assert "worker-run cadence must include a nonzero poll interval" in messages
+    assert "worker-run cadence must fail closed on dead jobs" in messages
 
 
 def test_cli_release_audit_rejects_malformed_worker_runtime_counts(tmp_path: Path) -> None:
