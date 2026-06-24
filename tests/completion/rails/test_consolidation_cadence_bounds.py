@@ -4,26 +4,24 @@ Rail: consolidation passes must run no more often than every 5 steps (lower
 bound) and at least every 24h (upper bound). This bounds both runaway
 self-editing (too frequent) and staleness (too infrequent).
 
-Enforcement point that DOES exist (partial / proxy):
+Enforcement point that DOES exist (proxy):
 - ``validate_policy_ops_bundle`` (self_optimization.py:443-462) enforces a
   cadence *window* in HOURS (>= ``min_cadence_window_hours``, default 1.0) and a
   ``max_updates_per_day`` ceiling. This bounds the *policy-ops* cadence, and is
   the closest existing analogue to the rail.
 
-Gaps vs the literal §31 bound:
-- The check is parameterised in hours with a default lower bound of 1.0h, not the
-  blueprint's "5 steps" step-count lower bound nor the explicit 24h upper bound.
-- It guards the policy-optimization bundle, NOT the consolidation worker. Nothing
-  in ``ConsolidationWorker.run_queue_payload`` (consolidation.py:135) records a
-  step counter / last-run timestamp or refuses a pass that fires before 5 steps
-  have elapsed or forces one after 24h. ``run_queue_payload`` will happily run an
-  arbitrary number of back-to-back passes.
+Live consolidation enforcement:
+- ``ConsolidationWorker.run_queue_payload`` records a per-tenant pass step and
+  timestamp, refuses reruns before five steps have elapsed, and lets stale tenants
+  run once the 24h upper bound is crossed.
 
-So: the policy-ops cadence guard is tested green (it is real), and the missing
-structural [5_steps, 24h] bound on the consolidation worker is xfail(strict).
+So: the policy-ops cadence guard remains tested as a proxy, and the structural
+[5_steps, 24h] bound on the consolidation worker is tested directly.
 """
 
 from __future__ import annotations
+
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -81,32 +79,22 @@ def test_policy_ops_accepts_cadence_within_bounds():
     assert "cadence_updates_too_frequent" not in codes
 
 
-# --- Surface B: MISSING structural [5_steps, 24h] bound on the worker (gap) ----
+# --- Surface B: structural [5_steps, 24h] bound on the worker ------------------
 
-def _run_one_pass(worker: ConsolidationWorker, cid: str):
-    return worker.run_queue_payload(
-        {
-            "tenant_id": TENANT,
-            "branch": "main",
-            "source_evidence_cids": [cid],
-            "passes": ["summarizer"],
-        }
-    )
+def _run_one_pass(worker: ConsolidationWorker, cid: str, *, step: int | None = None, now: datetime | None = None):
+    payload = {
+        "tenant_id": TENANT,
+        "branch": "main",
+        "source_evidence_cids": [cid],
+        "passes": ["summarizer"],
+    }
+    if step is not None:
+        payload["consolidation_step"] = step
+    if now is not None:
+        payload["now"] = now.isoformat()
+    return worker.run_queue_payload(payload)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "RAIL 7 NOT STRUCTURALLY ENFORCED ON THE WORKER. Missing enforcement point: "
-        "ConsolidationWorker.run_queue_payload (consolidation.py:135) keeps no step "
-        "counter or last-run timestamp and never refuses a pass that fires before the "
-        "5-step lower bound. The only cadence guard is validate_policy_ops_bundle "
-        "(self_optimization.py:443) which bounds the policy-ops bundle in HOURS "
-        "(default >=1.0h), not the literal §31 [5_steps, 24h] window, and does not "
-        "gate the consolidation worker. Codex must give the worker a per-tenant "
-        "cadence governor that refuses sub-5-step re-runs (and flags >24h staleness)."
-    ),
-)
 def test_back_to_back_consolidation_passes_are_rate_limited_to_five_steps():
     engine = fresh_engine()
     cid = engine.append_evidence(
@@ -123,7 +111,7 @@ def test_back_to_back_consolidation_passes_are_rate_limited_to_five_steps():
     worker = ConsolidationWorker(engine, gate_cases=[])
 
     # First pass is allowed.
-    _run_one_pass(worker, cid)
+    _run_one_pass(worker, cid, step=0)
 
     # Immediately firing a second pass (0 steps elapsed) breaches the 5-step
     # lower bound and must be refused by a cadence governor.
@@ -133,3 +121,25 @@ def test_back_to_back_consolidation_passes_are_rate_limited_to_five_steps():
     except (ValueError, PermissionError, RuntimeError):
         refused = True
     assert refused, "a consolidation pass fired before the 5-step lower bound must be refused"
+
+
+def test_stale_consolidation_pass_is_allowed_after_twenty_four_hours():
+    engine = fresh_engine()
+    cid = engine.append_evidence(
+        Evidence(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="episode",
+            content="A stale workflow should consolidate even when the step count is low.",
+            trust_tier=0,
+            access_policy={"tenant": TENANT},
+        )
+    )
+    worker = ConsolidationWorker(engine, gate_cases=[])
+    first = datetime(2026, 6, 23, 12, 0, tzinfo=UTC)
+
+    _run_one_pass(worker, cid, step=0, now=first)
+    stale = _run_one_pass(worker, cid, step=1, now=first + timedelta(hours=25))
+
+    assert next(item for item in stale.pass_results if item["name"] == "summarizer")["status"] == "complete"

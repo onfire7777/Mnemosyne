@@ -218,7 +218,8 @@ class ConsolidationWorker:
         user_model: UserModel | None = None,
         min_corroboration: int = 1,
         consolidation_min_interval_seconds: float = 0.0,
-        consolidation_min_steps: int = 0,
+        consolidation_min_steps: int = 5,
+        consolidation_max_interval_seconds: float = 24 * 60 * 60,
         max_supersession_rate: float | None = None,
         max_prune_fraction_per_pass: float = 0.02,
         clock: "Callable[[], datetime] | None" = None,
@@ -241,15 +242,15 @@ class ConsolidationWorker:
         self.consolidation_min_interval_seconds = max(0.0, float(consolidation_min_interval_seconds))
         self._clock: "Callable[[], datetime]" = clock or utc_now
         self._last_consolidation_at: dict[tuple[str, str], datetime] = {}
-        # §21 RAIL-7: lower-bound step cadence on full consolidation passes. A
-        # positive value makes run_queue_payload refuse a pass for a tenant until
-        # this many pass-steps have elapsed since the last allowed pass (the
-        # blueprint's <=5-steps lower bound). 0 disables it (behaviour-preserving
-        # default) — kept opt-in because the shared summary-rotation contract runs
-        # back-to-back passes; see escalation to the Coordinator on default-on.
+        # §31 RAIL-7: consolidation cadence is bounded to [5 steps, 24h]. The
+        # lower bound refuses runaway back-to-back self-editing. The upper bound
+        # lets stale tenants run even when fewer than five explicit pass steps
+        # elapsed, because the blueprint also requires at least one pass per 24h.
         self.consolidation_min_steps = max(0, int(consolidation_min_steps))
+        self.consolidation_max_interval_seconds = max(0.0, float(consolidation_max_interval_seconds))
         self._tenant_pass_calls: dict[str, int] = {}
         self._tenant_last_pass_call: dict[str, int] = {}
+        self._tenant_last_pass_at: dict[str, datetime] = {}
         # §23.3: minimum number of distinct corroborating evidence sources a fact
         # candidate must carry before it is allowed through the promotion gate.
         # Defaults to 1 (no extra corroboration required), so existing single-
@@ -280,20 +281,27 @@ class ConsolidationWorker:
         if not source_evidence_cids:
             raise ValueError("consolidation payload requires source_evidence_cids")
 
-        # §21 RAIL-7: bound the per-tenant consolidation-pass cadence. When enabled
-        # (consolidation_min_steps > 0), a pass is refused until at least that many
-        # pass-steps have elapsed for the tenant since the last allowed pass,
-        # preventing runaway back-to-back self-editing.
+        # §31 RAIL-7: bound the per-tenant consolidation-pass cadence. A caller
+        # may supply an explicit absolute step via `consolidation_step`; otherwise
+        # worker invocations count as one observed step.
         if self.consolidation_min_steps > 0:
-            call_index = self._tenant_pass_calls.get(tenant_id, 0) + 1
-            self._tenant_pass_calls[tenant_id] = call_index
-            last_pass = self._tenant_last_pass_call.get(tenant_id)
-            if last_pass is not None and (call_index - last_pass) < self.consolidation_min_steps:
+            current_step = self._cadence_step(tenant_id, payload)
+            last_step = self._tenant_last_pass_call.get(tenant_id)
+            now = self._parse_datetime(payload.get("now")) or self._clock()
+            last_at = self._tenant_last_pass_at.get(tenant_id)
+            elapsed_steps = current_step - last_step if last_step is not None else None
+            stale = (
+                last_at is not None
+                and self.consolidation_max_interval_seconds > 0.0
+                and (now - last_at).total_seconds() >= self.consolidation_max_interval_seconds
+            )
+            if elapsed_steps is not None and elapsed_steps < self.consolidation_min_steps and not stale:
                 raise RuntimeError(
-                    f"consolidation pass refused: {call_index - last_pass} step(s) since last pass "
-                    f"< {self.consolidation_min_steps}-step §21 cadence lower bound"
+                    f"consolidation pass refused: {elapsed_steps} step(s) since last pass "
+                    f"< {self.consolidation_min_steps}-step §31 cadence lower bound"
                 )
-            self._tenant_last_pass_call[tenant_id] = call_index
+            self._tenant_last_pass_call[tenant_id] = current_step
+            self._tenant_last_pass_at[tenant_id] = now
 
         evidence, missing = self._load_evidence(tenant_id, source_evidence_cids, branch)
         mutation_budget = self._new_mutation_rail_budget(tenant_id, branch)
@@ -457,6 +465,21 @@ class ConsolidationWorker:
             else:
                 evidence.append(item)
         return evidence, missing
+
+    def _cadence_step(self, tenant_id: str, payload: dict[str, Any]) -> int:
+        raw_step = payload.get("consolidation_step", payload.get("step"))
+        if raw_step is not None:
+            try:
+                step = int(raw_step)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("consolidation_step must be an integer") from exc
+            if step < 0:
+                raise ValueError("consolidation_step must be non-negative")
+            self._tenant_pass_calls[tenant_id] = max(self._tenant_pass_calls.get(tenant_id, 0), step)
+            return step
+        step = self._tenant_pass_calls.get(tenant_id, 0) + 1
+        self._tenant_pass_calls[tenant_id] = step
+        return step
 
     def _new_mutation_rail_budget(self, tenant_id: str, branch: str) -> MutationRailBudget:
         snapshot = self._export_snapshot(tenant_id)

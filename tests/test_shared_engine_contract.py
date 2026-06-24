@@ -824,6 +824,7 @@ def test_shared_engine_contract_summary_refresh_retires_superseded_gist(
             "branch": "main",
             "source_evidence_cids": [source_cid],
             "passes": ["summarizer"],
+            "consolidation_step": 0,
         }
     )
     first_summary = next(item for item in first.pass_results if item["name"] == "summarizer")["details"]
@@ -834,6 +835,7 @@ def test_shared_engine_contract_summary_refresh_retires_superseded_gist(
             "branch": "main",
             "source_evidence_cids": [source_cid],
             "passes": ["summarizer"],
+            "consolidation_step": 5,
         }
     )
     second_summary = next(item for item in second.pass_results if item["name"] == "summarizer")["details"]
