@@ -205,7 +205,7 @@ RELEASE_AUDIT_REQUIRED_OUTPUT_KEYS: dict[str, tuple[str, ...]] = {
     "worker-run": ("worker", "summary", "queue", "cycles", "jobs", "metrics"),
     "ops-dashboard-check": ("mode", "source", "checks", "findings"),
     "parametric-trainer-check": ("bundle", "requirements", "checks", "findings"),
-    "worker-ops-check": ("bundle", "requirements", "checks", "findings"),
+    "worker-ops-check": ("bundle", "requirements", "checks", "findings", "redaction"),
 }
 
 
@@ -9304,6 +9304,174 @@ def _release_worker_run_evidence_findings(stdout_json: Mapping[str, Any]) -> lis
     return findings
 
 
+def _release_worker_ops_evidence_findings(stdout_json: Mapping[str, Any]) -> list[dict[str, Any]]:
+    findings: list[dict[str, Any]] = []
+
+    def add(message: str) -> None:
+        findings.append(_release_finding("required_worker_ops_evidence_incomplete", message))
+
+    def as_int(value: Any) -> int | None:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    def as_float(value: Any) -> float | None:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    bundle = stdout_json.get("bundle")
+    requirements = stdout_json.get("requirements")
+    checks_raw = stdout_json.get("checks")
+    emitted_findings = stdout_json.get("findings")
+    redaction = stdout_json.get("redaction")
+    missing_sections = [
+        name
+        for name, value in (
+            ("bundle", bundle),
+            ("requirements", requirements),
+            ("checks", checks_raw),
+            ("findings", emitted_findings),
+            ("redaction", redaction),
+        )
+        if value is None
+        or (isinstance(value, Mapping) and not value)
+        or (name == "checks" and isinstance(value, list) and not value)
+        or (name == "findings" and not isinstance(value, list))
+    ]
+    if missing_sections:
+        add("worker-ops-check evidence has empty or malformed sections: " + ", ".join(missing_sections))
+
+    if stdout_json.get("ok") is not True:
+        add("worker-ops-check report must be ok")
+    if isinstance(emitted_findings, list) and emitted_findings:
+        add("worker-ops-check report must not contain findings")
+    if not isinstance(checks_raw, list):
+        return findings
+
+    checks = [item for item in checks_raw if isinstance(item, Mapping)]
+    checks_by_name = {str(check.get("name") or ""): check for check in checks}
+    required_check_names = (
+        "deployment_scope",
+        "supervisor",
+        "heartbeat",
+        "queue",
+        "jobs",
+        "observability",
+        "redaction",
+    )
+    missing_check_names = [name for name in required_check_names if name not in checks_by_name]
+    if missing_check_names:
+        add("worker-ops-check evidence is missing checks: " + ", ".join(missing_check_names))
+
+    for name in required_check_names:
+        check = checks_by_name.get(name)
+        if isinstance(check, Mapping) and check.get("ok") is not True:
+            add(f"worker-ops-check {name} check must be ok")
+
+    deployment = checks_by_name.get("deployment_scope", {})
+    if isinstance(deployment, Mapping):
+        if deployment.get("environment") != "production":
+            add("worker-ops-check deployment scope must target production")
+        if deployment.get("operator_asserted") is not True:
+            add("worker-ops-check deployment scope must include operator attestation")
+
+    requirements_map = requirements if isinstance(requirements, Mapping) else {}
+    min_processes = as_int(requirements_map.get("min_processes")) or 1
+    max_restart_seconds = as_float(requirements_map.get("max_restart_seconds")) or 120.0
+    max_heartbeat_age_seconds = as_float(requirements_map.get("max_heartbeat_age_seconds")) or 120.0
+    max_backlog = as_int(requirements_map.get("max_backlog")) or 1000
+    max_dead_jobs = as_int(requirements_map.get("max_dead_jobs"))
+    if max_dead_jobs is None:
+        max_dead_jobs = 0
+    max_oldest_pending_age_seconds = as_float(requirements_map.get("max_oldest_pending_age_seconds")) or 300.0
+
+    supervisor = checks_by_name.get("supervisor", {})
+    if isinstance(supervisor, Mapping):
+        supervisor_type = str(supervisor.get("type") or "").strip().lower()
+        process_count = as_int(supervisor.get("process_count"))
+        desired_processes = as_int(supervisor.get("desired_processes"))
+        restart_seconds = as_float(supervisor.get("max_restart_seconds"))
+        if supervisor_type in {"", "none", "manual", "local"}:
+            add("worker-ops-check supervisor must be an external process manager")
+        if process_count is None or process_count < min_processes:
+            add("worker-ops-check supervisor process count is below threshold")
+        if desired_processes is None or desired_processes < min_processes:
+            add("worker-ops-check supervisor desired process count is below threshold")
+        if restart_seconds is None or restart_seconds > max_restart_seconds:
+            add("worker-ops-check restart window exceeds threshold")
+
+    heartbeat = checks_by_name.get("heartbeat", {})
+    if isinstance(heartbeat, Mapping):
+        last_seen_age = as_float(heartbeat.get("last_seen_age_seconds"))
+        if last_seen_age is None or last_seen_age > max_heartbeat_age_seconds:
+            add("worker-ops-check heartbeat age exceeds threshold")
+
+    queue = checks_by_name.get("queue", {})
+    if isinstance(queue, Mapping):
+        backlog = as_int(queue.get("backlog"))
+        dead_jobs = as_int(queue.get("dead_jobs"))
+        oldest_pending_age = as_float(queue.get("oldest_pending_age_seconds"))
+        if queue.get("backend") != "postgres":
+            add("worker-ops-check queue backend must be postgres")
+        if queue.get("tenant_scoped") is not True:
+            add("worker-ops-check queue must prove tenant scoping")
+        if backlog is None or backlog > max_backlog:
+            add("worker-ops-check queue backlog exceeds threshold")
+        if dead_jobs is None or dead_jobs > max_dead_jobs:
+            add("worker-ops-check queue contains dead jobs")
+        if oldest_pending_age is None or oldest_pending_age > max_oldest_pending_age_seconds:
+            add("worker-ops-check oldest pending job age exceeds threshold")
+
+    jobs = checks_by_name.get("jobs", {})
+    if isinstance(jobs, Mapping):
+        required_job_kinds = requirements_map.get("required_job_kinds")
+        handled_kinds = jobs.get("handled_kinds")
+        missing_kinds = jobs.get("missing_kinds")
+        failed_cycle_count = as_int(jobs.get("failed_cycle_count"))
+        dead_job_count = as_int(jobs.get("dead_job_count"))
+        if isinstance(required_job_kinds, list):
+            if not isinstance(handled_kinds, list) or not set(required_job_kinds).issubset(set(handled_kinds)):
+                add("worker-ops-check handled job kinds are incomplete")
+        if missing_kinds not in ([], ()):
+            add("worker-ops-check has missing job kinds")
+        if failed_cycle_count is None or failed_cycle_count != 0:
+            add("worker-ops-check contains failed worker cycles")
+        if dead_job_count is None or dead_job_count > max_dead_jobs:
+            add("worker-ops-check job evidence contains dead jobs")
+
+    observability = checks_by_name.get("observability", {})
+    if isinstance(observability, Mapping):
+        for flag in ("metrics_exported", "cycle_heartbeats", "alerts_configured", "restart_alerts"):
+            if observability.get(flag) is not True:
+                add(f"worker-ops-check observability flag {flag} is not proven")
+
+    redaction_checks = []
+    check_redaction = checks_by_name.get("redaction")
+    if isinstance(check_redaction, Mapping):
+        redaction_checks.append(check_redaction)
+    if isinstance(redaction, Mapping):
+        redaction_checks.append(redaction)
+        if redaction.get("forbidden_raw_fields_present") is not False:
+            add("worker-ops-check redaction must prove no raw fields are present")
+    for redaction_check in redaction_checks:
+        for flag in (
+            "raw_env_omitted",
+            "raw_connection_strings_omitted",
+            "raw_queue_payloads_omitted",
+            "raw_worker_logs_omitted",
+        ):
+            if redaction_check.get(flag) is not True:
+                add(f"worker-ops-check redaction flag {flag} is not proven")
+        forbidden_paths = redaction_check.get("forbidden_raw_paths")
+        if isinstance(forbidden_paths, list) and forbidden_paths:
+            add("worker-ops-check redaction contains raw field paths")
+
+    return findings
+
+
 def _release_command_output_findings(check: Mapping[str, Any]) -> list[dict[str, Any]]:
     command = check.get("command")
     if not isinstance(command, str) or command not in RELEASE_AUDIT_REQUIRED_OUTPUT_KEYS:
@@ -9343,6 +9511,8 @@ def _release_command_output_findings(check: Mapping[str, Any]) -> list[dict[str,
         )
     if command == "worker-run":
         findings.extend(_release_worker_run_evidence_findings(stdout_json))
+    if command == "worker-ops-check":
+        findings.extend(_release_worker_ops_evidence_findings(stdout_json))
     return findings
 
 
