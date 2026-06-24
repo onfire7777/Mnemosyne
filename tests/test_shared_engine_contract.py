@@ -12,6 +12,7 @@ import pytest
 from mnemosyne.calibration import CalibrationSet, calibration_examples_from_rows, tune_calibration_set
 from mnemosyne.consolidation import CONSOLIDATE_EVIDENCE_JOB, ConsolidationWorker
 from mnemosyne.engine import LocalMemoryEngine
+from mnemosyne.gate import RegressionCase
 from mnemosyne.ingestion import IngestRequest, IngestionPipeline
 from mnemosyne.jobs import (
     CALIBRATE_JOB,
@@ -25,16 +26,28 @@ from mnemosyne.media import MEDIA_EXTRACT_JOB
 from mnemosyne.models import Assertion, Contradiction, Evidence, Hit, Justification, Preference, Relation
 from mnemosyne.mcp_tools import MemoryTools
 from mnemosyne.observability import MetricsRegistry
+from mnemosyne.parametric import ParametricArtifactStore, ParametricTier
 from mnemosyne.postgres_engine import PostgresEngine
 from mnemosyne.privacy import ErasureMode
 from mnemosyne.queue import InProcessQueue
 from mnemosyne.retrieval import gist_support_report
+from mnemosyne.runtime_state import RuntimeState
 from mnemosyne.storage import LocalObjectStore
 from mnemosyne.text import hashing_embedding
 
 
 def _live_dsn() -> str | None:
     return os.environ.get("MNEMOSYNE_POSTGRES_DSN")
+
+
+def _runtime_state_for_engine(engine: Any, tenant_id: str, tmp_path: Path) -> Any:
+    if isinstance(engine, PostgresEngine):
+        from mnemosyne.postgres_runtime_state import PostgresRuntimeState
+
+        dsn = _live_dsn()
+        assert dsn is not None
+        return PostgresRuntimeState(dsn, tenant_id=tenant_id)
+    return RuntimeState.from_store_path(tmp_path / f"{tenant_id}.runtime.json")
 
 
 class _RotatingSummarizer:
@@ -1855,6 +1868,102 @@ def test_shared_engine_contract_memory_tools_profile_graph_learning_facades(
     assert rolled_back["status"] == "rolled_back"
     assert outcome["outcome"] == "failure"
     assert replay["counterfactual_replay_score"] > 0
+
+
+def test_shared_engine_contract_memory_tools_parametric_facades(
+    engine_bundle: tuple[Any, str, str],
+    tmp_path: Path,
+) -> None:
+    engine, tenant, user = engine_bundle
+    runtime_state = _runtime_state_for_engine(engine, tenant, tmp_path)
+    protected_case_id = str(uuid4())
+    runtime_state.save_gate_cases(
+        [
+            RegressionCase(
+                id=protected_case_id,
+                signature="shared parametric rollback",
+                query="shared parametric rollback",
+                expected_substring="rollback",
+                tier="core",
+                protected=True,
+            )
+        ]
+    )
+    tools = MemoryTools(
+        engine,
+        runtime_state=runtime_state,
+        parametric=ParametricTier(ParametricArtifactStore(tmp_path / f"{tenant}.parametric")),
+    )
+    trajectory = tools.trajectory_log(
+        tenant_id=tenant,
+        user_id=user,
+        session_id="shared-parametric-facade-session",
+        task="shared parametric facade drill",
+        steps=[
+            {
+                "tool": "memory.retrieve",
+                "issue": "rollback evidence was missing from the protected suite",
+            }
+        ],
+        outcome="failure",
+        reward=-0.4,
+        memory_version="shared-parametric-v0",
+    )
+    attribution = tools.trajectory_attribute(trajectory["id"])
+    lesson = tools.lesson_induce(trajectory["id"])
+    procedure = tools.procedure_induce(lesson["id"])
+    promoted_lesson = tools.lesson_promote(
+        lesson["id"],
+        cases=[
+            {
+                "id": f"{tenant}-shared-parametric-lesson",
+                "signature": "shared parametric facade drill",
+                "query": "rollback evidence verify with tools",
+                "expected_substring": "verify with tools",
+                "protected": True,
+            }
+        ],
+        role="operator",
+        source_trust_tier=0,
+    )
+    validated_procedure = tools.procedure_validate(
+        procedure["id"],
+        role="operator",
+        source_trust_tier=0,
+    )
+    artifact = tools.parametric_propose(tenant_id=tenant, role="operator", source_trust_tier=0)
+    evaluated = tools.parametric_evaluate(
+        artifact_uri=artifact["artifact_uri"],
+        role="operator",
+        source_trust_tier=0,
+        protected_case_count=3,
+    )
+    rolled_back = tools.parametric_rollback(
+        artifact_uri=artifact["artifact_uri"],
+        reason="shared protected-suite rollback drill",
+        role="operator",
+        source_trust_tier=0,
+        protected_case_count=3,
+    )
+
+    assert attribution["trajectory_id"] == trajectory["id"]
+    assert procedure["signature"]["failure_signature"] == lesson["failure_signature"]
+    assert promoted_lesson["promoted"] is True
+    assert validated_procedure["status"] == "validated"
+    assert lesson["id"] in artifact["source_ids"]
+    assert procedure["id"] in artifact["source_ids"]
+    assert artifact["artifact_uri"].startswith("local-parametric://")
+    assert artifact["security"]["allowed"] is True
+    assert evaluated["promoted"] is True
+    assert evaluated["artifact"]["status"] == "promoted"
+    assert evaluated["protected_suite"]["source"] == "runtime_state"
+    assert evaluated["protected_suite"]["protected_case_ids"] == [protected_case_id]
+    assert evaluated["protected_suite"]["tier_counts"] == {"core": 1}
+    assert rolled_back["status"] == "rolled_back"
+    assert rolled_back["rollback_ref"]
+    assert rolled_back["protected_suite"]["source"] == "runtime_state"
+    assert rolled_back["protected_suite"]["protected_case_ids"] == [protected_case_id]
+    assert rolled_back["security"]["allowed"] is True
 
 
 def test_shared_engine_contract_branch_names_are_tenant_scoped(engine_bundle: tuple[Any, str, str]) -> None:
