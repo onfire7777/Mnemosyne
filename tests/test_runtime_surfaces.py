@@ -575,6 +575,81 @@ def test_memory_tools_direct_confirm_promotes_proposal_branch() -> None:
     assert main_assertion["source_evidence_cids"] == [cid]
 
 
+def test_memory_tools_direct_assert_fact_and_preference_write_paths() -> None:
+    engine = LocalMemoryEngine()
+    tools = MemoryTools(engine)
+    cid = engine.append_evidence(
+        Evidence(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="direct-write-facade",
+            content="Direct write facade coverage preserves source evidence.",
+            trust_tier=1,
+            access_policy={"tenant": TENANT},
+        )
+    )
+
+    asserted = tools.assert_fact(
+        TENANT,
+        "Direct write facade",
+        "covers",
+        "fact wrapper",
+        [cid],
+        user_id=USER,
+        confidence=0.93,
+        trust_tier=1,
+        role="operator",
+        source_trust_tier=0,
+    )
+    preferred = tools.preference(
+        TENANT,
+        USER,
+        "workflow",
+        "Prefer direct facade tests for low-count wrappers.",
+        explicit=True,
+        confidence=0.88,
+        source_evidence_cids=[cid],
+        role="operator",
+        source_trust_tier=0,
+    )
+    with pytest.raises(PermissionError, match="belief writes require normal-or-stronger source trust"):
+        tools.assert_fact(
+            TENANT,
+            "Low trust direct write",
+            "cannot",
+            "write fact",
+            [cid],
+            trust_tier=4,
+            source_trust_tier=4,
+        )
+    with pytest.raises(PermissionError, match="preference writes require user-authored or stronger evidence"):
+        tools.preference(
+            TENANT,
+            USER,
+            "workflow",
+            "Low trust inferred preference cannot write.",
+            explicit=False,
+            source_evidence_cids=[cid],
+        )
+    exported = engine.export_tenant(TENANT)
+    assertion = next(item for item in exported["assertions"] if item["id"] == asserted["id"])
+    preference = next(item for item in exported["preferences"] if item["id"] == preferred["id"])
+
+    assert asserted["branch"] == "main"
+    assert asserted["security"]["allowed"] is True
+    assert assertion["subject"] == "Direct write facade"
+    assert assertion["predicate"] == "covers"
+    assert assertion["object"] == "fact wrapper"
+    assert assertion["source_evidence_cids"] == [cid]
+    assert assertion["trust_tier"] == 1
+    assert preferred["security"]["allowed"] is True
+    assert preference["category"] == "workflow"
+    assert preference["statement"] == "Prefer direct facade tests for low-count wrappers."
+    assert preference["explicit"] is True
+    assert preference["source_evidence_cids"] == [cid]
+
+
 def test_memory_tools_direct_profile_graph_learning_facade_methods() -> None:
     engine = LocalMemoryEngine()
     tools = MemoryTools(engine)
