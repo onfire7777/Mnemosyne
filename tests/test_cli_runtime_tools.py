@@ -5261,13 +5261,106 @@ def production_provider_stdout(*, forbid_local: bool = True, local_retrieval: bo
     }
 
 
+def production_worker_ops_stdout() -> dict:
+    handled_kinds = [
+        "calibrate",
+        "consolidate_evidence",
+        "eval_suite",
+        "lifecycle_sweep",
+        "media_extract",
+        "observability_snapshot",
+        "projection_recompute",
+    ]
+    return {
+        "ok": True,
+        "bundle": {
+            "name": "production-worker-ops",
+            "deployment_present": True,
+            "supervisor_present": True,
+            "heartbeat_present": True,
+            "queue_present": True,
+            "jobs_present": True,
+        },
+        "requirements": {
+            "allow_non_production": False,
+            "max_backlog": 1000,
+            "max_dead_jobs": 0,
+            "max_heartbeat_age_seconds": 120.0,
+            "max_oldest_pending_age_seconds": 300.0,
+            "max_restart_seconds": 120.0,
+            "min_processes": 1,
+            "required_job_kinds": handled_kinds,
+        },
+        "checks": [
+            {
+                "name": "deployment_scope",
+                "ok": True,
+                "environment": "production",
+                "operator_asserted": True,
+            },
+            {
+                "name": "supervisor",
+                "ok": True,
+                "type": "systemd",
+                "process_count": 2,
+                "desired_processes": 2,
+                "max_restart_seconds": 30.0,
+            },
+            {"name": "heartbeat", "ok": True, "last_seen_age_seconds": 15.0},
+            {
+                "name": "queue",
+                "ok": True,
+                "backend": "postgres",
+                "tenant_scoped": True,
+                "backlog": 3,
+                "dead_jobs": 0,
+                "oldest_pending_age_seconds": 20.0,
+            },
+            {
+                "name": "jobs",
+                "ok": True,
+                "handled_kinds": handled_kinds,
+                "missing_kinds": [],
+                "failed_cycle_count": 0,
+                "dead_job_count": 0,
+            },
+            {
+                "name": "observability",
+                "ok": True,
+                "metrics_exported": True,
+                "cycle_heartbeats": True,
+                "alerts_configured": True,
+                "restart_alerts": True,
+            },
+            {
+                "name": "redaction",
+                "ok": True,
+                "raw_env_omitted": True,
+                "raw_connection_strings_omitted": True,
+                "raw_queue_payloads_omitted": True,
+                "raw_worker_logs_omitted": True,
+                "forbidden_raw_paths": [],
+            },
+        ],
+        "findings": [],
+        "redaction": {
+            "raw_env_omitted": True,
+            "raw_connection_strings_omitted": True,
+            "raw_queue_payloads_omitted": True,
+            "raw_worker_logs_omitted": True,
+            "forbidden_raw_fields_present": False,
+        },
+    }
+
+
 def production_release_stdout(command: str, provider_stdout: dict) -> dict:
     if command == "provider-check":
         return provider_stdout
+    if command == "worker-ops-check":
+        return production_worker_ops_stdout()
     if command in {
         "auth-ops-check",
         "mcp-ops-check",
-        "worker-ops-check",
         "tls-lifecycle-ops-check",
         "retrieval-ops-check",
         "consolidation-ops-check",
@@ -5588,6 +5681,43 @@ def test_cli_release_audit_rejects_malformed_worker_runtime_counts(tmp_path: Pat
     assert "summary must prove at least one worker cycle" in messages
     assert "summary must prove at least one processed job" in messages
     assert "cycles must include a processed-job cycle" in messages
+
+
+def test_cli_release_audit_rejects_placeholder_worker_ops_evidence(tmp_path: Path) -> None:
+    report_path, _manifest_path = write_release_report(tmp_path)
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    worker_ops_check = next(check for check in report["checks"] if check["command"] == "worker-ops-check")
+    worker_ops_check["stdout_json"] = {
+        "ok": True,
+        "bundle": {"name": "worker-ops-check"},
+        "requirements": {},
+        "checks": [],
+        "findings": [],
+    }
+    report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+
+    result = run_raw_cli(
+        tmp_path / "mnemosyne.json",
+        "release-audit",
+        "--soak-report",
+        str(report_path),
+        "--require-production-validated",
+    )
+    payload = json.loads(result.stdout)
+    output_findings = [
+        finding
+        for finding in payload["findings"]
+        if finding["code"] == "required_worker_ops_evidence_incomplete"
+    ]
+    messages = "\n".join(finding["message"] for finding in output_findings)
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert "worker-ops-check evidence has empty or malformed sections" in messages
+    assert "requirements" in messages
+    assert "checks" in messages
+    assert "redaction" in messages
+    assert "worker-ops-check evidence is missing checks" in messages
 
 
 def test_cli_release_audit_requires_production_scope_attestation(tmp_path: Path) -> None:
