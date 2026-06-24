@@ -1,6 +1,6 @@
 # Mnemosyne — Privacy, Redaction & Access Control Policy
 
-> **Lane scope.** This document covers **how memory content is classified for confidentiality, when and how it is redacted, and who (which caller, role, tenant, and residency) may read or export it.** It is a policy-and-rules guide: it assigns enforceable meaning to fields the schema already carries (`sensitivity`, `access_policy`, `scope`, `capability_tags`) and defines the read-side disclosure boundary. It is not a security architecture, an erasure runbook, or a retrieval-engine spec.
+> **Lane scope.** This document covers **how memory content is classified for confidentiality, when and how it is redacted, and who (which caller, role, tenant, and residency) may read or export it.** It is a policy-and-rules guide: it assigns enforceable meaning to fields the schema already carries (`sensitivity`, `access_policy`, `scope`, `capability_tags`) and defines the read-side disclosure boundary. It is not a security architecture, an erasure runbook, or a retrieval-engine spec. It also states **honestly — with `file:line` evidence (see §9.1, Enforcement state)** — which rules the code enforces today versus which remain policy targets. (This is the single canonical privacy policy; the earlier root-level `PRIVACY-AND-ACCESS-CONTROL-POLICY.md` was merged into it on 2026-06-24.)
 >
 > **What this lane does _not_ own (read those first):**
 > - **Security & governance / secret handling** (Build Blueprint **§27**, innovation **I11**, `src/mnemosyne/security.py`) — trust tiers, capability-mediated *writes*, the quarantine LLM, data-never-instruction sanitization, signed provenance (C2PA), anti-poisoning. That lane decides whether content may *influence behavior* (integrity, inbound). This lane decides whether content may be *disclosed* (confidentiality, outbound). This doc never redefines a trust tier, a write gate, or a secret-detection rule.
@@ -55,6 +55,8 @@ Classification is assigned at capture/ingest (Blueprint §20: *"Detect PII/sensi
 ### 2.2 Detector uncertainty fails toward privacy
 When the detector is uncertain whether content is personal, it classifies **up**, not down (uncertain ⇒ at least S2). A false S2 is a recoverable annoyance (operator can reclassify down with a recorded reason); a false S0 on real PII is a silent leak that the audit trail cannot catch because nothing flagged it.
 
+**Known detector limitation (stated honestly).** The shipped classifier `classify_privacy` (`privacy.py:16–43`) auto-detects only **email and phone** by regex, and ingest escalation is `sensitivity = max(request.sensitivity, detector)` (`ingestion.py:152`). Every other category in §1 reaches its level **only if the caller passes an explicit `sensitivity=` / `--sensitivity` floor** or an upstream classifier sets it. Until detector coverage expands (§9.2), operators handling regulated data MUST set ingest-time sensitivity floors by source and MUST NOT assume automatic S3/S4 escalation — a disclosure risk, not a cosmetic gap.
+
 ### 2.3 Derived items inherit the max of their sources (the load-bearing rule)
 Consolidation derives assertions, summaries, gists, entities, and lessons from evidence (`source_evidence_cids`, `justification_id`). A derived item's `sensitivity` is **≥ the maximum `sensitivity` of every source it draws on.** Summarizing three S3 health facts into one "profile" assertion does not produce an S0 assertion. This rides the *same* provenance graph that §25 uses for transitive erasure and that `projection-recompute-once` walks — sensitivity propagation and erasure propagation are the same edges, so they cannot disagree. The promotion gate (`gate.py`) must reject any candidate whose declared `sensitivity` is below its provenance-implied floor.
 
@@ -87,11 +89,14 @@ Recognized keys (all optional; absent ⇒ level/role default):
   "purpose":             ["support"],             // purpose binding; caller purpose must intersect
   "redact_fields":       ["ssn", "dob"],          // field-level masking on disclosure (see §5)
   "min_role_for_raw":    "operator",              // who may receive the unredacted form
-  "expires_at":          "2026-12-31T00:00:00Z"   // policy clause auto-tightens to deny after this
+  "expires_at":          "2026-12-31T00:00:00Z",  // policy clause auto-tightens to deny after this
+  "break_glass":         false                    // operator S2+ exceptional access, dual-control + audit (§4)
 }
 ```
 
 Unknown keys are **rejected (fail-closed)**, not ignored — an unrecognized key means the writer expected a guard this version cannot enforce, so the safe response is to refuse the write, not to drop the guard. `require_capabilities` ties into the existing `capability_tags TEXT[]`; `residency` ties into the deployment residency policy (`--allowed-residency`). The envelope is **data, never instruction** — it is evaluated by the access decision in §4, never executed, and an item's own content can never edit its own `access_policy` (that is a §27 data-never-instruction guarantee this lane depends on).
+
+**Reality today.** `access_policy` is populated minimally — effectively `{"tenant": tenant_id}` (`engine.py:780`, `belief.py:167`). The rich shape above is the normative target the writers converge on; §9.1 lists which keys the engine reads today versus which remain targets.
 
 ---
 
@@ -114,9 +119,11 @@ A caller is disclosed an item **only if every condition holds** (all-of; first f
 | `reader` | **S1** | read-only; no write authority at all |
 | `agent` | **S2** | the user-facing agent; S3+ only via explicit `require_capabilities` grant |
 | `consolidator` | **S3** | warm-loop worker; may read S3 to summarize, but every write goes through the promotion gate |
-| `operator` | **S4 (pointer)** | may resolve S4 pointers and unredacted S3; the only role that may *lower* a classification |
+| `operator` | **metadata only** | infra/audit role: never raw S2+ payloads — fingerprints/tags only. Raw S2+ plaintext requires an explicit, recorded **break-glass** grant (see below). The only role that may *lower* a classification (recorded, §2.4). |
 
 S4 raw values are never returned to *any* role through retrieval; only the pointer/reference is disclosable, and only to a role permitted by `min_role_for_raw`. Resolving the pointer to the live secret is an out-of-band operator action outside this lane. Ceilings are **defaults**: a deployment may tighten them (e.g. `agent → S1` in a regulated tenant); no request may widen them.
+
+**Exceptional access (break-glass).** Because the default `operator` ceiling is metadata/fingerprints only, raw S2+ plaintext for an operator is an explicit, bounded exception: it requires `access_policy.break_glass = true` **and** an operator session whose grant is recorded. The read is logged with actor, justification, the rows touched (by fingerprint), and time (dual-control), is surfaced by the relevant ops bundle, and is reviewable. Break-glass **never** crosses the tenant boundary (§4 condition 1) and **never** silently declassifies the row. Absent an explicit break-glass grant, operators get metadata/fingerprints only.
 
 ---
 
@@ -194,6 +201,38 @@ This lane is enforceable because every rule above maps to an existing, testable 
   - `provenance-ops-check` — quarantined items stay hidden from default retrieval (the §27 boundary this lane relies on).
 - **Protected-suite cases this policy adds** (alongside the existing trust/quarantine cases): (a) a `sensitivity`-ceiling regression per role; (b) `access_policy` narrowing cannot widen past role; (c) derived item inherits ≥ max source sensitivity (§2.3); (d) redaction-vs-drop selection; (e) S4 never embedded / never in prompt; (f) branch-merge takes higher sensitivity (§2.7); (g) reclassification-down is operator-only and recorded.
 
+### 9.1 Enforcement state — enforced today vs policy target
+
+This is the honesty section: **policy target ≠ current enforcement.** Conformance (§11) is auditable against these facts.
+
+**Enforced in code today (verified):**
+- Tenant isolation / RLS and signed-session binding — §27; `auth-ops-check`.
+- Sensitivity **ceiling** drop at retrieval — `engine.py:1177`; `postgres_engine.py:691` (evidence), `:740` (assertions).
+- Trust ceiling + quarantine exclusion — `engine.py:1169–1179`.
+- Ingest effective-sensitivity `max` escalation — `ingestion.py:152`.
+- Consolidation `max` sensitivity inheritance — `consolidation.py:727`, `:1447`, `:1505`.
+- Residency enforce + deny-by-default transfer at ingest — `ingestion.py:107,114`.
+- Erasure modes (`tombstone_recompute`, `hard_delete_legal`) — `privacy.py:11–13`; `privacy-ops-check`.
+- Per-request and default sensitivity ceilings — `--max-sensitivity` (`cli.py`), `policy.max_sensitivity`.
+
+**Policy target, NOT yet enforced (tracked in the hardening backlog below):**
+- Role→ceiling binding as an automatic default (today the ceiling is caller-supplied per request).
+- The rich `access_policy` object (today populated minimally as `{"tenant": …}`, `engine.py:780`, `belief.py:167`); `allow_roles` / `redact_fields` / `min_role_for_raw` / `purpose` / `expires_at` / `break_glass` are not yet read by the engine.
+- Assembly-time **field-masking / gist substitution** (today above-ceiling rows are dropped, not masked — "mask" degrades safely to "deny").
+- Prefetch access filtering (`prefetch.py` performs no sensitivity/trust filtering).
+- Most-restrictive `access_policy` merge on derived items (today first-evidence, `consolidation.py:1511`).
+
+### 9.2 Hardening backlog (disclosure-side, ordered by risk)
+
+Each item is a gap between the policy target (§1–§8) and what is enforced today (§9.1):
+
+1. **Wire field-masking at assembly** so "mask" stops degrading to "deny" and `redact_fields` spans are dropped in place.
+2. **Add prefetch access filtering** so warmed caches never hold above-ceiling content.
+3. **Bind role→`max_sensitivity` as the default ceiling** instead of trusting the caller's per-request filter.
+4. **Engine reads the full `access_policy` object** (`allow_roles`, `min_role_for_raw`, `purpose`, `expires_at`, `break_glass`).
+5. **Fix derived `access_policy` to a most-restrictive merge** (replace the first-evidence path at `consolidation.py:1511`).
+6. **Expand the ingest PII detector** beyond email/phone toward the §1 taxonomy (or require source-level `sensitivity` floors and document the residual risk).
+
 ---
 
 ## 10. Worked examples
@@ -214,6 +253,7 @@ A deployment conforms to this policy iff:
 - [ ] Every retrievable item resolves to an explicit `sensitivity`; a backfill pass has classified or quarantined-up all legacy default-`0` rows (§2.5).
 - [ ] The retrieval filter enforces both `max_trust` and `max_sensitivity`, fail-closed, with an unauthenticated caller defaulting to `reader`/S1.
 - [ ] Role→ceiling mapping is configured and `agent` cannot read S3+ without an explicit capability grant.
+- [ ] `operator` default disclosure is metadata/fingerprints only; raw S2+ plaintext requires a recorded **break-glass** grant (§4).
 - [ ] The promotion gate rejects derived items below their provenance-implied sensitivity floor.
 - [ ] `access_policy` parsing rejects unknown keys and can only narrow.
 - [ ] S4 is never embedded, never projected, never placed in the system prompt; S3 embedding is gated.
@@ -241,6 +281,8 @@ A deployment conforms to this policy iff:
 - **Derived ≥ max(sources).** Summarizing sensitive items cannot launder their class.
 - **`access_policy` only narrows;** unknown keys fail the write.
 - **S4 is pointer-only.** Never materialized, embedded, projected, or placed in the system prompt.
+- **`operator` sees metadata/fingerprints only;** raw S2+ needs a recorded break-glass grant (§4).
+- **Enforcement is stated honestly in §9.1** — several `access_policy` keys and assembly-time field-masking are policy targets, not yet wired (§9.2 backlog).
 - **Right-to-be-forgotten ⇒ §25**, not redaction. This lane routes; §25 erases.
 
 ---
