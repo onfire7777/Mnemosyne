@@ -23,7 +23,6 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-import pytest
 
 from mnemosyne.consolidation import ConsolidationWorker
 from mnemosyne.self_optimization import validate_policy_ops_bundle

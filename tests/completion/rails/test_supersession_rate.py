@@ -29,7 +29,6 @@ from .conftest import (
     fresh_engine,
     make_assertion,
     minutes_ago,
-    utcnow,
 )
 
 ACTIVE_COUNT = 40  # 5% of 40 == 2 facts allowed per pass
