@@ -207,6 +207,11 @@ RELEASE_AUDIT_REQUIRED_OUTPUT_KEYS: dict[str, tuple[str, ...]] = {
     "parametric-trainer-check": ("bundle", "requirements", "checks", "findings"),
     "worker-ops-check": ("bundle", "requirements", "checks", "findings", "redaction"),
 }
+RELEASE_AUDIT_BUNDLE_OPS_COMMANDS = frozenset(
+    command
+    for command, keys in RELEASE_AUDIT_REQUIRED_OUTPUT_KEYS.items()
+    if {"bundle", "requirements", "checks", "findings"}.issubset(keys)
+)
 
 
 def default_store() -> Path:
@@ -9304,6 +9309,52 @@ def _release_worker_run_evidence_findings(stdout_json: Mapping[str, Any]) -> lis
     return findings
 
 
+def _release_bundle_ops_evidence_findings(command: str, stdout_json: Mapping[str, Any]) -> list[dict[str, Any]]:
+    findings: list[dict[str, Any]] = []
+
+    def add(message: str) -> None:
+        findings.append(_release_finding("required_bundle_ops_evidence_incomplete", message))
+
+    bundle = stdout_json.get("bundle")
+    requirements = stdout_json.get("requirements")
+    checks_raw = stdout_json.get("checks")
+    emitted_findings = stdout_json.get("findings")
+    malformed_sections = [
+        name
+        for name, value in (
+            ("bundle", bundle),
+            ("requirements", requirements),
+            ("checks", checks_raw),
+            ("findings", emitted_findings),
+        )
+        if value is None
+        or (isinstance(value, Mapping) and not value)
+        or (name == "checks" and isinstance(value, list) and not value)
+        or (name == "findings" and not isinstance(value, list))
+    ]
+    if malformed_sections:
+        add(f"{command} evidence has empty or malformed sections: " + ", ".join(malformed_sections))
+    if stdout_json.get("ok") is not True:
+        add(f"{command} report must be ok")
+    if isinstance(emitted_findings, list) and emitted_findings:
+        add(f"{command} report must not contain findings")
+    if not isinstance(checks_raw, list) or not checks_raw:
+        return findings
+
+    checks = [check for check in checks_raw if isinstance(check, Mapping)]
+    if len(checks) != len(checks_raw):
+        add(f"{command} checks must be structured objects")
+    named_checks = [str(check.get("name") or check.get("check") or "").strip() for check in checks]
+    if not any(named_checks):
+        add(f"{command} checks must include names")
+    for index, check in enumerate(checks, start=1):
+        if check.get("ok") is not True:
+            name = str(check.get("name") or check.get("check") or index)
+            add(f"{command} check {name} must be ok")
+
+    return findings
+
+
 def _release_worker_ops_evidence_findings(stdout_json: Mapping[str, Any]) -> list[dict[str, Any]]:
     findings: list[dict[str, Any]] = []
 
@@ -9509,6 +9560,8 @@ def _release_command_output_findings(check: Mapping[str, Any]) -> list[dict[str,
                 f"required deployment check {command} is missing output sections: {', '.join(missing)}",
             )
         )
+    if not missing and command in RELEASE_AUDIT_BUNDLE_OPS_COMMANDS:
+        findings.extend(_release_bundle_ops_evidence_findings(command, stdout_json))
     if command == "worker-run":
         findings.extend(_release_worker_run_evidence_findings(stdout_json))
     if command == "worker-ops-check":
