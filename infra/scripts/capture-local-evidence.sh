@@ -90,7 +90,7 @@ manifest = {
         "completed_at": started_at,
         "note": (
             "Local real-service evidence only: Keycloak, Vault transit, "
-            "Postgres retrieval, and c2patool are real services/tools on "
+            "retrieval-provider metadata, and c2patool are exercised on "
             "localhost. This is not production operator evidence."
         ),
     },
