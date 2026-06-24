@@ -107,6 +107,7 @@ class PromotionGate:
         tenant_id: str,
         candidate: Candidate,
         apply_candidate: Callable[[LocalMemoryEngine, str], None],
+        pre_merge_check: Callable[[LocalMemoryEngine, str], str | None] | None = None,
     ) -> GateResult:
         branch = candidate.branch
         self._reset_branch(branch, tenant_id)
@@ -135,6 +136,12 @@ class PromotionGate:
             # Counterfactual replay can veto an otherwise-promotable candidate, but
             # never rescues one the regression suite already failed.
             if promoted and not verdict.passed:
+                promoted = False
+        if promoted and pre_merge_check is not None:
+            rail_violation = pre_merge_check(self.engine, branch)
+            if rail_violation:
+                failed.append(rail_violation)
+                protected_regressions.append(rail_violation)
                 promoted = False
         rollback_branch = None
         if promoted:

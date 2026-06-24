@@ -10,15 +10,12 @@ Two enforcement surfaces:
 1. Parametric metrics gate (ENFORCED): ``ParametricInvariantRails`` rejects a
    self-reported ``prune_fraction`` > 0.02. Covered by test_parametric_rail_gate.py.
 
-2. Live consolidation pass (GAP): ``ConsolidationWorker._run_forgetter``
-   (src/mnemosyne/consolidation.py:871) iterates the whole evidence working set
-   and demotes EVERY item whose decayed salience falls below the utility
-   threshold, with NO ceiling on the demoted fraction. A pass over 50 stale items
-   demotes all 50 (fraction 1.0).
+2. Live consolidation pass (ENFORCED): ``ConsolidationWorker._run_forgetter``
+   counts lifecycle demotions against a per-pass mutation rail budget and
+   defers additional low-utility items once the 2% budget is exhausted.
 
 This file drives surface (2) end-to-end through ``run_queue_payload`` and asserts
-the demoted fraction is clamped to <= 0.02. That fails today, so the breach test
-is xfail(strict) until Codex caps per-pass demotions in the forgetter.
+the demoted fraction is clamped to <= 0.02.
 """
 
 from __future__ import annotations
@@ -85,18 +82,6 @@ def _run_forgetter_pass(engine, cids: list[str]) -> dict:
     raise AssertionError("forgetter pass did not run")
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "RAIL 3 NOT ENFORCED ON LIVE PASS. Missing enforcement point: "
-        "ConsolidationWorker._run_forgetter (consolidation.py:871) demotes every "
-        "low-utility item in the working set with no per-pass fraction cap (50/50 "
-        "demoted == fraction 1.0). max_prune_fraction_per_pass=0.02 is only checked "
-        "on self-reported metrics in ParametricInvariantRails._check_rate "
-        "(parametric.py:130). Codex must clamp the forgetter so demotions/prunes "
-        "<= 2% of the pass working set, deferring the remainder."
-    ),
-)
 def test_forgetter_pass_is_clamped_to_two_percent():
     engine = fresh_engine()
     cids = _seed_stale_working_set(engine)
@@ -111,11 +96,12 @@ def test_forgetter_pass_is_clamped_to_two_percent():
         f"forgetter demoted {demoted}/{evaluated} in one pass; "
         f"max_prune_fraction_per_pass=0.02 allows at most {allowed}"
     )
+    assert details["rail_budget"]["prunes_used"] == demoted
+    assert details["rail_budget"]["violations"]
 
 
 def test_prune_fraction_metric_gate_is_the_only_current_enforcement():
-    """Documents the enforcement that DOES exist (parametric metrics gate) and
-    pins the 0.02 bound; kept green while the live-pass gap above stays xfail."""
+    """Pins the parametric metrics gate in addition to live-pass enforcement."""
 
     from mnemosyne.parametric import ParametricArtifact, ParametricInvariantRails
 
