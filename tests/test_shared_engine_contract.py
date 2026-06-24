@@ -12,6 +12,7 @@ import pytest
 from mnemosyne.calibration import CalibrationSet, calibration_examples_from_rows, tune_calibration_set
 from mnemosyne.consolidation import CONSOLIDATE_EVIDENCE_JOB, ConsolidationWorker
 from mnemosyne.engine import LocalMemoryEngine
+from mnemosyne.ingestion import IngestRequest, IngestionPipeline
 from mnemosyne.jobs import (
     CALIBRATE_JOB,
     EVAL_SUITE_JOB,
@@ -27,6 +28,7 @@ from mnemosyne.postgres_engine import PostgresEngine
 from mnemosyne.privacy import ErasureMode
 from mnemosyne.queue import InProcessQueue
 from mnemosyne.retrieval import gist_support_report
+from mnemosyne.storage import LocalObjectStore
 from mnemosyne.text import hashing_embedding
 
 
@@ -52,6 +54,32 @@ class _RotatingSummarizer:
             "summary": summary,
             "source_cids": [item.cid for item in evidence if item.cid],
         }
+
+
+class _StaticMediaEmbeddingProvider:
+    name = "static-media-embedding"
+
+    def __init__(self, dims: int):
+        self.dims = dims
+        self.calls: list[dict[str, object]] = []
+
+    def embed_media(
+        self,
+        payload: bytes,
+        *,
+        media_type: str,
+        modality: str,
+        metadata: dict[str, object] | None = None,
+    ) -> list[float]:
+        self.calls.append(
+            {
+                "payload": payload,
+                "media_type": media_type,
+                "modality": modality,
+                "metadata": dict(metadata or {}),
+            }
+        )
+        return hashing_embedding("shared raw visual beacon", dims=self.dims)
 
 
 @pytest.fixture(params=["local", "postgres"])
@@ -133,6 +161,78 @@ def test_shared_engine_contract_updates_evidence_embedding(engine_bundle: tuple[
     assert audit_rows[0]["trust_tier"] == 1
     assert audit_rows[0]["diff"]["embedding_dims"] == len(vector)
     assert audit_rows[0]["diff"]["source_type"] == "embedding-contract"
+
+
+def test_shared_engine_contract_ingests_raw_media_embedding_before_extraction(
+    engine_bundle: tuple[Any, str, str],
+    tmp_path: Path,
+) -> None:
+    engine, tenant, user = engine_bundle
+    dims = int(getattr(getattr(getattr(engine, "adapters", None), "embedding", None), "dims", 256))
+    provider = _StaticMediaEmbeddingProvider(dims)
+    queue = InProcessQueue()
+    object_store = LocalObjectStore(tmp_path / f"objects-{tenant}")
+    pipeline = IngestionPipeline(
+        engine,
+        object_store,
+        queue=queue,
+        media_embedding_provider=provider,
+    )
+    raw_payload = b"\x89PNG\r\n\x1a\nshared-visual-beacon"
+
+    result = pipeline.ingest(
+        IngestRequest(
+            tenant_id=tenant,
+            user_id=user,
+            actor="user",
+            source_type="shared-raw-media",
+            data=raw_payload,
+            media_type="image/png",
+            modality="image",
+            trust_tier=1,
+            metadata={"ingest_case": "raw-media-before-extraction"},
+        )
+    )
+    evidence = engine.get_evidence(tenant, result.cid)
+    retrieved = engine.retrieve("shared raw visual beacon", tenant)
+    exported = next(item for item in engine.export_tenant(tenant)["evidence"] if item["cid"] == result.cid)
+    expected_embedding = hashing_embedding("shared raw visual beacon", dims=dims)
+
+    assert result.content_pointer is not None
+    assert result.content_pointer.startswith("local-object://sha256/")
+    assert object_store.read_bytes(result.content_pointer) == raw_payload
+    assert [job["kind"] for job in result.queued_jobs] == [MEDIA_EXTRACT_JOB, CONSOLIDATE_EVIDENCE_JOB]
+    media_job = result.queued_jobs[0]["payload"]
+    consolidation_job = result.queued_jobs[1]["payload"]
+    assert media_job["source_evidence_cid"] == result.cid
+    assert media_job["content_pointer"] == result.content_pointer
+    assert media_job["media_type"] == "image/png"
+    assert media_job["modality"] == "image"
+    assert media_job["metadata"]["ingest_case"] == "raw-media-before-extraction"
+    assert consolidation_job["source_evidence_cids"] == [result.cid]
+    assert consolidation_job["trigger"] == "ingest"
+    assert consolidation_job["modality"] == "image"
+    assert evidence is not None
+    assert evidence.content == ""
+    assert evidence.embedding == pytest.approx(expected_embedding)
+    assert evidence.metadata["media_embedding"] == {
+        "provider": "static-media-embedding",
+        "dims": dims,
+        "source": "raw-externalized-media",
+    }
+    assert "raw-media-embedding-indexed" in evidence.capability_tags
+    assert exported["embedding"] == pytest.approx(expected_embedding)
+    assert len(provider.calls) == 1
+    call = provider.calls[0]
+    assert call["payload"] == raw_payload
+    assert call["media_type"] == "image/png"
+    assert call["modality"] == "image"
+    assert call["metadata"]["media_type"] == "image/png"
+    assert call["metadata"]["resource"]["uri"] == result.content_pointer
+    assert any(hit.id == result.cid for hit in retrieved.hits)
+    hit = next(hit for hit in retrieved.hits if hit.id == result.cid)
+    assert hit.metadata["stored_media_embedding"] is True
+    assert hit.metadata["media_embedding"]["provider"] == "static-media-embedding"
 
 
 def test_shared_engine_contract_updates_evidence_metadata(engine_bundle: tuple[Any, str, str]) -> None:
