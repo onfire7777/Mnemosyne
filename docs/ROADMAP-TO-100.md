@@ -12,11 +12,11 @@ The "70%" is a **blended** figure, and the blend hides the real shape of the wor
 
 - **~85% functional / architectural scaffold** — nearly every blueprint capability is built and green-tested on the deterministic local engine.
 - **5 of 6 headline SLOs are now empirically PROVEN** on the real retrieval path (real BGE embeddings + cross-encoder + Postgres, v2 hard corpus, adversarially reproduced): recall 0.977, nDCG 0.983, G2 lift +0.208 @7% tokens, poison-block 1.0, warm+serial P95 149.5 ms. **Only ECE (0.279 vs ≤0.05) is still red.**
-- **But ~55–60% production-grade 1:1 parity.** Every one of the 10 audit gap rows is "Partial" for the *same* reason: the code contracts and local/compose-Postgres validation are done, but **operator-captured evidence from real production deployments does not yet exist**, and **~9 `src` wirings remain disconnected**.
+- **But ~55–60% production-grade 1:1 parity.** Every one of the 10 audit gap rows is "Partial" for the *same* reason: the code contracts and local/compose-Postgres validation are done, but **operator-captured evidence from real production deployments does not yet exist**, and **~8 `src` wirings remain disconnected**.
 
 So the number has not moved because the remaining 30% is **not "write more code in the same style."** It is two distinct kinds of work that coding-as-usual does not produce:
 
-1. **~9 small `src` reconciliation wirings** (the disconnected machinery — Tier A below). These are owned by the autonomous **Codex** session on `main`; several may already be built additively/default-off in the local `reconcile/lane-a-cold` checkout.
+1. **~8 small `src` reconciliation wirings** (the disconnected machinery — Tier A below). These are owned by the autonomous **Codex** session on `main`; several may already be built additively/default-off in the local `reconcile/lane-a-cold` checkout.
 2. **Standing up real infrastructure and capturing evidence** (Tier B below) — real IdP, secret manager, KMS, ParadeDB/AGE, hosted embedding/reranker/trainer endpoints, C2PA trust roots. This is **ops/deployment work**, not feature code. The `*-ops-check` / `provider-check` / `release-audit` gates already exist and *demand* this evidence; nothing can fake it (the gates were deliberately hardened through `7f795df` to reject placeholder and hollow evidence).
 
 **The trap to avoid (already observed):** Codex has been spending recent cycles adding more `test(...)` coverage and more release-audit *gates*. After the placeholder/hollow evidence hardening through `7f795df`, real progress should pivot to Tier A wirings and Tier B evidence unless a concrete audit finding exposes a missing fail-closed gate.
@@ -52,7 +52,7 @@ Every item is **additive, default-off / shadow-first, byte-identical when inacti
 | A2 | **Calibrated confidence / ECE** (FR-6) — **KEYSTONE (the one red SLO)** | `engine.py:1454` returns constant `0.7` and **never abstains** → ECE 0.279 vs §16 ≤0.05. | Varied per-memory-type conformal confidence + working abstention; run `calibration-tune` on the completion-branch calibration set. | **ECE SLO red→green = 6/6 SLOs PASS** | **M** |
 | A3 | **§31 Rail 1** `max_supersession_rate 0.05` | Constant in `parametric.py`; enforced only as soft post-hoc metric, **no live per-pass clamp** in consolidation. | Add live per-pass clamp. | `tests/completion/rails/` rail-1 | **S** |
 | A4 | **§31 Rail 3** `max_prune_fraction_per_pass 0.02` | Same as A3 — metric-only, no clamp. | Add live per-pass clamp. | rails rail-3 | **S** |
-| A5 | **§31 Rail 6** `sanitize_retrieved_text` | Defined + self-tested (`security.py:956`, internal call `:1001`) but **not called from the engine retrieval/assembly path**. | Wire into retrieval path (OQ7). | rails rail-6 | **S** |
+| A5 | **§31 Rail 6** `sanitize_retrieved_text` | **Done 2026-06-24.** Local and Postgres returned retrieval hits now carry `metadata["retrieved_text"]` from `sanitize_retrieved_text`, preserving visible hit text while marking retrieved memory as data-only/no-write-authority. | Complete; keep retrieval metadata envelope on future hit builders. | Shared Local/Postgres sanitizer regression is green. | **Done** |
 | A6 | **§31 Rail 7** `consolidation_cadence_bounds [5 steps, 24h]` | **Absent** (0 hits in `src`). | Add immutable bound + enforce in consolidation/jobs. | rails rail-7 | **S** |
 | A7 | **cf-gate** (FR-17) + `cold_loop_counterfactual_trusted` | `gate.py PromotionGate.evaluate` is pure regression margin; no counterfactual `replay_predicted_lift` term; rail absent. | Add cf-term + new immutable rail (default off; flips on only when `replay-fidelity-check` passes). **Already built additively on `reconcile/lane-a-cold` — merge it.** | replay-fidelity suite | **S–M** |
 | A8 | **Ignition switch** (OQ5) — `RegressionCase.origin`, `PromotionGate.ignition_status()` | `ignition_status` absent (0 hits); `RegressionCase.origin` not present. | Shadow-no-merge until ignition. **Already built additively on `reconcile/lane-a-cold` — merge it.** | ignition/v2-selftest | **S** |
@@ -95,7 +95,7 @@ This is the **bulk of the remaining percentage** and the universal blocker on al
 
 1. **Inspect and selectively port the pre-built additive items** (A7, A8, A9 from `/Users/admin/Projects/Mnemosyne-lane-a` on `reconcile/lane-a-cold`) — keep them default-off and verify conflicts before merging because that checkout is currently dirty.
 2. **Codex lands the two keystones in order: A1 (embedding seam) → A2 (ECE).** This is the chain to the single red SLO → **6/6 SLOs PASS**.
-3. **Codex lands the remaining small rails + bugs:** A3, A4, A5, A6, A10, A13 (a few hours each).
+3. **Codex lands the remaining small rails + bugs:** A3, A4, A6, A10, A13 (a few hours each).
 4. **One real-infra evidence pass (Tier B):** bring up `infra/` (fix the Keycloak 1/3 failure first) plus a Postgres+ParadeDB+AGE+pgvector instance and one real embedding/reranker endpoint; run the `*-ops-check` / `provider-check` / `release-audit` captures. This flips the 10 parity rows Partial→Done.
 5. **Re-run the parity audit and sign off v1.0.** A11/A12/B8 + Tier C are optional polish beyond the v1.0 bar.
 
@@ -105,7 +105,7 @@ This is the **bulk of the remaining percentage** and the universal blocker on al
 
 | Milestone | Blended % | What changed |
 |---|---|---|
-| **Now** (after A14) | **~70–71%** | ~85% scaffold; 5/6 SLOs proven; ~55–60% production parity (no real-infra evidence; ~9 `src` wirings open) |
+| **Now** (after A14 + A5) | **~71%** | ~85% scaffold; 5/6 SLOs proven; ~55–60% production parity (no real-infra evidence; ~8 `src` wirings open) |
 | After **Tier A** (code wirings) | **~82%** | 6/6 SLOs; all 7 §31 rails enforced; all FR `src` gaps closed; local↔prod architecture unified |
 | After **Tier B** (real-infra evidence) | **~97%** | 10 audit rows flip Partial→Done |
 | After **Tier C** + sign-off | **100%** | multimodal/LoRA (optional) + v1.0 attestation |

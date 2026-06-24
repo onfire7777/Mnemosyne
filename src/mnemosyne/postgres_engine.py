@@ -36,7 +36,7 @@ from mnemosyne.retrieval import (
     is_retired_summary_metadata,
     semantic_entropy,
 )
-from mnemosyne.security import TrustTier, trust_weight
+from mnemosyne.security import TrustTier, sanitize_retrieved_text, trust_weight
 from mnemosyne.text import approx_tokens, cosine, hashing_embedding, lexical_score, tokenize
 
 
@@ -788,7 +788,7 @@ class PostgresEngine:
                     )
         if not hits:
             return self._local_rank(query, k, filt, channel="postgres_lexical_fallback")
-        return sorted(hits, key=lambda item: item.score, reverse=True)[:k]
+        return self._mark_retrieved_text_as_data(sorted(hits, key=lambda item: item.score, reverse=True)[:k])
 
     def vector_search(self, query: str, k: int, filt: dict[str, Any]) -> list[Hit]:
         tenant_id = filt["tenant_id"]
@@ -972,7 +972,7 @@ class PostgresEngine:
                             metadata=hit_metadata,
                         )
                     )
-        return sorted(hits, key=lambda item: item.score, reverse=True)[:k]
+        return self._mark_retrieved_text_as_data(sorted(hits, key=lambda item: item.score, reverse=True)[:k])
 
     def graph_ppr(
         self,
@@ -1063,7 +1063,7 @@ class PostgresEngine:
             )
             if len(hits) >= k:
                 break
-        return hits
+        return self._mark_retrieved_text_as_data(hits)
 
     def as_of(self, subject: str, predicate: str, t: datetime, tenant_id: str | None = None, branch: str = "main") -> list[Assertion]:
         moment = t.astimezone(UTC) if t.tzinfo else t.replace(tzinfo=UTC)
@@ -1100,6 +1100,7 @@ class PostgresEngine:
         activated = apply_activation_scores(diversified, self.policy)
         ordered = self._u_curve_order(activated)
         budgeted, used_tokens = self._fit_budget(ordered, self.policy.token_budget)
+        budgeted = self._mark_retrieved_text_as_data(budgeted)
         read_marks = self._record_retrieval_access(budgeted)
         confidence = self._confidence(budgeted)
         calibration = self._calibration_for(tenant_id, "fact")
@@ -2081,7 +2082,7 @@ class PostgresEngine:
                                 },
                             )
                         )
-        return sorted(candidates, key=lambda item: item.score, reverse=True)[:k]
+        return self._mark_retrieved_text_as_data(sorted(candidates, key=lambda item: item.score, reverse=True)[:k])
 
     def _audit(
         self,
@@ -2113,6 +2114,15 @@ class PostgresEngine:
             """,
             (tenant_id, actor, op, target_uuid, trust_tier, normalized_tags, self._jsonb(audit_diff)),
         )
+
+    @staticmethod
+    def _mark_retrieved_text_as_data(hits: list[Hit]) -> list[Hit]:
+        for hit in hits:
+            hit.metadata = {
+                **hit.metadata,
+                "retrieved_text": sanitize_retrieved_text(hit.text, hit.trust_tier),
+            }
+        return hits
 
     def _rrf(self, ranked_lists: list[list[Hit]], k: int) -> list[Hit]:
         by_id: dict[tuple[str, str], Hit] = {}

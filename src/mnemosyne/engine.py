@@ -35,7 +35,7 @@ from mnemosyne.retrieval import (
     is_retired_summary_metadata,
     semantic_entropy,
 )
-from mnemosyne.security import TrustTier, more_trusted, trust_weight
+from mnemosyne.security import TrustTier, more_trusted, sanitize_retrieved_text, trust_weight
 from mnemosyne.text import approx_tokens, cosine, hashing_embedding, lexical_score, tokenize
 
 
@@ -695,7 +695,7 @@ class LocalMemoryEngine:
                 hit.score = score
                 hit.channel = "dense_media" if hit.metadata.get("stored_media_embedding") else "dense_hash"
                 hits.append(hit)
-        return sorted(hits, key=lambda item: item.score, reverse=True)[:k]
+        return self._mark_retrieved_text_as_data(sorted(hits, key=lambda item: item.score, reverse=True)[:k])
 
     def lexical_search(self, query: str, k: int, filt: dict[str, Any]) -> list[Hit]:
         hits: list[Hit] = []
@@ -705,7 +705,7 @@ class LocalMemoryEngine:
                 hit.score = score
                 hit.channel = "lexical"
                 hits.append(hit)
-        return sorted(hits, key=lambda item: item.score, reverse=True)[:k]
+        return self._mark_retrieved_text_as_data(sorted(hits, key=lambda item: item.score, reverse=True)[:k])
 
     def graph_ppr(
         self,
@@ -777,7 +777,7 @@ class LocalMemoryEngine:
                 )
             if len(hits) >= k:
                 break
-        return hits
+        return self._mark_retrieved_text_as_data(hits)
 
     def retrieve(self, query: str, tenant_id: str, branch: str = "main", deep: bool = False, filt: dict[str, Any] | None = None) -> RetrievalResult:
         effective_filter = dict(filt or {})
@@ -791,6 +791,7 @@ class LocalMemoryEngine:
         activated = apply_activation_scores(reranked, self.policy)
         ordered = self._u_curve_order(activated)
         budgeted, used = self._fit_budget(ordered, self.policy.token_budget)
+        budgeted = self._mark_retrieved_text_as_data(budgeted)
         read_marks = self._record_retrieval_access(budgeted)
         confidence = self._confidence(budgeted)
         calibration = self._calibration_for(tenant_id, "fact")
@@ -1375,6 +1376,15 @@ class LocalMemoryEngine:
                     metadata={"category": pref.category, "explicit": pref.explicit},
                 )
             )
+        return hits
+
+    @staticmethod
+    def _mark_retrieved_text_as_data(hits: list[Hit]) -> list[Hit]:
+        for hit in hits:
+            hit.metadata = {
+                **hit.metadata,
+                "retrieved_text": sanitize_retrieved_text(hit.text, hit.trust_tier),
+            }
         return hits
 
     def _embedding_for_hit(self, hit: Hit) -> list[float]:
