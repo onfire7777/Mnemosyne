@@ -650,6 +650,79 @@ def test_memory_tools_direct_assert_fact_and_preference_write_paths() -> None:
     assert preference["source_evidence_cids"] == [cid]
 
 
+def test_memory_tools_direct_correct_and_prefetch_facades() -> None:
+    engine = LocalMemoryEngine()
+    tools = MemoryTools(engine)
+    prefetch_cid = engine.append_evidence(
+        Evidence(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="direct-prefetch",
+            content="Direct prefetch warms correction context before the next task.",
+            trust_tier=1,
+            access_policy={"tenant": TENANT},
+        )
+    )
+
+    corrected = tools.correct(
+        TENANT,
+        USER,
+        "Direct correction",
+        "updates",
+        "corrected wrapper state",
+        "Direct correction evidence from user-authored input.",
+    )
+    with pytest.raises(PermissionError, match="belief corrections require user-authored or stronger evidence"):
+        tools.correct(
+            TENANT,
+            USER,
+            "Low trust direct correction",
+            "cannot",
+            "write correction",
+            "Low-trust correction evidence.",
+            source_trust_tier=3,
+        )
+    prefetch = tools.prefetch(
+        TENANT,
+        [
+            {
+                "query": "prefetch warms correction context",
+                "probability": 0.91,
+                "reason": "next task prediction",
+                "metadata": {"surface": "direct-facade"},
+            },
+            {
+                "query": "unsafe network prefetch",
+                "probability": 0.99,
+                "reason": "requires network",
+                "metadata": {"requires_network": True},
+            },
+            {"query": "weak prefetch", "probability": 0.2, "reason": "weak signal"},
+        ],
+    )
+    exported = engine.export_tenant(TENANT)
+    assertion = next(item for item in exported["assertions"] if item["id"] == corrected["id"])
+    correction_evidence = next(
+        item
+        for item in exported["evidence"]
+        if item["source_type"] == "correction" and item["content"] == "Direct correction evidence from user-authored input."
+    )
+    prefetch_results = prefetch["results"]
+
+    assert corrected["branch"] == "main"
+    assert corrected["security"]["allowed"] is True
+    assert assertion["subject"] == "Direct correction"
+    assert assertion["object"] == "corrected wrapper state"
+    assert assertion["source_evidence_cids"] == [correction_evidence["cid"]]
+    assert [item["executed"] for item in prefetch_results] == [True, False, False]
+    assert prefetch_results[0]["candidate"]["metadata"] == {"surface": "direct-facade"}
+    assert any(hit["id"] == prefetch_cid for hit in prefetch_results[0]["retrieval"]["hits"])
+    assert prefetch_results[1]["reason"] == "prefetch cannot perform network side effects"
+    assert prefetch_results[2]["reason"] == "candidate below predictability threshold"
+    assert tools.prefetcher.get_warmed(TENANT, "prefetch warms correction context") is not None
+
+
 def test_memory_tools_direct_profile_graph_learning_facade_methods() -> None:
     engine = LocalMemoryEngine()
     tools = MemoryTools(engine)
