@@ -101,6 +101,7 @@
 - CLI/MCP runtime environment defaults now have direct coverage for object-store root, object-store encryption, object-key store, command-provider inference, key-command timeout parsing, allowed residency labels, runtime residency, residency transfers, and strict runtime-residency flags.
 - Shared Local/Postgres `MemoryTools` facade parity now covers the profile, graph, trajectory, lesson, procedure, and outcome wrapper group previously exercised only through Local runtime-surface tests.
 - MCP server entrypoint dispatch now has direct runtime coverage for default stdio, official SDK stdio, hosted HTTP, official SDK StreamableHTTP, direct SDK StreamableHTTP app construction, and serving-mode mutual exclusion; SDK StreamableHTTP dispatch no longer collides transport and facade stateless arguments, and self-test SDK readiness records both build success and structured failure with token/DSN credential redaction.
+- Shared Local/Postgres graph PPR parity now directly covers tokenized seed matching, proving a seed token can activate a multi-token relation source on both backends while preserving relation metadata and provenance.
 
 ## Supersession Note
 
