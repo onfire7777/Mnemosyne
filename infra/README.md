@@ -73,9 +73,21 @@ secrets, private keys, and tokens).
 # 3. Validate Mnemosyne against every real service.
 ./infra/validate/validate-all.sh
 
-# 4. Tear down (add --volumes for a full reset).
+# 4. Capture scoped local deployment-soak/release-audit evidence.
+./infra/scripts/capture-local-evidence.sh
+
+# 5. Tear down (add --volumes for a full reset).
 ./infra/scripts/down.sh
 ```
+
+`capture-local-evidence.sh` writes to a timestamped
+`/tmp/mnemosyne-tierb-local-evidence-*` directory, runs
+`deployment-soak --evidence-dir`, and then runs scoped
+`release-audit --allow-provider-local` for Keycloak, Vault/KMS provider, Postgres
+retrieval provider reporting, and C2PA trust verification. It does not claim
+production validation; production parity still requires operator-captured
+`release-audit --require-production-validated` evidence against deployed
+infrastructure.
 
 Ports are offset from defaults to avoid clashes:
 
