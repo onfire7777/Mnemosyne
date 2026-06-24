@@ -9048,6 +9048,83 @@ def _release_command_summary(checks: list[Mapping[str, Any]], required_commands:
     return rows
 
 
+def _release_worker_run_evidence_findings(stdout_json: Mapping[str, Any]) -> list[dict[str, Any]]:
+    findings: list[dict[str, Any]] = []
+
+    def as_int(value: Any) -> int | None:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    worker = stdout_json.get("worker")
+    summary = stdout_json.get("summary")
+    queue = stdout_json.get("queue")
+    cycles = stdout_json.get("cycles")
+    jobs = stdout_json.get("jobs")
+    metrics = stdout_json.get("metrics")
+    missing_sections = [
+        name
+        for name, value in (
+            ("worker", worker),
+            ("summary", summary),
+            ("queue", queue),
+            ("cycles", cycles),
+            ("jobs", jobs),
+            ("metrics", metrics),
+        )
+        if (isinstance(value, Mapping) and not value)
+        or (isinstance(value, list) and not value)
+        or value is None
+    ]
+    if missing_sections:
+        findings.append(
+            _release_finding(
+                "required_worker_runtime_evidence_incomplete",
+                "worker-run evidence has empty runtime sections: " + ", ".join(missing_sections),
+            )
+        )
+        return findings
+    summary_cycles = as_int(summary.get("cycles")) if isinstance(summary, Mapping) else None
+    summary_processed = as_int(summary.get("processed")) if isinstance(summary, Mapping) else None
+    if summary_cycles is None or summary_cycles < 1:
+        findings.append(
+            _release_finding(
+                "required_worker_runtime_evidence_incomplete",
+                "worker-run summary must prove at least one worker cycle",
+            )
+        )
+    if summary_processed is None or summary_processed < 1:
+        findings.append(
+            _release_finding(
+                "required_worker_runtime_evidence_incomplete",
+                "worker-run summary must prove at least one processed job",
+            )
+        )
+    if not isinstance(cycles, list) or not any(
+        isinstance(cycle, Mapping)
+        and (processed := as_int(cycle.get("processed"))) is not None
+        and processed > 0
+        for cycle in cycles
+    ):
+        findings.append(
+            _release_finding(
+                "required_worker_runtime_evidence_incomplete",
+                "worker-run cycles must include a processed-job cycle",
+            )
+        )
+    if not isinstance(jobs, list) or not any(
+        isinstance(job, Mapping) and job.get("kind") and job.get("status") for job in jobs
+    ):
+        findings.append(
+            _release_finding(
+                "required_worker_runtime_evidence_incomplete",
+                "worker-run jobs must include kind and status evidence",
+            )
+        )
+    return findings
+
+
 def _release_command_output_findings(check: Mapping[str, Any]) -> list[dict[str, Any]]:
     command = check.get("command")
     if not isinstance(command, str) or command not in RELEASE_AUDIT_REQUIRED_OUTPUT_KEYS:
@@ -9077,14 +9154,17 @@ def _release_command_output_findings(check: Mapping[str, Any]) -> list[dict[str,
         ]
     required_keys = RELEASE_AUDIT_REQUIRED_OUTPUT_KEYS[command]
     missing = [key for key in required_keys if key not in stdout_json]
-    if not missing:
-        return []
-    return [
-        _release_finding(
-            "required_command_output_incomplete",
-            f"required deployment check {command} is missing output sections: {', '.join(missing)}",
+    findings: list[dict[str, Any]] = []
+    if missing:
+        findings.append(
+            _release_finding(
+                "required_command_output_incomplete",
+                f"required deployment check {command} is missing output sections: {', '.join(missing)}",
+            )
         )
-    ]
+    if command == "worker-run":
+        findings.extend(_release_worker_run_evidence_findings(stdout_json))
+    return findings
 
 
 def _release_provider_check_summary(
