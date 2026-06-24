@@ -1012,11 +1012,26 @@ def test_shared_engine_contract_raptor_projection_recompute_refreshes_leaf_and_r
     assert {changed_raw_cid, changed_leaf_cid, root_cid}.issubset(recompute.details["affected_evidence_cids"])
     assert required_relation_ids.issubset(recompute.details["affected_projections"]["relations"])
     assert recompute.details["queued_consolidation_jobs"] == [jobs[0].id]
+    assert recompute.details["memo_hit"] is False
+    assert len(recompute.details["fingerprint"]) == 64
     assert len(jobs) == 1
     assert jobs[0].kind == CONSOLIDATE_EVIDENCE_JOB
     assert jobs[0].payload["source_evidence_cids"] == [changed_raw_cid]
     assert jobs[0].payload["passes"] == ["summarizer"]
     assert jobs[0].payload["trigger"] == PROJECTION_RECOMPUTE_JOB
+    repeated = handlers.run_projection_recompute(
+        {
+            "tenant_id": tenant,
+            "user_id": user,
+            "branch": "main",
+            "changed_evidence_cids": [changed_raw_cid],
+            "passes": ["summarizer"],
+        }
+    )
+    assert repeated.details["fingerprint"] == recompute.details["fingerprint"]
+    assert repeated.details["memo_hit"] is True
+    assert repeated.details["queued_consolidation_jobs"] == []
+    assert len(queue.jobs) == 1
 
 
 def test_shared_engine_contract_runtime_job_handlers_return_structured_results(

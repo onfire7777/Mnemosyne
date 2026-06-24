@@ -60,7 +60,7 @@ Every item is **additive, default-off / shadow-first, byte-identical when inacti
 | A10 | **Corroborated-erasure derived-evidence cascade** (OQ6/FR-8) | Projections split is done (`engine.py:931-976`), but the derived-evidence cascade (`engine.py:909-914`) still **blanket-zeroes every transitively-derived row**. | Extend the corroboration-aware retain/retract split to the derived-evidence cascade. | erasure xfail | **M** |
 | A11 | **Hosted-MCP transport** (FR-9) | Local JSON-RPC/TLS/self-test done; official StreamableHTTP/SSE not validated. | Implement/validate official transport (evidence in Tier B). | — | **M** |
 | A12 | **Cached PPR column** (FR-11) | Recursive PPR works; no materialized cached-PPR column. | Add cached-PPR column + refresh path. | — | **M** |
-| A13 | **Recompute memo** (FR-12) | `jobs.py run_projection_recompute` is dirty-driven but has no content-fingerprint memo to skip unchanged passes. | Add fingerprint memo. | — | **S** |
+| A13 | **Recompute memo** (FR-12) | **Done 2026-06-24.** `RuntimeJobHandlers.run_projection_recompute()` now computes a stable SHA-256 fingerprint over changed CIDs, affected evidence/projections, surviving source CIDs, pass list, branch, tenant, and enqueue mode; repeated unchanged recomputes skip duplicate consolidation enqueue side effects unless `force_recompute` is set. | Complete; keep fingerprint inputs aligned with future projection dependencies. | Runtime and shared Local/Postgres recompute memo tests are green. | **Done** |
 | A14 | **`--object` argparse bug + `Preference.access_policy`** | **Done 2026-06-24.** Root and subcommand parsers now disable implicit option abbreviation while preserving explicit `branch --from`; `Preference.access_policy` now round-trips through Local/Postgres model, schema, export, and audit diff. | Complete; keep future CLI aliases explicit. | Parser and shared Local/Postgres access-policy tests are green. | **Done** |
 
 > **Note — Rail 2 is DONE.** `min_corroboration_for_delete` is landed (`policy.py:32` default=2; enforced `engine.py:994-1017`). Cross it off any older reconciliation list.
@@ -95,7 +95,7 @@ This is the **bulk of the remaining percentage** and the universal blocker on al
 
 1. **Inspect and selectively port the pre-built additive items** (A7, A8, A9 from `/Users/admin/Projects/Mnemosyne-lane-a` on `reconcile/lane-a-cold`) — keep them default-off and verify conflicts before merging because that checkout is currently dirty.
 2. **Codex lands the two keystones in order: A1 (embedding seam) → A2 (ECE).** This is the chain to the single red SLO → **6/6 SLOs PASS**.
-3. **Codex lands the remaining small rails + bugs:** A10, A13 (A3/A4/A5/A6/A14 are now closed).
+3. **Codex lands the remaining small rails + bugs:** A10 (A3/A4/A5/A6/A13/A14 are now closed).
 4. **One real-infra evidence pass (Tier B):** bring up `infra/` (fix the Keycloak 1/3 failure first) plus a Postgres+ParadeDB+AGE+pgvector instance and one real embedding/reranker endpoint; run the `*-ops-check` / `provider-check` / `release-audit` captures. This flips the 10 parity rows Partial→Done.
 5. **Re-run the parity audit and sign off v1.0.** A11/A12/B8 + Tier C are optional polish beyond the v1.0 bar.
 
@@ -105,7 +105,7 @@ This is the **bulk of the remaining percentage** and the universal blocker on al
 
 | Milestone | Blended % | What changed |
 |---|---|---|
-| **Now** (after A14 + A5 + A3/A4 + A6) | **~74%** | ~85% scaffold; 5/6 SLOs proven; §31 live mutation-rate and cadence rails now enforced; ~55–60% production parity remains blocked by no real-infra evidence and remaining `src` wirings |
+| **Now** (after A14 + A5 + A3/A4 + A6 + A13) | **~75%** | ~85% scaffold; 5/6 SLOs proven; §31 live mutation-rate/cadence rails and FR-12 recompute memo now enforced; ~55–60% production parity remains blocked by no real-infra evidence and remaining `src` wirings |
 | After **Tier A** (code wirings) | **~82%** | 6/6 SLOs; all 7 §31 rails enforced; all FR `src` gaps closed; local↔prod architecture unified |
 | After **Tier B** (real-infra evidence) | **~97%** | 10 audit rows flip Partial→Done |
 | After **Tier C** + sign-off | **100%** | multimodal/LoRA (optional) + v1.0 attestation |

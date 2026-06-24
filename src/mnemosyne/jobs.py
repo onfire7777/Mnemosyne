@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
+from hashlib import sha256
 from typing import Any
 
 from mnemosyne.calibration import CalibrationSet, calibration_examples_from_rows, conformal_threshold, should_abstain, tune_calibration_set
@@ -68,6 +70,7 @@ class RuntimeJobHandlers:
         self.media_extractor = media_extractor or MetadataMediaTextExtractor()
         self.learning = learning
         self.gate_cases = gate_cases or []
+        self._projection_recompute_memo: set[str] = set()
         self.consolidator = ConsolidationWorker(
             engine,
             gate_cases=self.gate_cases,
@@ -100,10 +103,23 @@ class RuntimeJobHandlers:
         snapshot = _tenant_snapshot(self.engine, tenant_id)
         affected_cids = _affected_evidence_cids(snapshot, tenant_id, branch, changed_cids)
         projections = _affected_projections(snapshot, tenant_id, branch, affected_cids)
+        surviving_cids = _surviving_evidence_cids(snapshot, tenant_id, branch, affected_cids)
+        enqueue_consolidation = bool(payload.get("enqueue_consolidation", True))
+        passes = [str(name) for name in payload.get("passes") or DEFAULT_CONSOLIDATION_PASSES]
+        fingerprint = _projection_recompute_fingerprint(
+            tenant_id=tenant_id,
+            branch=branch,
+            changed_cids=changed_cids,
+            affected_cids=affected_cids,
+            projections=projections,
+            surviving_cids=surviving_cids,
+            passes=passes,
+            enqueue_consolidation=enqueue_consolidation,
+        )
+        memo_hit = fingerprint in self._projection_recompute_memo and not bool(payload.get("force_recompute", False))
         queued_jobs = []
-        if bool(payload.get("enqueue_consolidation", True)):
-            passes = [str(name) for name in payload.get("passes") or DEFAULT_CONSOLIDATION_PASSES]
-            for cid in _surviving_evidence_cids(snapshot, tenant_id, branch, affected_cids):
+        if enqueue_consolidation and not memo_hit:
+            for cid in surviving_cids:
                 job = self.queue.enqueue(
                     CONSOLIDATE_EVIDENCE_JOB,
                     {
@@ -116,7 +132,10 @@ class RuntimeJobHandlers:
                     },
                 )
                 queued_jobs.append(job.id)
+        self._projection_recompute_memo.add(fingerprint)
         self.metrics.increment("projection_recompute.completed")
+        if memo_hit:
+            self.metrics.increment("projection_recompute.memo_hit")
         return RuntimeJobResult(
             PROJECTION_RECOMPUTE_JOB,
             "complete",
@@ -127,6 +146,9 @@ class RuntimeJobHandlers:
                 "affected_evidence_cids": affected_cids,
                 "affected_projection_counts": {key: len(value) for key, value in projections.items()},
                 "affected_projections": projections,
+                "surviving_evidence_cids": surviving_cids,
+                "fingerprint": fingerprint,
+                "memo_hit": memo_hit,
                 "queued_consolidation_jobs": queued_jobs,
             },
         )
@@ -427,6 +449,30 @@ def _affected_evidence_cids(
                 ordered.append(target)
                 changed = True
     return ordered
+
+
+def _projection_recompute_fingerprint(
+    *,
+    tenant_id: str,
+    branch: str,
+    changed_cids: list[str],
+    affected_cids: list[str],
+    projections: dict[str, list[str]],
+    surviving_cids: list[str],
+    passes: list[str],
+    enqueue_consolidation: bool,
+) -> str:
+    payload = {
+        "tenant_id": tenant_id,
+        "branch": branch,
+        "changed_evidence_cids": sorted(set(changed_cids)),
+        "affected_evidence_cids": sorted(set(affected_cids)),
+        "affected_projections": {key: sorted(set(value)) for key, value in sorted(projections.items())},
+        "surviving_evidence_cids": sorted(set(surviving_cids)),
+        "passes": list(passes),
+        "enqueue_consolidation": enqueue_consolidation,
+    }
+    return sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
 
 
 def _metadata_source_cids(metadata: dict[str, Any]) -> set[str]:
