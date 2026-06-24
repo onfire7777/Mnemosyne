@@ -5930,6 +5930,7 @@ def consolidation_ops_bundle(
     bad_calibration: bool = False,
     bad_lifecycle: bool = False,
     bad_ops: bool = False,
+    bad_deployment: bool = False,
     raw_secret: bool = False,
 ) -> dict:
     hosted_origin = "http://127.0.0.1:8787" if local_providers else "https://llm.example.com"
@@ -6093,6 +6094,41 @@ def consolidation_ops_bundle(
             },
             "contradiction_backlog": 0 if not bad_ops else 2,
         },
+        "deployment": {
+            "ok": not bad_deployment,
+            "production_validated": not bad_deployment,
+            "execution_fingerprint": "sha256:consolidation-deployment-run" if not bad_deployment else "",
+            "latency_ms": 850 if not bad_deployment else 5000,
+            "alert_route": {
+                "configured": not bad_deployment,
+                "last_delivery_verified": not bad_deployment,
+                "target_hash": "route-sha256:ops-consolidation",
+            },
+            "supervision": {
+                "worker_run": not bad_deployment,
+                "provider_check": not bad_deployment,
+                "hosted_providers": not bad_deployment,
+                "projection_recompute": not bad_deployment,
+                "protected_suite": not bad_deployment,
+                "embedding": not bad_deployment,
+                "consolidation_run": not bad_deployment,
+                "calibration": not bad_deployment,
+                "lifecycle": not bad_deployment,
+                "ops_report": not bad_deployment,
+            },
+            "bindings": {
+                "worker_processed_jobs": 5 if not bad_deployment else 0,
+                "provider_check_count": 4 if not bad_deployment else 0,
+                "projection_changed_evidence_count": 1 if not bad_deployment else 0,
+                "protected_suite_case_count": 4 if not bad_deployment else 0,
+                "embedded_cid_hash_count": 1 if not bad_deployment else 0,
+                "consolidation_source_hash_count": 1 if not bad_deployment else 0,
+                "calibration_example_count": 80 if not bad_deployment else 0,
+                "lifecycle_evaluated": 4 if not bad_deployment else 0,
+                "ops_counter_count": 3 if not bad_deployment else 0,
+                "protected_suite_fingerprint": "gate-sha256:consolidation-suite" if not bad_deployment else "gate-sha256:mismatch",
+            },
+        },
         "redaction": {
             "raw_prompts_omitted": True,
             "raw_llm_requests_omitted": True,
@@ -6156,6 +6192,7 @@ def test_cli_consolidation_ops_check_validates_production_bundle(tmp_path: Path)
         "calibration",
         "lifecycle",
         "ops_report",
+        "deployment",
         "redaction",
     }
     assert all(item["ok"] for item in report["checks"])
@@ -6185,6 +6222,7 @@ def test_cli_consolidation_ops_check_fails_closed_on_bad_bundle(tmp_path: Path) 
                 bad_calibration=True,
                 bad_lifecycle=True,
                 bad_ops=True,
+                bad_deployment=True,
                 raw_secret=True,
             )
         ),
@@ -6211,7 +6249,70 @@ def test_cli_consolidation_ops_check_fails_closed_on_bad_bundle(tmp_path: Path) 
     assert "calibration_not_applied" in codes
     assert "lifecycle_not_complete" in codes
     assert "ops_tripwires_failed" in codes
+    assert "deployment_production_validation_missing" in codes
+    assert "deployment_control_missing" in codes
+    assert "deployment_count_binding_mismatch" in codes
     assert "redaction_raw_field_present" in codes
+
+
+def test_cli_consolidation_ops_check_rejects_invalid_deployment_latency(tmp_path: Path) -> None:
+    invalid_cases = [
+        ("missing", None),
+        ("negative", -1),
+        ("nan", "NaN"),
+    ]
+    for name, latency in invalid_cases:
+        bundle_payload = consolidation_ops_bundle()
+        deployment = bundle_payload["deployment"]
+        if latency is None:
+            deployment.pop("latency_ms", None)
+        else:
+            deployment["latency_ms"] = latency
+        bundle = tmp_path / f"bad-consolidation-deployment-latency-{name}.json"
+        bundle.write_text(json.dumps(bundle_payload), encoding="utf-8")
+
+        result = run_raw_cli(tmp_path / f"mnemosyne-{name}.json", "consolidation-ops-check", "--bundle", str(bundle))
+        payload = json.loads(result.stdout)
+        codes = {finding["code"] for finding in payload["findings"]}
+
+        assert result.returncode == 1
+        assert payload["ok"] is False
+        assert "deployment_latency_invalid" in codes
+
+
+def test_cli_consolidation_ops_check_requires_alert_delivery_verification(tmp_path: Path) -> None:
+    bundle_payload = consolidation_ops_bundle()
+    deployment = bundle_payload["deployment"]
+    deployment.pop("alert_route", None)
+    deployment["alert_route_configured"] = True
+    bundle = tmp_path / "bad-consolidation-alert-route.json"
+    bundle.write_text(json.dumps(bundle_payload), encoding="utf-8")
+
+    result = run_raw_cli(tmp_path / "mnemosyne.json", "consolidation-ops-check", "--bundle", str(bundle))
+    payload = json.loads(result.stdout)
+    codes = {finding["code"] for finding in payload["findings"]}
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert "deployment_alert_route_missing" in codes
+
+
+def test_cli_consolidation_ops_check_rejects_fractional_deployment_bindings(tmp_path: Path) -> None:
+    bundle_payload = consolidation_ops_bundle()
+    bundle_payload["deployment"]["bindings"]["worker_processed_jobs"] = 5.9
+    bundle_payload["deployment"]["bindings"]["provider_check_count"] = "4.0"
+    bundle = tmp_path / "bad-consolidation-fractional-bindings.json"
+    bundle.write_text(json.dumps(bundle_payload), encoding="utf-8")
+
+    result = run_raw_cli(tmp_path / "mnemosyne.json", "consolidation-ops-check", "--bundle", str(bundle))
+    payload = json.loads(result.stdout)
+    codes = {finding["code"] for finding in payload["findings"]}
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert "deployment_worker_processed_jobs_invalid" in codes
+    assert "deployment_provider_check_count_invalid" in codes
+    assert "deployment_count_binding_mismatch" in codes
 
 
 def retrieval_ops_bundle(
