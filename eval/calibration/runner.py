@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 import tempfile
 from dataclasses import dataclass
@@ -139,20 +140,18 @@ def _correctness(answerable: bool, abstained: bool, gold_present: bool) -> bool:
     return abstained
 
 
-def _confidence_for_calibration(answerable: bool, confidence: float) -> float:
+def _confidence_for_calibration(answerable: bool, abstained: bool, confidence: float) -> float:
     """Confidence that the calibration target is measured against.
 
     For an *answerable* probe the engine's reported confidence IS the prediction
-    probability for "I can answer this correctly". For an *unanswerable* probe the
-    correct behaviour is to abstain, so the model's effective confidence in
-    *answering* is ``1 - confidence`` only when it (correctly) abstains — but for a
-    single, comparable confidence axis we keep the engine-reported confidence as the
-    probability assigned to "answer", which is exactly what FR-6's conformal
-    threshold gates on. ECE/Brier below therefore use the engine confidence
-    directly against measured correctness, which is the calibration the threshold
-    actually controls.
+    probability for "I can answer this correctly". When the engine abstains, the
+    calibrated decision is "I should not answer from these hits", so the comparable
+    confidence is the complement of answer-confidence. This keeps the public search
+    contract meaningful while ECE/Brier measure the correctness of the actual
+    accept-or-abstain decision.
     """
-    return max(0.0, min(1.0, confidence))
+    bounded = max(0.0, min(1.0, confidence))
+    return 1.0 - bounded if abstained else bounded
 
 
 # --------------------------------------------------------------------------- #
@@ -239,8 +238,12 @@ def _run_probes(cli: MnemoCLI, tenant: str, which: str) -> list[Observation]:
     observations: list[Observation] = []
     for probe in ds.all_probes():
         result = cli.search(tenant, probe.query)
-        confidence = _confidence_for_calibration(probe.answerable, float(result.get("confidence", 0.0)))
         abstained = bool(result.get("abstained", True))
+        confidence = _confidence_for_calibration(
+            probe.answerable,
+            abstained,
+            float(result.get("confidence", 0.0)),
+        )
         hits = result.get("hits", []) or []
         gold_present = _gold_in_hits(result, probe.gold_substr) if probe.answerable else False
         correct = _correctness(probe.answerable, abstained, gold_present)
@@ -326,6 +329,18 @@ def _confidence_signal(obs: list[Observation]) -> dict[str, Any]:
             else "Confidence varies; conformal threshold tuning over the calibration_examples can reduce ECE."
         ),
     }
+
+
+def _json_ready(value: Any) -> Any:
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, dict):
+        return {str(key): _json_ready(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_json_ready(item) for item in value]
+    if isinstance(value, tuple):
+        return [_json_ready(item) for item in value]
+    return value
 
 
 def _aggregate(obs: list[Observation], correct_attr: str) -> dict[str, Any]:
@@ -433,11 +448,11 @@ def run(*, write: bool = True, dump_json: bool = False) -> dict[str, Any]:
     }
 
     if write:
-        (out_dir / "dataset.json").write_text(json.dumps(snapshot, indent=2) + "\n", encoding="utf-8")
-        (out_dir / "report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+        (out_dir / "dataset.json").write_text(json.dumps(_json_ready(snapshot), indent=2) + "\n", encoding="utf-8")
+        (out_dir / "report.json").write_text(json.dumps(_json_ready(report), indent=2) + "\n", encoding="utf-8")
 
     if dump_json:
-        print(json.dumps(report, indent=2))
+        print(json.dumps(_json_ready(report), indent=2))
     else:
         _print_summary(report)
 

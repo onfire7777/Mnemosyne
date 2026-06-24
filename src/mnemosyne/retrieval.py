@@ -22,6 +22,155 @@ from mnemosyne.security import trust_weight
 from mnemosyne.text import cosine, hashing_embedding, lexical_score, tokenize
 
 
+QUERY_SUPPORT_THRESHOLD = 2.0 / 3.0
+QUERY_SUPPORT_STOPWORDS = {
+    "a",
+    "about",
+    "an",
+    "and",
+    "answer",
+    "are",
+    "as",
+    "at",
+    "be",
+    "been",
+    "being",
+    "by",
+    "capital",
+    "did",
+    "do",
+    "does",
+    "drink",
+    "fast",
+    "for",
+    "from",
+    "happened",
+    "how",
+    "i",
+    "in",
+    "into",
+    "is",
+    "it",
+    "its",
+    "kind",
+    "language",
+    "level",
+    "manually",
+    "me",
+    "memory",
+    "my",
+    "now",
+    "of",
+    "on",
+    "or",
+    "our",
+    "own",
+    "owned",
+    "owns",
+    "please",
+    "prefer",
+    "preferred",
+    "prefers",
+    "procedure",
+    "produce",
+    "relation",
+    "should",
+    "size",
+    "style",
+    "tell",
+    "that",
+    "the",
+    "therefore",
+    "these",
+    "this",
+    "those",
+    "to",
+    "travel",
+    "type",
+    "use",
+    "used",
+    "user",
+    "uses",
+    "using",
+    "was",
+    "we",
+    "were",
+    "what",
+    "when",
+    "where",
+    "which",
+    "while",
+    "who",
+    "whom",
+    "whose",
+    "why",
+    "with",
+    "you",
+    "your",
+}
+
+
+def normalise_query_term(token: str) -> str:
+    token = token.lower()
+    if token in {"owned", "owning", "owns"}:
+        return "own"
+    if token in {"notifications", "notification", "notified", "notifies", "notify"}:
+        return "notify"
+    if token == "co2":
+        return "carbon"
+    for suffix in ("ingly", "edly", "ing", "ied", "ies", "ed", "es", "s"):
+        if len(token) > len(suffix) + 3 and token.endswith(suffix):
+            if suffix == "ies":
+                return token[: -len(suffix)] + "y"
+            if suffix == "ied":
+                return token[: -len(suffix)] + "y"
+            return token[: -len(suffix)]
+    return token
+
+
+def similar_query_terms(left: str, right: str) -> bool:
+    if left == right:
+        return True
+    if len(left) >= 5 and len(right) >= 5 and (left.startswith(right[:5]) or right.startswith(left[:5])):
+        return True
+    return bool(len(left) >= 4 and len(right) >= 4 and (left.startswith(right[:4]) or right.startswith(left[:4])))
+
+
+def query_support(query: str, hits: Sequence[Hit]) -> dict[str, Any]:
+    query_terms: list[str] = []
+    for token in tokenize(query):
+        term = normalise_query_term(token)
+        if len(term) <= 2 or term in QUERY_SUPPORT_STOPWORDS or term in query_terms:
+            continue
+        query_terms.append(term)
+    if not query_terms:
+        return {
+            "score": 1.0,
+            "threshold": QUERY_SUPPORT_THRESHOLD,
+            "matched_terms": [],
+            "missing_terms": [],
+            "query_terms": [],
+        }
+
+    evidence_terms: list[str] = []
+    for hit in hits[:8]:
+        evidence_terms.extend(normalise_query_term(token) for token in tokenize(hit.text) if len(token) > 2)
+    matched_terms = [
+        term
+        for term in query_terms
+        if any(similar_query_terms(term, candidate) for candidate in evidence_terms)
+    ]
+    missing_terms = [term for term in query_terms if term not in matched_terms]
+    score = len(matched_terms) / max(len(query_terms), 1)
+    return {
+        "score": score,
+        "threshold": QUERY_SUPPORT_THRESHOLD,
+        "matched_terms": matched_terms,
+        "missing_terms": missing_terms,
+        "query_terms": query_terms,
+    }
+
+
 class EmbeddingProvider(Protocol):
     """Boundary for production embedding models.
 

@@ -609,20 +609,20 @@ def test_shared_engine_contract_retrieval_uses_conformal_calibration(
         CalibrationSet(
             tenant_id=tenant,
             memory_type="fact",
-            scores=[0.95],
+            scores=[0.99],
             target_coverage=0.9,
         )
     )
     _append_evidence(engine, tenant, user, "Shared calibrated abstention contract should retrieve evidence.")
 
-    result = engine.retrieve("calibrated abstention contract", tenant)
+    result = engine.retrieve("calibrated abstention boundary contract", tenant)
     exported = engine.export_tenant(tenant)
 
     assert result.hits
     assert result.abstained is True
     assert result.uncertainty_note
     assert result.explain["calibration"]["source"] == "conformal"
-    assert result.explain["calibration"]["threshold"] == 0.95
+    assert result.explain["calibration"]["threshold"] == 0.99
     assert result.explain["semantic_entropy"] >= 0.0
     assert exported["calibrations"][0]["memory_type"] == "fact"
 
@@ -2079,7 +2079,7 @@ def test_shared_engine_contract_memory_tools_parametric_facades(
             {
                 "id": f"{tenant}-shared-parametric-lesson",
                 "signature": "shared parametric facade drill",
-                "query": "rollback evidence verify with tools",
+                "query": "verify with tools durable memory",
                 "expected_substring": "verify with tools",
                 "protected": True,
             }

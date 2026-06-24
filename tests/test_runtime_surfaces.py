@@ -3151,7 +3151,7 @@ def test_mcp_server_parametric_tier_can_use_command_provider(tmp_path: Path) -> 
                 {
                     "id": "mcp-parametric-provider-case",
                     "signature": "MCP parametric provider",
-                    "query": "provider regression",
+                    "query": "verify with tools durable memory",
                     "expected_substring": "verify with tools",
                     "protected": True,
                 }

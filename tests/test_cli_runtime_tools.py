@@ -8642,7 +8642,7 @@ def test_cli_parametric_tier_can_use_command_provider(tmp_path: Path) -> None:
                 {
                     "id": "case-parametric-provider",
                     "signature": "parametric provider smoke",
-                    "query": "provider regression",
+                    "query": "verify with tools durable memory",
                     "expected_substring": "verify with tools",
                     "protected": True,
                 }

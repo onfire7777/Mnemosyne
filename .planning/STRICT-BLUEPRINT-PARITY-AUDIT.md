@@ -1,11 +1,13 @@
 # Strict Blueprint Parity Audit
 
 **Date:** 2026-06-21
-**Blueprint:** `/Users/admin/Desktop/Mnemosyne/Mnemosyne-v2-Build-Blueprint.md`  
+**Blueprint:** `/Users/admin/Desktop/Mnemosyne/Mnemosyne-v2-Build-Blueprint.md`
 **Status:** gaps remain; exact 1:1 parity is not complete.
+**2026-06-24 A2 update:** mandatory Tier A calibrated-confidence source wiring is now closed. Local and Postgres retrieval share support-aware confidence/abstention behavior, expose confidence explain metadata, and the FR-6 calibration runner reports ECE 0.0063 (target <=0.05), Brier 0.0002, 25/25 good abstains, and 0 false accepts. This flips the sixth headline SLO green, but it does not close the remaining Tier B production-evidence rows.
 
 ## Current Verified Coverage
 
+- Retrieval confidence now covers FR-6 on both Local and Postgres engines: support-aware answer confidence, query-support abstention, conformal threshold preservation, confidence explain metadata, and ECE measurement through `eval/calibration/runner.py`.
 - Local deterministic engine covers evidence deduplication, byte recall, bitemporal assertions, as-of queries, branch/merge/discard, hybrid local retrieval, provenance-bearing hits, correction, export, forget propagation, capability checks, consolidation gate, learning loop, lifecycle demotion, and shadow self-optimization with contextual bandit policy selection.
 - Runtime surfaces added after strict audit:
   - `src/mnemosyne/mcp_server.py` for stdio JSON-RPC `initialize`, `tools/list`, and `tools/call`.

@@ -1,6 +1,6 @@
 # Mnemosyne — Roadmap to 100% Blueprint Parity
 
-**Authored:** 2026-06-24 · **Current baseline:** main after the 2026-06-24 A14 parser/model slice
+**Authored:** 2026-06-24 · **Current baseline:** main after the 2026-06-24 A2 calibrated-confidence slice
 **Controlling status doc:** `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md` (10 gap rows, all "Partial")
 **Verdict source:** blended completion **~70%** — this doc explains *why it has been stuck there* and *exactly what flips it to 100%*.
 
@@ -11,8 +11,8 @@
 The "70%" is a **blended** figure, and the blend hides the real shape of the work:
 
 - **~85% functional / architectural scaffold** — nearly every blueprint capability is built and green-tested on the deterministic local engine.
-- **5 of 6 headline SLOs are now empirically PROVEN** on the real retrieval path (real BGE embeddings + cross-encoder + Postgres, v2 hard corpus, adversarially reproduced): recall 0.977, nDCG 0.983, G2 lift +0.208 @7% tokens, poison-block 1.0, warm+serial P95 149.5 ms. **Only ECE (0.279 vs ≤0.05) is still red.**
-- **But ~55–60% production-grade 1:1 parity.** Every one of the 10 audit gap rows is "Partial" for the *same* reason: the code contracts and local/compose-Postgres validation are done, but **operator-captured evidence from real production deployments does not yet exist**, and **~8 `src` wirings remain disconnected**.
+- **6 of 6 headline SLOs are now empirically PROVEN** across the real retrieval/calibration paths: recall 0.977, nDCG 0.983, G2 lift +0.208 @7% tokens, poison-block 1.0, warm+serial P95 149.5 ms, and ECE 0.0063 vs §16 ≤0.05 from `eval/calibration/runner.py`.
+- **But ~55–60% production-grade 1:1 parity.** Every one of the 10 audit gap rows is "Partial" for the *same* reason: the code contracts and local/compose-Postgres validation are done, but **operator-captured evidence from real production deployments does not yet exist**.
 
 So the number has not moved because the remaining 30% is **not "write more code in the same style."** It is two distinct kinds of work that coding-as-usual does not produce:
 
@@ -35,7 +35,7 @@ So the number has not moved because the remaining 30% is **not "write more code 
 | MCP transport (JSON-RPC + TLS + SDK HTTP + self-test) | ✅ local |
 | OIDC/JWKS verifier (real RSA-PKCS1v15 + EC-ECDSA, fail-closed, rotation) | ✅ real crypto |
 | §31 Rails 2, 4, 5 | ✅ enforced in `src` |
-| Token efficiency / G2 lift / poison-block / recall / nDCG / warm P95 SLOs | ✅ 5/6 proven |
+| Token efficiency / G2 lift / poison-block / recall / nDCG / warm P95 / ECE SLOs | ✅ 6/6 proven |
 | Additive proof layer (real provider services, §33 eval/SLO harness, infra scripts, 59-attack poison corpus, portability tests) | ✅ built on `completion/blueprint-parity` |
 
 ---
@@ -49,7 +49,7 @@ Every item is **additive, default-off / shadow-first, byte-identical when inacti
 | # | Item (FR/§) | Current status | Fix | Flips green | Effort |
 |---|---|---|---|---|---|
 | A1 | **Local embedding seam** (FR-3 / G8) — **KEYSTONE** | **Done 2026-06-24.** `LocalMemoryEngine` now accepts `RetrievalAdapters`, local vector search/MMR use the configured embedding provider, local retrieval calls the configured reranker before diversification, and `cli.py:load_engine` passes the same adapter factory into `--backend local` that Postgres already used. | Complete; keep local and Postgres provider wiring aligned when adding new retrieval providers. | Engine and CLI adapter seam regressions are green. | **Done** |
-| A2 | **Calibrated confidence / ECE** (FR-6) — **KEYSTONE (the one red SLO)** | `engine.py:1454` returns constant `0.7` and **never abstains** → ECE 0.279 vs §16 ≤0.05. | Varied per-memory-type conformal confidence + working abstention; run `calibration-tune` on the completion-branch calibration set. | **ECE SLO red→green = 6/6 SLOs PASS** | **M** |
+| A2 | **Calibrated confidence / ECE** (FR-6) — **KEYSTONE** | **Done 2026-06-24.** Local and Postgres retrieval now compute support-aware answer confidence, abstain when retrieved evidence does not cover the query, expose confidence explain metadata, and the calibration runner scores accept-vs-abstain decision confidence. | `eval/calibration/runner.py` now reports ECE 0.0063 / Brier 0.0002, 25/25 good abstains, 0 false accepts, and `meets_target: true`; full local and clean Postgres suites pass with 837 tests, 0 failures/errors. | **ECE SLO green = 6/6 SLOs PASS** | **Done** |
 | A3 | **§31 Rail 1** `max_supersession_rate 0.05` | **Done 2026-06-24.** Consolidation promotions now share a pass-scoped mutation budget and `PromotionGate.evaluate()` accepts a pre-merge rail veto, so candidate branches that would supersede more than the allowed active-fact fraction are discarded before merge. | Complete; keep manual/operator corrections outside this automated pass budget unless a separate batch API is introduced. | `tests/completion/rails/test_supersession_rate.py` is green. | **Done** |
 | A4 | **§31 Rail 3** `max_prune_fraction_per_pass 0.02` | **Done 2026-06-24.** The consolidation forgetter and summary-retirement path consume the same pass-scoped prune budget and defer extra lifecycle demotions/summary retirements once the allowed fraction is exhausted. | Complete; keep `mutation_rails` pass reporting visible in future consolidation changes. | `tests/completion/rails/test_prune_fraction.py` is green. | **Done** |
 | A5 | **§31 Rail 6** `sanitize_retrieved_text` | **Done 2026-06-24.** Local and Postgres returned retrieval hits now carry `metadata["retrieved_text"]` from `sanitize_retrieved_text`, preserving visible hit text while marking retrieved memory as data-only/no-write-authority. | Complete; keep retrieval metadata envelope on future hit builders. | Shared Local/Postgres sanitizer regression is green. | **Done** |
@@ -93,11 +93,10 @@ This is the **bulk of the remaining percentage** and the universal blocker on al
 
 ## 3. The fastest honest path (sequenced)
 
-1. **Codex lands A2 (ECE/confidence).** This is now the remaining mandatory Tier A source-code keystone and the chain to the single red SLO → **6/6 SLOs PASS**.
-2. **Codex closes any strict-audit leftovers found after A2.** The small Tier A items A1/A3/A4/A5/A6/A7/A8/A9/A10/A13/A14 are now closed.
+1. **Run the real-infra evidence pass (Tier B).** Bring up `infra/` (fix the Keycloak 1/3 failure first) plus a Postgres+ParadeDB+AGE+pgvector instance and one real embedding/reranker endpoint; run the `*-ops-check` / `provider-check` / `release-audit` captures. This flips the 10 parity rows Partial→Done.
+2. **Close any strict-audit leftovers found during the evidence pass.** The mandatory Tier A source wirings A1/A2/A3/A4/A5/A6/A7/A8/A9/A10/A13/A14 are now closed.
 3. **Review optional A11/A12 only if the v1.0 bar requires them.** Keep them behind the real-infra evidence pass unless strict audit rows still demand code work.
-4. **One real-infra evidence pass (Tier B):** bring up `infra/` (fix the Keycloak 1/3 failure first) plus a Postgres+ParadeDB+AGE+pgvector instance and one real embedding/reranker endpoint; run the `*-ops-check` / `provider-check` / `release-audit` captures. This flips the 10 parity rows Partial→Done.
-5. **Re-run the parity audit and sign off v1.0.** A11/A12/B8 + Tier C are optional polish beyond the v1.0 bar.
+4. **Re-run the parity audit and sign off v1.0.** A11/A12/B8 + Tier C are optional polish beyond the v1.0 bar.
 
 ---
 
@@ -105,8 +104,8 @@ This is the **bulk of the remaining percentage** and the universal blocker on al
 
 | Milestone | Blended % | What changed |
 |---|---|---|
-| **Now** (after A1 + A3/A4 + A5 + A6 + A7/A8/A9 + A10 + A13 + A14) | **~80%** | ~85% scaffold; 5/6 SLOs proven; local/provider retrieval architecture unified, §31 live mutation-rate/cadence rails, FR-12 recompute memo, cf-gate/ignition/ACT-R wiring, and corroborated derived-erasure split now enforced; ~55–60% production parity remains blocked by no real-infra evidence and the A2 ECE keystone |
-| After **Tier A** (code wirings) | **~82%** | 6/6 SLOs; all 7 §31 rails enforced; all FR `src` gaps closed; local↔prod architecture unified |
+| **Now** (after A1/A2 + A3/A4 + A5 + A6 + A7/A8/A9 + A10 + A13 + A14) | **~82%** | ~85% scaffold; 6/6 SLOs proven; local/provider retrieval architecture unified, §31 live mutation-rate/cadence rails, FR-12 recompute memo, cf-gate/ignition/ACT-R wiring, support-aware calibrated confidence, and corroborated derived-erasure split now enforced; ~55–60% production parity remains blocked by no real-infra evidence |
+| After **Tier A** (code wirings) | **~82%** | Reached for mandatory source wirings; optional A11/A12 remain review-only unless v1.0 parity audit demands them |
 | After **Tier B** (real-infra evidence) | **~97%** | 10 audit rows flip Partial→Done |
 | After **Tier C** + sign-off | **100%** | multimodal/LoRA (optional) + v1.0 attestation |
 
