@@ -1469,6 +1469,59 @@ def _privacy_forbidden_raw_paths(value: Any, *, path: str = "$") -> list[str]:
     return paths
 
 
+def _privacy_positive_int(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int) and value > 0:
+        return value
+    return None
+
+
+def _privacy_operator_delete_corroboration(case: Mapping[str, Any]) -> dict[str, Any]:
+    mode = str(case.get("mode") or "")
+    requested_by = str(case.get("requested_by") or "").strip().lower()
+    required = mode == "legal_hard_delete" and requested_by == "operator"
+    if not required:
+        return {"required": False, "ok": True, "missing": []}
+
+    proof = case.get("operator_delete")
+    missing: list[str] = []
+    if not isinstance(proof, Mapping):
+        proof = {}
+        missing.append("operator_delete")
+    for field in (
+        "request_id_hash",
+        "approved_by_hash",
+        "subject_hash",
+        "audit_log_hash",
+        "delete_receipt_hash",
+    ):
+        if not proof.get(field):
+            missing.append(f"operator_delete.{field}")
+    minimum = _privacy_positive_int(proof.get("min_corroboration_for_delete"))
+    distinct_sources = _privacy_positive_int(proof.get("distinct_supporting_sources_before"))
+    source_hashes = proof.get("corroborating_source_hashes")
+    source_hash_count = len(source_hashes) if isinstance(source_hashes, list) else 0
+    if minimum is None or minimum < 2:
+        missing.append("operator_delete.min_corroboration_for_delete")
+    if distinct_sources is None or minimum is None or distinct_sources < minimum:
+        missing.append("operator_delete.distinct_supporting_sources_before")
+    if not isinstance(source_hashes, list) or source_hash_count < (minimum or 2) or not all(isinstance(item, str) and item for item in source_hashes):
+        missing.append("operator_delete.corroborating_source_hashes")
+    if proof.get("refused_if_uncorroborated") is not True:
+        missing.append("operator_delete.refused_if_uncorroborated")
+    if proof.get("post_delete_read_probe_failed") is not True:
+        missing.append("operator_delete.post_delete_read_probe_failed")
+    return {
+        "required": True,
+        "ok": not missing,
+        "missing": missing,
+        "min_corroboration_for_delete": minimum,
+        "distinct_supporting_sources_before": distinct_sources,
+        "corroborating_source_count": source_hash_count,
+    }
+
+
 def cmd_privacy_ops_check(args: argparse.Namespace) -> None:
     bundle = _load_privacy_ops_bundle(args)
     findings: list[dict[str, Any]] = []
@@ -1571,6 +1624,7 @@ def cmd_privacy_ops_check(args: argparse.Namespace) -> None:
     erasure_cases = _privacy_cases(erasure.get("cases"), section="erasure")
     erasure_case_reports: list[dict[str, Any]] = []
     erasure_modes: set[str] = set()
+    operator_delete_case_seen = False
     for index, case in enumerate(erasure_cases, start=1):
         case_id = str(case.get("id") or f"erasure-{index}")
         seen_case_ids.add(case_id)
@@ -1583,31 +1637,48 @@ def cmd_privacy_ops_check(args: argparse.Namespace) -> None:
             "tombstone_replay_blocked",
         )
         missing_flags = [flag for flag in required_flags if case.get(flag) is not True]
-        ok = mode in {"tombstone_recompute", "legal_hard_delete"} and not missing_flags
+        operator_delete = _privacy_operator_delete_corroboration(case)
+        if operator_delete["required"]:
+            operator_delete_case_seen = True
+        ok = mode in {"tombstone_recompute", "legal_hard_delete"} and not missing_flags and operator_delete["ok"]
         if not ok:
             findings.append(_privacy_finding("erasure_case_failed", "erasure safety case failed", case_id=case_id))
+        if not operator_delete["ok"]:
+            findings.append(
+                _privacy_finding(
+                    "operator_delete_corroboration_missing",
+                    "operator hard-delete case lacks corroborated request/delete evidence",
+                    case_id=case_id,
+                )
+            )
         erasure_case_reports.append(
             {
                 "id": case_id,
                 "ok": ok,
                 "mode": mode,
+                "requested_by": case.get("requested_by"),
                 "missing_flags": missing_flags,
                 "cid_hash_present": bool(case.get("cid_hash")),
+                "operator_delete": operator_delete,
             }
         )
     erasure_ok = (
         {"tombstone_recompute", "legal_hard_delete"}.issubset(erasure_modes)
+        and operator_delete_case_seen
         and erasure_case_reports
         and all(item["ok"] for item in erasure_case_reports)
     )
     if not {"tombstone_recompute", "legal_hard_delete"}.issubset(erasure_modes):
         findings.append(_privacy_finding("erasure_coverage_incomplete", "erasure evidence requires tombstone and legal hard-delete cases"))
+    if not operator_delete_case_seen:
+        findings.append(_privacy_finding("operator_delete_case_missing", "erasure evidence requires an operator hard-delete corroboration case"))
     checks.append(
         {
             "name": "erasure",
             "ok": erasure_ok,
             "case_count": len(erasure_case_reports),
             "modes": sorted(erasure_modes),
+            "operator_delete_case_present": operator_delete_case_seen,
             "cases": erasure_case_reports,
         }
     )
@@ -1660,6 +1731,7 @@ def cmd_privacy_ops_check(args: argparse.Namespace) -> None:
             "strict_runtime_residency": True,
             "requires_allow_and_deny_residency": True,
             "requires_tombstone_and_legal_delete": True,
+            "requires_operator_delete_corroboration": True,
         },
         "redaction": {**redaction_flags, "forbidden_raw_fields_present": bool(forbidden_raw_paths)},
         "checks": checks,
