@@ -75,9 +75,12 @@ class PostgresEngine:
                 graph_backend="postgres-recursive-ppr",
             )
         self.adapters = adapters
-        self._psycopg, self._jsonb = _require_psycopg()
+        self._psycopg: Any = None
+        self._jsonb: Any = None
 
     def connect(self) -> Any:
+        if self._psycopg is None or self._jsonb is None:
+            self._psycopg, self._jsonb = _require_psycopg()
         return self._psycopg.connect(self.dsn)
 
     @staticmethod

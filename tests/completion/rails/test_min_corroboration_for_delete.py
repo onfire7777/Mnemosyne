@@ -19,8 +19,6 @@ corroboration-blind.
 
 from __future__ import annotations
 
-import pytest
-
 from mnemosyne.privacy import ErasureMode
 from mnemosyne.security import TrustTier
 
