@@ -249,6 +249,12 @@ class LocalMemoryEngine:
             )
         self.adapters = adapters
         self._lock = threading.RLock()
+        # §31 RAIL-1: per-(tenant, branch) sliding-window accounting that clamps the
+        # supersession rate to <= max_supersession_rate of the active set per pass.
+        # Engine-instance state only (not persisted); engages only at scale (see
+        # _register_or_block_supersession).
+        self._supersession_calls: dict[tuple[str, str], int] = {}
+        self._supersession_window: dict[tuple[str, str], list[int]] = {}
         self.branches: dict[str, dict[str, Any]] = {
             "main": {"from": None, "kind": "protected", "created_at": utc_now().isoformat()}
         }
@@ -539,7 +545,19 @@ class LocalMemoryEngine:
             conflicts = [item for item in peers if item.object != incoming.object]
             if conflicts:
                 current = min(conflicts, key=lambda item: (item.trust_tier, -item.valid_from.timestamp()))
-                if incoming.trust_tier < current.trust_tier:
+                # §31 RAIL-1: an incoming assertion supersedes ``current`` when it is
+                # strictly more trusted, or equally trusted but newer. Rate-limit such
+                # supersessions to <= max_supersession_rate of the active set per pass;
+                # once the ceiling is hit, defer (reject the incoming, leave current
+                # active) so a burst cannot rewrite the belief base wholesale.
+                would_supersede = incoming.trust_tier < current.trust_tier or (
+                    incoming.trust_tier == current.trust_tier and incoming.valid_from > current.valid_from
+                )
+                if would_supersede and self._register_or_block_supersession(incoming.tenant_id, branch):
+                    incoming.status = "superseded"
+                    incoming.superseded_by = current.id
+                    op = "upsert_assertion.rate_limited_defer"
+                elif incoming.trust_tier < current.trust_tier:
                     if incoming.valid_from > current.valid_from:
                         current.valid_to = incoming.valid_from
                     else:
@@ -597,6 +615,74 @@ class LocalMemoryEngine:
             )
             self._persist()
             return incoming.id
+
+    def _register_or_block_supersession(self, tenant_id: str, branch: str) -> bool:
+        """§31 RAIL-1 rate limiter for the live belief-revision pass.
+
+        Returns True if this supersession should be BLOCKED (deferred) because the
+        active set has already been superseded at the ``max_supersession_rate``
+        ceiling within the current window; False if it is allowed (and records it).
+        Engages only when ``int(active * rate) >= 1`` — at small scales the 5% bound
+        rounds to zero and the rail does not clamp, so ordinary low-volume belief
+        revision stays byte-identical. Window = the last ``active``-count superseding
+        upserts for the (tenant, branch).
+        """
+        rate = float(self.policy.max_supersession_rate)
+        if rate <= 0.0:
+            return False
+        denom = sum(
+            1
+            for item in self.assertions.values()
+            if item.tenant_id == tenant_id
+            and item.branch == branch
+            and item.status in {"active", "contested"}
+        )
+        allowed = int(denom * rate)
+        if allowed <= 0:
+            return False
+        key = (tenant_id, branch)
+        idx = self._supersession_calls.get(key, 0) + 1
+        self._supersession_calls[key] = idx
+        window = self._supersession_window.setdefault(key, [])
+        cutoff = idx - denom
+        window[:] = [recorded for recorded in window if recorded > cutoff]
+        if len(window) >= allowed:
+            return True
+        window.append(idx)
+        return False
+
+    def assemble_system_prompt(self, *, tenant_id: str, hits: Any, sink: str = "system_prompt") -> str:
+        """§31 RAIL-6 serve-time sink guard: ``untrusted_to_system_prompt`` forbidden.
+
+        Assembles instruction text from retrieved ``hits`` for the given ``sink``.
+        When ``sink`` is a privileged instruction sink (system_prompt / system /
+        developer / instruction / tool), routing an untrusted-external or
+        ``sanitize-as-data`` hit into it is REFUSED with ``PermissionError`` —
+        retrieved text is data, never instruction (§31 immutable rail). Non-
+        privileged sinks assemble all admissible hits. This is the missing runtime
+        enforcement point: ingestion already tags untrusted content data-only, but
+        nothing previously refused routing a flagged hit into a system-prompt sink.
+        """
+        instruction_sinks = {"system_prompt", "system", "developer", "instruction", "tool"}
+        privileged = str(sink).strip().lower() in instruction_sinks
+        admissible: list[str] = []
+        for hit in hits or []:
+            trust_tier = int(getattr(hit, "trust_tier", 0))
+            metadata = getattr(hit, "metadata", None)
+            metadata = metadata if isinstance(metadata, dict) else {}
+            tags = set(metadata.get("capability_tags", []) or [])
+            flagged = bool(metadata.get("sanitize_as_data")) or "sanitize-as-data" in tags
+            untrusted = trust_tier >= int(TrustTier.UNTRUSTED_EXTERNAL) or flagged
+            if privileged and untrusted:
+                raise PermissionError(
+                    "§31 rail untrusted_to_system_prompt: refusing to route untrusted hit "
+                    f"{getattr(hit, 'id', '?')!r} into the {sink!r} sink"
+                )
+            if not untrusted:
+                text = getattr(hit, "text", "")
+                if text:
+                    admissible.append(str(text))
+        return "\n".join(admissible)
 
     def _rebalance_contested(self, items: list[Assertion]) -> None:
         total = sum(max(item.confidence, 0.01) for item in items)
