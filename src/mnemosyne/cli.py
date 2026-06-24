@@ -7506,6 +7506,62 @@ def _dashboard_html_check(html: str) -> dict[str, Any]:
     }
 
 
+_OPS_DASHBOARD_REQUIRED_REPORT_SECTIONS: Mapping[str, tuple[str, ...]] = {
+    "counts": (
+        "evidence",
+        "assertions",
+        "active_assertions",
+        "contested_assertions",
+        "contradictions",
+        "preferences",
+        "relations",
+        "deletions",
+        "audit_events",
+    ),
+    "queue": (),
+    "metrics": ("counters", "gauges", "samples"),
+    "learning": ("lessons", "procedures", "lesson_diversity"),
+    "tripwires": (
+        "passed",
+        "min_diversity",
+        "lesson_diversity",
+        "max_proxy_gap",
+        "proxy_true_gap",
+        "max_open_contradictions",
+        "open_contradictions",
+        "gate_promotions",
+        "gate_rollbacks",
+    ),
+}
+
+
+def _ops_dashboard_metric_taxonomy_check(snapshot_report: object) -> dict[str, Any]:
+    missing: list[str] = []
+    sections: dict[str, dict[str, Any]] = {}
+    if not isinstance(snapshot_report, Mapping):
+        return {
+            "name": "metric_taxonomy",
+            "ok": False,
+            "missing": ["report"],
+            "sections": sections,
+        }
+    for section, required_keys in _OPS_DASHBOARD_REQUIRED_REPORT_SECTIONS.items():
+        section_value = snapshot_report.get(section)
+        if not isinstance(section_value, Mapping):
+            missing.append(section)
+            sections[section] = {"present": False, "missing": list(required_keys)}
+            continue
+        section_missing = [key for key in required_keys if key not in section_value]
+        missing.extend(f"{section}.{key}" for key in section_missing)
+        sections[section] = {"present": True, "missing": section_missing}
+    return {
+        "name": "metric_taxonomy",
+        "ok": not missing,
+        "missing": missing,
+        "sections": sections,
+    }
+
+
 def _validate_ops_dashboard_package(package_dir: Path, *, expected_tenant: str | None) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
     checks: list[dict[str, Any]] = []
     findings: list[dict[str, str]] = []
@@ -7532,6 +7588,7 @@ def _validate_ops_dashboard_package(package_dir: Path, *, expected_tenant: str |
     tripwires = manifest.get("tripwires") if isinstance(manifest, Mapping) else None
     snapshot_report = snapshot.get("report") if isinstance(snapshot, Mapping) else None
     html_check = _dashboard_html_check(html)
+    metric_taxonomy_check = _ops_dashboard_metric_taxonomy_check(snapshot_report)
     manifest_ok = (
         manifest.get("kind") == "mnemosyne.ops_dashboard_package"
         and manifest.get("version") == 1
@@ -7541,6 +7598,7 @@ def _validate_ops_dashboard_package(package_dir: Path, *, expected_tenant: str |
     )
     snapshot_ok = snapshot.get("ok") is True and isinstance(snapshot_report, Mapping)
     tripwire_ok = isinstance(tripwires, Mapping) and tripwires.get("passed") is True
+    dashboard_html_ok = html_check["marker_present"] and html_check["doctype_present"]
     tenant_ok = expected_tenant is None or manifest.get("tenant_id") == expected_tenant
     checks.extend(
         [
@@ -7552,8 +7610,9 @@ def _validate_ops_dashboard_package(package_dir: Path, *, expected_tenant: str |
                 "tenant_id": manifest.get("tenant_id"),
             },
             {"name": "snapshot", "ok": snapshot_ok, "snapshot_ok": snapshot.get("ok") is True},
+            metric_taxonomy_check,
             {"name": "tripwires", "ok": tripwire_ok, "passed": bool(tripwires.get("passed")) if isinstance(tripwires, Mapping) else False},
-            {"name": "dashboard_html", "ok": html_check["marker_present"] and html_check["doctype_present"], **html_check},
+            {"name": "dashboard_html", "ok": dashboard_html_ok, **html_check},
             {"name": "tenant", "ok": tenant_ok, "expected_tenant": expected_tenant, "tenant_id": manifest.get("tenant_id")},
         ]
     )
@@ -7561,9 +7620,20 @@ def _validate_ops_dashboard_package(package_dir: Path, *, expected_tenant: str |
         findings.append(_ops_dashboard_finding("manifest_shape_invalid", "dashboard package manifest shape is invalid"))
     if not snapshot_ok:
         findings.append(_ops_dashboard_finding("snapshot_not_ok", "dashboard package snapshot is not ok"))
+    if not metric_taxonomy_check["ok"]:
+        missing = metric_taxonomy_check.get("missing", [])
+        missing_preview = ", ".join(missing[:8])
+        if len(missing) > 8:
+            missing_preview = f"{missing_preview}, +{len(missing) - 8} more"
+        findings.append(
+            _ops_dashboard_finding(
+                "metric_taxonomy_incomplete",
+                f"dashboard package snapshot metric taxonomy is incomplete: {missing_preview or 'report'}",
+            )
+        )
     if not tripwire_ok:
         findings.append(_ops_dashboard_finding("tripwires_not_passed", "dashboard package tripwires are not passing"))
-    if not checks[3]["ok"]:
+    if not dashboard_html_ok:
         findings.append(_ops_dashboard_finding("dashboard_marker_missing", "dashboard html marker is missing"))
     if not tenant_ok:
         findings.append(_ops_dashboard_finding("tenant_mismatch", "dashboard package tenant does not match expectation"))
