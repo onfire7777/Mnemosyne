@@ -68,12 +68,14 @@ Every item is **additive, default-off / shadow-first, byte-identical when inacti
 
 ### TIER B — Real-infrastructure evidence capture (ops/deployment; not feature code)
 
-This is the **bulk of the remaining percentage** and the universal blocker on all 10 audit rows. The code paths, adapter boundaries, and evidence gates already exist; `infra/` already scripts Keycloak/Vault/c2patool. What's missing is **running real services and capturing operator evidence bundles**.
+This is the **bulk of the remaining percentage** and the universal blocker on all 10 audit rows. The code paths, adapter boundaries, and evidence gates already exist; `infra/` already scripts Keycloak/Vault/c2patool. Local real-service evidence is now captured for Keycloak, Vault transit, Postgres-backed provider reporting, and C2PA trust verification; what's still missing is **operator-captured production evidence bundles**.
+
+> **Checkpoint — local real services now pass.** On 2026-06-24, `infra/scripts/setup-all.sh` and `infra/validate/validate-all.sh` passed locally. A scoped `deployment-soak --evidence-dir` bundle plus `release-audit --allow-provider-local` passed for `idp-jwks-live-check`, `provider-check`, and `provenance-trust-check` with fingerprint `c37aa7aeba44aa82ccc0c5f4f9e130701f34c106136468de1be16c5c0105175c`. This is not production validation; it is the staging proof that the official evidence path works against real local services.
 
 | # | Parity row | Real infra to stand up | Capture command |
 |---|---|---|---|
 | B1 | Production Postgres retrieval | Deployed **ParadeDB BM25** + **Apache AGE** graph + **pgvector** + reranker adapters | `retrieval-ops-check` evidence bundle |
-| B2 | Tenant isolation & auth | Live **Keycloak** IdP/JWKS (validate currently 1/3 checks fail — fix in `infra/`), **Vault** session-secret custody/rotation, **KMS** key provider, TLS cert lifecycle | `auth-ops-check`, `tls-lifecycle-ops-check` |
+| B2 | Tenant isolation & auth | Live **Keycloak** IdP/JWKS now passes locally; still needs production IdP/JWKS, **Vault** session-secret custody/rotation, **KMS** key provider, TLS cert lifecycle | `auth-ops-check`, `tls-lifecycle-ops-check` |
 | B3 | CLI/MCP runtime | Official **StreamableHTTP/SSE** transport + stateless soak on a real deployed endpoint | hosted MCP soak evidence |
 | B4 | Embedding/reranker providers | Real **embedding + cross-encoder + image/audio embedding** endpoints behind the HTTP adapter boundary | `provider-check` |
 | B5 | Entity resolution | Real deployed **entity-resolver** behind the command boundary | `provider-check` |
@@ -93,7 +95,7 @@ This is the **bulk of the remaining percentage** and the universal blocker on al
 
 ## 3. The fastest honest path (sequenced)
 
-1. **Run the real-infra evidence pass (Tier B).** Bring up `infra/` (fix the Keycloak 1/3 failure first) plus a Postgres+ParadeDB+AGE+pgvector instance and one real embedding/reranker endpoint; run the `*-ops-check` / `provider-check` / `release-audit` captures. This flips the 10 parity rows Partial→Done.
+1. **Run the production real-infra evidence pass (Tier B).** The local `infra/` stack now passes and scoped release evidence is captured. Next bring up production-equivalent Postgres+ParadeDB+AGE+pgvector plus real embedding/reranker/model endpoints, then run the `*-ops-check` / `provider-check` / `release-audit --require-production-validated` captures. This is what flips the 10 parity rows Partial→Done.
 2. **Close any strict-audit leftovers found during the evidence pass.** The mandatory Tier A source wirings A1/A2/A3/A4/A5/A6/A7/A8/A9/A10/A13/A14 are now closed.
 3. **Review optional A11/A12 only if the v1.0 bar requires them.** Keep them behind the real-infra evidence pass unless strict audit rows still demand code work.
 4. **Re-run the parity audit and sign off v1.0.** A11/A12/B8 + Tier C are optional polish beyond the v1.0 bar.
@@ -104,7 +106,7 @@ This is the **bulk of the remaining percentage** and the universal blocker on al
 
 | Milestone | Blended % | What changed |
 |---|---|---|
-| **Now** (after A1/A2 + A3/A4 + A5 + A6 + A7/A8/A9 + A10 + A13 + A14) | **~82%** | ~85% scaffold; 6/6 SLOs proven; local/provider retrieval architecture unified, §31 live mutation-rate/cadence rails, FR-12 recompute memo, cf-gate/ignition/ACT-R wiring, support-aware calibrated confidence, and corroborated derived-erasure split now enforced; ~55–60% production parity remains blocked by no real-infra evidence |
+| **Now** (after Tier A + local Tier B smoke) | **~82%** | Mandatory source wirings are closed, 6/6 SLOs are proven, and local real-service evidence now passes through `deployment-soak`/scoped `release-audit`; production parity still remains blocked by missing operator-captured production evidence |
 | After **Tier A** (code wirings) | **~82%** | Reached for mandatory source wirings; optional A11/A12 remain review-only unless v1.0 parity audit demands them |
 | After **Tier B** (real-infra evidence) | **~97%** | 10 audit rows flip Partial→Done |
 | After **Tier C** + sign-off | **100%** | multimodal/LoRA (optional) + v1.0 attestation |

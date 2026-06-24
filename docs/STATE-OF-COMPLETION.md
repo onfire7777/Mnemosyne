@@ -38,16 +38,15 @@ the structured wave results. The injection is not present in any committed file 
 | token-efficiency | ≥0.95 | **1.0 @ 8.3% tokens** | ✅ PROVEN |
 | poison-block (G7) | ≥95% | **100%** (59-attack) | ✅ PROVEN |
 | engine P95 | ≤300–400ms | **~107ms** warm | ✅ PROVEN (engine-only); embed-call P95 CPU-bound + un-wired local seam → ⛔/🌐 |
-| ECE | ≤0.05 | 0.20 (flat) | ⛔ BLOCKED-ON-SRC (calibration is policy/threshold-driven, embedding-independent) |
+| ECE | ≤0.05 | **0.0063** | ✅ PASS — Wave-2 flat-confidence result is superseded by the 2026-06-24 support-aware calibration run |
 | G2 lift | ≥+15% | 0.0 | 🌐 BLOCKED-BY-ENV (tiny curated corpus hit the full-context 1.0 ceiling) |
 
 ## §31 invariant rails (7)
 | Rail | Status |
 |---|---|
 | 4 monotonic_trust · 5 reward external-only | ✅ ENFORCED in src |
-| 1 max_supersession_rate · 3 max_prune_fraction · 6 untrusted→system_prompt · 7 cadence | ⛔ PARTIAL (metric-gate only) |
-| 2 min_corroboration_for_delete | ⛔ ABSENT from src |
-(All 7 covered by `tests/completion/rails/` breach tests — flip xfail→green as Codex lands enforcement.)
+| 1 max_supersession_rate · 2 min_corroboration_for_delete · 3 max_prune_fraction · 6 untrusted→system_prompt · 7 cadence | ✅ ENFORCED in src |
+(All 7 rails are now enforced in source; remaining parity risk is production operator evidence, not local rail wiring.)
 
 ## FR-1…21 (condensed)
 - **✅ Proven / additive-done:** FR-1, FR-2, FR-3 (retrieval quality on Postgres), FR-4, FR-5, FR-8, FR-10, FR-13, FR-14, FR-15, FR-16, FR-18 + the full proof-harness layer.
@@ -55,9 +54,8 @@ the structured wave results. The injection is not present in any committed file 
 - **◷ Scope-deferred (blueprint non-goals):** FR-20 multimodal (N5 post-v1 — Codex now building it), FR-21 real LoRA (N2 optional, GPU).
 
 ## The remaining path to full 1:1 parity
-The completion line's **additive scope is essentially complete** — real providers, the §33 harness,
-live infra, the §17 decisions, and the forcing-function test/bench suite are built, verified, and
-pushed, with **zero `src` edits and zero Codex conflict**. Full 1:1 parity now reduces to **Codex
-landing the unified reconciliation list** (`docs/CODEX-RECONCILIATION.md`) — every item default-off /
-byte-identical-when-inactive, ordered safety-first. Each completion-line forcing-function flips green
-automatically as Codex lands its paired `src` wiring. That handoff is the clean route to 100%.
+The mandatory Tier A source reconciliation list is now closed and locally/clean-Postgres verified.
+Full 1:1 parity now reduces to Tier B production operator evidence: run the existing
+`deployment-soak --evidence-dir` and `release-audit --require-production-validated` path against real
+deployed infrastructure, then re-run the strict parity audit and sign off v1.0. Optional FR-20/FR-21
+work remains outside the mandatory v1.0 source-wiring list unless the final audit raises it.
