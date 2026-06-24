@@ -5353,6 +5353,27 @@ def production_worker_ops_stdout() -> dict:
     }
 
 
+def production_bundle_ops_stdout(command: str) -> dict:
+    return {
+        "ok": True,
+        "bundle": {
+            "name": command,
+            "production_validated": True,
+        },
+        "requirements": {
+            "release_profile": command,
+        },
+        "checks": [
+            {
+                "name": "release_profile",
+                "ok": True,
+                "profile": command,
+            }
+        ],
+        "findings": [],
+    }
+
+
 def production_release_stdout(command: str, provider_stdout: dict) -> dict:
     if command == "provider-check":
         return provider_stdout
@@ -5370,7 +5391,7 @@ def production_release_stdout(command: str, provider_stdout: dict) -> dict:
         "provenance-ops-check",
         "policy-ops-check",
     }:
-        return {"ok": True, "bundle": {"name": command}, "requirements": {}, "checks": [], "findings": []}
+        return production_bundle_ops_stdout(command)
     if command in {"belief-revision-check", "forgetting-policy-check"}:
         return {"ok": True, "fingerprint": f"{command}-fingerprint", "summary": {}, "results": [], "findings": []}
     if command == "calibration-tune":
@@ -5574,6 +5595,41 @@ def test_cli_release_audit_rejects_placeholder_required_command_output(tmp_path:
     assert len(output_findings) == 1
     assert "auth-ops-check" in output_findings[0]["message"]
     assert "bundle" in output_findings[0]["message"]
+
+
+def test_cli_release_audit_rejects_hollow_bundle_ops_evidence(tmp_path: Path) -> None:
+    report_path, _manifest_path = write_release_report(tmp_path)
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    mcp_check = next(check for check in report["checks"] if check["command"] == "mcp-ops-check")
+    mcp_check["stdout_json"] = {
+        "ok": True,
+        "bundle": {"name": "mcp-ops-check"},
+        "requirements": {},
+        "checks": [],
+        "findings": [],
+    }
+    report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+
+    result = run_raw_cli(
+        tmp_path / "mnemosyne.json",
+        "release-audit",
+        "--soak-report",
+        str(report_path),
+        "--require-production-validated",
+    )
+    payload = json.loads(result.stdout)
+    output_findings = [
+        finding
+        for finding in payload["findings"]
+        if finding["code"] == "required_bundle_ops_evidence_incomplete"
+    ]
+    messages = "\n".join(finding["message"] for finding in output_findings)
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert "mcp-ops-check evidence has empty or malformed sections" in messages
+    assert "requirements" in messages
+    assert "checks" in messages
 
 
 def test_cli_release_audit_rejects_empty_worker_runtime_evidence(tmp_path: Path) -> None:
