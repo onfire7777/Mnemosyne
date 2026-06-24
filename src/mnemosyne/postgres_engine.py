@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
@@ -1377,6 +1378,8 @@ class PostgresEngine:
             "removed_entities": [],
             "trimmed_entities": [],
             "erased_derived_evidence": [],
+            "retained_derived_evidence": [],
+            "trimmed_derived_evidence": [],
         }
         with self.connect() as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
@@ -1403,23 +1406,22 @@ class PostgresEngine:
                     (db_tenant_id, branch, cid_bytes),
                 )
                 candidates = [(bytes(row["cid"]), dict(row["metadata"] or {})) for row in cur.fetchall()]
-                affected_cids = {cid}
-                derived_cid_bytes: list[bytes] = []
-                derived_cids: list[str] = []
-                changed = True
-                while changed:
-                    changed = False
-                    for candidate_bytes, metadata in candidates:
-                        candidate_cid = _bytes_to_cid(candidate_bytes)
-                        if candidate_cid in affected_cids:
-                            continue
-                        if affected_cids.intersection(_metadata_source_cids(metadata)):
-                            affected_cids.add(candidate_cid)
-                            derived_cid_bytes.append(candidate_bytes)
-                            derived_cids.append(candidate_cid)
-                            changed = True
+                legal_blind = mode is ErasureMode.HARD_DELETE_LEGAL and requested_by == "legal"
+                if legal_blind:
+                    derived_cid_bytes, derived_cids, retained_metadata = _derived_evidence_forget_plan(
+                        cid,
+                        candidates,
+                        legal_blind=True,
+                    )
+                else:
+                    derived_cid_bytes, derived_cids, retained_metadata = _derived_evidence_forget_plan(cid, candidates)
+                affected_cids = {cid, *derived_cids}
                 affected_cid_bytes = [cid_bytes, *derived_cid_bytes]
                 propagated["erased_derived_evidence"] = derived_cids
+                propagated["retained_derived_evidence"] = sorted(
+                    _bytes_to_cid(item) for item in retained_metadata
+                )
+                propagated["trimmed_derived_evidence"] = list(propagated["retained_derived_evidence"])
                 if mode is ErasureMode.HARD_DELETE_LEGAL and requested_by != "legal":
                     minimum = self.policy.min_corroboration_for_delete
                     cur.execute(
@@ -1465,6 +1467,15 @@ class PostgresEngine:
                         RETURNING cid
                         """,
                         (db_tenant_id, branch, affected_cid_bytes),
+                    )
+                for retained_bytes, metadata in retained_metadata.items():
+                    cur.execute(
+                        """
+                        UPDATE evidence
+                        SET metadata = %s
+                        WHERE tenant_id = %s AND branch = %s AND cid = %s
+                        """,
+                        (self._jsonb(metadata), db_tenant_id, branch, retained_bytes),
                     )
                 cur.execute(
                     """
@@ -2285,6 +2296,56 @@ def _metadata_source_cids(metadata: dict[str, Any]) -> set[str]:
         if isinstance(summary_values, list):
             sources.update(str(item) for item in summary_values if item)
     return sources
+
+
+def _derived_evidence_forget_plan(
+    cid: str,
+    candidates: list[tuple[bytes, dict[str, Any]]],
+    *,
+    legal_blind: bool = False,
+) -> tuple[list[bytes], list[str], dict[bytes, dict[str, Any]]]:
+    affected = {cid}
+    erased_bytes: list[bytes] = []
+    erased_cids: list[str] = []
+    retained: dict[bytes, dict[str, Any]] = {}
+    changed = True
+    while changed:
+        changed = False
+        for candidate_bytes, metadata in candidates:
+            candidate_cid = _bytes_to_cid(candidate_bytes)
+            if candidate_cid in affected:
+                continue
+            sources = _metadata_source_cids(metadata)
+            if not affected.intersection(sources):
+                continue
+            surviving_sources = sources - affected
+            if surviving_sources and not legal_blind:
+                retained[candidate_bytes] = _trim_metadata_source_cids(metadata, affected)
+                continue
+            affected.add(candidate_cid)
+            retained.pop(candidate_bytes, None)
+            erased_bytes.append(candidate_bytes)
+            erased_cids.append(candidate_cid)
+            changed = True
+    return erased_bytes, erased_cids, retained
+
+
+def _trim_metadata_source_cids(metadata: dict[str, Any], affected_cids: set[str]) -> dict[str, Any]:
+    trimmed = copy.deepcopy(metadata)
+    if str(trimmed.get("source_evidence_cid") or "") in affected_cids:
+        trimmed.pop("source_evidence_cid", None)
+    values = trimmed.get("source_evidence_cids")
+    if isinstance(values, list):
+        trimmed["source_evidence_cids"] = [str(item) for item in values if str(item) not in affected_cids]
+    summary = trimmed.get("summary")
+    if isinstance(summary, dict):
+        summary_values = summary.get("source_evidence_cids")
+        if isinstance(summary_values, list):
+            kept = [str(item) for item in summary_values if str(item) not in affected_cids]
+            summary["source_evidence_cids"] = kept
+            summary["source_count"] = len(kept)
+            summary.pop("source_fingerprint", None)
+    return trimmed
 
 
 def _uuid_or_none(value: str | None) -> str | None:

@@ -994,7 +994,12 @@ class LocalMemoryEngine:
             ev = self.evidence.get(key)
             if not ev:
                 return {"erased": False, "reason": "evidence_not_found", "cid": cid, "erasure_mode": mode.value}
-            derived_cids = self._derived_evidence_cids_forget(tenant_id, branch, cid)
+            legal_blind = mode is ErasureMode.HARD_DELETE_LEGAL and requested_by == "legal"
+            if legal_blind:
+                derived_cids = self._derived_evidence_cids_forget(tenant_id, branch, cid)
+                retained_derived: dict[str, dict[str, Any]] = {}
+            else:
+                derived_cids, retained_derived = self._derived_evidence_forget_plan(tenant_id, branch, cid)
             affected_cids = {cid, *derived_cids}
             if mode is ErasureMode.HARD_DELETE_LEGAL and requested_by != "legal":
                 # §31 RAIL-2 / FR-8 (min_corroboration_for_delete): an operator-initiated
@@ -1035,6 +1040,10 @@ class LocalMemoryEngine:
                     if derived:
                         derived.content = ""
                         derived.erased = True
+            for retained_cid, metadata in retained_derived.items():
+                retained = self.evidence.get(self._evidence_key(tenant_id, branch, retained_cid))
+                if retained:
+                    retained.metadata = metadata
             propagated: dict[str, Any] = {
                 "retracted_assertions": [],
                 "trimmed_assertions": [],
@@ -1045,6 +1054,8 @@ class LocalMemoryEngine:
                 "removed_entities": [],
                 "trimmed_entities": [],
                 "erased_derived_evidence": derived_cids,
+                "retained_derived_evidence": sorted(retained_derived),
+                "trimmed_derived_evidence": sorted(retained_derived),
             }
             for assertion in self.assertions.values():
                 if assertion.tenant_id != tenant_id or assertion.branch != branch:
@@ -1508,6 +1519,59 @@ class LocalMemoryEngine:
                     derived.append(item_cid)
                     changed = True
         return derived
+
+    def _derived_evidence_forget_plan(
+        self,
+        tenant_id: str,
+        branch: str,
+        cid: str,
+    ) -> tuple[list[str], dict[str, dict[str, Any]]]:
+        affected = {cid}
+        erased: list[str] = []
+        retained: dict[str, dict[str, Any]] = {}
+        changed = True
+        while changed:
+            changed = False
+            for item in self.evidence.values():
+                item_cid = item.cid
+                if (
+                    item.tenant_id != tenant_id
+                    or item.branch != branch
+                    or item.erased
+                    or not item_cid
+                    or item_cid in affected
+                ):
+                    continue
+                sources = self._metadata_source_cids(item.metadata)
+                if not affected.intersection(sources):
+                    continue
+                surviving_sources = sources - affected
+                if surviving_sources:
+                    retained[item_cid] = self._trim_metadata_source_cids(item.metadata, affected)
+                    continue
+                affected.add(item_cid)
+                retained.pop(item_cid, None)
+                erased.append(item_cid)
+                changed = True
+        return erased, retained
+
+    @staticmethod
+    def _trim_metadata_source_cids(metadata: dict[str, Any], affected_cids: set[str]) -> dict[str, Any]:
+        trimmed = copy.deepcopy(metadata)
+        if str(trimmed.get("source_evidence_cid") or "") in affected_cids:
+            trimmed.pop("source_evidence_cid", None)
+        values = trimmed.get("source_evidence_cids")
+        if isinstance(values, list):
+            trimmed["source_evidence_cids"] = [str(item) for item in values if str(item) not in affected_cids]
+        summary = trimmed.get("summary")
+        if isinstance(summary, dict):
+            summary_values = summary.get("source_evidence_cids")
+            if isinstance(summary_values, list):
+                kept = [str(item) for item in summary_values if str(item) not in affected_cids]
+                summary["source_evidence_cids"] = kept
+                summary["source_count"] = len(kept)
+                summary.pop("source_fingerprint", None)
+        return trimmed
 
     @staticmethod
     def _valid_at(valid_from: datetime, valid_to: datetime | None, moment: datetime) -> bool:

@@ -1186,6 +1186,85 @@ def test_shared_engine_contract_forget_source_invalidates_summary_gist(
     )
 
 
+def test_shared_engine_contract_forget_retains_corroborated_derived_evidence(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, user = engine_bundle
+    source_a = engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id=user,
+            actor="user",
+            source_type="chat",
+            content="First source says the archive uses dual corroboration.",
+            trust_tier=0,
+            access_policy={"tenant": tenant},
+        )
+    )
+    source_b = engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id=user,
+            actor="user",
+            source_type="chat",
+            content="Second source independently says the archive uses dual corroboration.",
+            trust_tier=0,
+            access_policy={"tenant": tenant},
+        )
+    )
+    derived_cid = engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id=user,
+            actor="system",
+            source_type="consolidation-summary",
+            content="The archive uses dual corroboration.",
+            trust_tier=0,
+            access_policy={"tenant": tenant},
+            metadata={
+                "source_evidence_cids": [source_a, source_b],
+                "summary": {
+                    "status": "active",
+                    "source_evidence_cids": [source_a, source_b],
+                    "source_count": 2,
+                    "source_fingerprint": "pre-forget-fingerprint",
+                },
+            },
+        )
+    )
+    assertion_id = engine.upsert_assertion(
+        Assertion(
+            tenant_id=tenant,
+            user_id=user,
+            subject="archive",
+            predicate="uses",
+            object="dual corroboration",
+            confidence=0.91,
+            source_evidence_cids=[source_a, derived_cid],
+            status="active",
+            trust_tier=0,
+            access_policy={"tenant": tenant},
+        )
+    )
+
+    result = engine.forget(tenant, source_a)
+    retained = engine.get_evidence(tenant, derived_cid)
+    exported = engine.export_tenant(tenant)
+    assertion = next(item for item in exported["assertions"] if item["id"] == assertion_id)
+
+    assert result["erased"] is True
+    assert result["propagated"]["erased_derived_evidence"] == []
+    assert result["propagated"]["retained_derived_evidence"] == [derived_cid]
+    assert retained is not None
+    assert retained.content == "The archive uses dual corroboration."
+    assert retained.metadata["source_evidence_cids"] == [source_b]
+    assert retained.metadata["summary"]["source_evidence_cids"] == [source_b]
+    assert retained.metadata["summary"]["source_count"] == 1
+    assert "source_fingerprint" not in retained.metadata["summary"]
+    assert assertion["source_evidence_cids"] == [derived_cid]
+    assert assertion["status"] == "active"
+
+
 def test_shared_engine_contract_direct_search_primitives(engine_bundle: tuple[Any, str, str]) -> None:
     engine, tenant, user = engine_bundle
     cid = _append_evidence(
