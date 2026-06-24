@@ -58,6 +58,7 @@ from mnemosyne.lifecycle import (
     validate_forgetting_policy_cases,
 )
 from mnemosyne.models import Assertion, Evidence, Relation
+from mnemosyne.policy import OperatingPolicy
 
 TENANT = "tenant-bc"
 USER = "user-bc"
@@ -357,6 +358,52 @@ def test_decayed_salience_rewards_recent_access() -> None:
     fresh = LifecycleState("fresh", FidelityTier.VERBATIM, 0.8, 0.5, 10, now)
     stale = LifecycleState("stale", FidelityTier.VERBATIM, 0.8, 0.5, 10, now - timedelta(days=180))
     assert decayed_salience(fresh, now) > decayed_salience(stale, now)
+
+
+def test_actr_decay_uses_power_law_salience_when_enabled() -> None:
+    now = datetime(2026, 6, 1, tzinfo=UTC)
+    stale = LifecycleState("stale", FidelityTier.VERBATIM, 0.8, 0.0, 0, now - timedelta(days=180))
+
+    legacy = decayed_salience(stale, now)
+    actr = decayed_salience(stale, now, actr_decay=0.5)
+
+    assert actr > legacy
+
+
+def test_consolidation_forgetter_uses_policy_actr_decay() -> None:
+    now = datetime(2026, 6, 1, tzinfo=UTC)
+
+    def run_forgetter(policy: OperatingPolicy) -> dict[str, object]:
+        engine = LocalMemoryEngine(policy=policy)
+        state = LifecycleState("cold", FidelityTier.VERBATIM, 0.8, 0.0, 0, now - timedelta(days=180))
+        cid = engine.append_evidence(
+            Evidence(
+                tenant_id=TENANT,
+                user_id=USER,
+                actor="user",
+                source_type="chat",
+                content="A cold memory with lifecycle metadata.",
+                metadata={"lifecycle": state.to_dict()},
+                trust_tier=0,
+                access_policy={"tenant": TENANT},
+            )
+        )
+        worker = ConsolidationWorker(engine, [], consolidation_min_steps=0)
+        worker.run_queue_payload(
+            {
+                "tenant_id": TENANT,
+                "source_evidence_cids": [cid],
+                "passes": ["forgetter"],
+                "now": now.isoformat(),
+                "utility_threshold": 0.04,
+            }
+        )
+        refreshed = engine.get_evidence(TENANT, cid)
+        assert refreshed is not None
+        return refreshed.metadata["lifecycle"]
+
+    assert run_forgetter(OperatingPolicy())["tier"] == FidelityTier.EXTRACTIVE_SUMMARY.value
+    assert run_forgetter(OperatingPolicy(actr_decay=0.5))["tier"] == FidelityTier.VERBATIM.value
 
 
 def test_protected_state_is_never_demoted() -> None:

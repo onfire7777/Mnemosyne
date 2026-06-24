@@ -641,6 +641,66 @@ def test_promotion_gate_counterfactual_hook_can_veto_promotion() -> None:
     assert gated.promoted is False
     assert gated.counterfactual["passed"] is False
     assert gated.counterfactual["predicted_lift"] == pytest.approx(-0.2)
+    assert gated.counterfactual["replay_predicted_lift"] == pytest.approx(-0.2)
+
+
+def test_promotion_gate_requires_ignition_before_merge_when_enabled() -> None:
+    """OQ5: shadow suites can evaluate but cannot merge until ignition is ready."""
+    from mnemosyne.gate import Candidate, PromotionGate, RegressionCase
+
+    engine = LocalMemoryEngine()
+    tools = MemoryTools(engine)
+    cid = tools.capture(
+        tenant_id=TENANT,
+        user_id=USER,
+        actor="user",
+        source_type="chat",
+        content="Mnemosyne cites evidence on every retrieval.",
+        trust_tier=0,
+    )["cid"]
+
+    def case(idx: int, *, origin: str = "curated", protected: bool = False, mode: str = "active") -> RegressionCase:
+        return RegressionCase(
+            id=f"case-{idx}",
+            signature="evidence citation",
+            query="evidence",
+            expected_substring="cites evidence",
+            tier="smoke",
+            protected=protected,
+            origin=origin,  # type: ignore[arg-type]
+            mode=mode,  # type: ignore[arg-type]
+        )
+
+    def candidate(branch: str) -> Candidate:
+        return Candidate(
+            id=f"{branch}-candidate",
+            kind="lesson",
+            signature="evidence citation",
+            description="reinforce evidence citation",
+            branch=branch,
+            source_evidence_cids=[cid],
+        )
+
+    def apply(_engine: LocalMemoryEngine, _branch: str) -> None:
+        return None
+
+    shadow_suite = [case(i, origin="synthetic", protected=(i == 0)) for i in range(35)]
+    shadow_gate = PromotionGate(engine, shadow_suite, require_ignition=True)
+    shadow_status = shadow_gate.ignition_status()
+    assert shadow_status.ready is False
+    assert shadow_status.n_active == 0
+    assert shadow_gate.evaluate(TENANT, candidate("shadow-branch"), apply).promoted is False
+
+    active_suite = [
+        case(i, origin="curated", protected=(i == 0)) for i in range(25)
+    ] + [
+        case(25 + i, origin="genuine") for i in range(5)
+    ]
+    active_gate = PromotionGate(engine, active_suite, require_ignition=True)
+    active_status = active_gate.ignition_status()
+    assert active_status.ready is True
+    assert active_status.n_active == 30
+    assert active_gate.evaluate(TENANT, candidate("active-branch"), apply).promoted is True
 
 
 def test_route_classifier_picks_fast_vs_deep_without_an_llm() -> None:

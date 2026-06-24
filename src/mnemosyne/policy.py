@@ -25,12 +25,18 @@ class OperatingPolicy:
     max_trust_tier: int = 4
     max_sensitivity: int = 3
     decay: float = 0.5
+    # §22.4 / §25 ACT-R base-level power-law decay parameter. Default 0.0 keeps
+    # lifecycle and retrieval on their legacy decay paths.
+    actr_decay: float = 0.0
     # §23.5 / §31 immutable mutation-rate rails (numeric). The self-optimization
     # cold loop may tune *within* these bounds but must never widen them; they are
     # mirrored by config/drift-baseline.toml and enforced structurally.
     max_supersession_rate: float = 0.05
     min_corroboration_for_delete: int = 2
     max_prune_fraction_per_pass: float = 0.02
+    # §31 / FR-17 / OQ2 immutable rail gate, default off. Kept outside
+    # immutable_rails so the all-true rail map remains byte-stable.
+    cold_loop_counterfactual_trusted: bool = False
     activation_weights: dict[str, float] = field(
         default_factory=lambda: {
             "base_level": 0.35,

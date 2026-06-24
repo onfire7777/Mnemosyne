@@ -317,9 +317,16 @@ def test_command_parametric_trainer_validates_construction_and_provider_output()
 def test_operating_policy_from_dict_backcompat_and_rails_default() -> None:
     default = OperatingPolicy.from_dict(None)
     assert all(default.immutable_rails.values())
+    assert default.actr_decay == 0.0
+    assert default.cold_loop_counterfactual_trusted is False
+    assert "actr_decay" not in default.immutable_rails
+    assert "cold_loop_counterfactual_trusted" not in default.immutable_rails
     # legacy "min_trust_tier" maps onto max_trust_tier
     mapped = OperatingPolicy.from_dict({"min_trust_tier": 2})
     assert mapped.max_trust_tier == 2
+    cold_loop = OperatingPolicy.from_dict({"actr_decay": 0.5, "cold_loop_counterfactual_trusted": True})
+    assert cold_loop.actr_decay == pytest.approx(0.5)
+    assert cold_loop.cold_loop_counterfactual_trusted is True
     # unknown keys are ignored rather than crashing
     ignored = OperatingPolicy.from_dict({"not_a_real_knob": 5, "top_k": 11})
     assert ignored.top_k == 11
