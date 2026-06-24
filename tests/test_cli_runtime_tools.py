@@ -7283,7 +7283,7 @@ def privacy_ops_bundle(
 ) -> dict:
     bundle = {
         "name": "production-privacy-ops",
-        "required_cases": ["residency-allow", "residency-deny", "tombstone", "legal-delete"],
+        "required_cases": ["residency-allow", "residency-deny", "tombstone", "legal-delete", "operator-delete"],
         "kms": {
             "provider": "aws-kms-prod" if not local_kms else "local-json",
             "key_id_hash": "kms-key-sha256:abc123",
@@ -7331,11 +7331,34 @@ def privacy_ops_bundle(
                 {
                     "id": "legal-delete",
                     "mode": "legal_hard_delete",
+                    "requested_by": "legal",
                     "cid_hash": "cid-sha256:bbb",
                     "audit_event": True,
                     "bytes_unreadable": True,
                     "derived_evidence_removed": True,
                     "tombstone_replay_blocked": True,
+                },
+                {
+                    "id": "operator-delete",
+                    "mode": "legal_hard_delete",
+                    "requested_by": "operator",
+                    "cid_hash": "cid-sha256:ccc",
+                    "audit_event": True,
+                    "bytes_unreadable": True,
+                    "derived_evidence_removed": True,
+                    "tombstone_replay_blocked": True,
+                    "operator_delete": {
+                        "request_id_hash": "request-sha256:ccc",
+                        "approved_by_hash": "operator-sha256:reviewer",
+                        "subject_hash": "subject-sha256:target",
+                        "audit_log_hash": "audit-sha256:delete",
+                        "delete_receipt_hash": "delete-sha256:storage",
+                        "min_corroboration_for_delete": 2,
+                        "distinct_supporting_sources_before": 2,
+                        "corroborating_source_hashes": ["cid-sha256:ccc", "cid-sha256:ddd"],
+                        "refused_if_uncorroborated": True,
+                        "post_delete_read_probe_failed": True,
+                    },
                 },
             ],
         },
@@ -7376,11 +7399,16 @@ def test_cli_privacy_ops_check_validates_kms_residency_erasure_bundle(tmp_path: 
     )
 
     serialized = json.dumps(report)
+    erasure_check = next(item for item in report["checks"] if item["name"] == "erasure")
+    operator_case = next(item for item in erasure_check["cases"] if item["id"] == "operator-delete")
     assert report["ok"] is True
     assert len(report["fingerprint"]) == 64
     assert report["bundle"]["kms_provider"] == "aws-kms-prod"
     assert {item["name"] for item in report["checks"]} == {"kms", "residency", "erasure", "redaction"}
     assert all(item["ok"] for item in report["checks"])
+    assert erasure_check["operator_delete_case_present"] is True
+    assert operator_case["operator_delete"]["ok"] is True
+    assert operator_case["operator_delete"]["missing"] == []
     assert report["redaction"]["raw_key_material_omitted"] is True
     assert report["redaction"]["raw_object_bytes_omitted"] is True
     assert report["redaction"]["raw_kms_responses_omitted"] is True
@@ -7402,6 +7430,31 @@ def test_cli_privacy_ops_check_fails_closed_on_local_kms_and_bad_erasure(tmp_pat
     assert payload["ok"] is False
     assert "kms_provider_local" in codes
     assert "erasure_case_failed" in codes
+
+
+def test_cli_privacy_ops_check_rejects_uncorroborated_operator_delete(tmp_path: Path) -> None:
+    bundle = privacy_ops_bundle()
+    operator_case = next(item for item in bundle["erasure"]["cases"] if item["id"] == "operator-delete")
+    operator_case["operator_delete"]["distinct_supporting_sources_before"] = 1
+    operator_case["operator_delete"]["corroborating_source_hashes"] = ["cid-sha256:ccc"]
+    operator_case["operator_delete"]["refused_if_uncorroborated"] = False
+    bundle_path = tmp_path / "uncorroborated-operator-delete.json"
+    bundle_path.write_text(json.dumps(bundle), encoding="utf-8")
+
+    result = run_raw_cli(tmp_path / "mnemosyne.json", "privacy-ops-check", "--bundle", str(bundle_path))
+    payload = json.loads(result.stdout)
+    codes = {finding["code"] for finding in payload["findings"]}
+    erasure_check = next(item for item in payload["checks"] if item["name"] == "erasure")
+    operator_report = next(item for item in erasure_check["cases"] if item["id"] == "operator-delete")
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert "operator_delete_corroboration_missing" in codes
+    assert operator_report["ok"] is False
+    assert operator_report["operator_delete"]["ok"] is False
+    assert "operator_delete.distinct_supporting_sources_before" in operator_report["operator_delete"]["missing"]
+    assert "operator_delete.corroborating_source_hashes" in operator_report["operator_delete"]["missing"]
+    assert "operator_delete.refused_if_uncorroborated" in operator_report["operator_delete"]["missing"]
 
 
 def test_cli_privacy_ops_check_rejects_raw_privacy_material(tmp_path: Path) -> None:
