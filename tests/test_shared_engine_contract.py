@@ -1200,6 +1200,38 @@ def test_shared_engine_contract_direct_search_primitives(engine_bundle: tuple[An
     assert all(hit.branch == "main" for hit in [*lexical, *dense, *graph])
 
 
+def test_shared_engine_contract_graph_ppr_matches_tokenized_seed(engine_bundle: tuple[Any, str, str]) -> None:
+    engine, tenant, user = engine_bundle
+    cid = _append_evidence(
+        engine,
+        tenant,
+        user,
+        "Shared graph PPR tokenized seed evidence links a named graph seed to a target.",
+    )
+    relation_id = engine.add_relation(
+        Relation(
+            tenant_id=tenant,
+            source="Tokenized Graph Seed",
+            predicate="points_to",
+            target="Token Match Target",
+            source_evidence_cids=[cid],
+            access_policy={"tenant": tenant},
+        )
+    )
+
+    hits = engine.graph_ppr(["seed"], 5, tenant_id=tenant, branch="main")
+    relation_hit = next((hit for hit in hits if hit.id == relation_id), None)
+
+    assert relation_hit is not None
+    assert relation_hit.kind == "relation"
+    assert relation_hit.channel.endswith("graph_ppr")
+    assert relation_hit.metadata["source"] == "Tokenized Graph Seed"
+    assert relation_hit.metadata["predicate"] == "points_to"
+    assert relation_hit.metadata["target"] == "Token Match Target"
+    assert relation_hit.provenance == [cid]
+    assert all(hit.metadata.get("target") != "Tokenized Graph Seed" for hit in hits)
+
+
 def test_shared_engine_contract_direct_primitives_honor_k_limit(engine_bundle: tuple[Any, str, str]) -> None:
     engine, tenant, user = engine_bundle
     cids = [
