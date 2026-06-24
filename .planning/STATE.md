@@ -184,12 +184,14 @@ Latest checkpoint: CLI `provenance-ops-check` now requires a production `deploym
 
 Latest checkpoint: CLI `multimodal-ops-check` now requires a production `deployment` section in addition to validation-scope, provider, object-store, extraction, media-embedding, retrieval, media-job, and redaction evidence. The gate validates supervised extraction, embedding, object-store, media-job, and retrieval operations, alert routing, execution fingerprints, deployment count binding across object hashes/extraction cases/embedding hashes/retrieval cases/media jobs, and bounded deployment latency. Focused multimodal/deployment-soak/release-audit coverage passes in `/tmp/mnemosyne-multimodal-deployment-focused.xml` with 4 tests, the full local suite passes in `/tmp/mnemosyne-multimodal-deployment-full-local.xml` with 434 tests, 0 failures/errors, and 63 live-DB skips, and the compose Postgres DSN suite passes in `/tmp/mnemosyne-multimodal-deployment-full-postgres.xml` with 434 tests, 0 failures/errors, and 0 skips. Actual extractor/media-embedding/object-store/retrieval/media-job deployment evidence remains operator-run.
 
+Latest checkpoint: §31 RAIL-2 destructive erasure is now enforced on local and Postgres engines. Operator hard-delete requests refuse to erase the sole support for an active assertion with `reason=min_corroboration_for_delete`, while legal/right-to-be-forgotten erasure remains corroboration-blind. Postgres public serialization was tightened so internal tenant/user/session metadata and auto-generated search vectors do not leak through evidence export, explicit evidence embeddings still round-trip, audit diffs omit internal CID storage shims, assertion/preference exports recover external user IDs from source evidence, calibration/entity exports match local public shape, and the cross-engine portability fixture uses valid preference categories plus fixed 1024-dim SQL-compatible embedding vectors. Focused RAIL/Postgres portability coverage passes in `/tmp/mnemosyne-rail2-pg-portability-focused.xml` with 10 tests, the full local suite passes in `/tmp/mnemosyne-rail2-full-local.xml` with 783 tests, 0 failures/errors, and 72 live-DB skips, and the clean compose Postgres DSN suite passes in `/tmp/mnemosyne-rail2-full-postgres.xml` with 783 tests, 0 failures/errors, and 8 skips. Exact production-evidence parity remains open.
+
 ### Blockers/Concerns
 
 - Exact 1:1 blueprint parity is not yet achieved; `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md` is the controlling status artifact.
 - Original documentation folder on Desktop is read-only to this process; project build lives in `/Users/admin/Projects/Mnemosyne`.
 - Docker/Postgres parity was verified live after launching Docker Desktop and recreating the schema volume.
-- Legal hard-delete semantics need operator policy beyond the local tombstone behavior.
+- Production legal-erasure policy and operator evidence still need deployment validation beyond local/clean-DSN enforcement.
 
 ## Deferred Items
 

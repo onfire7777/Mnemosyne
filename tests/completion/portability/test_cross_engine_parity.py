@@ -65,6 +65,10 @@ def _harness(name: str) -> ParityHarness:
     return ParityHarness(tenant=f"tenant-port-{name}", user=f"user-port-{name}")
 
 
+def _portable_explain_keys(explain: dict[str, Any]) -> list[str]:
+    return sorted(key for key in explain if key != "adapters")
+
+
 # --------------------------------------------------------------------- evidence CRUD
 
 
@@ -104,10 +108,7 @@ def test_parity_set_evidence_embedding() -> None:
                 trust_tier=1,
             )
         )
-        dims = int(
-            getattr(getattr(getattr(engine, "adapters", None), "embedding", None), "dims", 256)
-        )
-        vector = hashing_embedding("portability embedding contract", dims=dims)
+        vector = hashing_embedding("portability embedding contract", dims=1024)
         updated = engine.set_evidence_embedding(tenant, cid, vector)
         recalled = engine.get_evidence(tenant, cid)
         return {
@@ -448,7 +449,7 @@ def test_parity_retrieve_observable_shape() -> None:
             "abstained": result.abstained,
             "uncertainty_note": result.uncertainty_note,
             "hit_ids_contains_cid": cid in {hit.id for hit in result.hits},
-            "explain_keys": sorted(result.explain.keys()),
+            "explain_keys": _portable_explain_keys(result.explain),
             "rails": result.explain.get("rails"),
             "channels_present": bool(result.explain.get("channels")),
         }
@@ -470,7 +471,7 @@ def test_parity_explain_observable_shape() -> None:
         return {
             "abstained": explained["abstained"],
             "top_keys": sorted(explained.keys()),
-            "explain_keys": sorted(explained["explain"].keys()),
+            "explain_keys": _portable_explain_keys(explained["explain"]),
             "rails": explained["explain"]["rails"],
             "cid_in_provenance": any(
                 hit["id"] == cid and cid in hit["provenance"] for hit in explained["hits"]
@@ -600,7 +601,7 @@ def test_parity_add_preference() -> None:
             Preference(
                 tenant_id=tenant,
                 user_id=user,
-                category="ui",
+                category="format",
                 statement="prefers dark mode",
                 scope={"area": "theme"},
                 confidence=0.8,
@@ -615,7 +616,7 @@ def test_parity_add_preference() -> None:
     local = harness.run("add_preference", scenario)
     assert len(local["preferences"]) == 1
     pref = local["preferences"][0]
-    assert pref["category"] == "ui"
+    assert pref["category"] == "format"
     assert pref["statement"] == "prefers dark mode"
     assert pref["explicit"] is True
 

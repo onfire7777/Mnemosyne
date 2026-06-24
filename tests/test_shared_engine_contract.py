@@ -1867,6 +1867,19 @@ def test_shared_audit_log_records_actor_source_tier_and_diff_for_every_write(
             access_policy={"tenant": tenant},
         )
     )
+    corroborating_cid = engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id=user,
+            actor="tool",
+            source_type="workflow-log",
+            source_identity="git:memory-source-truth-corroborator.md",
+            content="Independent corroborator for shared audit contract deletion.",
+            trust_tier=2,
+            capability_tags=["tool-import", "signed"],
+            access_policy={"tenant": tenant},
+        )
+    )
     assertion_id = engine.upsert_assertion(
         Assertion(
             tenant_id=tenant,
@@ -1875,7 +1888,7 @@ def test_shared_audit_log_records_actor_source_tier_and_diff_for_every_write(
             predicate="records",
             object="source tier and diff",
             confidence=0.91,
-            source_evidence_cids=[cid],
+            source_evidence_cids=[cid, corroborating_cid],
             status="active",
             trust_tier=2,
             access_policy={"tenant": tenant},
@@ -1913,7 +1926,7 @@ def test_shared_audit_log_records_actor_source_tier_and_diff_for_every_write(
     assertion_audit = next(item for item in audit_log if item["op"] == "upsert_assertion" and item["target_id"] == assertion_id)
     assert assertion_audit["source"] == "assertion"
     assert assertion_audit["trust_tier"] == 2
-    assert assertion_audit["diff"]["source_evidence_cids"] == [cid]
+    assert assertion_audit["diff"]["source_evidence_cids"] == [cid, corroborating_cid]
 
     preference_audit = next(item for item in audit_log if item["op"] == "add_preference" and item["target_id"] == preference_id)
     assert preference_audit["source"] == "preference"
