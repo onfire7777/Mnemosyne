@@ -1649,6 +1649,50 @@ def test_mcp_server_reports_residency_policy(tmp_path: Path) -> None:
     assert policy["warnings"] == []
 
 
+def test_cli_and_mcp_runtime_env_defaults_are_parsed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from mnemosyne import cli as mneme_cli
+
+    object_store = tmp_path / "env-objects"
+    object_key_store = tmp_path / "env-keys.json"
+    monkeypatch.setenv("MNEMOSYNE_OBJECT_STORE", str(object_store))
+    monkeypatch.setenv("MNEMOSYNE_OBJECT_STORE_ENCRYPTION", "aesgcm")
+    monkeypatch.setenv("MNEMOSYNE_OBJECT_KEY_STORE", str(object_key_store))
+    monkeypatch.delenv("MNEMOSYNE_OBJECT_KEY_PROVIDER", raising=False)
+    monkeypatch.setenv("MNEMOSYNE_OBJECT_KEY_COMMAND", "fake-key-command --json")
+    monkeypatch.setenv("MNEMOSYNE_OBJECT_KEY_TIMEOUT", "12.5")
+    monkeypatch.setenv("MNEMOSYNE_ALLOWED_RESIDENCIES", " local, eu ,us,, ")
+    monkeypatch.setenv("MNEMOSYNE_RUNTIME_RESIDENCY", "eu")
+    monkeypatch.setenv("MNEMOSYNE_ALLOWED_RESIDENCY_TRANSFERS", "local->eu, eu->us ,")
+    monkeypatch.setenv("MNEMOSYNE_REQUIRE_RUNTIME_RESIDENCY", "yes")
+
+    server = MnemosyneMcpServer(store_path=tmp_path / "store.json")
+    policy = server.tools.residency_policy()
+
+    assert mneme_cli.default_object_store() == str(object_store)
+    assert mneme_cli.default_object_store_encryption() == "aesgcm"
+    assert mneme_cli.default_object_key_store() == str(object_key_store)
+    assert mneme_cli.default_object_key_provider() == "command"
+    assert mneme_cli.default_object_key_command() == "fake-key-command --json"
+    assert mneme_cli.default_allowed_residencies() == ["local", "eu", "us"]
+    assert mneme_cli.default_allowed_residency_transfers() == ["local->eu", "eu->us"]
+    assert server.object_store == str(object_store)
+    assert server.object_store_encryption == "aesgcm"
+    assert server.object_key_store == str(object_key_store)
+    assert server.object_key_provider == "command"
+    assert server.object_key_command == "fake-key-command --json"
+    assert server.object_key_timeout == 12.5
+    assert server.allowed_residencies == ("local", "eu", "us")
+    assert server.runtime_residency == "eu"
+    assert server.allowed_residency_transfers == ("local->eu", "eu->us")
+    assert server.require_runtime_residency is True
+    assert policy["allowed_residencies"] == ["local", "eu", "us"]
+    assert policy["runtime_residency"] == "eu"
+    assert policy["require_runtime_residency"] is True
+    assert policy["request_runtime_residency_required"] is False
+    assert policy["allowed_residency_transfers"] == ["local->eu", "eu->us"]
+    assert policy["warnings"] == []
+
+
 def test_mcp_server_can_use_command_key_provider_for_encrypted_objects(tmp_path: Path) -> None:
     objects = tmp_path / "objects"
     command, kms_state = fake_kms_command(tmp_path)
