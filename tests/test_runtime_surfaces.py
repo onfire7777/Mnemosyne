@@ -1845,6 +1845,73 @@ def test_mcp_server_rejects_schema_invalid_json_rpc_tool_arguments(tmp_path: Pat
     assert explicit_null["result"]["isError"] is False
 
 
+def test_mcp_prepare_tool_arguments_strips_metadata_and_binds_session(tmp_path: Path) -> None:
+    server = MnemosyneMcpServer(
+        store_path=tmp_path / "store.json",
+        session_secret=MCP_SESSION_SECRET,
+        require_session=True,
+    )
+    token = mcp_session_token(session_id="prepare-tool-arguments-session")
+
+    prepared_capture = server.prepare_tool_arguments(
+        "capture",
+        {"_meta": {"session_token": token}},
+        {
+            "_meta": {"auth_token": "transport-only"},
+            "auth_token": "transport-only",
+            "tenant_id": "",
+            "user_id": USER,
+            "actor": "user",
+            "source_type": "prepare-tool-arguments",
+            "content": "Session-bound prepare_tool_arguments input.",
+            "trust_tier": 5,
+        },
+    )
+    prepared_assert = server.prepare_tool_arguments(
+        "assert_fact",
+        {"session_token": token},
+        {
+            "tenant_id": TENANT,
+            "user_id": "",
+            "subject": "prepare_tool_arguments",
+            "predicate": "binds",
+            "object_value": "session claims",
+            "source_evidence_cids": [],
+            "trust_tier": 5,
+            "role": "reader",
+            "source_trust_tier": 5,
+        },
+    )
+
+    assert "_meta" not in prepared_capture
+    assert "auth_token" not in prepared_capture
+    assert "session_token" not in prepared_capture
+    assert prepared_capture["tenant_id"] == TENANT
+    assert prepared_capture["user_id"] == USER
+    assert prepared_capture["trust_tier"] == 0
+    assert prepared_capture["source_identity"] == "prepare-tool-arguments-session"
+    assert prepared_assert["user_id"] == USER
+    assert prepared_assert["role"] == "operator"
+    assert prepared_assert["source_trust_tier"] == 0
+    assert prepared_assert["trust_tier"] == 0
+
+    with pytest.raises(PermissionError, match="session token required"):
+        server.prepare_tool_arguments("search", {}, {"tenant_id": TENANT, "query": "session required"})
+    with pytest.raises(PermissionError, match="session tenant mismatch"):
+        server.prepare_tool_arguments(
+            "capture",
+            {},
+            {
+                "session_token": token,
+                "tenant_id": "other-tenant",
+                "user_id": USER,
+                "actor": "user",
+                "source_type": "prepare-tool-arguments",
+                "content": "Mismatched tenant should fail closed.",
+            },
+        )
+
+
 def test_mcp_self_test_validates_auth_session_and_schema(tmp_path: Path) -> None:
     auth_token = "mcp-self-test-auth-token"
     report = run_self_test(
