@@ -4913,18 +4913,59 @@ def test_cli_ops_dashboard_check_validates_dashboard_package(tmp_path: Path) -> 
     assert acknowledged["ok"] is True
     assert acknowledged["expected_fingerprint_present"] is True
     assert len(report["fingerprint"]) == 64
-    assert {item["name"] for item in report["checks"]} == {
+    report_checks = {item["name"]: item for item in report["checks"]}
+    assert set(report_checks) == {
         "manifest",
         "snapshot",
+        "metric_taxonomy",
         "tripwires",
         "dashboard_html",
         "tenant",
     }
     assert report["redaction"]["raw_dashboard_html_omitted"] is True
     assert report["redaction"]["raw_manifest_json_omitted"] is True
-    assert report["checks"][3]["marker_present"] is True
+    assert report_checks["metric_taxonomy"]["missing"] == []
+    assert report_checks["dashboard_html"]["marker_present"] is True
     assert "Mnemosyne Ops Dashboard" not in serialized
     assert "Snapshot JSON" not in serialized
+
+
+def test_cli_ops_dashboard_check_rejects_metric_incomplete_package(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    package_dir = tmp_path / "dashboard-package"
+    snapshot_path = package_dir / "ops-report.json"
+    run_cli(
+        store,
+        "ops-report",
+        "--tenant",
+        TENANT,
+        "--dashboard-package-dir",
+        str(package_dir),
+    )
+    snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
+    del snapshot["report"]["counts"]["audit_events"]
+    del snapshot["report"]["tripwires"]["proxy_true_gap"]
+    snapshot_path.write_text(json.dumps(snapshot, sort_keys=True), encoding="utf-8")
+
+    result = run_raw_cli(
+        store,
+        "ops-dashboard-check",
+        "--dashboard-package-dir",
+        str(package_dir),
+        "--expected-tenant",
+        TENANT,
+    )
+    payload = json.loads(result.stdout)
+    codes = {finding["code"] for finding in payload["findings"]}
+    taxonomy = next(item for item in payload["checks"] if item["name"] == "metric_taxonomy")
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert "metric_taxonomy_incomplete" in codes
+    assert taxonomy["ok"] is False
+    assert {"counts.audit_events", "tripwires.proxy_true_gap"} <= set(taxonomy["missing"])
+    assert any("counts.audit_events" in finding["message"] for finding in payload["findings"])
+    assert any("tripwires.proxy_true_gap" in finding["message"] for finding in payload["findings"])
 
 
 def dashboard_operations_bundle(*, weak: bool = False, raw_payload: bool = False) -> dict:
