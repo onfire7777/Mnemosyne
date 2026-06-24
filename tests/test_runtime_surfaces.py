@@ -24,6 +24,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography import x509
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
+import mnemosyne.mcp_server as mcp_server
 from mnemosyne.mcp_server import (
     MnemosyneMcpServer,
     build_http_server,
@@ -1693,6 +1694,203 @@ def test_cli_and_mcp_runtime_env_defaults_are_parsed(tmp_path: Path, monkeypatch
     assert policy["warnings"] == []
 
 
+def test_mcp_server_main_dispatches_serving_modes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str, dict[str, object]]] = []
+    monkeypatch.delenv("MNEMOSYNE_MCP_SDK_STREAMABLE_HTTP", raising=False)
+
+    def record(name: str):
+        def _inner(**kwargs: object) -> None:
+            calls.append((name, dict(kwargs)))
+
+        return _inner
+
+    class DummyServer:
+        def __init__(self, **kwargs: object) -> None:
+            calls.append(("stdio_init", dict(kwargs)))
+
+        def serve(self) -> None:
+            calls.append(("stdio_serve", {}))
+
+    monkeypatch.setattr(mcp_server, "serve_sdk_stdio", record("sdk_stdio"))
+    monkeypatch.setattr(mcp_server, "serve_sdk_streamable_http", record("sdk_streamable_http"))
+    monkeypatch.setattr(mcp_server, "serve_http", record("http"))
+    monkeypatch.setattr(mcp_server, "MnemosyneMcpServer", DummyServer)
+
+    def base_args(name: str) -> list[str]:
+        return [
+            "--store",
+            str(tmp_path / f"{name}.json"),
+            "--auth-token",
+            "entrypoint-token",
+            "--session-secret",
+            "entrypoint-secret",
+            "--require-session",
+            "--stateless",
+            "--object-store",
+            str(tmp_path / f"{name}-objects"),
+            "--parametric-artifact-store",
+            str(tmp_path / f"{name}-parametric"),
+            "--allowed-residency",
+            "local",
+            "--runtime-residency",
+            "local",
+            "--allowed-residency-transfer",
+            "local->local",
+        ]
+
+    mcp_server.main(base_args("stdio"))
+    mcp_server.main(["--sdk", *base_args("sdk")])
+    mcp_server.main(
+        [
+            "--sdk-streamable-http",
+            "--http-host",
+            "0.0.0.0",
+            "--http-port",
+            "9876",
+            "--sdk-streamable-http-path",
+            "/sdk-mcp",
+            "--sdk-streamable-health-path",
+            "/sdk-health",
+            "--sdk-streamable-stateful",
+            *base_args("sdk-streamable"),
+        ]
+    )
+    mcp_server.main(
+        [
+            "--http",
+            "--http-host",
+            "127.0.0.2",
+            "--http-port",
+            "9877",
+            "--http-rpc-path",
+            "/jsonrpc",
+            "--http-health-path",
+            "/live",
+            "--http-session-exchange-path",
+            "/exchange",
+            "--http-max-body-bytes",
+            "4096",
+            *base_args("http"),
+        ]
+    )
+
+    calls_by_name = {name: kwargs for name, kwargs in calls if name != "stdio_serve"}
+    assert calls[0][0] == "stdio_init"
+    assert calls[1] == ("stdio_serve", {})
+    assert calls_by_name["stdio_init"]["store_path"] == str(tmp_path / "stdio.json")
+    assert calls_by_name["stdio_init"]["auth_token"] == "entrypoint-token"
+    assert calls_by_name["stdio_init"]["require_session"] is True
+    assert calls_by_name["stdio_init"]["stateless"] is True
+    assert calls_by_name["stdio_init"]["allowed_residencies"][-1] == "local"
+    assert calls_by_name["stdio_init"]["allowed_residency_transfers"][-1] == "local->local"
+    assert calls_by_name["sdk_stdio"]["store_path"] == str(tmp_path / "sdk.json")
+    assert calls_by_name["sdk_stdio"]["stateless"] is True
+    assert calls_by_name["sdk_streamable_http"]["host"] == "0.0.0.0"
+    assert calls_by_name["sdk_streamable_http"]["port"] == 9876
+    assert calls_by_name["sdk_streamable_http"]["streamable_http_path"] == "/sdk-mcp"
+    assert calls_by_name["sdk_streamable_http"]["health_path"] == "/sdk-health"
+    assert calls_by_name["sdk_streamable_http"]["transport_stateless"] is False
+    assert calls_by_name["sdk_streamable_http"]["stateless"] is True
+    assert calls_by_name["sdk_streamable_http"]["store_path"] == str(tmp_path / "sdk-streamable.json")
+    assert calls_by_name["http"]["host"] == "127.0.0.2"
+    assert calls_by_name["http"]["port"] == 9877
+    assert calls_by_name["http"]["rpc_path"] == "/jsonrpc"
+    assert calls_by_name["http"]["health_path"] == "/live"
+    assert calls_by_name["http"]["session_exchange_path"] == "/exchange"
+    assert calls_by_name["http"]["max_body_bytes"] == 4096
+    assert calls_by_name["http"]["store_path"] == str(tmp_path / "http.json")
+
+
+def test_mcp_server_main_rejects_combined_serving_modes(tmp_path: Path) -> None:
+    with pytest.raises(SystemExit) as exc:
+        mcp_server.main(["--store", str(tmp_path / "store.json"), "--http", "--sdk"])
+
+    assert exc.value.code == 2
+
+
+def test_sdk_streamable_builder_preserves_facade_stateless_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: dict[str, object] = {}
+
+    def module(name: str) -> object:
+        return type(sys)(name)
+
+    fastmcp_server = module("mcp.server.fastmcp.server")
+    streamable_manager = module("mcp.server.streamable_http_manager")
+    mcp_module = module("mcp")
+    mcp_server_module = module("mcp.server")
+    mcp_fastmcp_module = module("mcp.server.fastmcp")
+    starlette_module = module("starlette")
+    starlette_applications = module("starlette.applications")
+    starlette_responses = module("starlette.responses")
+    starlette_routing = module("starlette.routing")
+
+    class FakeStreamableHTTPASGIApp:
+        def __init__(self, manager: object) -> None:
+            captured["streamable_app_manager"] = manager
+
+    class FakeStreamableHTTPSessionManager:
+        def __init__(
+            self,
+            *,
+            app: object,
+            event_store: object,
+            json_response: bool,
+            stateless: bool,
+            security_settings: object,
+        ) -> None:
+            captured["manager_app"] = app
+            captured["manager_stateless"] = stateless
+
+        def run(self) -> None:
+            return None
+
+    class FakeJSONResponse:
+        def __init__(self, body: object) -> None:
+            self.body = body
+
+    class FakeRoute:
+        def __init__(self, path: str, endpoint: object, methods: list[str] | None = None) -> None:
+            self.path = path
+            self.endpoint = endpoint
+            self.methods = methods
+
+    class FakeStarlette:
+        def __init__(self, *, routes: list[object], lifespan: object) -> None:
+            self.routes = routes
+            self.lifespan = lifespan
+            self.state = type("State", (), {})()
+
+    setattr(fastmcp_server, "StreamableHTTPASGIApp", FakeStreamableHTTPASGIApp)
+    setattr(streamable_manager, "StreamableHTTPSessionManager", FakeStreamableHTTPSessionManager)
+    setattr(starlette_applications, "Starlette", FakeStarlette)
+    setattr(starlette_responses, "JSONResponse", FakeJSONResponse)
+    setattr(starlette_routing, "Route", FakeRoute)
+    monkeypatch.setitem(sys.modules, "mcp", mcp_module)
+    monkeypatch.setitem(sys.modules, "mcp.server", mcp_server_module)
+    monkeypatch.setitem(sys.modules, "mcp.server.fastmcp", mcp_fastmcp_module)
+    monkeypatch.setitem(sys.modules, "mcp.server.fastmcp.server", fastmcp_server)
+    monkeypatch.setitem(sys.modules, "mcp.server.streamable_http_manager", streamable_manager)
+    monkeypatch.setitem(sys.modules, "starlette", starlette_module)
+    monkeypatch.setitem(sys.modules, "starlette.applications", starlette_applications)
+    monkeypatch.setitem(sys.modules, "starlette.responses", starlette_responses)
+    monkeypatch.setitem(sys.modules, "starlette.routing", starlette_routing)
+
+    def fake_build_sdk_server(**kwargs: object) -> object:
+        captured["sdk_kwargs"] = dict(kwargs)
+        return "sdk-server"
+
+    monkeypatch.setattr(mcp_server, "build_sdk_server", fake_build_sdk_server)
+
+    app = build_sdk_streamable_http_app(stateless=True, store_path=tmp_path / "store.json")
+
+    assert captured["sdk_kwargs"] == {"store_path": tmp_path / "store.json", "stateless": True}
+    assert captured["manager_app"] == "sdk-server"
+    assert captured["manager_stateless"] is True
+    assert getattr(app.state, "mnemosyne_streamable_http_manager")
+
+
 def test_mcp_server_can_use_command_key_provider_for_encrypted_objects(tmp_path: Path) -> None:
     objects = tmp_path / "objects"
     command, kms_state = fake_kms_command(tmp_path)
@@ -1990,6 +2188,54 @@ def test_mcp_self_test_fails_when_session_required_without_verifier(tmp_path: Pa
     assert report["ok"] is False
     assert checks["session_signing_configured"]["ok"] is False
     assert checks["read_only_tool_call"]["ok"] is False
+
+
+def test_mcp_self_test_records_sdk_build_status(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    sdk_calls: list[dict[str, object]] = []
+
+    def sdk_success(**kwargs: object) -> object:
+        sdk_calls.append(dict(kwargs))
+        return object()
+
+    monkeypatch.setattr(mcp_server, "build_sdk_server", sdk_success)
+    report = run_self_test(store_path=tmp_path / "sdk-ok.json", sdk=True, stateless=True)
+    checks = {check["name"]: check for check in report["checks"]}
+
+    assert report["ok"] is True
+    assert report["stateless"] is True
+    assert checks["sdk_build"]["ok"] is True
+    assert sdk_calls[0]["store_path"] == tmp_path / "sdk-ok.json"
+    assert sdk_calls[0]["stateless"] is True
+
+    dsn = "postgresql://mnemosyne:p%40ss@127.0.0.1:54329/mnemosyne?sslpassword=q%40pass"
+
+    def sdk_failure(**_kwargs: object) -> object:
+        raise RuntimeError(
+            f"sdk extra unavailable for sdk-self-test-token using {dsn}; password=p%40ss; decoded=p@ss; query=q@pass"
+        )
+
+    monkeypatch.setattr(mcp_server, "build_sdk_server", sdk_failure)
+    failed = run_self_test(
+        store_path=tmp_path / "sdk-fail.json",
+        auth_token="sdk-self-test-token",
+        postgres_dsn=dsn,
+        sdk=True,
+    )
+    failed_checks = {check["name"]: check for check in failed["checks"]}
+    encoded = json.dumps(failed)
+
+    assert failed["ok"] is False
+    assert failed_checks["sdk_build"]["ok"] is False
+    assert (
+        failed_checks["sdk_build"]["error"]
+        == "sdk extra unavailable for <redacted> using <redacted>; password=<redacted>; decoded=<redacted>; query=<redacted>"
+    )
+    assert "sdk-self-test-token" not in encoded
+    assert "p%40ss" not in encoded
+    assert "p@ss" not in encoded
+    assert "q%40pass" not in encoded
+    assert "q@pass" not in encoded
+    assert dsn not in encoded
 
 
 def test_mcp_cli_self_test_reports_deployment_health(tmp_path: Path) -> None:
