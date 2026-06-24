@@ -990,6 +990,33 @@ class LocalMemoryEngine:
                 return {"erased": False, "reason": "evidence_not_found", "cid": cid, "erasure_mode": mode.value}
             derived_cids = self._derived_evidence_cids_forget(tenant_id, branch, cid)
             affected_cids = {cid, *derived_cids}
+            if mode is ErasureMode.HARD_DELETE_LEGAL and requested_by != "legal":
+                # §31 RAIL-2 / FR-8 (min_corroboration_for_delete): an operator-initiated
+                # hard delete must not strand a projection. Refuse when removing this source
+                # (and its derived footprint) would leave an active assertion with no
+                # surviving support and fewer than `min_corroboration_for_delete` distinct
+                # independent sources. A legal right-to-be-forgotten erasure
+                # (requested_by="legal") is corroboration-blind and shreds regardless.
+                minimum = self.policy.min_corroboration_for_delete
+                blocking = [
+                    assertion.id
+                    for assertion in self.assertions.values()
+                    if assertion.tenant_id == tenant_id
+                    and assertion.branch == branch
+                    and assertion.status == "active"
+                    and affected_cids & set(assertion.source_evidence_cids)
+                    and not (set(assertion.source_evidence_cids) - affected_cids)
+                    and len(set(assertion.source_evidence_cids)) < minimum
+                ]
+                if blocking:
+                    return {
+                        "erased": False,
+                        "reason": "min_corroboration_for_delete",
+                        "cid": cid,
+                        "erasure_mode": mode.value,
+                        "min_corroboration_for_delete": minimum,
+                        "blocking_assertions": blocking,
+                    }
             if mode is ErasureMode.HARD_DELETE_LEGAL:
                 self.evidence.pop(key, None)
                 for derived_cid in derived_cids:

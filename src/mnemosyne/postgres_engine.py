@@ -132,6 +132,7 @@ class PostgresEngine:
         )
         cid_bytes = _cid_to_bytes(cid)
         if ev.embedding is not None:
+            metadata["_mnemosyne_embedding_explicit"] = True
             embedding = _vector_literal(ev.embedding)
         else:
             embedding = _vector_literal(self.adapters.embedding.embed(ev.content)) if ev.content else None
@@ -223,11 +224,18 @@ class PostgresEngine:
                 cur.execute(
                     """
                     UPDATE evidence
-                    SET embedding = %s::vector
+                    SET embedding = %s::vector,
+                        metadata = COALESCE(metadata, '{}'::jsonb) || %s::jsonb
                     WHERE tenant_id = %s AND branch = %s AND cid = %s AND erased = false
                     RETURNING source_type, trust_tier, capability_tags
                     """,
-                    (_vector_literal(embedding), db_tenant_id, branch, _cid_to_bytes(cid)),
+                    (
+                        _vector_literal(embedding),
+                        self._jsonb({"_mnemosyne_embedding_explicit": True}),
+                        db_tenant_id,
+                        branch,
+                        _cid_to_bytes(cid),
+                    ),
                 )
                 row = cur.fetchone()
                 if row is None:
@@ -271,7 +279,7 @@ class PostgresEngine:
                 if row is None:
                     return False
                 metadata = dict(row["metadata"] or {})
-                before_keys = sorted(metadata.keys())
+                before_keys = sorted(_public_evidence_metadata(metadata).keys())
                 metadata.update(metadata_patch)
                 cur.execute(
                     """
@@ -291,7 +299,7 @@ class PostgresEngine:
                         "branch": branch,
                         "patch": metadata_patch,
                         "before_keys": before_keys,
-                        "after_keys": sorted(metadata.keys()),
+                        "after_keys": sorted(_public_evidence_metadata(metadata).keys()),
                         "source_type": row["source_type"],
                     },
                     source=source,
@@ -1399,6 +1407,33 @@ class PostgresEngine:
                             changed = True
                 affected_cid_bytes = [cid_bytes, *derived_cid_bytes]
                 propagated["erased_derived_evidence"] = derived_cids
+                if mode is ErasureMode.HARD_DELETE_LEGAL and requested_by != "legal":
+                    minimum = self.policy.min_corroboration_for_delete
+                    cur.execute(
+                        """
+                        SELECT id, source_evidence_cids
+                        FROM assertions
+                        WHERE tenant_id = %s
+                          AND branch = %s
+                          AND status = 'active'
+                          AND source_evidence_cids && %s
+                        """,
+                        (db_tenant_id, branch, affected_cid_bytes),
+                    )
+                    blocking: list[str] = []
+                    for row in cur.fetchall():
+                        sources = set(_bytes_list_to_cids(row["source_evidence_cids"]))
+                        if sources and sources <= affected_cids and len(sources) < minimum:
+                            blocking.append(str(row["id"]))
+                    if blocking:
+                        return {
+                            "erased": False,
+                            "reason": "min_corroboration_for_delete",
+                            "cid": cid,
+                            "erasure_mode": mode.value,
+                            "min_corroboration_for_delete": minimum,
+                            "blocking_assertions": blocking,
+                        }
                 if mode is ErasureMode.HARD_DELETE_LEGAL:
                     cur.execute(
                         """
@@ -1546,7 +1581,16 @@ class PostgresEngine:
                 evidence = [_row_to_evidence(row, _bytes_to_cid(row["cid"])).to_dict() for row in cur.fetchall()]
                 cur.execute(
                     """
-                    SELECT a.*, t.name AS tenant_name
+                    SELECT a.*, t.name AS tenant_name,
+                           (
+                             SELECT ev.metadata->>'_external_user_id'
+                             FROM evidence ev
+                             WHERE ev.tenant_id = a.tenant_id
+                               AND ev.branch = a.branch
+                               AND ev.cid = ANY(a.source_evidence_cids)
+                             ORDER BY ev.created_at, ev.cid
+                             LIMIT 1
+                           ) AS external_user_id
                     FROM assertions a
                     JOIN tenants t ON t.id = a.tenant_id
                     WHERE a.tenant_id = %s
@@ -1558,7 +1602,15 @@ class PostgresEngine:
                 relations = [_row_to_relation(row, tenant_id).to_dict() for row in cur.fetchall()]
                 cur.execute(
                     """
-                    SELECT p.*, t.name AS tenant_name
+                    SELECT p.*, t.name AS tenant_name,
+                           (
+                             SELECT ev.metadata->>'_external_user_id'
+                             FROM evidence ev
+                             WHERE ev.tenant_id = p.tenant_id
+                               AND ev.cid = ANY(p.source_evidence_cids)
+                             ORDER BY ev.created_at, ev.cid
+                             LIMIT 1
+                           ) AS external_user_id
                     FROM preferences p
                     JOIN tenants t ON t.id = p.tenant_id
                     WHERE p.tenant_id = %s
@@ -1618,7 +1670,6 @@ class PostgresEngine:
                         "memory_type": row["memory_type"],
                         "scores": [float(score) for score in row["scores"]],
                         "target_coverage": float(row["target_coverage"]),
-                        "updated_at": dt_to_json(row["updated_at"]),
                     }
                     for row in cur.fetchall()
                 ]
@@ -1641,7 +1692,7 @@ class PostgresEngine:
                         "type": row["type"],
                         "summary": row["summary"],
                         "salience": float(row["salience"]),
-                        "aliases": list(row["aliases"]),
+                        "aliases": sorted(row["aliases"]),
                         "source_evidence_cids": _bytes_list_to_cids(row["source_evidence_cids"]),
                         "access_policy": dict(row["access_policy"] or {}),
                         "updated_at": dt_to_json(row["updated_at"]),
@@ -2174,10 +2225,12 @@ def _json_safe(value: Any) -> Any:
 def _row_to_audit_log(row: Any) -> dict[str, Any]:
     data = _json_safe(dict(row))
     diff = data.get("diff")
-    if not data.get("target_id") and isinstance(diff, dict) and diff.get("target_id"):
-        data["target_id"] = diff["target_id"]
-    if isinstance(diff, dict) and "source" in diff:
-        data.setdefault("source", diff["source"])
+    if isinstance(diff, dict):
+        if not data.get("target_id") and diff.get("target_id"):
+            data["target_id"] = diff["target_id"]
+        data["diff"] = {key: value for key, value in diff.items() if key != "target_id"}
+        if "source" in diff:
+            data.setdefault("source", diff["source"])
     return data
 
 
@@ -2251,8 +2304,26 @@ def _vector_from_db(value: Any) -> list[float] | None:
     return None
 
 
+_INTERNAL_EVIDENCE_METADATA_KEYS = {
+    "_external_tenant_id",
+    "_external_user_id",
+    "_external_session_id",
+    "_mnemosyne_embedding_explicit",
+}
+
+
+def _public_evidence_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in metadata.items()
+        if key not in _INTERNAL_EVIDENCE_METADATA_KEYS
+    }
+
+
 def _row_to_evidence(row: dict[str, Any], cid: str) -> Evidence:
     metadata = dict(row["metadata"] or {})
+    explicit_embedding = bool(metadata.get("_mnemosyne_embedding_explicit"))
+    public_metadata = _public_evidence_metadata(metadata)
     return Evidence(
         tenant_id=str(row.get("tenant_name") or metadata.get("_external_tenant_id") or row["tenant_id"]),
         user_id=str(metadata.get("_external_user_id") or row["user_id"]),
@@ -2261,10 +2332,10 @@ def _row_to_evidence(row: dict[str, Any], cid: str) -> Evidence:
         source_identity=row["source_identity"],
         session_id=str(metadata.get("_external_session_id") or row["session_id"]) if row["session_id"] else None,
         content=row["content"] or "",
-        metadata=metadata,
+        metadata=public_metadata,
         content_pointer=row["content_pointer"],
         modality=row["modality"],
-        embedding=_vector_from_db(row.get("embedding")),
+        embedding=_vector_from_db(row.get("embedding")) if explicit_embedding else None,
         signed_provenance=dict(row["signed_provenance"]) if row["signed_provenance"] else None,
         trust_tier=row["trust_tier"],
         capability_tags=list(row["capability_tags"] or []),
@@ -2281,7 +2352,7 @@ def _row_to_assertion(row: dict[str, Any]) -> Assertion:
     return Assertion(
         id=str(row["id"]),
         tenant_id=str(row.get("tenant_name") or row["tenant_id"]),
-        user_id=str(row["user_id"]) if row["user_id"] else None,
+        user_id=str(row.get("external_user_id") or row["user_id"]) if row["user_id"] else None,
         branch=row["branch"],
         subject=row["subject"],
         predicate=row["predicate"],
@@ -2326,13 +2397,13 @@ def _row_to_preference(row: dict[str, Any], tenant_id: str) -> Preference:
     return Preference(
         id=str(row["id"]),
         tenant_id=tenant_id,
-        user_id=str(row["user_id"]),
+        user_id=str(row.get("external_user_id") or row["user_id"]),
         category=row["category"],
         statement=row["statement"],
         scope=dict(row["scope"] or {}),
         confidence=float(row["confidence"]),
         explicit=bool(row["explicit"]),
-        exceptions=dict(row["exceptions"] or {}),
+        exceptions=row["exceptions"] if row["exceptions"] is not None else {},
         source_evidence_cids=_bytes_list_to_cids(row["source_evidence_cids"]),
         valid_from=parse_dt(row["valid_from"]) or utc_now(),
         valid_to=parse_dt(row["valid_to"]),

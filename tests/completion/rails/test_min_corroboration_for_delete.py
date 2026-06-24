@@ -12,14 +12,9 @@ Enforcement point that SHOULD exist: ``LocalMemoryEngine.forget`` /
 src/mnemosyne/postgres_engine.py:1328) when ``erasure_mode`` is
 ``ErasureMode.HARD_DELETE_LEGAL``.
 
-Current state (gap): ``forget`` performs the hard delete unconditionally. There
-is no ``min_corroboration_for_delete`` constant anywhere in ``src/mnemosyne``
-(``grep -rn min_corroboration src`` is empty), and ``forget`` never counts the
-independent sources backing the affected assertions before popping the evidence.
-The rate/metric gate in ``parametric.py`` does not cover deletes at all.
-
-=> The breach test below is xfail(strict) until Codex adds a corroboration count
-check to the HARD_DELETE_LEGAL branch of ``forget``.
+Current state: ``forget`` refuses operator hard deletes that would remove the
+sole support for an active assertion. Legal/right-to-be-forgotten erasures remain
+corroboration-blind.
 """
 
 from __future__ import annotations
@@ -54,25 +49,12 @@ def _fact_with_single_source(engine):
     return only_cid
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "RAIL 2 NOT STRUCTURALLY ENFORCED. Missing enforcement point: "
-        "LocalMemoryEngine.forget (engine.py:887) HARD_DELETE_LEGAL branch deletes "
-        "evidence with zero corroboration counting. No `min_corroboration_for_delete` "
-        "constant exists in src/mnemosyne. Codex must gate the HARD_DELETE_LEGAL path "
-        "on >=2 independent sources for any assertion that loses ALL its support, "
-        "raising/refusing otherwise."
-    ),
-)
 def test_hard_delete_of_sole_source_is_refused_without_corroboration():
     """Attempt to legally hard-delete the ONLY evidence backing an active,
     uncorroborated assertion. The rail requires >=2 independent sources before a
     hard delete; with a single source this must be refused.
 
-    We assert refusal as: forget reports ``erased == False`` OR raises. Today it
-    returns ``erased == True`` and silently retracts the assertion, so this
-    xfails until enforcement lands.
+    We assert refusal as: forget reports ``erased == False`` OR raises.
     """
 
     engine = fresh_engine()

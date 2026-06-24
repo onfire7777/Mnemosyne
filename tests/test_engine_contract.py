@@ -254,6 +254,117 @@ def test_forget_retracts_single_source_assertions_but_keeps_independent_evidence
     assert engine.get_evidence(TENANT, first) is None
 
 
+def test_operator_hard_delete_of_sole_uncorroborated_source_is_refused() -> None:
+    """§31 RAIL-2 / FR-8: an operator hard-delete that would strand a sole,
+    uncorroborated active assertion must be refused by the
+    ``min_corroboration_for_delete`` gate (>= 2 distinct independent sources)."""
+    engine = LocalMemoryEngine()
+    assert engine.policy.min_corroboration_for_delete == 2
+    cid = engine.append_evidence(
+        Evidence(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="chat",
+            content="Sole uncorroborated source backing a fact.",
+            trust_tier=0,
+            access_policy={"tenant": TENANT},
+        )
+    )
+    assertion_id = engine.upsert_assertion(
+        Assertion(
+            tenant_id=TENANT,
+            user_id=USER,
+            subject="secret",
+            predicate="is",
+            object="value",
+            source_evidence_cids=[cid],
+            confidence=0.9,
+            status="active",
+            trust_tier=0,
+            access_policy={"tenant": TENANT},
+        )
+    )
+
+    result = engine.forget(TENANT, cid, requested_by="operator", erasure_mode="hard_delete_legal")
+
+    assert result["erased"] is False
+    assert result["reason"] == "min_corroboration_for_delete"
+    assert assertion_id in result["blocking_assertions"]
+    # Refusal must not mutate the store: evidence + assertion survive.
+    assert engine.get_evidence(TENANT, cid) is not None
+    record = next(item for item in engine.export_tenant(TENANT)["assertions"] if item["id"] == assertion_id)
+    assert record["status"] == "active"
+
+
+def test_legal_erasure_is_corroboration_blind_even_for_sole_source() -> None:
+    """§31 RAIL-2 carve-out: a legal/right-to-be-forgotten erasure
+    (``requested_by='legal'``) is corroboration-blind and shreds regardless."""
+    engine = LocalMemoryEngine()
+    cid = engine.append_evidence(
+        Evidence(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="chat",
+            content="Sole source subject to a legal erasure request.",
+            trust_tier=0,
+            access_policy={"tenant": TENANT},
+        )
+    )
+    engine.upsert_assertion(
+        Assertion(
+            tenant_id=TENANT,
+            user_id=USER,
+            subject="legal-subject",
+            predicate="is",
+            object="value",
+            source_evidence_cids=[cid],
+            confidence=0.9,
+            status="active",
+            trust_tier=0,
+            access_policy={"tenant": TENANT},
+        )
+    )
+
+    result = engine.forget(TENANT, cid, requested_by="legal", erasure_mode="hard_delete_legal")
+
+    assert result["erased"] is True
+    assert engine.get_evidence(TENANT, cid) is None
+
+
+def test_operator_hard_delete_permitted_when_corroborated_by_two_sources() -> None:
+    """§31 RAIL-2 positive control: deleting one of two independent sources is
+    permitted because the fact survives on the remaining source (trim, not strand)."""
+    engine = LocalMemoryEngine()
+    cid_a = engine.append_evidence(
+        Evidence(tenant_id=TENANT, user_id=USER, actor="user", source_type="chat", content="Receipt A.", trust_tier=0, access_policy={"tenant": TENANT})
+    )
+    cid_b = engine.append_evidence(
+        Evidence(tenant_id=TENANT, user_id=USER, actor="user", source_type="chat", content="Bank statement B.", trust_tier=0, access_policy={"tenant": TENANT})
+    )
+    engine.upsert_assertion(
+        Assertion(
+            tenant_id=TENANT,
+            user_id=USER,
+            subject="invoice",
+            predicate="is",
+            object="paid",
+            source_evidence_cids=[cid_a, cid_b],
+            confidence=0.9,
+            status="active",
+            trust_tier=0,
+            access_policy={"tenant": TENANT},
+        )
+    )
+
+    result = engine.forget(TENANT, cid_a, requested_by="operator", erasure_mode="hard_delete_legal")
+
+    assert result["erased"] is True
+    assert engine.get_evidence(TENANT, cid_a) is None
+    assert engine.get_evidence(TENANT, cid_b) is not None
+
+
 def test_hard_delete_erasure_removes_evidence_row_and_logs_mode() -> None:
     engine = LocalMemoryEngine()
     cid = engine.append_evidence(

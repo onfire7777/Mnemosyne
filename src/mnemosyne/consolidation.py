@@ -127,6 +127,7 @@ class ConsolidationWorker:
         min_corroboration: int = 1,
         consolidation_min_interval_seconds: float = 0.0,
         consolidation_min_steps: int = 0,
+        max_prune_fraction_per_pass: float = 0.02,
         clock: "Callable[[], datetime] | None" = None,
     ):
         self.engine = engine

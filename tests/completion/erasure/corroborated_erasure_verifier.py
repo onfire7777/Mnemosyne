@@ -396,9 +396,8 @@ class CorroboratedErasureVerifier:
         )
 
     def case_c_operator_delete_sole_uncorroborated_gate(self) -> CaseResult:
-        """Strict-xfail: the corroboration rail (>=2 sources before a destructive
-        delete) is NOT enforced. We attempt an operator deletion of a sole,
-        uncorroborated source and assert the gate REFUSES it. Today it does not.
+        """The corroboration rail refuses destructive operator deletion when it
+        would strand a sole-source active assertion.
         """
         cid_d = self.capture("Sole uncorroborated source D: secret claim.", source_type="chat")
         aid = self.assert_fact("secret", "claim", "value-D", [cid_d])
@@ -418,7 +417,6 @@ class CorroboratedErasureVerifier:
             "assertion_after_status": after["status"] if after else "GONE",
             "sole_source_cid": cid_d,
         }
-        # The gate is supposed to refuse. Today it does NOT (erased=True) -> breach.
         passed = refused
         return CaseResult(
             name="c_operator_delete_sole_uncorroborated_blocked",
@@ -431,17 +429,11 @@ class CorroboratedErasureVerifier:
             observed=observed,
             passed=passed,
             status="ok" if passed else "breach_unenforced",
-            missing_enforcement=(
-                "NO min_corroboration_for_delete gate exists. Add a corroboration count "
-                "to the HARD_DELETE_LEGAL branch of LocalMemoryEngine.forget "
-                "(src/mnemosyne/engine.py:903) and PostgresMemoryEngine.forget "
-                "(src/mnemosyne/postgres_engine.py:~1328): before popping evidence, for every "
-                "active assertion that would lose ALL support, count its DISTINCT independent "
-                "source_evidence_cids; if < 2 (constant min_corroboration_for_delete=2, which "
-                "is absent from src/mnemosyne entirely), refuse the delete (return "
-                "{'erased': False, 'reason': 'min_corroboration_for_delete'} or raise "
-                "PermissionError). Mirror the OperatingPolicy.immutable_rails entry. The "
-                "facade MemoryTools.forget (mcp_tools.py:711) must surface the refusal."
+            missing_enforcement=None
+            if passed
+            else (
+                "min_corroboration_for_delete is not enforced for destructive operator "
+                "deletion of a sole-source active assertion."
             ),
         )
 

@@ -12,13 +12,8 @@ Four cases:
   (a) corroborated projection -> erase ONE source -> RETAINED + provenance trimmed.
   (b) sole-source projection  -> erase it        -> RETRACTED / tombstoned.
   (c) operator delete of a sole, uncorroborated source -> MUST be refused by a
-      ``min_corroboration_for_delete`` gate. NOT enforced today => xfail(strict).
+      ``min_corroboration_for_delete`` gate.
   (d) legal / right-to-be-forgotten erasure is corroboration-blind and shreds.
-
-Like the sibling ``tests/completion/rails`` suite, the (c) breach is
-``xfail(strict=True)``: it is a live TODO. When Codex wires the gate in
-``src/mnemosyne`` the test flips to XPASS and the strict marker turns that into a
-failure, forcing the xfail note to be removed.
 """
 
 from __future__ import annotations
@@ -64,25 +59,8 @@ def test_b_sole_source_projection_is_retracted(verifier):
     assert result.passed, result.observed
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "§31 RAIL 2 / min_corroboration_for_delete NOT ENFORCED. Operator deletion of a "
-        "sole, uncorroborated source is permitted (forget returns erased=True). Missing "
-        "enforcement: a corroboration count in the HARD_DELETE_LEGAL branch of "
-        "LocalMemoryEngine.forget (src/mnemosyne/engine.py:903) + "
-        "PostgresMemoryEngine.forget (postgres_engine.py:~1328). No "
-        "`min_corroboration_for_delete` constant exists anywhere in src/mnemosyne. The "
-        "engine must, before popping evidence, refuse when an active assertion would lose "
-        "ALL support and is backed by < 2 distinct independent sources, and "
-        "MemoryTools.forget (mcp_tools.py:711) must surface that refusal. "
-        "Consistent with tests/completion/rails/test_min_corroboration_for_delete.py."
-    ),
-)
 def test_c_operator_delete_of_sole_uncorroborated_source_is_blocked(verifier):
     result = verifier.case_c_operator_delete_sole_uncorroborated_gate()
-    # The gate SHOULD refuse the delete. Today it does not => this assertion fails
-    # => xfail. When the gate lands, refusal becomes True => XPASS => strict fail.
     assert result.observed["refused_by_corroboration_gate"] is True, result.observed
     assert result.passed, result.observed
 
@@ -103,15 +81,14 @@ def test_d_legal_erasure_is_corroboration_blind_and_shreds(verifier):
 
 
 def test_full_audit_report_is_emitted_and_self_consistent(verifier):
-    """The whole audit runs, emits a machine-readable report, and the only
-    non-passing case is the known (c) breach (status=breach_unenforced)."""
+    """The whole audit runs, emits a machine-readable report, and every
+    corroborated-erasure invariant is enforced."""
     report = verifier.run().to_dict()
     summary = report["summary"]
     assert summary["total"] == 4, report
     assert summary["errors"] == 0, report
-    # Exactly one known unenforced breach: case (c).
-    assert summary["breach_unenforced"] == 1, report
+    assert summary["breach_unenforced"] == 0, report
     assert summary["all_enforced_invariants_hold"] is True, report
     names = {c["name"]: c for c in report["cases"]}
-    assert names["c_operator_delete_sole_uncorroborated_blocked"]["status"] == "breach_unenforced"
-    assert names["c_operator_delete_sole_uncorroborated_blocked"]["missing_enforcement"]
+    assert names["c_operator_delete_sole_uncorroborated_blocked"]["status"] == "ok"
+    assert names["c_operator_delete_sole_uncorroborated_blocked"]["missing_enforcement"] is None
