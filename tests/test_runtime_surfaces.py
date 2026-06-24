@@ -575,6 +575,129 @@ def test_memory_tools_direct_confirm_promotes_proposal_branch() -> None:
     assert main_assertion["source_evidence_cids"] == [cid]
 
 
+def test_memory_tools_direct_branch_merge_discard_facades() -> None:
+    engine = LocalMemoryEngine()
+    tools = MemoryTools(engine)
+    initial_audit_count = len(engine.audit_log)
+
+    with pytest.raises(PermissionError, match="branch writes require normal-or-stronger source trust"):
+        tools.branch("denied-direct-branch", role="agent", source_trust_tier=4, tenant_id=TENANT)
+    denied_export = engine.export_all()
+    assert "denied-direct-branch" not in engine.branches
+    assert not any(item["name"] == "denied-direct-branch" for item in denied_export["branches"])
+    assert not any(
+        item.get("branch") == "denied-direct-branch"
+        for section in ("evidence", "assertions", "relations")
+        for item in denied_export[section]
+    )
+    assert len(engine.audit_log) == initial_audit_count
+    with pytest.raises(PermissionError, match="branch promotion requires operator/consolidator authority"):
+        tools.merge("denied-direct-merge", role="reader", source_trust_tier=0, tenant_id=TENANT)
+    with pytest.raises(PermissionError, match="branch promotion requires operator/consolidator authority"):
+        tools.discard("denied-direct-discard", role="reader", source_trust_tier=0, tenant_id=TENANT)
+    assert len(engine.audit_log) == initial_audit_count
+
+    tools.branch(
+        "low-trust-promotion-branch",
+        role="operator",
+        source_trust_tier=0,
+        tenant_id=TENANT,
+    )
+    low_trust_cid = engine.append_evidence(
+        Evidence(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="direct-low-trust-branch",
+            content="Low-trust branch promotion denial must not mutate main or branch state.",
+            trust_tier=1,
+            access_policy={"tenant": TENANT},
+        ),
+        branch="low-trust-promotion-branch",
+    )
+    low_trust_audit_count = len(engine.audit_log)
+    with pytest.raises(PermissionError, match="branch promotion requires operator/consolidator authority"):
+        tools.merge("low-trust-promotion-branch", role="operator", source_trust_tier=3, tenant_id=TENANT)
+    assert engine.get_evidence(TENANT, low_trust_cid, branch="main") is None
+    assert engine.get_evidence(TENANT, low_trust_cid, branch="low-trust-promotion-branch") is not None
+    assert "low-trust-promotion-branch" in engine.branches
+    assert len(engine.audit_log) == low_trust_audit_count
+    with pytest.raises(PermissionError, match="branch promotion requires operator/consolidator authority"):
+        tools.discard("low-trust-promotion-branch", role="operator", source_trust_tier=3, tenant_id=TENANT)
+    assert engine.get_evidence(TENANT, low_trust_cid, branch="low-trust-promotion-branch") is not None
+    assert "low-trust-promotion-branch" in engine.branches
+    assert len(engine.audit_log) == low_trust_audit_count
+
+    branched = tools.branch(
+        "direct-merge-branch",
+        role="operator",
+        source_trust_tier=0,
+        kind="proposal",
+        tenant_id=TENANT,
+    )
+    branch_cid = engine.append_evidence(
+        Evidence(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="direct-branch",
+            content="Direct branch facade evidence moves to main.",
+            trust_tier=1,
+            access_policy={"tenant": TENANT},
+        ),
+        branch="direct-merge-branch",
+    )
+    merged = tools.merge(
+        "direct-merge-branch",
+        role="operator",
+        source_trust_tier=0,
+        tenant_id=TENANT,
+    )
+
+    discard_branch = tools.branch(
+        "direct-discard-branch",
+        role="operator",
+        source_trust_tier=0,
+        tenant_id=TENANT,
+    )
+    discard_cid = engine.append_evidence(
+        Evidence(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="direct-discard",
+            content="Direct discard facade evidence stays off main.",
+            trust_tier=1,
+            access_policy={"tenant": TENANT},
+        ),
+        branch="direct-discard-branch",
+    )
+    discarded = tools.discard(
+        "direct-discard-branch",
+        role="operator",
+        source_trust_tier=0,
+        tenant_id=TENANT,
+    )
+
+    assert branched["branch"] == "direct-merge-branch"
+    assert branched["from"] == "main"
+    assert branched["kind"] == "proposal"
+    assert branched["security"]["allowed"] is True
+    assert merged["from_branch"] == "direct-merge-branch"
+    assert merged["into_branch"] == "main"
+    assert merged["evidence_added"] >= 1
+    assert merged["security"]["allowed"] is True
+    assert engine.get_evidence(TENANT, branch_cid, branch="main") is not None
+    assert discard_branch["branch"] == "direct-discard-branch"
+    assert discarded["discarded"] == "direct-discard-branch"
+    assert discarded["tenant_id"] == TENANT
+    assert discarded["security"]["allowed"] is True
+    assert engine.get_evidence(TENANT, discard_cid, branch="direct-discard-branch") is None
+    assert engine.get_evidence(TENANT, discard_cid, branch="main") is None
+    assert "direct-discard-branch" not in engine.branches
+    assert not any(item["name"] == "direct-discard-branch" for item in engine.export_all()["branches"])
+
+
 def test_memory_tools_direct_assert_fact_and_preference_write_paths() -> None:
     engine = LocalMemoryEngine()
     tools = MemoryTools(engine)

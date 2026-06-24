@@ -23,6 +23,7 @@ from mnemosyne.jobs import (
 )
 from mnemosyne.media import MEDIA_EXTRACT_JOB
 from mnemosyne.models import Assertion, Contradiction, Evidence, Hit, Justification, Preference, Relation
+from mnemosyne.mcp_tools import MemoryTools
 from mnemosyne.observability import MetricsRegistry
 from mnemosyne.postgres_engine import PostgresEngine
 from mnemosyne.privacy import ErasureMode
@@ -1398,6 +1399,81 @@ def test_shared_engine_contract_branches_and_discards(engine_bundle: tuple[Any, 
     _discard(engine, "candidate", tenant)
 
     assert engine.get_evidence(tenant, cid, branch="candidate") is None
+
+
+def test_shared_engine_contract_memory_tools_branch_facades(engine_bundle: tuple[Any, str, str]) -> None:
+    engine, tenant, user = engine_bundle
+    tools = MemoryTools(engine)
+    denied_branch = f"shared-facade-denied-{uuid4()}"
+    merge_branch = f"shared-facade-merge-{uuid4()}"
+    discard_branch = f"shared-facade-discard-{uuid4()}"
+
+    with pytest.raises(PermissionError, match="branch writes require normal-or-stronger source trust"):
+        tools.branch(denied_branch, role="agent", source_trust_tier=4, tenant_id=tenant)
+    assert not any(
+        item["tenant_id"] == tenant and item["name"] == denied_branch
+        for item in engine.export_all()["branches"]
+    )
+
+    created = tools.branch(merge_branch, role="operator", source_trust_tier=0, tenant_id=tenant)
+    merge_cid = engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id=user,
+            actor="user",
+            source_type="shared-facade-merge",
+            content="Shared engine facade branch evidence moves to main.",
+            trust_tier=1,
+            access_policy={"tenant": tenant},
+        ),
+        branch=merge_branch,
+    )
+
+    with pytest.raises(PermissionError, match="branch promotion requires operator/consolidator authority"):
+        tools.merge(merge_branch, role="operator", source_trust_tier=3, tenant_id=tenant)
+    assert engine.get_evidence(tenant, merge_cid, branch="main") is None
+    assert engine.get_evidence(tenant, merge_cid, branch=merge_branch) is not None
+
+    merged = tools.merge(merge_branch, role="operator", source_trust_tier=0, tenant_id=tenant)
+
+    discard_created = tools.branch(discard_branch, role="operator", source_trust_tier=0, tenant_id=tenant)
+    discard_cid = engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id=user,
+            actor="user",
+            source_type="shared-facade-discard",
+            content="Shared engine facade discard evidence stays off main.",
+            trust_tier=1,
+            access_policy={"tenant": tenant},
+        ),
+        branch=discard_branch,
+    )
+
+    with pytest.raises(PermissionError, match="branch promotion requires operator/consolidator authority"):
+        tools.discard(discard_branch, role="operator", source_trust_tier=3, tenant_id=tenant)
+    assert engine.get_evidence(tenant, discard_cid, branch=discard_branch) is not None
+
+    discarded = tools.discard(discard_branch, role="operator", source_trust_tier=0, tenant_id=tenant)
+
+    assert created["branch"] == merge_branch
+    assert created["tenant_id"] == tenant
+    assert created["security"]["allowed"] is True
+    assert merged["from_branch"] == merge_branch
+    assert merged["into_branch"] == "main"
+    assert merged["evidence_added"] >= 1
+    assert merged["security"]["allowed"] is True
+    assert engine.get_evidence(tenant, merge_cid, branch="main") is not None
+    assert discard_created["branch"] == discard_branch
+    assert discarded["discarded"] == discard_branch
+    assert discarded["tenant_id"] == tenant
+    assert discarded["security"]["allowed"] is True
+    assert engine.get_evidence(tenant, discard_cid, branch=discard_branch) is None
+    assert engine.get_evidence(tenant, discard_cid, branch="main") is None
+    assert not any(
+        item["tenant_id"] == tenant and item["name"] == discard_branch
+        for item in engine.export_all()["branches"]
+    )
 
 
 def test_shared_engine_contract_branch_names_are_tenant_scoped(engine_bundle: tuple[Any, str, str]) -> None:
