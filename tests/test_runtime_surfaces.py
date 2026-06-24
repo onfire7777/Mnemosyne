@@ -553,6 +553,20 @@ def test_memory_tools_direct_profile_graph_learning_facade_methods() -> None:
             access_policy={"tenant": TENANT},
         )
     )
+    superseded_source_id = engine.upsert_assertion(
+        Assertion(
+            tenant_id=TENANT,
+            user_id=USER,
+            subject="Direct facade supersede",
+            predicate="tracks",
+            object="old wrapper behavior",
+            confidence=0.75,
+            source_evidence_cids=[cid],
+            status="active",
+            trust_tier=1,
+            access_policy={"tenant": TENANT},
+        )
+    )
     engine.add_relation(
         Relation(
             tenant_id=TENANT,
@@ -585,6 +599,15 @@ def test_memory_tools_direct_profile_graph_learning_facade_methods() -> None:
         context={"surface": "mcp-tools"},
     )
     profile = tools.profile_get_relevant(TENANT, USER, {"surface": "mcp-tools"})
+    profile_context = tools.profile_context(TENANT, USER, {"surface": "mcp-tools"})
+    superseded = tools.supersede(
+        TENANT,
+        USER,
+        superseded_source_id,
+        {"object": "new wrapper behavior", "source_evidence_cids": [cid]},
+        role="operator",
+        source_trust_tier=0,
+    )
     neighbors = tools.graph_neighbors(TENANT, ["direct"], k=4)
     graph_query = tools.graph_query(TENANT, ["direct"], hops=2, k=4)
     timeline = tools.graph_timeline(TENANT, "Direct facade")
@@ -604,9 +627,37 @@ def test_memory_tools_direct_profile_graph_learning_facade_methods() -> None:
         -1.0,
         "direct-facade-v1",
     )
+    alias_trajectory = tools.trajectory_record(
+        TENANT,
+        USER,
+        "direct-facade-alias-session",
+        "direct facade alias coverage",
+        [{"status": "failed", "error": "alias drift"}],
+        "failure",
+        -1.0,
+        "direct-facade-v2",
+    )
     attribution = tools.trajectory_attribute(trajectory["id"])
     lesson = tools.lesson_induce(trajectory["id"])
     procedure = tools.procedure_induce(lesson["id"])
+    alias_lesson = tools.lesson_propose(alias_trajectory["id"])
+    alias_procedure = tools.procedure_propose(alias_lesson["id"])
+    promoted_lesson = tools.lesson_promote(
+        alias_lesson["id"],
+        cases=[
+            {
+                "id": "direct-facade-alias-lesson",
+                "signature": "direct facade alias coverage",
+                "query": "alias drift verify with tools",
+                "expected_substring": "verify with tools",
+                "protected": True,
+            }
+        ],
+        role="operator",
+        source_trust_tier=0,
+    )
+    lesson_lookup = tools.lesson_search("alias drift", tenant_id=TENANT, status="active")
+    procedure_lookup = tools.procedure_search("alias-drift", tenant_id=TENANT)
     validated = tools.procedure_validate(
         procedure["id"],
         role="operator",
@@ -629,6 +680,9 @@ def test_memory_tools_direct_profile_graph_learning_facade_methods() -> None:
     assert inferred["security"]["allowed"] is True
     assert corrected["corrects"] == recorded["id"]
     assert any("facade" in item["statement"] for item in profile["authoritative"])
+    assert profile_context["authoritative"] == profile["authoritative"]
+    assert superseded["supersedes"] == superseded_source_id
+    assert superseded["security"]["allowed"] is True
     assert neighbors["hits"]
     assert graph_query["hops"] == 2
     assert {event["kind"] for event in timeline["events"]} == {"assertion", "relation"}
@@ -636,6 +690,12 @@ def test_memory_tools_direct_profile_graph_learning_facade_methods() -> None:
     assert attribution["trajectory_id"] == trajectory["id"]
     assert lesson["failure_signature"] == attribution["signature"]
     assert procedure["signature"]["failure_signature"] == lesson["failure_signature"]
+    assert alias_lesson["failure_signature"].endswith("alias-drift")
+    assert alias_procedure["signature"]["failure_signature"] == alias_lesson["failure_signature"]
+    assert promoted_lesson["promoted"] is True
+    assert promoted_lesson["security"]["allowed"] is True
+    assert lesson_lookup["lessons"][0]["id"] == alias_lesson["id"]
+    assert procedure_lookup["procedures"][0]["id"] == alias_procedure["id"]
     assert validated["status"] == "validated"
     assert promoted["status"] == "promoted"
     assert rolled_back["status"] == "rolled_back"
