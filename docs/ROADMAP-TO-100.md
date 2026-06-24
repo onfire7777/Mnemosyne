@@ -1,6 +1,6 @@
 # Mnemosyne — Roadmap to 100% Blueprint Parity
 
-**Authored:** 2026-06-24 · **Current baseline:** `main @ 7f795df` (local and `origin/main` synchronized before tracking this doc)
+**Authored:** 2026-06-24 · **Current baseline:** main after the 2026-06-24 A14 parser/model slice
 **Controlling status doc:** `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md` (10 gap rows, all "Partial")
 **Verdict source:** blended completion **~70%** — this doc explains *why it has been stuck there* and *exactly what flips it to 100%*.
 
@@ -12,11 +12,11 @@ The "70%" is a **blended** figure, and the blend hides the real shape of the wor
 
 - **~85% functional / architectural scaffold** — nearly every blueprint capability is built and green-tested on the deterministic local engine.
 - **5 of 6 headline SLOs are now empirically PROVEN** on the real retrieval path (real BGE embeddings + cross-encoder + Postgres, v2 hard corpus, adversarially reproduced): recall 0.977, nDCG 0.983, G2 lift +0.208 @7% tokens, poison-block 1.0, warm+serial P95 149.5 ms. **Only ECE (0.279 vs ≤0.05) is still red.**
-- **But ~55–60% production-grade 1:1 parity.** Every one of the 10 audit gap rows is "Partial" for the *same* reason: the code contracts and local/compose-Postgres validation are done, but **operator-captured evidence from real production deployments does not yet exist**, and **~10 `src` wirings remain disconnected**.
+- **But ~55–60% production-grade 1:1 parity.** Every one of the 10 audit gap rows is "Partial" for the *same* reason: the code contracts and local/compose-Postgres validation are done, but **operator-captured evidence from real production deployments does not yet exist**, and **~9 `src` wirings remain disconnected**.
 
 So the number has not moved because the remaining 30% is **not "write more code in the same style."** It is two distinct kinds of work that coding-as-usual does not produce:
 
-1. **~10 small `src` reconciliation wirings** (the disconnected machinery — Tier A below). These are owned by the autonomous **Codex** session on `main`; most are already built additively/default-off on the unmerged `reconcile/lane-a-cold` branch.
+1. **~9 small `src` reconciliation wirings** (the disconnected machinery — Tier A below). These are owned by the autonomous **Codex** session on `main`; several may already be built additively/default-off in the local `reconcile/lane-a-cold` checkout.
 2. **Standing up real infrastructure and capturing evidence** (Tier B below) — real IdP, secret manager, KMS, ParadeDB/AGE, hosted embedding/reranker/trainer endpoints, C2PA trust roots. This is **ops/deployment work**, not feature code. The `*-ops-check` / `provider-check` / `release-audit` gates already exist and *demand* this evidence; nothing can fake it (the gates were deliberately hardened through `7f795df` to reject placeholder and hollow evidence).
 
 **The trap to avoid (already observed):** Codex has been spending recent cycles adding more `test(...)` coverage and more release-audit *gates*. After the placeholder/hollow evidence hardening through `7f795df`, real progress should pivot to Tier A wirings and Tier B evidence unless a concrete audit finding exposes a missing fail-closed gate.
@@ -46,7 +46,7 @@ So the number has not moved because the remaining 30% is **not "write more code 
 
 Every item is **additive, default-off / shadow-first, byte-identical when inactive** — no new deps, no rewrite. Theme: *wire machinery that already exists but is left disconnected.* Each has a paired forcing-function test on the completion branch that flips `xfail → green` the moment the wiring lands.
 
-| # | Item (FR/§) | Where it's broken today (verified @ `97a5c6b`) | Fix | Flips green | Effort |
+| # | Item (FR/§) | Current status | Fix | Flips green | Effort |
 |---|---|---|---|---|---|
 | A1 | **Local embedding seam** (FR-3 / G8) — **KEYSTONE** | `cli.py:455` `LocalMemoryEngine(store_path=…)` has **no `adapters=`** (only Postgres branch `cli.py:452` does); `engine.py:233 __init__` has no embedding hook; retrieval still calls `hashing_embedding` (`engine.py:685, 1380, 1403, 1408`). `--backend local` silently ignores real embedding/reranker providers. | Add embedding/reranker adapter seam to `LocalMemoryEngine`; wire through `cli.py:load_engine` local branch so local↔prod are one architecture. | portability suite; real dense retrieval on local | **M** |
 | A2 | **Calibrated confidence / ECE** (FR-6) — **KEYSTONE (the one red SLO)** | `engine.py:1454` returns constant `0.7` and **never abstains** → ECE 0.279 vs §16 ≤0.05. | Varied per-memory-type conformal confidence + working abstention; run `calibration-tune` on the completion-branch calibration set. | **ECE SLO red→green = 6/6 SLOs PASS** | **M** |
@@ -61,7 +61,7 @@ Every item is **additive, default-off / shadow-first, byte-identical when inacti
 | A11 | **Hosted-MCP transport** (FR-9) | Local JSON-RPC/TLS/self-test done; official StreamableHTTP/SSE not validated. | Implement/validate official transport (evidence in Tier B). | — | **M** |
 | A12 | **Cached PPR column** (FR-11) | Recursive PPR works; no materialized cached-PPR column. | Add cached-PPR column + refresh path. | — | **M** |
 | A13 | **Recompute memo** (FR-12) | `jobs.py run_projection_recompute` is dirty-driven but has no content-fingerprint memo to skip unchanged passes. | Add fingerprint memo. | — | **S** |
-| A14 | **`--object` argparse bug + `Preference.access_policy`** | `allow_abbrev` absent (0 hits) → `propose/supersede/assert --object X` errors `ambiguous option`; `models.Preference` lacks the `access_policy` field that Evidence/Assertion/Relation have. | `allow_abbrev=False` on those subparsers (or rename globals); add `access_policy` to `Preference`. | 1 harness test; unblocks `assert`/`propose` in eval | **XS** |
+| A14 | **`--object` argparse bug + `Preference.access_policy`** | **Done 2026-06-24.** Root and subcommand parsers now disable implicit option abbreviation while preserving explicit `branch --from`; `Preference.access_policy` now round-trips through Local/Postgres model, schema, export, and audit diff. | Complete; keep future CLI aliases explicit. | Parser and shared Local/Postgres access-policy tests are green. | **Done** |
 
 > **Note — Rail 2 is DONE.** `min_corroboration_for_delete` is landed (`policy.py:32` default=2; enforced `engine.py:994-1017`). Cross it off any older reconciliation list.
 > **Note — A7/A8/A9 are pre-built.** They exist additive/default-off on the local-only branch `reconcile/lane-a-cold` (commit `9820d0b`); the hot-file legs are specified in `~/Projects/Mnemosyne-lane-a/docs/LANE-A-HANDOFF.md`. Merging that branch + landing the handoff legs closes them with proven zero-conflict.
@@ -95,7 +95,7 @@ This is the **bulk of the remaining percentage** and the universal blocker on al
 
 1. **Inspect and selectively port the pre-built additive items** (A7, A8, A9 from `/Users/admin/Projects/Mnemosyne-lane-a` on `reconcile/lane-a-cold`) — keep them default-off and verify conflicts before merging because that checkout is currently dirty.
 2. **Codex lands the two keystones in order: A1 (embedding seam) → A2 (ECE).** This is the chain to the single red SLO → **6/6 SLOs PASS**.
-3. **Codex lands the remaining small rails + bugs:** A3, A4, A5, A6, A10, A13, A14 (a few hours each; A14 is minutes).
+3. **Codex lands the remaining small rails + bugs:** A3, A4, A5, A6, A10, A13 (a few hours each).
 4. **One real-infra evidence pass (Tier B):** bring up `infra/` (fix the Keycloak 1/3 failure first) plus a Postgres+ParadeDB+AGE+pgvector instance and one real embedding/reranker endpoint; run the `*-ops-check` / `provider-check` / `release-audit` captures. This flips the 10 parity rows Partial→Done.
 5. **Re-run the parity audit and sign off v1.0.** A11/A12/B8 + Tier C are optional polish beyond the v1.0 bar.
 
@@ -105,7 +105,7 @@ This is the **bulk of the remaining percentage** and the universal blocker on al
 
 | Milestone | Blended % | What changed |
 |---|---|---|
-| **Now** (`7f795df`) | **~70%** | ~85% scaffold; 5/6 SLOs proven; ~55–60% production parity (no real-infra evidence; ~10 `src` wirings open) |
+| **Now** (after A14) | **~70–71%** | ~85% scaffold; 5/6 SLOs proven; ~55–60% production parity (no real-infra evidence; ~9 `src` wirings open) |
 | After **Tier A** (code wirings) | **~82%** | 6/6 SLOs; all 7 §31 rails enforced; all FR `src` gaps closed; local↔prod architecture unified |
 | After **Tier B** (real-infra evidence) | **~97%** | 10 audit rows flip Partial→Done |
 | After **Tier C** + sign-off | **100%** | multimodal/LoRA (optional) + v1.0 attestation |

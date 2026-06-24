@@ -2748,11 +2748,13 @@ def test_shared_audit_log_records_actor_source_tier_and_diff_for_every_write(
             statement="Audit writes must retain source tier and diff metadata.",
             explicit=True,
             source_evidence_cids=[cid],
+            access_policy={"tenant": tenant, "purpose": "audit-contract"},
         )
     )
 
     engine.forget(tenant, cid, requested_by=user, erasure_mode=ErasureMode.HARD_DELETE_LEGAL)
-    audit_log = engine.export_tenant(tenant)["audit_log"]
+    exported = engine.export_tenant(tenant)
+    audit_log = exported["audit_log"]
 
     assert audit_log
     for item in audit_log:
@@ -2778,6 +2780,9 @@ def test_shared_audit_log_records_actor_source_tier_and_diff_for_every_write(
     assert preference_audit["source"] == "preference"
     assert preference_audit["trust_tier"] == 0
     assert preference_audit["diff"]["source_evidence_cids"] == [cid]
+    assert preference_audit["diff"]["access_policy"] == {"tenant": tenant, "purpose": "audit-contract"}
+    exported_preference = next(item for item in exported["preferences"] if item["id"] == preference_id)
+    assert exported_preference["access_policy"] == {"tenant": tenant, "purpose": "audit-contract"}
 
     forget_audit = next(item for item in audit_log if item["op"] == "forget" and item["target_id"] == cid)
     assert forget_audit["actor"] == user

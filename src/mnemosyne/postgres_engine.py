@@ -98,6 +98,10 @@ class PostgresEngine:
         cur.execute("ALTER TABLE evidence ADD COLUMN IF NOT EXISTS embedding VECTOR(1024)")
         cur.execute("CREATE INDEX IF NOT EXISTS evidence_embedding_hnsw ON evidence USING hnsw (embedding vector_cosine_ops)")
 
+    @staticmethod
+    def _ensure_preference_access_policy_schema(cur: Any) -> None:
+        cur.execute("ALTER TABLE preferences ADD COLUMN IF NOT EXISTS access_policy JSONB NOT NULL DEFAULT '{}'::jsonb")
+
     def ensure_tenant_and_branch(self, tenant_id: str, branch: str = "main", kind: str = "protected") -> None:
         db_tenant_id = _stable_uuid("tenant", tenant_id)
         with self.connect() as conn:
@@ -270,6 +274,7 @@ class PostgresEngine:
         with self.connect() as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
                 self._set_tenant(cur, db_tenant_id)
+                self._ensure_preference_access_policy_schema(cur)
                 cur.execute(
                     """
                     SELECT metadata, source_type, trust_tier, capability_tags
@@ -557,6 +562,7 @@ class PostgresEngine:
         with self.connect() as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
                 self._set_tenant(cur, db_tenant_id)
+                self._ensure_preference_access_policy_schema(cur)
                 cur.execute(
                     """
                     SELECT id
@@ -628,9 +634,9 @@ class PostgresEngine:
                     INSERT INTO preferences (
                       id, tenant_id, user_id, category, statement, scope, confidence,
                       explicit, exceptions, source_evidence_cids, valid_from, valid_to,
-                      status
+                      status, access_policy
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (id) DO UPDATE
                     SET statement = EXCLUDED.statement,
                         confidence = EXCLUDED.confidence,
@@ -638,7 +644,8 @@ class PostgresEngine:
                         exceptions = EXCLUDED.exceptions,
                         source_evidence_cids = EXCLUDED.source_evidence_cids,
                         valid_to = EXCLUDED.valid_to,
-                        status = EXCLUDED.status
+                        status = EXCLUDED.status,
+                        access_policy = EXCLUDED.access_policy
                     """,
                     (
                         pref.id,
@@ -654,6 +661,7 @@ class PostgresEngine:
                         pref.valid_from,
                         pref.valid_to,
                         pref.status,
+                        self._jsonb(pref.access_policy),
                     ),
                 )
                 self._audit(
@@ -666,6 +674,7 @@ class PostgresEngine:
                         "category": pref.category,
                         "explicit": pref.explicit,
                         "source_evidence_cids": pref.source_evidence_cids,
+                        "access_policy": pref.access_policy,
                     },
                     source="preference",
                     trust_tier=0 if pref.explicit else None,
@@ -2408,6 +2417,7 @@ def _row_to_preference(row: dict[str, Any], tenant_id: str) -> Preference:
         explicit=bool(row["explicit"]),
         exceptions=row["exceptions"] if row["exceptions"] is not None else {},
         source_evidence_cids=_bytes_list_to_cids(row["source_evidence_cids"]),
+        access_policy=dict(row.get("access_policy") or {}),
         valid_from=parse_dt(row["valid_from"]) or utc_now(),
         valid_to=parse_dt(row["valid_to"]),
         status=row["status"],

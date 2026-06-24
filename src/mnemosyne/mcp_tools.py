@@ -486,6 +486,7 @@ class MemoryTools:
         explicit: bool = False,
         confidence: float = 0.7,
         source_evidence_cids: list[str] | None = None,
+        access_policy: dict[str, Any] | None = None,
         role: WriteRole = "agent",
         source_trust_tier: int | None = None,
     ) -> dict[str, Any]:
@@ -505,6 +506,7 @@ class MemoryTools:
                 explicit=explicit,
                 confidence=confidence,
                 source_evidence_cids=source_evidence_cids or [],
+                access_policy=access_policy or {},
             )
         )
         return {"id": preference_id, "security": decision}
