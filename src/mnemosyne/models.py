@@ -162,6 +162,7 @@ class Preference:
     explicit: bool = False
     exceptions: dict[str, Any] = field(default_factory=dict)
     source_evidence_cids: list[str] = field(default_factory=list)
+    access_policy: dict[str, Any] = field(default_factory=dict)
     valid_from: datetime = field(default_factory=utc_now)
     valid_to: datetime | None = None
     status: AssertionStatus = "active"
@@ -176,6 +177,7 @@ class Preference:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Preference":
         copy = dict(data)
+        copy.setdefault("access_policy", {})
         copy["valid_from"] = parse_dt(copy.get("valid_from")) or utc_now()
         copy["valid_to"] = parse_dt(copy.get("valid_to"))
         return cls(**copy)

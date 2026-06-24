@@ -674,7 +674,12 @@ class LocalMemoryEngine:
                 "engine",
                 "add_preference",
                 pref.id,
-                {"category": pref.category, "explicit": pref.explicit, "source_evidence_cids": pref.source_evidence_cids},
+                {
+                    "category": pref.category,
+                    "explicit": pref.explicit,
+                    "source_evidence_cids": pref.source_evidence_cids,
+                    "access_policy": pref.access_policy,
+                },
                 source="preference",
                 trust_tier=0 if pref.explicit else None,
             )

@@ -19,6 +19,7 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
+import pytest
 
 from mnemosyne.cli import (
     PRODUCTION_RELEASE_REQUIRED_COMMANDS,
@@ -1026,6 +1027,39 @@ def test_cli_exposes_retrieval_provider_flags() -> None:
     assert args.embedding_model == "qwen3-embedding"
     assert args.reranker_provider == "http"
     assert args.reranker_model == "qwen3-reranker"
+
+
+def test_cli_parser_requires_exact_object_option_for_assert() -> None:
+    parser = build_parser()
+    parsed = parser.parse_args(
+        [
+            "assert",
+            "--tenant",
+            TENANT,
+            "--subject",
+            "parser subject",
+            "--predicate",
+            "has",
+            "--object",
+            "parser object",
+        ]
+    )
+
+    assert parsed.object == "parser object"
+    with pytest.raises(SystemExit):
+        parser.parse_args(
+            [
+                "assert",
+                "--tenant",
+                TENANT,
+                "--subject",
+                "parser subject",
+                "--predicate",
+                "has",
+                "--obj",
+                "parser object",
+            ]
+        )
 
 
 def test_cli_session_exchange_exposes_jwks_rotation_flags() -> None:

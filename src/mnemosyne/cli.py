@@ -11481,7 +11481,15 @@ def cmd_residency_policy(args: argparse.Namespace) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="mneme", description="Mnemosyne local memory compiler CLI")
+    def subparser_factory(*args: Any, **kwargs: Any) -> argparse.ArgumentParser:
+        kwargs.setdefault("allow_abbrev", False)
+        return argparse.ArgumentParser(*args, **kwargs)
+
+    parser = argparse.ArgumentParser(
+        prog="mneme",
+        description="Mnemosyne local memory compiler CLI",
+        allow_abbrev=False,
+    )
     parser.add_argument("--backend", choices=["local", "postgres"], default=default_backend(), help="Storage backend")
     parser.add_argument("--store", default=str(default_store()), help="Path to local JSON store")
     parser.add_argument("--postgres-dsn", default=default_postgres_dsn(), help="PostgreSQL DSN for --backend postgres")
@@ -11718,7 +11726,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=os.environ.get("MNEMOSYNE_SESSION_REVOKED_IDS"),
         help="Comma-separated session ids to reject",
     )
-    sub = parser.add_subparsers(dest="command", required=True)
+    sub = parser.add_subparsers(dest="command", required=True, parser_class=subparser_factory)
 
     session_exchange = sub.add_parser("session-exchange")
     session_exchange.add_argument("--idp-token", default=os.environ.get("MNEMOSYNE_IDP_TOKEN"))
@@ -12252,7 +12260,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     branch = sub.add_parser("branch")
     branch.add_argument("--name", required=True)
-    branch.add_argument("--from-branch", default="main")
+    branch.add_argument("--from-branch", "--from", dest="from_branch", default="main")
     branch.add_argument("--kind", default="scratch")
     branch.add_argument("--tenant", help="Tenant scope for Postgres backend")
     branch.add_argument("--role", choices=["reader", "agent", "consolidator", "operator"])

@@ -192,6 +192,7 @@ CREATE TABLE IF NOT EXISTS preferences (
   explicit BOOLEAN NOT NULL DEFAULT false,
   exceptions JSONB NOT NULL DEFAULT '{}'::jsonb,
   source_evidence_cids BYTEA[] NOT NULL DEFAULT '{}',
+  access_policy JSONB NOT NULL DEFAULT '{}'::jsonb,
   valid_from TIMESTAMPTZ NOT NULL DEFAULT now(),
   valid_to TIMESTAMPTZ,
   status TEXT NOT NULL DEFAULT 'active',
