@@ -452,7 +452,7 @@ def load_engine(args: argparse.Namespace) -> MemoryEngine:
             return PostgresEngine(dsn, adapters=load_retrieval_adapters(args))
         except PostgresUnavailableError as exc:
             raise SystemExit(str(exc)) from exc
-    return LocalMemoryEngine(store_path=Path(args.store))
+    return LocalMemoryEngine(store_path=Path(args.store), adapters=load_retrieval_adapters(args))
 
 
 def load_provenance_verifier(args: argparse.Namespace) -> SignedProvenanceVerifier | C2paToolVerifier:

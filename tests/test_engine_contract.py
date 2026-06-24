@@ -61,6 +61,70 @@ def test_local_engine_loads_export_json_branch_shape(tmp_path) -> None:
     assert any(item["name"] == "main" and item["tenant_id"] == TENANT for item in loaded.export_all()["branches"])
 
 
+def test_local_engine_uses_configured_retrieval_adapters() -> None:
+    from mnemosyne.retrieval import RetrievalAdapters
+
+    class RecordingEmbedding:
+        name = "recording-embedding"
+        dims = 2
+
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        def embed(self, text: str) -> list[float]:
+            self.calls.append(text)
+            if "needle" in text or "semantic target" in text:
+                return [1.0, 0.0]
+            return [-1.0, 0.0]
+
+    class RecordingReranker:
+        name = "recording-reranker"
+
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, list[str], int]] = []
+
+        def rerank(self, query: str, hits, k: int):  # noqa: ANN001 - protocol test double
+            self.calls.append((query, [hit.id for hit in hits], k))
+            return list(hits)[:k]
+
+    embedding = RecordingEmbedding()
+    reranker = RecordingReranker()
+    engine = LocalMemoryEngine(adapters=RetrievalAdapters(embedding=embedding, reranker=reranker))
+    target = engine.append_evidence(
+        Evidence(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="chat",
+            content="semantic target",
+            trust_tier=0,
+            access_policy={"tenant": TENANT},
+        )
+    )
+    distractor = engine.append_evidence(
+        Evidence(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="chat",
+            content="unrelated distractor",
+            trust_tier=0,
+            access_policy={"tenant": TENANT},
+        )
+    )
+
+    dense = engine.vector_search("needle", 10, {"tenant_id": TENANT, "branch": "main"})
+    result = engine.retrieve("needle", tenant_id=TENANT)
+
+    assert target in {hit.id for hit in dense}
+    assert distractor not in {hit.id for hit in dense}
+    assert "needle" in embedding.calls
+    assert "semantic target" in embedding.calls
+    assert reranker.calls
+    assert reranker.calls[0][0] == "needle"
+    assert target in {hit.id for hit in result.hits}
+
+
 def test_bitemporal_supersession_and_as_of_queries() -> None:
     engine = LocalMemoryEngine()
     t1 = datetime(2026, 1, 1, tzinfo=UTC)

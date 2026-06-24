@@ -29,6 +29,9 @@ from mnemosyne.models import (
 from mnemosyne.policy import OperatingPolicy
 from mnemosyne.privacy import ErasureMode
 from mnemosyne.retrieval import (
+    HashingEmbeddingProvider,
+    LocalSimilarityReranker,
+    RetrievalAdapters,
     activation_explain,
     apply_activation_scores,
     gist_support_report,
@@ -36,7 +39,7 @@ from mnemosyne.retrieval import (
     semantic_entropy,
 )
 from mnemosyne.security import TrustTier, more_trusted, sanitize_retrieved_text, trust_weight
-from mnemosyne.text import approx_tokens, cosine, hashing_embedding, lexical_score, tokenize
+from mnemosyne.text import approx_tokens, cosine, lexical_score, tokenize
 
 
 @dataclass(slots=True)
@@ -230,9 +233,21 @@ class LocalMemoryEngine:
     counterfactual replay, and single-user operation.
     """
 
-    def __init__(self, store_path: str | os.PathLike[str] | None = None, policy: OperatingPolicy | None = None):
+    def __init__(
+        self,
+        store_path: str | os.PathLike[str] | None = None,
+        policy: OperatingPolicy | None = None,
+        adapters: RetrievalAdapters | None = None,
+    ):
         self.store_path = Path(store_path).expanduser() if store_path else None
         self.policy = policy or OperatingPolicy()
+        if adapters is None:
+            embedding = HashingEmbeddingProvider()
+            adapters = RetrievalAdapters(
+                embedding=embedding,
+                reranker=LocalSimilarityReranker(embedding_provider=embedding),
+            )
+        self.adapters = adapters
         self._lock = threading.RLock()
         self.branches: dict[str, dict[str, Any]] = {
             "main": {"from": None, "kind": "protected", "created_at": utc_now().isoformat()}
@@ -687,7 +702,7 @@ class LocalMemoryEngine:
             return pref.id
 
     def vector_search(self, query: str, k: int, filt: dict[str, Any]) -> list[Hit]:
-        query_vec = hashing_embedding(query)
+        query_vec = self._embed_text(query)
         hits: list[Hit] = []
         for hit in self._candidate_hits(filt):
             score = cosine(query_vec, self._embedding_for_hit(hit))
@@ -787,8 +802,9 @@ class LocalMemoryEngine:
         lexical = self.lexical_search(query, self.policy.rerank_width, effective_filter)
         graph = self.graph_ppr(tokenize(query), max(4, k // 2), tenant_id=tenant_id, branch=branch) if deep else []
         fused = self._rrf([dense, lexical, graph], k=max(k * 2, self.policy.rerank_width))
-        reranked = self._mmr(query, fused, k=max(k, 1))
-        activated = apply_activation_scores(reranked, self.policy)
+        reranked = self.adapters.reranker.rerank(query, fused, k=max(k * 2, k))
+        diversified = self._mmr(query, reranked, k=max(k, 1))
+        activated = apply_activation_scores(diversified, self.policy)
         ordered = self._u_curve_order(activated)
         budgeted, used = self._fit_budget(ordered, self.policy.token_budget)
         budgeted = self._mark_retrieved_text_as_data(budgeted)
@@ -1403,7 +1419,10 @@ class LocalMemoryEngine:
             ev = self.evidence.get(self._evidence_key(hit.tenant_id, hit.branch, hit.id))
             if ev and ev.embedding:
                 return ev.embedding
-        return hashing_embedding(hit.text)
+        return self._embed_text(hit.text)
+
+    def _embed_text(self, text: str) -> list[float]:
+        return self.adapters.embedding.embed(text)
 
     def _rrf(self, ranked_lists: list[list[Hit]], k: int) -> list[Hit]:
         by_id: dict[tuple[str, str], Hit] = {}
@@ -1426,15 +1445,16 @@ class LocalMemoryEngine:
     def _mmr(self, query: str, hits: list[Hit], k: int) -> list[Hit]:
         selected: list[Hit] = []
         remaining = list(hits)
-        query_vec = hashing_embedding(query)
+        query_vec = self._embed_text(query)
         while remaining and len(selected) < k:
             best: Hit | None = None
             best_score = float("-inf")
             for hit in remaining:
-                relevance = cosine(query_vec, hashing_embedding(hit.text))
+                hit_vec = self._embedding_for_hit(hit)
+                relevance = cosine(query_vec, hit_vec)
                 diversity_penalty = 0.0
                 if selected:
-                    diversity_penalty = max(cosine(hashing_embedding(hit.text), hashing_embedding(item.text)) for item in selected)
+                    diversity_penalty = max(cosine(hit_vec, self._embedding_for_hit(item)) for item in selected)
                 score = self.policy.mmr_lambda * relevance - (1.0 - self.policy.mmr_lambda) * diversity_penalty
                 score += hit.score
                 if score > best_score:
