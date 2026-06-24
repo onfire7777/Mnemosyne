@@ -12,8 +12,17 @@ import pytest
 from mnemosyne.calibration import CalibrationSet, calibration_examples_from_rows, tune_calibration_set
 from mnemosyne.consolidation import CONSOLIDATE_EVIDENCE_JOB, ConsolidationWorker
 from mnemosyne.engine import LocalMemoryEngine
-from mnemosyne.jobs import PROJECTION_RECOMPUTE_JOB, RuntimeJobHandlers
+from mnemosyne.jobs import (
+    CALIBRATE_JOB,
+    EVAL_SUITE_JOB,
+    LIFECYCLE_SWEEP_JOB,
+    OBSERVABILITY_SNAPSHOT_JOB,
+    PROJECTION_RECOMPUTE_JOB,
+    RuntimeJobHandlers,
+)
+from mnemosyne.media import MEDIA_EXTRACT_JOB
 from mnemosyne.models import Assertion, Contradiction, Evidence, Hit, Justification, Preference, Relation
+from mnemosyne.observability import MetricsRegistry
 from mnemosyne.postgres_engine import PostgresEngine
 from mnemosyne.privacy import ErasureMode
 from mnemosyne.queue import InProcessQueue
@@ -892,6 +901,112 @@ def test_shared_engine_contract_raptor_projection_recompute_refreshes_leaf_and_r
     assert jobs[0].payload["source_evidence_cids"] == [changed_raw_cid]
     assert jobs[0].payload["passes"] == ["summarizer"]
     assert jobs[0].payload["trigger"] == PROJECTION_RECOMPUTE_JOB
+
+
+def test_shared_engine_contract_runtime_job_handlers_return_structured_results(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, user = engine_bundle
+    queue = InProcessQueue()
+    metrics = MetricsRegistry()
+    handlers = RuntimeJobHandlers(engine, queue, metrics=metrics)
+    handler_map = handlers.handlers()
+    source_cid = engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id=user,
+            actor="user",
+            source_type="shared-runtime-handler",
+            content="Shared runtime handler media source has no content pointer.",
+            modality="image",
+            metadata={"media_type": "image/png"},
+            trust_tier=1,
+            access_policy={"tenant": tenant},
+        )
+    )
+
+    required_jobs = {
+        MEDIA_EXTRACT_JOB,
+        CALIBRATE_JOB,
+        LIFECYCLE_SWEEP_JOB,
+        EVAL_SUITE_JOB,
+        OBSERVABILITY_SNAPSHOT_JOB,
+        PROJECTION_RECOMPUTE_JOB,
+    }
+    assert required_jobs <= set(handler_map)
+
+    media_payload = {"tenant_id": tenant, "source_evidence_cid": source_cid}
+    calibration_payload = {
+        "tenant_id": tenant,
+        "memory_type": "fact",
+        "scores": [0.2, 0.4, 0.8],
+        "target_coverage": 0.8,
+        "confidence": 0.1,
+    }
+    lifecycle_payload = {
+        "states": [
+            {
+                "item_id": f"{tenant}-runtime-handler-stale",
+                "tier": "verbatim",
+                "salience": 0.01,
+                "importance": 0.0,
+                "access_count": 0,
+                "last_accessed": "2020-01-01T00:00:00Z",
+            },
+            {
+                "item_id": f"{tenant}-runtime-handler-must-keep",
+                "tier": "verbatim",
+                "salience": 0.01,
+                "importance": 0.8,
+                "access_count": 1,
+                "last_accessed": "2026-06-01T00:00:00Z",
+                "must_keep": True,
+                "successful_rehearsals": 1,
+                "next_rehearsal_at": "2025-12-31T00:00:00Z",
+            },
+        ],
+        "now": "2026-01-01T00:00:00Z",
+    }
+    eval_payload = {"suite": "shared-direct"}
+
+    media_result = handler_map[MEDIA_EXTRACT_JOB](media_payload)
+    calibration_result = handler_map[CALIBRATE_JOB](calibration_payload)
+    lifecycle_result = handler_map[LIFECYCLE_SWEEP_JOB](lifecycle_payload)
+    eval_result = handler_map[EVAL_SUITE_JOB](eval_payload)
+    observability_result = handler_map[OBSERVABILITY_SNAPSHOT_JOB]({})
+    exported = engine.export_tenant(tenant)
+
+    assert media_result.kind == MEDIA_EXTRACT_JOB
+    assert media_result.status == "skipped"
+    assert media_result.details["reason"] == "missing_content_pointer"
+    assert calibration_result.kind == CALIBRATE_JOB
+    assert calibration_result.status == "complete"
+    assert calibration_result.details["abstain"] is True
+    calibration_record = next(item for item in exported["calibrations"] if item["memory_type"] == "fact")
+    assert calibration_record["tenant_id"] == tenant
+    assert calibration_record["scores"] == calibration_payload["scores"]
+    assert calibration_record["target_coverage"] == calibration_payload["target_coverage"]
+    assert lifecycle_result.kind == LIFECYCLE_SWEEP_JOB
+    assert lifecycle_result.status == "complete"
+    assert lifecycle_result.details["demoted"] == 1
+    assert lifecycle_result.details["rehearsed"] == 1
+    lifecycle_states = {item["item_id"]: item for item in lifecycle_result.details["states"]}
+    must_keep_state = lifecycle_states[f"{tenant}-runtime-handler-must-keep"]
+    assert must_keep_state["next_rehearsal_at"] == "2026-01-08T00:00:00+00:00"
+    assert must_keep_state["rehearsed"] is True
+    assert eval_result.kind == EVAL_SUITE_JOB
+    assert eval_result.status == "complete"
+    assert eval_result.details["suite"] == "shared-direct"
+    assert eval_result.details["passed"] is True
+    assert eval_result.details["outcomes"]
+    json.dumps(eval_result.to_dict())
+    assert observability_result.kind == OBSERVABILITY_SNAPSHOT_JOB
+    assert observability_result.status == "complete"
+    assert observability_result.details["metrics"]["counters"]["media_extract.skipped"] == 1
+    assert observability_result.details["metrics"]["counters"]["calibration.jobs"] == 1
+    assert observability_result.details["metrics"]["counters"]["lifecycle.sweeps"] == 1
+    assert observability_result.details["metrics"]["counters"]["eval.suites"] == 1
+    assert observability_result.details["metrics"]["counters"]["observability.snapshots"] == 1
 
 
 def test_shared_engine_contract_forget_source_invalidates_summary_gist(
