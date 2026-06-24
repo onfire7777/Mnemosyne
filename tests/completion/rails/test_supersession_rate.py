@@ -6,23 +6,21 @@ Two enforcement surfaces matter:
    self-reported ``supersession_rate`` > 0.05. Covered by
    test_parametric_rail_gate.py.
 
-2. Live belief-revision pass (GAP): a batch of incoming assertions that
-   supersedes far more than 5% of the active set is applied by
-   ``LocalMemoryEngine.upsert_assertion`` with NO per-pass rate ceiling. There is
-   no batch/"pass" abstraction in engine.py that counts supersessions against the
-   active-fact denominator and clamps/refuses once 5% is exceeded.
+2. Live consolidation pass (ENFORCED): candidate assertions promoted through
+   ``ConsolidationWorker.run_queue_payload`` are checked against a per-pass
+   active-fact denominator before the promotion branch can merge to ``main``.
 
-This file drives surface (2): it builds an active set and then submits a batch of
-strictly-more-trusted corrections that supersede 100% of it, and asserts the
-system clamps the supersession rate to <= 5%. That assertion fails today, so the
-breach test is xfail(strict) until Codex adds a pass-level supersession-rate rail
-to the engine write path.
+This file drives surface (2): it builds an active set and then submits a
+consolidation batch of strictly-more-trusted candidates that would supersede 100%
+of it, and asserts the system clamps the supersession rate to <= 5%.
 """
 
 from __future__ import annotations
 
 import pytest
 
+from mnemosyne.consolidation import ConsolidationWorker
+from mnemosyne.gate import RegressionCase
 from mnemosyne.security import TrustTier
 
 from .conftest import (
@@ -58,60 +56,73 @@ def _seed_active_population(engine, n: int = ACTIVE_COUNT):
     assert len(active_assertions(engine)) == n
 
 
-def _apply_supersession_batch(engine, n: int) -> int:
-    """Apply `n` strictly-more-trusted conflicting corrections (each legitimately
-    supersedes its target under monotonic_trust). Returns how many active facts
-    ended up superseded in this single pass."""
+class _MassSupersessionExtractor:
+    def __init__(self, n: int):
+        self.n = n
 
-    before = {a.id for a in active_assertions(engine)}
-    for i in range(n):
-        cid = add_evidence(engine, content=f"fact {i} value beta", trust_tier=int(TrustTier.DIRECT_USER))
-        engine.upsert_assertion(
-            make_assertion(
-                subject=f"entity-{i}",
-                predicate="value_is",
-                obj="beta",
-                trust_tier=int(TrustTier.DIRECT_USER),  # more trusted => legal supersede
-                source_cids=[cid],
-                confidence=0.7,
-                valid_from=utcnow(),
-            )
-        )
-    after = {a.id for a in active_assertions(engine)}
-    superseded = before - after
-    return len(superseded)
+    def extract(self, tenant_id, payload, evidence):
+        return {
+            "candidates": [
+                {
+                    "signature": f"entity-{i} value_is",
+                    "query": f"entity-{i}",
+                    "candidate_subject": f"entity-{i}",
+                    "candidate_predicate": "value_is",
+                    "candidate_object": "beta",
+                    "confidence": 0.7,
+                    "trust_tier": int(TrustTier.DIRECT_USER),
+                }
+                for i in range(self.n)
+            ],
+            "details": {"provider": "test_mass_supersession_extractor"},
+        }
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "RAIL 1 NOT ENFORCED ON LIVE PASS. Missing enforcement point: "
-        "LocalMemoryEngine.upsert_assertion (engine.py:397) applies supersessions "
-        "one-by-one with no pass-level rate ceiling against the active-fact "
-        "denominator. max_supersession_rate=0.05 is only checked on self-reported "
-        "metrics in ParametricInvariantRails._check_rate (parametric.py:127). Codex "
-        "must add a batch/pass guard to the engine write path that clamps or refuses "
-        "once supersessions exceed 5% of the active set in a single pass."
-    ),
-)
 def test_mass_supersession_pass_is_clamped_to_five_percent():
     engine = fresh_engine()
     _seed_active_population(engine)
+    before = {a.id for a in active_assertions(engine)}
+    source_cids = [
+        add_evidence(engine, content=f"fact {i} value beta", trust_tier=int(TrustTier.DIRECT_USER))
+        for i in range(ACTIVE_COUNT)
+    ]
+    worker = ConsolidationWorker(
+        engine,
+        gate_cases=[
+            RegressionCase(
+                id="candidate-beta-smoke",
+                signature="entity value_is",
+                query="entity beta",
+                expected_substring="beta",
+                tier="smoke",
+            )
+        ],
+        candidate_extractor=_MassSupersessionExtractor(ACTIVE_COUNT),
+    )
 
-    # Adversary submits corrections that would supersede every active fact.
-    superseded = _apply_supersession_batch(engine, ACTIVE_COUNT)
+    result = worker.run_queue_payload(
+        {
+            "tenant_id": "tenant-rails",
+            "branch": "main",
+            "source_evidence_cids": source_cids,
+            "passes": ["extractor", "resolver", "belief_reviser", "promotion_gate"],
+        }
+    )
 
+    after = {a.id for a in active_assertions(engine)}
+    superseded = len(before - after)
     allowed = int(ACTIVE_COUNT * MAX_RATE)  # == 2
     assert superseded <= allowed, (
         f"single pass superseded {superseded}/{ACTIVE_COUNT} active facts; "
         f"max_supersession_rate=0.05 allows at most {allowed}"
     )
+    rails = next(item for item in result.pass_results if item["name"] == "mutation_rails")["details"]
+    assert rails["supersessions_used"] == superseded
+    assert any(item["rail"] == "max_supersession_rate" for item in rails["violations"])
 
 
 def test_supersession_rate_metric_gate_is_the_only_current_enforcement():
-    """Documents the enforcement that DOES exist: the parametric metrics gate.
-    Kept green so the suite records that the rail is partially enforced (and to
-    pin the 0.05 bound), while the live-pass gap above stays xfail."""
+    """Pins the parametric metrics gate in addition to live-pass enforcement."""
 
     from mnemosyne.parametric import ParametricArtifact, ParametricInvariantRails
 

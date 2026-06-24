@@ -6,7 +6,7 @@ import json
 import re
 import shlex
 import subprocess
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from hashlib import sha256
 from typing import Any, Callable, Protocol, Sequence
@@ -81,6 +81,98 @@ class PassResult:
 
 
 @dataclass(slots=True)
+class MutationRailBudget:
+    tenant_id: str
+    branch: str
+    max_supersession_rate: float
+    max_prune_fraction_per_pass: float
+    active_fact_ids: set[str]
+    active_memory_cids: set[str]
+    superseded_fact_ids: set[str] = field(default_factory=set)
+    pruned_cids: set[str] = field(default_factory=set)
+    violations: list[dict[str, Any]] = field(default_factory=list)
+
+    @staticmethod
+    def _allowed_count(total: int, rate: float) -> int:
+        if total <= 0 or rate <= 0:
+            return 0
+        return max(1, int(total * max(0.0, float(rate)) + 1e-12))
+
+    @property
+    def supersessions_allowed(self) -> int:
+        return self._allowed_count(len(self.active_fact_ids), self.max_supersession_rate)
+
+    @property
+    def prunes_allowed(self) -> int:
+        return self._allowed_count(len(self.active_memory_cids), self.max_prune_fraction_per_pass)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "tenant_id": self.tenant_id,
+            "branch": self.branch,
+            "max_supersession_rate": self.max_supersession_rate,
+            "active_fact_count": len(self.active_fact_ids),
+            "supersessions_allowed": self.supersessions_allowed,
+            "supersessions_used": len(self.superseded_fact_ids),
+            "superseded_fact_ids": sorted(self.superseded_fact_ids),
+            "max_prune_fraction_per_pass": self.max_prune_fraction_per_pass,
+            "active_memory_count": len(self.active_memory_cids),
+            "prunes_allowed": self.prunes_allowed,
+            "prunes_used": len(self.pruned_cids),
+            "pruned_cids": sorted(self.pruned_cids),
+            "violations": list(self.violations),
+        }
+
+    def check_branch_supersessions(self, snapshot: dict[str, Any], candidate_branch: str) -> str | None:
+        branch_superseded = {
+            str(row.get("id"))
+            for row in snapshot.get("assertions", [])
+            if isinstance(row, dict)
+            and row.get("branch") == candidate_branch
+            and row.get("status") == "superseded"
+            and str(row.get("id")) in self.active_fact_ids
+        }
+        proposed = self.superseded_fact_ids | branch_superseded
+        if len(proposed) <= self.supersessions_allowed:
+            self.superseded_fact_ids = proposed
+            return None
+        violation = {
+            "rail": "max_supersession_rate",
+            "attempted": len(proposed),
+            "allowed": self.supersessions_allowed,
+            "active_fact_count": len(self.active_fact_ids),
+            "rate": self.max_supersession_rate,
+            "candidate_branch": candidate_branch,
+        }
+        self.violations.append(violation)
+        return (
+            "rail_violation:max_supersession_rate "
+            f"{len(proposed)}/{len(self.active_fact_ids)} active facts exceeds "
+            f"allowed {self.supersessions_allowed} at rate {self.max_supersession_rate}"
+        )
+
+    def try_consume_prune(self, cid: str, *, kind: str) -> bool:
+        if not cid or cid in self.pruned_cids:
+            return True
+        proposed = len(self.pruned_cids) + 1
+        if proposed <= self.prunes_allowed:
+            self.pruned_cids.add(cid)
+            return True
+        self.violations.append(
+            {
+                "rail": "max_prune_fraction_per_pass",
+                "kind": kind,
+                "cid": cid,
+                "attempted": proposed,
+                "allowed": self.prunes_allowed,
+                "active_memory_count": len(self.active_memory_cids),
+                "rate": self.max_prune_fraction_per_pass,
+            }
+        )
+        return False
+
+
+@dataclass(slots=True)
 class ConsolidationRunResult:
     tenant_id: str
     branch: str
@@ -127,6 +219,7 @@ class ConsolidationWorker:
         min_corroboration: int = 1,
         consolidation_min_interval_seconds: float = 0.0,
         consolidation_min_steps: int = 0,
+        max_supersession_rate: float | None = None,
         max_prune_fraction_per_pass: float = 0.02,
         clock: "Callable[[], datetime] | None" = None,
     ):
@@ -162,6 +255,13 @@ class ConsolidationWorker:
         # Defaults to 1 (no extra corroboration required), so existing single-
         # source promotion behaviour is unchanged unless a deployment opts in.
         self.min_corroboration = max(1, int(min_corroboration))
+        policy = getattr(engine, "policy", None)
+        policy_supersession_rate = getattr(policy, "max_supersession_rate", 0.05)
+        self.max_supersession_rate = max(
+            0.0,
+            float(policy_supersession_rate if max_supersession_rate is None else max_supersession_rate),
+        )
+        self.max_prune_fraction_per_pass = max(0.0, float(max_prune_fraction_per_pass))
 
     def run_queue_payload(self, payload: dict[str, Any]) -> ConsolidationRunResult:
         decision = self.security.authorize_write(
@@ -196,6 +296,7 @@ class ConsolidationWorker:
             self._tenant_last_pass_call[tenant_id] = call_index
 
         evidence, missing = self._load_evidence(tenant_id, source_evidence_cids, branch)
+        mutation_budget = self._new_mutation_rail_budget(tenant_id, branch)
         replay_rows = self._prioritize_replay(evidence, payload)
         evidence = [row["evidence"] for row in replay_rows]
         evidence_seen = len(evidence)
@@ -260,7 +361,8 @@ class ConsolidationWorker:
                             sensitivity=int(candidate.get("sensitivity", payload.get("sensitivity", 0))),
                             access_policy=candidate.get("access_policy") or payload.get("access_policy"),
                             entity_key=str(candidate.get("entity_key") or "") or None,
-                        )
+                        ),
+                        mutation_budget=mutation_budget,
                     )
                     candidate_results.append(result.to_dict())
                 pass_results.append(PassResult("belief_reviser", "complete", {"candidate_count": len(candidates)}))
@@ -274,7 +376,7 @@ class ConsolidationWorker:
             if pass_name in {"replayer", "extractor", "resolver", "belief_reviser"}:
                 continue
             if pass_name == "summarizer":
-                summary = self._run_summarizer_pass(tenant_id, branch, evidence, payload)
+                summary = self._run_summarizer_pass(tenant_id, branch, evidence, payload, mutation_budget)
                 if summary:
                     pass_results.append(PassResult(pass_name, "complete", summary))
                 else:
@@ -298,7 +400,7 @@ class ConsolidationWorker:
                 pass_results.append(PassResult(pass_name, status, procedure_result))
                 continue
             if pass_name == "forgetter":
-                forgetter_result = self._run_forgetter(tenant_id, branch, payload, evidence)
+                forgetter_result = self._run_forgetter(tenant_id, branch, payload, evidence, mutation_budget)
                 status = "complete" if forgetter_result["backend_supported"] else "skipped"
                 if status == "skipped":
                     skipped.append("forgetter_backend_unavailable")
@@ -329,6 +431,7 @@ class ConsolidationWorker:
             skipped.append(skipped_name)
             pass_results.append(PassResult(pass_name, "skipped", {"reason": "not_implemented"}))
 
+        pass_results.append(PassResult("mutation_rails", "complete", mutation_budget.to_dict()))
         return ConsolidationRunResult(
             tenant_id=tenant_id,
             branch=branch,
@@ -354,6 +457,43 @@ class ConsolidationWorker:
             else:
                 evidence.append(item)
         return evidence, missing
+
+    def _new_mutation_rail_budget(self, tenant_id: str, branch: str) -> MutationRailBudget:
+        snapshot = self._export_snapshot(tenant_id)
+        active_fact_ids = {
+            str(row.get("id"))
+            for row in snapshot.get("assertions", [])
+            if isinstance(row, dict)
+            and row.get("branch", "main") == branch
+            and row.get("status") == "active"
+            and row.get("id")
+        }
+        active_memory_cids = {
+            str(row.get("cid"))
+            for row in snapshot.get("evidence", [])
+            if isinstance(row, dict)
+            and row.get("branch", "main") == branch
+            and row.get("cid")
+            and not is_retired_summary_metadata(row.get("metadata") if isinstance(row.get("metadata"), dict) else {})
+        }
+        return MutationRailBudget(
+            tenant_id=tenant_id,
+            branch=branch,
+            max_supersession_rate=self.max_supersession_rate,
+            max_prune_fraction_per_pass=self.max_prune_fraction_per_pass,
+            active_fact_ids=active_fact_ids,
+            active_memory_cids=active_memory_cids,
+        )
+
+    def _export_snapshot(self, tenant_id: str) -> dict[str, Any]:
+        export_tenant = getattr(self.engine, "export_tenant", None)
+        if not callable(export_tenant):
+            return {"assertions": [], "evidence": []}
+        try:
+            snapshot = export_tenant(tenant_id)
+        except Exception:
+            return {"assertions": [], "evidence": []}
+        return snapshot if isinstance(snapshot, dict) else {"assertions": [], "evidence": []}
 
     def _role_pipeline_report(self, pass_results: list[PassResult]) -> dict[str, Any]:
         roles = []
@@ -572,6 +712,7 @@ class ConsolidationWorker:
         branch: str,
         evidence: list[Evidence],
         payload: dict[str, Any],
+        mutation_budget: MutationRailBudget | None = None,
     ) -> dict[str, Any] | None:
         if not evidence:
             return None
@@ -581,13 +722,21 @@ class ConsolidationWorker:
             summary = self.summarizer.summarize(tenant_id, evidence)
             if not summary:
                 return None
-            return self._materialize_summary(tenant_id, branch, summary, evidence, raptor_level=1)
+            return self._materialize_summary(
+                tenant_id,
+                branch,
+                summary,
+                evidence,
+                raptor_level=1,
+                mutation_budget=mutation_budget,
+            )
         return self._materialize_summary_hierarchy(
             tenant_id,
             branch,
             evidence,
             cluster_size=cluster_size,
             max_levels=max_levels,
+            mutation_budget=mutation_budget,
         )
 
     def _materialize_summary_hierarchy(
@@ -598,13 +747,21 @@ class ConsolidationWorker:
         *,
         cluster_size: int,
         max_levels: int,
+        mutation_budget: MutationRailBudget | None = None,
     ) -> dict[str, Any] | None:
         get_evidence = getattr(self.engine, "get_evidence", None)
         if not callable(get_evidence):
             summary = self.summarizer.summarize(tenant_id, evidence)
             if not summary:
                 return None
-            return self._materialize_summary(tenant_id, branch, summary, evidence, raptor_level=1)
+            return self._materialize_summary(
+                tenant_id,
+                branch,
+                summary,
+                evidence,
+                raptor_level=1,
+                mutation_budget=mutation_budget,
+            )
 
         raw_source_cids = self._summary_transitive_source_cids(evidence)
         current = list(evidence)
@@ -632,7 +789,14 @@ class ConsolidationWorker:
                         "source_summary_cids": child_summary_cids,
                         "relation_source_cids": child_summary_cids,
                     }
-                result = self._materialize_summary(tenant_id, branch, summary, cluster, raptor_level=level)
+                result = self._materialize_summary(
+                    tenant_id,
+                    branch,
+                    summary,
+                    cluster,
+                    raptor_level=level,
+                    mutation_budget=mutation_budget,
+                )
                 if not result.get("materialized") or not result.get("summary_cid"):
                     continue
                 summary_cid = str(result["summary_cid"])
@@ -704,6 +868,7 @@ class ConsolidationWorker:
         evidence: list[Evidence],
         *,
         raptor_level: int = 1,
+        mutation_budget: MutationRailBudget | None = None,
     ) -> dict[str, Any]:
         append_evidence = getattr(self.engine, "append_evidence", None)
         add_relation = getattr(self.engine, "add_relation", None)
@@ -778,6 +943,7 @@ class ConsolidationWorker:
             summary_cid,
             generated_at=generated_at,
             raptor_level=raptor_level,
+            mutation_budget=mutation_budget,
         )
         relation_ids: list[str] = []
         for source_cid in relation_source_cids:
@@ -817,6 +983,7 @@ class ConsolidationWorker:
         *,
         generated_at: str,
         raptor_level: int = 1,
+        mutation_budget: MutationRailBudget | None = None,
     ) -> list[str]:
         export_tenant = getattr(self.engine, "export_tenant", None)
         update_metadata = getattr(self.engine, "update_evidence_metadata", None)
@@ -855,6 +1022,11 @@ class ConsolidationWorker:
                 "retired_by": "consolidation.summarizer",
                 "superseded_by": new_summary_cid,
             }
+            if mutation_budget is not None and not mutation_budget.try_consume_prune(
+                cid,
+                kind="summary_retirement",
+            ):
+                continue
             if update_metadata(
                 tenant_id,
                 cid,
@@ -923,6 +1095,7 @@ class ConsolidationWorker:
         branch: str,
         payload: dict[str, Any],
         evidence: list[Evidence],
+        mutation_budget: MutationRailBudget | None = None,
     ) -> dict[str, Any]:
         update_metadata = getattr(self.engine, "update_evidence_metadata", None)
         if not callable(update_metadata):
@@ -939,6 +1112,11 @@ class ConsolidationWorker:
             state = self._lifecycle_state(item, lifecycle)
             scheduled_state, rehearsed = apply_rehearsal_schedule(state, now)
             next_state, changed = demotion_decision(scheduled_state, now, utility_threshold=threshold)
+            rail_blocked = bool(
+                changed
+                and mutation_budget is not None
+                and not mutation_budget.try_consume_prune(item.cid, kind="lifecycle_demotion")
+            )
             payload_patch = {
                 "lifecycle": {
                     **next_state.to_dict(),
@@ -948,21 +1126,23 @@ class ConsolidationWorker:
                     "rehearsed": rehearsed,
                 }
             }
-            updated = bool(
-                update_metadata(
-                    tenant_id,
-                    item.cid,
-                    payload_patch,
-                    branch=branch,
-                    actor="consolidation",
-                    source="forgetter",
+            updated = False
+            if not rail_blocked:
+                updated = bool(
+                    update_metadata(
+                        tenant_id,
+                        item.cid,
+                        payload_patch,
+                        branch=branch,
+                        actor="consolidation",
+                        source="forgetter",
+                    )
                 )
-            )
             if updated:
                 item.metadata = {**item.metadata, **payload_patch}
                 if changed:
                     demoted_cids.append(item.cid)
-            else:
+            elif not rail_blocked:
                 failed_cids.append(item.cid)
             evaluated.append(
                 {
@@ -979,6 +1159,7 @@ class ConsolidationWorker:
                         else None
                     ),
                     "updated": updated,
+                    "rail_blocked": rail_blocked,
                 }
             )
         return {
@@ -988,6 +1169,7 @@ class ConsolidationWorker:
             "demoted_cids": demoted_cids,
             "failed_cids": failed_cids,
             "states": evaluated,
+            "rail_budget": mutation_budget.to_dict() if mutation_budget is not None else None,
         }
 
     @staticmethod
@@ -1045,7 +1227,7 @@ class ConsolidationWorker:
         trust_values = [int(payload.get("trust_tier", TrustTier.NORMAL)), *(item.trust_tier for item in evidence)]
         return any(value >= int(TrustTier.UNTRUSTED_EXTERNAL) for value in trust_values)
 
-    def run_job(self, job: ConsolidationJob) -> GateResult:
+    def run_job(self, job: ConsolidationJob, mutation_budget: MutationRailBudget | None = None) -> GateResult:
         """Promote a single fact candidate through authorization, cadence, corroboration, and the gate.
 
         Fails closed when the consolidator write is not authorized, when the same
@@ -1135,7 +1317,12 @@ class ConsolidationWorker:
                 branch=branch,
             )
 
-        result = self.gate.evaluate(job.tenant_id, candidate, apply)
+        budget = mutation_budget or self._new_mutation_rail_budget(job.tenant_id, "main")
+
+        def pre_merge_check(engine: LocalMemoryEngine, branch: str) -> str | None:
+            return budget.check_branch_supersessions(self._export_snapshot(job.tenant_id), branch)
+
+        result = self.gate.evaluate(job.tenant_id, candidate, apply, pre_merge_check=pre_merge_check)
         if result.promoted and hasattr(self.engine, "register_entity"):
             entity_key = job.entity_key or _entity_key(job.candidate_subject)
             self.engine.register_entity(
