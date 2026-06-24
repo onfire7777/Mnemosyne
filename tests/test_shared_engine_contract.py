@@ -1637,6 +1637,194 @@ def test_shared_engine_contract_memory_tools_correct_prefetch_facades(
     assert tools.prefetcher.get_warmed(tenant, "shared prefetch warms correction context") is not None
 
 
+def test_shared_engine_contract_memory_tools_profile_graph_learning_facades(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, user = engine_bundle
+    tools = MemoryTools(engine)
+    subject = f"Shared facade {uuid4()}"
+    target = f"Wrapper behavior {uuid4()}"
+    cid = engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id=user,
+            actor="user",
+            source_type="shared-facade-profile-graph-learning",
+            content=f"{subject} links profile, graph, and learning wrappers.",
+            trust_tier=1,
+            access_policy={"tenant": tenant},
+        )
+    )
+    assertion_id = engine.upsert_assertion(
+        Assertion(
+            tenant_id=tenant,
+            user_id=user,
+            subject=subject,
+            predicate="covers",
+            object=target,
+            confidence=0.92,
+            source_evidence_cids=[cid],
+            status="active",
+            trust_tier=1,
+            access_policy={"tenant": tenant},
+        )
+    )
+    engine.add_relation(
+        Relation(
+            tenant_id=tenant,
+            source=subject,
+            predicate="related_to",
+            target=target,
+            confidence=0.88,
+            source_evidence_cids=[cid],
+            access_policy={"tenant": tenant},
+        )
+    )
+
+    recorded = tools.profile_record_explicit(
+        tenant,
+        user,
+        "Prefer shared facade regression tests.",
+        scope={"surface": "shared-mcp-tools"},
+    )
+    inference_scope = {"surface": "shared-mcp-tools", "profile": "inferred"}
+    inferred = tools.profile_propose_inference(
+        tenant,
+        user,
+        "Likely values shared wrapper-level tests.",
+        context=inference_scope,
+    )
+    corrected = tools.profile_correct(
+        tenant,
+        user,
+        recorded["id"],
+        "Prefer shared facade and transport tests together.",
+        context={"surface": "shared-mcp-tools"},
+    )
+    profile = tools.profile_get_relevant(tenant, user, {"surface": "shared-mcp-tools"})
+    inferred_profile = tools.profile_get_relevant(tenant, user, inference_scope)
+    profile_context = tools.profile_context(tenant, user, {"surface": "shared-mcp-tools"})
+    neighbors = tools.graph_neighbors(tenant, [subject], k=4)
+    graph_query = tools.graph_query(tenant, [subject], hops=2, k=4)
+    timeline = tools.graph_timeline(tenant, subject)
+    graph_as_of = tools.graph_as_of(tenant, subject, "covers", "2999-01-01T00:00:00Z")
+    trajectory = tools.trajectory_log(
+        tenant,
+        user,
+        "shared-facade-session",
+        "shared facade coverage",
+        [{"status": "failed", "error": "wrapper drift"}],
+        "failure",
+        -1.0,
+        "shared-facade-v1",
+    )
+    alias_trajectory = tools.trajectory_record(
+        tenant,
+        user,
+        "shared-facade-alias-session",
+        "shared facade alias coverage",
+        [{"status": "failed", "error": "alias drift"}],
+        "failure",
+        -1.0,
+        "shared-facade-v2",
+    )
+    attribution = tools.trajectory_attribute(trajectory["id"])
+    lesson = tools.lesson_induce(trajectory["id"])
+    procedure = tools.procedure_induce(lesson["id"])
+    alias_lesson = tools.lesson_propose(alias_trajectory["id"])
+    alias_procedure = tools.procedure_propose(alias_lesson["id"])
+    promoted_lesson = tools.lesson_promote(
+        alias_lesson["id"],
+        cases=[
+            {
+                "id": f"{tenant}-shared-facade-alias-lesson",
+                "signature": "shared facade alias coverage",
+                "query": "alias drift verify with tools",
+                "expected_substring": "verify with tools",
+                "protected": True,
+            }
+        ],
+        role="operator",
+        source_trust_tier=0,
+    )
+    lesson_lookup = tools.lesson_search("alias drift", tenant_id=tenant, status="active")
+    procedure_lookup = tools.procedure_search("alias-drift", tenant_id=tenant)
+    validated = tools.procedure_validate(
+        procedure["id"],
+        role="operator",
+        source_trust_tier=0,
+    )
+    promoted = tools.procedure_promote(
+        procedure["id"],
+        role="operator",
+        source_trust_tier=0,
+    )
+    rolled_back = tools.procedure_rollback(
+        procedure["id"],
+        role="operator",
+        source_trust_tier=0,
+    )
+    outcome = tools.outcome_evaluate(trajectory_id=trajectory["id"])
+    replay = tools.outcome_evaluate(before_successes=1, after_successes=3, total_cases=4)
+    authoritative_by_id = {item["id"]: item for item in profile["authoritative"]}
+    inferred_by_id = {item["id"]: item for item in inferred_profile["inferred"]}
+    neighbor_relation = next(
+        (
+            hit
+            for hit in neighbors["hits"]
+            if hit.get("metadata", {}).get("source") == subject
+            and hit.get("metadata", {}).get("predicate") == "related_to"
+            and hit.get("metadata", {}).get("target") == target
+        ),
+        None,
+    )
+    query_relation = next(
+        (
+            hit
+            for hit in graph_query["hits"]
+            if hit.get("metadata", {}).get("source") == subject
+            and hit.get("metadata", {}).get("predicate") == "related_to"
+            and hit.get("metadata", {}).get("target") == target
+        ),
+        None,
+    )
+
+    assert recorded["security"]["allowed"] is True
+    assert inferred["security"]["allowed"] is True
+    assert corrected["corrects"] == recorded["id"]
+    assert authoritative_by_id[recorded["id"]]["kind"] == "explicit_preference"
+    assert authoritative_by_id[recorded["id"]]["statement"] == "Prefer shared facade regression tests."
+    assert authoritative_by_id[recorded["id"]]["scope"] == {"surface": "shared-mcp-tools"}
+    assert authoritative_by_id[corrected["id"]]["kind"] == "explicit_preference"
+    assert authoritative_by_id[corrected["id"]]["statement"] == "Prefer shared facade and transport tests together."
+    assert authoritative_by_id[corrected["id"]]["scope"] == {"surface": "shared-mcp-tools"}
+    assert authoritative_by_id[corrected["id"]]["source_evidence_cids"] == [recorded["id"]]
+    assert inferred_by_id[inferred["id"]]["kind"] == "inferred_preference"
+    assert inferred_by_id[inferred["id"]]["statement"] == "Likely values shared wrapper-level tests."
+    assert inferred_by_id[inferred["id"]]["scope"] == inference_scope
+    assert profile_context["authoritative"] == profile["authoritative"]
+    assert assertion_id
+    assert neighbor_relation is not None
+    assert query_relation == neighbor_relation
+    assert graph_query["hops"] == 2
+    assert {event["kind"] for event in timeline["events"]} == {"assertion", "relation"}
+    assert graph_as_of["assertions"][0]["object"] == target
+    assert attribution["trajectory_id"] == trajectory["id"]
+    assert lesson["failure_signature"] == attribution["signature"]
+    assert procedure["signature"]["failure_signature"] == lesson["failure_signature"]
+    assert alias_lesson["failure_signature"].endswith("alias-drift")
+    assert alias_procedure["signature"]["failure_signature"] == alias_lesson["failure_signature"]
+    assert promoted_lesson["promoted"] is True
+    assert promoted_lesson["security"]["allowed"] is True
+    assert lesson_lookup["lessons"][0]["id"] == alias_lesson["id"]
+    assert procedure_lookup["procedures"][0]["id"] == alias_procedure["id"]
+    assert validated["status"] == "validated"
+    assert promoted["status"] == "promoted"
+    assert rolled_back["status"] == "rolled_back"
+    assert outcome["outcome"] == "failure"
+    assert replay["counterfactual_replay_score"] > 0
+
+
 def test_shared_engine_contract_branch_names_are_tenant_scoped(engine_bundle: tuple[Any, str, str]) -> None:
     engine, tenant, user = engine_bundle
     other_tenant = f"{tenant}-other"
