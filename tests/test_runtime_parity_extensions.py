@@ -855,9 +855,24 @@ def test_projection_recompute_schedules_summary_refresh_for_affected_gist(tmp_pa
     assert recompute.details["affected_evidence_cids"] == [cid, summary_cid]
     assert recompute.details["affected_projections"]["relations"] == [relation_id]
     assert recompute.details["queued_consolidation_jobs"] == [jobs[0].id]
+    assert recompute.details["memo_hit"] is False
+    assert len(recompute.details["fingerprint"]) == 64
     assert len(jobs) == 1
     assert jobs[0].kind == CONSOLIDATE_EVIDENCE_JOB
     assert jobs[0].payload["source_evidence_cids"] == [cid]
+    repeated = handlers.run_projection_recompute(
+        {
+            "tenant_id": TENANT,
+            "user_id": USER,
+            "branch": "main",
+            "changed_evidence_cids": [cid],
+            "passes": ["summarizer"],
+        }
+    )
+    assert repeated.details["fingerprint"] == recompute.details["fingerprint"]
+    assert repeated.details["memo_hit"] is True
+    assert repeated.details["queued_consolidation_jobs"] == []
+    assert len(queue.jobs) == 1
     assert jobs[0].payload["passes"] == ["summarizer"]
     assert jobs[0].payload["trigger"] == PROJECTION_RECOMPUTE_JOB
 
