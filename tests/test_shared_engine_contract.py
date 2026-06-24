@@ -1521,6 +1521,71 @@ def test_shared_engine_contract_memory_tools_branch_facades(engine_bundle: tuple
     )
 
 
+def test_shared_engine_contract_memory_tools_propose_confirm_facades(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, user = engine_bundle
+    tools = MemoryTools(engine)
+    source_cid = engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id=user,
+            actor="user",
+            source_type="shared-facade-propose-confirm",
+            content="Shared propose confirm facade promotes candidate memory to main.",
+            trust_tier=1,
+            access_policy={"tenant": tenant},
+        )
+    )
+
+    proposal = tools.propose(
+        tenant,
+        user,
+        "Shared propose confirm",
+        "promotes",
+        "candidate memory",
+        source_evidence_cids=[source_cid],
+        confidence=0.91,
+        trust_tier=1,
+    )
+
+    assert proposal["status"] == "proposed"
+    assert proposal["tenant_id"] == tenant
+    assert proposal["user_id"] == user
+    assert proposal["security"]["allowed"] is True
+    assert proposal["branch"].startswith("proposal-")
+    assert engine.get_evidence(tenant, source_cid, branch=proposal["branch"]) is not None
+    assert not any(
+        item["id"] == proposal["id"] and item["branch"] == "main"
+        for item in engine.export_tenant(tenant)["assertions"]
+    )
+
+    confirmed = tools.confirm(
+        proposal["id"],
+        role="operator",
+        source_trust_tier=0,
+        tenant_id=tenant,
+    )
+    exported = engine.export_tenant(tenant)
+    main_assertion = next(
+        item
+        for item in exported["assertions"]
+        if item["id"] == proposal["id"] and item["branch"] == "main"
+    )
+
+    assert confirmed["id"] == proposal["id"]
+    assert confirmed["branch"] == proposal["branch"]
+    assert confirmed["into"] == "main"
+    assert confirmed["security"]["allowed"] is True
+    assert confirmed["merge"]["from_branch"] == proposal["branch"]
+    assert confirmed["merge"]["into_branch"] == "main"
+    assert confirmed["merge"]["assertions_added"] >= 1
+    assert main_assertion["subject"] == "Shared propose confirm"
+    assert main_assertion["predicate"] == "promotes"
+    assert main_assertion["object"] == "candidate memory"
+    assert main_assertion["source_evidence_cids"] == [source_cid]
+
+
 def test_shared_engine_contract_memory_tools_write_facades(engine_bundle: tuple[Any, str, str]) -> None:
     engine, tenant, user = engine_bundle
     tools = MemoryTools(engine)
