@@ -57,19 +57,21 @@ class LifecycleState:
         return data
 
 
-def decayed_salience(state: LifecycleState, now: datetime) -> float:
+def decayed_salience(state: LifecycleState, now: datetime, *, actr_decay: float = 0.0) -> float:
     """Estimate a memory's current utility from recency, importance and use.
 
-    Combines an exponential recency decay (45-day time constant) with the
-    item's intrinsic importance and a bounded access-frequency boost, clamped
-    to ``[0, 1]``. This is the predicted-future-utility signal that
-    :func:`demotion_decision` uses to govern fidelity-tier forgetting.
+    With ``actr_decay == 0.0`` this preserves the legacy exponential recency
+    decay. Positive values switch the recency term to the ACT-R power-law
+    ``(1 + age_days) ** -d`` used by the blueprint's forgetting model.
     """
     if state.last_accessed is None:
         age_days = 30.0
     else:
         age_days = max((now.astimezone(UTC) - state.last_accessed.astimezone(UTC)).total_seconds() / 86400.0, 0.0)
-    decay = math.exp(-age_days / 45.0)
+    if actr_decay > 0.0:
+        decay = (1.0 + age_days) ** (-actr_decay)
+    else:
+        decay = math.exp(-age_days / 45.0)
     access_boost = min(math.log1p(state.access_count) / 6.0, 0.35)
     return max(0.0, min(1.0, state.salience * decay + state.importance * 0.35 + access_boost))
 
@@ -84,18 +86,25 @@ def next_fidelity_tier(current: FidelityTier) -> FidelityTier:
     return FIDELITY_ORDER[min(index + 1, len(FIDELITY_ORDER) - 1)]
 
 
-def demotion_decision(state: LifecycleState, now: datetime, utility_threshold: float = 0.18) -> tuple[LifecycleState, bool]:
+def demotion_decision(
+    state: LifecycleState,
+    now: datetime,
+    utility_threshold: float = 0.18,
+    *,
+    actr_decay: float = 0.0,
+) -> tuple[LifecycleState, bool]:
     """Apply graduated forgetting to one memory and report whether it demoted.
 
     Protected memories are never demoted. Otherwise the item keeps its tier
     while its predicted utility stays above ``utility_threshold``; once utility
     drops below it the item falls one fidelity tier (and is flagged
     ``confabulation_risk`` on the gist/statistical-trace tiers per fuzzy-trace
-    theory). Returns ``(updated_state, demoted)``.
+    theory). ``actr_decay`` is forwarded to :func:`decayed_salience`, defaulting
+    to the legacy exponential path. Returns ``(updated_state, demoted)``.
     """
     if state.protected:
         return state, False
-    utility = decayed_salience(state, now)
+    utility = decayed_salience(state, now, actr_decay=actr_decay)
     # I7: must-keep memories are never demoted even when their decayed utility
     # falls below the threshold (e.g. when not yet due for rehearsal); they keep
     # their fidelity tier while their salience estimate is refreshed.

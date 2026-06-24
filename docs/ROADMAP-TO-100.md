@@ -54,9 +54,9 @@ Every item is **additive, default-off / shadow-first, byte-identical when inacti
 | A4 | **§31 Rail 3** `max_prune_fraction_per_pass 0.02` | **Done 2026-06-24.** The consolidation forgetter and summary-retirement path consume the same pass-scoped prune budget and defer extra lifecycle demotions/summary retirements once the allowed fraction is exhausted. | Complete; keep `mutation_rails` pass reporting visible in future consolidation changes. | `tests/completion/rails/test_prune_fraction.py` is green. | **Done** |
 | A5 | **§31 Rail 6** `sanitize_retrieved_text` | **Done 2026-06-24.** Local and Postgres returned retrieval hits now carry `metadata["retrieved_text"]` from `sanitize_retrieved_text`, preserving visible hit text while marking retrieved memory as data-only/no-write-authority. | Complete; keep retrieval metadata envelope on future hit builders. | Shared Local/Postgres sanitizer regression is green. | **Done** |
 | A6 | **§31 Rail 7** `consolidation_cadence_bounds [5 steps, 24h]` | **Done 2026-06-24.** `ConsolidationWorker.run_queue_payload()` now enforces a default five-step lower bound per tenant, accepts explicit `consolidation_step` inputs for deterministic pass scheduling, and allows stale tenants through once the 24h upper bound is crossed. | Complete; keep repeated-pass tests advancing explicit steps. | `tests/completion/rails/test_consolidation_cadence_bounds.py` is green. | **Done** |
-| A7 | **cf-gate** (FR-17) + `cold_loop_counterfactual_trusted` | `gate.py PromotionGate.evaluate` is pure regression margin; no counterfactual `replay_predicted_lift` term; rail absent. | Add cf-term + new immutable rail (default off; flips on only when `replay-fidelity-check` passes). **Already built additively on `reconcile/lane-a-cold` — merge it.** | replay-fidelity suite | **S–M** |
-| A8 | **Ignition switch** (OQ5) — `RegressionCase.origin`, `PromotionGate.ignition_status()` | `ignition_status` absent (0 hits); `RegressionCase.origin` not present. | Shadow-no-merge until ignition. **Already built additively on `reconcile/lane-a-cold` — merge it.** | ignition/v2-selftest | **S** |
-| A9 | **ACT-R demotion** (OQ4) | `lifecycle.py:72` still `exp(-age_days/45)` (not power-law `(1+age)^-d`); retrieval base_level frequency-only. | Add `policy.actr_decay` (default 0.0 = off) driving decay + base_level. **Already built additively on `reconcile/lane-a-cold` — merge it.** | demotion tests | **S** |
+| A7 | **cf-gate** (FR-17) + `cold_loop_counterfactual_trusted` | **Done 2026-06-24.** `PromotionGate.evaluate()` now records the counterfactual `replay_predicted_lift` term and `OperatingPolicy.cold_loop_counterfactual_trusted` exists as a default-off top-level rail gate without mutating the all-true `immutable_rails` map. | Complete; future replay-fidelity automation can flip the trust flag only after the protected replay check passes. | Counterfactual gate/policy regressions are green. | **Done** |
+| A8 | **Ignition switch** (OQ5) — `RegressionCase.origin`, `PromotionGate.ignition_status()` | **Done 2026-06-24.** `RegressionCase` now carries `origin` and `mode`; `PromotionGate.ignition_status()` counts active curated/genuine cases only, excludes synthetic/shadow cases from `N_active`, and `require_ignition=True` keeps otherwise-passing candidates shadow-no-merge until the suite is ready. | Complete; keep synthetic/shadow generated cases from satisfying private-suite ignition. | Ignition shadow/active gate regression is green. | **Done** |
+| A9 | **ACT-R demotion** (OQ4) | **Done 2026-06-24.** `OperatingPolicy.actr_decay` defaults to `0.0` for legacy byte-stable behavior, and when enabled drives ACT-R power-law lifecycle salience, consolidation forgetter demotion, and retrieval base-level activation instead of frequency-only scoring. | Complete; keep default-off path unchanged unless deployments opt into ACT-R decay. | Lifecycle, forgetter, and activation regressions are green. | **Done** |
 | A10 | **Corroborated-erasure derived-evidence cascade** (OQ6/FR-8) | **Done 2026-06-24.** Local and Postgres forget paths now split derived evidence into erased vs retained rows: legal hard-delete by `requested_by="legal"` still shreds all derived evidence, while normal/operator erasure retains derived rows with surviving source support and trims their source metadata before projection propagation. | Complete; keep retained-derived metadata trimming aligned with future summary metadata fields. | Shared Local/Postgres corroborated-derived forget regression is green. | **Done** |
 | A11 | **Hosted-MCP transport** (FR-9) | Local JSON-RPC/TLS/self-test done; official StreamableHTTP/SSE not validated. | Implement/validate official transport (evidence in Tier B). | — | **M** |
 | A12 | **Cached PPR column** (FR-11) | Recursive PPR works; no materialized cached-PPR column. | Add cached-PPR column + refresh path. | — | **M** |
@@ -64,7 +64,7 @@ Every item is **additive, default-off / shadow-first, byte-identical when inacti
 | A14 | **`--object` argparse bug + `Preference.access_policy`** | **Done 2026-06-24.** Root and subcommand parsers now disable implicit option abbreviation while preserving explicit `branch --from`; `Preference.access_policy` now round-trips through Local/Postgres model, schema, export, and audit diff. | Complete; keep future CLI aliases explicit. | Parser and shared Local/Postgres access-policy tests are green. | **Done** |
 
 > **Note — Rail 2 is DONE.** `min_corroboration_for_delete` is landed (`policy.py:32` default=2; enforced `engine.py:994-1017`). Cross it off any older reconciliation list.
-> **Note — A7/A8/A9 are pre-built.** They exist additive/default-off on the local-only branch `reconcile/lane-a-cold` (commit `9820d0b`); the hot-file legs are specified in `~/Projects/Mnemosyne-lane-a/docs/LANE-A-HANDOFF.md`. Merging that branch + landing the handoff legs closes them with proven zero-conflict.
+> **Note — A7/A8/A9 are now ported to `main`.** The lane-a checkout remains useful as historical source material only; do not merge it wholesale over newer `main` changes.
 
 ### TIER B — Real-infrastructure evidence capture (ops/deployment; not feature code)
 
@@ -93,9 +93,9 @@ This is the **bulk of the remaining percentage** and the universal blocker on al
 
 ## 3. The fastest honest path (sequenced)
 
-1. **Inspect and selectively port the pre-built additive items** (A7, A8, A9 from `/Users/admin/Projects/Mnemosyne-lane-a` on `reconcile/lane-a-cold`) — keep them default-off and verify conflicts before merging because that checkout is currently dirty.
-2. **Codex lands the two keystones in order: A1 (embedding seam) → A2 (ECE).** This is the chain to the single red SLO → **6/6 SLOs PASS**.
-3. **Codex lands the remaining keystones and lane-a reconciliations:** A1, A2, and A7/A8/A9. The small Tier A source-wiring items A3/A4/A5/A6/A10/A13/A14 are now closed.
+1. **Codex lands the two keystones in order: A1 (embedding seam) → A2 (ECE).** This is the chain to the single red SLO → **6/6 SLOs PASS**.
+2. **Codex closes remaining Tier A source wiring:** A1 and A2 are the remaining mandatory source-code keystones. The small Tier A items A3/A4/A5/A6/A7/A8/A9/A10/A13/A14 are now closed.
+3. **Review optional A11/A12 only if the v1.0 bar requires them.** Keep them behind the real-infra evidence pass unless strict audit rows still demand code work.
 4. **One real-infra evidence pass (Tier B):** bring up `infra/` (fix the Keycloak 1/3 failure first) plus a Postgres+ParadeDB+AGE+pgvector instance and one real embedding/reranker endpoint; run the `*-ops-check` / `provider-check` / `release-audit` captures. This flips the 10 parity rows Partial→Done.
 5. **Re-run the parity audit and sign off v1.0.** A11/A12/B8 + Tier C are optional polish beyond the v1.0 bar.
 
@@ -105,7 +105,7 @@ This is the **bulk of the remaining percentage** and the universal blocker on al
 
 | Milestone | Blended % | What changed |
 |---|---|---|
-| **Now** (after A14 + A5 + A3/A4 + A6 + A13 + A10) | **~76%** | ~85% scaffold; 5/6 SLOs proven; §31 live mutation-rate/cadence rails, FR-12 recompute memo, and corroborated derived-erasure split now enforced; ~55–60% production parity remains blocked by no real-infra evidence and remaining keystone/lane-a `src` wirings |
+| **Now** (after A14 + A5 + A3/A4 + A6 + A7/A8/A9 + A10 + A13) | **~78%** | ~85% scaffold; 5/6 SLOs proven; §31 live mutation-rate/cadence rails, FR-12 recompute memo, cf-gate/ignition/ACT-R wiring, and corroborated derived-erasure split now enforced; ~55–60% production parity remains blocked by no real-infra evidence and A1/A2 keystones |
 | After **Tier A** (code wirings) | **~82%** | 6/6 SLOs; all 7 §31 rails enforced; all FR `src` gaps closed; local↔prod architecture unified |
 | After **Tier B** (real-infra evidence) | **~97%** | 10 audit rows flip Partial→Done |
 | After **Tier C** + sign-off | **100%** | multimodal/LoRA (optional) + v1.0 attestation |
@@ -116,5 +116,5 @@ This is the **bulk of the remaining percentage** and the universal blocker on al
 
 - **Live edit hazard:** `main` is edited by an autonomous Codex/GSD session. Never `git add -A`; stage specific files only; push fast-forward only; verify it is not mid-edit before committing.
 - **Don't build more gates/tests by default** — the machine-checkable evidence layer (`PRODUCTION_RELEASE_REQUIRED_COMMANDS`, `RELEASE_AUDIT_REQUIRED_OUTPUT_KEYS`) now rejects placeholder/hollow release evidence; further gate work needs a concrete audit finding.
-- **Tier A items A7/A8/A9 may already exist** in `/Users/admin/Projects/Mnemosyne-lane-a` on `reconcile/lane-a-cold`; inspect and port, don't rebuild blindly.
+- **Lane-a checkout is historical source material now** — A7/A8/A9 have been selectively ported to `main`; do not wholesale-merge `/Users/admin/Projects/Mnemosyne-lane-a` over newer commits.
 - The completion branch's additive scope is **essentially complete** — it never edits `src/`; treat it as the proof/forcing-function layer.

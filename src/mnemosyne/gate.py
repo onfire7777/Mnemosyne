@@ -8,6 +8,7 @@ from typing import Any, Callable, Literal
 from mnemosyne.engine import LocalMemoryEngine
 
 CaseTier = Literal["smoke", "core", "archive"]
+CaseOrigin = Literal["curated", "genuine", "synthetic"]
 
 
 @dataclass(slots=True)
@@ -18,6 +19,8 @@ class RegressionCase:
     expected_substring: str
     tier: CaseTier = "smoke"
     protected: bool = False
+    origin: CaseOrigin = "curated"
+    mode: Literal["shadow", "active"] = "active"
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -78,6 +81,26 @@ class GateResult:
         return asdict(self)
 
 
+IGNITION_N_ACTIVE = 30
+IGNITION_MIN_CURATED = 20
+IGNITION_MIN_GENUINE = 5
+
+
+@dataclass(slots=True)
+class IgnitionStatus:
+    """Suite-ignition readiness for the OQ5 shadow-to-active promotion flip."""
+
+    mode: Literal["SHADOW", "ACTIVE"]
+    ready: bool
+    n_active: int
+    n_active_target: int
+    counts: dict[str, int]
+    blocking_reasons: list[str]
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
 class PromotionGate:
     def __init__(
         self,
@@ -85,6 +108,7 @@ class PromotionGate:
         cases: list[RegressionCase],
         noise_margin: float = 0.01,
         counterfactual_hook: CounterfactualHook | None = None,
+        require_ignition: bool = False,
     ):
         self.engine = engine
         self.cases = cases
@@ -92,6 +116,7 @@ class PromotionGate:
         # Optional §30.6 seam: when set, a counterfactual-replay verdict can veto an
         # otherwise-promotable candidate. Default ``None`` preserves prior behaviour.
         self.counterfactual_hook = counterfactual_hook
+        self.require_ignition = require_ignition
 
     def relevant_cases(self, candidate: Candidate) -> list[RegressionCase]:
         signature_terms = set(candidate.signature.lower().split())
@@ -101,6 +126,40 @@ class PromotionGate:
             if signature_terms & case_terms or case.protected or case.tier == "smoke":
                 relevant.append(case)
         return relevant
+
+    def ignition_status(self) -> IgnitionStatus:
+        """Return the private-suite readiness gate for OQ5 cold-loop promotion."""
+
+        counts = {"curated": 0, "genuine": 0, "synthetic": 0}
+        protected_present = False
+        for case in self.cases:
+            origin = getattr(case, "origin", "curated")
+            if origin not in counts:
+                origin = "curated"
+            if getattr(case, "mode", "active") != "active":
+                continue
+            counts[origin] += 1
+            if origin != "synthetic" and case.protected:
+                protected_present = True
+        n_active = counts["curated"] + counts["genuine"]
+        blocking: list[str] = []
+        if counts["curated"] < IGNITION_MIN_CURATED:
+            blocking.append(f"curated {counts['curated']} < required {IGNITION_MIN_CURATED}")
+        if counts["genuine"] < IGNITION_MIN_GENUINE:
+            blocking.append(f"genuine {counts['genuine']} < required {IGNITION_MIN_GENUINE}")
+        if n_active < IGNITION_N_ACTIVE:
+            blocking.append(f"N_active {n_active} < target {IGNITION_N_ACTIVE}")
+        if not protected_present:
+            blocking.append("no protected active curated/genuine case present")
+        ready = not blocking
+        return IgnitionStatus(
+            mode="ACTIVE" if ready else "SHADOW",
+            ready=ready,
+            n_active=n_active,
+            n_active_target=IGNITION_N_ACTIVE,
+            counts=counts,
+            blocking_reasons=blocking,
+        )
 
     def evaluate(
         self,
@@ -133,6 +192,8 @@ class PromotionGate:
         if self.counterfactual_hook is not None:
             verdict = self.counterfactual_hook(tenant_id, candidate, self.engine, passed, failed)
             counterfactual = verdict.to_dict()
+            # Replay-fidelity term consumed by the cold-loop counterfactual rail.
+            counterfactual["replay_predicted_lift"] = verdict.predicted_lift
             # Counterfactual replay can veto an otherwise-promotable candidate, but
             # never rescues one the regression suite already failed.
             if promoted and not verdict.passed:
@@ -143,6 +204,8 @@ class PromotionGate:
                 failed.append(rail_violation)
                 protected_regressions.append(rail_violation)
                 promoted = False
+        if promoted and self.require_ignition and not self.ignition_status().ready:
+            promoted = False
         rollback_branch = None
         if promoted:
             self._merge(branch, tenant_id)

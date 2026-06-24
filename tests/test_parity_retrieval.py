@@ -418,6 +418,22 @@ def test_apply_activation_scores_annotates_and_sorts() -> None:
     assert apply_activation_scores([], policy) == []
 
 
+def test_apply_activation_scores_uses_actr_base_level_when_enabled() -> None:
+    now = datetime(2026, 6, 23, tzinfo=UTC)
+    hit = _hit(
+        "stale",
+        "frequently accessed but old memory",
+        score=0.8,
+        metadata={"confidence": 0.9, "access_count": 5, "last_accessed": (now - timedelta(days=90)).isoformat()},
+        trust_tier=3,
+    )
+
+    legacy = apply_activation_scores([hit], OperatingPolicy(), now=now)[0]
+    actr = apply_activation_scores([hit], OperatingPolicy(actr_decay=0.5), now=now)[0]
+
+    assert actr.metadata["activation"]["components"]["base_level"] < legacy.metadata["activation"]["components"]["base_level"]
+
+
 def test_activation_explain_reports_weights() -> None:
     policy = OperatingPolicy()
     hits = apply_activation_scores([_hit("a", "fact", score=0.5)], policy)

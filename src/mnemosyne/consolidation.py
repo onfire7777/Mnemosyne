@@ -257,6 +257,7 @@ class ConsolidationWorker:
         # source promotion behaviour is unchanged unless a deployment opts in.
         self.min_corroboration = max(1, int(min_corroboration))
         policy = getattr(engine, "policy", None)
+        self.policy = policy
         policy_supersession_rate = getattr(policy, "max_supersession_rate", 0.05)
         self.max_supersession_rate = max(
             0.0,
@@ -1125,6 +1126,7 @@ class ConsolidationWorker:
             return {"backend_supported": False, "evaluated": len(evidence), "demoted": 0}
         now = self._parse_datetime(payload.get("now")) or datetime.now(UTC)
         threshold = float(payload.get("utility_threshold", 0.18))
+        actr_decay = max(float(getattr(self.policy, "actr_decay", 0.0)), 0.0)
         evaluated: list[dict[str, Any]] = []
         demoted_cids: list[str] = []
         failed_cids: list[str] = []
@@ -1134,7 +1136,12 @@ class ConsolidationWorker:
             lifecycle = item.metadata.get("lifecycle") if isinstance(item.metadata, dict) else None
             state = self._lifecycle_state(item, lifecycle)
             scheduled_state, rehearsed = apply_rehearsal_schedule(state, now)
-            next_state, changed = demotion_decision(scheduled_state, now, utility_threshold=threshold)
+            next_state, changed = demotion_decision(
+                scheduled_state,
+                now,
+                utility_threshold=threshold,
+                actr_decay=actr_decay,
+            )
             rail_blocked = bool(
                 changed
                 and mutation_budget is not None

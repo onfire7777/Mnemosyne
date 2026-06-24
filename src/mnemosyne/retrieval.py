@@ -688,8 +688,17 @@ def apply_activation_scores(hits: Sequence[Hit], policy: OperatingPolicy, *, now
         semantic = max(hit.score, 0.0) / max(max_relevance, 0.01)
         confidence = _bounded_float(hit.metadata.get("confidence", 0.7), default=0.7)
         access_count = _bounded_int(hit.metadata.get("access_count", 0))
-        base_level = min(1.0, math.log1p(access_count) / math.log(11))
         recency = _recency_score(hit.metadata.get("last_accessed"), moment, policy.decay)
+        actr_d = max(float(getattr(policy, "actr_decay", 0.0)), 0.0)
+        if actr_d > 0.0:
+            age_days = _age_days(hit.metadata.get("last_accessed"), moment)
+            raw_base_level = math.log1p(access_count) - actr_d * math.log1p(age_days)
+            base_level = max(
+                0.0,
+                min(1.0, (raw_base_level + actr_d * math.log1p(_BASE_LEVEL_AGE_REF)) / math.log(11)),
+            )
+        else:
+            base_level = min(1.0, math.log1p(access_count) / math.log(11))
         importance = confidence * trust_weight(hit.trust_tier)
         activation_numerator = (
             max(weights.get("base_level", 0.0), 0.0) * base_level
@@ -943,6 +952,17 @@ def _recency_score(value: object, now: datetime, decay: float) -> float:
     accessed = accessed.astimezone(UTC) if accessed.tzinfo else accessed.replace(tzinfo=UTC)
     age_days = max((now - accessed).total_seconds(), 0.0) / 86_400.0
     return 1.0 / (1.0 + max(decay, 0.0) * age_days)
+
+
+_BASE_LEVEL_AGE_REF = 30.0
+
+
+def _age_days(value: object, now: datetime) -> float:
+    accessed = value if isinstance(value, datetime) else parse_dt(value)
+    if accessed is None:
+        return _BASE_LEVEL_AGE_REF
+    accessed = accessed.astimezone(UTC) if accessed.tzinfo else accessed.replace(tzinfo=UTC)
+    return max((now - accessed).total_seconds(), 0.0) / 86_400.0
 
 
 def _bounded_float(value: object, *, default: float) -> float:
