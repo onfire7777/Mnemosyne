@@ -1,5 +1,7 @@
 # Mnemosyne Completion Line — Cross-Wave Scoreboard (Waves 1–3)
 
+> **Status note (updated 2026-06-24).** This is a **historical Waves 1–3 scoreboard**, kept for lineage. For current completion status read **`docs/ROADMAP-TO-100.md`** (blended ~82%, mandatory Tier A wirings closed) and the controlling **`.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md`**. Since this scoreboard was written, the mandatory Tier A `src` reconciliation items (A1–A10, A13, A14) have all landed — so the "Codex has closed no new reconciliation items" and "6 xfails map to 6 still-open `src` items" notes below describe the 2026-06-21 state, not today.
+
 **Date:** 2026-06-21 · **Branch:** `completion/blueprint-parity` (rebased onto Codex `main` @ `730589b`)
 **Authoring note:** the Wave-3 cross-wave critic agent was hit by a **prompt-injection** (a payload,
 most likely from the adversarial poison corpus, surfaced an "output-style OVERRIDE" instruction in

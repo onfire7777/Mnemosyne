@@ -2,28 +2,28 @@
 
 **Authored:** 2026-06-24 · **Current baseline:** main after the 2026-06-24 A2 calibrated-confidence slice
 **Controlling status doc:** `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md` (10 gap rows, all "Partial")
-**Verdict source:** blended completion **~70%** — this doc explains *why it has been stuck there* and *exactly what flips it to 100%*.
+**Verdict source:** blended completion **~82%** today (up from a long ~70% plateau, broken by the 2026-06-24 Tier A wirings) — this doc explains *why it sat at ~70%*, *what moved it to ~82%*, and *exactly what flips it to 100%*.
 
 ---
 
-## 0. Why the number has been stuck at ~70% (read this first)
+## 0. Why the number sat at ~70% for so long — and what moved it to ~82% (read this first)
 
-The "70%" is a **blended** figure, and the blend hides the real shape of the work:
+The headline number is a **blended** figure, and the blend hides the real shape of the work:
 
 - **~85% functional / architectural scaffold** — nearly every blueprint capability is built and green-tested on the deterministic local engine.
 - **6 of 6 headline SLOs are now empirically PROVEN** across the real retrieval/calibration paths: recall 0.977, nDCG 0.983, G2 lift +0.208 @7% tokens, poison-block 1.0, warm+serial P95 149.5 ms, and ECE 0.0063 vs §16 ≤0.05 from `eval/calibration/runner.py`.
 - **But ~55–60% production-grade 1:1 parity.** Every one of the 10 audit gap rows is "Partial" for the *same* reason: the code contracts and local/compose-Postgres validation are done, but **operator-captured evidence from real production deployments does not yet exist**.
 
-So the number has not moved because the remaining 30% is **not "write more code in the same style."** It is two distinct kinds of work that coding-as-usual does not produce:
+The ~70% plateau held for so long — and the remaining ~18% to 100% is slow — because that work is **not "write more code in the same style."** It is two distinct kinds of work that coding-as-usual does not produce:
 
-1. **~8 small `src` reconciliation wirings** (the disconnected machinery — Tier A below). These are owned by the autonomous **Codex** session on `main`; several may already be built additively/default-off in the local `reconcile/lane-a-cold` checkout.
-2. **Standing up real infrastructure and capturing evidence** (Tier B below) — real IdP, secret manager, KMS, ParadeDB/AGE, hosted embedding/reranker/trainer endpoints, C2PA trust roots. This is **ops/deployment work**, not feature code. The `*-ops-check` / `provider-check` / `release-audit` gates already exist and *demand* this evidence; nothing can fake it (the gates were deliberately hardened through `7f795df` to reject placeholder and hollow evidence).
+1. **`src` reconciliation wirings (Tier A below) — now essentially closed.** The mandatory items (A1–A10, A13, A14) landed additively/default-off on `main` on 2026-06-24, which is exactly what moved the blend from ~70% to ~82%. Only the optional A11 (hosted StreamableHTTP/SSE) and A12 (cached-PPR column) remain, and both stay gated behind the real-infra evidence pass unless the strict audit demands them.
+2. **Standing up real infrastructure and capturing evidence** (Tier B below) — real IdP, secret manager, KMS, ParadeDB/AGE, hosted embedding/reranker/trainer endpoints, C2PA trust roots. This is **ops/deployment work**, not feature code, and it is now the bulk of the remaining ~18%. The `*-ops-check` / `provider-check` / `release-audit` gates already exist and *demand* this evidence; nothing can fake it (the gates were deliberately hardened through `7f795df` to reject placeholder and hollow evidence).
 
-**The trap to avoid (already observed):** Codex has been spending recent cycles adding more `test(...)` coverage and more release-audit *gates*. After the placeholder/hollow evidence hardening through `7f795df`, real progress should pivot to Tier A wirings and Tier B evidence unless a concrete audit finding exposes a missing fail-closed gate.
+**The trap to avoid (already observed):** Codex has been spending recent cycles adding more `test(...)` coverage and more release-audit *gates*. With the mandatory Tier A wirings now closed and placeholder/hollow evidence rejected (hardened through `7f795df`), real progress should pivot to **Tier B real-infrastructure evidence** — and the optional A11/A12 only if a concrete audit finding demands them — not more gates or tests.
 
 ---
 
-## 1. What is actually DONE (so "70%" is legible)
+## 1. What is actually DONE (so the ~82% is legible)
 
 | Area | State |
 |---|---|
@@ -40,7 +40,7 @@ So the number has not moved because the remaining 30% is **not "write more code 
 
 ---
 
-## 2. The remaining 30% — three tiers
+## 2. The remaining ~18% — three tiers
 
 ### TIER A — `src` reconciliation wirings (code; Codex owns `main`)
 

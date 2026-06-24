@@ -40,7 +40,7 @@ No synthetic confidences are injected — this is what makes the ECE "real".
 
 ```bash
 # reuse the prepared eval venv (never commit it)
-PYTHONPATH=src /Users/admin/Projects/Mnemosyne-completion/.venv-eval/bin/python \
+PYTHONPATH=src .venv-eval/bin/python \
   eval/calibration/runner.py            # writes dataset.json + report.json, prints summary
 
 PYTHONPATH=src .venv-eval/bin/python eval/calibration/runner.py --json      # full JSON to stdout

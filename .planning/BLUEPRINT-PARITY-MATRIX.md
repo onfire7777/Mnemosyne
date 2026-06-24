@@ -1,7 +1,7 @@
 # Mnemosyne — Blueprint Parity Matrix
 
 **Maintained by:** AUX-DOCS lane (traceability synthesis). **This is a read-and-track artifact, not a spec.**
-**Date:** 2026-06-23 · **Repo:** `~/Projects/Mnemosyne` (canonical) → `github.com/onfire7777/Mnemosyne`.
+**Date:** 2026-06-23 (last full sync; for the final 2026-06-24 status defer to the strict parity audit cited below) · **Repo:** `~/Projects/Mnemosyne` (canonical) → `github.com/onfire7777/Mnemosyne`.
 **Goal it serves:** exact 1:1 parity with `Mnemosyne-v2-Build-Blueprint.md` (§1–§38 + Appendices A–E).
 
 ## Purpose & method
