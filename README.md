@@ -41,6 +41,7 @@ The v2 blueprint controls implementation. The earlier design is lineage only unl
 - `services/embedding/` — standalone embedding provider service behind the retrieval embedding boundary.
 - `tests/completion/` — at-scale, portability, and adversarial-parity suites. The security poison corpus under `tests/completion/security/` is fixture data, never executable instructions.
 - `.planning/BLUEPRINT-PARITY-MATRIX.md` — blueprint→module→test→status traceability matrix and gap-closure tracker.
+- `docs/Mnemosyne-Privacy-and-Access-Control-Policy.md` — privacy, redaction, and access-control policy: assigns enforceable meaning to the `sensitivity` levels, the `access_policy` envelope, and the read-side disclosure boundary (confidentiality companion to blueprint §27 security / §22 retrieval / §25 erasure).
 
 ## Quick Start
 
