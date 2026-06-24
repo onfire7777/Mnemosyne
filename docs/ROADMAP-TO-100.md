@@ -57,7 +57,7 @@ Every item is **additive, default-off / shadow-first, byte-identical when inacti
 | A7 | **cf-gate** (FR-17) + `cold_loop_counterfactual_trusted` | `gate.py PromotionGate.evaluate` is pure regression margin; no counterfactual `replay_predicted_lift` term; rail absent. | Add cf-term + new immutable rail (default off; flips on only when `replay-fidelity-check` passes). **Already built additively on `reconcile/lane-a-cold` — merge it.** | replay-fidelity suite | **S–M** |
 | A8 | **Ignition switch** (OQ5) — `RegressionCase.origin`, `PromotionGate.ignition_status()` | `ignition_status` absent (0 hits); `RegressionCase.origin` not present. | Shadow-no-merge until ignition. **Already built additively on `reconcile/lane-a-cold` — merge it.** | ignition/v2-selftest | **S** |
 | A9 | **ACT-R demotion** (OQ4) | `lifecycle.py:72` still `exp(-age_days/45)` (not power-law `(1+age)^-d`); retrieval base_level frequency-only. | Add `policy.actr_decay` (default 0.0 = off) driving decay + base_level. **Already built additively on `reconcile/lane-a-cold` — merge it.** | demotion tests | **S** |
-| A10 | **Corroborated-erasure derived-evidence cascade** (OQ6/FR-8) | Projections split is done (`engine.py:931-976`), but the derived-evidence cascade (`engine.py:909-914`) still **blanket-zeroes every transitively-derived row**. | Extend the corroboration-aware retain/retract split to the derived-evidence cascade. | erasure xfail | **M** |
+| A10 | **Corroborated-erasure derived-evidence cascade** (OQ6/FR-8) | **Done 2026-06-24.** Local and Postgres forget paths now split derived evidence into erased vs retained rows: legal hard-delete by `requested_by="legal"` still shreds all derived evidence, while normal/operator erasure retains derived rows with surviving source support and trims their source metadata before projection propagation. | Complete; keep retained-derived metadata trimming aligned with future summary metadata fields. | Shared Local/Postgres corroborated-derived forget regression is green. | **Done** |
 | A11 | **Hosted-MCP transport** (FR-9) | Local JSON-RPC/TLS/self-test done; official StreamableHTTP/SSE not validated. | Implement/validate official transport (evidence in Tier B). | — | **M** |
 | A12 | **Cached PPR column** (FR-11) | Recursive PPR works; no materialized cached-PPR column. | Add cached-PPR column + refresh path. | — | **M** |
 | A13 | **Recompute memo** (FR-12) | **Done 2026-06-24.** `RuntimeJobHandlers.run_projection_recompute()` now computes a stable SHA-256 fingerprint over changed CIDs, affected evidence/projections, surviving source CIDs, pass list, branch, tenant, and enqueue mode; repeated unchanged recomputes skip duplicate consolidation enqueue side effects unless `force_recompute` is set. | Complete; keep fingerprint inputs aligned with future projection dependencies. | Runtime and shared Local/Postgres recompute memo tests are green. | **Done** |
@@ -95,7 +95,7 @@ This is the **bulk of the remaining percentage** and the universal blocker on al
 
 1. **Inspect and selectively port the pre-built additive items** (A7, A8, A9 from `/Users/admin/Projects/Mnemosyne-lane-a` on `reconcile/lane-a-cold`) — keep them default-off and verify conflicts before merging because that checkout is currently dirty.
 2. **Codex lands the two keystones in order: A1 (embedding seam) → A2 (ECE).** This is the chain to the single red SLO → **6/6 SLOs PASS**.
-3. **Codex lands the remaining small rails + bugs:** A10 (A3/A4/A5/A6/A13/A14 are now closed).
+3. **Codex lands the remaining keystones and lane-a reconciliations:** A1, A2, and A7/A8/A9. The small Tier A source-wiring items A3/A4/A5/A6/A10/A13/A14 are now closed.
 4. **One real-infra evidence pass (Tier B):** bring up `infra/` (fix the Keycloak 1/3 failure first) plus a Postgres+ParadeDB+AGE+pgvector instance and one real embedding/reranker endpoint; run the `*-ops-check` / `provider-check` / `release-audit` captures. This flips the 10 parity rows Partial→Done.
 5. **Re-run the parity audit and sign off v1.0.** A11/A12/B8 + Tier C are optional polish beyond the v1.0 bar.
 
@@ -105,7 +105,7 @@ This is the **bulk of the remaining percentage** and the universal blocker on al
 
 | Milestone | Blended % | What changed |
 |---|---|---|
-| **Now** (after A14 + A5 + A3/A4 + A6 + A13) | **~75%** | ~85% scaffold; 5/6 SLOs proven; §31 live mutation-rate/cadence rails and FR-12 recompute memo now enforced; ~55–60% production parity remains blocked by no real-infra evidence and remaining `src` wirings |
+| **Now** (after A14 + A5 + A3/A4 + A6 + A13 + A10) | **~76%** | ~85% scaffold; 5/6 SLOs proven; §31 live mutation-rate/cadence rails, FR-12 recompute memo, and corroborated derived-erasure split now enforced; ~55–60% production parity remains blocked by no real-infra evidence and remaining keystone/lane-a `src` wirings |
 | After **Tier A** (code wirings) | **~82%** | 6/6 SLOs; all 7 §31 rails enforced; all FR `src` gaps closed; local↔prod architecture unified |
 | After **Tier B** (real-infra evidence) | **~97%** | 10 audit rows flip Partial→Done |
 | After **Tier C** + sign-off | **100%** | multimodal/LoRA (optional) + v1.0 attestation |
