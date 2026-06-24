@@ -525,6 +525,56 @@ def test_command_media_embedding_provider_validates_json_contract(tmp_path: Path
     assert vector == [0.6, 0.8, 0.0]
 
 
+def test_memory_tools_direct_confirm_promotes_proposal_branch() -> None:
+    engine = LocalMemoryEngine()
+    tools = MemoryTools(engine)
+    cid = engine.append_evidence(
+        Evidence(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="direct-confirm",
+            content="Direct confirm promotes a proposal branch into main.",
+            trust_tier=1,
+            access_policy={"tenant": TENANT},
+        )
+    )
+
+    proposal = tools.propose(
+        TENANT,
+        USER,
+        "Direct confirm",
+        "promotes",
+        "proposal branch",
+        source_evidence_cids=[cid],
+        confidence=0.91,
+        trust_tier=1,
+    )
+    confirmed = tools.confirm(
+        proposal["id"],
+        role="operator",
+        source_trust_tier=0,
+        tenant_id=TENANT,
+    )
+    exported = engine.export_tenant(TENANT)
+    main_assertion = next(
+        item
+        for item in exported["assertions"]
+        if item["id"] == proposal["id"] and item["branch"] == "main"
+    )
+
+    assert confirmed["id"] == proposal["id"]
+    assert confirmed["branch"] == proposal["branch"]
+    assert confirmed["into"] == "main"
+    assert confirmed["security"]["allowed"] is True
+    assert confirmed["merge"]["from_branch"] == proposal["branch"]
+    assert confirmed["merge"]["into_branch"] == "main"
+    assert confirmed["merge"]["assertions_added"] >= 1
+    assert main_assertion["subject"] == "Direct confirm"
+    assert main_assertion["object"] == "proposal branch"
+    assert main_assertion["source_evidence_cids"] == [cid]
+
+
 def test_memory_tools_direct_profile_graph_learning_facade_methods() -> None:
     engine = LocalMemoryEngine()
     tools = MemoryTools(engine)
