@@ -15,7 +15,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import UnionType
 from typing import Any, Literal, TextIO, Union, get_args, get_origin, get_type_hints
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, unquote, urlsplit
 
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.ingestion import IngestionPipeline
@@ -658,6 +658,7 @@ def build_sdk_streamable_http_app(
     streamable_http_path: str = "/mcp",
     health_path: str = "/healthz",
     stateless: bool = True,
+    transport_stateless: bool | None = None,
     **kwargs: Any,
 ) -> Any:
     """Build an official MCP SDK StreamableHTTP ASGI app."""
@@ -671,12 +672,15 @@ def build_sdk_streamable_http_app(
     except ImportError as exc:  # pragma: no cover - exercised when optional extra is absent.
         raise RuntimeError("Official MCP SDK streamable HTTP mode requires `mnemosyne-memory[mcp]`.") from exc
 
-    sdk_server = build_sdk_server(**kwargs)
+    manager_stateless = stateless if transport_stateless is None else transport_stateless
+    sdk_kwargs = dict(kwargs)
+    sdk_kwargs["stateless"] = stateless
+    sdk_server = build_sdk_server(**sdk_kwargs)
     session_manager = StreamableHTTPSessionManager(
         app=sdk_server,
         event_store=None,
         json_response=True,
-        stateless=stateless,
+        stateless=manager_stateless,
         security_settings=None,
     )
     streamable_app = StreamableHTTPASGIApp(session_manager)
@@ -687,7 +691,7 @@ def build_sdk_streamable_http_app(
                 "ok": True,
                 "transport": "mcp-sdk-streamable-http",
                 "rpc_path": _normalize_http_path(streamable_http_path),
-                "stateless": bool(stateless),
+                "stateless": bool(manager_stateless),
             }
         )
 
@@ -709,6 +713,7 @@ def serve_sdk_streamable_http(
     streamable_http_path: str = "/mcp",
     health_path: str = "/healthz",
     stateless: bool = True,
+    transport_stateless: bool | None = None,
     **kwargs: Any,
 ) -> None:
     try:
@@ -719,6 +724,7 @@ def serve_sdk_streamable_http(
         streamable_http_path=streamable_http_path,
         health_path=health_path,
         stateless=stateless,
+        transport_stateless=transport_stateless,
         **kwargs,
     )
     uvicorn.run(app, host=host, port=port, log_level="info")
@@ -1082,7 +1088,7 @@ def run_self_test(*, sdk: bool = False, **kwargs: Any) -> dict[str, Any]:
             build_sdk_server(**kwargs)
             record("sdk_build", True)
         except Exception as exc:  # noqa: BLE001 - optional SDK readiness is a deployment check.
-            record("sdk_build", False, error=str(exc))
+            record("sdk_build", False, error=_redact_self_test_error(str(exc), kwargs, server))
 
     ok = initialized and schemas_ok and session_config_ok and all(item["ok"] for item in checks)
     return {
@@ -1093,6 +1099,61 @@ def run_self_test(*, sdk: bool = False, **kwargs: Any) -> dict[str, Any]:
         "session_required": bool(server.require_session),
         "checks": checks,
     }
+
+
+def _redact_self_test_error(message: str, kwargs: dict[str, Any], server: MnemosyneMcpServer) -> str:
+    sensitive: set[str] = set()
+    for key, value in kwargs.items():
+        key_l = key.lower()
+        if any(
+            marker in key_l
+            for marker in ("token", "secret", "keyring", "password", "dsn", "credential", "key")
+        ) and value:
+            value_s = str(value)
+            sensitive.add(value_s)
+            if "dsn" in key_l:
+                sensitive.update(_dsn_sensitive_parts(value_s))
+    for value in (
+        getattr(server, "auth_token", None),
+        getattr(server, "session_secret", None),
+        getattr(server, "session_keyring", None),
+    ):
+        if value:
+            sensitive.add(str(value))
+    redacted = message
+    for value in sorted(sensitive, key=len, reverse=True):
+        redacted = redacted.replace(value, "<redacted>")
+    return redacted
+
+
+def _dsn_sensitive_parts(value: str) -> set[str]:
+    parts: set[str] = set()
+    parsed = urlsplit(value)
+    for component in (parsed.username, parsed.password):
+        if component:
+            parts.add(component)
+            parts.add(unquote(component))
+    userinfo = parsed.netloc.rsplit("@", 1)[0] if "@" in parsed.netloc else ""
+    if ":" in userinfo:
+        username, password = userinfo.split(":", 1)
+        if username:
+            parts.add(username)
+            parts.add(unquote(username))
+        if password:
+            parts.add(password)
+            parts.add(unquote(password))
+    for key, item in parse_qsl(parsed.query, keep_blank_values=True):
+        if "password" in key.lower() and item:
+            parts.add(item)
+            parts.add(unquote(item))
+    for field in parsed.query.split("&"):
+        if "=" not in field:
+            continue
+        key, item = field.split("=", 1)
+        if "password" in key.lower() and item:
+            parts.add(item)
+            parts.add(unquote(item))
+    return parts
 
 
 def _self_test_auth_params(server: MnemosyneMcpServer, *, include_session: bool) -> dict[str, Any]:
@@ -1481,7 +1542,7 @@ def main(argv: list[str] | None = None) -> None:
             port=args.http_port,
             streamable_http_path=args.sdk_streamable_http_path,
             health_path=args.sdk_streamable_health_path,
-            stateless=not args.sdk_streamable_stateful,
+            transport_stateless=not args.sdk_streamable_stateful,
             **config,
         )
         return
