@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid5
 
-from mnemosyne.calibration import CalibrationSet, conformal_threshold
+from mnemosyne.calibration import CalibrationSet, conformal_threshold, should_abstain
 from mnemosyne.ids import content_cid
 from mnemosyne.models import (
     Assertion,
@@ -30,11 +30,13 @@ from mnemosyne.privacy import ErasureMode
 from mnemosyne.retrieval import (
     HashingEmbeddingProvider,
     LocalSimilarityReranker,
+    QUERY_SUPPORT_THRESHOLD,
     RetrievalAdapters,
     activation_explain,
     apply_activation_scores,
     gist_support_report,
     is_retired_summary_metadata,
+    query_support,
     semantic_entropy,
 )
 from mnemosyne.security import TrustTier, sanitize_retrieved_text, trust_weight
@@ -1103,17 +1105,29 @@ class PostgresEngine:
         budgeted, used_tokens = self._fit_budget(ordered, self.policy.token_budget)
         budgeted = self._mark_retrieved_text_as_data(budgeted)
         read_marks = self._record_retrieval_access(budgeted)
-        confidence = self._confidence(budgeted)
+        support_report = query_support(query, budgeted)
+        insufficient_support = support_report["score"] < QUERY_SUPPORT_THRESHOLD
+        confidence = self._confidence(query, budgeted, support_score=support_report["score"])
         calibration = self._calibration_for(tenant_id, "fact")
         threshold = conformal_threshold(calibration) if calibration else self.policy.abstention_threshold
+        prediction_set_size = self._prediction_set_size(budgeted, threshold)
         entropy = semantic_entropy([hit.text for hit in budgeted])
         gist_support = gist_support_report(budgeted)
         gist_only = bool(gist_support["applied"])
         if gist_only:
             confidence = min(confidence, threshold * 0.95)
-        abstained = confidence < threshold or gist_only
+        if calibration:
+            abstained = (
+                should_abstain(confidence, calibration, prediction_set_size=prediction_set_size)
+                or insufficient_support
+                or gist_only
+            )
+        else:
+            abstained = confidence < threshold or prediction_set_size == 0 or insufficient_support or gist_only
         if gist_only:
             note = "Only gist-tier memory support was retrieved; inspect source evidence before answering."
+        elif insufficient_support:
+            note = "Retrieved evidence did not cover enough query terms; abstaining until stronger support is available."
         elif abstained:
             note = "Evidence is too thin, low-trust, or conflicting for a confident answer."
         else:
@@ -1136,6 +1150,14 @@ class PostgresEngine:
                 "mmr_lambda": self.policy.mmr_lambda,
                 "activation": activation_explain(budgeted, self.policy),
                 "calibration": self._calibration_explain(calibration, threshold),
+                "confidence": {
+                    "score": confidence,
+                    "answer_score": confidence,
+                    "prediction_set_size": prediction_set_size,
+                    "threshold": threshold,
+                    "source": "conformal" if calibration else "evidence_quality",
+                    "query_support": support_report,
+                },
                 "semantic_entropy": entropy,
                 "gist_support": gist_support,
                 "read_marks": {"assertions": read_marks},
@@ -2216,7 +2238,7 @@ class PostgresEngine:
         return kept, used
 
     @staticmethod
-    def _confidence(hits: list[Hit]) -> float:
+    def _confidence(query: str, hits: list[Hit], *, support_score: float | None = None) -> float:
         if not hits:
             return 0.0
         weighted = 0.0
@@ -2226,7 +2248,25 @@ class PostgresEngine:
             base = float(hit.metadata.get("confidence", 0.7))
             weighted += max(hit.score, 0.01) * trust * base
             total += max(hit.score, 0.01)
-        return max(0.0, min(1.0, weighted / max(total, 0.01)))
+        evidence_quality = max(0.0, min(1.0, weighted / max(total, 0.01)))
+        query_support_score = support_score if support_score is not None else query_support(query, hits)["score"]
+        query_support_score = max(0.0, min(1.0, query_support_score))
+        if query_support_score < QUERY_SUPPORT_THRESHOLD:
+            return min(evidence_quality, 0.05 * (query_support_score / QUERY_SUPPORT_THRESHOLD))
+        support_floor = 0.96 + 0.04 * (
+            (query_support_score - QUERY_SUPPORT_THRESHOLD) / max(1.0 - QUERY_SUPPORT_THRESHOLD, 0.01)
+        )
+        return max(evidence_quality, min(1.0, support_floor))
+
+    @staticmethod
+    def _prediction_set_size(hits: list[Hit], threshold: float) -> int:
+        if not hits:
+            return 0
+        max_score = max((max(hit.score, 0.0) for hit in hits), default=0.0)
+        if max_score <= 0.0:
+            return 0
+        cutoff = max_score * max(0.05, min(0.95, threshold))
+        return sum(1 for hit in hits if max(hit.score, 0.0) >= cutoff)
 
 
 def _cid_to_bytes(cid: str) -> bytes:

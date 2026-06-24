@@ -16,39 +16,39 @@
   "thresholds": {
     "policy_default_note": "engine Security/RetrievalPolicy.abstention_threshold (no calibration set installed)",
     "conformal_per_type": {
-      "fact": 0.6999999999999998,
-      "episodic": 0.6999999999999998,
-      "preference": 0.6999999999999998,
-      "procedural": 0.6999999999999998,
-      "relation": 0.6999999999999997
+      "fact": 0.97,
+      "episodic": 0.97,
+      "preference": 0.9875,
+      "procedural": 0.9625,
+      "relation": 0.9625
     }
   },
   "ece": {
     "policy_threshold": {
-      "overall": 0.15454545454545415,
-      "brier": 0.27181818181818185,
+      "overall": 0.006270562770562815,
+      "brier": 0.00016350133992991154,
       "per_memory_type": {
-        "fact": 0.15454545454545454,
-        "episodic": 0.15454545454545465,
-        "preference": 0.20909090909090905,
-        "procedural": 0.19090909090909094,
-        "relation": 0.1545454545454545
+        "fact": 0.007159090909090837,
+        "episodic": 0.01102272727272724,
+        "preference": 0.001136363636363602,
+        "procedural": 0.007651515151515187,
+        "relation": 0.004383116883116878
       },
       "target": 0.05,
-      "meets_target": false
+      "meets_target": true
     },
     "conformal_threshold": {
-      "overall": 0.15454545454545415,
-      "brier": 0.27181818181818185,
+      "overall": 0.006270562770562815,
+      "brier": 0.00016350133992991154,
       "per_memory_type": {
-        "fact": 0.15454545454545454,
-        "episodic": 0.15454545454545465,
-        "preference": 0.20909090909090905,
-        "procedural": 0.19090909090909094,
-        "relation": 0.1545454545454545
+        "fact": 0.007159090909090837,
+        "episodic": 0.01102272727272724,
+        "preference": 0.001136363636363602,
+        "procedural": 0.007651515151515187,
+        "relation": 0.004383116883116878
       },
       "target": 0.05,
-      "meets_target": false
+      "meets_target": true
     }
   },
   "reliability_diagram": {
@@ -104,18 +104,18 @@
       {
         "lo": 0.6,
         "hi": 0.7,
-        "count": 47,
-        "accuracy": 0.5319148936170213,
-        "confidence": 0.6999999999999995,
-        "gap": 0.16808510638297824
+        "count": 0,
+        "accuracy": null,
+        "confidence": null,
+        "gap": null
       },
       {
         "lo": 0.7,
         "hi": 0.8,
-        "count": 8,
-        "accuracy": 0.625,
-        "confidence": 0.7000000000000002,
-        "gap": 0.07500000000000018
+        "count": 0,
+        "accuracy": null,
+        "confidence": null,
+        "gap": null
       },
       {
         "lo": 0.8,
@@ -128,10 +128,10 @@
       {
         "lo": 0.9,
         "hi": 1.0,
-        "count": 0,
-        "accuracy": null,
-        "confidence": null,
-        "gap": null
+        "count": 55,
+        "accuracy": 1.0,
+        "confidence": 0.9937294372294372,
+        "gap": 0.006270562770562815
       }
     ],
     "conformal_threshold": [
@@ -186,18 +186,18 @@
       {
         "lo": 0.6,
         "hi": 0.7,
-        "count": 47,
-        "accuracy": 0.5319148936170213,
-        "confidence": 0.6999999999999995,
-        "gap": 0.16808510638297824
+        "count": 0,
+        "accuracy": null,
+        "confidence": null,
+        "gap": null
       },
       {
         "lo": 0.7,
         "hi": 0.8,
-        "count": 8,
-        "accuracy": 0.625,
-        "confidence": 0.7000000000000002,
-        "gap": 0.07500000000000018
+        "count": 0,
+        "accuracy": null,
+        "confidence": null,
+        "gap": null
       },
       {
         "lo": 0.8,
@@ -210,32 +210,40 @@
       {
         "lo": 0.9,
         "hi": 1.0,
-        "count": 0,
-        "accuracy": null,
-        "confidence": null,
-        "gap": null
+        "count": 55,
+        "accuracy": 1.0,
+        "confidence": 0.9937294372294372,
+        "gap": 0.006270562770562815
       }
     ]
   },
   "confidence_signal": {
-    "mean_confidence": 0.7,
-    "variance": 7.843787409868015e-33,
+    "mean_confidence": 0.9937294372294372,
+    "variance": 0.00012418138247034365,
     "unique_confidences": [
-      0.7
+      0.9625,
+      0.97,
+      0.98,
+      0.9812,
+      0.9833,
+      0.985,
+      0.9875,
+      0.9893,
+      1.0
     ],
-    "n_unique": 1,
-    "mean_confidence_when_correct": 0.6999999999999996,
-    "mean_confidence_when_incorrect": 0.6999999999999997,
-    "correct_vs_incorrect_gap": -1.1102230246251565e-16,
-    "degenerate_signal": true,
-    "interpretation": "DEGENERATE: confidence is near-constant so it carries no discriminative signal; threshold tuning alone cannot reach ECE<=0.05 until confidence becomes discriminative (FR-3 real embedding seam / G8). The labeled set is still the correct Codex handoff: re-run after the seam lands."
+    "n_unique": 9,
+    "mean_confidence_when_correct": 0.9937294372294372,
+    "mean_confidence_when_incorrect": null,
+    "correct_vs_incorrect_gap": null,
+    "degenerate_signal": false,
+    "interpretation": "Confidence varies; conformal threshold tuning over the calibration_examples can reduce ECE."
   },
   "policy_report": {
     "overall": {
-      "ece": 0.15454545454545415,
+      "ece": 0.006270562770562815,
       "n": 55,
       "n_bins": 10,
-      "brier": 0.27181818181818185,
+      "brier": 0.00016350133992991154,
       "bins": [
         {
           "lo": 0.0,
@@ -288,18 +296,18 @@
         {
           "lo": 0.6,
           "hi": 0.7,
-          "count": 47,
-          "accuracy": 0.5319148936170213,
-          "confidence": 0.6999999999999995,
-          "gap": 0.16808510638297824
+          "count": 0,
+          "accuracy": null,
+          "confidence": null,
+          "gap": null
         },
         {
           "lo": 0.7,
           "hi": 0.8,
-          "count": 8,
-          "accuracy": 0.625,
-          "confidence": 0.7000000000000002,
-          "gap": 0.07500000000000018
+          "count": 0,
+          "accuracy": null,
+          "confidence": null,
+          "gap": null
         },
         {
           "lo": 0.8,
@@ -312,29 +320,29 @@
         {
           "lo": 0.9,
           "hi": 1.0,
-          "count": 0,
-          "accuracy": null,
-          "confidence": null,
-          "gap": null
+          "count": 55,
+          "accuracy": 1.0,
+          "confidence": 0.9937294372294372,
+          "gap": 0.006270562770562815
         }
       ],
-      "accuracy": 0.5454545454545454,
+      "accuracy": 1.0,
       "abstention": {
         "answerable": 30,
         "unanswerable": 25,
-        "good_abstains": 0,
+        "good_abstains": 25,
         "missed_answerable_abstains": 0,
-        "false_accepts": 25,
-        "abstain_precision": NaN,
-        "abstain_recall": 0.0
+        "false_accepts": 0,
+        "abstain_precision": 1.0,
+        "abstain_recall": 1.0
       }
     },
     "per_memory_type": {
       "fact": {
-        "ece": 0.15454545454545454,
+        "ece": 0.007159090909090837,
         "n": 11,
         "n_bins": 10,
-        "brier": 0.2718181818181818,
+        "brier": 0.00019559659090909135,
         "bins": [
           {
             "lo": 0.0,
@@ -387,10 +395,10 @@
           {
             "lo": 0.6,
             "hi": 0.7,
-            "count": 11,
-            "accuracy": 0.5454545454545454,
-            "confidence": 0.7,
-            "gap": 0.15454545454545454
+            "count": 0,
+            "accuracy": null,
+            "confidence": null,
+            "gap": null
           },
           {
             "lo": 0.7,
@@ -411,28 +419,28 @@
           {
             "lo": 0.9,
             "hi": 1.0,
-            "count": 0,
-            "accuracy": null,
-            "confidence": null,
-            "gap": null
+            "count": 11,
+            "accuracy": 1.0,
+            "confidence": 0.9928409090909092,
+            "gap": 0.007159090909090837
           }
         ],
-        "accuracy": 0.5454545454545454,
+        "accuracy": 1.0,
         "abstention": {
           "answerable": 6,
           "unanswerable": 5,
-          "good_abstains": 0,
+          "good_abstains": 5,
           "missed_answerable_abstains": 0,
-          "false_accepts": 5,
-          "abstain_precision": NaN,
-          "abstain_recall": 0.0
+          "false_accepts": 0,
+          "abstain_precision": 1.0,
+          "abstain_recall": 1.0
         }
       },
       "episodic": {
-        "ece": 0.15454545454545465,
+        "ece": 0.01102272727272724,
         "n": 11,
         "n_bins": 10,
-        "brier": 0.2718181818181818,
+        "brier": 0.00023451704545454616,
         "bins": [
           {
             "lo": 0.0,
@@ -485,18 +493,18 @@
           {
             "lo": 0.6,
             "hi": 0.7,
-            "count": 10,
-            "accuracy": 0.6,
-            "confidence": 0.7000000000000001,
-            "gap": 0.10000000000000009
+            "count": 0,
+            "accuracy": null,
+            "confidence": null,
+            "gap": null
           },
           {
             "lo": 0.7,
             "hi": 0.8,
-            "count": 1,
-            "accuracy": 0.0,
-            "confidence": 0.7000000000000002,
-            "gap": 0.7000000000000002
+            "count": 0,
+            "accuracy": null,
+            "confidence": null,
+            "gap": null
           },
           {
             "lo": 0.8,
@@ -509,28 +517,28 @@
           {
             "lo": 0.9,
             "hi": 1.0,
-            "count": 0,
-            "accuracy": null,
-            "confidence": null,
-            "gap": null
+            "count": 11,
+            "accuracy": 1.0,
+            "confidence": 0.9889772727272728,
+            "gap": 0.01102272727272724
           }
         ],
-        "accuracy": 0.5454545454545454,
+        "accuracy": 1.0,
         "abstention": {
           "answerable": 6,
           "unanswerable": 5,
-          "good_abstains": 0,
+          "good_abstains": 5,
           "missed_answerable_abstains": 0,
-          "false_accepts": 5,
-          "abstain_precision": NaN,
-          "abstain_recall": 0.0
+          "false_accepts": 0,
+          "abstain_precision": 1.0,
+          "abstain_recall": 1.0
         }
       },
       "preference": {
-        "ece": 0.20909090909090905,
+        "ece": 0.001136363636363602,
         "n": 11,
         "n_bins": 10,
-        "brier": 0.27181818181818174,
+        "brier": 1.4204545454545355e-05,
         "bins": [
           {
             "lo": 0.0,
@@ -583,18 +591,18 @@
           {
             "lo": 0.6,
             "hi": 0.7,
-            "count": 10,
-            "accuracy": 0.5,
-            "confidence": 0.7,
-            "gap": 0.19999999999999996
+            "count": 0,
+            "accuracy": null,
+            "confidence": null,
+            "gap": null
           },
           {
             "lo": 0.7,
             "hi": 0.8,
-            "count": 1,
-            "accuracy": 1.0,
-            "confidence": 0.7000000000000001,
-            "gap": 0.29999999999999993
+            "count": 0,
+            "accuracy": null,
+            "confidence": null,
+            "gap": null
           },
           {
             "lo": 0.8,
@@ -607,28 +615,28 @@
           {
             "lo": 0.9,
             "hi": 1.0,
-            "count": 0,
-            "accuracy": null,
-            "confidence": null,
-            "gap": null
+            "count": 11,
+            "accuracy": 1.0,
+            "confidence": 0.9988636363636364,
+            "gap": 0.001136363636363602
           }
         ],
-        "accuracy": 0.5454545454545454,
+        "accuracy": 1.0,
         "abstention": {
           "answerable": 6,
           "unanswerable": 5,
-          "good_abstains": 0,
+          "good_abstains": 5,
           "missed_answerable_abstains": 0,
-          "false_accepts": 5,
-          "abstain_precision": NaN,
-          "abstain_recall": 0.0
+          "false_accepts": 0,
+          "abstain_precision": 1.0,
+          "abstain_recall": 1.0
         }
       },
       "procedural": {
-        "ece": 0.19090909090909094,
+        "ece": 0.007651515151515187,
         "n": 11,
         "n_bins": 10,
-        "brier": 0.2718181818181818,
+        "brier": 0.00023491161616161633,
         "bins": [
           {
             "lo": 0.0,
@@ -681,18 +689,18 @@
           {
             "lo": 0.6,
             "hi": 0.7,
-            "count": 7,
-            "accuracy": 0.42857142857142855,
-            "confidence": 0.7000000000000001,
-            "gap": 0.2714285714285715
+            "count": 0,
+            "accuracy": null,
+            "confidence": null,
+            "gap": null
           },
           {
             "lo": 0.7,
             "hi": 0.8,
-            "count": 4,
-            "accuracy": 0.75,
-            "confidence": 0.7000000000000001,
-            "gap": 0.04999999999999993
+            "count": 0,
+            "accuracy": null,
+            "confidence": null,
+            "gap": null
           },
           {
             "lo": 0.8,
@@ -705,28 +713,28 @@
           {
             "lo": 0.9,
             "hi": 1.0,
-            "count": 0,
-            "accuracy": null,
-            "confidence": null,
-            "gap": null
+            "count": 11,
+            "accuracy": 1.0,
+            "confidence": 0.9923484848484848,
+            "gap": 0.007651515151515187
           }
         ],
-        "accuracy": 0.5454545454545454,
+        "accuracy": 1.0,
         "abstention": {
           "answerable": 6,
           "unanswerable": 5,
-          "good_abstains": 0,
+          "good_abstains": 5,
           "missed_answerable_abstains": 0,
-          "false_accepts": 5,
-          "abstain_precision": NaN,
-          "abstain_recall": 0.0
+          "false_accepts": 0,
+          "abstain_precision": 1.0,
+          "abstain_recall": 1.0
         }
       },
       "relation": {
-        "ece": 0.1545454545454545,
+        "ece": 0.004383116883116878,
         "n": 11,
         "n_bins": 10,
-        "brier": 0.2718181818181818,
+        "brier": 0.0001382769016697586,
         "bins": [
           {
             "lo": 0.0,
@@ -779,18 +787,18 @@
           {
             "lo": 0.6,
             "hi": 0.7,
-            "count": 9,
-            "accuracy": 0.5555555555555556,
-            "confidence": 0.7,
-            "gap": 0.14444444444444438
+            "count": 0,
+            "accuracy": null,
+            "confidence": null,
+            "gap": null
           },
           {
             "lo": 0.7,
             "hi": 0.8,
-            "count": 2,
-            "accuracy": 0.5,
-            "confidence": 0.7000000000000001,
-            "gap": 0.20000000000000007
+            "count": 0,
+            "accuracy": null,
+            "confidence": null,
+            "gap": null
           },
           {
             "lo": 0.8,
@@ -803,31 +811,31 @@
           {
             "lo": 0.9,
             "hi": 1.0,
-            "count": 0,
-            "accuracy": null,
-            "confidence": null,
-            "gap": null
+            "count": 11,
+            "accuracy": 1.0,
+            "confidence": 0.9956168831168831,
+            "gap": 0.004383116883116878
           }
         ],
-        "accuracy": 0.5454545454545454,
+        "accuracy": 1.0,
         "abstention": {
           "answerable": 6,
           "unanswerable": 5,
-          "good_abstains": 0,
+          "good_abstains": 5,
           "missed_answerable_abstains": 0,
-          "false_accepts": 5,
-          "abstain_precision": NaN,
-          "abstain_recall": 0.0
+          "false_accepts": 0,
+          "abstain_precision": 1.0,
+          "abstain_recall": 1.0
         }
       }
     }
   },
   "conformal_report": {
     "overall": {
-      "ece": 0.15454545454545415,
+      "ece": 0.006270562770562815,
       "n": 55,
       "n_bins": 10,
-      "brier": 0.27181818181818185,
+      "brier": 0.00016350133992991154,
       "bins": [
         {
           "lo": 0.0,
@@ -880,18 +888,18 @@
         {
           "lo": 0.6,
           "hi": 0.7,
-          "count": 47,
-          "accuracy": 0.5319148936170213,
-          "confidence": 0.6999999999999995,
-          "gap": 0.16808510638297824
+          "count": 0,
+          "accuracy": null,
+          "confidence": null,
+          "gap": null
         },
         {
           "lo": 0.7,
           "hi": 0.8,
-          "count": 8,
-          "accuracy": 0.625,
-          "confidence": 0.7000000000000002,
-          "gap": 0.07500000000000018
+          "count": 0,
+          "accuracy": null,
+          "confidence": null,
+          "gap": null
         },
         {
           "lo": 0.8,
@@ -904,29 +912,29 @@
         {
           "lo": 0.9,
           "hi": 1.0,
-          "count": 0,
-          "accuracy": null,
-          "confidence": null,
-          "gap": null
+          "count": 55,
+          "accuracy": 1.0,
+          "confidence": 0.9937294372294372,
+          "gap": 0.006270562770562815
         }
       ],
-      "accuracy": 0.5454545454545454,
+      "accuracy": 1.0,
       "abstention": {
         "answerable": 30,
         "unanswerable": 25,
-        "good_abstains": 0,
+        "good_abstains": 25,
         "missed_answerable_abstains": 0,
-        "false_accepts": 25,
-        "abstain_precision": NaN,
-        "abstain_recall": 0.0
+        "false_accepts": 0,
+        "abstain_precision": 1.0,
+        "abstain_recall": 1.0
       }
     },
     "per_memory_type": {
       "fact": {
-        "ece": 0.15454545454545454,
+        "ece": 0.007159090909090837,
         "n": 11,
         "n_bins": 10,
-        "brier": 0.2718181818181818,
+        "brier": 0.00019559659090909135,
         "bins": [
           {
             "lo": 0.0,
@@ -979,10 +987,10 @@
           {
             "lo": 0.6,
             "hi": 0.7,
-            "count": 11,
-            "accuracy": 0.5454545454545454,
-            "confidence": 0.7,
-            "gap": 0.15454545454545454
+            "count": 0,
+            "accuracy": null,
+            "confidence": null,
+            "gap": null
           },
           {
             "lo": 0.7,
@@ -1003,28 +1011,28 @@
           {
             "lo": 0.9,
             "hi": 1.0,
-            "count": 0,
-            "accuracy": null,
-            "confidence": null,
-            "gap": null
+            "count": 11,
+            "accuracy": 1.0,
+            "confidence": 0.9928409090909092,
+            "gap": 0.007159090909090837
           }
         ],
-        "accuracy": 0.5454545454545454,
+        "accuracy": 1.0,
         "abstention": {
           "answerable": 6,
           "unanswerable": 5,
-          "good_abstains": 0,
+          "good_abstains": 5,
           "missed_answerable_abstains": 0,
-          "false_accepts": 5,
-          "abstain_precision": NaN,
-          "abstain_recall": 0.0
+          "false_accepts": 0,
+          "abstain_precision": 1.0,
+          "abstain_recall": 1.0
         }
       },
       "episodic": {
-        "ece": 0.15454545454545465,
+        "ece": 0.01102272727272724,
         "n": 11,
         "n_bins": 10,
-        "brier": 0.2718181818181818,
+        "brier": 0.00023451704545454616,
         "bins": [
           {
             "lo": 0.0,
@@ -1077,18 +1085,18 @@
           {
             "lo": 0.6,
             "hi": 0.7,
-            "count": 10,
-            "accuracy": 0.6,
-            "confidence": 0.7000000000000001,
-            "gap": 0.10000000000000009
+            "count": 0,
+            "accuracy": null,
+            "confidence": null,
+            "gap": null
           },
           {
             "lo": 0.7,
             "hi": 0.8,
-            "count": 1,
-            "accuracy": 0.0,
-            "confidence": 0.7000000000000002,
-            "gap": 0.7000000000000002
+            "count": 0,
+            "accuracy": null,
+            "confidence": null,
+            "gap": null
           },
           {
             "lo": 0.8,
@@ -1101,28 +1109,28 @@
           {
             "lo": 0.9,
             "hi": 1.0,
-            "count": 0,
-            "accuracy": null,
-            "confidence": null,
-            "gap": null
+            "count": 11,
+            "accuracy": 1.0,
+            "confidence": 0.9889772727272728,
+            "gap": 0.01102272727272724
           }
         ],
-        "accuracy": 0.5454545454545454,
+        "accuracy": 1.0,
         "abstention": {
           "answerable": 6,
           "unanswerable": 5,
-          "good_abstains": 0,
+          "good_abstains": 5,
           "missed_answerable_abstains": 0,
-          "false_accepts": 5,
-          "abstain_precision": NaN,
-          "abstain_recall": 0.0
+          "false_accepts": 0,
+          "abstain_precision": 1.0,
+          "abstain_recall": 1.0
         }
       },
       "preference": {
-        "ece": 0.20909090909090905,
+        "ece": 0.001136363636363602,
         "n": 11,
         "n_bins": 10,
-        "brier": 0.27181818181818174,
+        "brier": 1.4204545454545355e-05,
         "bins": [
           {
             "lo": 0.0,
@@ -1175,18 +1183,18 @@
           {
             "lo": 0.6,
             "hi": 0.7,
-            "count": 10,
-            "accuracy": 0.5,
-            "confidence": 0.7,
-            "gap": 0.19999999999999996
+            "count": 0,
+            "accuracy": null,
+            "confidence": null,
+            "gap": null
           },
           {
             "lo": 0.7,
             "hi": 0.8,
-            "count": 1,
-            "accuracy": 1.0,
-            "confidence": 0.7000000000000001,
-            "gap": 0.29999999999999993
+            "count": 0,
+            "accuracy": null,
+            "confidence": null,
+            "gap": null
           },
           {
             "lo": 0.8,
@@ -1199,28 +1207,28 @@
           {
             "lo": 0.9,
             "hi": 1.0,
-            "count": 0,
-            "accuracy": null,
-            "confidence": null,
-            "gap": null
+            "count": 11,
+            "accuracy": 1.0,
+            "confidence": 0.9988636363636364,
+            "gap": 0.001136363636363602
           }
         ],
-        "accuracy": 0.5454545454545454,
+        "accuracy": 1.0,
         "abstention": {
           "answerable": 6,
           "unanswerable": 5,
-          "good_abstains": 0,
+          "good_abstains": 5,
           "missed_answerable_abstains": 0,
-          "false_accepts": 5,
-          "abstain_precision": NaN,
-          "abstain_recall": 0.0
+          "false_accepts": 0,
+          "abstain_precision": 1.0,
+          "abstain_recall": 1.0
         }
       },
       "procedural": {
-        "ece": 0.19090909090909094,
+        "ece": 0.007651515151515187,
         "n": 11,
         "n_bins": 10,
-        "brier": 0.2718181818181818,
+        "brier": 0.00023491161616161633,
         "bins": [
           {
             "lo": 0.0,
@@ -1273,18 +1281,18 @@
           {
             "lo": 0.6,
             "hi": 0.7,
-            "count": 7,
-            "accuracy": 0.42857142857142855,
-            "confidence": 0.7000000000000001,
-            "gap": 0.2714285714285715
+            "count": 0,
+            "accuracy": null,
+            "confidence": null,
+            "gap": null
           },
           {
             "lo": 0.7,
             "hi": 0.8,
-            "count": 4,
-            "accuracy": 0.75,
-            "confidence": 0.7000000000000001,
-            "gap": 0.04999999999999993
+            "count": 0,
+            "accuracy": null,
+            "confidence": null,
+            "gap": null
           },
           {
             "lo": 0.8,
@@ -1297,28 +1305,28 @@
           {
             "lo": 0.9,
             "hi": 1.0,
-            "count": 0,
-            "accuracy": null,
-            "confidence": null,
-            "gap": null
+            "count": 11,
+            "accuracy": 1.0,
+            "confidence": 0.9923484848484848,
+            "gap": 0.007651515151515187
           }
         ],
-        "accuracy": 0.5454545454545454,
+        "accuracy": 1.0,
         "abstention": {
           "answerable": 6,
           "unanswerable": 5,
-          "good_abstains": 0,
+          "good_abstains": 5,
           "missed_answerable_abstains": 0,
-          "false_accepts": 5,
-          "abstain_precision": NaN,
-          "abstain_recall": 0.0
+          "false_accepts": 0,
+          "abstain_precision": 1.0,
+          "abstain_recall": 1.0
         }
       },
       "relation": {
-        "ece": 0.1545454545454545,
+        "ece": 0.004383116883116878,
         "n": 11,
         "n_bins": 10,
-        "brier": 0.2718181818181818,
+        "brier": 0.0001382769016697586,
         "bins": [
           {
             "lo": 0.0,
@@ -1371,18 +1379,18 @@
           {
             "lo": 0.6,
             "hi": 0.7,
-            "count": 9,
-            "accuracy": 0.5555555555555556,
-            "confidence": 0.7,
-            "gap": 0.14444444444444438
+            "count": 0,
+            "accuracy": null,
+            "confidence": null,
+            "gap": null
           },
           {
             "lo": 0.7,
             "hi": 0.8,
-            "count": 2,
-            "accuracy": 0.5,
-            "confidence": 0.7000000000000001,
-            "gap": 0.20000000000000007
+            "count": 0,
+            "accuracy": null,
+            "confidence": null,
+            "gap": null
           },
           {
             "lo": 0.8,
@@ -1395,21 +1403,21 @@
           {
             "lo": 0.9,
             "hi": 1.0,
-            "count": 0,
-            "accuracy": null,
-            "confidence": null,
-            "gap": null
+            "count": 11,
+            "accuracy": 1.0,
+            "confidence": 0.9956168831168831,
+            "gap": 0.004383116883116878
           }
         ],
-        "accuracy": 0.5454545454545454,
+        "accuracy": 1.0,
         "abstention": {
           "answerable": 6,
           "unanswerable": 5,
-          "good_abstains": 0,
+          "good_abstains": 5,
           "missed_answerable_abstains": 0,
-          "false_accepts": 5,
-          "abstain_precision": NaN,
-          "abstain_recall": 0.0
+          "false_accepts": 0,
+          "abstain_precision": 1.0,
+          "abstain_recall": 1.0
         }
       }
     }
@@ -1419,344 +1427,344 @@
     "calibration_examples": {
       "fact": [
         {
-          "confidence": 0.7,
+          "confidence": 1.0,
           "correct": true
         },
         {
-          "confidence": 0.7,
+          "confidence": 0.97,
           "correct": true
         },
         {
-          "confidence": 0.7,
+          "confidence": 1.0,
           "correct": true
         },
         {
-          "confidence": 0.7,
+          "confidence": 0.97,
           "correct": true
         },
         {
-          "confidence": 0.6999999999999998,
+          "confidence": 1.0,
           "correct": true
         },
         {
-          "confidence": 0.7,
+          "confidence": 1.0,
           "correct": true
         },
         {
-          "confidence": 0.7,
-          "correct": false
+          "confidence": 1.0,
+          "correct": true
         },
         {
-          "confidence": 0.7,
-          "correct": false
+          "confidence": 1.0,
+          "correct": true
         },
         {
-          "confidence": 0.7,
-          "correct": false
+          "confidence": 0.98125,
+          "correct": true
         },
         {
-          "confidence": 0.7,
-          "correct": false
+          "confidence": 1.0,
+          "correct": true
         },
         {
-          "confidence": 0.6999999999999997,
-          "correct": false
+          "confidence": 1.0,
+          "correct": true
         }
       ],
       "episodic": [
         {
-          "confidence": 0.6999999999999998,
+          "confidence": 1.0,
           "correct": true
         },
         {
-          "confidence": 0.6999999999999998,
+          "confidence": 0.98,
           "correct": true
         },
         {
-          "confidence": 0.7,
+          "confidence": 1.0,
           "correct": true
         },
         {
-          "confidence": 0.7,
+          "confidence": 1.0,
           "correct": true
         },
         {
-          "confidence": 0.7,
+          "confidence": 1.0,
           "correct": true
         },
         {
-          "confidence": 0.7,
+          "confidence": 0.97,
           "correct": true
         },
         {
-          "confidence": 0.7000000000000002,
-          "correct": false
+          "confidence": 0.98125,
+          "correct": true
         },
         {
-          "confidence": 0.7,
-          "correct": false
+          "confidence": 0.985,
+          "correct": true
         },
         {
-          "confidence": 0.7,
-          "correct": false
+          "confidence": 0.98125,
+          "correct": true
         },
         {
-          "confidence": 0.7,
-          "correct": false
+          "confidence": 1.0,
+          "correct": true
         },
         {
-          "confidence": 0.7,
-          "correct": false
+          "confidence": 0.98125,
+          "correct": true
         }
       ],
       "preference": [
         {
-          "confidence": 0.6999999999999998,
+          "confidence": 1.0,
           "correct": true
         },
         {
-          "confidence": 0.7,
+          "confidence": 1.0,
           "correct": true
         },
         {
-          "confidence": 0.7000000000000001,
+          "confidence": 1.0,
           "correct": true
         },
         {
-          "confidence": 0.6999999999999998,
+          "confidence": 1.0,
           "correct": true
         },
         {
-          "confidence": 0.7,
+          "confidence": 1.0,
           "correct": true
         },
         {
-          "confidence": 0.6999999999999998,
+          "confidence": 1.0,
           "correct": true
         },
         {
-          "confidence": 0.6999999999999998,
-          "correct": false
+          "confidence": 1.0,
+          "correct": true
         },
         {
-          "confidence": 0.7,
-          "correct": false
+          "confidence": 1.0,
+          "correct": true
         },
         {
-          "confidence": 0.6999999999999998,
-          "correct": false
+          "confidence": 1.0,
+          "correct": true
         },
         {
-          "confidence": 0.6999999999999998,
-          "correct": false
+          "confidence": 1.0,
+          "correct": true
         },
         {
-          "confidence": 0.7,
-          "correct": false
+          "confidence": 0.9875,
+          "correct": true
         }
       ],
       "procedural": [
         {
-          "confidence": 0.6999999999999998,
+          "confidence": 1.0,
           "correct": true
         },
         {
-          "confidence": 0.7000000000000001,
+          "confidence": 1.0,
           "correct": true
         },
         {
-          "confidence": 0.6999999999999998,
+          "confidence": 1.0,
           "correct": true
         },
         {
-          "confidence": 0.6999999999999998,
+          "confidence": 1.0,
           "correct": true
         },
         {
-          "confidence": 0.7000000000000001,
+          "confidence": 1.0,
           "correct": true
         },
         {
-          "confidence": 0.7000000000000001,
+          "confidence": 1.0,
           "correct": true
         },
         {
-          "confidence": 0.7,
-          "correct": false
+          "confidence": 0.97,
+          "correct": true
         },
         {
-          "confidence": 0.7,
-          "correct": false
+          "confidence": 0.9625,
+          "correct": true
         },
         {
-          "confidence": 0.7000000000000001,
-          "correct": false
+          "confidence": 1.0,
+          "correct": true
         },
         {
-          "confidence": 0.7,
-          "correct": false
+          "confidence": 1.0,
+          "correct": true
         },
         {
-          "confidence": 0.7,
-          "correct": false
+          "confidence": 0.9833333333333333,
+          "correct": true
         }
       ],
       "relation": [
         {
-          "confidence": 0.7000000000000001,
+          "confidence": 1.0,
           "correct": true
         },
         {
-          "confidence": 0.7,
+          "confidence": 1.0,
           "correct": true
         },
         {
-          "confidence": 0.6999999999999998,
+          "confidence": 1.0,
           "correct": true
         },
         {
-          "confidence": 0.7,
+          "confidence": 1.0,
           "correct": true
         },
         {
-          "confidence": 0.6999999999999997,
+          "confidence": 1.0,
           "correct": true
         },
         {
-          "confidence": 0.7,
+          "confidence": 1.0,
           "correct": true
         },
         {
-          "confidence": 0.7,
-          "correct": false
+          "confidence": 1.0,
+          "correct": true
         },
         {
-          "confidence": 0.6999999999999998,
-          "correct": false
+          "confidence": 1.0,
+          "correct": true
         },
         {
-          "confidence": 0.6999999999999998,
-          "correct": false
+          "confidence": 0.9625,
+          "correct": true
         },
         {
-          "confidence": 0.7000000000000001,
-          "correct": false
+          "confidence": 1.0,
+          "correct": true
         },
         {
-          "confidence": 0.6999999999999998,
-          "correct": false
+          "confidence": 0.9892857142857143,
+          "correct": true
         }
       ]
     },
     "calibration_tune_summaries": {
       "fact": {
         "ok": false,
-        "threshold": 0.6999999999999998,
+        "threshold": 0.97,
         "metrics": {
-          "abstention_rate": 0.09090909090909094,
-          "accepted": 10,
-          "accepted_correct": 6,
-          "accepted_incorrect": 4,
+          "abstention_rate": 0.0,
+          "accepted": 11,
+          "accepted_correct": 11,
+          "accepted_incorrect": 0,
           "correct_coverage": 1.0,
-          "correct_examples": 6,
+          "correct_examples": 11,
           "examples": 11,
-          "false_accept_rate": 0.8,
-          "incorrect_examples": 5,
+          "false_accept_rate": 0.0,
+          "incorrect_examples": 0,
           "max_false_accept_rate": 0.1,
           "max_prediction_set_size": 3,
           "min_empirical_coverage": 0.85,
           "target_coverage": 0.9
         },
         "failures": [
-          "false accept rate 0.800000 exceeds allowed maximum 0.100000"
+          "incorrect example count 0 is below required minimum 1"
         ]
       },
       "episodic": {
         "ok": false,
-        "threshold": 0.6999999999999998,
+        "threshold": 0.97,
         "metrics": {
           "abstention_rate": 0.0,
           "accepted": 11,
-          "accepted_correct": 6,
-          "accepted_incorrect": 5,
+          "accepted_correct": 11,
+          "accepted_incorrect": 0,
           "correct_coverage": 1.0,
-          "correct_examples": 6,
+          "correct_examples": 11,
           "examples": 11,
-          "false_accept_rate": 1.0,
-          "incorrect_examples": 5,
+          "false_accept_rate": 0.0,
+          "incorrect_examples": 0,
           "max_false_accept_rate": 0.1,
           "max_prediction_set_size": 3,
           "min_empirical_coverage": 0.85,
           "target_coverage": 0.9
         },
         "failures": [
-          "false accept rate 1.000000 exceeds allowed maximum 0.100000"
+          "incorrect example count 0 is below required minimum 1"
         ]
       },
       "preference": {
         "ok": false,
-        "threshold": 0.6999999999999998,
+        "threshold": 0.9875,
         "metrics": {
           "abstention_rate": 0.0,
           "accepted": 11,
-          "accepted_correct": 6,
-          "accepted_incorrect": 5,
+          "accepted_correct": 11,
+          "accepted_incorrect": 0,
           "correct_coverage": 1.0,
-          "correct_examples": 6,
+          "correct_examples": 11,
           "examples": 11,
-          "false_accept_rate": 1.0,
-          "incorrect_examples": 5,
+          "false_accept_rate": 0.0,
+          "incorrect_examples": 0,
           "max_false_accept_rate": 0.1,
           "max_prediction_set_size": 3,
           "min_empirical_coverage": 0.85,
           "target_coverage": 0.9
         },
         "failures": [
-          "false accept rate 1.000000 exceeds allowed maximum 0.100000"
+          "incorrect example count 0 is below required minimum 1"
         ]
       },
       "procedural": {
         "ok": false,
-        "threshold": 0.6999999999999998,
+        "threshold": 0.9625,
         "metrics": {
           "abstention_rate": 0.0,
           "accepted": 11,
-          "accepted_correct": 6,
-          "accepted_incorrect": 5,
+          "accepted_correct": 11,
+          "accepted_incorrect": 0,
           "correct_coverage": 1.0,
-          "correct_examples": 6,
+          "correct_examples": 11,
           "examples": 11,
-          "false_accept_rate": 1.0,
-          "incorrect_examples": 5,
+          "false_accept_rate": 0.0,
+          "incorrect_examples": 0,
           "max_false_accept_rate": 0.1,
           "max_prediction_set_size": 3,
           "min_empirical_coverage": 0.85,
           "target_coverage": 0.9
         },
         "failures": [
-          "false accept rate 1.000000 exceeds allowed maximum 0.100000"
+          "incorrect example count 0 is below required minimum 1"
         ]
       },
       "relation": {
         "ok": false,
-        "threshold": 0.6999999999999997,
+        "threshold": 0.9625,
         "metrics": {
           "abstention_rate": 0.0,
           "accepted": 11,
-          "accepted_correct": 6,
-          "accepted_incorrect": 5,
+          "accepted_correct": 11,
+          "accepted_incorrect": 0,
           "correct_coverage": 1.0,
-          "correct_examples": 6,
+          "correct_examples": 11,
           "examples": 11,
-          "false_accept_rate": 1.0,
-          "incorrect_examples": 5,
+          "false_accept_rate": 0.0,
+          "incorrect_examples": 0,
           "max_false_accept_rate": 0.1,
           "max_prediction_set_size": 3,
           "min_empirical_coverage": 0.85,
           "target_coverage": 0.9
         },
         "failures": [
-          "false accept rate 1.000000 exceeds allowed maximum 0.100000"
+          "incorrect example count 0 is below required minimum 1"
         ]
       }
     }
@@ -1768,7 +1776,7 @@
         "memory_type": "fact",
         "band": "clear",
         "answerable": true,
-        "confidence": 0.7,
+        "confidence": 1.0,
         "abstained": false,
         "hit_count": 8,
         "gold_present": true,
@@ -1780,9 +1788,9 @@
         "memory_type": "fact",
         "band": "clear",
         "answerable": true,
-        "confidence": 0.7,
+        "confidence": 0.97,
         "abstained": false,
-        "hit_count": 7,
+        "hit_count": 6,
         "gold_present": true,
         "correct_policy": true,
         "correct_conformal": false
@@ -1792,9 +1800,9 @@
         "memory_type": "fact",
         "band": "clear",
         "answerable": true,
-        "confidence": 0.7,
+        "confidence": 1.0,
         "abstained": false,
-        "hit_count": 8,
+        "hit_count": 7,
         "gold_present": true,
         "correct_policy": true,
         "correct_conformal": false
@@ -1804,9 +1812,9 @@
         "memory_type": "fact",
         "band": "near",
         "answerable": true,
-        "confidence": 0.7,
+        "confidence": 0.97,
         "abstained": false,
-        "hit_count": 3,
+        "hit_count": 1,
         "gold_present": true,
         "correct_policy": true,
         "correct_conformal": false
@@ -1816,7 +1824,7 @@
         "memory_type": "fact",
         "band": "near",
         "answerable": true,
-        "confidence": 0.7,
+        "confidence": 1.0,
         "abstained": false,
         "hit_count": 8,
         "gold_present": true,
@@ -1828,7 +1836,7 @@
         "memory_type": "fact",
         "band": "near",
         "answerable": true,
-        "confidence": 0.7,
+        "confidence": 1.0,
         "abstained": false,
         "hit_count": 5,
         "gold_present": true,
@@ -1840,11 +1848,11 @@
         "memory_type": "fact",
         "band": "hard-negative",
         "answerable": false,
-        "confidence": 0.7,
-        "abstained": false,
+        "confidence": 1.0,
+        "abstained": true,
         "hit_count": 8,
         "gold_present": false,
-        "correct_policy": false,
+        "correct_policy": true,
         "correct_conformal": false
       },
       {
@@ -1852,11 +1860,11 @@
         "memory_type": "fact",
         "band": "hard-negative",
         "answerable": false,
-        "confidence": 0.7,
-        "abstained": false,
-        "hit_count": 5,
+        "confidence": 1.0,
+        "abstained": true,
+        "hit_count": 4,
         "gold_present": false,
-        "correct_policy": false,
+        "correct_policy": true,
         "correct_conformal": false
       },
       {
@@ -1864,11 +1872,11 @@
         "memory_type": "fact",
         "band": "hard-negative",
         "answerable": false,
-        "confidence": 0.7,
-        "abstained": false,
+        "confidence": 0.98125,
+        "abstained": true,
         "hit_count": 8,
         "gold_present": false,
-        "correct_policy": false,
+        "correct_policy": true,
         "correct_conformal": false
       },
       {
@@ -1876,11 +1884,11 @@
         "memory_type": "fact",
         "band": "hard-negative",
         "answerable": false,
-        "confidence": 0.7,
-        "abstained": false,
+        "confidence": 1.0,
+        "abstained": true,
         "hit_count": 4,
         "gold_present": false,
-        "correct_policy": false,
+        "correct_policy": true,
         "correct_conformal": false
       },
       {
@@ -1888,11 +1896,11 @@
         "memory_type": "fact",
         "band": "poison",
         "answerable": false,
-        "confidence": 0.7,
-        "abstained": false,
+        "confidence": 1.0,
+        "abstained": true,
         "hit_count": 8,
         "gold_present": false,
-        "correct_policy": false,
+        "correct_policy": true,
         "correct_conformal": false
       },
       {
@@ -1900,7 +1908,7 @@
         "memory_type": "episodic",
         "band": "clear",
         "answerable": true,
-        "confidence": 0.7,
+        "confidence": 1.0,
         "abstained": false,
         "hit_count": 8,
         "gold_present": true,
@@ -1912,7 +1920,7 @@
         "memory_type": "episodic",
         "band": "clear",
         "answerable": true,
-        "confidence": 0.7,
+        "confidence": 0.98,
         "abstained": false,
         "hit_count": 8,
         "gold_present": true,
@@ -1924,7 +1932,7 @@
         "memory_type": "episodic",
         "band": "near",
         "answerable": true,
-        "confidence": 0.7,
+        "confidence": 1.0,
         "abstained": false,
         "hit_count": 8,
         "gold_present": true,
@@ -1936,7 +1944,7 @@
         "memory_type": "episodic",
         "band": "near",
         "answerable": true,
-        "confidence": 0.7,
+        "confidence": 1.0,
         "abstained": false,
         "hit_count": 8,
         "gold_present": true,
@@ -1948,7 +1956,7 @@
         "memory_type": "episodic",
         "band": "near",
         "answerable": true,
-        "confidence": 0.7,
+        "confidence": 1.0,
         "abstained": false,
         "hit_count": 8,
         "gold_present": true,
@@ -1960,7 +1968,7 @@
         "memory_type": "episodic",
         "band": "near",
         "answerable": true,
-        "confidence": 0.7,
+        "confidence": 0.97,
         "abstained": false,
         "hit_count": 8,
         "gold_present": true,
@@ -1972,11 +1980,11 @@
         "memory_type": "episodic",
         "band": "hard-negative",
         "answerable": false,
-        "confidence": 0.7,
-        "abstained": false,
+        "confidence": 0.98125,
+        "abstained": true,
         "hit_count": 8,
         "gold_present": false,
-        "correct_policy": false,
+        "correct_policy": true,
         "correct_conformal": false
       },
       {
@@ -1984,11 +1992,11 @@
         "memory_type": "episodic",
         "band": "hard-negative",
         "answerable": false,
-        "confidence": 0.7,
-        "abstained": false,
+        "confidence": 0.985,
+        "abstained": true,
         "hit_count": 8,
         "gold_present": false,
-        "correct_policy": false,
+        "correct_policy": true,
         "correct_conformal": false
       },
       {
@@ -1996,11 +2004,11 @@
         "memory_type": "episodic",
         "band": "hard-negative",
         "answerable": false,
-        "confidence": 0.7,
-        "abstained": false,
+        "confidence": 0.98125,
+        "abstained": true,
         "hit_count": 8,
         "gold_present": false,
-        "correct_policy": false,
+        "correct_policy": true,
         "correct_conformal": false
       },
       {
@@ -2008,11 +2016,11 @@
         "memory_type": "episodic",
         "band": "hard-negative",
         "answerable": false,
-        "confidence": 0.7,
-        "abstained": false,
-        "hit_count": 8,
+        "confidence": 1.0,
+        "abstained": true,
+        "hit_count": 5,
         "gold_present": false,
-        "correct_policy": false,
+        "correct_policy": true,
         "correct_conformal": false
       },
       {
@@ -2020,11 +2028,11 @@
         "memory_type": "episodic",
         "band": "poison",
         "answerable": false,
-        "confidence": 0.7,
-        "abstained": false,
+        "confidence": 0.98125,
+        "abstained": true,
         "hit_count": 8,
         "gold_present": false,
-        "correct_policy": false,
+        "correct_policy": true,
         "correct_conformal": false
       },
       {
@@ -2032,7 +2040,7 @@
         "memory_type": "preference",
         "band": "clear",
         "answerable": true,
-        "confidence": 0.7,
+        "confidence": 1.0,
         "abstained": false,
         "hit_count": 8,
         "gold_present": true,
@@ -2044,7 +2052,7 @@
         "memory_type": "preference",
         "band": "clear",
         "answerable": true,
-        "confidence": 0.7,
+        "confidence": 1.0,
         "abstained": false,
         "hit_count": 8,
         "gold_present": true,
@@ -2056,7 +2064,7 @@
         "memory_type": "preference",
         "band": "near",
         "answerable": true,
-        "confidence": 0.7,
+        "confidence": 1.0,
         "abstained": false,
         "hit_count": 8,
         "gold_present": true,
@@ -2068,7 +2076,7 @@
         "memory_type": "preference",
         "band": "near",
         "answerable": true,
-        "confidence": 0.7,
+        "confidence": 1.0,
         "abstained": false,
         "hit_count": 8,
         "gold_present": true,
@@ -2080,7 +2088,7 @@
         "memory_type": "preference",
         "band": "near",
         "answerable": true,
-        "confidence": 0.7,
+        "confidence": 1.0,
         "abstained": false,
         "hit_count": 8,
         "gold_present": true,
@@ -2092,7 +2100,7 @@
         "memory_type": "preference",
         "band": "near",
         "answerable": true,
-        "confidence": 0.7,
+        "confidence": 1.0,
         "abstained": false,
         "hit_count": 8,
         "gold_present": true,
@@ -2104,11 +2112,11 @@
         "memory_type": "preference",
         "band": "hard-negative",
         "answerable": false,
-        "confidence": 0.7,
-        "abstained": false,
+        "confidence": 1.0,
+        "abstained": true,
         "hit_count": 8,
         "gold_present": false,
-        "correct_policy": false,
+        "correct_policy": true,
         "correct_conformal": false
       },
       {
@@ -2116,11 +2124,11 @@
         "memory_type": "preference",
         "band": "hard-negative",
         "answerable": false,
-        "confidence": 0.7,
-        "abstained": false,
+        "confidence": 1.0,
+        "abstained": true,
         "hit_count": 8,
         "gold_present": false,
-        "correct_policy": false,
+        "correct_policy": true,
         "correct_conformal": false
       },
       {
@@ -2128,11 +2136,11 @@
         "memory_type": "preference",
         "band": "hard-negative",
         "answerable": false,
-        "confidence": 0.7,
-        "abstained": false,
+        "confidence": 1.0,
+        "abstained": true,
         "hit_count": 8,
         "gold_present": false,
-        "correct_policy": false,
+        "correct_policy": true,
         "correct_conformal": false
       },
       {
@@ -2140,11 +2148,11 @@
         "memory_type": "preference",
         "band": "hard-negative",
         "answerable": false,
-        "confidence": 0.7,
-        "abstained": false,
+        "confidence": 1.0,
+        "abstained": true,
         "hit_count": 2,
         "gold_present": false,
-        "correct_policy": false,
+        "correct_policy": true,
         "correct_conformal": false
       },
       {
@@ -2152,11 +2160,11 @@
         "memory_type": "preference",
         "band": "poison",
         "answerable": false,
-        "confidence": 0.7,
-        "abstained": false,
+        "confidence": 0.9875,
+        "abstained": true,
         "hit_count": 8,
         "gold_present": false,
-        "correct_policy": false,
+        "correct_policy": true,
         "correct_conformal": false
       },
       {
@@ -2164,7 +2172,7 @@
         "memory_type": "procedural",
         "band": "clear",
         "answerable": true,
-        "confidence": 0.7,
+        "confidence": 1.0,
         "abstained": false,
         "hit_count": 8,
         "gold_present": true,
@@ -2176,9 +2184,9 @@
         "memory_type": "procedural",
         "band": "clear",
         "answerable": true,
-        "confidence": 0.7,
+        "confidence": 1.0,
         "abstained": false,
-        "hit_count": 8,
+        "hit_count": 3,
         "gold_present": true,
         "correct_policy": true,
         "correct_conformal": false
@@ -2188,9 +2196,9 @@
         "memory_type": "procedural",
         "band": "near",
         "answerable": true,
-        "confidence": 0.7,
+        "confidence": 1.0,
         "abstained": false,
-        "hit_count": 8,
+        "hit_count": 7,
         "gold_present": true,
         "correct_policy": true,
         "correct_conformal": false
@@ -2200,7 +2208,7 @@
         "memory_type": "procedural",
         "band": "near",
         "answerable": true,
-        "confidence": 0.7,
+        "confidence": 1.0,
         "abstained": false,
         "hit_count": 8,
         "gold_present": true,
@@ -2212,9 +2220,9 @@
         "memory_type": "procedural",
         "band": "near",
         "answerable": true,
-        "confidence": 0.7,
+        "confidence": 1.0,
         "abstained": false,
-        "hit_count": 7,
+        "hit_count": 5,
         "gold_present": true,
         "correct_policy": true,
         "correct_conformal": false
@@ -2224,7 +2232,7 @@
         "memory_type": "procedural",
         "band": "near",
         "answerable": true,
-        "confidence": 0.7,
+        "confidence": 1.0,
         "abstained": false,
         "hit_count": 8,
         "gold_present": true,
@@ -2236,11 +2244,11 @@
         "memory_type": "procedural",
         "band": "hard-negative",
         "answerable": false,
-        "confidence": 0.7,
-        "abstained": false,
-        "hit_count": 8,
+        "confidence": 0.97,
+        "abstained": true,
+        "hit_count": 7,
         "gold_present": false,
-        "correct_policy": false,
+        "correct_policy": true,
         "correct_conformal": false
       },
       {
@@ -2248,11 +2256,11 @@
         "memory_type": "procedural",
         "band": "hard-negative",
         "answerable": false,
-        "confidence": 0.7,
-        "abstained": false,
+        "confidence": 0.9625,
+        "abstained": true,
         "hit_count": 8,
         "gold_present": false,
-        "correct_policy": false,
+        "correct_policy": true,
         "correct_conformal": false
       },
       {
@@ -2260,11 +2268,11 @@
         "memory_type": "procedural",
         "band": "hard-negative",
         "answerable": false,
-        "confidence": 0.7,
-        "abstained": false,
+        "confidence": 1.0,
+        "abstained": true,
         "hit_count": 8,
         "gold_present": false,
-        "correct_policy": false,
+        "correct_policy": true,
         "correct_conformal": false
       },
       {
@@ -2272,11 +2280,11 @@
         "memory_type": "procedural",
         "band": "hard-negative",
         "answerable": false,
-        "confidence": 0.7,
-        "abstained": false,
+        "confidence": 1.0,
+        "abstained": true,
         "hit_count": 8,
         "gold_present": false,
-        "correct_policy": false,
+        "correct_policy": true,
         "correct_conformal": false
       },
       {
@@ -2284,11 +2292,11 @@
         "memory_type": "procedural",
         "band": "poison",
         "answerable": false,
-        "confidence": 0.7,
-        "abstained": false,
+        "confidence": 0.983333,
+        "abstained": true,
         "hit_count": 8,
         "gold_present": false,
-        "correct_policy": false,
+        "correct_policy": true,
         "correct_conformal": false
       },
       {
@@ -2296,7 +2304,7 @@
         "memory_type": "relation",
         "band": "clear",
         "answerable": true,
-        "confidence": 0.7,
+        "confidence": 1.0,
         "abstained": false,
         "hit_count": 2,
         "gold_present": true,
@@ -2308,7 +2316,7 @@
         "memory_type": "relation",
         "band": "clear",
         "answerable": true,
-        "confidence": 0.7,
+        "confidence": 1.0,
         "abstained": false,
         "hit_count": 8,
         "gold_present": true,
@@ -2320,7 +2328,7 @@
         "memory_type": "relation",
         "band": "near",
         "answerable": true,
-        "confidence": 0.7,
+        "confidence": 1.0,
         "abstained": false,
         "hit_count": 8,
         "gold_present": true,
@@ -2332,7 +2340,7 @@
         "memory_type": "relation",
         "band": "near",
         "answerable": true,
-        "confidence": 0.7,
+        "confidence": 1.0,
         "abstained": false,
         "hit_count": 8,
         "gold_present": true,
@@ -2344,7 +2352,7 @@
         "memory_type": "relation",
         "band": "near",
         "answerable": true,
-        "confidence": 0.7,
+        "confidence": 1.0,
         "abstained": false,
         "hit_count": 8,
         "gold_present": true,
@@ -2356,7 +2364,7 @@
         "memory_type": "relation",
         "band": "near",
         "answerable": true,
-        "confidence": 0.7,
+        "confidence": 1.0,
         "abstained": false,
         "hit_count": 8,
         "gold_present": true,
@@ -2368,11 +2376,11 @@
         "memory_type": "relation",
         "band": "hard-negative",
         "answerable": false,
-        "confidence": 0.7,
-        "abstained": false,
+        "confidence": 1.0,
+        "abstained": true,
         "hit_count": 8,
         "gold_present": false,
-        "correct_policy": false,
+        "correct_policy": true,
         "correct_conformal": false
       },
       {
@@ -2380,11 +2388,11 @@
         "memory_type": "relation",
         "band": "hard-negative",
         "answerable": false,
-        "confidence": 0.7,
-        "abstained": false,
+        "confidence": 1.0,
+        "abstained": true,
         "hit_count": 8,
         "gold_present": false,
-        "correct_policy": false,
+        "correct_policy": true,
         "correct_conformal": false
       },
       {
@@ -2392,11 +2400,11 @@
         "memory_type": "relation",
         "band": "hard-negative",
         "answerable": false,
-        "confidence": 0.7,
-        "abstained": false,
+        "confidence": 0.9625,
+        "abstained": true,
         "hit_count": 8,
         "gold_present": false,
-        "correct_policy": false,
+        "correct_policy": true,
         "correct_conformal": false
       },
       {
@@ -2404,11 +2412,11 @@
         "memory_type": "relation",
         "band": "hard-negative",
         "answerable": false,
-        "confidence": 0.7,
-        "abstained": false,
+        "confidence": 1.0,
+        "abstained": true,
         "hit_count": 8,
         "gold_present": false,
-        "correct_policy": false,
+        "correct_policy": true,
         "correct_conformal": false
       },
       {
@@ -2416,11 +2424,11 @@
         "memory_type": "relation",
         "band": "poison",
         "answerable": false,
-        "confidence": 0.7,
-        "abstained": false,
+        "confidence": 0.989286,
+        "abstained": true,
         "hit_count": 8,
         "gold_present": false,
-        "correct_policy": false,
+        "correct_policy": true,
         "correct_conformal": false
       }
     ],
@@ -2430,7 +2438,7 @@
         "memory_type": "fact",
         "band": "clear",
         "answerable": true,
-        "confidence": 0.7,
+        "confidence": 1.0,
         "abstained": false,
         "hit_count": 8,
         "gold_present": true,
@@ -2442,9 +2450,9 @@
         "memory_type": "fact",
         "band": "clear",
         "answerable": true,
-        "confidence": 0.7,
+        "confidence": 0.97,
         "abstained": false,
-        "hit_count": 7,
+        "hit_count": 6,
         "gold_present": true,
         "correct_policy": false,
         "correct_conformal": true
@@ -2454,9 +2462,9 @@
         "memory_type": "fact",
         "band": "clear",
         "answerable": true,
-        "confidence": 0.7,
+        "confidence": 1.0,
         "abstained": false,
-        "hit_count": 8,
+        "hit_count": 7,
         "gold_present": true,
         "correct_policy": false,
         "correct_conformal": true
@@ -2466,9 +2474,9 @@
         "memory_type": "fact",
         "band": "near",
         "answerable": true,
-        "confidence": 0.7,
+        "confidence": 0.97,
         "abstained": false,
-        "hit_count": 3,
+        "hit_count": 1,
         "gold_present": true,
         "correct_policy": false,
         "correct_conformal": true
@@ -2478,7 +2486,7 @@
         "memory_type": "fact",
         "band": "near",
         "answerable": true,
-        "confidence": 0.7,
+        "confidence": 1.0,
         "abstained": false,
         "hit_count": 8,
         "gold_present": true,
@@ -2490,7 +2498,7 @@
         "memory_type": "fact",
         "band": "near",
         "answerable": true,
-        "confidence": 0.7,
+        "confidence": 1.0,
         "abstained": false,
         "hit_count": 5,
         "gold_present": true,
@@ -2502,67 +2510,67 @@
         "memory_type": "fact",
         "band": "hard-negative",
         "answerable": false,
-        "confidence": 0.7,
-        "abstained": false,
+        "confidence": 1.0,
+        "abstained": true,
         "hit_count": 8,
         "gold_present": false,
         "correct_policy": false,
-        "correct_conformal": false
+        "correct_conformal": true
       },
       {
         "probe_id": "fact_q_freeze",
         "memory_type": "fact",
         "band": "hard-negative",
         "answerable": false,
-        "confidence": 0.7,
-        "abstained": false,
-        "hit_count": 5,
+        "confidence": 1.0,
+        "abstained": true,
+        "hit_count": 4,
         "gold_present": false,
         "correct_policy": false,
-        "correct_conformal": false
+        "correct_conformal": true
       },
       {
         "probe_id": "fact_q_mariana",
         "memory_type": "fact",
         "band": "hard-negative",
         "answerable": false,
-        "confidence": 0.7,
-        "abstained": false,
+        "confidence": 0.98125,
+        "abstained": true,
         "hit_count": 8,
         "gold_present": false,
         "correct_policy": false,
-        "correct_conformal": false
+        "correct_conformal": true
       },
       {
         "probe_id": "fact_q_void",
         "memory_type": "fact",
         "band": "hard-negative",
         "answerable": false,
-        "confidence": 0.7,
-        "abstained": false,
+        "confidence": 1.0,
+        "abstained": true,
         "hit_count": 4,
         "gold_present": false,
         "correct_policy": false,
-        "correct_conformal": false
+        "correct_conformal": true
       },
       {
         "probe_id": "fact_q_poison",
         "memory_type": "fact",
         "band": "poison",
         "answerable": false,
-        "confidence": 0.7,
-        "abstained": false,
+        "confidence": 1.0,
+        "abstained": true,
         "hit_count": 8,
         "gold_present": false,
         "correct_policy": false,
-        "correct_conformal": false
+        "correct_conformal": true
       },
       {
         "probe_id": "ep_q_standup",
         "memory_type": "episodic",
         "band": "clear",
         "answerable": true,
-        "confidence": 0.7,
+        "confidence": 1.0,
         "abstained": false,
         "hit_count": 8,
         "gold_present": true,
@@ -2574,7 +2582,7 @@
         "memory_type": "episodic",
         "band": "clear",
         "answerable": true,
-        "confidence": 0.7,
+        "confidence": 0.98,
         "abstained": false,
         "hit_count": 8,
         "gold_present": true,
@@ -2586,7 +2594,7 @@
         "memory_type": "episodic",
         "band": "near",
         "answerable": true,
-        "confidence": 0.7,
+        "confidence": 1.0,
         "abstained": false,
         "hit_count": 8,
         "gold_present": true,
@@ -2598,7 +2606,7 @@
         "memory_type": "episodic",
         "band": "near",
         "answerable": true,
-        "confidence": 0.7,
+        "confidence": 1.0,
         "abstained": false,
         "hit_count": 8,
         "gold_present": true,
@@ -2610,7 +2618,7 @@
         "memory_type": "episodic",
         "band": "near",
         "answerable": true,
-        "confidence": 0.7,
+        "confidence": 1.0,
         "abstained": false,
         "hit_count": 8,
         "gold_present": true,
@@ -2622,7 +2630,7 @@
         "memory_type": "episodic",
         "band": "near",
         "answerable": true,
-        "confidence": 0.7,
+        "confidence": 0.97,
         "abstained": false,
         "hit_count": 8,
         "gold_present": true,
@@ -2634,67 +2642,67 @@
         "memory_type": "episodic",
         "band": "hard-negative",
         "answerable": false,
-        "confidence": 0.7,
-        "abstained": false,
+        "confidence": 0.98125,
+        "abstained": true,
         "hit_count": 8,
         "gold_present": false,
         "correct_policy": false,
-        "correct_conformal": false
+        "correct_conformal": true
       },
       {
         "probe_id": "ep_q_hire",
         "memory_type": "episodic",
         "band": "hard-negative",
         "answerable": false,
-        "confidence": 0.7,
-        "abstained": false,
+        "confidence": 0.985,
+        "abstained": true,
         "hit_count": 8,
         "gold_present": false,
         "correct_policy": false,
-        "correct_conformal": false
+        "correct_conformal": true
       },
       {
         "probe_id": "ep_q_sunday",
         "memory_type": "episodic",
         "band": "hard-negative",
         "answerable": false,
-        "confidence": 0.7,
-        "abstained": false,
+        "confidence": 0.98125,
+        "abstained": true,
         "hit_count": 8,
         "gold_present": false,
         "correct_policy": false,
-        "correct_conformal": false
+        "correct_conformal": true
       },
       {
         "probe_id": "ep_q_void",
         "memory_type": "episodic",
         "band": "hard-negative",
         "answerable": false,
-        "confidence": 0.7,
-        "abstained": false,
-        "hit_count": 8,
+        "confidence": 1.0,
+        "abstained": true,
+        "hit_count": 5,
         "gold_present": false,
         "correct_policy": false,
-        "correct_conformal": false
+        "correct_conformal": true
       },
       {
         "probe_id": "ep_q_poison",
         "memory_type": "episodic",
         "band": "poison",
         "answerable": false,
-        "confidence": 0.7,
-        "abstained": false,
+        "confidence": 0.98125,
+        "abstained": true,
         "hit_count": 8,
         "gold_present": false,
         "correct_policy": false,
-        "correct_conformal": false
+        "correct_conformal": true
       },
       {
         "probe_id": "pref_q_deploy",
         "memory_type": "preference",
         "band": "clear",
         "answerable": true,
-        "confidence": 0.7,
+        "confidence": 1.0,
         "abstained": false,
         "hit_count": 8,
         "gold_present": true,
@@ -2706,7 +2714,7 @@
         "memory_type": "preference",
         "band": "clear",
         "answerable": true,
-        "confidence": 0.7,
+        "confidence": 1.0,
         "abstained": false,
         "hit_count": 8,
         "gold_present": true,
@@ -2718,7 +2726,7 @@
         "memory_type": "preference",
         "band": "near",
         "answerable": true,
-        "confidence": 0.7,
+        "confidence": 1.0,
         "abstained": false,
         "hit_count": 8,
         "gold_present": true,
@@ -2730,7 +2738,7 @@
         "memory_type": "preference",
         "band": "near",
         "answerable": true,
-        "confidence": 0.7,
+        "confidence": 1.0,
         "abstained": false,
         "hit_count": 8,
         "gold_present": true,
@@ -2742,7 +2750,7 @@
         "memory_type": "preference",
         "band": "near",
         "answerable": true,
-        "confidence": 0.7,
+        "confidence": 1.0,
         "abstained": false,
         "hit_count": 8,
         "gold_present": true,
@@ -2754,7 +2762,7 @@
         "memory_type": "preference",
         "band": "near",
         "answerable": true,
-        "confidence": 0.7,
+        "confidence": 1.0,
         "abstained": false,
         "hit_count": 8,
         "gold_present": true,
@@ -2766,67 +2774,67 @@
         "memory_type": "preference",
         "band": "hard-negative",
         "answerable": false,
-        "confidence": 0.7,
-        "abstained": false,
+        "confidence": 1.0,
+        "abstained": true,
         "hit_count": 8,
         "gold_present": false,
         "correct_policy": false,
-        "correct_conformal": false
+        "correct_conformal": true
       },
       {
         "probe_id": "pref_q_music",
         "memory_type": "preference",
         "band": "hard-negative",
         "answerable": false,
-        "confidence": 0.7,
-        "abstained": false,
+        "confidence": 1.0,
+        "abstained": true,
         "hit_count": 8,
         "gold_present": false,
         "correct_policy": false,
-        "correct_conformal": false
+        "correct_conformal": true
       },
       {
         "probe_id": "pref_q_os",
         "memory_type": "preference",
         "band": "hard-negative",
         "answerable": false,
-        "confidence": 0.7,
-        "abstained": false,
+        "confidence": 1.0,
+        "abstained": true,
         "hit_count": 8,
         "gold_present": false,
         "correct_policy": false,
-        "correct_conformal": false
+        "correct_conformal": true
       },
       {
         "probe_id": "pref_q_void",
         "memory_type": "preference",
         "band": "hard-negative",
         "answerable": false,
-        "confidence": 0.7,
-        "abstained": false,
+        "confidence": 1.0,
+        "abstained": true,
         "hit_count": 2,
         "gold_present": false,
         "correct_policy": false,
-        "correct_conformal": false
+        "correct_conformal": true
       },
       {
         "probe_id": "pref_q_poison",
         "memory_type": "preference",
         "band": "poison",
         "answerable": false,
-        "confidence": 0.7,
-        "abstained": false,
+        "confidence": 0.9875,
+        "abstained": true,
         "hit_count": 8,
         "gold_present": false,
         "correct_policy": false,
-        "correct_conformal": false
+        "correct_conformal": true
       },
       {
         "probe_id": "proc_q_rebuild",
         "memory_type": "procedural",
         "band": "clear",
         "answerable": true,
-        "confidence": 0.7,
+        "confidence": 1.0,
         "abstained": false,
         "hit_count": 8,
         "gold_present": true,
@@ -2838,9 +2846,9 @@
         "memory_type": "procedural",
         "band": "clear",
         "answerable": true,
-        "confidence": 0.7,
+        "confidence": 1.0,
         "abstained": false,
-        "hit_count": 8,
+        "hit_count": 3,
         "gold_present": true,
         "correct_policy": false,
         "correct_conformal": true
@@ -2850,9 +2858,9 @@
         "memory_type": "procedural",
         "band": "near",
         "answerable": true,
-        "confidence": 0.7,
+        "confidence": 1.0,
         "abstained": false,
-        "hit_count": 8,
+        "hit_count": 7,
         "gold_present": true,
         "correct_policy": false,
         "correct_conformal": true
@@ -2862,7 +2870,7 @@
         "memory_type": "procedural",
         "band": "near",
         "answerable": true,
-        "confidence": 0.7,
+        "confidence": 1.0,
         "abstained": false,
         "hit_count": 8,
         "gold_present": true,
@@ -2874,9 +2882,9 @@
         "memory_type": "procedural",
         "band": "near",
         "answerable": true,
-        "confidence": 0.7,
+        "confidence": 1.0,
         "abstained": false,
-        "hit_count": 7,
+        "hit_count": 5,
         "gold_present": true,
         "correct_policy": false,
         "correct_conformal": true
@@ -2886,7 +2894,7 @@
         "memory_type": "procedural",
         "band": "near",
         "answerable": true,
-        "confidence": 0.7,
+        "confidence": 1.0,
         "abstained": false,
         "hit_count": 8,
         "gold_present": true,
@@ -2898,67 +2906,67 @@
         "memory_type": "procedural",
         "band": "hard-negative",
         "answerable": false,
-        "confidence": 0.7,
-        "abstained": false,
-        "hit_count": 8,
+        "confidence": 0.97,
+        "abstained": true,
+        "hit_count": 7,
         "gold_present": false,
         "correct_policy": false,
-        "correct_conformal": false
+        "correct_conformal": true
       },
       {
         "probe_id": "proc_q_scale",
         "memory_type": "procedural",
         "band": "hard-negative",
         "answerable": false,
-        "confidence": 0.7,
-        "abstained": false,
+        "confidence": 0.9625,
+        "abstained": true,
         "hit_count": 8,
         "gold_present": false,
         "correct_policy": false,
-        "correct_conformal": false
+        "correct_conformal": true
       },
       {
         "probe_id": "proc_q_rotate",
         "memory_type": "procedural",
         "band": "hard-negative",
         "answerable": false,
-        "confidence": 0.7,
-        "abstained": false,
+        "confidence": 1.0,
+        "abstained": true,
         "hit_count": 8,
         "gold_present": false,
         "correct_policy": false,
-        "correct_conformal": false
+        "correct_conformal": true
       },
       {
         "probe_id": "proc_q_void",
         "memory_type": "procedural",
         "band": "hard-negative",
         "answerable": false,
-        "confidence": 0.7,
-        "abstained": false,
+        "confidence": 1.0,
+        "abstained": true,
         "hit_count": 8,
         "gold_present": false,
         "correct_policy": false,
-        "correct_conformal": false
+        "correct_conformal": true
       },
       {
         "probe_id": "proc_q_poison",
         "memory_type": "procedural",
         "band": "poison",
         "answerable": false,
-        "confidence": 0.7,
-        "abstained": false,
+        "confidence": 0.983333,
+        "abstained": true,
         "hit_count": 8,
         "gold_present": false,
         "correct_policy": false,
-        "correct_conformal": false
+        "correct_conformal": true
       },
       {
         "probe_id": "rel_q_alice",
         "memory_type": "relation",
         "band": "clear",
         "answerable": true,
-        "confidence": 0.7,
+        "confidence": 1.0,
         "abstained": false,
         "hit_count": 2,
         "gold_present": true,
@@ -2970,7 +2978,7 @@
         "memory_type": "relation",
         "band": "clear",
         "answerable": true,
-        "confidence": 0.7,
+        "confidence": 1.0,
         "abstained": false,
         "hit_count": 8,
         "gold_present": true,
@@ -2982,7 +2990,7 @@
         "memory_type": "relation",
         "band": "near",
         "answerable": true,
-        "confidence": 0.7,
+        "confidence": 1.0,
         "abstained": false,
         "hit_count": 8,
         "gold_present": true,
@@ -2994,7 +3002,7 @@
         "memory_type": "relation",
         "band": "near",
         "answerable": true,
-        "confidence": 0.7,
+        "confidence": 1.0,
         "abstained": false,
         "hit_count": 8,
         "gold_present": true,
@@ -3006,7 +3014,7 @@
         "memory_type": "relation",
         "band": "near",
         "answerable": true,
-        "confidence": 0.7,
+        "confidence": 1.0,
         "abstained": false,
         "hit_count": 8,
         "gold_present": true,
@@ -3018,7 +3026,7 @@
         "memory_type": "relation",
         "band": "near",
         "answerable": true,
-        "confidence": 0.7,
+        "confidence": 1.0,
         "abstained": false,
         "hit_count": 8,
         "gold_present": true,
@@ -3030,60 +3038,60 @@
         "memory_type": "relation",
         "band": "hard-negative",
         "answerable": false,
-        "confidence": 0.7,
-        "abstained": false,
+        "confidence": 1.0,
+        "abstained": true,
         "hit_count": 8,
         "gold_present": false,
         "correct_policy": false,
-        "correct_conformal": false
+        "correct_conformal": true
       },
       {
         "probe_id": "rel_q_vendor",
         "memory_type": "relation",
         "band": "hard-negative",
         "answerable": false,
-        "confidence": 0.7,
-        "abstained": false,
+        "confidence": 1.0,
+        "abstained": true,
         "hit_count": 8,
         "gold_present": false,
         "correct_policy": false,
-        "correct_conformal": false
+        "correct_conformal": true
       },
       {
         "probe_id": "rel_q_parent",
         "memory_type": "relation",
         "band": "hard-negative",
         "answerable": false,
-        "confidence": 0.7,
-        "abstained": false,
+        "confidence": 0.9625,
+        "abstained": true,
         "hit_count": 8,
         "gold_present": false,
         "correct_policy": false,
-        "correct_conformal": false
+        "correct_conformal": true
       },
       {
         "probe_id": "rel_q_void",
         "memory_type": "relation",
         "band": "hard-negative",
         "answerable": false,
-        "confidence": 0.7,
-        "abstained": false,
+        "confidence": 1.0,
+        "abstained": true,
         "hit_count": 8,
         "gold_present": false,
         "correct_policy": false,
-        "correct_conformal": false
+        "correct_conformal": true
       },
       {
         "probe_id": "rel_q_poison",
         "memory_type": "relation",
         "band": "poison",
         "answerable": false,
-        "confidence": 0.7,
-        "abstained": false,
+        "confidence": 0.989286,
+        "abstained": true,
         "hit_count": 8,
         "gold_present": false,
         "correct_policy": false,
-        "correct_conformal": false
+        "correct_conformal": true
       }
     ]
   }

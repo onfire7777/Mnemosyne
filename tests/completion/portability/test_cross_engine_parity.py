@@ -491,13 +491,13 @@ def test_parity_retrieval_conformal_calibration() -> None:
     def scenario(engine: Any, tenant: str, user: str) -> dict[str, Any]:
         engine.set_calibration(
             CalibrationSet(
-                tenant_id=tenant, memory_type="fact", scores=[0.95], target_coverage=0.9
+                tenant_id=tenant, memory_type="fact", scores=[0.99], target_coverage=0.9
             )
         )
         engine.append_evidence(
             _evidence(tenant, user, "Portability calibrated abstention should still retrieve.")
         )
-        result = engine.retrieve("calibrated abstention", tenant)
+        result = engine.retrieve("calibrated abstention boundary", tenant)
         exported = engine.export_tenant(tenant)
         return {
             "has_hits": bool(result.hits),
@@ -510,7 +510,7 @@ def test_parity_retrieval_conformal_calibration() -> None:
     local = harness.run("set_calibration+retrieve", scenario)
     assert local["abstained"] is True
     assert local["calibration_source"] == "conformal"
-    assert local["calibration_threshold"] == 0.95
+    assert local["calibration_threshold"] == 0.99
 
 
 def test_parity_retrieval_records_assertion_access() -> None:

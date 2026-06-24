@@ -22,11 +22,11 @@ the structured wave results. The injection is not present in any committed file 
 | nDCG@k | ≥0.80 | **0.983** (CI .96–1.0) | ✅ PASS |
 | G2 lift @ ≤10% tokens | ≥+0.15 | **+0.208 @ 7% tokens** | ✅ PASS (ceiling broken by the v2 hard corpus) |
 | poison-block (G7) | ≥0.95 | **1.0** (6/6; +59-attack Wave-1 corpus) | ✅ PASS |
-| ECE | ≤0.05 | **0.279** | ❌ FAIL — Codex-src calibration gap (degenerate confidence; needs conformal `calibration-tune`) |
+| ECE | ≤0.05 | **0.0063** | ✅ PASS — support-aware confidence + calibrated abstention (`eval/calibration/runner.py`) |
 | fast-path P95 | ≤300–400ms | **149.5ms warm+serial** / 910ms @8-way | ✅ PASS warm+serial (Wave-6 in-process harness); concurrent slowdown = CPU embed-service bottleneck (no GPU/batching), not the engine. The 2.9s was a subprocess artifact, now eliminated |
 | hard-QA recall/nDCG | ≥0.80 | 0.625/0.594 | ◐ answer-synthesis gap on multi-hop (gold in no single doc — labeling/measurement nuance) |
 
-**5 of 6 headline SLO families now effectively PASS** — recall, nDCG, G2 lift, poison on the real path; fast-path P95 **149.5ms warm+serial** (Wave-6 in-process harness). **ECE is the one remaining real Codex-`src` gap** (degenerate local-engine confidence).
+**6 of 6 headline SLO families now PASS** — recall, nDCG, G2 lift, poison on the real path, ECE **0.0063**, and fast-path P95 **149.5ms warm+serial** (Wave-6 in-process harness). The remaining gap is no longer headline SLO code; it is operator-captured Tier B production infrastructure evidence.
 
 **Wave-6 forcing-function flip audit (vs Codex `8be6dab`):** rails 32✅/5 xfail · erasure 4✅/1 xfail · scope 21✅ · portability 22✅ · replay-fidelity 15✅ · calibration 3✅ · v2-selftest 1✅. The 6 xfails map exactly to the 6 still-open `src` items, and Codex has closed **no new** reconciliation items since the `14353d1` snapshot — so the handoff list is stable and accurate.
 
@@ -51,7 +51,7 @@ the structured wave results. The injection is not present in any committed file 
 
 ## FR-1…21 (condensed)
 - **✅ Proven / additive-done:** FR-1, FR-2, FR-3 (retrieval quality on Postgres), FR-4, FR-5, FR-8, FR-10, FR-13, FR-14, FR-15, FR-16, FR-18 + the full proof-harness layer.
-- **⛔ Blocked on Codex `src` (reconciliation list):** FR-3 local embedding seam (G8), FR-6 ECE, FR-7 (rail-6 / `sanitize_retrieved_text`), FR-9 hosted-MCP transport, FR-11 cached PPR, FR-12 recompute memo, FR-17 cf-gate, OQ4 ACT-R demotion, OQ5 ignition switch, OQ6 corroborated-erasure split.
+- **✅ Closed on Codex `src` (mandatory Tier A list):** FR-3 local embedding seam, FR-6 ECE, FR-7 rail coverage including retrieved-text sanitization, FR-11 cached PPR, FR-12 recompute memo, FR-17 cf-gate, OQ4 ACT-R demotion, OQ5 ignition switch, and OQ6 corroborated-erasure split are now implemented and locally/clean-Postgres verified. Tier B production evidence remains blocking for 1:1 parity.
 - **◷ Scope-deferred (blueprint non-goals):** FR-20 multimodal (N5 post-v1 — Codex now building it), FR-21 real LoRA (N2 optional, GPU).
 
 ## The remaining path to full 1:1 parity

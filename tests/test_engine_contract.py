@@ -125,6 +125,58 @@ def test_local_engine_uses_configured_retrieval_adapters() -> None:
     assert target in {hit.id for hit in result.hits}
 
 
+def test_retrieval_confidence_varies_by_evidence_quality_and_abstains_on_weak_support() -> None:
+    def engine_with_hit(*, trust_tier: int) -> LocalMemoryEngine:
+        engine = LocalMemoryEngine()
+        engine.append_evidence(
+            Evidence(
+                tenant_id=TENANT,
+                user_id=USER,
+                actor="user",
+                source_type="chat",
+                content="Needle retrieval confidence should depend on evidence quality.",
+                trust_tier=trust_tier,
+                access_policy={"tenant": TENANT},
+            )
+        )
+        return engine
+
+    strong = engine_with_hit(trust_tier=0).retrieve("Needle retrieval confidence", tenant_id=TENANT)
+    weak = engine_with_hit(trust_tier=5).retrieve("Needle retrieval confidence", tenant_id=TENANT)
+
+    assert strong.confidence > weak.confidence
+    assert weak.confidence != pytest.approx(0.7)
+    assert strong.abstained is False
+    assert weak.abstained is True
+    assert strong.explain["confidence"]["source"] == "evidence_quality"
+    assert strong.explain["confidence"]["prediction_set_size"] >= 1
+
+
+def test_retrieval_confidence_uses_conformal_calibration_threshold() -> None:
+    from mnemosyne.calibration import CalibrationSet
+
+    engine = LocalMemoryEngine()
+    engine.append_evidence(
+        Evidence(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="chat",
+            content="Calibrated retrieval should respect thresholds.",
+            trust_tier=0,
+            access_policy={"tenant": TENANT},
+        )
+    )
+    engine.set_calibration(CalibrationSet(tenant_id=TENANT, memory_type="fact", scores=[0.99], target_coverage=0.9))
+
+    result = engine.retrieve("Calibrated retrieval boundary", tenant_id=TENANT)
+
+    assert result.explain["confidence"]["source"] == "conformal"
+    assert result.explain["confidence"]["threshold"] == pytest.approx(0.99)
+    assert result.confidence < 0.99
+    assert result.abstained is True
+
+
 def test_bitemporal_supersession_and_as_of_queries() -> None:
     engine = LocalMemoryEngine()
     t1 = datetime(2026, 1, 1, tzinfo=UTC)
