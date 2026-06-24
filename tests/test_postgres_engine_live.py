@@ -92,6 +92,35 @@ def fake_command_retrieval_provider(tmp_path: Path) -> tuple[str, Path]:
     return " ".join(shlex.quote(item) for item in (sys.executable, str(script), str(state))), state
 
 
+def fake_parametric_command(tmp_path: Path) -> tuple[str, Path]:
+    state = tmp_path / "parametric-state.json"
+    script = tmp_path / "fake-parametric.py"
+    script.write_text(
+        "\n".join(
+            [
+                "from __future__ import annotations",
+                "import json, sys",
+                "from pathlib import Path",
+                "state = Path(sys.argv[1])",
+                "action = sys.argv[2]",
+                "request = json.load(sys.stdin)",
+                "data = json.loads(state.read_text()) if state.exists() else {'calls': []}",
+                "data.setdefault('calls', []).append({'action': action, 'tenant_id': request.get('tenant_id'), 'source_ids': request.get('source_ids'), 'protected_suite': request.get('protected_suite'), 'protected_cases': [case.get('id') for case in request.get('protected_cases', [])]})",
+                "state.write_text(json.dumps(data, sort_keys=True), encoding='utf-8')",
+                "if action == 'propose':",
+                "    print(json.dumps({'adapter_kind': 'postgres-command-parametric-adapter', 'artifact_ref': 'provider://' + request['tenant_id'] + '/postgres-adapter', 'metrics': {'source_count': len(request['source_ids']), 'rail_count': len(request['immutable_rails'])}, 'metadata': {'lesson_count': len(request['lessons']), 'procedure_count': len(request['procedures'])}}))",
+                "elif action == 'rollback':",
+                "    print(json.dumps({'rollback_ref': 'postgres-provider-rollback-' + request['artifact']['id'], 'metrics': {'provider_rolled_back': 1}}))",
+                "else:",
+                "    print('bad action', file=sys.stderr)",
+                "    raise SystemExit(2)",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return " ".join(shlex.quote(item) for item in (sys.executable, str(script), str(state))), state
+
+
 def start_fake_retrieval_provider(*, malformed_embedding: bool = False) -> tuple[ThreadingHTTPServer, str, dict[str, list[dict]]]:
     calls: dict[str, list[dict]] = {"embedding": [], "reranker": []}
 
@@ -556,11 +585,22 @@ def test_postgres_evidence_vector_search_keeps_null_embedding_fallback_live() ->
     assert evidence_hit.metadata["source_table"] == "evidence"
 
 
-def test_postgres_mcp_runtime_state_persists_profile_and_learning_live() -> None:
+def test_postgres_mcp_runtime_state_persists_profile_learning_and_command_parametric_live(tmp_path: Path) -> None:
     tenant = f"tenant-runtime-state-{uuid4()}"
     user = "user-runtime-state"
     dsn = live_dsn()
-    server = MnemosyneMcpServer(backend="postgres", postgres_dsn=dsn, stateless=True, queue_tenant=tenant)
+    command, provider_state = fake_parametric_command(tmp_path)
+    artifact_store = tmp_path / "parametric-artifacts"
+    server = MnemosyneMcpServer(
+        backend="postgres",
+        postgres_dsn=dsn,
+        stateless=True,
+        queue_tenant=tenant,
+        parametric_provider="command",
+        parametric_command=command,
+        parametric_adapter_kind="postgres-command-parametric-adapter",
+        parametric_artifact_store=artifact_store,
+    )
 
     server.call_tool(
         "profile_add",
@@ -586,17 +626,72 @@ def test_postgres_mcp_runtime_state_persists_profile_and_learning_live() -> None
         },
     )
 
-    reloaded = MnemosyneMcpServer(backend="postgres", postgres_dsn=dsn, stateless=True, queue_tenant=tenant)
+    reloaded = MnemosyneMcpServer(
+        backend="postgres",
+        postgres_dsn=dsn,
+        stateless=True,
+        queue_tenant=tenant,
+        parametric_provider="command",
+        parametric_command=command,
+        parametric_adapter_kind="postgres-command-parametric-adapter",
+        parametric_artifact_store=artifact_store,
+    )
     profile = reloaded.call_tool(
         "profile_context",
         {"tenant_id": tenant, "user_id": user, "scope": {"category": "workflow"}},
     )
     lesson = reloaded.call_tool("lesson_propose", {"trajectory_id": trajectory["id"]})
     procedure = reloaded.call_tool("procedure_propose", {"lesson_id": lesson["id"]})
+    reloaded.call_tool(
+        "procedure_validate",
+        {"procedure_id": procedure["id"], "role": "operator", "source_trust_tier": 0},
+    )
+    reloaded.call_tool(
+        "lesson_promote",
+        {
+            "lesson_id": lesson["id"],
+            "cases": [
+                {
+                    "id": "postgres-parametric-provider-case",
+                    "signature": "Postgres runtime state parity",
+                    "query": "runtime state dropped verify with tools",
+                    "expected_substring": "verify with tools",
+                    "protected": True,
+                }
+            ],
+            "role": "operator",
+            "source_trust_tier": 0,
+        },
+    )
+    artifact = reloaded.call_tool("parametric_propose", {"tenant_id": tenant, "role": "operator", "source_trust_tier": 0})
+    evaluated = reloaded.call_tool(
+        "parametric_evaluate",
+        {"artifact_uri": artifact["artifact_uri"], "role": "operator", "source_trust_tier": 0},
+    )
+    rolled_back = reloaded.call_tool(
+        "parametric_rollback",
+        {
+            "artifact_uri": artifact["artifact_uri"],
+            "reason": "Postgres command provider rollback smoke",
+            "role": "operator",
+            "source_trust_tier": 0,
+        },
+    )
+    provider_calls = json.loads(provider_state.read_text(encoding="utf-8"))["calls"]
 
     assert profile["authoritative"][0]["statement"] == "Prefer Postgres-backed runtime state for MCP tools."
     assert lesson["tenant_id"] == tenant
     assert procedure["tenant_id"] == tenant
+    assert artifact["adapter_kind"] == "postgres-command-parametric-adapter"
+    assert artifact["metrics"]["provider_invoked"] == 1.0
+    assert artifact["metrics"]["source_count"] == 2.0
+    assert evaluated["promoted"] is True
+    assert rolled_back["rollback_ref"] == f"postgres-provider-rollback-{artifact['id']}"
+    assert rolled_back["protected_suite"]["source"] == "synthetic"
+    assert [call["action"] for call in provider_calls] == ["propose", "rollback"]
+    assert provider_calls[0]["tenant_id"] == tenant
+    assert provider_calls[0]["source_ids"] == [lesson["id"], procedure["id"]]
+    assert provider_calls[-1]["protected_cases"] == ["parametric-protected-0"]
 
     engine = PostgresEngine(dsn)
     db_tenant_id = _stable_uuid("tenant", tenant)
