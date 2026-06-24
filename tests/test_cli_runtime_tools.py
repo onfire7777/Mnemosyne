@@ -5260,7 +5260,30 @@ def production_release_stdout(command: str, provider_stdout: dict) -> dict:
     if command == "projection-recompute-once":
         return {"ok": True, "queue": {}, "enqueued_job": {}, "job": {}, "metrics": {}}
     if command == "worker-run":
-        return {"ok": True, "worker": {}, "summary": {}, "queue": {}, "cycles": [], "jobs": [], "metrics": {}}
+        job = {
+            "id": "worker-job-1",
+            "kind": "consolidate_evidence",
+            "status": "complete",
+            "attempts": 1,
+            "max_attempts": 3,
+        }
+        queue = {"queued": 0, "running": 0, "complete": 1, "dead": 0}
+        return {
+            "ok": True,
+            "worker": {
+                "backend": "postgres",
+                "tenant": "tenant-a",
+                "kind": "any",
+                "limit": 1,
+                "max_cycles": 1,
+                "fail_on_dead": True,
+            },
+            "summary": {"cycles": 1, "processed": 1, "idle_cycles": 0, "stopped_reason": "max_cycles"},
+            "queue": queue,
+            "cycles": [{"cycle": 1, "processed": 1, "idle": False, "queue": queue, "jobs": [job]}],
+            "jobs": [job],
+            "metrics": {"worker": {"processed_jobs": 1}},
+        }
     if command == "ops-dashboard-check":
         return {"ok": True, "mode": "package", "source": {}, "checks": [], "findings": []}
     if command == "ops-report":
@@ -5412,6 +5435,80 @@ def test_cli_release_audit_rejects_placeholder_required_command_output(tmp_path:
     assert len(output_findings) == 1
     assert "auth-ops-check" in output_findings[0]["message"]
     assert "bundle" in output_findings[0]["message"]
+
+
+def test_cli_release_audit_rejects_empty_worker_runtime_evidence(tmp_path: Path) -> None:
+    report_path, _manifest_path = write_release_report(tmp_path)
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    worker_check = next(check for check in report["checks"] if check["command"] == "worker-run")
+    worker_check["stdout_json"] = {
+        "ok": True,
+        "worker": {},
+        "summary": {},
+        "queue": {},
+        "cycles": [],
+        "jobs": [],
+        "metrics": {},
+    }
+    report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+
+    result = run_raw_cli(
+        tmp_path / "mnemosyne.json",
+        "release-audit",
+        "--soak-report",
+        str(report_path),
+        "--require-production-validated",
+    )
+    payload = json.loads(result.stdout)
+    output_findings = [
+        finding
+        for finding in payload["findings"]
+        if finding["code"] == "required_worker_runtime_evidence_incomplete"
+    ]
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert len(output_findings) == 1
+    assert "worker-run evidence has empty runtime sections" in output_findings[0]["message"]
+    assert "cycles" in output_findings[0]["message"]
+    assert "jobs" in output_findings[0]["message"]
+
+
+def test_cli_release_audit_rejects_malformed_worker_runtime_counts(tmp_path: Path) -> None:
+    report_path, _manifest_path = write_release_report(tmp_path)
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    worker_check = next(check for check in report["checks"] if check["command"] == "worker-run")
+    worker_check["stdout_json"] = {
+        "ok": True,
+        "worker": {"backend": "postgres", "tenant": "tenant-a", "fail_on_dead": True},
+        "summary": {"cycles": "many", "processed": "one"},
+        "queue": {"queued": 0, "running": 0, "complete": 1, "dead": 0},
+        "cycles": [{"cycle": 1, "processed": "one", "idle": False}],
+        "jobs": [{"kind": "consolidate_evidence", "status": "complete"}],
+        "metrics": {"worker": {"processed_jobs": 1}},
+    }
+    report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+
+    result = run_raw_cli(
+        tmp_path / "mnemosyne.json",
+        "release-audit",
+        "--soak-report",
+        str(report_path),
+        "--require-production-validated",
+    )
+    payload = json.loads(result.stdout)
+    output_findings = [
+        finding
+        for finding in payload["findings"]
+        if finding["code"] == "required_worker_runtime_evidence_incomplete"
+    ]
+    messages = "\n".join(finding["message"] for finding in output_findings)
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert "summary must prove at least one worker cycle" in messages
+    assert "summary must prove at least one processed job" in messages
+    assert "cycles must include a processed-job cycle" in messages
 
 
 def test_cli_release_audit_requires_production_scope_attestation(tmp_path: Path) -> None:
