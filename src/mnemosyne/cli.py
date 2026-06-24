@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import ipaddress
 import json
+import math
 import os
 import socket
 import ssl
@@ -5074,6 +5075,134 @@ def cmd_consolidation_ops_check(args: argparse.Namespace) -> None:
         }
     )
 
+    deployment = bundle.get("deployment")
+    if not isinstance(deployment, Mapping):
+        findings.append(_consolidation_finding("deployment_missing", "consolidation ops bundle requires deployment section"))
+        deployment = {}
+    deployment_supervision = deployment.get("supervision") if isinstance(deployment.get("supervision"), Mapping) else {}
+    required_deployment_controls = [
+        "worker_run",
+        "provider_check",
+        "hosted_providers",
+        "projection_recompute",
+        "protected_suite",
+        "embedding",
+        "consolidation_run",
+        "calibration",
+        "lifecycle",
+        "ops_report",
+    ]
+    missing_deployment_controls = [
+        control
+        for control in required_deployment_controls
+        if deployment_supervision.get(control) is not True and deployment.get(f"{control}_supervised") is not True
+    ]
+    alert_route = deployment.get("alert_route") if isinstance(deployment.get("alert_route"), Mapping) else {}
+    alert_route_configured = alert_route.get("configured") is True or deployment.get("alert_route_configured") is True
+    alert_route_delivery_verified = (
+        alert_route.get("last_delivery_verified") is True or deployment.get("alert_route_delivery_verified") is True
+    )
+    alert_route_ok = alert_route_configured and alert_route_delivery_verified
+    execution_fingerprint = str(deployment.get("execution_fingerprint") or "")
+    deployment_latency_raw = deployment.get("latency_ms", deployment.get("p95_latency_ms", deployment.get("max_latency_ms")))
+    try:
+        deployment_latency_ms = float(deployment_latency_raw)
+    except (TypeError, ValueError):
+        deployment_latency_ms = float("inf")
+        findings.append(_consolidation_finding("deployment_latency_invalid", "deployment latency must be numeric"))
+    deployment_bindings = deployment.get("bindings") if isinstance(deployment.get("bindings"), Mapping) else {}
+
+    def _deployment_binding(name: str) -> Any:
+        return deployment_bindings.get(name, deployment.get(name))
+
+    def _deployment_binding_int(name: str) -> int:
+        value = _deployment_binding(name)
+        code = f"deployment_{name}_invalid"
+        message = f"deployment binding {name} must be an integer"
+        if isinstance(value, bool):
+            findings.append(_consolidation_finding(code, message))
+            return -1
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str) and value.strip().isdigit():
+            return int(value.strip())
+        findings.append(_consolidation_finding(code, message))
+        return -1
+
+    deployment_count_bindings = {
+        "worker_processed_jobs": processed_jobs,
+        "provider_check_count": len(provider_rows),
+        "projection_changed_evidence_count": changed_count,
+        "protected_suite_case_count": suite_case_count,
+        "embedded_cid_hash_count": embedded_count,
+        "consolidation_source_hash_count": len(consolidation_hashes),
+        "calibration_example_count": calibration_examples,
+        "lifecycle_evaluated": lifecycle_evaluated,
+        "ops_counter_count": len(ops_counters),
+    }
+    deployment_binding_mismatches: list[dict[str, Any]] = []
+    for field, expected in deployment_count_bindings.items():
+        actual = _deployment_binding_int(field)
+        if actual != expected:
+            deployment_binding_mismatches.append({"field": field, "expected": expected, "actual": actual})
+    protected_suite_fingerprint = str(suite.get("fingerprint") or "")
+    deployment_suite_fingerprint = str(_deployment_binding("protected_suite_fingerprint") or "")
+    suite_fingerprint_bound = bool(protected_suite_fingerprint) and deployment_suite_fingerprint == protected_suite_fingerprint
+    deployment_ok = (
+        deployment.get("ok", True) is True
+        and deployment.get("production_validated") is True
+        and not missing_deployment_controls
+        and alert_route_ok
+        and "sha256:" in execution_fingerprint.lower()
+        and 0 <= deployment_latency_ms <= args.max_deployment_latency_ms
+        and math.isfinite(deployment_latency_ms)
+        and not deployment_binding_mismatches
+        and suite_fingerprint_bound
+    )
+    if deployment.get("ok", True) is not True:
+        findings.append(_consolidation_finding("deployment_not_ok", "deployment evidence must be ok"))
+    if deployment.get("production_validated") is not True:
+        findings.append(_consolidation_finding("deployment_production_validation_missing", "deployment evidence must be production validated"))
+    for control in missing_deployment_controls:
+        findings.append(_consolidation_finding("deployment_control_missing", f"deployment supervision evidence missing for {control}"))
+    if not alert_route_ok:
+        findings.append(_consolidation_finding("deployment_alert_route_missing", "deployment alert route must be configured and delivery verified"))
+    if "sha256:" not in execution_fingerprint.lower():
+        findings.append(_consolidation_finding("deployment_execution_fingerprint_missing", "deployment execution fingerprint must include sha256"))
+    if deployment_latency_raw is None or not math.isfinite(deployment_latency_ms) or deployment_latency_ms < 0:
+        findings.append(
+            _consolidation_finding(
+                "deployment_latency_invalid",
+                "deployment latency must be present, finite, and non-negative",
+            )
+        )
+    elif deployment_latency_ms > args.max_deployment_latency_ms:
+        findings.append(_consolidation_finding("deployment_latency_too_high", "deployment latency exceeds threshold"))
+    for mismatch in deployment_binding_mismatches:
+        findings.append(
+            _consolidation_finding(
+                "deployment_count_binding_mismatch",
+                f"deployment binding {mismatch['field']} expected {mismatch['expected']} got {mismatch['actual']}",
+            )
+        )
+    if not suite_fingerprint_bound:
+        findings.append(_consolidation_finding("deployment_fingerprint_binding_mismatch", "deployment must bind protected suite fingerprint"))
+    checks.append(
+        {
+            "name": "deployment",
+            "ok": deployment_ok,
+            "production_validated": deployment.get("production_validated") is True,
+            "missing_controls": missing_deployment_controls,
+            "alert_route_configured": alert_route_configured,
+            "alert_route_delivery_verified": alert_route_delivery_verified,
+            "execution_fingerprint_present": "sha256:" in execution_fingerprint.lower(),
+            "latency_ms": deployment_latency_ms if math.isfinite(deployment_latency_ms) else None,
+            "latency_threshold_ms": args.max_deployment_latency_ms,
+            "binding_mismatches": deployment_binding_mismatches,
+            "protected_suite_fingerprint_bound": suite_fingerprint_bound,
+        }
+    )
+
     redaction = bundle.get("redaction") if isinstance(bundle.get("redaction"), Mapping) else {}
     redaction_flags = {
         "raw_prompts_omitted": redaction.get("raw_prompts_omitted") is True,
@@ -5120,6 +5249,9 @@ def cmd_consolidation_ops_check(args: argparse.Namespace) -> None:
             "calibration_dataset_fingerprint_present": "sha256:" in dataset_fingerprint.lower(),
             "lifecycle_evaluated": lifecycle_evaluated,
             "ops_tripwires_passed": tripwires.get("passed") is True,
+            "deployment_latency_ms": deployment_latency_ms if math.isfinite(deployment_latency_ms) else None,
+            "deployment_alert_route_configured": alert_route_configured,
+            "deployment_alert_route_delivery_verified": alert_route_delivery_verified,
         },
         "requirements": {
             "production_validated": True,
@@ -5154,6 +5286,8 @@ def cmd_consolidation_ops_check(args: argparse.Namespace) -> None:
             "min_lifecycle_evaluated": args.min_lifecycle_evaluated,
             "required_ops_counters": required_counters,
             "max_contradiction_backlog": args.max_contradiction_backlog,
+            "required_deployment_controls": required_deployment_controls,
+            "max_deployment_latency_ms": args.max_deployment_latency_ms,
         },
         "redaction": {**redaction_flags, "forbidden_raw_fields_present": bool(forbidden_raw_paths)},
         "checks": checks,
@@ -11576,6 +11710,7 @@ def build_parser() -> argparse.ArgumentParser:
     consolidation_ops_check.add_argument("--min-lifecycle-evaluated", type=int, default=1)
     consolidation_ops_check.add_argument("--require-ops-counter", action="append", default=[])
     consolidation_ops_check.add_argument("--max-contradiction-backlog", type=int, default=0)
+    consolidation_ops_check.add_argument("--max-deployment-latency-ms", type=float, default=2000.0)
     consolidation_ops_check.add_argument("--expected-fingerprint")
     consolidation_ops_check.set_defaults(func=cmd_consolidation_ops_check)
 
