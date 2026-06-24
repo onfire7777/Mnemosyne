@@ -108,19 +108,10 @@ def test_retrieval_explain_declares_data_not_instruction_rail():
 
 # --- Surface D: MISSING runtime prompt-assembly enforcement (gap) -------------
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "RAIL 6 HAS NO RUNTIME SINK GUARD. Missing enforcement point: there is no "
-        "prompt-assembly component in src/mnemosyne that builds a system prompt and "
-        "structurally excludes untrusted/sanitize-as-data hits. policy.immutable_rails "
-        "declares retrieved_text_is_data_not_instruction=True and ingestion tags "
-        "untrusted content data-only, but nothing REFUSES routing a flagged hit into a "
-        "system-prompt sink at serve time. Codex must add a prompt-assembler (or "
-        "engine API) that raises/drops when an untrusted hit is targeted at the "
-        "system_prompt sink, then this test asserts that refusal."
-    ),
-)
+# RAIL 6 NOW ENFORCED (Tier-A reconciliation): LocalMemoryEngine.assemble_system_prompt
+# provides the missing serve-time sink guard — it refuses routing untrusted /
+# data-only hits into a privileged system_prompt sink. This forcing-function is
+# flipped from strict-xfail to a live regression now that the enforcement exists.
 def test_routing_untrusted_hit_to_system_prompt_is_refused_at_runtime():
     """Adversarial: ingest an untrusted-external injection payload, retrieve it,
     and attempt to route a retrieved hit into a 'system_prompt' sink. The rail

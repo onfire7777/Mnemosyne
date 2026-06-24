@@ -611,6 +611,39 @@ class LocalMemoryEngine:
             self._persist()
             return incoming.id
 
+    def assemble_system_prompt(self, *, tenant_id: str, hits: Any, sink: str = "system_prompt") -> str:
+        """§31 RAIL-6 serve-time sink guard: ``untrusted_to_system_prompt`` forbidden.
+
+        Assembles instruction text from retrieved ``hits`` for the given ``sink``.
+        When ``sink`` is a privileged instruction sink (system_prompt / system /
+        developer / instruction / tool), routing an untrusted-external or
+        ``sanitize-as-data`` hit into it is REFUSED with ``PermissionError`` —
+        retrieved text is data, never instruction (§31 immutable rail). Non-
+        privileged sinks assemble all admissible hits. This is the missing runtime
+        enforcement point: ingestion already tags untrusted content data-only, but
+        nothing previously refused routing a flagged hit into a system-prompt sink.
+        """
+        instruction_sinks = {"system_prompt", "system", "developer", "instruction", "tool"}
+        privileged = str(sink).strip().lower() in instruction_sinks
+        admissible: list[str] = []
+        for hit in hits or []:
+            trust_tier = int(getattr(hit, "trust_tier", 0))
+            metadata = getattr(hit, "metadata", None)
+            metadata = metadata if isinstance(metadata, dict) else {}
+            tags = set(metadata.get("capability_tags", []) or [])
+            flagged = bool(metadata.get("sanitize_as_data")) or "sanitize-as-data" in tags
+            untrusted = trust_tier >= int(TrustTier.UNTRUSTED_EXTERNAL) or flagged
+            if privileged and untrusted:
+                raise PermissionError(
+                    "§31 rail untrusted_to_system_prompt: refusing to route untrusted hit "
+                    f"{getattr(hit, 'id', '?')!r} into the {sink!r} sink"
+                )
+            if not untrusted:
+                text = getattr(hit, "text", "")
+                if text:
+                    admissible.append(str(text))
+        return "\n".join(admissible)
+
     def _rebalance_contested(self, items: list[Assertion]) -> None:
         total = sum(max(item.confidence, 0.01) for item in items)
         for item in items:

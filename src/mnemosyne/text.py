@@ -12,7 +12,15 @@ TOKEN_RE = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_:+./-]*")
 
 
 def tokenize(text: str) -> list[str]:
-    return [match.group(0).lower() for match in TOKEN_RE.finditer(text)]
+    # Strip trailing/leading sentence punctuation so e.g. "instructions." matches
+    # the query "instructions", while keeping internal dots/hyphens/slashes that
+    # carry meaning (URLs, versions, hyphenated capability tags like "data-only").
+    tokens: list[str] = []
+    for match in TOKEN_RE.finditer(text):
+        token = match.group(0).lower().strip("./:+-")
+        if token:
+            tokens.append(token)
+    return tokens
 
 
 def term_counts(text: str) -> Counter[str]:
