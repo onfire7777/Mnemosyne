@@ -53,7 +53,7 @@ Every item is **additive, default-off / shadow-first, byte-identical when inacti
 | A3 | **§31 Rail 1** `max_supersession_rate 0.05` | **Done 2026-06-24.** Consolidation promotions now share a pass-scoped mutation budget and `PromotionGate.evaluate()` accepts a pre-merge rail veto, so candidate branches that would supersede more than the allowed active-fact fraction are discarded before merge. | Complete; keep manual/operator corrections outside this automated pass budget unless a separate batch API is introduced. | `tests/completion/rails/test_supersession_rate.py` is green. | **Done** |
 | A4 | **§31 Rail 3** `max_prune_fraction_per_pass 0.02` | **Done 2026-06-24.** The consolidation forgetter and summary-retirement path consume the same pass-scoped prune budget and defer extra lifecycle demotions/summary retirements once the allowed fraction is exhausted. | Complete; keep `mutation_rails` pass reporting visible in future consolidation changes. | `tests/completion/rails/test_prune_fraction.py` is green. | **Done** |
 | A5 | **§31 Rail 6** `sanitize_retrieved_text` | **Done 2026-06-24.** Local and Postgres returned retrieval hits now carry `metadata["retrieved_text"]` from `sanitize_retrieved_text`, preserving visible hit text while marking retrieved memory as data-only/no-write-authority. | Complete; keep retrieval metadata envelope on future hit builders. | Shared Local/Postgres sanitizer regression is green. | **Done** |
-| A6 | **§31 Rail 7** `consolidation_cadence_bounds [5 steps, 24h]` | **Absent** (0 hits in `src`). | Add immutable bound + enforce in consolidation/jobs. | rails rail-7 | **S** |
+| A6 | **§31 Rail 7** `consolidation_cadence_bounds [5 steps, 24h]` | **Done 2026-06-24.** `ConsolidationWorker.run_queue_payload()` now enforces a default five-step lower bound per tenant, accepts explicit `consolidation_step` inputs for deterministic pass scheduling, and allows stale tenants through once the 24h upper bound is crossed. | Complete; keep repeated-pass tests advancing explicit steps. | `tests/completion/rails/test_consolidation_cadence_bounds.py` is green. | **Done** |
 | A7 | **cf-gate** (FR-17) + `cold_loop_counterfactual_trusted` | `gate.py PromotionGate.evaluate` is pure regression margin; no counterfactual `replay_predicted_lift` term; rail absent. | Add cf-term + new immutable rail (default off; flips on only when `replay-fidelity-check` passes). **Already built additively on `reconcile/lane-a-cold` — merge it.** | replay-fidelity suite | **S–M** |
 | A8 | **Ignition switch** (OQ5) — `RegressionCase.origin`, `PromotionGate.ignition_status()` | `ignition_status` absent (0 hits); `RegressionCase.origin` not present. | Shadow-no-merge until ignition. **Already built additively on `reconcile/lane-a-cold` — merge it.** | ignition/v2-selftest | **S** |
 | A9 | **ACT-R demotion** (OQ4) | `lifecycle.py:72` still `exp(-age_days/45)` (not power-law `(1+age)^-d`); retrieval base_level frequency-only. | Add `policy.actr_decay` (default 0.0 = off) driving decay + base_level. **Already built additively on `reconcile/lane-a-cold` — merge it.** | demotion tests | **S** |
@@ -95,7 +95,7 @@ This is the **bulk of the remaining percentage** and the universal blocker on al
 
 1. **Inspect and selectively port the pre-built additive items** (A7, A8, A9 from `/Users/admin/Projects/Mnemosyne-lane-a` on `reconcile/lane-a-cold`) — keep them default-off and verify conflicts before merging because that checkout is currently dirty.
 2. **Codex lands the two keystones in order: A1 (embedding seam) → A2 (ECE).** This is the chain to the single red SLO → **6/6 SLOs PASS**.
-3. **Codex lands the remaining small rails + bugs:** A6, A10, A13 (A3/A4/A5/A14 are now closed).
+3. **Codex lands the remaining small rails + bugs:** A10, A13 (A3/A4/A5/A6/A14 are now closed).
 4. **One real-infra evidence pass (Tier B):** bring up `infra/` (fix the Keycloak 1/3 failure first) plus a Postgres+ParadeDB+AGE+pgvector instance and one real embedding/reranker endpoint; run the `*-ops-check` / `provider-check` / `release-audit` captures. This flips the 10 parity rows Partial→Done.
 5. **Re-run the parity audit and sign off v1.0.** A11/A12/B8 + Tier C are optional polish beyond the v1.0 bar.
 
@@ -105,7 +105,7 @@ This is the **bulk of the remaining percentage** and the universal blocker on al
 
 | Milestone | Blended % | What changed |
 |---|---|---|
-| **Now** (after A14 + A5 + A3/A4) | **~73%** | ~85% scaffold; 5/6 SLOs proven; §31 live mutation-rate clamps now enforced; ~55–60% production parity remains blocked by no real-infra evidence and remaining `src` wirings |
+| **Now** (after A14 + A5 + A3/A4 + A6) | **~74%** | ~85% scaffold; 5/6 SLOs proven; §31 live mutation-rate and cadence rails now enforced; ~55–60% production parity remains blocked by no real-infra evidence and remaining `src` wirings |
 | After **Tier A** (code wirings) | **~82%** | 6/6 SLOs; all 7 §31 rails enforced; all FR `src` gaps closed; local↔prod architecture unified |
 | After **Tier B** (real-infra evidence) | **~97%** | 10 audit rows flip Partial→Done |
 | After **Tier C** + sign-off | **100%** | multimodal/LoRA (optional) + v1.0 attestation |
