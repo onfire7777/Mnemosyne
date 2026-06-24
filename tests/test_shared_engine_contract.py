@@ -1476,6 +1476,167 @@ def test_shared_engine_contract_memory_tools_branch_facades(engine_bundle: tuple
     )
 
 
+def test_shared_engine_contract_memory_tools_write_facades(engine_bundle: tuple[Any, str, str]) -> None:
+    engine, tenant, user = engine_bundle
+    tools = MemoryTools(engine)
+    cid = engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id=user,
+            actor="user",
+            source_type="shared-facade-write",
+            content="Shared facade write coverage preserves source evidence.",
+            trust_tier=1,
+            access_policy={"tenant": tenant},
+        )
+    )
+
+    asserted = tools.assert_fact(
+        tenant,
+        "Shared facade write",
+        "covers",
+        "fact wrapper",
+        [cid],
+        user_id=user,
+        confidence=0.91,
+        trust_tier=1,
+        role="operator",
+        source_trust_tier=0,
+    )
+    preferred = tools.preference(
+        tenant,
+        user,
+        "workflow",
+        "Prefer shared facade parity for engine-backed wrappers.",
+        explicit=True,
+        confidence=0.87,
+        source_evidence_cids=[cid],
+        role="operator",
+        source_trust_tier=0,
+    )
+
+    with pytest.raises(PermissionError, match="belief writes require normal-or-stronger source trust"):
+        tools.assert_fact(
+            tenant,
+            "Shared low trust write",
+            "cannot",
+            "write fact",
+            [cid],
+            trust_tier=4,
+            source_trust_tier=4,
+        )
+    with pytest.raises(PermissionError, match="preference writes require user-authored or stronger evidence"):
+        tools.preference(
+            tenant,
+            user,
+            "workflow",
+            "Low trust shared inferred preference cannot write.",
+            explicit=False,
+            source_evidence_cids=[cid],
+        )
+
+    exported = engine.export_tenant(tenant)
+    assertion = next(item for item in exported["assertions"] if item["id"] == asserted["id"])
+    preference = next(item for item in exported["preferences"] if item["id"] == preferred["id"])
+
+    assert asserted["branch"] == "main"
+    assert asserted["security"]["allowed"] is True
+    assert assertion["subject"] == "Shared facade write"
+    assert assertion["predicate"] == "covers"
+    assert assertion["object"] == "fact wrapper"
+    assert assertion["source_evidence_cids"] == [cid]
+    assert assertion["trust_tier"] == 1
+    assert preferred["security"]["allowed"] is True
+    assert preference["category"] == "workflow"
+    assert preference["statement"] == "Prefer shared facade parity for engine-backed wrappers."
+    assert preference["explicit"] is True
+    assert preference["source_evidence_cids"] == [cid]
+    assert not any(item["subject"] == "Shared low trust write" for item in exported["assertions"])
+    assert not any(
+        item["statement"] == "Low trust shared inferred preference cannot write."
+        for item in exported["preferences"]
+    )
+
+
+def test_shared_engine_contract_memory_tools_correct_prefetch_facades(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, user = engine_bundle
+    tools = MemoryTools(engine)
+    prefetch_cid = engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id=user,
+            actor="user",
+            source_type="shared-facade-prefetch",
+            content="Shared prefetch warms correction context before the next task.",
+            trust_tier=1,
+            access_policy={"tenant": tenant},
+        )
+    )
+
+    corrected = tools.correct(
+        tenant,
+        user,
+        "Shared correction",
+        "updates",
+        "corrected wrapper state",
+        "Shared correction evidence from user-authored input.",
+    )
+    with pytest.raises(PermissionError, match="belief corrections require user-authored or stronger evidence"):
+        tools.correct(
+            tenant,
+            user,
+            "Shared low trust correction",
+            "cannot",
+            "write correction",
+            "Low-trust shared correction evidence.",
+            source_trust_tier=3,
+        )
+    prefetch = tools.prefetch(
+        tenant,
+        [
+            {
+                "query": "shared prefetch warms correction context",
+                "probability": 0.91,
+                "reason": "next task prediction",
+                "metadata": {"surface": "shared-facade"},
+            },
+            {
+                "query": "unsafe shared network prefetch",
+                "probability": 0.99,
+                "reason": "requires network",
+                "metadata": {"requires_network": True},
+            },
+            {"query": "weak shared prefetch", "probability": 0.2, "reason": "weak signal"},
+        ],
+    )
+
+    exported = engine.export_tenant(tenant)
+    assertion = next(item for item in exported["assertions"] if item["id"] == corrected["id"])
+    correction_evidence = next(
+        item
+        for item in exported["evidence"]
+        if item["source_type"] == "correction"
+        and item["content"] == "Shared correction evidence from user-authored input."
+    )
+    prefetch_results = prefetch["results"]
+
+    assert corrected["branch"] == "main"
+    assert corrected["security"]["allowed"] is True
+    assert assertion["subject"] == "Shared correction"
+    assert assertion["object"] == "corrected wrapper state"
+    assert assertion["source_evidence_cids"] == [correction_evidence["cid"]]
+    assert not any(item["subject"] == "Shared low trust correction" for item in exported["assertions"])
+    assert not any(item["content"] == "Low-trust shared correction evidence." for item in exported["evidence"])
+    assert [item["executed"] for item in prefetch_results] == [True, False, False]
+    assert prefetch_results[0]["candidate"]["metadata"] == {"surface": "shared-facade"}
+    assert any(hit["id"] == prefetch_cid for hit in prefetch_results[0]["retrieval"]["hits"])
+    assert prefetch_results[1]["reason"] == "prefetch cannot perform network side effects"
+    assert prefetch_results[2]["reason"] == "candidate below predictability threshold"
+    assert tools.prefetcher.get_warmed(tenant, "shared prefetch warms correction context") is not None
+
+
 def test_shared_engine_contract_branch_names_are_tenant_scoped(engine_bundle: tuple[Any, str, str]) -> None:
     engine, tenant, user = engine_bundle
     other_tenant = f"{tenant}-other"
