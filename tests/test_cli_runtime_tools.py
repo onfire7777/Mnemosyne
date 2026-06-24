@@ -25,6 +25,7 @@ from mnemosyne.cli import (
     PRODUCTION_RELEASE_REQUIRED_COMMANDS,
     PRODUCTION_RELEASE_REQUIRED_PROVIDER_CHECKS,
     build_parser,
+    load_engine,
 )
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.mcp_server import MnemosyneMcpServer, build_http_server, build_sdk_streamable_http_app
@@ -1027,6 +1028,28 @@ def test_cli_exposes_retrieval_provider_flags() -> None:
     assert args.embedding_model == "qwen3-embedding"
     assert args.reranker_provider == "http"
     assert args.reranker_model == "qwen3-reranker"
+
+
+def test_load_engine_threads_retrieval_adapters_into_local_backend(tmp_path: Path) -> None:
+    args = build_parser().parse_args(
+        [
+            "--backend",
+            "local",
+            "--store",
+            str(tmp_path / "memory.json"),
+            "--embedding-dims",
+            "16",
+            "tools",
+        ]
+    )
+
+    engine = load_engine(args)
+
+    assert isinstance(engine, LocalMemoryEngine)
+    assert isinstance(engine.adapters.embedding, HashingEmbeddingProvider)
+    assert engine.adapters.embedding.dims == 16
+    assert isinstance(engine.adapters.reranker, LocalSimilarityReranker)
+    assert engine.adapters.reranker.embedding_provider is engine.adapters.embedding
 
 
 def test_cli_parser_requires_exact_object_option_for_assert() -> None:

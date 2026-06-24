@@ -48,7 +48,7 @@ Every item is **additive, default-off / shadow-first, byte-identical when inacti
 
 | # | Item (FR/§) | Current status | Fix | Flips green | Effort |
 |---|---|---|---|---|---|
-| A1 | **Local embedding seam** (FR-3 / G8) — **KEYSTONE** | `cli.py:455` `LocalMemoryEngine(store_path=…)` has **no `adapters=`** (only Postgres branch `cli.py:452` does); `engine.py:233 __init__` has no embedding hook; retrieval still calls `hashing_embedding` (`engine.py:685, 1380, 1403, 1408`). `--backend local` silently ignores real embedding/reranker providers. | Add embedding/reranker adapter seam to `LocalMemoryEngine`; wire through `cli.py:load_engine` local branch so local↔prod are one architecture. | portability suite; real dense retrieval on local | **M** |
+| A1 | **Local embedding seam** (FR-3 / G8) — **KEYSTONE** | **Done 2026-06-24.** `LocalMemoryEngine` now accepts `RetrievalAdapters`, local vector search/MMR use the configured embedding provider, local retrieval calls the configured reranker before diversification, and `cli.py:load_engine` passes the same adapter factory into `--backend local` that Postgres already used. | Complete; keep local and Postgres provider wiring aligned when adding new retrieval providers. | Engine and CLI adapter seam regressions are green. | **Done** |
 | A2 | **Calibrated confidence / ECE** (FR-6) — **KEYSTONE (the one red SLO)** | `engine.py:1454` returns constant `0.7` and **never abstains** → ECE 0.279 vs §16 ≤0.05. | Varied per-memory-type conformal confidence + working abstention; run `calibration-tune` on the completion-branch calibration set. | **ECE SLO red→green = 6/6 SLOs PASS** | **M** |
 | A3 | **§31 Rail 1** `max_supersession_rate 0.05` | **Done 2026-06-24.** Consolidation promotions now share a pass-scoped mutation budget and `PromotionGate.evaluate()` accepts a pre-merge rail veto, so candidate branches that would supersede more than the allowed active-fact fraction are discarded before merge. | Complete; keep manual/operator corrections outside this automated pass budget unless a separate batch API is introduced. | `tests/completion/rails/test_supersession_rate.py` is green. | **Done** |
 | A4 | **§31 Rail 3** `max_prune_fraction_per_pass 0.02` | **Done 2026-06-24.** The consolidation forgetter and summary-retirement path consume the same pass-scoped prune budget and defer extra lifecycle demotions/summary retirements once the allowed fraction is exhausted. | Complete; keep `mutation_rails` pass reporting visible in future consolidation changes. | `tests/completion/rails/test_prune_fraction.py` is green. | **Done** |
@@ -93,8 +93,8 @@ This is the **bulk of the remaining percentage** and the universal blocker on al
 
 ## 3. The fastest honest path (sequenced)
 
-1. **Codex lands the two keystones in order: A1 (embedding seam) → A2 (ECE).** This is the chain to the single red SLO → **6/6 SLOs PASS**.
-2. **Codex closes remaining Tier A source wiring:** A1 and A2 are the remaining mandatory source-code keystones. The small Tier A items A3/A4/A5/A6/A7/A8/A9/A10/A13/A14 are now closed.
+1. **Codex lands A2 (ECE/confidence).** This is now the remaining mandatory Tier A source-code keystone and the chain to the single red SLO → **6/6 SLOs PASS**.
+2. **Codex closes any strict-audit leftovers found after A2.** The small Tier A items A1/A3/A4/A5/A6/A7/A8/A9/A10/A13/A14 are now closed.
 3. **Review optional A11/A12 only if the v1.0 bar requires them.** Keep them behind the real-infra evidence pass unless strict audit rows still demand code work.
 4. **One real-infra evidence pass (Tier B):** bring up `infra/` (fix the Keycloak 1/3 failure first) plus a Postgres+ParadeDB+AGE+pgvector instance and one real embedding/reranker endpoint; run the `*-ops-check` / `provider-check` / `release-audit` captures. This flips the 10 parity rows Partial→Done.
 5. **Re-run the parity audit and sign off v1.0.** A11/A12/B8 + Tier C are optional polish beyond the v1.0 bar.
@@ -105,7 +105,7 @@ This is the **bulk of the remaining percentage** and the universal blocker on al
 
 | Milestone | Blended % | What changed |
 |---|---|---|
-| **Now** (after A14 + A5 + A3/A4 + A6 + A7/A8/A9 + A10 + A13) | **~78%** | ~85% scaffold; 5/6 SLOs proven; §31 live mutation-rate/cadence rails, FR-12 recompute memo, cf-gate/ignition/ACT-R wiring, and corroborated derived-erasure split now enforced; ~55–60% production parity remains blocked by no real-infra evidence and A1/A2 keystones |
+| **Now** (after A1 + A3/A4 + A5 + A6 + A7/A8/A9 + A10 + A13 + A14) | **~80%** | ~85% scaffold; 5/6 SLOs proven; local/provider retrieval architecture unified, §31 live mutation-rate/cadence rails, FR-12 recompute memo, cf-gate/ignition/ACT-R wiring, and corroborated derived-erasure split now enforced; ~55–60% production parity remains blocked by no real-infra evidence and the A2 ECE keystone |
 | After **Tier A** (code wirings) | **~82%** | 6/6 SLOs; all 7 §31 rails enforced; all FR `src` gaps closed; local↔prod architecture unified |
 | After **Tier B** (real-infra evidence) | **~97%** | 10 audit rows flip Partial→Done |
 | After **Tier C** + sign-off | **100%** | multimodal/LoRA (optional) + v1.0 attestation |
