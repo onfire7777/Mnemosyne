@@ -1,6 +1,6 @@
 {
   "kind": "mnemosyne.production_soak_manifest.template",
-  "template_warning": "Copy this file outside the repo, replace every MNEMOSYNE_PROD_* placeholder with production evidence paths/endpoints, and never put raw secrets in args or global_args.",
+  "template_warning": "Render this file outside the repo with infra/scripts/render-production-soak-manifest.sh, and never put raw secrets in args or global_args.",
   "validation_scope": {
     "production_validated": true,
     "target_environment": "production",

@@ -8,7 +8,9 @@ Plan 06-09 is non-autonomous. It defines the 10 production evidence gates that
 flip strict audit rows from Partial to Done only after an operator runs
 production-scoped evidence capture against deployed infrastructure.
 
-No `src/` or `infra/` code was modified for this plan.
+No `src/` code was modified for this plan. The follow-up renderer hardening
+adds only infra/operator handoff code and documentation so production evidence
+capture is deterministic and fail-closed.
 
 ## Executor Readiness
 
@@ -28,6 +30,7 @@ Verified present:
 - `.planning/ENV-AND-SECRETS.md`
 - `.planning/ROLLBACK.md`
 - `infra/scripts/capture-production-evidence.sh`
+- `infra/scripts/render-production-soak-manifest.sh`
 - `infra/templates/production-soak-manifest.template.json`
 
 Verified prerequisite summaries present:
@@ -72,21 +75,24 @@ with a manifest whose validation scope contains:
 }
 ```
 
-and the resulting `release-audit --require-production-validated
---require-provider-forbid-local` output reports `ok=true` and `findings=[]`.
+and the resulting `release-audit --require-production-validated --require-provider-forbid-local`
+output reports `ok=true` and `findings=[]`.
 
 ## Production Input Preflight
 
-Checked 2026-06-25 after push `129234a`:
+Checked 2026-06-25 during renderer hardening:
 
-- GitHub remote `onfire7777/Mnemosyne` default branch `main` points at
-  `129234ac947145648c058ee06f1dfe36e44eb1c2`.
-- GitHub CI for `129234ac947145648c058ee06f1dfe36e44eb1c2` completed
-  successfully in run `28142616744`.
 - `infra/templates/production-soak-manifest.template.json` is structurally
   production-scoped with `production_validated=true`,
   `target_environment=production`, `operator_asserted=true`, and 28 checks.
-- The template contains 19 production placeholders that must be replaced outside
+- `infra/scripts/render-production-soak-manifest.sh` now renders the 19
+  non-secret production placeholders from the operator environment, refuses
+  repository-local output by default, validates the production scope, and
+  validates the full 28-command production release profile before writing.
+- `infra/scripts/capture-production-evidence.sh` rejects unresolved
+  `MNEMOSYNE_PROD_` placeholders before creating an evidence directory or
+  running `deployment-soak`.
+- The template contains 19 production placeholders that must be rendered outside
   the repo before operator capture:
   `MNEMOSYNE_PROD_C2PA_TOOL`, `MNEMOSYNE_PROD_CHANGE_TICKET`,
   `MNEMOSYNE_PROD_DASHBOARD_URL`, `MNEMOSYNE_PROD_EVIDENCE_DIR`,

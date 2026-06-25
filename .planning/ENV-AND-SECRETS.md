@@ -8,8 +8,9 @@ material.
 ## Production Evidence Inputs
 
 Use `infra/templates/production-soak-manifest.template.json` as the command
-shape. Copy it outside the repository before filling environment-specific
-values.
+shape. Render it outside the repository with
+`infra/scripts/render-production-soak-manifest.sh --output /secure/path/to/production-soak-manifest.json`
+before filling environment-specific production values into the capture path.
 
 Secrets and credentials must be supplied outside manifest `args` and
 `global_args`, using runtime environment variables or provider custody files.
@@ -18,8 +19,9 @@ The capture wrapper rejects secret-bearing options such as `--token`,
 
 ## Production Manifest Placeholders
 
-The production soak template contains these non-secret placeholders. Replace
-them outside the repository before running
+The production soak template contains these non-secret placeholders. Render
+them outside the repository with
+`infra/scripts/render-production-soak-manifest.sh` before running
 `infra/scripts/capture-production-evidence.sh`.
 
 | Placeholder | Purpose | Source | Consumed by |

@@ -39,7 +39,6 @@ fi
 
 STAMP="$(date -u +"%Y%m%dT%H%M%SZ")"
 OUT_ROOT="${2:-/tmp/mnemosyne-tierb-production-evidence-${STAMP}}"
-mkdir -p "${OUT_ROOT}"
 
 PYTHON="${MNEMOSYNE_PYTHON:-}"
 if [ -z "${PYTHON}" ]; then
@@ -57,6 +56,7 @@ export MANIFEST_PATH OUT_ROOT REPO_DIR STARTED_AT
 "${PYTHON}" - <<'PY'
 import json
 import os
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -70,7 +70,23 @@ from mnemosyne.cli import (  # noqa: E402
 
 manifest_path = Path(os.environ["MANIFEST_PATH"])
 out_root = Path(os.environ["OUT_ROOT"])
-manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+manifest_text = manifest_path.read_text(encoding="utf-8")
+unresolved_placeholders = sorted(set(re.findall(r"MNEMOSYNE_PROD_[A-Z0-9_]+", manifest_text)))
+if unresolved_placeholders or "MNEMOSYNE_PROD_" in manifest_text:
+    print(
+        "ERROR: unresolved production placeholders remain in the soak manifest:",
+        file=sys.stderr,
+    )
+    for placeholder in unresolved_placeholders or ["MNEMOSYNE_PROD_"]:
+        print(f"  - {placeholder}", file=sys.stderr)
+    print(
+        "Render the template with infra/scripts/render-production-soak-manifest.sh "
+        "before capture.",
+        file=sys.stderr,
+    )
+    sys.exit(65)
+
+manifest = json.loads(manifest_text)
 
 scope = manifest.get("validation_scope", {})
 if not isinstance(scope, dict):
@@ -133,6 +149,7 @@ if errors:
         print(f"ERROR: {error}", file=sys.stderr)
     sys.exit(65)
 
+out_root.mkdir(parents=True, exist_ok=True)
 shutil.copyfile(manifest_path, out_root / "operator-soak-manifest.json")
 preflight = {
     "ok": True,
