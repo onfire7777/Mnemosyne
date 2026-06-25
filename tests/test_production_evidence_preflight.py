@@ -271,6 +271,210 @@ def test_capture_production_evidence_preflight_rejects_relative_artifact_path(
     assert not out_root.exists()
 
 
+def test_capture_production_evidence_preflight_records_input_artifacts(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "production-soak.json"
+    out_root = tmp_path / "capture"
+    artifact = tmp_path / "production-inputs" / "cases.json"
+    artifact.parent.mkdir()
+    artifact.write_text('{"ok": true}\n', encoding="utf-8")
+
+    def add_external_artifact_path(payload: dict[str, Any]) -> None:
+        payload["checks"][0]["args"] = ["--cases", str(artifact)]
+
+    _minimal_production_manifest(manifest, mutate=add_external_artifact_path)
+
+    proc = subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "--preflight-only",
+            str(manifest),
+            str(out_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    stdout = json.loads(proc.stdout)
+    redaction_scan = json.loads(
+        (out_root / "redaction-scan.json").read_text(encoding="utf-8")
+    )
+
+    assert stdout["required_input_artifacts"] == [
+        {"path": str(artifact), "labels": ["checks[1].args"]}
+    ]
+    assert str(artifact) in redaction_scan["scanned_files"]
+    assert redaction_scan["skipped_files"] == []
+
+
+def test_capture_production_evidence_preflight_rejects_missing_input_artifact(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "production-soak.json"
+    out_root = tmp_path / "capture"
+    artifact = tmp_path / "production-inputs" / "missing.json"
+
+    def add_missing_artifact_path(payload: dict[str, Any]) -> None:
+        payload["checks"][0]["args"] = ["--cases", str(artifact)]
+
+    _minimal_production_manifest(manifest, mutate=add_missing_artifact_path)
+
+    proc = subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "--preflight-only",
+            str(manifest),
+            str(out_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+    )
+
+    assert proc.returncode == 65
+    assert "required production input artifact does not exist" in proc.stderr
+    assert str(artifact) in proc.stderr
+    assert not out_root.exists()
+
+
+def test_capture_production_evidence_preflight_rejects_secret_input_artifact(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "production-soak.json"
+    out_root = tmp_path / "capture"
+    artifact = tmp_path / "production-inputs" / "cases.json"
+    artifact.parent.mkdir()
+    artifact.write_text(
+        (
+            '{"token": "'
+            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
+            "eyJzdWIiOiJvcGVyYXRvciIsImlhdCI6MTcwMDAwMDAwMH0."
+            'MDEyMzQ1Njc4OWFiY2RlZg"}'
+        ),
+        encoding="utf-8",
+    )
+
+    def add_secret_artifact_path(payload: dict[str, Any]) -> None:
+        payload["checks"][0]["args"] = ["--cases", str(artifact)]
+
+    _minimal_production_manifest(manifest, mutate=add_secret_artifact_path)
+
+    proc = subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "--preflight-only",
+            str(manifest),
+            str(out_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+    )
+
+    assert proc.returncode == 65
+    assert "production input artifacts" in proc.stderr
+    assert "jwt" in proc.stderr
+    assert not out_root.exists()
+
+
+def test_capture_production_evidence_preflight_rejects_unscanned_input_artifact(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "production-soak.json"
+    out_root = tmp_path / "capture"
+    artifact = tmp_path / "production-inputs" / "cases.json"
+    artifact.parent.mkdir()
+    artifact.write_bytes(b"\xff\xfe")
+
+    def add_binary_artifact_path(payload: dict[str, Any]) -> None:
+        payload["checks"][0]["args"] = ["--cases", str(artifact)]
+
+    _minimal_production_manifest(manifest, mutate=add_binary_artifact_path)
+
+    proc = subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "--preflight-only",
+            str(manifest),
+            str(out_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+    )
+
+    assert proc.returncode == 65
+    assert "production input artifacts include unscanned files" in proc.stderr
+    assert "not utf-8 text" in proc.stderr
+    assert not out_root.exists()
+
+
+def test_capture_production_evidence_preflight_rejects_empty_input_directory(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "production-soak.json"
+    out_root = tmp_path / "capture"
+    artifact_dir = tmp_path / "production-inputs" / "dashboard-package"
+    artifact_dir.mkdir(parents=True)
+
+    def add_empty_artifact_dir(payload: dict[str, Any]) -> None:
+        payload["checks"][0]["args"] = ["--package-dir", str(artifact_dir)]
+
+    _minimal_production_manifest(manifest, mutate=add_empty_artifact_dir)
+
+    proc = subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "--preflight-only",
+            str(manifest),
+            str(out_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+    )
+
+    assert proc.returncode == 65
+    assert "production input artifacts include unscanned files" in proc.stderr
+    assert "empty directory" in proc.stderr
+    assert not out_root.exists()
+
+
+def test_capture_production_evidence_preflight_rejects_symlinked_input_artifact(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "production-soak.json"
+    out_root = tmp_path / "capture"
+    artifact_dir = tmp_path / "production-inputs" / "dashboard-package"
+    artifact_dir.mkdir(parents=True)
+    (artifact_dir / "repo-roadmap.md").symlink_to(REPO / "docs" / "ROADMAP-TO-100.md")
+
+    def add_symlinked_artifact_dir(payload: dict[str, Any]) -> None:
+        payload["checks"][0]["args"] = ["--package-dir", str(artifact_dir)]
+
+    _minimal_production_manifest(manifest, mutate=add_symlinked_artifact_dir)
+
+    proc = subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "--preflight-only",
+            str(manifest),
+            str(out_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+    )
+
+    assert proc.returncode == 65
+    assert "production input artifacts include unscanned files" in proc.stderr
+    assert "symlink not allowed" in proc.stderr
+    assert not out_root.exists()
+
+
 def test_capture_production_evidence_preflight_rejects_duplicate_commands(
     tmp_path: Path,
 ) -> None:
