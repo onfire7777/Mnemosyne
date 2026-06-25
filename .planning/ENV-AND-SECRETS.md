@@ -30,7 +30,7 @@ them outside the repository with
 | `MNEMOSYNE_PROD_C2PA_TOOL` | Production C2PA verifier command/path | Deployment image/config | provenance gates |
 | `MNEMOSYNE_PROD_CHANGE_TICKET` | Operator change or release ticket id | Release metadata | production validation scope |
 | `MNEMOSYNE_PROD_DASHBOARD_URL` | Hosted ops dashboard URL | Deployment metadata | dashboard gate |
-| `MNEMOSYNE_PROD_EVIDENCE_DIR` | Operator evidence output directory | Operator workstation or secure artifact store | production capture wrapper |
+| `MNEMOSYNE_PROD_EVIDENCE_DIR` | Prepared production input-artifact directory | Operator workstation or secure artifact store | soak manifest gate commands; capture output is passed separately as `OUT_ROOT` |
 | `MNEMOSYNE_PROD_IDP_AUDIENCE` | Production IdP token audience | IdP client config | IdP/JWKS gates |
 | `MNEMOSYNE_PROD_IDP_ISSUER` | Production IdP issuer URL | IdP realm config | IdP/JWKS gates |
 | `MNEMOSYNE_PROD_IDP_JWKS_URL` | Production JWKS endpoint | IdP realm config | IdP/JWKS gates |
