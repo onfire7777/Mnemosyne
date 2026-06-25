@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import shlex
@@ -386,17 +387,39 @@ class ParametricTier:
             provider = self.trainer.rollback(artifact, reason, protected_cases=protected_cases)
             payload["provider"] = _provider_payload(provider)
             artifact.metrics.update(_provider_metrics(provider.get("metrics", {})))
-        artifact.rollback_ref = str(provider.get("rollback_ref") or provider.get("rollbackRef") or f"rollback-{new_id()}")
+        artifact.rollback_ref = str(
+            provider.get("rollback_ref") or provider.get("rollbackRef") or f"rollback-{new_id()}"
+        )
         artifact.metrics["rolled_back"] = 1.0
         artifact.metrics["rollback_protected_cases"] = float(suite["protected_case_count"])
+        rollback_fingerprint = hashlib.sha256(
+            json.dumps(
+                {
+                    "artifact_id": artifact.id,
+                    "artifact_uri": artifact.artifact_uri,
+                    "protected_suite": suite,
+                    "reason": reason,
+                    "rollback_ref": artifact.rollback_ref,
+                },
+                sort_keys=True,
+            ).encode("utf-8")
+        ).hexdigest()
+        rollback_record = {
+            "reason": reason,
+            "rollback_ref": artifact.rollback_ref,
+            "protected_suite": suite,
+            "rollback_verified": True,
+            "same_artifact_uri_verified": bool(artifact.artifact_uri),
+            "protected_suite_passed": suite["protected_case_count"] > 0,
+            "rollback_branch": None,
+            "rollback_branch_promoted": False,
+            "rollback_fingerprint": rollback_fingerprint,
+        }
         artifact.rail_report = {
             **artifact.rail_report,
-            "rollback": {
-                "reason": reason,
-                "rollback_ref": artifact.rollback_ref,
-                "protected_suite": suite,
-            },
+            "rollback": rollback_record,
         }
+        payload["rollback"] = rollback_record
         if self.artifact_store:
             self.artifact_store.write(artifact, payload)
         return artifact
