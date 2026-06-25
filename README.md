@@ -22,7 +22,7 @@ Mnemosyne (`mnemosyne-memory`, v0.1.0) implements the **Mnemosyne v2 build bluep
 - **Hard invariant rails.** Seven §31 rails (bounded supersession, corroborated deletion, bounded pruning, monotonic trust, external-only reward, retrieved-text-is-data, bounded cadence) are enforced and regression-tested.
 - **Capability-mediated, fail-closed writes.** Trust tiers, sensitivity ceilings, signed CLI/MCP sessions, OIDC→role mapping, and prompt-injection sanitization on every retrieved span.
 - **Branchable memory.** Fork a tenant's memory, experiment, then `merge` or `discard` — like git for beliefs.
-- **Two backends, proven equivalent.** A zero-dependency in-memory engine and a production PostgreSQL engine pass a shared contract + parity test suite.
+- **Two backends, proven equivalent.** A zero-dependency in-memory engine and a PostgreSQL-backed engine pass a shared contract + parity test suite; production parity still requires the Tier-B operator evidence described below.
 - **Local-first.** Single core dependency (`cryptography`). No network, no Postgres, and no model server required to start.
 
 ---
@@ -64,7 +64,7 @@ python -m pip install --upgrade pip
 python -m pip install -e '.[mcp]'        # local + MCP
 # python -m pip install -e '.[mcp,postgres]'   # add the Postgres backend
 
-# 3. Run the test suite (no Postgres DSN → live-DB tests skip; this is the CI gate)
+# 3. Run the local test suite (no Postgres DSN → live-DB tests skip)
 python -m pytest
 
 # 4. Capture a memory and search it (in-memory backend, no services needed)
@@ -280,7 +280,7 @@ Controlling artifacts: [`docs/ROADMAP-TO-100.md`](docs/ROADMAP-TO-100.md) (blend
 ## Testing & CI
 
 - `.github/workflows/ci.yml` runs **ruff** lint, the full **pytest** suite (configuration / invariant-rail drift checks included), and a **Postgres integration** job on every push and pull request.
-- With `MNEMOSYNE_POSTGRES_DSN` **unset**, the suite runs the local deterministic tests and skips live-DB integration tests — this no-DSN run is the CI gate and must stay green.
+- With `MNEMOSYNE_POSTGRES_DSN` **unset**, the suite runs the local deterministic tests and skips live-DB integration tests — this no-DSN run is one required CI gate and must stay green.
 - With Docker-compose Postgres running and the DSN set, the live tests in `tests/test_postgres_engine_live.py` and `tests/test_shared_engine_contract.py` additionally run, covering tenant RLS, FTS, pgvector search, recursive graph/PPR, bitemporal supersession, branch/merge/discard, tombstone + hard-delete forget modes, command-backed KMS, and **local↔Postgres parity** of the engine contract.
 
 ```bash
@@ -295,7 +295,7 @@ python -m pytest          # local gate (live-DB tests skip without a DSN)
 - **Signed sessions** for CLI (`--session-token`) and MCP (`X-Mnemosyne-Session-Token`), minted from OIDC tokens via `session-exchange`; secret custody through shell-free `--session-secret-command` adapters.
 - **Retrieved text is data, not instructions** — every retrieved span is sanitized (§31 Rail 6) to defend against prompt injection. The poison corpus under `tests/completion/security/` is fixture data, never executable.
 - **Tenant isolation** via Postgres RLS keyed on `mnemosyne_current_tenant()` on every tenant-scoped table.
-- **Crypto-shred erasure**: encrypted object storage with KMS/Vault-backed key custody enables legal hard-delete by destroying keys.
+- **Crypto-shred erasure**: encrypted object storage and KMS/Vault-backed key-custody adapters support legal hard-delete once production custody is configured and evidenced.
 - **Provenance**: C2PA verification with scoped trust roots; manifests that match no trust rule are quarantined, not trusted.
 
 Please report vulnerabilities privately to the maintainers rather than opening a public issue.
