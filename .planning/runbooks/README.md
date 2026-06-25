@@ -17,8 +17,9 @@ CLI commands consumed by `deployment-soak` and `release-audit`.
   default and validates the production command profile before writing.
 - `infra/scripts/capture-production-evidence.sh` - operator capture wrapper
   that validates the rendered manifest, rejects unresolved production
-  placeholders, runs `deployment-soak --evidence-dir`, and then runs
-  `release-audit --require-production-validated --require-provider-forbid-local`.
+  placeholders, supports `--preflight-only` setup validation, runs
+  `deployment-soak --evidence-dir`, and then runs `release-audit
+  --require-production-validated --require-provider-forbid-local`.
 
 ## Row Runbooks
 
@@ -36,6 +37,8 @@ CLI commands consumed by `deployment-soak` and `release-audit`.
 ## Scope Rules
 
 - Local and compose evidence can prove gate mechanics, but cannot satisfy Tier B.
+- `--preflight-only` output is setup proof only; it does not flip any row to
+  Done.
 - Production evidence must be operator-captured against real production or
   production-equivalent IdP, Postgres/retrieval, provider, MCP, dashboard,
   worker, object-store, KMS/residency, C2PA, and trainer surfaces.

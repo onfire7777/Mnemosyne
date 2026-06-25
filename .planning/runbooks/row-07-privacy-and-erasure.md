@@ -24,6 +24,14 @@ passwords, or provider credentials. Store redacted erasure requests, tombstone
 IDs, key-shred attestations, residency policy summaries, and denial/allow
 outcomes.
 
+## Production Capture
+
+Use the universal Tier B production capture flow in `infra/PRODUCTION-EVIDENCE.md`:
+render the production soak manifest, run
+`infra/scripts/capture-production-evidence.sh --preflight-only` as setup proof only, then run
+`infra/scripts/capture-production-evidence.sh` for the real `deployment-soak` +
+`release-audit` capture. The preflight output does not flip this row to Done.
+
 ## Acceptance
 
 Operator runs the gates against real infra, evidence is redacted, the outputs

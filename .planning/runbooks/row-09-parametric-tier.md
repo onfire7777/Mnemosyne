@@ -30,6 +30,14 @@ This row is the operator-evidence side of FR-21 LoRA/TTT. Local command-provider
 rails do not replace deployed trainer and production rollback evidence. Rollback
 expectations are indexed in `.planning/ROLLBACK.md`.
 
+## Production Capture
+
+Use the universal Tier B production capture flow in `infra/PRODUCTION-EVIDENCE.md`:
+render the production soak manifest, run
+`infra/scripts/capture-production-evidence.sh --preflight-only` as setup proof only, then run
+`infra/scripts/capture-production-evidence.sh` for the real `deployment-soak` +
+`release-audit` capture. The preflight output does not flip this row to Done.
+
 ## Acceptance
 
 Operator runs the gates against real infra, evidence is redacted, the outputs
