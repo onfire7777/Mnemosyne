@@ -1,7 +1,14 @@
 # Phase 6: Exact Blueprint Runtime Parity — Context
 
+> **Superseded bootstrap context.** This file is preserved as the 2026-06-24
+> phase-planning input. For current status, use `.planning/STATE.md`,
+> `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md`, and `docs/ROADMAP-TO-100.md`.
+> Later work closed the mandatory Tier A source wirings and hardened the
+> production evidence handoff; all production rows still remain Partial until
+> operator-captured production evidence is supplied.
+
 **Gathered:** 2026-06-24
-**Status:** Ready for planning
+**Status:** Historical planning context; superseded by the current state docs
 **Source:** Synthesized from controlling parity docs (no discuss-phase needed — design is already locked in ROADMAP-TO-100.md + OPS-HANDOFF-AND-OWNERSHIP.md + STRICT-BLUEPRINT-PARITY-AUDIT.md)
 
 <domain>
@@ -11,7 +18,8 @@ Phase 6 converts the verified local scaffold into **exact 1:1 blueprint parity**
 the project is **~82% blended**: the functional/architectural scaffold is ~85% done, **6 of 6
 headline SLOs are empirically PROVEN** (recall 0.977, nDCG 0.983, G2 +0.208@7%, poison 1.0, warm
 P95 149.5ms, ECE 0.0063), and the mandatory Tier A `src` reconciliation wirings (A1–A10, A13, A14)
-are **closed on `main`**. The full local + clean-Postgres suite is green (837 tests, 0 failures).
+are **closed on `main`**. This planning snapshot recorded the then-current local + clean-Postgres
+suite as green; current exact test counts are superseded by `.planning/STATE.md` and CI.
 
 The remaining ~18% is **NOT "write more code in the same style."** It is two distinct kinds of work:
 1. **Operator-captured production evidence** for the 10 "Partial" strict-audit rows (ops/deployment,
@@ -28,11 +36,12 @@ gates** — the executor authors the runbooks + proves the local-staging dry-run
 production capture later. This phase therefore drives the project to **"one operator run from 100%"**,
 not to a literal v1.0 attestation (which requires the operator evidence pass).
 
-### ⚠ LIVE COORDINATION HAZARD (load-bearing)
+### Historical coordination hazard (load-bearing at planning time)
 
-`main` is being edited by an **autonomous Codex/GSD session right now** — `infra/` has uncommitted
-changes and `capture-production-evidence.sh` was touched minutes ago. The Codex session owns the
-`src/` and `infra/` ops lane. **This plan must not clobber active work.** Planning artifacts under
+At phase-planning time, `main` was being edited by an autonomous Codex/GSD session:
+`infra/` had uncommitted changes and `capture-production-evidence.sh` had been touched minutes
+earlier. The Codex session owned the `src/` and `infra/` ops lane. **This plan was not allowed to
+clobber active work.** Planning artifacts under
 `.planning/phases/06-.../` and `.planning/runbooks/`, `.planning/ENV-AND-SECRETS.md`,
 `.planning/ROLLBACK.md` are safe (Codex is not touching them). For any `infra/` or `src/` task: VERIFY
 and COMPLETE what already exists, coordinate, and never `git add -A`.

@@ -50,52 +50,36 @@ PYTHONPATH=src .venv-eval/bin/python eval/calibration/runner.py --no-write  # CI
 PYTHONPATH=src .venv-eval/bin/python -m pytest eval/calibration/test_calibration_eval.py -v
 ```
 
-## Current result (the true gap on real data)
+## Current result
 
-On `--backend local` (the deterministic engine, as shipped today):
+The old local run that reported constant `0.70` confidence, no local embedding
+seam, and ECE `0.155` is historical. It was superseded on 2026-06-24 after the
+FR-3 local embedding seam and FR-6 support-aware confidence/abstention path
+landed on `main`.
+
+`report.json` now records:
 
 | Regime | Overall ECE | Brier | Meets §16 ≤0.05? |
 |--------|-------------|-------|------------------|
-| Policy default threshold | **0.155** | 0.272 | ❌ |
-| Conformal (applied set)  | **0.155** | 0.272 | ❌ |
+| Policy default threshold | **0.006270562770562815** | 0.00016350133992991154 | yes |
+| Conformal (applied set)  | **0.006270562770562815** | 0.00016350133992991154 | yes |
 
-Per-memory-type ECE (policy): fact 0.155 · episodic 0.155 · preference 0.209 ·
-procedural 0.191 · relation 0.155.
-
-### Root cause (why tuning alone can't fix it yet)
-
-The runner's `confidence_signal` block reports **degenerate confidence**: every
-probe returns confidence ≈ **0.70** (variance 0, one unique value, zero gap between
-correct and incorrect items). On `--backend local` the engine has **no real
-embedding seam** (the documented FR-3 / G8 gap — `CODEX-RECONCILIATION.md` §4), so
-`retrieve()._confidence` collapses to the per-hit default base confidence (0.7) and
-**never abstains** (lexical/hash retrieval returns low-score hits for every query,
-including nonsense). Consequently:
-
-* abstention quality on the policy pass: `good_abstains=0`, `false_accepts=25` —
-  the engine answers every unanswerable probe.
-* a constant confidence axis means **no conformal threshold can separate correct
-  from incorrect**; ECE is pinned by the accuracy at conf=0.7, not by the threshold.
-
-This matches the reconciliation finding exactly: ECE is policy/threshold-driven and
-embedding-independent until confidence becomes discriminative.
+Abstention quality is also green on the current report: `good_abstains=25`,
+`false_accepts=0`, `abstain_precision=1.0`, and `abstain_recall=1.0`. The
+`confidence_signal` block is no longer degenerate: it reports 9 unique confidence
+values and `degenerate_signal=false`.
 
 ## Codex reconciliation handoff
 
-`report.json → codex_reconciliation.calibration_examples[<memory_type>]` is the
+`report.json -> codex_reconciliation.calibration_examples[<memory_type>]` is the
 exact `[{confidence, correct}]` list `mneme calibration-tune --memory-type <mt>`
-consumes. The workflow:
+consumes. The workflow remains:
 
-1. **Codex lands the FR-3 embedding seam on `LocalMemoryEngine`** (or runs this on
-   `--backend postgres` with real providers) so confidence varies with retrieval
-   quality. *Until then the confidence axis is degenerate and ECE cannot reach
-   ≤0.05 by tuning — the diagnostic flags this so the number isn't misread.*
-2. Re-run `runner.py` → fresh real `{confidence, correct}` distributions per type.
-3. Codex tunes per-type conformal thresholds / `target_coverage` against those
+1. Re-run `runner.py` after retrieval/confidence changes.
+2. Codex tunes per-type conformal thresholds / `target_coverage` against those
    lists (minimise `ece.policy_threshold` while keeping `false_accept_rate` in
-   bound — both surfaced in `calibration_tune_summaries`).
-4. Re-run `runner.py` to re-measure ECE the same way — closing the loop toward
-   §16's ≤0.05.
+   bound).
+3. Re-run `runner.py` to re-measure ECE the same way.
 
 The dataset, labels, and harness are stable across all of this: only the engine's
 confidence signal changes, and the measurement re-runs unchanged.

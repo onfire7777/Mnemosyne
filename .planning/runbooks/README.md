@@ -55,7 +55,9 @@ CLI commands consumed by `deployment-soak` and `release-audit`.
   `redaction-scan.json` at `ok: true` with no skipped files and retain
   `bundle-manifest.json` plus the `summary.json` `bundle_fingerprint` for
   handoff custody.
-- After capture, `python -m mnemosyne.cli production-evidence-verify
+- After capture, select the repo interpreter with
+  `PYTHON="${PYTHON:-$(if [ -x .venv/bin/python ]; then printf '%s' .venv/bin/python; else command -v python3; fi)}"`;
+  then `"$PYTHON" -m mnemosyne.cli production-evidence-verify
   /secure/path/to/mnemosyne-production-evidence --expected-bundle-fingerprint
   '<summary.json bundle_fingerprint>'` can recheck the completed bundle offline.
   This is custody review only; it does not contact production, rerun

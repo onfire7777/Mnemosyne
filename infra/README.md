@@ -118,7 +118,8 @@ infra/scripts/capture-production-evidence.sh \
 infra/scripts/capture-production-evidence.sh \
   /secure/path/to/production-soak-manifest.json \
   /secure/path/to/mnemosyne-production-evidence
-python -m mnemosyne.cli production-evidence-verify \
+PYTHON="${PYTHON:-$(if [ -x .venv/bin/python ]; then printf '%s' .venv/bin/python; else command -v python3; fi)}"
+"$PYTHON" -m mnemosyne.cli production-evidence-verify \
   /secure/path/to/mnemosyne-production-evidence \
   --expected-bundle-fingerprint '<summary.json bundle_fingerprint>'
 ```
