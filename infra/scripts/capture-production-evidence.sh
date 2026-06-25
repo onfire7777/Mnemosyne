@@ -131,6 +131,7 @@ import re
 import shutil
 import sys
 from pathlib import Path
+from urllib.parse import urlparse
 
 repo_dir = Path(os.environ["REPO_DIR"])
 sys.path.insert(0, str(repo_dir / "src"))
@@ -213,6 +214,47 @@ sensitive_options = {
     "--private-key",
     "--key",
 }
+file_suffixes = {
+    ".csv",
+    ".crt",
+    ".cer",
+    ".html",
+    ".json",
+    ".jsonl",
+    ".pem",
+    ".txt",
+    ".yaml",
+    ".yml",
+    ".zip",
+}
+
+def _is_url(value: str) -> bool:
+    parsed = urlparse(value)
+    return bool(parsed.scheme and parsed.netloc)
+
+def _looks_like_file_path(value: str) -> bool:
+    if not value or value.startswith("-") or _is_url(value):
+        return False
+    if value.startswith(("/", "./", "../", "~")):
+        return True
+    path = Path(value)
+    return path.suffix.lower() in file_suffixes or value in {
+        "dashboard-package",
+    }
+
+def _validate_external_file_path(value: str, *, label: str) -> None:
+    if not _looks_like_file_path(value):
+        return
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        errors.append(f"{label} contains relative production artifact path {value}; use an absolute external path")
+        return
+    resolved = path.resolve(strict=False)
+    try:
+        resolved.relative_to(repo_dir.resolve())
+    except ValueError:
+        return
+    errors.append(f"{label} points inside the repository: {resolved}; use an external custody path")
 
 for index, check in enumerate(checks, start=1):
     if not isinstance(check, dict):
@@ -235,6 +277,7 @@ for index, check in enumerate(checks, start=1):
                     f"checks[{index}].{field} contains secret-bearing option {value}; "
                     "use environment, files, or command providers instead"
                 )
+            _validate_external_file_path(value, label=f"checks[{index}].{field}")
 
 required_commands = set(PRODUCTION_RELEASE_REQUIRED_COMMANDS)
 missing = sorted(required_commands - commands)
