@@ -1,6 +1,6 @@
 # Mnemosyne — Roadmap to 100% Blueprint Parity
 
-**Authored:** 2026-06-24 · **Current baseline:** main after the 2026-06-24 A2 calibrated-confidence slice
+**Authored:** 2026-06-24 · **Current baseline:** main after the 2026-06-24 adapter-scope hardening slice
 **Controlling status doc:** `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md` (10 gap rows, all "Partial")
 **Verdict source:** blended completion **~82%** today (up from a long ~70% plateau, broken by the 2026-06-24 Tier A wirings) — this doc explains *why it sat at ~70%*, *what moved it to ~82%*, and *exactly what flips it to 100%*.
 
@@ -48,7 +48,7 @@ Every item is **additive, default-off / shadow-first, byte-identical when inacti
 
 | # | Item (FR/§) | Current status | Fix | Flips green | Effort |
 |---|---|---|---|---|---|
-| A1 | **Local embedding seam** (FR-3 / G8) — **KEYSTONE** | **Done 2026-06-24.** `LocalMemoryEngine` now accepts `RetrievalAdapters`, local vector search/MMR use the configured embedding provider, local retrieval calls the configured reranker before diversification, and `cli.py:load_engine` passes the same adapter factory into `--backend local` that Postgres already used. | Complete; keep local and Postgres provider wiring aligned when adding new retrieval providers. | Engine and CLI adapter seam regressions are green. | **Done** |
+| A1 | **Local embedding seam** (FR-3 / G8) — **KEYSTONE** | **Done 2026-06-24.** `LocalMemoryEngine` now accepts `RetrievalAdapters`, local vector search/MMR use the configured embedding provider, local retrieval calls the configured reranker before diversification, and `cli.py:load_engine` passes the same adapter factory into `--backend local` that Postgres already used. Configured lexical/graph adapters now also share Local/Postgres scope validation and direct `lexical_search`/`graph_ppr` parity. | Complete; keep local and Postgres provider wiring aligned when adding new retrieval providers. Adapter hits must stay fail-closed on tenant/branch scope mismatches. | Engine, CLI, and Local/Postgres configured adapter regressions are green. | **Done** |
 | A2 | **Calibrated confidence / ECE** (FR-6) — **KEYSTONE** | **Done 2026-06-24.** Local and Postgres retrieval now compute support-aware answer confidence, abstain when retrieved evidence does not cover the query, expose confidence explain metadata, and the calibration runner scores accept-vs-abstain decision confidence. | `eval/calibration/runner.py` now reports ECE 0.0063 / Brier 0.0002, 25/25 good abstains, 0 false accepts, and `meets_target: true`; full local and clean Postgres suites pass with 837 tests, 0 failures/errors. | **ECE SLO green = 6/6 SLOs PASS** | **Done** |
 | A3 | **§31 Rail 1** `max_supersession_rate 0.05` | **Done 2026-06-24.** Consolidation promotions now share a pass-scoped mutation budget and `PromotionGate.evaluate()` accepts a pre-merge rail veto, so candidate branches that would supersede more than the allowed active-fact fraction are discarded before merge. | Complete; keep manual/operator corrections outside this automated pass budget unless a separate batch API is introduced. | `tests/completion/rails/test_supersession_rate.py` is green. | **Done** |
 | A4 | **§31 Rail 3** `max_prune_fraction_per_pass 0.02` | **Done 2026-06-24.** The consolidation forgetter and summary-retirement path consume the same pass-scoped prune budget and defer extra lifecycle demotions/summary retirements once the allowed fraction is exhausted. | Complete; keep `mutation_rails` pass reporting visible in future consolidation changes. | `tests/completion/rails/test_prune_fraction.py` is green. | **Done** |
@@ -65,6 +65,7 @@ Every item is **additive, default-off / shadow-first, byte-identical when inacti
 
 > **Note — Rail 2 is DONE.** `min_corroboration_for_delete` is landed (`policy.py:32` default=2; enforced `engine.py:994-1017`). Cross it off any older reconciliation list.
 > **Note — A7/A8/A9 are now ported to `main`.** The lane-a checkout remains useful as historical source material only; do not merge it wholesale over newer `main` changes.
+> **Note — adapter-scope hardening is DONE.** Local and Postgres now both validate configured lexical/graph adapter hits against the requested tenant/branch, mark direct adapter hits as data-only retrieved memory, and cover those direct paths in the live cross-engine portability suite.
 
 ### TIER B — Real-infrastructure evidence capture (ops/deployment; not feature code)
 

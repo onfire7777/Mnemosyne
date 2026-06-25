@@ -57,7 +57,7 @@ Gate commands already exist and are frozen. Work = run each against real infra a
 | 7 | Privacy & erasure | `privacy-ops-check` (+ `policy-ops-check`, `forgetting-policy-check`) | Real KMS (Vault) + residency policy ops | C,D,F,G | KMS lifecycle/shred + residency + tombstone/hard-delete evidence; `release-audit` ok |
 | 8 | Observability dashboards | `ops-dashboard-check` (+ `ops-report`) | Hosted production dashboard URL/package | E (primary), G | hosted-dashboard ops evidence in bundle; `release-audit` ok |
 | 9 | Parametric tier | `parametric-trainer-check` (+ `hosted-llm-check`, `calibration-tune`) | Deployed LoRA/TTT trainer + rollback orchestration | C,D,F,G | trainer deploy + protected-suite + rollback-drill evidence; `release-audit` ok |
-| 10 | Live parity suite | full compose-Postgres suite + `belief-revision-check` | Optional production adapters enabled | G (sanctioned code) | every engine/runtime method covered; full suite green w/ prod adapters |
+| 10 | Live parity suite | full compose-Postgres suite + `belief-revision-check` | Optional production adapters enabled | G (sanctioned code) | Local/Postgres direct configured lexical/graph adapter parity is now covered; final done still requires every engine/runtime method green with production adapters enabled |
 
 **Universal acceptance pattern (every row):** operator runs the gate against real infra → evidence redacted → included in `deployment-soak --evidence-dir` (production scope + operator attestation) → `release-audit --require-production-validated` passes with that command's output shape present and `findings` empty.
 
