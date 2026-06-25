@@ -135,6 +135,42 @@ def test_renderer_check_environment_passes_without_writing_manifest(tmp_path: Pa
     assert not list(tmp_path.glob("*.json"))
 
 
+def test_renderer_check_environment_rejects_repo_local_input_dir(tmp_path: Path) -> None:
+    env = _filled_render_env(tmp_path)
+    env["MNEMOSYNE_PROD_EVIDENCE_DIR"] = str(REPO / "production-input-artifacts")
+
+    proc = subprocess.run(
+        [str(RENDERER), "--check-environment"],
+        cwd=REPO,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert proc.returncode == 78
+    assert proc.stdout == ""
+    assert "MNEMOSYNE_PROD_EVIDENCE_DIR must not point inside the repository" in proc.stderr
+
+
+def test_renderer_check_environment_rejects_relative_input_dir(tmp_path: Path) -> None:
+    env = _filled_render_env(tmp_path)
+    env["MNEMOSYNE_PROD_EVIDENCE_DIR"] = "production-input-artifacts"
+
+    proc = subprocess.run(
+        [str(RENDERER), "--check-environment"],
+        cwd=REPO,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert proc.returncode == 78
+    assert proc.stdout == ""
+    assert "MNEMOSYNE_PROD_EVIDENCE_DIR must be an absolute external" in proc.stderr
+
+
 def test_renderer_refuses_repo_local_output() -> None:
     proc = subprocess.run(
         [str(RENDERER), "--output", str(REPO / "production-soak-manifest.json")],
