@@ -6,7 +6,7 @@ This runbook is the operator handoff for flipping the remaining Tier B parity ro
 
 - Copy `infra/templates/production-render.env.example` outside the repo, fill the blank non-secret `MNEMOSYNE_PROD_*` values there, and source the external copy before rendering.
 - Render `infra/templates/production-soak-manifest.template.json` outside the repo with `infra/scripts/render-production-soak-manifest.sh --output /secure/path/to/production-soak-manifest.json`. Manual edits are only a fallback and must still leave no unresolved `MNEMOSYNE_PROD_*` placeholders; the capture wrapper rejects unresolved placeholders before running production checks.
-- Keep raw secrets out of `args` and `global_args`. The production wrapper rejects secret-bearing options such as `--idp-token`, `--session-secret`, `--auth-token`, and `--password`.
+- Keep raw secrets out of `args` and `global_args`. The production wrapper rejects secret-bearing options such as `--idp-token`, `--session-secret`, `--auth-token`, and `--password`, and it fails closed on high-confidence secret material such as JWTs, private-key blocks, GitHub tokens, AWS access keys, and `sk-*` API keys.
 - Provide secrets through environment variables or command/provider files. Required examples include `MNEMOSYNE_POSTGRES_DSN`, `MNEMOSYNE_IDP_TOKEN`, `MNEMOSYNE_MCP_TOKEN`, and `MNEMOSYNE_MCP_SESSION_TOKEN` where the selected checks need them.
 - The manifest must include:
   - `validation_scope.production_validated: true`
@@ -37,20 +37,25 @@ infra/scripts/capture-production-evidence.sh \
 ```
 
 The `--preflight-only` command validates production scope, full command coverage,
-absence of unresolved placeholders, and absence of secret-bearing CLI options. It
-writes `preflight.json` plus a copied operator manifest, then exits before
-`deployment-soak` or `release-audit` runs. A passing preflight is setup proof only;
-it does not flip any strict-audit row to Done.
+absence of unresolved placeholders, absence of secret-bearing CLI options, and a
+high-confidence redaction scan over the rendered manifest. It writes
+`preflight.json`, `redaction-scan.json`, and a copied operator manifest, then
+exits before `deployment-soak` or `release-audit` runs. A passing preflight is
+setup proof only; it does not flip any strict-audit row to Done.
 
-The wrapper performs three steps:
+The wrapper performs these steps:
 
 1. Validates the operator manifest is explicitly production-scoped.
 2. Runs `deployment-soak --evidence-dir`.
 3. Runs `release-audit --evidence-manifest ... --require-production-validated --require-provider-forbid-local`.
+4. Scans the generated evidence bundle for high-confidence secret material before writing the final summary.
 
 ## Acceptance
 
-The resulting `release-audit.json` must report `ok: true` with no findings. A passing local or compose-only bundle is useful staging evidence, but it does not satisfy Tier B unless the manifest is operator asserted and the checks use production infrastructure.
+The resulting `release-audit.json` must report `ok: true` with no findings, and
+`redaction-scan.json` must report `ok: true`. A passing local or compose-only
+bundle is useful staging evidence, but it does not satisfy Tier B unless the
+manifest is operator asserted and the checks use production infrastructure.
 
 The current strict audit remains incomplete until the production evidence bundle proves:
 

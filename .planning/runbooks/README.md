@@ -17,9 +17,11 @@ CLI commands consumed by `deployment-soak` and `release-audit`.
   default and validates the production command profile before writing.
 - `infra/scripts/capture-production-evidence.sh` - operator capture wrapper
   that validates the rendered manifest, rejects unresolved production
-  placeholders, supports `--preflight-only` setup validation, runs
-  `deployment-soak --evidence-dir`, and then runs `release-audit
-  --require-production-validated --require-provider-forbid-local`.
+  placeholders, rejects high-confidence secret material, supports
+  `--preflight-only` setup validation, runs `deployment-soak --evidence-dir`,
+  and then runs `release-audit --require-production-validated
+  --require-provider-forbid-local`. Successful preflight and capture runs write
+  `redaction-scan.json`.
 
 ## Row Runbooks
 
@@ -44,4 +46,5 @@ CLI commands consumed by `deployment-soak` and `release-audit`.
   worker, object-store, KMS/residency, C2PA, and trainer surfaces.
 - Secrets must be supplied through environment variables, provider files, Vault,
   Keycloak, KMS, or equivalent runtime custody. Do not place raw secrets in the
-  soak manifest or committed docs.
+  soak manifest or committed docs; production bundles must keep
+  `redaction-scan.json` at `ok: true`.

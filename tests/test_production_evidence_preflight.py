@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
+import sys
 from pathlib import Path
+from typing import Any, Callable
 
 from mnemosyne.cli import PRODUCTION_RELEASE_REQUIRED_COMMANDS
 
@@ -10,8 +13,11 @@ from mnemosyne.cli import PRODUCTION_RELEASE_REQUIRED_COMMANDS
 REPO = Path(__file__).resolve().parents[1]
 
 
-def _minimal_production_manifest(path: Path) -> None:
-    manifest = {
+def _minimal_production_manifest(
+    path: Path,
+    mutate: Callable[[dict[str, Any]], None] | None = None,
+) -> None:
+    manifest: dict[str, Any] = {
         "kind": "mnemosyne-production-soak-manifest",
         "validation_scope": {
             "production_validated": True,
@@ -31,6 +37,8 @@ def _minimal_production_manifest(path: Path) -> None:
             for command in PRODUCTION_RELEASE_REQUIRED_COMMANDS
         ],
     }
+    if mutate is not None:
+        mutate(manifest)
     path.write_text(json.dumps(manifest), encoding="utf-8")
 
 
@@ -54,12 +62,17 @@ def test_capture_production_evidence_preflight_only_stops_before_soak(tmp_path: 
 
     stdout = json.loads(proc.stdout)
     preflight = json.loads((out_root / "preflight.json").read_text(encoding="utf-8"))
+    redaction_scan = json.loads((out_root / "redaction-scan.json").read_text(encoding="utf-8"))
     copied_manifest = json.loads((out_root / "operator-soak-manifest.json").read_text(encoding="utf-8"))
 
     assert stdout["ok"] is True
     assert stdout["preflight_only"] is True
     assert preflight == stdout
     assert copied_manifest["validation_scope"]["target_environment"] == "production"
+    assert stdout["redaction_scan"] == str(out_root / "redaction-scan.json")
+    assert redaction_scan["ok"] is True
+    assert redaction_scan["scope"] == "preflight"
+    assert redaction_scan["findings"] == []
     assert sorted(preflight["provided_commands"]) == sorted(PRODUCTION_RELEASE_REQUIRED_COMMANDS)
     assert not (out_root / "evidence").exists()
     assert not (out_root / "deployment-soak.stdout.json").exists()
@@ -83,3 +96,191 @@ def test_capture_production_evidence_preflight_rejects_unrendered_template(tmp_p
     assert proc.returncode == 65
     assert "unresolved production placeholders" in proc.stderr
     assert not out_root.exists()
+
+
+def test_capture_production_evidence_preflight_rejects_secret_option_name(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "production-soak.json"
+    out_root = tmp_path / "capture"
+
+    def add_secret_option(payload: dict[str, Any]) -> None:
+        payload["checks"][0]["args"] = ["--idp-token", "from-env-instead"]
+
+    _minimal_production_manifest(manifest, mutate=add_secret_option)
+
+    proc = subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "--preflight-only",
+            str(manifest),
+            str(out_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+    )
+
+    assert proc.returncode == 65
+    assert "secret-bearing option --idp-token" in proc.stderr
+    assert not out_root.exists()
+
+
+def test_capture_production_evidence_preflight_rejects_jwt_in_manifest_args(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "production-soak.json"
+    out_root = tmp_path / "capture"
+
+    def add_jwt_argument(payload: dict[str, Any]) -> None:
+        payload["checks"][0]["args"] = [
+            "--operator-evidence-token",
+            (
+                "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
+                "eyJzdWIiOiJvcGVyYXRvciIsImlhdCI6MTcwMDAwMDAwMH0."
+                "MDEyMzQ1Njc4OWFiY2RlZg"
+            ),
+        ]
+
+    _minimal_production_manifest(manifest, mutate=add_jwt_argument)
+
+    proc = subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "--preflight-only",
+            str(manifest),
+            str(out_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+    )
+
+    assert proc.returncode == 65
+    assert "high-confidence secret material" in proc.stderr
+    assert "jwt" in proc.stderr
+    assert not out_root.exists()
+
+
+def test_capture_production_evidence_preflight_rejects_private_key_in_manifest_args(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "production-soak.json"
+    out_root = tmp_path / "capture"
+
+    def add_private_key_argument(payload: dict[str, Any]) -> None:
+        payload["checks"][0]["global_args"] = [
+            "--operator-proof-file",
+            "-----BEGIN OPENSSH PRIVATE KEY-----\nredacted-test\n-----END OPENSSH PRIVATE KEY-----",
+        ]
+
+    _minimal_production_manifest(manifest, mutate=add_private_key_argument)
+
+    proc = subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "--preflight-only",
+            str(manifest),
+            str(out_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+    )
+
+    assert proc.returncode == 65
+    assert "high-confidence secret material" in proc.stderr
+    assert "private_key_block" in proc.stderr
+    assert not out_root.exists()
+
+
+def test_capture_production_evidence_fails_if_generated_bundle_contains_secret(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "production-soak.json"
+    out_root = tmp_path / "capture"
+    fake_python = tmp_path / "fake-python"
+    _minimal_production_manifest(manifest)
+    fake_python.write_text(
+        f"""#!/usr/bin/env bash
+set -euo pipefail
+REAL_PYTHON={json.dumps(sys.executable)}
+if [ "${{1:-}}" = "-" ]; then
+  exec "$REAL_PYTHON" "$@"
+fi
+if [ "${{1:-}}" = "-m" ] && [ "${{2:-}}" = "mnemosyne.cli" ]; then
+  shift 2
+  mode=""
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --store)
+        shift 2
+        ;;
+      deployment-soak)
+        mode="soak"
+        shift
+        break
+        ;;
+      release-audit)
+        mode="audit"
+        shift
+        break
+        ;;
+      *)
+        shift
+        ;;
+    esac
+  done
+  if [ "$mode" = "soak" ]; then
+    evidence_dir=""
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --evidence-dir)
+          evidence_dir="$2"
+          shift 2
+          ;;
+        *)
+          shift
+          ;;
+      esac
+    done
+    mkdir -p "$evidence_dir"
+    cat > "$evidence_dir/manifest.json" <<'JSON'
+{{"ok": true, "validation_scope": {{"production_validated": true, "target_environment": "production", "operator_asserted": true}}, "checks": []}}
+JSON
+    cat > "$evidence_dir/leaked-token.json" <<'JSON'
+{{"token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJvcGVyYXRvciIsImlhdCI6MTcwMDAwMDAwMH0.MDEyMzQ1Njc4OWFiY2RlZg"}}
+JSON
+    printf '%s\\n' '{{"ok": true}}'
+    exit 0
+  fi
+  if [ "$mode" = "audit" ]; then
+    printf '%s\\n' '{{"ok": true, "fingerprint": "fake-fingerprint", "findings": []}}'
+    exit 0
+  fi
+fi
+exec "$REAL_PYTHON" "$@"
+""",
+        encoding="utf-8",
+    )
+    fake_python.chmod(0o755)
+
+    proc = subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            str(manifest),
+            str(out_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        env={**os.environ, "MNEMOSYNE_PYTHON": str(fake_python)},
+    )
+
+    redaction_scan = json.loads((out_root / "redaction-scan.json").read_text(encoding="utf-8"))
+    assert proc.returncode == 65
+    assert "high-confidence secret material found in the production evidence bundle" in proc.stderr
+    assert "jwt" in proc.stderr
+    assert redaction_scan["ok"] is False
+    assert redaction_scan["findings"][0]["kind"] == "jwt"
+    assert not (out_root / "summary.json").exists()
