@@ -121,6 +121,28 @@ if [ -e "${OUT_ROOT}" ]; then
 fi
 
 MANIFEST_PATH="$(cd "$(dirname "${MANIFEST}")" && pwd)/$(basename "${MANIFEST}")"
+MANIFEST_PATH="$("${PYTHON}" - "${MANIFEST_PATH}" "${REPO_DIR}" <<'PY'
+from pathlib import Path
+import sys
+
+manifest_path = Path(sys.argv[1]).expanduser().resolve(strict=True)
+repo_dir = Path(sys.argv[2]).resolve()
+try:
+    manifest_path.relative_to(repo_dir)
+except ValueError:
+    print(manifest_path)
+else:
+    print(
+        f"ERROR: refusing to use production soak manifest inside the repository: {manifest_path}",
+        file=sys.stderr,
+    )
+    print(
+        "Render the manifest to an external custody path such as /secure/path/to/production-soak-manifest.json.",
+        file=sys.stderr,
+    )
+    sys.exit(65)
+PY
+)"
 STARTED_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 export MANIFEST_PATH OUT_ROOT REPO_DIR STARTED_AT PREFLIGHT_ONLY
 
