@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 077
 
 usage() {
   cat >&2 <<'USAGE'
@@ -137,6 +138,27 @@ if missing:
     print("ERROR: missing required production placeholder environment variables:", file=sys.stderr)
     for name in missing:
         print(f"  - {name}", file=sys.stderr)
+    raise SystemExit(78)
+
+evidence_dir_raw = os.environ.get("MNEMOSYNE_PROD_EVIDENCE_DIR", "")
+evidence_dir = Path(evidence_dir_raw).expanduser()
+if not evidence_dir.is_absolute():
+    print(
+        "ERROR: MNEMOSYNE_PROD_EVIDENCE_DIR must be an absolute external production input-artifact path",
+        file=sys.stderr,
+    )
+    raise SystemExit(78)
+evidence_dir_resolved = evidence_dir.resolve(strict=False)
+try:
+    evidence_dir_resolved.relative_to(repo_dir)
+except ValueError:
+    pass
+else:
+    print(
+        "ERROR: MNEMOSYNE_PROD_EVIDENCE_DIR must not point inside the repository; "
+        f"choose an external custody path: {evidence_dir_resolved}",
+        file=sys.stderr,
+    )
     raise SystemExit(78)
 
 manifest = json.loads(template_text)

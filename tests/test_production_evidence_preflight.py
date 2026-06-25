@@ -181,6 +181,65 @@ def test_capture_production_evidence_preflight_rejects_secret_option_name(
     assert not out_root.exists()
 
 
+def test_capture_production_evidence_preflight_rejects_repo_local_artifact_path(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "production-soak.json"
+    out_root = tmp_path / "capture"
+
+    def add_repo_local_artifact_path(payload: dict[str, Any]) -> None:
+        payload["checks"][0]["args"] = [
+            "--cases",
+            str(REPO / "tests" / "fixtures" / "production-cases.json"),
+        ]
+
+    _minimal_production_manifest(manifest, mutate=add_repo_local_artifact_path)
+
+    proc = subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "--preflight-only",
+            str(manifest),
+            str(out_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+    )
+
+    assert proc.returncode == 65
+    assert "points inside the repository" in proc.stderr
+    assert not out_root.exists()
+
+
+def test_capture_production_evidence_preflight_rejects_relative_artifact_path(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "production-soak.json"
+    out_root = tmp_path / "capture"
+
+    def add_relative_artifact_path(payload: dict[str, Any]) -> None:
+        payload["checks"][0]["args"] = ["--cases", "production-cases.json"]
+
+    _minimal_production_manifest(manifest, mutate=add_relative_artifact_path)
+
+    proc = subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "--preflight-only",
+            str(manifest),
+            str(out_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+    )
+
+    assert proc.returncode == 65
+    assert "contains relative production artifact path" in proc.stderr
+    assert not out_root.exists()
+
+
 def test_capture_production_evidence_preflight_rejects_duplicate_commands(
     tmp_path: Path,
 ) -> None:
