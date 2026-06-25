@@ -475,7 +475,11 @@ Dev/CI: pytest · ruff
 
 **Completion:** ~**82%** blended. *Done & proven:* all Tier-A source wirings, 6/6 SLOs, 7/7 rails, local + clean-Postgres validation, real-provider compose (Keycloak/Vault/C2PA) wired. *Remaining ~18% (Tier B):* operator-captured **real-infrastructure evidence** — production soak + release audit against live ParadeDB/IdP/Vault/KMS/C2PA/embedding endpoints (10 parity rows B1–B10). This is *operational evidence, not missing code* — flipped by running `deployment-soak --evidence-dir` + `release-audit --require-production-validated`.
 
-See `docs/STATE-OF-COMPLETION.md`, `docs/ROADMAP-TO-100.md`, and `eval/reports/KEYSTONE_PROOF.md`.
+See `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md` for the controlling Partial rows,
+`docs/ROADMAP-TO-100.md` for the sequenced parity path,
+`infra/PRODUCTION-EVIDENCE.md` and `infra/scripts/capture-production-evidence.sh`
+for the Tier-B operator capture handoff, and `eval/reports/KEYSTONE_PROOF.md`
+for the headline SLO proof.
 
 ---
 
