@@ -14,8 +14,8 @@ jobs:
     name: Lint (ruff)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - name: Install ruff
@@ -27,8 +27,8 @@ jobs:
     name: Unit + drift checks
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - name: Install package and test deps
@@ -60,8 +60,8 @@ jobs:
     env:
       MNEMOSYNE_POSTGRES_DSN: postgresql://mnemosyne:mnemosyne-local-dev@localhost:5432/mnemosyne
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - name: Install package with Postgres + MCP extras
