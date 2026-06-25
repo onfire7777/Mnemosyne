@@ -259,6 +259,7 @@ fi
 "${PYTHON}" -m mnemosyne.cli "${AUDIT_ARGS[@]}" > "${OUT_ROOT}/release-audit.json"
 
 "${PYTHON}" - <<'PY'
+import hashlib
 import json
 import os
 import sys
@@ -295,11 +296,48 @@ if not redaction_scan["ok"]:
     )
     sys.exit(65)
 
+excluded_manifest_paths = {"bundle-manifest.json", "summary.json"}
+bundle_files = []
+for file_path in sorted(path for path in out_root.rglob("*") if path.is_file()):
+    rel_path = file_path.relative_to(out_root).as_posix()
+    if rel_path in excluded_manifest_paths:
+        continue
+    payload = file_path.read_bytes()
+    bundle_files.append(
+        {
+            "path": rel_path,
+            "size_bytes": len(payload),
+            "sha256": "sha256:" + hashlib.sha256(payload).hexdigest(),
+        }
+    )
+bundle_manifest_payload = {
+    "schema": "mnemosyne.production-evidence-bundle.v1",
+    "files": bundle_files,
+}
+bundle_fingerprint = "sha256:" + hashlib.sha256(
+    json.dumps(
+        bundle_manifest_payload,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+).hexdigest()
+bundle_manifest = {
+    **bundle_manifest_payload,
+    "artifact_count": len(bundle_files),
+    "fingerprint": bundle_fingerprint,
+}
+(out_root / "bundle-manifest.json").write_text(
+    json.dumps(bundle_manifest, indent=2),
+    encoding="utf-8",
+)
+
 summary = {
     "out_root": str(out_root),
     "operator_manifest": str(out_root / "operator-soak-manifest.json"),
     "evidence_manifest": str(out_root / "evidence/manifest.json"),
     "redaction_scan": str(out_root / "redaction-scan.json"),
+    "bundle_manifest": str(out_root / "bundle-manifest.json"),
+    "bundle_fingerprint": bundle_fingerprint,
     "redaction_scan_ok": redaction_scan["ok"],
     "deployment_soak_ok": soak.get("ok") is True,
     "release_audit_ok": audit.get("ok") is True,

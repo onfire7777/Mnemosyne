@@ -8865,6 +8865,10 @@ def _deployment_evidence_file_name(index: int, name: str) -> str:
     return f"{index:03d}-{slug or 'check'}.json"
 
 
+def _file_sha256(path: Path) -> str:
+    return "sha256:" + sha256(path.read_bytes()).hexdigest()
+
+
 def _write_deployment_soak_evidence(
     *,
     evidence_dir: str,
@@ -8880,6 +8884,7 @@ def _write_deployment_soak_evidence(
         file_name = _deployment_evidence_file_name(int(item["index"]), str(item["name"]))
         path = checks_dir / file_name
         path.write_text(json.dumps(item, indent=2, sort_keys=True), encoding="utf-8")
+        relative_path = f"{checks_dir.name}/{file_name}"
         check_files.append(
             {
                 "index": item["index"],
@@ -8888,7 +8893,8 @@ def _write_deployment_soak_evidence(
                 "ok": item["ok"],
                 "required": item["required"],
                 "evidence_class": item.get("evidence_class"),
-                "path": str(path),
+                "path": relative_path,
+                "sha256": _file_sha256(path),
             }
         )
     report_path = package_dir / "deployment-soak-report.json"
@@ -8902,6 +8908,7 @@ def _write_deployment_soak_evidence(
     }
     report["evidence_bundle"] = bundle
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+    report_sha256 = _file_sha256(report_path)
     manifest = {
         "kind": "mnemosyne.deployment_soak_evidence",
         "version": 1,
@@ -8912,6 +8919,7 @@ def _write_deployment_soak_evidence(
         "redaction": report["redaction"],
         "files": {
             "report": report_path.name,
+            "report_sha256": report_sha256,
             "checks_dir": checks_dir.name,
         },
         "summary": report["summary"],
@@ -8919,6 +8927,36 @@ def _write_deployment_soak_evidence(
     }
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
     return bundle
+
+
+def _release_manifest_path(manifest_path: Path, value: Any, label: str) -> Path:
+    if not isinstance(value, str) or not value:
+        raise SystemExit(f"release evidence manifest requires {label}")
+    relative_path = Path(value)
+    if relative_path.is_absolute() or ".." in relative_path.parts:
+        raise SystemExit(f"release evidence manifest {label} must be a relative path inside the evidence bundle")
+    return manifest_path.parent / relative_path
+
+
+def _release_manifest_expected_sha256(value: Any, label: str) -> str:
+    if not isinstance(value, str) or not value.startswith("sha256:"):
+        raise SystemExit(f"release evidence manifest requires {label}")
+    return value
+
+
+def _verify_release_manifest_file(
+    *,
+    path: Path,
+    expected_sha256: str,
+    label: str,
+) -> str:
+    try:
+        actual_sha256 = _file_sha256(path)
+    except OSError as exc:
+        raise SystemExit(f"release evidence manifest {label} denied: {exc}") from exc
+    if actual_sha256 != expected_sha256:
+        raise SystemExit(f"release evidence manifest {label} digest mismatch")
+    return actual_sha256
 
 
 def _deployment_validation_scope(manifest: Mapping[str, Any]) -> dict[str, Any]:
@@ -9073,14 +9111,46 @@ def _load_release_audit_report(args: argparse.Namespace) -> tuple[dict[str, Any]
             raise SystemExit("release evidence manifest must be a JSON object")
         if evidence_manifest.get("kind") != "mnemosyne.deployment_soak_evidence":
             raise SystemExit("release evidence manifest has unsupported kind")
-        report_name = evidence_manifest.get("files", {}).get("report") if isinstance(evidence_manifest.get("files"), dict) else None
-        if not isinstance(report_name, str) or not report_name:
-            raise SystemExit("release evidence manifest requires files.report")
-        report_path = manifest_path.parent / report_name
+        files = evidence_manifest.get("files")
+        if not isinstance(files, Mapping):
+            raise SystemExit("release evidence manifest requires files")
+        report_path = _release_manifest_path(manifest_path, files.get("report"), "files.report")
+        report_sha256 = _verify_release_manifest_file(
+            path=report_path,
+            expected_sha256=_release_manifest_expected_sha256(files.get("report_sha256"), "files.report_sha256"),
+            label="files.report",
+        )
+        check_entries = evidence_manifest.get("checks")
+        if not isinstance(check_entries, list):
+            raise SystemExit("release evidence manifest requires checks")
+        verified_checks: list[dict[str, Any]] = []
+        for index, check_entry in enumerate(check_entries, start=1):
+            if not isinstance(check_entry, Mapping):
+                raise SystemExit(f"release evidence manifest checks[{index}] must be an object")
+            check_path = _release_manifest_path(manifest_path, check_entry.get("path"), f"checks[{index}].path")
+            check_sha256 = _verify_release_manifest_file(
+                path=check_path,
+                expected_sha256=_release_manifest_expected_sha256(
+                    check_entry.get("sha256"),
+                    f"checks[{index}].sha256",
+                ),
+                label=f"checks[{index}]",
+            )
+            verified_checks.append(
+                {
+                    "path": str(check_path),
+                    "sha256": check_sha256,
+                }
+            )
         source = {
             "kind": "evidence_manifest",
             "manifest_path": str(manifest_path),
             "report_path": str(report_path),
+            "integrity": {
+                "report_sha256": report_sha256,
+                "check_count": len(verified_checks),
+                "checks": verified_checks,
+            },
         }
     else:
         report_path = Path(args.soak_report).expanduser()
@@ -9091,6 +9161,12 @@ def _load_release_audit_report(args: argparse.Namespace) -> tuple[dict[str, Any]
         raise SystemExit(f"deployment-soak report denied: {exc}") from exc
     if not isinstance(report, dict):
         raise SystemExit("deployment-soak report must be a JSON object")
+    if source["kind"] == "evidence_manifest":
+        report_checks = report.get("checks")
+        if not isinstance(report_checks, list):
+            raise SystemExit("deployment-soak report requires checks")
+        if len(report_checks) != source["integrity"]["check_count"]:
+            raise SystemExit("release evidence manifest check digest count mismatch")
     return report, source
 
 
@@ -12719,7 +12795,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--require-production-validated",
         action="store_true",
         default=False,
-        help="Fail unless the deployment-soak report is explicitly marked production_validated",
+        help=(
+            "Fail unless the deployment-soak report is production scoped, "
+            "operator asserted, and explicitly marked production_validated"
+        ),
     )
     release_audit.add_argument("--expected-fingerprint")
     release_audit.set_defaults(func=cmd_release_audit)

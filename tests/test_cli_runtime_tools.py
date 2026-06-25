@@ -5212,6 +5212,9 @@ def test_cli_deployment_soak_allows_ops_report_dashboard(tmp_path: Path) -> None
     assert evidence_manifest["validation_scope"] == report["validation_scope"]
     assert evidence_manifest["redaction"] == report["redaction"]
     assert evidence_manifest["checks"][0]["evidence_class"] == "allowlisted_local_cli_check"
+    assert evidence_manifest["files"]["report_sha256"].startswith("sha256:")
+    assert evidence_manifest["checks"][0]["path"] == "checks/001-ops-dashboard.json"
+    assert evidence_manifest["checks"][0]["sha256"].startswith("sha256:")
     assert evidence_report["evidence_bundle"]["report_path"] == str(evidence_dir / "deployment-soak-report.json")
     assert evidence_report["validation_scope"]["production_validated"] is False
     assert check_record["redaction"]["raw_command_omitted"] is True
@@ -5518,7 +5521,9 @@ def write_release_report(
     production_validated: bool = True,
 ) -> tuple[Path, Path]:
     evidence_dir = tmp_path / "release-evidence"
-    evidence_dir.mkdir()
+    evidence_dir.mkdir(parents=True)
+    checks_dir = evidence_dir / "checks"
+    checks_dir.mkdir()
     provider_stdout = provider_stdout or production_provider_stdout()
     checks = [
         release_check(command, production_release_stdout(command, provider_stdout))
@@ -5551,16 +5556,37 @@ def write_release_report(
     }
     report_path = evidence_dir / "deployment-soak-report.json"
     manifest_path = evidence_dir / "manifest.json"
+    check_files = []
+    for check in checks:
+        check_path = checks_dir / f"{int(check['index']):03d}-{check['command']}.json"
+        check_path.write_text(json.dumps(check, indent=2, sort_keys=True), encoding="utf-8")
+        check_files.append(
+            {
+                "index": check["index"],
+                "name": check["name"],
+                "command": check["command"],
+                "ok": check["ok"],
+                "required": check["required"],
+                "evidence_class": check.get("evidence_class"),
+                "path": f"checks/{check_path.name}",
+                "sha256": "sha256:" + sha256(check_path.read_bytes()).hexdigest(),
+            }
+        )
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
     manifest_path.write_text(
         json.dumps(
             {
                 "kind": "mnemosyne.deployment_soak_evidence",
                 "version": 1,
-                "files": {"report": report_path.name, "checks_dir": "checks"},
+                "files": {
+                    "report": report_path.name,
+                    "report_sha256": "sha256:" + sha256(report_path.read_bytes()).hexdigest(),
+                    "checks_dir": "checks",
+                },
                 "summary": report["summary"],
                 "validation_scope": report["validation_scope"],
                 "redaction": report["redaction"],
+                "checks": check_files,
             }
         ),
         encoding="utf-8",
@@ -5601,6 +5627,76 @@ def test_cli_release_audit_verifies_production_deployment_evidence(tmp_path: Pat
     assert report["provider"]["retrieval_backends"]["lexical_backend"] == "paradedb-bm25"
     assert report["provider"]["retrieval_backends"]["graph_backend"] == "apache-age"
     assert report["validation_scope"]["production_validated"] is True
+
+
+def test_cli_release_audit_requires_manifest_file_digests(tmp_path: Path) -> None:
+    _report_path, manifest_path = write_release_report(tmp_path)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["files"].pop("report_sha256")
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+
+    result = run_raw_cli(
+        tmp_path / "mnemosyne.json",
+        "release-audit",
+        "--evidence-manifest",
+        str(manifest_path),
+        "--require-production-validated",
+    )
+
+    assert result.returncode == 1
+    assert "release evidence manifest requires files.report_sha256" in result.stderr
+
+    _count_report_path, count_manifest_path = write_release_report(tmp_path / "count")
+    manifest = json.loads(count_manifest_path.read_text(encoding="utf-8"))
+    manifest["checks"].pop()
+    count_manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+
+    count_result = run_raw_cli(
+        tmp_path / "count" / "mnemosyne.json",
+        "release-audit",
+        "--evidence-manifest",
+        str(count_manifest_path),
+        "--require-production-validated",
+    )
+
+    assert count_result.returncode == 1
+    assert "release evidence manifest check digest count mismatch" in count_result.stderr
+
+
+def test_cli_release_audit_rejects_tampered_manifest_bound_artifacts(tmp_path: Path) -> None:
+    report_path, manifest_path = write_release_report(tmp_path / "report")
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    report["summary"]["checks"] = 0
+    report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+
+    report_result = run_raw_cli(
+        tmp_path / "report" / "mnemosyne.json",
+        "release-audit",
+        "--evidence-manifest",
+        str(manifest_path),
+        "--require-production-validated",
+    )
+
+    assert report_result.returncode == 1
+    assert "release evidence manifest files.report digest mismatch" in report_result.stderr
+
+    _check_report_path, check_manifest_path = write_release_report(tmp_path / "check")
+    manifest = json.loads(check_manifest_path.read_text(encoding="utf-8"))
+    check_path = check_manifest_path.parent / manifest["checks"][0]["path"]
+    check_record = json.loads(check_path.read_text(encoding="utf-8"))
+    check_record["ok"] = False
+    check_path.write_text(json.dumps(check_record, indent=2, sort_keys=True), encoding="utf-8")
+
+    check_result = run_raw_cli(
+        tmp_path / "check" / "mnemosyne.json",
+        "release-audit",
+        "--evidence-manifest",
+        str(check_manifest_path),
+        "--require-production-validated",
+    )
+
+    assert check_result.returncode == 1
+    assert "release evidence manifest checks[1] digest mismatch" in check_result.stderr
 
 
 def test_cli_release_audit_fails_closed_on_missing_and_local_evidence(tmp_path: Path) -> None:

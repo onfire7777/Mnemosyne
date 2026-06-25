@@ -130,9 +130,14 @@ and requires the exact production release command profile, with no missing,
 duplicate, or unknown commands, before running `deployment-soak --evidence-dir`
 followed by
 `release-audit --require-production-validated --require-provider-forbid-local`.
+The deployment evidence manifest binds its report and check artifacts with
+SHA-256 digests, and release-audit verifies those digests before trusting the
+bundle.
 Use `--preflight-only` to validate and copy the rendered manifest without
 running production checks; preflight output plus `redaction-scan.json` is setup
-proof only, not production parity evidence.
+proof only, not production parity evidence. Successful full capture writes
+`bundle-manifest.json` with SHA-256 hashes for retained artifacts and surfaces
+its `bundle_fingerprint` in `summary.json` for operator handoff custody.
 Put secrets in environment variables, files, or command-backed providers, not
 in manifest `args`.
 

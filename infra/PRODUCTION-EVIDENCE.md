@@ -47,15 +47,18 @@ The wrapper performs these steps:
 
 1. Validates the operator manifest is explicitly production-scoped.
 2. Runs `deployment-soak --evidence-dir`.
-3. Runs `release-audit --evidence-manifest ... --require-production-validated --require-provider-forbid-local`.
-4. Scans the generated evidence bundle for high-confidence secret material before writing the final summary.
+3. Runs `release-audit --evidence-manifest ... --require-production-validated --require-provider-forbid-local`, which verifies the deployment evidence manifest's report and check SHA-256 digests before auditing.
+4. Scans the generated evidence bundle for high-confidence secret material.
+5. Writes `bundle-manifest.json` with SHA-256 hashes for every retained artifact before writing the final summary.
 
 ## Acceptance
 
 The resulting `release-audit.json` must report `ok: true` with no findings, and
-`redaction-scan.json` must report `ok: true`. A passing local or compose-only
-bundle is useful staging evidence, but it does not satisfy Tier B unless the
-manifest is operator asserted and the checks use production infrastructure.
+`redaction-scan.json` must report `ok: true`. Retain `bundle-manifest.json`
+and the `summary.json` `bundle_fingerprint` as the handoff chain-of-custody
+record for the captured files. A passing local or compose-only bundle is useful
+staging evidence, but it does not satisfy Tier B unless the manifest is
+operator asserted and the checks use production infrastructure.
 
 The current strict audit remains incomplete until the production evidence bundle proves:
 
