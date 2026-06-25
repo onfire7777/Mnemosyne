@@ -303,10 +303,27 @@ def test_capture_production_evidence_preflight_records_input_artifacts(
         (out_root / "redaction-scan.json").read_text(encoding="utf-8")
     )
 
-    assert stdout["required_input_artifacts"] == [
-        {"path": str(artifact), "labels": ["checks[1].args"]}
+    input_artifacts = stdout["required_input_artifacts"]
+    assert len(input_artifacts) == 1
+    assert input_artifacts[0]["path"] == str(artifact)
+    assert input_artifacts[0]["kind"] == "file"
+    assert input_artifacts[0]["labels"] == ["checks[1].args"]
+    assert input_artifacts[0]["snapshot_path"].startswith(
+        str(out_root / "input-artifacts")
+    )
+    assert input_artifacts[0]["files"][0]["source_path"] == str(artifact)
+    assert input_artifacts[0]["files"][0]["snapshot_path"] == input_artifacts[0]["snapshot_path"]
+    assert input_artifacts[0]["files"][0]["sha256"].startswith("sha256:")
+    assert input_artifacts[0]["files"][0]["size_bytes"] == artifact.stat().st_size
+    copied_manifest = json.loads(
+        (out_root / "operator-soak-manifest.json").read_text(encoding="utf-8")
+    )
+    assert copied_manifest["checks"][0]["args"] == [
+        "--cases",
+        input_artifacts[0]["snapshot_path"],
     ]
-    assert str(artifact) in redaction_scan["scanned_files"]
+    assert (out_root / "source-soak-manifest.json").exists()
+    assert input_artifacts[0]["snapshot_path"] in redaction_scan["scanned_files"]
     assert redaction_scan["skipped_files"] == []
 
 
@@ -502,6 +519,116 @@ def test_capture_production_evidence_preflight_rejects_duplicate_commands(
     assert "duplicate production release commands" in proc.stderr
     assert PRODUCTION_RELEASE_REQUIRED_COMMANDS[0] in proc.stderr
     assert not out_root.exists()
+
+
+def test_capture_production_evidence_uses_staged_input_snapshot_after_source_mutation(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "production-soak.json"
+    out_root = tmp_path / "capture"
+    source_artifact = tmp_path / "production-inputs" / "cases.json"
+    fake_python = tmp_path / "fake-python"
+    source_artifact.parent.mkdir()
+    source_artifact.write_text('{"value": "original"}\n', encoding="utf-8")
+
+    def add_external_artifact_path(payload: dict[str, Any]) -> None:
+        payload["checks"][0]["args"] = ["--cases", str(source_artifact)]
+
+    _minimal_production_manifest(manifest, mutate=add_external_artifact_path)
+    fake_python.write_text(
+        f"""#!/usr/bin/env bash
+set -euo pipefail
+REAL_PYTHON={json.dumps(sys.executable)}
+if [ "${{1:-}}" = "-" ]; then
+  exec "$REAL_PYTHON" "$@"
+fi
+if [ "${{1:-}}" = "-m" ] && [ "${{2:-}}" = "mnemosyne.cli" ]; then
+  shift 2
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --store)
+        shift 2
+        ;;
+      deployment-soak)
+        shift
+        evidence_dir=""
+        soak_manifest=""
+        while [ "$#" -gt 0 ]; do
+          case "$1" in
+            --soak-manifest)
+              soak_manifest="$2"
+              shift 2
+              ;;
+            --evidence-dir)
+              evidence_dir="$2"
+              shift 2
+              ;;
+            *)
+              shift
+              ;;
+          esac
+        done
+        mkdir -p "$evidence_dir"
+        artifact_path="$("$REAL_PYTHON" - "$soak_manifest" <<'PY'
+import json
+import sys
+from pathlib import Path
+manifest = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+args = manifest["checks"][0]["args"]
+print(args[args.index("--cases") + 1])
+PY
+)"
+        printf '%s\n' '{{"value": "mutated"}}' > "$SOURCE_ARTIFACT"
+        cp "$artifact_path" "$evidence_dir/used-input.json"
+        cat > "$evidence_dir/manifest.json" <<'JSON'
+{{"ok": true, "validation_scope": {{"production_validated": true, "target_environment": "production", "operator_asserted": true}}, "checks": []}}
+JSON
+        printf '%s\\n' '{{"ok": true}}'
+        exit 0
+        ;;
+      release-audit)
+        printf '%s\\n' '{{"ok": true, "fingerprint": "fake-fingerprint", "findings": []}}'
+        exit 0
+        ;;
+      *)
+        shift
+        ;;
+    esac
+  done
+fi
+exec "$REAL_PYTHON" "$@"
+""",
+        encoding="utf-8",
+    )
+    fake_python.chmod(0o755)
+
+    proc = subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            str(manifest),
+            str(out_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        env={
+            **os.environ,
+            "MNEMOSYNE_PYTHON": str(fake_python),
+            "SOURCE_ARTIFACT": str(source_artifact),
+        },
+        check=True,
+    )
+
+    copied_manifest = json.loads(
+        (out_root / "operator-soak-manifest.json").read_text(encoding="utf-8")
+    )
+    used_input = (out_root / "evidence" / "used-input.json").read_text(encoding="utf-8")
+    snapshot_path = copied_manifest["checks"][0]["args"][1]
+
+    assert json.loads(proc.stdout)["release_audit_ok"] is True
+    assert snapshot_path.startswith(str(out_root / "input-artifacts"))
+    assert used_input == '{"value": "original"}\n'
+    assert source_artifact.read_text(encoding="utf-8") == '{"value": "mutated"}\n'
 
 
 def test_capture_production_evidence_preflight_rejects_unknown_commands(

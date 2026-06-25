@@ -10203,6 +10203,8 @@ def _production_evidence_summary_ok(summary: Mapping[str, Any] | None) -> bool:
 
 def _verify_production_evidence_preflight(
     preflight: Mapping[str, Any] | None,
+    *,
+    bundle_dir: Path,
     findings: list[dict[str, Any]],
 ) -> bool:
     if preflight is None:
@@ -10267,6 +10269,148 @@ def _verify_production_evidence_preflight(
             "preflight_provided_commands_mismatch",
             "preflight.json provided_commands do not match the frozen production command set",
         )
+
+    input_artifacts = preflight.get("required_input_artifacts")
+    if not isinstance(input_artifacts, list):
+        ok = False
+        _production_evidence_finding(
+            findings,
+            "preflight_input_artifacts_invalid",
+            "preflight.json required_input_artifacts must be a list",
+        )
+        input_artifacts = []
+    snapshot_root = (bundle_dir / "input-artifacts").resolve(strict=False)
+    for index, artifact in enumerate(input_artifacts, start=1):
+        if not isinstance(artifact, Mapping):
+            ok = False
+            _production_evidence_finding(
+                findings,
+                "preflight_input_artifact_invalid",
+                f"preflight.json required_input_artifacts[{index}] must be an object",
+            )
+            continue
+        source_path = artifact.get("path")
+        snapshot_path_value = artifact.get("snapshot_path")
+        kind = artifact.get("kind")
+        labels = artifact.get("labels")
+        files = artifact.get("files")
+        if not isinstance(source_path, str) or not source_path:
+            ok = False
+            _production_evidence_finding(
+                findings,
+                "preflight_input_artifact_path_invalid",
+                f"preflight.json required_input_artifacts[{index}].path must be non-empty",
+            )
+        if kind not in {"file", "directory"}:
+            ok = False
+            _production_evidence_finding(
+                findings,
+                "preflight_input_artifact_kind_invalid",
+                f"preflight.json required_input_artifacts[{index}].kind must be file or directory",
+            )
+        if not isinstance(labels, list) or not labels or not all(isinstance(label, str) for label in labels):
+            ok = False
+            _production_evidence_finding(
+                findings,
+                "preflight_input_artifact_labels_invalid",
+                f"preflight.json required_input_artifacts[{index}].labels must be a non-empty string list",
+            )
+        if not isinstance(snapshot_path_value, str) or not snapshot_path_value:
+            ok = False
+            _production_evidence_finding(
+                findings,
+                "preflight_input_artifact_snapshot_invalid",
+                f"preflight.json required_input_artifacts[{index}].snapshot_path must be non-empty",
+            )
+            snapshot_path = None
+        else:
+            snapshot_path = Path(snapshot_path_value).expanduser()
+            try:
+                resolved_snapshot_path = snapshot_path.resolve(strict=True)
+                resolved_snapshot_path.relative_to(snapshot_root)
+            except (OSError, ValueError):
+                ok = False
+                _production_evidence_finding(
+                    findings,
+                    "preflight_input_artifact_snapshot_invalid",
+                    f"preflight.json required_input_artifacts[{index}].snapshot_path must resolve under input-artifacts",
+                )
+        if not isinstance(files, list) or not files:
+            ok = False
+            _production_evidence_finding(
+                findings,
+                "preflight_input_artifact_files_invalid",
+                f"preflight.json required_input_artifacts[{index}].files must be a non-empty list",
+            )
+            continue
+        for file_index, file_entry in enumerate(files, start=1):
+            if not isinstance(file_entry, Mapping):
+                ok = False
+                _production_evidence_finding(
+                    findings,
+                    "preflight_input_artifact_file_invalid",
+                    f"preflight.json required_input_artifacts[{index}].files[{file_index}] must be an object",
+                )
+                continue
+            snapshot_file_value = file_entry.get("snapshot_path")
+            relative_path = file_entry.get("relative_path")
+            size_bytes = file_entry.get("size_bytes")
+            expected_sha256 = file_entry.get("sha256")
+            if not isinstance(relative_path, str) or not relative_path:
+                ok = False
+                _production_evidence_finding(
+                    findings,
+                    "preflight_input_artifact_file_relative_path_invalid",
+                    f"preflight.json required_input_artifacts[{index}].files[{file_index}].relative_path must be non-empty",
+                )
+            if (
+                not isinstance(snapshot_file_value, str)
+                or not isinstance(size_bytes, int)
+                or size_bytes < 0
+                or not isinstance(expected_sha256, str)
+                or not expected_sha256.startswith("sha256:")
+            ):
+                ok = False
+                _production_evidence_finding(
+                    findings,
+                    "preflight_input_artifact_file_digest_invalid",
+                    f"preflight.json required_input_artifacts[{index}].files[{file_index}] has invalid digest metadata",
+                )
+                continue
+            snapshot_file = Path(snapshot_file_value).expanduser()
+            try:
+                resolved_snapshot_file = snapshot_file.resolve(strict=True)
+                resolved_snapshot_file.relative_to(snapshot_root)
+            except (OSError, ValueError):
+                ok = False
+                _production_evidence_finding(
+                    findings,
+                    "preflight_input_artifact_file_snapshot_invalid",
+                    f"preflight.json required_input_artifacts[{index}].files[{file_index}].snapshot_path must resolve under input-artifacts",
+                )
+                continue
+            if not resolved_snapshot_file.is_file():
+                ok = False
+                _production_evidence_finding(
+                    findings,
+                    "preflight_input_artifact_file_missing",
+                    f"preflight.json required_input_artifacts[{index}].files[{file_index}].snapshot_path is missing",
+                )
+                continue
+            if resolved_snapshot_file.stat().st_size != size_bytes:
+                ok = False
+                _production_evidence_finding(
+                    findings,
+                    "preflight_input_artifact_file_size_mismatch",
+                    f"preflight.json required_input_artifacts[{index}].files[{file_index}] size does not match snapshot",
+                )
+            if _file_sha256(resolved_snapshot_file) != expected_sha256:
+                ok = False
+                _production_evidence_finding(
+                    findings,
+                    "preflight_input_artifact_file_sha256_mismatch",
+                    f"preflight.json required_input_artifacts[{index}].files[{file_index}] sha256 does not match snapshot",
+                )
     return ok
 
 
@@ -10627,7 +10771,11 @@ def cmd_production_evidence_verify(args: argparse.Namespace) -> None:
         findings,
     )
     _verify_production_evidence_summary(summary, findings)
-    preflight_ok = _verify_production_evidence_preflight(preflight, findings)
+    preflight_ok = _verify_production_evidence_preflight(
+        preflight,
+        bundle_dir=resolved_bundle_dir,
+        findings=findings,
+    )
     _verify_production_evidence_redaction_scan(redaction_scan, findings)
     operator_manifest_ok = _verify_production_evidence_operator_manifest(operator_manifest, findings)
     deployment_soak_manifest_ok = _verify_production_evidence_deployment_soak_manifest(

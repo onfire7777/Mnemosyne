@@ -5662,6 +5662,7 @@ def write_production_evidence_bundle(tmp_path: Path) -> tuple[Path, str]:
                 "redaction_scan": str(bundle_dir / "redaction-scan.json"),
                 "required_commands": list(PRODUCTION_RELEASE_REQUIRED_COMMANDS),
                 "provided_commands": sorted(PRODUCTION_RELEASE_REQUIRED_COMMANDS),
+                "required_input_artifacts": [],
             },
             indent=2,
             sort_keys=True,
@@ -5943,6 +5944,51 @@ def test_cli_production_evidence_verify_rejects_tampered_preflight(tmp_path: Pat
     assert "preflight_provided_commands_mismatch" in codes
     assert "bundle_file_sha256_mismatch" not in codes
     assert "bundle_fingerprint_mismatch" not in codes
+
+
+def test_cli_production_evidence_verify_rejects_tampered_input_artifact_metadata(
+    tmp_path: Path,
+) -> None:
+    bundle_dir, _bundle_fingerprint = write_production_evidence_bundle(tmp_path)
+    snapshot = bundle_dir / "input-artifacts" / "0001-cases.json"
+    snapshot.parent.mkdir()
+    snapshot.write_text('{"ok": true}\n', encoding="utf-8")
+    preflight_path = bundle_dir / "preflight.json"
+    preflight = json.loads(preflight_path.read_text(encoding="utf-8"))
+    preflight["required_input_artifacts"] = [
+        {
+            "path": str(tmp_path / "external" / "cases.json"),
+            "snapshot_path": str(snapshot),
+            "kind": "file",
+            "labels": ["checks[1].args"],
+            "files": [
+                {
+                    "source_path": str(tmp_path / "external" / "cases.json"),
+                    "snapshot_path": str(snapshot),
+                    "relative_path": snapshot.name,
+                    "size_bytes": snapshot.stat().st_size,
+                    "sha256": "sha256:" + sha256(snapshot.read_bytes()).hexdigest(),
+                }
+            ],
+        }
+    ]
+    preflight["required_input_artifacts"][0]["files"][0]["sha256"] = "sha256:" + ("0" * 64)
+    preflight_path.write_text(json.dumps(preflight, indent=2, sort_keys=True), encoding="utf-8")
+    rewrite_production_bundle_manifest(bundle_dir)
+
+    result = run_raw_cli(
+        tmp_path / "verify-store.json",
+        "production-evidence-verify",
+        str(bundle_dir),
+    )
+    payload = json.loads(result.stdout)
+    codes = {finding["code"] for finding in payload["findings"]}
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert payload["checks"]["preflight"] is False
+    assert "preflight_input_artifact_file_sha256_mismatch" in codes
+    assert "bundle_file_sha256_mismatch" not in codes
 
 
 def test_cli_production_evidence_verify_rejects_tampered_bundle(tmp_path: Path) -> None:
