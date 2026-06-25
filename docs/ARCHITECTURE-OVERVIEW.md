@@ -17,11 +17,11 @@
 
 - **Package:** `mnemosyne-memory` v0.1.0 · Python ≥3.12 · Apache-2.0
 - **Entry points:** `mneme` (CLI, 91 subcommands) · `mneme-mcp` (MCP server, 48 tools)
-- **Source:** ~35K LOC across 40 modules in `src/mnemosyne/`
+- **Source:** ~35,283 lines across 41 `.py` files in `src/mnemosyne/` (40 top-level modules + the `providers/` subpackage `__init__.py`)
 - **Wiki:** [Home](https://github.com/onfire7777/Mnemosyne/wiki) ·
   [Data Model](https://github.com/onfire7777/Mnemosyne/wiki/Data-Model) ·
-  [Consolidation](https://github.com/onfire7777/Mnemosyne/wiki/Consolidation) ·
-  [Security](https://github.com/onfire7777/Mnemosyne/wiki/Security)
+  [Consolidation](https://github.com/onfire7777/Mnemosyne/wiki/Memory-Pipelines) ·
+  [Security](https://github.com/onfire7777/Mnemosyne/wiki/Security-Privacy-and-Provenance)
 
 ---
 
@@ -46,7 +46,7 @@ flowchart TB
     end
 
     subgraph infra["Optional real-provider infrastructure (local fallback for each)"]
-        PG[("PostgreSQL 16<br/>pgvector · HNSW · RLS")]
+        PG[("PostgreSQL + pgvector<br/>HNSW · RLS · FTS")]
         EMB["Embedding + Reranker<br/>service (:8000)"]
         KC["Keycloak (host :8089)<br/>OIDC / JWKS identity"]
         VAULT["Vault (host :8211)<br/>transit KMS · crypto-erase"]
@@ -64,7 +64,9 @@ flowchart TB
 
 Every caller reaches the system through exactly two surfaces — the `mneme` CLI (humans/ops) and the
 `mneme-mcp` server (agents). Both call the **same** `MemoryEngine`. Ports shown are the **host-published**
-ports operators connect to (Keycloak `8089`, Vault `8211`); see §8 for the host→container mapping.
+ports operators connect to (embedding `8000`, Keycloak `8089`, Vault `8211`); see §8 for the
+host→container mapping. The dev compose image is `pgvector/pgvector:pg16`, but `postgres_engine.py`
+pins no server version, so the engine is not restricted to PG16.
 
 ---
 
@@ -79,10 +81,10 @@ flowchart TB
     end
 
     subgraph CORE["② Engine core"]
-        eng["engine.py · MemoryEngine Protocol<br/>+ LocalMemoryEngine (in-memory)"]
+        eng["engine.py · MemoryEngine Protocol<br/>+ LocalMemoryEngine · route() · RoutePlan"]
         pg["postgres_engine.py · PostgresEngine<br/>RLS · FTS · pgvector · recursive PPR · as_of()"]
         models["models.py · Evidence / Assertion / Relation / Hit"]
-        ids["ids.py · content_cid() · canonical_json()"]
+        ids["ids.py · content_cid() · bytes_cid() · canonical_json()"]
         text["text.py · tokenize · lexical_score · hashing_embedding"]
     end
 
@@ -90,7 +92,7 @@ flowchart TB
         ing["ingestion.py · IngestionPipeline"]
         ret["retrieval.py · adapters + local fallbacks"]
         con["consolidation.py · ConsolidationWorker (11-pass)"]
-        bel["belief.py · AGM belief revision"]
+        bel["belief.py · ATMS belief revision"]
         gr["graph.py · GraphAdapter · PPR"]
         pf["prefetch.py · anticipatory cache"]
         par["parametric.py · learned promotion tier"]
@@ -117,7 +119,7 @@ flowchart TB
         sec["security.py · TrustTier · WriteRole · sanitize"]
         gate["gate.py · WRITE gate (poison/taint)"]
         pol["policy.py · OperatingPolicy · max_sensitivity"]
-        priv["privacy.py · erasure (logical + crypto-shred)"]
+        priv["privacy.py · erasure (tombstone + hard-delete)"]
         red["evidence_redaction.py · PII redaction"]
         prov["provenance.py · SignedProvenance / C2paTool verify"]
         st["source_truth.py · human source-of-record"]
@@ -125,11 +127,11 @@ flowchart TB
     end
 
     subgraph STORE["⑦ Storage · state · providers"]
-        sto["storage.py · content-addressed object store"]
+        sto["storage.py · object store · CommandKeyManager (KMS)"]
         rs["runtime_state.py · in-process state"]
         prs["postgres_runtime_state.py · durable state"]
         med["media.py · OCR / STT extraction"]
-        prov2["providers/__init__.py · pluggable adapters"]
+        prov2["providers/__init__.py · ProviderRegistry"]
     end
 
     IF --> CORE
@@ -143,24 +145,26 @@ flowchart TB
 ```
 
 **Reading the layers**
+
 1. **Interface** — the only surfaces a caller touches. CLI for humans/ops, MCP for agents. Both call the same engine.
-2. **Engine core** — `MemoryEngine` is a `typing.Protocol` (interface). `LocalMemoryEngine` (ephemeral, in-memory, dev/test) and `PostgresEngine` (ACID, multi-tenant, auditable) are interchangeable implementations chosen at deploy time; parity tests (`tests/test_parity_*.py`, `test_shared_engine_contract.py`) prove behavioural equivalence.
+2. **Engine core** — `MemoryEngine` is a `typing.Protocol` (interface). `LocalMemoryEngine` (ephemeral, in-memory, dev/test) and `PostgresEngine` (ACID, multi-tenant, auditable) are interchangeable implementations chosen at deploy time; parity tests (`tests/test_parity_*.py`, `test_shared_engine_contract.py`) prove behavioural equivalence. The router `route()` and its `RoutePlan` dataclass are defined **in `engine.py`** (not `retrieval.py`).
 3. **Pipelines** — the write path (ingestion → consolidation → belief) and read path (retrieval → graph).
 4. **Background/learning** — durable job queue + lifecycle/forgetting + induction of lessons/skills + shadow-mode tuning.
 5. **Eval/calibration** — turns confidence into calibrated abstention and measures the SLOs. `guard.py` lives here: it is the **§25 evaluation anti-degradation guard** (`no_degradation_guard` + `LongHorizonNoDegradationTracker`), proving memory-augmented scores stay non-inferior to a no-memory baseline. *It has no read/confidentiality, sensitivity, role, or `access_policy` logic* — read-side enforcement lives on the engine read path (§5).
-6. **Security** — the **write-side gate** (`gate.py`, integrity) and the **read-side confidentiality enforcement** on the engine read path (`policy.max_sensitivity` + `access_policy` + `security.sanitize_retrieved_text`) wrap the engine.
-7. **Storage/providers** — content store, durable runtime state, and the pluggable provider registry (embedding/reranker/graph/lexical/KMS/C2PA).
+6. **Security** — the **write-side gate** (`gate.py`, integrity) plus **read-side confidentiality enforcement** on the engine read path (`policy.max_sensitivity` + `access_policy` + `security.sanitize_retrieved_text`) wrap the engine.
+7. **Storage/providers** — content store, durable runtime state, the Vault-transit `CommandKeyManager` (defined in `storage.py`), and the pluggable `ProviderRegistry` (`providers/__init__.py`).
 
 ---
 
 ## 3. Data Model — the canonical schema (`sql/schema.sql`)
 
-PostgreSQL 16 + `pgcrypto` + `vector` (pgvector). The schema defines **24 tables**. Every tenant-aware
-table has **Row-Level Security**; all but one use the policy `tenant_id = mnemosyne_current_tenant()`.
-The exception is **`audit_log`**, whose policy is `tenant_id IS NULL OR tenant_id = mnemosyne_current_tenant()`
-so **system-level (NULL-tenant) audit rows remain visible**. Embeddings are `VECTOR(1024)`; both
-`evidence.embedding` and `assertions.embedding` carry an **HNSW** cosine index, and `assertions.lexeme`
-(a `TSVECTOR`) has a GIN index.
+PostgreSQL + `pgcrypto` + `vector` (pgvector); the dev compose image is `pgvector/pgvector:pg16`. The schema
+defines **24 distinct tables**. Every **tenant-scoped** table (all tables except the `tenants` registry,
+which has no `tenant_id` column) carries **Row-Level Security**; all but one use the policy
+`tenant_id = mnemosyne_current_tenant()`. The exception is **`audit_log`**, whose policy is
+`tenant_id IS NULL OR tenant_id = mnemosyne_current_tenant()` so **system-level (NULL-tenant) audit rows
+remain visible**. Embeddings are `VECTOR(1024)`; both `evidence.embedding` and `assertions.embedding`
+carry an **HNSW** cosine index, and `assertions.lexeme` (a `TSVECTOR`) has a GIN index.
 
 > **The ERD below is a partial view** (the 12 most load-bearing tables). The full 24-table catalogue
 > follows it. Columns shown are verbatim from `sql/schema.sql`.
@@ -169,7 +173,7 @@ so **system-level (NULL-tenant) audit rows remain visible**. Embeddings are `VEC
 erDiagram
     tenants ||--o{ branches : owns
     tenants ||--o{ evidence : owns
-    branches ||--o{ evidence : contains
+    branches ||--o{ evidence : "scopes"
     tenants ||--o{ entities : owns
     entities ||--o{ entity_aliases : "aliased by"
     tenants ||--o{ relations : owns
@@ -185,15 +189,15 @@ erDiagram
         text name UK
     }
     branches {
-        uuid tenant_id PK_FK
+        uuid tenant_id PK
         text name PK "default 'main'"
         text from_branch
         text kind "TEXT default 'scratch' (no enum)"
         bytea head "commit pointer"
     }
     evidence {
-        uuid tenant_id PK_FK
-        text branch PK_FK
+        uuid tenant_id PK
+        text branch PK
         bytea cid PK "content address"
         uuid user_id
         uuid session_id
@@ -205,11 +209,9 @@ erDiagram
         text modality "default 'text'"
         jsonb metadata
         smallint trust_tier
-        text_arr capability_tags
         smallint sensitivity
         jsonb signed_provenance
         jsonb access_policy
-        vector embedding "1024 · HNSW"
         bool erased "crypto-erase flag"
     }
     assertions {
@@ -217,38 +219,29 @@ erDiagram
         text subject
         text predicate
         text object
-        jsonb scope
         real confidence
-        jsonb calibration
         real calibrated_confidence
         real salience
         timestamptz valid_from "bitemporal"
         timestamptz valid_to
         timestamptz transaction_time
         timestamptz recorded_time
-        timestamptz expired_at
         uuid justification_id
         text status "candidate|active|superseded|contested|quarantined|retracted"
         int version
         uuid superseded_by
-        vector embedding "1024 · HNSW"
-        tsvector lexeme "FTS · GIN"
-        timestamptz last_accessed
-        int access_count
     }
     justifications {
         uuid id PK
         uuid assertion_id FK
-        bytea_arr evidence_cids
         text rule
-        uuid_arr dependency_ids
         text kind "default 'support'"
         real hypothesis_prob
     }
     contradictions {
         uuid id PK
-        uuid a FK "→ assertions.id"
-        uuid b FK "→ assertions.id"
+        uuid a FK "assertions.id"
+        uuid b FK "assertions.id"
         timestamptz detected_at
         text status "default 'open'"
         text resolution
@@ -266,8 +259,8 @@ erDiagram
         uuid id PK
         text canonical
         text type
+        text summary
         real salience
-        vector embedding "1024"
     }
     self_model {
         bigserial id PK
@@ -277,19 +270,17 @@ erDiagram
         tstzrange metric_window
     }
     conformal_calibration {
-        uuid tenant_id PK_FK
+        uuid tenant_id PK
         text memory_type PK
-        real_arr scores
         real target_coverage
     }
     audit_log {
         bigserial id PK
         uuid tenant_id "NULL allowed"
         text actor
-        text op "action verb"
+        text op
         uuid target_id
         smallint trust_tier
-        text_arr capability_tags
         jsonb diff
         timestamptz at
     }
@@ -299,12 +290,12 @@ erDiagram
 
 | Table | Purpose | Notable columns (verbatim) |
 |---|---|---|
-| **tenants** | Multi-tenant isolation root | `id`, `name` (unique) |
-| **branches** | Branchable memory ledger per tenant | PK `(tenant_id, name)`, `from_branch`, `kind` (free TEXT, default `'scratch'`), `head` |
+| **tenants** | Multi-tenant isolation root (no RLS — has no `tenant_id`) | `id`, `name` (unique) |
+| **branches** | Branchable memory ledger per tenant | PK `(tenant_id, name)`, `from_branch`, `kind` (free TEXT, default `'scratch'` — no check-constraint enum), `head` |
 | **evidence** | Content-addressed, append-only raw log — *the backbone* | PK `(tenant_id, branch, cid)`, `user_id`, `session_id`, `actor`, `source_type`, `source_identity`, `content`, `content_pointer`, `modality`, `metadata`, `trust_tier`, `capability_tags[]`, `sensitivity`, `signed_provenance`, `access_policy`, `embedding VECTOR(1024)`, `erased` |
 | **assertions** | Bitemporal belief statements (typed projection) | `subject/predicate/object`, `scope`, `confidence`, `calibration`, `calibrated_confidence`, `salience`, `valid_from/to`, `transaction_time`, `recorded_time`, `expired_at`, `justification_id`, `status`, `version`, `superseded_by`, `source_evidence_cids[]`, `embedding`, `lexeme`, `last_accessed`, `access_count` |
-| **justifications** | Truth-maintenance support/attack links | `assertion_id`, `evidence_cids[]`, `rule`, `dependency_ids[]`, `kind` (default `support`), `hypothesis_prob` |
-| **entities** | Canonical entities extracted from evidence | `canonical`, `type`, `summary`, `salience`, `embedding`, `source_evidence_cids[]` |
+| **justifications** | Truth-maintenance support/attack links | `assertion_id` (FK → `assertions.id`), `evidence_cids[]`, `rule`, `dependency_ids[]`, `kind` (default `support`), `hypothesis_prob` |
+| **entities** | Canonical entities extracted from evidence | `canonical`, `type`, `summary`, `salience`, `embedding`, `source_evidence_cids[]`, `access_policy` |
 | **entity_aliases** | alias → canonical entity map | PK `(tenant_id, alias)` → `entity_id` |
 | **relations** | Typed graph edges (source—predicate→target) | `source`, `predicate`, `target`, `confidence`, `weight`, `valid_from/to`, `recorded_at`, `expired_at`, `justification_id`, `status` (`active\|superseded\|retracted`), `source_evidence_cids[]` |
 | **graph_ppr_cache** | Recursive-PPR result cache (deep read path) | PK `(tenant_id, branch, seed_hash, as_of_key)`, `as_of`, `relation_fingerprint`, `cache_depth`, `hits` (JSONB), `refreshed_at` |
@@ -320,15 +311,25 @@ erDiagram
 | **merges** | Branch merge reports | `frm`, `into_`, `report` (JSONB), `at` |
 | **deletion_log** | Right-to-be-forgotten propagation ledger | `evidence_cid`, `requested_by`, `propagated` (JSONB), `at` |
 | **conformal_calibration** | Score arrays behind the ECE / abstention SLO | PK `(tenant_id, memory_type)`, `scores REAL[]`, `target_coverage`, `updated_at` |
-| **audit_log** | Immutable mutation trail (NULL-tenant rows visible) | `actor`, `op` (action verb), `target_id`, `trust_tier`, `capability_tags[]`, `diff`, `at` |
+| **audit_log** | Immutable mutation trail (NULL-tenant rows visible) | `actor`, `op`, `target_id`, `trust_tier`, `capability_tags[]`, `diff`, `at` |
 | **runtime_jobs** | Durable async job queue | `kind`, `payload`, `status` (`queued\|running\|retry\|complete\|dead`), `attempts`, `max_attempts`, `last_error`, `result` |
 | **runtime_state** | Durable runtime KV state | PK `(tenant_id, key)`, `payload` (JSONB) |
 
 **Cross-cutting design**
-- **Content addressing:** `evidence.cid` is produced by `ids.content_cid(content, metadata=None)` (SHA-256 over `canonical_json` of `{content, metadata}`), giving dedup + tamper-evidence. Projections cite `source_evidence_cids[]`, so every belief is traceable to raw evidence.
-- **Bitemporal:** `valid_from / valid_to` (plus `transaction_time` / `recorded_time` / `expired_at` on assertions) enable `as_of()` time-travel queries.
-- **Erasure:** `evidence.erased` is a crypto-shred marker (right-to-be-forgotten) — the row stays for ledger integrity, the *plaintext key* is destroyed via Vault transit, and the propagation is logged in `deletion_log`.
-- **Indexes that drive retrieval:** `evidence_embedding_hnsw` and `assertions_embedding_hnsw` (HNSW, `vector_cosine_ops`); `assertions_lexeme_gin` (GIN over the FTS `lexeme`); `assertions_current` (btree current-truth lookup on `(tenant_id, subject, predicate, branch, status, valid_from DESC)`).
+
+- **Content addressing vs. embedding — distinct hashes.** `evidence.cid` is produced by
+  `ids.content_cid(content, metadata=None)` = `sha256(canonical_json({"content":…,"metadata":…}))`
+  (the raw-bytes variant is `ids.bytes_cid(data)`), giving dedup + tamper-evidence. The **local fallback
+  embedding** uses **BLAKE2b** per-token (`text.hashing_embedding`, §9) — a *different* algorithm from the
+  SHA-256 CID. Projections cite `source_evidence_cids[]`, so every belief is traceable to raw evidence.
+- **Bitemporal:** `valid_from / valid_to` (plus `transaction_time` / `recorded_time` / `expired_at` on
+  assertions) enable `as_of()` time-travel queries.
+- **Erasure:** `evidence.erased` is a crypto-shred marker (right-to-be-forgotten) — the row stays for
+  ledger integrity, the *plaintext key* is destroyed via Vault transit, and the propagation is logged in
+  `deletion_log`.
+- **Indexes that drive retrieval:** `evidence_embedding_hnsw` and `assertions_embedding_hnsw`
+  (HNSW, `vector_cosine_ops`); `assertions_lexeme_gin` (GIN over the FTS `lexeme`); `assertions_current`
+  (btree current-truth lookup on `(tenant_id, subject, predicate, branch, status, valid_from DESC)`).
 
 ---
 
@@ -342,14 +343,18 @@ Each pass binds to a provider — deterministic/local or a pluggable model-backe
 | 1 | `replayer` | `deterministic_priority_replay` | deterministic |
 | 2 | `extractor` | strategy provider | pluggable (model-adapter or local) |
 | 3 | `resolver` | strategy provider | pluggable |
-| 4 | `belief_reviser` | `promotion_gate` (AGM revision) | deterministic |
+| 4 | `belief_reviser` | AGM revision (per-candidate, gated) | deterministic |
 | 5 | `skill_inducer` | strategy provider | pluggable |
 | 6 | `lesson_distiller` | strategy provider | pluggable |
-| 7 | `summarizer` | strategy provider (`deterministic_raptor_tree` by default) | pluggable; builds a RAPTOR tree |
+| 7 | `summarizer` | `deterministic_first_sentence` (class default) | pluggable; builds a RAPTOR hierarchy (the multi-level result is labelled `deterministic_raptor_tree`) |
 | 8 | `forgetter` | `fidelity_lifecycle_policy` | deterministic |
 | 9 | `embedder` | `deterministic_hashing_embedding` | deterministic (or HTTP provider) |
 | 10 | `promotion_gate` | `protected_regression_gate` | deterministic |
 | 11 | `user_model_updater` | `latent_user_model_updater` | deterministic |
+
+**Per-candidate scope.** `extractor` and `resolver` each run **once** over the prioritized evidence set
+to produce the candidate set; only `belief_reviser` (via `run_job()` + the promotion gate) is applied
+**per candidate**, gating each fact individually before the durable write.
 
 ```mermaid
 flowchart LR
@@ -357,7 +362,7 @@ flowchart LR
     GATE -->|reject| X1["dropped"]
     GATE -->|quarantine| QZ["quarantine pool (data-only)"]
     GATE -->|pass| ING["ingestion.py · build Evidence"]
-    ING --> CID["ids.content_cid()<br/>content address"]
+    ING --> CID["ids.content_cid()<br/>SHA-256 content address"]
     ING --> STORE["storage.py · externalize large<br/>payloads → content_pointer"]
     CID --> EV[("evidence row<br/>append-only")]
     EV --> ENQ["queue.py · enqueue CONSOLIDATE job"]
@@ -365,10 +370,13 @@ flowchart LR
 
     subgraph PASS["11-pass consolidation — bounded by MutationRailBudget + §31 cadence"]
         direction TB
-        P1["1 · replayer<br/>(deterministic priority replay)"] --> P2["2 · extractor<br/>candidate assertions"]
-        P2 --> P3["3 · resolver<br/>entities / aliases"]
-        P3 --> P4["4 · belief_reviser<br/>AGM: ADD·UPDATE·SUPERSEDE·CONTEST"]
-        P4 --> P5["5 · skill_inducer<br/>procedures"]
+        P1["1 · replayer<br/>(deterministic priority replay)"] --> P2["2 · extractor<br/>candidate assertions (once)"]
+        P2 --> P3["3 · resolver<br/>entities / aliases (once)"]
+        P3 --> PC
+        subgraph PC["per-candidate · run_job + gate"]
+            P4["4 · belief_reviser<br/>AGM: ADD·UPDATE·SUPERSEDE·CONTEST"]
+        end
+        PC --> P5["5 · skill_inducer<br/>procedures"]
         P5 --> P6["6 · lesson_distiller<br/>lessons"]
         P6 --> P7["7 · summarizer<br/>RAPTOR hierarchical tree"]
         P7 --> P8["8 · forgetter<br/>fidelity demotion / decay"]
@@ -384,9 +392,10 @@ flowchart LR
     ACT --> AUD[("audit_log")]
 ```
 
-The per-pass mutation budget is the `MutationRailBudget` dataclass: `supersessions_allowed` and
-`prunes_allowed` are computed from `max_supersession_rate` and `max_prune_fraction_per_pass` against the
-active fact / memory counts, so the rates below are enforced numerically rather than advisorily.
+The per-pass mutation budget is the `MutationRailBudget` dataclass (`consolidation.py`):
+`supersessions_allowed` and `prunes_allowed` are computed from `max_supersession_rate` and
+`max_prune_fraction_per_pass` against the active fact / memory counts, so the rates below are enforced
+numerically rather than advisorily.
 
 **Key invariant rails enforced here** (`§31`, all **7/7 ENFORCED**):
 
@@ -408,10 +417,10 @@ active fact / memory counts, so the rates below are enforced numerically rather 
 flowchart LR
     Q["query (+ tenant/user/session, auth)"] --> AUTH["oidc_jwks.py + security.py<br/>verify JWT → session claims"]
     AUTH --> ROUTE{"engine.route()<br/>fast | deep"}
-    ROUTE --> EMB["embed query<br/>(provider or hashing fallback)"]
+    ROUTE --> EMBQ["embed query<br/>(provider or BLAKE2b hashing fallback)"]
 
-    EMB --> HYB
-    subgraph HYB["hybrid retrieval (parallel)"]
+    EMBQ --> HYB
+    subgraph HYB["hybrid retrieval (dense → lexical → graph)"]
         direction TB
         LEX["lexical FTS<br/>(Postgres tsvector / text.lexical_score)"]
         VEC["vector ANN<br/>(pgvector HNSW · cosine)"]
@@ -422,15 +431,21 @@ flowchart LR
     RR --> CALc{"calibration.py<br/>conformal threshold<br/>should_abstain?"}
     CALc -->|abstain| ABS["return abstention<br/>(thin / contested evidence)"]
     CALc -->|accept| ENF["engine read path<br/>policy.max_sensitivity ≤ 3<br/>+ access_policy JSONB<br/>+ security.sanitize_retrieved_text"]
-    ENF --> OUT["RetrievalResult<br/>hits + provenance CIDs<br/>+ confidence + route_plan"]
+    ENF --> OUT["RetrievalResult<br/>hits + provenance + confidence + explain"]
 ```
 
-Retrieval is **fail-closed**. Read-side confidentiality is enforced on the **engine read path**
-(`engine.py` / `postgres_engine.py`) against `policy.max_sensitivity` (default ceiling **3**) and each
-row's `access_policy` JSONB; untrusted retrieved text is sanitized to **data-only** via
-`security.sanitize_retrieved_text` so it can never be executed as an instruction (R6). Every hit carries
-its `source_evidence_cids`, so answers are auditable. *(Note: `guard.py` is **not** part of this path — it
-is the §25 evaluation anti-degradation guard; see §2.)*
+Retrieval is **fail-closed**. Routing is computed by the standalone `engine.route()` → `RoutePlan` *before*
+dispatch (it is **not** embedded in `RetrievalResult.explain`). Read-side confidentiality is enforced on
+the **engine read path** (`engine.py` / `postgres_engine.py`) against `policy.max_sensitivity` (default
+ceiling **3**) and each row's `access_policy` JSONB; untrusted retrieved text is sanitized to **data-only**
+via `security.sanitize_retrieved_text` so it can never be executed as an instruction (R6).
+
+Each retrieval **`Hit`** (`models.py`) has `kind ∈ {evidence, assertion, relation, preference}` and carries
+a **`provenance`** list of supporting evidence CIDs (the underlying projection rows separately carry
+`source_evidence_cids`). The `RetrievalResult.to_dict()` exposes top-level `query / hits / confidence`
+(a scalar float) `/ abstained / explain`; the structured firing **channels** and **adapters** live nested
+under `explain`. *(Note: `guard.py` is **not** part of this path — it is the §25 evaluation
+anti-degradation guard; see §2.)*
 
 ---
 
@@ -447,8 +462,8 @@ flowchart TB
     end
 
     Q --> H["jobs.py · RuntimeJobHandlers"]
-    H --> JT["7 job kinds"]
-    JT --> C1["consolidate"]
+    H --> JT["job kinds"]
+    JT --> C1["consolidate_evidence"]
     JT --> C2["calibrate (tune ECE)"]
     JT --> C3["lifecycle_sweep"]
     JT --> C4["eval_suite"]
@@ -465,16 +480,17 @@ flowchart TB
     FT -. "utility < threshold demotes one tier<br/>(must_keep / STATISTICAL_TRACE never demote)" .-> FT
 ```
 
-- **Durable state** persists via `postgres_runtime_state.py`, which `CREATE`s the canonical
-  **`runtime_state`** (key/value JSONB) table and reads/writes the existing `runtime_jobs`, `eval_cases`,
+- **Durable state** persists via `postgres_runtime_state.py`, which **`CREATE`s only** the canonical
+  **`runtime_state`** (key/value JSONB) table and reads/writes the **existing** `runtime_jobs`, `eval_cases`,
   `preferences`, `trajectories`, `lessons`, `procedures`, and `user_latent` tables — so workers survive
-  restarts and scale to multiple nodes. `runtime_state.py` is the in-process equivalent. *(There are no
-  `mnemosyne_*` job/lifecycle/calibration tables; the only `mnemosyne_*` identifiers are the
-  `mnemosyne_current_tenant()` function and the RLS policy names.)*
+  restarts and scale to multiple nodes. `runtime_state.py` is the in-process equivalent. *(There are **no**
+  `mnemosyne_queue_jobs` / `mnemosyne_lifecycle_state` / `mnemosyne_calibration_sets` /
+  `mnemosyne_self_model_records` / `mnemosyne_observability_counters` tables; the only `mnemosyne_*`
+  identifiers are the `mnemosyne_current_tenant()` function and the RLS policy names.)*
 - **Learning loop:** `learning.py` logs trajectories → attributes failures → induces **lessons/procedures**;
   `self_optimization.py` searches policy variants (retrieval weights, consolidation cadence, calibration
-  thresholds, demotion threshold) in **shadow mode**; `parametric.py` proposes a learned promotion boundary
-  with rollback rails.
+  thresholds, demotion threshold) in **shadow mode**, gated by `within_invariant_rails(...)`;
+  `parametric.py` proposes a learned promotion boundary with rollback rails.
 
 ---
 
@@ -497,31 +513,44 @@ flowchart TB
     end
 
     subgraph PROV["Provenance & key custody"]
-        VAULT["Vault transit · wrap / unwrap / rotate / shred"] --> KM["providers · CommandKeyManager"]
+        VAULT["Vault transit · wrap / unwrap / rotate / shred"] --> KM["storage.py · CommandKeyManager"]
         C2PA["c2patool · media manifests"] --> CV["provenance.py · C2paToolVerifier"]
         GIT["git history = human source-of-record"] --> ST["source_truth.py"]
         SP["signed_provenance JSONB on evidence"] --> SPV["provenance.py · SignedProvenanceVerifier"]
     end
 
-    PRIV["privacy.py · ErasureMode<br/>logical (reversible) + crypto-shred (one-way)"]
+    PRIV["privacy.py · ErasureMode<br/>TOMBSTONE_RECOMPUTE / HARD_DELETE_LEGAL"]
     KM --> PRIV
 ```
 
-- **Roles** (`security.py`: `WriteRole = Literal["reader", "agent", "consolidator", "operator"]`). Authorization is mediated by an `OidcAuthorizationPolicy` that maps the OIDC token to one of these four roles. `consolidator`-only and `operator`-only operations are enforced (e.g. branch promotion and destructive ops require `consolidator`/`operator` plus a trust floor).
-- **Trust model** (`security.TrustTier`, an `IntEnum`, **lower = more trusted**, monotonic per R4):
+- **Roles** (`security.py`: `WriteRole = Literal["reader", "agent", "consolidator", "operator"]` — exactly
+  **four** roles; there is no "viewer"). Authorization is mediated by an `OidcAuthorizationPolicy` that maps
+  the OIDC token to one of these four roles. `consolidator`-only and `operator`-only operations are enforced
+  (e.g. branch promotion and destructive ops require `consolidator`/`operator` plus a trust floor).
+- **Trust model** (`security.TrustTier`, an `IntEnum` **0–5 ladder**, **lower = more trusted**, monotonic
+  per R4). Belief and branch writes require ≥ `NORMAL` (3):
 
   | Tier | Aliases |
   |--:|---|
-  | 0 | `DIRECT_USER` / `USER_AUTHORED` / `OPERATOR` |
+  | 0 | `DIRECT_USER` / `USER_AUTHORED` / `OPERATOR` *(most trusted)* |
   | 1 | `VERIFIED` |
   | 2 | `AUTHENTICATED` |
-  | 3 | `NORMAL` *(default for ingestion / consolidation)* |
+  | 3 | `NORMAL` *(default for ingestion / consolidation; belief & branch write floor)* |
   | 4 | `LOW` |
-  | 5 | `UNTRUSTED_EXTERNAL` / `UNTRUSTED` |
+  | 5 | `UNTRUSTED_EXTERNAL` / `UNTRUSTED` *(least trusted)* |
 
-- **Sensitivity** is a plain `SMALLINT` (default `0`) on evidence/assertions; the read ceiling is `policy.max_sensitivity` (default **3**). There is no named `S0…S4` scale.
-- **Taint:** content tagged `data-only` / `no-write-authority` / `sanitize-as-data` / `quarantined` is stripped of write authority (`security.is_write_tainted`) — data can never author a write regardless of role or trust (I11).
-- **Chain of custody:** every evidence item can carry `signed_provenance` (manifest + signer + signature + timestamp), verified by `provenance.SignedProvenanceVerifier`; media is verified via C2PA (`provenance.C2paToolVerifier` → `c2patool`); keys are wrapped by Vault transit so erasure = destroying the key.
+- **Sensitivity** is a plain `SMALLINT` (default `0`) on evidence/assertions; the read ceiling is
+  `policy.max_sensitivity` (default **3**). There is no named `S0…S4` scale.
+- **Taint:** content tagged `data-only` / `no-write-authority` / `sanitize-as-data` / `quarantined` is
+  stripped of write authority (`security.is_write_tainted`) — data can never author a write regardless of
+  role or trust (I11).
+- **Erasure:** `privacy.ErasureMode` has exactly two members — `TOMBSTONE_RECOMPUTE` (reversible logical
+  erasure) and `HARD_DELETE_LEGAL` (one-way) — implemented as crypto-shred via Vault transit (destroying the
+  key) with propagation logged in `deletion_log`.
+- **Chain of custody:** every evidence item can carry `signed_provenance` (manifest + signer + signature +
+  timestamp), verified by `provenance.SignedProvenanceVerifier`; media is verified via C2PA
+  (`provenance.C2paToolVerifier` → `c2patool`); keys are wrapped by Vault transit through
+  `storage.CommandKeyManager`.
 
 ---
 
@@ -539,7 +568,7 @@ flowchart TB
 
     subgraph providers["infra/docker-compose.providers.yml"]
         KC["keycloak 25.0<br/>8089 → 8080"]
-        VA["vault 1.15+<br/>8211 → 8200 (in-container :8200)"]
+        VA["vault 1.17<br/>8211 → 8200 (in-container :8200)"]
         C2["c2pa builder (c2patool)"]
     end
 
@@ -554,10 +583,11 @@ flowchart TB
     APP -. verify .-> C2
 ```
 
-**Host → container port mapping:** Postgres `54329→5432`, Keycloak `8089→8080`, Vault `8211→8200`.
-Vault listens on `0.0.0.0:8200` *inside* the container (dev mode), but operators connect on the published
-host port **8211** — `setup-vault.sh` defaults to `VAULT_ADDR=http://localhost:8211`. Set `VAULT_ADDR`
-accordingly.
+**Host → container port mapping:** Postgres `54329→5432`, embedding service `8000`, Keycloak `8089→8080`,
+Vault `8211→8200`. Vault listens on `0.0.0.0:8200` *inside* the container (dev mode), but operators connect
+on the published host port **8211** — `setup-vault.sh` defaults to `VAULT_ADDR=http://localhost:8211`. Set
+`VAULT_ADDR` accordingly. Provider images are pinned: `quay.io/keycloak/keycloak:25.0` and
+`hashicorp/vault:1.17`.
 
 **Infra lifecycle scripts** (`infra/scripts/`): `up.sh` / `down.sh`, `setup-all.sh` (seed all three
 providers idempotently), per-provider `setup-keycloak.sh` / `setup-vault.sh` / `setup-c2pa.sh`, and
@@ -574,15 +604,19 @@ providers idempotently), per-provider `setup-keycloak.sh` / `setup-vault.sh` / `
 | **Reranker** | `HttpReranker` (cross-encoder) | `LocalSimilarityReranker` (lexical + dense cosine) | `MNEMOSYNE_RERANKER_URL` |
 | **LexicalRetriever** | `CommandLexicalRetriever` (e.g. ParadeDB/BM25 or native Postgres FTS) | engine `text.py` `lexical_score` | — |
 | **GraphRetriever** | `CommandGraphRetriever` (e.g. Apache AGE) | engine native recursive PPR (`graph.py`) | — |
-| **ObjectKeyProvider (KMS)** | `CommandKeyManager` (Vault transit) | *none — external only* | Vault addr/token |
-| **C2PA / provenance** | `C2paToolVerifier` (c2patool) | `SignedProvenanceVerifier` (JSON) — both in `provenance.py` | `MNEMOSYNE_C2PA_TOOL` |
+| **ObjectKeyManager (KMS)** | `CommandKeyManager` (Vault transit) | *none — external only* | Vault addr/token |
+| **C2PA / provenance** | `C2paToolVerifier` (c2patool) | `SignedProvenanceVerifier` (JSON) | `MNEMOSYNE_C2PA_TOOL` |
 
-The fallback embedding is `text.hashing_embedding(text, dims=256)` — **BLAKE2b** per-token, 256-d by default
-(`retrieval.HashingEmbeddingProvider.dims = 256`). The production schema column is `VECTOR(1024)`; the
-configured production dimensionality (1024) is supplied by a real embedding provider, **not** the hashing
-fallback. All command adapters are **shell-free**: JSON on stdin, JSON on stdout, no secret-bearing argv.
-The registry (`providers/__init__.py`, `retrieval.retrieval_adapters_from_env()`) means **the engine runs
-fully offline by default**; production swaps in real endpoints without touching engine code.
+*Source:* `providers/__init__.py` (`ProviderRegistry`) and `retrieval.py` (embedding/reranker/lexical/graph
+adapters); `storage.py` (`CommandKeyManager`, KMS); `provenance.py` (`C2paToolVerifier` /
+`SignedProvenanceVerifier`, C2PA).
+
+The fallback embedding is `text.hashing_embedding(text, dims=256)` — **BLAKE2b** per-token, **256-d** by
+default (`retrieval.HashingEmbeddingProvider.dims = 256`). The production schema column is `VECTOR(1024)`;
+the production dimensionality (1024) is supplied by a real embedding provider, **not** the hashing fallback.
+All command adapters are **shell-free**: JSON on stdin, JSON on stdout, no secret-bearing argv. The registry
+means **the engine runs fully offline by default**; production swaps in real endpoints without touching
+engine code.
 
 ---
 
@@ -620,14 +654,17 @@ tests self-skip when no live DB.
 | G2 context-lift @ ≤10% tokens | ≥ +0.15 | **+0.208 @ 7% tokens** | `eval/datasets/v2/v2_judge.py` |
 | Poison-block (G7) | ≥ 0.95 | **1.0** (59-attack corpus) | `eval/harness/synthetic.py` |
 | ECE (calibration) | ≤ 0.05 | **0.0063** | `eval/calibration/runner.py` → `eval/calibration/report.json` |
-| Fast-path P95 latency | ≤ 300–400 ms | **149.5 ms** (warm + serial) | `eval/latency_warm/bench_warm.py` |
+| Fast-path P95 latency | ≤ 300–400 ms | **149.5 ms** (warm + serial) | `eval/latency_warm/bench_warm.py` (default serial run) |
 
-> **Headline proof artifact:** `eval/calibration/report.json` plus the definitive runner above — **not**
-> `eval/reports/KEYSTONE_PROOF.md`. KEYSTONE_PROOF.md is a **historical/superseded** seed-level keystone run
-> (recall 0.9444, nDCG 0.9570, **ECE 0.20 which still FAILS** ≤0.05) that *exposed* the local-embedding seam
-> and the ECE/G2 gaps; ECE is policy/threshold-driven and independent of embedding quality, which is why the
-> seed run's ECE never moved. The local-embedding seam was closed 2026-06-24; the headline numbers above come
-> from the Wave-5 definitive run.
+> **Headline proof artifact:** `eval/calibration/report.json` plus the definitive runner above, summarized in
+> `docs/ROADMAP-TO-100.md` — **not** `eval/reports/KEYSTONE_PROOF.md`. `KEYSTONE_PROOF.md` is a
+> **historical / superseded** seed-level keystone run (recall 0.9444, nDCG 0.9570, **ECE 0.20, which still
+> FAILS** ≤0.05) that *exposed* the local-embedding seam and the ECE/G2 gaps; ECE is policy/threshold-driven
+> and independent of embedding quality, which is why the seed run's ECE never moved. The local-embedding seam
+> was closed 2026-06-24; the headline numbers above come from the Wave-5 definitive run, **not** from
+> `KEYSTONE_PROOF.md`. The latency figure is from the serial `bench_warm.py` run (1 client × 50 queries,
+> models loaded once); the concurrent 8-client warm run is a separate, known CPU-embed bottleneck and is not
+> the serial SLO proof.
 
 A known **non-headline** gap remains: hard-QA multi-hop **answer-synthesis** (recall/nDCG ≈ 0.625 / 0.594) —
 retrieval is strong, multi-hop synthesis is the open frontier.
@@ -663,6 +700,10 @@ capture handoff.
 | Hosted HTTP JSON-RPC | `--http` | `/mcp` + `/healthz` + `POST /session/exchange` | `serve_http` |
 | Legacy SSE | — | — | validated via `mcp-sse-soak` |
 
+The 48 tool definitions live in `mcp_tools.py` (the `TOOL_SPEC` list), which `mcp_server.py` imports and
+wraps into strict MCP `inputSchema`s (`additionalProperties: false`, `type: "object"`) via
+`_to_mcp_tool_spec()`.
+
 **Auth:** static bearer (`Authorization` / `--auth-token` / `MNEMOSYNE_MCP_TOKEN`) and/or a signed
 Mnemosyne session (header `X-Mnemosyne-Session-Token`); `--require-session` enforces session auth. The
 `/session/exchange` endpoint mints Mnemosyne sessions from OIDC tokens.
@@ -676,26 +717,27 @@ Mnemosyne session (header `X-Mnemosyne-Session-Token`); `--require-session` enfo
 | `cli.py` | 13.9K | `mneme` CLI — 91 subcommands across memory/graph/correction/branch/learning/parametric/profile/ops |
 | `postgres_engine.py` | 2.8K | Production engine: RLS, FTS, pgvector, recursive PPR, bitemporal `as_of()` |
 | `consolidation.py` | 2.0K | 11-pass background knowledge compiler + promotion gate |
-| `engine.py` | 1.8K | `MemoryEngine` Protocol + `LocalMemoryEngine`; routing; read-side sensitivity/access enforcement |
+| `engine.py` | 1.8K | `MemoryEngine` Protocol + `LocalMemoryEngine`; `route()` / `RoutePlan`; read-side sensitivity/access enforcement |
 | `mcp_server.py` | 1.6K | MCP transports (stdio shim / SDK stdio / SDK StreamableHTTP / hosted HTTP) + session exchange |
-| `mcp_tools.py` | 1.4K | 48-tool MemoryTools facade |
+| `mcp_tools.py` | 1.4K | 48-tool `MemoryTools` facade (`TOOL_SPEC`) |
 | `retrieval.py` | 1.3K | Provider adapters + deterministic local fallbacks |
-| `security.py` | 1.1K | `TrustTier`, `WriteRole`, sanitize, capability + OIDC authz enforcement |
-| `self_optimization.py` | 0.8K | Shadow-mode policy search |
+| `security.py` | 1.1K | `TrustTier` (0–5), `WriteRole` (reader/agent/consolidator/operator), sanitize, capability + OIDC authz |
+| `self_optimization.py` | 0.8K | Shadow-mode policy search (`within_invariant_rails`) |
 | `provenance.py` | 0.8K | `SignedProvenanceVerifier` + `C2paToolVerifier` (chain of custody) |
 | `jobs.py` · `queue.py` | 0.6K · 0.4K | Durable job handlers + queue |
 | `ingestion.py` | 0.6K | Ingest → evidence → enqueue |
-| `belief.py` | 0.5K | AGM belief revision (truth maintenance) |
+| `belief.py` | 0.5K | AGM belief revision + ATMS labels (`atms_label`) |
 | `parametric.py` | 0.5K | Learned promotion tier with rails |
 | `guard.py` | 0.4K | §25 evaluation anti-degradation guard (non-inferiority to no-memory baseline) |
-| `lifecycle.py` | 0.4K | Fidelity tiers + graduated forgetting |
+| `lifecycle.py` | 0.4K | Fidelity tiers + graduated forgetting (`MutationRailBudget`) |
 | `learning.py` | 0.4K | Lessons / procedures / trajectories induction |
 | `models.py` | 0.3K | Core dataclasses (Evidence / Assertion / Relation / Hit) |
+| `storage.py` | — | Content store + `CommandKeyManager` (Vault-transit KMS) |
 | `calibration.py` · `eval.py` · `benchmarks.py` | 0.2K each | Conformal calibration · seed suite · SLO benches |
-| `storage.py` · `runtime_state.py` · `postgres_runtime_state.py` | — | Content store + state persistence |
+| `runtime_state.py` · `postgres_runtime_state.py` | — | In-process + durable state persistence |
 | `gate.py` · `policy.py` · `privacy.py` · `evidence_redaction.py` · `source_truth.py` · `oidc_jwks.py` | — | Security / privacy / provenance / identity stack |
-| `providers/__init__.py` | 0.3K | Pluggable adapter registry |
+| `providers/__init__.py` | 0.3K | `ProviderRegistry` (pluggable adapter registry) |
 
 ---
 
-*Generated from a structural read of `/Users/admin/Projects/Mnemosyne` @ `main` (4cb8c80).*
+*Generated from a structural read of `/Users/admin/Projects/Mnemosyne` @ `main` (`4cb8c80`).*
