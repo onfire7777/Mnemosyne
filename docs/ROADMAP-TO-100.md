@@ -88,7 +88,7 @@ This is the **bulk of the remaining percentage** and the universal blocker on al
 
 ### TIER C — Scope-deferred (blueprint non-goals) + final sign-off
 
-- **FR-20 multimodal** (N5, post-v1) — Codex is now building it. Optional for v1.0.
+- **FR-20 multimodal** (N5, post-v1) — local image/audio/video breadth is validated; production extractor/embedder/object-store/retrieval evidence remains operator-run. Optional for v1.0.
 - **FR-21 real LoRA** (N2, optional, GPU) — overlaps B8.
 - **Final 1:1 sign-off:** re-run `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md`, flip the 10 rows Partial→Done, supersede with a v1.0 release attestation.
 
