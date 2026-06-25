@@ -12,7 +12,7 @@ This runbook is the operator handoff for flipping the remaining Tier B parity ro
   - `validation_scope.production_validated: true`
   - `validation_scope.target_environment: "production"`
   - `validation_scope.operator_asserted: true`
-- The manifest must include every command in the production release profile. The template tracks the current 28-command set from `src/mnemosyne/cli.py`.
+- The manifest must include the exact production release profile: every command in the current 28-command set from `src/mnemosyne/cli.py`, with no duplicate or unknown commands.
 
 ## Capture
 
@@ -36,9 +36,9 @@ infra/scripts/capture-production-evidence.sh \
   /secure/path/to/mnemosyne-production-evidence
 ```
 
-The `--preflight-only` command validates production scope, full command coverage,
-absence of unresolved placeholders, absence of secret-bearing CLI options, and a
-high-confidence redaction scan over the rendered manifest. It writes
+The `--preflight-only` command validates production scope, exact command
+coverage, absence of unresolved placeholders, absence of secret-bearing CLI
+options, and a high-confidence redaction scan over the rendered manifest. It writes
 `preflight.json`, `redaction-scan.json`, and a copied operator manifest, then
 exits before `deployment-soak` or `release-audit` runs. A passing preflight is
 setup proof only; it does not flip any strict-audit row to Done.

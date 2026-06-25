@@ -126,8 +126,9 @@ refuses manifests unless `validation_scope.production_validated=true`,
 `validation_scope.target_environment="production"`, and
 `validation_scope.operator_asserted=true`; rejects unresolved production
 placeholders, secret-bearing CLI options, and high-confidence secret material;
-and requires the full production release command profile before running
-`deployment-soak --evidence-dir` followed by
+and requires the exact production release command profile, with no missing,
+duplicate, or unknown commands, before running `deployment-soak --evidence-dir`
+followed by
 `release-audit --require-production-validated --require-provider-forbid-local`.
 Use `--preflight-only` to validate and copy the rendered manifest without
 running production checks; preflight output plus `redaction-scan.json` is setup

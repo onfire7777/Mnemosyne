@@ -5630,6 +5630,62 @@ def test_cli_release_audit_fails_closed_on_missing_and_local_evidence(tmp_path: 
     assert payload["provider"]["retrieval_backends"]["lexical_local"] is True
 
 
+def test_cli_release_audit_rejects_duplicate_production_commands(tmp_path: Path) -> None:
+    report_path, _manifest_path = write_release_report(
+        tmp_path,
+        commands=tuple(PRODUCTION_RELEASE_REQUIRED_COMMANDS) + ("provider-check",),
+    )
+
+    result = run_raw_cli(
+        tmp_path / "mnemosyne.json",
+        "release-audit",
+        "--soak-report",
+        str(report_path),
+        "--require-production-validated",
+    )
+    payload = json.loads(result.stdout)
+    codes = {finding["code"] for finding in payload["findings"]}
+    provider_summary = next(item for item in payload["commands"] if item["command"] == "provider-check")
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert "duplicate_required_command" in codes
+    assert provider_summary["count"] == 2
+
+
+def test_cli_release_audit_rejects_unexpected_production_commands(tmp_path: Path) -> None:
+    report_path, _manifest_path = write_release_report(tmp_path)
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    report["checks"].append(
+        release_check(
+            "custom-ops-check",
+            {
+                "ok": True,
+                "custom": True,
+            },
+        )
+    )
+    report["checks"][-1]["index"] = len(report["checks"])
+    report["manifest"]["check_count"] = len(report["checks"])
+    report["summary"]["checks"] = len(report["checks"])
+    report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+
+    result = run_raw_cli(
+        tmp_path / "mnemosyne.json",
+        "release-audit",
+        "--soak-report",
+        str(report_path),
+        "--require-production-validated",
+    )
+    payload = json.loads(result.stdout)
+    findings = [finding for finding in payload["findings"] if finding["code"] == "unexpected_production_command"]
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert len(findings) == 1
+    assert "custom-ops-check" in findings[0]["message"]
+
+
 def test_cli_release_audit_rejects_placeholder_required_command_output(tmp_path: Path) -> None:
     report_path, _manifest_path = write_release_report(tmp_path)
     report = json.loads(report_path.read_text(encoding="utf-8"))

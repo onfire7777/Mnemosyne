@@ -9655,6 +9655,20 @@ def cmd_release_audit(args: argparse.Namespace) -> None:
 
     command_summary = _release_command_summary(checks, required_commands)
     required_command_set = set(required_commands)
+    unexpected_commands = sorted(
+        {
+            command
+            for check in checks
+            if isinstance(command := check.get("command"), str) and command not in required_command_set
+        }
+    )
+    if args.require_production_validated and unexpected_commands:
+        findings.append(
+            _release_finding(
+                "unexpected_production_command",
+                "production deployment evidence contains unknown checks: " + ", ".join(unexpected_commands),
+            )
+        )
     for check in checks:
         if check.get("command") in required_command_set:
             findings.extend(_release_command_output_findings(check))
@@ -9662,6 +9676,16 @@ def cmd_release_audit(args: argparse.Namespace) -> None:
         if not row["present"]:
             findings.append(
                 _release_finding("missing_required_command", f"required deployment check {row['command']} is missing")
+            )
+        elif args.require_production_validated and row["count"] != 1:
+            findings.append(
+                _release_finding(
+                    "duplicate_required_command",
+                    (
+                        f"required deployment check {row['command']} appears {row['count']} times; "
+                        "production profile requires exactly one"
+                    ),
+                )
             )
         elif not row["ok"]:
             findings.append(

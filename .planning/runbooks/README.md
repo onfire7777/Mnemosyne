@@ -17,11 +17,11 @@ CLI commands consumed by `deployment-soak` and `release-audit`.
   default and validates the production command profile before writing.
 - `infra/scripts/capture-production-evidence.sh` - operator capture wrapper
   that validates the rendered manifest, rejects unresolved production
-  placeholders, rejects high-confidence secret material, supports
-  `--preflight-only` setup validation, runs `deployment-soak --evidence-dir`,
-  and then runs `release-audit --require-production-validated
-  --require-provider-forbid-local`. Successful preflight and capture runs write
-  `redaction-scan.json`.
+  placeholders, rejects duplicate or unknown production commands, rejects
+  high-confidence secret material, supports `--preflight-only` setup validation,
+  runs `deployment-soak --evidence-dir`, and then runs `release-audit
+  --require-production-validated --require-provider-forbid-local`. Successful
+  preflight and capture runs write `redaction-scan.json`.
 
 ## Row Runbooks
 
