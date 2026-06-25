@@ -11,7 +11,7 @@
 1. **The 70/30 completion split is SETTLED.** Do not recompute, re-score, or re-audit it.
 2. **The machine-checkable gate layer is COMPLETE.** All 28 `PRODUCTION_RELEASE_REQUIRED_COMMANDS` already have output-shape validators in `RELEASE_AUDIT_REQUIRED_OUTPUT_KEYS` (`cli.py`). **Do NOT add new `*-ops-check` gates** — they add zero parity value and re-derive the split.
 3. **Every "Partial" row is OPS SCOPE, not coding.** Closing a Partial row = run the existing gate against *real infrastructure* and capture operator evidence. If a task reads as "write code to close a Partial row," STOP — it is mis-scoped.
-4. **The only sanctioned acceptance path:** operator evidence → `deployment-soak --evidence-dir` (with `production_validated=true, target_environment=production, operator_asserted=true`) → `release-audit --require-production-validated` passes. No code change is required or wanted to flip a row Partial→Done.
+4. **The only sanctioned acceptance path:** operator evidence → `deployment-soak --evidence-dir` (with `production_validated=true, target_environment=production, operator_asserted=true`) → `release-audit --require-production-validated` passes. Use `infra/scripts/capture-production-evidence.sh` to run that path from an operator-authored production soak manifest. No code change is required or wanted to flip a row Partial→Done.
 
 If any future session is tempted to re-open the table, regenerate scores, or build another gate: that work is already done. Run infra instead.
 
