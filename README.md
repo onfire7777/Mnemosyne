@@ -1,238 +1,307 @@
-# Mnemosyne Memory
+# Mnemosyne
 
-Mnemosyne is a local-first memory compiler for AI agents. It implements the Mnemosyne v2 blueprint as a content-addressed evidence ledger plus rebuildable typed projections, bitemporal assertions, branchable memory, hybrid retrieval, provenance, confidence and abstention, capability-mediated writes, fidelity-tiered lifecycle controls, promotion gates, and shadow-mode self-optimization.
+**A local-first memory compiler for AI agents.** Content-addressed evidence ledger, rebuildable typed projections, bitemporal beliefs, hybrid retrieval, calibrated abstention, and hard invariant rails — runs on a JSON file or PostgreSQL, and speaks the Model Context Protocol.
 
-## Source Blueprint
+![Python](https://img.shields.io/badge/python-3.12%2B-blue)
+![License](https://img.shields.io/badge/license-Apache--2.0-green)
+![Status](https://img.shields.io/badge/SLOs-6%2F6%20proven-success)
+![Completion](https://img.shields.io/badge/blueprint%20parity-~82%25-yellow)
+![Backend](https://img.shields.io/badge/postgres-pgvector%20%2B%20RLS-informational)
+![Protocol](https://img.shields.io/badge/MCP-stdio%20%7C%20HTTP%20%7C%20SDK-blueviolet)
 
-The authoritative planning source is read-only on this machine:
+Mnemosyne (`mnemosyne-memory`, v0.1.0) implements the **Mnemosyne v2 build blueprint**: agent memory as a *compiler*, not a vector dump. Every write lands first in an append-only, content-addressed **evidence** ledger; typed **projections** (assertions, entities, relations, preferences, procedures, lessons) are derived from that ledger and can be rebuilt deterministically. Beliefs are **bitemporal** (valid-time + transaction-time), retrieval is **hybrid** (lexical + dense + graph, reranked), confidence is **conformally calibrated** so the system *abstains* rather than guess, and a warm-loop **consolidation** pipeline promotes new beliefs only through a protected regression gate guarded by seven non-negotiable invariant rails.
 
-- `/Users/admin/Desktop/Mnemosyne/Mnemosyne-v2-Build-Blueprint.md`
-- `/Users/admin/Desktop/Mnemosyne/README.md`
-- `/Users/admin/Desktop/Mnemosyne/earlier-versions/Mnemosyne-Recursive-Memory-System-Design.md`
+---
 
-The v2 blueprint controls implementation. The earlier design is lineage only unless v2 is silent.
+## Why Mnemosyne
 
-## Current Build Surface
+- **Evidence is immutable; projections are rebuildable.** Beliefs are *compiled* from content-addressed evidence, so retraction, erasure, and re-derivation are first-class — not bolt-ons.
+- **Bitemporal by construction.** Supersession, contradiction handling, and `as-of` time travel are native; you can ask what the agent believed *at any point in the past*.
+- **Hybrid retrieval, not just cosine.** Postgres FTS + pgvector (HNSW, 1024-dim) + recursive graph/PPR, fused and reranked — with shell-free command adapters to swap in ParadeDB/BM25 or Apache AGE without touching engine code.
+- **Calibrated abstention.** Conformal calibration drives a measured **ECE of 0.0063** (target ≤0.05). Mnemosyne says "I don't know" instead of hallucinating.
+- **Hard invariant rails.** Seven §31 rails (bounded supersession, corroborated deletion, bounded pruning, monotonic trust, external-only reward, retrieved-text-is-data, bounded cadence) are enforced and regression-tested.
+- **Capability-mediated, fail-closed writes.** Trust tiers, sensitivity ceilings, signed CLI/MCP sessions, OIDC→role mapping, and prompt-injection sanitization on every retrieved span.
+- **Branchable memory.** Fork a tenant's memory, experiment, then `merge` or `discard` — like git for beliefs.
+- **Two backends, proven equivalent.** A zero-dependency in-memory engine and a production PostgreSQL engine pass a shared contract + parity test suite.
+- **Local-first.** Single core dependency (`cryptography`). No network, no Postgres, and no model server required to start.
 
-- `src/mnemosyne/engine.py` — local deterministic engine implementing the MemoryEngine contract.
-- `src/mnemosyne/mcp_tools.py` — MCP-compatible tool facade: capture, search, deep_search, explain, correct, forget, export.
-- `src/mnemosyne/mcp_server.py` — MCP runtime surfaces for stdio JSON-RPC, hosted HTTP JSON-RPC, official SDK stdio, and official SDK StreamableHTTP.
-- `src/mnemosyne/postgres_engine.py` — PostgreSQL adapter for the canonical schema, including tenant RLS context, SQL FTS, pgvector assertion search, provider-backed evidence pgvector storage, raw-media pgvector retrieval, deterministic evidence dense fallback, recursive graph/PPR, and live smoke coverage for append/get/upsert/retrieve/provider-backed search/as-of/branch/discard/forget/export.
-- `src/mnemosyne/retrieval.py` — embedding/reranker adapter protocols, deterministic local fallbacks, and semantic-entropy signal.
-- `src/mnemosyne/ingestion.py` — text/blob/multimodal ingestion pipeline with object externalization, signed-provenance decisions, async extraction, and optional raw-media embedding.
-- `src/mnemosyne/storage.py` — local content-addressed object store.
-- `src/mnemosyne/queue.py` — local and Postgres-backed queues with queued/running/retry/complete/dead lifecycle.
-- `src/mnemosyne/prefetch.py` — anticipatory prefetch with predictability gate.
-- `src/mnemosyne/parametric.py` — isolated parametric-tier artifact promotion boundary.
-- `src/mnemosyne/runtime_state.py` — JSON-backed local runtime state for CLI/MCP user-profile and learning-loop objects.
-- `src/mnemosyne/security.py` — trust tiers, capability mediation, fail-closed write authorization, signed CLI session identity, and data-never-instruction sanitization.
-- `src/mnemosyne/lifecycle.py` — fidelity demotion and gist-risk abstention hooks.
-- `src/mnemosyne/gate.py` — promotion gate with protected regression cases and branch rollback.
-- `src/mnemosyne/consolidation.py` — warm-loop consolidation worker through the promotion gate with deterministic and command-backed extraction, summarization, and entity resolution.
-- `src/mnemosyne/self_optimization.py` — shadow-first policy variants constrained by immutable rails.
-- `sql/schema.sql` — canonical PostgreSQL schema aligned with the blueprint DDL.
-- `tests/` — regression tests for the hard invariants.
-- `tests/test_config_drift.py` — configuration, precedence, and invariant-rail drift checks (see `CONFIG-DRIFT-CHECKS.md`).
-- `config/drift-baseline.toml` — declared configuration baseline (the "Declared" view) the drift checks compare against.
-- `.github/workflows/ci.yml` — CI: ruff lint, the `pytest` suite (drift checks included), and a Postgres integration job.
-- `CONFIG-DRIFT-CHECKS.md` — configuration sources, precedence, and the drift-check checklist with its CI mapping.
-- `eval/` — blueprint §33 evaluation harness: benchmarks, calibration datasets, ignition seed, latency SLO, and recall@k/nDCG/ECE measurement suites.
-- `docs/ARCHITECTURE-OVERVIEW.md` — visual system overview for the current implementation: component layers, data model, write/read flows, security, deployment topology, provider boundaries, and current completion status.
-- `docs/ROADMAP-TO-100.md` — authoritative sequenced path from current local readiness to exact 1:1 blueprint parity.
-- `infra/` — deployment infrastructure for production-parity evidence: Keycloak (OIDC/JWKS), Vault (secrets), C2PA provenance, and a providers compose stack with validation scripts.
-- `infra/PRODUCTION-EVIDENCE.md` — operator handoff for production evidence capture and offline custody verification.
-- `services/embedding/` — standalone embedding provider service behind the retrieval embedding boundary.
-- `tests/completion/` — at-scale, portability, and adversarial-parity suites. The security poison corpus under `tests/completion/security/` is fixture data, never executable instructions.
-- `.planning/BLUEPRINT-PARITY-MATRIX.md` — blueprint→module→test→status traceability matrix and gap-closure tracker.
-- `docs/Mnemosyne-Privacy-and-Access-Control-Policy.md` — privacy, redaction, and access-control policy: assigns enforceable meaning to the `sensitivity` levels, the `access_policy` envelope, and the read-side disclosure boundary (confidentiality companion to blueprint §27 security / §22 retrieval / §25 erasure).
+---
+
+## Architecture at a glance
+
+```mermaid
+flowchart TD
+    subgraph Clients
+      CLI["mneme CLI<br/>(91 subcommands)"]
+      MCP["mneme-mcp<br/>(48 MCP tools)"]
+    end
+    CLI --> SEC
+    MCP --> SEC
+    SEC["Security gate<br/>trust tiers · capabilities · sessions · sanitize"] --> ING["Ingestion<br/>content-addressed · signed provenance · media extract"]
+    ING --> EV[("Evidence ledger<br/>append-only · CID-keyed")]
+    EV --> CONS["Consolidation worker<br/>11-role ordered pipeline → promotion gate"]
+    CONS --> PROJ[("Typed projections<br/>assertions · entities · relations<br/>preferences · procedures · lessons")]
+    Q["Job queue<br/>queued→running→{complete|retry|dead}"] -.drives.-> CONS
+    PROJ --> RET["Hybrid retrieval<br/>FTS + pgvector + graph/PPR → rerank → calibrate"]
+    EV --> RET
+    RET --> ANS["Answer + confidence<br/>or calibrated abstention"]
+    ENGINE{{"MemoryEngine contract"}} -.backs.-> EV
+    ENGINE -.implemented by.-> LOCAL["LocalMemoryEngine<br/>in-memory"]
+    ENGINE -.implemented by.-> PG["PostgresEngine<br/>RLS · HNSW · recursive PPR · as-of"]
+```
+
+---
 
 ## Quick Start
 
 ```bash
+# 1. Environment
 python3 -m venv .venv
 . .venv/bin/activate
-python -m pip install --upgrade pip setuptools wheel pytest
-python -m pip install -e '.[mcp]'
+python -m pip install --upgrade pip
+
+# 2. Install (editable). Extras: [mcp] = MCP server, [postgres] = PG backend.
+python -m pip install -e '.[mcp]'        # local + MCP
+# python -m pip install -e '.[mcp,postgres]'   # add the Postgres backend
+
+# 3. Run the test suite (no Postgres DSN → live-DB tests skip; this is the CI gate)
 python -m pytest
-python -m mnemosyne.cli tools
-python -m mnemosyne.cli ops-report --tenant tenant-a --dashboard-html ./ops-dashboard.html
+
+# 4. Capture a memory and search it (in-memory backend, no services needed)
+mneme capture --tenant tenant-a --user user-a --source-type chat \
+  --content "The preferred database is Postgres." --trust-tier 0
+mneme search --tenant tenant-a --query "preferred database"
 ```
 
-Example capture and retrieval:
+After `pip install`, the two console-script entry points are on your `PATH`:
 
-```bash
-python -m mnemosyne.cli capture --tenant tenant-a --user user-a --source-type chat --content "The preferred database is Postgres." --trust-tier 0
-python -m mnemosyne.cli search --tenant tenant-a --query "preferred database"
-```
+| Command    | Entry point                  | Purpose                |
+| ---------- | ---------------------------- | ---------------------- |
+| `mneme`    | `mnemosyne.cli:main`         | Memory CLI (91 subcommands) |
+| `mneme-mcp`| `mnemosyne.mcp_server:main`  | MCP server (48 tools)  |
 
-Postgres-backed CLI usage:
+> The module form `python -m mnemosyne.cli …` is equivalent to `mneme …` and works without installation; this README uses the installed scripts.
+
+### PostgreSQL backend
+
+Requires the `postgres` extra (`pip install -e '.[postgres]'`). The Postgres engine adds tenant **row-level security**, SQL **FTS**, **pgvector** assertion/evidence search, recursive **graph/PPR**, `as-of` time travel, and durable queue leasing.
 
 ```bash
 docker compose up -d postgres
-MNEMOSYNE_POSTGRES_DSN=postgresql://mnemosyne:mnemosyne-local-dev@127.0.0.1:54329/mnemosyne \
-  python -m mnemosyne.cli --backend postgres search --tenant tenant-a --query "preferred database"
-```
+export MNEMOSYNE_POSTGRES_DSN=postgresql://mnemosyne:mnemosyne-local-dev@127.0.0.1:54329/mnemosyne
 
-Runtime jobs can use the same Postgres deployment for durable queue leasing:
+mneme --backend postgres search --tenant tenant-a --query "preferred database"
 
-```bash
-python -m mnemosyne.cli --backend postgres --queue-backend postgres \
+# Durable queue + bounded consolidation worker
+mneme --backend postgres --queue-backend postgres \
   --postgres-dsn "$MNEMOSYNE_POSTGRES_DSN" --queue-tenant tenant-a \
-  queue-drain --limit 10
+  worker-run --max-cycles 20 --idle-exit-after 2 --fail-on-dead
 ```
 
-HTTP-compatible embedding/reranker providers can be selected from the same CLI:
+> `--trust-tier 0` means **most trusted** (direct user / operator). Trust tiers are a monotonic 0–5 ladder with **0 = most trusted** and **5 = least trusted**; the default for new agent writes is `3` (`NORMAL`) — see [Core concepts](#core-concepts).
+
+### MCP server
 
 ```bash
-python -m mnemosyne.cli --backend postgres \
-  --embedding-provider http --embedding-url http://127.0.0.1:8000/embed \
-  --reranker-provider http --reranker-url http://127.0.0.1:8000/rerank \
-  search --tenant tenant-a --query "preferred database"
-```
+# Default: deterministic stdio JSON-RPC shim (no SDK dependency)
+mneme-mcp --store .mnemosyne/mcp-store.json
 
-The live Postgres suite covers this CLI path with local fake HTTP providers: capture persists provider-generated 1024-dim pgvectors, search/explain report `http-embedding` and `http-reranker` adapters, reranker ordering is reflected in the final hits, and malformed embedding output fails closed instead of falling back to local hashing. Production deployments can also set `--lexical-provider command --lexical-command <adapter> --lexical-backend paradedb-bm25` and `--graph-provider command --graph-command <adapter> --graph-backend apache-age` to route lexical/BM25 and specialist graph retrieval through shell-free JSON command adapters while preserving the default native Postgres FTS/recursive-PPR path.
-
-Use `provider-check` with the same flags, or `provider-check --provider-manifest ./providers.json`, for deployment smoke checks. It returns structured JSON and exits nonzero if any required embedding, reranker, media-extractor, media-embedding, object-key/KMS, parametric-provider, candidate-extractor, summarizer, entity-resolver, lesson-distiller, skill-inducer, OIDC/JWKS, authz-policy, session-secret, or residency-policy contract fails. Use `hosted-llm-check --hosted-llm-manifest ./hosted-llm.json` to validate live hosted candidate-extractor, summarizer, entity-resolver, lesson-distiller, and skill-inducer HTTP/model endpoints with HTTPS-by-default URL policy, redacted auth, role-specific contract checks, and stable fingerprints. Use `idp-jwks-live-check --idp-token "$OIDC_ID_TOKEN" --idp-jwks-url https://idp.example.com/.well-known/jwks.json --idp-issuer https://idp.example.com/ --idp-audience mnemosyne` for a redacted live-token/JWKS validation report before exposing hosted auth. Use `tls-cert-check --url https://mnemosyne.example.com --min-days-valid 30` for CA-chain, hostname, TLS-version, and certificate-expiry gates. Use `tls-rotation-plan-check --current-cert-file ./current.pem --candidate-cert-file ./candidate.pem --hostname mnemosyne.example.com --min-overlap-days 7` before swapping certificate material. Use `mcp-http-soak --base-url https://mnemosyne.example.com --auth-token "$MNEMOSYNE_MCP_TOKEN" --require-stateless` for bounded hosted JSON-RPC MCP health, stateless, `initialize`, `tools/list` schema, and structured read-only `tools/call` loops. Use `mcp-streamable-http-soak --base-url https://mnemosyne.example.com --auth-token "$MNEMOSYNE_MCP_TOKEN"` for the official MCP SDK StreamableHTTP transport with the same tool-contract checks. Use `mcp-sse-soak --base-url https://mnemosyne-legacy.example.com --auth-token "$MNEMOSYNE_MCP_TOKEN"` for legacy SSE stream handshakes, `endpoint` event detection, and secret-redacted event previews. Use `ops-report --tenant tenant-a --dashboard-html ./ops-dashboard.html` for a static observability dashboard with a top-level tripwire `ok` gate. Use `ops-dashboard-check --dashboard-package-dir ./dashboard-package --expected-tenant tenant-a --ops-bundle ./dashboard-ops.json` to validate dashboard packages or hosted dashboard URLs plus production operations evidence for refresh freshness, access control, alerting, tenant binding, HTTPS-by-default hosted access, raw HTML/JSON/snapshot/token/user-data redaction, and stable fingerprints. Use `calibration-tune --tenant tenant-a --dataset ./calibration.json --min-examples 100 --min-correct 50 --min-incorrect 50` to tune conformal abstention from labeled production eval rows and fail closed on insufficient sample shape, low empirical coverage, or high false-accept rate. Use `belief-revision-check --cases ./belief-revision.json --require-case supersession-contradiction --require-case cascade-invalidation --require-case contested-hypotheses` to validate TMS/AGM supersession, contradiction, cascade invalidation, and contested-hypothesis probability cases with a stable fingerprint. Use `forgetting-policy-check --cases ./forgetting-policy.json --require-case demote-low-utility --require-case must-keep-rehearsal --require-case gist-risk-abstention` to validate demotion, rehearsal, and gist-risk abstention cases with a stable fingerprint. Use `policy-ops-check --bundle ./policy-ops.json --require-variant stable --require-variant recall` to validate shadow-only policy variants, invariant rails, external-reward outcomes, cadence limits, tripwires, and contextual-bandit recommendation fingerprints. Use `provenance-trust-check --suite ./provenance-trust.json --require-case asset-bound` to validate C2PA trust-root suites with asset-bound verifier reports, trusted issuer/root expectations, redacted verifier evidence, and stable fingerprints. Use `deployment-soak --soak-manifest ./deployment-soak.json --evidence-dir ./soak-evidence` to run an allowlisted JSON manifest of deployment preflights without shell execution or secret-bearing argument echo; each check may include non-secret `global_args` such as `--queue-backend` and `--queue-tenant` before the child command. Use `release-audit --evidence-manifest ./soak-evidence/manifest.json --require-production-validated` as the second-stage release gate: it requires the production command profile, provider subchecks, non-local retrieval/provider evidence, redaction flags, and an optional expected fingerprint acknowledgement before marking a release bundle ready. Use `gate-suite-check --min-protected 1 --expected-fingerprint "$EXPECTED_SUITE_SHA256"` to verify protected-suite deployment shape and change-control acknowledgement. Use `--queue-backend postgres --queue-tenant tenant-a worker-run --max-cycles 20 --idle-exit-after 2 --fail-on-dead` for bounded supervised runtime-job cycles with JSON heartbeat and fail-closed dead-job gating. Use `projection-recompute-once --tenant tenant-a --cid <changed-cid>` to compute the affected evidence/projection set and queue consolidation only for surviving affected evidence.
-
-Use `worker-ops-check --bundle ./worker-ops.json` to validate production worker deployment supervision evidence: external process manager, restart/backoff policy, fresh heartbeats, Postgres tenant-scoped queue health, required runtime job handlers, observability/alerts, and raw env/DSN/payload/log redaction.
-
-Use `tls-lifecycle-ops-check --bundle ./tls-lifecycle.json` to validate production TLS lifecycle evidence: CA/ACME issuance, renewal execution, current/candidate overlap, deployed serial/chain match, reload verification, non-local private-key custody, monitoring alerts, and raw key/cert/token/log redaction.
-
-Use `retrieval-ops-check --bundle ./retrieval-ops.json --min-cases 3 --min-calibration-examples 50` to validate production Postgres retrieval evidence bundles. The bundle must include `provider_check` evidence with `forbid_local=true`, non-local embedding/reranker providers, non-local lexical/graph retrieval backends, and provider-check `lexical_probe`/`graph_probe` hit evidence for those backends; `adapter_probes` evidence for lexical, vector, graph, and reranker adapters with production validation, non-local backend/provider names, SHA-256 command/source/query/tenant/result/top-id fingerprints, hit counts, and bounded latency; `retrieval` evidence with hashed tenant/query cases proving lexical, vector, graph, reranked, and calibrated retrieval paths; `calibration` evidence with a production dataset fingerprint, sample-shape counts, empirical coverage, false-accept rate, and threshold; plus a verified `redaction` section that omits raw queries, embeddings, documents, results, stdout/stderr, commands, env, and credentials.
-
-Use `auth-ops-check --bundle ./auth-ops.json --min-token-ttl-seconds 300` to validate production tenant isolation and auth evidence bundles. The bundle must include `idp_jwks` evidence for live issuer/audience/JWKS validation, key rotation, refresh-on-unknown-kid, safe token headers, hashed identity, and configured authz policy, `authz_rollout` evidence with acknowledged policy fingerprints and allow/deny simulations, `session_secret` evidence for external command-backed key custody and rotation, `tls` certificate plus rotation-plan evidence, `tenant_isolation` evidence for Postgres RLS, signed-session tenant binding, cross-tenant deny cases, and same-tenant allow cases, plus verified redaction of raw tokens, claims, secrets, and certificate private keys.
-
-Use `mcp-ops-check --bundle ./mcp-ops.json --require-legacy-sse --require-client-cert` to validate production MCP runtime evidence bundles. The bundle must include hosted `http_json_rpc` and `streamable_http` evidence with HTTPS non-local URLs, health, initialize, tools/list schema validation, structured read-only tool-call output, stateless loop, bearer-token, signed-session, latency, and loop-count proof; optional or required `legacy_sse` endpoint event evidence; `tls` certificate evidence with optional client-certificate enforcement; and verified redaction of raw bearer tokens, signed-session tokens, requests, and responses.
-
-Use `privacy-ops-check --bundle ./privacy-ops.json --require-case residency-deny --require-case legal-delete --require-case operator-delete` to validate production privacy evidence bundles for non-local KMS lifecycle/rotation/shred, strict residency allow/deny enforcement, tombstone recompute safety, legal hard-delete safety, operator hard-delete corroboration, explicit raw key/object/subject/KMS-response redaction flags, recursive raw-field rejection, and stable fingerprints.
-
-Use `parametric-trainer-check --bundle ./parametric-trainer.json --min-cases 5 --min-protected 2` to validate production parametric trainer evidence bundles. The bundle must include `trainer` evidence with a non-local provider plus immutable `artifact_uri`/`artifact_uri_hash`, `protected_suite` evidence with `case_count`, `protected_case_count`, `case_ids`, `protected_case_ids`, non-synthetic `source`, `fingerprint`, and smoke/core/archive `tier_counts`, `gate` evidence with matching `artifact_id`/`candidate_id`, passed protected cases, margin, and no rollback branch, `deployment` evidence for HTTPS supervised production endpoint health, canary pass, alert routing, protected-suite/artifact/rollback fingerprint binding, rollback drill verification, and bounded latency, `rail_report` evidence for external reward, monotonic trust, non-negative trust delta, no system-prompt sink, and no eval/source overlap, plus `rollback`, `metrics`, and verified `redaction` sections with stable fingerprints.
-
-Use `provenance-ops-check --bundle ./provenance-ops.json` to validate production C2PA provenance operations evidence bundles. The bundle must include `validation_scope`, `c2pa_verifier`, `trust_roots`, `provenance_trust`, `asset_bound_cases`, `quarantine`, `ingestion`, `deployment`, and `redaction` sections proving production operator assertion, non-local command/container/hosted verifier identity, trusted issuer/root policy fingerprints, trust-root rotation and stale-root rejection, asset-bound trusted and quarantined cases, hidden-from-default retrieval quarantine behavior, Postgres ingestion tags and hashed evidence IDs, supervised verifier health, trust-root refresh, quarantine drill, ingestion-pipeline supervision, alert routing, deployment policy/ingestion fingerprint binding, and omission of raw asset bytes, manifests, verifier stdout/stderr, certificates, credentials, and secrets.
-
-Use `consolidation-ops-check --bundle ./consolidation-ops.json --min-processed-jobs 5 --min-gate-cases 4 --min-protected 2` to validate production consolidation role-pipeline evidence bundles. The bundle must include `validation_scope`, `worker_run`, `provider_check`, `hosted_llm`, `projection_recompute`, `gate_suite`, `embedding`, `consolidation_run`, `calibration`, `lifecycle`, `ops_report`, `deployment`, and `redaction` sections proving production operator assertion, Postgres-backed supervised worker cycles across consolidation/calibration/lifecycle/observability/projection jobs, forbid-local hosted extractor/summarizer/entity-resolver and embedding providers, projection recompute with consolidation re-enqueue, protected-suite tier coverage, model-backed consolidator write authority, calibration/lifecycle/ops tripwire health, deployment supervision/alert/fingerprint/count binding with bounded latency, and omission of raw prompts, requests, responses, evidence, embeddings, CIDs, credentials, tenant/user values, and secrets.
-
-Use `multimodal-ops-check --bundle ./multimodal-ops.json --require-modality image --require-modality audio --require-modality video` to validate production multimodal retrieval evidence bundles. The bundle must include `validation_scope`, `provider_check`, `object_store`, `extraction`, `media_embedding`, `retrieval`, `media_jobs`, `deployment`, and `redaction` sections proving production operator assertion, forbid-local media extractor/embedder checks, encrypted external object storage, image/audio/video extraction cases with asset and derived-CID hashes, raw media embedding indexing, Postgres production retrieval over stored media vectors and derived text, Postgres-backed `media_extract` job processing with fail-closed dead-job handling, supervised extraction/embedding/object-store/job/retrieval operations, alert routing, execution fingerprints, deployment count binding, and omission of raw media bytes, extractor requests/responses, embeddings, documents, credentials, and secrets.
-
-Signed CLI session tokens can bind tenant/user identity and write authority before a subcommand executes:
-
-```bash
-MNEMOSYNE_SESSION_SECRET="$SESSION_SECRET" \
-python -m mnemosyne.cli --session-token "$SIGNED_SESSION_TOKEN" \
-  assert --tenant tenant-a --subject Mnemosyne --predicate has --object "session-bound writes"
-```
-
-For deployment secret custody, `--session-secret-command` / `MNEMOSYNE_SESSION_SECRET_COMMAND` invokes a shell-free adapter with a `get_session_secret` action and JSON stdin. The adapter returns either `{"secret":"..."}` or `{"keyring":{"kid":"..."}, "active_key_id":"kid"}`; Mnemosyne uses the material for signing or verification without echoing it in command output. `provider-check` can validate the same adapter from flags or a manifest `session_secret` provider block by proving a redacted signed-session round trip.
-
-`session-exchange` validates an external OIDC/JWT identity token against a configured JWKS and mints the bounded Mnemosyne signed-session token used by CLI and MCP authorization:
-
-```bash
-python -m mnemosyne.cli --session-secret-command "$SESSION_SECRET_COMMAND" session-exchange \
-  --idp-token "$OIDC_ID_TOKEN" \
-  --idp-jwks-url https://idp.example.com/.well-known/jwks.json \
-  --idp-issuer https://idp.example.com/ \
-  --idp-audience mnemosyne \
-  --idp-authz-policy-file ./mnemosyne-idp-authz-policy.json
-```
-
-By default the verifier requires issuer, audience, expiration, and the tenant/user/role/trust claims `tenant_id`, `sub`, `mnemosyne_role`, and `mnemosyne_source_trust_tier`. Deployments can instead pass `--idp-authz-policy` or `--idp-authz-policy-file` to map verified IdP client, tenant, and claim rules to Mnemosyne roles (`reader`, `agent`, `consolidator`, `operator`) plus a source trust tier. Policy mode requires `allowed_client_ids`, rejects malformed or unknown policy fields, denies missing and ambiguous rule matches, rejects invalid roles such as `writer`, and never falls back to raw IdP role/trust claims when a policy is configured. JWKS input can be inline JSON, a file, or HTTPS URL; insecure JWKS URLs are rejected unless explicitly allowed for local testing. File and URL JWKS sources support bounded reads, cache TTL refresh, and refresh-on-unknown-`kid` rotation through `--idp-jwks-max-bytes`, `--idp-jwks-cache-ttl-seconds`, and `--idp-disable-refresh-on-unknown-kid`.
-
-`idp-jwks-live-check` uses the same OIDC/JWKS/authz-policy verifier as `session-exchange`, but it does not mint or print a Mnemosyne session token. It emits a deployment preflight report with JWKS source/key count, token algorithm and hashed `kid`, redacted user identity, role, trust tier, policy presence, and fail-closed errors without echoing the IdP token.
-
-Validate a deployment authz policy without exchanging an IdP token:
-
-```bash
-python -m mnemosyne.cli idp-authz-policy-check \
-  --idp-authz-policy-file ./mnemosyne-idp-authz-policy.json
-```
-
-The check emits a bounded summary with a stable policy fingerprint, client/rule counts, role and trust-tier coverage, and matcher field names only; it does not print client IDs, tenant IDs, group values, scopes, or tokens. Use the fingerprint for rollout/change-control acknowledgement:
-
-```bash
-python -m mnemosyne.cli idp-authz-policy-rollout-check \
-  --current-idp-authz-policy-file ./current-idp-authz-policy.json \
-  --candidate-idp-authz-policy-file ./candidate-idp-authz-policy.json \
-  --expected-current-fingerprint "$CURRENT_POLICY_SHA256" \
-  --expected-candidate-fingerprint "$CANDIDATE_POLICY_SHA256" \
-  --simulation-file ./idp-claim-simulations.json
-```
-
-The rollout check compares redacted summaries, reports secret-free diffs, and fails closed if any claim simulation changes authorization unless `--allow-simulation-changes` is supplied.
-
-Encrypted local object storage is available for crypto-shred legal erasure:
-
-```bash
-python -m mnemosyne.cli \
-  --object-store .mnemosyne/objects \
-  --object-store-encryption aesgcm \
-  --object-key-store .mnemosyne/object-keys.json \
-  --allowed-residency local \
-  ingest --tenant tenant-a --user user-a --actor user --source-type upload \
-  --file ./private-capture.bin --modality binary --trust-tier 0
-```
-
-For production key custody, use `--object-key-provider command --object-key-command "<kms-wrapper>"`. Mnemosyne invokes the command without a shell, passes JSON on stdin, and expects JSON on stdout for `get_or_create_key`, `get_key`, `has_key`, and `shred_key`.
-
-For isolated parametric adapter custody, use `--parametric-provider command --parametric-command "<trainer-wrapper>"`. Mnemosyne invokes the command without a shell, passes JSON on stdin for `propose` and `rollback`, requires operator-grade role/trust authorization before trainer calls, enforces local mutation-rate/reward/sink/gate rails, persists provider metrics/payloads with rollback metadata, and routes production trainer deployment evidence through `parametric-trainer-check`.
-
-For model-backed consolidation, use `--candidate-extractor-provider command --candidate-extractor-command "<extractor-wrapper>"` and `--summarizer-provider command --summarizer-command "<summarizer-wrapper>"`. Mnemosyne invokes each command without a shell. The extractor receives `{"tenant_id":"...","payload":{...},"evidence":[...]}` and must return `{"candidates":[...]}` rows containing `signature`, `query`, `candidate_subject`, `candidate_predicate`, and `candidate_object`; malformed or empty required fields fail closed before promotion. The summarizer receives `{"tenant_id":"...","evidence":[...]}` and must return a non-empty `summary`. Neither provider can bypass data-only/quarantine skips or the protected promotion gate.
-
-For production entity resolution, use `--entity-resolver-provider command --entity-resolver-command "<resolver-wrapper>"`. Mnemosyne invokes the resolver without a shell after consolidation candidate extraction and passes `{"tenant_id":"...","candidates":[...]}` on stdin. The resolver must return a JSON object with a `candidates` array containing one row per input candidate: `{"signature":"...","entity_key":"..."}`. It may also return `entities` rows with `key`, `label`, `aliases`, and `candidate_signatures`. Missing, duplicate, unknown, or keyless candidate mappings fail closed, and successful promotions persist the resolver-provided `entity_key` into the tenant entity registry. Provider manifests can require this check with `required_checks: ["entity_resolver"]` and a `providers.entity_resolver` block containing `provider: "command"` plus `command`.
-
-`mneme-mcp` accepts the same object-store encryption, key-provider, allowed-residency, runtime queue, and parametric provider flags for MCP ingestion and runtime learning.
-By default it runs Mnemosyne's deterministic stdio JSON-RPC shim; pass `--sdk` to run stdio through the official Python MCP SDK, or `--sdk-streamable-http` for the official SDK StreamableHTTP transport. Use `--self-test` as a local deployment preflight before wiring stdio into a host, or `--http` for Mnemosyne's hosted HTTP JSON-RPC transport:
-
-```bash
+# Official Python MCP SDK over stdio, or SDK StreamableHTTP at /mcp (+ /healthz)
 mneme-mcp --store .mnemosyne/mcp-store.json --sdk
-mneme-mcp --store .mnemosyne/mcp-store.json --sdk-streamable-http \
-  --http-host 127.0.0.1 --http-port 8765
-mneme-mcp --backend postgres --postgres-dsn "$MNEMOSYNE_POSTGRES_DSN" \
-  --queue-backend postgres --stateless
-mneme-mcp --store .mnemosyne/mcp-store.json \
-  --auth-token "$MNEMOSYNE_MCP_TOKEN" \
-  --session-secret-command "$MNEMOSYNE_MCP_SESSION_SECRET_COMMAND" \
-  --require-session --self-test
+mneme-mcp --store .mnemosyne/mcp-store.json --sdk-streamable-http --http-host 127.0.0.1 --http-port 8765
+
+# Hosted HTTP JSON-RPC at /mcp (+ /healthz, + POST /session/exchange), TLS + bearer + signed session
 mneme-mcp --http --http-host 127.0.0.1 --http-port 8765 \
-  --auth-token "$MNEMOSYNE_MCP_TOKEN" \
-  --session-secret-command "$MNEMOSYNE_MCP_SESSION_SECRET_COMMAND" \
-  --require-session \
-  --tls-cert-file ./certs/server.pem \
-  --tls-key-file ./certs/server-key.pem \
-  --tls-client-ca-file ./certs/client-ca.pem \
-  --tls-require-client-cert \
-  --idp-jwks-url https://idp.example.com/.well-known/jwks.json \
-  --idp-issuer https://idp.example.com/ \
-  --idp-audience mnemosyne
+  --auth-token "$MNEMOSYNE_MCP_TOKEN" --require-session
 ```
 
-The self-test exercises `initialize`, `tools/list`, strict MCP input schemas, auth-token rejection, signed-session enforcement, and a read-only tool call. It redacts configured secrets and does not replace operator-run production IdP/JWKS checks, TLS lifecycle evidence, or operator-run `deployment-soak` evidence.
-`mneme-mcp` accepts the same command-backed session custody contract through `--session-secret-command` / `MNEMOSYNE_MCP_SESSION_SECRET_COMMAND`.
-The official SDK StreamableHTTP transport serves the MCP endpoint at `/mcp` and liveness metadata at `/healthz` by default, uses stateless SDK sessions unless `--sdk-streamable-stateful` is set, and can be relocated with `--sdk-streamable-http-path` / `--sdk-streamable-health-path`. Local runtime tests verify SDK-client `initialize`, `tools/list`, and `tools/call` over the in-process StreamableHTTP ASGI surface; production network/soak validation requires operator-run endpoint evidence.
-The hosted HTTP transport serves liveness metadata at `/healthz` and JSON-RPC at `/mcp`, reusing the same tool schema, auth-token, signed-session, stateless, queue, and backend enforcement as stdio. Pass bearer auth in `Authorization` and signed sessions in `X-Mnemosyne-Session-Token`, or through JSON-RPC `_meta` for non-HTTP transports. `--tls-cert-file` and `--tls-key-file` enable HTTPS; `--tls-client-ca-file --tls-require-client-cert` enforces client certificate identity. When OIDC settings are configured, `POST /session/exchange` accepts `{"idp_token":"..."}` with the static bearer token and returns a Mnemosyne signed session; hosted JWKS file/URL sources support the same bounded read, TTL refresh, unknown-`kid` refresh controls, and optional authz policy mapping with `MNEMOSYNE_MCP_IDP_*` environment variables. `/healthz` reports only whether TLS, client-certificate enforcement, session exchange, and authz policy are configured, not policy contents. Deployments should still pass `--self-test`, `idp-authz-policy-rollout-check`, `idp-jwks-live-check`, `tls-rotation-plan-check`, and `tls-lifecycle-ops-check` before exposure; HTTP mode is not a substitute for operator-run production TLS/IdP evidence or operator-run `mcp-sse-soak` against deployed legacy SSE URLs.
-The `mcp-http-soak` CLI command validates a hosted HTTP JSON-RPC endpoint without echoing bearer or session tokens. It checks `/healthz`, optional stateless requirements, and repeated SDK-style `initialize`, `tools/list`, and configurable read-only `tools/call` loops; local tests run it against the real in-process hosted server, while production endpoint `deployment-soak` runs remain operator-supplied.
-The `mcp-sse-soak` CLI command validates a legacy MCP SSE endpoint without echoing bearer/session tokens or endpoint query secrets. It opens bounded `text/event-stream` connections, requires an `endpoint` event with data by default, and fails closed on non-SSE endpoints, missing expected events, or missing endpoint data.
-The `deployment-soak` CLI command runs an allowlisted deployment manifest of existing preflight commands (`provider-check`, `idp-jwks-live-check`, `tls-cert-check`, `tls-lifecycle-ops-check`, `mcp-http-soak`, `mcp-sse-soak`, `worker-run`, `worker-ops-check`) through shell-free subprocesses. It parses child JSON reports, omits command arguments from output, reports required vs optional failures, and fails closed when required checks fail, time out, emit non-JSON, or request a disallowed command.
-The `tls-rotation-plan-check` CLI command validates local current/candidate certificate files before deployment. It verifies SAN hostname coverage on both certs, current and candidate minimum validity windows, overlap days, issuer continuity when required, and reports hashed serials instead of raw serial numbers.
+---
 
-C2PA verifier trust can be scoped through a JSON policy file:
+## Core concepts
 
-```bash
-python -m mnemosyne.cli \
-  --c2pa-tool c2patool \
-  --provenance-trust-policy ./c2pa-trust-policy.json \
-  ingest --tenant tenant-a --user user-a --actor external --source-type camera \
-  --file ./capture.bin --modality binary --trust-tier 5
+| Concept | What it is |
+| --- | --- |
+| **Evidence** | Append-only, content-addressed (`content_cid` = SHA-256 over canonical JSON) record of everything ingested. Immutable; the single source of truth. |
+| **Assertion / projection** | Typed beliefs (`subject–predicate–object`) *derived* from evidence and rebuildable from it. Projections also cover entities, relations, preferences, procedures, and lessons. |
+| **Bitemporal** | Every belief carries valid-time (`valid_from`/`valid_to`) and transaction-time, enabling supersession and `as-of` queries. |
+| **Hybrid retrieval** | Lexical (FTS/BM25) + dense (pgvector HNSW, 1024-dim in production; a BLAKE2b hashing embedder, dims=256, is the offline fallback) + graph (recursive PPR / Apache AGE), fused and reranked. |
+| **Calibrated abstention** | Conformal calibration per tenant/memory-type yields a confidence the system can *abstain* on rather than answer (measured ECE 0.0063). |
+| **Trust tiers** | `TrustTier` (IntEnum), a monotonic **0–5 ladder, lower = more trusted**: `0` = direct-user / user-authored / operator, `1` verified, `2` authenticated, `3` normal (default), `4` low, `5` untrusted-external. A write may never raise its own trust (§31 Rail 4); belief and branch writes require ≥ `3` (`NORMAL`). |
+| **Sensitivity** | Per-row `SMALLINT` (default `0`); the read path enforces a per-role ceiling (`policy.max_sensitivity`, default `3`) on the read-side disclosure boundary. |
+| **Fidelity tiers** | Lifecycle demotion order: `VERBATIM` → `EXTRACTIVE_SUMMARY` → `ABSTRACTIVE_GIST` → `STATISTICAL_TRACE`. Demotion is gated by a gist-risk abstention hook. |
+| **Consolidation** | Warm-loop worker that runs an ordered 11-role pass pipeline through the promotion gate (see below). |
+| **Promotion gate** | Protected regression cases must pass before any candidate belief is promoted; failures roll back on a branch. |
+| **Branchable memory** | Fork (`branch`), experiment, then `merge` or `discard` — bitemporal, tenant-isolated. |
+
+### Roles (OIDC → Mnemosyne)
+
+`session-exchange` validates an external OIDC/JWT token against a configured JWKS and mints a bounded signed session. An authz policy maps verified IdP claims to exactly one of the four write roles; unknown roles (e.g. `writer`) are rejected and the verifier never falls back to raw IdP claims.
+
+| Role | Capability |
+| --- | --- |
+| `reader` | Read-only retrieval within its sensitivity ceiling. |
+| `agent` | Capture + read; standard agent write authority. |
+| `consolidator` | Run consolidation / promotion-gate writes. |
+| `operator` | Operator-grade authority (e.g. parametric trainer, hard-delete corroboration). |
+
+### Consolidation pipeline (`DEFAULT_CONSOLIDATION_PASSES`)
+
+Eleven roles run **in this order**, bounded by the mutation-rail budget and the §31 cadence rail:
+
+`replayer` → `extractor` → `resolver` → `belief_reviser` → `skill_inducer` → `lesson_distiller` → `summarizer` → `forgetter` → `embedder` → `promotion_gate` → `user_model_updater`
+
+`extractor` and `resolver` run **once** over the prioritized evidence set to produce candidates; `belief_reviser` then gates **each candidate individually** through `run_job()` and the promotion gate. Default role providers: `replayer` = deterministic priority replay, `belief_reviser` = promotion gate, `forgetter` = fidelity lifecycle policy, `embedder` = deterministic hashing embedding, `promotion_gate` = protected regression gate, `user_model_updater` = latent user-model updater. The `extractor`, `resolver`, `summarizer`, `lesson_distiller`, and `skill_inducer` roles use pluggable strategy providers (deterministic by default, or shell-free command/HTTP adapters).
+
+> Tenant-scoped one-shot: `mneme --queue-tenant tenant-a consolidate-once` (the `consolidate-once` subcommand takes no arguments; pass the tenant via the global `--queue-tenant`).
+
+### Invariant rails (§31)
+
+All seven are enforced and regression-tested:
+
+| Rail | Invariant |
+| --- | --- |
+| R1 | `max_supersession_rate` ≤ 0.05 per pass |
+| R2 | ≥ 2 corroborations required to delete (`min_corroboration_for_delete`) |
+| R3 | `max_prune_fraction_per_pass` ≤ 0.02 |
+| R4 | Monotonic trust tiers (a write may not raise its own trust) |
+| R5 | Reward is external-only |
+| R6 | Retrieved text is **data, not instructions** (`security.sanitize_retrieved_text`) |
+| R7 | Consolidation cadence bounded to `[5 steps, 24h]` |
+
+### Background job kinds
+
+The runtime queue moves jobs through a non-linear lifecycle — `queued → running → {complete | retry | dead}`, where `retry` re-enters the queue until `max_attempts` is reached (then `dead`). Seven job kinds run on it:
+
+`consolidate_evidence` · `calibrate` · `lifecycle_sweep` · `eval_suite` · `observability_snapshot` · `projection_recompute` · `media_extract`
+
+### Providers (shell-free command adapters)
+
+All command adapters are shell-free: JSON on stdin, JSON on stdout, **no secret-bearing argv**. Each provider has a deterministic local fallback so nothing external is required to run.
+
+| Boundary | Default / fallback | Pluggable adapter |
+| --- | --- | --- |
+| Embedding | `HashingEmbeddingProvider` (BLAKE2b, dims=256) | `HttpEmbeddingProvider`, `CommandMediaEmbeddingProvider` |
+| Reranker | `LocalSimilarityReranker` | `HttpReranker` |
+| Lexical | native Postgres FTS | `CommandLexicalRetriever` (e.g. ParadeDB/BM25) |
+| Graph | native recursive PPR | `CommandGraphRetriever` (e.g. Apache AGE) |
+| Object key / KMS | local AES-GCM keystore | `CommandKeyManager` → Vault transit |
+| Provenance | `SignedProvenanceVerifier` | `C2paToolVerifier` (C2PA) |
+
+### MCP transports
+
+| Transport | Flag | Endpoint(s) | Notes |
+| --- | --- | --- | --- |
+| Deterministic stdio JSON-RPC shim | *(default)* | stdio | No SDK dependency |
+| Official SDK stdio | `--sdk` | stdio | Official Python MCP SDK |
+| Official SDK StreamableHTTP | `--sdk-streamable-http` | `/mcp` + `/healthz` | Stateless unless `--sdk-streamable-stateful` |
+| Hosted HTTP JSON-RPC | `--http` | `/mcp` + `/healthz` + `POST /session/exchange` | Reuses stdio's tool schema + enforcement |
+| Legacy SSE | *(validated via `mcp-sse-soak`)* | SSE stream + `endpoint` event | Legacy compatibility |
+
+Auth: static bearer (`Authorization` header / `--auth-token` / `MNEMOSYNE_MCP_TOKEN`) and/or a signed Mnemosyne session (`X-Mnemosyne-Session-Token`). `--require-session` enforces signed sessions; TLS via `--tls-cert-file`/`--tls-key-file`, with optional mTLS via `--tls-client-ca-file --tls-require-client-cert`.
+
+---
+
+## Documentation
+
+Full reference lives in the [project wiki](https://github.com/onfire7777/Mnemosyne/wiki):
+
+- [Architecture Overview](https://github.com/onfire7777/Mnemosyne/wiki/Architecture-Overview) — component layers, write/read flows, deployment topology
+- [Getting Started](https://github.com/onfire7777/Mnemosyne/wiki/Getting-Started) — install, first capture, Postgres setup
+- [CLI Reference](https://github.com/onfire7777/Mnemosyne/wiki/CLI-Reference) — all 91 subcommands incl. the operations/preflight suite
+- [MCP Server and Tools](https://github.com/onfire7777/Mnemosyne/wiki/MCP-Server-and-Tools) — transports, auth, all 48 tools
+- [Data Model](https://github.com/onfire7777/Mnemosyne/wiki/Data-Model) — the 24-table schema, RLS, and bitemporal design
+- [Security, Privacy and Provenance](https://github.com/onfire7777/Mnemosyne/wiki/Security-Privacy-and-Provenance) — trust tiers, capabilities, residency, C2PA
+- [Operations and Production Preflight](https://github.com/onfire7777/Mnemosyne/wiki/Operations-and-Production-Preflight) — `provider-check`, `deployment-soak`, `release-audit`, the `*-ops-check` family
+
+### MCP tools (illustrative)
+
+`mcp_tools.py` exposes **48** tools. A representative slice: `capture`, `ingest`, `assert_fact`, `search`, `deep_search`, `get`, `explain`, `correct`, `supersede`, `forget`, `export`, `branch` / `merge` / `discard`, `graph_neighbors` / `graph_as_of`, `trajectory_record`, `lesson_induce` / `procedure_promote`, `outcome_evaluate`, `parametric_propose`, and the `profile_*` user-model tools.
+
+### Data model (24 tables)
+
+`sql/schema.sql` defines the canonical Postgres schema (extensions `pgcrypto` + `vector`). Vectors are `VECTOR(1024)` with HNSW indexes (`vector_cosine_ops`) on `evidence.embedding` and `assertions.embedding`; every tenant-scoped table enforces RLS via `mnemosyne_current_tenant()`.
+
+`tenants` · `branches` · `evidence` · `assertions` · `justifications` · `entities` · `entity_aliases` · `relations` · `graph_ppr_cache` · `contradictions` · `procedures` · `lessons` · `preferences` · `user_latent` · `trajectories` · `self_model` · `eval_cases` · `resources` · `merges` · `deletion_log` · `conformal_calibration` · `audit_log` · `runtime_jobs` · `runtime_state`
+
+---
+
+## Project layout
+
+```
+Mnemosyne/
+├── src/mnemosyne/
+│   ├── engine.py            # MemoryEngine contract + LocalMemoryEngine; route() + RoutePlan
+│   ├── postgres_engine.py   # PostgresEngine: RLS, FTS, pgvector, recursive PPR, as-of
+│   ├── mcp_tools.py         # 48 MCP tool definitions (the TOOL_SPEC facade)
+│   ├── mcp_server.py        # stdio shim · SDK stdio · SDK StreamableHTTP · hosted HTTP
+│   ├── cli.py               # 91-subcommand CLI (mneme)
+│   ├── ingestion.py         # content-addressed ingest, signed provenance, media extract
+│   ├── retrieval.py         # embedding/reranker/lexical/graph adapter classes + fallbacks
+│   ├── consolidation.py     # 11-role warm-loop pipeline → promotion gate
+│   ├── gate.py              # promotion gate: protected regression cases, branch rollback
+│   ├── guard.py             # §25 anti-degradation guard (no_degradation_guard)
+│   ├── lifecycle.py         # fidelity tiers + gist-risk abstention
+│   ├── security.py          # trust tiers, capabilities, sessions, sanitization
+│   ├── self_optimization.py # shadow-first policy variants under §31 rails
+│   ├── queue.py / jobs.py / media.py   # durable queue + 7 job kinds
+│   └── providers/           # ProviderRegistry + adapter plumbing (adapter classes live in retrieval.py)
+├── sql/schema.sql           # canonical 24-table PostgreSQL schema
+├── tests/                   # invariant, parity, contract, and completion suites
+├── eval/                    # §33 eval harness: recall@k / nDCG / ECE / latency SLOs
+├── infra/                   # Keycloak (OIDC), Vault, C2PA, provider compose stack
+├── services/embedding/      # standalone embedding provider service
+├── docs/ROADMAP-TO-100.md   # sequenced path to 1:1 blueprint parity
+└── .github/workflows/ci.yml # ruff + pytest + Postgres integration job
 ```
 
-Policy files can define global `trusted_issuers`, `trusted_roots`, or scoped `rules` such as `{"rules": [{"scope": {"tenant_id": "tenant-a", "source_type": "camera", "modality": "binary"}, "trusted_issuers": ["issuer-a"], "trusted_roots": ["<sha256-root-fingerprint>"]}]}`. When scoped rules are present, no matching rule means the otherwise valid manifest is quarantined instead of trusted.
+---
 
 ## Status
 
-The repository has a verified local scaffold plus runtime parity extensions. Current checks:
+Exact 1:1 blueprint parity is in progress, but the headline guarantees are proven. As of 2026-06-25, **all six headline §16 SLOs PASS** on the real retrieval/calibration paths:
 
-- `.venv/bin/python -m compileall -q src tests` passes.
-- `.github/workflows/ci.yml` runs ruff, the full `pytest` suite (configuration/invariant-rail drift checks included), and a Postgres integration job on every push and pull request; configuration sources, precedence, and drift checks are documented in `CONFIG-DRIFT-CHECKS.md`.
-- `uv run pytest -q` (or `.venv/bin/python -m pytest -q`) runs the suite. With `MNEMOSYNE_POSTGRES_DSN` unset it runs the local deterministic tests and skips the live-DB integration tests (which require a Postgres DSN); this no-DSN run is the CI gate and must stay green. Run the suite for the current pass/skip counts.
-- With Docker compose Postgres running and `MNEMOSYNE_POSTGRES_DSN` set, the live Postgres / shared-adapter tests in `tests/test_postgres_engine_live.py` and `tests/test_shared_engine_contract.py` additionally run, covering tenant RLS, SQL FTS, pgvector assertion search, dense evidence fallback, recursive graph/PPR, explain channels/rails/provenance, branch/discard, branch merge retrieval, bitemporal supersession, tenant isolation, tombstone and hard-delete forget modes, command-backed object key management, transitive derived-evidence erasure across assertions/preferences/relations, retrieval trust/sensitivity/quarantine filtering, deep graph tenant/branch isolation, hard-delete audit export, HTTP-configurable retrieval adapter wiring with strict provider response validation, provider-backed CLI/Postgres evidence pgvector storage, HTTP reranker final-hit ordering, fail-closed malformed provider output, command-backed raw-media embedding storage and vector retrieval, CLI `--backend postgres`, fail-closed CLI `provider-check`, stateless MCP ingestion over tenant-scoped durable Postgres queues, shared local/Postgres evidence/retrieval/explain/branch/as-of/relation/preference/correction/forget-propagation contracts, durable Postgres queue leasing/drain, bounded `worker-run` supervision, asset-bound CLI file ingestion through the C2PA verifier adapter, externalized payload derived-text retrieval, async media extraction with graph lineage, gated consolidation promotion on Postgres, and shared local/Postgres contract parity.
+| SLO | Measured | Target | Result |
+| --- | --- | --- | --- |
+| recall@k | 0.977 | ≥ 0.80 | ✅ |
+| nDCG@k | 0.983 | ≥ 0.80 | ✅ |
+| G2 token-efficiency lift | +0.208 @ 7% tokens | ≥ +0.15 | ✅ |
+| Poison-block rate | 1.0 | ≥ 0.95 | ✅ |
+| Calibration error (ECE) | 0.0063 | ≤ 0.05 | ✅ |
+| Fast-path P95 (warm + serial) | 149.5 ms | ≤ 300–400 ms | ✅ |
 
-Exact 1:1 blueprint parity is still in progress. As of 2026-06-25, all six headline §16 SLOs are empirically proven on the real retrieval/calibration paths (recall@k 0.977, nDCG@k 0.983, G2 token-efficiency lift +0.208 @ 7% tokens, poison-block 1.0, warm+serial fast-path P95 149.5 ms, and ECE 0.0063 against the ≤0.05 target), and the mandatory Tier A `src` reconciliation wirings are closed. The remaining work to full parity is Tier B operator-captured production-infrastructure evidence (the 10 audit rows that stand at "Partial"). The controlling status artifact is `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md`; `docs/ROADMAP-TO-100.md` holds the blended-completion figure (~82%) and the sequenced path to 100%, and `infra/PRODUCTION-EVIDENCE.md` describes the production capture/offline custody handoff.
+> SLO evidence is the Wave-5 definitive run summarized in [`docs/ROADMAP-TO-100.md`](docs/ROADMAP-TO-100.md) and `eval/calibration/report.json` (`ece.policy_threshold.meets_target: true`). Hard-QA multi-hop answer-synthesis (recall/nDCG 0.625/0.594) is a known, non-headline gap, tracked separately.
+
+**Blended completion ≈ 82%** (up from a long ~70% plateau). Roughly 85% functional/architectural scaffold; the mandatory Tier-A `src` reconciliation wirings (A1–A10, A13, A14) landed 2026-06-24. The remaining ~18% is **Tier-B operator-captured production-infrastructure evidence** (real IdP/Keycloak, Vault/KMS, ParadeDB/Apache AGE, hosted embedding/reranker/trainer endpoints, C2PA trust roots) captured via `deployment-soak` + `release-audit` — evidence capture, not feature code. The 10 audit gap rows currently stand at "Partial".
+
+Controlling artifacts: [`docs/ROADMAP-TO-100.md`](docs/ROADMAP-TO-100.md) (blended figure + sequenced path), `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md` (status), and `infra/PRODUCTION-EVIDENCE.md` (capture/offline-custody handoff).
+
+---
+
+## Testing & CI
+
+- `.github/workflows/ci.yml` runs **ruff** lint, the full **pytest** suite (configuration / invariant-rail drift checks included), and a **Postgres integration** job on every push and pull request.
+- With `MNEMOSYNE_POSTGRES_DSN` **unset**, the suite runs the local deterministic tests and skips live-DB integration tests — this no-DSN run is the CI gate and must stay green.
+- With Docker-compose Postgres running and the DSN set, the live tests in `tests/test_postgres_engine_live.py` and `tests/test_shared_engine_contract.py` additionally run, covering tenant RLS, FTS, pgvector search, recursive graph/PPR, bitemporal supersession, branch/merge/discard, tombstone + hard-delete forget modes, command-backed KMS, and **local↔Postgres parity** of the engine contract.
+
+```bash
+python -m pytest          # local gate (live-DB tests skip without a DSN)
+```
+
+---
+
+## Security
+
+- **Capability-mediated, fail-closed writes** gated by trust tiers and sensitivity ceilings.
+- **Signed sessions** for CLI (`--session-token`) and MCP (`X-Mnemosyne-Session-Token`), minted from OIDC tokens via `session-exchange`; secret custody through shell-free `--session-secret-command` adapters.
+- **Retrieved text is data, not instructions** — every retrieved span is sanitized (§31 Rail 6) to defend against prompt injection. The poison corpus under `tests/completion/security/` is fixture data, never executable.
+- **Tenant isolation** via Postgres RLS keyed on `mnemosyne_current_tenant()` on every tenant-scoped table.
+- **Crypto-shred erasure**: encrypted object storage with KMS/Vault-backed key custody enables legal hard-delete by destroying keys.
+- **Provenance**: C2PA verification with scoped trust roots; manifests that match no trust rule are quarantined, not trusted.
+
+Please report vulnerabilities privately to the maintainers rather than opening a public issue.
+
+---
+
+## License
+
+Licensed under the [Apache License 2.0](LICENSE).
