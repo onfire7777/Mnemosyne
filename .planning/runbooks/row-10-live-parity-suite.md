@@ -10,11 +10,17 @@ available.
 Optional production adapters enabled for the full compose-Postgres suite and
 belief revision check.
 
+## Precondition
+
+The full compose-Postgres suite with `MNEMOSYNE_POSTGRES_DSN` set must already
+be green with production-equivalent adapters enabled where available. That suite
+is supporting runtime evidence; it is not itself one of the frozen 28 production
+soak manifest commands.
+
 ## Gate Commands
 
 Run in the production soak/profile process:
 
-- Full compose-Postgres suite with `MNEMOSYNE_POSTGRES_DSN` set.
 - `belief-revision-check`
 
 ## Redaction Requirement

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -77,6 +78,35 @@ def test_capture_production_evidence_preflight_only_stops_before_soak(tmp_path: 
     assert not (out_root / "evidence").exists()
     assert not (out_root / "deployment-soak.stdout.json").exists()
     assert not (out_root / "release-audit.json").exists()
+    assert out_root.stat().st_mode & 0o777 == 0o700
+
+
+def test_capture_production_evidence_rejects_repo_local_output_root(tmp_path: Path) -> None:
+    manifest = tmp_path / "production-soak.json"
+    out_root = REPO / ".tmp-production-evidence-repo-local"
+    _minimal_production_manifest(manifest)
+    if out_root.exists():
+        shutil.rmtree(out_root)
+
+    try:
+        proc = subprocess.run(
+            [
+                str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+                "--preflight-only",
+                str(manifest),
+                str(out_root),
+            ],
+            cwd=REPO,
+            capture_output=True,
+            text=True,
+        )
+
+        assert proc.returncode == 65
+        assert "refusing to write production evidence inside the repository" in proc.stderr
+        assert not out_root.exists()
+    finally:
+        if out_root.exists():
+            shutil.rmtree(out_root)
 
 
 def test_capture_production_evidence_preflight_rejects_unrendered_template(tmp_path: Path) -> None:

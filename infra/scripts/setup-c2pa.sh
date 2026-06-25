@@ -16,6 +16,7 @@
 #
 # Requires: docker (to run the c2patool image), openssl, jq, python3 on host.
 set -euo pipefail
+umask 077
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INFRA_DIR="$(cd "${HERE}/.." && pwd)"
@@ -23,9 +24,10 @@ COMPOSE_FILE="${INFRA_DIR}/docker-compose.providers.yml"
 C2PA_DIR="${INFRA_DIR}/c2pa"
 OUT_DIR="${C2PA_DIR}/out"
 mkdir -p "${OUT_DIR}"
+chmod 700 "${OUT_DIR}"
 
 IMAGE="mnemosyne-c2patool:local"
-RUN="docker run --rm -v ${C2PA_DIR}:/work/config:ro -v ${OUT_DIR}:/work/out -w /work ${IMAGE}"
+C2PA_RUN=(docker run --rm -v "${C2PA_DIR}:/work/config:ro" -v "${OUT_DIR}:/work/out" -w /work "${IMAGE}")
 
 echo "==> Building c2patool image '${IMAGE}' (cached after first run) ..."
 docker compose -f "${COMPOSE_FILE}" build c2pa
@@ -111,7 +113,7 @@ manifest["private_key"] = "/work/out/signer.key.pem"
 manifest["sign_cert"] = "/work/out/signer.cert.pem"
 json.dump(manifest, open(sys.argv[2], "w"), indent=2)
 PY
-${RUN} sh -c '
+"${C2PA_RUN[@]}" sh -c '
   set -e
   c2patool /work/out/asset.jpg \
     --manifest /work/out/manifest.signed.json \
@@ -122,7 +124,7 @@ ${RUN} sh -c '
 echo "==> Verifying the signed asset with the real c2patool ..."
 # c2patool 0.9.12 prints the JSON report by default; the legacy `--json` flag
 # was removed. Invoke without it.
-${RUN} c2patool /work/out/asset.signed.jpg > "${OUT_DIR}/c2patool-report.json" || {
+"${C2PA_RUN[@]}" c2patool /work/out/asset.signed.jpg > "${OUT_DIR}/c2patool-report.json" || {
   echo "ERROR: c2patool verification of the signed asset failed." >&2
   exit 1
 }

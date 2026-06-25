@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 077
 
 usage() {
   cat >&2 <<'USAGE'
@@ -16,8 +17,10 @@ Runs the existing production evidence path:
 
 Reviewers can recheck a completed bundle offline with:
   PYTHON="${PYTHON:-$(if [ -x .venv/bin/python ]; then printf '%s' .venv/bin/python; else command -v python3; fi)}"
-  "$PYTHON" -m mnemosyne.cli production-evidence-verify OUT_ROOT \
-    --expected-bundle-fingerprint '<summary.json bundle_fingerprint>'
+  BUNDLE_DIR=OUT_ROOT
+  EXPECTED_BUNDLE_FINGERPRINT="$("$PYTHON" -c 'import json, pathlib, sys; print(json.loads((pathlib.Path(sys.argv[1]) / "summary.json").read_text())["bundle_fingerprint"])' "$BUNDLE_DIR")"
+  "$PYTHON" -m mnemosyne.cli production-evidence-verify "$BUNDLE_DIR" \
+    --expected-bundle-fingerprint "$EXPECTED_BUNDLE_FINGERPRINT"
 This is custody review only; it does not rerun production checks or flip rows.
 
 The manifest must contain validation_scope.production_validated=true,
@@ -73,7 +76,39 @@ if [ ! -f "${MANIFEST}" ]; then
 fi
 
 STAMP="$(date -u +"%Y%m%dT%H%M%SZ")"
-OUT_ROOT="${2:-/tmp/mnemosyne-tierb-production-evidence-${STAMP}}"
+OUT_ROOT_RAW="${2:-/tmp/mnemosyne-tierb-production-evidence-${STAMP}}"
+
+PYTHON="${MNEMOSYNE_PYTHON:-}"
+if [ -z "${PYTHON}" ]; then
+  if [ -x "${REPO_DIR}/.venv/bin/python" ]; then
+    PYTHON="${REPO_DIR}/.venv/bin/python"
+  else
+    PYTHON="python3"
+  fi
+fi
+
+OUT_ROOT="$("${PYTHON}" - "${OUT_ROOT_RAW}" "${REPO_DIR}" <<'PY'
+from pathlib import Path
+import sys
+
+out_root = Path(sys.argv[1]).expanduser().resolve(strict=False)
+repo_dir = Path(sys.argv[2]).resolve()
+try:
+    out_root.relative_to(repo_dir)
+except ValueError:
+    print(out_root)
+else:
+    print(
+        f"ERROR: refusing to write production evidence inside the repository: {out_root}",
+        file=sys.stderr,
+    )
+    print(
+        "Choose an external custody path such as /secure/path/to/mnemosyne-production-evidence.",
+        file=sys.stderr,
+    )
+    sys.exit(65)
+PY
+)"
 if [ -e "${OUT_ROOT}" ]; then
   if [ ! -d "${OUT_ROOT}" ]; then
     echo "ERROR: production evidence output path exists and is not a directory: ${OUT_ROOT}" >&2
@@ -82,15 +117,6 @@ if [ -e "${OUT_ROOT}" ]; then
   if [ -n "$(find "${OUT_ROOT}" -mindepth 1 -maxdepth 1 -print -quit)" ]; then
     echo "ERROR: production evidence output directory must be empty: ${OUT_ROOT}" >&2
     exit 65
-  fi
-fi
-
-PYTHON="${MNEMOSYNE_PYTHON:-}"
-if [ -z "${PYTHON}" ]; then
-  if [ -x "${REPO_DIR}/.venv/bin/python" ]; then
-    PYTHON="${REPO_DIR}/.venv/bin/python"
-  else
-    PYTHON="python3"
   fi
 fi
 
@@ -227,6 +253,7 @@ if errors:
     sys.exit(65)
 
 out_root.mkdir(parents=True, exist_ok=True)
+out_root.chmod(0o700)
 shutil.copyfile(manifest_path, out_root / "operator-soak-manifest.json")
 redaction_scan_path = out_root / "redaction-scan.json"
 write_redaction_scan(

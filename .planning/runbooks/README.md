@@ -57,8 +57,10 @@ CLI commands consumed by `deployment-soak` and `release-audit`.
   handoff custody.
 - After capture, select the repo interpreter with
   `PYTHON="${PYTHON:-$(if [ -x .venv/bin/python ]; then printf '%s' .venv/bin/python; else command -v python3; fi)}"`;
-  then `"$PYTHON" -m mnemosyne.cli production-evidence-verify
-  /secure/path/to/mnemosyne-production-evidence --expected-bundle-fingerprint
-  '<summary.json bundle_fingerprint>'` can recheck the completed bundle offline.
+  set `BUNDLE_DIR=/secure/path/to/mnemosyne-production-evidence`; derive
+  `EXPECTED_BUNDLE_FINGERPRINT` from `"$BUNDLE_DIR/summary.json"`; then
+  `"$PYTHON" -m mnemosyne.cli production-evidence-verify "$BUNDLE_DIR"
+  --expected-bundle-fingerprint "$EXPECTED_BUNDLE_FINGERPRINT"` can recheck
+  the completed bundle offline.
   This is custody review only; it does not contact production, rerun
   `deployment-soak`, create evidence, or replace operator capture.
