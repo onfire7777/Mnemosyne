@@ -10401,6 +10401,74 @@ def _verify_production_evidence_operator_manifest(
     return ok
 
 
+def _production_evidence_path_matches(path_value: Any, *, expected_path: Path) -> bool:
+    if not isinstance(path_value, str) or not path_value:
+        return False
+    candidate = Path(path_value).expanduser()
+    if not candidate.is_absolute():
+        candidate = expected_path.parent / candidate
+    try:
+        return candidate.resolve(strict=True) == expected_path.resolve(strict=True)
+    except OSError:
+        return False
+
+
+def _verify_production_evidence_deployment_soak_manifest(
+    *,
+    expected_manifest_path: Path,
+    deployment_soak: Mapping[str, Any] | None,
+    evidence_manifest: Mapping[str, Any] | None,
+    findings: list[dict[str, Any]],
+) -> bool:
+    ok = True
+    expected_count = len(PRODUCTION_RELEASE_REQUIRED_COMMANDS)
+    if deployment_soak is None:
+        ok = False
+    else:
+        report_manifest = deployment_soak.get("manifest")
+        if not isinstance(report_manifest, Mapping):
+            ok = False
+            _production_evidence_finding(
+                findings,
+                "deployment_soak_manifest_missing",
+                "deployment-soak.stdout.json is missing manifest metadata",
+            )
+        else:
+            report_manifest_path = report_manifest.get("path")
+            if not _production_evidence_path_matches(
+                report_manifest_path,
+                expected_path=expected_manifest_path,
+            ):
+                ok = False
+                _production_evidence_finding(
+                    findings,
+                    "deployment_soak_manifest_path_invalid",
+                    "deployment-soak.stdout.json manifest.path must resolve to the retained operator-soak-manifest.json",
+                )
+            if report_manifest.get("check_count") != expected_count:
+                ok = False
+                _production_evidence_finding(
+                    findings,
+                    "deployment_soak_manifest_check_count_mismatch",
+                    "deployment-soak.stdout.json manifest.check_count does not match the frozen production command set",
+                )
+    if evidence_manifest is None:
+        ok = False
+    else:
+        source_manifest = evidence_manifest.get("source_manifest")
+        if not _production_evidence_path_matches(
+            source_manifest,
+            expected_path=expected_manifest_path,
+        ):
+            ok = False
+            _production_evidence_finding(
+                findings,
+                "evidence_manifest_source_manifest_invalid",
+                "evidence/manifest.json source_manifest must resolve to the retained operator-soak-manifest.json",
+            )
+    return ok
+
+
 def _verify_production_evidence_release_audit(
     *,
     bundle_dir: Path,
@@ -10542,6 +10610,11 @@ def cmd_production_evidence_verify(args: argparse.Namespace) -> None:
         "deployment_soak_stdout",
         findings,
     )
+    evidence_manifest = _read_json_object_for_evidence(
+        resolved_bundle_dir / "evidence" / "manifest.json",
+        "evidence_manifest",
+        findings,
+    )
     preflight = _read_json_object_for_evidence(
         resolved_bundle_dir / "preflight.json",
         "preflight",
@@ -10556,6 +10629,12 @@ def cmd_production_evidence_verify(args: argparse.Namespace) -> None:
     preflight_ok = _verify_production_evidence_preflight(preflight, findings)
     _verify_production_evidence_redaction_scan(redaction_scan, findings)
     operator_manifest_ok = _verify_production_evidence_operator_manifest(operator_manifest, findings)
+    deployment_soak_manifest_ok = _verify_production_evidence_deployment_soak_manifest(
+        expected_manifest_path=resolved_bundle_dir / "operator-soak-manifest.json",
+        deployment_soak=deployment_soak,
+        evidence_manifest=evidence_manifest,
+        findings=findings,
+    )
     bundle_fingerprint = None
     artifact_count = 0
     if bundle_manifest is not None:
@@ -10589,6 +10668,7 @@ def cmd_production_evidence_verify(args: argparse.Namespace) -> None:
             "redaction_scan": redaction_scan is not None and redaction_scan.get("ok") is True,
             "bundle_manifest": bundle_manifest is not None and bundle_fingerprint is not None,
             "operator_manifest": operator_manifest_ok,
+            "deployment_soak_manifest": deployment_soak_manifest_ok,
             "deployment_soak_stdout": deployment_soak is not None and deployment_soak.get("ok") is True,
             "release_audit_replay": isinstance(recomputed_release_audit, Mapping)
             and recomputed_release_audit.get("ok") is True,

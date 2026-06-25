@@ -5603,17 +5603,8 @@ def write_production_evidence_bundle(tmp_path: Path) -> tuple[Path, str]:
     evidence_dir = bundle_dir / "evidence"
     shutil.copytree(manifest_path.parent, evidence_dir)
 
-    release_audit = run_cli(
-        store,
-        "release-audit",
-        "--evidence-manifest",
-        str(evidence_dir / "manifest.json"),
-        "--require-production-validated",
-        "--require-provider-forbid-local",
-    )
-    deployment_soak = json.loads((evidence_dir / "deployment-soak-report.json").read_text(encoding="utf-8"))
-
-    (bundle_dir / "operator-soak-manifest.json").write_text(
+    operator_manifest_path = bundle_dir / "operator-soak-manifest.json"
+    operator_manifest_path.write_text(
         json.dumps(
             {
                 "validation_scope": {
@@ -5630,6 +5621,36 @@ def write_production_evidence_bundle(tmp_path: Path) -> tuple[Path, str]:
             sort_keys=True,
         ),
         encoding="utf-8",
+    )
+    deployment_soak_path = evidence_dir / "deployment-soak-report.json"
+    deployment_soak = json.loads(deployment_soak_path.read_text(encoding="utf-8"))
+    deployment_soak["manifest"] = {
+        **deployment_soak.get("manifest", {}),
+        "path": str(operator_manifest_path),
+        "check_count": len(PRODUCTION_RELEASE_REQUIRED_COMMANDS),
+    }
+    deployment_soak_path.write_text(
+        json.dumps(deployment_soak, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    evidence_manifest_path = evidence_dir / "manifest.json"
+    evidence_manifest = json.loads(evidence_manifest_path.read_text(encoding="utf-8"))
+    evidence_manifest["source_manifest"] = str(operator_manifest_path)
+    evidence_manifest["files"]["report_sha256"] = (
+        "sha256:" + sha256(deployment_soak_path.read_bytes()).hexdigest()
+    )
+    evidence_manifest_path.write_text(
+        json.dumps(evidence_manifest, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+
+    release_audit = run_cli(
+        store,
+        "release-audit",
+        "--evidence-manifest",
+        str(evidence_manifest_path),
+        "--require-production-validated",
+        "--require-provider-forbid-local",
     )
     (bundle_dir / "preflight.json").write_text(
         json.dumps(
@@ -5820,6 +5841,7 @@ def test_cli_production_evidence_verify_accepts_captured_bundle(tmp_path: Path) 
         "redaction_scan": True,
         "bundle_manifest": True,
         "operator_manifest": True,
+        "deployment_soak_manifest": True,
         "deployment_soak_stdout": True,
         "release_audit_replay": True,
     }
@@ -5853,6 +5875,38 @@ def test_cli_production_evidence_verify_rejects_tampered_operator_manifest(tmp_p
     assert "operator_manifest_attestation_missing" in codes
     assert "operator_manifest_unresolved_placeholder" in codes
     assert "operator_manifest_duplicate_commands" in codes
+    assert "bundle_file_sha256_mismatch" not in codes
+    assert "bundle_fingerprint_mismatch" not in codes
+
+
+def test_cli_production_evidence_verify_rejects_tampered_deployment_soak_manifest(tmp_path: Path) -> None:
+    bundle_dir, _bundle_fingerprint = write_production_evidence_bundle(tmp_path)
+    wrong_manifest_path = tmp_path / "outside" / "operator-soak-manifest.json"
+    wrong_manifest_path.parent.mkdir()
+    wrong_manifest_path.write_text("{}", encoding="utf-8")
+    deployment_soak_path = bundle_dir / "deployment-soak.stdout.json"
+    deployment_soak = json.loads(deployment_soak_path.read_text(encoding="utf-8"))
+    deployment_soak["manifest"]["path"] = str(wrong_manifest_path)
+    deployment_soak["manifest"]["check_count"] = 0
+    deployment_soak_path.write_text(
+        json.dumps(deployment_soak, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    rewrite_production_bundle_manifest(bundle_dir)
+
+    result = run_raw_cli(
+        tmp_path / "verify-store.json",
+        "production-evidence-verify",
+        str(bundle_dir),
+    )
+    payload = json.loads(result.stdout)
+    codes = {finding["code"] for finding in payload["findings"]}
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert payload["checks"]["deployment_soak_manifest"] is False
+    assert "deployment_soak_manifest_path_invalid" in codes
+    assert "deployment_soak_manifest_check_count_mismatch" in codes
     assert "bundle_file_sha256_mismatch" not in codes
     assert "bundle_fingerprint_mismatch" not in codes
 
