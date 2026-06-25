@@ -116,7 +116,11 @@ infra/scripts/capture-production-evidence.sh \
   /secure/path/to/production-soak-manifest.json \
   /secure/path/to/mnemosyne-production-preflight
 infra/scripts/capture-production-evidence.sh \
-  /secure/path/to/production-soak-manifest.json
+  /secure/path/to/production-soak-manifest.json \
+  /secure/path/to/mnemosyne-production-evidence
+python -m mnemosyne.cli production-evidence-verify \
+  /secure/path/to/mnemosyne-production-evidence \
+  --expected-bundle-fingerprint '<summary.json bundle_fingerprint>'
 ```
 
 The renderer replaces non-secret `MNEMOSYNE_PROD_*` placeholders from the
@@ -134,7 +138,10 @@ followed by
 The deployment evidence manifest binds its report and check artifacts with
 SHA-256 digests; release-audit verifies those digests, rejects artifact paths
 that resolve outside the evidence bundle, and confirms retained check JSON
-matches the audited report before trusting the bundle.
+matches the audited report before trusting the bundle. The offline
+`production-evidence-verify` command rechecks an already captured bundle's
+custody metadata and release-audit replay without contacting production or
+rerunning deployment soak.
 Use `--preflight-only` to validate and copy the rendered manifest without
 running production checks; preflight output plus `redaction-scan.json` is setup
 proof only, not production parity evidence. Successful full capture writes

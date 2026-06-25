@@ -8,9 +8,9 @@ Plan 06-09 is non-autonomous. It defines the 10 production evidence gates that
 flip strict audit rows from Partial to Done only after an operator runs
 production-scoped evidence capture against deployed infrastructure.
 
-No `src/` code was modified for this plan. The follow-up renderer hardening
-adds only infra/operator handoff code and documentation so production evidence
-capture is deterministic and fail-closed.
+No `src/` code was modified for the original plan. Follow-up hardening now adds
+infra/operator handoff code, documentation, and a CLI custody verifier so
+production evidence capture and review are deterministic and fail-closed.
 
 Post-plan redaction hardening added the shared
 `src/mnemosyne/evidence_redaction.py` scanner and wired it into the capture
@@ -36,6 +36,14 @@ Post-plan redaction-skip hardening now fails closed when any generated evidence
 file is skipped by redaction scanning and rejects non-empty output roots before
 capture starts. `summary.json` and `bundle-manifest.json` are written only after
 the generated bundle has no redaction findings and no skipped files.
+
+Post-plan offline-custody hardening adds `production-evidence-verify` for
+reviewing an already captured production bundle without credentials. It rechecks
+`summary.json`, `redaction-scan.json`, `bundle-manifest.json`, retained artifact
+sizes/SHA-256 hashes, captured `release-audit.json`, optional expected
+`bundle_fingerprint`, and a fresh offline `release-audit` replay over
+`evidence/manifest.json`. This is not a new production gate and does not replace
+operator capture against deployed infrastructure.
 
 ## Executor Readiness
 

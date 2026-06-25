@@ -8869,6 +8869,20 @@ def _file_sha256(path: Path) -> str:
     return "sha256:" + sha256(path.read_bytes()).hexdigest()
 
 
+PRODUCTION_EVIDENCE_BUNDLE_SCHEMA = "mnemosyne.production-evidence-bundle.v1"
+PRODUCTION_EVIDENCE_BUNDLE_EXCLUDED_FILES = frozenset({"bundle-manifest.json", "summary.json"})
+PRODUCTION_EVIDENCE_REQUIRED_FILES = frozenset(
+    {
+        "deployment-soak.stdout.json",
+        "evidence/manifest.json",
+        "operator-soak-manifest.json",
+        "preflight.json",
+        "redaction-scan.json",
+        "release-audit.json",
+    }
+)
+
+
 def _write_deployment_soak_evidence(
     *,
     evidence_dir: str,
@@ -9692,7 +9706,7 @@ def _release_provider_check_summary(
     return rows
 
 
-def cmd_release_audit(args: argparse.Namespace) -> None:
+def _build_release_audit_report(args: argparse.Namespace) -> dict[str, Any]:
     report, source = _load_release_audit_report(args)
     checks_raw = report.get("checks")
     if not isinstance(checks_raw, list):
@@ -9870,7 +9884,519 @@ def cmd_release_audit(args: argparse.Namespace) -> None:
         },
         "findings": findings,
     }
+    return report_out
+
+
+def cmd_release_audit(args: argparse.Namespace) -> None:
+    report_out = _build_release_audit_report(args)
     emit(report_out)
+    if report_out["findings"]:
+        raise SystemExit(1)
+
+
+def _production_evidence_finding(
+    findings: list[dict[str, Any]],
+    code: str,
+    message: str,
+    *,
+    severity: str = "critical",
+) -> None:
+    findings.append(_release_finding(code, message, severity=severity))
+
+
+def _read_json_object_for_evidence(
+    path: Path,
+    label: str,
+    findings: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        _production_evidence_finding(findings, f"{label}_missing", f"{label} is missing")
+        return None
+    except (OSError, json.JSONDecodeError) as exc:
+        _production_evidence_finding(findings, f"{label}_invalid", f"{label} denied: {exc}")
+        return None
+    if not isinstance(payload, dict):
+        _production_evidence_finding(findings, f"{label}_invalid", f"{label} must be a JSON object")
+        return None
+    return payload
+
+
+def _production_evidence_bundle_path(
+    bundle_dir: Path,
+    value: Any,
+    label: str,
+    findings: list[dict[str, Any]],
+) -> Path | None:
+    if not isinstance(value, str) or not value:
+        _production_evidence_finding(findings, "bundle_manifest_invalid_path", f"{label} must be a non-empty path")
+        return None
+    relative_path = Path(value)
+    if relative_path.is_absolute() or ".." in relative_path.parts:
+        _production_evidence_finding(
+            findings,
+            "bundle_manifest_invalid_path",
+            f"{label} must be a relative path inside the evidence bundle",
+        )
+        return None
+    try:
+        root = bundle_dir.resolve(strict=True)
+        candidate = (bundle_dir / relative_path).resolve(strict=True)
+        candidate.relative_to(root)
+    except FileNotFoundError:
+        _production_evidence_finding(findings, "bundle_file_missing", f"{label} is missing: {value}")
+        return None
+    except (OSError, ValueError) as exc:
+        _production_evidence_finding(findings, "bundle_manifest_invalid_path", f"{label} denied: {exc}")
+        return None
+    return bundle_dir / relative_path
+
+
+def _production_evidence_bundle_entry(path: Path, bundle_dir: Path) -> dict[str, Any]:
+    payload = path.read_bytes()
+    return {
+        "path": path.relative_to(bundle_dir).as_posix(),
+        "size_bytes": len(payload),
+        "sha256": "sha256:" + sha256(payload).hexdigest(),
+    }
+
+
+def _production_evidence_bundle_fingerprint(files: list[dict[str, Any]]) -> str:
+    payload = {
+        "schema": PRODUCTION_EVIDENCE_BUNDLE_SCHEMA,
+        "files": files,
+    }
+    return "sha256:" + sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
+def _actual_production_evidence_files(
+    bundle_dir: Path,
+    findings: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    actual_files: list[dict[str, Any]] = []
+    root = bundle_dir.resolve(strict=True)
+    for path in sorted(item for item in bundle_dir.rglob("*") if item.is_file() or item.is_symlink()):
+        relative_path = path.relative_to(bundle_dir).as_posix()
+        if relative_path in PRODUCTION_EVIDENCE_BUNDLE_EXCLUDED_FILES:
+            continue
+        if path.is_symlink():
+            _production_evidence_finding(
+                findings,
+                "bundle_file_symlink",
+                f"production evidence artifact must not be a symlink: {relative_path}",
+            )
+            continue
+        try:
+            path.resolve(strict=True).relative_to(root)
+        except (OSError, ValueError) as exc:
+            _production_evidence_finding(
+                findings,
+                "bundle_file_escape",
+                f"production evidence artifact resolves outside the bundle: {relative_path}: {exc}",
+            )
+            continue
+        actual_files.append(_production_evidence_bundle_entry(path, bundle_dir))
+    return actual_files
+
+
+def _verify_production_evidence_bundle_manifest(
+    *,
+    bundle_dir: Path,
+    bundle_manifest: Mapping[str, Any],
+    summary: Mapping[str, Any] | None,
+    expected_bundle_fingerprint: str | None,
+    findings: list[dict[str, Any]],
+) -> tuple[str | None, list[dict[str, Any]]]:
+    if bundle_manifest.get("schema") != PRODUCTION_EVIDENCE_BUNDLE_SCHEMA:
+        _production_evidence_finding(
+            findings,
+            "bundle_manifest_schema_invalid",
+            "bundle-manifest.json has unsupported schema",
+        )
+    manifest_files = bundle_manifest.get("files")
+    if not isinstance(manifest_files, list) or not all(isinstance(item, Mapping) for item in manifest_files):
+        _production_evidence_finding(
+            findings,
+            "bundle_manifest_files_invalid",
+            "bundle-manifest.json files must be an array of objects",
+        )
+        manifest_files = []
+    typed_manifest_files = [
+        {
+            "path": item.get("path"),
+            "size_bytes": item.get("size_bytes"),
+            "sha256": item.get("sha256"),
+        }
+        for item in manifest_files
+        if isinstance(item, Mapping)
+    ]
+    artifact_count = bundle_manifest.get("artifact_count")
+    if artifact_count != len(typed_manifest_files):
+        _production_evidence_finding(
+            findings,
+            "bundle_manifest_artifact_count_mismatch",
+            "bundle-manifest.json artifact_count does not match files length",
+        )
+    manifest_fingerprint = bundle_manifest.get("fingerprint")
+    if not isinstance(manifest_fingerprint, str) or not manifest_fingerprint.startswith("sha256:"):
+        _production_evidence_finding(
+            findings,
+            "bundle_manifest_fingerprint_missing",
+            "bundle-manifest.json requires a sha256 fingerprint",
+        )
+        manifest_fingerprint = None
+    recorded_fingerprint = _production_evidence_bundle_fingerprint(typed_manifest_files)
+    if manifest_fingerprint and manifest_fingerprint != recorded_fingerprint:
+        _production_evidence_finding(
+            findings,
+            "bundle_manifest_fingerprint_mismatch",
+            "bundle-manifest.json fingerprint does not match its files payload",
+        )
+    if expected_bundle_fingerprint and expected_bundle_fingerprint.strip() != manifest_fingerprint:
+        _production_evidence_finding(
+            findings,
+            "expected_bundle_fingerprint_mismatch",
+            "expected production evidence bundle fingerprint did not match",
+        )
+    if summary is not None and summary.get("bundle_fingerprint") != manifest_fingerprint:
+        _production_evidence_finding(
+            findings,
+            "summary_bundle_fingerprint_mismatch",
+            "summary.json bundle_fingerprint does not match bundle-manifest.json",
+        )
+
+    manifest_paths: set[str] = set()
+    for index, item in enumerate(typed_manifest_files, start=1):
+        rel_path = item.get("path")
+        if not isinstance(rel_path, str):
+            _production_evidence_finding(
+                findings,
+                "bundle_manifest_invalid_path",
+                f"bundle-manifest.json files[{index}].path must be a string",
+            )
+            continue
+        if rel_path in PRODUCTION_EVIDENCE_BUNDLE_EXCLUDED_FILES:
+            _production_evidence_finding(
+                findings,
+                "bundle_manifest_excluded_file",
+                f"bundle-manifest.json must not include {rel_path}",
+            )
+        if rel_path in manifest_paths:
+            _production_evidence_finding(
+                findings,
+                "bundle_manifest_duplicate_file",
+                f"bundle-manifest.json lists {rel_path} more than once",
+            )
+        manifest_paths.add(rel_path)
+        path = _production_evidence_bundle_path(bundle_dir, rel_path, f"files[{index}].path", findings)
+        if path is None:
+            continue
+        if path.is_symlink():
+            _production_evidence_finding(
+                findings,
+                "bundle_file_symlink",
+                f"production evidence artifact must not be a symlink: {rel_path}",
+            )
+            continue
+        try:
+            expected_size = item.get("size_bytes")
+            if not isinstance(expected_size, int) or expected_size < 0:
+                _production_evidence_finding(
+                    findings,
+                    "bundle_file_size_invalid",
+                    f"bundle-manifest.json files[{index}].size_bytes must be a non-negative integer",
+                )
+            elif path.stat().st_size != expected_size:
+                _production_evidence_finding(
+                    findings,
+                    "bundle_file_size_mismatch",
+                    f"production evidence artifact size mismatch: {rel_path}",
+                )
+            expected_sha256 = item.get("sha256")
+            if not isinstance(expected_sha256, str) or not expected_sha256.startswith("sha256:"):
+                _production_evidence_finding(
+                    findings,
+                    "bundle_file_sha256_invalid",
+                    f"bundle-manifest.json files[{index}].sha256 must be a sha256 digest",
+                )
+            elif _file_sha256(path) != expected_sha256:
+                _production_evidence_finding(
+                    findings,
+                    "bundle_file_sha256_mismatch",
+                    f"production evidence artifact digest mismatch: {rel_path}",
+                )
+        except OSError as exc:
+            _production_evidence_finding(
+                findings,
+                "bundle_file_denied",
+                f"production evidence artifact denied: {rel_path}: {exc}",
+            )
+
+    actual_files = _actual_production_evidence_files(bundle_dir, findings)
+    actual_paths = {str(item["path"]) for item in actual_files}
+    required_missing = sorted(PRODUCTION_EVIDENCE_REQUIRED_FILES - actual_paths)
+    if required_missing:
+        _production_evidence_finding(
+            findings,
+            "production_evidence_required_file_missing",
+            "production evidence bundle is missing required files: " + ", ".join(required_missing),
+        )
+    missing_from_manifest = sorted(actual_paths - manifest_paths)
+    unexpected_manifest_paths = sorted(manifest_paths - actual_paths)
+    if missing_from_manifest:
+        _production_evidence_finding(
+            findings,
+            "bundle_manifest_missing_actual_files",
+            "bundle-manifest.json does not list artifacts: " + ", ".join(missing_from_manifest),
+        )
+    if unexpected_manifest_paths:
+        _production_evidence_finding(
+            findings,
+            "bundle_manifest_unknown_files",
+            "bundle-manifest.json lists missing artifacts: " + ", ".join(unexpected_manifest_paths),
+        )
+    actual_fingerprint = _production_evidence_bundle_fingerprint(actual_files)
+    if manifest_fingerprint and manifest_fingerprint != actual_fingerprint:
+        _production_evidence_finding(
+            findings,
+            "bundle_fingerprint_mismatch",
+            "bundle-manifest.json fingerprint does not match current bundle files",
+        )
+    return manifest_fingerprint, actual_files
+
+
+def _verify_production_evidence_summary(
+    summary: Mapping[str, Any] | None,
+    findings: list[dict[str, Any]],
+) -> None:
+    if summary is None:
+        return
+    expected_truthy = {
+        "redaction_scan_ok": "summary.json does not confirm redaction_scan_ok",
+        "deployment_soak_ok": "summary.json does not confirm deployment_soak_ok",
+        "release_audit_ok": "summary.json does not confirm release_audit_ok",
+    }
+    for key, message in expected_truthy.items():
+        if summary.get(key) is not True:
+            _production_evidence_finding(findings, f"summary_{key}_missing", message)
+    if summary.get("release_audit_findings") != []:
+        _production_evidence_finding(
+            findings,
+            "summary_release_audit_findings_present",
+            "summary.json reports release-audit findings",
+        )
+
+
+def _verify_production_evidence_redaction_scan(
+    redaction_scan: Mapping[str, Any] | None,
+    findings: list[dict[str, Any]],
+) -> None:
+    if redaction_scan is None:
+        return
+    if redaction_scan.get("ok") is not True:
+        _production_evidence_finding(
+            findings,
+            "redaction_scan_not_ok",
+            "redaction-scan.json is not ok",
+        )
+    if redaction_scan.get("findings") != []:
+        _production_evidence_finding(
+            findings,
+            "redaction_scan_findings_present",
+            "redaction-scan.json contains findings",
+        )
+    if redaction_scan.get("skipped_files") != []:
+        _production_evidence_finding(
+            findings,
+            "redaction_scan_skipped_files_present",
+            "redaction-scan.json contains skipped files",
+        )
+
+
+def _verify_production_evidence_release_audit(
+    *,
+    bundle_dir: Path,
+    release_audit: Mapping[str, Any] | None,
+    deployment_soak: Mapping[str, Any] | None,
+    summary: Mapping[str, Any] | None,
+    findings: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    if deployment_soak is not None and deployment_soak.get("ok") is not True:
+        _production_evidence_finding(
+            findings,
+            "deployment_soak_stdout_not_ok",
+            "deployment-soak.stdout.json is not ok",
+        )
+    if release_audit is not None:
+        if release_audit.get("ok") is not True:
+            _production_evidence_finding(findings, "release_audit_not_ok", "release-audit.json is not ok")
+        if release_audit.get("findings") != []:
+            _production_evidence_finding(
+                findings,
+                "release_audit_findings_present",
+                "release-audit.json contains findings",
+            )
+        requirements = release_audit.get("requirements")
+        if not isinstance(requirements, Mapping):
+            _production_evidence_finding(
+                findings,
+                "release_audit_requirements_missing",
+                "release-audit.json is missing requirements",
+            )
+        else:
+            if requirements.get("require_production_validated") is not True:
+                _production_evidence_finding(
+                    findings,
+                    "release_audit_production_requirement_missing",
+                    "release-audit.json did not require production validation",
+                )
+            if requirements.get("require_provider_forbid_local") is not True:
+                _production_evidence_finding(
+                    findings,
+                    "release_audit_provider_requirement_missing",
+                    "release-audit.json did not forbid local providers",
+                )
+        validation_scope = release_audit.get("validation_scope")
+        if not isinstance(validation_scope, Mapping):
+            _production_evidence_finding(
+                findings,
+                "release_audit_validation_scope_missing",
+                "release-audit.json is missing validation_scope",
+            )
+        else:
+            if validation_scope.get("production_validated") is not True:
+                _production_evidence_finding(
+                    findings,
+                    "release_audit_production_validation_missing",
+                    "release-audit.json is not production validated",
+                )
+            if validation_scope.get("target_environment") != "production":
+                _production_evidence_finding(
+                    findings,
+                    "release_audit_target_missing",
+                    "release-audit.json did not target production",
+                )
+            if validation_scope.get("operator_asserted") is not True:
+                _production_evidence_finding(
+                    findings,
+                    "release_audit_operator_attestation_missing",
+                    "release-audit.json is missing operator attestation",
+                )
+    evidence_manifest_path = bundle_dir / "evidence" / "manifest.json"
+    try:
+        recomputed = _build_release_audit_report(
+            argparse.Namespace(
+                soak_report=None,
+                evidence_manifest=str(evidence_manifest_path),
+                require_command=None,
+                require_provider_check=None,
+                require_provider_forbid_local=True,
+                require_production_validated=True,
+                expected_fingerprint=None,
+            )
+        )
+    except SystemExit as exc:
+        _production_evidence_finding(
+            findings,
+            "release_audit_recompute_failed",
+            f"offline release-audit replay failed: {exc}",
+        )
+        return None
+    if recomputed.get("ok") is not True:
+        _production_evidence_finding(
+            findings,
+            "release_audit_recompute_not_ok",
+            "offline release-audit replay is not ok",
+        )
+    if release_audit is not None and recomputed.get("fingerprint") != release_audit.get("fingerprint"):
+        _production_evidence_finding(
+            findings,
+            "release_audit_fingerprint_mismatch",
+            "offline release-audit replay fingerprint does not match release-audit.json",
+        )
+    if summary is not None and summary.get("release_audit_fingerprint") != recomputed.get("fingerprint"):
+        _production_evidence_finding(
+            findings,
+            "summary_release_audit_fingerprint_mismatch",
+            "summary.json release_audit_fingerprint does not match offline replay",
+        )
+    return recomputed
+
+
+def cmd_production_evidence_verify(args: argparse.Namespace) -> None:
+    bundle_dir = Path(args.bundle_dir).expanduser()
+    findings: list[dict[str, Any]] = []
+    try:
+        resolved_bundle_dir = bundle_dir.resolve(strict=True)
+    except OSError as exc:
+        raise SystemExit(f"production evidence bundle denied: {exc}") from exc
+    if not resolved_bundle_dir.is_dir():
+        raise SystemExit("production evidence bundle path must be a directory")
+
+    summary = _read_json_object_for_evidence(resolved_bundle_dir / "summary.json", "summary", findings)
+    redaction_scan = _read_json_object_for_evidence(
+        resolved_bundle_dir / "redaction-scan.json",
+        "redaction_scan",
+        findings,
+    )
+    bundle_manifest = _read_json_object_for_evidence(
+        resolved_bundle_dir / "bundle-manifest.json",
+        "bundle_manifest",
+        findings,
+    )
+    release_audit = _read_json_object_for_evidence(
+        resolved_bundle_dir / "release-audit.json",
+        "release_audit",
+        findings,
+    )
+    deployment_soak = _read_json_object_for_evidence(
+        resolved_bundle_dir / "deployment-soak.stdout.json",
+        "deployment_soak_stdout",
+        findings,
+    )
+    _verify_production_evidence_summary(summary, findings)
+    _verify_production_evidence_redaction_scan(redaction_scan, findings)
+    bundle_fingerprint = None
+    artifact_count = 0
+    if bundle_manifest is not None:
+        bundle_fingerprint, actual_files = _verify_production_evidence_bundle_manifest(
+            bundle_dir=resolved_bundle_dir,
+            bundle_manifest=bundle_manifest,
+            summary=summary,
+            expected_bundle_fingerprint=args.expected_bundle_fingerprint,
+            findings=findings,
+        )
+        artifact_count = len(actual_files)
+    recomputed_release_audit = _verify_production_evidence_release_audit(
+        bundle_dir=resolved_bundle_dir,
+        release_audit=release_audit,
+        deployment_soak=deployment_soak,
+        summary=summary,
+        findings=findings,
+    )
+    report = {
+        "ok": not findings,
+        "bundle_dir": str(resolved_bundle_dir),
+        "bundle_fingerprint": bundle_fingerprint,
+        "expected_bundle_fingerprint_present": bool(args.expected_bundle_fingerprint),
+        "artifact_count": artifact_count,
+        "release_audit_fingerprint": recomputed_release_audit.get("fingerprint")
+        if isinstance(recomputed_release_audit, Mapping)
+        else None,
+        "checks": {
+            "summary": summary is not None and summary.get("redaction_scan_ok") is True,
+            "redaction_scan": redaction_scan is not None and redaction_scan.get("ok") is True,
+            "bundle_manifest": bundle_manifest is not None and bundle_fingerprint is not None,
+            "deployment_soak_stdout": deployment_soak is not None and deployment_soak.get("ok") is True,
+            "release_audit_replay": isinstance(recomputed_release_audit, Mapping)
+            and recomputed_release_audit.get("ok") is True,
+        },
+        "findings": findings,
+    }
+    emit(report)
     if findings:
         raise SystemExit(1)
 
@@ -12830,6 +13356,20 @@ def build_parser() -> argparse.ArgumentParser:
     )
     release_audit.add_argument("--expected-fingerprint")
     release_audit.set_defaults(func=cmd_release_audit)
+
+    production_evidence_verify = sub.add_parser("production-evidence-verify")
+    production_evidence_verify.add_argument(
+        "bundle_dir",
+        help=(
+            "Path to an already captured production evidence bundle; verifies custody "
+            "metadata offline without rerunning production checks"
+        ),
+    )
+    production_evidence_verify.add_argument(
+        "--expected-bundle-fingerprint",
+        help="Expected bundle-manifest.json sha256 fingerprint for handoff review",
+    )
+    production_evidence_verify.set_defaults(func=cmd_production_evidence_verify)
 
     tls_cert_check = sub.add_parser("tls-cert-check")
     tls_cert_check.add_argument("--url", default=os.environ.get("MNEMOSYNE_TLS_CHECK_URL"))

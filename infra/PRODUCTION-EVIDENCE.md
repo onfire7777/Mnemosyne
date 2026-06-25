@@ -52,15 +52,34 @@ The wrapper performs these steps:
 4. Scans the generated evidence bundle for high-confidence secret material and fails closed if any retained artifact cannot be scanned.
 5. Writes `bundle-manifest.json` with SHA-256 hashes for every retained artifact before writing the final summary.
 
+After a successful full capture, reviewers can recheck the completed bundle
+offline without production credentials:
+
+```bash
+python -m mnemosyne.cli production-evidence-verify \
+  /secure/path/to/mnemosyne-production-evidence \
+  --expected-bundle-fingerprint '<summary.json bundle_fingerprint>'
+```
+
+This command verifies `summary.json`, `redaction-scan.json`,
+`bundle-manifest.json`, every manifest-listed artifact hash/size, the captured
+`release-audit.json`, and a fresh offline replay of `release-audit` against
+`evidence/manifest.json`. It does not contact production services, does not run
+`deployment-soak`, does not create production evidence, and cannot flip any
+strict-audit row to Done unless the bundle was originally captured by the
+production wrapper against deployed infrastructure.
+
 ## Acceptance
 
 The resulting `release-audit.json` must report `ok: true` with no findings, and
 `redaction-scan.json` must report `ok: true` with no findings and no skipped
-files. Retain `bundle-manifest.json`
-and the `summary.json` `bundle_fingerprint` as the handoff chain-of-custody
-record for the captured files. A passing local or compose-only bundle is useful
-staging evidence, but it does not satisfy Tier B unless the manifest is
-operator asserted and the checks use production infrastructure.
+files. `production-evidence-verify` must also report `ok: true` when pointed at
+the completed bundle and, when supplied, the retained `summary.json`
+`bundle_fingerprint`. Retain `bundle-manifest.json` and the `summary.json`
+`bundle_fingerprint` as the handoff chain-of-custody record for the captured
+files. A passing local or compose-only bundle is useful staging evidence, but it
+does not satisfy Tier B unless the manifest is operator asserted and the checks
+use production infrastructure.
 
 The current strict audit remains incomplete until the production evidence bundle proves:
 
