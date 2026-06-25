@@ -93,6 +93,7 @@ import re
 import sys
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 repo_dir = Path(os.environ["REPO_DIR"]).resolve()
 sys.path.insert(0, str(repo_dir / "src"))
@@ -242,22 +243,6 @@ if check_environment:
             file=sys.stderr,
         )
         raise SystemExit(78)
-    print(
-        json.dumps(
-            {
-                "ok": True,
-                "template": str(template_path),
-                "placeholder_count": len(required),
-                "present": present,
-                "missing": [],
-                "values_redacted": True,
-                "evidence_dir_external": True,
-                "c2pa_tool_external": True,
-            },
-            indent=2,
-        )
-    )
-    raise SystemExit(0)
 
 manifest = json.loads(template_text)
 
@@ -318,6 +303,109 @@ if errors:
     for error in errors:
         print(f"  - {error}", file=sys.stderr)
     raise SystemExit(78)
+
+def is_url(value: str) -> bool:
+    parsed = urlparse(value)
+    return bool(parsed.scheme and parsed.netloc)
+
+def collect_manifest_input_artifacts(manifest_payload: dict[str, Any]) -> list[dict[str, object]]:
+    artifacts: dict[str, dict[str, object]] = {}
+    if not isinstance(evidence_dir_resolved, Path):
+        return []
+
+    def record(value: str, *, check_name: str, command: str, option: str) -> None:
+        if not value or is_url(value):
+            return
+        candidate = Path(value).expanduser()
+        if not candidate.is_absolute():
+            return
+        resolved = candidate.resolve(strict=False)
+        try:
+            relative = candidate.relative_to(evidence_dir)
+        except ValueError:
+            try:
+                relative = resolved.relative_to(evidence_dir_resolved)
+            except ValueError:
+                return
+        relative_name = relative.as_posix()
+        artifact = artifacts.setdefault(
+            str(resolved),
+            {
+                "relative_path": relative_name,
+                "checks": [],
+                "exists": resolved.exists(),
+            },
+        )
+        artifact["checks"].append(
+            {
+                "name": check_name,
+                "command": command,
+                "option": option,
+            }
+        )
+
+    checks_payload = manifest_payload.get("checks", [])
+    if not isinstance(checks_payload, list):
+        return []
+    for check in checks_payload:
+        if not isinstance(check, dict):
+            continue
+        command = check.get("command")
+        check_name = check.get("name")
+        if not isinstance(command, str):
+            command = ""
+        if not isinstance(check_name, str):
+            check_name = command
+        for field in ("args", "global_args"):
+            values = check.get(field, [])
+            if not isinstance(values, list) or not all(isinstance(v, str) for v in values):
+                continue
+            for index, value in enumerate(values):
+                previous = values[index - 1] if index > 0 else ""
+                if previous == "--c2pa-tool":
+                    continue
+                option = previous if previous.startswith("--") and "=" not in previous else field
+                if value.startswith("--"):
+                    option_name, separator, option_value = value.partition("=")
+                    if separator and option_name != "--c2pa-tool":
+                        record(
+                            option_value,
+                            check_name=check_name,
+                            command=command,
+                            option=option_name,
+                        )
+                    continue
+                record(value, check_name=check_name, command=command, option=option)
+    return sorted(artifacts.values(), key=lambda item: str(item["relative_path"]))
+
+input_artifacts = collect_manifest_input_artifacts(rendered_manifest)
+missing_input_artifacts = [
+    str(artifact["relative_path"])
+    for artifact in input_artifacts
+    if not bool(artifact.get("exists"))
+]
+
+if check_environment:
+    payload = {
+        "ok": not missing_input_artifacts,
+        "template": str(template_path),
+        "placeholder_count": len(required),
+        "present": present,
+        "missing": [],
+        "values_redacted": True,
+        "evidence_dir_external": True,
+        "c2pa_tool_external": True,
+        "required_input_artifact_count": len(input_artifacts),
+        "required_input_artifacts": [
+            str(artifact["relative_path"]) for artifact in input_artifacts
+        ],
+        "missing_input_artifacts": missing_input_artifacts,
+        "input_artifacts_complete": not missing_input_artifacts,
+    }
+    print(json.dumps(payload, indent=2))
+    if missing_input_artifacts:
+        raise SystemExit(78)
+    raise SystemExit(0)
 
 output_path.parent.mkdir(parents=True, exist_ok=True)
 tmp_path = output_path.with_name(f".{output_path.name}.tmp")
