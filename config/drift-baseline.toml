@@ -123,6 +123,7 @@ required_tables = [
   "entities",
   "entity_aliases",
   "relations",
+  "graph_ppr_cache",
   "contradictions",
   "procedures",
   "lessons",

@@ -171,6 +171,7 @@ class MemoryEngine(Protocol):
         as_of: datetime | None = None,
         tenant_id: str | None = None,
         branch: str | None = None,
+        use_cache: bool = False,
     ) -> list[Hit]:
         raise NotImplementedError
 
@@ -794,6 +795,7 @@ class LocalMemoryEngine:
         as_of: datetime | None = None,
         tenant_id: str | None = None,
         branch: str | None = None,
+        use_cache: bool = False,
     ) -> list[Hit]:
         seed_set = {seed.lower() for seed in seeds}
         if not seed_set:

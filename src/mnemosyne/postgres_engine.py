@@ -6,6 +6,7 @@ import copy
 import json
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
+from hashlib import sha256
 from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid5
 
@@ -105,6 +106,52 @@ class PostgresEngine:
     @staticmethod
     def _ensure_preference_access_policy_schema(cur: Any) -> None:
         cur.execute("ALTER TABLE preferences ADD COLUMN IF NOT EXISTS access_policy JSONB NOT NULL DEFAULT '{}'::jsonb")
+
+    @staticmethod
+    def _ensure_graph_ppr_cache_schema(cur: Any) -> None:
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS graph_ppr_cache (
+              tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+              branch TEXT NOT NULL DEFAULT 'main',
+              seed_hash TEXT NOT NULL,
+              as_of_key TEXT NOT NULL,
+              as_of TIMESTAMPTZ,
+              relation_fingerprint TEXT NOT NULL,
+              cache_depth INTEGER NOT NULL DEFAULT 0 CHECK (cache_depth >= 0),
+              hits JSONB NOT NULL DEFAULT '[]'::jsonb,
+              refreshed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+              PRIMARY KEY (tenant_id, branch, seed_hash, as_of_key),
+              FOREIGN KEY (tenant_id, branch) REFERENCES branches(tenant_id, name)
+            )
+            """
+        )
+        cur.execute("ALTER TABLE graph_ppr_cache ADD COLUMN IF NOT EXISTS cache_depth INTEGER NOT NULL DEFAULT 0")
+        cur.execute(
+            """
+            DO $$
+            BEGIN
+              IF NOT EXISTS (
+                SELECT 1
+                FROM pg_constraint
+                WHERE conname = 'graph_ppr_cache_cache_depth_check'
+              ) THEN
+                ALTER TABLE graph_ppr_cache
+                  ADD CONSTRAINT graph_ppr_cache_cache_depth_check CHECK (cache_depth >= 0);
+              END IF;
+            END $$;
+            """
+        )
+        cur.execute("ALTER TABLE graph_ppr_cache ENABLE ROW LEVEL SECURITY")
+        cur.execute("ALTER TABLE graph_ppr_cache FORCE ROW LEVEL SECURITY")
+        cur.execute("DROP POLICY IF EXISTS graph_ppr_cache_tenant_isolation ON graph_ppr_cache")
+        cur.execute(
+            """
+            CREATE POLICY graph_ppr_cache_tenant_isolation ON graph_ppr_cache
+              USING (tenant_id = mnemosyne_current_tenant())
+              WITH CHECK (tenant_id = mnemosyne_current_tenant())
+            """
+        )
 
     def ensure_tenant_and_branch(self, tenant_id: str, branch: str = "main", kind: str = "protected") -> None:
         db_tenant_id = _stable_uuid("tenant", tenant_id)
@@ -993,6 +1040,7 @@ class PostgresEngine:
         as_of: datetime | None = None,
         tenant_id: str | None = None,
         branch: str | None = None,
+        use_cache: bool = False,
     ) -> list[Hit]:
         seed_set = {seed.lower() for seed in seeds}
         if not seed_set or not tenant_id:
@@ -1022,6 +1070,18 @@ class PostgresEngine:
             )
             return self._mark_retrieved_text_as_data(hits)
         db_tenant_id = _stable_uuid("tenant", tenant_id)
+        if use_cache:
+            cached_hits = self._read_graph_ppr_cache(
+                seed_set=seed_set,
+                k=k,
+                db_tenant_id=db_tenant_id,
+                tenant_id=tenant_id,
+                branch=branch,
+                moment=moment,
+                as_of=as_of,
+            )
+            if cached_hits is not None:
+                return self._mark_retrieved_text_as_data(cached_hits)
         adjacency: dict[str, set[str]] = defaultdict(set)
         relation_by_pair: dict[tuple[str, str], dict[str, Any]] = {}
         with self.connect() as conn:
@@ -1085,6 +1145,137 @@ class PostgresEngine:
             if len(hits) >= k:
                 break
         return self._mark_retrieved_text_as_data(hits)
+
+    def refresh_graph_ppr_cache(
+        self,
+        seeds: list[str],
+        k: int,
+        as_of: datetime | None = None,
+        tenant_id: str | None = None,
+        branch: str = "main",
+    ) -> dict[str, Any]:
+        seed_set = {seed.lower() for seed in seeds}
+        if not seed_set or not tenant_id:
+            return {"refreshed": False, "reason": "missing_seed_or_tenant", "hit_count": 0}
+        tenant_id = str(tenant_id)
+        branch = str(branch or "main")
+        db_tenant_id = _stable_uuid("tenant", tenant_id)
+        moment = as_of or utc_now()
+        moment = moment.astimezone(UTC) if moment.tzinfo else moment.replace(tzinfo=UTC)
+        self.ensure_tenant_and_branch(tenant_id, branch)
+        hits = self.graph_ppr(seeds, k, as_of=as_of, tenant_id=tenant_id, branch=branch, use_cache=False)
+        relation_fingerprint = self._graph_ppr_relation_fingerprint(db_tenant_id, branch, moment)
+        seed_hash = _graph_ppr_seed_hash(seed_set)
+        as_of_key = _graph_ppr_as_of_key(as_of, moment)
+        with self.connect() as conn:
+            with conn.cursor() as cur:
+                self._ensure_graph_ppr_cache_schema(cur)
+                self._set_tenant(cur, db_tenant_id)
+                cur.execute(
+                    """
+                    INSERT INTO graph_ppr_cache (
+                      tenant_id, branch, seed_hash, as_of_key, as_of,
+                      relation_fingerprint, cache_depth, hits, refreshed_at
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, now())
+                    ON CONFLICT (tenant_id, branch, seed_hash, as_of_key)
+                    DO UPDATE SET
+                      as_of = EXCLUDED.as_of,
+                      relation_fingerprint = EXCLUDED.relation_fingerprint,
+                      cache_depth = EXCLUDED.cache_depth,
+                      hits = EXCLUDED.hits,
+                      refreshed_at = now()
+                    """,
+                    (
+                        db_tenant_id,
+                        branch,
+                        seed_hash,
+                        as_of_key,
+                        moment if as_of is not None else None,
+                        relation_fingerprint,
+                        k,
+                        self._jsonb([hit.to_dict() for hit in hits]),
+                    ),
+                )
+        return {
+            "refreshed": True,
+            "hit_count": len(hits),
+            "seed_hash": seed_hash,
+            "as_of_key": as_of_key,
+            "relation_fingerprint": relation_fingerprint,
+        }
+
+    def _read_graph_ppr_cache(
+        self,
+        *,
+        seed_set: set[str],
+        k: int,
+        db_tenant_id: str,
+        tenant_id: str,
+        branch: str,
+        moment: datetime,
+        as_of: datetime | None,
+    ) -> list[Hit] | None:
+        relation_fingerprint = self._graph_ppr_relation_fingerprint(db_tenant_id, branch, moment)
+        seed_hash = _graph_ppr_seed_hash(seed_set)
+        as_of_key = _graph_ppr_as_of_key(as_of, moment)
+        with self.connect() as conn:
+            with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                self._ensure_graph_ppr_cache_schema(cur)
+                self._set_tenant(cur, db_tenant_id)
+                cur.execute(
+                    """
+                    SELECT relation_fingerprint, cache_depth, hits
+                    FROM graph_ppr_cache
+                    WHERE tenant_id = %s AND branch = %s AND seed_hash = %s AND as_of_key = %s
+                    """,
+                    (db_tenant_id, branch, seed_hash, as_of_key),
+                )
+                row = cur.fetchone()
+        if row is None or row["relation_fingerprint"] != relation_fingerprint:
+            return None
+        if int(row["cache_depth"] or 0) < k or len(row["hits"] or []) < k:
+            return None
+        hits: list[Hit] = []
+        for item in list(row["hits"] or [])[:k]:
+            data = dict(item)
+            data["tenant_id"] = tenant_id
+            data["branch"] = branch
+            hits.append(Hit(**data))
+        return hits
+
+    def _graph_ppr_relation_fingerprint(self, db_tenant_id: str, branch: str, moment: datetime) -> str:
+        with self.connect() as conn:
+            with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                self._set_tenant(cur, db_tenant_id)
+                cur.execute(
+                    """
+                    SELECT id, source, predicate, target, confidence, weight,
+                           valid_from, valid_to, source_evidence_cids
+                    FROM relations
+                    WHERE tenant_id = %s AND branch = %s
+                      AND valid_from <= %s AND (valid_to IS NULL OR valid_to > %s)
+                    ORDER BY id
+                    """,
+                    (db_tenant_id, branch, moment, moment),
+                )
+                rows = cur.fetchall()
+        payload = [
+            {
+                "id": str(row["id"]),
+                "source": row["source"],
+                "predicate": row["predicate"],
+                "target": row["target"],
+                "confidence": float(row["confidence"]),
+                "weight": float(row["weight"]),
+                "valid_from": dt_to_json(row["valid_from"]),
+                "valid_to": dt_to_json(row["valid_to"]),
+                "source_evidence_cids": _bytes_list_to_cids(row["source_evidence_cids"]),
+            }
+            for row in rows
+        ]
+        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        return sha256(encoded).hexdigest()
 
     def as_of(self, subject: str, predicate: str, t: datetime, tenant_id: str | None = None, branch: str = "main") -> list[Assertion]:
         moment = t.astimezone(UTC) if t.tzinfo else t.replace(tzinfo=UTC)
@@ -2338,6 +2529,17 @@ def _bytes_list_to_cids(values: list[bytes] | None) -> list[str]:
     if not values:
         return []
     return [_bytes_to_cid(value) for value in values]
+
+
+def _graph_ppr_seed_hash(seed_set: set[str]) -> str:
+    payload = json.dumps(sorted(seed_set), sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return sha256(payload).hexdigest()
+
+
+def _graph_ppr_as_of_key(as_of: datetime | None, moment: datetime) -> str:
+    if as_of is None:
+        return "current"
+    return moment.isoformat()
 
 
 def _metadata_source_cids(metadata: dict[str, Any]) -> set[str]:

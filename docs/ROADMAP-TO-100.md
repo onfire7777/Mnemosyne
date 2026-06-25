@@ -16,7 +16,7 @@ The headline number is a **blended** figure, and the blend hides the real shape 
 
 The ~70% plateau held for so long — and the remaining ~18% to 100% is slow — because that work is **not "write more code in the same style."** It is two distinct kinds of work that coding-as-usual does not produce:
 
-1. **`src` reconciliation wirings (Tier A below) — now essentially closed.** The mandatory items (A1–A10, A13, A14) landed additively/default-off on `main` on 2026-06-24, which is exactly what moved the blend from ~70% to ~82%. Only the optional A11 (hosted StreamableHTTP/SSE) and A12 (cached-PPR column) remain, and both stay gated behind the real-infra evidence pass unless the strict audit demands them.
+1. **`src` reconciliation wirings (Tier A below) — now essentially closed.** The mandatory items (A1–A10, A13, A14) landed additively/default-off on `main` on 2026-06-24, which is exactly what moved the blend from ~70% to ~82%. A12 cached PPR is now implemented as a default-off Postgres cache seam with refresh/read coverage. Only the optional A11 hosted endpoint evidence remains tied to the real-infra pass unless the strict audit demands more code.
 2. **Standing up real infrastructure and capturing evidence** (Tier B below) — real IdP, secret manager, KMS, ParadeDB/AGE, hosted embedding/reranker/trainer endpoints, C2PA trust roots. This is **ops/deployment work**, not feature code, and it is now the bulk of the remaining ~18%. The `*-ops-check` / `provider-check` / `release-audit` gates already exist and *demand* this evidence; nothing can fake it (the gates were deliberately hardened through `7f795df` to reject placeholder and hollow evidence).
 
 **The trap to avoid (already observed):** Codex has been spending recent cycles adding more `test(...)` coverage and more release-audit *gates*. With the mandatory Tier A wirings now closed and placeholder/hollow evidence rejected (hardened through `7f795df`), real progress should pivot to **Tier B real-infrastructure evidence** — and the optional A11/A12 only if a concrete audit finding demands them — not more gates or tests.
@@ -59,7 +59,7 @@ Every item is **additive, default-off / shadow-first, byte-identical when inacti
 | A9 | **ACT-R demotion** (OQ4) | **Done 2026-06-24.** `OperatingPolicy.actr_decay` defaults to `0.0` for legacy byte-stable behavior, and when enabled drives ACT-R power-law lifecycle salience, consolidation forgetter demotion, and retrieval base-level activation instead of frequency-only scoring. | Complete; keep default-off path unchanged unless deployments opt into ACT-R decay. | Lifecycle, forgetter, and activation regressions are green. | **Done** |
 | A10 | **Corroborated-erasure derived-evidence cascade** (OQ6/FR-8) | **Done 2026-06-24.** Local and Postgres forget paths now split derived evidence into erased vs retained rows: legal hard-delete by `requested_by="legal"` still shreds all derived evidence, while normal/operator erasure retains derived rows with surviving source support and trims their source metadata before projection propagation. | Complete; keep retained-derived metadata trimming aligned with future summary metadata fields. | Shared Local/Postgres corroborated-derived forget regression is green. | **Done** |
 | A11 | **Hosted-MCP transport** (FR-9) | Local JSON-RPC/TLS/self-test done; official StreamableHTTP/SSE not validated. | Implement/validate official transport (evidence in Tier B). | — | **M** |
-| A12 | **Cached PPR column** (FR-11) | Recursive PPR works; no materialized cached-PPR column. | Add cached-PPR column + refresh path. | — | **M** |
+| A12 | **Cached PPR column** (FR-11) | Done 2026-06-24. Postgres now has a tenant-scoped `graph_ppr_cache` materialization table, `refresh_graph_ppr_cache()`, and an explicit default-off `graph_ppr(..., use_cache=True)` read path with relation-fingerprint and cache-depth guards. | Keep default recursive path unchanged; measure DSN-backed cached-read latency separately if the final audit asks for a timing report. | Focused Local/Postgres PPR tests pass; live DSN cached-depth guard passes; OQ1 benchmark detects the cache seam without fabricating local cache latency. | **Done** |
 | A13 | **Recompute memo** (FR-12) | **Done 2026-06-24.** `RuntimeJobHandlers.run_projection_recompute()` now computes a stable SHA-256 fingerprint over changed CIDs, affected evidence/projections, surviving source CIDs, pass list, branch, tenant, and enqueue mode; repeated unchanged recomputes skip duplicate consolidation enqueue side effects unless `force_recompute` is set. | Complete; keep fingerprint inputs aligned with future projection dependencies. | Runtime and shared Local/Postgres recompute memo tests are green. | **Done** |
 | A14 | **`--object` argparse bug + `Preference.access_policy`** | **Done 2026-06-24.** Root and subcommand parsers now disable implicit option abbreviation while preserving explicit `branch --from`; `Preference.access_policy` now round-trips through Local/Postgres model, schema, export, and audit diff. | Complete; keep future CLI aliases explicit. | Parser and shared Local/Postgres access-policy tests are green. | **Done** |
 
@@ -98,8 +98,8 @@ This is the **bulk of the remaining percentage** and the universal blocker on al
 
 1. **Run the production real-infra evidence pass (Tier B).** The local `infra/` stack now passes and scoped release evidence is captured. Next bring up production-equivalent Postgres+ParadeDB+AGE+pgvector plus real embedding/reranker/model endpoints, then run the `*-ops-check` / `provider-check` / `release-audit --require-production-validated` captures. This is what flips the 10 parity rows Partial→Done.
 2. **Close any strict-audit leftovers found during the evidence pass.** The mandatory Tier A source wirings A1/A2/A3/A4/A5/A6/A7/A8/A9/A10/A13/A14 are now closed.
-3. **Review optional A11/A12 only if the v1.0 bar requires them.** Keep them behind the real-infra evidence pass unless strict audit rows still demand code work.
-4. **Re-run the parity audit and sign off v1.0.** A11/A12/B8 + Tier C are optional polish beyond the v1.0 bar.
+3. **Review optional A11 only if the v1.0 bar requires hosted transport code beyond operator evidence.** A12 is now closed locally; A11 remains primarily hosted-endpoint evidence.
+4. **Re-run the parity audit and sign off v1.0.** A11/B8 + Tier C are optional polish beyond the v1.0 bar unless production evidence exposes a concrete code gap.
 
 ---
 
@@ -108,7 +108,7 @@ This is the **bulk of the remaining percentage** and the universal blocker on al
 | Milestone | Blended % | What changed |
 |---|---|---|
 | **Now** (after Tier A + local Tier B smoke) | **~82%** | Mandatory source wirings are closed, 6/6 SLOs are proven, and local real-service evidence now passes through `deployment-soak`/scoped `release-audit`; production parity still remains blocked by missing operator-captured production evidence |
-| After **Tier A** (code wirings) | **~82%** | Reached for mandatory source wirings; optional A11/A12 remain review-only unless v1.0 parity audit demands them |
+| After **Tier A** (code wirings) | **~82%+** | Reached for mandatory source wirings; A12 cached PPR is now closed locally; A11 remains review-only unless v1.0 parity audit demands hosted transport code |
 | After **Tier B** (real-infra evidence) | **~97%** | 10 audit rows flip Partial→Done |
 | After **Tier C** + sign-off | **100%** | multimodal/LoRA (optional) + v1.0 attestation |
 
