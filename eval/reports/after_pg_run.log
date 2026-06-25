@@ -1,6 +1,0 @@
-[eval] running SLO suites against the public CLI ...
-[eval] running §33 mandatory test classes ...
-[eval] wrote eval/reports/after_postgres/slo_report_20260621T235107Z.json
-[eval] wrote eval/reports/after_postgres/slo_report_20260621T235107Z.md
-[eval] mode=ACTIVE suite_size=41 N=40 checks=10/15 pass
-AFTER_PG_EXIT=1

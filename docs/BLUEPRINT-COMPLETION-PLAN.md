@@ -1,9 +1,12 @@
-# Mnemosyne — Blueprint Completion Plan (authoritative, traceable to the 40-page blueprint)
+# Mnemosyne — Historical Blueprint Completion Plan
 
 **Author:** Claude · **Date:** 2026-06-21
-**Authoritative source:** `/Users/admin/Desktop/Mnemosyne/Mnemosyne-v2-Build-Blueprint.md` (1,133 lines, v2.0)
-**Consolidates & replaces:** the earlier `Mnemosyne-PROGRESS-PLAN.md` (now removed) — this is the
-single canonical planning document for Mnemosyne completion.
+**Historical blueprint source:** `/Users/admin/Desktop/Mnemosyne/Mnemosyne-v2-Build-Blueprint.md` (1,133 lines, v2.0)
+**Historical note:** this document is retained for lineage from the original
+completion-planning pass. For current status and remaining work, use
+`docs/ROADMAP-TO-100.md` plus the controlling
+`.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md`.
+**Consolidated at the time:** the earlier `Mnemosyne-PROGRESS-PLAN.md` (now removed).
 **Why this exists:** the prior plan was derived from `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md` (a
 *secondary* artifact). This plan is built directly from the blueprint's own requirement sections
 (§12 goals/non‑goals, §14 FR‑1…21, §15 NFR, §16 success metrics, §29/App‑A data model, §30.1 engine
@@ -36,7 +39,7 @@ both gates pass *at the blueprint's own bar*:
 
 ## 0.1 Why progress has plateaued — and the anti‑patterns to stop
 
-Despite very high commit velocity (~30+ commits/day), the headline number sits at ~70% because
+At the historical checkpoint captured here, the headline number sat at ~70% because
 **effort flows into the deterministic scaffold** (more depth inside already‑built modules, more green
 unit tests) while **every remaining gate is elsewhere** — real backing services + *measured* SLO
 evidence (Gate B), which scaffold code cannot satisfy. The adapter seams already exist, so the work

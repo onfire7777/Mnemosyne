@@ -47,9 +47,12 @@ infra/
     capture-production-evidence.sh  # production Tier-B deployment-soak runner
     setup-keycloak.sh setup-vault.sh setup-c2pa.sh
     keycloak-token.sh               # mint a fresh ID token on demand
+  templates/
+    production-soak-manifest.template.json
   validate/
     validate-all.sh                 # run all three validations
     validate-keycloak.sh validate-vault.sh validate-c2pa.sh
+  PRODUCTION-EVIDENCE.md            # production evidence capture runbook
 ```
 
 Everything generated lands under `*/out/` and is git-ignored (it contains
@@ -77,7 +80,10 @@ secrets, private keys, and tokens).
 # 4. Capture scoped local deployment-soak/release-audit evidence.
 ./infra/scripts/capture-local-evidence.sh
 
-# 5. Tear down (add --volumes for a full reset).
+# 5. For production Tier-B evidence, copy/fill the production template.
+open ./infra/PRODUCTION-EVIDENCE.md
+
+# 6. Tear down (add --volumes for a full reset).
 ./infra/scripts/down.sh
 ```
 

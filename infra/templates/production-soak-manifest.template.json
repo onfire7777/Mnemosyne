@@ -1,0 +1,372 @@
+{
+  "kind": "mnemosyne.production_soak_manifest.template",
+  "template_warning": "Copy this file outside the repo, replace every MNEMOSYNE_PROD_* placeholder with production evidence paths/endpoints, and never put raw secrets in args or global_args.",
+  "validation_scope": {
+    "production_validated": true,
+    "target_environment": "production",
+    "operator_asserted": true
+  },
+  "operator": {
+    "name": "MNEMOSYNE_PROD_OPERATOR_NAME",
+    "ticket": "MNEMOSYNE_PROD_CHANGE_TICKET",
+    "environment": "production"
+  },
+  "checks": [
+    {
+      "name": "belief-revision",
+      "command": "belief-revision-check",
+      "args": [
+        "--cases",
+        "MNEMOSYNE_PROD_EVIDENCE_DIR/belief-revision-cases.json",
+        "--min-cases",
+        "30"
+      ],
+      "timeout": 120
+    },
+    {
+      "name": "auth-ops",
+      "command": "auth-ops-check",
+      "args": [
+        "--bundle",
+        "MNEMOSYNE_PROD_EVIDENCE_DIR/auth-ops-bundle.json"
+      ],
+      "timeout": 120
+    },
+    {
+      "name": "calibration-tune",
+      "command": "calibration-tune",
+      "args": [
+        "--dataset",
+        "MNEMOSYNE_PROD_EVIDENCE_DIR/calibration-dataset.json",
+        "--tenant",
+        "MNEMOSYNE_PROD_TENANT",
+        "--min-examples",
+        "25"
+      ],
+      "timeout": 120
+    },
+    {
+      "name": "forgetting-policy",
+      "command": "forgetting-policy-check",
+      "args": [
+        "--cases",
+        "MNEMOSYNE_PROD_EVIDENCE_DIR/forgetting-policy-cases.json",
+        "--min-cases",
+        "4"
+      ],
+      "timeout": 120
+    },
+    {
+      "name": "hosted-llm",
+      "command": "hosted-llm-check",
+      "args": [
+        "--hosted-llm-manifest",
+        "MNEMOSYNE_PROD_EVIDENCE_DIR/hosted-llm-manifest.json"
+      ],
+      "timeout": 120
+    },
+    {
+      "name": "policy-ops",
+      "command": "policy-ops-check",
+      "args": [
+        "--bundle",
+        "MNEMOSYNE_PROD_EVIDENCE_DIR/policy-ops-bundle.json"
+      ],
+      "timeout": 120
+    },
+    {
+      "name": "privacy-ops",
+      "command": "privacy-ops-check",
+      "args": [
+        "--bundle",
+        "MNEMOSYNE_PROD_EVIDENCE_DIR/privacy-ops-bundle.json"
+      ],
+      "timeout": 120
+    },
+    {
+      "name": "provenance-ops",
+      "command": "provenance-ops-check",
+      "args": [
+        "--bundle",
+        "MNEMOSYNE_PROD_EVIDENCE_DIR/provenance-ops-bundle.json"
+      ],
+      "timeout": 120
+    },
+    {
+      "name": "provenance-trust",
+      "command": "provenance-trust-check",
+      "args": [
+        "--suite",
+        "MNEMOSYNE_PROD_EVIDENCE_DIR/provenance-trust-suite.json",
+        "--c2pa-tool",
+        "MNEMOSYNE_PROD_C2PA_TOOL"
+      ],
+      "timeout": 120
+    },
+    {
+      "name": "provider-check",
+      "command": "provider-check",
+      "args": [
+        "--provider-manifest",
+        "MNEMOSYNE_PROD_EVIDENCE_DIR/provider-manifest.production.json"
+      ],
+      "timeout": 120
+    },
+    {
+      "name": "retrieval-ops",
+      "command": "retrieval-ops-check",
+      "args": [
+        "--bundle",
+        "MNEMOSYNE_PROD_EVIDENCE_DIR/retrieval-ops-bundle.json",
+        "--require-provider-check",
+        "embedding",
+        "--require-provider-check",
+        "reranker",
+        "--require-provider-check",
+        "retrieval_backends"
+      ],
+      "timeout": 120
+    },
+    {
+      "name": "idp-jwks-live",
+      "command": "idp-jwks-live-check",
+      "args": [
+        "--idp-issuer",
+        "MNEMOSYNE_PROD_IDP_ISSUER",
+        "--idp-audience",
+        "MNEMOSYNE_PROD_IDP_AUDIENCE",
+        "--idp-jwks-url",
+        "MNEMOSYNE_PROD_IDP_JWKS_URL",
+        "--idp-authz-policy-file",
+        "MNEMOSYNE_PROD_EVIDENCE_DIR/idp-authz-policy.current.json"
+      ],
+      "timeout": 120
+    },
+    {
+      "name": "idp-authz-policy-rollout",
+      "command": "idp-authz-policy-rollout-check",
+      "args": [
+        "--current-idp-authz-policy-file",
+        "MNEMOSYNE_PROD_EVIDENCE_DIR/idp-authz-policy.current.json",
+        "--candidate-idp-authz-policy-file",
+        "MNEMOSYNE_PROD_EVIDENCE_DIR/idp-authz-policy.candidate.json",
+        "--simulation-file",
+        "MNEMOSYNE_PROD_EVIDENCE_DIR/idp-authz-policy-simulation.json"
+      ],
+      "timeout": 120
+    },
+    {
+      "name": "tls-cert",
+      "command": "tls-cert-check",
+      "args": [
+        "--url",
+        "MNEMOSYNE_PROD_TLS_URL",
+        "--min-days-valid",
+        "30",
+        "--min-tls-version",
+        "TLSv1.2"
+      ],
+      "timeout": 120
+    },
+    {
+      "name": "tls-lifecycle",
+      "command": "tls-lifecycle-ops-check",
+      "args": [
+        "--bundle",
+        "MNEMOSYNE_PROD_EVIDENCE_DIR/tls-lifecycle-bundle.json"
+      ],
+      "timeout": 120
+    },
+    {
+      "name": "tls-rotation-plan",
+      "command": "tls-rotation-plan-check",
+      "args": [
+        "--hostname",
+        "MNEMOSYNE_PROD_TLS_HOSTNAME",
+        "--current-cert-file",
+        "MNEMOSYNE_PROD_EVIDENCE_DIR/tls-current.pem",
+        "--candidate-cert-file",
+        "MNEMOSYNE_PROD_EVIDENCE_DIR/tls-candidate.pem",
+        "--require-issuer-continuity"
+      ],
+      "timeout": 120
+    },
+    {
+      "name": "mcp-http-soak",
+      "command": "mcp-http-soak",
+      "args": [
+        "--base-url",
+        "MNEMOSYNE_PROD_MCP_HTTP_BASE_URL",
+        "--health-url",
+        "MNEMOSYNE_PROD_MCP_HTTP_HEALTH_URL",
+        "--rpc-url",
+        "MNEMOSYNE_PROD_MCP_HTTP_RPC_URL",
+        "--require-stateless",
+        "--iterations",
+        "5"
+      ],
+      "timeout": 120
+    },
+    {
+      "name": "mcp-ops",
+      "command": "mcp-ops-check",
+      "args": [
+        "--bundle",
+        "MNEMOSYNE_PROD_EVIDENCE_DIR/mcp-ops-bundle.json",
+        "--require-client-cert"
+      ],
+      "timeout": 120
+    },
+    {
+      "name": "mcp-streamable-http-soak",
+      "command": "mcp-streamable-http-soak",
+      "args": [
+        "--base-url",
+        "MNEMOSYNE_PROD_MCP_STREAMABLE_HTTP_BASE_URL",
+        "--health-url",
+        "MNEMOSYNE_PROD_MCP_STREAMABLE_HTTP_HEALTH_URL",
+        "--streamable-url",
+        "MNEMOSYNE_PROD_MCP_STREAMABLE_HTTP_URL",
+        "--iterations",
+        "3"
+      ],
+      "timeout": 120
+    },
+    {
+      "name": "consolidation-ops",
+      "command": "consolidation-ops-check",
+      "args": [
+        "--bundle",
+        "MNEMOSYNE_PROD_EVIDENCE_DIR/consolidation-ops-bundle.json",
+        "--require-provider-check",
+        "candidate_extractor",
+        "--require-provider-check",
+        "summarizer",
+        "--require-provider-check",
+        "entity_resolver"
+      ],
+      "timeout": 120
+    },
+    {
+      "name": "multimodal-ops",
+      "command": "multimodal-ops-check",
+      "args": [
+        "--bundle",
+        "MNEMOSYNE_PROD_EVIDENCE_DIR/multimodal-ops-bundle.json",
+        "--require-provider-check",
+        "media_extractor",
+        "--require-provider-check",
+        "media_embedding"
+      ],
+      "timeout": 120
+    },
+    {
+      "name": "gate-suite",
+      "command": "gate-suite-check",
+      "args": [
+        "--include-cases",
+        "MNEMOSYNE_PROD_EVIDENCE_DIR/protected-gate-cases.json",
+        "--min-cases",
+        "30",
+        "--min-protected",
+        "20"
+      ],
+      "timeout": 120
+    },
+    {
+      "name": "projection-recompute",
+      "command": "projection-recompute-once",
+      "global_args": [
+        "--backend",
+        "postgres",
+        "--queue-backend",
+        "postgres",
+        "--runtime-state",
+        "postgres"
+      ],
+      "args": [
+        "--tenant",
+        "MNEMOSYNE_PROD_TENANT",
+        "--user",
+        "MNEMOSYNE_PROD_OPERATOR_USER",
+        "--cid",
+        "MNEMOSYNE_PROD_RECOMPUTE_CID"
+      ],
+      "timeout": 120
+    },
+    {
+      "name": "worker-run",
+      "command": "worker-run",
+      "global_args": [
+        "--backend",
+        "postgres",
+        "--queue-backend",
+        "postgres",
+        "--runtime-state",
+        "postgres"
+      ],
+      "args": [
+        "--max-cycles",
+        "3",
+        "--limit",
+        "10",
+        "--fail-on-dead"
+      ],
+      "timeout": 120
+    },
+    {
+      "name": "ops-dashboard",
+      "command": "ops-dashboard-check",
+      "args": [
+        "--dashboard-package-dir",
+        "MNEMOSYNE_PROD_EVIDENCE_DIR/dashboard-package",
+        "--dashboard-url",
+        "MNEMOSYNE_PROD_DASHBOARD_URL",
+        "--expected-tenant",
+        "MNEMOSYNE_PROD_TENANT"
+      ],
+      "timeout": 120
+    },
+    {
+      "name": "parametric-trainer",
+      "command": "parametric-trainer-check",
+      "args": [
+        "--bundle",
+        "MNEMOSYNE_PROD_EVIDENCE_DIR/parametric-trainer-bundle.json"
+      ],
+      "timeout": 120
+    },
+    {
+      "name": "worker-ops",
+      "command": "worker-ops-check",
+      "args": [
+        "--bundle",
+        "MNEMOSYNE_PROD_EVIDENCE_DIR/worker-ops-bundle.json",
+        "--require-job-kind",
+        "consolidate_evidence",
+        "--require-job-kind",
+        "projection_recompute"
+      ],
+      "timeout": 120
+    },
+    {
+      "name": "ops-report",
+      "command": "ops-report",
+      "global_args": [
+        "--backend",
+        "postgres",
+        "--queue-backend",
+        "postgres",
+        "--runtime-state",
+        "postgres"
+      ],
+      "args": [
+        "--tenant",
+        "MNEMOSYNE_PROD_TENANT",
+        "--dashboard-package-dir",
+        "MNEMOSYNE_PROD_EVIDENCE_DIR/dashboard-package"
+      ],
+      "timeout": 120
+    }
+  ]
+}
