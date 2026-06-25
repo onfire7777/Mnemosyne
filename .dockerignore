@@ -1,0 +1,27 @@
+# Generated provider material and local secrets must never enter Docker contexts.
+infra/keycloak/out/
+infra/vault/out/
+infra/c2pa/out/
+**/wrapped-keys/
+
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa
+id_ed25519
+credentials.json
+service-account.json
+secrets.json
+config.local.*
+
+.git/
+.venv/
+venv/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.DS_Store

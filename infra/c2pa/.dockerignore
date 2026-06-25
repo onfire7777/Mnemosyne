@@ -1,0 +1,19 @@
+# The C2PA setup script writes generated certs, private keys, and signed
+# sample artifacts here. Keep them out of the c2pa verifier build context.
+out/
+**/wrapped-keys/
+
+*.pem
+*.key
+*.p12
+*.pfx
+.env
+.env.*
+secrets.json
+credentials.json
+service-account.json
+
+.git/
+__pycache__/
+.pytest_cache/
+.DS_Store
