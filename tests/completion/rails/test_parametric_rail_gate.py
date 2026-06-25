@@ -11,10 +11,9 @@ Blueprint: §31 invariant rails (7); G7 safe-by-construction.
 
 NOTE on scope: this gate only sees *self-reported* metrics. It is a necessary
 but not sufficient enforcement point for the rate rails (supersession_rate,
-prune_fraction): a component that actually performs supersession/pruning
-(engine.upsert_assertion, consolidation._run_forgetter) is not forced to report
-honest metrics into this gate. The live-path gaps are covered (and xfailed)
-in test_supersession_rate.py and test_prune_fraction.py.
+prune_fraction): a component that actually performs supersession/pruning needs
+its own live-path guard. Those live-path regressions now live in
+test_supersession_rate.py and test_prune_fraction.py.
 """
 
 from __future__ import annotations
