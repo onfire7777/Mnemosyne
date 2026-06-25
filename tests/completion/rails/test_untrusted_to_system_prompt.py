@@ -106,7 +106,7 @@ def test_retrieval_explain_declares_data_not_instruction_rail():
     assert rails.get("retrieved_text_is_data_not_instruction") is True
 
 
-# --- Surface D: MISSING runtime prompt-assembly enforcement (gap) -------------
+# --- Surface D: runtime prompt-assembly enforcement --------------------------
 
 # RAIL 6 NOW ENFORCED (Tier-A reconciliation): LocalMemoryEngine.assemble_system_prompt
 # provides the missing serve-time sink guard — it refuses routing untrusted /
@@ -117,9 +117,9 @@ def test_routing_untrusted_hit_to_system_prompt_is_refused_at_runtime():
     and attempt to route a retrieved hit into a 'system_prompt' sink. The rail
     requires this be refused/quarantined at runtime.
 
-    There is no API that performs system-prompt assembly with a sink guard today,
-    so we look for one and assert it refuses. Absent such an API, the assertion
-    cannot pass, and the strict-xfail keeps this as a live TODO for Codex.
+    The serve-time assembly API now performs the sink guard; this regression
+    proves retrieved untrusted data cannot be promoted into privileged prompt
+    authority.
     """
 
     engine = fresh_engine()

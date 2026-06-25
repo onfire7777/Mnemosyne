@@ -2,12 +2,10 @@
 
 These tests are *adversarial*: each one constructs an input that deliberately
 tries to breach one of the seven immutable §31 rails and asserts the system
-refuses or clamps. Where a rail is not yet structurally enforced, the test is
-marked ``xfail(strict=True)`` with a precise note naming the missing enforcement
-point so that, once Codex closes the gap in ``src/mnemosyne``, the test flips to
-an ``XPASS`` and the strict marker turns that into a failure (forcing the xfail
-note to be removed). That is the contract: an xfail here is a live TODO, not a
-silently-skipped test.
+refuses or clamps. Earlier completion branches used strict xfail markers as
+forcing functions while Tier A enforcement was still landing; current tests in
+this directory should run as live regressions unless a new, evidence-backed
+strict-audit gap is intentionally added.
 
 No ``src/mnemosyne`` module is imported with side effects beyond construction;
 nothing here mutates the production tree.
