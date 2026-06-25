@@ -6,6 +6,7 @@
 **2026-06-24 A2 update:** mandatory Tier A calibrated-confidence source wiring is now closed. Local and Postgres retrieval share support-aware confidence/abstention behavior, expose confidence explain metadata, and the FR-6 calibration runner reports ECE 0.0063 (target <=0.05), Brier 0.0002, 25/25 good abstains, and 0 false accepts. This flips the sixth headline SLO green, but it does not close the remaining Tier B production-evidence rows.
 **2026-06-24 adapter-scope update:** configured lexical/graph retrieval adapters now have shared Local/Postgres scope validation. Direct `lexical_search` and `graph_ppr` adapter outputs, plus fused `retrieve()` outputs, are covered by cross-engine parity and fail closed on cross-tenant or cross-branch adapter hits.
 **2026-06-25 06-07 update:** compose-Postgres Lane G runtime readiness is green. The full DSN suite, `belief-revision-check`, local hosted JSON-RPC HTTP soak, local SDK StreamableHTTP soak, and local SSE endpoint soak all pass; live Postgres FR-20 media breadth now covers image/audio/video extraction and raw media embedding retrieval. This remains local/compose evidence only and does not flip production audit rows to Done.
+**2026-06-25 06-08 update:** local-staging evidence capture is proven end-to-end with `production_validated=false`, `target_environment=local-real-services`, empty release-audit findings, and fingerprint `75f5e348930a0310a6a4c26ea22980bbb60d11d324bfef18a5f870c6e0a36a01`. This is staging proof only; production rows remain Partial.
 
 ## Current Verified Coverage
 
