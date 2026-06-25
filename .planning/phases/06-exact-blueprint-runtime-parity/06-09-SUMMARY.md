@@ -12,6 +12,11 @@ No `src/` code was modified for this plan. The follow-up renderer hardening
 adds only infra/operator handoff code and documentation so production evidence
 capture is deterministic and fail-closed.
 
+Post-plan redaction hardening added the shared
+`src/mnemosyne/evidence_redaction.py` scanner and wired it into the capture
+wrapper. This is evidence hygiene for the sanctioned operator path, not a new
+release gate and not production validation by itself.
+
 ## Executor Readiness
 
 Verified present:
@@ -77,7 +82,8 @@ with a manifest whose validation scope contains:
 ```
 
 and the resulting `release-audit --require-production-validated --require-provider-forbid-local`
-output reports `ok=true` and `findings=[]`.
+output reports `ok=true` and `findings=[]`. The wrapper must also produce
+`redaction-scan.json` with `ok=true`.
 
 ## Production Input Preflight
 
@@ -95,6 +101,9 @@ Checked 2026-06-25 during renderer hardening:
 - `infra/scripts/capture-production-evidence.sh` rejects unresolved
   `MNEMOSYNE_PROD_` placeholders before creating an evidence directory or
   running `deployment-soak`.
+- `infra/scripts/capture-production-evidence.sh` rejects high-confidence secret
+  material in the rendered manifest, writes `redaction-scan.json` during
+  preflight, and scans generated text evidence before writing `summary.json`.
 - The template contains 19 production placeholders that must be rendered outside
   the repo before operator capture:
   `MNEMOSYNE_PROD_C2PA_TOOL`, `MNEMOSYNE_PROD_CHANGE_TICKET`,
