@@ -28,9 +28,19 @@ set +a
 infra/scripts/render-production-soak-manifest.sh \
   --output /secure/path/to/production-soak-manifest.json
 infra/scripts/capture-production-evidence.sh \
+  --preflight-only \
+  /secure/path/to/production-soak-manifest.json \
+  /secure/path/to/mnemosyne-production-preflight
+infra/scripts/capture-production-evidence.sh \
   /secure/path/to/production-soak-manifest.json \
   /secure/path/to/mnemosyne-production-evidence
 ```
+
+The `--preflight-only` command validates production scope, full command coverage,
+absence of unresolved placeholders, and absence of secret-bearing CLI options. It
+writes `preflight.json` plus a copied operator manifest, then exits before
+`deployment-soak` or `release-audit` runs. A passing preflight is setup proof only;
+it does not flip any strict-audit row to Done.
 
 The wrapper performs three steps:
 
