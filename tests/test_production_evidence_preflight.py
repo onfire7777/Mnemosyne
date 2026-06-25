@@ -1043,7 +1043,7 @@ def test_capture_production_evidence_preflight_rejects_suite_repo_local_asset(
     )
 
     assert proc.returncode == 65
-    assert "suite cases[1].asset_path points inside the repository" in proc.stderr
+    assert "suite cases[0].asset_path points inside the repository" in proc.stderr
     assert not out_root.exists()
 
 

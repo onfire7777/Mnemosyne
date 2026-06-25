@@ -593,7 +593,7 @@ for index, check in enumerate(checks, start=1):
             if not isinstance(cases, list):
                 errors.append(f"checks[{index}].args provenance trust suite cases must be an array")
                 continue
-            for case_index, case in enumerate(cases, start=1):
+            for case_index, case in enumerate(cases):
                 if not isinstance(case, dict):
                     errors.append(f"checks[{index}].args suite cases[{case_index}] must be an object")
                     continue
@@ -607,7 +607,7 @@ for index, check in enumerate(checks, start=1):
                     if asset_path is not None:
                         suite_rewrites.append(
                             {
-                                "case_index": case_index - 1,
+                                "case_index": case_index,
                                 "field": asset_field,
                                 "path": str(asset_path),
                             }
