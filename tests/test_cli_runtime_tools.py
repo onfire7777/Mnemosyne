@@ -5423,15 +5423,19 @@ def production_bundle_ops_stdout(command: str) -> dict:
         "bundle": {
             "name": command,
             "production_validated": True,
+            "environment": "production",
+            "artifact_fingerprint": f"sha256:{command.replace('-', '')[:8]:0<64}",
         },
         "requirements": {
             "release_profile": command,
+            "operator_asserted": True,
         },
         "checks": [
             {
-                "name": "release_profile",
+                "name": f"{command}_production_evidence",
                 "ok": True,
                 "profile": command,
+                "evidence_count": 1,
             }
         ],
         "findings": [],
@@ -5457,27 +5461,89 @@ def production_release_stdout(command: str, provider_stdout: dict) -> dict:
     }:
         return production_bundle_ops_stdout(command)
     if command in {"belief-revision-check", "forgetting-policy-check"}:
-        return {"ok": True, "fingerprint": f"{command}-fingerprint", "summary": {}, "results": [], "findings": []}
+        return {
+            "ok": True,
+            "fingerprint": f"{command}-fingerprint",
+            "summary": {"case_count": 1, "passed": 1},
+            "results": [{"case_id": f"{command}-case", "ok": True}],
+            "findings": [],
+        }
     if command == "calibration-tune":
-        return {"ok": True, "calibration": {}, "threshold": 0.2, "metrics": {}, "failures": []}
+        return {
+            "ok": True,
+            "calibration": {"set_id": "production-calibration", "rows": 25},
+            "threshold": 0.2,
+            "metrics": {"ece": 0.01, "brier": 0.02},
+            "failures": [],
+        }
     if command == "hosted-llm-check":
-        return {"ok": True, "manifest": {}, "required_roles": [], "checks": [], "findings": []}
+        return {
+            "ok": True,
+            "manifest": {"forbid_local": True, "provider": "hosted"},
+            "required_roles": ["candidate_extractor"],
+            "checks": [{"name": "candidate_extractor", "ok": True}],
+            "findings": [],
+        }
     if command == "provenance-trust-check":
-        return {"ok": True, "suite": {}, "required_case_ids": [], "checks": [], "findings": []}
+        return {
+            "ok": True,
+            "suite": {"name": "production-provenance", "case_count": 1},
+            "required_case_ids": ["trusted-root-valid"],
+            "checks": [{"name": "trusted-root-valid", "ok": True}],
+            "findings": [],
+        }
     if command == "idp-jwks-live-check":
-        return {"ok": True, "issuer": "https://idp.example.com/", "audience": "mnemosyne", "jwks": {}, "token": {}, "identity": {}}
+        return {
+            "ok": True,
+            "issuer": "https://idp.example.com/",
+            "audience": "mnemosyne",
+            "jwks": {"key_count": 2, "fingerprint": "sha256:" + "1" * 64},
+            "token": {"claims_hash": "sha256:" + "2" * 64},
+            "identity": {"subject_hash": "sha256:" + "3" * 64, "roles": ["operator"]},
+        }
     if command == "idp-authz-policy-rollout-check":
-        return {"ok": True, "rollout": {"simulation_change_count": 0}}
+        return {"ok": True, "rollout": {"policy_id": "mnemosyne-prod", "simulation_change_count": 0}}
     if command == "tls-cert-check":
-        return {"ok": True, "target": {}, "tls": {}, "certificate": {}, "checks": {}}
+        return {
+            "ok": True,
+            "target": {"host": "mnemosyne.example.com", "port": 443},
+            "tls": {"version": "TLSv1.3"},
+            "certificate": {"sha256": "sha256:" + "4" * 64},
+            "checks": {"hostname": True, "validity": True},
+        }
     if command == "tls-rotation-plan-check":
-        return {"ok": True, "config": {}, "current": {}, "candidate": {}, "rotation": {}, "checks": {}}
+        return {
+            "ok": True,
+            "config": {"rotation_days": 60},
+            "current": {"sha256": "sha256:" + "5" * 64},
+            "candidate": {"sha256": "sha256:" + "6" * 64},
+            "rotation": {"dry_run_ok": True},
+            "checks": {"candidate_valid": True},
+        }
     if command in {"mcp-http-soak", "mcp-streamable-http-soak"}:
-        return {"ok": True, "target": {}, "config": {}, "health": {}, "iterations": [], "summary": {}}
+        return {
+            "ok": True,
+            "target": {"url": "https://mcp.example.com/rpc"},
+            "config": {"transport": command},
+            "health": {"ok": True},
+            "iterations": [{"index": 1, "ok": True, "latency_ms": 25.0}],
+            "summary": {"attempts": 1, "successes": 1},
+        }
     if command == "gate-suite-check":
-        return {"ok": True, "suite": {}, "requirements": {}, "failures": []}
+        return {
+            "ok": True,
+            "suite": {"name": "protected-production", "case_count": 3},
+            "requirements": {"min_cases": 3},
+            "failures": [],
+        }
     if command == "projection-recompute-once":
-        return {"ok": True, "queue": {}, "enqueued_job": {}, "job": {}, "metrics": {}}
+        return {
+            "ok": True,
+            "queue": {"backend": "postgres", "tenant_scoped": True},
+            "enqueued_job": {"kind": "projection_recompute", "id": "job-1"},
+            "job": {"status": "complete", "attempts": 1},
+            "metrics": {"changed_evidence": 1, "affected_projections": 1},
+        }
     if command == "worker-run":
         job = {
             "id": "worker-job-1",
@@ -5509,9 +5575,15 @@ def production_release_stdout(command: str, provider_stdout: dict) -> dict:
             "metrics": {"worker": {"processed_jobs": 1}},
         }
     if command == "ops-dashboard-check":
-        return {"ok": True, "mode": "package", "source": {}, "checks": [], "findings": []}
+        return {
+            "ok": True,
+            "mode": "package",
+            "source": {"package_fingerprint": "sha256:" + "7" * 64},
+            "checks": [{"name": "taxonomy", "ok": True}],
+            "findings": [],
+        }
     if command == "ops-report":
-        return {"ok": True, "counts": {}, "tripwires": {"passed": True}}
+        return {"ok": True, "counts": {"memories": 10}, "tripwires": {"passed": True}}
     return {"ok": True}
 
 
@@ -5691,6 +5763,27 @@ def write_production_evidence_bundle(tmp_path: Path) -> tuple[Path, str]:
         encoding="utf-8",
     )
     (bundle_dir / "store.json").write_text("{}", encoding="utf-8")
+    scanned_files = [
+        str(path)
+        for path in sorted(file_path for file_path in bundle_dir.rglob("*") if file_path.is_file())
+        if path.relative_to(bundle_dir).as_posix()
+        not in {"bundle-manifest.json", "summary.json", "redaction-scan.json"}
+    ]
+    (bundle_dir / "redaction-scan.json").write_text(
+        json.dumps(
+            {
+                "ok": True,
+                "scope": "generated-evidence",
+                "patterns": [],
+                "scanned_files": scanned_files,
+                "findings": [],
+                "skipped_files": [],
+            },
+            indent=2,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
 
     files = []
     for file_path in sorted(path for path in bundle_dir.rglob("*") if path.is_file()):
@@ -6050,6 +6143,202 @@ def test_cli_production_evidence_verify_rejects_unmanifested_artifacts(tmp_path:
     assert payload["ok"] is False
     assert "bundle_manifest_missing_actual_files" in codes
     assert "bundle_fingerprint_mismatch" in codes
+
+
+def test_cli_production_evidence_verify_rescans_bundle_for_secret_material(tmp_path: Path) -> None:
+    bundle_dir, _bundle_fingerprint = write_production_evidence_bundle(tmp_path)
+    secret_artifact = bundle_dir / "evidence" / "late-secret.txt"
+    secret_artifact.write_text(
+        "jwt=eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJvcGVyYXRvciJ9.signature123\n",
+        encoding="utf-8",
+    )
+    rewrite_production_bundle_manifest(bundle_dir)
+
+    result = run_raw_cli(
+        tmp_path / "verify-store.json",
+        "production-evidence-verify",
+        str(bundle_dir),
+    )
+    payload = json.loads(result.stdout)
+    codes = {finding["code"] for finding in payload["findings"]}
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert payload["checks"]["redaction_scan"] is False
+    assert "redaction_scan_recompute_not_ok" in codes
+    assert "redaction_scan_recompute_findings_present" in codes
+
+
+def test_cli_production_evidence_verify_rejects_stale_redaction_scan_coverage(
+    tmp_path: Path,
+) -> None:
+    bundle_dir, _bundle_fingerprint = write_production_evidence_bundle(tmp_path)
+    redaction_scan_path = bundle_dir / "redaction-scan.json"
+    redaction_scan = json.loads(redaction_scan_path.read_text(encoding="utf-8"))
+    redaction_scan["scanned_files"] = redaction_scan["scanned_files"][:-1]
+    redaction_scan_path.write_text(
+        json.dumps(redaction_scan, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    rewrite_production_bundle_manifest(bundle_dir)
+
+    result = run_raw_cli(
+        tmp_path / "verify-store.json",
+        "production-evidence-verify",
+        str(bundle_dir),
+    )
+    payload = json.loads(result.stdout)
+    codes = {finding["code"] for finding in payload["findings"]}
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert payload["checks"]["redaction_scan"] is False
+    assert "redaction_scan_scanned_files_mismatch" in codes
+
+
+def test_cli_production_evidence_verify_rejects_unscannable_retained_artifact(
+    tmp_path: Path,
+) -> None:
+    bundle_dir, _bundle_fingerprint = write_production_evidence_bundle(tmp_path)
+    binary_artifact = bundle_dir / "evidence" / "binary-artifact.bin"
+    binary_artifact.write_bytes(b"\xff\xfe\x00\x00")
+    redaction_scan_path = bundle_dir / "redaction-scan.json"
+    redaction_scan = json.loads(redaction_scan_path.read_text(encoding="utf-8"))
+    redaction_scan["scanned_files"].append(str(binary_artifact))
+    redaction_scan_path.write_text(
+        json.dumps(redaction_scan, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    rewrite_production_bundle_manifest(bundle_dir)
+
+    result = run_raw_cli(
+        tmp_path / "verify-store.json",
+        "production-evidence-verify",
+        str(bundle_dir),
+    )
+    payload = json.loads(result.stdout)
+    codes = {finding["code"] for finding in payload["findings"]}
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert payload["checks"]["redaction_scan"] is False
+    assert "redaction_scan_recompute_not_ok" in codes
+    assert "redaction_scan_recompute_skipped_files_present" in codes
+
+
+def test_cli_release_audit_rejects_placeholder_production_evidence(tmp_path: Path) -> None:
+    report_path, manifest_path = write_release_report(tmp_path)
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    placeholder_stdout_by_command = {
+        command: {
+            "ok": True,
+            **{
+                key: [] if key in {"failures", "findings"} else {"value": "placeholder"}
+                for key in RELEASE_AUDIT_REQUIRED_OUTPUT_KEYS[command]
+            },
+        }
+        for command in PRODUCTION_RELEASE_REQUIRED_COMMANDS
+    }
+    for check in report["checks"]:
+        check["stdout_json"] = placeholder_stdout_by_command[check["command"]]
+    report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    checks_dir = manifest_path.parent / manifest["files"]["checks_dir"]
+    for check in report["checks"]:
+        check_path = checks_dir / f"{int(check['index']):03d}-{check['command']}.json"
+        check_path.write_text(json.dumps(check, indent=2, sort_keys=True), encoding="utf-8")
+        manifest_check = next(item for item in manifest["checks"] if item["command"] == check["command"])
+        manifest_check["sha256"] = "sha256:" + sha256(check_path.read_bytes()).hexdigest()
+    manifest["files"]["report_sha256"] = "sha256:" + sha256(report_path.read_bytes()).hexdigest()
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+
+    result = run_raw_cli(
+        tmp_path / "mnemosyne.json",
+        "release-audit",
+        "--evidence-manifest",
+        str(manifest_path),
+        "--require-production-validated",
+        "--require-provider-forbid-local",
+    )
+    payload = json.loads(result.stdout)
+    codes = {finding["code"] for finding in payload["findings"]}
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert "required_command_output_placeholder" in codes
+
+
+def test_cli_release_audit_rejects_placeholder_ops_report_evidence(tmp_path: Path) -> None:
+    report_path, manifest_path = write_release_report(tmp_path)
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    ops_report_check = next(check for check in report["checks"] if check["command"] == "ops-report")
+    ops_report_check["stdout_json"] = {
+        "ok": True,
+        "counts": {"value": "placeholder"},
+        "tripwires": {"passed": True},
+    }
+    report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    checks_dir = manifest_path.parent / manifest["files"]["checks_dir"]
+    check_path = checks_dir / f"{int(ops_report_check['index']):03d}-{ops_report_check['command']}.json"
+    check_path.write_text(json.dumps(ops_report_check, indent=2, sort_keys=True), encoding="utf-8")
+    manifest_check = next(item for item in manifest["checks"] if item["command"] == "ops-report")
+    manifest_check["sha256"] = "sha256:" + sha256(check_path.read_bytes()).hexdigest()
+    manifest["files"]["report_sha256"] = "sha256:" + sha256(report_path.read_bytes()).hexdigest()
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+
+    result = run_raw_cli(
+        tmp_path / "mnemosyne.json",
+        "release-audit",
+        "--evidence-manifest",
+        str(manifest_path),
+        "--require-production-validated",
+        "--require-provider-forbid-local",
+    )
+    payload = json.loads(result.stdout)
+    codes = {finding["code"] for finding in payload["findings"]}
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert "required_command_output_placeholder" in codes
+
+
+def test_cli_release_audit_rejects_hollow_ops_report_evidence(tmp_path: Path) -> None:
+    report_path, manifest_path = write_release_report(tmp_path)
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    ops_report_check = next(check for check in report["checks"] if check["command"] == "ops-report")
+    ops_report_check["stdout_json"] = {
+        "ok": True,
+        "counts": {},
+        "tripwires": {},
+    }
+    report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    checks_dir = manifest_path.parent / manifest["files"]["checks_dir"]
+    check_path = checks_dir / f"{int(ops_report_check['index']):03d}-{ops_report_check['command']}.json"
+    check_path.write_text(json.dumps(ops_report_check, indent=2, sort_keys=True), encoding="utf-8")
+    manifest_check = next(item for item in manifest["checks"] if item["command"] == "ops-report")
+    manifest_check["sha256"] = "sha256:" + sha256(check_path.read_bytes()).hexdigest()
+    manifest["files"]["report_sha256"] = "sha256:" + sha256(report_path.read_bytes()).hexdigest()
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+
+    result = run_raw_cli(
+        tmp_path / "mnemosyne.json",
+        "release-audit",
+        "--evidence-manifest",
+        str(manifest_path),
+        "--require-production-validated",
+        "--require-provider-forbid-local",
+    )
+    payload = json.loads(result.stdout)
+    codes = {finding["code"] for finding in payload["findings"]}
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert "required_command_output_hollow" in codes
 
 
 def test_cli_release_audit_requires_manifest_file_digests(tmp_path: Path) -> None:

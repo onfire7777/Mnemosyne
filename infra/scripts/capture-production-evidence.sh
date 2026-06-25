@@ -322,9 +322,10 @@ for index, check in enumerate(checks, start=1):
             errors.append(f"checks[{index}].{field} must be an array of strings")
             continue
         for value_index, value in enumerate(values):
-            if value in sensitive_options:
+            option_name = value.partition("=")[0]
+            if option_name in sensitive_options:
                 errors.append(
-                    f"checks[{index}].{field} contains secret-bearing option {value}; "
+                    f"checks[{index}].{field} contains secret-bearing option {option_name}; "
                     "use environment, files, or command providers instead"
                 )
             _validate_external_file_path(

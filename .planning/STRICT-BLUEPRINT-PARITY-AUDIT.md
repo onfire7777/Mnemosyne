@@ -1,7 +1,8 @@
 # Strict Blueprint Parity Audit
 
 **Date:** 2026-06-21
-**Blueprint:** `/Users/admin/Desktop/Mnemosyne/Mnemosyne-v2-Build-Blueprint.md`
+**Blueprint:** External source document `Mnemosyne-v2-Build-Blueprint.md` from the
+local blueprint/documentation folder, not a repo-owned generated artifact.
 **Status:** gaps remain; exact 1:1 parity is not complete.
 **2026-06-24 A2 update:** mandatory Tier A calibrated-confidence source wiring is now closed. Local and Postgres retrieval share support-aware confidence/abstention behavior, expose confidence explain metadata, and the FR-6 calibration runner reports ECE 0.0063 (target <=0.05), Brier 0.0002, 25/25 good abstains, and 0 false accepts. This flips the sixth headline SLO green, but it does not close the remaining Tier B production-evidence rows.
 **2026-06-24 adapter-scope update:** configured lexical/graph retrieval adapters now have shared Local/Postgres scope validation. Direct `lexical_search` and `graph_ppr` adapter outputs, plus fused `retrieve()` outputs, are covered by cross-engine parity and fail closed on cross-tenant or cross-branch adapter hits.

@@ -10,18 +10,16 @@ available.
 Optional production adapters enabled for the full compose-Postgres suite and
 belief revision check.
 
-## Precondition
-
-The full compose-Postgres suite with `MNEMOSYNE_POSTGRES_DSN` set must already
-be green with production-equivalent adapters enabled where available. That suite
-is supporting runtime evidence; it is not itself one of the frozen 28 production
-soak manifest commands.
-
 ## Gate Commands
 
-Run in the production soak/profile process:
+Run for the row-10 operator evidence pass:
 
+- `MNEMOSYNE_POSTGRES_DSN="$PRODUCTION_POSTGRES_DSN" .venv/bin/python -m pytest -q`
 - `belief-revision-check`
+
+The full suite is not itself one of the frozen 28 production soak manifest
+commands, so retain its redacted output and coverage summary as row-10 input
+evidence before running the production soak/profile process.
 
 ## Redaction Requirement
 
@@ -61,3 +59,12 @@ Done when every engine/runtime method is green with production adapters enabled,
 The full wrapper summary must have `release_audit_ok=true`,
 `redaction_scan_ok=true`, no redaction findings or skipped files, a retained
 `bundle-manifest.json`/fingerprint, and passing `production-evidence-verify`.
+
+## Operator Resume Signal
+
+After all 10 strict-audit rows are Done, attestation is recorded, and the final
+live parity suite evidence bundle passes
+`release-audit --require-production-validated --require-provider-forbid-local`
+plus `production-evidence-verify`, resume the v1.0 handoff with
+`v1.0 signed off`.
+Use `skip operator gates` only to explicitly defer the production evidence pass.
