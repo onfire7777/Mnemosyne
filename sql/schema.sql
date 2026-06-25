@@ -141,6 +141,20 @@ CREATE TABLE IF NOT EXISTS relations (
   CHECK (valid_to IS NULL OR valid_to > valid_from)
 );
 
+CREATE TABLE IF NOT EXISTS graph_ppr_cache (
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  branch TEXT NOT NULL DEFAULT 'main',
+  seed_hash TEXT NOT NULL,
+  as_of_key TEXT NOT NULL,
+  as_of TIMESTAMPTZ,
+  relation_fingerprint TEXT NOT NULL,
+  cache_depth INTEGER NOT NULL DEFAULT 0 CHECK (cache_depth >= 0),
+  hits JSONB NOT NULL DEFAULT '[]'::jsonb,
+  refreshed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (tenant_id, branch, seed_hash, as_of_key),
+  FOREIGN KEY (tenant_id, branch) REFERENCES branches(tenant_id, name)
+);
+
 CREATE TABLE IF NOT EXISTS contradictions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -374,6 +388,13 @@ CREATE POLICY relations_tenant_isolation ON relations
   USING (tenant_id = mnemosyne_current_tenant())
   WITH CHECK (tenant_id = mnemosyne_current_tenant());
 
+ALTER TABLE graph_ppr_cache ENABLE ROW LEVEL SECURITY;
+ALTER TABLE graph_ppr_cache FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS graph_ppr_cache_tenant_isolation ON graph_ppr_cache;
+CREATE POLICY graph_ppr_cache_tenant_isolation ON graph_ppr_cache
+  USING (tenant_id = mnemosyne_current_tenant())
+  WITH CHECK (tenant_id = mnemosyne_current_tenant());
+
 ALTER TABLE contradictions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE contradictions FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS contradictions_tenant_isolation ON contradictions;
@@ -502,6 +523,20 @@ ALTER TABLE relations ADD COLUMN IF NOT EXISTS expired_at TIMESTAMPTZ;
 ALTER TABLE relations ADD COLUMN IF NOT EXISTS justification_id UUID;
 ALTER TABLE relations ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active'
   CHECK (status IN ('active', 'superseded', 'retracted'));
+
+CREATE TABLE IF NOT EXISTS graph_ppr_cache (
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  branch TEXT NOT NULL DEFAULT 'main',
+  seed_hash TEXT NOT NULL,
+  as_of_key TEXT NOT NULL,
+  as_of TIMESTAMPTZ,
+  relation_fingerprint TEXT NOT NULL,
+  cache_depth INTEGER NOT NULL DEFAULT 0 CHECK (cache_depth >= 0),
+  hits JSONB NOT NULL DEFAULT '[]'::jsonb,
+  refreshed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (tenant_id, branch, seed_hash, as_of_key),
+  FOREIGN KEY (tenant_id, branch) REFERENCES branches(tenant_id, name)
+);
 
 -- preferences: supersession pointer for revised preferences.
 ALTER TABLE preferences ADD COLUMN IF NOT EXISTS superseded_by UUID;

@@ -10,23 +10,23 @@ honestly:
     src/mnemosyne/engine.py:615). That is the only PPR seam exposed today.
   * It runs a **scale sweep** over relation counts (the §17 OQ1 cost driver),
     reporting live-PPR P50/P95/max per graph size against the fast-path budget.
-  * It attempts to measure a **cached PPR** path. Today there is **no cached PPR
-    column** in src — ``graph_ppr`` recomputes the power-iteration on every call
-    (engine.py:633-685 rebuilds adjacency + iterates 12 times each call). The
-    bench therefore reports ``cached_ppr_available: false`` and a cache HONESTY
-    note, and uses a repeated-identical-call probe to show the engine does NOT
-    get cheaper on a warm repeat (proving the absence of memoization), so the
-    "cached" column is reported as N/A rather than fabricated.
+  * It probes for the default-off Postgres cached-PPR seam. Without a Postgres
+    DSN this bench still measures the local live recompute path, but reports the
+    cached seam as structurally present instead of fabricating a cache latency.
+  * Repeated warm calls are still timed, but they are explicitly labelled as
+    live recompute repeats. Cached latency must be measured against an explicit
+    Postgres cache refresh/read path, not inferred from local warm repeats.
 
-HONEST STATUS as a forcing function: with no cache, P95 is governed entirely by
-live recompute and grows with relation count. The src wiring that would add the
-missing cached column is named in ``wiring`` below.
+HONEST STATUS as a forcing function: live local P95 is governed by recompute and
+grows with relation count. The Postgres cache seam is named in ``wiring`` below,
+and DSN-backed cache latency should be measured separately.
 
 Run: ``python eval/benches/bench_oq1_ppr_latency.py``
 """
 
 from __future__ import annotations
 
+import inspect
 import sys
 from pathlib import Path
 
@@ -48,6 +48,7 @@ from mnemosyne.graph import (  # noqa: E402
     benchmark_graph_adapter,
 )
 from mnemosyne.models import Evidence, Relation  # noqa: E402
+from mnemosyne.postgres_engine import PostgresEngine  # noqa: E402
 
 TENANT = "oq1-tenant"
 # Relation-count scale sweep — the OQ1 cost driver.
@@ -94,12 +95,14 @@ def _build_graph(engine: LocalMemoryEngine, n_relations: int) -> list[list[str]]
 def _detect_cached_ppr() -> dict[str, object]:
     """Probe whether src exposes a cached-PPR column / memoized graph read.
 
-    We look for any of: a ppr cache attribute on the engine, a cached adapter, or
-    a documented ``cached`` flag on ``graph_ppr``. None exist today, so this is a
-    structural honesty check, not a guess.
+    We look for the default-off Postgres refresh path plus an explicit
+    ``use_cache`` flag on ``graph_ppr``. This keeps the local benchmark honest:
+    it can say the seam exists without pretending local warm-repeat timings are
+    cached reads.
     """
 
     engine_attrs = set(dir(LocalMemoryEngine))
+    postgres_attrs = set(dir(PostgresEngine))
     adapter_attrs = set(dir(LocalRelationGraphAdapter))
     cache_signals = {
         "ppr_cache",
@@ -107,9 +110,23 @@ def _detect_cached_ppr() -> dict[str, object]:
         "graph_ppr_cache",
         "cached_ppr",
         "ppr_cached",
+        "refresh_graph_ppr_cache",
     }
-    found = sorted((engine_attrs | adapter_attrs) & cache_signals)
-    return {"cached_ppr_available": bool(found), "cache_signals_found": found}
+    graph_params = set(inspect.signature(PostgresEngine.graph_ppr).parameters)
+    found = sorted((engine_attrs | postgres_attrs | adapter_attrs) & cache_signals)
+    has_default_off_flag = "use_cache" in graph_params
+    has_refresh_path = "refresh_graph_ppr_cache" in postgres_attrs
+    return {
+        "cached_ppr_available": bool(has_default_off_flag and has_refresh_path),
+        "cache_signals_found": found,
+        "postgres_graph_ppr_use_cache_flag": has_default_off_flag,
+        "postgres_refresh_path": has_refresh_path,
+        "latency_measured": False,
+        "latency_note": (
+            "Postgres cached-read latency requires a refreshed Postgres cache path; "
+            "local warm repeats are live recompute repeats."
+        ),
+    }
 
 
 def main() -> dict[str, object]:
@@ -179,16 +196,17 @@ def main() -> dict[str, object]:
         },
         "target": {
             "fast_path_p95_ms": f"<= {FAST_PATH_P95_BUDGET_MS} (§15/§16)",
-            "cached_ppr_column": "expected present once OQ1 resolved; currently ABSENT",
+            "cached_ppr_column": (
+                "default-off Postgres cache seam expected present; latency requires "
+                "DSN-backed cache refresh/read measurement"
+            ),
         },
         "honest_status": {
-            "cached_ppr_today": False,
+            "cached_ppr_today": bool(cache["cached_ppr_available"]),
             "note": (
-                "There is NO cached-PPR column in src today: graph_ppr recomputes "
-                "the full power-iteration on every call, so warm repeats are not "
-                "cheaper than cold (warm_vs_cold_speedup_x ~= 1.0). The 'cached' "
-                "latency column is therefore reported as N/A, not fabricated. Live "
-                "P95 is the only real number and is governed by relation count."
+                "Local warm repeats still exercise live recompute. The default-off "
+                "Postgres cached-PPR seam is detected structurally; cached latency "
+                "must be measured only after an explicit Postgres cache refresh/read."
             ),
         },
         "verdict": {
@@ -196,15 +214,9 @@ def main() -> dict[str, object]:
             "cached_column_present": bool(cache["cached_ppr_available"]),
         },
         "wiring_to_make_cached_path_real": [
-            "Add a per-(tenant,branch,seed-set,as_of) PPR result cache keyed on a "
-            "content hash of the relation set; invalidate on add_relation / "
-            "supersession (engine.py add_relation @501, _valid_at edges).",
-            "Expose a `cached: bool` kwarg or a CachedGraphAdapter in graph.py that "
-            "wraps LocalRelationGraphAdapter and short-circuits on cache hit so the "
-            "bench's warm_repeat path measures a real cached column.",
-            "Materialize a precomputed PPR/edge-weight column in postgres_engine.py "
-            "(recursive CTE result table) so the §16 fast-path serves a graph read "
-            "without recomputing diffusion per request.",
+            "PostgresEngine.refresh_graph_ppr_cache materializes per-(tenant,branch,seed-set,as_of) PPR hits keyed by a relation-set fingerprint.",
+            "PostgresEngine.graph_ppr(..., use_cache=True) reads the refreshed cache only when the fingerprint matches; default graph_ppr remains recursive.",
+            "Next benchmark step: run a DSN-backed cache refresh/read timing path instead of treating local warm repeats as cached latency.",
         ],
     }
     emit(payload)

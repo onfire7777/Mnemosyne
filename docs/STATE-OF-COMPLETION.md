@@ -52,7 +52,7 @@ the structured wave results. The injection is not present in any committed file 
 
 ## FR-1…21 (condensed)
 - **✅ Proven / additive-done:** FR-1, FR-2, FR-3 (retrieval quality on Postgres), FR-4, FR-5, FR-8, FR-10, FR-13, FR-14, FR-15, FR-16, FR-18 + the full proof-harness layer.
-- **✅ Closed on Codex `src` (mandatory Tier A list):** FR-3 local embedding seam, FR-6 ECE, FR-7 rail coverage including retrieved-text sanitization, FR-11 recursive PPR retrieval coverage, FR-12 recompute memo, FR-17 cf-gate, OQ4 ACT-R demotion, OQ5 ignition switch, and OQ6 corroborated-erasure split are now implemented and locally/clean-Postgres verified. FR-11 materialized cached PPR remains tracked as optional A12 unless the v1.0 parity audit requires it. Tier B production evidence remains blocking for 1:1 parity.
+- **✅ Closed on Codex `src` (mandatory Tier A list):** FR-3 local embedding seam, FR-6 ECE, FR-7 rail coverage including retrieved-text sanitization, FR-11 recursive PPR retrieval coverage plus the default-off Postgres cached-PPR seam, FR-12 recompute memo, FR-17 cf-gate, OQ4 ACT-R demotion, OQ5 ignition switch, and OQ6 corroborated-erasure split are now implemented and locally/clean-Postgres verified. Tier B production evidence remains blocking for 1:1 parity.
 - **◷ Scope-deferred (blueprint non-goals):** FR-20 multimodal (N5 post-v1 — Codex now building it), FR-21 real LoRA (N2 optional, GPU).
 
 ## The remaining path to full 1:1 parity

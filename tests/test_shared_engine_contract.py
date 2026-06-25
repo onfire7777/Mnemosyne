@@ -1341,6 +1341,115 @@ def test_shared_engine_contract_graph_ppr_matches_tokenized_seed(engine_bundle: 
     assert all(hit.metadata.get("target") != "Tokenized Graph Seed" for hit in hits)
 
 
+def test_shared_engine_contract_postgres_cached_ppr_is_default_off_and_equivalent(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, user = engine_bundle
+    if not isinstance(engine, PostgresEngine):
+        pytest.skip("cached PPR is a Postgres materialization path")
+    cid = _append_evidence(
+        engine,
+        tenant,
+        user,
+        "Cached graph PPR seed evidence links a materialized seed to its target.",
+    )
+    seed = f"cached ppr seed {uuid4()}"
+    first_relation_id = engine.add_relation(
+        Relation(
+            tenant_id=tenant,
+            source=seed,
+            predicate="points_to",
+            target="cached ppr target",
+            source_evidence_cids=[cid],
+            access_policy={"tenant": tenant},
+        )
+    )
+
+    def signature(hits: list[Hit]) -> list[tuple[str, str, str, float, tuple[str, ...]]]:
+        return [
+            (
+                hit.id,
+                hit.channel,
+                hit.text,
+                round(hit.score, 8),
+                tuple(hit.provenance),
+            )
+            for hit in hits
+        ]
+
+    recursive = engine.graph_ppr([seed], 5, tenant_id=tenant, branch="main")
+    refresh = engine.refresh_graph_ppr_cache([seed], 5, tenant_id=tenant, branch="main")
+    cached = engine.graph_ppr([seed], 5, tenant_id=tenant, branch="main", use_cache=True)
+    default_after_refresh = engine.graph_ppr([seed], 5, tenant_id=tenant, branch="main")
+
+    assert refresh["refreshed"] is True
+    assert refresh["hit_count"] == len(recursive)
+    assert first_relation_id in {hit.id for hit in cached}
+    assert signature(cached) == signature(recursive)
+    assert signature(default_after_refresh) == signature(recursive)
+
+    second_relation_id = engine.add_relation(
+        Relation(
+            tenant_id=tenant,
+            source=seed,
+            predicate="points_to_new",
+            target="cached ppr changed target",
+            source_evidence_cids=[cid],
+            access_policy={"tenant": tenant},
+        )
+    )
+    recursive_after_change = engine.graph_ppr([seed], 10, tenant_id=tenant, branch="main")
+    cached_after_change = engine.graph_ppr([seed], 10, tenant_id=tenant, branch="main", use_cache=True)
+
+    assert second_relation_id in {hit.id for hit in cached_after_change}
+    assert signature(cached_after_change) == signature(recursive_after_change)
+
+
+def test_shared_engine_contract_postgres_cached_ppr_requires_sufficient_depth(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, user = engine_bundle
+    if not isinstance(engine, PostgresEngine):
+        pytest.skip("cached PPR is a Postgres materialization path")
+    cid = _append_evidence(
+        engine,
+        tenant,
+        user,
+        "Cached graph PPR depth evidence fans out to multiple targets.",
+    )
+    seed = f"cached ppr depth seed {uuid4()}"
+    first_relation_id = engine.add_relation(
+        Relation(
+            tenant_id=tenant,
+            source=seed,
+            predicate="points_to_first",
+            target="cached ppr depth first target",
+            source_evidence_cids=[cid],
+            access_policy={"tenant": tenant},
+        )
+    )
+    second_relation_id = engine.add_relation(
+        Relation(
+            tenant_id=tenant,
+            source=seed,
+            predicate="points_to_second",
+            target="cached ppr depth second target",
+            source_evidence_cids=[cid],
+            access_policy={"tenant": tenant},
+        )
+    )
+
+    recursive_two = engine.graph_ppr([seed], 2, tenant_id=tenant, branch="main")
+    refresh_one = engine.refresh_graph_ppr_cache([seed], 1, tenant_id=tenant, branch="main")
+    cached_two = engine.graph_ppr([seed], 2, tenant_id=tenant, branch="main", use_cache=True)
+
+    assert refresh_one["refreshed"] is True
+    assert refresh_one["hit_count"] == 1
+    assert len(cached_two) == len(recursive_two) == 2
+    assert {first_relation_id, second_relation_id} == {hit.id for hit in cached_two}
+    assert [hit.id for hit in cached_two] == [hit.id for hit in recursive_two]
+
+
 def test_shared_engine_contract_direct_primitives_honor_k_limit(engine_bundle: tuple[Any, str, str]) -> None:
     engine, tenant, user = engine_bundle
     cids = [
