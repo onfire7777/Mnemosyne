@@ -481,8 +481,8 @@ flowchart TB
 ```
 
 - **Durable state** persists via `postgres_runtime_state.py`, which **`CREATE`s only** the canonical
-  **`runtime_state`** (key/value JSONB) table and reads/writes the **existing** `runtime_jobs`, `eval_cases`,
-  `preferences`, `trajectories`, `lessons`, `procedures`, and `user_latent` tables — so workers survive
+  **`runtime_state`** (key/value JSONB) table and reads/writes the **existing** `eval_cases`, `preferences`, `trajectories`,
+  `lessons`, `procedures`, `user_latent`, and the `tenants` registry (the durable `runtime_jobs` queue table is owned by `queue.py`) — so workers survive
   restarts and scale to multiple nodes. `runtime_state.py` is the in-process equivalent. *(There are **no**
   `mnemosyne_queue_jobs` / `mnemosyne_lifecycle_state` / `mnemosyne_calibration_sets` /
   `mnemosyne_self_model_records` / `mnemosyne_observability_counters` tables; the only `mnemosyne_*`
@@ -729,7 +729,7 @@ Mnemosyne session (header `X-Mnemosyne-Session-Token`); `--require-session` enfo
 | `belief.py` | 0.5K | AGM belief revision + ATMS labels (`atms_label`) |
 | `parametric.py` | 0.5K | Learned promotion tier with rails |
 | `guard.py` | 0.4K | §25 evaluation anti-degradation guard (non-inferiority to no-memory baseline) |
-| `lifecycle.py` | 0.4K | Fidelity tiers + graduated forgetting (`MutationRailBudget`) |
+| `lifecycle.py` | 0.4K | Fidelity tiers + graduated forgetting (`FidelityTier`) |
 | `learning.py` | 0.4K | Lessons / procedures / trajectories induction |
 | `models.py` | 0.3K | Core dataclasses (Evidence / Assertion / Relation / Hit) |
 | `storage.py` | — | Content store + `CommandKeyManager` (Vault-transit KMS) |
@@ -740,4 +740,4 @@ Mnemosyne session (header `X-Mnemosyne-Session-Token`); `--require-session` enfo
 
 ---
 
-*Generated from a structural read of `/Users/admin/Projects/Mnemosyne` @ `main` (`4cb8c80`).*
+*Generated from a structural read of `/Users/admin/Projects/Mnemosyne` @ `main` (`1b82c5e`).*
