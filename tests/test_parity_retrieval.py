@@ -59,6 +59,7 @@ from mnemosyne.retrieval import (
     marginal_gain_cutoff,
     retrieval_adapters_from_env,
     semantic_entropy,
+    validate_adapter_hit_scope,
 )
 from mnemosyne.retrieval import (
     _coerce_vector,
@@ -81,6 +82,18 @@ _PRINT_HITS = (
 _PRINT_EMBEDDING = (
     "import json,sys;sys.stdin.read();"
     "print(json.dumps({'embedding':[0.1,0.2,0.3,0.4]}))"
+)
+_PRINT_CROSS_SCOPE_HITS = (
+    "import json,sys;sys.stdin.read();"
+    "print(json.dumps({'hits':["
+    "{'id':'h1','text':'alpha context','kind':'evidence','score':0.9,'tenant_id':'tenant-b'}"
+    "]}))"
+)
+_PRINT_CROSS_BRANCH_HITS = (
+    "import json,sys;sys.stdin.read();"
+    "print(json.dumps({'hits':["
+    "{'id':'h1','text':'alpha context','kind':'evidence','score':0.9,'branch':'shadow'}"
+    "]}))"
 )
 
 
@@ -257,6 +270,40 @@ def test_command_graph_retriever_parses_seeds() -> None:
     hits = retriever.search(["alpha"], tenant_id="tenant-a", branch="main", k=5)
     assert [hit.id for hit in hits] == ["h1", "h2"]
     assert hits[0].channel == "command_graph_ppr"
+
+
+def test_command_retriever_rejects_cross_scope_hits() -> None:
+    retriever = CommandLexicalRetriever([sys.executable, "-c", _PRINT_CROSS_SCOPE_HITS])
+    with pytest.raises(ValueError, match="outside requested tenant"):
+        retriever.search("alpha", tenant_id="tenant-a", branch="main", k=1)
+
+
+def test_command_retriever_rejects_cross_branch_hits() -> None:
+    retriever = CommandLexicalRetriever([sys.executable, "-c", _PRINT_CROSS_BRANCH_HITS])
+    with pytest.raises(ValueError, match="outside requested branch"):
+        retriever.search("alpha", tenant_id="tenant-a", branch="main", k=1)
+
+
+def test_validate_adapter_hit_scope_rejects_cross_scope_hits() -> None:
+    hit = _hit("h1", "alpha context", score=0.9, tenant_id="tenant-b")
+    with pytest.raises(ValueError, match="outside requested tenant"):
+        validate_adapter_hit_scope(
+            [hit],
+            tenant_id="tenant-a",
+            branch="main",
+            adapter_name="lexical",
+        )
+
+
+def test_validate_adapter_hit_scope_rejects_cross_branch_hits() -> None:
+    hit = _hit("h1", "alpha context", score=0.9, branch="shadow")
+    with pytest.raises(ValueError, match="outside requested branch"):
+        validate_adapter_hit_scope(
+            [hit],
+            tenant_id="tenant-a",
+            branch="main",
+            adapter_name="lexical",
+        )
 
 
 def test_command_media_embedding_normalizes() -> None:

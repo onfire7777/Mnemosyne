@@ -40,6 +40,7 @@ from mnemosyne.retrieval import (
     is_retired_summary_metadata,
     query_support,
     semantic_entropy,
+    validate_adapter_hit_scope,
 )
 from mnemosyne.security import TrustTier, more_trusted, sanitize_retrieved_text, trust_weight
 from mnemosyne.text import approx_tokens, cosine, lexical_score, tokenize
@@ -759,6 +760,24 @@ class LocalMemoryEngine:
         return self._mark_retrieved_text_as_data(sorted(hits, key=lambda item: item.score, reverse=True)[:k])
 
     def lexical_search(self, query: str, k: int, filt: dict[str, Any]) -> list[Hit]:
+        tenant_id = str(filt.get("tenant_id") or "")
+        branch = str(filt.get("branch") or "main")
+        if self.adapters.lexical_retriever is not None:
+            hits = self.adapters.lexical_retriever.search(
+                query,
+                tenant_id=tenant_id,
+                branch=branch,
+                k=k,
+                filt=filt,
+            )
+            hits = validate_adapter_hit_scope(
+                hits,
+                tenant_id=tenant_id,
+                branch=branch,
+                k=k,
+                adapter_name="lexical",
+            )
+            return self._mark_retrieved_text_as_data(hits)
         hits: list[Hit] = []
         for hit in self._candidate_hits(filt):
             score = lexical_score(query, hit.text)
@@ -781,6 +800,22 @@ class LocalMemoryEngine:
             return []
         moment = as_of or utc_now()
         moment = moment.astimezone(UTC) if moment.tzinfo else moment.replace(tzinfo=UTC)
+        if self.adapters.graph_retriever is not None and tenant_id:
+            hits = self.adapters.graph_retriever.search(
+                seeds,
+                tenant_id=tenant_id,
+                branch=branch or "main",
+                k=k,
+                as_of=moment,
+            )
+            hits = validate_adapter_hit_scope(
+                hits,
+                tenant_id=tenant_id,
+                branch=branch or "main",
+                k=k,
+                adapter_name="graph",
+            )
+            return self._mark_retrieved_text_as_data(hits)
 
         def matches_seed(node: str) -> bool:
             node_lower = node.lower()

@@ -38,6 +38,7 @@ from mnemosyne.retrieval import (
     is_retired_summary_metadata,
     query_support,
     semantic_entropy,
+    validate_adapter_hit_scope,
 )
 from mnemosyne.security import TrustTier, sanitize_retrieved_text, trust_weight
 from mnemosyne.text import approx_tokens, cosine, hashing_embedding, lexical_score, tokenize
@@ -685,16 +686,24 @@ class PostgresEngine:
         return pref.id
 
     def lexical_search(self, query: str, k: int, filt: dict[str, Any]) -> list[Hit]:
-        tenant_id = filt["tenant_id"]
-        branch = filt.get("branch", "main")
+        tenant_id = str(filt["tenant_id"])
+        branch = str(filt.get("branch", "main"))
         if self.adapters.lexical_retriever is not None:
-            return self.adapters.lexical_retriever.search(
+            hits = self.adapters.lexical_retriever.search(
                 query,
                 tenant_id=tenant_id,
                 branch=branch,
                 k=k,
                 filt=filt,
             )
+            hits = validate_adapter_hit_scope(
+                hits,
+                tenant_id=tenant_id,
+                branch=branch,
+                k=k,
+                adapter_name="lexical",
+            )
+            return self._mark_retrieved_text_as_data(hits)
         db_tenant_id = _stable_uuid("tenant", tenant_id)
         include_quarantined = bool(filt.get("include_quarantined", False))
         default_max_trust = int(TrustTier.UNTRUSTED_EXTERNAL) if include_quarantined else self.policy.max_trust_tier
@@ -992,17 +1001,26 @@ class PostgresEngine:
             node_lower = node.lower()
             return node_lower in seed_set or bool(set(tokenize(node_lower)) & seed_set)
 
-        branch = branch or "main"
+        tenant_id = str(tenant_id or "")
+        branch = str(branch or "main")
         moment = as_of or utc_now()
         moment = moment.astimezone(UTC) if moment.tzinfo else moment.replace(tzinfo=UTC)
         if self.adapters.graph_retriever is not None:
-            return self.adapters.graph_retriever.search(
+            hits = self.adapters.graph_retriever.search(
                 seeds,
                 tenant_id=tenant_id,
                 branch=branch,
                 k=k,
                 as_of=moment,
             )
+            hits = validate_adapter_hit_scope(
+                hits,
+                tenant_id=tenant_id,
+                branch=branch,
+                k=k,
+                adapter_name="graph",
+            )
+            return self._mark_retrieved_text_as_data(hits)
         db_tenant_id = _stable_uuid("tenant", tenant_id)
         adjacency: dict[str, set[str]] = defaultdict(set)
         relation_by_pair: dict[tuple[str, str], dict[str, Any]] = {}
