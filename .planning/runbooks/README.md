@@ -28,8 +28,9 @@ CLI commands consumed by `deployment-soak` and `release-audit`.
   preflight and capture runs write `redaction-scan.json`; successful full
   captures bind the deployment report/check artifacts with manifest SHA-256
   digests, reject path escape and report/check divergence during release audit,
-  and also write `bundle-manifest.json` with SHA-256 hashes for retained
-  artifacts.
+  snapshot manifest-referenced input artifacts under `OUT_ROOT/input-artifacts/`,
+  rewrite the copied operator manifest to those staged paths, and also write
+  `bundle-manifest.json` with SHA-256 hashes for retained artifacts.
 
 ## Row Runbooks
 
@@ -49,6 +50,9 @@ CLI commands consumed by `deployment-soak` and `release-audit`.
 - Local and compose evidence can prove gate mechanics, but cannot satisfy Tier B.
 - `--preflight-only` output is setup proof only; it does not flip any row to
   Done.
+- Each row handoff resumes only after the operator reports the row's evidence
+  capture signal from the row runbook. The generic defer signal is
+  `skip operator gates`.
 - Production evidence must be operator-captured against real production or
   production-equivalent IdP, Postgres/retrieval, provider, MCP, dashboard,
   worker, object-store, KMS/residency, C2PA, and trainer surfaces.

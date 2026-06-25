@@ -42,6 +42,7 @@ from mnemosyne.consolidation import (
     ProcedureInducer,
 )
 from mnemosyne.engine import LocalMemoryEngine, MemoryEngine
+from mnemosyne.evidence_redaction import scan_evidence_paths
 from mnemosyne.eval import run_seed_suite
 from mnemosyne.gate import RegressionCase
 from mnemosyne.ingestion import IngestionPipeline
@@ -212,6 +213,18 @@ RELEASE_AUDIT_BUNDLE_OPS_COMMANDS = frozenset(
     command
     for command, keys in RELEASE_AUDIT_REQUIRED_OUTPUT_KEYS.items()
     if {"bundle", "requirements", "checks", "findings"}.issubset(keys)
+)
+RELEASE_AUDIT_ALLOWED_EMPTY_OUTPUT_KEYS = frozenset({"failures", "findings"})
+RELEASE_AUDIT_PLACEHOLDER_MARKERS = (
+    "placeholder",
+    "dummy",
+    "todo",
+    "tbd",
+    "changeme",
+    "change-me",
+    "replace-me",
+    "replace_me",
+    "lorem ipsum",
 )
 
 
@@ -9658,11 +9671,12 @@ def _release_command_output_findings(check: Mapping[str, Any]) -> list[dict[str,
         ]
     if command == "ops-report":
         report = stdout_json.get("report")
+        required_keys = RELEASE_AUDIT_REQUIRED_OUTPUT_KEYS[command]
         if isinstance(report, Mapping):
-            return []
+            return _release_required_output_evidence_findings(command, report, required_keys)
         missing_ops_report = [key for key in ("counts", "tripwires") if key not in stdout_json]
         if not missing_ops_report:
-            return []
+            return _release_required_output_evidence_findings(command, stdout_json, required_keys)
         return [
             _release_finding(
                 "required_command_output_incomplete",
@@ -9679,12 +9693,81 @@ def _release_command_output_findings(check: Mapping[str, Any]) -> list[dict[str,
                 f"required deployment check {command} is missing output sections: {', '.join(missing)}",
             )
         )
+    if not missing:
+        findings.extend(
+            _release_required_output_evidence_findings(command, stdout_json, required_keys)
+        )
     if not missing and command in RELEASE_AUDIT_BUNDLE_OPS_COMMANDS:
         findings.extend(_release_bundle_ops_evidence_findings(command, stdout_json))
     if command == "worker-run":
         findings.extend(_release_worker_run_evidence_findings(stdout_json))
     if command == "worker-ops-check":
         findings.extend(_release_worker_ops_evidence_findings(stdout_json))
+    return findings
+
+
+def _release_placeholder_paths(value: Any, *, path: str = "$") -> list[str]:
+    paths: list[str] = []
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if any(marker in lowered for marker in RELEASE_AUDIT_PLACEHOLDER_MARKERS):
+            paths.append(path)
+    elif isinstance(value, Mapping):
+        for key, child in value.items():
+            paths.extend(_release_placeholder_paths(child, path=f"{path}.{key}"))
+    elif isinstance(value, list | tuple):
+        for index, child in enumerate(value):
+            paths.extend(_release_placeholder_paths(child, path=f"{path}[{index}]"))
+    return paths
+
+
+def _release_has_substantive_evidence(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, bool | int | float):
+        return True
+    if isinstance(value, str):
+        stripped = value.strip()
+        lowered = stripped.lower()
+        return bool(stripped) and not any(
+            marker in lowered for marker in RELEASE_AUDIT_PLACEHOLDER_MARKERS
+        )
+    if isinstance(value, Mapping):
+        return bool(value) and any(_release_has_substantive_evidence(child) for child in value.values())
+    if isinstance(value, list | tuple):
+        return bool(value) and any(_release_has_substantive_evidence(child) for child in value)
+    return True
+
+
+def _release_required_output_evidence_findings(
+    command: str,
+    stdout_json: Mapping[str, Any],
+    required_keys: tuple[str, ...],
+) -> list[dict[str, Any]]:
+    findings: list[dict[str, Any]] = []
+    placeholder_paths = _release_placeholder_paths(stdout_json)
+    if placeholder_paths:
+        findings.append(
+            _release_finding(
+                "required_command_output_placeholder",
+                f"required deployment check {command} contains placeholder evidence at "
+                + ", ".join(placeholder_paths[:8]),
+            )
+        )
+    hollow_keys = [
+        key
+        for key in required_keys
+        if key not in RELEASE_AUDIT_ALLOWED_EMPTY_OUTPUT_KEYS
+        and not _release_has_substantive_evidence(stdout_json.get(key))
+    ]
+    if hollow_keys:
+        findings.append(
+            _release_finding(
+                "required_command_output_hollow",
+                f"required deployment check {command} has hollow output sections: "
+                + ", ".join(hollow_keys),
+            )
+        )
     return findings
 
 
@@ -10416,28 +10499,106 @@ def _verify_production_evidence_preflight(
 
 def _verify_production_evidence_redaction_scan(
     redaction_scan: Mapping[str, Any] | None,
+    *,
+    bundle_dir: Path,
+    actual_files: list[dict[str, Any]],
     findings: list[dict[str, Any]],
-) -> None:
+) -> bool:
     if redaction_scan is None:
-        return
+        return False
+    ok = True
     if redaction_scan.get("ok") is not True:
+        ok = False
         _production_evidence_finding(
             findings,
             "redaction_scan_not_ok",
             "redaction-scan.json is not ok",
         )
     if redaction_scan.get("findings") != []:
+        ok = False
         _production_evidence_finding(
             findings,
             "redaction_scan_findings_present",
             "redaction-scan.json contains findings",
         )
     if redaction_scan.get("skipped_files") != []:
+        ok = False
         _production_evidence_finding(
             findings,
             "redaction_scan_skipped_files_present",
             "redaction-scan.json contains skipped files",
         )
+    scan_paths: list[Path] = []
+    expected_scanned: set[str] = set()
+    for item in actual_files:
+        rel_path = item.get("path")
+        if not isinstance(rel_path, str) or rel_path == "redaction-scan.json":
+            continue
+        scan_paths.append(bundle_dir / rel_path)
+        expected_scanned.add(rel_path)
+    recomputed = scan_evidence_paths(
+        scan_paths,
+        scope="verify",
+        reject_symlinks=True,
+    )
+    if recomputed.get("ok") is not True:
+        ok = False
+        _production_evidence_finding(
+            findings,
+            "redaction_scan_recompute_not_ok",
+            "fresh redaction scan over current bundle artifacts is not ok",
+        )
+    if recomputed.get("findings") != []:
+        ok = False
+        _production_evidence_finding(
+            findings,
+            "redaction_scan_recompute_findings_present",
+            "fresh redaction scan found high-confidence secret material",
+        )
+    if recomputed.get("skipped_files") != []:
+        ok = False
+        _production_evidence_finding(
+            findings,
+            "redaction_scan_recompute_skipped_files_present",
+            "fresh redaction scan skipped current bundle artifacts",
+        )
+
+    def relative_scanned_files(scan: Mapping[str, Any]) -> set[str] | None:
+        scanned = scan.get("scanned_files")
+        if not isinstance(scanned, list) or not all(isinstance(item, str) for item in scanned):
+            return None
+        relative: set[str] = set()
+        for item in scanned:
+            try:
+                relative.add(Path(item).resolve(strict=False).relative_to(bundle_dir).as_posix())
+            except ValueError:
+                relative.add(item)
+        return relative
+
+    recorded_scanned = relative_scanned_files(redaction_scan)
+    recomputed_scanned = relative_scanned_files(recomputed)
+    if recorded_scanned is None:
+        ok = False
+        _production_evidence_finding(
+            findings,
+            "redaction_scan_scanned_files_missing",
+            "redaction-scan.json must list scanned_files",
+        )
+    elif recorded_scanned != expected_scanned:
+        ok = False
+        _production_evidence_finding(
+            findings,
+            "redaction_scan_scanned_files_mismatch",
+            "redaction-scan.json scanned_files do not match bundle-manifest artifacts",
+        )
+    if recomputed_scanned is not None and recomputed_scanned != expected_scanned:
+        ok = False
+        _production_evidence_finding(
+            findings,
+            "redaction_scan_recompute_scanned_files_mismatch",
+            "fresh redaction scan did not cover exactly the current bundle artifacts",
+        )
+    return ok
 
 
 def _verify_production_evidence_operator_manifest(
@@ -10776,7 +10937,6 @@ def cmd_production_evidence_verify(args: argparse.Namespace) -> None:
         bundle_dir=resolved_bundle_dir,
         findings=findings,
     )
-    _verify_production_evidence_redaction_scan(redaction_scan, findings)
     operator_manifest_ok = _verify_production_evidence_operator_manifest(operator_manifest, findings)
     deployment_soak_manifest_ok = _verify_production_evidence_deployment_soak_manifest(
         expected_manifest_path=resolved_bundle_dir / "operator-soak-manifest.json",
@@ -10786,6 +10946,7 @@ def cmd_production_evidence_verify(args: argparse.Namespace) -> None:
     )
     bundle_fingerprint = None
     artifact_count = 0
+    actual_files: list[dict[str, Any]] = []
     if bundle_manifest is not None:
         bundle_fingerprint, actual_files = _verify_production_evidence_bundle_manifest(
             bundle_dir=resolved_bundle_dir,
@@ -10795,6 +10956,12 @@ def cmd_production_evidence_verify(args: argparse.Namespace) -> None:
             findings=findings,
         )
         artifact_count = len(actual_files)
+    redaction_scan_ok = _verify_production_evidence_redaction_scan(
+        redaction_scan,
+        bundle_dir=resolved_bundle_dir,
+        actual_files=actual_files,
+        findings=findings,
+    )
     recomputed_release_audit = _verify_production_evidence_release_audit(
         bundle_dir=resolved_bundle_dir,
         release_audit=release_audit,
@@ -10814,7 +10981,7 @@ def cmd_production_evidence_verify(args: argparse.Namespace) -> None:
         "checks": {
             "summary": _production_evidence_summary_ok(summary),
             "preflight": preflight_ok,
-            "redaction_scan": redaction_scan is not None and redaction_scan.get("ok") is True,
+            "redaction_scan": redaction_scan_ok,
             "bundle_manifest": bundle_manifest is not None and bundle_fingerprint is not None,
             "operator_manifest": operator_manifest_ok,
             "deployment_soak_manifest": deployment_soak_manifest_ok,

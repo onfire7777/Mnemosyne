@@ -81,7 +81,7 @@ Verified prerequisite summaries present:
 |---|---|---|---|
 | 1 | Production Postgres retrieval | Runbook exists; local-staging dry run proven. | Pending real ParadeDB/BM25, AGE, pgvector, embedding/reranker evidence. |
 | 2 | Tenant isolation and auth | Runbook exists; env/secrets catalog exists; local-staging dry run proven. | Pending real IdP/JWKS, Vault/session-secret, TLS, tenant-isolation evidence. |
-| 3 | CLI/MCP runtime coverage | Runbook exists; A11 local readiness proven in 06-07. | Pending hosted JSON-RPC/StreamableHTTP/SSE endpoint evidence. |
+| 3 | CLI/MCP runtime coverage | Runbook exists; A11 local readiness proven in 06-07. | Pending hosted JSON-RPC and StreamableHTTP endpoint evidence. |
 | 4 | Consolidation role pipeline | Runbook exists; local-staging dry run proven. | Pending production worker, provider, projection, gate-suite, and supervision evidence. |
 | 5 | Signed provenance | Runbook exists; local C2PA validation proven. | Pending production verifier, issuer/root, rotation, and quarantine evidence. |
 | 6 | Multimodal retrieval | Runbook exists; FR-20 local/live breadth proven. | Pending production extractor, media-embedding, object-store, retrieval, and job evidence. |

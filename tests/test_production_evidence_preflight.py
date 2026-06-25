@@ -212,6 +212,34 @@ def test_capture_production_evidence_preflight_rejects_secret_option_name(
     assert not out_root.exists()
 
 
+def test_capture_production_evidence_preflight_rejects_secret_option_equals_form(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "production-soak.json"
+    out_root = tmp_path / "capture"
+
+    def add_secret_option(payload: dict[str, Any]) -> None:
+        payload["checks"][0]["args"] = ["--auth-token=plain-placeholder-secret"]
+
+    _minimal_production_manifest(manifest, mutate=add_secret_option)
+
+    proc = subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "--preflight-only",
+            str(manifest),
+            str(out_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+    )
+
+    assert proc.returncode == 65
+    assert "secret-bearing option --auth-token" in proc.stderr
+    assert not out_root.exists()
+
+
 def test_capture_production_evidence_preflight_rejects_repo_local_artifact_path(
     tmp_path: Path,
 ) -> None:

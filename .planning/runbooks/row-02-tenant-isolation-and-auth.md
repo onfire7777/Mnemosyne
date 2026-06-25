@@ -50,3 +50,10 @@ Done when live IdP/JWKS/TLS evidence plus tenant-RLS cases are in the bundle and
 The full wrapper summary must have `release_audit_ok=true`,
 `redaction_scan_ok=true`, no redaction findings or skipped files, a retained
 `bundle-manifest.json`/fingerprint, and passing `production-evidence-verify`.
+
+## Operator Resume Signal
+
+After `release-audit --require-production-validated --require-provider-forbid-local`
+passes for row 2 and `production-evidence-verify` passes for the retained
+bundle, resume the parity handoff with `row-2 evidence captured`.
+Use `skip operator gates` only to explicitly defer this production evidence pass.
