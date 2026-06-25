@@ -119,9 +119,11 @@ infra/scripts/capture-production-evidence.sh \
   /secure/path/to/production-soak-manifest.json \
   /secure/path/to/mnemosyne-production-evidence
 PYTHON="${PYTHON:-$(if [ -x .venv/bin/python ]; then printf '%s' .venv/bin/python; else command -v python3; fi)}"
+BUNDLE_DIR=/secure/path/to/mnemosyne-production-evidence
+EXPECTED_BUNDLE_FINGERPRINT="$("$PYTHON" -c 'import json, pathlib, sys; print(json.loads((pathlib.Path(sys.argv[1]) / "summary.json").read_text())["bundle_fingerprint"])' "$BUNDLE_DIR")"
 "$PYTHON" -m mnemosyne.cli production-evidence-verify \
-  /secure/path/to/mnemosyne-production-evidence \
-  --expected-bundle-fingerprint '<summary.json bundle_fingerprint>'
+  "$BUNDLE_DIR" \
+  --expected-bundle-fingerprint "$EXPECTED_BUNDLE_FINGERPRINT"
 ```
 
 The renderer replaces non-secret `MNEMOSYNE_PROD_*` placeholders from the

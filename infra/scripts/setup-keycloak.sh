@@ -13,12 +13,14 @@
 #
 # Requires: docker (compose stack up), curl, jq, python3.
 set -euo pipefail
+umask 077
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INFRA_DIR="$(cd "${HERE}/.." && pwd)"
 COMPOSE_FILE="${INFRA_DIR}/docker-compose.providers.yml"
 OUT_DIR="${INFRA_DIR}/keycloak/out"
 mkdir -p "${OUT_DIR}"
+chmod 700 "${OUT_DIR}"
 
 KC_BASE="${KEYCLOAK_BASE_URL:-http://localhost:8089}"
 REALM="mnemosyne"
@@ -90,6 +92,7 @@ if [ -z "${ID_TOKEN}" ] || [ "${ID_TOKEN}" = "null" ]; then
   exit 1
 fi
 printf '%s' "${ID_TOKEN}" > "${OUT_DIR}/id_token.jwt"
+chmod 600 "${OUT_DIR}/id_token.jwt"
 
 # Decode the claim set so the operator can eyeball the mapping.
 echo "==> ID token claims (for verification):"
@@ -122,6 +125,7 @@ export KEYCLOAK_TOKEN_URL="${TOKEN_URL}"
 export KEYCLOAK_CLIENT_ID="${CLIENT_ID}"
 export KEYCLOAK_CLIENT_SECRET="${CLIENT_SECRET}"
 EOF
+chmod 600 "${OUT_DIR}/oidc.env"
 
 echo
 echo "==> Done. OIDC env written to ${OUT_DIR}/oidc.env"
