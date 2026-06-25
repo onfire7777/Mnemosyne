@@ -5722,6 +5722,46 @@ def write_production_evidence_bundle(tmp_path: Path) -> tuple[Path, str]:
     return bundle_dir, bundle_fingerprint
 
 
+def rewrite_production_bundle_manifest(bundle_dir: Path) -> str:
+    files = []
+    for file_path in sorted(path for path in bundle_dir.rglob("*") if path.is_file()):
+        rel_path = file_path.relative_to(bundle_dir).as_posix()
+        if rel_path in {"bundle-manifest.json", "summary.json"}:
+            continue
+        payload = file_path.read_bytes()
+        files.append(
+            {
+                "path": rel_path,
+                "size_bytes": len(payload),
+                "sha256": "sha256:" + sha256(payload).hexdigest(),
+            }
+        )
+    bundle_manifest_payload = {
+        "schema": "mnemosyne.production-evidence-bundle.v1",
+        "files": files,
+    }
+    bundle_fingerprint = "sha256:" + sha256(
+        json.dumps(bundle_manifest_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    (bundle_dir / "bundle-manifest.json").write_text(
+        json.dumps(
+            {
+                **bundle_manifest_payload,
+                "artifact_count": len(files),
+                "fingerprint": bundle_fingerprint,
+            },
+            indent=2,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    summary_path = bundle_dir / "summary.json"
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    summary["bundle_fingerprint"] = bundle_fingerprint
+    summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
+    return bundle_fingerprint
+
+
 def test_cli_release_audit_verifies_production_deployment_evidence(tmp_path: Path) -> None:
     store = tmp_path / "mnemosyne.json"
     _report_path, manifest_path = write_release_report(tmp_path)
@@ -5776,10 +5816,42 @@ def test_cli_production_evidence_verify_accepts_captured_bundle(tmp_path: Path) 
         "summary": True,
         "redaction_scan": True,
         "bundle_manifest": True,
+        "operator_manifest": True,
         "deployment_soak_stdout": True,
         "release_audit_replay": True,
     }
     assert report["findings"] == []
+
+
+def test_cli_production_evidence_verify_rejects_tampered_operator_manifest(tmp_path: Path) -> None:
+    bundle_dir, _bundle_fingerprint = write_production_evidence_bundle(tmp_path)
+    operator_manifest_path = bundle_dir / "operator-soak-manifest.json"
+    operator_manifest = json.loads(operator_manifest_path.read_text(encoding="utf-8"))
+    operator_manifest["validation_scope"]["operator_asserted"] = False
+    operator_manifest["checks"][0]["args"] = ["MNEMOSYNE_PROD_UNRESOLVED_ARTIFACT"]
+    operator_manifest["checks"].append({"command": "provider-check", "args": []})
+    operator_manifest_path.write_text(
+        json.dumps(operator_manifest, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    rewrite_production_bundle_manifest(bundle_dir)
+
+    result = run_raw_cli(
+        tmp_path / "verify-store.json",
+        "production-evidence-verify",
+        str(bundle_dir),
+    )
+    payload = json.loads(result.stdout)
+    codes = {finding["code"] for finding in payload["findings"]}
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert payload["checks"]["operator_manifest"] is False
+    assert "operator_manifest_attestation_missing" in codes
+    assert "operator_manifest_unresolved_placeholder" in codes
+    assert "operator_manifest_duplicate_commands" in codes
+    assert "bundle_file_sha256_mismatch" not in codes
+    assert "bundle_fingerprint_mismatch" not in codes
 
 
 def test_cli_production_evidence_verify_rejects_tampered_bundle(tmp_path: Path) -> None:

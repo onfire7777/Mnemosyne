@@ -10226,6 +10226,112 @@ def _verify_production_evidence_redaction_scan(
         )
 
 
+def _verify_production_evidence_operator_manifest(
+    operator_manifest: Mapping[str, Any] | None,
+    findings: list[dict[str, Any]],
+) -> bool:
+    if operator_manifest is None:
+        return False
+    ok = True
+    manifest_payload = json.dumps(operator_manifest, sort_keys=True)
+    if "MNEMOSYNE_PROD_" in manifest_payload:
+        ok = False
+        _production_evidence_finding(
+            findings,
+            "operator_manifest_unresolved_placeholder",
+            "operator-soak-manifest.json contains unresolved production placeholders",
+        )
+
+    validation_scope = operator_manifest.get("validation_scope")
+    if not isinstance(validation_scope, Mapping):
+        ok = False
+        _production_evidence_finding(
+            findings,
+            "operator_manifest_validation_scope_missing",
+            "operator-soak-manifest.json is missing validation_scope",
+        )
+    else:
+        if validation_scope.get("production_validated") is not True:
+            ok = False
+            _production_evidence_finding(
+                findings,
+                "operator_manifest_production_validation_missing",
+                "operator-soak-manifest.json is not production validated",
+            )
+        if validation_scope.get("target_environment") != "production":
+            ok = False
+            _production_evidence_finding(
+                findings,
+                "operator_manifest_target_missing",
+                "operator-soak-manifest.json did not target production",
+            )
+        if validation_scope.get("operator_asserted") is not True:
+            ok = False
+            _production_evidence_finding(
+                findings,
+                "operator_manifest_attestation_missing",
+                "operator-soak-manifest.json is missing operator attestation",
+            )
+
+    checks = operator_manifest.get("checks")
+    if not isinstance(checks, list) or not checks:
+        _production_evidence_finding(
+            findings,
+            "operator_manifest_checks_missing",
+            "operator-soak-manifest.json requires a non-empty checks array",
+        )
+        return False
+
+    commands: list[str] = []
+    for index, check in enumerate(checks, start=1):
+        if not isinstance(check, Mapping):
+            ok = False
+            _production_evidence_finding(
+                findings,
+                "operator_manifest_check_invalid",
+                f"operator-soak-manifest.json checks[{index}] must be an object",
+            )
+            continue
+        command = check.get("command")
+        if not isinstance(command, str) or not command:
+            ok = False
+            _production_evidence_finding(
+                findings,
+                "operator_manifest_command_invalid",
+                f"operator-soak-manifest.json checks[{index}].command must be a non-empty string",
+            )
+            continue
+        commands.append(command)
+
+    required_commands = set(PRODUCTION_RELEASE_REQUIRED_COMMANDS)
+    provided_commands = set(commands)
+    missing = sorted(required_commands - provided_commands)
+    if missing:
+        ok = False
+        _production_evidence_finding(
+            findings,
+            "operator_manifest_required_commands_missing",
+            "operator-soak-manifest.json is missing production commands: " + ", ".join(missing),
+        )
+    extra = sorted(provided_commands - required_commands)
+    if extra:
+        ok = False
+        _production_evidence_finding(
+            findings,
+            "operator_manifest_unknown_commands",
+            "operator-soak-manifest.json contains unknown production commands: " + ", ".join(extra),
+        )
+    duplicates = sorted({command for command in commands if commands.count(command) > 1})
+    if duplicates:
+        ok = False
+        _production_evidence_finding(
+            findings,
+            "operator_manifest_duplicate_commands",
+            "operator-soak-manifest.json contains duplicate production commands: " + ", ".join(duplicates),
+        )
+    return ok
+
+
 def _verify_production_evidence_release_audit(
     *,
     bundle_dir: Path,
@@ -10367,8 +10473,14 @@ def cmd_production_evidence_verify(args: argparse.Namespace) -> None:
         "deployment_soak_stdout",
         findings,
     )
+    operator_manifest = _read_json_object_for_evidence(
+        resolved_bundle_dir / "operator-soak-manifest.json",
+        "operator_soak_manifest",
+        findings,
+    )
     _verify_production_evidence_summary(summary, findings)
     _verify_production_evidence_redaction_scan(redaction_scan, findings)
+    operator_manifest_ok = _verify_production_evidence_operator_manifest(operator_manifest, findings)
     bundle_fingerprint = None
     artifact_count = 0
     if bundle_manifest is not None:
@@ -10400,6 +10512,7 @@ def cmd_production_evidence_verify(args: argparse.Namespace) -> None:
             "summary": _production_evidence_summary_ok(summary),
             "redaction_scan": redaction_scan is not None and redaction_scan.get("ok") is True,
             "bundle_manifest": bundle_manifest is not None and bundle_fingerprint is not None,
+            "operator_manifest": operator_manifest_ok,
             "deployment_soak_stdout": deployment_soak is not None and deployment_soak.get("ok") is True,
             "release_audit_replay": isinstance(recomputed_release_audit, Mapping)
             and recomputed_release_audit.get("ok") is True,
