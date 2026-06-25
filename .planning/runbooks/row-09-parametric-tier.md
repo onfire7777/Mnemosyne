@@ -34,7 +34,7 @@ expectations are indexed in `.planning/ROLLBACK.md`.
 
 Operator runs the gates against real infra, evidence is redacted, the outputs
 are included in `deployment-soak --evidence-dir` with production scope and
-operator attestation, and `release-audit --require-production-validated` passes
+operator attestation, and `release-audit --require-production-validated --require-provider-forbid-local` passes
 with required output shapes present and empty findings.
 
 Done when trainer deploy, protected-suite, and rollback-drill evidence is in the

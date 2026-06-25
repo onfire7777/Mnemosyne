@@ -41,6 +41,6 @@ Completed the 06-07 compose-Postgres and hosted-MCP readiness checkpoint.
 
 - This does not flip any production audit row to Done. The 10 strict-parity rows
   still require operator-captured production evidence from concrete deployed
-  infrastructure under `release-audit --require-production-validated`.
+  infrastructure under `release-audit --require-production-validated --require-provider-forbid-local`.
 - A11 hosted MCP production parity remains an operator evidence task for real
   deployed endpoints, certificates, sessions, and redaction bundles.

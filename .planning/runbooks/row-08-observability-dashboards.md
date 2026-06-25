@@ -27,7 +27,7 @@ redacted counters, alert-route verification, and findings.
 
 Operator runs the gates against real infra, evidence is redacted, the outputs
 are included in `deployment-soak --evidence-dir` with production scope and
-operator attestation, and `release-audit --require-production-validated` passes
+operator attestation, and `release-audit --require-production-validated --require-provider-forbid-local` passes
 with required output shapes present and empty findings.
 
 Done when hosted-dashboard ops evidence is in the bundle and `release-audit` is
