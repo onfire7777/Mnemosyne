@@ -125,14 +125,16 @@ profile before writing the manifest. The runner is intentionally fail-closed. It
 refuses manifests unless `validation_scope.production_validated=true`,
 `validation_scope.target_environment="production"`, and
 `validation_scope.operator_asserted=true`; rejects unresolved production
-placeholders, secret-bearing CLI options, and high-confidence secret material;
-and requires the exact production release command profile, with no missing,
+placeholders, secret-bearing CLI options, high-confidence secret material,
+unscannable retained artifacts, and non-empty output roots; and requires the
+exact production release command profile, with no missing,
 duplicate, or unknown commands, before running `deployment-soak --evidence-dir`
 followed by
 `release-audit --require-production-validated --require-provider-forbid-local`.
 The deployment evidence manifest binds its report and check artifacts with
-SHA-256 digests, and release-audit verifies those digests before trusting the
-bundle.
+SHA-256 digests; release-audit verifies those digests, rejects artifact paths
+that resolve outside the evidence bundle, and confirms retained check JSON
+matches the audited report before trusting the bundle.
 Use `--preflight-only` to validate and copy the rendered manifest without
 running production checks; preflight output plus `redaction-scan.json` is setup
 proof only, not production parity evidence. Successful full capture writes

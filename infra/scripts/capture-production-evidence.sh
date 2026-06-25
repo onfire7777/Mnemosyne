@@ -66,6 +66,16 @@ fi
 
 STAMP="$(date -u +"%Y%m%dT%H%M%SZ")"
 OUT_ROOT="${2:-/tmp/mnemosyne-tierb-production-evidence-${STAMP}}"
+if [ -e "${OUT_ROOT}" ]; then
+  if [ ! -d "${OUT_ROOT}" ]; then
+    echo "ERROR: production evidence output path exists and is not a directory: ${OUT_ROOT}" >&2
+    exit 65
+  fi
+  if [ -n "$(find "${OUT_ROOT}" -mindepth 1 -maxdepth 1 -print -quit)" ]; then
+    echo "ERROR: production evidence output directory must be empty: ${OUT_ROOT}" >&2
+    exit 65
+  fi
+fi
 
 PYTHON="${MNEMOSYNE_PYTHON:-}"
 if [ -z "${PYTHON}" ]; then
@@ -279,7 +289,7 @@ redaction_scan = scan_evidence_tree(out_root)
     json.dumps(redaction_scan, indent=2),
     encoding="utf-8",
 )
-if not redaction_scan["ok"]:
+if redaction_scan["findings"]:
     print(
         "ERROR: high-confidence secret material found in the production evidence bundle:",
         file=sys.stderr,
@@ -289,9 +299,21 @@ if not redaction_scan["ok"]:
             f"  - {finding['source']}:{finding['line']} {finding['kind']}",
             file=sys.stderr,
         )
+if redaction_scan.get("skipped_files"):
+    print(
+        "ERROR: production evidence bundle contains unscanned files:",
+        file=sys.stderr,
+    )
+    for skipped in redaction_scan["skipped_files"]:
+        print(
+            f"  - {skipped['path']}: {skipped['reason']}",
+            file=sys.stderr,
+        )
+if not redaction_scan["ok"]:
     print(
         "Do not publish this bundle. Redact the affected file or move the secret "
-        "to environment, files, or command providers and rerun capture.",
+        "to environment, files, or command providers; remove unscannable artifacts; "
+        "then rerun capture.",
         file=sys.stderr,
     )
     sys.exit(65)

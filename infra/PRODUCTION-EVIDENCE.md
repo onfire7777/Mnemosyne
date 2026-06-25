@@ -13,6 +13,7 @@ This runbook is the operator handoff for flipping the remaining Tier B parity ro
   - `validation_scope.target_environment: "production"`
   - `validation_scope.operator_asserted: true`
 - The manifest must include the exact production release profile: every command in the current 28-command set from `src/mnemosyne/cli.py`, with no duplicate or unknown commands.
+- The output root must be new or empty. The wrapper rejects non-empty output directories so stale artifacts cannot enter a production bundle.
 
 ## Capture
 
@@ -47,14 +48,15 @@ The wrapper performs these steps:
 
 1. Validates the operator manifest is explicitly production-scoped.
 2. Runs `deployment-soak --evidence-dir`.
-3. Runs `release-audit --evidence-manifest ... --require-production-validated --require-provider-forbid-local`, which verifies the deployment evidence manifest's report and check SHA-256 digests before auditing.
-4. Scans the generated evidence bundle for high-confidence secret material.
+3. Runs `release-audit --evidence-manifest ... --require-production-validated --require-provider-forbid-local`, which verifies the deployment evidence manifest's report and check SHA-256 digests, rejects artifact paths that resolve outside the evidence bundle, and confirms retained check JSON matches the audited report before auditing.
+4. Scans the generated evidence bundle for high-confidence secret material and fails closed if any retained artifact cannot be scanned.
 5. Writes `bundle-manifest.json` with SHA-256 hashes for every retained artifact before writing the final summary.
 
 ## Acceptance
 
 The resulting `release-audit.json` must report `ok: true` with no findings, and
-`redaction-scan.json` must report `ok: true`. Retain `bundle-manifest.json`
+`redaction-scan.json` must report `ok: true` with no findings and no skipped
+files. Retain `bundle-manifest.json`
 and the `summary.json` `bundle_fingerprint` as the handoff chain-of-custody
 record for the captured files. A passing local or compose-only bundle is useful
 staging evidence, but it does not satisfy Tier B unless the manifest is
