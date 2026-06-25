@@ -4,6 +4,14 @@
 **Date:** 2026-06-23 (last full sync; for the final 2026-06-24 status defer to the strict parity audit cited below) · **Repo:** `~/Projects/Mnemosyne` (canonical) → `github.com/onfire7777/Mnemosyne`.
 **Goal it serves:** exact 1:1 parity with `Mnemosyne-v2-Build-Blueprint.md` (§1–§38 + Appendices A–E).
 
+> **Supersession note (2026-06-25):** this matrix is retained as a traceability
+> synthesis. The current status source is
+> `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md` plus `.planning/STATE.md` and
+> `docs/ROADMAP-TO-100.md`. Older rows below that describe ECE/G2 as failing or
+> operator-deferred are superseded by the 2026-06-24/25 updates: mandatory Tier A
+> wirings are closed, all 6 headline SLOs are proven locally/compose, and the
+> remaining 10 rows are Tier B operator production-evidence blockers.
+
 ## Purpose & method
 
 This matrix maps every blueprint surface to the module that implements it, the test that
@@ -298,7 +306,12 @@ The code seam exists and the deterministic local behavior is correct and tested;
 
 ### 12.3 DEFERRED-OPERATOR — 🔒 not codeable in this environment (requires real infrastructure / a real model an operator runs)
 - Prod-scale SLO at volume (10⁵ local / 10⁸ prod); real C2PA signature / certificate-chain; real LoRA / test-time-training trainer deployment; live IdP/JWKS + KMS/Vault + TLS rotation; production ParadeDB/BM25, Apache AGE, and hosted reranker adapters. The provider boundaries already exist in code.
-- **ECE ≈0.20 vs ≤0.05** and **G2 answer-quality lift = 0.0** — **FORMALLY DEFERRED-operator** (Coordinator ruling): both are model-dependent and unreachable by the deterministic local engine. ECE needs discriminative *real* embeddings; G2 needs a *real* LLM judge command (the deterministic `substring_judge` cannot show lift). The harnesses + seams exist (`eval/calibration/`, `eval/harness/answer_quality.py`, `eval/judge_claude.py`); only the real model backend is deferred. This is exactly the limit the blueprint **§11.13 honesty map** predicts for a deterministic local scaffold — not a code defect or a fabricated metric.
+- **Superseded SLO note:** the historical ECE/G2 deferral is no longer current.
+  The controlling strict audit records 6/6 headline SLOs proven after the
+  calibrated-confidence and retrieval-source wirings landed; `eval/calibration/report.json`
+  reports ECE 0.0063 against the ≤0.05 target. Production-scale reruns still
+  belong to Tier B operator evidence, but ECE/G2 are not open code gaps in this
+  matrix anymore.
 
 **Honest "complete":** 12.1 is done; 12.2 is a rationale-backed scope boundary (seams present, deterministic local behavior correct + tested); 12.3 is the operator's deployment surface with boundaries already in place.
 
@@ -319,9 +332,10 @@ The only blueprint gaps still genuinely open (suite otherwise green; operator-ev
 | JWKS `enc`-key rejection (real `src` bug) | §27 (live-evidence deferred) | `oidc_jwks.py` — [CC-SEC/B10] | `infra` `validate-keycloak.sh` fails-closed |
 | counterfactual-replay scorer attached to gate hook by default | I12 / §30.6 | self_optimization/gate — [CC-LS/B2] | OQ2 'cf term wired into gate' → True |
 
-**2 headline SLOs — FORMALLY DEFERRED-operator** (Coordinator ruling; see §12.3): both are model-dependent and the deterministic local engine cannot meet them — consistent with the blueprint **§11.13 honesty map**. The eval harness + seams are present; only the real model backend is deferred.
-- **ECE ≈0.20 vs ≤0.05** — needs discriminative *real* embeddings (the FR-3 embedding seam exists; the real model is deferred).
-- **G2 answer-quality lift = 0.0 under `substring_judge`** — needs a *real* LLM judge command (`eval/judge_claude.py`); the deterministic substring judge cannot show lift. Not an AUX-DOCS `config/` item.
+**Superseded headline-SLO note:** the older ECE/G2 operator-deferral language is
+historical. Current controlling docs record recall, nDCG, G2 lift, poison block,
+warm P95, and ECE as proven. Do not use this matrix section to reopen Tier A SLO
+work; only production-scale operator reruns remain under Tier B.
 
 Re-verification: ping Builder 7 to re-check any item once its enforcement is wired.
 

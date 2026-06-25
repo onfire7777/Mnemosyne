@@ -5804,6 +5804,27 @@ def test_cli_production_evidence_verify_rejects_tampered_bundle(tmp_path: Path) 
     assert "release_audit_not_ok" in codes
 
 
+def test_cli_production_evidence_verify_summary_check_requires_full_summary_contract(tmp_path: Path) -> None:
+    bundle_dir, _bundle_fingerprint = write_production_evidence_bundle(tmp_path)
+    summary_path = bundle_dir / "summary.json"
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    summary["deployment_soak_ok"] = False
+    summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
+
+    result = run_raw_cli(
+        tmp_path / "verify-store.json",
+        "production-evidence-verify",
+        str(bundle_dir),
+    )
+    payload = json.loads(result.stdout)
+    codes = {finding["code"] for finding in payload["findings"]}
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert payload["checks"]["summary"] is False
+    assert "summary_deployment_soak_ok_missing" in codes
+
+
 def test_cli_production_evidence_verify_rejects_unmanifested_artifacts(tmp_path: Path) -> None:
     bundle_dir, _bundle_fingerprint = write_production_evidence_bundle(tmp_path)
     (bundle_dir / "unmanifested.txt").write_text("not captured by bundle-manifest\n", encoding="utf-8")
