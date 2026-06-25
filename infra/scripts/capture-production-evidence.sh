@@ -156,6 +156,7 @@ if not isinstance(checks, list) or not checks:
     checks = []
 
 commands: set[str] = set()
+command_list: list[str] = []
 sensitive_options = {
     "--auth-token",
     "--idp-token",
@@ -176,6 +177,7 @@ for index, check in enumerate(checks, start=1):
     command = check.get("command")
     if isinstance(command, str):
         commands.add(command)
+        command_list.append(command)
     else:
         errors.append(f"checks[{index}].command must be a string")
     for field in ("args", "global_args"):
@@ -190,9 +192,16 @@ for index, check in enumerate(checks, start=1):
                     "use environment, files, or command providers instead"
                 )
 
-missing = sorted(set(PRODUCTION_RELEASE_REQUIRED_COMMANDS) - commands)
+required_commands = set(PRODUCTION_RELEASE_REQUIRED_COMMANDS)
+missing = sorted(required_commands - commands)
 if missing:
     errors.append("manifest is missing production release commands: " + ", ".join(missing))
+extra = sorted(commands - required_commands)
+if extra:
+    errors.append("manifest contains unknown production release commands: " + ", ".join(extra))
+duplicates = sorted({command for command in command_list if command_list.count(command) > 1})
+if duplicates:
+    errors.append("manifest contains duplicate production release commands: " + ", ".join(duplicates))
 
 if errors:
     for error in errors:

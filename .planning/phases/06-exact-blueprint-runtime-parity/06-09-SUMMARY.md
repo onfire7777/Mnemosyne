@@ -17,6 +17,10 @@ Post-plan redaction hardening added the shared
 wrapper. This is evidence hygiene for the sanctioned operator path, not a new
 release gate and not production validation by itself.
 
+Post-plan exact-profile hardening also aligned the renderer, capture wrapper,
+and strict release audit path: production bundles must carry exactly one entry
+for every frozen production release command and no unknown command evidence.
+
 ## Executor Readiness
 
 Verified present:
@@ -104,6 +108,10 @@ Checked 2026-06-25 during renderer hardening:
 - `infra/scripts/capture-production-evidence.sh` rejects high-confidence secret
   material in the rendered manifest, writes `redaction-scan.json` during
   preflight, and scans generated text evidence before writing `summary.json`.
+- `infra/scripts/capture-production-evidence.sh` rejects manual manifests with
+  duplicate or unknown production commands, matching the renderer.
+- `release-audit --require-production-validated` rejects duplicate required
+  command evidence and unexpected commands outside the frozen production profile.
 - The template contains 19 production placeholders that must be rendered outside
   the repo before operator capture:
   `MNEMOSYNE_PROD_C2PA_TOOL`, `MNEMOSYNE_PROD_CHANGE_TICKET`,

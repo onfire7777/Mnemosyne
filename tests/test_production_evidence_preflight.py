@@ -126,6 +126,70 @@ def test_capture_production_evidence_preflight_rejects_secret_option_name(
     assert not out_root.exists()
 
 
+def test_capture_production_evidence_preflight_rejects_duplicate_commands(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "production-soak.json"
+    out_root = tmp_path / "capture"
+
+    def duplicate_command(payload: dict[str, Any]) -> None:
+        payload["checks"].append(dict(payload["checks"][0]))
+
+    _minimal_production_manifest(manifest, mutate=duplicate_command)
+
+    proc = subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "--preflight-only",
+            str(manifest),
+            str(out_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+    )
+
+    assert proc.returncode == 65
+    assert "duplicate production release commands" in proc.stderr
+    assert PRODUCTION_RELEASE_REQUIRED_COMMANDS[0] in proc.stderr
+    assert not out_root.exists()
+
+
+def test_capture_production_evidence_preflight_rejects_unknown_commands(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "production-soak.json"
+    out_root = tmp_path / "capture"
+
+    def add_unknown_command(payload: dict[str, Any]) -> None:
+        payload["checks"].append(
+            {
+                "name": "custom-ops-check",
+                "command": "custom-ops-check",
+                "args": [],
+            }
+        )
+
+    _minimal_production_manifest(manifest, mutate=add_unknown_command)
+
+    proc = subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "--preflight-only",
+            str(manifest),
+            str(out_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+    )
+
+    assert proc.returncode == 65
+    assert "unknown production release commands" in proc.stderr
+    assert "custom-ops-check" in proc.stderr
+    assert not out_root.exists()
+
+
 def test_capture_production_evidence_preflight_rejects_jwt_in_manifest_args(
     tmp_path: Path,
 ) -> None:
