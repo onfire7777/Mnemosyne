@@ -112,6 +112,10 @@ set +a
 infra/scripts/render-production-soak-manifest.sh \
   --output /secure/path/to/production-soak-manifest.json
 infra/scripts/capture-production-evidence.sh \
+  --preflight-only \
+  /secure/path/to/production-soak-manifest.json \
+  /secure/path/to/mnemosyne-production-preflight
+infra/scripts/capture-production-evidence.sh \
   /secure/path/to/production-soak-manifest.json
 ```
 
@@ -124,6 +128,9 @@ refuses manifests unless `validation_scope.production_validated=true`,
 placeholders; and requires the full production release command profile before
 running `deployment-soak --evidence-dir` followed by
 `release-audit --require-production-validated --require-provider-forbid-local`.
+Use `--preflight-only` to validate and copy the rendered manifest without
+running production checks; preflight output is setup proof only, not production
+parity evidence.
 Put secrets in environment variables, files, or command-backed providers, not
 in manifest `args`.
 

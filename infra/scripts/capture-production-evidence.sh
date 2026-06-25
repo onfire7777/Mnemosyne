@@ -3,7 +3,8 @@ set -euo pipefail
 
 usage() {
   cat >&2 <<'USAGE'
-Usage: infra/scripts/capture-production-evidence.sh SOAK_MANIFEST [OUT_ROOT]
+Usage:
+  infra/scripts/capture-production-evidence.sh [--preflight-only] SOAK_MANIFEST [OUT_ROOT]
 
 Runs the existing production evidence path:
   1. Validate that SOAK_MANIFEST is explicitly production-scoped.
@@ -15,6 +16,10 @@ The manifest must contain validation_scope.production_validated=true,
 validation_scope.target_environment="production", and
 validation_scope.operator_asserted=true. Secrets must come from environment,
 files, or command providers; do not put tokens directly in manifest args.
+
+Options:
+  --preflight-only  Validate and copy the manifest, write preflight.json, then
+                    exit before deployment-soak or release-audit runs.
 USAGE
 }
 
@@ -22,10 +27,31 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INFRA_DIR="$(cd "${HERE}/.." && pwd)"
 REPO_DIR="$(cd "${INFRA_DIR}/.." && pwd)"
 
-if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
-  usage
-  exit 0
-fi
+PREFLIGHT_ONLY=0
+while [ "$#" -gt 0 ]; do
+  case "${1}" in
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    --preflight-only)
+      PREFLIGHT_ONLY=1
+      shift
+      ;;
+    --)
+      shift
+      break
+      ;;
+    -*)
+      echo "ERROR: unknown option: ${1}" >&2
+      usage
+      exit 64
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
 
 MANIFEST="${1:-}"
 if [ -z "${MANIFEST}" ]; then
@@ -52,7 +78,7 @@ fi
 
 MANIFEST_PATH="$(cd "$(dirname "${MANIFEST}")" && pwd)/$(basename "${MANIFEST}")"
 STARTED_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-export MANIFEST_PATH OUT_ROOT REPO_DIR STARTED_AT
+export MANIFEST_PATH OUT_ROOT REPO_DIR STARTED_AT PREFLIGHT_ONLY
 
 "${PYTHON}" - <<'PY'
 import json
@@ -154,6 +180,7 @@ out_root.mkdir(parents=True, exist_ok=True)
 shutil.copyfile(manifest_path, out_root / "operator-soak-manifest.json")
 preflight = {
     "ok": True,
+    "preflight_only": os.environ.get("PREFLIGHT_ONLY") == "1",
     "source_manifest": str(manifest_path),
     "copied_manifest": str(out_root / "operator-soak-manifest.json"),
     "started_at": os.environ["STARTED_AT"],
@@ -162,6 +189,11 @@ preflight = {
 }
 (out_root / "preflight.json").write_text(json.dumps(preflight, indent=2), encoding="utf-8")
 PY
+
+if [ "${PREFLIGHT_ONLY}" = "1" ]; then
+  cat "${OUT_ROOT}/preflight.json"
+  exit 0
+fi
 
 cd "${REPO_DIR}"
 "${PYTHON}" -m mnemosyne.cli \
