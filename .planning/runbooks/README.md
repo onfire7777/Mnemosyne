@@ -18,7 +18,7 @@ CLI commands consumed by `deployment-soak` and `release-audit`.
 - `infra/scripts/capture-production-evidence.sh` - operator capture wrapper
   that validates the rendered manifest, rejects unresolved production
   placeholders, runs `deployment-soak --evidence-dir`, and then runs
-  `release-audit --require-production-validated`.
+  `release-audit --require-production-validated --require-provider-forbid-local`.
 
 ## Row Runbooks
 

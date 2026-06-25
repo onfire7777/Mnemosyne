@@ -8,7 +8,8 @@ Usage: infra/scripts/capture-production-evidence.sh SOAK_MANIFEST [OUT_ROOT]
 Runs the existing production evidence path:
   1. Validate that SOAK_MANIFEST is explicitly production-scoped.
   2. Run deployment-soak with --evidence-dir.
-  3. Run release-audit with --require-production-validated.
+  3. Run release-audit with --require-production-validated and
+     --require-provider-forbid-local.
 
 The manifest must contain validation_scope.production_validated=true,
 validation_scope.target_environment="production", and
