@@ -253,6 +253,9 @@ file_suffixes = {
     ".yml",
     ".zip",
 }
+executable_path_options = {
+    "--c2pa-tool",
+}
 
 def _is_url(value: str) -> bool:
     parsed = urlparse(value)
@@ -274,8 +277,11 @@ def _validate_external_file_path(
     check_index: int,
     field: str,
     value_index: int,
+    previous_option: str | None,
     label: str,
 ) -> None:
+    if previous_option in executable_path_options:
+        return
     if not _looks_like_file_path(value):
         return
     path = Path(value).expanduser()
@@ -328,11 +334,17 @@ for index, check in enumerate(checks, start=1):
                     f"checks[{index}].{field} contains secret-bearing option {option_name}; "
                     "use environment, files, or command providers instead"
                 )
+            previous_option = None
+            if value_index > 0:
+                previous_value = values[value_index - 1]
+                if previous_value.startswith("--") and "=" not in previous_value:
+                    previous_option = previous_value
             _validate_external_file_path(
                 value,
                 check_index=index - 1,
                 field=field,
                 value_index=value_index,
+                previous_option=previous_option,
                 label=f"checks[{index}].{field}",
             )
 
