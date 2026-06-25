@@ -756,6 +756,159 @@ def test_ingestion_indexes_raw_media_embedding_before_extraction(tmp_path) -> No
     assert hits.hits[0].metadata["stored_media_embedding"] is True
 
 
+@pytest.mark.parametrize(
+    ("modality", "media_type", "payload", "metadata", "embedding_query", "derived_query"),
+    [
+        (
+            "image",
+            "image/png",
+            b"\x89PNG multimodal image bytes",
+            {"ocr_text": "whiteboard roadmap diagram", "caption": "architecture sketch"},
+            "visual diagram signature",
+            "whiteboard roadmap diagram",
+        ),
+        (
+            "audio",
+            "audio/wav",
+            b"RIFF multimodal audio bytes",
+            {"transcript": "standup transcript names the alpha release"},
+            "audio meeting signature",
+            "standup transcript alpha release",
+        ),
+        (
+            "video",
+            "video/mp4",
+            b"\x00\x00\x00 ftyp multimodal video bytes",
+            {"caption": "demo video shows the beta workflow"},
+            "video demo signature",
+            "demo video beta workflow",
+        ),
+    ],
+)
+def test_multimodal_image_audio_video_externalize_embed_and_retrieve(
+    tmp_path,
+    modality: str,
+    media_type: str,
+    payload: bytes,
+    metadata: dict[str, str],
+    embedding_query: str,
+    derived_query: str,
+) -> None:
+    engine = LocalMemoryEngine()
+    object_store = LocalObjectStore(tmp_path / "objects")
+    media_embedding = StaticMediaEmbeddingProvider(embedding_query)
+    pipeline = IngestionPipeline(engine, object_store, media_embedding_provider=media_embedding)
+
+    result = pipeline.ingest(
+        IngestRequest(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type=f"{modality}-capture",
+            data=payload,
+            modality=modality,  # type: ignore[arg-type]
+            media_type=media_type,
+            metadata=metadata,
+        )
+    )
+    evidence = engine.get_evidence(TENANT, result.cid)
+    media_hits = engine.retrieve(embedding_query, TENANT)
+    derived_hits = engine.retrieve(derived_query, TENANT)
+
+    assert evidence is not None
+    assert result.modality == modality
+    assert evidence.modality == modality
+    assert evidence.content_pointer is not None
+    assert object_store.read_bytes(evidence.content_pointer) == payload
+    assert evidence.embedding == hashing_embedding(embedding_query, dims=media_embedding.dims)
+    assert evidence.metadata["media_type"] == media_type
+    assert evidence.metadata["media_embedding"] == {
+        "provider": "static-media-embedding",
+        "dims": 256,
+        "source": "raw-externalized-media",
+    }
+    assert evidence.metadata["derived_text_sources"]
+    assert "raw-media-embedding-indexed" in evidence.capability_tags
+    assert "derived-text-indexed" in evidence.capability_tags
+    assert media_embedding.calls[0]["payload"] == payload
+    assert media_embedding.calls[0]["media_type"] == media_type
+    assert media_embedding.calls[0]["modality"] == modality
+
+    media_hit = next(hit for hit in media_hits.hits if hit.id == result.cid)
+    derived_hit = next(hit for hit in derived_hits.hits if hit.id == result.cid)
+    assert "dense_media" in media_hit.channel
+    assert media_hit.metadata["stored_media_embedding"] is True
+    assert media_hit.provenance == [result.cid]
+    assert media_hit.metadata["retrieved_text"]["instruction_authority"] == "none"
+    assert derived_hit.metadata["modality"] == modality
+    assert derived_hit.metadata["retrieved_text"]["instruction_authority"] == "none"
+
+
+@pytest.mark.parametrize(
+    ("modality", "media_type", "payload", "derived_text"),
+    [
+        ("image", "image/png", b"\x89PNG extraction image bytes", "Image OCR says gamma board."),
+        ("audio", "audio/wav", b"RIFF extraction audio bytes", "Audio transcript says gamma call."),
+        ("video", "video/mp4", b"\x00\x00\x00 ftyp extraction video bytes", "Video caption says gamma demo."),
+    ],
+)
+def test_media_extract_job_covers_image_audio_video(
+    tmp_path,
+    modality: str,
+    media_type: str,
+    payload: bytes,
+    derived_text: str,
+) -> None:
+    engine = LocalMemoryEngine()
+    queue = InProcessQueue()
+    object_store = LocalObjectStore(tmp_path / "objects")
+    pipeline = IngestionPipeline(engine, object_store, queue=queue)
+
+    result = pipeline.ingest(
+        IngestRequest(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type=f"{modality}-capture",
+            data=payload,
+            modality=modality,  # type: ignore[arg-type]
+            media_type=media_type,
+        )
+    )
+    handlers = RuntimeJobHandlers(
+        engine,
+        queue,
+        object_store=object_store,
+        media_extractor=StaticMediaExtractor(derived_text),
+    )
+    job = QueueWorker(queue, handlers.handlers()).run_once(MEDIA_EXTRACT_JOB)
+    derived_cid = job.result["details"]["derived_cid"]
+    relation_id = job.result["details"]["relation_id"]
+    source = engine.get_evidence(TENANT, result.cid)
+    derived = engine.get_evidence(TENANT, derived_cid)
+    relation = next(item for item in engine.relations.values() if item.id == relation_id)
+    hits = engine.retrieve(derived_text, TENANT)
+
+    assert job.status == "complete"
+    assert source is not None
+    assert source.content == ""
+    assert source.modality == modality
+    assert source.content_pointer is not None
+    assert object_store.read_bytes(source.content_pointer) == payload
+    assert derived is not None
+    assert derived.content == derived_text
+    assert derived.content_pointer == source.content_pointer
+    assert derived.metadata["source_evidence_cid"] == result.cid
+    assert derived.metadata["derived_text_sources"] == ["test_extractor"]
+    assert derived.metadata["source_modality"] == modality
+    assert derived.metadata["extraction"]["modality"] == modality
+    assert "derived-from-media" in derived.capability_tags
+    assert relation.source == result.cid
+    assert relation.target == derived_cid
+    assert relation.predicate == "media-derived-text"
+    assert hits.hits[0].id == derived_cid
+
+
 def test_media_extract_job_appends_derived_evidence_without_mutating_source(tmp_path) -> None:
     engine = LocalMemoryEngine()
     queue = InProcessQueue()
