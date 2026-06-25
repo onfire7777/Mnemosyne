@@ -32,6 +32,13 @@ CLI commands consumed by `deployment-soak` and `release-audit`.
   snapshot manifest-referenced input artifacts under `OUT_ROOT/input-artifacts/`,
   rewrite the copied operator manifest to those staged paths, and also write
   `bundle-manifest.json` with SHA-256 hashes for retained artifacts.
+- Executable tool paths such as `MNEMOSYNE_PROD_C2PA_TOOL` are validated as
+  absolute, external, executable tool references and recorded in
+  `preflight.json`; they are not snapshotted as evidence input artifacts.
+- `provenance-trust-check --suite` is parsed during preflight: nested
+  `asset_path` and `c2pa_asset_path` values are snapshotted and rewritten in
+  the staged suite JSON, while inline `--suite-json` is rejected for production
+  capture.
 
 ## Row Runbooks
 

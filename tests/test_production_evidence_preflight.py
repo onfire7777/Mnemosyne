@@ -363,6 +363,7 @@ def test_capture_production_evidence_preflight_does_not_snapshot_tool_executable
     tool = tmp_path / "bin" / "c2patool"
     tool.parent.mkdir()
     tool.write_bytes(b"\x00\x01not utf-8 executable bytes")
+    tool.chmod(0o755)
 
     def add_tool_path(payload: dict[str, Any]) -> None:
         check = next(
@@ -396,6 +397,13 @@ def test_capture_production_evidence_preflight_does_not_snapshot_tool_executable
     )
 
     assert stdout["required_input_artifacts"] == []
+    assert stdout["executable_tool_references"] == [
+        {
+            "option": "--c2pa-tool",
+            "path": str(tool),
+            "labels": ["checks[9].args"],
+        }
+    ]
     provenance_check = next(
         item
         for item in copied_manifest["checks"]
@@ -404,6 +412,825 @@ def test_capture_production_evidence_preflight_does_not_snapshot_tool_executable
     assert provenance_check["args"] == ["--c2pa-tool", str(tool)]
     assert str(tool) not in redaction_scan["scanned_files"]
     assert redaction_scan["skipped_files"] == []
+
+
+def test_capture_production_evidence_preflight_rejects_relative_tool_executable(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "production-soak.json"
+    out_root = tmp_path / "capture"
+
+    def add_relative_tool_path(payload: dict[str, Any]) -> None:
+        check = next(
+            item
+            for item in payload["checks"]
+            if item["command"] == "provenance-trust-check"
+        )
+        check["args"] = ["--c2pa-tool", "c2patool"]
+
+    _minimal_production_manifest(manifest, mutate=add_relative_tool_path)
+
+    proc = subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "--preflight-only",
+            str(manifest),
+            str(out_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+    )
+
+    assert proc.returncode == 65
+    assert "relative executable path for --c2pa-tool" in proc.stderr
+    assert not out_root.exists()
+
+
+def test_capture_production_evidence_preflight_rejects_non_executable_tool(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "production-soak.json"
+    out_root = tmp_path / "capture"
+    tool = tmp_path / "bin" / "c2patool"
+    tool.parent.mkdir()
+    tool.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+
+    def add_non_executable_tool_path(payload: dict[str, Any]) -> None:
+        check = next(
+            item
+            for item in payload["checks"]
+            if item["command"] == "provenance-trust-check"
+        )
+        check["args"] = [f"--c2pa-tool={tool}"]
+
+    _minimal_production_manifest(manifest, mutate=add_non_executable_tool_path)
+
+    proc = subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "--preflight-only",
+            str(manifest),
+            str(out_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+    )
+
+    assert proc.returncode == 65
+    assert "executable path for --c2pa-tool is not executable" in proc.stderr
+    assert not out_root.exists()
+
+
+def test_capture_production_evidence_preflight_rejects_missing_tool_executable(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "production-soak.json"
+    out_root = tmp_path / "capture"
+    tool = tmp_path / "bin" / "missing-c2patool"
+
+    def add_missing_tool_path(payload: dict[str, Any]) -> None:
+        check = next(
+            item
+            for item in payload["checks"]
+            if item["command"] == "provenance-trust-check"
+        )
+        check["args"] = ["--c2pa-tool", str(tool)]
+
+    _minimal_production_manifest(manifest, mutate=add_missing_tool_path)
+
+    proc = subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "--preflight-only",
+            str(manifest),
+            str(out_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+    )
+
+    assert proc.returncode == 65
+    assert "executable path for --c2pa-tool does not exist" in proc.stderr
+    assert not out_root.exists()
+
+
+def test_capture_production_evidence_preflight_rejects_repo_local_tool_executable(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "production-soak.json"
+    out_root = tmp_path / "capture"
+
+    def add_repo_local_tool_path(payload: dict[str, Any]) -> None:
+        check = next(
+            item
+            for item in payload["checks"]
+            if item["command"] == "provenance-trust-check"
+        )
+        check["args"] = ["--c2pa-tool", str(REPO / "infra" / "c2pa" / "c2pa-verify-host.sh")]
+
+    _minimal_production_manifest(manifest, mutate=add_repo_local_tool_path)
+
+    proc = subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "--preflight-only",
+            str(manifest),
+            str(out_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+    )
+
+    assert proc.returncode == 65
+    assert "executable path points inside the repository" in proc.stderr
+    assert not out_root.exists()
+
+
+def test_capture_production_evidence_preflight_rejects_url_tool_executable(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "production-soak.json"
+    out_root = tmp_path / "capture"
+
+    def add_url_tool_path(payload: dict[str, Any]) -> None:
+        check = next(
+            item
+            for item in payload["checks"]
+            if item["command"] == "provenance-trust-check"
+        )
+        check["args"] = ["--c2pa-tool=https://tools.example.invalid/c2patool"]
+
+    _minimal_production_manifest(manifest, mutate=add_url_tool_path)
+
+    proc = subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "--preflight-only",
+            str(manifest),
+            str(out_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+    )
+
+    assert proc.returncode == 65
+    assert "URL executable path for --c2pa-tool" in proc.stderr
+    assert not out_root.exists()
+
+
+def test_capture_production_evidence_preflight_snapshots_provenance_suite_assets(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "production-soak.json"
+    out_root = tmp_path / "capture"
+    tool = tmp_path / "bin" / "c2patool"
+    asset = tmp_path / "production-inputs" / "asset.json"
+    suite = tmp_path / "production-inputs" / "provenance-trust-suite.json"
+    tool.parent.mkdir()
+    asset.parent.mkdir()
+    tool.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    tool.chmod(0o755)
+    asset.write_text('{"asset":"redacted-c2pa-fixture"}\n', encoding="utf-8")
+    suite.write_text(
+        json.dumps(
+            {
+                "name": "production-c2pa",
+                "tool": str(tool),
+                "cases": [
+                    {
+                        "id": "asset-bound",
+                        "asset_path": str(asset),
+                        "manifest": {"sha256": "fixture"},
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def add_suite_path(payload: dict[str, Any]) -> None:
+        check = next(
+            item
+            for item in payload["checks"]
+            if item["command"] == "provenance-trust-check"
+        )
+        check["args"] = ["--suite", str(suite)]
+
+    _minimal_production_manifest(manifest, mutate=add_suite_path)
+
+    proc = subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "--preflight-only",
+            str(manifest),
+            str(out_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    stdout = json.loads(proc.stdout)
+    copied_manifest = json.loads(
+        (out_root / "operator-soak-manifest.json").read_text(encoding="utf-8")
+    )
+    provenance_check = next(
+        item
+        for item in copied_manifest["checks"]
+        if item["command"] == "provenance-trust-check"
+    )
+    suite_snapshot = Path(provenance_check["args"][1])
+    rewritten_suite = json.loads(suite_snapshot.read_text(encoding="utf-8"))
+    rewritten_asset_path = rewritten_suite["cases"][0]["asset_path"]
+
+    assert stdout["executable_tool_references"] == [
+        {
+            "option": "suite.tool",
+            "path": str(tool),
+            "labels": ["checks[9].args tool"],
+        }
+    ]
+    assert suite_snapshot.is_relative_to(out_root / "input-artifacts")
+    assert Path(rewritten_asset_path).is_relative_to(out_root / "input-artifacts")
+    assert rewritten_asset_path != str(asset)
+    assert {Path(item["path"]).name for item in stdout["required_input_artifacts"]} == {
+        "asset.json",
+        "provenance-trust-suite.json",
+    }
+
+
+def test_capture_production_evidence_preflight_rewrites_equals_form_suite_path(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "production-soak.json"
+    out_root = tmp_path / "capture"
+    tool = tmp_path / "bin" / "c2patool"
+    asset = tmp_path / "production-inputs" / "asset.json"
+    suite = tmp_path / "production-inputs" / "provenance-trust-suite.json"
+    tool.parent.mkdir()
+    asset.parent.mkdir()
+    tool.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    tool.chmod(0o755)
+    asset.write_text('{"asset":"redacted-c2pa-fixture"}\n', encoding="utf-8")
+    suite.write_text(
+        json.dumps(
+            {
+                "name": "production-c2pa",
+                "tool": str(tool),
+                "cases": [{"id": "asset-bound", "asset_path": str(asset)}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def add_equals_form_suite_path(payload: dict[str, Any]) -> None:
+        check = next(
+            item
+            for item in payload["checks"]
+            if item["command"] == "provenance-trust-check"
+        )
+        check["args"] = [f"--suite={suite}"]
+
+    _minimal_production_manifest(manifest, mutate=add_equals_form_suite_path)
+
+    proc = subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "--preflight-only",
+            str(manifest),
+            str(out_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    stdout = json.loads(proc.stdout)
+    copied_manifest = json.loads(
+        (out_root / "operator-soak-manifest.json").read_text(encoding="utf-8")
+    )
+    provenance_check = next(
+        item
+        for item in copied_manifest["checks"]
+        if item["command"] == "provenance-trust-check"
+    )
+    rewritten_arg = provenance_check["args"][0]
+    suite_snapshot = Path(rewritten_arg.split("=", 1)[1])
+    rewritten_suite = json.loads(suite_snapshot.read_text(encoding="utf-8"))
+
+    assert rewritten_arg.startswith("--suite=")
+    assert suite_snapshot.is_relative_to(out_root / "input-artifacts")
+    assert Path(rewritten_suite["cases"][0]["asset_path"]).is_relative_to(
+        out_root / "input-artifacts"
+    )
+    assert {Path(item["path"]).name for item in stdout["required_input_artifacts"]} == {
+        "asset.json",
+        "provenance-trust-suite.json",
+    }
+
+
+def test_capture_production_evidence_preflight_rejects_suite_json(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "production-soak.json"
+    out_root = tmp_path / "capture"
+
+    def add_suite_json(payload: dict[str, Any]) -> None:
+        check = next(
+            item
+            for item in payload["checks"]
+            if item["command"] == "provenance-trust-check"
+        )
+        check["args"] = ["--suite-json", '{"cases": []}']
+
+    _minimal_production_manifest(manifest, mutate=add_suite_json)
+
+    proc = subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "--preflight-only",
+            str(manifest),
+            str(out_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+    )
+
+    assert proc.returncode == 65
+    assert "uses --suite-json" in proc.stderr
+    assert not out_root.exists()
+
+
+def test_capture_production_evidence_preflight_rejects_bare_suite_json(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "production-soak.json"
+    out_root = tmp_path / "capture"
+
+    def add_bare_suite_json(payload: dict[str, Any]) -> None:
+        check = next(
+            item
+            for item in payload["checks"]
+            if item["command"] == "provenance-trust-check"
+        )
+        check["args"] = ["--suite-json"]
+
+    _minimal_production_manifest(manifest, mutate=add_bare_suite_json)
+
+    proc = subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "--preflight-only",
+            str(manifest),
+            str(out_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+    )
+
+    assert proc.returncode == 65
+    assert "option --suite-json requires a non-empty value" in proc.stderr
+    assert "uses --suite-json" in proc.stderr
+    assert not out_root.exists()
+
+
+def test_capture_production_evidence_preflight_rejects_bare_suite_option(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "production-soak.json"
+    out_root = tmp_path / "capture"
+    tool = tmp_path / "bin" / "c2patool"
+    tool.parent.mkdir()
+    tool.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    tool.chmod(0o755)
+
+    def add_bare_suite(payload: dict[str, Any]) -> None:
+        check = next(
+            item
+            for item in payload["checks"]
+            if item["command"] == "provenance-trust-check"
+        )
+        check["args"] = ["--suite", "--c2pa-tool", str(tool)]
+
+    _minimal_production_manifest(manifest, mutate=add_bare_suite)
+
+    proc = subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "--preflight-only",
+            str(manifest),
+            str(out_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+    )
+
+    assert proc.returncode == 65
+    assert "option --suite requires a non-empty value" in proc.stderr
+    assert "must include exactly one --suite path" in proc.stderr
+    assert not out_root.exists()
+
+
+def test_capture_production_evidence_preflight_rejects_relative_suite_path(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "production-soak.json"
+    out_root = tmp_path / "capture"
+    tool = tmp_path / "bin" / "c2patool"
+    tool.parent.mkdir()
+    tool.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    tool.chmod(0o755)
+
+    def add_relative_suite(payload: dict[str, Any]) -> None:
+        check = next(
+            item
+            for item in payload["checks"]
+            if item["command"] == "provenance-trust-check"
+        )
+        check["args"] = ["--suite", "suite", "--c2pa-tool", str(tool)]
+
+    _minimal_production_manifest(manifest, mutate=add_relative_suite)
+
+    proc = subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "--preflight-only",
+            str(manifest),
+            str(out_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+    )
+
+    assert proc.returncode == 65
+    assert "contains relative provenance trust suite path suite" in proc.stderr
+    assert not out_root.exists()
+
+
+def test_capture_production_evidence_preflight_rejects_invalid_suite_path_bytes(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "production-soak.json"
+    out_root = tmp_path / "capture"
+
+    def add_invalid_suite_path(payload: dict[str, Any]) -> None:
+        check = next(
+            item
+            for item in payload["checks"]
+            if item["command"] == "provenance-trust-check"
+        )
+        check["args"] = ["--suite", f"{tmp_path}\u0000suite.json"]
+
+    _minimal_production_manifest(manifest, mutate=add_invalid_suite_path)
+
+    proc = subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "--preflight-only",
+            str(manifest),
+            str(out_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+    )
+
+    assert proc.returncode == 65
+    assert "contains invalid path" in proc.stderr
+    assert "Traceback" not in proc.stderr
+    assert not out_root.exists()
+
+
+def test_capture_production_evidence_preflight_rejects_invalid_direct_tool_path_bytes(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "production-soak.json"
+    out_root = tmp_path / "capture"
+
+    def add_invalid_tool_path(payload: dict[str, Any]) -> None:
+        check = next(
+            item
+            for item in payload["checks"]
+            if item["command"] == "provenance-trust-check"
+        )
+        check["args"] = ["--c2pa-tool", f"{tmp_path}\u0000c2patool"]
+
+    _minimal_production_manifest(manifest, mutate=add_invalid_tool_path)
+
+    proc = subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "--preflight-only",
+            str(manifest),
+            str(out_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+    )
+
+    assert proc.returncode == 65
+    assert "contains invalid path" in proc.stderr
+    assert "Traceback" not in proc.stderr
+    assert not out_root.exists()
+
+
+def test_capture_production_evidence_preflight_rejects_suite_repo_local_tool(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "production-soak.json"
+    out_root = tmp_path / "capture"
+    asset = tmp_path / "production-inputs" / "asset.json"
+    suite = tmp_path / "production-inputs" / "provenance-trust-suite.json"
+    asset.parent.mkdir()
+    asset.write_text('{"asset":"redacted-c2pa-fixture"}\n', encoding="utf-8")
+    suite.write_text(
+        json.dumps(
+            {
+                "name": "production-c2pa",
+                "tool": str(REPO / "infra" / "c2pa" / "c2pa-verify-host.sh"),
+                "cases": [{"id": "asset-bound", "asset_path": str(asset)}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def add_suite_path(payload: dict[str, Any]) -> None:
+        check = next(
+            item
+            for item in payload["checks"]
+            if item["command"] == "provenance-trust-check"
+        )
+        check["args"] = ["--suite", str(suite)]
+
+    _minimal_production_manifest(manifest, mutate=add_suite_path)
+
+    proc = subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "--preflight-only",
+            str(manifest),
+            str(out_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+    )
+
+    assert proc.returncode == 65
+    assert "executable path points inside the repository" in proc.stderr
+    assert not out_root.exists()
+
+
+def test_capture_production_evidence_preflight_rejects_suite_repo_local_asset(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "production-soak.json"
+    out_root = tmp_path / "capture"
+    tool = tmp_path / "bin" / "c2patool"
+    suite = tmp_path / "production-inputs" / "provenance-trust-suite.json"
+    tool.parent.mkdir()
+    suite.parent.mkdir()
+    tool.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    tool.chmod(0o755)
+    suite.write_text(
+        json.dumps(
+            {
+                "name": "production-c2pa",
+                "tool": str(tool),
+                "cases": [
+                    {
+                        "id": "asset-bound",
+                        "asset_path": str(REPO / "infra" / "c2pa" / "manifest.json"),
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def add_suite_path(payload: dict[str, Any]) -> None:
+        check = next(
+            item
+            for item in payload["checks"]
+            if item["command"] == "provenance-trust-check"
+        )
+        check["args"] = ["--suite", str(suite)]
+
+    _minimal_production_manifest(manifest, mutate=add_suite_path)
+
+    proc = subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "--preflight-only",
+            str(manifest),
+            str(out_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+    )
+
+    assert proc.returncode == 65
+    assert "suite cases[1].asset_path points inside the repository" in proc.stderr
+    assert not out_root.exists()
+
+
+def test_capture_production_evidence_preflight_rejects_invalid_suite_tool_path_bytes(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "production-soak.json"
+    out_root = tmp_path / "capture"
+    asset = tmp_path / "production-inputs" / "asset.json"
+    suite = tmp_path / "production-inputs" / "provenance-trust-suite.json"
+    asset.parent.mkdir()
+    asset.write_text('{"asset":"redacted-c2pa-fixture"}\n', encoding="utf-8")
+    suite.write_text(
+        json.dumps(
+            {
+                "name": "production-c2pa",
+                "tool": f"{tmp_path}\u0000c2patool",
+                "cases": [{"id": "asset-bound", "asset_path": str(asset)}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def add_suite_path(payload: dict[str, Any]) -> None:
+        check = next(
+            item
+            for item in payload["checks"]
+            if item["command"] == "provenance-trust-check"
+        )
+        check["args"] = ["--suite", str(suite)]
+
+    _minimal_production_manifest(manifest, mutate=add_suite_path)
+
+    proc = subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "--preflight-only",
+            str(manifest),
+            str(out_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+    )
+
+    assert proc.returncode == 65
+    assert "contains invalid path" in proc.stderr
+    assert "Traceback" not in proc.stderr
+    assert not out_root.exists()
+
+
+def test_capture_production_evidence_preflight_rejects_invalid_suite_asset_path_bytes(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "production-soak.json"
+    out_root = tmp_path / "capture"
+    tool = tmp_path / "bin" / "c2patool"
+    suite = tmp_path / "production-inputs" / "provenance-trust-suite.json"
+    tool.parent.mkdir()
+    suite.parent.mkdir()
+    tool.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    tool.chmod(0o755)
+    suite.write_text(
+        json.dumps(
+            {
+                "name": "production-c2pa",
+                "tool": str(tool),
+                "cases": [{"id": "asset-bound", "asset_path": f"{tmp_path}\u0000asset.json"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def add_suite_path(payload: dict[str, Any]) -> None:
+        check = next(
+            item
+            for item in payload["checks"]
+            if item["command"] == "provenance-trust-check"
+        )
+        check["args"] = ["--suite", str(suite)]
+
+    _minimal_production_manifest(manifest, mutate=add_suite_path)
+
+    proc = subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "--preflight-only",
+            str(manifest),
+            str(out_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+    )
+
+    assert proc.returncode == 65
+    assert "contains invalid path" in proc.stderr
+    assert "Traceback" not in proc.stderr
+    assert not out_root.exists()
+
+
+def test_capture_production_evidence_preflight_rejects_suite_in_global_args(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "production-soak.json"
+    out_root = tmp_path / "capture"
+    suite = tmp_path / "production-inputs" / "provenance-trust-suite.json"
+    suite.parent.mkdir()
+    suite.write_text(
+        json.dumps(
+            {
+                "name": "production-c2pa",
+                "cases": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def add_suite_global_args(payload: dict[str, Any]) -> None:
+        check = next(
+            item
+            for item in payload["checks"]
+            if item["command"] == "provenance-trust-check"
+        )
+        check["global_args"] = ["--suite", str(suite)]
+
+    _minimal_production_manifest(manifest, mutate=add_suite_global_args)
+
+    proc = subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "--preflight-only",
+            str(manifest),
+            str(out_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+    )
+
+    assert proc.returncode == 65
+    assert "global_args contains provenance-trust-check command options" in proc.stderr
+    assert not out_root.exists()
+
+
+def test_capture_production_evidence_preflight_rejects_c2pa_tool_in_global_args(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "production-soak.json"
+    out_root = tmp_path / "capture"
+    tool = tmp_path / "bin" / "c2patool"
+    suite = tmp_path / "production-inputs" / "provenance-trust-suite.json"
+    tool.parent.mkdir()
+    suite.parent.mkdir()
+    tool.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    tool.chmod(0o755)
+    suite.write_text(
+        json.dumps({"name": "production-c2pa", "cases": []}),
+        encoding="utf-8",
+    )
+
+    def add_global_tool(payload: dict[str, Any]) -> None:
+        check = next(
+            item
+            for item in payload["checks"]
+            if item["command"] == "provenance-trust-check"
+        )
+        check["args"] = ["--suite", str(suite)]
+        check["global_args"] = ["--c2pa-tool", str(tool)]
+
+    _minimal_production_manifest(manifest, mutate=add_global_tool)
+
+    proc = subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "--preflight-only",
+            str(manifest),
+            str(out_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+    )
+
+    assert proc.returncode == 65
+    assert "global_args contains provenance-trust-check command options" in proc.stderr
+    assert not out_root.exists()
 
 
 def test_capture_production_evidence_preflight_rejects_missing_input_artifact(
