@@ -16,6 +16,7 @@ This runbook is the operator handoff for flipping the remaining Tier B parity ro
 - The manifest must include the exact production release profile: every command in the current 28-command set from `src/mnemosyne/cli.py`, with no duplicate or unknown commands.
 - The output root must be new or empty and outside this repository. The wrapper rejects repo-local or non-empty output directories so stale artifacts cannot enter a production bundle.
 - Every manifest-referenced production input artifact must already exist at an absolute external path before preflight. The wrapper inventories those paths in `preflight.json`, recursively scans referenced directories, and fails closed on missing, symlinked, secret-shaped, non-UTF-8, or over-limit input artifacts. Accepted inputs are snapshotted under `OUT_ROOT/input-artifacts/` with per-file size and SHA-256 metadata, and the copied operator manifest is rewritten to use those immutable snapshots so later mutation of the external source paths cannot change the capture inputs.
+- `MNEMOSYNE_PROD_C2PA_TOOL` is the absolute path to the deployed c2patool-compatible executable. It is executed by `provenance-trust-check` and is not snapshotted as input evidence; keep the C2PA trust-suite JSON and trust-root evidence under `MNEMOSYNE_PROD_EVIDENCE_DIR` instead.
 
 ## Capture
 

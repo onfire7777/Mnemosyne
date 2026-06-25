@@ -355,6 +355,57 @@ def test_capture_production_evidence_preflight_records_input_artifacts(
     assert redaction_scan["skipped_files"] == []
 
 
+def test_capture_production_evidence_preflight_does_not_snapshot_tool_executable(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "production-soak.json"
+    out_root = tmp_path / "capture"
+    tool = tmp_path / "bin" / "c2patool"
+    tool.parent.mkdir()
+    tool.write_bytes(b"\x00\x01not utf-8 executable bytes")
+
+    def add_tool_path(payload: dict[str, Any]) -> None:
+        check = next(
+            item
+            for item in payload["checks"]
+            if item["command"] == "provenance-trust-check"
+        )
+        check["args"] = ["--c2pa-tool", str(tool)]
+
+    _minimal_production_manifest(manifest, mutate=add_tool_path)
+
+    proc = subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "--preflight-only",
+            str(manifest),
+            str(out_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    stdout = json.loads(proc.stdout)
+    copied_manifest = json.loads(
+        (out_root / "operator-soak-manifest.json").read_text(encoding="utf-8")
+    )
+    redaction_scan = json.loads(
+        (out_root / "redaction-scan.json").read_text(encoding="utf-8")
+    )
+
+    assert stdout["required_input_artifacts"] == []
+    provenance_check = next(
+        item
+        for item in copied_manifest["checks"]
+        if item["command"] == "provenance-trust-check"
+    )
+    assert provenance_check["args"] == ["--c2pa-tool", str(tool)]
+    assert str(tool) not in redaction_scan["scanned_files"]
+    assert redaction_scan["skipped_files"] == []
+
+
 def test_capture_production_evidence_preflight_rejects_missing_input_artifact(
     tmp_path: Path,
 ) -> None:
