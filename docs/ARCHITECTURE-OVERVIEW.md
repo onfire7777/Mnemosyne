@@ -715,7 +715,7 @@ Mnemosyne session (header `X-Mnemosyne-Session-Token`); `--require-session` enfo
 | Module | LOC | Role |
 |---|--:|---|
 | `cli.py` | 13.9K | `mneme` CLI — 91 subcommands across memory/graph/correction/branch/learning/parametric/profile/ops |
-| `postgres_engine.py` | 2.8K | Production engine: RLS, FTS, pgvector, recursive PPR, bitemporal `as_of()` |
+| `postgres_engine.py` | 2.8K | PostgreSQL engine: RLS, FTS, pgvector, recursive PPR, bitemporal `as_of()` |
 | `consolidation.py` | 2.0K | 11-pass background knowledge compiler + promotion gate |
 | `engine.py` | 1.8K | `MemoryEngine` Protocol + `LocalMemoryEngine`; `route()` / `RoutePlan`; read-side sensitivity/access enforcement |
 | `mcp_server.py` | 1.6K | MCP transports (stdio shim / SDK stdio / SDK StreamableHTTP / hosted HTTP) + session exchange |
