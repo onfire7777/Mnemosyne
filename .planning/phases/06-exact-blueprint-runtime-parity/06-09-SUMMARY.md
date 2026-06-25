@@ -75,6 +75,34 @@ with a manifest whose validation scope contains:
 and the resulting `release-audit --require-production-validated
 --require-provider-forbid-local` output reports `ok=true` and `findings=[]`.
 
+## Production Input Preflight
+
+Checked 2026-06-25 after push `129234a`:
+
+- GitHub remote `onfire7777/Mnemosyne` default branch `main` points at
+  `129234ac947145648c058ee06f1dfe36e44eb1c2`.
+- GitHub CI for `129234ac947145648c058ee06f1dfe36e44eb1c2` completed
+  successfully in run `28142616744`.
+- `infra/templates/production-soak-manifest.template.json` is structurally
+  production-scoped with `production_validated=true`,
+  `target_environment=production`, `operator_asserted=true`, and 28 checks.
+- The template contains 19 production placeholders that must be replaced outside
+  the repo before operator capture:
+  `MNEMOSYNE_PROD_C2PA_TOOL`, `MNEMOSYNE_PROD_CHANGE_TICKET`,
+  `MNEMOSYNE_PROD_DASHBOARD_URL`, `MNEMOSYNE_PROD_EVIDENCE_DIR`,
+  `MNEMOSYNE_PROD_IDP_AUDIENCE`, `MNEMOSYNE_PROD_IDP_ISSUER`,
+  `MNEMOSYNE_PROD_IDP_JWKS_URL`, `MNEMOSYNE_PROD_MCP_HTTP_BASE_URL`,
+  `MNEMOSYNE_PROD_MCP_HTTP_HEALTH_URL`, `MNEMOSYNE_PROD_MCP_HTTP_RPC_URL`,
+  `MNEMOSYNE_PROD_MCP_STREAMABLE_HTTP_BASE_URL`,
+  `MNEMOSYNE_PROD_MCP_STREAMABLE_HTTP_HEALTH_URL`,
+  `MNEMOSYNE_PROD_MCP_STREAMABLE_HTTP_URL`, `MNEMOSYNE_PROD_OPERATOR_NAME`,
+  `MNEMOSYNE_PROD_OPERATOR_USER`, `MNEMOSYNE_PROD_RECOMPUTE_CID`,
+  `MNEMOSYNE_PROD_TENANT`, `MNEMOSYNE_PROD_TLS_HOSTNAME`, and
+  `MNEMOSYNE_PROD_TLS_URL`.
+- None of those production placeholder environment variables are set in the
+  current Codex environment. Production evidence capture cannot honestly run
+  here without operator-provided deployed endpoints and evidence paths.
+
 ## Current Status
 
 - Executor readiness: complete.
