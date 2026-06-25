@@ -85,11 +85,12 @@ the completed bundle and, when supplied, the retained `summary.json`
 `bundle_fingerprint`. Retain `bundle-manifest.json` and the `summary.json`
 `bundle_fingerprint` as the handoff chain-of-custody record for the captured
 files. The offline verifier independently rechecks the retained
-`operator-soak-manifest.json` for production scope, operator attestation,
-unresolved production placeholders, and the frozen production command set. A
-passing local or compose-only bundle is useful staging evidence, but it does not
-satisfy Tier B unless the manifest is operator asserted and the checks use
-production infrastructure.
+`preflight.json` and `operator-soak-manifest.json` for production scope,
+operator attestation, unresolved production placeholders, copied-manifest
+custody metadata, and the frozen production command set. A passing local or
+compose-only bundle is useful staging evidence, but it does not satisfy Tier B
+unless the manifest is operator asserted and the checks use production
+infrastructure.
 
 The current strict audit remains incomplete until the production evidence bundle proves:
 

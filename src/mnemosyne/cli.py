@@ -10200,6 +10200,75 @@ def _production_evidence_summary_ok(summary: Mapping[str, Any] | None) -> bool:
     )
 
 
+def _verify_production_evidence_preflight(
+    preflight: Mapping[str, Any] | None,
+    findings: list[dict[str, Any]],
+) -> bool:
+    if preflight is None:
+        return False
+    ok = True
+    if preflight.get("ok") is not True:
+        ok = False
+        _production_evidence_finding(
+            findings,
+            "preflight_not_ok",
+            "preflight.json is not ok",
+        )
+    if preflight.get("preflight_only") is not False:
+        ok = False
+        _production_evidence_finding(
+            findings,
+            "preflight_completion_missing",
+            "preflight.json does not describe a completed production capture",
+        )
+
+    copied_manifest = preflight.get("copied_manifest")
+    if not isinstance(copied_manifest, str) or Path(copied_manifest).name != "operator-soak-manifest.json":
+        ok = False
+        _production_evidence_finding(
+            findings,
+            "preflight_copied_manifest_invalid",
+            "preflight.json copied_manifest must point at operator-soak-manifest.json",
+        )
+    redaction_scan = preflight.get("redaction_scan")
+    if not isinstance(redaction_scan, str) or Path(redaction_scan).name != "redaction-scan.json":
+        ok = False
+        _production_evidence_finding(
+            findings,
+            "preflight_redaction_scan_invalid",
+            "preflight.json redaction_scan must point at redaction-scan.json",
+        )
+
+    required_commands = preflight.get("required_commands")
+    provided_commands = preflight.get("provided_commands")
+    expected_commands = set(PRODUCTION_RELEASE_REQUIRED_COMMANDS)
+    if (
+        not isinstance(required_commands, list)
+        or not all(isinstance(command, str) for command in required_commands)
+        or len(required_commands) != len(PRODUCTION_RELEASE_REQUIRED_COMMANDS)
+        or set(required_commands) != expected_commands
+    ):
+        ok = False
+        _production_evidence_finding(
+            findings,
+            "preflight_required_commands_mismatch",
+            "preflight.json required_commands do not match the frozen production command set",
+        )
+    if (
+        not isinstance(provided_commands, list)
+        or not all(isinstance(command, str) for command in provided_commands)
+        or len(provided_commands) != len(PRODUCTION_RELEASE_REQUIRED_COMMANDS)
+        or set(provided_commands) != expected_commands
+    ):
+        ok = False
+        _production_evidence_finding(
+            findings,
+            "preflight_provided_commands_mismatch",
+            "preflight.json provided_commands do not match the frozen production command set",
+        )
+    return ok
+
+
 def _verify_production_evidence_redaction_scan(
     redaction_scan: Mapping[str, Any] | None,
     findings: list[dict[str, Any]],
@@ -10473,12 +10542,18 @@ def cmd_production_evidence_verify(args: argparse.Namespace) -> None:
         "deployment_soak_stdout",
         findings,
     )
+    preflight = _read_json_object_for_evidence(
+        resolved_bundle_dir / "preflight.json",
+        "preflight",
+        findings,
+    )
     operator_manifest = _read_json_object_for_evidence(
         resolved_bundle_dir / "operator-soak-manifest.json",
         "operator_soak_manifest",
         findings,
     )
     _verify_production_evidence_summary(summary, findings)
+    preflight_ok = _verify_production_evidence_preflight(preflight, findings)
     _verify_production_evidence_redaction_scan(redaction_scan, findings)
     operator_manifest_ok = _verify_production_evidence_operator_manifest(operator_manifest, findings)
     bundle_fingerprint = None
@@ -10510,6 +10585,7 @@ def cmd_production_evidence_verify(args: argparse.Namespace) -> None:
         else None,
         "checks": {
             "summary": _production_evidence_summary_ok(summary),
+            "preflight": preflight_ok,
             "redaction_scan": redaction_scan is not None and redaction_scan.get("ok") is True,
             "bundle_manifest": bundle_manifest is not None and bundle_fingerprint is not None,
             "operator_manifest": operator_manifest_ok,
