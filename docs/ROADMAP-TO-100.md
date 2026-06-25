@@ -90,10 +90,10 @@ This is the **bulk of the remaining percentage** and the universal blocker on al
 | B9 | Privacy ops | Production **residency-policy** + **legal-erasure / operator-delete** (KMS-backed) operations | `privacy-ops-check` |
 | B10 | Worker / observability | Real **worker supervision/deployment** + deployment observability; headline SLOs demonstrated on **real production** (not the completion harness) | `worker-run` + `release-audit` |
 
-### TIER C — Scope-deferred (blueprint non-goals) + final sign-off
+### TIER C — Final sign-off after Tier B evidence
 
-- **FR-20 multimodal** (N5, post-v1) — local image/audio/video breadth is validated; production extractor/embedder/object-store/retrieval evidence remains operator-run. Optional for v1.0.
-- **FR-21 real LoRA** (N2, optional, GPU) — local trainer/protected-suite/rollback validation is done; deployed GPU trainer evidence remains operator-run under B8.
+- **FR-20 multimodal** (N5) — local image/audio/video breadth is validated; production extractor/embedder/object-store/retrieval evidence remains operator-run under B6.
+- **FR-21 real LoRA** (N2, GPU) — local trainer/protected-suite/rollback validation is done; deployed GPU trainer evidence remains operator-run under B8.
 - **Final 1:1 sign-off:** re-run `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md`, flip the 10 rows Partial→Done, supersede with a v1.0 release attestation.
 
 ---

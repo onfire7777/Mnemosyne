@@ -5636,6 +5636,8 @@ def write_production_evidence_bundle(tmp_path: Path) -> tuple[Path, str]:
             {
                 "ok": True,
                 "preflight_only": False,
+                "copied_manifest": str(bundle_dir / "operator-soak-manifest.json"),
+                "redaction_scan": str(bundle_dir / "redaction-scan.json"),
                 "required_commands": list(PRODUCTION_RELEASE_REQUIRED_COMMANDS),
                 "provided_commands": sorted(PRODUCTION_RELEASE_REQUIRED_COMMANDS),
             },
@@ -5814,6 +5816,7 @@ def test_cli_production_evidence_verify_accepts_captured_bundle(tmp_path: Path) 
     assert report["artifact_count"] > 0
     assert report["checks"] == {
         "summary": True,
+        "preflight": True,
         "redaction_scan": True,
         "bundle_manifest": True,
         "operator_manifest": True,
@@ -5850,6 +5853,34 @@ def test_cli_production_evidence_verify_rejects_tampered_operator_manifest(tmp_p
     assert "operator_manifest_attestation_missing" in codes
     assert "operator_manifest_unresolved_placeholder" in codes
     assert "operator_manifest_duplicate_commands" in codes
+    assert "bundle_file_sha256_mismatch" not in codes
+    assert "bundle_fingerprint_mismatch" not in codes
+
+
+def test_cli_production_evidence_verify_rejects_tampered_preflight(tmp_path: Path) -> None:
+    bundle_dir, _bundle_fingerprint = write_production_evidence_bundle(tmp_path)
+    preflight_path = bundle_dir / "preflight.json"
+    preflight = json.loads(preflight_path.read_text(encoding="utf-8"))
+    preflight["ok"] = False
+    preflight["copied_manifest"] = str(bundle_dir / "wrong-manifest.json")
+    preflight["provided_commands"] = preflight["provided_commands"][:-1]
+    preflight_path.write_text(json.dumps(preflight, indent=2, sort_keys=True), encoding="utf-8")
+    rewrite_production_bundle_manifest(bundle_dir)
+
+    result = run_raw_cli(
+        tmp_path / "verify-store.json",
+        "production-evidence-verify",
+        str(bundle_dir),
+    )
+    payload = json.loads(result.stdout)
+    codes = {finding["code"] for finding in payload["findings"]}
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert payload["checks"]["preflight"] is False
+    assert "preflight_not_ok" in codes
+    assert "preflight_copied_manifest_invalid" in codes
+    assert "preflight_provided_commands_mismatch" in codes
     assert "bundle_file_sha256_mismatch" not in codes
     assert "bundle_fingerprint_mismatch" not in codes
 
