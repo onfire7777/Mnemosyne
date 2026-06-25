@@ -1,6 +1,6 @@
 # Mnemosyne — Roadmap to 100% Blueprint Parity
 
-**Authored:** 2026-06-24 · **Current baseline:** `main` at `74fe3e3` after production manifest rendering hardening
+**Authored:** 2026-06-24 · **Current baseline:** `main` after production manifest rendering and operator handoff hardening
 **Controlling status doc:** `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md` (10 gap rows, all "Partial")
 **Verdict source:** blended completion **~82%** today (up from a long ~70% plateau, broken by the 2026-06-24 Tier A wirings) — this doc explains *why it sat at ~70%*, *what moved it to ~82%*, and *exactly what flips it to 100%*.
 
