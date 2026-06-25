@@ -4,6 +4,7 @@ This runbook is the operator handoff for flipping the remaining Tier B parity ro
 
 ## Preconditions
 
+- Copy `infra/templates/production-render.env.example` outside the repo, fill the blank non-secret `MNEMOSYNE_PROD_*` values there, and source the external copy before rendering.
 - Render `infra/templates/production-soak-manifest.template.json` outside the repo with `infra/scripts/render-production-soak-manifest.sh --output /secure/path/to/production-soak-manifest.json`. Manual edits are only a fallback and must still leave no unresolved `MNEMOSYNE_PROD_*` placeholders; the capture wrapper rejects unresolved placeholders before running production checks.
 - Keep raw secrets out of `args` and `global_args`. The production wrapper rejects secret-bearing options such as `--idp-token`, `--session-secret`, `--auth-token`, and `--password`.
 - Provide secrets through environment variables or command/provider files. Required examples include `MNEMOSYNE_POSTGRES_DSN`, `MNEMOSYNE_IDP_TOKEN`, `MNEMOSYNE_MCP_TOKEN`, and `MNEMOSYNE_MCP_SESSION_TOKEN` where the selected checks need them.
@@ -18,6 +19,12 @@ This runbook is the operator handoff for flipping the remaining Tier B parity ro
 Run the production wrapper from the repository root:
 
 ```bash
+cp infra/templates/production-render.env.example \
+  /secure/path/to/production-render.env
+# Fill /secure/path/to/production-render.env outside this repository.
+set -a
+. /secure/path/to/production-render.env
+set +a
 infra/scripts/render-production-soak-manifest.sh \
   --output /secure/path/to/production-soak-manifest.json
 infra/scripts/capture-production-evidence.sh \

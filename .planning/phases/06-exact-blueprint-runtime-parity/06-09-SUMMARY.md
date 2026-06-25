@@ -31,6 +31,7 @@ Verified present:
 - `.planning/ROLLBACK.md`
 - `infra/scripts/capture-production-evidence.sh`
 - `infra/scripts/render-production-soak-manifest.sh`
+- `infra/templates/production-render.env.example`
 - `infra/templates/production-soak-manifest.template.json`
 
 Verified prerequisite summaries present:
@@ -89,6 +90,8 @@ Checked 2026-06-25 during renderer hardening:
   non-secret production placeholders from the operator environment, refuses
   repository-local output by default, validates the production scope, and
   validates the full 28-command production release profile before writing.
+- `infra/templates/production-render.env.example` gives operators a blank,
+  no-secret list of all 19 render inputs to copy and fill outside the repo.
 - `infra/scripts/capture-production-evidence.sh` rejects unresolved
   `MNEMOSYNE_PROD_` placeholders before creating an evidence directory or
   running `deployment-soak`.

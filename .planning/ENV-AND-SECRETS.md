@@ -8,9 +8,10 @@ material.
 ## Production Evidence Inputs
 
 Use `infra/templates/production-soak-manifest.template.json` as the command
-shape. Render it outside the repository with
+shape. Copy `infra/templates/production-render.env.example` outside the
+repository, fill the blank non-secret values there, then render with
 `infra/scripts/render-production-soak-manifest.sh --output /secure/path/to/production-soak-manifest.json`
-before filling environment-specific production values into the capture path.
+before running `infra/scripts/capture-production-evidence.sh`.
 
 Secrets and credentials must be supplied outside manifest `args` and
 `global_args`, using runtime environment variables or provider custody files.
