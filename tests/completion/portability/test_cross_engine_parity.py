@@ -27,6 +27,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from uuid import uuid4
 
 import pytest
 
@@ -48,6 +49,9 @@ from _portability import ParityHarness, assert_parity, live_dsn
 # --------------------------------------------------------------------------- helpers
 
 
+_RUN_TOKEN = uuid4().hex[:12]
+
+
 def _evidence(tenant: str, user: str, content: str, **kw: Any) -> Evidence:
     base = dict(
         tenant_id=tenant,
@@ -63,8 +67,11 @@ def _evidence(tenant: str, user: str, content: str, **kw: Any) -> Evidence:
 
 
 def _harness(name: str) -> ParityHarness:
-    # Fixed (non-random) tenant/user ids so local and postgres receive identical inputs.
-    return ParityHarness(tenant=f"tenant-port-{name}", user=f"user-port-{name}")
+    # Keep local and postgres inputs identical while isolating repeated live-DB runs.
+    return ParityHarness(
+        tenant=f"tenant-port-{name}-{_RUN_TOKEN}",
+        user=f"user-port-{name}-{_RUN_TOKEN}",
+    )
 
 
 def _portable_explain_keys(explain: dict[str, Any]) -> list[str]:
@@ -73,7 +80,7 @@ def _portable_explain_keys(explain: dict[str, Any]) -> list[str]:
 
 class _AdapterParityEmbedding:
     name = "adapter-parity-embedding"
-    dims = 8
+    dims = 1024
 
     def __init__(self) -> None:
         self.calls: list[str] = []
@@ -81,8 +88,8 @@ class _AdapterParityEmbedding:
     def embed(self, text: str) -> list[float]:
         self.calls.append(text)
         if "beacon" in text.lower():
-            return [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-        return [0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+            return [1.0] + [0.0] * (self.dims - 1)
+        return [0.0, 1.0] + [0.0] * (self.dims - 2)
 
 
 class _AdapterParityReranker:
@@ -116,6 +123,101 @@ def _adapter_parity_stack() -> tuple[RetrievalAdapters, _AdapterParityEmbedding,
     embedding = _AdapterParityEmbedding()
     reranker = _AdapterParityReranker()
     return RetrievalAdapters(embedding=embedding, reranker=reranker), embedding, reranker
+
+
+class _AdapterParityLexicalRetriever:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    def search(
+        self,
+        query: str,
+        *,
+        tenant_id: str,
+        branch: str,
+        k: int,
+        filt: dict[str, Any] | None = None,
+    ) -> list[Hit]:
+        self.calls.append(
+            {
+                "query": query,
+                "tenant_id": tenant_id,
+                "branch": branch,
+                "k": k,
+                "filter": dict(filt or {}),
+            }
+        )
+        return [
+            Hit(
+                id="adapter-lexical-hit",
+                kind="evidence",
+                tenant_id=tenant_id,
+                branch=branch,
+                text="Configured lexical adapter returns the jade beacon memory.",
+                score=0.97,
+                channel="command_lexical",
+                metadata={"backend": "paradedb-bm25", "command_retrieval": True},
+            )
+        ]
+
+
+class _AdapterParityGraphRetriever:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    def search(
+        self,
+        seeds: list[str],
+        *,
+        tenant_id: str,
+        branch: str,
+        k: int,
+        as_of: datetime | None = None,
+    ) -> list[Hit]:
+        self.calls.append(
+            {
+                "seeds": list(seeds),
+                "tenant_id": tenant_id,
+                "branch": branch,
+                "k": k,
+                "as_of_present": as_of is not None,
+            }
+        )
+        return [
+            Hit(
+                id="adapter-graph-hit",
+                kind="relation",
+                tenant_id=tenant_id,
+                branch=branch,
+                text="Configured graph adapter returns the jade beacon relation.",
+                score=0.91,
+                channel="command_graph_ppr",
+                metadata={"backend": "apache-age", "command_retrieval": True},
+            )
+        ]
+
+
+def _adapter_parity_retrieval_stack() -> tuple[
+    RetrievalAdapters,
+    _AdapterParityLexicalRetriever,
+    _AdapterParityGraphRetriever,
+]:
+    embedding = _AdapterParityEmbedding()
+    reranker = _AdapterParityReranker()
+    lexical = _AdapterParityLexicalRetriever()
+    graph = _AdapterParityGraphRetriever()
+    return (
+        RetrievalAdapters(
+            embedding=embedding,
+            reranker=reranker,
+            lexical_backend="paradedb-bm25",
+            graph_backend="apache-age",
+            lexical_retriever=lexical,
+            graph_retriever=graph,
+        ),
+        lexical,
+        graph,
+    )
 
 
 # --------------------------------------------------------------------- evidence CRUD
@@ -513,8 +615,8 @@ def test_parity_retrieve_with_configured_adapters_enabled() -> None:
     from mnemosyne.engine import LocalMemoryEngine
     from mnemosyne.postgres_engine import PostgresEngine
 
-    tenant = "tenant-port-adapter-retrieve"
-    user = "user-port-adapter-retrieve"
+    tenant = f"tenant-port-adapter-retrieve-{_RUN_TOKEN}"
+    user = f"user-port-adapter-retrieve-{_RUN_TOKEN}"
 
     def scenario(engine: Any, embedding: _AdapterParityEmbedding, reranker: _AdapterParityReranker) -> dict[str, Any]:
         cid = engine.append_evidence(
@@ -543,7 +645,7 @@ def test_parity_retrieve_with_configured_adapters_enabled() -> None:
 
     assert local["top_hit_is_beacon"] is True
     assert local["embedding_name"] == "adapter-parity-embedding"
-    assert local["embedding_dims"] == 8
+    assert local["embedding_dims"] == 1024
     assert local["reranker_name"] == "adapter-parity-reranker"
     assert local["top_hit_adapter_reranked"] is True
     assert local["top_hit_adapter_metadata"] is True
@@ -558,6 +660,104 @@ def test_parity_retrieve_with_configured_adapters_enabled() -> None:
     pg_adapters, pg_embedding, pg_reranker = _adapter_parity_stack()
     postgres = scenario(PostgresEngine(dsn, adapters=pg_adapters), pg_embedding, pg_reranker)
     assert_parity("configured-adapter-retrieve", local, postgres)
+
+
+def test_parity_retrieve_with_configured_lexical_graph_adapters_enabled() -> None:
+    from mnemosyne.engine import LocalMemoryEngine
+    from mnemosyne.postgres_engine import PostgresEngine
+
+    tenant = f"tenant-port-retrieval-adapters-{_RUN_TOKEN}"
+    user = f"user-port-retrieval-adapters-{_RUN_TOKEN}"
+
+    def scenario(
+        engine: Any,
+        lexical: _AdapterParityLexicalRetriever,
+        graph: _AdapterParityGraphRetriever,
+    ) -> dict[str, Any]:
+        engine.append_evidence(_evidence(tenant, user, "Native fallback evidence should not hide adapter retrieval."))
+
+        direct_lexical = engine.lexical_search(
+            "configured jade beacon adapter retrieval",
+            1,
+            {"tenant_id": tenant, "branch": "main"},
+        )
+        direct_graph = engine.graph_ppr(
+            ["configured", "jade", "beacon"],
+            1,
+            tenant_id=tenant,
+            branch="main",
+        )
+        result = engine.retrieve("configured jade beacon adapter retrieval", tenant, deep=True)
+        adapter_hits = [hit for hit in result.hits if hit.metadata.get("command_retrieval") is True]
+        lexical_hits = [hit for hit in adapter_hits if hit.metadata.get("backend") == "paradedb-bm25"]
+        graph_hits = [hit for hit in adapter_hits if hit.metadata.get("backend") == "apache-age"]
+        retrieved_text_markers = [hit.metadata.get("retrieved_text", {}) for hit in adapter_hits]
+        direct_markers = [
+            hit.metadata.get("retrieved_text", {}) for hit in [*direct_lexical, *direct_graph]
+        ]
+        adapters = result.explain["adapters"]
+        return {
+            "abstained": result.abstained,
+            "adapter_hit_count": len(adapter_hits),
+            "lexical_hit_count": len(lexical_hits),
+            "graph_hit_count": len(graph_hits),
+            "direct_lexical_hit_count": len(direct_lexical),
+            "direct_graph_hit_count": len(direct_graph),
+            "direct_lexical_backend": direct_lexical[0].metadata.get("backend") if direct_lexical else None,
+            "direct_graph_backend": direct_graph[0].metadata.get("backend") if direct_graph else None,
+            "direct_tenant_scoped": all(
+                hit.tenant_id == tenant and hit.branch == "main" for hit in [*direct_lexical, *direct_graph]
+            ),
+            "direct_retrieved_text_marked_data": all(
+                marker.get("instruction_authority") == "none" for marker in direct_markers
+            ),
+            "direct_retrieved_text_has_data_role": all(
+                marker.get("kind") == "retrieved_memory_data" for marker in direct_markers
+            ),
+            "lexical_backend": adapters["lexical_backend"],
+            "graph_backend": adapters["graph_backend"],
+            "lexical_called": bool(lexical.calls),
+            "graph_called": bool(graph.calls),
+            "lexical_filter_tenant": lexical.calls[0]["filter"].get("tenant_id") if lexical.calls else None,
+            "graph_as_of_present": graph.calls[0]["as_of_present"] if graph.calls else None,
+            "retrieved_text_marked_data": all(
+                marker.get("instruction_authority") == "none" for marker in retrieved_text_markers
+            ),
+            "retrieved_text_has_data_role": all(
+                marker.get("kind") == "retrieved_memory_data" for marker in retrieved_text_markers
+            ),
+        }
+
+    local_adapters, local_lexical, local_graph = _adapter_parity_retrieval_stack()
+    local = scenario(LocalMemoryEngine(adapters=local_adapters), local_lexical, local_graph)
+
+    assert local["adapter_hit_count"] >= 2
+    assert local["lexical_hit_count"] >= 1
+    assert local["graph_hit_count"] >= 1
+    assert local["direct_lexical_hit_count"] == 1
+    assert local["direct_graph_hit_count"] == 1
+    assert local["direct_lexical_backend"] == "paradedb-bm25"
+    assert local["direct_graph_backend"] == "apache-age"
+    assert local["direct_tenant_scoped"] is True
+    assert local["direct_retrieved_text_marked_data"] is True
+    assert local["direct_retrieved_text_has_data_role"] is True
+    assert local["lexical_backend"] == "paradedb-bm25"
+    assert local["graph_backend"] == "apache-age"
+    assert local["lexical_called"] is True
+    assert local["graph_called"] is True
+    assert local["lexical_filter_tenant"] == tenant
+    assert local["graph_as_of_present"] is True
+    assert local["retrieved_text_marked_data"] is True
+    assert local["retrieved_text_has_data_role"] is True
+
+    dsn = live_dsn()
+    if not dsn:
+        return
+    pytest.importorskip("psycopg")
+
+    pg_adapters, pg_lexical, pg_graph = _adapter_parity_retrieval_stack()
+    postgres = scenario(PostgresEngine(dsn, adapters=pg_adapters), pg_lexical, pg_graph)
+    assert_parity("configured-lexical-graph-adapter-retrieve", local, postgres)
 
 
 def test_parity_explain_observable_shape() -> None:

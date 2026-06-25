@@ -1374,8 +1374,10 @@ def test_postgres_engine_delegates_to_command_retrieval_adapters(tmp_path: Path)
 
     assert lexical_hits[0].id == "lexical-hit"
     assert lexical_hits[0].metadata["backend"] == "paradedb-bm25"
+    assert lexical_hits[0].metadata["retrieved_text"]["instruction_authority"] == "none"
     assert graph_hits[0].id == "graph-hit"
     assert graph_hits[0].metadata["backend"] == "apache-age"
+    assert graph_hits[0].metadata["retrieved_text"]["instruction_authority"] == "none"
     assert [item["role"] for item in requests] == ["lexical_search", "graph_ppr"]
     assert requests[0]["tenant_id"] == TENANT
     assert requests[1]["tenant_id"] == TENANT

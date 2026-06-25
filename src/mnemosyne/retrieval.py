@@ -333,11 +333,15 @@ def _command_hit(
     metadata = dict(metadata_raw) if isinstance(metadata_raw, Mapping) else {}
     metadata.setdefault("backend", backend)
     metadata["command_retrieval"] = True
+    if "tenant_id" in item and str(item["tenant_id"]) != tenant_id:
+        raise ValueError("retrieval command hit tenant_id is outside requested tenant")
+    if "branch" in item and str(item["branch"]) != branch:
+        raise ValueError("retrieval command hit branch is outside requested branch")
     return Hit(
         id=hit_id,
         kind=kind,  # type: ignore[arg-type]
-        tenant_id=str(item.get("tenant_id") or tenant_id),
-        branch=str(item.get("branch") or branch),
+        tenant_id=tenant_id,
+        branch=branch,
         text=text,
         score=score,
         channel=str(item.get("channel") or default_channel),
@@ -365,6 +369,28 @@ def _command_hits(
         for item in raw_hits
     ]
     return sorted(hits, key=lambda item: item.score, reverse=True)[: max(k, 0)]
+
+
+def validate_adapter_hit_scope(
+    hits: list[Hit],
+    *,
+    tenant_id: str,
+    branch: str,
+    k: int | None = None,
+    adapter_name: str = "retrieval",
+) -> list[Hit]:
+    """Fail closed if a retrieval adapter returns cross-tenant or cross-branch data."""
+
+    scoped: list[Hit] = []
+    for hit in hits:
+        if hit.tenant_id != tenant_id:
+            raise ValueError(f"{adapter_name} adapter returned hit outside requested tenant")
+        if hit.branch != branch:
+            raise ValueError(f"{adapter_name} adapter returned hit outside requested branch")
+        scoped.append(hit)
+    if k is None:
+        return scoped
+    return scoped[: max(k, 0)]
 
 
 @dataclass(frozen=True, slots=True)
