@@ -39,11 +39,17 @@ def _placeholders() -> list[str]:
 
 
 def _filled_render_env(tmp_path: Path) -> dict[str, str]:
+    evidence_dir = tmp_path / "production-input-artifacts"
+    evidence_dir.mkdir(exist_ok=True)
+    c2pa_tool = tmp_path / "bin" / "c2patool"
+    c2pa_tool.parent.mkdir(exist_ok=True)
+    c2pa_tool.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    c2pa_tool.chmod(0o755)
     values = {
-        "MNEMOSYNE_PROD_C2PA_TOOL": "c2patool",
+        "MNEMOSYNE_PROD_C2PA_TOOL": str(c2pa_tool),
         "MNEMOSYNE_PROD_CHANGE_TICKET": "CHG-12345",
         "MNEMOSYNE_PROD_DASHBOARD_URL": "https://mnemosyne.example.com/dashboards/ops",
-        "MNEMOSYNE_PROD_EVIDENCE_DIR": str(tmp_path / "production-input-artifacts"),
+        "MNEMOSYNE_PROD_EVIDENCE_DIR": str(evidence_dir),
         "MNEMOSYNE_PROD_IDP_AUDIENCE": "mnemosyne",
         "MNEMOSYNE_PROD_IDP_ISSUER": "https://idp.example.com/realms/mnemosyne",
         "MNEMOSYNE_PROD_IDP_JWKS_URL": (
@@ -130,6 +136,7 @@ def test_renderer_check_environment_passes_without_writing_manifest(tmp_path: Pa
     assert payload["ok"] is True
     assert payload["values_redacted"] is True
     assert payload["evidence_dir_external"] is True
+    assert payload["c2pa_tool_external"] is True
     assert payload["missing"] == []
     assert sorted(payload["present"]) == _placeholders()
     assert not list(tmp_path.glob("*.json"))
@@ -151,6 +158,7 @@ def test_renderer_check_environment_rejects_repo_local_input_dir(tmp_path: Path)
     assert proc.returncode == 78
     assert proc.stdout == ""
     assert "MNEMOSYNE_PROD_EVIDENCE_DIR must not point inside the repository" in proc.stderr
+    assert env["MNEMOSYNE_PROD_EVIDENCE_DIR"] not in proc.stderr
 
 
 def test_renderer_check_environment_rejects_relative_input_dir(tmp_path: Path) -> None:
@@ -169,6 +177,87 @@ def test_renderer_check_environment_rejects_relative_input_dir(tmp_path: Path) -
     assert proc.returncode == 78
     assert proc.stdout == ""
     assert "MNEMOSYNE_PROD_EVIDENCE_DIR must be an absolute external" in proc.stderr
+    assert env["MNEMOSYNE_PROD_EVIDENCE_DIR"] not in proc.stderr
+
+
+def test_renderer_check_environment_rejects_missing_input_dir(tmp_path: Path) -> None:
+    env = _filled_render_env(tmp_path)
+    missing_dir = tmp_path / "missing-production-input-artifacts"
+    env["MNEMOSYNE_PROD_EVIDENCE_DIR"] = str(missing_dir)
+
+    proc = subprocess.run(
+        [str(RENDERER), "--check-environment"],
+        cwd=REPO,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert proc.returncode == 78
+    assert proc.stdout == ""
+    assert "MNEMOSYNE_PROD_EVIDENCE_DIR must exist as an external directory" in proc.stderr
+    assert env["MNEMOSYNE_PROD_EVIDENCE_DIR"] not in proc.stderr
+
+
+def test_renderer_check_environment_rejects_relative_c2pa_tool(tmp_path: Path) -> None:
+    env = _filled_render_env(tmp_path)
+    env["MNEMOSYNE_PROD_C2PA_TOOL"] = "c2patool"
+
+    proc = subprocess.run(
+        [str(RENDERER), "--check-environment"],
+        cwd=REPO,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert proc.returncode == 78
+    assert proc.stdout == ""
+    assert "MNEMOSYNE_PROD_C2PA_TOOL must be an absolute external executable path" in proc.stderr
+    assert env["MNEMOSYNE_PROD_C2PA_TOOL"] not in proc.stderr
+
+
+def test_renderer_check_environment_rejects_non_executable_c2pa_tool(tmp_path: Path) -> None:
+    env = _filled_render_env(tmp_path)
+    tool = tmp_path / "bin" / "not-executable-c2patool"
+    tool.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    tool.chmod(0o600)
+    env["MNEMOSYNE_PROD_C2PA_TOOL"] = str(tool)
+
+    proc = subprocess.run(
+        [str(RENDERER), "--check-environment"],
+        cwd=REPO,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert proc.returncode == 78
+    assert proc.stdout == ""
+    assert "MNEMOSYNE_PROD_C2PA_TOOL must be executable" in proc.stderr
+    assert env["MNEMOSYNE_PROD_C2PA_TOOL"] not in proc.stderr
+
+
+def test_renderer_check_environment_rejects_repo_local_c2pa_tool(tmp_path: Path) -> None:
+    env = _filled_render_env(tmp_path)
+    env["MNEMOSYNE_PROD_C2PA_TOOL"] = str(RENDERER)
+
+    proc = subprocess.run(
+        [str(RENDERER), "--check-environment"],
+        cwd=REPO,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert proc.returncode == 78
+    assert proc.stdout == ""
+    assert "MNEMOSYNE_PROD_C2PA_TOOL must not point inside the repository" in proc.stderr
+    assert env["MNEMOSYNE_PROD_C2PA_TOOL"] not in proc.stderr
 
 
 def test_renderer_refuses_repo_local_output() -> None:
