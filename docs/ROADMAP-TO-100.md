@@ -67,6 +67,7 @@ Every item is **additive, default-off / shadow-first, byte-identical when inacti
 > **Note — A7/A8/A9 are now ported to `main`.** The lane-a checkout remains useful as historical source material only; do not merge it wholesale over newer `main` changes.
 > **Note — adapter-scope hardening is DONE.** Local and Postgres now both validate configured lexical/graph adapter hits against the requested tenant/branch, mark direct adapter hits as data-only retrieved memory, and cover those direct paths in the live cross-engine portability suite.
 > **Note — 06-07 Lane G local readiness is DONE.** The full compose-Postgres suite, belief-revision check, local hosted JSON-RPC soak, SDK StreamableHTTP soak, and SSE endpoint soak are green. This closes local runtime-readiness gaps only; production operator evidence still gates the 10 Partial rows.
+> **Note — 06-08 local-staging evidence proof is DONE.** `setup-all.sh`, `validate-all.sh`, `capture-local-evidence.sh`, and release-audit fingerprint verification passed with `production_validated=false`; fingerprint `75f5e348930a0310a6a4c26ea22980bbb60d11d324bfef18a5f870c6e0a36a01`.
 
 ### TIER B — Real-infrastructure evidence capture (ops/deployment; not feature code)
 
