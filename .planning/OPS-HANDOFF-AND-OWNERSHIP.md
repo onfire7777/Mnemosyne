@@ -20,7 +20,7 @@ If any future session is tempted to re-open the table, regenerate scores, or bui
 ## 1. Scope rule (enforced)
 
 - **Partial = ops. Coding is frozen for parity.**
-- The **only** sanctioned code changes are in **Lane G / "Live parity suite"** (test determinism + engine-method coverage), reviewed against `gh-attention-20260612/repos/gstack-onfire/review/checklist.md`. Everything else is deployment/operations/documentation.
+- The **only** sanctioned code changes are in **Lane G / "Live parity suite"** (test determinism + engine-method coverage), reviewed against the external workflow-tooling checklist at `gh-attention-20260612/repos/gstack-onfire/review/checklist.md`. That checklist is process guidance only; it is not Mnemosyne memory-system code or architecture. Everything else is deployment/operations/documentation.
 
 ---
 
@@ -81,4 +81,4 @@ Confirmed distinct as scoped: A↔B and C↔D↔E↔F↔G. Five seams carry over
 
 `release-audit --require-production-validated --require-provider-forbid-local` passes on a `deployment-soak` bundle in which **every** required command and required provider sub-check carries real-infra operator evidence. At that point all 10 rows flip Partial→Done. Until then: **Partial = ops backlog, never code backlog.**
 
-Deploy/land flow for each surface: use `gstack land-and-deploy` (dry-run → pre-merge gate → deploy strategy → canary verification → deploy report). Pre-landing diffs (Lane G code only) go through `review/checklist.md`.
+Deploy/land flow for each surface: use the external `gstack land-and-deploy` workflow tooling (dry-run -> pre-merge gate -> deploy strategy -> canary verification -> deploy report). Pre-landing diffs (Lane G code only) go through `review/checklist.md`. This tooling reference does not merge Mnemosyne with gstack, gbrain, or mempalace.

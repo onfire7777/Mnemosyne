@@ -1,6 +1,0 @@
-[eval] running SLO suites against the public CLI ...
-[eval] running §33 mandatory test classes ...
-[eval] wrote eval/reports/after/slo_report_20260621T233602Z.json
-[eval] wrote eval/reports/after/slo_report_20260621T233602Z.md
-[eval] mode=ACTIVE suite_size=41 N=40 checks=8/15 pass
-AFTER_RUN_EXIT=1
