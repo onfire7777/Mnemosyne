@@ -55,6 +55,11 @@ capture executes that copied operator manifest from `OUT_ROOT`, not the mutable
 source path. A passing preflight is setup proof only; it does not flip any
 strict-audit row to Done.
 
+The `--check-environment` command is a no-write readiness check. It reports only
+placeholder names, verifies the required `MNEMOSYNE_PROD_*` keys are present,
+and confirms `MNEMOSYNE_PROD_EVIDENCE_DIR` is an existing external directory and
+`MNEMOSYNE_PROD_C2PA_TOOL` is an existing external executable.
+
 The wrapper performs these steps:
 
 1. Validates the operator manifest is explicitly production-scoped.

@@ -13,6 +13,9 @@ repository, fill the blank non-secret values there, then render with
 `infra/scripts/render-production-soak-manifest.sh --check-environment` and
 `infra/scripts/render-production-soak-manifest.sh --output /secure/path/to/production-soak-manifest.json`
 before running `infra/scripts/capture-production-evidence.sh`.
+The check command prints key names only; it also verifies the production input
+directory exists outside the repo and the C2PA verifier path is an external
+executable.
 
 Secrets and credentials must be supplied outside manifest `args` and
 `global_args`, using runtime environment variables or provider custody files.
