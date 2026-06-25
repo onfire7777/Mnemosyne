@@ -56,7 +56,8 @@ After a successful full capture, reviewers can recheck the completed bundle
 offline without production credentials:
 
 ```bash
-python -m mnemosyne.cli production-evidence-verify \
+PYTHON="${PYTHON:-$(if [ -x .venv/bin/python ]; then printf '%s' .venv/bin/python; else command -v python3; fi)}"
+"$PYTHON" -m mnemosyne.cli production-evidence-verify \
   /secure/path/to/mnemosyne-production-evidence \
   --expected-bundle-fingerprint '<summary.json bundle_fingerprint>'
 ```

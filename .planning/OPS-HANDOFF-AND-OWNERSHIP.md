@@ -8,7 +8,7 @@
 
 ## 0. DO-NOT-REDERIVE RULE — read first, load-bearing
 
-1. **The 70/30 completion split is SETTLED.** Do not recompute, re-score, or re-audit it.
+1. **The current split is SETTLED by `docs/ROADMAP-TO-100.md` and `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md`.** Tier A code/local readiness is closed; all 10 production-evidence rows remain Partial until operator-captured production evidence exists. Do not recompute, re-score, or re-audit percentages.
 2. **The machine-checkable gate layer is COMPLETE.** All 28 `PRODUCTION_RELEASE_REQUIRED_COMMANDS` already have output-shape validators in `RELEASE_AUDIT_REQUIRED_OUTPUT_KEYS` (`cli.py`). **Do NOT add new `*-ops-check` gates** — they add zero parity value and re-derive the split.
 3. **Every "Partial" row is OPS SCOPE, not coding.** Closing a Partial row = run the existing gate against *real infrastructure* and capture operator evidence. If a task reads as "write code to close a Partial row," STOP — it is mis-scoped.
 4. **The only sanctioned acceptance path:** operator evidence → `deployment-soak --evidence-dir` (with `production_validated=true, target_environment=production, operator_asserted=true`) → `release-audit --require-production-validated --require-provider-forbid-local` passes. Use `infra/scripts/capture-production-evidence.sh` to run that path from an operator-authored production soak manifest. Operators may run `infra/scripts/capture-production-evidence.sh --preflight-only` first as setup proof only; preflight does not flip any row Partial→Done. No code change is required or wanted to flip a row Partial→Done.
@@ -27,6 +27,10 @@ If any future session is tempted to re-open the table, regenerate scores, or bui
 ## 2. Artifact Ownership Registry — ONE owner per lane, NO overlap
 
 Assign exactly one terminal per lane. A lane MAY read another lane's output; a lane MUST NOT write another lane's artifact.
+
+Lanes A/B are external BridgeMemory coordination artifacts for tracking Partial
+items. They are not Mnemosyne runtime architecture and do not imply that
+Mnemosyne depends on gbrain, mempalace, or any external memory system.
 
 | Lane | Artifact | Owns (scope IN) | Out of scope (belongs to another lane) | Primary surface |
 |---|---|---|---|---|

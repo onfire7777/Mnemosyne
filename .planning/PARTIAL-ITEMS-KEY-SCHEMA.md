@@ -1,5 +1,10 @@
 # Mnemosyne — Partial-Item Memory Key Schema & Guardrail Contract (Lane A)
 
+> **Scope boundary.** This is an external BridgeMemory coordination artifact for
+> tracking the 10 Partial audit items. It is not Mnemosyne runtime architecture
+> and is not a blueprint-parity blocker unless the strict audit explicitly
+> reactivates it.
+
 **Spec version:** 2.0 (2026-06-23) — supersedes 1.0 (`f470de7`); see Appendix R for the reconciliation log.
 **Lane:** A (Memory schema) — owns key/title/field/link **definitions** + the guardrail/lock contract. One owner per lane; A never writes another lane's artifact.
 **Type:** Canonical schema + guardrails. **Not** prose/body content (Lane B), **not** ops content (Lanes C–G).

@@ -15,7 +15,8 @@ Runs the existing production evidence path:
   5. Write bundle-manifest.json and summary.json with bundle_fingerprint.
 
 Reviewers can recheck a completed bundle offline with:
-  python -m mnemosyne.cli production-evidence-verify OUT_ROOT \
+  PYTHON="${PYTHON:-$(if [ -x .venv/bin/python ]; then printf '%s' .venv/bin/python; else command -v python3; fi)}"
+  "$PYTHON" -m mnemosyne.cli production-evidence-verify OUT_ROOT \
     --expected-bundle-fingerprint '<summary.json bundle_fingerprint>'
 This is custody review only; it does not rerun production checks or flip rows.
 
