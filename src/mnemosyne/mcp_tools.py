@@ -1303,6 +1303,10 @@ class MemoryTools:
         result = rolled_back.to_dict()
         result["security"] = security
         result["protected_suite"] = {"source": suite_source, **protected_suite_report(cases)}
+        rollback_record = dict(result.get("rail_report", {}).get("rollback") or {})
+        if rollback_record:
+            rollback_record["rollback_provider_authorized"] = security.get("allowed") is True
+            result["rollback"] = rollback_record
         return result
 
     def _save_user_model(self) -> None:
