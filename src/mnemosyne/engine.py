@@ -910,6 +910,13 @@ class LocalMemoryEngine:
                 "semantic_entropy": entropy,
                 "gist_support": gist_support,
                 "read_marks": {"assertions": read_marks},
+                "adapters": {
+                    "embedding": self.adapters.embedding.name,
+                    "embedding_dims": self.adapters.embedding.dims,
+                    "reranker": self.adapters.reranker.name,
+                    "lexical_backend": self.adapters.lexical_backend,
+                    "graph_backend": self.adapters.graph_backend,
+                },
                 "rails": self.policy.immutable_rails,
             },
         )
