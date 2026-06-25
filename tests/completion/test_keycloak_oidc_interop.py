@@ -12,22 +12,12 @@ It is skipped automatically unless the live stack + setup outputs are present:
     ./infra/scripts/setup-keycloak.sh
     pytest tests/completion/test_keycloak_oidc_interop.py
 
-RECONCILIATION NOTE (src bug, NOT fixed here)
----------------------------------------------
-`src/mnemosyne/security.py::OidcSessionVerifier._install_jwks` rejects the
-*entire* JWKS the moment it sees any key whose ``use`` is not ``sig``/``None``
-(line ~624: ``raise SessionAuthError("OIDC JWKS key use is not allowed")``).
-A standard Keycloak realm publishes TWO keys at its JWKS endpoint: an
-RS256 ``sig`` key (used to sign ID tokens) AND an RSA-OAEP ``enc`` key. The
-shipped `infra/validate/validate-keycloak.sh` therefore fails closed against a
-real Keycloak even though the token itself is perfectly valid.
-
-The correct fix is to *skip* (not reject) keys whose ``use == "enc"`` so the
-encryption key is simply excluded from ``keys_by_id`` instead of failing the
-whole set. This test demonstrates that once the ``enc`` key is excluded, the
-real token verifies end-to-end — i.e. the ``enc``-key rejection is the sole
-blocker. We feed the verifier the *same real signing key* Keycloak published,
-just filtered to ``use == "sig"``.
+REGRESSION NOTE
+---------------
+A standard Keycloak realm publishes an RS256 ``sig`` key for ID-token signing
+and an RSA-OAEP ``enc`` key for encryption. Mnemosyne must skip the non-signing
+``enc`` key while still verifying the real token against the published signing
+key. The full-JWKS test below guards that interop path.
 """
 
 from __future__ import annotations
@@ -157,12 +147,16 @@ def test_wrong_audience_is_rejected(tmp_path):
     assert proc.returncode != 0, "wrong audience must be rejected (fail-closed)"
 
 
-def test_full_jwks_currently_blocks_on_enc_key(tmp_path):
-    """Documents the src bug: the unfiltered Keycloak JWKS is rejected.
+def test_full_jwks_skips_enc_key_and_succeeds(tmp_path):
+    """Reconciliation tripwire (now GREEN): the unfiltered Keycloak JWKS — which
+    includes an `enc` key alongside the `sig` key — must be ACCEPTED because
+    src/mnemosyne/security.py now skips non-signing keys instead of rejecting the
+    whole key set.
 
-    If/when src/mnemosyne/security.py is fixed to *skip* enc keys, this test
-    will start failing and should be flipped to assert success — it is the
-    reconciliation tripwire.
+    Flipped from the former ``test_full_jwks_currently_blocks_on_enc_key`` bug
+    characterization per that test's own instruction. Asserts the full
+    session-exchange success shape (not just exit code) so a silent/empty
+    acceptance cannot pass.
     """
     token = _mint_token()
     with urllib.request.urlopen(JWKS_URL, timeout=10) as resp:  # noqa: S310
@@ -187,6 +181,14 @@ def test_full_jwks_currently_blocks_on_enc_key(tmp_path):
         ],
         env={},
     )
-    # Current (buggy) behavior: rejected because of the enc key.
-    assert proc.returncode != 0
-    assert "key use is not allowed" in (proc.stdout + proc.stderr)
+    # Fixed behavior: enc keys are skipped, the sig key verifies the token.
+    assert proc.returncode == 0, (
+        f"full Keycloak JWKS must be accepted (enc key skipped): "
+        f"{proc.stdout}\n{proc.stderr}"
+    )
+    result = json.loads(proc.stdout)
+    assert result["ok"] is True
+    assert result["identity"]["tenant_id"] == "tenant-a"
+    assert result["identity"]["role"] == "agent"
+    assert result["identity"]["source_trust_tier"] == 3
+    assert isinstance(result["session_token"], str) and result["session_token"]

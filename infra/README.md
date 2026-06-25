@@ -96,7 +96,7 @@ open ./infra/PRODUCTION-EVIDENCE.md
 retrieval-provider metadata reporting, and C2PA trust verification. It does not
 prove live ParadeDB/AGE/pgvector retrieval and does not claim production
 validation; production parity still requires operator-captured
-`release-audit --require-production-validated` evidence against deployed
+`release-audit --require-production-validated --require-provider-forbid-local` evidence against deployed
 infrastructure.
 
 For production Tier-B evidence, render the production soak manifest outside the

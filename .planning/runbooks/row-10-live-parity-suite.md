@@ -34,7 +34,7 @@ adapters enabled.
 
 Operator runs the suite and gate against real infra, evidence is redacted, the
 outputs are included in `deployment-soak --evidence-dir` with production scope
-and operator attestation, and `release-audit --require-production-validated`
+and operator attestation, and `release-audit --require-production-validated --require-provider-forbid-local`
 passes with required output shapes present and empty findings.
 
 Done when every engine/runtime method is green with production adapters enabled,

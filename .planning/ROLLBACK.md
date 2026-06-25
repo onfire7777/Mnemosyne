@@ -18,7 +18,7 @@ good release artifact.
 5. Re-run the surface-specific gate listed in `.planning/runbooks/`.
 6. Capture redacted evidence into the production evidence directory.
 7. Include the rollback evidence in `deployment-soak --evidence-dir`.
-8. Require `release-audit --require-production-validated` to pass before
+8. Require `release-audit --require-production-validated --require-provider-forbid-local` to pass before
    declaring the rollback accepted.
 
 ## Canary-Abort Procedure
@@ -118,7 +118,7 @@ fingerprints stay bound.
 
 Rollback drills are accepted only when captured by
 `infra/scripts/capture-production-evidence.sh` and accepted by
-`release-audit --require-production-validated`.
+`release-audit --require-production-validated --require-provider-forbid-local`.
 
 Local tests and compose smoke runs can prove mechanics, but they do not replace
 operator-captured production rollback evidence.
@@ -131,4 +131,4 @@ operator-captured production rollback evidence.
 - Gate commands rerun after the revert.
 - Redaction applied to tokens, keys, raw prompts, documents, queries, and
   credentials.
-- `release-audit --require-production-validated` passes over the bundle.
+- `release-audit --require-production-validated --require-provider-forbid-local` passes over the bundle.

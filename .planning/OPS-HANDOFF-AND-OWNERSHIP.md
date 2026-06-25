@@ -11,7 +11,7 @@
 1. **The 70/30 completion split is SETTLED.** Do not recompute, re-score, or re-audit it.
 2. **The machine-checkable gate layer is COMPLETE.** All 28 `PRODUCTION_RELEASE_REQUIRED_COMMANDS` already have output-shape validators in `RELEASE_AUDIT_REQUIRED_OUTPUT_KEYS` (`cli.py`). **Do NOT add new `*-ops-check` gates** — they add zero parity value and re-derive the split.
 3. **Every "Partial" row is OPS SCOPE, not coding.** Closing a Partial row = run the existing gate against *real infrastructure* and capture operator evidence. If a task reads as "write code to close a Partial row," STOP — it is mis-scoped.
-4. **The only sanctioned acceptance path:** operator evidence → `deployment-soak --evidence-dir` (with `production_validated=true, target_environment=production, operator_asserted=true`) → `release-audit --require-production-validated` passes. Use `infra/scripts/capture-production-evidence.sh` to run that path from an operator-authored production soak manifest. No code change is required or wanted to flip a row Partial→Done.
+4. **The only sanctioned acceptance path:** operator evidence → `deployment-soak --evidence-dir` (with `production_validated=true, target_environment=production, operator_asserted=true`) → `release-audit --require-production-validated --require-provider-forbid-local` passes. Use `infra/scripts/capture-production-evidence.sh` to run that path from an operator-authored production soak manifest. No code change is required or wanted to flip a row Partial→Done.
 
 If any future session is tempted to re-open the table, regenerate scores, or build another gate: that work is already done. Run infra instead.
 
@@ -59,7 +59,7 @@ Gate commands already exist and are frozen. Work = run each against real infra a
 | 9 | Parametric tier | `parametric-trainer-check` (+ `hosted-llm-check`, `calibration-tune`) | Deployed LoRA/TTT trainer + rollback orchestration | C,D,F,G | trainer deploy + protected-suite + rollback-drill evidence; `release-audit` ok |
 | 10 | Live parity suite | full compose-Postgres suite + `belief-revision-check` | Optional production adapters enabled | G (sanctioned code) | Local/Postgres direct configured lexical/graph adapter parity is now covered; final done still requires every engine/runtime method green with production adapters enabled |
 
-**Universal acceptance pattern (every row):** operator runs the gate against real infra → evidence redacted → included in `deployment-soak --evidence-dir` (production scope + operator attestation) → `release-audit --require-production-validated` passes with that command's output shape present and `findings` empty.
+**Universal acceptance pattern (every row):** operator runs the gate against real infra → evidence redacted → included in `deployment-soak --evidence-dir` (production scope + operator attestation) → `release-audit --require-production-validated --require-provider-forbid-local` passes with that command's output shape present and `findings` empty.
 
 ---
 

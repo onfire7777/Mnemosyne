@@ -32,7 +32,7 @@ store evidence.
 
 Operator runs the gate against real infra, evidence is redacted, the output is
 included in `deployment-soak --evidence-dir` with production scope and operator
-attestation, and `release-audit --require-production-validated` passes with the
+attestation, and `release-audit --require-production-validated --require-provider-forbid-local` passes with the
 required output shape present and empty findings.
 
 Done when extraction and media-vector retrieval evidence is in the bundle and
