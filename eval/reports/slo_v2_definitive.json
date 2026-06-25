@@ -25,7 +25,15 @@
       "qa_hard_v2_cases_total": 24,
       "poison_attacks": 6
     },
-    "note": "net-new definitive runner; reuses unmodified eval/harness suites; real bge-small-en-v1.5 + cross-encoder over HTTP; postgres backend"
+    "note": "net-new definitive runner; reuses unmodified eval/harness suites; real bge-small-en-v1.5 + cross-encoder over HTTP; postgres backend",
+    "status": "historical_superseded",
+    "superseded_at": "2026-06-25",
+    "superseded_by": [
+      "eval/calibration/report.json",
+      ".planning/STRICT-BLUEPRINT-PARITY-AUDIT.md",
+      "docs/ROADMAP-TO-100.md"
+    ],
+    "supersession_note": "Preserved historical run. Current controlling evidence records 6/6 headline SLOs proven, including ECE 0.0063 <= 0.05 from eval/calibration/report.json; Tier B remains blocked on operator production evidence."
   },
   "overall": {
     "passed": 5,

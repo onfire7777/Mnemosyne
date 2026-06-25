@@ -10190,6 +10190,16 @@ def _verify_production_evidence_summary(
         )
 
 
+def _production_evidence_summary_ok(summary: Mapping[str, Any] | None) -> bool:
+    return (
+        summary is not None
+        and summary.get("redaction_scan_ok") is True
+        and summary.get("deployment_soak_ok") is True
+        and summary.get("release_audit_ok") is True
+        and summary.get("release_audit_findings") == []
+    )
+
+
 def _verify_production_evidence_redaction_scan(
     redaction_scan: Mapping[str, Any] | None,
     findings: list[dict[str, Any]],
@@ -10387,7 +10397,7 @@ def cmd_production_evidence_verify(args: argparse.Namespace) -> None:
         if isinstance(recomputed_release_audit, Mapping)
         else None,
         "checks": {
-            "summary": summary is not None and summary.get("redaction_scan_ok") is True,
+            "summary": _production_evidence_summary_ok(summary),
             "redaction_scan": redaction_scan is not None and redaction_scan.get("ok") is True,
             "bundle_manifest": bundle_manifest is not None and bundle_fingerprint is not None,
             "deployment_soak_stdout": deployment_soak is not None and deployment_soak.get("ok") is True,

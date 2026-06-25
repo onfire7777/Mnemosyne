@@ -2,6 +2,15 @@
 
 Generated: 2026-06-21T23:57:26.142055+00:00
 
+> **Historical/superseded report.** This file is preserved as the 2026-06-21
+> keystone run that exposed the local embedding seam and ECE/G2 gaps. It is not
+> the current parity status. The local embedding seam was closed on 2026-06-24,
+> and current controlling evidence in
+> `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md`, `docs/ROADMAP-TO-100.md`, and
+> `eval/calibration/report.json` records 6/6 headline SLOs proven, including ECE
+> 0.0063 against the ≤0.05 target. Remaining strict-parity work is Tier B
+> operator production evidence.
+
 ## What was proven
 
 - Real embedding+reranker service stood up from `services/embedding/app.py` on `127.0.0.1:8000`.

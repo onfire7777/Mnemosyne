@@ -11,6 +11,13 @@ Runs the existing production evidence path:
   2. Run deployment-soak with --evidence-dir.
   3. Run release-audit with --require-production-validated and
      --require-provider-forbid-local.
+  4. Redaction-scan generated evidence and fail on findings or skipped files.
+  5. Write bundle-manifest.json and summary.json with bundle_fingerprint.
+
+Reviewers can recheck a completed bundle offline with:
+  python -m mnemosyne.cli production-evidence-verify OUT_ROOT \
+    --expected-bundle-fingerprint '<summary.json bundle_fingerprint>'
+This is custody review only; it does not rerun production checks or flip rows.
 
 The manifest must contain validation_scope.production_validated=true,
 validation_scope.target_environment="production", and
