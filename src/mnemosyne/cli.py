@@ -8935,7 +8935,16 @@ def _release_manifest_path(manifest_path: Path, value: Any, label: str) -> Path:
     relative_path = Path(value)
     if relative_path.is_absolute() or ".." in relative_path.parts:
         raise SystemExit(f"release evidence manifest {label} must be a relative path inside the evidence bundle")
-    return manifest_path.parent / relative_path
+    try:
+        root = manifest_path.parent.resolve(strict=True)
+        candidate = (manifest_path.parent / relative_path).resolve(strict=True)
+    except OSError as exc:
+        raise SystemExit(f"release evidence manifest {label} denied: {exc}") from exc
+    try:
+        candidate.relative_to(root)
+    except ValueError as exc:
+        raise SystemExit(f"release evidence manifest {label} must resolve inside the evidence bundle") from exc
+    return candidate
 
 
 def _release_manifest_expected_sha256(value: Any, label: str) -> str:
@@ -9140,6 +9149,10 @@ def _load_release_audit_report(args: argparse.Namespace) -> tuple[dict[str, Any]
                 {
                     "path": str(check_path),
                     "sha256": check_sha256,
+                    "manifest": {
+                        key: check_entry.get(key)
+                        for key in ("index", "name", "command", "ok", "required")
+                    },
                 }
             )
         source = {
@@ -9167,6 +9180,21 @@ def _load_release_audit_report(args: argparse.Namespace) -> tuple[dict[str, Any]
             raise SystemExit("deployment-soak report requires checks")
         if len(report_checks) != source["integrity"]["check_count"]:
             raise SystemExit("release evidence manifest check digest count mismatch")
+        for index, (report_check, verified_check) in enumerate(
+            zip(report_checks, source["integrity"]["checks"], strict=True),
+            start=1,
+        ):
+            try:
+                check_payload = json.loads(Path(verified_check["path"]).read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                raise SystemExit(f"release evidence manifest checks[{index}] denied: {exc}") from exc
+            if not isinstance(check_payload, dict):
+                raise SystemExit(f"release evidence manifest checks[{index}] must contain a JSON object")
+            if check_payload != report_check:
+                raise SystemExit(f"release evidence manifest checks[{index}] content mismatch")
+            for key, value in verified_check["manifest"].items():
+                if check_payload.get(key) != value:
+                    raise SystemExit(f"release evidence manifest checks[{index}].{key} metadata mismatch")
     return report, source
 
 

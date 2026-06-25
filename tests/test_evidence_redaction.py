@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from mnemosyne.evidence_redaction import redaction_findings
+from mnemosyne.evidence_redaction import redaction_findings, redaction_scan
 
 
 def test_redaction_findings_ignores_secret_custody_words_without_secret_shapes() -> None:
@@ -22,3 +22,15 @@ def test_redaction_findings_reports_anthropic_key_once() -> None:
             "kind": "anthropic_api_key",
         }
     ]
+
+
+def test_redaction_scan_fails_closed_on_skipped_files() -> None:
+    scan = redaction_scan(
+        scope="capture",
+        scanned_files=["evidence/manifest.json"],
+        findings=[],
+        skipped_files=[{"path": "evidence/blob.bin", "reason": "not utf-8 text"}],
+    )
+
+    assert scan["ok"] is False
+    assert scan["skipped_files"] == [{"path": "evidence/blob.bin", "reason": "not utf-8 text"}]

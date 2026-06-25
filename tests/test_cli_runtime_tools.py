@@ -5699,6 +5699,54 @@ def test_cli_release_audit_rejects_tampered_manifest_bound_artifacts(tmp_path: P
     assert "release evidence manifest checks[1] digest mismatch" in check_result.stderr
 
 
+def test_cli_release_audit_rejects_manifest_check_content_mismatch(tmp_path: Path) -> None:
+    _report_path, manifest_path = write_release_report(tmp_path)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    check_path = manifest_path.parent / manifest["checks"][0]["path"]
+    check_record = json.loads(check_path.read_text(encoding="utf-8"))
+    check_record["stdout_json"] = {"ok": True, "mutated": True}
+    check_path.write_text(json.dumps(check_record, indent=2, sort_keys=True), encoding="utf-8")
+    manifest["checks"][0]["sha256"] = "sha256:" + sha256(check_path.read_bytes()).hexdigest()
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+
+    result = run_raw_cli(
+        tmp_path / "mnemosyne.json",
+        "release-audit",
+        "--evidence-manifest",
+        str(manifest_path),
+        "--require-production-validated",
+    )
+
+    assert result.returncode == 1
+    assert "release evidence manifest checks[1] content mismatch" in result.stderr
+
+
+def test_cli_release_audit_rejects_manifest_artifact_symlink_escape(tmp_path: Path) -> None:
+    _report_path, manifest_path = write_release_report(tmp_path)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    outside = tmp_path / "outside-check.json"
+    outside.write_text(
+        (manifest_path.parent / manifest["checks"][0]["path"]).read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    escaped = manifest_path.parent / "checks" / "escaped.json"
+    escaped.symlink_to(outside)
+    manifest["checks"][0]["path"] = "checks/escaped.json"
+    manifest["checks"][0]["sha256"] = "sha256:" + sha256(outside.read_bytes()).hexdigest()
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+
+    result = run_raw_cli(
+        tmp_path / "mnemosyne.json",
+        "release-audit",
+        "--evidence-manifest",
+        str(manifest_path),
+        "--require-production-validated",
+    )
+
+    assert result.returncode == 1
+    assert "release evidence manifest checks[1].path must resolve inside the evidence bundle" in result.stderr
+
+
 def test_cli_release_audit_fails_closed_on_missing_and_local_evidence(tmp_path: Path) -> None:
     report_path, _manifest_path = write_release_report(
         tmp_path,

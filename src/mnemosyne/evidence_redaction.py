@@ -58,15 +58,16 @@ def redaction_scan(
     findings: list[dict[str, object]],
     skipped_files: list[dict[str, str]] | None = None,
 ) -> dict[str, object]:
+    skipped = skipped_files or []
     scan: dict[str, object] = {
-        "ok": not findings,
+        "ok": not findings and not skipped,
         "scope": scope,
         "patterns": [kind for kind, _ in SECRET_PATTERNS],
         "scanned_files": scanned_files,
         "findings": findings,
     }
     if skipped_files is not None:
-        scan["skipped_files"] = skipped_files
+        scan["skipped_files"] = skipped
     return scan
 
 
