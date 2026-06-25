@@ -44,11 +44,13 @@ infra/
   scripts/
     up.sh  down.sh                  # stack lifecycle
     setup-all.sh                    # seed all three providers
+    render-production-soak-manifest.sh
     capture-production-evidence.sh  # production Tier-B deployment-soak runner
     setup-keycloak.sh setup-vault.sh setup-c2pa.sh
     keycloak-token.sh               # mint a fresh ID token on demand
   templates/
     production-soak-manifest.template.json
+    production-render.env.example   # blank non-secret render inputs template
   validate/
     validate-all.sh                 # run all three validations
     validate-keycloak.sh validate-vault.sh validate-c2pa.sh
@@ -101,6 +103,12 @@ For production Tier-B evidence, render the production soak manifest outside the
 repository, then use the production runner:
 
 ```bash
+cp infra/templates/production-render.env.example \
+  /secure/path/to/production-render.env
+# Fill /secure/path/to/production-render.env outside this repository.
+set -a
+. /secure/path/to/production-render.env
+set +a
 infra/scripts/render-production-soak-manifest.sh \
   --output /secure/path/to/production-soak-manifest.json
 infra/scripts/capture-production-evidence.sh \

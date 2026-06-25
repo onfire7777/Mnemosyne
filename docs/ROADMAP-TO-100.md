@@ -1,6 +1,6 @@
 # Mnemosyne — Roadmap to 100% Blueprint Parity
 
-**Authored:** 2026-06-24 · **Current baseline:** main after the 2026-06-24 adapter-scope hardening slice
+**Authored:** 2026-06-24 · **Current baseline:** `main` at `74fe3e3` after production manifest rendering hardening
 **Controlling status doc:** `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md` (10 gap rows, all "Partial")
 **Verdict source:** blended completion **~82%** today (up from a long ~70% plateau, broken by the 2026-06-24 Tier A wirings) — this doc explains *why it sat at ~70%*, *what moved it to ~82%*, and *exactly what flips it to 100%*.
 
@@ -17,9 +17,9 @@ The headline number is a **blended** figure, and the blend hides the real shape 
 The ~70% plateau held for so long — and the remaining ~18% to 100% is slow — because that work is **not "write more code in the same style."** It is two distinct kinds of work that coding-as-usual does not produce:
 
 1. **`src` reconciliation wirings (Tier A below) — now essentially closed.** The mandatory items (A1–A10, A13, A14) landed additively/default-off on `main` on 2026-06-24, which is exactly what moved the blend from ~70% to ~82%. A12 cached PPR is now implemented as a default-off Postgres cache seam with refresh/read coverage. Only the optional A11 hosted endpoint evidence remains tied to the real-infra pass unless the strict audit demands more code.
-2. **Standing up real infrastructure and capturing evidence** (Tier B below) — real IdP, secret manager, KMS, ParadeDB/AGE, hosted embedding/reranker/trainer endpoints, C2PA trust roots. This is **ops/deployment work**, not feature code, and it is now the bulk of the remaining ~18%. The `*-ops-check` / `provider-check` / `release-audit` gates already exist and *demand* this evidence; nothing can fake it (the gates were deliberately hardened through `7f795df` to reject placeholder and hollow evidence).
+2. **Standing up real infrastructure and capturing evidence** (Tier B below) — real IdP, secret manager, KMS, ParadeDB/AGE, hosted embedding/reranker/trainer endpoints, C2PA trust roots. This is **ops/deployment work**, not feature code, and it is now the bulk of the remaining ~18%. The `*-ops-check` / `provider-check` / `release-audit` gates already exist and *demand* this evidence; nothing can fake it. The gates reject placeholder and hollow evidence, and `74fe3e3` adds a fail-closed production manifest renderer plus unresolved-placeholder rejection in the capture wrapper.
 
-**The trap to avoid (already observed):** Codex has been spending recent cycles adding more `test(...)` coverage and more release-audit *gates*. With the mandatory Tier A wirings now closed and placeholder/hollow evidence rejected (hardened through `7f795df`), real progress should pivot to **Tier B real-infrastructure evidence** — and the optional A11/A12 only if a concrete audit finding demands them — not more gates or tests.
+**The trap to avoid (already observed):** Codex has been spending recent cycles adding more `test(...)` coverage and more release-audit *gates*. With the mandatory Tier A wirings now closed, placeholder/hollow evidence rejected, and production manifest rendering made deterministic/fail-closed, real progress should pivot to **Tier B real-infrastructure evidence** — and the optional A11/A12 only if a concrete audit finding demands them — not more gates or tests.
 
 ---
 
@@ -99,7 +99,7 @@ This is the **bulk of the remaining percentage** and the universal blocker on al
 
 ## 3. The fastest honest path (sequenced)
 
-1. **Run the production real-infra evidence pass (Tier B).** The local `infra/` stack, compose Postgres suite, belief-revision check, and local hosted-MCP soaks now pass. Next bring up production-equivalent Postgres+ParadeDB+AGE+pgvector plus real embedding/reranker/model endpoints, then run the `*-ops-check` / `provider-check` / `release-audit --require-production-validated` captures. This is what flips the 10 parity rows Partial→Done.
+1. **Run the production real-infra evidence pass (Tier B).** The local `infra/` stack, compose Postgres suite, belief-revision check, and local hosted-MCP soaks now pass. Next bring up production-equivalent Postgres+ParadeDB+AGE+pgvector plus real embedding/reranker/model endpoints, copy/fill `infra/templates/production-render.env.example` outside the repo, render the external production soak manifest with `infra/scripts/render-production-soak-manifest.sh`, then run the `*-ops-check` / `provider-check` / `release-audit --require-production-validated` captures through `infra/scripts/capture-production-evidence.sh`. This is what flips the 10 parity rows Partial→Done.
 2. **Close any strict-audit leftovers found during the evidence pass.** The mandatory Tier A source wirings A1/A2/A3/A4/A5/A6/A7/A8/A9/A10/A13/A14 are now closed.
 3. **Review optional A11 only if the v1.0 bar requires hosted transport code beyond operator evidence.** A12 is now closed locally; A11 remains primarily hosted-endpoint evidence.
 4. **Re-run the parity audit and sign off v1.0.** A11/B8 + Tier C are optional polish beyond the v1.0 bar unless production evidence exposes a concrete code gap.
@@ -110,7 +110,7 @@ This is the **bulk of the remaining percentage** and the universal blocker on al
 
 | Milestone | Blended % | What changed |
 |---|---|---|
-| **Now** (after Tier A + Lane G local readiness) | **~82%** | Mandatory source wirings are closed, 6/6 SLOs are proven, the full compose-Postgres suite is green, local hosted-MCP soaks pass, and local real-service evidence now passes through `deployment-soak`/scoped `release-audit`; production parity still remains blocked by missing operator-captured production evidence |
+| **Now** (after Tier A + Lane G local readiness + manifest hardening) | **~82%** | Mandatory source wirings are closed, 6/6 SLOs are proven, the full compose-Postgres suite is green, local hosted-MCP soaks pass, local real-service evidence now passes through `deployment-soak`/scoped `release-audit`, and production manifest rendering/capture preflight is fail-closed with a blank no-secret env template; production parity still remains blocked by missing operator-captured production evidence |
 | After **Tier A** (code wirings) | **~82%+** | Reached for mandatory source wirings; A12 cached PPR is now closed locally; A11 remains review-only unless v1.0 parity audit demands hosted transport code |
 | After **Tier B** (real-infra evidence) | **~97%** | 10 audit rows flip Partial→Done |
 | After **Tier C** + sign-off | **100%** | multimodal/LoRA (optional) + v1.0 attestation |
