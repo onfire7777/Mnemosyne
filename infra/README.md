@@ -130,8 +130,9 @@ EXPECTED_BUNDLE_FINGERPRINT="$("$PYTHON" -c 'import json, pathlib, sys; print(js
 ```
 
 `--check-environment` writes no files and prints no values. It verifies required
-`MNEMOSYNE_PROD_*` key names, the external production input directory, and the
-external executable C2PA verifier before rendering.
+`MNEMOSYNE_PROD_*` key names, the external production input directory, the
+manifest-referenced relative input artifacts in that directory, and the external
+executable C2PA verifier before rendering.
 
 The renderer replaces non-secret `MNEMOSYNE_PROD_*` placeholders from the
 operator environment and validates production scope plus the full command

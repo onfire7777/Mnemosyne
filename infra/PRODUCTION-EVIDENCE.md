@@ -5,6 +5,7 @@ This runbook is the operator handoff for flipping the remaining Tier B parity ro
 ## Preconditions
 
 - Copy `infra/templates/production-render.env.example` outside the repo, fill the blank non-secret `MNEMOSYNE_PROD_*` values there, and source the external copy before rendering.
+- Populate `MNEMOSYNE_PROD_EVIDENCE_DIR` with the manifest-referenced production input artifacts before running `--check-environment`. The check is no-write, but it fails if required relative artifact names are missing from that external directory.
 - Render `infra/templates/production-soak-manifest.template.json` outside the repo with `infra/scripts/render-production-soak-manifest.sh --output /secure/path/to/production-soak-manifest.json`. Manual edits are only a fallback and must still leave no unresolved `MNEMOSYNE_PROD_*` placeholders; the capture wrapper rejects unresolved placeholders before running production checks.
 - `MNEMOSYNE_PROD_EVIDENCE_DIR`, `PREFLIGHT_OUT_ROOT`, and `OUT_ROOT` must be absolute external custody paths outside the repository; output roots must be new or empty.
 - Keep raw secrets out of `args` and `global_args`. The production wrapper rejects secret-bearing options such as `--idp-token`, `--session-secret`, `--auth-token`, and `--password`, and it fails closed on high-confidence secret material such as JWTs, private-key blocks, GitHub tokens, AWS access keys, and `sk-*` API keys.
@@ -58,7 +59,11 @@ strict-audit row to Done.
 The `--check-environment` command is a no-write readiness check. It reports only
 placeholder names, verifies the required `MNEMOSYNE_PROD_*` keys are present,
 and confirms `MNEMOSYNE_PROD_EVIDENCE_DIR` is an existing external directory and
-`MNEMOSYNE_PROD_C2PA_TOOL` is an existing external executable.
+`MNEMOSYNE_PROD_C2PA_TOOL` is an existing external executable. It also renders
+the manifest in memory, derives the required input artifacts under
+`MNEMOSYNE_PROD_EVIDENCE_DIR`, and fails if any are missing. It reports only
+relative artifact names and redacted status fields, not configured absolute
+paths or secret values.
 
 The wrapper performs these steps:
 

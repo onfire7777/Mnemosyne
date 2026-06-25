@@ -15,6 +15,32 @@ REPO = Path(__file__).resolve().parents[1]
 RENDERER = REPO / "infra" / "scripts" / "render-production-soak-manifest.sh"
 ENV_EXAMPLE = REPO / "infra" / "templates" / "production-render.env.example"
 ENV_GUIDE = REPO / ".planning" / "ENV-AND-SECRETS.md"
+REQUIRED_PRODUCTION_INPUT_ARTIFACTS = [
+    "auth-ops-bundle.json",
+    "belief-revision-cases.json",
+    "calibration-dataset.json",
+    "consolidation-ops-bundle.json",
+    "dashboard-package",
+    "forgetting-policy-cases.json",
+    "hosted-llm-manifest.json",
+    "idp-authz-policy-simulation.json",
+    "idp-authz-policy.candidate.json",
+    "idp-authz-policy.current.json",
+    "mcp-ops-bundle.json",
+    "multimodal-ops-bundle.json",
+    "parametric-trainer-bundle.json",
+    "policy-ops-bundle.json",
+    "privacy-ops-bundle.json",
+    "protected-gate-cases.json",
+    "provider-manifest.production.json",
+    "provenance-ops-bundle.json",
+    "provenance-trust-suite.json",
+    "retrieval-ops-bundle.json",
+    "tls-candidate.pem",
+    "tls-current.pem",
+    "tls-lifecycle-bundle.json",
+    "worker-ops-bundle.json",
+]
 
 
 def _renderer_base_env() -> dict[str, str]:
@@ -75,6 +101,21 @@ def _filled_render_env(tmp_path: Path) -> dict[str, str]:
     return env
 
 
+def _populate_required_input_artifacts(env: dict[str, str]) -> None:
+    evidence_dir = Path(env["MNEMOSYNE_PROD_EVIDENCE_DIR"])
+    for relative_path in REQUIRED_PRODUCTION_INPUT_ARTIFACTS:
+        path = evidence_dir / relative_path
+        if relative_path == "dashboard-package":
+            path.mkdir(parents=True, exist_ok=True)
+            (path / "manifest.json").write_text("{}\n", encoding="utf-8")
+            continue
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if relative_path == "provenance-trust-suite.json":
+            path.write_text('{"cases": []}\n', encoding="utf-8")
+        else:
+            path.write_text("{}\n", encoding="utf-8")
+
+
 def test_renderer_placeholders_match_env_example_and_env_guide() -> None:
     placeholders = _placeholders()
     example_vars = sorted(
@@ -122,10 +163,13 @@ def test_renderer_check_environment_reports_missing_without_output() -> None:
 
 
 def test_renderer_check_environment_passes_without_writing_manifest(tmp_path: Path) -> None:
+    env = _filled_render_env(tmp_path)
+    _populate_required_input_artifacts(env)
+
     proc = subprocess.run(
         [str(RENDERER), "--check-environment"],
         cwd=REPO,
-        env=_filled_render_env(tmp_path),
+        env=env,
         capture_output=True,
         text=True,
         check=True,
@@ -138,8 +182,36 @@ def test_renderer_check_environment_passes_without_writing_manifest(tmp_path: Pa
     assert payload["evidence_dir_external"] is True
     assert payload["c2pa_tool_external"] is True
     assert payload["missing"] == []
+    assert payload["input_artifacts_complete"] is True
+    assert payload["missing_input_artifacts"] == []
+    assert payload["required_input_artifact_count"] == len(REQUIRED_PRODUCTION_INPUT_ARTIFACTS)
+    assert sorted(payload["required_input_artifacts"]) == sorted(REQUIRED_PRODUCTION_INPUT_ARTIFACTS)
     assert sorted(payload["present"]) == _placeholders()
     assert not list(tmp_path.glob("*.json"))
+
+
+def test_renderer_check_environment_fails_on_missing_input_artifacts(tmp_path: Path) -> None:
+    env = _filled_render_env(tmp_path)
+
+    proc = subprocess.run(
+        [str(RENDERER), "--check-environment"],
+        cwd=REPO,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    payload = json.loads(proc.stdout)
+
+    assert proc.returncode == 78
+    assert payload["ok"] is False
+    assert payload["input_artifacts_complete"] is False
+    assert sorted(payload["missing_input_artifacts"]) == sorted(REQUIRED_PRODUCTION_INPUT_ARTIFACTS)
+    assert payload["required_input_artifact_count"] == len(REQUIRED_PRODUCTION_INPUT_ARTIFACTS)
+    assert env["MNEMOSYNE_PROD_EVIDENCE_DIR"] not in proc.stdout
+    assert env["MNEMOSYNE_PROD_C2PA_TOOL"] not in proc.stdout
+    assert proc.stderr == ""
 
 
 def test_renderer_check_environment_rejects_repo_local_input_dir(tmp_path: Path) -> None:
