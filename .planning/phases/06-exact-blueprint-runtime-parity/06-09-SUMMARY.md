@@ -21,6 +21,15 @@ Post-plan exact-profile hardening also aligned the renderer, capture wrapper,
 and strict release audit path: production bundles must carry exactly one entry
 for every frozen production release command and no unknown command evidence.
 
+Post-plan custody hardening now writes `bundle-manifest.json` for successful full
+production captures. It records each retained artifact path, size, and SHA-256
+hash, and `summary.json` surfaces the manifest `bundle_fingerprint`.
+
+Post-plan evidence-integrity hardening now also binds the inner
+`deployment-soak --evidence-dir` report and per-check JSON artifacts with
+SHA-256 digests in `evidence/manifest.json`. `release-audit --evidence-manifest`
+recomputes those digests before trusting the report.
+
 ## Executor Readiness
 
 Verified present:
@@ -87,7 +96,8 @@ with a manifest whose validation scope contains:
 
 and the resulting `release-audit --require-production-validated --require-provider-forbid-local`
 output reports `ok=true` and `findings=[]`. The wrapper must also produce
-`redaction-scan.json` with `ok=true`.
+`redaction-scan.json` with `ok=true`, `bundle-manifest.json`, and a
+`summary.json` `bundle_fingerprint`.
 
 ## Production Input Preflight
 
@@ -112,6 +122,11 @@ Checked 2026-06-25 during renderer hardening:
   duplicate or unknown production commands, matching the renderer.
 - `release-audit --require-production-validated` rejects duplicate required
   command evidence and unexpected commands outside the frozen production profile.
+- Successful full captures now write `bundle-manifest.json` with per-artifact
+  SHA-256 hashes and copy its fingerprint into `summary.json`.
+- `deployment-soak --evidence-dir` writes SHA-256 digests for its report/check
+  JSON artifacts, and `release-audit --evidence-manifest` rejects missing or
+  mismatched digests.
 - The template contains 19 production placeholders that must be rendered outside
   the repo before operator capture:
   `MNEMOSYNE_PROD_C2PA_TOOL`, `MNEMOSYNE_PROD_CHANGE_TICKET`,

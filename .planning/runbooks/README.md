@@ -21,7 +21,10 @@ CLI commands consumed by `deployment-soak` and `release-audit`.
   high-confidence secret material, supports `--preflight-only` setup validation,
   runs `deployment-soak --evidence-dir`, and then runs `release-audit
   --require-production-validated --require-provider-forbid-local`. Successful
-  preflight and capture runs write `redaction-scan.json`.
+  preflight and capture runs write `redaction-scan.json`; successful full
+  captures bind the deployment report/check artifacts with manifest SHA-256
+  digests and also write `bundle-manifest.json` with SHA-256 hashes for retained
+  artifacts.
 
 ## Row Runbooks
 
@@ -47,4 +50,5 @@ CLI commands consumed by `deployment-soak` and `release-audit`.
 - Secrets must be supplied through environment variables, provider files, Vault,
   Keycloak, KMS, or equivalent runtime custody. Do not place raw secrets in the
   soak manifest or committed docs; production bundles must keep
-  `redaction-scan.json` at `ok: true`.
+  `redaction-scan.json` at `ok: true` and retain `bundle-manifest.json` plus the
+  `summary.json` `bundle_fingerprint` for handoff custody.
