@@ -11,7 +11,9 @@ CLI commands consumed by `deployment-soak` and `release-audit`.
 - `infra/templates/production-soak-manifest.template.json` - secret-free
   manifest template covering the production release command profile.
 - `infra/templates/production-render.env.example` - blank non-secret input
-  template operators copy outside the repo before filling render values.
+  template operators copy outside the repo before filling render values;
+  `MNEMOSYNE_PROD_EVIDENCE_DIR` must be an absolute external input-artifact path
+  outside the repository.
 - `infra/scripts/render-production-soak-manifest.sh` - canonical renderer for
   non-secret `MNEMOSYNE_PROD_*` placeholders; refuses repo-local output by
   default and validates the production command profile before writing.
@@ -19,8 +21,9 @@ CLI commands consumed by `deployment-soak` and `release-audit`.
   that validates the rendered manifest, rejects unresolved production
   placeholders, rejects duplicate or unknown production commands, rejects
   high-confidence secret material, rejects unscannable retained artifacts,
-  rejects non-empty output roots, supports `--preflight-only` setup validation,
-  runs `deployment-soak --evidence-dir`, and then runs `release-audit
+  rejects repo-local or non-empty output roots, supports `--preflight-only`
+  setup validation, runs `deployment-soak --evidence-dir` from the copied
+  `operator-soak-manifest.json`, and then runs `release-audit
   --require-production-validated --require-provider-forbid-local`. Successful
   preflight and capture runs write `redaction-scan.json`; successful full
   captures bind the deployment report/check artifacts with manifest SHA-256

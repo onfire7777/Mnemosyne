@@ -6,6 +6,7 @@ This runbook is the operator handoff for flipping the remaining Tier B parity ro
 
 - Copy `infra/templates/production-render.env.example` outside the repo, fill the blank non-secret `MNEMOSYNE_PROD_*` values there, and source the external copy before rendering.
 - Render `infra/templates/production-soak-manifest.template.json` outside the repo with `infra/scripts/render-production-soak-manifest.sh --output /secure/path/to/production-soak-manifest.json`. Manual edits are only a fallback and must still leave no unresolved `MNEMOSYNE_PROD_*` placeholders; the capture wrapper rejects unresolved placeholders before running production checks.
+- `MNEMOSYNE_PROD_EVIDENCE_DIR`, `PREFLIGHT_OUT_ROOT`, and `OUT_ROOT` must be absolute external custody paths outside the repository; output roots must be new or empty.
 - Keep raw secrets out of `args` and `global_args`. The production wrapper rejects secret-bearing options such as `--idp-token`, `--session-secret`, `--auth-token`, and `--password`, and it fails closed on high-confidence secret material such as JWTs, private-key blocks, GitHub tokens, AWS access keys, and `sk-*` API keys.
 - Provide secrets through environment variables or command/provider files. Required examples include `MNEMOSYNE_POSTGRES_DSN`, `MNEMOSYNE_IDP_TOKEN`, `MNEMOSYNE_MCP_TOKEN`, and `MNEMOSYNE_MCP_SESSION_TOKEN` where the selected checks need them.
 - The manifest must include:
@@ -13,7 +14,7 @@ This runbook is the operator handoff for flipping the remaining Tier B parity ro
   - `validation_scope.target_environment: "production"`
   - `validation_scope.operator_asserted: true`
 - The manifest must include the exact production release profile: every command in the current 28-command set from `src/mnemosyne/cli.py`, with no duplicate or unknown commands.
-- The output root must be new or empty. The wrapper rejects non-empty output directories so stale artifacts cannot enter a production bundle.
+- The output root must be new or empty and outside this repository. The wrapper rejects repo-local or non-empty output directories so stale artifacts cannot enter a production bundle.
 
 ## Capture
 
@@ -39,10 +40,13 @@ infra/scripts/capture-production-evidence.sh \
 
 The `--preflight-only` command validates production scope, exact command
 coverage, absence of unresolved placeholders, absence of secret-bearing CLI
-options, and a high-confidence redaction scan over the rendered manifest. It writes
+options, absolute external custody paths for production input artifacts, and a
+high-confidence redaction scan over the rendered manifest. It writes
 `preflight.json`, `redaction-scan.json`, and a copied operator manifest, then
-exits before `deployment-soak` or `release-audit` runs. A passing preflight is
-setup proof only; it does not flip any strict-audit row to Done.
+exits before `deployment-soak` or `release-audit` runs. Full capture executes
+that copied operator manifest from `OUT_ROOT`, not the mutable source path. A
+passing preflight is setup proof only; it does not flip any strict-audit row to
+Done.
 
 The wrapper performs these steps:
 

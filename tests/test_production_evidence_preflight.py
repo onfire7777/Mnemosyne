@@ -411,8 +411,13 @@ if [ "${{1:-}}" = "-m" ] && [ "${{2:-}}" = "mnemosyne.cli" ]; then
   done
   if [ "$mode" = "soak" ]; then
     evidence_dir=""
+    soak_manifest=""
     while [ "$#" -gt 0 ]; do
       case "$1" in
+        --soak-manifest)
+          soak_manifest="$2"
+          shift 2
+          ;;
         --evidence-dir)
           evidence_dir="$2"
           shift 2
@@ -423,6 +428,7 @@ if [ "${{1:-}}" = "-m" ] && [ "${{2:-}}" = "mnemosyne.cli" ]; then
       esac
     done
     mkdir -p "$evidence_dir"
+    printf '%s\n' "$soak_manifest" > "$evidence_dir/soak-manifest-path.txt"
     cat > "$evidence_dir/manifest.json" <<'JSON'
 {{"ok": true, "validation_scope": {{"production_validated": true, "target_environment": "production", "operator_asserted": true}}, "checks": []}}
 JSON
@@ -503,8 +509,13 @@ if [ "${{1:-}}" = "-m" ] && [ "${{2:-}}" = "mnemosyne.cli" ]; then
   done
   if [ "$mode" = "soak" ]; then
     evidence_dir=""
+    soak_manifest=""
     while [ "$#" -gt 0 ]; do
       case "$1" in
+        --soak-manifest)
+          soak_manifest="$2"
+          shift 2
+          ;;
         --evidence-dir)
           evidence_dir="$2"
           shift 2
@@ -515,6 +526,7 @@ if [ "${{1:-}}" = "-m" ] && [ "${{2:-}}" = "mnemosyne.cli" ]; then
       esac
     done
     mkdir -p "$evidence_dir"
+    printf '%s\n' "$soak_manifest" > "$evidence_dir/soak-manifest-path.txt"
     cat > "$evidence_dir/manifest.json" <<'JSON'
 {{"ok": true, "validation_scope": {{"production_validated": true, "target_environment": "production", "operator_asserted": true}}, "checks": []}}
 JSON
@@ -594,8 +606,13 @@ if [ "${{1:-}}" = "-m" ] && [ "${{2:-}}" = "mnemosyne.cli" ]; then
   done
   if [ "$mode" = "soak" ]; then
     evidence_dir=""
+    soak_manifest=""
     while [ "$#" -gt 0 ]; do
       case "$1" in
+        --soak-manifest)
+          soak_manifest="$2"
+          shift 2
+          ;;
         --evidence-dir)
           evidence_dir="$2"
           shift 2
@@ -606,6 +623,7 @@ if [ "${{1:-}}" = "-m" ] && [ "${{2:-}}" = "mnemosyne.cli" ]; then
       esac
     done
     mkdir -p "$evidence_dir"
+    printf '%s\n' "$soak_manifest" > "$evidence_dir/soak-manifest-path.txt"
     cat > "$evidence_dir/manifest.json" <<'JSON'
 {{"ok": true, "validation_scope": {{"production_validated": true, "target_environment": "production", "operator_asserted": true}}, "checks": []}}
 JSON
@@ -657,6 +675,10 @@ exec "$REAL_PYTHON" "$@"
     assert "redaction-scan.json" in bundle_paths
     assert "evidence/manifest.json" in bundle_paths
     assert "evidence/provider-output.json" in bundle_paths
+    assert "evidence/soak-manifest-path.txt" in bundle_paths
     assert "bundle-manifest.json" not in bundle_paths
     assert "summary.json" not in bundle_paths
     assert all(item["sha256"].startswith("sha256:") for item in bundle_manifest["files"])
+    assert (out_root / "evidence" / "soak-manifest-path.txt").read_text(
+        encoding="utf-8"
+    ).strip() == str(out_root / "operator-soak-manifest.json")
