@@ -44,6 +44,7 @@ infra/
   scripts/
     up.sh  down.sh                  # stack lifecycle
     setup-all.sh                    # seed all three providers
+    capture-production-evidence.sh  # production Tier-B deployment-soak runner
     setup-keycloak.sh setup-vault.sh setup-c2pa.sh
     keycloak-token.sh               # mint a fresh ID token on demand
   validate/
@@ -89,6 +90,22 @@ prove live ParadeDB/AGE/pgvector retrieval and does not claim production
 validation; production parity still requires operator-captured
 `release-audit --require-production-validated` evidence against deployed
 infrastructure.
+
+For production Tier-B evidence, use an operator-authored soak manifest and the
+production runner:
+
+```bash
+infra/scripts/capture-production-evidence.sh ./deployment-soak.production.json
+```
+
+That runner is intentionally fail-closed. It refuses manifests unless
+`validation_scope.production_validated=true`,
+`validation_scope.target_environment="production"`, and
+`validation_scope.operator_asserted=true`; it also requires the full production
+release command profile before running `deployment-soak --evidence-dir` followed
+by `release-audit --require-production-validated
+--require-provider-forbid-local`. Put secrets in environment variables, files,
+or command-backed providers, not in manifest `args`.
 
 Ports are offset from defaults to avoid clashes:
 
