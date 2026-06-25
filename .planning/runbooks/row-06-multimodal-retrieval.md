@@ -37,9 +37,8 @@ as setup proof only, then run
 `infra/scripts/capture-production-evidence.sh "$SOAK_MANIFEST" "$OUT_ROOT"` for the real
 `deployment-soak` + `release-audit` capture. The preflight output does not flip this row to Done.
 Use absolute external paths outside the repo for `SOAK_MANIFEST`, `PREFLIGHT_OUT_ROOT`, `OUT_ROOT`, and the `MNEMOSYNE_PROD_EVIDENCE_DIR` input-artifact directory.
-After capture, reviewers may run `"$PYTHON" -m mnemosyne.cli production-evidence-verify` with the retained
-`summary.json` `bundle_fingerprint`; this is custody review only and does not
-flip this row.
+After capture, reviewers must run `"$PYTHON" -m mnemosyne.cli production-evidence-verify` with the retained
+`summary.json` `bundle_fingerprint`; offline custody verification must pass before this row can flip Done.
 
 ## Acceptance
 
@@ -50,3 +49,6 @@ required output shape present and empty findings.
 
 Done when extraction and media-vector retrieval evidence is in the bundle and
 `release-audit` is ok.
+The full wrapper summary must have `release_audit_ok=true`,
+`redaction_scan_ok=true`, no redaction findings or skipped files, a retained
+`bundle-manifest.json`/fingerprint, and passing `production-evidence-verify`.

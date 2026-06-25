@@ -25,6 +25,7 @@ import pytest
 from mnemosyne.cli import (
     PRODUCTION_RELEASE_REQUIRED_COMMANDS,
     PRODUCTION_RELEASE_REQUIRED_PROVIDER_CHECKS,
+    RELEASE_AUDIT_REQUIRED_OUTPUT_KEYS,
     build_parser,
     load_engine,
 )
@@ -5783,6 +5784,11 @@ def rewrite_production_bundle_manifest(bundle_dir: Path) -> str:
     summary["bundle_fingerprint"] = bundle_fingerprint
     summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
     return bundle_fingerprint
+
+
+def test_release_audit_output_key_contract_covers_frozen_production_profile() -> None:
+    assert set(RELEASE_AUDIT_REQUIRED_OUTPUT_KEYS) == set(PRODUCTION_RELEASE_REQUIRED_COMMANDS)
+    assert all(RELEASE_AUDIT_REQUIRED_OUTPUT_KEYS[command] for command in PRODUCTION_RELEASE_REQUIRED_COMMANDS)
 
 
 def test_cli_release_audit_verifies_production_deployment_evidence(tmp_path: Path) -> None:

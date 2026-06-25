@@ -206,6 +206,7 @@ RELEASE_AUDIT_REQUIRED_OUTPUT_KEYS: dict[str, tuple[str, ...]] = {
     "ops-dashboard-check": ("mode", "source", "checks", "findings"),
     "parametric-trainer-check": ("bundle", "requirements", "checks", "findings"),
     "worker-ops-check": ("bundle", "requirements", "checks", "findings", "redaction"),
+    "ops-report": ("counts", "tripwires"),
 }
 RELEASE_AUDIT_BUNDLE_OPS_COMMANDS = frozenset(
     command

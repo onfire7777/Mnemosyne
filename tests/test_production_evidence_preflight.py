@@ -109,13 +109,44 @@ def test_capture_production_evidence_rejects_repo_local_output_root(tmp_path: Pa
             shutil.rmtree(out_root)
 
 
+def test_capture_production_evidence_rejects_repo_local_soak_manifest(tmp_path: Path) -> None:
+    manifest = REPO / ".tmp-production-soak-manifest.json"
+    out_root = tmp_path / "capture"
+    _minimal_production_manifest(manifest)
+
+    try:
+        proc = subprocess.run(
+            [
+                str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+                "--preflight-only",
+                str(manifest),
+                str(out_root),
+            ],
+            cwd=REPO,
+            capture_output=True,
+            text=True,
+        )
+
+        assert proc.returncode == 65
+        assert "refusing to use production soak manifest inside the repository" in proc.stderr
+        assert not out_root.exists()
+    finally:
+        if manifest.exists():
+            manifest.unlink()
+
+
 def test_capture_production_evidence_preflight_rejects_unrendered_template(tmp_path: Path) -> None:
+    manifest = tmp_path / "production-soak-manifest.template.json"
+    manifest.write_text(
+        (REPO / "infra" / "templates" / "production-soak-manifest.template.json").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
     out_root = tmp_path / "capture"
     proc = subprocess.run(
         [
             str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
             "--preflight-only",
-            str(REPO / "infra" / "templates" / "production-soak-manifest.template.json"),
+            str(manifest),
             str(out_root),
         ],
         cwd=REPO,

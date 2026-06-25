@@ -32,6 +32,12 @@ def test_every_row_runbook_points_to_universal_preflight_capture_flow() -> None:
             "`MNEMOSYNE_PROD_EVIDENCE_DIR` input-artifact directory."
             in text
         ), path
+        assert "reviewers must run" in text, path
+        assert "offline custody verification must pass before this row can flip Done" in text, path
+        assert "`release_audit_ok=true`" in text, path
+        assert "`redaction_scan_ok=true`" in text, path
+        assert "`bundle-manifest.json`/fingerprint" in text, path
+        assert "passing `production-evidence-verify`" in text, path
         assert "release-audit --require-production-validated --require-provider-forbid-local" in text, path
 
 
@@ -67,3 +73,11 @@ def test_production_evidence_input_dir_is_not_capture_output() -> None:
     assert "new or empty absolute external custody path outside the" in rollback_doc
     assert "validates local real-service mechanics" in infra_readme
     assert "not production validation" in infra_readme
+
+
+def test_roadmap_tier_b_table_routes_rows_through_full_production_manifest() -> None:
+    roadmap = (REPO / "docs" / "ROADMAP-TO-100.md").read_text(encoding="utf-8")
+    assert "| # | Parity row | Real infra to stand up | Canonical capture |" in roadmap
+    assert "Capture command" not in roadmap
+    assert roadmap.count("Full 28-command production manifest via `infra/PRODUCTION-EVIDENCE.md`") == 10
+    assert "row signals: `worker-run`, `ops-report`, `ops-dashboard-check`" in roadmap
