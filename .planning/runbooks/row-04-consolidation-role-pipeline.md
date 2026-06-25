@@ -26,6 +26,14 @@ Evidence must not include raw documents, raw prompts, private extracted text, or
 provider credentials. Store job IDs, redacted role outputs, queue metrics,
 provider contract status, recompute fingerprints, and protected-suite metadata.
 
+## Production Capture
+
+Use the universal Tier B production capture flow in `infra/PRODUCTION-EVIDENCE.md`:
+render the production soak manifest, run
+`infra/scripts/capture-production-evidence.sh --preflight-only` as setup proof only, then run
+`infra/scripts/capture-production-evidence.sh` for the real `deployment-soak` +
+`release-audit` capture. The preflight output does not flip this row to Done.
+
 ## Acceptance
 
 Operator runs the gates against real infra, evidence is redacted, the outputs
