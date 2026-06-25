@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import shlex
 import socket
 import subprocess
@@ -5594,6 +5595,133 @@ def write_release_report(
     return report_path, manifest_path
 
 
+def write_production_evidence_bundle(tmp_path: Path) -> tuple[Path, str]:
+    store = tmp_path / "mnemosyne.json"
+    source_root = tmp_path / "source"
+    _report_path, manifest_path = write_release_report(source_root)
+    bundle_dir = tmp_path / "production-evidence"
+    evidence_dir = bundle_dir / "evidence"
+    shutil.copytree(manifest_path.parent, evidence_dir)
+
+    release_audit = run_cli(
+        store,
+        "release-audit",
+        "--evidence-manifest",
+        str(evidence_dir / "manifest.json"),
+        "--require-production-validated",
+        "--require-provider-forbid-local",
+    )
+    deployment_soak = json.loads((evidence_dir / "deployment-soak-report.json").read_text(encoding="utf-8"))
+
+    (bundle_dir / "operator-soak-manifest.json").write_text(
+        json.dumps(
+            {
+                "validation_scope": {
+                    "production_validated": True,
+                    "target_environment": "production",
+                    "operator_asserted": True,
+                },
+                "checks": [
+                    {"command": command, "args": []}
+                    for command in PRODUCTION_RELEASE_REQUIRED_COMMANDS
+                ],
+            },
+            indent=2,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    (bundle_dir / "preflight.json").write_text(
+        json.dumps(
+            {
+                "ok": True,
+                "preflight_only": False,
+                "required_commands": list(PRODUCTION_RELEASE_REQUIRED_COMMANDS),
+                "provided_commands": sorted(PRODUCTION_RELEASE_REQUIRED_COMMANDS),
+            },
+            indent=2,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    (bundle_dir / "redaction-scan.json").write_text(
+        json.dumps(
+            {
+                "ok": True,
+                "scope": "generated-evidence",
+                "findings": [],
+                "skipped_files": [],
+            },
+            indent=2,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    (bundle_dir / "deployment-soak.stdout.json").write_text(
+        json.dumps(deployment_soak, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    (bundle_dir / "release-audit.json").write_text(
+        json.dumps(release_audit, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    (bundle_dir / "store.json").write_text("{}", encoding="utf-8")
+
+    files = []
+    for file_path in sorted(path for path in bundle_dir.rglob("*") if path.is_file()):
+        rel_path = file_path.relative_to(bundle_dir).as_posix()
+        if rel_path in {"bundle-manifest.json", "summary.json"}:
+            continue
+        payload = file_path.read_bytes()
+        files.append(
+            {
+                "path": rel_path,
+                "size_bytes": len(payload),
+                "sha256": "sha256:" + sha256(payload).hexdigest(),
+            }
+        )
+    bundle_manifest_payload = {
+        "schema": "mnemosyne.production-evidence-bundle.v1",
+        "files": files,
+    }
+    bundle_fingerprint = "sha256:" + sha256(
+        json.dumps(bundle_manifest_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    (bundle_dir / "bundle-manifest.json").write_text(
+        json.dumps(
+            {
+                **bundle_manifest_payload,
+                "artifact_count": len(files),
+                "fingerprint": bundle_fingerprint,
+            },
+            indent=2,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    (bundle_dir / "summary.json").write_text(
+        json.dumps(
+            {
+                "out_root": str(bundle_dir),
+                "operator_manifest": str(bundle_dir / "operator-soak-manifest.json"),
+                "evidence_manifest": str(evidence_dir / "manifest.json"),
+                "redaction_scan": str(bundle_dir / "redaction-scan.json"),
+                "bundle_manifest": str(bundle_dir / "bundle-manifest.json"),
+                "bundle_fingerprint": bundle_fingerprint,
+                "redaction_scan_ok": True,
+                "deployment_soak_ok": True,
+                "release_audit_ok": True,
+                "release_audit_fingerprint": release_audit["fingerprint"],
+                "release_audit_findings": [],
+            },
+            indent=2,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    return bundle_dir, bundle_fingerprint
+
+
 def test_cli_release_audit_verifies_production_deployment_evidence(tmp_path: Path) -> None:
     store = tmp_path / "mnemosyne.json"
     _report_path, manifest_path = write_release_report(tmp_path)
@@ -5627,6 +5755,71 @@ def test_cli_release_audit_verifies_production_deployment_evidence(tmp_path: Pat
     assert report["provider"]["retrieval_backends"]["lexical_backend"] == "paradedb-bm25"
     assert report["provider"]["retrieval_backends"]["graph_backend"] == "apache-age"
     assert report["validation_scope"]["production_validated"] is True
+
+
+def test_cli_production_evidence_verify_accepts_captured_bundle(tmp_path: Path) -> None:
+    bundle_dir, bundle_fingerprint = write_production_evidence_bundle(tmp_path)
+
+    report = run_cli(
+        tmp_path / "verify-store.json",
+        "production-evidence-verify",
+        str(bundle_dir),
+        "--expected-bundle-fingerprint",
+        bundle_fingerprint,
+    )
+
+    assert report["ok"] is True
+    assert report["bundle_fingerprint"] == bundle_fingerprint
+    assert report["expected_bundle_fingerprint_present"] is True
+    assert report["artifact_count"] > 0
+    assert report["checks"] == {
+        "summary": True,
+        "redaction_scan": True,
+        "bundle_manifest": True,
+        "deployment_soak_stdout": True,
+        "release_audit_replay": True,
+    }
+    assert report["findings"] == []
+
+
+def test_cli_production_evidence_verify_rejects_tampered_bundle(tmp_path: Path) -> None:
+    bundle_dir, _bundle_fingerprint = write_production_evidence_bundle(tmp_path)
+    release_audit_path = bundle_dir / "release-audit.json"
+    release_audit = json.loads(release_audit_path.read_text(encoding="utf-8"))
+    release_audit["ok"] = False
+    release_audit_path.write_text(json.dumps(release_audit, indent=2, sort_keys=True), encoding="utf-8")
+
+    result = run_raw_cli(
+        tmp_path / "verify-store.json",
+        "production-evidence-verify",
+        str(bundle_dir),
+    )
+    payload = json.loads(result.stdout)
+    codes = {finding["code"] for finding in payload["findings"]}
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert "bundle_file_sha256_mismatch" in codes
+    assert "bundle_fingerprint_mismatch" in codes
+    assert "release_audit_not_ok" in codes
+
+
+def test_cli_production_evidence_verify_rejects_unmanifested_artifacts(tmp_path: Path) -> None:
+    bundle_dir, _bundle_fingerprint = write_production_evidence_bundle(tmp_path)
+    (bundle_dir / "unmanifested.txt").write_text("not captured by bundle-manifest\n", encoding="utf-8")
+
+    result = run_raw_cli(
+        tmp_path / "verify-store.json",
+        "production-evidence-verify",
+        str(bundle_dir),
+    )
+    payload = json.loads(result.stdout)
+    codes = {finding["code"] for finding in payload["findings"]}
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert "bundle_manifest_missing_actual_files" in codes
+    assert "bundle_fingerprint_mismatch" in codes
 
 
 def test_cli_release_audit_requires_manifest_file_digests(tmp_path: Path) -> None:
