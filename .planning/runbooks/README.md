@@ -20,7 +20,8 @@ CLI commands consumed by `deployment-soak` and `release-audit`.
 - `infra/scripts/capture-production-evidence.sh` - operator capture wrapper
   that validates the rendered manifest, rejects unresolved production
   placeholders, rejects duplicate or unknown production commands, rejects
-  high-confidence secret material, rejects unscannable retained artifacts,
+  high-confidence secret material, rejects secret-bearing manifest options in
+  split and `--option=value` forms, rejects unscannable retained artifacts,
   rejects repo-local or non-empty output roots, supports `--preflight-only`
   setup validation, runs `deployment-soak --evidence-dir` from the copied
   `operator-soak-manifest.json`, and then runs `release-audit
@@ -59,15 +60,16 @@ CLI commands consumed by `deployment-soak` and `release-audit`.
 - Secrets must be supplied through environment variables, provider files, Vault,
   Keycloak, KMS, or equivalent runtime custody. Do not place raw secrets in the
   soak manifest or committed docs; production bundles must keep
-  `redaction-scan.json` at `ok: true` with no skipped files and retain
-  `bundle-manifest.json` plus the `summary.json` `bundle_fingerprint` for
-  handoff custody.
+  `redaction-scan.json` at `ok: true` with no skipped files and a
+  `scanned_files` list matching the retained `bundle-manifest.json` artifact
+  set, plus the `summary.json` `bundle_fingerprint` for handoff custody.
 - After capture, select the repo interpreter with
   `PYTHON="${PYTHON:-$(if [ -x .venv/bin/python ]; then printf '%s' .venv/bin/python; else command -v python3; fi)}"`;
   set `BUNDLE_DIR=/secure/path/to/mnemosyne-production-evidence`; derive
   `EXPECTED_BUNDLE_FINGERPRINT` from `"$BUNDLE_DIR/summary.json"`; then
   `"$PYTHON" -m mnemosyne.cli production-evidence-verify "$BUNDLE_DIR"
   --expected-bundle-fingerprint "$EXPECTED_BUNDLE_FINGERPRINT"` can recheck
-  the completed bundle offline.
+  the completed bundle offline, including fresh redaction recompute and
+  `scanned_files` coverage against `bundle-manifest.json`.
   This is custody review only; it does not contact production, rerun
   `deployment-soak`, create evidence, or replace operator capture.
