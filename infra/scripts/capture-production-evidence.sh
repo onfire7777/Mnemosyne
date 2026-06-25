@@ -163,6 +163,7 @@ from mnemosyne.cli import (  # noqa: E402
 )
 from mnemosyne.evidence_redaction import (  # noqa: E402
     redaction_findings,
+    scan_evidence_paths,
     write_redaction_scan,
 )
 
@@ -224,6 +225,7 @@ if not isinstance(checks, list) or not checks:
 
 commands: set[str] = set()
 command_list: list[str] = []
+required_artifacts: dict[str, dict[str, object]] = {}
 sensitive_options = {
     "--auth-token",
     "--idp-token",
@@ -275,6 +277,14 @@ def _validate_external_file_path(value: str, *, label: str) -> None:
     try:
         resolved.relative_to(repo_dir.resolve())
     except ValueError:
+        artifact = required_artifacts.setdefault(
+            str(resolved),
+            {
+                "path": str(resolved),
+                "labels": [],
+            },
+        )
+        artifact["labels"].append(label)
         return
     errors.append(f"{label} points inside the repository: {resolved}; use an external custody path")
 
@@ -312,20 +322,72 @@ duplicates = sorted({command for command in command_list if command_list.count(c
 if duplicates:
     errors.append("manifest contains duplicate production release commands: " + ", ".join(duplicates))
 
+for artifact in required_artifacts.values():
+    artifact_path = Path(str(artifact["path"]))
+    labels = ", ".join(str(label) for label in artifact["labels"])
+    if not artifact_path.exists():
+        errors.append(
+            f"required production input artifact does not exist: {artifact_path} ({labels})"
+        )
+    elif not artifact_path.is_file() and not artifact_path.is_dir():
+        errors.append(
+            f"required production input artifact is not a file or directory: {artifact_path} ({labels})"
+        )
+
 if errors:
     for error in errors:
         print(f"ERROR: {error}", file=sys.stderr)
+    sys.exit(65)
+
+input_scan = scan_evidence_paths(
+    [Path(str(artifact["path"])) for artifact in required_artifacts.values()],
+    scope="preflight-inputs",
+    forbidden_roots=[repo_dir],
+    reject_symlinks=True,
+)
+input_findings = input_scan.get("findings", [])
+input_skipped = input_scan.get("skipped_files", [])
+if input_findings:
+    print(
+        "ERROR: high-confidence secret material found in production input artifacts:",
+        file=sys.stderr,
+    )
+    for finding in input_findings:
+        print(
+            f"  - {finding['source']}:{finding['line']} {finding['kind']}",
+            file=sys.stderr,
+        )
+    print(
+        "Redact the input artifact or move secrets to environment, files, or "
+        "command providers before capture.",
+        file=sys.stderr,
+    )
+    sys.exit(65)
+if input_skipped:
+    print(
+        "ERROR: production input artifacts include unscanned files:",
+        file=sys.stderr,
+    )
+    for skipped in input_skipped:
+        print(f"  - {skipped['path']}: {skipped['reason']}", file=sys.stderr)
+    print(
+        "Use UTF-8 text evidence within the scan limit, or replace binary/large "
+        "inputs with redacted manifests before capture.",
+        file=sys.stderr,
+    )
     sys.exit(65)
 
 out_root.mkdir(parents=True, exist_ok=True)
 out_root.chmod(0o700)
 shutil.copyfile(manifest_path, out_root / "operator-soak-manifest.json")
 redaction_scan_path = out_root / "redaction-scan.json"
+preflight_scanned_files = [str(manifest_path)] + list(input_scan.get("scanned_files", []))
 write_redaction_scan(
     redaction_scan_path,
     scope="preflight",
-    scanned_files=[str(manifest_path)],
+    scanned_files=preflight_scanned_files,
     findings=[],
+    skipped_files=[],
 )
 preflight = {
     "ok": True,
@@ -336,6 +398,13 @@ preflight = {
     "started_at": os.environ["STARTED_AT"],
     "required_commands": list(PRODUCTION_RELEASE_REQUIRED_COMMANDS),
     "provided_commands": sorted(commands),
+    "required_input_artifacts": [
+        {
+            "path": str(artifact["path"]),
+            "labels": sorted(set(str(label) for label in artifact["labels"])),
+        }
+        for artifact in sorted(required_artifacts.values(), key=lambda item: str(item["path"]))
+    ],
 }
 (out_root / "preflight.json").write_text(json.dumps(preflight, indent=2), encoding="utf-8")
 PY
