@@ -11,8 +11,10 @@ services they emulate:
 | **c2patool** | built from `infra/c2pa/Dockerfile` | FR-19 provenance | `C2paToolVerifier` (real C2PA manifest signing + verification with a test cert root) |
 
 Blueprint references: `docs/BLUEPRINT-COMPLETION-PLAN.md` rows **FR-7/FR-9** (auth),
-**KMS**, and **FR-19** (signed provenance), plus the "P1 (real services)" line —
-*docker-compose Keycloak/Vault/c2patool → flips FR-7/9/19 to Validated*.
+**KMS**, and **FR-19** (signed provenance), plus the "P1 (real services)" line.
+This stack validates local real-service mechanics for FR-7/FR-9/FR-19; it is
+not production validation and does not flip Tier B rows without
+operator-captured production evidence.
 
 > These services are **not required** to run in the build environment. Everything
 > here is turnkey and documented so an operator can stand it up on any Docker

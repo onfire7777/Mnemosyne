@@ -14,12 +14,14 @@
 # Requires: docker (compose stack up). Uses the Vault CLI inside the container,
 # so no host Vault binary is needed.
 set -euo pipefail
+umask 077
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INFRA_DIR="$(cd "${HERE}/.." && pwd)"
 COMPOSE_FILE="${INFRA_DIR}/docker-compose.providers.yml"
 OUT_DIR="${INFRA_DIR}/vault/out"
 mkdir -p "${OUT_DIR}"
+chmod 700 "${OUT_DIR}"
 
 VAULT_ADDR_HOST="${VAULT_ADDR:-http://localhost:8211}"
 VAULT_ADDR_IN="http://127.0.0.1:8200"

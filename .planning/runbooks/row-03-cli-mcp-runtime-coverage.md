@@ -31,10 +31,11 @@ operator evidence.
 ## Production Capture
 
 Use the universal Tier B production capture flow in `infra/PRODUCTION-EVIDENCE.md`:
-render the production soak manifest, run
-`infra/scripts/capture-production-evidence.sh --preflight-only` as setup proof only, then run
-`infra/scripts/capture-production-evidence.sh` for the real `deployment-soak` +
-`release-audit` capture. The preflight output does not flip this row to Done.
+render the production soak manifest to `SOAK_MANIFEST`, run
+`infra/scripts/capture-production-evidence.sh --preflight-only "$SOAK_MANIFEST" "$PREFLIGHT_OUT_ROOT"`
+as setup proof only, then run
+`infra/scripts/capture-production-evidence.sh "$SOAK_MANIFEST" "$OUT_ROOT"` for the real
+`deployment-soak` + `release-audit` capture. The preflight output does not flip this row to Done.
 After capture, reviewers may run `"$PYTHON" -m mnemosyne.cli production-evidence-verify` with the retained
 `summary.json` `bundle_fingerprint`; this is custody review only and does not
 flip this row.

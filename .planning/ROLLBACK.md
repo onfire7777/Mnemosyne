@@ -16,8 +16,10 @@ good release artifact.
 3. Preserve the failing deploy report, canary report, and relevant gate output.
 4. Restore the previous release artifact, config bundle, or provider pointer.
 5. Re-run the surface-specific gate listed in `.planning/runbooks/`.
-6. Capture redacted evidence into the production evidence directory.
-7. Include the rollback evidence in `deployment-soak --evidence-dir`.
+6. Stage redacted rollback input artifacts in the external directory referenced
+   by `MNEMOSYNE_PROD_EVIDENCE_DIR`.
+7. Run `infra/scripts/capture-production-evidence.sh "$SOAK_MANIFEST" "$OUT_ROOT"`;
+   the capture wrapper writes the production bundle under `OUT_ROOT`.
 8. Require `release-audit --require-production-validated --require-provider-forbid-local` to pass before
    declaring the rollback accepted.
 

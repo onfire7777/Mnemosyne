@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 077
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INFRA_DIR="$(cd "${HERE}/.." && pwd)"
 REPO_DIR="$(cd "${INFRA_DIR}/.." && pwd)"
 
 STAMP="$(date -u +"%Y%m%dT%H%M%SZ")"
-OUT_ROOT="${1:-/tmp/mnemosyne-tierb-local-evidence-${STAMP}}"
-mkdir -p "${OUT_ROOT}"
+OUT_ROOT_RAW="${1:-/tmp/mnemosyne-tierb-local-evidence-${STAMP}}"
 
 PYTHON="${MNEMOSYNE_PYTHON:-}"
 if [ -z "${PYTHON}" ]; then
@@ -17,6 +17,31 @@ if [ -z "${PYTHON}" ]; then
     PYTHON="python3"
   fi
 fi
+
+OUT_ROOT="$("${PYTHON}" - "${OUT_ROOT_RAW}" "${REPO_DIR}" <<'PY'
+from pathlib import Path
+import sys
+
+out_root = Path(sys.argv[1]).expanduser().resolve(strict=False)
+repo_dir = Path(sys.argv[2]).resolve()
+try:
+    out_root.relative_to(repo_dir)
+except ValueError:
+    print(out_root)
+else:
+    print(
+        f"ERROR: refusing to write local-staging evidence inside the repository: {out_root}",
+        file=sys.stderr,
+    )
+    print(
+        "Choose an external path such as /tmp/mnemosyne-tierb-local-evidence.",
+        file=sys.stderr,
+    )
+    sys.exit(65)
+PY
+)"
+mkdir -p "${OUT_ROOT}"
+chmod 700 "${OUT_ROOT}"
 
 for required in \
   "${INFRA_DIR}/keycloak/out/oidc.env" \
