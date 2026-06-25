@@ -80,7 +80,7 @@ secrets, private keys, and tokens).
 # 4. Capture scoped local deployment-soak/release-audit evidence.
 ./infra/scripts/capture-local-evidence.sh
 
-# 5. For production Tier-B evidence, copy/fill the production template.
+# 5. For production Tier-B evidence, render the production template.
 open ./infra/PRODUCTION-EVIDENCE.md
 
 # 6. Tear down (add --volumes for a full reset).
@@ -97,21 +97,27 @@ validation; production parity still requires operator-captured
 `release-audit --require-production-validated` evidence against deployed
 infrastructure.
 
-For production Tier-B evidence, use an operator-authored soak manifest and the
-production runner:
+For production Tier-B evidence, render the production soak manifest outside the
+repository, then use the production runner:
 
 ```bash
-infra/scripts/capture-production-evidence.sh ./deployment-soak.production.json
+infra/scripts/render-production-soak-manifest.sh \
+  --output /secure/path/to/production-soak-manifest.json
+infra/scripts/capture-production-evidence.sh \
+  /secure/path/to/production-soak-manifest.json
 ```
 
-That runner is intentionally fail-closed. It refuses manifests unless
-`validation_scope.production_validated=true`,
+The renderer replaces non-secret `MNEMOSYNE_PROD_*` placeholders from the
+operator environment and validates production scope plus the full command
+profile before writing the manifest. The runner is intentionally fail-closed. It
+refuses manifests unless `validation_scope.production_validated=true`,
 `validation_scope.target_environment="production"`, and
-`validation_scope.operator_asserted=true`; it also requires the full production
-release command profile before running `deployment-soak --evidence-dir` followed
-by `release-audit --require-production-validated
---require-provider-forbid-local`. Put secrets in environment variables, files,
-or command-backed providers, not in manifest `args`.
+`validation_scope.operator_asserted=true`; rejects unresolved production
+placeholders; and requires the full production release command profile before
+running `deployment-soak --evidence-dir` followed by
+`release-audit --require-production-validated --require-provider-forbid-local`.
+Put secrets in environment variables, files, or command-backed providers, not
+in manifest `args`.
 
 Ports are offset from defaults to avoid clashes:
 

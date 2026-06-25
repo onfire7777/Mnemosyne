@@ -10,9 +10,13 @@ CLI commands consumed by `deployment-soak` and `release-audit`.
 - `infra/PRODUCTION-EVIDENCE.md` - Tier B production evidence runbook.
 - `infra/templates/production-soak-manifest.template.json` - secret-free
   manifest template covering the production release command profile.
+- `infra/scripts/render-production-soak-manifest.sh` - canonical renderer for
+  non-secret `MNEMOSYNE_PROD_*` placeholders; refuses repo-local output by
+  default and validates the production command profile before writing.
 - `infra/scripts/capture-production-evidence.sh` - operator capture wrapper
-  that validates the manifest, runs `deployment-soak --evidence-dir`, and then
-  runs `release-audit --require-production-validated`.
+  that validates the rendered manifest, rejects unresolved production
+  placeholders, runs `deployment-soak --evidence-dir`, and then runs
+  `release-audit --require-production-validated`.
 
 ## Row Runbooks
 
