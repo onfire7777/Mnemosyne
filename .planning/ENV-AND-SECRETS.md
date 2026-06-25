@@ -16,6 +16,34 @@ Secrets and credentials must be supplied outside manifest `args` and
 The capture wrapper rejects secret-bearing options such as `--token`,
 `--password`, `--client-secret`, `--private-key`, and `--key`.
 
+## Production Manifest Placeholders
+
+The production soak template contains these non-secret placeholders. Replace
+them outside the repository before running
+`infra/scripts/capture-production-evidence.sh`.
+
+| Placeholder | Purpose | Source | Consumed by |
+|---|---|---|---|
+| `MNEMOSYNE_PROD_C2PA_TOOL` | Production C2PA verifier command/path | Deployment image/config | provenance gates |
+| `MNEMOSYNE_PROD_CHANGE_TICKET` | Operator change or release ticket id | Release metadata | production validation scope |
+| `MNEMOSYNE_PROD_DASHBOARD_URL` | Hosted ops dashboard URL | Deployment metadata | dashboard gate |
+| `MNEMOSYNE_PROD_EVIDENCE_DIR` | Operator evidence output directory | Operator workstation or secure artifact store | production capture wrapper |
+| `MNEMOSYNE_PROD_IDP_AUDIENCE` | Production IdP token audience | IdP client config | IdP/JWKS gates |
+| `MNEMOSYNE_PROD_IDP_ISSUER` | Production IdP issuer URL | IdP realm config | IdP/JWKS gates |
+| `MNEMOSYNE_PROD_IDP_JWKS_URL` | Production JWKS endpoint | IdP realm config | IdP/JWKS gates |
+| `MNEMOSYNE_PROD_MCP_HTTP_BASE_URL` | Hosted JSON-RPC MCP base URL | Deployment metadata | MCP ops gate |
+| `MNEMOSYNE_PROD_MCP_HTTP_HEALTH_URL` | Hosted JSON-RPC MCP health URL | Deployment metadata | MCP HTTP soak |
+| `MNEMOSYNE_PROD_MCP_HTTP_RPC_URL` | Hosted JSON-RPC MCP RPC URL | Deployment metadata | MCP HTTP soak |
+| `MNEMOSYNE_PROD_MCP_STREAMABLE_HTTP_BASE_URL` | Hosted SDK StreamableHTTP base URL | Deployment metadata | MCP ops gate |
+| `MNEMOSYNE_PROD_MCP_STREAMABLE_HTTP_HEALTH_URL` | Hosted SDK StreamableHTTP health URL | Deployment metadata | StreamableHTTP soak |
+| `MNEMOSYNE_PROD_MCP_STREAMABLE_HTTP_URL` | Hosted SDK StreamableHTTP endpoint URL | Deployment metadata | StreamableHTTP soak |
+| `MNEMOSYNE_PROD_OPERATOR_NAME` | Human operator display name | Release metadata | operator attestation |
+| `MNEMOSYNE_PROD_OPERATOR_USER` | Human operator account id | Release metadata | operator attestation |
+| `MNEMOSYNE_PROD_RECOMPUTE_CID` | Production evidence CID for recompute probe | Prior production ingestion evidence | projection recompute gate |
+| `MNEMOSYNE_PROD_TENANT` | Production tenant id used for evidence capture | Deployment metadata | tenant-scoped production checks |
+| `MNEMOSYNE_PROD_TLS_HOSTNAME` | Production TLS hostname | Certificate/deployment metadata | TLS gates |
+| `MNEMOSYNE_PROD_TLS_URL` | Production TLS endpoint URL | Certificate/deployment metadata | TLS gates |
+
 ## Environment Catalog
 
 | Variable or option | Purpose | Source | Consumed by |
