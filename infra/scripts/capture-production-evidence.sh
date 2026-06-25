@@ -148,6 +148,7 @@ export MANIFEST_PATH OUT_ROOT REPO_DIR STARTED_AT PREFLIGHT_ONLY
 
 "${PYTHON}" - <<'PY'
 import json
+import hashlib
 import os
 import re
 import shutil
@@ -226,6 +227,7 @@ if not isinstance(checks, list) or not checks:
 commands: set[str] = set()
 command_list: list[str] = []
 required_artifacts: dict[str, dict[str, object]] = {}
+artifact_occurrences: list[dict[str, object]] = []
 sensitive_options = {
     "--auth-token",
     "--idp-token",
@@ -266,7 +268,14 @@ def _looks_like_file_path(value: str) -> bool:
         "dashboard-package",
     }
 
-def _validate_external_file_path(value: str, *, label: str) -> None:
+def _validate_external_file_path(
+    value: str,
+    *,
+    check_index: int,
+    field: str,
+    value_index: int,
+    label: str,
+) -> None:
     if not _looks_like_file_path(value):
         return
     path = Path(value).expanduser()
@@ -285,6 +294,15 @@ def _validate_external_file_path(value: str, *, label: str) -> None:
             },
         )
         artifact["labels"].append(label)
+        artifact_occurrences.append(
+            {
+                "path": str(resolved),
+                "check_index": check_index,
+                "field": field,
+                "value_index": value_index,
+                "label": label,
+            }
+        )
         return
     errors.append(f"{label} points inside the repository: {resolved}; use an external custody path")
 
@@ -303,13 +321,19 @@ for index, check in enumerate(checks, start=1):
         if not isinstance(values, list) or not all(isinstance(v, str) for v in values):
             errors.append(f"checks[{index}].{field} must be an array of strings")
             continue
-        for value in values:
+        for value_index, value in enumerate(values):
             if value in sensitive_options:
                 errors.append(
                     f"checks[{index}].{field} contains secret-bearing option {value}; "
                     "use environment, files, or command providers instead"
                 )
-            _validate_external_file_path(value, label=f"checks[{index}].{field}")
+            _validate_external_file_path(
+                value,
+                check_index=index - 1,
+                field=field,
+                value_index=value_index,
+                label=f"checks[{index}].{field}",
+            )
 
 required_commands = set(PRODUCTION_RELEASE_REQUIRED_COMMANDS)
 missing = sorted(required_commands - commands)
@@ -377,11 +401,125 @@ if input_skipped:
     )
     sys.exit(65)
 
+def _artifact_snapshot_name(index: int, source_path: Path) -> str:
+    safe_name = re.sub(r"[^A-Za-z0-9._-]+", "-", source_path.name).strip("-")
+    if not safe_name:
+        safe_name = "artifact"
+    return f"{index:04d}-{safe_name}"
+
+def _sha256_path(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return "sha256:" + digest.hexdigest()
+
+def _snapshot_file_entries(original_root: Path, snapshot_root: Path) -> list[dict[str, object]]:
+    if snapshot_root.is_symlink():
+        return []
+    if snapshot_root.is_file():
+        return [
+            {
+                "source_path": str(original_root.resolve(strict=True)),
+                "snapshot_path": str(snapshot_root.resolve(strict=True)),
+                "relative_path": snapshot_root.name,
+                "size_bytes": snapshot_root.stat().st_size,
+                "sha256": _sha256_path(snapshot_root),
+            }
+        ]
+    files: list[dict[str, object]] = []
+    for snapshot_file in sorted(path for path in snapshot_root.rglob("*") if path.is_file()):
+        if snapshot_file.is_symlink():
+            continue
+        relative = snapshot_file.relative_to(snapshot_root)
+        source_file = original_root / relative
+        files.append(
+            {
+                "source_path": str(source_file.resolve(strict=True)),
+                "snapshot_path": str(snapshot_file.resolve(strict=True)),
+                "relative_path": relative.as_posix(),
+                "size_bytes": snapshot_file.stat().st_size,
+                "sha256": _sha256_path(snapshot_file),
+            }
+        )
+    return files
+
 out_root.mkdir(parents=True, exist_ok=True)
 out_root.chmod(0o700)
-shutil.copyfile(manifest_path, out_root / "operator-soak-manifest.json")
+snapshot_root = out_root / "input-artifacts"
+snapshot_root.mkdir(mode=0o700, exist_ok=True)
+artifact_metadata: list[dict[str, object]] = []
+path_rewrites: dict[str, str] = {}
+for artifact_index, artifact in enumerate(
+    sorted(required_artifacts.values(), key=lambda item: str(item["path"])),
+    start=1,
+):
+    source_path = Path(str(artifact["path"]))
+    snapshot_path = snapshot_root / _artifact_snapshot_name(artifact_index, source_path)
+    if source_path.is_dir():
+        shutil.copytree(source_path, snapshot_path, symlinks=True)
+        kind = "directory"
+    else:
+        snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source_path, snapshot_path, follow_symlinks=False)
+        kind = "file"
+    if not snapshot_path.is_symlink():
+        snapshot_path.chmod(0o600 if snapshot_path.is_file() else 0o700)
+    path_rewrites[str(source_path.resolve(strict=False))] = str(snapshot_path.resolve(strict=True))
+    artifact_metadata.append(
+        {
+            "path": str(source_path.resolve(strict=True)),
+            "snapshot_path": str(snapshot_path.resolve(strict=True)),
+            "kind": kind,
+            "labels": sorted(set(str(label) for label in artifact["labels"])),
+            "files": _snapshot_file_entries(source_path, snapshot_path),
+        }
+    )
+
+snapshot_scan = scan_evidence_paths(
+    [Path(str(artifact["snapshot_path"])) for artifact in artifact_metadata],
+    scope="preflight-input-snapshots",
+    forbidden_roots=[repo_dir],
+    reject_symlinks=True,
+)
+snapshot_findings = snapshot_scan.get("findings", [])
+snapshot_skipped = snapshot_scan.get("skipped_files", [])
+if snapshot_findings:
+    print(
+        "ERROR: high-confidence secret material found in staged production input artifacts:",
+        file=sys.stderr,
+    )
+    for finding in snapshot_findings:
+        print(
+            f"  - {finding['source']}:{finding['line']} {finding['kind']}",
+            file=sys.stderr,
+        )
+    sys.exit(65)
+if snapshot_skipped:
+    print(
+        "ERROR: staged production input artifacts include unscanned files:",
+        file=sys.stderr,
+    )
+    for skipped in snapshot_skipped:
+        print(f"  - {skipped['path']}: {skipped['reason']}", file=sys.stderr)
+    sys.exit(65)
+
+for occurrence in artifact_occurrences:
+    check = checks[int(occurrence["check_index"])]
+    values = check[str(occurrence["field"])]
+    original_path = str(Path(str(occurrence["path"])).resolve(strict=False))
+    values[int(occurrence["value_index"])] = path_rewrites[original_path]
+
+(out_root / "source-soak-manifest.json").write_text(
+    manifest_text,
+    encoding="utf-8",
+)
+(out_root / "operator-soak-manifest.json").write_text(
+    json.dumps(manifest, indent=2, sort_keys=True),
+    encoding="utf-8",
+)
 redaction_scan_path = out_root / "redaction-scan.json"
-preflight_scanned_files = [str(manifest_path)] + list(input_scan.get("scanned_files", []))
+preflight_scanned_files = [str(manifest_path)] + list(snapshot_scan.get("scanned_files", []))
 write_redaction_scan(
     redaction_scan_path,
     scope="preflight",
@@ -393,18 +531,13 @@ preflight = {
     "ok": True,
     "preflight_only": os.environ.get("PREFLIGHT_ONLY") == "1",
     "source_manifest": str(manifest_path),
+    "source_manifest_copy": str(out_root / "source-soak-manifest.json"),
     "copied_manifest": str(out_root / "operator-soak-manifest.json"),
     "redaction_scan": str(redaction_scan_path),
     "started_at": os.environ["STARTED_AT"],
     "required_commands": list(PRODUCTION_RELEASE_REQUIRED_COMMANDS),
     "provided_commands": sorted(commands),
-    "required_input_artifacts": [
-        {
-            "path": str(artifact["path"]),
-            "labels": sorted(set(str(label) for label in artifact["labels"])),
-        }
-        for artifact in sorted(required_artifacts.values(), key=lambda item: str(item["path"]))
-    ],
+    "required_input_artifacts": artifact_metadata,
 }
 (out_root / "preflight.json").write_text(json.dumps(preflight, indent=2), encoding="utf-8")
 PY

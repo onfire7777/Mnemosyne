@@ -15,7 +15,7 @@ This runbook is the operator handoff for flipping the remaining Tier B parity ro
   - `validation_scope.operator_asserted: true`
 - The manifest must include the exact production release profile: every command in the current 28-command set from `src/mnemosyne/cli.py`, with no duplicate or unknown commands.
 - The output root must be new or empty and outside this repository. The wrapper rejects repo-local or non-empty output directories so stale artifacts cannot enter a production bundle.
-- Every manifest-referenced production input artifact must already exist at an absolute external path before preflight. The wrapper inventories those paths in `preflight.json`, recursively scans referenced directories, and fails closed on missing, symlinked, secret-shaped, non-UTF-8, or over-limit input artifacts.
+- Every manifest-referenced production input artifact must already exist at an absolute external path before preflight. The wrapper inventories those paths in `preflight.json`, recursively scans referenced directories, and fails closed on missing, symlinked, secret-shaped, non-UTF-8, or over-limit input artifacts. Accepted inputs are snapshotted under `OUT_ROOT/input-artifacts/` with per-file size and SHA-256 metadata, and the copied operator manifest is rewritten to use those immutable snapshots so later mutation of the external source paths cannot change the capture inputs.
 
 ## Capture
 
@@ -43,12 +43,14 @@ The `--preflight-only` command validates production scope, exact command
 coverage, absence of unresolved placeholders, absence of secret-bearing CLI
 options, absolute external custody paths for production input artifacts,
 existence of manifest-referenced input artifacts, and a high-confidence
-redaction scan over the rendered manifest plus those referenced inputs. It writes
-`preflight.json`, `redaction-scan.json`, and a copied operator manifest, then
-exits before `deployment-soak` or `release-audit` runs. Full capture executes
-that copied operator manifest from `OUT_ROOT`, not the mutable source path. A
-passing preflight is setup proof only; it does not flip any strict-audit row to
-Done.
+redaction scan over the rendered manifest plus staged snapshots of those
+referenced inputs. It writes `preflight.json`, `redaction-scan.json`, a
+`source-soak-manifest.json` copy of the rendered source manifest, and a copied
+operator manifest whose artifact arguments point at `OUT_ROOT/input-artifacts/`
+snapshots. It then exits before `deployment-soak` or `release-audit` runs. Full
+capture executes that copied operator manifest from `OUT_ROOT`, not the mutable
+source path. A passing preflight is setup proof only; it does not flip any
+strict-audit row to Done.
 
 The wrapper performs these steps:
 
