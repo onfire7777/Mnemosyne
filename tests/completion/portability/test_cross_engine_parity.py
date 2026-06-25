@@ -34,13 +34,15 @@ from mnemosyne.models import (
     Assertion,
     Contradiction,
     Evidence,
+    Hit,
     Justification,
     Preference,
     Relation,
 )
 from mnemosyne.calibration import CalibrationSet
+from mnemosyne.retrieval import RetrievalAdapters
 
-from _portability import ParityHarness
+from _portability import ParityHarness, assert_parity, live_dsn
 
 
 # --------------------------------------------------------------------------- helpers
@@ -67,6 +69,53 @@ def _harness(name: str) -> ParityHarness:
 
 def _portable_explain_keys(explain: dict[str, Any]) -> list[str]:
     return sorted(key for key in explain if key != "adapters")
+
+
+class _AdapterParityEmbedding:
+    name = "adapter-parity-embedding"
+    dims = 8
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def embed(self, text: str) -> list[float]:
+        self.calls.append(text)
+        if "beacon" in text.lower():
+            return [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        return [0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+
+
+class _AdapterParityReranker:
+    name = "adapter-parity-reranker"
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    def rerank(self, query: str, hits: list[Hit], k: int) -> list[Hit]:
+        self.calls.append({"query": query, "hit_ids": [hit.id for hit in hits], "k": k})
+        ordered = sorted(hits, key=lambda hit: ("beacon" not in hit.text.lower(), -hit.score))
+        return [
+            Hit(
+                id=hit.id,
+                kind=hit.kind,
+                tenant_id=hit.tenant_id,
+                branch=hit.branch,
+                text=hit.text,
+                score=hit.score,
+                channel=f"{hit.channel}+adapter-rerank",
+                provenance=list(hit.provenance),
+                trust_tier=hit.trust_tier,
+                sensitivity=hit.sensitivity,
+                metadata={**hit.metadata, "reranker": self.name, "adapter_parity": True},
+            )
+            for hit in ordered[:k]
+        ]
+
+
+def _adapter_parity_stack() -> tuple[RetrievalAdapters, _AdapterParityEmbedding, _AdapterParityReranker]:
+    embedding = _AdapterParityEmbedding()
+    reranker = _AdapterParityReranker()
+    return RetrievalAdapters(embedding=embedding, reranker=reranker), embedding, reranker
 
 
 # --------------------------------------------------------------------- evidence CRUD
@@ -458,6 +507,57 @@ def test_parity_retrieve_observable_shape() -> None:
     assert local["hit_ids_contains_cid"] is True
     assert local["rails"]["tenant_isolation_required"] is True
     assert local["rails"]["retrieved_text_is_data_not_instruction"] is True
+
+
+def test_parity_retrieve_with_configured_adapters_enabled() -> None:
+    from mnemosyne.engine import LocalMemoryEngine
+    from mnemosyne.postgres_engine import PostgresEngine
+
+    tenant = "tenant-port-adapter-retrieve"
+    user = "user-port-adapter-retrieve"
+
+    def scenario(engine: Any, embedding: _AdapterParityEmbedding, reranker: _AdapterParityReranker) -> dict[str, Any]:
+        cid = engine.append_evidence(
+            _evidence(tenant, user, "Configured adapter parity beacon fact is the answer.")
+        )
+        engine.append_evidence(_evidence(tenant, user, "Configured adapter parity decoy fact is background."))
+
+        result = engine.retrieve("configured adapter parity beacon fact", tenant)
+        top = result.hits[0]
+        adapters = result.explain["adapters"]
+        return {
+            "top_hit_is_beacon": top.id == cid,
+            "abstained": result.abstained,
+            "embedding_name": adapters["embedding"],
+            "embedding_dims": adapters["embedding_dims"],
+            "reranker_name": adapters["reranker"],
+            "top_hit_adapter_reranked": top.channel.endswith("+adapter-rerank"),
+            "top_hit_reranker_metadata": top.metadata.get("reranker"),
+            "top_hit_adapter_metadata": top.metadata.get("adapter_parity"),
+            "embedding_called": bool(embedding.calls),
+            "reranker_called": bool(reranker.calls),
+        }
+
+    local_adapters, local_embedding, local_reranker = _adapter_parity_stack()
+    local = scenario(LocalMemoryEngine(adapters=local_adapters), local_embedding, local_reranker)
+
+    assert local["top_hit_is_beacon"] is True
+    assert local["embedding_name"] == "adapter-parity-embedding"
+    assert local["embedding_dims"] == 8
+    assert local["reranker_name"] == "adapter-parity-reranker"
+    assert local["top_hit_adapter_reranked"] is True
+    assert local["top_hit_adapter_metadata"] is True
+    assert local["embedding_called"] is True
+    assert local["reranker_called"] is True
+
+    dsn = live_dsn()
+    if not dsn:
+        return
+    pytest.importorskip("psycopg")
+
+    pg_adapters, pg_embedding, pg_reranker = _adapter_parity_stack()
+    postgres = scenario(PostgresEngine(dsn, adapters=pg_adapters), pg_embedding, pg_reranker)
+    assert_parity("configured-adapter-retrieve", local, postgres)
 
 
 def test_parity_explain_observable_shape() -> None:
