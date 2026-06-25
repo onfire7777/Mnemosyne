@@ -103,7 +103,7 @@ This is the **bulk of the remaining percentage** and the universal blocker on al
 1. **Run the production real-infra evidence pass (Tier B).** The local `infra/` stack, compose Postgres suite, belief-revision check, and local hosted-MCP soaks now pass. Next bring up production-equivalent Postgres+ParadeDB+AGE+pgvector plus real embedding/reranker/model endpoints, copy/fill `infra/templates/production-render.env.example` outside the repo, set `MNEMOSYNE_PROD_EVIDENCE_DIR` to an absolute external input-artifact path, render the external production soak manifest with `infra/scripts/render-production-soak-manifest.sh`, then run the `*-ops-check` / `provider-check` / `release-audit --require-production-validated --require-provider-forbid-local` captures through `infra/scripts/capture-production-evidence.sh` with absolute external preflight/capture output roots. After capture, run `production-evidence-verify` with the retained `summary.json` `bundle_fingerprint` to recheck chain-of-custody offline. The operator capture is what flips the 10 parity rows Partial→Done; the offline verifier only confirms the captured bundle stayed intact.
 2. **Close any strict-audit leftovers found during the evidence pass.** The mandatory Tier A source wirings A1/A2/A3/A4/A5/A6/A7/A8/A9/A10/A13/A14 are now closed.
 3. **Review optional A11 only if the v1.0 bar requires hosted transport code beyond operator evidence.** A12 is now closed locally; A11 remains primarily hosted-endpoint evidence.
-4. **Re-run the parity audit and sign off v1.0.** A11/B8 + Tier C are optional polish beyond the v1.0 bar unless production evidence exposes a concrete code gap.
+4. **Re-run the parity audit and sign off v1.0.** B8/FR-21 remains required Tier-B operator evidence until the strict audit row flips; only A11 hosted-transport code polish and Tier C are optional beyond the v1.0 bar unless production evidence exposes a concrete code gap.
 
 ---
 
@@ -114,7 +114,7 @@ This is the **bulk of the remaining percentage** and the universal blocker on al
 | **Now** (after Tier A + Lane G local readiness + manifest/custody hardening) | **~82%** | Mandatory source wirings are closed, 6/6 SLOs are proven, the full compose-Postgres suite is green, local hosted-MCP soaks pass, local real-service evidence now passes through `deployment-soak`/scoped `release-audit`, production manifest rendering/capture preflight is fail-closed with a blank no-secret env template, and completed production bundles can be rechecked offline with `production-evidence-verify`; production parity still remains blocked by missing operator-captured production evidence |
 | After **Tier A** (code wirings) | **~82%+** | Reached for mandatory source wirings; A12 cached PPR is now closed locally; A11 remains review-only unless v1.0 parity audit demands hosted transport code |
 | After **Tier B** (real-infra evidence) | **~97%** | 10 audit rows flip Partial→Done |
-| After **Tier C** + sign-off | **100%** | multimodal/LoRA (optional) + v1.0 attestation |
+| After **Tier C** + sign-off | **100%** | post-evidence multimodal/LoRA polish + v1.0 attestation |
 
 ---
 
