@@ -111,6 +111,7 @@ cp infra/templates/production-render.env.example \
 set -a
 . /secure/path/to/production-render.env
 set +a
+infra/scripts/render-production-soak-manifest.sh --check-environment
 infra/scripts/render-production-soak-manifest.sh \
   --output /secure/path/to/production-soak-manifest.json
 infra/scripts/capture-production-evidence.sh \

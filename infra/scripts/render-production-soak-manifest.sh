@@ -7,6 +7,7 @@ usage() {
 Usage:
   infra/scripts/render-production-soak-manifest.sh --output OUT [--template TEMPLATE] [--force]
   infra/scripts/render-production-soak-manifest.sh --list-placeholders [--template TEMPLATE]
+  infra/scripts/render-production-soak-manifest.sh --check-environment [--template TEMPLATE]
 
 Renders infra/templates/production-soak-manifest.template.json by replacing every
 MNEMOSYNE_PROD_* placeholder from the current environment. The rendered manifest
@@ -16,10 +17,11 @@ command providers; do not put raw secrets in MNEMOSYNE_PROD_* placeholders.
 
 Options:
   --template PATH       Template path. Defaults to infra/templates/production-soak-manifest.template.json.
-  --output PATH         Destination manifest path. Required unless --list-placeholders is used.
+  --output PATH         Destination manifest path. Required unless --list-placeholders or --check-environment is used.
   --force              Overwrite OUT if it already exists.
   --allow-repo-output  Permit writing OUT inside this repository. Default is to refuse.
   --list-placeholders  Print required MNEMOSYNE_PROD_* placeholder names as JSON.
+  --check-environment  Validate required MNEMOSYNE_PROD_* keys without writing a manifest.
   -h, --help           Show this help text.
 USAGE
 }
@@ -33,6 +35,7 @@ OUTPUT=""
 FORCE=0
 ALLOW_REPO_OUTPUT=0
 LIST_PLACEHOLDERS=0
+CHECK_ENVIRONMENT=0
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -56,6 +59,10 @@ while [ "$#" -gt 0 ]; do
       LIST_PLACEHOLDERS=1
       shift
       ;;
+    --check-environment)
+      CHECK_ENVIRONMENT=1
+      shift
+      ;;
     -h|--help)
       usage
       exit 0
@@ -77,7 +84,7 @@ if [ -z "${PYTHON}" ]; then
   fi
 fi
 
-export TEMPLATE OUTPUT FORCE ALLOW_REPO_OUTPUT LIST_PLACEHOLDERS REPO_DIR
+export TEMPLATE OUTPUT FORCE ALLOW_REPO_OUTPUT LIST_PLACEHOLDERS CHECK_ENVIRONMENT REPO_DIR
 
 "${PYTHON}" - <<'PY'
 import json
@@ -97,6 +104,7 @@ output_raw = os.environ.get("OUTPUT", "")
 force = os.environ.get("FORCE") == "1"
 allow_repo_output = os.environ.get("ALLOW_REPO_OUTPUT") == "1"
 list_placeholders = os.environ.get("LIST_PLACEHOLDERS") == "1"
+check_environment = os.environ.get("CHECK_ENVIRONMENT") == "1"
 placeholder_re = re.compile(r"MNEMOSYNE_PROD_[A-Z0-9_]+")
 
 if not template_path.is_file():
@@ -110,30 +118,45 @@ if list_placeholders:
     print(json.dumps({"template": str(template_path), "placeholders": required}, indent=2))
     raise SystemExit(0)
 
-if not output_raw:
-    print("ERROR: --output is required unless --list-placeholders is used", file=sys.stderr)
-    raise SystemExit(64)
-
-output_path = Path(output_raw).expanduser().resolve()
-try:
-    output_path.relative_to(repo_dir)
-    inside_repo = True
-except ValueError:
-    inside_repo = False
-
-if inside_repo and not allow_repo_output:
-    print(
-        "ERROR: refusing to write production manifest inside the repository; "
-        "choose an external path or pass --allow-repo-output",
-        file=sys.stderr,
-    )
-    raise SystemExit(73)
-
-if output_path.exists() and not force:
-    print(f"ERROR: output already exists: {output_path} (pass --force to overwrite)", file=sys.stderr)
-    raise SystemExit(73)
-
 missing = [name for name in required if not os.environ.get(name)]
+present = [name for name in required if os.environ.get(name)]
+if check_environment:
+    payload = {
+        "ok": not missing,
+        "template": str(template_path),
+        "placeholder_count": len(required),
+        "present": present,
+        "missing": missing,
+        "values_redacted": True,
+    }
+    if missing:
+        print(json.dumps(payload, indent=2))
+        raise SystemExit(78)
+
+if not check_environment:
+    if not output_raw:
+        print("ERROR: --output is required unless --list-placeholders or --check-environment is used", file=sys.stderr)
+        raise SystemExit(64)
+
+    output_path = Path(output_raw).expanduser().resolve()
+    try:
+        output_path.relative_to(repo_dir)
+        inside_repo = True
+    except ValueError:
+        inside_repo = False
+
+    if inside_repo and not allow_repo_output:
+        print(
+            "ERROR: refusing to write production manifest inside the repository; "
+            "choose an external path or pass --allow-repo-output",
+            file=sys.stderr,
+        )
+        raise SystemExit(73)
+
+    if output_path.exists() and not force:
+        print(f"ERROR: output already exists: {output_path} (pass --force to overwrite)", file=sys.stderr)
+        raise SystemExit(73)
+
 if missing:
     print("ERROR: missing required production placeholder environment variables:", file=sys.stderr)
     for name in missing:
@@ -160,6 +183,23 @@ else:
         file=sys.stderr,
     )
     raise SystemExit(78)
+
+if check_environment:
+    print(
+        json.dumps(
+            {
+                "ok": True,
+                "template": str(template_path),
+                "placeholder_count": len(required),
+                "present": present,
+                "missing": [],
+                "values_redacted": True,
+                "evidence_dir_external": True,
+            },
+            indent=2,
+        )
+    )
+    raise SystemExit(0)
 
 manifest = json.loads(template_text)
 

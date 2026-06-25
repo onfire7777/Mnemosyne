@@ -95,6 +95,46 @@ def test_renderer_requires_all_production_env_values(tmp_path: Path) -> None:
     assert "MNEMOSYNE_PROD_EVIDENCE_DIR" in proc.stderr
 
 
+def test_renderer_check_environment_reports_missing_without_output() -> None:
+    proc = subprocess.run(
+        [str(RENDERER), "--check-environment"],
+        cwd=REPO,
+        env=_renderer_base_env(),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    payload = json.loads(proc.stdout)
+
+    assert proc.returncode == 78
+    assert payload["ok"] is False
+    assert payload["values_redacted"] is True
+    assert "MNEMOSYNE_PROD_EVIDENCE_DIR" in payload["missing"]
+    assert payload["present"] == []
+    assert proc.stderr == ""
+
+
+def test_renderer_check_environment_passes_without_writing_manifest(tmp_path: Path) -> None:
+    proc = subprocess.run(
+        [str(RENDERER), "--check-environment"],
+        cwd=REPO,
+        env=_filled_render_env(tmp_path),
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    payload = json.loads(proc.stdout)
+
+    assert payload["ok"] is True
+    assert payload["values_redacted"] is True
+    assert payload["evidence_dir_external"] is True
+    assert payload["missing"] == []
+    assert sorted(payload["present"]) == _placeholders()
+    assert not list(tmp_path.glob("*.json"))
+
+
 def test_renderer_refuses_repo_local_output() -> None:
     proc = subprocess.run(
         [str(RENDERER), "--output", str(REPO / "production-soak-manifest.json")],

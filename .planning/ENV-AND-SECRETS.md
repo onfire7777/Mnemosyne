@@ -10,6 +10,7 @@ material.
 Use `infra/templates/production-soak-manifest.template.json` as the command
 shape. Copy `infra/templates/production-render.env.example` outside the
 repository, fill the blank non-secret values there, then render with
+`infra/scripts/render-production-soak-manifest.sh --check-environment` and
 `infra/scripts/render-production-soak-manifest.sh --output /secure/path/to/production-soak-manifest.json`
 before running `infra/scripts/capture-production-evidence.sh`.
 
