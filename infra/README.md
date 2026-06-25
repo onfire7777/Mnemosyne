@@ -125,12 +125,13 @@ profile before writing the manifest. The runner is intentionally fail-closed. It
 refuses manifests unless `validation_scope.production_validated=true`,
 `validation_scope.target_environment="production"`, and
 `validation_scope.operator_asserted=true`; rejects unresolved production
-placeholders; and requires the full production release command profile before
-running `deployment-soak --evidence-dir` followed by
+placeholders, secret-bearing CLI options, and high-confidence secret material;
+and requires the full production release command profile before running
+`deployment-soak --evidence-dir` followed by
 `release-audit --require-production-validated --require-provider-forbid-local`.
 Use `--preflight-only` to validate and copy the rendered manifest without
-running production checks; preflight output is setup proof only, not production
-parity evidence.
+running production checks; preflight output plus `redaction-scan.json` is setup
+proof only, not production parity evidence.
 Put secrets in environment variables, files, or command-backed providers, not
 in manifest `args`.
 

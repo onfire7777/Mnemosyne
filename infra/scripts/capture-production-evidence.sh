@@ -94,6 +94,11 @@ sys.path.insert(0, str(repo_dir / "src"))
 from mnemosyne.cli import (  # noqa: E402
     PRODUCTION_RELEASE_REQUIRED_COMMANDS,
 )
+from mnemosyne.evidence_redaction import (  # noqa: E402
+    redaction_findings,
+    write_redaction_scan,
+)
+
 
 manifest_path = Path(os.environ["MANIFEST_PATH"])
 out_root = Path(os.environ["OUT_ROOT"])
@@ -109,6 +114,24 @@ if unresolved_placeholders or "MNEMOSYNE_PROD_" in manifest_text:
     print(
         "Render the template with infra/scripts/render-production-soak-manifest.sh "
         "before capture.",
+        file=sys.stderr,
+    )
+    sys.exit(65)
+
+manifest_findings = redaction_findings(str(manifest_path), manifest_text)
+if manifest_findings:
+    print(
+        "ERROR: high-confidence secret material found in the production soak manifest:",
+        file=sys.stderr,
+    )
+    for finding in manifest_findings:
+        print(
+            f"  - {finding['source']}:{finding['line']} {finding['kind']}",
+            file=sys.stderr,
+        )
+    print(
+        "Redact the manifest or move secrets to environment, files, or command "
+        "providers before capture.",
         file=sys.stderr,
     )
     sys.exit(65)
@@ -178,11 +201,19 @@ if errors:
 
 out_root.mkdir(parents=True, exist_ok=True)
 shutil.copyfile(manifest_path, out_root / "operator-soak-manifest.json")
+redaction_scan_path = out_root / "redaction-scan.json"
+write_redaction_scan(
+    redaction_scan_path,
+    scope="preflight",
+    scanned_files=[str(manifest_path)],
+    findings=[],
+)
 preflight = {
     "ok": True,
     "preflight_only": os.environ.get("PREFLIGHT_ONLY") == "1",
     "source_manifest": str(manifest_path),
     "copied_manifest": str(out_root / "operator-soak-manifest.json"),
+    "redaction_scan": str(redaction_scan_path),
     "started_at": os.environ["STARTED_AT"],
     "required_commands": list(PRODUCTION_RELEASE_REQUIRED_COMMANDS),
     "provided_commands": sorted(commands),
@@ -221,15 +252,46 @@ fi
 "${PYTHON}" - <<'PY'
 import json
 import os
+import sys
 from pathlib import Path
+
+repo_dir = Path(os.environ["REPO_DIR"])
+sys.path.insert(0, str(repo_dir / "src"))
+
+from mnemosyne.evidence_redaction import scan_evidence_tree  # noqa: E402
+
 
 out_root = Path(os.environ["OUT_ROOT"])
 soak = json.loads((out_root / "deployment-soak.stdout.json").read_text(encoding="utf-8"))
 audit = json.loads((out_root / "release-audit.json").read_text(encoding="utf-8"))
+redaction_scan = scan_evidence_tree(out_root)
+(out_root / "redaction-scan.json").write_text(
+    json.dumps(redaction_scan, indent=2),
+    encoding="utf-8",
+)
+if not redaction_scan["ok"]:
+    print(
+        "ERROR: high-confidence secret material found in the production evidence bundle:",
+        file=sys.stderr,
+    )
+    for finding in redaction_scan["findings"]:
+        print(
+            f"  - {finding['source']}:{finding['line']} {finding['kind']}",
+            file=sys.stderr,
+        )
+    print(
+        "Do not publish this bundle. Redact the affected file or move the secret "
+        "to environment, files, or command providers and rerun capture.",
+        file=sys.stderr,
+    )
+    sys.exit(65)
+
 summary = {
     "out_root": str(out_root),
     "operator_manifest": str(out_root / "operator-soak-manifest.json"),
     "evidence_manifest": str(out_root / "evidence/manifest.json"),
+    "redaction_scan": str(out_root / "redaction-scan.json"),
+    "redaction_scan_ok": redaction_scan["ok"],
     "deployment_soak_ok": soak.get("ok") is True,
     "release_audit_ok": audit.get("ok") is True,
     "release_audit_fingerprint": audit.get("fingerprint"),
