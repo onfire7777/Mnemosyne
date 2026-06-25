@@ -327,7 +327,7 @@ cd "${REPO_DIR}"
 "${PYTHON}" -m mnemosyne.cli \
   --store "${OUT_ROOT}/store.json" \
   deployment-soak \
-  --soak-manifest "${MANIFEST_PATH}" \
+  --soak-manifest "${OUT_ROOT}/operator-soak-manifest.json" \
   --evidence-dir "${OUT_ROOT}/evidence" \
   --check-timeout "${MNEMOSYNE_PRODUCTION_SOAK_CHECK_TIMEOUT:-120}" \
   > "${OUT_ROOT}/deployment-soak.stdout.json"

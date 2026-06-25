@@ -38,6 +38,7 @@ render the production soak manifest to `SOAK_MANIFEST`, run
 as setup proof only, then run
 `infra/scripts/capture-production-evidence.sh "$SOAK_MANIFEST" "$OUT_ROOT"` for the real
 `deployment-soak` + `release-audit` capture. The preflight output does not flip this row to Done.
+Use absolute external paths outside the repo for `SOAK_MANIFEST`, `PREFLIGHT_OUT_ROOT`, `OUT_ROOT`, and the `MNEMOSYNE_PROD_EVIDENCE_DIR` input-artifact directory.
 After capture, reviewers may run `"$PYTHON" -m mnemosyne.cli production-evidence-verify` with the retained
 `summary.json` `bundle_fingerprint`; this is custody review only and does not
 flip this row.
