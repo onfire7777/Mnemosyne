@@ -1375,9 +1375,36 @@ def test_postgres_cli_ingests_file_with_c2pa_verifier(tmp_path) -> None:
     assert search["hits"][0]["id"] == ingested["cid"]
 
 
-def test_postgres_media_extract_job_appends_searchable_derived_evidence_live(tmp_path) -> None:
+@pytest.mark.parametrize(
+    ("modality", "media_type", "payload", "source_type", "derived_text"),
+    [
+        ("image", "image/png", b"\x89PNG postgres-image-bytes", "camera", "Image OCR says quarterly planning moved."),
+        (
+            "audio",
+            "audio/wav",
+            b"RIFF postgres-audio-bytes",
+            "microphone",
+            "Audio transcript says quarterly planning moved.",
+        ),
+        (
+            "video",
+            "video/mp4",
+            b"\x00\x00\x00 ftyp postgres-video-bytes",
+            "screen-recording",
+            "Video caption says quarterly planning moved.",
+        ),
+    ],
+)
+def test_postgres_media_extract_job_appends_searchable_derived_evidence_live(
+    tmp_path,
+    modality: str,
+    media_type: str,
+    payload: bytes,
+    source_type: str,
+    derived_text: str,
+) -> None:
     engine = PostgresEngine(live_dsn())
-    tenant = f"tenant-media-live-{uuid4()}"
+    tenant = f"tenant-{modality}-media-live-{uuid4()}"
     user = "user-media-live"
     queue = InProcessQueue()
     object_store = LocalObjectStore(tmp_path / "objects")
@@ -1388,17 +1415,17 @@ def test_postgres_media_extract_job_appends_searchable_derived_evidence_live(tmp
             tenant_id=tenant,
             user_id=user,
             actor="user",
-            source_type="microphone",
-            data=b"postgres-audio-bytes",
-            modality="audio",
-            media_type="audio/wav",
+            source_type=source_type,
+            data=payload,
+            modality=modality,  # type: ignore[arg-type]
+            media_type=media_type,
         )
     )
     handlers = RuntimeJobHandlers(
         engine,
         queue,
         object_store=object_store,
-        media_extractor=StaticMediaExtractor("Audio transcript says quarterly planning moved."),
+        media_extractor=StaticMediaExtractor(derived_text),
     )
     worker = QueueWorker(queue, handlers.handlers())
 
@@ -1449,8 +1476,15 @@ def test_postgres_media_extract_job_appends_searchable_derived_evidence_live(tmp
 
     assert job.status == "complete"
     assert derived is not None
+    assert result.modality == modality
+    assert derived.modality == "text"
     assert derived.metadata["source_evidence_cid"] == result.cid
+    assert derived.metadata["source_modality"] == modality
+    assert derived.metadata["media_type"] == media_type
     assert derived.metadata["derived_text_sources"] == ["test_extractor"]
+    assert derived.metadata["extraction"]["media_type"] == media_type
+    assert derived.metadata["extraction"]["modality"] == modality
+    assert derived.metadata["extraction"]["bytes"] == len(payload)
     assert derived_relation["source"] == result.cid
     assert derived_relation["predicate"] == "media-derived-text"
     assert derived_relation["target"] == derived_cid
@@ -1470,11 +1504,48 @@ def test_postgres_media_extract_job_appends_searchable_derived_evidence_live(tmp
     assert set(forgotten["propagated"]["expired_relations"]) == {relation_id, derived_relation_id}
 
 
-def test_postgres_cli_ingests_raw_media_embedding_for_vector_retrieval_live(tmp_path) -> None:
-    tenant = f"tenant-raw-media-vector-live-{uuid4()}"
+@pytest.mark.parametrize(
+    ("modality", "media_type", "payload", "file_name", "source_type", "embedding_query"),
+    [
+        (
+            "image",
+            "image/png",
+            b"\x89PNG opaque raw media vector bytes",
+            "frame.png",
+            "camera",
+            "raw visual memory beacon",
+        ),
+        (
+            "audio",
+            "audio/wav",
+            b"RIFF opaque raw media vector bytes",
+            "sample.wav",
+            "microphone",
+            "raw audio memory beacon",
+        ),
+        (
+            "video",
+            "video/mp4",
+            b"\x00\x00\x00 ftyp opaque raw media vector bytes",
+            "clip.mp4",
+            "screen-recording",
+            "raw video memory beacon",
+        ),
+    ],
+)
+def test_postgres_cli_ingests_raw_media_embedding_for_vector_retrieval_live(
+    tmp_path,
+    modality: str,
+    media_type: str,
+    payload: bytes,
+    file_name: str,
+    source_type: str,
+    embedding_query: str,
+) -> None:
+    tenant = f"tenant-{modality}-raw-media-vector-live-{uuid4()}"
     user = "user-raw-media-vector-live"
-    media_path = tmp_path / "frame.png"
-    media_path.write_bytes(b"\x89PNG opaque raw media vector bytes")
+    media_path = tmp_path / file_name
+    media_path.write_bytes(payload)
     embedder = tmp_path / "media_embedder.py"
     embedder.write_text(
         "\n".join(
@@ -1482,10 +1553,13 @@ def test_postgres_cli_ingests_raw_media_embedding_for_vector_retrieval_live(tmp_
                 "import json",
                 "import sys",
                 "from mnemosyne.text import hashing_embedding",
+                f"expected_media_type = {media_type!r}",
+                f"expected_modality = {modality!r}",
+                f"embedding_query = {embedding_query!r}",
                 "request = json.load(sys.stdin)",
-                "assert request['media_type'] == 'image/png'",
-                "assert request['modality'] == 'image'",
-                "print(json.dumps({'embedding': hashing_embedding('raw visual memory beacon', dims=1024)}))",
+                "assert request['media_type'] == expected_media_type",
+                "assert request['modality'] == expected_modality",
+                "print(json.dumps({'embedding': hashing_embedding(embedding_query, dims=1024)}))",
             ]
         ),
         encoding="utf-8",
@@ -1506,13 +1580,13 @@ def test_postgres_cli_ingests_raw_media_embedding_for_vector_retrieval_live(tmp_
         "--user",
         user,
         "--source-type",
-        "camera",
+        source_type,
         "--file",
         str(media_path),
         "--modality",
-        "image",
+        modality,
         "--media-type",
-        "image/png",
+        media_type,
         "--trust-tier",
         "0",
         "--no-enqueue-consolidation",
@@ -1522,7 +1596,7 @@ def test_postgres_cli_ingests_raw_media_embedding_for_vector_retrieval_live(tmp_
         "--tenant",
         tenant,
         "--query",
-        "raw visual memory beacon",
+        embedding_query,
     )
 
     db_tenant_id = _stable_uuid("tenant", tenant)
@@ -1532,17 +1606,19 @@ def test_postgres_cli_ingests_raw_media_embedding_for_vector_retrieval_live(tmp_
             engine._set_tenant(cur, db_tenant_id)  # noqa: SLF001 - live RLS contract assertion.
             cur.execute(
                 """
-                SELECT content, embedding IS NOT NULL, metadata, capability_tags
+                SELECT content, embedding IS NOT NULL, modality, metadata, capability_tags
                 FROM evidence
                 WHERE tenant_id = %s AND branch = 'main' AND cid = %s
                 """,
                 (db_tenant_id, _cid_to_bytes(ingested["cid"])),
             )
-            content, has_embedding, metadata, capability_tags = cur.fetchone()
+            content, has_embedding, persisted_modality, metadata, capability_tags = cur.fetchone()
 
     assert ingested["content_pointer"].startswith("local-object://sha256/")
     assert content == ""
     assert has_embedding is True
+    assert persisted_modality == modality
+    assert metadata["media_type"] == media_type
     assert metadata["media_embedding"] == {
         "provider": "command-media-embedding",
         "dims": 1024,
