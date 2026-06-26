@@ -17,6 +17,11 @@ from mnemosyne.consolidation import (
     CommandProcedureInducer,
     ConsolidationWorker,
 )
+from mnemosyne.cli import (
+    DEPLOYMENT_SOAK_COMMANDS,
+    PRODUCTION_RELEASE_REQUIRED_COMMANDS,
+    RELEASE_AUDIT_REQUIRED_OUTPUT_KEYS,
+)
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.gate import GateResult, RegressionCase
 from mnemosyne.ingestion import IngestRequest, IngestionPipeline
@@ -45,6 +50,25 @@ from mnemosyne.user_model import LatentUserProfile, UserMemoryKind, UserModel, U
 
 TENANT = "tenant-runtime-extensions"
 USER = "user-runtime-extensions"
+
+
+def test_a11_hosted_mcp_local_readiness_commands_are_registered() -> None:
+    local_readiness_validators = {
+        "mcp-http-soak",
+        "mcp-streamable-http-soak",
+        "mcp-sse-soak",
+    }
+    production_evidence_commands = {
+        "mcp-http-soak",
+        "mcp-ops-check",
+        "mcp-streamable-http-soak",
+    }
+
+    assert local_readiness_validators.issubset(DEPLOYMENT_SOAK_COMMANDS)
+    assert production_evidence_commands.issubset(set(PRODUCTION_RELEASE_REQUIRED_COMMANDS))
+    assert "mcp-sse-soak" not in PRODUCTION_RELEASE_REQUIRED_COMMANDS
+    for command in production_evidence_commands:
+        assert command in RELEASE_AUDIT_REQUIRED_OUTPUT_KEYS
 
 
 class StaticMediaExtractor:
