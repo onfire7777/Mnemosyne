@@ -1,0 +1,53 @@
+{
+  "schema_version": "g0.continual_learning.dataset.v1",
+  "tenant": "g0-continual-learning",
+  "k": 3,
+  "tasks": [
+    {
+      "id": "earlier",
+      "phase": "earlier",
+      "items": [
+        {
+          "case_id": "aurora_launch_date",
+          "query": "aurora launch date",
+          "content": "Project Aurora launch date is 2031-04-05.",
+          "source_type": "task-a-note"
+        },
+        {
+          "case_id": "borealis_owner",
+          "query": "borealis owner",
+          "content": "Project Borealis owner is Mina Patel.",
+          "source_type": "task-a-note"
+        },
+        {
+          "case_id": "cerulean_budget",
+          "query": "cerulean budget",
+          "content": "Contract Cerulean budget is 74 planning units.",
+          "source_type": "task-a-note"
+        }
+      ]
+    },
+    {
+      "id": "later",
+      "phase": "later",
+      "items": [
+        {
+          "content": "Project Aurora risk review tracks launch readiness but not the committed launch date.",
+          "source_type": "task-b-note"
+        },
+        {
+          "content": "Project Borealis onboarding notes mention reviewers but do not change the owner.",
+          "source_type": "task-b-note"
+        },
+        {
+          "content": "Contract Cerulean renewal notes discuss budget controls without replacing the recorded budget.",
+          "source_type": "task-b-note"
+        },
+        {
+          "content": "Project Delta launch date is 2034-09-18 and owner is Rowan Lee.",
+          "source_type": "task-b-note"
+        }
+      ]
+    }
+  ]
+}

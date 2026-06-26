@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from eval.g0.confabulation import run_confabulation_eval
+from eval.g0.continual_learning import run_continual_learning_eval
 
 G0_METRIC_SPECS: tuple[dict[str, Any], ...] = (
     {
@@ -160,6 +161,7 @@ SOURCE_PATHS = {
 }
 
 DATASET_PATHS = (
+    "eval/datasets/continual_learning_interference.json",
     "eval/datasets/retrieval_curated.json",
     "eval/datasets/poison_suite.json",
     "eval/datasets/belief_cases.json",
@@ -197,6 +199,13 @@ def build_report(
 
     repo_root = repo_root.resolve()
     sources = _load_sources(repo_root)
+    continual_learning_report = run_continual_learning_eval()
+    sources["continual_learning_eval"] = _computed_source(
+        repo_root,
+        "continual_learning_eval",
+        "computed:eval.g0.continual_learning",
+        continual_learning_report,
+    )
     confabulation_report = run_confabulation_eval()
     sources["confabulation_eval"] = _computed_source(
         repo_root,
@@ -328,6 +337,7 @@ def _build_metric(spec: dict[str, Any], sources: dict[str, Source]) -> dict[str,
         "ece": _metric_ece,
         "abstention_precision": _metric_abstention_precision,
         "abstention_recall": _metric_abstention_recall,
+        "continual_learning_interference": _metric_continual_learning_interference,
         "confabulation_rate": _metric_confabulation_rate,
         "poison_block_rate": _metric_poison_block_rate,
         "fast_path_p95_ms": _metric_fast_path_p95,
@@ -420,6 +430,23 @@ def _metric_abstention_recall(spec: dict[str, Any], sources: dict[str, Source]) 
         "abstain_recall",
     )
     return _measured(spec, value, "calibration_report", "/conformal_report/overall/abstention/abstain_recall")
+
+
+def _metric_continual_learning_interference(
+    spec: dict[str, Any],
+    sources: dict[str, Source],
+) -> dict[str, Any]:
+    value = _source_data(sources, "continual_learning_eval", "interference")
+    return _measured(
+        spec,
+        value,
+        "continual_learning_eval",
+        "/interference",
+        note=(
+            "Measured by the G0 continual-learning fixture as the backward-transfer "
+            "accuracy drop on earlier task queries after later overlapping ingests."
+        ),
+    )
 
 
 def _metric_confabulation_rate(spec: dict[str, Any], sources: dict[str, Source]) -> dict[str, Any]:
