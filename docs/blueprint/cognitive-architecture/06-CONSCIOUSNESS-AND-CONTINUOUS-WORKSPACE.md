@@ -43,6 +43,7 @@ G0 also reports:
 - `reality_monitor_shadow_tag_contract`
 
 These are functional probes. They do not certify consciousness.
+`metacognition_meta_d_prime` and `metacognition_m_ratio` are backed by the runtime shadow `MetacognitiveMonitor`, which scores bounded confidence/outcome discrimination and abstention alignment from trace rows.
 
 ## 3. G1 Reality Monitor
 

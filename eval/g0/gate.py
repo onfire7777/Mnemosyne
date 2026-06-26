@@ -162,7 +162,10 @@ def evaluate_ablation(
         elif guard_direction == "decrease":
             passed = cand_guard_value <= base_guard_value + tolerance
         else:
-            passed = True
+            result["reason"] = f"unsupported guardrail direction {guard_direction!r}"
+            reasons.append(f"guardrail {gid!r} has unsupported direction {guard_direction!r}")
+            guardrail_results.append(result)
+            continue
         result["passed"] = passed
         result["reason"] = "ok" if passed else "regressed beyond tolerance"
         if not passed:

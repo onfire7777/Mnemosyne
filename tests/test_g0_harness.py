@@ -310,7 +310,42 @@ def test_ablation_gate_fails_guardrail_regression_and_missing_metrics() -> None:
     assert any("confabulation_rate" in reason for reason in decision.reasons)
 
 
+def test_ablation_gate_fails_unknown_guardrail_direction() -> None:
+    baseline = _report(
+        [
+            _metric("recall_at_k", 0.80, cls="target", direction="increase"),
+            _metric("custom_guardrail", 0.50, cls="guardrail", direction="sideways"),
+        ]
+    )
+    candidate = _report(
+        [
+            _metric("recall_at_k", 0.83, cls="target", direction="increase"),
+            _metric("custom_guardrail", 0.50, cls="guardrail", direction="sideways"),
+        ]
+    )
+
+    decision = evaluate_ablation(
+        baseline,
+        candidate,
+        {
+            "change_id": "invalid-guardrail-direction-test",
+            "target_metric": "recall_at_k",
+            "minimum_delta": 0.02,
+        },
+    )
+
+    assert decision.passed is False
+    assert any("unsupported direction" in reason for reason in decision.reasons)
+
+
 def test_committed_g0_preregistrations_have_passing_decisions() -> None:
+    def target_delta_satisfies(direction: str, target_delta: float, minimum_delta: float) -> bool:
+        if direction == "increase":
+            return target_delta >= minimum_delta
+        if direction == "decrease":
+            return target_delta <= -minimum_delta
+        return False
+
     decision_log = REPO_ROOT / "eval/g0/decision-log.jsonl"
     decisions = [
         json.loads(line)
@@ -331,7 +366,11 @@ def test_committed_g0_preregistrations_have_passing_decisions() -> None:
             decision
             for decision in passed_by_change.get(change_id, [])
             if decision.get("target_metric") == target_metric
-            and float(decision.get("target_delta") or 0.0) >= minimum_delta
+            and target_delta_satisfies(
+                str(prereg.get("direction", "increase")),
+                float(decision.get("target_delta") or 0.0),
+                minimum_delta,
+            )
         ]
         assert matching, f"{prereg_path.name} has no passing decision-log entry"
 

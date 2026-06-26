@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import Any, Literal, Sequence
 
 from .calibration import reality_monitor_confidence
 
@@ -79,6 +79,94 @@ class RealityMonitor:
         if lowered_actor == "external" or trust_tier >= 2:
             return "externally_suggested"
         return "evidence_grounded"
+
+
+@dataclass(frozen=True, slots=True)
+class MetacognitiveTrace:
+    """Shadow trace row for confidence/outcome monitoring."""
+
+    confidence: float
+    outcome_correct: bool
+    abstained: bool = False
+    answerable: bool = True
+    reality_class: RealityClass = "unknown"
+    source: str = "runtime"
+
+
+@dataclass(frozen=True, slots=True)
+class MetacognitiveScore:
+    """Bounded functional metacognition score for G0/G1 guardrails."""
+
+    meta_d_prime: float
+    m_ratio: float
+    discrimination_auc: float
+    abstention_alignment: float
+    task_accuracy: float
+    rows: tuple[dict[str, Any], ...]
+
+
+@dataclass(slots=True)
+class MetacognitiveMonitor:
+    """Runtime shadow monitor for confidence/outcome calibration traces.
+
+    The score is a bounded functional proxy, not a clinical or subjective
+    consciousness claim. It measures whether higher confidence tracks correct
+    outcomes and whether abstention choices align with answerability.
+    """
+
+    traces: list[MetacognitiveTrace] = field(default_factory=list)
+
+    def observe(
+        self,
+        *,
+        confidence: float,
+        outcome_correct: bool,
+        abstained: bool = False,
+        answerable: bool = True,
+        reality_class: RealityClass = "unknown",
+        source: str = "runtime",
+    ) -> MetacognitiveTrace:
+        trace = MetacognitiveTrace(
+            confidence=_clamp01(confidence),
+            outcome_correct=bool(outcome_correct),
+            abstained=bool(abstained),
+            answerable=bool(answerable),
+            reality_class=_normalise_reality_class(reality_class) or "unknown",
+            source=source,
+        )
+        self.traces.append(trace)
+        return trace
+
+    def score(self, traces: Sequence[MetacognitiveTrace] | None = None) -> MetacognitiveScore:
+        rows = tuple(traces if traces is not None else self.traces)
+        if not rows:
+            return MetacognitiveScore(
+                meta_d_prime=0.0,
+                m_ratio=0.0,
+                discrimination_auc=0.5,
+                abstention_alignment=0.0,
+                task_accuracy=0.0,
+                rows=(),
+            )
+
+        correct_confidences = [row.confidence for row in rows if row.outcome_correct]
+        incorrect_confidences = [row.confidence for row in rows if not row.outcome_correct]
+        auc = _pairwise_confidence_auc(correct_confidences, incorrect_confidences)
+        meta_d_prime = round(max(0.0, (2.0 * auc) - 1.0), 6)
+        abstention_alignment = round(
+            sum(row.abstained == (not row.answerable) for row in rows) / len(rows),
+            6,
+        )
+        task_accuracy = round(sum(row.outcome_correct for row in rows) / len(rows), 6)
+        m_ratio = round(_clamp01(meta_d_prime * abstention_alignment), 6)
+        return MetacognitiveScore(
+            meta_d_prime=meta_d_prime,
+            m_ratio=m_ratio,
+            discrimination_auc=round(auc, 6),
+            abstention_alignment=abstention_alignment,
+            task_accuracy=task_accuracy,
+            rows=tuple(_trace_to_dict(row) for row in rows),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -202,6 +290,32 @@ def _normalise_reality_class(value: Any) -> RealityClass | None:
         "unknown": "unknown",
     }
     return aliases.get(lowered)  # type: ignore[return-value]
+
+
+def _pairwise_confidence_auc(correct: Sequence[float], incorrect: Sequence[float]) -> float:
+    if not correct or not incorrect:
+        return 0.5
+    wins = 0.0
+    total = 0
+    for correct_confidence in correct:
+        for incorrect_confidence in incorrect:
+            total += 1
+            if correct_confidence > incorrect_confidence:
+                wins += 1.0
+            elif correct_confidence == incorrect_confidence:
+                wins += 0.5
+    return wins / total
+
+
+def _trace_to_dict(row: MetacognitiveTrace) -> dict[str, Any]:
+    return {
+        "confidence": row.confidence,
+        "outcome_correct": row.outcome_correct,
+        "abstained": row.abstained,
+        "answerable": row.answerable,
+        "reality_class": row.reality_class,
+        "source": row.source,
+    }
 
 
 def _clamp01(value: float) -> float:

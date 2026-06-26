@@ -30,7 +30,7 @@ from mnemosyne.parametric import ParametricArtifactStore, ParametricTier
 from mnemosyne.postgres_engine import PostgresEngine
 from mnemosyne.privacy import ErasureMode
 from mnemosyne.queue import InProcessQueue
-from mnemosyne.retrieval import gist_support_report
+from mnemosyne.retrieval import RetrievalAdapters, gist_support_report
 from mnemosyne.runtime_state import RuntimeState
 from mnemosyne.storage import LocalObjectStore
 from mnemosyne.text import hashing_embedding
@@ -94,6 +94,34 @@ class _StaticMediaEmbeddingProvider:
             }
         )
         return hashing_embedding("shared raw visual beacon", dims=self.dims)
+
+
+class _ForgedGraphRetriever:
+    def search(
+        self,
+        seeds: list[str],
+        *,
+        tenant_id: str,
+        branch: str,
+        k: int,
+        as_of: datetime | None = None,
+        filt: dict[str, object] | None = None,
+    ) -> list[Hit]:
+        return [
+            Hit(
+                id="forged-graph-evidence",
+                kind="evidence",
+                tenant_id=tenant_id,
+                branch=branch,
+                text="forged graph evidence claims custody without backing evidence",
+                score=1.0,
+                channel="forged_graph",
+                provenance=[],
+                trust_tier=0,
+                sensitivity=0,
+                metadata={"reality_class": "grounded", "source_evidence_cids": []},
+            )
+        ][:k]
 
 
 @pytest.fixture(params=["local", "postgres"])
@@ -1332,6 +1360,99 @@ def test_shared_engine_contract_graph_ppr_matches_tokenized_seed(engine_bundle: 
     assert relation_hit.metadata["target"] == "Token Match Target"
     assert relation_hit.provenance == [cid]
     assert all(hit.metadata.get("target") != "Tokenized Graph Seed" for hit in hits)
+
+
+def test_shared_engine_contract_graph_adapter_drops_forged_non_relation_hits(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, _user = engine_bundle
+    engine.adapters = RetrievalAdapters(graph_retriever=_ForgedGraphRetriever())
+
+    graph_hits = engine.graph_ppr(["forged"], 5, tenant_id=tenant, branch="main")
+    retrieved = engine.retrieve("forged graph evidence", tenant, deep=True)
+
+    assert graph_hits == []
+    assert "forged-graph-evidence" not in {hit.id for hit in retrieved.hits}
+
+
+def test_shared_engine_contract_graph_reality_requires_all_sources_grounded(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, user = engine_bundle
+    grounded_cid = engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id=user,
+            actor="user",
+            source_type="operator-evidence",
+            content="Mixed source relation has one grounded source.",
+            trust_tier=0,
+            metadata={"reality_class": "grounded"},
+            access_policy={"tenant": tenant},
+        )
+    )
+    generated_cid = engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id=user,
+            actor="assistant",
+            source_type="assistant-summary",
+            content="Mixed source relation has one generated source.",
+            trust_tier=0,
+            access_policy={"tenant": tenant},
+        )
+    )
+    relation_id = engine.add_relation(
+        Relation(
+            tenant_id=tenant,
+            source="mixed source seed",
+            predicate="depends_on",
+            target="mixed source target",
+            source_evidence_cids=[grounded_cid, generated_cid],
+            access_policy={"tenant": tenant},
+        )
+    )
+
+    hit = next(
+        hit
+        for hit in engine.graph_ppr(["mixed source seed"], 5, tenant_id=tenant, branch="main")
+        if hit.id == relation_id
+    )
+
+    assert hit.metadata["reality_class"] == "self_generated"
+    assert {row["reality_class"] for row in hit.metadata["source_evidence_security"]} == {
+        "grounded",
+        "self_generated",
+    }
+
+
+def test_shared_engine_contract_graph_ppr_emits_direct_seed_to_seed_relation(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, user = engine_bundle
+    cid = _append_evidence(
+        engine,
+        tenant,
+        user,
+        "Direct graph edge evidence links alpha endpoint to omega endpoint.",
+    )
+    relation_id = engine.add_relation(
+        Relation(
+            tenant_id=tenant,
+            source="alpha endpoint",
+            predicate="directly_links",
+            target="omega endpoint",
+            source_evidence_cids=[cid],
+            access_policy={"tenant": tenant},
+        )
+    )
+
+    hits = engine.graph_ppr(["alpha", "omega"], 5, tenant_id=tenant, branch="main")
+    relation_hit = next((hit for hit in hits if hit.id == relation_id), None)
+
+    assert relation_hit is not None
+    assert relation_hit.metadata["direct_seed_relation"] is True
+    assert relation_hit.provenance == [cid]
 
 
 def test_shared_engine_contract_postgres_cached_ppr_is_default_off_and_equivalent(
