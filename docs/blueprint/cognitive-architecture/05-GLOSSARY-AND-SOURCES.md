@@ -58,6 +58,6 @@
 **Metacognition & calibration:** Fleming & Lau 2014; Moore & Healy 2008 (overconfidence); Guo et al. 2017 (calibration/ECE).
 **Consciousness & workspace:** Mashour, Roelfsema, Changeux & Dehaene 2020 (GNW); Graziano 2017 (AST); Block 1995 (access vs phenomenal); **Cogitate Consortium / Melloni et al., Nature 642:133–142, 2025** (adversarial test — neither theory vindicated).
 **Cognitive architectures / agents:** Goyal & Bengio 2022 (shared global workspace, ICLR); Sumers, Yao, Narasimhan & Griffiths 2023 (CoALA); Park et al. 2023 (Generative Agents); Packer et al. 2023 (MemGPT); Franklin et al. 2009 (LIDA).
-**Candidate evaluation benchmarks (to confirm at G0 build time):** a long‑term conversational‑memory set (LoCoMo‑style); a multi‑hop QA set (HotpotQA‑style); a continual‑learning task sequence.
+**Evaluation benchmark lane:** G0 is implemented at repo root `eval/g0/` using the existing eval lane plus project-native fixtures. External comparability sets remain candidates for future expansion where licensing and format fit: a long‑term conversational‑memory set (LoCoMo‑style), a multi‑hop QA set (HotpotQA‑style), and a continual‑learning task sequence.
 
 **System of record for Mnemosyne itself:** the `onfire7777/Mnemosyne` wiki (Architecture Overview, Memory Pipelines, Engine Internals, Data Model, Security/Provenance).

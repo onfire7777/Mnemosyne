@@ -1,12 +1,12 @@
 # 04 · G0 — Benchmark Harness Specification (the blocking first deliverable)
 
-**Status:** Draft spec · **Gate:** G0 is *blocking* — per ADR‑001 (`03`), no feature in G1–G4 ships without an ablation win measured here. **Builds on (does not duplicate):** the workspace's evaluation lane — `../Mnemosyne-Evaluation-and-Test-Plan.md` and the `../eval/` spec suite — plus the repo‑root **eval harness** (`eval/g0/` is already scaffolded · `eval/harness/` · `eval/calibration/` · `eval/run_eval.py`).
+**Status:** Implemented (`eval/g0/`) · **Gate:** G0 is *blocking* — per ADR‑001 (`03`), no feature in G1–G4 ships without an ablation win measured here. **Builds on (does not duplicate):** the workspace's evaluation lane — `../Mnemosyne-Evaluation-and-Test-Plan.md` and the `../eval/` spec suite — plus the repo‑root **eval harness** (`eval/g0/runner.py` · `eval/g0/gate.py` · `eval/g0/baselines/baseline-0.json` · `eval/g0/reports/report.json` · `eval/harness/` · `eval/calibration/` · `eval/run_eval.py`).
 
 > Why this is first. Every claim in this program — "self‑improving," "better than the brain," "complete recall" — is a hypothesis until a number moves. G0 turns the goal into instrumentation. It is deliberately built **before** any new feature so that each later layer either earns its place or is cut, automatically and cheaply.
 
 ## 0. Relationship to the existing eval lane (reuse, don't reinvent)
 
-This workspace already has a mature evaluation lane: `../Mnemosyne-Evaluation-and-Test-Plan.md` (test taxonomy §2, **metric catalog §3**, golden scenarios §4, **datasets §5**, acceptance criteria §6, tripwires §8) and the `../eval/` spec suite (`01-metrics-specification.md`, `02a/02b` catalogs, `03-dataset-and-corpora-spec.md`, `04-adversarial-security-playbook.md`, `05-harness-architecture-and-ci-gating.md`, `06-release-gate-and-tripwire-runbooks.md`). **G0 does not replace any of it.** G0 = (a) **freeze a baseline** using that harness, and (b) **add only the few program‑specific metrics** the brain comparison introduces — *confabulation/faithfulness rate*, *continual‑learning interference*, and *controller watts/\$* (for the G4 always‑on loop) — registering them in the existing metric catalog and wiring them into the existing CI gating (`eval/05`) and release‑gate runbooks (`eval/06`). Read everything below as **deltas** on that lane, not a parallel one.
+This workspace already has a mature evaluation lane: `../Mnemosyne-Evaluation-and-Test-Plan.md` (test taxonomy §2, **metric catalog §3**, golden scenarios §4, **datasets §5**, acceptance criteria §6, tripwires §8) and the `../eval/` spec suite (`01-metrics-specification.md`, `02a/02b` catalogs, `03-dataset-and-corpora-spec.md`, `04-adversarial-security-playbook.md`, `05-harness-architecture-and-ci-gating.md`, `06-release-gate-and-tripwire-runbooks.md`). **G0 does not replace any of it.** G0 = (a) **freeze a baseline** using that harness, and (b) **add only the few program‑specific metrics** the brain comparison introduces — *confabulation/faithfulness rate*, *continual‑learning interference*, paid-provider cost, and *controller watts/\$* (for the G4 always‑on loop, measured only when explicit controller power/cost telemetry is supplied) — registering them in the existing metric catalog and wiring them into the existing CI gating (`eval/05`) and release‑gate runbooks (`eval/06`). Read everything below as **deltas** on that lane, not a parallel one.
 
 ---
 
@@ -75,10 +75,10 @@ For each proposed change (a G1–G4 item):
 
 ## 8. Definition of done for G0
 
-- [ ] Harness runs reproducibly and emits `report.json` with every §2 metric.
-- [ ] `baseline‑0` recorded with pinned commit/seeds/env.
-- [ ] Adversarial/poison set wired to the poison‑block + R6 checks.
-- [ ] Gate script enforces "target‑up, guardrail‑not‑down," with pre‑registration.
-- [ ] Independently reproduce the wiki's headline SLOs (recall, nDCG, ECE, poison‑block, P95) inside this harness before citing them anywhere.
+- [x] Harness runs reproducibly and emits `report.json` with every §2 metric slot. The default local report marks `controller_watts_per_dollar` missing until an explicit telemetry artifact is supplied; `--controller-telemetry` produces a 14/14 measured report.
+- [x] `baseline‑0` recorded with pinned commit/seeds/env.
+- [x] Adversarial/poison set wired to the poison‑block + R6 checks.
+- [x] Gate script enforces "target‑up, guardrail‑not‑down," with pre‑registration.
+- [x] Independently reproduce the wiki's headline SLOs (recall, nDCG, ECE, poison‑block, P95) inside this harness before citing them anywhere.
 
 Only when this is green does G1 begin.

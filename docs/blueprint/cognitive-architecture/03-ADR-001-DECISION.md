@@ -160,7 +160,7 @@ No upgrade is accepted without moving one of these against a frozen baseline, vi
 
 Framing is **decided**: research vehicle, product‑grade verification. Sequence:
 
-- [ ] **G0 — Benchmarks first (blocking).** Harness + frozen baseline: recall@k / nDCG@k (incl. hard multi‑hop), ECE + abstention precision/recall, continual‑learning interference, confabulation rate (answers unsupported by provenance), P95 latency, controller watts/$. No feature ships without an ablation win here.
+- [x] **G0 — Benchmarks first (blocking).** Implemented at repo root `eval/g0/`: harness + frozen baseline for recall@k / nDCG@k (incl. hard multi‑hop), ECE + abstention precision/recall, continual‑learning interference, confabulation rate (answers unsupported by provenance), P95 latency, paid-provider cost, and controller watts/$ when explicit telemetry is supplied. No feature ships without an ablation win here.
 - [ ] **G1 — Reliability core.** Multi‑signal write priority; prediction‑error‑gated consolidation; reality‑monitoring tags wired to abstention; retrieval‑strengthening; schema fast‑path (`contested` for uncorroborated‑but‑congruent).
 - [ ] **G2 — Structure + generalisation.** Refactor `providers` → typed **specialist‑module registry**; advance embeddings + the fenced parametric "semantic cortex"; meta‑d′ self‑monitoring.
 - [ ] **G3 — Generative replay, sandboxed.** Low‑trust recombination, gate‑promoted only; must not raise the confabulation rate.
