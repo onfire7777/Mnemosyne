@@ -4,7 +4,9 @@ from mnemosyne.consolidation import ConsolidationWorker
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.ingestion import IngestRequest, IngestionPipeline
 from mnemosyne.models import Assertion, Evidence
+from mnemosyne.postgres_engine import PostgresEngine
 from mnemosyne.queue import InProcessQueue
+from mnemosyne.retrieval import Hit
 
 
 TENANT = "g1-tenant"
@@ -83,6 +85,26 @@ def test_g1_retrieval_strengthens_evidence_lifecycle_metadata() -> None:
     assert ev.metadata["lifecycle"]["access_count"] == 3
     assert ev.metadata["lifecycle"]["last_accessed"]
     assert ev.metadata["lifecycle"]["salience"] > 0.5
+
+
+def test_g1_postgres_read_marks_ignore_provider_local_hit_ids() -> None:
+    engine = PostgresEngine("postgresql://unused")
+    marks = engine._record_retrieval_access(  # noqa: SLF001 - regression for command adapter ids.
+        [
+            Hit(
+                id="lexical-hit-live",
+                kind="evidence",
+                tenant_id=TENANT,
+                branch="main",
+                text="command lexical retrieval reached a provider-local id",
+                score=0.91,
+                channel="command_lexical",
+                metadata={"command_retrieval": True},
+            )
+        ]
+    )
+
+    assert marks == {"assertions": 0, "evidence": 0}
 
 
 def test_g1_schema_congruent_uncorroborated_projection_is_contested() -> None:
