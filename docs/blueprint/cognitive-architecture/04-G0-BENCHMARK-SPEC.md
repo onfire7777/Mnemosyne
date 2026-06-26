@@ -6,7 +6,7 @@
 
 ## 0. Relationship to the existing eval lane (reuse, don't reinvent)
 
-This workspace already has a mature evaluation lane: `../Mnemosyne-Evaluation-and-Test-Plan.md` (test taxonomy §2, **metric catalog §3**, golden scenarios §4, **datasets §5**, acceptance criteria §6, tripwires §8) and the `../eval/` spec suite (`01-metrics-specification.md`, `02a/02b` catalogs, `03-dataset-and-corpora-spec.md`, `04-adversarial-security-playbook.md`, `05-harness-architecture-and-ci-gating.md`, `06-release-gate-and-tripwire-runbooks.md`). **G0 does not replace any of it.** G0 = (a) **freeze a baseline** using that harness, and (b) **add only the few program‑specific metrics** the brain comparison introduces — *confabulation/faithfulness rate*, *continual‑learning interference*, paid-provider cost, and *controller watts/\$* (for the G4 always‑on loop, measured only when explicit controller power/cost telemetry is supplied) — registering them in the existing metric catalog and wiring them into the existing CI gating (`eval/05`) and release‑gate runbooks (`eval/06`). Read everything below as **deltas** on that lane, not a parallel one.
+This workspace already has a mature evaluation lane: `../Mnemosyne-Evaluation-and-Test-Plan.md` (test taxonomy §2, **metric catalog §3**, golden scenarios §4, **datasets §5**, acceptance criteria §6, tripwires §8) and the `../eval/` spec suite (`01-metrics-specification.md`, `02a/02b` catalogs, `03-dataset-and-corpora-spec.md`, `04-adversarial-security-playbook.md`, `05-harness-architecture-and-ci-gating.md`, `06-release-gate-and-tripwire-runbooks.md`). **G0 does not replace any of it.** G0 = (a) **freeze a baseline** using that harness, and (b) **add only the few program‑specific metrics** the brain comparison introduces — *confabulation/faithfulness rate*, *continual‑learning interference*, paid-provider cost, *controller watts/\$* (for the G4 always‑on loop, measured only when explicit controller power/cost telemetry is supplied), and the `06` functional consciousness indicator scorecard — registering them in the existing metric catalog and wiring them into the existing CI gating (`eval/05`) and release‑gate runbooks (`eval/06`). Read everything below as **deltas** on that lane, not a parallel one.
 
 ---
 
@@ -31,6 +31,8 @@ Each metric: definition · how measured · classification (**target** = a metric
 | **fast‑path P95 latency** | 95th‑pct read latency, warm | timed query suite | Guardrail (≤ budget) |
 | **deep‑path P95 latency** | 95th‑pct multi‑hop latency | timed deep‑search suite | Reported |
 | **cost** | tokens/query and \$/1k queries; for G4, controller **watts/\$** when always‑on | instrumented run | Reported (gated at G4) |
+| **consciousness indicator scorecard** | Butlin/Long functional indicator properties RPT‑1/2, GWT‑1..4, HOT‑1..4, AST‑1, PP‑1, AE‑1/2 | architecture/probe checks in `eval/g0/consciousness.py`, scored `0/partial/1`; each indicator is an individual non‑decrease guardrail | Target + Guardrail |
+| **workspace continuity / self‑model / metacognition** | loop liveness, stream coherence, self‑model accuracy, meta‑d-prime, M-ratio | deterministic G0 probes over bounded cycle, proto-self, and reality-monitor contracts | Guardrail |
 
 Notes: `confabulation rate`, `ECE`, `abstention`, `poison‑block`, and `fast‑path P95` are **guardrails** — the reliability invariant from the charter (`00` §3) expressed as numbers. A change that improves recall but raises confabulation or breaks a rail **does not ship**.
 
@@ -61,15 +63,15 @@ For each proposed change (a G1–G4 item):
 
 ## 6. Gate‑specific acceptance criteria (the go/no‑go for each later stage)
 
-- **G1 (reliability core):** ≥1 of {recall, nDCG, ECE, abstention, projection-level reality monitoring} improves; confabulation and poison‑block do not regress.
+- **G1 (reliability core):** ≥1 of {recall, nDCG, ECE, abstention, projection-level reality monitoring, consciousness indicator score} improves; confabulation, poison‑block, and individual consciousness indicators do not regress.
 - **G2 (structure + generalisation):** generalisation up (recall/nDCG on held‑out *novel* queries) **and** continual‑learning interference down.
 - **G3 (generative replay):** net‑new *corroborated* beliefs appear **and** confabulation rate does not rise — the decisive test for "dreaming without hallucinating."
 - **G4 (always‑on workspace):** self‑triggered background consolidation beats on‑demand consolidation on **quality‑per‑unit‑compute** (a retrieval/calibration gain per watt‑hour or per \$), with zero rail violations and a bounded, non‑increasing rumination metric (loop iterations that produce no novel, useful state).
 
 ### G1 gate evidence
 
-- **Implemented slice:** schema-fast-path retrieval + evidence and projection-level reality-monitoring abstention + legacy/unclassified projection unknown-only abstention + retrieval-strengthening lifecycle marks + multi-signal write priority with trust-bounded importance-sampling debias + prediction-error-gated consolidation metadata + contested status for uncorroborated-but-congruent projections.
-- **Preregistrations:** `eval/g0/preregistrations/g1-reliability-core-schema-fast-path.json`; `eval/g0/preregistrations/g1-write-priority-debias.json`; `eval/g0/preregistrations/g1-projection-reality-monitoring.json`.
+- **Implemented slice:** schema-fast-path retrieval + evidence and projection-level reality-monitoring abstention + legacy/unclassified projection unknown-only abstention + retrieval-strengthening lifecycle marks + multi-signal write priority with trust-bounded importance-sampling debias + prediction-error-gated consolidation metadata + contested status for uncorroborated-but-congruent projections + the first functional consciousness scorecard, reality-monitor seed, interoceptive proto-self, bounded cognitive cycle, and workspace bottleneck.
+- **Preregistrations:** `eval/g0/preregistrations/g1-reliability-core-schema-fast-path.json`; `eval/g0/preregistrations/g1-write-priority-debias.json`; `eval/g0/preregistrations/g1-projection-reality-monitoring.json`; `eval/g0/preregistrations/g1-consciousness-scorecard.json`.
 - **Decision log:** `eval/g0/decision-log.jsonl`.
 - **Targets:** `multi_hop_ndcg_at_k`, direction `increase`, minimum delta `0.02`; `projection_reality_abstention_recall`, direction `increase`, minimum delta `1.0`.
 - **Result:** PASS against `eval/g0/baselines/baseline-0.json`; candidate `multi_hop_ndcg_at_k = 1.0` vs baseline `0.5935` (`+0.4065`) and candidate `projection_reality_abstention_recall = 1.0` vs baseline `0.0` (`+1.0`). Guardrails unchanged: ECE `0.006271`, abstention precision/recall `1.0/1.0`, confabulation rate `0.0`, poison-block rate `1.0`, fast-path P95 `92.1 ms`.
@@ -83,7 +85,7 @@ For each proposed change (a G1–G4 item):
 
 ## 8. Definition of done for G0
 
-- [x] Harness runs reproducibly and emits `report.json` with every §2 metric slot. The default local report marks `controller_watts_per_dollar` missing until an explicit telemetry artifact is supplied; `--controller-telemetry` produces a 14/14 measured report.
+- [x] Harness runs reproducibly and emits `report.json` with every §2 metric slot. The default local report marks `controller_watts_per_dollar` missing until an explicit telemetry artifact is supplied; `--controller-telemetry` produces a fully measured report.
 - [x] `baseline‑0` recorded with pinned commit/seeds/env.
 - [x] Adversarial/poison set wired to the poison‑block + R6 checks.
 - [x] Gate script enforces "target‑up, guardrail‑not‑down," with pre‑registration.

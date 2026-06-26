@@ -22,8 +22,9 @@ Take the best mechanisms of human memory and the latest memory science, make eac
 | 03 | `03-ADR-001-DECISION.md` | The architecture **decision** (Accepted): full vision, reliability‑first, metric‑gated (Option E) |
 | 04 | `04-G0-BENCHMARK-SPEC.md` | The **G0** gate — implemented at repo root `eval/g0/`; freezes a baseline on the eval lane and adds program‑specific metrics; blocks every later stage |
 | 05 | `05-GLOSSARY-AND-SOURCES.md` | Shared vocabulary + consolidated reputable bibliography |
+| 06 | `06-CONSCIOUSNESS-AND-CONTINUOUS-WORKSPACE.md` | Measurable functional consciousness indicator scorecard + shadow continuous-workspace reliability stack |
 
-New readers: 00 → 01 → 02 → 03 → 04. Implementers start at 03 (decision) then 04 (first buildable unit).
+New readers: 00 → 01 → 02 → 03 → 04 → 06. Implementers start at 03 (decision), 04 (gate), then 06 (scorecard and workspace addendum).
 
 ## Non‑negotiables (apply to every doc and every gate)
 

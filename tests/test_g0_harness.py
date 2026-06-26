@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 from eval.g0.confabulation import run_confabulation_eval
+from eval.g0.consciousness import INDICATORS, run_consciousness_eval
 from eval.g0.continual_learning import run_continual_learning_eval
 from eval.g0.deep_latency import run_deep_latency_eval
 from eval.g0.gate import evaluate_ablation
@@ -56,6 +57,8 @@ def test_g0_report_emits_every_spec_metric_and_source_hashes() -> None:
     assert sources["deep_latency_eval"]["path"] == "computed:eval.g0.deep_latency"
     assert sources["resource_usage_eval"]["present"] is True
     assert sources["resource_usage_eval"]["path"] == "computed:eval.g0.resource_usage"
+    assert sources["consciousness_eval"]["present"] is True
+    assert sources["consciousness_eval"]["path"] == "computed:eval.g0.consciousness"
 
     metrics = {metric["id"]: metric for metric in report["metrics"]}
     assert metrics["recall_at_k"]["status"] == "measured"
@@ -78,6 +81,11 @@ def test_g0_report_emits_every_spec_metric_and_source_hashes() -> None:
     assert metrics["controller_watts_per_dollar"]["status"] == "missing"
     assert metrics["controller_watts_per_dollar"]["source_id"] == "resource_usage_eval"
     assert "requires explicit" in metrics["controller_watts_per_dollar"]["notes"]
+    assert metrics["consciousness_indicator_total"]["status"] == "measured"
+    assert metrics["consciousness_indicator_total"]["source_id"] == "consciousness_eval"
+    assert metrics["workspace_loop_liveness"]["value"] == 1.0
+    assert metrics["self_model_accuracy"]["value"] == 1.0
+    assert metrics["metacognition_m_ratio"]["value"] == 1.0
 
     dataset_paths = {manifest["path"] for manifest in report["dataset_manifests"]}
     assert "eval/datasets/continual_learning_interference.json" in dataset_paths
@@ -157,6 +165,23 @@ def test_g0_resource_usage_fixture_computes_controller_watts_with_explicit_telem
     assert report["dataset_path"] == "eval/datasets/resource_usage.json"
 
 
+def test_g0_consciousness_scorecard_reports_indicator_properties() -> None:
+    report = run_consciousness_eval(repo_root=REPO_ROOT)
+
+    assert report["schema_version"] == "g0.consciousness_scorecard.v1"
+    assert report["phenomenal_claim"] is False
+    assert report["indicator_count"] == 14
+    assert len(report["indicators"]) == len(INDICATORS)
+    assert {row["id"] for row in report["indicators"]} == {spec.id for spec in INDICATORS}
+    assert all(row["score_label"] in {"0", "partial", "1"} for row in report["indicators"])
+    assert report["metrics"]["consciousness_indicator_total"] == report["total_score"]
+    assert report["metrics"]["workspace_loop_liveness"] == 1.0
+    assert report["metrics"]["workspace_stream_coherence"] == 1.0
+    assert report["metrics"]["self_model_accuracy"] == 1.0
+    assert report["metrics"]["metacognition_meta_d_prime"] == 1.0
+    assert report["metrics"]["metacognition_m_ratio"] == 1.0
+
+
 def test_g0_report_measures_controller_watts_with_explicit_telemetry(tmp_path: Path) -> None:
     telemetry = tmp_path / "controller-telemetry.json"
     telemetry.write_text(
@@ -205,7 +230,7 @@ def test_g0_runner_cli_accepts_controller_telemetry(tmp_path: Path) -> None:
     )
     report = json.loads((out_dir / "report.json").read_text(encoding="utf-8"))
 
-    assert "G0 coverage: 15/15 measured; gate_ready=True" in result.stdout
+    assert f"G0 coverage: {len(G0_METRIC_SPECS)}/{len(G0_METRIC_SPECS)} measured; gate_ready=True" in result.stdout
     assert report["coverage"]["gate_ready"] is True
     assert report["computed_evidence"]["resource_usage_eval"]["controller_watts_per_dollar"] == 50.0
 
