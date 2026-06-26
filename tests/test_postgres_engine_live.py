@@ -859,6 +859,18 @@ def test_postgres_mcp_runtime_state_persists_profile_learning_and_command_parame
         "procedure_validate",
         {"procedure_id": procedure["id"], "role": "operator", "source_trust_tier": 0},
     )
+    reloaded.engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id=user,
+            actor="user",
+            source_type="grounded-gate-fixture",
+            content="runtime state dropped verify with tools",
+            metadata={"reality_class": "grounded"},
+            trust_tier=0,
+            access_policy={"tenant": tenant},
+        )
+    )
     reloaded.call_tool(
         "lesson_promote",
         {
