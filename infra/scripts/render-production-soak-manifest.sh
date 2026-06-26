@@ -507,7 +507,7 @@ missing_input_artifacts = [
 
 if check_environment:
     payload = {
-        "ok": not missing_input_artifacts,
+        "ok": not missing_input_artifacts and not input_artifact_errors,
         "template": str(template_path),
         "placeholder_count": len(required),
         "present": present,

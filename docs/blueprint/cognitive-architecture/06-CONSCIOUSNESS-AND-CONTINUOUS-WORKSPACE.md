@@ -87,7 +87,7 @@ The continuous workspace loop is never unbounded:
 - anti-rumination cadence bound
 - cycle-consistency self-supervision
 
-Generative replay, imagination, and self-loop outputs are low-trust until gate promoted. They are not on the critical path to an answer.
+Generative replay, imagination, and self-loop outputs are low-trust until gate promoted. They are not on the critical path to an answer. The initial runtime seed is `SandboxedDreamer` in `src/mnemosyne/dreamer.py`; it emits CID-backed low-trust replay candidates with `production_mutation=false` and is registered as `dreamer.shadow` with `critical_path_allowed=false`.
 
 ## 6. Gate Contract
 

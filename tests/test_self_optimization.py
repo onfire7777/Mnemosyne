@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from mnemosyne.engine import LocalMemoryEngine
-from mnemosyne.gate import RegressionCase
+from mnemosyne.gate import CounterfactualVerdict, RegressionCase
 from mnemosyne.models import Assertion, Evidence
 from mnemosyne.self_optimization import (
     PolicyVariant,
@@ -104,7 +104,7 @@ def test_tripwire_blocks_low_diversity_and_proxy_divergence() -> None:
     assert passing.passed is True
 
 
-def test_policy_canary_promotion_uses_gate_and_rails() -> None:
+def test_policy_canary_promotion_fails_closed_until_replay_is_proven() -> None:
     engine = seeded_engine()
     optimizer = ShadowPolicyOptimizer(
         engine,
@@ -127,5 +127,39 @@ def test_policy_canary_promotion_uses_gate_and_rails() -> None:
 
     result = optimizer.evaluate_variant(TENANT, variant)
 
-    assert result.promoted is True
+    assert result.promoted is False
+    assert result.counterfactual is not None
+    assert result.counterfactual["passed"] is False
+    assert "cf proxy unproven" in result.counterfactual["reason"]
     assert result.protected_regressions == []
+
+
+def test_policy_canary_promotion_can_use_explicit_authorized_counterfactual_hook() -> None:
+    engine = seeded_engine()
+    optimizer = ShadowPolicyOptimizer(
+        engine,
+        [
+            RegressionCase(
+                id="case-self-optimization-rails",
+                signature="policy retrieval activation confidence",
+                query="self optimization rails",
+                expected_substring="immutable rails",
+                protected=True,
+            )
+        ],
+    )
+    variant = PolicyVariant(
+        id="safe",
+        activation_weights={"base_level": 0.35, "semantic": 0.35, "importance": 0.20, "recency": 0.10},
+        abstention_threshold=0.45,
+        top_k=8,
+    )
+
+    def authorized_hook(*_args, **_kwargs) -> CounterfactualVerdict:
+        return CounterfactualVerdict(passed=True, predicted_lift=0.1, reason="explicitly authorized")
+
+    result = optimizer.evaluate_variant(TENANT, variant, counterfactual_hook=authorized_hook)
+
+    assert result.promoted is True
+    assert result.counterfactual is not None
+    assert result.counterfactual["reason"] == "explicitly authorized"

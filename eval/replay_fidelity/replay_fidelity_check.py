@@ -24,10 +24,10 @@ evidence artifact:
      exist yet (window = 0).
 
   3. **Bar verdict** — exits 0 only when the golden guarantee holds AND the
-     current-src state is the correct one (shadow/veto-only until wired). It exits
-     non-zero if the golden guarantee breaks, or if the harness is told (via
-     ``--require-wired``) that the cf->gate path should already be live and it is
-     not.
+      current-src state is safe: replay is wired into promotion, but unproven
+      replay fidelity fails closed. It exits non-zero if the golden guarantee
+      breaks, or if ``--require-wired`` is set before real replay pairs clear the
+      OQ2 bar.
 
 Run:
     python eval/replay_fidelity/replay_fidelity_check.py
@@ -100,19 +100,19 @@ def build_report(
     golden_ok = all(g.ok for g in golden)
     cf_wired = bool(src_state["cf_wired_into_gate"])
     # Current-src verdict: the proxy is authorized to gate only if it is wired AND
-    # clears the OQ2 bar on real paired data. Neither is true today.
+    # clears the OQ2 bar on real paired data.
     current_score = src_state.get("fidelity_score")
     proxy_authorized = cf_wired and bool(current_score and current_score.get("passed"))
-    loop_correctly_shadow = (not proxy_authorized)
+    loop_correctly_shadow = bool(src_state.get("default_replay_fails_closed")) and not proxy_authorized
 
     if require_wired:
         # CI-flip mode: the cf->gate path is asserted to be live and above bar.
         passed = golden_ok and proxy_authorized
         exit_code = 0 if passed else 2
     else:
-        # Default mode: pass iff the gate is internally sound (golden) and the
-        # loop is in the correct (shadow/veto-only) state for the current src.
-        passed = golden_ok and loop_correctly_shadow
+        # Default mode: pass iff the gate is internally sound, replay is wired,
+        # and unproven replay fidelity blocks active promotion.
+        passed = golden_ok and cf_wired and loop_correctly_shadow
         exit_code = 0 if passed else 1
 
     return {

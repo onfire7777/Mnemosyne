@@ -818,6 +818,31 @@ def test_shared_engine_contract_abstains_on_trace_or_confabulation_risk_support(
     assert risk_result.explain["gist_support"]["gist_hit_ids"] == [risk_cid]
 
 
+def test_shared_engine_contract_external_reality_alias_is_not_grounded(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, user = engine_bundle
+    cid = engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id=user,
+            actor="external",
+            source_type="external-suggestion",
+            content="External alias contract says unsupported suggestions require abstention.",
+            metadata={"reality_class": "external"},
+            trust_tier=0,
+            access_policy={"tenant": tenant},
+        )
+    )
+
+    result = engine.retrieve("external alias contract unsupported suggestions", tenant)
+
+    assert result.hits[0].id == cid
+    assert result.abstained is True
+    assert result.explain["reality_monitoring"]["classes"] == {"externally_suggested": 1}
+    assert result.explain["reality_monitoring"]["abstention_gate"]["active"] is True
+
+
 def test_shared_engine_contract_summary_refresh_retires_superseded_gist(
     engine_bundle: tuple[Any, str, str],
 ) -> None:

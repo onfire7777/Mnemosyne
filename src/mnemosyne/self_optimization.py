@@ -270,7 +270,8 @@ class ShadowPolicyOptimizer:
         )
         # The cold loop consumes the counterfactual replay proxy by default: when
         # no explicit hook is supplied, attach the default scorer over recorded
-        # replay pairs (veto-only, abstains until proven — blueprint I12/§30.6).
+        # replay pairs (promotion fails closed until fidelity is proven —
+        # blueprint I12/§30.6).
         gate = PromotionGate(
             self.engine,
             self.cases,
@@ -452,9 +453,10 @@ def default_counterfactual_hook(
     enough real paired data.
 
     * Below ``min_window`` recorded pairs, or when the mean proxy-vs-true gap
-      exceeds ``max_gap``, the proxy is unproven -> it ABSTAINS (``passed=True``):
-      it never vetoes on an untrusted proxy, so the regression-suite margin alone
-      decides (the loop stays correctly in shadow).
+      exceeds ``max_gap``, the proxy is unproven -> it fails closed
+      (``passed=False``): active promotion is blocked until replay fidelity is
+      proven. Callers that want shadow-only exploration may pass an explicit
+      hook with different semantics.
     * Once fidelity holds, it vetoes any candidate whose mean predicted lift is
       negative (a self-modification predicted to regress historical task success).
     """
@@ -470,17 +472,17 @@ def default_counterfactual_hook(
         window = len(pairs)
         if window < min_window:
             return CounterfactualVerdict(
-                passed=True,
+                passed=False,
                 predicted_lift=0.0,
-                reason=f"cf proxy abstains (shadow): {window} replay pairs < window {min_window}",
+                reason=f"cf proxy unproven: {window} replay pairs < window {min_window}",
             )
         mean_gap = sum(abs(predicted - observed) for predicted, observed in pairs) / window
         mean_predicted = sum(predicted for predicted, _ in pairs) / window
         if mean_gap > max_gap:
             return CounterfactualVerdict(
-                passed=True,
+                passed=False,
                 predicted_lift=mean_predicted,
-                reason=f"cf proxy abstains (shadow): fidelity gap {mean_gap:.3f} > {max_gap}",
+                reason=f"cf proxy unproven: fidelity gap {mean_gap:.3f} > {max_gap}",
             )
         non_inferior = mean_predicted >= 0.0
         reason = (

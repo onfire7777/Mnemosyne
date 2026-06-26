@@ -1284,7 +1284,7 @@ class LocalMemoryEngine:
         aliases = {
             "grounded": "grounded",
             "evidence_grounded": "grounded",
-            "external": "grounded",
+            "external": "externally_suggested",
             "external_grounded": "grounded",
             "observed": "grounded",
             "user_grounded": "grounded",
