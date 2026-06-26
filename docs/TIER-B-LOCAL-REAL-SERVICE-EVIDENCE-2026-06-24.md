@@ -40,7 +40,7 @@ findings: []
 
 ## Reproduction
 
-Run from `/Users/admin/Projects/Mnemosyne` after `./infra/scripts/setup-all.sh`:
+Run from `/Users/admin/Mnemosyne` after `./infra/scripts/setup-all.sh`:
 
 ```bash
 source infra/keycloak/out/oidc.env

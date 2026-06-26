@@ -680,6 +680,38 @@ def test_postgres_projection_reality_monitoring_abstains_live() -> None:
     assert mixed.explain["reality_monitoring"]["ungrounded_only"] is False
 
 
+def test_postgres_legacy_evidence_reality_classification_abstains_live() -> None:
+    engine = PostgresEngine(live_dsn())
+    tenant = f"tenant-legacy-evidence-reality-live-{uuid4()}"
+    user = "user-legacy-evidence-reality-live"
+    cid = engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id=user,
+            actor="system",
+            source_type="workspace-reflection",
+            content="Legacy metadata-free workspace-only evidence names launch codename Nadir.",
+            trust_tier=0,
+            access_policy={"tenant": tenant},
+        ),
+    )
+    db_tenant_id = str(_stable_uuid("tenant", tenant))
+    with engine.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE evidence SET metadata = '{}'::jsonb WHERE tenant_id = %s AND cid = %s",
+                (db_tenant_id, _cid_to_bytes(cid)),
+            )
+
+    result = engine.retrieve("launch codename Nadir", tenant)
+    hit = next(item for item in result.hits if item.id == cid)
+
+    assert hit.metadata["reality_class"] == "self_generated"
+    assert result.abstained is True
+    assert result.explain["reality_monitoring"]["classes"]["self_generated"] >= 1
+    assert result.explain["reality_monitoring"]["ungrounded_only"] is True
+
+
 def test_postgres_legacy_projection_reality_monitoring_abstains_live() -> None:
     engine = PostgresEngine(live_dsn())
     tenant = f"tenant-legacy-projection-reality-live-{uuid4()}"

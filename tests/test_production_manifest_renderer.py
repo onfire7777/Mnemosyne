@@ -468,12 +468,36 @@ def test_renderer_refuses_relative_production_input_dir(tmp_path: Path) -> None:
     assert "MNEMOSYNE_PROD_EVIDENCE_DIR must be an absolute external" in proc.stderr
 
 
-def test_renderer_writes_private_valid_manifest_outside_repo(tmp_path: Path) -> None:
+def test_renderer_output_fails_on_missing_input_artifacts(tmp_path: Path) -> None:
     output = tmp_path / "secure" / "production-soak-manifest.json"
+    env = _filled_render_env(tmp_path)
+
     proc = subprocess.run(
         [str(RENDERER), "--output", str(output)],
         cwd=REPO,
-        env=_filled_render_env(tmp_path),
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert proc.returncode == 78
+    assert not output.exists()
+    assert "refusing to write production soak manifest" in proc.stderr
+    assert "missing input artifact: retrieval-ops-bundle.json" in proc.stderr
+    assert env["MNEMOSYNE_PROD_EVIDENCE_DIR"] not in proc.stderr
+    assert env["MNEMOSYNE_PROD_C2PA_TOOL"] not in proc.stderr
+
+
+def test_renderer_writes_private_valid_manifest_outside_repo(tmp_path: Path) -> None:
+    output = tmp_path / "secure" / "production-soak-manifest.json"
+    env = _filled_render_env(tmp_path)
+    _populate_required_input_artifacts(env)
+
+    proc = subprocess.run(
+        [str(RENDERER), "--output", str(output)],
+        cwd=REPO,
+        env=env,
         capture_output=True,
         text=True,
         check=True,

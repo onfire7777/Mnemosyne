@@ -932,7 +932,8 @@ class PostgresEngine:
                     """
                     WITH q AS (SELECT plainto_tsquery('english', %s) AS query)
                     SELECT e.cid, e.branch, e.content, e.metadata, e.trust_tier, e.sensitivity,
-                      e.source_type, ts_rank_cd(to_tsvector('english', coalesce(e.content, '')), q.query) AS score
+                      e.actor, e.source_type,
+                      ts_rank_cd(to_tsvector('english', coalesce(e.content, '')), q.query) AS score
                     FROM evidence e, q
                     WHERE e.tenant_id = %s AND e.branch = %s AND e.erased = false
                       AND e.trust_tier <= %s AND e.sensitivity <= %s
@@ -958,8 +959,9 @@ class PostgresEngine:
                         continue
                     hit_metadata = {
                         "source_type": row["source_type"],
+                        "actor": row["actor"],
                         "backend": self.adapters.lexical_backend,
-                        "reality_class": metadata.get("reality_class", "grounded"),
+                        "reality_class": self._classify_evidence_row_reality(row, metadata),
                     }
                     if isinstance(metadata.get("summary"), dict):
                         hit_metadata["summary"] = metadata["summary"]
@@ -1085,7 +1087,7 @@ class PostgresEngine:
                 cur.execute(
                     """
                     SELECT cid, branch, content, content_pointer, modality, metadata,
-                      trust_tier, sensitivity, source_type,
+                      trust_tier, sensitivity, actor, source_type,
                       1.0 - (embedding <=> %s::vector) AS score
                     FROM evidence
                     WHERE tenant_id = %s AND branch = %s AND erased = false
@@ -1126,6 +1128,7 @@ class PostgresEngine:
                     media_embedding = metadata.get("media_embedding")
                     hit_metadata = {
                         "source_type": row["source_type"],
+                        "actor": row["actor"],
                         "backend": self.adapters.embedding.name,
                         "embedding_dims": self.adapters.embedding.dims,
                         "stored_embedding": True,
@@ -1133,7 +1136,7 @@ class PostgresEngine:
                         "source_table": "evidence",
                         "modality": row["modality"],
                         "content_pointer": row["content_pointer"],
-                        "reality_class": metadata.get("reality_class", "grounded"),
+                        "reality_class": self._classify_evidence_row_reality(row, metadata),
                     }
                     if isinstance(media_embedding, dict):
                         hit_metadata["media_embedding"] = media_embedding
@@ -1158,7 +1161,7 @@ class PostgresEngine:
                     )
                 cur.execute(
                     """
-                    SELECT cid, branch, content, content_pointer, modality, metadata, trust_tier, sensitivity, source_type
+                    SELECT cid, branch, content, content_pointer, modality, metadata, trust_tier, sensitivity, actor, source_type
                     FROM evidence
                     WHERE tenant_id = %s AND branch = %s AND erased = false
                       AND trust_tier <= %s AND sensitivity <= %s
@@ -1186,11 +1189,12 @@ class PostgresEngine:
                         continue
                     hit_metadata = {
                         "source_type": row["source_type"],
+                        "actor": row["actor"],
                         "backend": self.adapters.embedding.name,
                         "embedding_dims": self.adapters.embedding.dims,
                         "stored_embedding": False,
                         "source_table": "evidence",
-                        "reality_class": metadata.get("reality_class", "grounded"),
+                        "reality_class": self._classify_evidence_row_reality(row, metadata),
                     }
                     if isinstance(metadata.get("summary"), dict):
                         hit_metadata["summary"] = metadata["summary"]
@@ -1831,6 +1835,28 @@ class PostgresEngine:
         ):
             return "self_generated"
         if actor == "external" or ev.trust_tier >= int(TrustTier.LOW):
+            return "externally_suggested"
+        return "grounded"
+
+    @classmethod
+    def _classify_evidence_row_reality(cls, row: dict[str, Any], metadata: dict[str, Any]) -> str:
+        explicit = cls._normalise_reality_class(metadata.get("reality_class"))
+        if explicit:
+            return explicit
+        source_type = str(row.get("source_type") or "").lower()
+        actor = str(row.get("actor") or "").lower()
+        trust_tier = int(row.get("trust_tier") or 0)
+        if any(marker in source_type for marker in ("simulation", "synthetic", "generated", "hypothesis")):
+            return "simulated"
+        if any(marker in source_type for marker in ("summary", "trace", "analysis", "consolidation")):
+            return "self_generated"
+        if actor == "assistant":
+            return "self_generated"
+        if actor in {"system", "tool"} and any(
+            marker in source_type for marker in ("scratchpad", "workspace", "thought", "reflection")
+        ):
+            return "self_generated"
+        if actor == "external" or trust_tier >= int(TrustTier.LOW):
             return "externally_suggested"
         return "grounded"
 
@@ -2606,7 +2632,7 @@ class PostgresEngine:
                 self._set_tenant(cur, db_tenant_id)
                 cur.execute(
                     """
-                    SELECT cid, tenant_id, branch, content, metadata, trust_tier, sensitivity, source_type
+                    SELECT cid, tenant_id, branch, content, metadata, trust_tier, sensitivity, actor, source_type
                     FROM evidence
                     WHERE tenant_id = %s AND branch = %s AND erased = false
                       AND trust_tier <= %s AND sensitivity <= %s
@@ -2632,7 +2658,8 @@ class PostgresEngine:
                             continue
                         hit_metadata = {
                             "source_type": row["source_type"],
-                            "reality_class": metadata.get("reality_class", "grounded"),
+                            "actor": row["actor"],
+                            "reality_class": self._classify_evidence_row_reality(row, metadata),
                         }
                         if isinstance(metadata.get("summary"), dict):
                             hit_metadata["summary"] = metadata["summary"]

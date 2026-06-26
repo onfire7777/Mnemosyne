@@ -1,8 +1,8 @@
 # Mnemosyne G0 Benchmark Report
 
-- Generated: `2026-06-26T12:39:02.841991+00:00`
-- Baseline: `baseline-0` at `a871e5adb3016c929dfa8ce008a84be233673c52`
-- Gate ready: **False** (35/36 metrics measured)
+- Generated: `2026-06-26T14:11:27.567151+00:00`
+- Baseline: `baseline-0` at `67c229ace12313a8b8a6c6ede99d0a2096bae178`
+- Gate ready: **False** (36/37 metrics measured)
 
 ## Metrics
 
@@ -44,6 +44,7 @@
 | self_model_accuracy | guardrail | measured | 1.0 | reported | consciousness_eval |
 | metacognition_meta_d_prime | guardrail | measured | 1.0 | reported | consciousness_eval |
 | metacognition_m_ratio | guardrail | measured | 1.0 | reported | consciousness_eval |
+| reality_monitor_shadow_tag_contract | target | measured | 1.0 | reported | consciousness_eval |
 
 ## Missing Metrics
 

@@ -390,6 +390,7 @@ def _build_metric(spec: dict[str, Any], sources: dict[str, Source]) -> dict[str,
         "deep_path_p95_ms": _metric_deep_path_p95,
         "cost_usd_per_1k_queries": _metric_cost_usd_per_1k_queries,
         "controller_watts_per_dollar": _metric_controller_watts_per_dollar,
+        "reality_monitor_shadow_tag_contract": _metric_consciousness_scorecard,
     }
     base = {
         "id": spec["id"],

@@ -10,8 +10,8 @@ Usage:
 Runs the existing production evidence path:
   1. Validate that SOAK_MANIFEST is explicitly production-scoped.
   2. Run deployment-soak with --evidence-dir.
-  3. Run release-audit with --require-production-validated and
-     --require-provider-forbid-local.
+  3. Run release-audit with --evidence-manifest "$OUT_ROOT/evidence/manifest.json",
+     --require-production-validated, and --require-provider-forbid-local.
   4. Redaction-scan generated evidence and fail on findings or skipped files.
   5. Write bundle-manifest.json and summary.json with bundle_fingerprint.
 

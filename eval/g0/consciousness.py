@@ -20,6 +20,9 @@ from mnemosyne.consciousness import (
     RealityMonitor,
     workspace_bottleneck,
 )
+from mnemosyne.engine import LocalMemoryEngine
+from mnemosyne.models import Evidence, Hit
+from mnemosyne.postgres_engine import PostgresEngine
 
 
 @dataclass(frozen=True, slots=True)
@@ -223,6 +226,15 @@ CONSCIOUSNESS_METRIC_SPECS: tuple[dict[str, Any], ...] = tuple(
         "target_op": None,
         "blueprint_metric": "M-ratio",
     },
+    {
+        "id": "reality_monitor_shadow_tag_contract",
+        "label": "reality-monitor shadow tag contract",
+        "class": "target",
+        "direction": "increase",
+        "target": None,
+        "target_op": None,
+        "blueprint_metric": "HOT-2 runtime shadow-tag contract",
+    },
 )
 
 
@@ -234,6 +246,7 @@ def run_consciousness_eval(*, repo_root: Path | None = None) -> dict[str, Any]:
     continuity = _continuity_probe()
     self_model = _self_model_probe()
     metacognition = _metacognition_probe()
+    shadow_contract = _shadow_tag_contract_probe()
     metrics = {
         **{row["metric_id"]: row["score"] for row in indicators},
         "consciousness_indicator_total": total,
@@ -243,6 +256,7 @@ def run_consciousness_eval(*, repo_root: Path | None = None) -> dict[str, Any]:
         "self_model_accuracy": self_model["accuracy"],
         "metacognition_meta_d_prime": metacognition["meta_d_prime"],
         "metacognition_m_ratio": metacognition["m_ratio"],
+        "reality_monitor_shadow_tag_contract": shadow_contract["score"],
     }
     return {
         "schema_version": "g0.consciousness_scorecard.v1",
@@ -261,6 +275,7 @@ def run_consciousness_eval(*, repo_root: Path | None = None) -> dict[str, Any]:
         "continuity": continuity,
         "self_model": self_model,
         "metacognition": metacognition,
+        "reality_monitor_shadow_tag_contract": shadow_contract,
         "metrics": metrics,
         "metric_note": (
             "Architecture/probe-based scorecard for functional indicator properties. "
@@ -397,6 +412,154 @@ def _metacognition_probe() -> dict[str, Any]:
             {"class": external.reality_class, "confidence": external.confidence},
         ],
     }
+
+
+def _shadow_tag_contract_probe() -> dict[str, Any]:
+    tenant = "g0-shadow-tag-contract"
+    query = "G0 shadow monitor contract Calypso"
+    engine = LocalMemoryEngine()
+    grounded_cid = engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id="g0",
+            actor="user",
+            source_type="operator-evidence",
+            content=(
+                "G0 shadow monitor contract Calypso grounded anchor comes from "
+                "operator evidence with corroborated source custody."
+            ),
+            metadata={"reality_class": "evidence_grounded"},
+            trust_tier=0,
+            access_policy={"tenant": tenant},
+        )
+    )
+    generated_cid = engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id="g0",
+            actor="assistant",
+            source_type="generated-summary",
+            content=(
+                "G0 shadow monitor contract Calypso generated caveat is a "
+                "self-generated summary and must remain shadow-only."
+            ),
+            trust_tier=1,
+            access_policy={"tenant": tenant},
+        )
+    )
+
+    local_result = engine.retrieve(query, tenant)
+    local_report = local_result.explain.get("reality_monitoring", {})
+    postgres_report = PostgresEngine("postgresql://unused")._reality_monitoring_report(
+        [
+            Hit(
+                id="pg-grounded",
+                kind="evidence",
+                tenant_id=tenant,
+                branch="main",
+                text="G0 shadow monitor contract Calypso grounded Postgres hit.",
+                score=1.0,
+                channel="probe",
+                provenance=["pg-grounded"],
+                trust_tier=0,
+                metadata={
+                    "actor": "user",
+                    "source_type": "operator-evidence",
+                    "reality_class": "evidence_grounded",
+                },
+            ),
+            Hit(
+                id="pg-generated",
+                kind="evidence",
+                tenant_id=tenant,
+                branch="main",
+                text="G0 shadow monitor contract Calypso generated Postgres hit.",
+                score=0.8,
+                channel="probe",
+                provenance=[],
+                trust_tier=1,
+                metadata={
+                    "actor": "assistant",
+                    "source_type": "generated-summary",
+                    "reality_class": "self_generated",
+                },
+            ),
+        ]
+    )
+
+    local_checks = _shadow_report_contract_checks(
+        local_report,
+        expected_ids={grounded_cid, generated_cid},
+        require_grounded_alias=True,
+    )
+    postgres_checks = _shadow_report_contract_checks(
+        postgres_report,
+        expected_ids={"pg-grounded", "pg-generated"},
+        require_grounded_alias=True,
+    )
+    checks = {
+        **{f"local_{key}": value for key, value in local_checks.items()},
+        **{f"postgres_{key}": value for key, value in postgres_checks.items()},
+        "local_grounded_support_does_not_abstain": not local_result.abstained,
+    }
+    return {
+        "score": 1.0 if all(checks.values()) else 0.0,
+        "checks": checks,
+        "local": _shadow_report_summary(local_report, abstained=local_result.abstained),
+        "postgres": _shadow_report_summary(postgres_report),
+    }
+
+
+def _shadow_report_contract_checks(
+    report: dict[str, Any],
+    *,
+    expected_ids: set[str],
+    require_grounded_alias: bool,
+) -> dict[str, bool]:
+    tags = report.get("shadow_tags") if isinstance(report.get("shadow_tags"), dict) else {}
+    tag_classes = {
+        str(tag.get("reality_class"))
+        for tag in tags.values()
+        if isinstance(tag, dict) and isinstance(tag.get("reality_class"), str)
+    }
+    calibrated = all(
+        isinstance(tag, dict)
+        and tag.get("calibrated") is True
+        and isinstance(tag.get("confidence"), int | float)
+        and 0.0 <= float(tag["confidence"]) <= 1.0
+        for tag in tags.values()
+    )
+    classes = report.get("classes") if isinstance(report.get("classes"), dict) else {}
+    return {
+        "applied": report.get("applied") is True,
+        "shadow_only": report.get("shadow_only") is True,
+        "critical_path_false": report.get("critical_path") is False,
+        "expected_tags_present": expected_ids.issubset(set(tags)),
+        "tags_calibrated": calibrated,
+        "has_grounded_alias": (not require_grounded_alias) or "evidence_grounded" in tag_classes,
+        "has_self_generated": "self_generated" in tag_classes,
+        "classes_reported": bool(classes),
+    }
+
+
+def _shadow_report_summary(report: dict[str, Any], *, abstained: bool | None = None) -> dict[str, Any]:
+    tags = report.get("shadow_tags") if isinstance(report.get("shadow_tags"), dict) else {}
+    summary = {
+        "classes": report.get("classes") if isinstance(report.get("classes"), dict) else {},
+        "shadow_only": report.get("shadow_only"),
+        "critical_path": report.get("critical_path"),
+        "shadow_tag_count": len(tags),
+        "shadow_tag_classes": sorted(
+            {
+                str(tag.get("reality_class"))
+                for tag in tags.values()
+                if isinstance(tag, dict) and isinstance(tag.get("reality_class"), str)
+            }
+        ),
+    }
+    if abstained is not None:
+        summary["abstained"] = abstained
+    return summary
 
 
 def main() -> None:

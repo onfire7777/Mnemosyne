@@ -138,8 +138,9 @@ Checked 2026-06-25 during renderer hardening:
   so stale files cannot be fingerprinted into a successful capture.
 - `infra/scripts/capture-production-evidence.sh` rejects manual manifests with
   duplicate or unknown production commands, matching the renderer.
-- `release-audit --require-production-validated` rejects duplicate required
-  command evidence and unexpected commands outside the frozen production profile.
+- `release-audit --evidence-manifest "$OUT_ROOT/evidence/manifest.json"
+  --require-production-validated` rejects duplicate required command evidence
+  and unexpected commands outside the frozen production profile.
 - Successful full captures now write `bundle-manifest.json` with per-artifact
   SHA-256 hashes and copy its fingerprint into `summary.json`.
 - `deployment-soak --evidence-dir` writes SHA-256 digests for its report/check

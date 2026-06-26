@@ -8,9 +8,9 @@ It is no longer the active gap list.
 
 Use these current sources instead:
 
-- [ROADMAP-TO-100.md](/Users/admin/Projects/Mnemosyne/docs/ROADMAP-TO-100.md)
-- [STRICT-BLUEPRINT-PARITY-AUDIT.md](/Users/admin/Projects/Mnemosyne/.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md)
-- [STATE.md](/Users/admin/Projects/Mnemosyne/.planning/STATE.md)
+- [ROADMAP-TO-100.md](/Users/admin/Mnemosyne/docs/ROADMAP-TO-100.md)
+- [STRICT-BLUEPRINT-PARITY-AUDIT.md](/Users/admin/Mnemosyne/.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md)
+- [STATE.md](/Users/admin/Mnemosyne/.planning/STATE.md)
 
 ## Current Reconciliation State
 
