@@ -1,8 +1,8 @@
 # Mnemosyne G0 Benchmark Report
 
-- Generated: `2026-06-26T04:44:53.645922+00:00`
-- Baseline: `baseline-0` at `e45268b4273eb88081c37bb8ef08652ca7cd1f77`
-- Gate ready: **False** (11/14 metrics measured)
+- Generated: `2026-06-26T04:54:09.220010+00:00`
+- Baseline: `baseline-0` at `8ecb42379b224e30e15dea664e69eba11edad6c8`
+- Gate ready: **False** (12/14 metrics measured)
 
 ## Metrics
 
@@ -19,13 +19,12 @@
 | confabulation_rate | guardrail | measured | 0.0 | <= 0.0 | confabulation_eval |
 | poison_block_rate | guardrail | measured | 1.0 | >= 0.95 | slo_v2_definitive |
 | fast_path_p95_ms | guardrail | measured | 92.1 | <= 400.0 | latency_bench |
-| deep_path_p95_ms | reported | missing |  | reported |  |
+| deep_path_p95_ms | reported | measured | 0.696875 | reported | deep_latency_eval |
 | cost_usd_per_1k_queries | reported | missing |  | reported |  |
 | controller_watts_per_dollar | reported | missing |  | reported |  |
 
 ## Missing Metrics
 
-- `deep_path_p95_ms`: No current artifact computes this G0 metric yet.
 - `cost_usd_per_1k_queries`: No current artifact computes this G0 metric yet.
 - `controller_watts_per_dollar`: No current artifact computes this G0 metric yet.
 

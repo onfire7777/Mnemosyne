@@ -20,6 +20,8 @@ This writes:
   false-accept rate for generated / low-fidelity support; this is the local
   deterministic proxy for the full provenance-entailment plus sampled-audit G0
   metric
+- an embedded computed `deep_latency_eval` fixture recording reported-only
+  local deep-search P95 latency over a versioned graph corpus
 
 Evaluate a preregistered ablation:
 

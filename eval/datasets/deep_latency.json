@@ -1,0 +1,42 @@
+{
+  "schema_version": "g0.deep_latency.dataset.v1",
+  "tenant": "g0-deep-latency",
+  "rounds": 5,
+  "queries": [
+    "why does Aurora depend on Zephyr",
+    "how does Borealis connect to Atlas",
+    "what path links Cerulean to Helios"
+  ],
+  "relations": [
+    {
+      "source": "Aurora",
+      "predicate": "depends_on",
+      "target": "Zephyr"
+    },
+    {
+      "source": "Zephyr",
+      "predicate": "approved_by",
+      "target": "Iris"
+    },
+    {
+      "source": "Borealis",
+      "predicate": "connects_to",
+      "target": "Atlas"
+    },
+    {
+      "source": "Atlas",
+      "predicate": "runs_in",
+      "target": "RegionOne"
+    },
+    {
+      "source": "Cerulean",
+      "predicate": "routes_through",
+      "target": "Helios"
+    },
+    {
+      "source": "Helios",
+      "predicate": "owned_by",
+      "target": "Mina"
+    }
+  ]
+}
