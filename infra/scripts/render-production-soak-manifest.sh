@@ -379,6 +379,108 @@ def collect_manifest_input_artifacts(manifest_payload: dict[str, Any]) -> list[d
     return sorted(artifacts.values(), key=lambda item: str(item["relative_path"]))
 
 input_artifacts = collect_manifest_input_artifacts(rendered_manifest)
+input_artifact_errors: list[str] = []
+
+def artifact_relative_name(value: str) -> str:
+    candidate = Path(value).expanduser()
+    resolved = candidate.resolve(strict=False)
+    try:
+        return candidate.relative_to(evidence_dir).as_posix()
+    except ValueError:
+        try:
+            return resolved.relative_to(evidence_dir_resolved).as_posix()
+        except ValueError:
+            return candidate.name or "artifact"
+
+def record_suite_nested_artifact(value: object, *, suite_name: str, field: str) -> None:
+    if not isinstance(value, str) or not value.strip() or is_url(value):
+        input_artifact_errors.append(f"{suite_name} {field} must be an absolute external path")
+        return
+    candidate = Path(value).expanduser()
+    if not candidate.is_absolute():
+        input_artifact_errors.append(f"{suite_name} {field} must be an absolute external path")
+        return
+    resolved = candidate.resolve(strict=False)
+    try:
+        relative = candidate.relative_to(evidence_dir)
+    except ValueError:
+        try:
+            relative = resolved.relative_to(evidence_dir_resolved)
+        except ValueError:
+            input_artifact_errors.append(f"{suite_name} {field} must live under MNEMOSYNE_PROD_EVIDENCE_DIR")
+            return
+    relative_name = relative.as_posix()
+    artifact = {
+        "relative_path": relative_name,
+        "checks": [
+            {
+                "name": "provenance-trust",
+                "command": "provenance-trust-check",
+                "option": field,
+            }
+        ],
+        "exists": resolved.exists(),
+    }
+    existing = next(
+        (item for item in input_artifacts if item.get("relative_path") == relative_name),
+        None,
+    )
+    if existing is None:
+        input_artifacts.append(artifact)
+    else:
+        existing.setdefault("checks", []).extend(artifact["checks"])
+
+def inspect_provenance_suites(manifest_payload: dict[str, Any]) -> None:
+    checks_payload = manifest_payload.get("checks", [])
+    if not isinstance(checks_payload, list):
+        return
+    for check in checks_payload:
+        if not isinstance(check, dict) or check.get("command") != "provenance-trust-check":
+            continue
+        values = check.get("args", [])
+        if not isinstance(values, list) or not all(isinstance(v, str) for v in values):
+            continue
+        suite_values: list[str] = []
+        for index, value in enumerate(values):
+            if value == "--suite" and index + 1 < len(values):
+                suite_values.append(values[index + 1])
+            elif value.startswith("--suite="):
+                suite_values.append(value.split("=", 1)[1])
+        for suite_value in suite_values:
+            suite_name = artifact_relative_name(suite_value)
+            suite_path = Path(suite_value).expanduser()
+            if not suite_path.is_absolute():
+                input_artifact_errors.append(f"{suite_name} must be an absolute external path")
+                continue
+            suite_resolved = suite_path.resolve(strict=False)
+            if not suite_resolved.exists() or not suite_resolved.is_file():
+                continue
+            try:
+                suite_payload = json.loads(suite_resolved.read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+                input_artifact_errors.append(f"{suite_name} must be readable UTF-8 JSON")
+                continue
+            if not isinstance(suite_payload, dict):
+                input_artifact_errors.append(f"{suite_name} must be a JSON object")
+                continue
+            cases = suite_payload.get("cases")
+            if not isinstance(cases, list):
+                input_artifact_errors.append(f"{suite_name} cases must be an array")
+                continue
+            for case_index, case in enumerate(cases):
+                if not isinstance(case, dict):
+                    input_artifact_errors.append(f"{suite_name} cases[{case_index}] must be an object")
+                    continue
+                for field in ("asset_path", "c2pa_asset_path"):
+                    if field in case:
+                        record_suite_nested_artifact(
+                            case.get(field),
+                            suite_name=suite_name,
+                            field=f"cases[{case_index}].{field}",
+                        )
+
+inspect_provenance_suites(rendered_manifest)
+input_artifacts = sorted(input_artifacts, key=lambda item: str(item["relative_path"]))
 missing_input_artifacts = [
     str(artifact["relative_path"])
     for artifact in input_artifacts
@@ -400,10 +502,11 @@ if check_environment:
             str(artifact["relative_path"]) for artifact in input_artifacts
         ],
         "missing_input_artifacts": missing_input_artifacts,
-        "input_artifacts_complete": not missing_input_artifacts,
+        "input_artifact_errors": input_artifact_errors,
+        "input_artifacts_complete": not missing_input_artifacts and not input_artifact_errors,
     }
     print(json.dumps(payload, indent=2))
-    if missing_input_artifacts:
+    if missing_input_artifacts or input_artifact_errors:
         raise SystemExit(78)
     raise SystemExit(0)
 

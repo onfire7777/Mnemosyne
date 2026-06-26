@@ -101,7 +101,7 @@ def _filled_render_env(tmp_path: Path) -> dict[str, str]:
     return env
 
 
-def _populate_required_input_artifacts(env: dict[str, str]) -> None:
+def _populate_required_input_artifacts(env: dict[str, str], *, suite_payload: str = '{"cases": []}\n') -> None:
     evidence_dir = Path(env["MNEMOSYNE_PROD_EVIDENCE_DIR"])
     for relative_path in REQUIRED_PRODUCTION_INPUT_ARTIFACTS:
         path = evidence_dir / relative_path
@@ -111,7 +111,7 @@ def _populate_required_input_artifacts(env: dict[str, str]) -> None:
             continue
         path.parent.mkdir(parents=True, exist_ok=True)
         if relative_path == "provenance-trust-suite.json":
-            path.write_text('{"cases": []}\n', encoding="utf-8")
+            path.write_text(suite_payload, encoding="utf-8")
         else:
             path.write_text("{}\n", encoding="utf-8")
 
@@ -184,6 +184,7 @@ def test_renderer_check_environment_passes_without_writing_manifest(tmp_path: Pa
     assert payload["missing"] == []
     assert payload["input_artifacts_complete"] is True
     assert payload["missing_input_artifacts"] == []
+    assert payload["input_artifact_errors"] == []
     assert payload["required_input_artifact_count"] == len(REQUIRED_PRODUCTION_INPUT_ARTIFACTS)
     assert sorted(payload["required_input_artifacts"]) == sorted(REQUIRED_PRODUCTION_INPUT_ARTIFACTS)
     assert sorted(payload["present"]) == _placeholders()
@@ -208,10 +209,89 @@ def test_renderer_check_environment_fails_on_missing_input_artifacts(tmp_path: P
     assert payload["ok"] is False
     assert payload["input_artifacts_complete"] is False
     assert sorted(payload["missing_input_artifacts"]) == sorted(REQUIRED_PRODUCTION_INPUT_ARTIFACTS)
+    assert payload["input_artifact_errors"] == []
     assert payload["required_input_artifact_count"] == len(REQUIRED_PRODUCTION_INPUT_ARTIFACTS)
     assert env["MNEMOSYNE_PROD_EVIDENCE_DIR"] not in proc.stdout
     assert env["MNEMOSYNE_PROD_C2PA_TOOL"] not in proc.stdout
     assert proc.stderr == ""
+
+
+def test_renderer_check_environment_fails_on_missing_provenance_suite_asset(
+    tmp_path: Path,
+) -> None:
+    env = _filled_render_env(tmp_path)
+    nested_asset = Path(env["MNEMOSYNE_PROD_EVIDENCE_DIR"]) / "missing-suite-asset.txt"
+    _populate_required_input_artifacts(
+        env,
+        suite_payload=json.dumps({"cases": [{"asset_path": str(nested_asset)}]}) + "\n",
+    )
+
+    proc = subprocess.run(
+        [str(RENDERER), "--check-environment"],
+        cwd=REPO,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    payload = json.loads(proc.stdout)
+
+    assert proc.returncode == 78
+    assert payload["ok"] is False
+    assert payload["input_artifacts_complete"] is False
+    assert "missing-suite-asset.txt" in payload["missing_input_artifacts"]
+    assert "missing-suite-asset.txt" in payload["required_input_artifacts"]
+    assert payload["input_artifact_errors"] == []
+    assert env["MNEMOSYNE_PROD_EVIDENCE_DIR"] not in proc.stdout
+    assert env["MNEMOSYNE_PROD_C2PA_TOOL"] not in proc.stdout
+    assert proc.stderr == ""
+
+
+def test_renderer_check_environment_accepts_provenance_suite_assets(
+    tmp_path: Path,
+) -> None:
+    env = _filled_render_env(tmp_path)
+    evidence_dir = Path(env["MNEMOSYNE_PROD_EVIDENCE_DIR"])
+    asset = evidence_dir / "suite-asset.txt"
+    c2pa_asset = evidence_dir / "suite-c2pa-asset.txt"
+    asset.write_text("asset\n", encoding="utf-8")
+    c2pa_asset.write_text("c2pa asset\n", encoding="utf-8")
+    _populate_required_input_artifacts(
+        env,
+        suite_payload=json.dumps(
+            {
+                "cases": [
+                    {
+                        "asset_path": str(asset),
+                        "c2pa_asset_path": str(c2pa_asset),
+                    }
+                ]
+            }
+        )
+        + "\n",
+    )
+
+    proc = subprocess.run(
+        [str(RENDERER), "--check-environment"],
+        cwd=REPO,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    payload = json.loads(proc.stdout)
+
+    assert payload["ok"] is True
+    assert payload["input_artifacts_complete"] is True
+    assert payload["missing_input_artifacts"] == []
+    assert payload["input_artifact_errors"] == []
+    assert "suite-asset.txt" in payload["required_input_artifacts"]
+    assert "suite-c2pa-asset.txt" in payload["required_input_artifacts"]
+    assert payload["required_input_artifact_count"] == len(REQUIRED_PRODUCTION_INPUT_ARTIFACTS) + 2
+    assert env["MNEMOSYNE_PROD_EVIDENCE_DIR"] not in proc.stdout
+    assert env["MNEMOSYNE_PROD_C2PA_TOOL"] not in proc.stdout
 
 
 def test_renderer_check_environment_rejects_repo_local_input_dir(tmp_path: Path) -> None:
