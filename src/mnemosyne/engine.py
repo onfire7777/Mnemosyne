@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Literal, Protocol, runtime_checkable
 
 from mnemosyne.calibration import CalibrationSet, conformal_threshold, should_abstain
+from mnemosyne.consciousness import RealityMonitor
 from mnemosyne.ids import content_cid, new_id
 from mnemosyne.models import (
     Assertion,
@@ -1213,6 +1214,7 @@ class LocalMemoryEngine:
         normalized = str(value).strip().lower().replace("-", "_")
         aliases = {
             "grounded": "grounded",
+            "evidence_grounded": "grounded",
             "external": "grounded",
             "external_grounded": "grounded",
             "observed": "grounded",
@@ -1256,10 +1258,14 @@ class LocalMemoryEngine:
         counts: dict[str, int] = {}
         grounded_cids: set[str] = set()
         risky_hit_ids: list[str] = []
-        for hit in hits:
+        shadow_tags: dict[str, dict[str, Any]] = {}
+        monitor = RealityMonitor()
+        for index, hit in enumerate(hits):
             raw = hit.metadata.get("reality_class")
             reality_class = self._normalise_reality_class(raw) or "unknown"
             counts[reality_class] = counts.get(reality_class, 0) + 1
+            tag = self._shadow_reality_monitor_tag(monitor, hit)
+            shadow_tags[hit.id or f"{hit.kind}:{index}"] = tag
             if reality_class == "grounded":
                 grounded_cids.update(str(cid) for cid in hit.provenance if cid)
                 if hit.kind == "evidence" and hit.id:
@@ -1276,6 +1282,27 @@ class LocalMemoryEngine:
             "grounded_source_count": len(grounded_cids),
             "risky_hit_ids": risky_hit_ids,
             "ungrounded_only": ungrounded_only,
+            "shadow_only": True,
+            "critical_path": False,
+            "shadow_source": "RealityMonitor",
+            "shadow_tags": shadow_tags,
+        }
+
+    @staticmethod
+    def _shadow_reality_monitor_tag(monitor: RealityMonitor, hit: Hit) -> dict[str, Any]:
+        metadata = hit.metadata if isinstance(hit.metadata, dict) else {}
+        tag = monitor.tag(
+            source_type=str(metadata.get("source_type") or hit.kind),
+            actor=str(metadata.get("actor") or ""),
+            trust_tier=int(hit.trust_tier),
+            metadata={"reality_class": metadata.get("reality_class")},
+            provenance_count=len(hit.provenance),
+        )
+        return {
+            "reality_class": tag.reality_class,
+            "confidence": tag.confidence,
+            "calibrated": tag.calibrated,
+            "signals": tag.signals,
         }
 
     @staticmethod

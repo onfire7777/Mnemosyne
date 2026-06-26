@@ -73,6 +73,34 @@ def test_g1_reality_monitoring_abstains_on_self_generated_only_support() -> None
     assert "grounded evidence" in result.uncertainty_note
 
 
+def test_g1_reality_monitoring_accepts_evidence_grounded_alias() -> None:
+    engine = LocalMemoryEngine()
+    cid = _append(
+        engine,
+        "Operator source evidence grounds release codename beta.",
+        metadata={"reality_class": "evidence_grounded"},
+    )
+
+    result = engine.retrieve("release codename beta", TENANT)
+
+    assert LocalMemoryEngine._normalise_reality_class("evidence-grounded") == "grounded"
+    assert PostgresEngine._normalise_reality_class("evidence-grounded") == "grounded"
+    assert result.hits[0].id == cid
+    assert result.explain["reality_monitoring"]["classes"]["grounded"] >= 1
+    assert result.explain["reality_monitoring"]["ungrounded_only"] is False
+    assert result.explain["reality_monitoring"]["shadow_only"] is True
+    assert result.explain["reality_monitoring"]["critical_path"] is False
+    shadow_tag = result.explain["reality_monitoring"]["shadow_tags"][cid]
+    assert shadow_tag["reality_class"] == "evidence_grounded"
+    assert shadow_tag["calibrated"] is True
+    assert shadow_tag["confidence"] > 0.8
+    postgres_report = PostgresEngine(
+        "postgresql://example.invalid/mnemosyne",
+    )._reality_monitoring_report(result.hits)
+    assert postgres_report["shadow_tags"][cid]["reality_class"] == "evidence_grounded"
+    assert postgres_report["critical_path"] is False
+
+
 def test_g1_projection_reality_monitoring_abstains_on_self_generated_assertion() -> None:
     engine = LocalMemoryEngine()
     cid = _append(

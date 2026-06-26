@@ -64,7 +64,7 @@ and COMPLETE what already exists, coordinate, and never `git add -A`.
 - **D-03 (Lane C — runbooks):** Create `.planning/runbooks/` with **one runbook per parity row
   (10 total)**. Each runbook cites the exact frozen gate command(s) and run order, the real-infra
   dependency, redaction requirements, and the universal acceptance pattern (evidence →
-  `deployment-soak --evidence-dir` → `release-audit --require-production-validated --require-provider-forbid-local`). Source the
+  `deployment-soak --evidence-dir` → `release-audit --evidence-manifest "$OUT_ROOT/evidence/manifest.json" --require-production-validated --require-provider-forbid-local`). Source the
   per-row command list verbatim from OPS-HANDOFF §3; do not re-derive it.
 - **D-04 (Lane D — env/secrets):** Author `.planning/ENV-AND-SECRETS.md` — env-var catalog +
   Vault/Keycloak/KMS wiring + provisioning steps. **NO secret values.** Cross-reference the existing
@@ -169,7 +169,7 @@ and COMPLETE what already exists, coordinate, and never `git add -A`.
 
 ### Universal acceptance pattern (every row)
 operator runs gate against real infra → evidence redacted → `deployment-soak --evidence-dir`
-(production scope + operator attestation) → `release-audit --require-production-validated --require-provider-forbid-local` passes with
+(production scope + operator attestation) → `release-audit --evidence-manifest "$OUT_ROOT/evidence/manifest.json" --require-production-validated --require-provider-forbid-local` passes with
 that command's output shape present and `findings` empty.
 
 ### Lane registry (one owner per lane, OPS-HANDOFF §2)

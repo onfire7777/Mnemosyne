@@ -125,7 +125,7 @@ Concurrency is governed by **one-owning-lane-per-artifact** (per `OPS-HANDOFF-AN
 
 ### 6.3 Status authority is the only gate this contract adds
 
-`status` advances **only** as in §7, and the Partial→Done transition is bound to the **existing** acceptance gate (`release-audit --require-production-validated --require-provider-forbid-local` for the row's `gate`). This contract introduces **no new judgment** — it points at the gate that already exists.
+`status` advances **only** as in §7, and the Partial→Done transition is bound to the **existing** acceptance gate (`release-audit --evidence-manifest "$OUT_ROOT/evidence/manifest.json" --require-production-validated --require-provider-forbid-local` for the row's `gate`). This contract introduces **no new judgment** — it points at the gate that already exists.
 
 ## 7. Status lifecycle (and reconciliation with the audit's binary)
 
@@ -137,7 +137,7 @@ partial ──▶ evidence-pending ──▶ validated ──▶ done
 ```
 
 - `evidence-pending` and `validated` are **Lane-A-defined sub-states of the audit's "Partial"** for tracking progress; they do **not** reclassify the row.
-- A row may reach `validated`/`done` **only** when `release-audit --require-production-validated --require-provider-forbid-local` passes for that row's `gate` with real-infra operator evidence (per the ops handoff's universal acceptance pattern). `done` ⇔ the audit's "Done".
+- A row may reach `validated`/`done` **only** when `release-audit --evidence-manifest "$OUT_ROOT/evidence/manifest.json" --require-production-validated --require-provider-forbid-local` passes for that row's `gate` with real-infra operator evidence (per the ops handoff's universal acceptance pattern). `done` ⇔ the audit's "Done".
 - Reconciliation: `{partial, evidence-pending, validated}` ⊂ audit-"Partial"; `done` ⇔ audit-"Done". The authoritative Partial/Done flip remains the audit's; this lifecycle never re-derives the split (§10).
 - `superseded` is terminal and only for a retired/mis-minted key.
 
