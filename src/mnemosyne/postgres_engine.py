@@ -38,6 +38,7 @@ from mnemosyne.retrieval import (
     gist_support_report,
     is_retired_summary_metadata,
     query_support,
+    schema_fast_path_rerank,
     semantic_entropy,
     validate_adapter_hit_scope,
 )
@@ -177,6 +178,7 @@ class PostgresEngine:
         db_user_id = _stable_uuid("user", ev.user_id)
         db_session_id = _stable_uuid("session", ev.session_id) if ev.session_id else None
         metadata = {**ev.metadata, "_external_tenant_id": ev.tenant_id, "_external_user_id": ev.user_id}
+        metadata.setdefault("reality_class", self._classify_evidence_reality(ev))
         if ev.session_id:
             metadata["_external_session_id"] = ev.session_id
         cid = content_cid(
@@ -367,11 +369,52 @@ class PostgresEngine:
                 )
         return True
 
+    def _apply_schema_fast_path_projection_status(
+        self,
+        incoming: Assertion,
+        *,
+        requested_status: str,
+    ) -> None:
+        if not bool(getattr(self.policy, "schema_fast_path_enabled", True)):
+            return
+        if requested_status not in {"candidate", "active"}:
+            return
+        calibration = dict(incoming.calibration)
+        schema_fast_path = calibration.get("schema_fast_path")
+        schema_fast_path = dict(schema_fast_path) if isinstance(schema_fast_path, dict) else {}
+        scope = incoming.scope if isinstance(incoming.scope, dict) else {}
+        congruent = bool(
+            calibration.get("schema_congruent")
+            or schema_fast_path.get("schema_congruent")
+            or scope.get("schema_congruent")
+            or scope.get("schema_fast_path")
+        )
+        if not congruent:
+            return
+        minimum = max(1, int(getattr(self.policy, "schema_fast_path_min_corroboration", 2)))
+        corroboration = len(set(incoming.source_evidence_cids))
+        schema_fast_path.update(
+            {
+                "schema_congruent": True,
+                "corroboration_count": corroboration,
+                "min_corroboration": minimum,
+            }
+        )
+        if corroboration < minimum:
+            incoming.status = "contested"
+            schema_fast_path["reason"] = "uncorroborated_but_congruent"
+        else:
+            schema_fast_path["reason"] = "corroborated_schema_fast_path"
+        calibration["schema_fast_path"] = schema_fast_path
+        incoming.calibration = calibration
+
     def upsert_assertion(self, assertion: Assertion, branch: str = "main") -> str:
         self.ensure_tenant_and_branch(assertion.tenant_id, branch)
         incoming = Assertion.from_dict(assertion.to_dict())
         incoming.branch = branch
+        requested_status = incoming.status
         incoming.status = "active" if incoming.status == "candidate" else incoming.status
+        self._apply_schema_fast_path_projection_status(incoming, requested_status=requested_status)
         incoming.transaction_time = utc_now()
         db_tenant_id = _stable_uuid("tenant", incoming.tenant_id)
         db_user_id = _stable_uuid("user", incoming.user_id) if incoming.user_id else None
@@ -788,7 +831,11 @@ class PostgresEngine:
                     metadata = dict(row["metadata"] or {})
                     if is_retired_summary_metadata(metadata):
                         continue
-                    hit_metadata = {"source_type": row["source_type"], "backend": self.adapters.lexical_backend}
+                    hit_metadata = {
+                        "source_type": row["source_type"],
+                        "backend": self.adapters.lexical_backend,
+                        "reality_class": metadata.get("reality_class", "grounded"),
+                    }
                     if isinstance(metadata.get("summary"), dict):
                         hit_metadata["summary"] = metadata["summary"]
                     if isinstance(metadata.get("lifecycle"), dict):
@@ -839,6 +886,7 @@ class PostgresEngine:
                             sensitivity=row["sensitivity"],
                             metadata={
                                 "confidence": float(row["confidence"]),
+                                "reality_class": "grounded",
                                 "backend": self.adapters.lexical_backend,
                                 "last_accessed": row["last_accessed"].isoformat() if row["last_accessed"] else None,
                                 "access_count": row["access_count"],
@@ -896,6 +944,7 @@ class PostgresEngine:
                             sensitivity=row["sensitivity"],
                             metadata={
                                 "confidence": float(row["confidence"]),
+                                "reality_class": "grounded",
                                 "backend": self.adapters.embedding.name,
                                 "embedding_dims": self.adapters.embedding.dims,
                                 "last_accessed": row["last_accessed"].isoformat() if row["last_accessed"] else None,
@@ -955,6 +1004,7 @@ class PostgresEngine:
                         "source_table": "evidence",
                         "modality": row["modality"],
                         "content_pointer": row["content_pointer"],
+                        "reality_class": metadata.get("reality_class", "grounded"),
                     }
                     if isinstance(media_embedding, dict):
                         hit_metadata["media_embedding"] = media_embedding
@@ -1011,6 +1061,7 @@ class PostgresEngine:
                         "embedding_dims": self.adapters.embedding.dims,
                         "stored_embedding": False,
                         "source_table": "evidence",
+                        "reality_class": metadata.get("reality_class", "grounded"),
                     }
                     if isinstance(metadata.get("summary"), dict):
                         hit_metadata["summary"] = metadata["summary"]
@@ -1308,9 +1359,12 @@ class PostgresEngine:
         graph = self.graph_ppr(tokenize(query), max(4, k // 2), tenant_id=tenant_id, branch=branch) if deep else []
         fused = self._rrf([dense, lexical, graph], k=max(k * 2, self.policy.rerank_width))
         reranked = self.adapters.reranker.rerank(query, fused, k=max(k * 2, k))
+        reranked, schema_fast_path = schema_fast_path_rerank(query, reranked, self.policy)
         diversified = self._mmr(query, reranked, k=max(k, 1))
         activated = apply_activation_scores(diversified, self.policy)
         ordered = self._u_curve_order(activated)
+        ordered, schema_fast_path_final = schema_fast_path_rerank(query, ordered, self.policy)
+        schema_fast_path = self._merge_schema_fast_path_reports(schema_fast_path, schema_fast_path_final)
         budgeted, used_tokens = self._fit_budget(ordered, self.policy.token_budget)
         budgeted = self._mark_retrieved_text_as_data(budgeted)
         read_marks = self._record_retrieval_access(budgeted)
@@ -1323,18 +1377,31 @@ class PostgresEngine:
         entropy = semantic_entropy([hit.text for hit in budgeted])
         gist_support = gist_support_report(budgeted)
         gist_only = bool(gist_support["applied"])
+        reality_monitoring = self._reality_monitoring_report(budgeted)
+        ungrounded_reality_only = bool(reality_monitoring["ungrounded_only"])
         if gist_only:
+            confidence = min(confidence, threshold * 0.95)
+        if ungrounded_reality_only:
             confidence = min(confidence, threshold * 0.95)
         if calibration:
             abstained = (
                 should_abstain(confidence, calibration, prediction_set_size=prediction_set_size)
                 or insufficient_support
                 or gist_only
+                or ungrounded_reality_only
             )
         else:
-            abstained = confidence < threshold or prediction_set_size == 0 or insufficient_support or gist_only
+            abstained = (
+                confidence < threshold
+                or prediction_set_size == 0
+                or insufficient_support
+                or gist_only
+                or ungrounded_reality_only
+            )
         if gist_only:
             note = "Only gist-tier memory support was retrieved; inspect source evidence before answering."
+        elif ungrounded_reality_only:
+            note = "Retrieved support is self-generated or externally suggested only; abstaining until grounded evidence is available."
         elif insufficient_support:
             note = "Retrieved evidence did not cover enough query terms; abstaining until stronger support is available."
         elif abstained:
@@ -1369,7 +1436,9 @@ class PostgresEngine:
                 },
                 "semantic_entropy": entropy,
                 "gist_support": gist_support,
-                "read_marks": {"assertions": read_marks},
+                "reality_monitoring": reality_monitoring,
+                "schema_fast_path": schema_fast_path,
+                "read_marks": read_marks,
                 "adapters": {
                     "embedding": self.adapters.embedding.name,
                     "embedding_dims": self.adapters.embedding.dims,
@@ -1516,17 +1585,23 @@ class PostgresEngine:
             "scores": len(calibration.scores),
         }
 
-    def _record_retrieval_access(self, hits: list[Hit]) -> int:
+    def _record_retrieval_access(self, hits: list[Hit]) -> dict[str, int]:
         ids_by_scope: dict[tuple[str, str], list[UUID]] = defaultdict(list)
+        evidence_by_scope: dict[tuple[str, str], set[bytes]] = defaultdict(set)
         for hit in hits:
-            if hit.kind != "assertion":
-                continue
-            assertion_id = _uuid_or_none(hit.id)
-            if assertion_id:
-                ids_by_scope[(hit.tenant_id, hit.branch)].append(assertion_id)
-        if not ids_by_scope:
-            return 0
-        touched = 0
+            if hit.kind == "evidence" and hit.id:
+                evidence_by_scope[(hit.tenant_id, hit.branch)].add(_cid_to_bytes(hit.id))
+            for cid in hit.provenance:
+                if cid:
+                    evidence_by_scope[(hit.tenant_id, hit.branch)].add(_cid_to_bytes(str(cid)))
+            if hit.kind == "assertion":
+                assertion_id = _uuid_or_none(hit.id)
+                if assertion_id:
+                    ids_by_scope[(hit.tenant_id, hit.branch)].append(assertion_id)
+        if not ids_by_scope and not evidence_by_scope:
+            return {"assertions": 0, "evidence": 0}
+        touched_assertions = 0
+        touched_evidence = 0
         with self.connect() as conn:
             with conn.cursor() as cur:
                 for (tenant_id, branch), assertion_ids in ids_by_scope.items():
@@ -1540,8 +1615,133 @@ class PostgresEngine:
                         """,
                         (db_tenant_id, branch, [str(item) for item in assertion_ids]),
                     )
-                    touched += max(cur.rowcount or 0, 0)
-        return touched
+                    touched_assertions += max(cur.rowcount or 0, 0)
+                for (tenant_id, branch), evidence_cids in evidence_by_scope.items():
+                    if not evidence_cids:
+                        continue
+                    db_tenant_id = _stable_uuid("tenant", tenant_id)
+                    self._set_tenant(cur, db_tenant_id)
+                    cur.execute(
+                        """
+                        SELECT cid, metadata
+                        FROM evidence
+                        WHERE tenant_id = %s AND branch = %s AND cid = ANY(%s::bytea[])
+                        """,
+                        (db_tenant_id, branch, list(evidence_cids)),
+                    )
+                    rows = cur.fetchall()
+                    for cid_bytes, metadata_raw in rows:
+                        metadata = dict(metadata_raw or {})
+                        lifecycle = metadata.get("lifecycle")
+                        lifecycle = dict(lifecycle) if isinstance(lifecycle, dict) else {}
+                        try:
+                            access_count = int(lifecycle.get("access_count", 0))
+                        except (TypeError, ValueError):
+                            access_count = 0
+                        lifecycle["access_count"] = access_count + 1
+                        lifecycle["last_accessed"] = utc_now().isoformat()
+                        try:
+                            salience = float(lifecycle.get("salience", 0.5))
+                        except (TypeError, ValueError):
+                            salience = 0.5
+                        lifecycle["salience"] = min(1.0, max(0.0, salience) + 0.05)
+                        metadata["lifecycle"] = lifecycle
+                        cur.execute(
+                            """
+                            UPDATE evidence
+                            SET metadata = %s
+                            WHERE tenant_id = %s AND branch = %s AND cid = %s
+                            """,
+                            (self._jsonb(metadata), db_tenant_id, branch, cid_bytes),
+                        )
+                        touched_evidence += max(cur.rowcount or 0, 0)
+        return {"assertions": touched_assertions, "evidence": touched_evidence}
+
+    @staticmethod
+    def _normalise_reality_class(value: object) -> str | None:
+        if value is None:
+            return None
+        normalized = str(value).strip().lower().replace("-", "_")
+        aliases = {
+            "grounded": "grounded",
+            "external": "grounded",
+            "external_grounded": "grounded",
+            "observed": "grounded",
+            "user_grounded": "grounded",
+            "self_generated": "self_generated",
+            "self": "self_generated",
+            "generated": "self_generated",
+            "assistant_generated": "self_generated",
+            "simulation": "simulated",
+            "simulated": "simulated",
+            "externally_suggested": "externally_suggested",
+            "suggested": "externally_suggested",
+            "untrusted_suggestion": "externally_suggested",
+        }
+        return aliases.get(normalized)
+
+    @classmethod
+    def _classify_evidence_reality(cls, ev: Evidence) -> str:
+        explicit = cls._normalise_reality_class(ev.metadata.get("reality_class"))
+        if explicit:
+            return explicit
+        source_type = ev.source_type.lower()
+        actor = ev.actor.lower()
+        if any(marker in source_type for marker in ("simulation", "synthetic", "generated", "hypothesis")):
+            return "simulated"
+        if any(marker in source_type for marker in ("summary", "trace", "analysis", "consolidation")):
+            return "self_generated"
+        if actor == "assistant":
+            return "self_generated"
+        if actor in {"system", "tool"} and any(
+            marker in source_type for marker in ("scratchpad", "workspace", "thought", "reflection")
+        ):
+            return "self_generated"
+        if actor == "external" or ev.trust_tier >= int(TrustTier.LOW):
+            return "externally_suggested"
+        return "grounded"
+
+    def _reality_monitoring_report(self, hits: list[Hit]) -> dict[str, Any]:
+        risky = {"self_generated", "simulated", "externally_suggested"}
+        counts: dict[str, int] = {}
+        grounded_cids: set[str] = set()
+        risky_hit_ids: list[str] = []
+        for hit in hits:
+            reality_class = self._normalise_reality_class(hit.metadata.get("reality_class")) or "unknown"
+            counts[reality_class] = counts.get(reality_class, 0) + 1
+            if reality_class == "grounded":
+                grounded_cids.update(str(cid) for cid in hit.provenance if cid)
+                if hit.kind == "evidence" and hit.id:
+                    grounded_cids.add(hit.id)
+            elif reality_class in risky:
+                risky_hit_ids.append(hit.id)
+        hit_count = len(hits)
+        grounded = counts.get("grounded", 0)
+        ungrounded_only = hit_count > 0 and grounded == 0 and any(counts.get(item, 0) for item in risky)
+        return {
+            "applied": True,
+            "classes": counts,
+            "grounded_hit_count": grounded,
+            "grounded_source_count": len(grounded_cids),
+            "risky_hit_ids": risky_hit_ids,
+            "ungrounded_only": ungrounded_only,
+        }
+
+    @staticmethod
+    def _merge_schema_fast_path_reports(first: dict[str, Any], second: dict[str, Any]) -> dict[str, Any]:
+        boosted = sorted(set(first.get("boosted_hit_ids") or []) | set(second.get("boosted_hit_ids") or []))
+        reasons: dict[str, Any] = {}
+        if isinstance(first.get("reasons"), dict):
+            reasons.update(first["reasons"])
+        if isinstance(second.get("reasons"), dict):
+            reasons.update(second["reasons"])
+        return {
+            "applied": bool(first.get("applied")) or bool(second.get("applied")),
+            "boost": second.get("boost", first.get("boost")),
+            "boosted_hit_ids": boosted,
+            "reasons": reasons,
+            "passes": [first, second],
+        }
 
     def deep_search(self, query: str, tenant_id: str, branch: str = "main", filt: dict[str, Any] | None = None) -> RetrievalResult:
         return self.retrieve(query=query, tenant_id=tenant_id, branch=branch, deep=True, filt=filt)
@@ -2271,7 +2471,10 @@ class PostgresEngine:
                         metadata = dict(row["metadata"] or {})
                         if is_retired_summary_metadata(metadata):
                             continue
-                        hit_metadata = {"source_type": row["source_type"]}
+                        hit_metadata = {
+                            "source_type": row["source_type"],
+                            "reality_class": metadata.get("reality_class", "grounded"),
+                        }
                         if isinstance(metadata.get("summary"), dict):
                             hit_metadata["summary"] = metadata["summary"]
                         if isinstance(metadata.get("lifecycle"), dict):
@@ -2319,6 +2522,7 @@ class PostgresEngine:
                                 sensitivity=row["sensitivity"],
                                 metadata={
                                     "confidence": float(row["confidence"]),
+                                    "reality_class": "grounded",
                                     "last_accessed": row["last_accessed"].isoformat() if row["last_accessed"] else None,
                                     "access_count": row["access_count"],
                                 },

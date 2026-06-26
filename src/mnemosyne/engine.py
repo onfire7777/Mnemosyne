@@ -39,6 +39,7 @@ from mnemosyne.retrieval import (
     gist_support_report,
     is_retired_summary_metadata,
     query_support,
+    schema_fast_path_rerank,
     semantic_entropy,
     validate_adapter_hit_scope,
 )
@@ -430,6 +431,8 @@ class LocalMemoryEngine:
             stored = copy.deepcopy(ev)
             stored.cid = cid
             stored.branch = branch
+            stored.metadata = dict(stored.metadata)
+            stored.metadata.setdefault("reality_class", self._classify_evidence_reality(stored))
             self.evidence[key] = stored
             self._audit(
                 ev.tenant_id,
@@ -520,7 +523,9 @@ class LocalMemoryEngine:
             incoming = copy.deepcopy(assertion)
             incoming.branch = branch
             incoming.transaction_time = utc_now()
+            requested_status = incoming.status
             incoming.status = "active" if incoming.status == "candidate" else incoming.status
+            self._apply_schema_fast_path_projection_status(incoming, requested_status=requested_status)
             peers = [
                 item
                 for item in self.assertions.values()
@@ -650,6 +655,45 @@ class LocalMemoryEngine:
         total = sum(max(item.confidence, 0.01) for item in items)
         for item in items:
             item.calibration["hypothesis_prob"] = max(item.confidence, 0.01) / total
+
+    def _apply_schema_fast_path_projection_status(
+        self,
+        incoming: Assertion,
+        *,
+        requested_status: str,
+    ) -> None:
+        if not bool(getattr(self.policy, "schema_fast_path_enabled", True)):
+            return
+        if requested_status not in {"candidate", "active"}:
+            return
+        calibration = dict(incoming.calibration)
+        schema_fast_path = calibration.get("schema_fast_path")
+        schema_fast_path = dict(schema_fast_path) if isinstance(schema_fast_path, dict) else {}
+        scope = incoming.scope if isinstance(incoming.scope, dict) else {}
+        congruent = bool(
+            calibration.get("schema_congruent")
+            or schema_fast_path.get("schema_congruent")
+            or scope.get("schema_congruent")
+            or scope.get("schema_fast_path")
+        )
+        if not congruent:
+            return
+        minimum = max(1, int(getattr(self.policy, "schema_fast_path_min_corroboration", 2)))
+        corroboration = len(set(incoming.source_evidence_cids))
+        schema_fast_path.update(
+            {
+                "schema_congruent": True,
+                "corroboration_count": corroboration,
+                "min_corroboration": minimum,
+            }
+        )
+        if corroboration < minimum:
+            incoming.status = "contested"
+            schema_fast_path["reason"] = "uncorroborated_but_congruent"
+        else:
+            schema_fast_path["reason"] = "corroborated_schema_fast_path"
+        calibration["schema_fast_path"] = schema_fast_path
+        incoming.calibration = calibration
 
     def add_relation(self, relation: Relation, branch: str = "main") -> str:
         with self._lock:
@@ -886,9 +930,12 @@ class LocalMemoryEngine:
         graph = self.graph_ppr(tokenize(query), max(4, k // 2), tenant_id=tenant_id, branch=branch) if deep else []
         fused = self._rrf([dense, lexical, graph], k=max(k * 2, self.policy.rerank_width))
         reranked = self.adapters.reranker.rerank(query, fused, k=max(k * 2, k))
+        reranked, schema_fast_path = schema_fast_path_rerank(query, reranked, self.policy)
         diversified = self._mmr(query, reranked, k=max(k, 1))
         activated = apply_activation_scores(diversified, self.policy)
         ordered = self._u_curve_order(activated)
+        ordered, schema_fast_path_final = schema_fast_path_rerank(query, ordered, self.policy)
+        schema_fast_path = self._merge_schema_fast_path_reports(schema_fast_path, schema_fast_path_final)
         budgeted, used = self._fit_budget(ordered, self.policy.token_budget)
         budgeted = self._mark_retrieved_text_as_data(budgeted)
         read_marks = self._record_retrieval_access(budgeted)
@@ -901,19 +948,32 @@ class LocalMemoryEngine:
         entropy = semantic_entropy([hit.text for hit in budgeted])
         gist_support = gist_support_report(budgeted)
         gist_only = bool(gist_support["applied"])
+        reality_monitoring = self._reality_monitoring_report(budgeted)
+        ungrounded_reality_only = bool(reality_monitoring["ungrounded_only"])
         if gist_only:
+            confidence = min(confidence, threshold * 0.95)
+        if ungrounded_reality_only:
             confidence = min(confidence, threshold * 0.95)
         if calibration:
             abstained = (
                 should_abstain(confidence, calibration, prediction_set_size=prediction_set_size)
                 or insufficient_support
                 or gist_only
+                or ungrounded_reality_only
             )
         else:
-            abstained = confidence < threshold or prediction_set_size == 0 or insufficient_support or gist_only
+            abstained = (
+                confidence < threshold
+                or prediction_set_size == 0
+                or insufficient_support
+                or gist_only
+                or ungrounded_reality_only
+            )
         note = None
         if gist_only:
             note = "Only gist-tier memory support was retrieved; inspect source evidence before answering."
+        elif ungrounded_reality_only:
+            note = "Retrieved support is self-generated or externally suggested only; abstaining until grounded evidence is available."
         elif insufficient_support:
             note = "Retrieved evidence did not cover enough query terms; abstaining until stronger support is available."
         elif abstained:
@@ -946,7 +1006,9 @@ class LocalMemoryEngine:
                 },
                 "semantic_entropy": entropy,
                 "gist_support": gist_support,
-                "read_marks": {"assertions": read_marks},
+                "reality_monitoring": reality_monitoring,
+                "schema_fast_path": schema_fast_path,
+                "read_marks": read_marks,
                 "adapters": {
                     "embedding": self.adapters.embedding.name,
                     "embedding_dims": self.adapters.embedding.dims,
@@ -1030,22 +1092,136 @@ class LocalMemoryEngine:
             "scores": len(calibration.scores),
         }
 
-    def _record_retrieval_access(self, hits: list[Hit]) -> int:
-        touched = 0
+    def _record_retrieval_access(self, hits: list[Hit]) -> dict[str, int]:
+        touched_assertions = 0
+        touched_evidence = 0
         now = utc_now()
         with self._lock:
+            evidence_cids: set[tuple[str, str, str]] = set()
             for hit in hits:
-                if hit.kind != "assertion":
+                if hit.kind == "evidence" and hit.id:
+                    evidence_cids.add((hit.tenant_id, hit.branch, hit.id))
+                for cid in hit.provenance:
+                    if cid:
+                        evidence_cids.add((hit.tenant_id, hit.branch, str(cid)))
+                if hit.kind == "assertion":
+                    assertion = self.assertions.get(self._branch_key(hit.tenant_id, hit.branch, hit.id))
+                    if assertion is None:
+                        continue
+                    assertion.last_accessed = now
+                    assertion.access_count += 1
+                    touched_assertions += 1
+                    for cid in assertion.source_evidence_cids:
+                        if cid:
+                            evidence_cids.add((assertion.tenant_id, assertion.branch, str(cid)))
+            for tenant_id, branch, cid in sorted(evidence_cids):
+                ev = self.evidence.get(self._evidence_key(tenant_id, branch, cid))
+                if ev is None or ev.erased:
                     continue
-                assertion = self.assertions.get(self._branch_key(hit.tenant_id, hit.branch, hit.id))
-                if assertion is None:
-                    continue
-                assertion.last_accessed = now
-                assertion.access_count += 1
-                touched += 1
-            if touched:
+                metadata = dict(ev.metadata)
+                lifecycle = metadata.get("lifecycle")
+                lifecycle = dict(lifecycle) if isinstance(lifecycle, dict) else {}
+                try:
+                    access_count = int(lifecycle.get("access_count", 0))
+                except (TypeError, ValueError):
+                    access_count = 0
+                access_count += 1
+                lifecycle["access_count"] = access_count
+                lifecycle["last_accessed"] = now.isoformat()
+                lifecycle["salience"] = min(1.0, _bounded_float(lifecycle.get("salience", 0.5), default=0.5) + 0.05)
+                metadata["lifecycle"] = lifecycle
+                ev.metadata = metadata
+                touched_evidence += 1
+            if touched_assertions or touched_evidence:
                 self._persist()
-        return touched
+        return {"assertions": touched_assertions, "evidence": touched_evidence}
+
+    @staticmethod
+    def _normalise_reality_class(value: object) -> str | None:
+        if value is None:
+            return None
+        normalized = str(value).strip().lower().replace("-", "_")
+        aliases = {
+            "grounded": "grounded",
+            "external": "grounded",
+            "external_grounded": "grounded",
+            "observed": "grounded",
+            "user_grounded": "grounded",
+            "self_generated": "self_generated",
+            "self": "self_generated",
+            "generated": "self_generated",
+            "assistant_generated": "self_generated",
+            "simulation": "simulated",
+            "simulated": "simulated",
+            "externally_suggested": "externally_suggested",
+            "suggested": "externally_suggested",
+            "untrusted_suggestion": "externally_suggested",
+        }
+        return aliases.get(normalized)
+
+    @classmethod
+    def _classify_evidence_reality(cls, ev: Evidence) -> str:
+        explicit = cls._normalise_reality_class(ev.metadata.get("reality_class"))
+        if explicit:
+            return explicit
+        source_type = ev.source_type.lower()
+        actor = ev.actor.lower()
+        if any(marker in source_type for marker in ("simulation", "synthetic", "generated", "hypothesis")):
+            return "simulated"
+        if any(marker in source_type for marker in ("summary", "trace", "analysis", "consolidation")):
+            return "self_generated"
+        if actor == "assistant":
+            return "self_generated"
+        if actor in {"system", "tool"} and any(
+            marker in source_type for marker in ("scratchpad", "workspace", "thought", "reflection")
+        ):
+            return "self_generated"
+        if actor == "external" or ev.trust_tier >= int(TrustTier.LOW):
+            return "externally_suggested"
+        return "grounded"
+
+    def _reality_monitoring_report(self, hits: list[Hit]) -> dict[str, Any]:
+        risky = {"self_generated", "simulated", "externally_suggested"}
+        counts: dict[str, int] = {}
+        grounded_cids: set[str] = set()
+        risky_hit_ids: list[str] = []
+        for hit in hits:
+            raw = hit.metadata.get("reality_class")
+            reality_class = self._normalise_reality_class(raw) or "unknown"
+            counts[reality_class] = counts.get(reality_class, 0) + 1
+            if reality_class == "grounded":
+                grounded_cids.update(str(cid) for cid in hit.provenance if cid)
+                if hit.kind == "evidence" and hit.id:
+                    grounded_cids.add(hit.id)
+            elif reality_class in risky:
+                risky_hit_ids.append(hit.id)
+        hit_count = len(hits)
+        grounded = counts.get("grounded", 0)
+        ungrounded_only = hit_count > 0 and grounded == 0 and any(counts.get(item, 0) for item in risky)
+        return {
+            "applied": True,
+            "classes": counts,
+            "grounded_hit_count": grounded,
+            "grounded_source_count": len(grounded_cids),
+            "risky_hit_ids": risky_hit_ids,
+            "ungrounded_only": ungrounded_only,
+        }
+
+    @staticmethod
+    def _merge_schema_fast_path_reports(first: dict[str, Any], second: dict[str, Any]) -> dict[str, Any]:
+        boosted = sorted(set(first.get("boosted_hit_ids") or []) | set(second.get("boosted_hit_ids") or []))
+        reasons: dict[str, Any] = {}
+        if isinstance(first.get("reasons"), dict):
+            reasons.update(first["reasons"])
+        if isinstance(second.get("reasons"), dict):
+            reasons.update(second["reasons"])
+        return {
+            "applied": bool(first.get("applied")) or bool(second.get("applied")),
+            "boost": second.get("boost", first.get("boost")),
+            "boosted_hit_ids": boosted,
+            "reasons": reasons,
+            "passes": [first, second],
+        }
 
     def deep_search(self, query: str, tenant_id: str, branch: str = "main", filt: dict[str, Any] | None = None) -> RetrievalResult:
         return self.retrieve(query=query, tenant_id=tenant_id, branch=branch, deep=True, filt=filt)
@@ -1445,6 +1621,7 @@ class LocalMemoryEngine:
                 "source_type": ev.source_type,
                 "modality": ev.modality,
                 "content_pointer": ev.content_pointer,
+                "reality_class": self._classify_evidence_reality(ev),
                 "stored_media_embedding": bool(ev.embedding and ev.modality != "text"),
             }
             if isinstance(ev.metadata.get("media_embedding"), dict):
@@ -1490,6 +1667,11 @@ class LocalMemoryEngine:
                     metadata={
                         "status": assertion.status,
                         "confidence": assertion.confidence,
+                        "reality_class": self._normalise_reality_class(
+                            assertion.calibration.get("reality_class")
+                            or assertion.calibration.get("reality_monitoring")
+                        )
+                        or "grounded",
                         "last_accessed": assertion.last_accessed.isoformat() if assertion.last_accessed else None,
                         "access_count": assertion.access_count,
                     },

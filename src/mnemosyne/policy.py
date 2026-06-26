@@ -34,6 +34,32 @@ class OperatingPolicy:
     max_supersession_rate: float = 0.05
     min_corroboration_for_delete: int = 2
     max_prune_fraction_per_pass: float = 0.02
+    # Cognitive-architecture G1 knobs. Defaults are conservative and keep the
+    # path deterministic: schema bridging only boosts recognized low-risk
+    # relation/time patterns, and prediction-error gating records signals
+    # without making consolidation destructive.
+    schema_fast_path_enabled: bool = True
+    schema_fast_path_boost: float = 1.25
+    schema_fast_path_min_corroboration: int = 2
+    prediction_error_threshold: float = 0.35
+    write_priority_weights: dict[str, float] = field(
+        default_factory=lambda: {
+            "importance": 0.35,
+            "novelty": 0.25,
+            "surprise": 0.25,
+            "reward": 0.15,
+        }
+    )
+    write_priority_max_by_trust_tier: dict[int, float] = field(
+        default_factory=lambda: {
+            0: 1.0,
+            1: 0.9,
+            2: 0.75,
+            3: 0.55,
+            4: 0.35,
+            5: 0.2,
+        }
+    )
     # §31 / FR-17 / OQ2 immutable rail gate, default off. Kept outside
     # immutable_rails so the all-true rail map remains byte-stable.
     cold_loop_counterfactual_trusted: bool = False
