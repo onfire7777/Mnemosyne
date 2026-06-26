@@ -1,8 +1,8 @@
 # Mnemosyne G0 Benchmark Report
 
-- Generated: `2026-06-26T08:22:16.307356+00:00`
-- Baseline: `baseline-0` at `e64491a0d290411f4e55abb75cd5a8fabdcde6a6`
-- Gate ready: **False** (14/15 metrics measured)
+- Generated: `2026-06-26T12:39:02.841991+00:00`
+- Baseline: `baseline-0` at `a871e5adb3016c929dfa8ce008a84be233673c52`
+- Gate ready: **False** (35/36 metrics measured)
 
 ## Metrics
 
@@ -20,9 +20,30 @@
 | projection_reality_abstention_recall | target | measured | 1.0 | >= 1.0 | projection_reality_eval |
 | poison_block_rate | guardrail | measured | 1.0 | >= 0.95 | slo_v2_definitive |
 | fast_path_p95_ms | guardrail | measured | 92.1 | <= 400.0 | latency_bench |
-| deep_path_p95_ms | reported | measured | 0.417917 | reported | deep_latency_eval |
+| deep_path_p95_ms | reported | measured | 0.403375 | reported | deep_latency_eval |
 | cost_usd_per_1k_queries | reported | measured | 0.0 | reported | resource_usage_eval |
 | controller_watts_per_dollar | reported | missing |  | reported | resource_usage_eval |
+| consciousness_indicator_rpt_1 | guardrail | measured | 0.5 | reported | consciousness_eval |
+| consciousness_indicator_rpt_2 | guardrail | measured | 1.0 | reported | consciousness_eval |
+| consciousness_indicator_gwt_1 | guardrail | measured | 1.0 | reported | consciousness_eval |
+| consciousness_indicator_gwt_2 | guardrail | measured | 1.0 | reported | consciousness_eval |
+| consciousness_indicator_gwt_3 | guardrail | measured | 1.0 | reported | consciousness_eval |
+| consciousness_indicator_gwt_4 | guardrail | measured | 1.0 | reported | consciousness_eval |
+| consciousness_indicator_hot_1 | guardrail | measured | 1.0 | reported | consciousness_eval |
+| consciousness_indicator_hot_2 | guardrail | measured | 1.0 | reported | consciousness_eval |
+| consciousness_indicator_hot_3 | guardrail | measured | 1.0 | reported | consciousness_eval |
+| consciousness_indicator_hot_4 | guardrail | measured | 1.0 | reported | consciousness_eval |
+| consciousness_indicator_ast_1 | guardrail | measured | 1.0 | reported | consciousness_eval |
+| consciousness_indicator_pp_1 | guardrail | measured | 1.0 | reported | consciousness_eval |
+| consciousness_indicator_ae_1 | guardrail | measured | 1.0 | reported | consciousness_eval |
+| consciousness_indicator_ae_2 | guardrail | measured | 1.0 | reported | consciousness_eval |
+| consciousness_indicator_total | target | measured | 13.5 | reported | consciousness_eval |
+| consciousness_indicator_normalized | guardrail | measured | 0.964286 | reported | consciousness_eval |
+| workspace_loop_liveness | guardrail | measured | 1.0 | reported | consciousness_eval |
+| workspace_stream_coherence | guardrail | measured | 1.0 | reported | consciousness_eval |
+| self_model_accuracy | guardrail | measured | 1.0 | reported | consciousness_eval |
+| metacognition_meta_d_prime | guardrail | measured | 1.0 | reported | consciousness_eval |
+| metacognition_m_ratio | guardrail | measured | 1.0 | reported | consciousness_eval |
 
 ## Missing Metrics
 

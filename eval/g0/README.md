@@ -26,6 +26,10 @@ This writes:
   spend per 1k local G0 queries; controller watts/$ remains unmeasured unless
   an explicit power/cost telemetry artifact is supplied, because the harness
   does not estimate power data
+- an embedded computed `consciousness_eval` fixture recording the functional
+  indicator-property scorecard, continuity probes, self-model accuracy, and
+  metacognition metrics; these are architecture/probe signals only and do not
+  claim phenomenal consciousness
 
 To measure `controller_watts_per_dollar`, pass a local telemetry artifact:
 

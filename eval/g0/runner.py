@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from eval.g0.confabulation import run_confabulation_eval
+from eval.g0.consciousness import CONSCIOUSNESS_METRIC_SPECS, run_consciousness_eval
 from eval.g0.continual_learning import run_continual_learning_eval
 from eval.g0.deep_latency import run_deep_latency_eval
 from eval.g0.projection_reality import run_projection_reality_eval
@@ -162,7 +163,7 @@ G0_METRIC_SPECS: tuple[dict[str, Any], ...] = (
         "target_op": None,
         "blueprint_metric": "controller watts/$",
     },
-)
+) + CONSCIOUSNESS_METRIC_SPECS
 
 SOURCE_PATHS = {
     "slo_v2_definitive": "eval/reports/slo_v2_definitive.json",
@@ -249,6 +250,13 @@ def build_report(
         "computed:eval.g0.resource_usage",
         resource_usage_report,
     )
+    consciousness_report = run_consciousness_eval(repo_root=repo_root)
+    sources["consciousness_eval"] = _computed_source(
+        repo_root,
+        "consciousness_eval",
+        "computed:eval.g0.consciousness",
+        consciousness_report,
+    )
     metrics = [_build_metric(spec, sources) for spec in G0_METRIC_SPECS]
     measured = sum(1 for metric in metrics if metric["status"] == "measured")
     missing = len(metrics) - measured
@@ -261,6 +269,7 @@ def build_report(
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "blueprint_refs": [
             "docs/blueprint/cognitive-architecture/04-G0-BENCHMARK-SPEC.md",
+            "docs/blueprint/cognitive-architecture/06-CONSCIOUSNESS-AND-CONTINUOUS-WORKSPACE.md",
             "docs/blueprint/eval/05-harness-architecture-and-ci-gating.md",
             "eval/calibration/report.json",
         ],
@@ -398,6 +407,10 @@ def _build_metric(spec: dict[str, Any], sources: dict[str, Source]) -> dict[str,
         "notes": "No current artifact computes this G0 metric yet.",
     }
     builder = builders.get(spec["id"])
+    if builder is None and spec["id"].startswith(
+        ("consciousness_indicator_", "workspace_", "self_model_", "metacognition_")
+    ):
+        builder = _metric_consciousness_scorecard
     if builder is None:
         return base
     measured = builder(spec, sources)
@@ -603,6 +616,21 @@ def _metric_controller_watts_per_dollar(
             "no default estimate is used."
         ),
     }
+
+
+def _metric_consciousness_scorecard(spec: dict[str, Any], sources: dict[str, Source]) -> dict[str, Any]:
+    metric_id = spec["id"]
+    value = _source_data(sources, "consciousness_eval", "metrics", metric_id)
+    return _measured(
+        spec,
+        value,
+        "consciousness_eval",
+        f"/metrics/{metric_id}",
+        note=(
+            "Measured by the G0 functional consciousness indicator scorecard. "
+            "This is an architecture/probe signal only and makes no phenomenal-consciousness claim."
+        ),
+    )
 
 
 def _measured(

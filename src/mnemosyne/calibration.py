@@ -231,3 +231,35 @@ def tune_calibration_set(
         },
         failures=failures,
     )
+
+
+def reality_monitor_confidence(
+    *,
+    reality_class: str,
+    trust_tier: int,
+    provenance_count: int,
+    explicit_label: bool,
+) -> float:
+    """Return a conservative confidence for a reality-monitoring label.
+
+    This is label confidence, not answer confidence. Abstention must continue to
+    key off the reality class and grounded-evidence signals, not this scalar
+    alone. Learned discriminators can replace the scoring policy later, but must
+    keep the same calibrated confidence semantics and must pass G0 gates.
+    """
+
+    label = reality_class.strip().lower().replace("-", "_")
+    score = 0.45
+    if label == "evidence_grounded":
+        score = 0.70
+        if trust_tier <= 0:
+            score += 0.15
+        if provenance_count > 0:
+            score += 0.10
+    elif label in {"self_generated", "externally_suggested"}:
+        score = 0.70
+    elif label == "unknown":
+        score = 0.55
+    if explicit_label:
+        score += 0.05
+    return round(max(0.0, min(1.0, score)), 6)

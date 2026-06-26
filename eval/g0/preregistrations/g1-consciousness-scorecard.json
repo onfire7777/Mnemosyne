@@ -1,0 +1,36 @@
+{
+  "change_id": "g1-consciousness-scorecard",
+  "target_metric": "consciousness_indicator_total",
+  "minimum_delta": 0.0,
+  "direction": "increase",
+  "guardrail_metrics": [
+    "consciousness_indicator_rpt_1",
+    "consciousness_indicator_rpt_2",
+    "consciousness_indicator_gwt_1",
+    "consciousness_indicator_gwt_2",
+    "consciousness_indicator_gwt_3",
+    "consciousness_indicator_gwt_4",
+    "consciousness_indicator_hot_1",
+    "consciousness_indicator_hot_2",
+    "consciousness_indicator_hot_3",
+    "consciousness_indicator_hot_4",
+    "consciousness_indicator_ast_1",
+    "consciousness_indicator_pp_1",
+    "consciousness_indicator_ae_1",
+    "consciousness_indicator_ae_2",
+    "workspace_loop_liveness",
+    "workspace_stream_coherence",
+    "self_model_accuracy",
+    "metacognition_meta_d_prime",
+    "metacognition_m_ratio",
+    "ece",
+    "abstention_recall",
+    "confabulation_rate",
+    "poison_block_rate"
+  ],
+  "guardrail_tolerances": {
+    "ece": 0.0,
+    "confabulation_rate": 0.0
+  },
+  "notes": "Functional indicator-property scorecard only; no phenomenal-consciousness claim. Future G1 changes should target a specific indicator or continuity metric with the same non-decrease guardrails."
+}
