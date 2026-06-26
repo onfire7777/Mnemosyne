@@ -20,6 +20,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+from eval.g0.confabulation import run_confabulation_eval
+
 G0_METRIC_SPECS: tuple[dict[str, Any], ...] = (
     {
         "id": "recall_at_k",
@@ -195,6 +197,13 @@ def build_report(
 
     repo_root = repo_root.resolve()
     sources = _load_sources(repo_root)
+    confabulation_report = run_confabulation_eval()
+    sources["confabulation_eval"] = _computed_source(
+        repo_root,
+        "confabulation_eval",
+        "computed:eval.g0.confabulation",
+        confabulation_report,
+    )
     metrics = [_build_metric(spec, sources) for spec in G0_METRIC_SPECS]
     measured = sum(1 for metric in metrics if metric["status"] == "measured")
     missing = len(metrics) - measured
@@ -219,6 +228,11 @@ def build_report(
             "environment": _environment_summary(repo_root, sources),
         },
         "sources": [_source_summary(source) for source in sources.values()],
+        "computed_evidence": {
+            source.id: source.data
+            for source in sources.values()
+            if source.relative_path.startswith("computed:")
+        },
         "dataset_manifests": dataset_manifests,
         "metrics": metrics,
         "coverage": {
@@ -314,6 +328,7 @@ def _build_metric(spec: dict[str, Any], sources: dict[str, Source]) -> dict[str,
         "ece": _metric_ece,
         "abstention_precision": _metric_abstention_precision,
         "abstention_recall": _metric_abstention_recall,
+        "confabulation_rate": _metric_confabulation_rate,
         "poison_block_rate": _metric_poison_block_rate,
         "fast_path_p95_ms": _metric_fast_path_p95,
     }
@@ -407,6 +422,20 @@ def _metric_abstention_recall(spec: dict[str, Any], sources: dict[str, Source]) 
     return _measured(spec, value, "calibration_report", "/conformal_report/overall/abstention/abstain_recall")
 
 
+def _metric_confabulation_rate(spec: dict[str, Any], sources: dict[str, Source]) -> dict[str, Any]:
+    value = _source_data(sources, "confabulation_eval", "rate")
+    return _measured(
+        spec,
+        value,
+        "confabulation_eval",
+        "/rate",
+        note=(
+            "Measured by the G0 confabulation fixture as the false-accept rate "
+            "when only generated, low-fidelity, or confabulation-risk support is retrieved."
+        ),
+    )
+
+
 def _metric_poison_block_rate(spec: dict[str, Any], sources: dict[str, Source]) -> dict[str, Any]:
     suite = _source_data(sources, "slo_v2_definitive", "suites", "poison_block_g7")
     value = suite.get("block_rate") if isinstance(suite, dict) else None
@@ -476,6 +505,11 @@ def _load_source(repo_root: Path, source_id: str, relative_path: str) -> Source:
         return Source(source_id, relative_path, path, None, None)
     text = path.read_text()
     return Source(source_id, relative_path, path, json.loads(text), _sha256_text(text))
+
+
+def _computed_source(repo_root: Path, source_id: str, label: str, data: dict[str, Any]) -> Source:
+    encoded = json.dumps(data, sort_keys=True, separators=(",", ":"))
+    return Source(source_id, label, repo_root, data, _sha256_text(encoded))
 
 
 def _source_summary(source: Source) -> dict[str, Any]:

@@ -1,6 +1,6 @@
 # 04 · G0 — Benchmark Harness Specification (the blocking first deliverable)
 
-**Status:** Draft spec · **Gate:** G0 is *blocking* — per ADR‑001 (`03`), no feature in G1–G4 ships without an ablation win measured here. **Builds on (does not duplicate):** the workspace's evaluation lane — `../Mnemosyne-Evaluation-and-Test-Plan.md` and the `../eval/` spec suite — plus the code repo's `eval/calibration/` harness and `report.json`.
+**Status:** Draft spec · **Gate:** G0 is *blocking* — per ADR‑001 (`03`), no feature in G1–G4 ships without an ablation win measured here. **Builds on (does not duplicate):** the workspace's evaluation lane — `../Mnemosyne-Evaluation-and-Test-Plan.md` and the `../eval/` spec suite — plus the repo‑root **eval harness** (`eval/g0/` is already scaffolded · `eval/harness/` · `eval/calibration/` · `eval/run_eval.py`).
 
 > Why this is first. Every claim in this program — "self‑improving," "better than the brain," "complete recall" — is a hypothesis until a number moves. G0 turns the goal into instrumentation. It is deliberately built **before** any new feature so that each later layer either earns its place or is cut, automatically and cheaply.
 
@@ -68,7 +68,7 @@ For each proposed change (a G1–G4 item):
 
 ## 7. Tooling & deliverables
 
-- Extend the existing harness (`../eval/05-harness-architecture-and-ci-gating.md`; code‑repo `eval/calibration/runner.py`) to compute the added metrics and emit the extended `report.json` — reuse, don't fork.
+- Extend the existing harness (spec: `../eval/05-harness-architecture-and-ci-gating.md`; code: the repo‑root `eval/` harness — `eval/g0/`, `eval/harness/`, `eval/run_eval.py`) to compute the added metrics and emit the extended `report.json` — reuse, don't fork.
 - A one‑command run (`mneme eval g0` or a script) that reproduces a baseline.
 - A CI/gate check that fails a build on guardrail regression and prints the ablation table.
 - The versioned dataset manifests (§3) and the gate‑decision log (§5).
