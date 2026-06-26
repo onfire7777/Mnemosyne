@@ -122,5 +122,5 @@ This is the **bulk of the remaining percentage** and the universal blocker on al
 
 - **Live edit hazard:** `main` is edited by an autonomous Codex/GSD session. Never `git add -A`; stage specific files only; push fast-forward only; verify it is not mid-edit before committing.
 - **Don't build more gates/tests by default** — the machine-checkable evidence layer (`PRODUCTION_RELEASE_REQUIRED_COMMANDS`, `RELEASE_AUDIT_REQUIRED_OUTPUT_KEYS`) now rejects placeholder/hollow required command output, including `ops-report` `counts`/`tripwires`; further gate work needs a concrete audit finding.
-- **Lane-a checkout is historical source material now** — A7/A8/A9 have been selectively ported to `main`; do not wholesale-merge `/Users/admin/Projects/Mnemosyne-lane-a` over newer commits.
+- **Lane-a is fully reconciled and removed** — A7/A8/A9 were selectively ported to `main`; the `~/Projects/Mnemosyne-lane-a` clone was consolidated into the single canonical checkout on 2026-06-26 (its `reconcile/lane-a-cold` / `lane-a-recovered` branches live on `origin` and in `~/Mnemosyne-consolidation-archive-20260626-151915/`). Do not resurrect it over newer commits.
 - The completion branch's additive scope is **essentially complete** — it never edits `src/`; treat it as the proof/forcing-function layer.

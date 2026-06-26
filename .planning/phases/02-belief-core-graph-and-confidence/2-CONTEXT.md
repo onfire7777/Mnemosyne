@@ -28,10 +28,10 @@ Phase 2 must complete the blueprint's belief-revision core: TMS and AGM semantic
 <canonical_refs>
 ## Canonical References
 
-- `/Users/admin/Desktop/Mnemosyne/Mnemosyne-v2-Build-Blueprint.md` §11 I2 and I8.
-- `/Users/admin/Desktop/Mnemosyne/Mnemosyne-v2-Build-Blueprint.md` §23.3.
-- `/Users/admin/Desktop/Mnemosyne/Mnemosyne-v2-Build-Blueprint.md` §26.
-- `/Users/admin/Desktop/Mnemosyne/Mnemosyne-v2-Build-Blueprint.md` §30.3.
+- `docs/blueprint/Mnemosyne-v2-Build-Blueprint.md` §11 I2 and I8.
+- `docs/blueprint/Mnemosyne-v2-Build-Blueprint.md` §23.3.
+- `docs/blueprint/Mnemosyne-v2-Build-Blueprint.md` §26.
+- `docs/blueprint/Mnemosyne-v2-Build-Blueprint.md` §30.3.
 
 </canonical_refs>
 

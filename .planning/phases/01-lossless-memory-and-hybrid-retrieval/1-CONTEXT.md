@@ -30,9 +30,9 @@ Phase 1 delivers bitemporal assertions, supersession, provenance, hybrid retriev
 <canonical_refs>
 ## Canonical References
 
-- `/Users/admin/Desktop/Mnemosyne/Mnemosyne-v2-Build-Blueprint.md` §14 — FR-2 through FR-8.
-- `/Users/admin/Desktop/Mnemosyne/Mnemosyne-v2-Build-Blueprint.md` §22 and §30.4 — retrieval design.
-- `/Users/admin/Desktop/Mnemosyne/Mnemosyne-v2-Build-Blueprint.md` §25 — erasure propagation.
+- `docs/blueprint/Mnemosyne-v2-Build-Blueprint.md` §14 — FR-2 through FR-8.
+- `docs/blueprint/Mnemosyne-v2-Build-Blueprint.md` §22 and §30.4 — retrieval design.
+- `docs/blueprint/Mnemosyne-v2-Build-Blueprint.md` §25 — erasure propagation.
 
 </canonical_refs>
 

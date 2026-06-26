@@ -27,8 +27,8 @@ Phase 5 implements shadow-first policy optimization within immutable rails: self
 <canonical_refs>
 ## Canonical References
 
-- `/Users/admin/Desktop/Mnemosyne/Mnemosyne-v2-Build-Blueprint.md` §23.4 and §23.5 — cold loop and immutable outer invariant.
-- `/Users/admin/Desktop/Mnemosyne/Mnemosyne-v2-Build-Blueprint.md` §34 Phase 5.
+- `docs/blueprint/Mnemosyne-v2-Build-Blueprint.md` §23.4 and §23.5 — cold loop and immutable outer invariant.
+- `docs/blueprint/Mnemosyne-v2-Build-Blueprint.md` §34 Phase 5.
 
 </canonical_refs>
 

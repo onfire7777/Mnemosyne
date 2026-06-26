@@ -16,10 +16,10 @@ This runner needs NO pytest and NO network — only stdlib + mnemosyne on the pa
 It is a forcing function: it reports the honest pass/fail of the v1 bar AND prints
 the deferred real-deployment validation that remains out of scope for v1.
 
-Usage (reusing the ready eval venv with torch + sentence-transformers):
+Usage:
 
-    cd /Users/admin/Projects/Mnemosyne-completion
-    PYTHONPATH=src .venv-eval/bin/python \
+    cd /Users/admin/Mnemosyne
+    PYTHONPATH=src .venv/bin/python \
         tests/completion/scope/run_scope_conformance.py
 
 Add ``--json <path>`` to also write a machine-readable evidence artifact.

@@ -37,8 +37,8 @@ The foundation must prove byte-exact recall, idempotent deduplication, branch ro
 <canonical_refs>
 ## Canonical References
 
-- `/Users/admin/Desktop/Mnemosyne/Mnemosyne-v2-Build-Blueprint.md` §28-33 — implementation stack, data model, component walkthroughs, operations, tests.
-- `/Users/admin/Desktop/Mnemosyne/Mnemosyne-v2-Build-Blueprint.md` §34 — Phase 0 exit criteria.
+- `docs/blueprint/Mnemosyne-v2-Build-Blueprint.md` §28-33 — implementation stack, data model, component walkthroughs, operations, tests.
+- `docs/blueprint/Mnemosyne-v2-Build-Blueprint.md` §34 — Phase 0 exit criteria.
 - `.planning/REQUIREMENTS.md` — REQ-001, REQ-002, REQ-003, REQ-004, REQ-011.
 
 </canonical_refs>
