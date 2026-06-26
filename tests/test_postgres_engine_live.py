@@ -65,14 +65,16 @@ def run_postgres_cli(*args: str) -> dict:
     return json.loads(result.stdout)
 
 
-def fake_command_retrieval_provider(tmp_path: Path) -> tuple[str, Path]:
+def fake_command_retrieval_provider(tmp_path: Path, *, source_cid: str | None = None) -> tuple[str, Path]:
     script = tmp_path / "command-retrieval-provider.py"
     state = tmp_path / "command-retrieval-requests.json"
+    source_cids = [source_cid] if source_cid else []
     script.write_text(
         "\n".join(
             [
                 "#!/usr/bin/env python3",
                 "import json, pathlib, sys",
+                f"source_cids = {source_cids!r}",
                 "state = pathlib.Path(sys.argv[1])",
                 "request = json.loads(sys.stdin.read())",
                 "requests = json.loads(state.read_text()) if state.exists() else []",
@@ -80,7 +82,7 @@ def fake_command_retrieval_provider(tmp_path: Path) -> tuple[str, Path]:
                 "state.write_text(json.dumps(requests, sort_keys=True))",
                 "role = request.get('role')",
                 "if role == 'graph_ppr':",
-                "    hit = {'id': 'graph-hit-live', 'kind': 'relation', 'text': 'command graph retrieval reached Apache AGE wrapper', 'score': 0.93, 'channel': 'command_graph_ppr', 'metadata': {'source': 'Command graph', 'predicate': 'uses', 'target': 'Apache AGE'}}",
+                "    hit = {'id': 'graph-hit-live', 'kind': 'relation', 'text': 'command graph retrieval reached Apache AGE wrapper', 'score': 0.93, 'channel': 'command_graph_ppr', 'provenance': source_cids, 'metadata': {'source': 'Command graph', 'predicate': 'uses', 'target': 'Apache AGE', 'source_evidence_cids': source_cids}}",
                 "else:",
                 "    hit = {'id': 'lexical-hit-live', 'kind': 'evidence', 'text': 'command lexical retrieval reached ParadeDB BM25 wrapper', 'score': 0.91, 'channel': 'command_lexical', 'metadata': {'source_type': 'command-lexical'}}",
                 "print(json.dumps({'hits': [hit]}))",
@@ -1405,7 +1407,20 @@ def test_postgres_cli_uses_http_retrieval_providers_live() -> None:
 
 def test_postgres_cli_uses_command_retrieval_adapters_live(tmp_path: Path) -> None:
     tenant = f"tenant-command-retrieval-live-{uuid4()}"
-    command, state = fake_command_retrieval_provider(tmp_path)
+    source = run_postgres_cli(
+        "capture",
+        "--tenant",
+        tenant,
+        "--user",
+        "user-command-retrieval-live",
+        "--source-type",
+        "live-test",
+        "--content",
+        "Command graph retrieval reached Apache AGE wrapper.",
+        "--trust-tier",
+        "0",
+    )
+    command, state = fake_command_retrieval_provider(tmp_path, source_cid=source["cid"])
     provider_args = (
         "--lexical-provider",
         "command",
