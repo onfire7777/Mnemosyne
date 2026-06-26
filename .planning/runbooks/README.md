@@ -77,6 +77,8 @@ CLI commands consumed by `deployment-soak` and `release-audit`.
   `"$PYTHON" -m mnemosyne.cli production-evidence-verify "$BUNDLE_DIR"
   --expected-bundle-fingerprint "$EXPECTED_BUNDLE_FINGERPRINT"` can recheck
   the completed bundle offline, including fresh redaction recompute and
-  `scanned_files` coverage against `bundle-manifest.json`.
+  `scanned_files` coverage against `bundle-manifest.json`, retained
+  `source-soak-manifest.json` custody, and source/operator command-profile
+  agreement.
   This is custody review only; it does not contact production, rerun
   `deployment-soak`, create evidence, or replace operator capture.
