@@ -69,6 +69,23 @@ def test_runbook_index_and_ops_handoff_document_preflight_scope() -> None:
         ), path
 
 
+def test_production_evidence_docs_require_manifest_bound_release_audit() -> None:
+    production_evidence = (REPO / "infra" / "PRODUCTION-EVIDENCE.md").read_text(
+        encoding="utf-8",
+    )
+    runbook_index = (RUNBOOK_DIR / "README.md").read_text(encoding="utf-8")
+    ops_handoff = (REPO / ".planning" / "OPS-HANDOFF-AND-OWNERSHIP.md").read_text(
+        encoding="utf-8",
+    )
+
+    assert "release-audit --evidence-manifest" in production_evidence
+    assert "source-soak-manifest.json" in production_evidence
+    assert "source/operator command-profile agreement" in production_evidence
+    assert "source-soak-manifest.json" in runbook_index
+    assert "source/operator command-profile" in runbook_index
+    assert "release-audit --evidence-manifest" in ops_handoff
+
+
 def test_production_evidence_input_dir_is_not_capture_output() -> None:
     env_doc = (REPO / ".planning" / "ENV-AND-SECRETS.md").read_text(encoding="utf-8")
     rollback_doc = (REPO / ".planning" / "ROLLBACK.md").read_text(encoding="utf-8")

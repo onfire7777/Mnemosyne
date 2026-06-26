@@ -83,6 +83,6 @@ Confirmed distinct as scoped: A↔B and C↔D↔E↔F↔G. Five seams carry over
 
 ## 5. Definition of Done (whole effort)
 
-`release-audit --require-production-validated --require-provider-forbid-local` passes on a `deployment-soak` bundle in which **every** required command and required provider sub-check carries real-infra operator evidence. At that point all 10 rows flip Partial→Done. Until then: **Partial = ops backlog, never code backlog.**
+`release-audit --evidence-manifest ... --require-production-validated --require-provider-forbid-local` passes on a `deployment-soak` evidence bundle in which **every** required command and required provider sub-check carries real-infra operator evidence. At that point all 10 rows flip Partial→Done. Until then: **Partial = ops backlog, never code backlog.**
 
 Deploy/land flow for each surface: use the external `gstack land-and-deploy` workflow tooling (dry-run -> pre-merge gate -> deploy strategy -> canary verification -> deploy report). Pre-landing diffs (Lane G code only) go through `review/checklist.md`. This tooling reference does not merge Mnemosyne with gstack, gbrain, or mempalace.
