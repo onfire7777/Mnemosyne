@@ -23,6 +23,7 @@ from mnemosyne.consciousness import (
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.models import Evidence, Hit
 from mnemosyne.postgres_engine import PostgresEngine
+from mnemosyne.workspace import ShadowWorkspaceController, WorkspaceItem
 
 
 @dataclass(frozen=True, slots=True)
@@ -247,6 +248,7 @@ def run_consciousness_eval(*, repo_root: Path | None = None) -> dict[str, Any]:
     self_model = _self_model_probe()
     metacognition = _metacognition_probe()
     shadow_contract = _shadow_tag_contract_probe()
+    dreamer_contract = _dreamer_shadow_contract_probe()
     metrics = {
         **{row["metric_id"]: row["score"] for row in indicators},
         "consciousness_indicator_total": total,
@@ -257,6 +259,7 @@ def run_consciousness_eval(*, repo_root: Path | None = None) -> dict[str, Any]:
         "metacognition_meta_d_prime": metacognition["meta_d_prime"],
         "metacognition_m_ratio": metacognition["m_ratio"],
         "reality_monitor_shadow_tag_contract": shadow_contract["score"],
+        "dreamer_shadow_contract": dreamer_contract["score"],
     }
     return {
         "schema_version": "g0.consciousness_scorecard.v1",
@@ -276,11 +279,13 @@ def run_consciousness_eval(*, repo_root: Path | None = None) -> dict[str, Any]:
         "self_model": self_model,
         "metacognition": metacognition,
         "reality_monitor_shadow_tag_contract": shadow_contract,
+        "dreamer_shadow_contract": dreamer_contract,
         "metrics": metrics,
         "metric_note": (
             "Architecture/probe-based scorecard for functional indicator properties. "
             "The 14 Butlin/Long indicator rows are architecture source scans; "
-            "continuity, self-model, metacognition, and shadow-tag contract rows are runtime probes. "
+            "continuity, self-model, metacognition, shadow-tag contract, and dreamer shadow-contract "
+            "rows are runtime probes. "
             "Scores are guardrails for non-decrease and do not establish phenomenal consciousness."
         ),
     }
@@ -563,6 +568,81 @@ def _shadow_report_summary(report: dict[str, Any], *, abstained: bool | None = N
     if abstained is not None:
         summary["abstained"] = abstained
     return summary
+
+
+def _dreamer_shadow_contract_probe() -> dict[str, Any]:
+    controller = ShadowWorkspaceController(max_workspace_items=2, max_cycles=3, tick_ms=250)
+    report = controller.run_shadow_cycle(
+        tenant_id="g0-dreamer-shadow-contract",
+        items=[
+            WorkspaceItem(
+                id="dreamer-low",
+                priority=0.10,
+                content="Low-priority workspace item.",
+                source="g0",
+            ),
+            WorkspaceItem(
+                id="dreamer-high",
+                priority=0.90,
+                content="High-priority workspace item.",
+                source="g0",
+            ),
+        ],
+        evidence=[
+            {
+                "cid": "cid-g0-dream-a",
+                "tenant_id": "g0-dreamer-shadow-contract",
+                "content": "Calypso replay evidence anchors source-custody retention.",
+            },
+            {
+                "cid": "cid-g0-dream-b",
+                "tenant_id": "g0-dreamer-shadow-contract",
+                "content": "Orion replay evidence anchors promotion-gated hypotheses.",
+            },
+        ],
+        confidence=0.82,
+        resource_health=0.94,
+        error_rate=0.01,
+        latency_ms=80.0,
+        memory_pressure=0.25,
+        rail_budget=0.96,
+    )
+    payload = report.to_dict()
+    invocations = payload["specialist_invocations"]
+    dreamer = invocations[0] if invocations else {}
+    output = dreamer.get("output_summary", {}) if isinstance(dreamer, dict) else {}
+    checks = {
+        "controller_shadow_only": payload.get("shadow_only") is True,
+        "controller_critical_path_false": payload.get("critical_path") is False,
+        "controller_production_mutation_false": payload.get("production_mutation") is False,
+        "controller_bottleneck_applied": [item["id"] for item in payload["selected_items"]] == [
+            "dreamer-high",
+            "dreamer-low",
+        ],
+        "dreamer_invoked": dreamer.get("name") == "dreamer.shadow",
+        "dreamer_role_reported": dreamer.get("role") == "dreamer",
+        "dreamer_shadow_only": dreamer.get("shadow_only") is True,
+        "dreamer_critical_path_false": dreamer.get("critical_path") is False,
+        "dreamer_not_critical_path_allowed": dreamer.get("critical_path_allowed") is False,
+        "dreamer_production_mutation_false": output.get("production_mutation") is False,
+        "dreamer_promotion_gate_required": output.get("promotion_gate_required") is True,
+        "dreamer_created_candidate": int(output.get("candidate_count") or 0) > 0,
+        "dreamer_low_trust_candidates": output.get("candidate_trust_tiers") == [5],
+        "dreamer_self_generated_candidates": output.get("candidate_reality_classes") == ["self_generated"],
+    }
+    return {
+        "score": 1.0 if all(checks.values()) else 0.0,
+        "checks": checks,
+        "workspace": {
+            "cycle": payload["cycle"],
+            "selected_item_ids": [item["id"] for item in payload["selected_items"]],
+            "shadow_only": payload["shadow_only"],
+            "critical_path": payload["critical_path"],
+            "production_mutation": payload["production_mutation"],
+            "escalation_required": payload["escalation_required"],
+        },
+        "dreamer": dreamer,
+    }
 
 
 def main() -> None:

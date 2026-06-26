@@ -181,9 +181,11 @@ def _build_native_graph(_config: Mapping[str, Any]) -> GraphRetriever | None:
 
 
 def _build_sandboxed_dreamer(config: Mapping[str, Any]) -> SandboxedDreamer:
+    max_candidates = max(0, min(3, _as_int(config.get("dreamer_max_candidates"), default=3)))
+    min_sources = max(2, _as_int(config.get("dreamer_min_sources"), default=2))
     return SandboxedDreamer(
-        max_candidates=_as_int(config.get("dreamer_max_candidates"), default=3),
-        min_sources=_as_int(config.get("dreamer_min_sources"), default=2),
+        max_candidates=max_candidates,
+        min_sources=min_sources,
     )
 
 

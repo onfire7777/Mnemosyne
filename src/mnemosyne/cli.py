@@ -66,6 +66,7 @@ from mnemosyne.parametric import (
     ParametricTier,
     protected_suite_report,
 )
+from mnemosyne.providers import default_registry
 from mnemosyne.provenance import C2paToolVerifier, ProvenanceTrustPolicy, SignedProvenanceVerifier
 from mnemosyne.queue import InProcessQueue, PostgresQueue, QueueWorker
 from mnemosyne.retrieval import (
@@ -13077,6 +13078,23 @@ def cmd_provider_check(args: argparse.Namespace) -> None:
         raise SystemExit(1)
 
 
+def cmd_specialist_manifest(args: argparse.Namespace) -> None:
+    registry = default_registry()
+    specialists = registry.specialist_manifest()
+    if args.role:
+        specialists = [item for item in specialists if item.get("role") == args.role]
+    roles = sorted({str(item.get("role")) for item in specialists})
+    emit(
+        {
+            "ok": True,
+            "role": args.role,
+            "count": len(specialists),
+            "roles": roles,
+            "specialists": specialists,
+        }
+    )
+
+
 def cmd_residency_policy(args: argparse.Namespace) -> None:
     tools = load_tools(args)
     emit(tools.residency_policy())
@@ -14237,6 +14255,27 @@ def build_parser() -> argparse.ArgumentParser:
     provider_check = sub.add_parser("provider-check")
     provider_check.add_argument("--provider-manifest", help="JSON deployment manifest for provider health gates")
     provider_check.set_defaults(func=cmd_provider_check)
+
+    specialist_manifest = sub.add_parser("specialist-manifest")
+    specialist_manifest.add_argument(
+        "--role",
+        choices=[
+            "reasoner",
+            "extractor",
+            "resolver",
+            "embedder",
+            "media_embedder",
+            "reranker",
+            "lexical_retriever",
+            "graph_retriever",
+            "parametric_trainer",
+            "dreamer",
+            "reality_monitor",
+            "workspace_controller",
+        ],
+        help="Return only specialists with this role",
+    )
+    specialist_manifest.set_defaults(func=cmd_specialist_manifest)
 
     hosted_llm_check = sub.add_parser("hosted-llm-check")
     hosted_llm_check.add_argument(

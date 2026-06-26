@@ -57,6 +57,8 @@ def test_g0_report_emits_every_spec_metric_and_source_hashes() -> None:
     assert sources["deep_latency_eval"]["path"] == "computed:eval.g0.deep_latency"
     assert sources["resource_usage_eval"]["present"] is True
     assert sources["resource_usage_eval"]["path"] == "computed:eval.g0.resource_usage"
+    assert sources["dreamer_eval"]["present"] is True
+    assert sources["dreamer_eval"]["path"] == "computed:eval.g0.dreamer"
     assert sources["consciousness_eval"]["present"] is True
     assert sources["consciousness_eval"]["path"] == "computed:eval.g0.consciousness"
 
@@ -81,16 +83,24 @@ def test_g0_report_emits_every_spec_metric_and_source_hashes() -> None:
     assert metrics["controller_watts_per_dollar"]["status"] == "missing"
     assert metrics["controller_watts_per_dollar"]["source_id"] == "resource_usage_eval"
     assert "requires explicit" in metrics["controller_watts_per_dollar"]["notes"]
+    assert metrics["dreamer_shadow_corroborated_candidate_yield"]["status"] == "measured"
+    assert metrics["dreamer_shadow_corroborated_candidate_yield"]["value"] == 1.0
+    assert metrics["dreamer_shadow_corroborated_candidate_yield"]["source_id"] == "dreamer_eval"
+    assert metrics["dreamer_shadow_contract"]["status"] == "measured"
+    assert metrics["dreamer_shadow_contract"]["value"] == 1.0
+    assert metrics["dreamer_shadow_contract"]["source_id"] == "dreamer_eval"
     assert metrics["consciousness_indicator_total"]["status"] == "measured"
     assert metrics["consciousness_indicator_total"]["source_id"] == "consciousness_eval"
     assert metrics["workspace_loop_liveness"]["value"] == 1.0
     assert metrics["self_model_accuracy"]["value"] == 1.0
     assert metrics["metacognition_m_ratio"]["value"] == 1.0
     assert metrics["reality_monitor_shadow_tag_contract"]["value"] == 1.0
+    assert report["computed_evidence"]["consciousness_eval"]["dreamer_shadow_contract"]["score"] == 1.0
 
     dataset_paths = {manifest["path"] for manifest in report["dataset_manifests"]}
     assert "eval/datasets/continual_learning_interference.json" in dataset_paths
     assert "eval/datasets/deep_latency.json" in dataset_paths
+    assert "eval/datasets/dreamer_shadow_ablation.json" in dataset_paths
     assert "eval/datasets/resource_usage.json" in dataset_paths
     assert "eval/datasets/retrieval_curated.json" in dataset_paths
     assert "eval/datasets/poison_suite.json" in dataset_paths
@@ -182,6 +192,7 @@ def test_g0_consciousness_scorecard_reports_indicator_properties() -> None:
     assert report["metrics"]["metacognition_meta_d_prime"] == 1.0
     assert report["metrics"]["metacognition_m_ratio"] == 1.0
     assert report["metrics"]["reality_monitor_shadow_tag_contract"] == 1.0
+    assert report["metrics"]["dreamer_shadow_contract"] == 1.0
     shadow_contract = report["reality_monitor_shadow_tag_contract"]
     assert shadow_contract["score"] == 1.0
     assert all(shadow_contract["checks"].values())
@@ -192,6 +203,16 @@ def test_g0_consciousness_scorecard_reports_indicator_properties() -> None:
     assert shadow_contract["postgres"]["critical_path"] is True
     assert shadow_contract["postgres"]["abstention_gate"]["critical_path"] is True
     assert shadow_contract["postgres"]["shadow_tags_critical_path"] is False
+    dreamer_contract = report["dreamer_shadow_contract"]
+    assert dreamer_contract["score"] == 1.0
+    assert all(dreamer_contract["checks"].values())
+    assert dreamer_contract["workspace"]["shadow_only"] is True
+    assert dreamer_contract["workspace"]["critical_path"] is False
+    assert dreamer_contract["workspace"]["production_mutation"] is False
+    assert dreamer_contract["dreamer"]["name"] == "dreamer.shadow"
+    assert dreamer_contract["dreamer"]["critical_path"] is False
+    assert dreamer_contract["dreamer"]["critical_path_allowed"] is False
+    assert dreamer_contract["dreamer"]["output_summary"]["promotion_gate_required"] is True
 
 
 def test_g0_report_measures_controller_watts_with_explicit_telemetry(tmp_path: Path) -> None:

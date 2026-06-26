@@ -24,6 +24,7 @@ from eval.g0.confabulation import run_confabulation_eval
 from eval.g0.consciousness import CONSCIOUSNESS_METRIC_SPECS, run_consciousness_eval
 from eval.g0.continual_learning import run_continual_learning_eval
 from eval.g0.deep_latency import run_deep_latency_eval
+from eval.g0.dreamer import run_dreamer_eval
 from eval.g0.projection_reality import run_projection_reality_eval
 from eval.g0.resource_usage import run_resource_usage_eval
 
@@ -163,6 +164,24 @@ G0_METRIC_SPECS: tuple[dict[str, Any], ...] = (
         "target_op": None,
         "blueprint_metric": "controller watts/$",
     },
+    {
+        "id": "dreamer_shadow_corroborated_candidate_yield",
+        "label": "dreamer shadow corroborated candidate yield",
+        "class": "target",
+        "direction": "increase",
+        "target": None,
+        "target_op": None,
+        "blueprint_metric": "G3 shadow generative replay candidate yield",
+    },
+    {
+        "id": "dreamer_shadow_contract",
+        "label": "dreamer shadow contract",
+        "class": "guardrail",
+        "direction": "increase",
+        "target": 1.0,
+        "target_op": ">=",
+        "blueprint_metric": "G3 shadow-only generative replay safety contract",
+    },
 ) + CONSCIOUSNESS_METRIC_SPECS
 
 SOURCE_PATHS = {
@@ -176,6 +195,7 @@ SOURCE_PATHS = {
 DATASET_PATHS = (
     "eval/datasets/continual_learning_interference.json",
     "eval/datasets/deep_latency.json",
+    "eval/datasets/dreamer_shadow_ablation.json",
     "eval/datasets/resource_usage.json",
     "eval/datasets/retrieval_curated.json",
     "eval/datasets/poison_suite.json",
@@ -249,6 +269,13 @@ def build_report(
         "resource_usage_eval",
         "computed:eval.g0.resource_usage",
         resource_usage_report,
+    )
+    dreamer_report = run_dreamer_eval(repo_root=repo_root)
+    sources["dreamer_eval"] = _computed_source(
+        repo_root,
+        "dreamer_eval",
+        "computed:eval.g0.dreamer",
+        dreamer_report,
     )
     consciousness_report = run_consciousness_eval(repo_root=repo_root)
     sources["consciousness_eval"] = _computed_source(
@@ -390,6 +417,8 @@ def _build_metric(spec: dict[str, Any], sources: dict[str, Source]) -> dict[str,
         "deep_path_p95_ms": _metric_deep_path_p95,
         "cost_usd_per_1k_queries": _metric_cost_usd_per_1k_queries,
         "controller_watts_per_dollar": _metric_controller_watts_per_dollar,
+        "dreamer_shadow_corroborated_candidate_yield": _metric_dreamer_shadow_candidate_yield,
+        "dreamer_shadow_contract": _metric_dreamer_shadow_contract,
         "reality_monitor_shadow_tag_contract": _metric_consciousness_scorecard,
     }
     base = {
@@ -617,6 +646,35 @@ def _metric_controller_watts_per_dollar(
             "no default estimate is used."
         ),
     }
+
+
+def _metric_dreamer_shadow_candidate_yield(spec: dict[str, Any], sources: dict[str, Source]) -> dict[str, Any]:
+    value = _source_data(sources, "dreamer_eval", "corroborated_candidate_yield")
+    return _measured(
+        spec,
+        value,
+        "dreamer_eval",
+        "/corroborated_candidate_yield",
+        note=(
+            "Measured by the G0 dreamer fixture as the count of CID-backed, "
+            "promotion-gated shadow candidates produced without ledger mutation."
+        ),
+    )
+
+
+def _metric_dreamer_shadow_contract(spec: dict[str, Any], sources: dict[str, Source]) -> dict[str, Any]:
+    value = _source_data(sources, "dreamer_eval", "shadow_contract")
+    return _measured(
+        spec,
+        value,
+        "dreamer_eval",
+        "/shadow_contract",
+        note=(
+            "Measured by the G0 dreamer fixture. Passing requires shadow_only=true, "
+            "critical_path=false, production_mutation=false, promotion_gate_required=true, "
+            "self-generated trust-tier-5 candidates, CID-backed sources, and no engine mutation."
+        ),
+    )
 
 
 def _metric_consciousness_scorecard(spec: dict[str, Any], sources: dict[str, Source]) -> dict[str, Any]:

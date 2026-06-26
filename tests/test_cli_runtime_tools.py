@@ -3438,6 +3438,24 @@ def test_cli_provider_check_manifest_configures_command_retrieval_adapters(tmp_p
     assert [item["role"] for item in requests] == ["lexical_search", "graph_ppr"]
 
 
+def test_cli_specialist_manifest_exposes_shadow_dreamer_contract(tmp_path: Path) -> None:
+    result = run_raw_cli(tmp_path / "mnemosyne.json", "specialist-manifest", "--role", "dreamer")
+    payload = json.loads(result.stdout)
+
+    assert result.returncode == 0
+    assert payload["ok"] is True
+    assert payload["role"] == "dreamer"
+    assert payload["count"] == 1
+    assert payload["roles"] == ["dreamer"]
+    dreamer = payload["specialists"][0]
+    assert dreamer["name"] == "dreamer.shadow"
+    assert dreamer["role"] == "dreamer"
+    assert dreamer["provider_kind"] == "shadow_local"
+    assert dreamer["budget"]["shadow_only"] is True
+    assert dreamer["budget"]["critical_path_allowed"] is False
+    assert "promotion gate" in dreamer["output_contract"]
+
+
 def test_cli_ingests_binary_file_with_c2pa_verifier(tmp_path: Path) -> None:
     store = tmp_path / "mnemosyne.json"
     asset = tmp_path / "capture.bin"
