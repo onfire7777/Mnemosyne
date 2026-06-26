@@ -51,6 +51,7 @@ from mnemosyne.parametric import (
 )
 from mnemosyne.policy import OperatingPolicy
 from mnemosyne.self_optimization import (
+    CounterfactualVerdict,
     OQ2_MIN_REPLAY_WINDOW,
     OQ2_PROXY_TRUE_GAP,
     ContextualBanditLearner,
@@ -488,17 +489,17 @@ def test_self_model_replay_pairs_roundtrip() -> None:
     assert store.outcomes(TENANT) == []
 
 
-def test_default_cf_hook_abstains_until_window_then_gates() -> None:
+def test_default_cf_hook_fails_closed_until_window_then_gates() -> None:
     candidate = Candidate(
         id="v", kind="policy", signature="s", description="d", branch="main", source_evidence_cids=[]
     )
     engine = LocalMemoryEngine()
 
-    # (1) below the OQ2 window the proxy is unproven -> abstains (never vetoes)
+    # (1) below the OQ2 window the proxy is unproven -> fail closed.
     sparse = SelfModelStore()
     sparse.record_replay_pair(TENANT, "v", 0.5, -0.5)  # bad fidelity, but too few pairs
     verdict = default_counterfactual_hook(sparse)(TENANT, candidate, engine, [], [])
-    assert verdict.passed is True and "abstains" in verdict.reason
+    assert verdict.passed is False and "unproven" in verdict.reason
 
     # (2) enough faithful pairs with non-negative mean predicted lift -> authorized pass
     good = SelfModelStore()
@@ -514,15 +515,15 @@ def test_default_cf_hook_abstains_until_window_then_gates() -> None:
     veto = default_counterfactual_hook(bad)(TENANT, candidate, engine, [], [])
     assert veto.passed is False and "vetoes" in veto.reason
 
-    # (4) enough pairs but the proxy is unfaithful (gap too large) -> abstains (shadow)
+    # (4) enough pairs but the proxy is unfaithful (gap too large) -> fail closed.
     noisy = SelfModelStore()
     for _ in range(OQ2_MIN_REPLAY_WINDOW):
         noisy.record_replay_pair(TENANT, "v", 0.9, -0.9)
     drift = default_counterfactual_hook(noisy)(TENANT, candidate, engine, [], [])
-    assert drift.passed is True and "gap" in drift.reason
+    assert drift.passed is False and "gap" in drift.reason
 
 
-def test_evaluate_variant_consumes_cf_proxy_by_default() -> None:
+def test_evaluate_variant_consumes_cf_proxy_by_default_and_fails_closed() -> None:
     engine = _replay_engine()
     optimizer = ShadowPolicyOptimizer(
         engine,
@@ -540,9 +541,41 @@ def test_evaluate_variant_consumes_cf_proxy_by_default() -> None:
         "safe", {"base_level": 0.35, "semantic": 0.35, "importance": 0.20, "recency": 0.10}, 0.45, 8
     )
     # No explicit hook: the cold loop attaches the default cf scorer, so the gate
-    # result carries a counterfactual verdict (abstaining in shadow with no pairs)
-    # and promotion is unaffected because the proxy never vetoes when unproven.
+    # result carries a counterfactual verdict and active promotion fails closed
+    # until real replay pairs prove the proxy faithful.
     result = optimizer.evaluate_variant(TENANT, variant)
+    assert result.counterfactual is not None
+    assert result.counterfactual["passed"] is False
+    assert "unproven" in result.counterfactual["reason"]
+    assert result.promoted is False
+
+
+def test_evaluate_variant_can_promote_with_explicit_authorized_cf_hook() -> None:
+    engine = _replay_engine()
+    optimizer = ShadowPolicyOptimizer(
+        engine,
+        [
+            RegressionCase(
+                id="case-authorized-cf",
+                signature="policy retrieval activation confidence",
+                query="immutable rails",
+                expected_substring="immutable rails",
+                protected=True,
+            )
+        ],
+    )
+    variant = PolicyVariant(
+        "safe", {"base_level": 0.35, "semantic": 0.35, "importance": 0.20, "recency": 0.10}, 0.45, 8
+    )
+    result = optimizer.evaluate_variant(
+        TENANT,
+        variant,
+        counterfactual_hook=lambda *_args: CounterfactualVerdict(
+            passed=True,
+            predicted_lift=0.0,
+            reason="authorized fixture",
+        ),
+    )
     assert result.counterfactual is not None
     assert result.counterfactual["passed"] is True
     assert result.promoted is True

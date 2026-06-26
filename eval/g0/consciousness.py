@@ -56,9 +56,9 @@ INDICATORS: tuple[IndicatorSpec, ...] = (
         "GWT-1",
         "Global Workspace Theory",
         "parallel specialized systems",
-        "Source exposes specialist providers/tools around a common memory contract.",
-        ("RetrievalAdapters", "MemoryTools", "provider"),
-        ("src/mnemosyne/retrieval.py", "src/mnemosyne/mcp_tools.py"),
+        "Source exposes typed specialist providers/tools around a common memory contract.",
+        ("SpecialistModuleRegistry", "SpecialistModuleSpec", "provider"),
+        ("src/mnemosyne/providers/__init__.py", "src/mnemosyne/mcp_tools.py"),
     ),
     IndicatorSpec(
         "GWT-2",

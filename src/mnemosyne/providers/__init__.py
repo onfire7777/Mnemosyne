@@ -23,8 +23,10 @@ and never mutates it, so every existing import site is unaffected.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field
-from typing import Any, Callable
+from dataclasses import asdict, dataclass, field
+from typing import Any, Callable, Literal
+
+from mnemosyne.dreamer import SandboxedDreamer
 
 from mnemosyne.retrieval import (
     CommandGraphRetriever,
@@ -58,11 +60,17 @@ __all__ = [
     "CommandLexicalRetriever",
     "CommandGraphRetriever",
     "CommandMediaEmbeddingProvider",
+    "SandboxedDreamer",
     # Adapter bundle + env convenience
     "RetrievalAdapters",
     "retrieval_adapters_from_env",
     # Registry-driven construction
     "ProviderRegistry",
+    "SpecialistBudget",
+    "SpecialistFactory",
+    "SpecialistModuleRegistry",
+    "SpecialistModuleSpec",
+    "SpecialistRole",
     "default_registry",
     "build_adapters_from_config",
 ]
@@ -74,6 +82,21 @@ EmbeddingFactory = Callable[[Mapping[str, Any]], EmbeddingProvider]
 RerankerFactory = Callable[[Mapping[str, Any]], Reranker]
 LexicalFactory = Callable[[Mapping[str, Any]], "LexicalRetriever | None"]
 GraphFactory = Callable[[Mapping[str, Any]], "GraphRetriever | None"]
+SpecialistRole = Literal[
+    "reasoner",
+    "extractor",
+    "resolver",
+    "embedder",
+    "media_embedder",
+    "reranker",
+    "lexical_retriever",
+    "graph_retriever",
+    "parametric_trainer",
+    "dreamer",
+    "reality_monitor",
+    "workspace_controller",
+]
+SpecialistFactory = Callable[[Mapping[str, Any]], Any]
 
 
 def _as_int(value: Any, *, default: int) -> int:
@@ -157,9 +180,126 @@ def _build_native_graph(_config: Mapping[str, Any]) -> GraphRetriever | None:
     return None
 
 
+def _build_sandboxed_dreamer(config: Mapping[str, Any]) -> SandboxedDreamer:
+    return SandboxedDreamer(
+        max_candidates=_as_int(config.get("dreamer_max_candidates"), default=3),
+        min_sources=_as_int(config.get("dreamer_min_sources"), default=2),
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class SpecialistBudget:
+    """Invocation budget and trust boundary for a specialist module."""
+
+    max_calls_per_task: int = 1
+    max_latency_ms: float = 30_000.0
+    max_cost_usd: float = 0.0
+    token_budget: int = 0
+    critical_path_allowed: bool = False
+    shadow_only: bool = True
+
+    def __post_init__(self) -> None:
+        if self.max_calls_per_task < 0:
+            raise ValueError("max_calls_per_task must be non-negative")
+        if self.max_latency_ms < 0:
+            raise ValueError("max_latency_ms must be non-negative")
+        if self.max_cost_usd < 0:
+            raise ValueError("max_cost_usd must be non-negative")
+        if self.token_budget < 0:
+            raise ValueError("token_budget must be non-negative")
+        if self.shadow_only and self.critical_path_allowed:
+            raise ValueError("shadow-only specialists cannot be critical-path allowed")
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True, slots=True)
+class SpecialistModuleSpec:
+    """Typed Layer-3 specialist contract.
+
+    Specialist modules wrap provider factories with role, budget, and critical
+    path metadata so the workspace controller can recruit them explicitly.
+    """
+
+    name: str
+    role: SpecialistRole
+    factory: SpecialistFactory
+    budget: SpecialistBudget
+    input_contract: str
+    output_contract: str
+    provider_kind: str = "local"
+    description: str = ""
+    tags: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not self.name.strip():
+            raise ValueError("specialist name must not be empty")
+        if not self.input_contract.strip():
+            raise ValueError("specialist input_contract must not be empty")
+        if not self.output_contract.strip():
+            raise ValueError("specialist output_contract must not be empty")
+
+    def build(self, config: Mapping[str, Any] | None = None) -> Any:
+        return self.factory(dict(config or {}))
+
+    def manifest(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "role": self.role,
+            "provider_kind": self.provider_kind,
+            "description": self.description,
+            "input_contract": self.input_contract,
+            "output_contract": self.output_contract,
+            "budget": self.budget.to_dict(),
+            "tags": list(self.tags),
+        }
+
+
 @dataclass(slots=True)
-class ProviderRegistry:
-    """Name → factory tables for each retrieval provider boundary.
+class SpecialistModuleRegistry:
+    """Typed registry for on-demand cognitive specialist modules."""
+
+    specialists: dict[str, SpecialistModuleSpec] = field(default_factory=dict)
+
+    def register_specialist(self, spec: SpecialistModuleSpec, *, replace: bool = False) -> None:
+        key = spec.name.lower()
+        if not replace and key in self.specialists:
+            raise ValueError(f"specialist {spec.name!r} is already registered")
+        self.specialists[key] = spec
+
+    def specialist(self, name: str) -> SpecialistModuleSpec:
+        key = name.lower()
+        spec = self.specialists.get(key)
+        if spec is None:
+            raise ValueError(f"unsupported specialist module: {name}")
+        return spec
+
+    def specialists_by_role(self, role: SpecialistRole) -> list[SpecialistModuleSpec]:
+        return sorted(
+            [spec for spec in self.specialists.values() if spec.role == role],
+            key=lambda spec: spec.name,
+        )
+
+    def build_specialist(
+        self,
+        name: str,
+        config: Mapping[str, Any] | None = None,
+        *,
+        critical_path: bool = False,
+    ) -> Any:
+        spec = self.specialist(name)
+        if critical_path and not spec.budget.critical_path_allowed:
+            raise ValueError(f"specialist {name!r} is not approved for critical-path use")
+        return spec.build(config)
+
+    def specialist_manifest(self) -> list[dict[str, Any]]:
+        return [spec.manifest() for spec in sorted(self.specialists.values(), key=lambda item: item.name)]
+
+
+@dataclass(slots=True)
+class ProviderRegistry(SpecialistModuleRegistry):
+    """Name → factory tables for each retrieval provider boundary and specialist.
 
     Use :func:`default_registry` for the built-in set, then ``register_*`` to add
     deployment-specific providers before calling :func:`build_adapters_from_config`.
@@ -198,7 +338,106 @@ def default_registry() -> ProviderRegistry:
         registry.register_graph_provider(name, _build_native_graph)
     registry.register_lexical_provider("command", _build_command_lexical)
     registry.register_graph_provider("command", _build_command_graph)
+    _register_builtin_specialists(registry)
     return registry
+
+
+def _critical_budget(
+    *,
+    max_calls_per_task: int = 1,
+    max_latency_ms: float = 30_000.0,
+    max_cost_usd: float = 0.0,
+    token_budget: int = 0,
+) -> SpecialistBudget:
+    return SpecialistBudget(
+        max_calls_per_task=max_calls_per_task,
+        max_latency_ms=max_latency_ms,
+        max_cost_usd=max_cost_usd,
+        token_budget=token_budget,
+        critical_path_allowed=True,
+        shadow_only=False,
+    )
+
+
+def _register_builtin_specialists(registry: ProviderRegistry) -> None:
+    registry.register_specialist(
+        SpecialistModuleSpec(
+            name="embedder.local",
+            role="embedder",
+            factory=_build_local_embedding,
+            budget=_critical_budget(max_latency_ms=250.0),
+            input_contract="text -> dense vector",
+            output_contract="normalized embedding vector",
+            provider_kind="local",
+            description="Deterministic local hashing embedder.",
+            tags=("retrieval", "offline"),
+        )
+    )
+    registry.register_specialist(
+        SpecialistModuleSpec(
+            name="embedder.http",
+            role="embedder",
+            factory=_build_http_embedding,
+            budget=_critical_budget(max_latency_ms=30_000.0, max_cost_usd=0.05),
+            input_contract="text -> hosted embedding request",
+            output_contract="normalized embedding vector",
+            provider_kind="hosted_http",
+            description="Hosted embedding provider boundary.",
+            tags=("retrieval", "production-provider"),
+        )
+    )
+    registry.register_specialist(
+        SpecialistModuleSpec(
+            name="reranker.local",
+            role="reranker",
+            factory=_build_local_reranker,
+            budget=_critical_budget(max_latency_ms=250.0),
+            input_contract="query + hits -> ranked hits",
+            output_contract="score-ordered retrieval hits",
+            provider_kind="local",
+            description="Deterministic local reranker.",
+            tags=("retrieval", "offline"),
+        )
+    )
+    registry.register_specialist(
+        SpecialistModuleSpec(
+            name="reranker.http",
+            role="reranker",
+            factory=_build_http_reranker,
+            budget=_critical_budget(max_latency_ms=30_000.0, max_cost_usd=0.05),
+            input_contract="query + hits -> hosted rerank request",
+            output_contract="score-ordered retrieval hits",
+            provider_kind="hosted_http",
+            description="Hosted cross-encoder reranker boundary.",
+            tags=("retrieval", "production-provider"),
+        )
+    )
+    registry.register_specialist(
+        SpecialistModuleSpec(
+            name="graph.command",
+            role="graph_retriever",
+            factory=_build_command_graph,
+            budget=_critical_budget(max_latency_ms=30_000.0),
+            input_contract="seed terms + custody filter -> relation hits",
+            output_contract="ledger-backed relation hits only",
+            provider_kind="command",
+            description="Shell-free command graph specialist.",
+            tags=("retrieval", "graph", "custody-required"),
+        )
+    )
+    registry.register_specialist(
+        SpecialistModuleSpec(
+            name="dreamer.shadow",
+            role="dreamer",
+            factory=_build_sandboxed_dreamer,
+            budget=SpecialistBudget(max_calls_per_task=1, max_latency_ms=1_000.0, token_budget=512),
+            input_contract="retained evidence rows with CIDs",
+            output_contract="low-trust replay candidates requiring promotion gate",
+            provider_kind="shadow_local",
+            description="Sandboxed generative replay specialist; never on answer critical path.",
+            tags=("generative-replay", "shadow-only", "g3"),
+        )
+    )
 
 
 def build_adapters_from_config(

@@ -37,6 +37,9 @@ from mnemosyne.models import Assertion, Evidence, Hit
 from mnemosyne.policy import OperatingPolicy
 from mnemosyne.providers import (
     ProviderRegistry,
+    SandboxedDreamer,
+    SpecialistBudget,
+    SpecialistModuleSpec,
     build_adapters_from_config,
     default_registry,
 )
@@ -785,6 +788,49 @@ def test_provider_registry_is_constructible_empty() -> None:
     assert empty.embedding == {} and empty.reranker == {}
     with pytest.raises(ValueError, match="unsupported embedding provider"):
         build_adapters_from_config({"embedding_provider": "local"}, registry=empty)
+
+
+def test_specialist_registry_exposes_typed_roles_and_budgets() -> None:
+    registry = default_registry()
+    manifest = {item["name"]: item for item in registry.specialist_manifest()}
+
+    assert manifest["embedder.local"]["role"] == "embedder"
+    assert manifest["embedder.local"]["budget"]["critical_path_allowed"] is True
+    assert manifest["dreamer.shadow"]["role"] == "dreamer"
+    assert manifest["dreamer.shadow"]["budget"]["shadow_only"] is True
+    assert manifest["dreamer.shadow"]["budget"]["critical_path_allowed"] is False
+    assert [spec.name for spec in registry.specialists_by_role("dreamer")] == ["dreamer.shadow"]
+
+
+def test_specialist_registry_builds_modules_and_blocks_shadow_critical_path() -> None:
+    registry = default_registry()
+
+    embedder = registry.build_specialist("embedder.local", {"embedding_dims": 8}, critical_path=True)
+    dreamer = registry.build_specialist("dreamer.shadow", {"dreamer_max_candidates": 2})
+
+    assert isinstance(embedder, providers_pkg.HashingEmbeddingProvider)
+    assert isinstance(dreamer, SandboxedDreamer)
+    assert dreamer.max_candidates == 2
+    with pytest.raises(ValueError, match="not approved for critical-path use"):
+        registry.build_specialist("dreamer.shadow", critical_path=True)
+
+
+def test_specialist_registry_rejects_invalid_specs_and_duplicate_names() -> None:
+    with pytest.raises(ValueError, match="shadow-only specialists"):
+        SpecialistBudget(shadow_only=True, critical_path_allowed=True)
+
+    registry = ProviderRegistry()
+    spec = SpecialistModuleSpec(
+        name="custom.shadow",
+        role="dreamer",
+        factory=lambda _config: object(),
+        budget=SpecialistBudget(),
+        input_contract="input",
+        output_contract="output",
+    )
+    registry.register_specialist(spec)
+    with pytest.raises(ValueError, match="already registered"):
+        registry.register_specialist(spec)
 
 
 # --------------------------------------------------------------------------- #

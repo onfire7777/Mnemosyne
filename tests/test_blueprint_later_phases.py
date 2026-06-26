@@ -12,7 +12,14 @@ from mnemosyne.lifecycle import FidelityTier, LifecycleState, demotion_decision,
 from mnemosyne.mcp_tools import MemoryTools
 from mnemosyne.models import Assertion, Evidence, Relation
 from mnemosyne.security import SecurityPolicy, sanitize_retrieved_text
-from mnemosyne.self_optimization import PolicyVariant, SelfModelRecord, SelfModelStore, ShadowPolicyOptimizer, within_invariant_rails
+from mnemosyne.self_optimization import (
+    CounterfactualVerdict,
+    PolicyVariant,
+    SelfModelRecord,
+    SelfModelStore,
+    ShadowPolicyOptimizer,
+    within_invariant_rails,
+)
 
 
 TENANT = "tenant-b"
@@ -396,7 +403,15 @@ def test_shadow_policy_optimizer_accepts_only_variants_inside_rails() -> None:
 
     assert within_invariant_rails(engine.policy, valid) is True
     assert within_invariant_rails(engine.policy, invalid) is False
-    result = optimizer.evaluate_variant(TENANT, valid)
+    result = optimizer.evaluate_variant(
+        TENANT,
+        valid,
+        counterfactual_hook=lambda *_args: CounterfactualVerdict(
+            passed=True,
+            predicted_lift=0.0,
+            reason="authorized fixture",
+        ),
+    )
     assert result.promoted is True
 
 

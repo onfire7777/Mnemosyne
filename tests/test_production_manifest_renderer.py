@@ -256,6 +256,42 @@ def test_renderer_check_environment_fails_on_missing_provenance_suite_asset(
     assert proc.stderr == ""
 
 
+def test_renderer_check_environment_fails_on_invalid_provenance_suite_asset_path(
+    tmp_path: Path,
+) -> None:
+    env = _filled_render_env(tmp_path)
+    outside_asset = tmp_path / "outside-suite-asset.txt"
+    outside_asset.write_text("asset\n", encoding="utf-8")
+    _populate_required_input_artifacts(
+        env,
+        suite_payload=json.dumps({"cases": [{"asset_path": str(outside_asset)}]}) + "\n",
+    )
+
+    proc = subprocess.run(
+        [str(RENDERER), "--check-environment"],
+        cwd=REPO,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    payload = json.loads(proc.stdout)
+
+    assert proc.returncode == 78
+    assert payload["ok"] is False
+    assert payload["blocked_reason"] == "missing_or_invalid_input_artifacts"
+    assert payload["input_artifacts_complete"] is False
+    assert payload["missing_input_artifacts"] == []
+    assert payload["input_artifact_errors"] == [
+        "provenance-trust-suite.json cases[0].asset_path must live under "
+        "MNEMOSYNE_PROD_EVIDENCE_DIR"
+    ]
+    assert env["MNEMOSYNE_PROD_EVIDENCE_DIR"] not in proc.stdout
+    assert env["MNEMOSYNE_PROD_C2PA_TOOL"] not in proc.stdout
+    assert proc.stderr == ""
+
+
 def test_renderer_check_environment_accepts_provenance_suite_assets(
     tmp_path: Path,
 ) -> None:

@@ -143,23 +143,24 @@ def test_predicted_lift_is_real_cf_arithmetic():
 # --------------------------------------------------------------------------- #
 
 
-def test_current_src_cf_not_wired_into_gate():
+def test_current_src_cf_wired_and_fails_closed_until_real_pairs_clear_bar():
     bar = scorer.FidelityBar()
     state = src_probe.probe_current_src(bar)
-    assert state["cf_wired_into_gate"] is False
+    assert state["cf_wired_into_gate"] is True
     assert state["shadow_only_by_construction"] is True
-    assert state["cf_only_informational"] is True
+    assert state["default_replay_fails_closed"] is True
+    assert state["default_promotion_probe"]["promoted"] is False
     assert state["real_paired_corpus_size"] == 0
 
 
-def test_default_check_passes_because_loop_correctly_in_shadow():
-    # Golden guarantee holds AND loop is correctly shadow/veto-only -> exit 0.
+def test_default_check_passes_because_wired_loop_fails_closed_without_real_pairs():
+    # Golden guarantee holds AND wired replay blocks unproven active promotion -> exit 0.
     code = check.main(["--quiet", "--json-out", _tmp("a.json"), "--md-out", _tmp("a.md")])
     assert code == 0
 
 
-def test_require_wired_fails_today_with_exit_2():
-    # The cf->gate path is not wired yet, so the CI-flip mode must veto (exit 2).
+def test_require_wired_fails_until_real_pairs_authorize_promotion():
+    # The cf->gate path is wired, but real replay pairs do not yet clear OQ2.
     code = check.main(
         ["--quiet", "--require-wired", "--json-out", _tmp("b.json"), "--md-out", _tmp("b.md")]
     )
