@@ -14,7 +14,9 @@ This writes:
 
 - `eval/g0/reports/report.json` and `report.md`
 - `eval/g0/baselines/baseline-0.json` when `--write-baseline` is used
-- an embedded computed `confabulation_eval` fixture proving the current
+- an embedded computed `continual_learning_eval` fixture measuring the current
+  backward-transfer accuracy drop after later overlapping ingests
+- an embedded computed `confabulation_eval` fixture measuring the current
   false-accept rate for generated / low-fidelity support; this is the local
   deterministic proxy for the full provenance-entailment plus sampled-audit G0
   metric

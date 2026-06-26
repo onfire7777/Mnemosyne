@@ -1,8 +1,8 @@
 # Mnemosyne G0 Benchmark Report
 
-- Generated: `2026-06-26T04:24:42.458431+00:00`
-- Baseline: `baseline-0` at `a488464cac8d63fb27704eac7c28fd3108163562`
-- Gate ready: **False** (10/14 metrics measured)
+- Generated: `2026-06-26T04:44:53.645922+00:00`
+- Baseline: `baseline-0` at `e45268b4273eb88081c37bb8ef08652ca7cd1f77`
+- Gate ready: **False** (11/14 metrics measured)
 
 ## Metrics
 
@@ -15,7 +15,7 @@
 | ece | guardrail | measured | 0.006271 | <= 0.05 | calibration_report |
 | abstention_precision | guardrail | measured | 1.0 | >= 1.0 | calibration_report |
 | abstention_recall | guardrail | measured | 1.0 | >= 1.0 | calibration_report |
-| continual_learning_interference | target | missing |  | <= 0.0 |  |
+| continual_learning_interference | target | measured | 0.0 | <= 0.0 | continual_learning_eval |
 | confabulation_rate | guardrail | measured | 0.0 | <= 0.0 | confabulation_eval |
 | poison_block_rate | guardrail | measured | 1.0 | >= 0.95 | slo_v2_definitive |
 | fast_path_p95_ms | guardrail | measured | 92.1 | <= 400.0 | latency_bench |
@@ -25,7 +25,6 @@
 
 ## Missing Metrics
 
-- `continual_learning_interference`: No current artifact computes this G0 metric yet.
 - `deep_path_p95_ms`: No current artifact computes this G0 metric yet.
 - `cost_usd_per_1k_queries`: No current artifact computes this G0 metric yet.
 - `controller_watts_per_dollar`: No current artifact computes this G0 metric yet.

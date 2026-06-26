@@ -14,7 +14,7 @@
       "reranker_provider": "cross-encoder/ms-marco-MiniLM-L-6-v2"
     },
     "name": "baseline-0",
-    "pinned_commit": "a488464cac8d63fb27704eac7c28fd3108163562",
+    "pinned_commit": "e45268b4273eb88081c37bb8ef08652ca7cd1f77",
     "seeds": {
       "harness_bootstrap_mean": 1234,
       "harness_bootstrap_percentile": 4321,
@@ -32,7 +32,7 @@
     "confabulation_eval": {
       "definition": "False-accept rate on cases where the only support is generated, low-fidelity, or explicitly confabulation-risk provenance.",
       "false_accepts": 0,
-      "generated_at": "2026-06-26T04:24:42.395718+00:00",
+      "generated_at": "2026-06-26T04:44:53.489594+00:00",
       "metric": "confabulation_rate",
       "metric_note": "Deterministic local proxy for the full G0 provenance-entailment and sampled-audit confabulation metric; this proves the live retrieval/abstention rail fails closed on generated or risky support without introducing a network or LLM evaluator.",
       "passed": true,
@@ -96,14 +96,125 @@
       "schema_version": "g0.confabulation.v1",
       "target": 0.0,
       "total_cases": 3
+    },
+    "continual_learning_eval": {
+      "after_accuracy": 1.0,
+      "before_accuracy": 1.0,
+      "dataset_path": "/Users/admin/Mnemosyne/eval/datasets/continual_learning_interference.json",
+      "definition": "Backward-transfer accuracy drop on earlier task queries after sequentially ingesting later task blocks.",
+      "generated_at": "2026-06-26T04:44:53.488663+00:00",
+      "interference": 0.0,
+      "metric": "continual_learning_interference",
+      "metric_note": "Deterministic local proxy for the full sequential task-block G0 benchmark; this records whether the live LocalMemoryEngine retrieval path retains earlier task accuracy after later overlapping ingests.",
+      "passed": true,
+      "retrieval_k": 3,
+      "rows": [
+        {
+          "after": {
+            "abstained": false,
+            "confidence": 1.0,
+            "correct": true,
+            "expected_rank": 1,
+            "hit_count": 3,
+            "phase": "after",
+            "top_hit_id": "6f4f7c580a74bad8dcffdb09ba643cd7133099f0887a54470f97607baf4ffe69",
+            "top_k_hit_ids": [
+              "6f4f7c580a74bad8dcffdb09ba643cd7133099f0887a54470f97607baf4ffe69",
+              "b7d239873be90761db39e00dcac288108dffa14ccc3bf8a086b4fe301b923623",
+              "0c5d7a02929c557e0532140c174e9abebd0f75e36491d361797938683359e1ff"
+            ]
+          },
+          "before": {
+            "abstained": false,
+            "confidence": 1.0,
+            "correct": true,
+            "expected_rank": 1,
+            "hit_count": 1,
+            "phase": "before",
+            "top_hit_id": "6f4f7c580a74bad8dcffdb09ba643cd7133099f0887a54470f97607baf4ffe69",
+            "top_k_hit_ids": [
+              "6f4f7c580a74bad8dcffdb09ba643cd7133099f0887a54470f97607baf4ffe69"
+            ]
+          },
+          "case_id": "aurora_launch_date",
+          "expected_cid": "6f4f7c580a74bad8dcffdb09ba643cd7133099f0887a54470f97607baf4ffe69",
+          "query": "aurora launch date",
+          "regressed": false
+        },
+        {
+          "after": {
+            "abstained": false,
+            "confidence": 1.0,
+            "correct": true,
+            "expected_rank": 1,
+            "hit_count": 3,
+            "phase": "after",
+            "top_hit_id": "73dc01f5755bd6632c76d888d3dac20a0809edce9907f3aee9858aeb726f810b",
+            "top_k_hit_ids": [
+              "73dc01f5755bd6632c76d888d3dac20a0809edce9907f3aee9858aeb726f810b",
+              "b7d239873be90761db39e00dcac288108dffa14ccc3bf8a086b4fe301b923623",
+              "c40481837db9b6cdd0f9c9b06bb6e4d7aa7e2a85d05572df309b08cd8a8c5d39"
+            ]
+          },
+          "before": {
+            "abstained": false,
+            "confidence": 1.0,
+            "correct": true,
+            "expected_rank": 1,
+            "hit_count": 1,
+            "phase": "before",
+            "top_hit_id": "73dc01f5755bd6632c76d888d3dac20a0809edce9907f3aee9858aeb726f810b",
+            "top_k_hit_ids": [
+              "73dc01f5755bd6632c76d888d3dac20a0809edce9907f3aee9858aeb726f810b"
+            ]
+          },
+          "case_id": "borealis_owner",
+          "expected_cid": "73dc01f5755bd6632c76d888d3dac20a0809edce9907f3aee9858aeb726f810b",
+          "query": "borealis owner",
+          "regressed": false
+        },
+        {
+          "after": {
+            "abstained": false,
+            "confidence": 1.0,
+            "correct": true,
+            "expected_rank": 1,
+            "hit_count": 2,
+            "phase": "after",
+            "top_hit_id": "6b0296d1506d30c75e0b24ed840d11793c936dc4b114112376270b076230872a",
+            "top_k_hit_ids": [
+              "6b0296d1506d30c75e0b24ed840d11793c936dc4b114112376270b076230872a",
+              "893fef7d07c04a1b8ff3be2d4e3e12f1a327d3accb84ae1e7618f3700945ea4e"
+            ]
+          },
+          "before": {
+            "abstained": false,
+            "confidence": 1.0,
+            "correct": true,
+            "expected_rank": 1,
+            "hit_count": 1,
+            "phase": "before",
+            "top_hit_id": "6b0296d1506d30c75e0b24ed840d11793c936dc4b114112376270b076230872a",
+            "top_k_hit_ids": [
+              "6b0296d1506d30c75e0b24ed840d11793c936dc4b114112376270b076230872a"
+            ]
+          },
+          "case_id": "cerulean_budget",
+          "expected_cid": "6b0296d1506d30c75e0b24ed840d11793c936dc4b114112376270b076230872a",
+          "query": "cerulean budget",
+          "regressed": false
+        }
+      ],
+      "schema_version": "g0.continual_learning.v1",
+      "target": 0.0,
+      "total_cases": 3
     }
   },
   "coverage": {
     "gate_ready": false,
-    "measured": 10,
-    "missing": 4,
+    "measured": 11,
+    "missing": 3,
     "missing_metric_ids": [
-      "continual_learning_interference",
       "deep_path_p95_ms",
       "cost_usd_per_1k_queries",
       "controller_watts_per_dollar"
@@ -111,6 +222,17 @@
     "total": 14
   },
   "dataset_manifests": [
+    {
+      "bytes": 1570,
+      "counts": {
+        "tasks": 2
+      },
+      "k": 3,
+      "path": "eval/datasets/continual_learning_interference.json",
+      "present": true,
+      "sha256": "4cf4f3b5db704548dac13caceb79856c9469bc45c77295a46225e838fc756f93",
+      "tenant": "g0-continual-learning"
+    },
     {
       "bytes": 3702,
       "counts": {
@@ -171,7 +293,7 @@
     "preregistration_required": true,
     "rule": "ship iff a preregistered target metric improves by its margin and no guardrail regresses"
   },
-  "generated_at": "2026-06-26T04:24:42.458431+00:00",
+  "generated_at": "2026-06-26T04:44:53.645922+00:00",
   "headline_slos": {
     "ece": {
       "blueprint_metric": "ECE",
@@ -359,16 +481,16 @@
       "blueprint_metric": "continual-learning interference",
       "class": "target",
       "direction": "decrease",
-      "evidence_path": null,
+      "evidence_path": "/interference",
       "id": "continual_learning_interference",
       "label": "continual-learning interference",
-      "notes": "No current artifact computes this G0 metric yet.",
-      "pass": null,
-      "source_id": null,
-      "status": "missing",
+      "notes": "Measured by the G0 continual-learning fixture as the backward-transfer accuracy drop on earlier task queries after later overlapping ingests.",
+      "pass": true,
+      "source_id": "continual_learning_eval",
+      "status": "measured",
       "target": 0.0,
       "target_op": "<=",
-      "value": null
+      "value": 0.0
     },
     {
       "blueprint_metric": "confabulation rate",
@@ -499,11 +621,18 @@
       "sha256": "aee46e3a0908f5e44edff596e1206e6aecc10234c1e24af953f623e929a958a6"
     },
     {
-      "generated_at": "2026-06-26T04:24:42.395718+00:00",
+      "generated_at": "2026-06-26T04:44:53.488663+00:00",
+      "id": "continual_learning_eval",
+      "path": "computed:eval.g0.continual_learning",
+      "present": true,
+      "sha256": "6ab9dac3efb4048479fa457400f7afb2d45da4cd300811f1ebc422bd398ac007"
+    },
+    {
+      "generated_at": "2026-06-26T04:44:53.489594+00:00",
       "id": "confabulation_eval",
       "path": "computed:eval.g0.confabulation",
       "present": true,
-      "sha256": "a33ca061711b2aedc4da68e9883a18739414d75fc2a3e83ac48fbc4e29e7f7b5"
+      "sha256": "b651497a234c1985fb2cf6ce154c4167319f2ee397d993a354dc3437d651f822"
     }
   ]
 }
