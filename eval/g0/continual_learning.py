@@ -87,7 +87,7 @@ def run_continual_learning_eval(dataset_path: Path | None = None) -> dict[str, A
             "retrieval path retains earlier task accuracy after later "
             "overlapping ingests."
         ),
-        "dataset_path": str((dataset_path or DEFAULT_DATASET_PATH).resolve()),
+        "dataset_path": _portable_path(dataset_path or DEFAULT_DATASET_PATH),
         "retrieval_k": k,
         "total_cases": len(earlier_items),
         "before_accuracy": round(before_accuracy, 6),
@@ -152,6 +152,14 @@ def _load_dataset(path: Path) -> dict[str, Any]:
 def _require_string(item: Any, key: str, label: str) -> None:
     if not isinstance(item, dict) or not isinstance(item.get(key), str) or not item[key]:
         raise ValueError(f"{label} must contain non-empty string field {key}")
+
+
+def _portable_path(path: Path) -> str:
+    repo_root = Path(__file__).resolve().parents[2]
+    try:
+        return path.resolve().relative_to(repo_root).as_posix()
+    except ValueError:
+        return path.resolve().as_posix()
 
 
 def _score_case(

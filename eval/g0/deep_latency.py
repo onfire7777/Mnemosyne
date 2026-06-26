@@ -74,7 +74,7 @@ def run_deep_latency_eval(dataset_path: Path | None = None) -> dict[str, Any]:
             "live LocalMemoryEngine deep path over a versioned graph corpus; "
             "it is not production infrastructure evidence."
         ),
-        "dataset_path": str(dataset_file.resolve()),
+        "dataset_path": _portable_path(dataset_file),
         "query_count": len(rows),
         "unique_queries": len(queries),
         "rounds": rounds,
@@ -111,6 +111,14 @@ def _load_dataset(path: Path) -> dict[str, Any]:
 def _require_string(item: Any, key: str, label: str) -> None:
     if not isinstance(item, dict) or not isinstance(item.get(key), str) or not item[key]:
         raise ValueError(f"{label} must contain non-empty string field {key}")
+
+
+def _portable_path(path: Path) -> str:
+    repo_root = Path(__file__).resolve().parents[2]
+    try:
+        return path.resolve().relative_to(repo_root).as_posix()
+    except ValueError:
+        return path.resolve().as_posix()
 
 
 def _percentile(values: list[float], percentile: float) -> float:
