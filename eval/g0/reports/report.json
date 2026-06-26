@@ -1,0 +1,433 @@
+{
+  "baseline": {
+    "environment": {
+      "backend": "postgres",
+      "embedding_provider": "BAAI/bge-small-en-v1.5",
+      "hardware": {
+        "cpu_count": 10,
+        "machine": "arm64",
+        "processor": "arm"
+      },
+      "platform": "macOS-26.5-arm64-arm-64bit-Mach-O",
+      "python": "3.14.5",
+      "repo_root": "/Users/admin/Projects/Mnemosyne",
+      "reranker_provider": "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    },
+    "name": "baseline-0",
+    "pinned_commit": "35d3344ec71ccaaf00f19f9feaf413e5fdb848f5",
+    "seeds": {
+      "harness_bootstrap_mean": 1234,
+      "harness_bootstrap_percentile": 4321,
+      "synthetic_retrieval": 7
+    },
+    "tag_exists": true,
+    "tag_target": "35d3344ec71ccaaf00f19f9feaf413e5fdb848f5"
+  },
+  "blueprint_refs": [
+    "docs/blueprint/cognitive-architecture/04-G0-BENCHMARK-SPEC.md",
+    "docs/blueprint/eval/05-harness-architecture-and-ci-gating.md",
+    "eval/calibration/report.json"
+  ],
+  "coverage": {
+    "gate_ready": false,
+    "measured": 9,
+    "missing": 5,
+    "missing_metric_ids": [
+      "continual_learning_interference",
+      "confabulation_rate",
+      "deep_path_p95_ms",
+      "cost_usd_per_1k_queries",
+      "controller_watts_per_dollar"
+    ],
+    "total": 14
+  },
+  "dataset_manifests": [
+    {
+      "bytes": 3702,
+      "counts": {
+        "corpus": 12,
+        "queries": 10
+      },
+      "k": 5,
+      "path": "eval/datasets/retrieval_curated.json",
+      "present": true,
+      "sha256": "07506b1ed6e026af62736a728e0ced93766a591398bcab313f3a6d33d3b66437",
+      "tenant": "eval-retrieval-curated"
+    },
+    {
+      "bytes": 2900,
+      "counts": {
+        "attacks": 6
+      },
+      "path": "eval/datasets/poison_suite.json",
+      "present": true,
+      "sha256": "acf0c544390756feda4deec96d34cfe5149e287fd5fa22fc809617f1fb98d605",
+      "tenant": "eval-poison"
+    },
+    {
+      "bytes": 2534,
+      "counts": {},
+      "path": "eval/datasets/belief_cases.json",
+      "present": true,
+      "sha256": "a7805d8d16b8c54e425b07191cc3f072658d441674e3db27241d39d645d6614b"
+    },
+    {
+      "bytes": 25684,
+      "counts": {
+        "corpus": 105,
+        "queries": 45
+      },
+      "k": 5,
+      "path": "eval/datasets/v2/retrieval_v2.json",
+      "present": true,
+      "sha256": "fdbf7d1de34c99215d005dbc6e9ce3f9e15247ed1496e9421843803f9fa48194",
+      "tenant": "eval-retrieval-v2"
+    },
+    {
+      "bytes": 28376,
+      "counts": {
+        "corpus": 105,
+        "queries": 24
+      },
+      "k": 5,
+      "path": "eval/datasets/v2/qa_hard_v2.json",
+      "present": true,
+      "sha256": "1864974807f2171904a5e5f04b727b3cbfb258f94c1280106ecc08a4dade52e2",
+      "tenant": "eval-qa-hard-v2"
+    }
+  ],
+  "gate_contract": {
+    "decision_log": "eval/g0/decision-log.jsonl",
+    "gate_command": "python -m eval.g0.gate --baseline BASELINE.json --candidate CANDIDATE.json --prereg PREREG.json",
+    "preregistration_required": true,
+    "rule": "ship iff a preregistered target metric improves by its margin and no guardrail regresses"
+  },
+  "generated_at": "2026-06-26T04:04:33.639081+00:00",
+  "headline_slos": {
+    "ece": {
+      "blueprint_metric": "ECE",
+      "class": "guardrail",
+      "direction": "decrease",
+      "evidence_path": "/ece/conformal_threshold/overall",
+      "id": "ece",
+      "label": "expected calibration error",
+      "notes": "Measured from an existing eval artifact.",
+      "pass": true,
+      "source_id": "calibration_report",
+      "status": "measured",
+      "target": 0.05,
+      "target_op": "<=",
+      "value": 0.006271
+    },
+    "fast_path_p95_ms": {
+      "blueprint_metric": "fast-path P95 latency",
+      "class": "guardrail",
+      "direction": "decrease",
+      "evidence_path": "/components/fast_path_total/p95_ms",
+      "id": "fast_path_p95_ms",
+      "label": "fast-path P95 latency",
+      "notes": "Uses long-lived local/in-process latency artifact, avoiding per-query CLI cold start.",
+      "pass": true,
+      "source_id": "latency_bench",
+      "status": "measured",
+      "target": 400.0,
+      "target_op": "<=",
+      "value": 92.1
+    },
+    "ndcg_at_k": {
+      "blueprint_metric": "nDCG@k",
+      "class": "target",
+      "direction": "increase",
+      "evidence_path": "/suites/retrieval_v2/ndcg_at_k/mean",
+      "id": "ndcg_at_k",
+      "label": "nDCG@k",
+      "notes": "Measured from an existing eval artifact.",
+      "pass": true,
+      "source_id": "slo_v2_definitive",
+      "status": "measured",
+      "target": 0.8,
+      "target_op": ">=",
+      "value": 0.983
+    },
+    "poison_block_rate": {
+      "blueprint_metric": "poison-block rate",
+      "class": "guardrail",
+      "direction": "increase",
+      "evidence_path": "/suites/poison_block_g7/block_rate",
+      "id": "poison_block_rate",
+      "label": "poison-block rate",
+      "notes": "Measured from an existing eval artifact.",
+      "pass": true,
+      "source_id": "slo_v2_definitive",
+      "status": "measured",
+      "target": 0.95,
+      "target_op": ">=",
+      "value": 1.0
+    },
+    "recall_at_k": {
+      "blueprint_metric": "recall@k",
+      "class": "target",
+      "direction": "increase",
+      "evidence_path": "/suites/retrieval_v2/recall_at_k/mean",
+      "id": "recall_at_k",
+      "label": "recall@k",
+      "notes": "Measured from an existing eval artifact.",
+      "pass": true,
+      "source_id": "slo_v2_definitive",
+      "status": "measured",
+      "target": 0.8,
+      "target_op": ">=",
+      "value": 0.9773
+    }
+  },
+  "metrics": [
+    {
+      "blueprint_metric": "recall@k",
+      "class": "target",
+      "direction": "increase",
+      "evidence_path": "/suites/retrieval_v2/recall_at_k/mean",
+      "id": "recall_at_k",
+      "label": "recall@k",
+      "notes": "Measured from an existing eval artifact.",
+      "pass": true,
+      "source_id": "slo_v2_definitive",
+      "status": "measured",
+      "target": 0.8,
+      "target_op": ">=",
+      "value": 0.9773
+    },
+    {
+      "blueprint_metric": "nDCG@k",
+      "class": "target",
+      "direction": "increase",
+      "evidence_path": "/suites/retrieval_v2/ndcg_at_k/mean",
+      "id": "ndcg_at_k",
+      "label": "nDCG@k",
+      "notes": "Measured from an existing eval artifact.",
+      "pass": true,
+      "source_id": "slo_v2_definitive",
+      "status": "measured",
+      "target": 0.8,
+      "target_op": ">=",
+      "value": 0.983
+    },
+    {
+      "blueprint_metric": "multi-hop recall/nDCG",
+      "class": "target",
+      "direction": "increase",
+      "evidence_path": "/suites/retrieval_qa_hard_v2/recall_at_k/mean",
+      "id": "multi_hop_recall_at_k",
+      "label": "multi-hop recall@k",
+      "notes": "Current proxy uses the hard QA/multi-hop gap suite from the definitive SLO artifact.",
+      "pass": false,
+      "source_id": "slo_v2_definitive",
+      "status": "measured",
+      "target": 0.8,
+      "target_op": ">=",
+      "value": 0.625
+    },
+    {
+      "blueprint_metric": "multi-hop recall/nDCG",
+      "class": "target",
+      "direction": "increase",
+      "evidence_path": "/suites/retrieval_qa_hard_v2/ndcg_at_k/mean",
+      "id": "multi_hop_ndcg_at_k",
+      "label": "multi-hop nDCG@k",
+      "notes": "Current proxy uses the hard QA/multi-hop gap suite from the definitive SLO artifact.",
+      "pass": false,
+      "source_id": "slo_v2_definitive",
+      "status": "measured",
+      "target": 0.8,
+      "target_op": ">=",
+      "value": 0.5935
+    },
+    {
+      "blueprint_metric": "ECE",
+      "class": "guardrail",
+      "direction": "decrease",
+      "evidence_path": "/ece/conformal_threshold/overall",
+      "id": "ece",
+      "label": "expected calibration error",
+      "notes": "Measured from an existing eval artifact.",
+      "pass": true,
+      "source_id": "calibration_report",
+      "status": "measured",
+      "target": 0.05,
+      "target_op": "<=",
+      "value": 0.006271
+    },
+    {
+      "blueprint_metric": "abstention precision / recall",
+      "class": "guardrail",
+      "direction": "increase",
+      "evidence_path": "/conformal_report/overall/abstention/abstain_precision",
+      "id": "abstention_precision",
+      "label": "abstention precision",
+      "notes": "Measured from an existing eval artifact.",
+      "pass": true,
+      "source_id": "calibration_report",
+      "status": "measured",
+      "target": 1.0,
+      "target_op": ">=",
+      "value": 1.0
+    },
+    {
+      "blueprint_metric": "abstention precision / recall",
+      "class": "guardrail",
+      "direction": "increase",
+      "evidence_path": "/conformal_report/overall/abstention/abstain_recall",
+      "id": "abstention_recall",
+      "label": "abstention recall",
+      "notes": "Measured from an existing eval artifact.",
+      "pass": true,
+      "source_id": "calibration_report",
+      "status": "measured",
+      "target": 1.0,
+      "target_op": ">=",
+      "value": 1.0
+    },
+    {
+      "blueprint_metric": "continual-learning interference",
+      "class": "target",
+      "direction": "decrease",
+      "evidence_path": null,
+      "id": "continual_learning_interference",
+      "label": "continual-learning interference",
+      "notes": "No current artifact computes this G0 metric yet.",
+      "pass": null,
+      "source_id": null,
+      "status": "missing",
+      "target": 0.0,
+      "target_op": "<=",
+      "value": null
+    },
+    {
+      "blueprint_metric": "confabulation rate",
+      "class": "guardrail",
+      "direction": "decrease",
+      "evidence_path": null,
+      "id": "confabulation_rate",
+      "label": "confabulation rate",
+      "notes": "No current artifact computes this G0 metric yet.",
+      "pass": null,
+      "source_id": null,
+      "status": "missing",
+      "target": 0.0,
+      "target_op": "<=",
+      "value": null
+    },
+    {
+      "blueprint_metric": "poison-block rate",
+      "class": "guardrail",
+      "direction": "increase",
+      "evidence_path": "/suites/poison_block_g7/block_rate",
+      "id": "poison_block_rate",
+      "label": "poison-block rate",
+      "notes": "Measured from an existing eval artifact.",
+      "pass": true,
+      "source_id": "slo_v2_definitive",
+      "status": "measured",
+      "target": 0.95,
+      "target_op": ">=",
+      "value": 1.0
+    },
+    {
+      "blueprint_metric": "fast-path P95 latency",
+      "class": "guardrail",
+      "direction": "decrease",
+      "evidence_path": "/components/fast_path_total/p95_ms",
+      "id": "fast_path_p95_ms",
+      "label": "fast-path P95 latency",
+      "notes": "Uses long-lived local/in-process latency artifact, avoiding per-query CLI cold start.",
+      "pass": true,
+      "source_id": "latency_bench",
+      "status": "measured",
+      "target": 400.0,
+      "target_op": "<=",
+      "value": 92.1
+    },
+    {
+      "blueprint_metric": "deep-path P95 latency",
+      "class": "reported",
+      "direction": "decrease",
+      "evidence_path": null,
+      "id": "deep_path_p95_ms",
+      "label": "deep-path P95 latency",
+      "notes": "No current artifact computes this G0 metric yet.",
+      "pass": null,
+      "source_id": null,
+      "status": "missing",
+      "target": null,
+      "target_op": null,
+      "value": null
+    },
+    {
+      "blueprint_metric": "cost",
+      "class": "reported",
+      "direction": "decrease",
+      "evidence_path": null,
+      "id": "cost_usd_per_1k_queries",
+      "label": "cost per 1k queries",
+      "notes": "No current artifact computes this G0 metric yet.",
+      "pass": null,
+      "source_id": null,
+      "status": "missing",
+      "target": null,
+      "target_op": null,
+      "value": null
+    },
+    {
+      "blueprint_metric": "controller watts/$",
+      "class": "reported",
+      "direction": "decrease",
+      "evidence_path": null,
+      "id": "controller_watts_per_dollar",
+      "label": "controller watts per dollar",
+      "notes": "No current artifact computes this G0 metric yet.",
+      "pass": null,
+      "source_id": null,
+      "status": "missing",
+      "target": null,
+      "target_op": null,
+      "value": null
+    }
+  ],
+  "schema_version": "g0.report.v1",
+  "sources": [
+    {
+      "generated_at": "2026-06-22T04:38:17.745196+00:00",
+      "id": "slo_v2_definitive",
+      "path": "eval/reports/slo_v2_definitive.json",
+      "present": true,
+      "sha256": "6c369e55a839ad187c6caf0d701aa194c5ac1689ea09cef6721ed6a515ee8dcf"
+    },
+    {
+      "generated_at": null,
+      "id": "calibration_report",
+      "path": "eval/calibration/report.json",
+      "present": true,
+      "sha256": "0616066e276e5a971cf22c68d8679d65652ffa310756326a768e5696988fa01e"
+    },
+    {
+      "generated_at": "2026-06-22T03:43:51.393596+00:00",
+      "id": "latency_bench",
+      "path": "eval/latency/reports/latency_bench_latest.json",
+      "present": true,
+      "sha256": "59442807dff7a20ebdc16114ad41c651f74f1441e8f5ab93d3667f0254b108c9"
+    },
+    {
+      "generated_at": "2026-06-22T05:14:29.124198+00:00",
+      "id": "warm_latency",
+      "path": "eval/latency_warm/reports/warm_latency_latest.json",
+      "present": true,
+      "sha256": "d32180c98fa370dcce10772fd0f40af935aff63bf76cf1107af3a96408632937"
+    },
+    {
+      "generated_at": "2026-06-22T00:19:24.809140+00:00",
+      "id": "replay_fidelity",
+      "path": "eval/reports/replay_fidelity_latest.json",
+      "present": true,
+      "sha256": "aee46e3a0908f5e44edff596e1206e6aecc10234c1e24af953f623e929a958a6"
+    }
+  ]
+}
