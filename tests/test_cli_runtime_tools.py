@@ -195,6 +195,27 @@ def run_cli(store: Path, *args: str) -> dict:
     return json.loads(result.stdout)
 
 
+def seed_grounded_gate_evidence(
+    store: Path,
+    content: str,
+    *,
+    tenant_id: str = TENANT,
+    user_id: str = USER,
+) -> str:
+    return LocalMemoryEngine(store_path=store).append_evidence(
+        Evidence(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            actor="user",
+            source_type="grounded-gate-fixture",
+            content=content,
+            metadata={"reality_class": "grounded"},
+            trust_tier=0,
+            access_policy={"tenant": tenant_id},
+        )
+    )
+
+
 def run_packaged_cli(store: Path, *args: str) -> dict:
     entrypoint = Path(sys.executable).with_name("mneme")
     assert entrypoint.exists(), (
@@ -5840,6 +5861,30 @@ def write_production_evidence_bundle(tmp_path: Path) -> tuple[Path, str]:
     return bundle_dir, bundle_fingerprint
 
 
+def rewrite_production_redaction_scan(bundle_dir: Path) -> None:
+    scanned_files = [
+        str(path)
+        for path in sorted(file_path for file_path in bundle_dir.rglob("*") if file_path.is_file())
+        if path.relative_to(bundle_dir).as_posix()
+        not in {"bundle-manifest.json", "summary.json", "redaction-scan.json"}
+    ]
+    (bundle_dir / "redaction-scan.json").write_text(
+        json.dumps(
+            {
+                "ok": True,
+                "scope": "generated-evidence",
+                "patterns": [],
+                "scanned_files": scanned_files,
+                "findings": [],
+                "skipped_files": [],
+            },
+            indent=2,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+
 def rewrite_production_bundle_manifest(bundle_dir: Path) -> str:
     files = []
     for file_path in sorted(path for path in bundle_dir.rglob("*") if path.is_file()):
@@ -5941,6 +5986,7 @@ def test_cli_production_evidence_verify_accepts_captured_bundle(tmp_path: Path) 
         "redaction_scan": True,
         "bundle_manifest": True,
         "operator_manifest": True,
+        "input_artifact_custody": True,
         "deployment_soak_manifest": True,
         "deployment_soak_stdout": True,
         "release_audit_replay": True,
@@ -6039,6 +6085,39 @@ def test_cli_production_evidence_verify_rejects_tampered_preflight(tmp_path: Pat
     assert "bundle_fingerprint_mismatch" not in codes
 
 
+def test_cli_production_evidence_verify_rejects_external_preflight_paths(
+    tmp_path: Path,
+) -> None:
+    bundle_dir, _bundle_fingerprint = write_production_evidence_bundle(tmp_path)
+    external = tmp_path / "external"
+    external.mkdir()
+    external_manifest = external / "operator-soak-manifest.json"
+    external_redaction = external / "redaction-scan.json"
+    external_manifest.write_text("{}", encoding="utf-8")
+    external_redaction.write_text("{}", encoding="utf-8")
+    preflight_path = bundle_dir / "preflight.json"
+    preflight = json.loads(preflight_path.read_text(encoding="utf-8"))
+    preflight["copied_manifest"] = str(external_manifest)
+    preflight["redaction_scan"] = str(external_redaction)
+    preflight_path.write_text(json.dumps(preflight, indent=2, sort_keys=True), encoding="utf-8")
+    rewrite_production_bundle_manifest(bundle_dir)
+
+    result = run_raw_cli(
+        tmp_path / "verify-store.json",
+        "production-evidence-verify",
+        str(bundle_dir),
+    )
+    payload = json.loads(result.stdout)
+    codes = {finding["code"] for finding in payload["findings"]}
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert payload["checks"]["preflight"] is False
+    assert "preflight_copied_manifest_invalid" in codes
+    assert "preflight_redaction_scan_invalid" in codes
+    assert "bundle_file_sha256_mismatch" not in codes
+
+
 def test_cli_production_evidence_verify_rejects_tampered_input_artifact_metadata(
     tmp_path: Path,
 ) -> None:
@@ -6081,6 +6160,160 @@ def test_cli_production_evidence_verify_rejects_tampered_input_artifact_metadata
     assert payload["ok"] is False
     assert payload["checks"]["preflight"] is False
     assert "preflight_input_artifact_file_sha256_mismatch" in codes
+    assert "bundle_file_sha256_mismatch" not in codes
+
+
+def test_cli_production_evidence_verify_rejects_unreferenced_input_artifact_snapshot(
+    tmp_path: Path,
+) -> None:
+    bundle_dir, _bundle_fingerprint = write_production_evidence_bundle(tmp_path)
+    snapshot = bundle_dir / "input-artifacts" / "0001-cases.json"
+    snapshot.parent.mkdir()
+    snapshot.write_text('{"ok": true}\n', encoding="utf-8")
+    preflight_path = bundle_dir / "preflight.json"
+    preflight = json.loads(preflight_path.read_text(encoding="utf-8"))
+    preflight["required_input_artifacts"] = [
+        {
+            "path": str(tmp_path / "external" / "cases.json"),
+            "snapshot_path": str(snapshot),
+            "kind": "file",
+            "labels": ["checks[1].args"],
+            "files": [
+                {
+                    "source_path": str(tmp_path / "external" / "cases.json"),
+                    "snapshot_path": str(snapshot),
+                    "relative_path": snapshot.name,
+                    "size_bytes": snapshot.stat().st_size,
+                    "sha256": "sha256:" + sha256(snapshot.read_bytes()).hexdigest(),
+                }
+            ],
+        }
+    ]
+    preflight_path.write_text(json.dumps(preflight, indent=2, sort_keys=True), encoding="utf-8")
+    rewrite_production_redaction_scan(bundle_dir)
+    rewrite_production_bundle_manifest(bundle_dir)
+
+    result = run_raw_cli(
+        tmp_path / "verify-store.json",
+        "production-evidence-verify",
+        str(bundle_dir),
+    )
+    payload = json.loads(result.stdout)
+    codes = {finding["code"] for finding in payload["findings"]}
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert payload["checks"]["input_artifact_custody"] is False
+    assert "operator_manifest_input_artifact_reference_missing" in codes
+    assert "bundle_file_sha256_mismatch" not in codes
+
+
+def test_cli_production_evidence_verify_rejects_unrecorded_operator_input_artifact(
+    tmp_path: Path,
+) -> None:
+    bundle_dir, _bundle_fingerprint = write_production_evidence_bundle(tmp_path)
+    snapshot = bundle_dir / "input-artifacts" / "0001-cases.json"
+    snapshot.parent.mkdir()
+    snapshot.write_text('{"ok": true}\n', encoding="utf-8")
+    operator_manifest_path = bundle_dir / "operator-soak-manifest.json"
+    operator_manifest = json.loads(operator_manifest_path.read_text(encoding="utf-8"))
+    operator_manifest["checks"][0]["args"] = ["--cases", str(snapshot)]
+    operator_manifest_path.write_text(
+        json.dumps(operator_manifest, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    rewrite_production_redaction_scan(bundle_dir)
+    rewrite_production_bundle_manifest(bundle_dir)
+
+    result = run_raw_cli(
+        tmp_path / "verify-store.json",
+        "production-evidence-verify",
+        str(bundle_dir),
+    )
+    payload = json.loads(result.stdout)
+    codes = {finding["code"] for finding in payload["findings"]}
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert payload["checks"]["input_artifact_custody"] is False
+    assert "operator_manifest_input_artifact_reference_unrecorded" in codes
+    assert "preflight_input_artifact_unrecorded_snapshot_file" in codes
+    assert "bundle_file_sha256_mismatch" not in codes
+
+
+def test_cli_production_evidence_verify_rejects_symlinked_input_artifact(
+    tmp_path: Path,
+) -> None:
+    bundle_dir, _bundle_fingerprint = write_production_evidence_bundle(tmp_path)
+    snapshot = bundle_dir / "input-artifacts" / "linked-cases.json"
+    snapshot.parent.mkdir()
+    try:
+        snapshot.symlink_to(Path("/etc/hosts"))
+    except OSError as exc:
+        pytest.skip(f"symlink setup unavailable: {exc}")
+    rewrite_production_redaction_scan(bundle_dir)
+    rewrite_production_bundle_manifest(bundle_dir)
+
+    result = run_raw_cli(
+        tmp_path / "verify-store.json",
+        "production-evidence-verify",
+        str(bundle_dir),
+    )
+    payload = json.loads(result.stdout)
+    codes = {finding["code"] for finding in payload["findings"]}
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert payload["checks"]["input_artifact_custody"] is False
+    assert "preflight_input_artifact_symlink" in codes
+    assert "Traceback" not in result.stderr
+
+
+def test_cli_production_evidence_verify_rejects_input_artifact_parent_mismatch(
+    tmp_path: Path,
+) -> None:
+    bundle_dir, _bundle_fingerprint = write_production_evidence_bundle(tmp_path)
+    artifact_root = bundle_dir / "input-artifacts" / "0001-suite"
+    other_root = bundle_dir / "input-artifacts" / "0002-cases"
+    snapshot = other_root / "cases.json"
+    artifact_root.mkdir(parents=True)
+    snapshot.parent.mkdir(parents=True)
+    snapshot.write_text('{"ok": true}\n', encoding="utf-8")
+    preflight_path = bundle_dir / "preflight.json"
+    preflight = json.loads(preflight_path.read_text(encoding="utf-8"))
+    preflight["required_input_artifacts"] = [
+        {
+            "path": str(tmp_path / "external" / "suite"),
+            "snapshot_path": str(artifact_root),
+            "kind": "directory",
+            "labels": ["checks[1].args"],
+            "files": [
+                {
+                    "source_path": str(tmp_path / "external" / "suite" / "cases.json"),
+                    "snapshot_path": str(snapshot),
+                    "relative_path": "cases.json",
+                    "size_bytes": snapshot.stat().st_size,
+                    "sha256": "sha256:" + sha256(snapshot.read_bytes()).hexdigest(),
+                }
+            ],
+        }
+    ]
+    preflight_path.write_text(json.dumps(preflight, indent=2, sort_keys=True), encoding="utf-8")
+    rewrite_production_redaction_scan(bundle_dir)
+    rewrite_production_bundle_manifest(bundle_dir)
+
+    result = run_raw_cli(
+        tmp_path / "verify-store.json",
+        "production-evidence-verify",
+        str(bundle_dir),
+    )
+    payload = json.loads(result.stdout)
+    codes = {finding["code"] for finding in payload["findings"]}
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert payload["checks"]["preflight"] is False
+    assert "preflight_input_artifact_file_parent_mismatch" in codes
     assert "bundle_file_sha256_mismatch" not in codes
 
 
@@ -9522,6 +9755,8 @@ def test_cli_provider_check_fails_closed_when_command_key_provider_retains_shred
 def test_cli_parametric_tier_can_use_command_provider(tmp_path: Path) -> None:
     store = tmp_path / "mnemosyne.json"
     command, provider_state = fake_parametric_command(tmp_path)
+    seed_grounded_gate_evidence(store, "verify with tools durable memory")
+    seed_grounded_gate_evidence(store, "parametric protected suite query protected")
     trajectory = run_cli(
         store,
         "trajectory-record",
@@ -10223,6 +10458,7 @@ def test_cli_profile_graph_learning_and_parametric_flows_persist(tmp_path: Path)
     lesson_search = run_cli(store, "lesson-search", "--tenant", TENANT, "--signature", "off by one")
     procedure_search = run_cli(store, "procedure-search", "--tenant", TENANT, "--query", "date-math-deploy")
     outcome = run_cli(store, "outcome-evaluate", "--trajectory-id", trajectory["id"])
+    seed_grounded_gate_evidence(store, "lesson off by one day verify with tools")
     promoted = run_cli(
         store,
         "lesson-promote",

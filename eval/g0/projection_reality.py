@@ -85,7 +85,8 @@ def run_projection_reality_eval() -> dict[str, Any]:
             projection_reality_class = assertion_hit.metadata.get("reality_class")
         expected = str(case["support_reality_class"])
         projection_tagged = projection_reality_class == expected
-        projection_abstained = bool(projection_tagged and result.abstained)
+        risky_hit_ids = set(result.explain.get("reality_monitoring", {}).get("risky_hit_ids") or [])
+        projection_abstained = bool(projection_tagged and result.abstained and assertion_id in risky_hit_ids)
         rows.append(
             {
                 "case_id": case["id"],

@@ -762,7 +762,7 @@ class LocalMemoryEngine:
         return {
             "source": "legacy_or_unclassified_projection",
             "applied": False,
-            "reality_class": normalized or "grounded",
+            "reality_class": normalized or "unknown",
         }
 
     def add_relation(self, relation: Relation, branch: str = "main") -> str:
@@ -1252,6 +1252,7 @@ class LocalMemoryEngine:
 
     def _reality_monitoring_report(self, hits: list[Hit]) -> dict[str, Any]:
         risky = {"self_generated", "simulated", "externally_suggested"}
+        ungrounded = risky | {"unknown"}
         counts: dict[str, int] = {}
         grounded_cids: set[str] = set()
         risky_hit_ids: list[str] = []
@@ -1263,11 +1264,11 @@ class LocalMemoryEngine:
                 grounded_cids.update(str(cid) for cid in hit.provenance if cid)
                 if hit.kind == "evidence" and hit.id:
                     grounded_cids.add(hit.id)
-            elif reality_class in risky:
+            elif reality_class in ungrounded:
                 risky_hit_ids.append(hit.id)
         hit_count = len(hits)
         grounded = counts.get("grounded", 0)
-        ungrounded_only = hit_count > 0 and grounded == 0 and any(counts.get(item, 0) for item in risky)
+        ungrounded_only = hit_count > 0 and grounded == 0 and any(counts.get(item, 0) for item in ungrounded)
         return {
             "applied": True,
             "classes": counts,

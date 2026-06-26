@@ -151,8 +151,8 @@ SHA-256 digests; release-audit verifies those digests, rejects artifact paths
 that resolve outside the evidence bundle, and confirms retained check JSON
 matches the audited report before trusting the bundle. The offline
 `production-evidence-verify` command rechecks an already captured bundle's
-custody metadata and release-audit replay without contacting production or
-rerunning deployment soak.
+custody metadata, retained input-artifact bindings, and release-audit replay
+without contacting production or rerunning deployment soak.
 Use `--preflight-only` to validate and copy the rendered manifest without
 running production checks; preflight output plus `redaction-scan.json` is setup
 proof only, not production parity evidence. Successful full capture writes

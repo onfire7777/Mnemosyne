@@ -2048,6 +2048,13 @@ def test_shared_engine_contract_memory_tools_profile_graph_learning_facades(
     procedure = tools.procedure_induce(lesson["id"])
     alias_lesson = tools.lesson_propose(alias_trajectory["id"])
     alias_procedure = tools.procedure_propose(alias_lesson["id"])
+    _append_evidence(
+        engine,
+        tenant,
+        user,
+        "alias drift verify with tools",
+        metadata={"reality_class": "grounded"},
+    )
     promoted_lesson = tools.lesson_promote(
         alias_lesson["id"],
         cases=[
@@ -2163,6 +2170,20 @@ def test_shared_engine_contract_memory_tools_parametric_facades(
         engine,
         runtime_state=runtime_state,
         parametric=ParametricTier(ParametricArtifactStore(tmp_path / f"{tenant}.parametric")),
+    )
+    _append_evidence(
+        engine,
+        tenant,
+        user,
+        "shared parametric rollback",
+        metadata={"reality_class": "grounded"},
+    )
+    _append_evidence(
+        engine,
+        tenant,
+        user,
+        "verify with tools durable memory",
+        metadata={"reality_class": "grounded"},
     )
     trajectory = tools.trajectory_log(
         tenant_id=tenant,

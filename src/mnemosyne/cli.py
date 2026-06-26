@@ -14,7 +14,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import asdict
 from datetime import UTC, datetime
 from hashlib import sha256
@@ -10309,20 +10309,26 @@ def _verify_production_evidence_preflight(
         )
 
     copied_manifest = preflight.get("copied_manifest")
-    if not isinstance(copied_manifest, str) or Path(copied_manifest).name != "operator-soak-manifest.json":
+    if not _production_evidence_path_matches(
+        copied_manifest,
+        expected_path=bundle_dir / "operator-soak-manifest.json",
+    ):
         ok = False
         _production_evidence_finding(
             findings,
             "preflight_copied_manifest_invalid",
-            "preflight.json copied_manifest must point at operator-soak-manifest.json",
+            "preflight.json copied_manifest must resolve to the retained operator-soak-manifest.json",
         )
     redaction_scan = preflight.get("redaction_scan")
-    if not isinstance(redaction_scan, str) or Path(redaction_scan).name != "redaction-scan.json":
+    if not _production_evidence_path_matches(
+        redaction_scan,
+        expected_path=bundle_dir / "redaction-scan.json",
+    ):
         ok = False
         _production_evidence_finding(
             findings,
             "preflight_redaction_scan_invalid",
-            "preflight.json redaction_scan must point at redaction-scan.json",
+            "preflight.json redaction_scan must resolve to the retained redaction-scan.json",
         )
 
     required_commands = preflight.get("required_commands")
@@ -10405,14 +10411,16 @@ def _verify_production_evidence_preflight(
                 "preflight_input_artifact_snapshot_invalid",
                 f"preflight.json required_input_artifacts[{index}].snapshot_path must be non-empty",
             )
-            snapshot_path = None
+            artifact_snapshot_root = None
         else:
             snapshot_path = Path(snapshot_path_value).expanduser()
             try:
                 resolved_snapshot_path = snapshot_path.resolve(strict=True)
                 resolved_snapshot_path.relative_to(snapshot_root)
+                artifact_snapshot_root = resolved_snapshot_path
             except (OSError, ValueError):
                 ok = False
+                artifact_snapshot_root = None
                 _production_evidence_finding(
                     findings,
                     "preflight_input_artifact_snapshot_invalid",
@@ -10472,6 +10480,24 @@ def _verify_production_evidence_preflight(
                     f"preflight.json required_input_artifacts[{index}].files[{file_index}].snapshot_path must resolve under input-artifacts",
                 )
                 continue
+            if artifact_snapshot_root is not None:
+                try:
+                    if artifact_snapshot_root.is_file():
+                        if resolved_snapshot_file != artifact_snapshot_root:
+                            raise ValueError("snapshot file is outside parent file artifact")
+                    else:
+                        resolved_snapshot_file.relative_to(artifact_snapshot_root)
+                except (OSError, ValueError) as exc:
+                    ok = False
+                    _production_evidence_finding(
+                        findings,
+                        "preflight_input_artifact_file_parent_mismatch",
+                        (
+                            f"preflight.json required_input_artifacts[{index}].files[{file_index}].snapshot_path "
+                            f"must stay under its artifact snapshot root: {exc}"
+                        ),
+                    )
+                    continue
             if not resolved_snapshot_file.is_file():
                 ok = False
                 _production_evidence_finding(
@@ -10494,6 +10520,144 @@ def _verify_production_evidence_preflight(
                     "preflight_input_artifact_file_sha256_mismatch",
                     f"preflight.json required_input_artifacts[{index}].files[{file_index}] sha256 does not match snapshot",
                 )
+    return ok
+
+
+def _iter_evidence_string_values(value: Any) -> Iterable[str]:
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, Mapping):
+        for item in value.values():
+            yield from _iter_evidence_string_values(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _iter_evidence_string_values(item)
+
+
+def _production_input_artifact_path(value: Any, *, input_root: Path) -> str | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        resolved = Path(value).expanduser().resolve(strict=True)
+        resolved.relative_to(input_root)
+    except (OSError, ValueError):
+        return None
+    return str(resolved)
+
+
+def _verify_production_evidence_input_artifact_custody(
+    *,
+    preflight: Mapping[str, Any] | None,
+    operator_manifest: Mapping[str, Any] | None,
+    bundle_dir: Path,
+    findings: list[dict[str, Any]],
+) -> bool:
+    if preflight is None or operator_manifest is None:
+        return False
+    ok = True
+    input_root_path = bundle_dir / "input-artifacts"
+    input_root = input_root_path.resolve(strict=False)
+    input_artifacts = preflight.get("required_input_artifacts")
+    if not isinstance(input_artifacts, list):
+        return False
+
+    declared_artifact_roots: set[str] = set()
+    declared_file_paths: set[str] = set()
+    for artifact in input_artifacts:
+        if not isinstance(artifact, Mapping):
+            continue
+        snapshot_path = _production_input_artifact_path(artifact.get("snapshot_path"), input_root=input_root)
+        if snapshot_path is not None:
+            declared_artifact_roots.add(snapshot_path)
+        files = artifact.get("files")
+        if not isinstance(files, list):
+            continue
+        for file_entry in files:
+            if not isinstance(file_entry, Mapping):
+                continue
+            snapshot_file = _production_input_artifact_path(file_entry.get("snapshot_path"), input_root=input_root)
+            if snapshot_file is not None:
+                declared_file_paths.add(snapshot_file)
+
+    actual_file_paths: dict[str, str] = {}
+    if input_root_path.is_symlink():
+        ok = False
+        _production_evidence_finding(
+            findings,
+            "preflight_input_artifact_symlink",
+            "input-artifacts must be a retained directory, not a symlink",
+        )
+    elif input_root_path.exists():
+        for path in sorted(input_root_path.rglob("*")):
+            try:
+                display_path = path.relative_to(input_root_path).as_posix()
+            except ValueError:
+                display_path = str(path)
+            if path.is_symlink():
+                ok = False
+                _production_evidence_finding(
+                    findings,
+                    "preflight_input_artifact_symlink",
+                    f"input-artifacts contains a symlink: {display_path}",
+                )
+                continue
+            if not path.is_file():
+                continue
+            try:
+                resolved_path = path.resolve(strict=True)
+                resolved_path.relative_to(input_root)
+                actual_file_paths[str(resolved_path)] = display_path
+            except (OSError, ValueError) as exc:
+                ok = False
+                _production_evidence_finding(
+                    findings,
+                    "preflight_input_artifact_file_escape",
+                    f"input-artifacts contains an invalid retained file {display_path}: {exc}",
+                )
+                continue
+    unrecorded_files = sorted(set(actual_file_paths) - declared_file_paths)
+    if unrecorded_files:
+        ok = False
+        _production_evidence_finding(
+            findings,
+            "preflight_input_artifact_unrecorded_snapshot_file",
+            "input-artifacts contains files missing from preflight.json: "
+            + ", ".join(actual_file_paths[item] for item in unrecorded_files),
+        )
+
+    declared_paths = declared_artifact_roots | declared_file_paths
+    operator_strings = list(_iter_evidence_string_values(operator_manifest))
+    operator_input_references = [
+        value for value in operator_strings if str(input_root) in value
+    ]
+    for value in operator_input_references:
+        if not any(path in value for path in declared_paths):
+            ok = False
+            _production_evidence_finding(
+                findings,
+                "operator_manifest_input_artifact_reference_unrecorded",
+                "operator-soak-manifest.json references an input-artifacts path not recorded in preflight.json",
+            )
+            break
+
+    reference_haystacks = list(operator_strings)
+    for file_path in sorted(declared_file_paths):
+        path = Path(file_path)
+        try:
+            if path.stat().st_size <= 5 * 1024 * 1024:
+                reference_haystacks.append(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError):
+            continue
+
+    for snapshot_path in sorted(declared_artifact_roots):
+        if not any(snapshot_path in value for value in reference_haystacks):
+            ok = False
+            _production_evidence_finding(
+                findings,
+                "operator_manifest_input_artifact_reference_missing",
+                "preflight.json records an input artifact snapshot not referenced by the retained operator manifest or nested artifact metadata",
+            )
+            break
     return ok
 
 
@@ -10938,6 +11102,12 @@ def cmd_production_evidence_verify(args: argparse.Namespace) -> None:
         findings=findings,
     )
     operator_manifest_ok = _verify_production_evidence_operator_manifest(operator_manifest, findings)
+    input_artifact_custody_ok = _verify_production_evidence_input_artifact_custody(
+        preflight=preflight,
+        operator_manifest=operator_manifest,
+        bundle_dir=resolved_bundle_dir,
+        findings=findings,
+    )
     deployment_soak_manifest_ok = _verify_production_evidence_deployment_soak_manifest(
         expected_manifest_path=resolved_bundle_dir / "operator-soak-manifest.json",
         deployment_soak=deployment_soak,
@@ -10984,6 +11154,7 @@ def cmd_production_evidence_verify(args: argparse.Namespace) -> None:
             "redaction_scan": redaction_scan_ok,
             "bundle_manifest": bundle_manifest is not None and bundle_fingerprint is not None,
             "operator_manifest": operator_manifest_ok,
+            "input_artifact_custody": input_artifact_custody_ok,
             "deployment_soak_manifest": deployment_soak_manifest_ok,
             "deployment_soak_stdout": deployment_soak is not None and deployment_soak.get("ok") is True,
             "release_audit_replay": isinstance(recomputed_release_audit, Mapping)
