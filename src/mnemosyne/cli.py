@@ -8893,6 +8893,7 @@ PRODUCTION_EVIDENCE_REQUIRED_FILES = frozenset(
         "preflight.json",
         "redaction-scan.json",
         "release-audit.json",
+        "source-soak-manifest.json",
     }
 )
 
@@ -9814,6 +9815,13 @@ def _build_release_audit_report(args: argparse.Namespace) -> dict[str, Any]:
     if args.expected_fingerprint and args.expected_fingerprint.strip().lower() != fingerprint:
         findings.append(_release_finding("fingerprint_mismatch", "release-audit fingerprint mismatch"))
     if args.require_production_validated:
+        if source.get("kind") != "evidence_manifest":
+            findings.append(
+                _release_finding(
+                    "production_evidence_manifest_required",
+                    "production release-audit requires --evidence-manifest so report/check files are digest-bound",
+                )
+            )
         validation_scope = report.get("validation_scope")
         if not isinstance(validation_scope, Mapping):
             findings.append(
@@ -10318,6 +10326,17 @@ def _verify_production_evidence_preflight(
             findings,
             "preflight_copied_manifest_invalid",
             "preflight.json copied_manifest must resolve to the retained operator-soak-manifest.json",
+        )
+    source_manifest_copy = preflight.get("source_manifest_copy")
+    if not _production_evidence_path_matches(
+        source_manifest_copy,
+        expected_path=bundle_dir / "source-soak-manifest.json",
+    ):
+        ok = False
+        _production_evidence_finding(
+            findings,
+            "preflight_source_manifest_copy_invalid",
+            "preflight.json source_manifest_copy must resolve to the retained source-soak-manifest.json",
         )
     redaction_scan = preflight.get("redaction_scan")
     if not _production_evidence_path_matches(
@@ -11095,6 +11114,11 @@ def cmd_production_evidence_verify(args: argparse.Namespace) -> None:
         "operator_soak_manifest",
         findings,
     )
+    source_soak_manifest = _read_json_object_for_evidence(
+        resolved_bundle_dir / "source-soak-manifest.json",
+        "source_soak_manifest",
+        findings,
+    )
     _verify_production_evidence_summary(summary, findings)
     preflight_ok = _verify_production_evidence_preflight(
         preflight,
@@ -11154,6 +11178,7 @@ def cmd_production_evidence_verify(args: argparse.Namespace) -> None:
             "redaction_scan": redaction_scan_ok,
             "bundle_manifest": bundle_manifest is not None and bundle_fingerprint is not None,
             "operator_manifest": operator_manifest_ok,
+            "source_soak_manifest": source_soak_manifest is not None,
             "input_artifact_custody": input_artifact_custody_ok,
             "deployment_soak_manifest": deployment_soak_manifest_ok,
             "deployment_soak_stdout": deployment_soak is not None and deployment_soak.get("ok") is True,

@@ -7,6 +7,14 @@ REPO = Path(__file__).resolve().parents[1]
 RUNBOOK_DIR = REPO / ".planning" / "runbooks"
 
 
+def _markdown_table_cells(line: str) -> list[str]:
+    return [cell.strip() for cell in line.strip().strip("|").split("|")]
+
+
+def _normalized_row_name(value: str) -> str:
+    return " ".join(value.lower().split())
+
+
 def test_every_row_runbook_points_to_universal_preflight_capture_flow() -> None:
     row_runbooks = sorted(RUNBOOK_DIR.glob("row-*.md"))
     assert len(row_runbooks) == 10
@@ -77,7 +85,38 @@ def test_production_evidence_input_dir_is_not_capture_output() -> None:
 
 def test_roadmap_tier_b_table_routes_rows_through_full_production_manifest() -> None:
     roadmap = (REPO / "docs" / "ROADMAP-TO-100.md").read_text(encoding="utf-8")
+    strict_audit = (REPO / ".planning" / "STRICT-BLUEPRINT-PARITY-AUDIT.md").read_text(
+        encoding="utf-8",
+    )
     assert "| # | Parity row | Real infra to stand up | Canonical capture |" in roadmap
     assert "Capture command" not in roadmap
     assert roadmap.count("Full 28-command production manifest via `infra/PRODUCTION-EVIDENCE.md`") == 10
-    assert "row signals: `worker-run`, `ops-report`, `ops-dashboard-check`" in roadmap
+
+    strict_rows = [
+        _markdown_table_cells(line)[0]
+        for line in strict_audit.splitlines()
+        if line.startswith("| ")
+        and " | Partial | " in line
+        and len(_markdown_table_cells(line)) >= 3
+    ]
+    roadmap_rows = [
+        _markdown_table_cells(line)[1]
+        for line in roadmap.splitlines()
+        if line.startswith("| B")
+        and len(_markdown_table_cells(line)) >= 4
+        and _markdown_table_cells(line)[0][1:].isdigit()
+    ]
+    runbook_rows = [
+        path.read_text(encoding="utf-8").splitlines()[0].removeprefix("# ").split(" - ", 1)[1]
+        for path in sorted(RUNBOOK_DIR.glob("row-*.md"))
+    ]
+
+    assert len(strict_rows) == 10
+    assert [_normalized_row_name(row) for row in roadmap_rows] == [
+        _normalized_row_name(row) for row in strict_rows
+    ]
+    assert [_normalized_row_name(row) for row in runbook_rows] == [
+        _normalized_row_name(row) for row in strict_rows
+    ]
+    assert "B6 / row 06" in roadmap
+    assert "B9 / row 09" in roadmap

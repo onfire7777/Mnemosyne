@@ -82,6 +82,29 @@ def test_capture_production_evidence_preflight_only_stops_before_soak(tmp_path: 
     assert out_root.stat().st_mode & 0o777 == 0o700
 
 
+def test_capture_production_evidence_rejects_malformed_manifest(tmp_path: Path) -> None:
+    manifest = tmp_path / "production-soak.json"
+    out_root = tmp_path / "capture"
+    manifest.write_text("{", encoding="utf-8")
+
+    proc = subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "--preflight-only",
+            str(manifest),
+            str(out_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert proc.returncode == 65
+    assert "ERROR: production soak manifest is not valid JSON" in proc.stderr
+    assert not out_root.exists()
+
+
 def test_capture_production_evidence_rejects_repo_local_output_root(tmp_path: Path) -> None:
     manifest = tmp_path / "production-soak.json"
     out_root = REPO / ".tmp-production-evidence-repo-local"

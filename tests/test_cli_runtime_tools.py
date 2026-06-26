@@ -5716,6 +5716,8 @@ def write_production_evidence_bundle(tmp_path: Path) -> tuple[Path, str]:
         ),
         encoding="utf-8",
     )
+    source_manifest_path = bundle_dir / "source-soak-manifest.json"
+    source_manifest_path.write_text(operator_manifest_path.read_text(encoding="utf-8"), encoding="utf-8")
     deployment_soak_path = evidence_dir / "deployment-soak-report.json"
     deployment_soak = json.loads(deployment_soak_path.read_text(encoding="utf-8"))
     deployment_soak["manifest"] = {
@@ -5751,6 +5753,8 @@ def write_production_evidence_bundle(tmp_path: Path) -> tuple[Path, str]:
             {
                 "ok": True,
                 "preflight_only": False,
+                "source_manifest": str(source_manifest_path),
+                "source_manifest_copy": str(source_manifest_path),
                 "copied_manifest": str(bundle_dir / "operator-soak-manifest.json"),
                 "redaction_scan": str(bundle_dir / "redaction-scan.json"),
                 "required_commands": list(PRODUCTION_RELEASE_REQUIRED_COMMANDS),
@@ -5965,6 +5969,26 @@ def test_cli_release_audit_verifies_production_deployment_evidence(tmp_path: Pat
     assert report["validation_scope"]["production_validated"] is True
 
 
+def test_cli_release_audit_requires_manifest_bound_production_evidence(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    report_path, _manifest_path = write_release_report(tmp_path)
+
+    result = run_raw_cli(
+        store,
+        "release-audit",
+        "--soak-report",
+        str(report_path),
+        "--require-production-validated",
+    )
+    payload = json.loads(result.stdout)
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert {finding["code"] for finding in payload["findings"]} == {
+        "production_evidence_manifest_required",
+    }
+
+
 def test_cli_production_evidence_verify_accepts_captured_bundle(tmp_path: Path) -> None:
     bundle_dir, bundle_fingerprint = write_production_evidence_bundle(tmp_path)
 
@@ -5986,6 +6010,7 @@ def test_cli_production_evidence_verify_accepts_captured_bundle(tmp_path: Path) 
         "redaction_scan": True,
         "bundle_manifest": True,
         "operator_manifest": True,
+        "source_soak_manifest": True,
         "input_artifact_custody": True,
         "deployment_soak_manifest": True,
         "deployment_soak_stdout": True,
@@ -6091,12 +6116,15 @@ def test_cli_production_evidence_verify_rejects_external_preflight_paths(
     bundle_dir, _bundle_fingerprint = write_production_evidence_bundle(tmp_path)
     external = tmp_path / "external"
     external.mkdir()
+    external_source_manifest = external / "source-soak-manifest.json"
     external_manifest = external / "operator-soak-manifest.json"
     external_redaction = external / "redaction-scan.json"
+    external_source_manifest.write_text("{}", encoding="utf-8")
     external_manifest.write_text("{}", encoding="utf-8")
     external_redaction.write_text("{}", encoding="utf-8")
     preflight_path = bundle_dir / "preflight.json"
     preflight = json.loads(preflight_path.read_text(encoding="utf-8"))
+    preflight["source_manifest_copy"] = str(external_source_manifest)
     preflight["copied_manifest"] = str(external_manifest)
     preflight["redaction_scan"] = str(external_redaction)
     preflight_path.write_text(json.dumps(preflight, indent=2, sort_keys=True), encoding="utf-8")
@@ -6113,6 +6141,7 @@ def test_cli_production_evidence_verify_rejects_external_preflight_paths(
     assert result.returncode == 1
     assert payload["ok"] is False
     assert payload["checks"]["preflight"] is False
+    assert "preflight_source_manifest_copy_invalid" in codes
     assert "preflight_copied_manifest_invalid" in codes
     assert "preflight_redaction_scan_invalid" in codes
     assert "bundle_file_sha256_mismatch" not in codes
