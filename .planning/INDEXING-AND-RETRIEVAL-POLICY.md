@@ -159,8 +159,8 @@ out_score(m)  = hit.score · (0.5 + activation)                   # activation l
 | Signal | Reads (canonical column) | Owned by | Role here |
 |---|---|---|---|
 | **semantic** (relevance) | fused dense (`embedding`) + lexical (`lexeme`) score | **retrieval** | computed here (RRF then normalized) |
-| **base_level** (frequency) | `assertions.access_count` | retrieval reads; **lifecycle** governs decay | computed from the column; decay not recomputed here |
-| **recency** | `assertions.last_accessed` → age | retrieval reads | computed here (hyperbolic) |
+| **base_level** (frequency) | `assertions.access_count`; evidence `metadata.lifecycle.access_count` for forgetter input | retrieval reads/writes; **lifecycle** governs decay | computed from the column for assertion ranking; evidence access counts feed lifecycle demotion/rehearsal state |
+| **recency** | `assertions.last_accessed` → age; evidence `metadata.lifecycle.last_accessed` for forgetter input | retrieval reads/writes | computed here (hyperbolic) for assertion ranking; evidence recency feeds lifecycle utility |
 | **importance** | `assertions.confidence` × `trust_weight(trust_tier)` | belief sets `confidence`; **guardrail** owns `trust_weight`/tiers; **lifecycle** owns entity `salience` | consumed; folds trust as a *soft* multiplier (see note) |
 
 **Trust appears in two places, deliberately:** as a **hard admit/deny floor** at the pre-filter (②), and as a **soft confidence multiplier** inside `importance` via `trust_weight`. These are not in conflict — a record below `max_trust_tier` is already excluded, so the score-level use only **down-weights among already-admitted records**. (This corrects an earlier draft claim that trust is "never folded into the score.")

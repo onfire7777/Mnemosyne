@@ -218,6 +218,8 @@ class PostgresQueue:
                           AND kind = %s
                         ORDER BY
                           CASE
+                            WHEN payload #>> '{write_priority,effective_score}' ~ '^[0-9]+([.][0-9]+)?$'
+                            THEN (payload #>> '{write_priority,effective_score}')::DOUBLE PRECISION
                             WHEN payload #>> '{write_priority,score}' ~ '^[0-9]+([.][0-9]+)?$'
                             THEN (payload #>> '{write_priority,score}')::DOUBLE PRECISION
                             ELSE 0.0
@@ -238,6 +240,8 @@ class PostgresQueue:
                           AND status IN ('queued', 'retry')
                         ORDER BY
                           CASE
+                            WHEN payload #>> '{write_priority,effective_score}' ~ '^[0-9]+([.][0-9]+)?$'
+                            THEN (payload #>> '{write_priority,effective_score}')::DOUBLE PRECISION
                             WHEN payload #>> '{write_priority,score}' ~ '^[0-9]+([.][0-9]+)?$'
                             THEN (payload #>> '{write_priority,score}')::DOUBLE PRECISION
                             ELSE 0.0
@@ -422,7 +426,7 @@ def _job_priority(job: QueueJob) -> float:
     if not isinstance(write_priority, dict):
         return 0.0
     try:
-        score = float(write_priority.get("score", 0.0))
+        score = float(write_priority.get("effective_score", write_priority.get("score", 0.0)))
     except (TypeError, ValueError):
         return 0.0
     if score != score:
