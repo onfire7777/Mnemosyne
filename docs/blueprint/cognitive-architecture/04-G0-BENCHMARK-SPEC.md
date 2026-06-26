@@ -79,13 +79,14 @@ For each proposed change (a G1–G4 item):
 ## 7. Tooling & deliverables
 
 - Extend the existing harness (spec: `../eval/05-harness-architecture-and-ci-gating.md`; code: the repo‑root `eval/` harness — `eval/g0/`, `eval/harness/`, `eval/run_eval.py`) to compute the added metrics and emit the extended `report.json` — reuse, don't fork.
-- A one‑command run (`mneme eval g0` or a script) that reproduces a baseline.
+- A one‑command run (`mneme eval g0`, backed by `python -m eval.g0.runner`) that reproduces a baseline.
 - A CI/gate check that fails a build on guardrail regression and prints the ablation table.
 - The versioned dataset manifests (§3) and the gate‑decision log (§5).
 
 ## 8. Definition of done for G0
 
 - [x] Harness runs reproducibly and emits `report.json` with every §2 metric slot. The default local report marks `controller_watts_per_dollar` missing until an explicit telemetry artifact is supplied; `--controller-telemetry` produces a fully measured report.
+- [x] `mneme eval g0` runs the G0 harness from the project CLI while preserving the direct `python -m eval.g0.runner` path for CI and reviewed baseline custody work.
 - [x] `baseline‑0` recorded with pinned commit/seeds/env.
 - [x] Adversarial/poison set wired to the poison‑block + R6 checks.
 - [x] Gate script enforces "target‑up, guardrail‑not‑down," with pre‑registration.

@@ -1024,6 +1024,81 @@ def test_cli_eval_reports_seed_suite_outcomes_without_backend(tmp_path: Path) ->
     assert all(set(item) == {"name", "passed", "detail"} for item in payload["outcomes"])
 
 
+def test_cli_eval_explicit_seed_suite_preserves_legacy_contract(tmp_path: Path) -> None:
+    implicit = run_cli(tmp_path / "implicit.json", "eval")
+    explicit = run_cli(tmp_path / "explicit.json", "eval", "seed")
+
+    assert explicit == implicit
+
+
+def test_cli_eval_g0_runs_benchmark_report_with_explicit_telemetry(tmp_path: Path) -> None:
+    telemetry = tmp_path / "controller-telemetry.json"
+    out_dir = tmp_path / "g0-report"
+    telemetry.write_text(
+        json.dumps(
+            {
+                "controller_avg_watts": 12.5,
+                "controller_cost_usd_per_hour": 0.25,
+                "controller_cost_window_hours": 1.0,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = run_raw_cli(
+        tmp_path / "mnemosyne.json",
+        "--backend",
+        "postgres",
+        "--postgres-dsn",
+        "",
+        "eval",
+        "g0",
+        "--repo-root",
+        str(Path.cwd()),
+        "--out-dir",
+        str(out_dir),
+        "--controller-telemetry",
+        str(telemetry),
+        "--print-json",
+    )
+
+    assert result.returncode == 0, result.stderr
+    report = json.loads(result.stdout)
+    metrics = {item["id"]: item for item in report["metrics"]}
+    assert report["schema_version"] == "g0.report.v1"
+    assert report["coverage"]["gate_ready"] is True
+    assert report["coverage"]["missing_metric_ids"] == []
+    assert metrics["controller_watts_per_dollar"]["status"] == "measured"
+    assert metrics["controller_watts_per_dollar"]["value"] == 50.0
+    assert (out_dir / "report.json").exists()
+    assert (out_dir / "report.md").exists()
+
+
+def test_packaged_cli_eval_g0_uses_repo_root_harness(tmp_path: Path) -> None:
+    telemetry = tmp_path / "controller-telemetry.json"
+    telemetry.write_text(
+        json.dumps({"controller_avg_watts": 10.0, "controller_cost_usd_per_hour": 0.5}),
+        encoding="utf-8",
+    )
+
+    report = run_packaged_cli(
+        tmp_path / "mnemosyne.json",
+        "eval",
+        "g0",
+        "--repo-root",
+        str(Path.cwd()),
+        "--out-dir",
+        str(tmp_path / "packaged-g0-report"),
+        "--controller-telemetry",
+        str(telemetry),
+        "--print-json",
+    )
+
+    metrics = {item["id"]: item for item in report["metrics"]}
+    assert report["coverage"]["gate_ready"] is True
+    assert metrics["controller_watts_per_dollar"]["value"] == 20.0
+
+
 def test_cli_exposes_retrieval_provider_flags() -> None:
     args = build_parser().parse_args(
         [
@@ -1398,12 +1473,11 @@ def test_postgres_engine_delegates_to_command_retrieval_adapters(tmp_path: Path)
     assert lexical_hits[0].id == "lexical-hit"
     assert lexical_hits[0].metadata["backend"] == "paradedb-bm25"
     assert lexical_hits[0].metadata["retrieved_text"]["instruction_authority"] == "none"
-    assert graph_hits[0].id == "graph-hit"
-    assert graph_hits[0].metadata["backend"] == "apache-age"
-    assert graph_hits[0].metadata["retrieved_text"]["instruction_authority"] == "none"
+    assert graph_hits == []
     assert [item["role"] for item in requests] == ["lexical_search", "graph_ppr"]
     assert requests[0]["tenant_id"] == TENANT
     assert requests[1]["tenant_id"] == TENANT
+    assert requests[1]["filter"] == {}
 
 
 def test_cli_provider_check_returns_nonzero_for_malformed_http_provider(tmp_path: Path) -> None:
@@ -10510,6 +10584,8 @@ def test_cli_profile_graph_learning_and_parametric_flows_persist(tmp_path: Path)
         "uses",
         "--target",
         "Postgres",
+        "--evidence-cid",
+        captured["cid"],
     )
     graph = run_cli(store, "graph-neighbors", "--tenant", TENANT, "--seed", "Mnemosyne")
     graph_alias = run_cli(store, "graph-query", "--tenant", TENANT, "--seed", "Mnemosyne")

@@ -14,6 +14,28 @@ TENANT = "tenant-a"
 USER = "user-a"
 
 
+def _graph_source_cid(
+    engine: LocalMemoryEngine,
+    *,
+    tenant_id: str = TENANT,
+    user_id: str = USER,
+    content: str = "Graph relation backing evidence.",
+    branch: str = "main",
+) -> str:
+    return engine.append_evidence(
+        Evidence(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            actor="user",
+            source_type="chat",
+            content=content,
+            trust_tier=0,
+            access_policy={"tenant": tenant_id},
+        ),
+        branch=branch,
+    )
+
+
 def test_evidence_ledger_deduplicates_and_recalls_bytes() -> None:
     engine = LocalMemoryEngine()
     ev = Evidence(
@@ -534,13 +556,14 @@ def test_explicit_preferences_outrank_inferred_preferences() -> None:
 
 def test_deep_search_uses_graph_channel_when_relations_exist() -> None:
     engine = LocalMemoryEngine()
+    cid = _graph_source_cid(engine, content="Mnemosyne uses Postgres backing evidence.")
     engine.add_relation(
         Relation(
             tenant_id=TENANT,
             source="Mnemosyne",
             predicate="uses",
             target="Postgres",
-            source_evidence_cids=[],
+            source_evidence_cids=[cid],
             access_policy={"tenant": TENANT},
         )
     )
@@ -552,13 +575,14 @@ def test_deep_search_uses_graph_channel_when_relations_exist() -> None:
 
 def test_deep_search_graph_channel_seeds_phrase_nodes_from_query_tokens() -> None:
     engine = LocalMemoryEngine()
+    cid = _graph_source_cid(engine, content="Runtime smoke uses Postgres backing evidence.")
     engine.add_relation(
         Relation(
             tenant_id=TENANT,
             source="runtime smoke",
             predicate="uses",
             target="Postgres",
-            source_evidence_cids=[],
+            source_evidence_cids=[cid],
             access_policy={"tenant": TENANT},
         )
     )
@@ -571,13 +595,25 @@ def test_deep_search_graph_channel_seeds_phrase_nodes_from_query_tokens() -> Non
 
 def test_deep_search_graph_channel_respects_tenant_and_branch_isolation() -> None:
     engine = LocalMemoryEngine()
+    tenant_a_cid = _graph_source_cid(
+        engine,
+        tenant_id="tenant-a",
+        user_id="user-a",
+        content="Tenant A graph relation backing evidence.",
+    )
+    tenant_b_cid = _graph_source_cid(
+        engine,
+        tenant_id="tenant-b",
+        user_id="user-b",
+        content="Tenant B graph relation backing evidence.",
+    )
     engine.add_relation(
         Relation(
             tenant_id="tenant-a",
             source="TenantA",
             predicate="uses",
             target="PrivateA",
-            source_evidence_cids=[],
+            source_evidence_cids=[tenant_a_cid],
             access_policy={"tenant": "tenant-a"},
         )
     )
@@ -587,18 +623,25 @@ def test_deep_search_graph_channel_respects_tenant_and_branch_isolation() -> Non
             source="TenantA",
             predicate="uses",
             target="PrivateB",
-            source_evidence_cids=[],
+            source_evidence_cids=[tenant_b_cid],
             access_policy={"tenant": "tenant-b"},
         )
     )
     engine.branch("draft")
+    draft_cid = _graph_source_cid(
+        engine,
+        tenant_id="tenant-a",
+        user_id="user-a",
+        content="Tenant A draft graph relation backing evidence.",
+        branch="draft",
+    )
     engine.add_relation(
         Relation(
             tenant_id="tenant-a",
             source="TenantA",
             predicate="uses",
             target="DraftOnly",
-            source_evidence_cids=[],
+            source_evidence_cids=[draft_cid],
             access_policy={"tenant": "tenant-a"},
         ),
         branch="draft",

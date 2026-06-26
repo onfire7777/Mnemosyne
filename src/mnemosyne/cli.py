@@ -7243,6 +7243,33 @@ def cmd_tools(args: argparse.Namespace) -> None:
 
 
 def cmd_eval(args: argparse.Namespace) -> None:
+    if getattr(args, "suite", "seed") == "g0":
+        repo_root = args.repo_root.resolve()
+        repo_root_text = str(repo_root)
+        if repo_root_text not in sys.path:
+            sys.path.insert(0, repo_root_text)
+        from eval.g0.runner import build_report, write_report
+
+        report = build_report(
+            repo_root,
+            baseline_name=args.baseline_name,
+            pinned_commit=args.pinned_commit,
+            controller_telemetry_path=args.controller_telemetry,
+        )
+        paths = write_report(report, repo_root / args.out_dir, write_baseline=args.write_baseline)
+        if args.print_json:
+            print(json.dumps(report, indent=2, sort_keys=True))
+            return
+        print(f"G0 report: {paths['json']}")
+        print(f"G0 markdown: {paths['markdown']}")
+        if "baseline" in paths:
+            print(f"G0 baseline: {paths['baseline']}")
+        print(
+            f"G0 coverage: {report['coverage']['measured']}/{report['coverage']['total']} "
+            f"measured; gate_ready={report['coverage']['gate_ready']}"
+        )
+        return
+
     outcomes = run_seed_suite()
     emit({"passed": all(item.passed for item in outcomes), "outcomes": [asdict(item) for item in outcomes]})
 
@@ -14066,6 +14093,21 @@ def build_parser() -> argparse.ArgumentParser:
     tools.set_defaults(func=cmd_tools)
 
     eval_cmd = sub.add_parser("eval")
+    eval_cmd.add_argument("suite", nargs="?", choices=["seed", "g0"], default="seed")
+    eval_cmd.add_argument("--repo-root", type=Path, default=Path(__file__).resolve().parents[2])
+    eval_cmd.add_argument("--out-dir", type=Path, default=Path("eval/g0/reports"))
+    eval_cmd.add_argument("--baseline-name", default="baseline-0")
+    eval_cmd.add_argument("--pinned-commit")
+    eval_cmd.add_argument(
+        "--controller-telemetry",
+        type=Path,
+        help=(
+            "optional JSON artifact with controller_avg_watts and "
+            "controller_cost_usd_per_hour for controller_watts_per_dollar"
+        ),
+    )
+    eval_cmd.add_argument("--write-baseline", action="store_true")
+    eval_cmd.add_argument("--print-json", action="store_true")
     eval_cmd.set_defaults(func=cmd_eval)
 
     queue_snapshot = sub.add_parser("queue-snapshot")

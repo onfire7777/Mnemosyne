@@ -7,7 +7,7 @@ existing eval lane instead of forking it.
 Run:
 
 ```bash
-python -m eval.g0.runner
+mneme eval g0
 ```
 
 This writes:
@@ -38,7 +38,7 @@ rollover decision.
 To measure `controller_watts_per_dollar`, pass a local telemetry artifact:
 
 ```bash
-python -m eval.g0.runner \
+mneme eval g0 \
   --controller-telemetry /secure/path/controller-telemetry.json \
   --write-baseline
 ```
@@ -58,6 +58,12 @@ watts/$ denominator is `controller_cost_usd_per_hour * controller_cost_window_ho
 The report records the telemetry basename and SHA-256, not the absolute source
 path. Do not commit operational power/cost telemetry unless it is intentionally
 sanitized fixture data.
+
+The Python module remains available for CI and direct harness work:
+
+```bash
+python -m eval.g0.runner
+```
 
 Evaluate a preregistered ablation:
 

@@ -919,6 +919,11 @@ class LocalMemoryEngine:
             return []
         moment = as_of or utc_now()
         moment = moment.astimezone(UTC) if moment.tzinfo else moment.replace(tzinfo=UTC)
+        graph_filter = dict(filt or {})
+        include_quarantined = bool(graph_filter.get("include_quarantined", False))
+        default_max_trust = int(TrustTier.UNTRUSTED_EXTERNAL) if include_quarantined else self.policy.max_trust_tier
+        max_trust = int(graph_filter.get("max_trust_tier", graph_filter.get("min_trust_tier", default_max_trust)))
+        max_sensitivity = int(graph_filter.get("max_sensitivity", self.policy.max_sensitivity))
         if self.adapters.graph_retriever is not None and tenant_id:
             hits = self.adapters.graph_retriever.search(
                 seeds,
@@ -926,6 +931,7 @@ class LocalMemoryEngine:
                 branch=branch or "main",
                 k=k,
                 as_of=moment,
+                filt=graph_filter,
             )
             hits = validate_adapter_hit_scope(
                 hits,
@@ -934,12 +940,14 @@ class LocalMemoryEngine:
                 k=k,
                 adapter_name="graph",
             )
+            hits = self._filter_graph_adapter_hits(
+                hits,
+                branch=branch or "main",
+                include_quarantined=include_quarantined,
+                max_trust=max_trust,
+                max_sensitivity=max_sensitivity,
+            )
             return self._mark_retrieved_text_as_data(hits)
-        graph_filter = dict(filt or {})
-        include_quarantined = bool(graph_filter.get("include_quarantined", False))
-        default_max_trust = int(TrustTier.UNTRUSTED_EXTERNAL) if include_quarantined else self.policy.max_trust_tier
-        max_trust = int(graph_filter.get("max_trust_tier", graph_filter.get("min_trust_tier", default_max_trust)))
-        max_sensitivity = int(graph_filter.get("max_sensitivity", self.policy.max_sensitivity))
 
         def matches_seed(node: str) -> bool:
             node_lower = node.lower()
@@ -1278,6 +1286,61 @@ class LocalMemoryEngine:
             return "externally_suggested"
         return "grounded"
 
+    @staticmethod
+    def _hit_source_evidence_cids(hit: Hit) -> list[str]:
+        raw = hit.metadata.get("source_evidence_cids")
+        if isinstance(raw, list | tuple):
+            return [str(cid) for cid in raw if str(cid)]
+        if isinstance(raw, str) and raw:
+            return [raw]
+        return [str(cid) for cid in hit.provenance if str(cid)]
+
+    def _filter_graph_adapter_hits(
+        self,
+        hits: list[Hit],
+        *,
+        branch: str,
+        include_quarantined: bool,
+        max_trust: int,
+        max_sensitivity: int,
+    ) -> list[Hit]:
+        filtered: list[Hit] = []
+        for hit in hits:
+            if hit.kind != "relation":
+                if hit.trust_tier <= max_trust and hit.sensitivity <= max_sensitivity:
+                    filtered.append(hit)
+                continue
+            source_cids = self._hit_source_evidence_cids(hit)
+            relation = Relation(
+                tenant_id=hit.tenant_id,
+                source=str(hit.metadata.get("source") or hit.text),
+                predicate=str(hit.metadata.get("predicate") or "related_to"),
+                target=str(hit.metadata.get("target") or hit.text),
+                branch=hit.branch,
+                source_evidence_cids=source_cids,
+            )
+            security = self._relation_hit_security(
+                relation,
+                branch=hit.branch or branch,
+                include_quarantined=include_quarantined,
+                max_trust=max_trust,
+                max_sensitivity=max_sensitivity,
+            )
+            if security is None:
+                continue
+            hit.trust_tier = int(security["trust_tier"])
+            hit.sensitivity = int(security["sensitivity"])
+            hit.provenance = list(source_cids)
+            hit.metadata = {
+                **hit.metadata,
+                "source_evidence_cids": list(source_cids),
+                "source_evidence_status": security["source_evidence_status"],
+                "source_evidence_security": security["source_evidence_security"],
+                "reality_class": security["reality_class"],
+            }
+            filtered.append(hit)
+        return filtered
+
     def _relation_hit_security(
         self,
         relation: Relation,
@@ -1289,13 +1352,7 @@ class LocalMemoryEngine:
     ) -> dict[str, Any] | None:
         source_cids = [cid for cid in relation.source_evidence_cids if cid]
         if not source_cids:
-            return {
-                "trust_tier": 0,
-                "sensitivity": 0,
-                "reality_class": "unknown",
-                "source_evidence_status": "no_source_evidence",
-                "source_evidence_security": [],
-            }
+            return None
 
         source_rows: list[Evidence] = []
         for cid in source_cids:

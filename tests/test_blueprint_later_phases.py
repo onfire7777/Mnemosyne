@@ -431,13 +431,35 @@ def test_shadow_policy_optimizer_uses_contextual_bandit_outcomes() -> None:
 
 def test_graph_adapter_benchmark_reports_latency_and_hits() -> None:
     engine = LocalMemoryEngine()
+    mnemosyne_cid = engine.append_evidence(
+        Evidence(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="test-fixture",
+            content="Mnemosyne uses Postgres.",
+            trust_tier=0,
+            access_policy={"tenant": TENANT},
+        )
+    )
+    postgres_cid = engine.append_evidence(
+        Evidence(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="test-fixture",
+            content="Postgres stores assertions.",
+            trust_tier=0,
+            access_policy={"tenant": TENANT},
+        )
+    )
     engine.add_relation(
         Relation(
             tenant_id=TENANT,
             source="Mnemosyne",
             predicate="uses",
             target="Postgres",
-            source_evidence_cids=[],
+            source_evidence_cids=[mnemosyne_cid],
             access_policy={"tenant": TENANT},
         )
     )
@@ -447,7 +469,7 @@ def test_graph_adapter_benchmark_reports_latency_and_hits() -> None:
             source="Postgres",
             predicate="stores",
             target="assertions",
-            source_evidence_cids=[],
+            source_evidence_cids=[postgres_cid],
             access_policy={"tenant": TENANT},
         )
     )
