@@ -8,9 +8,9 @@ Build a memory compiler for AI agents that keeps an immutable, content-addressed
 
 | Source | Role | Precedence |
 |--------|------|------------|
-| `/Users/admin/Desktop/Mnemosyne/Mnemosyne-v2-Build-Blueprint.md` | Research report, PRD, architecture, implementation blueprint, DDL, build plan | Controlling |
-| `/Users/admin/Desktop/Mnemosyne/README.md` | Folder guide and v2-over-v1 precedence note | Supporting |
-| `/Users/admin/Desktop/Mnemosyne/earlier-versions/Mnemosyne-Recursive-Memory-System-Design.md` | Superseded lineage design | Reference only |
+| `docs/blueprint/Mnemosyne-v2-Build-Blueprint.md` | Research report, PRD, architecture, implementation blueprint, DDL, build plan | Controlling |
+| `docs/blueprint/README.md` | Folder guide and v2-over-v1 precedence note | Supporting |
+| `docs/blueprint/earlier-versions/Mnemosyne-Recursive-Memory-System-Design.md` | Superseded lineage design | Reference only |
 
 ## Product Thesis
 

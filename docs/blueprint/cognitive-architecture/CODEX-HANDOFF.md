@@ -1,8 +1,8 @@
 # Codex Handoff
 
-**Verified checkout:** `/Users/admin/Mnemosyne` on `main`.
+**Canonical checkout:** `/Users/admin/Mnemosyne` on `main`, tracking `origin/main` (`github.com/onfire7777/Mnemosyne`). This is now the single local checkout.
 
-**Important path note:** a stale planning note names `/Users/admin/Desktop/Mnemosyne/`, but that path is absent in the current Codex runtime. Do not edit `/Users/admin/Projects/Mnemosyne` for this work; it is a separate older checkout.
+**Path note:** the earlier duplicate clones (`/Users/admin/Projects/Mnemosyne`, `…/Mnemosyne-completion`, `…/Mnemosyne-lane-a`) and the historical `/Users/admin/Desktop/Mnemosyne/` planning folder were consolidated and removed on 2026-06-26. Full git bundles were archived first under `~/Mnemosyne-consolidation-archive-20260626-151915/`, so every branch is recoverable from `origin` or that archive. GitHub (`origin/main`) is the source of truth.
 
 ## Canonical Design Inputs
 
