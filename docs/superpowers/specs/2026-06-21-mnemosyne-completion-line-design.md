@@ -1,9 +1,11 @@
 # Mnemosyne Completion Line — Design Spec
 
 **Date:** 2026-06-21 · **Status:** approved, executing
+
+> **Superseded / archival (2026-06-26):** this completion-line effort has concluded and its work is reconciled into `main`. The `~/Projects/Mnemosyne-completion` worktree and `~/Projects/Mnemosyne` clone referenced below were consolidated into the single canonical checkout `/Users/admin/Mnemosyne` (branches preserved on `origin` and in `~/Mnemosyne-consolidation-archive-20260626-151915/`). The working-directory paths below are historical.
 **Baseline:** branched from `origin/main` @ `8c24197` (Codex's live line)
 **Requirements source of truth:** `docs/BLUEPRINT-COMPLETION-PLAN.md` (full FR-1…21 traceability) +
-`/Users/admin/Desktop/Mnemosyne/Mnemosyne-v2-Build-Blueprint.md` (the 40-page blueprint).
+`docs/blueprint/Mnemosyne-v2-Build-Blueprint.md` (the 40-page blueprint).
 
 ## Objective
 Drive Mnemosyne to **full, no-compromise 1:1 parity** with the blueprint using a **parallel

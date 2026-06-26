@@ -27,9 +27,9 @@ Phase 4 captures trajectories, attributes failures, induces lessons and procedur
 <canonical_refs>
 ## Canonical References
 
-- `/Users/admin/Desktop/Mnemosyne/Mnemosyne-v2-Build-Blueprint.md` §23.3 — promotion gate.
-- `/Users/admin/Desktop/Mnemosyne/Mnemosyne-v2-Build-Blueprint.md` §27 — security governance.
-- `/Users/admin/Desktop/Mnemosyne/Mnemosyne-v2-Build-Blueprint.md` §34 Phase 4.
+- `docs/blueprint/Mnemosyne-v2-Build-Blueprint.md` §23.3 — promotion gate.
+- `docs/blueprint/Mnemosyne-v2-Build-Blueprint.md` §27 — security governance.
+- `docs/blueprint/Mnemosyne-v2-Build-Blueprint.md` §34 Phase 4.
 
 </canonical_refs>
 

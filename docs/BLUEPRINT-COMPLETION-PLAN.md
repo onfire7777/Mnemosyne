@@ -1,7 +1,7 @@
 # Mnemosyne — Historical Blueprint Completion Plan
 
 **Author:** Claude · **Date:** 2026-06-21
-**Historical blueprint source:** `/Users/admin/Desktop/Mnemosyne/Mnemosyne-v2-Build-Blueprint.md` (1,133 lines, v2.0)
+**Historical blueprint source:** `docs/blueprint/Mnemosyne-v2-Build-Blueprint.md` (1,133 lines, v2.0)
 **Historical note:** this document is retained for lineage from the original
 completion-planning pass. For current status and remaining work, use
 `docs/ROADMAP-TO-100.md` plus the controlling

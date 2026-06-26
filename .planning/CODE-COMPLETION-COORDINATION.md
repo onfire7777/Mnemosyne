@@ -1,7 +1,7 @@
 # Mnemosyne — Code-Completion Coordination & Task Map
 
 **Date:** 2026-06-23
-**Type:** Code-completion coordination for `src/` + `tests/` + `sql/`. **This is a CODING coordination plan** — distinct from `OPS-HANDOFF-AND-OWNERSHIP.md` (ops lanes A–G, markdown/deploy artifacts) and from the active **policy / indexing / lifecycle / docs** agents (markdown in `Desktop/Mnemosyne/` and `.planning/`).
+**Type:** Code-completion coordination for `src/` + `tests/` + `sql/`. **This is a CODING coordination plan** — distinct from `OPS-HANDOFF-AND-OWNERSHIP.md` (ops lanes A–G, markdown/deploy artifacts) and from the active **policy / indexing / lifecycle / docs** agents (markdown in `docs/` and `.planning/`).
 **Owned by:** the Coordinator (this file). Read-only to all execution lanes; only the Coordinator + Sync lane edit it.
 **Scope source (do not recompute):** `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md`, `REVIEW.md` (status: `remediated`), `.planning/ROADMAP.md` Phase 6.
 
@@ -18,7 +18,7 @@
 
 ## 1. Repo reality (verified 2026-06-23)
 
-- Repo: `~/Projects/Mnemosyne` → `origin = github.com/onfire7777/Mnemosyne`. Branch `main` is **in sync** with `origin/main` (no ahead/behind).
+- Repo: `/Users/admin/Mnemosyne` → `origin = github.com/onfire7777/Mnemosyne`. Branch `main` is **in sync** with `origin/main` (no ahead/behind).
 - Untracked WIP (belongs to sibling lanes — **their owners commit, not Sync, not code lanes**): `.planning/INDEXING-AND-RETRIEVAL-POLICY.md`, `CONFIG-DRIFT-CHECKS.md`, `Mnemosyne-Secret-Handling-Policy.md`.
 - `REVIEW.md`: 9/9 findings remediated @ `fe72a66`. **Remaining = Phase 6 parity + production hardening**, not bug-fixing.
 - Test gate: full local suite **354 passing + 63 skipped live-DB**. Run: `uv run pytest` (live-DB tests need `MNEMOSYNE_POSTGRES_DSN`).
@@ -38,7 +38,7 @@ Each lane owns a **disjoint** set of source files + the matching tests. The "Ass
 | **CC‑LS** | Learning / self-optimization / policy / eval | `src/mnemosyne/self_optimization.py`, `src/mnemosyne/parametric.py`, `src/mnemosyne/policy.py`, `src/mnemosyne/eval.py` | Phase 4/5 residuals: shadow optimizer, policy-ops gates, regression-suite breadth controls, eval harness | `tests/test_self_optimization.py`, `tests/test_learning_and_attack_suite.py` | _(unbound)_ |
 | **CC‑UPS** | User model / privacy / security / ingest | `src/mnemosyne/user_model.py`, `src/mnemosyne/privacy.py`, `src/mnemosyne/security.py`, `src/mnemosyne/source_truth.py`, `src/mnemosyne/attack_suite.py`, `src/mnemosyne/media.py`, `src/mnemosyne/ingestion.py` | Privacy erasure-path hardening (code side of the Privacy policy), user-model guards, capability/taint security, source-sync | `tests/test_user_model_and_guards.py`, `tests/test_nfrs_and_schema.py` | _(unbound)_ |
 
-**Cross-effort boundary:** none of these lanes write `Desktop/Mnemosyne/*.md`, `.planning/*.md` (except their own test fixtures), or the ops A–G artifacts. CC‑UPS *reads* the Privacy policy doc but does not edit it; the policy lane owns the spec, CC‑UPS owns the code.
+**Cross-effort boundary:** none of these lanes write `docs/**/*.md`, `.planning/*.md` (except their own test fixtures), or the ops A–G artifacts. CC‑UPS *reads* the Privacy policy doc but does not edit it; the policy lane owns the spec, CC‑UPS owns the code.
 
 ---
 
@@ -59,9 +59,9 @@ These are cross-cutting; uncontrolled edits here are the #1 merge-conflict sourc
 
 **4.1 Bring local up to date (run first, once):**
 ```
-git -C ~/Projects/Mnemosyne fetch origin
-git -C ~/Projects/Mnemosyne status -sb          # confirm: main...origin/main (in sync)
-git -C ~/Projects/Mnemosyne switch main && git -C ~/Projects/Mnemosyne pull --ff-only origin main
+git -C /Users/admin/Mnemosyne fetch origin
+git -C /Users/admin/Mnemosyne status -sb          # confirm: main...origin/main (in sync)
+git -C /Users/admin/Mnemosyne switch main && git -C /Users/admin/Mnemosyne pull --ff-only origin main
 ```
 Do **not** commit the 3 untracked sibling-lane files — ping their owners to commit on their own lanes.
 

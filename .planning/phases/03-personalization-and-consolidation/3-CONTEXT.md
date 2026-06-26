@@ -28,9 +28,9 @@ Phase 3 implements the dual user model, warm-loop consolidation, fidelity-tiered
 <canonical_refs>
 ## Canonical References
 
-- `/Users/admin/Desktop/Mnemosyne/Mnemosyne-v2-Build-Blueprint.md` §24 — user model.
-- `/Users/admin/Desktop/Mnemosyne/Mnemosyne-v2-Build-Blueprint.md` §25 — forgetting and lifecycle.
-- `/Users/admin/Desktop/Mnemosyne/Mnemosyne-v2-Build-Blueprint.md` §30.5 — consolidation worker.
+- `docs/blueprint/Mnemosyne-v2-Build-Blueprint.md` §24 — user model.
+- `docs/blueprint/Mnemosyne-v2-Build-Blueprint.md` §25 — forgetting and lifecycle.
+- `docs/blueprint/Mnemosyne-v2-Build-Blueprint.md` §30.5 — consolidation worker.
 
 </canonical_refs>
 
