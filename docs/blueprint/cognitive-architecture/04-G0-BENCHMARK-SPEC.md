@@ -68,7 +68,7 @@ For each proposed change (a G1–G4 item):
 
 ### G1 gate evidence
 
-- **Implemented slice:** schema-fast-path retrieval + evidence and projection-level reality-monitoring abstention + retrieval-strengthening lifecycle marks + multi-signal write priority with trust-bounded importance-sampling debias + prediction-error-gated consolidation metadata + contested status for uncorroborated-but-congruent projections.
+- **Implemented slice:** schema-fast-path retrieval + evidence and projection-level reality-monitoring abstention + legacy/unclassified projection unknown-only abstention + retrieval-strengthening lifecycle marks + multi-signal write priority with trust-bounded importance-sampling debias + prediction-error-gated consolidation metadata + contested status for uncorroborated-but-congruent projections.
 - **Preregistrations:** `eval/g0/preregistrations/g1-reliability-core-schema-fast-path.json`; `eval/g0/preregistrations/g1-write-priority-debias.json`; `eval/g0/preregistrations/g1-projection-reality-monitoring.json`.
 - **Decision log:** `eval/g0/decision-log.jsonl`.
 - **Targets:** `multi_hop_ndcg_at_k`, direction `increase`, minimum delta `0.02`; `projection_reality_abstention_recall`, direction `increase`, minimum delta `1.0`.

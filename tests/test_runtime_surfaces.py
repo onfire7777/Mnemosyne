@@ -55,6 +55,27 @@ IDP_ISSUER = "https://idp.example.test/"
 IDP_AUDIENCE = "mnemosyne-production"
 
 
+def seed_grounded_gate_evidence(
+    engine: LocalMemoryEngine,
+    content: str,
+    *,
+    tenant_id: str = TENANT,
+    user_id: str = USER,
+) -> str:
+    return engine.append_evidence(
+        Evidence(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            actor="user",
+            source_type="grounded-gate-fixture",
+            content=content,
+            metadata={"reality_class": "grounded"},
+            trust_tier=0,
+            access_policy={"tenant": tenant_id},
+        )
+    )
+
+
 def mcp_call(server: MnemosyneMcpServer, name: str, arguments: dict[str, object]) -> dict:
     response = server.handle(
         {
@@ -964,6 +985,7 @@ def test_memory_tools_direct_profile_graph_learning_facade_methods() -> None:
     procedure = tools.procedure_induce(lesson["id"])
     alias_lesson = tools.lesson_propose(alias_trajectory["id"])
     alias_procedure = tools.procedure_propose(alias_lesson["id"])
+    seed_grounded_gate_evidence(engine, "alias drift verify with tools")
     promoted_lesson = tools.lesson_promote(
         alias_lesson["id"],
         cases=[
@@ -3052,6 +3074,7 @@ def test_mcp_server_stateless_mode_reloads_durable_engine_and_runtime_state(tmp_
 def test_mcp_server_persists_parametric_artifacts_and_rolls_back(tmp_path: Path) -> None:
     store = tmp_path / "store.json"
     server = MnemosyneMcpServer(store_path=store)
+    seed_grounded_gate_evidence(server.engine, "regression verify tools durable memory verify with tools")
     trajectory = mcp_call(
         server,
         "trajectory_record",
@@ -3125,6 +3148,7 @@ def test_mcp_server_parametric_tier_can_use_command_provider(tmp_path: Path) -> 
         parametric_command=command,
         parametric_adapter_kind="test-time-command-adapter",
     )
+    seed_grounded_gate_evidence(server.engine, "verify with tools durable memory")
     trajectory = mcp_call(
         server,
         "trajectory_record",

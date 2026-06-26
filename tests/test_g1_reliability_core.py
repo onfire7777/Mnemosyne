@@ -144,6 +144,34 @@ def test_g1_projection_reality_monitoring_treats_mixed_support_as_grounded() -> 
     assert result.explain["reality_monitoring"]["ungrounded_only"] is False
 
 
+def test_g1_legacy_projection_reality_monitoring_abstains_on_unknown_assertion() -> None:
+    engine = LocalMemoryEngine()
+    assertion_id = engine.upsert_assertion(
+        Assertion(
+            tenant_id=TENANT,
+            user_id=USER,
+            subject="legacy projection",
+            predicate="is",
+            object="Unclassified",
+            source_evidence_cids=[],
+            confidence=0.91,
+            trust_tier=0,
+            access_policy={"tenant": TENANT},
+        )
+    )
+    assertion_key = next(key for key, value in engine.assertions.items() if value.id == assertion_id)
+    engine.assertions[assertion_key].calibration = {}
+
+    result = engine.retrieve("legacy projection Unclassified", TENANT)
+    assertion_hit = next(hit for hit in result.hits if hit.id == assertion_id)
+
+    assert assertion_hit.metadata["reality_class"] == "unknown"
+    assert result.abstained is True
+    assert result.explain["reality_monitoring"]["classes"]["unknown"] >= 1
+    assert assertion_id in result.explain["reality_monitoring"]["risky_hit_ids"]
+    assert result.explain["reality_monitoring"]["ungrounded_only"] is True
+
+
 def test_g1_retrieval_strengthens_evidence_lifecycle_metadata() -> None:
     engine = LocalMemoryEngine()
     cid = _append(engine, "Lifecycle strengthening evidence should survive demotion.", metadata={"lifecycle": {"access_count": 2}})

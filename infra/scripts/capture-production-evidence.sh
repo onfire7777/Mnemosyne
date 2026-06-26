@@ -780,6 +780,12 @@ for suite_source, rewrites in suite_case_artifact_rewrites.items():
                 cases[case_index][field] = path_rewrites[original_path]
     suite_snapshot_path.write_text(json.dumps(suite_data, indent=2, sort_keys=True), encoding="utf-8")
 
+for artifact in artifact_metadata:
+    artifact["files"] = _snapshot_file_entries(
+        Path(str(artifact["path"])),
+        Path(str(artifact["snapshot_path"])),
+    )
+
 snapshot_scan = scan_evidence_paths(
     [Path(str(artifact["snapshot_path"])) for artifact in artifact_metadata],
     scope="preflight-input-snapshots",

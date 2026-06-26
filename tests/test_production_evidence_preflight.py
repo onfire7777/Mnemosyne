@@ -5,6 +5,7 @@ import os
 import shutil
 import subprocess
 import sys
+from hashlib import sha256
 from pathlib import Path
 from typing import Any, Callable
 
@@ -648,6 +649,11 @@ def test_capture_production_evidence_preflight_snapshots_provenance_suite_assets
     suite_snapshot = Path(provenance_check["args"][1])
     rewritten_suite = json.loads(suite_snapshot.read_text(encoding="utf-8"))
     rewritten_asset_path = rewritten_suite["cases"][0]["asset_path"]
+    suite_metadata = next(
+        item
+        for item in stdout["required_input_artifacts"]
+        if Path(item["path"]).name == "provenance-trust-suite.json"
+    )
 
     assert stdout["executable_tool_references"] == [
         {
@@ -659,6 +665,11 @@ def test_capture_production_evidence_preflight_snapshots_provenance_suite_assets
     assert suite_snapshot.is_relative_to(out_root / "input-artifacts")
     assert Path(rewritten_asset_path).is_relative_to(out_root / "input-artifacts")
     assert rewritten_asset_path != str(asset)
+    assert suite_metadata["files"][0]["snapshot_path"] == str(suite_snapshot)
+    assert suite_metadata["files"][0]["size_bytes"] == suite_snapshot.stat().st_size
+    assert suite_metadata["files"][0]["sha256"] == "sha256:" + sha256(
+        suite_snapshot.read_bytes()
+    ).hexdigest()
     assert {Path(item["path"]).name for item in stdout["required_input_artifacts"]} == {
         "asset.json",
         "provenance-trust-suite.json",

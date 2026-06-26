@@ -16,7 +16,7 @@ This runbook is the operator handoff for flipping the remaining Tier B parity ro
   - `validation_scope.operator_asserted: true`
 - The manifest must include the exact production release profile: every command in the current 28-command set from `src/mnemosyne/cli.py`, with no duplicate or unknown commands.
 - The output root must be new or empty and outside this repository. The wrapper rejects repo-local or non-empty output directories so stale artifacts cannot enter a production bundle.
-- Every manifest-referenced production input artifact must already exist at an absolute external path before preflight. The wrapper inventories those paths in `preflight.json`, recursively scans referenced directories, and fails closed on missing, symlinked, secret-shaped, non-UTF-8, or over-limit input artifacts. Accepted inputs are snapshotted under `OUT_ROOT/input-artifacts/` with per-file size and SHA-256 metadata, and the copied operator manifest is rewritten to use those immutable snapshots so later mutation of the external source paths cannot change the capture inputs.
+- Every manifest-referenced production input artifact must already exist at an absolute external path before preflight. The wrapper inventories those paths in `preflight.json`, recursively scans referenced directories, and fails closed on missing, symlinked, secret-shaped, non-UTF-8, or over-limit input artifacts. Accepted inputs are snapshotted under `OUT_ROOT/input-artifacts/` with per-file size and SHA-256 metadata, and the copied operator manifest is rewritten to use those immutable snapshots so later mutation of the external source paths cannot change the capture inputs. Provenance trust-suite metadata is hashed after nested asset-path rewrites, so `preflight.json` describes the retained staged suite exactly.
 - `MNEMOSYNE_PROD_C2PA_TOOL` is the absolute path to the deployed c2patool-compatible executable. Preflight verifies it exists outside the repository and is executable, records it under `executable_tool_references`, and does not snapshot it as input evidence; keep the C2PA trust-suite JSON and trust-root evidence under `MNEMOSYNE_PROD_EVIDENCE_DIR` instead.
 - For `provenance-trust-check --suite`, nested suite `asset_path` and `c2pa_asset_path` values are also treated as production input artifacts. Preflight snapshots those assets and rewrites the staged suite JSON to point at the immutable snapshots. Inline `--suite-json` is rejected for production capture because nested paths cannot be custody-rewritten safely.
 
@@ -87,8 +87,12 @@ EXPECTED_BUNDLE_FINGERPRINT="$("$PYTHON" -c 'import json, pathlib, sys; print(js
 
 This command verifies `summary.json`, `redaction-scan.json`,
 `bundle-manifest.json`, every manifest-listed artifact hash/size, the captured
-`release-audit.json`, and a fresh offline replay of `release-audit` against
-`evidence/manifest.json`. It does not contact production services, does not run
+`release-audit.json`, the retained `input-artifacts/` inventory, and a fresh
+offline replay of `release-audit` against `evidence/manifest.json`. It rejects
+symlinked or unrecorded retained input artifacts, fails if preflight paths do
+not resolve to the retained bundle files, and checks that the retained operator
+manifest plus nested suite JSON still reference the staged artifacts recorded in
+`preflight.json`. It does not contact production services, does not run
 `deployment-soak`, does not create production evidence, and cannot flip any
 strict-audit row to Done unless the bundle was originally captured by the
 production wrapper against deployed infrastructure.
@@ -103,6 +107,7 @@ the completed bundle and, when supplied, the retained `summary.json`
 `bundle_fingerprint` as the handoff chain-of-custody record for the captured
 files. The offline verifier independently rechecks the retained
 `preflight.json` and `operator-soak-manifest.json` for production scope,
+input-artifact reference binding,
 operator attestation, unresolved production placeholders, copied-manifest
 custody metadata, and the frozen production command set. A passing local or
 compose-only bundle is useful staging evidence, but it does not satisfy Tier B
