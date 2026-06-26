@@ -23,6 +23,7 @@ from typing import Any, Callable
 from eval.g0.confabulation import run_confabulation_eval
 from eval.g0.continual_learning import run_continual_learning_eval
 from eval.g0.deep_latency import run_deep_latency_eval
+from eval.g0.projection_reality import run_projection_reality_eval
 from eval.g0.resource_usage import run_resource_usage_eval
 
 G0_METRIC_SPECS: tuple[dict[str, Any], ...] = (
@@ -106,6 +107,15 @@ G0_METRIC_SPECS: tuple[dict[str, Any], ...] = (
         "target": 0.0,
         "target_op": "<=",
         "blueprint_metric": "confabulation rate",
+    },
+    {
+        "id": "projection_reality_abstention_recall",
+        "label": "projection-reality abstention recall",
+        "class": "target",
+        "direction": "increase",
+        "target": 1.0,
+        "target_op": ">=",
+        "blueprint_metric": "projection-level reality monitoring",
     },
     {
         "id": "poison_block_rate",
@@ -217,6 +227,13 @@ def build_report(
         "confabulation_eval",
         "computed:eval.g0.confabulation",
         confabulation_report,
+    )
+    projection_reality_report = run_projection_reality_eval()
+    sources["projection_reality_eval"] = _computed_source(
+        repo_root,
+        "projection_reality_eval",
+        "computed:eval.g0.projection_reality",
+        projection_reality_report,
     )
     deep_latency_report = run_deep_latency_eval()
     sources["deep_latency_eval"] = _computed_source(
@@ -358,6 +375,7 @@ def _build_metric(spec: dict[str, Any], sources: dict[str, Source]) -> dict[str,
         "abstention_recall": _metric_abstention_recall,
         "continual_learning_interference": _metric_continual_learning_interference,
         "confabulation_rate": _metric_confabulation_rate,
+        "projection_reality_abstention_recall": _metric_projection_reality_abstention_recall,
         "poison_block_rate": _metric_poison_block_rate,
         "fast_path_p95_ms": _metric_fast_path_p95,
         "deep_path_p95_ms": _metric_deep_path_p95,
@@ -481,6 +499,24 @@ def _metric_confabulation_rate(spec: dict[str, Any], sources: dict[str, Source])
         note=(
             "Measured by the G0 confabulation fixture as the false-accept rate "
             "when only generated, low-fidelity, or confabulation-risk support is retrieved."
+        ),
+    )
+
+
+def _metric_projection_reality_abstention_recall(
+    spec: dict[str, Any],
+    sources: dict[str, Source],
+) -> dict[str, Any]:
+    value = _source_data(sources, "projection_reality_eval", "recall")
+    return _measured(
+        spec,
+        value,
+        "projection_reality_eval",
+        "/recall",
+        note=(
+            "Measured by the G0 projection-reality fixture as recall for "
+            "abstaining on risky semantic projections whose assertion hit "
+            "itself carries the derived reality-monitoring class."
         ),
     )
 

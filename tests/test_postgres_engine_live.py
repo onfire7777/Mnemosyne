@@ -515,6 +515,171 @@ def test_postgres_engine_live_contract_smoke() -> None:
     assert exported["assertions"]
 
 
+def test_postgres_graph_ppr_cache_refresh_materializes_live() -> None:
+    engine = PostgresEngine(live_dsn())
+    tenant = f"tenant-cached-ppr-live-{uuid4()}"
+    user = "user-cached-ppr-live"
+
+    cid = engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id=user,
+            actor="user",
+            source_type="cached-ppr-live",
+            content="Live cached PPR evidence links a cache seed to a cache target.",
+            trust_tier=0,
+            access_policy={"tenant": tenant},
+        )
+    )
+    seed = f"live cached ppr seed {uuid4()}"
+    relation_id = engine.add_relation(
+        Relation(
+            tenant_id=tenant,
+            source=seed,
+            predicate="points_to",
+            target="live cached ppr target",
+            source_evidence_cids=[cid],
+            access_policy={"tenant": tenant},
+        )
+    )
+
+    recursive = engine.graph_ppr([seed], 1, tenant_id=tenant, branch="main")
+    refresh = engine.refresh_graph_ppr_cache([seed], 1, tenant_id=tenant, branch="main")
+
+    assert refresh["refreshed"] is True
+    assert refresh["hit_count"] == len(recursive) == 1
+    assert recursive[0].id == relation_id
+
+    db_tenant_id = _stable_uuid("tenant", tenant)
+    with engine.connect() as conn:
+        with conn.cursor(row_factory=engine._psycopg.rows.dict_row) as cur:
+            engine._set_tenant(cur, db_tenant_id)
+            cur.execute(
+                """
+                SELECT seed_hash, as_of_key, hits
+                FROM graph_ppr_cache
+                WHERE tenant_id = %s AND branch = %s AND relation_fingerprint = %s
+                """,
+                (db_tenant_id, "main", refresh["relation_fingerprint"]),
+            )
+            row = cur.fetchone()
+            assert row is not None
+            cached_payload = list(row["hits"])
+            cached_payload[0].setdefault("metadata", {})["cache_probe"] = "materialized-live"
+            cur.execute(
+                """
+                UPDATE graph_ppr_cache
+                SET hits = %s
+                WHERE tenant_id = %s AND branch = %s AND seed_hash = %s AND as_of_key = %s
+                """,
+                (
+                    engine._jsonb(cached_payload),
+                    db_tenant_id,
+                    "main",
+                    row["seed_hash"],
+                    row["as_of_key"],
+                ),
+            )
+
+    cached = engine.graph_ppr([seed], 1, tenant_id=tenant, branch="main", use_cache=True)
+    default_after_refresh = engine.graph_ppr([seed], 1, tenant_id=tenant, branch="main")
+
+    assert cached[0].metadata["cache_probe"] == "materialized-live"
+    assert cached[0].id == default_after_refresh[0].id == relation_id
+    assert "cache_probe" not in default_after_refresh[0].metadata
+
+    engine.add_relation(
+        Relation(
+            tenant_id=tenant,
+            source=seed,
+            predicate="points_to_new",
+            target="live cached ppr changed target",
+            source_evidence_cids=[cid],
+            access_policy={"tenant": tenant},
+        )
+    )
+    after_mutation = engine.graph_ppr([seed], 1, tenant_id=tenant, branch="main", use_cache=True)
+    refresh_after_mutation = engine.refresh_graph_ppr_cache([seed], 1, tenant_id=tenant, branch="main")
+
+    assert "cache_probe" not in after_mutation[0].metadata
+    assert refresh_after_mutation["relation_fingerprint"] != refresh["relation_fingerprint"]
+
+
+def test_postgres_projection_reality_monitoring_abstains_live() -> None:
+    engine = PostgresEngine(live_dsn())
+    tenant = f"tenant-projection-reality-live-{uuid4()}"
+    user = "user-projection-reality-live"
+
+    generated = engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id=user,
+            actor="system",
+            source_type="workspace-reflection",
+            content="Synthetic workspace-only support for a projected release code.",
+            metadata={"reality_class": "self_generated"},
+            trust_tier=0,
+            access_policy={"tenant": tenant},
+        )
+    )
+    assertion_id = engine.upsert_assertion(
+        Assertion(
+            tenant_id=tenant,
+            user_id=user,
+            subject="projected release code",
+            predicate="is",
+            object="Mirage",
+            source_evidence_cids=[generated],
+            confidence=0.95,
+            trust_tier=0,
+            access_policy={"tenant": tenant},
+        )
+    )
+
+    result = engine.retrieve("projected release code Mirage", tenant)
+    assertion_hit = next(hit for hit in result.hits if hit.id == assertion_id)
+    exported = engine.export_tenant(tenant)
+    assertion = next(item for item in exported["assertions"] if item["id"] == assertion_id)
+
+    assert assertion["calibration"]["reality_monitoring"]["reality_class"] == "self_generated"
+    assert assertion_hit.metadata["reality_class"] == "self_generated"
+    assert assertion_hit.metadata["reality_monitoring"]["source"] == "g1_projection_reality_monitoring"
+    assert result.abstained is True
+    assert result.explain["reality_monitoring"]["ungrounded_only"] is True
+
+    grounded = engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id=user,
+            actor="user",
+            source_type="operator-note",
+            content="Operator note confirms the grounded release code projection.",
+            metadata={"reality_class": "grounded"},
+            trust_tier=0,
+            access_policy={"tenant": tenant},
+        )
+    )
+    mixed_assertion_id = engine.upsert_assertion(
+        Assertion(
+            tenant_id=tenant,
+            user_id=user,
+            subject="grounded release code",
+            predicate="is",
+            object="Atlas",
+            source_evidence_cids=[generated, grounded],
+            confidence=0.95,
+            trust_tier=0,
+            access_policy={"tenant": tenant},
+        )
+    )
+    mixed = engine.retrieve("grounded release code Atlas", tenant)
+    mixed_hit = next(hit for hit in mixed.hits if hit.id == mixed_assertion_id)
+
+    assert mixed_hit.metadata["reality_class"] == "grounded"
+    assert mixed_hit.metadata["reality_monitoring"]["mixed"] is True
+    assert mixed.explain["reality_monitoring"]["ungrounded_only"] is False
+
+
 def test_postgres_evidence_vector_search_uses_stored_pgvector_live() -> None:
     engine = PostgresEngine(live_dsn())
     tenant = f"tenant-evidence-vector-{uuid4()}"

@@ -73,6 +73,77 @@ def test_g1_reality_monitoring_abstains_on_self_generated_only_support() -> None
     assert "grounded evidence" in result.uncertainty_note
 
 
+def test_g1_projection_reality_monitoring_abstains_on_self_generated_assertion() -> None:
+    engine = LocalMemoryEngine()
+    cid = _append(
+        engine,
+        "Synthetic planning scratchpad support for an imagined projection.",
+        metadata={"reality_class": "self_generated"},
+        actor="system",
+    )
+    assertion_id = engine.upsert_assertion(
+        Assertion(
+            tenant_id=TENANT,
+            user_id=USER,
+            subject="projection codename",
+            predicate="is",
+            object="Mirage",
+            source_evidence_cids=[cid],
+            confidence=0.95,
+            trust_tier=0,
+            access_policy={"tenant": TENANT},
+        )
+    )
+
+    result = engine.retrieve("projection codename Mirage", TENANT)
+    assertion_hit = next(hit for hit in result.hits if hit.id == assertion_id)
+    row = next(item for item in engine.export_tenant(TENANT)["assertions"] if item["id"] == assertion_id)
+
+    assert row["calibration"]["reality_monitoring"]["reality_class"] == "self_generated"
+    assert assertion_hit.metadata["reality_class"] == "self_generated"
+    assert assertion_hit.metadata["reality_monitoring"]["source"] == "g1_projection_reality_monitoring"
+    assert result.abstained is True
+    assert result.explain["reality_monitoring"]["ungrounded_only"] is True
+
+
+def test_g1_projection_reality_monitoring_treats_mixed_support_as_grounded() -> None:
+    engine = LocalMemoryEngine()
+    generated = _append(
+        engine,
+        "Synthetic workspace draft mentions a mixed-support projection.",
+        metadata={"reality_class": "self_generated"},
+        actor="system",
+    )
+    grounded = _append(
+        engine,
+        "User supplied source confirms the mixed-support projection.",
+        metadata={"reality_class": "grounded"},
+    )
+    assertion_id = engine.upsert_assertion(
+        Assertion(
+            tenant_id=TENANT,
+            user_id=USER,
+            subject="mixed support projection",
+            predicate="is",
+            object="confirmed",
+            source_evidence_cids=[generated, grounded],
+            confidence=0.95,
+            trust_tier=0,
+            access_policy={"tenant": TENANT},
+        )
+    )
+
+    result = engine.retrieve("mixed support projection confirmed", TENANT)
+    assertion_hit = next(hit for hit in result.hits if hit.id == assertion_id)
+    monitoring = assertion_hit.metadata["reality_monitoring"]
+
+    assert monitoring["reality_class"] == "grounded"
+    assert monitoring["mixed"] is True
+    assert monitoring["classes"]["grounded"] == 1
+    assert monitoring["classes"]["self_generated"] == 1
+    assert result.explain["reality_monitoring"]["ungrounded_only"] is False
+
+
 def test_g1_retrieval_strengthens_evidence_lifecycle_metadata() -> None:
     engine = LocalMemoryEngine()
     cid = _append(engine, "Lifecycle strengthening evidence should survive demotion.", metadata={"lifecycle": {"access_count": 2}})

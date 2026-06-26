@@ -205,7 +205,7 @@ def test_g0_runner_cli_accepts_controller_telemetry(tmp_path: Path) -> None:
     )
     report = json.loads((out_dir / "report.json").read_text(encoding="utf-8"))
 
-    assert "G0 coverage: 14/14 measured; gate_ready=True" in result.stdout
+    assert "G0 coverage: 15/15 measured; gate_ready=True" in result.stdout
     assert report["coverage"]["gate_ready"] is True
     assert report["computed_evidence"]["resource_usage_eval"]["controller_watts_per_dollar"] == 50.0
 

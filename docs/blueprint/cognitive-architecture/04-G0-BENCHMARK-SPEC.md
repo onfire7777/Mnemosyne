@@ -61,18 +61,18 @@ For each proposed change (a G1–G4 item):
 
 ## 6. Gate‑specific acceptance criteria (the go/no‑go for each later stage)
 
-- **G1 (reliability core):** ≥1 of {recall, nDCG, ECE, abstention} improves; confabulation and poison‑block do not regress.
+- **G1 (reliability core):** ≥1 of {recall, nDCG, ECE, abstention, projection-level reality monitoring} improves; confabulation and poison‑block do not regress.
 - **G2 (structure + generalisation):** generalisation up (recall/nDCG on held‑out *novel* queries) **and** continual‑learning interference down.
 - **G3 (generative replay):** net‑new *corroborated* beliefs appear **and** confabulation rate does not rise — the decisive test for "dreaming without hallucinating."
 - **G4 (always‑on workspace):** self‑triggered background consolidation beats on‑demand consolidation on **quality‑per‑unit‑compute** (a retrieval/calibration gain per watt‑hour or per \$), with zero rail violations and a bounded, non‑increasing rumination metric (loop iterations that produce no novel, useful state).
 
 ### G1 gate evidence
 
-- **Implemented slice:** schema-fast-path retrieval + reality-monitoring abstention + retrieval-strengthening lifecycle marks + multi-signal write priority with trust-bounded importance-sampling debias + prediction-error-gated consolidation metadata + contested status for uncorroborated-but-congruent projections.
-- **Preregistrations:** `eval/g0/preregistrations/g1-reliability-core-schema-fast-path.json`; `eval/g0/preregistrations/g1-write-priority-debias.json`.
+- **Implemented slice:** schema-fast-path retrieval + evidence and projection-level reality-monitoring abstention + retrieval-strengthening lifecycle marks + multi-signal write priority with trust-bounded importance-sampling debias + prediction-error-gated consolidation metadata + contested status for uncorroborated-but-congruent projections.
+- **Preregistrations:** `eval/g0/preregistrations/g1-reliability-core-schema-fast-path.json`; `eval/g0/preregistrations/g1-write-priority-debias.json`; `eval/g0/preregistrations/g1-projection-reality-monitoring.json`.
 - **Decision log:** `eval/g0/decision-log.jsonl`.
-- **Target:** `multi_hop_ndcg_at_k`, direction `increase`, minimum delta `0.02`.
-- **Result:** PASS against `eval/g0/baselines/baseline-0.json`; candidate `multi_hop_ndcg_at_k = 1.0` vs baseline `0.5935` (`+0.4065`). Guardrails unchanged: ECE `0.006271`, abstention precision/recall `1.0/1.0`, confabulation rate `0.0`, poison-block rate `1.0`, fast-path P95 `92.1 ms`.
+- **Targets:** `multi_hop_ndcg_at_k`, direction `increase`, minimum delta `0.02`; `projection_reality_abstention_recall`, direction `increase`, minimum delta `1.0`.
+- **Result:** PASS against `eval/g0/baselines/baseline-0.json`; candidate `multi_hop_ndcg_at_k = 1.0` vs baseline `0.5935` (`+0.4065`) and candidate `projection_reality_abstention_recall = 1.0` vs baseline `0.0` (`+1.0`). Guardrails unchanged: ECE `0.006271`, abstention precision/recall `1.0/1.0`, confabulation rate `0.0`, poison-block rate `1.0`, fast-path P95 `92.1 ms`.
 
 ## 7. Tooling & deliverables
 
