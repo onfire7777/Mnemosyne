@@ -807,10 +807,17 @@ def test_specialist_registry_builds_modules_and_blocks_shadow_critical_path() ->
 
     embedder = registry.build_specialist("embedder.local", {"embedding_dims": 8}, critical_path=True)
     dreamer = registry.build_specialist("dreamer.shadow", {"dreamer_max_candidates": 2})
+    capped_dreamer = registry.build_specialist(
+        "dreamer.shadow",
+        {"dreamer_max_candidates": 99, "dreamer_min_sources": 1},
+    )
 
     assert isinstance(embedder, providers_pkg.HashingEmbeddingProvider)
     assert isinstance(dreamer, SandboxedDreamer)
     assert dreamer.max_candidates == 2
+    assert isinstance(capped_dreamer, SandboxedDreamer)
+    assert capped_dreamer.max_candidates == 3
+    assert capped_dreamer.min_sources == 2
     with pytest.raises(ValueError, match="not approved for critical-path use"):
         registry.build_specialist("dreamer.shadow", critical_path=True)
 

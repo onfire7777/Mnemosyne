@@ -41,9 +41,12 @@ G0 also reports:
 - `metacognition_meta_d_prime`
 - `metacognition_m_ratio`
 - `reality_monitor_shadow_tag_contract`
+- `dreamer_shadow_corroborated_candidate_yield`
+- `dreamer_shadow_contract`
 
 These are functional probes. They do not certify consciousness.
 `metacognition_meta_d_prime` and `metacognition_m_ratio` are backed by the runtime shadow `MetacognitiveMonitor`, which scores bounded confidence/outcome discrimination and abstention alignment from trace rows.
+`dreamer_shadow_corroborated_candidate_yield` and `dreamer_shadow_contract` are backed by the G3 shadow replay fixture in `eval/g0/dreamer.py`; they measure tenant-scoped, CID-backed replay candidates and the non-mutation/off-critical-path contract.
 
 ## 3. G1 Reality Monitor
 
@@ -87,7 +90,7 @@ The continuous workspace loop is never unbounded:
 - anti-rumination cadence bound
 - cycle-consistency self-supervision
 
-Generative replay, imagination, and self-loop outputs are low-trust until gate promoted. They are not on the critical path to an answer. The initial runtime seed is `SandboxedDreamer` in `src/mnemosyne/dreamer.py`; it emits CID-backed low-trust replay candidates with `production_mutation=false` and is registered as `dreamer.shadow` with `critical_path_allowed=false`.
+Generative replay, imagination, and self-loop outputs are low-trust until gate promoted. They are not on the critical path to an answer. The runtime seed is `ShadowWorkspaceController` in `src/mnemosyne/workspace.py`, which applies the bounded cognitive cycle, interoceptive proto-self, and low-bandwidth workspace bottleneck before recruiting typed specialists. Its first specialist is `SandboxedDreamer` in `src/mnemosyne/dreamer.py`; it emits tenant-scoped, CID-backed low-trust replay candidates with `production_mutation=false` and is registered as `dreamer.shadow` with `critical_path_allowed=false`.
 
 ## 6. Gate Contract
 
@@ -98,4 +101,4 @@ Every consciousness-module change must preregister:
 - existing reliability guardrails: faithfulness, calibration, confabulation, poison-block, and section 31 rails
 - evidence that the self-loop remains shadow/advisory unless explicitly promoted
 
-The scorecard lives in `eval/g0/consciousness.py` and is included by `eval/g0/runner.py`. The existing `eval/g0/gate.py` remains authoritative.
+The scorecard lives in `eval/g0/consciousness.py` and is included by `eval/g0/runner.py`. The dreamer shadow ablation lives in `eval/g0/dreamer.py`, uses `eval/datasets/dreamer_shadow_ablation.json`, and is preregistered in `eval/g0/preregistrations/g3-dreamer-shadow-ablation.json`. The existing `eval/g0/gate.py` remains authoritative.

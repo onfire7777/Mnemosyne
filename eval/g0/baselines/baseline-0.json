@@ -947,6 +947,25 @@
       "schema_version": "g0.deep_latency.v1",
       "unique_queries": 3
     },
+    "dreamer_eval": {
+      "candidate_count": 0,
+      "candidates": [],
+      "checks": {
+        "baseline_predates_dreamer": true
+      },
+      "corroborated_candidate_count": 0,
+      "corroborated_candidate_yield": 0.0,
+      "dataset_path": "eval/datasets/dreamer_shadow_ablation.json",
+      "definition": "Pre-G3 baseline: no sandboxed dreamer candidates were available.",
+      "dreamer": {},
+      "generated_at": "2026-06-26T14:11:27.567151+00:00",
+      "metric_note": "Explicit zero baseline for the G3 shadow dreamer target-up gate.",
+      "schema_version": "g0.dreamer_shadow_ablation.v1",
+      "shadow_contract": 0.0,
+      "source_evidence_count": 0,
+      "tenant": "g0-dreamer-shadow-ablation",
+      "workspace": {}
+    },
     "projection_reality_eval": {
       "definition": "Recall for abstaining on semantic assertion projections whose only support is self-generated or simulated, with the projection hit itself carrying the risky reality class.",
       "generated_at": "2026-06-26T14:11:27.419395+00:00",
@@ -1208,12 +1227,12 @@
   },
   "coverage": {
     "gate_ready": false,
-    "measured": 36,
+    "measured": 38,
     "missing": 1,
     "missing_metric_ids": [
       "controller_watts_per_dollar"
     ],
-    "total": 37
+    "total": 39
   },
   "dataset_manifests": [
     {
@@ -1300,6 +1319,14 @@
       "present": true,
       "sha256": "1864974807f2171904a5e5f04b727b3cbfb258f94c1280106ecc08a4dade52e2",
       "tenant": "eval-qa-hard-v2"
+    },
+    {
+      "bytes": 686,
+      "counts": {},
+      "path": "eval/datasets/dreamer_shadow_ablation.json",
+      "present": true,
+      "sha256": "1a055a7be81a780c5827dd7d03b0209e733358ec7cd6ce0063ebd609757bbebf",
+      "tenant": "g0-dreamer-shadow-ablation"
     }
   ],
   "gate_contract": {
@@ -1941,6 +1968,36 @@
       "target": null,
       "target_op": null,
       "value": 1
+    },
+    {
+      "blueprint_metric": "G3 shadow generative replay candidate yield",
+      "class": "target",
+      "direction": "increase",
+      "evidence_path": "/corroborated_candidate_yield",
+      "id": "dreamer_shadow_corroborated_candidate_yield",
+      "label": "dreamer shadow corroborated candidate yield",
+      "notes": "Baseline-0 predates G3 dreamer wiring; explicit zero anchors the preregistered target-up comparison.",
+      "pass": null,
+      "source_id": "dreamer_eval",
+      "status": "measured",
+      "target": null,
+      "target_op": null,
+      "value": 0.0
+    },
+    {
+      "blueprint_metric": "G3 shadow-only generative replay safety contract",
+      "class": "guardrail",
+      "direction": "increase",
+      "evidence_path": "/shadow_contract",
+      "id": "dreamer_shadow_contract",
+      "label": "dreamer shadow contract",
+      "notes": "Baseline-0 predates G3 dreamer wiring; explicit zero anchors the preregistered target-up comparison.",
+      "pass": false,
+      "source_id": "dreamer_eval",
+      "status": "measured",
+      "target": 1.0,
+      "target_op": ">=",
+      "value": 0.0
     }
   ],
   "schema_version": "g0.report.v1",
@@ -2021,6 +2078,13 @@
       "path": "computed:eval.g0.consciousness",
       "present": true,
       "sha256": "34ab41a5eed19cee2b25fbfcd51d777d168f6af09e38cbf68736410ea12e76c8"
+    },
+    {
+      "generated_at": "2026-06-26T14:11:27.567151+00:00",
+      "id": "dreamer_eval",
+      "path": "computed:eval.g0.dreamer",
+      "present": true,
+      "sha256": "99087013534bf0dc0155198cc14890f652b1eb80f7e75922840c9689a46162eb"
     }
   ]
 }

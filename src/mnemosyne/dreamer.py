@@ -72,7 +72,11 @@ class SandboxedDreamer:
         max_candidates: int | None = None,
     ) -> DreamReport:
         usable = [_coerce_source(item) for item in evidence]
-        usable = [item for item in usable if item["cid"] and item["content"]]
+        usable = [
+            item
+            for item in usable
+            if item["cid"] and item["content"] and item["tenant_id"] == tenant_id
+        ]
         if len(usable) < self.min_sources:
             return DreamReport(tenant_id=tenant_id, branch=branch, candidates=(), source_count=len(usable))
 
@@ -109,8 +113,12 @@ class SandboxedDreamer:
 
 def _coerce_source(item: Evidence | Mapping[str, Any]) -> dict[str, str]:
     if isinstance(item, Evidence):
-        return {"cid": str(item.cid or ""), "content": item.content}
-    return {"cid": str(item.get("cid") or ""), "content": str(item.get("content") or "")}
+        return {"cid": str(item.cid or ""), "content": item.content, "tenant_id": item.tenant_id}
+    return {
+        "cid": str(item.get("cid") or ""),
+        "content": str(item.get("content") or ""),
+        "tenant_id": str(item.get("tenant_id") or ""),
+    }
 
 
 def _salient_terms(text: str) -> list[str]:

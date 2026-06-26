@@ -3,6 +3,7 @@ from __future__ import annotations
 from mnemosyne.dreamer import SandboxedDreamer
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.models import Evidence
+from mnemosyne.workspace import ShadowWorkspaceController, WorkspaceItem
 
 
 def test_sandboxed_dreamer_generates_low_trust_candidates_without_mutating_engine() -> None:
@@ -55,9 +56,70 @@ def test_sandboxed_dreamer_generates_low_trust_candidates_without_mutating_engin
 
 def test_sandboxed_dreamer_requires_multiple_cid_backed_sources() -> None:
     report = SandboxedDreamer().dream(
-        [{"cid": "cidv1:abc", "content": "single source evidence"}],
+        [{"cid": "cidv1:abc", "tenant_id": "tenant-dreamer", "content": "single source evidence"}],
         tenant_id="tenant-dreamer",
     )
 
     assert report.candidates == ()
     assert report.source_count == 1
+
+
+def test_sandboxed_dreamer_rejects_cross_tenant_mapped_sources() -> None:
+    report = SandboxedDreamer().dream(
+        [
+            {
+                "cid": "cidv1:wrong-a",
+                "tenant_id": "other-tenant",
+                "content": "Wrong tenant replay source should not count.",
+            },
+            {
+                "cid": "cidv1:wrong-b",
+                "tenant_id": "other-tenant",
+                "content": "Wrong tenant corroboration should not count.",
+            },
+        ],
+        tenant_id="tenant-dreamer",
+    )
+
+    assert report.candidates == ()
+    assert report.source_count == 0
+
+
+def test_shadow_workspace_controller_recruits_dreamer_off_critical_path() -> None:
+    report = ShadowWorkspaceController(max_workspace_items=1).run_shadow_cycle(
+        tenant_id="tenant-workspace",
+        items=[
+            WorkspaceItem(id="low", priority=0.1, content="low priority"),
+            WorkspaceItem(id="high", priority=0.9, content="high priority"),
+        ],
+        evidence=[
+            {
+                "cid": "cid-workspace-a",
+                "tenant_id": "tenant-workspace",
+                "content": "First retained source supports replay.",
+            },
+            {
+                "cid": "cid-workspace-b",
+                "tenant_id": "tenant-workspace",
+                "content": "Second retained source supports gating.",
+            },
+        ],
+    )
+    payload = report.to_dict()
+    invocation = payload["specialist_invocations"][0]
+    output = invocation["output_summary"]
+
+    assert payload["shadow_only"] is True
+    assert payload["critical_path"] is False
+    assert payload["production_mutation"] is False
+    assert payload["selected_items"][0]["id"] == "high"
+    assert invocation["name"] == "dreamer.shadow"
+    assert invocation["role"] == "dreamer"
+    assert invocation["shadow_only"] is True
+    assert invocation["critical_path"] is False
+    assert invocation["critical_path_allowed"] is False
+    assert output["candidate_count"] == 1
+    assert output["production_mutation"] is False
+    assert output["promotion_gate_required"] is True
+    assert output["candidate_reality_classes"] == ["self_generated"]
+    assert output["candidate_trust_tiers"] == [5]

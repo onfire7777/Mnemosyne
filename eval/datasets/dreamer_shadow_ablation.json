@@ -1,0 +1,26 @@
+{
+  "schema_version": "mnemosyne.g0.dreamer_shadow_ablation.v1",
+  "tenant": "g0-dreamer-shadow-ablation",
+  "items": [
+    {
+      "id": "low",
+      "priority": 0.1,
+      "content": "Low-priority scratch item for bottleneck ordering."
+    },
+    {
+      "id": "high",
+      "priority": 0.9,
+      "content": "High-priority scratch item for bottleneck ordering."
+    }
+  ],
+  "evidence": [
+    {
+      "cid": "cid-g0-dream-a",
+      "content": "Calypso replay evidence links durable source custody to safe memory hypotheses."
+    },
+    {
+      "cid": "cid-g0-dream-b",
+      "content": "Orion replay evidence links promotion-gated replay to calibrated abstention rails."
+    }
+  ]
+}
