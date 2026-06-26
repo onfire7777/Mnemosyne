@@ -1590,10 +1590,13 @@ class PostgresEngine:
         evidence_by_scope: dict[tuple[str, str], set[bytes]] = defaultdict(set)
         for hit in hits:
             if hit.kind == "evidence" and hit.id:
-                evidence_by_scope[(hit.tenant_id, hit.branch)].add(_cid_to_bytes(hit.id))
+                cid_bytes = _cid_bytes_or_none(hit.id)
+                if cid_bytes is not None:
+                    evidence_by_scope[(hit.tenant_id, hit.branch)].add(cid_bytes)
             for cid in hit.provenance:
-                if cid:
-                    evidence_by_scope[(hit.tenant_id, hit.branch)].add(_cid_to_bytes(str(cid)))
+                cid_bytes = _cid_bytes_or_none(str(cid)) if cid else None
+                if cid_bytes is not None:
+                    evidence_by_scope[(hit.tenant_id, hit.branch)].add(cid_bytes)
             if hit.kind == "assertion":
                 assertion_id = _uuid_or_none(hit.id)
                 if assertion_id:
@@ -2684,6 +2687,14 @@ class PostgresEngine:
 
 def _cid_to_bytes(cid: str) -> bytes:
     return bytes.fromhex(cid.removeprefix("cidv1:"))
+
+
+def _cid_bytes_or_none(cid: str) -> bytes | None:
+    value = cid.removeprefix("cidv1:")
+    try:
+        return bytes.fromhex(value)
+    except ValueError:
+        return None
 
 
 def _vector_literal(vector: list[float]) -> str:
