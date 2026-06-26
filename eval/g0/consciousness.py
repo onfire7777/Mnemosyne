@@ -18,7 +18,6 @@ from mnemosyne.consciousness import (
     BoundedCognitiveCycle,
     InteroceptiveProtoSelf,
     MetacognitiveMonitor,
-    RealityMonitor,
     workspace_bottleneck,
 )
 from mnemosyne.engine import LocalMemoryEngine
