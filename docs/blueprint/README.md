@@ -14,6 +14,10 @@ A self-optimizing memory architecture for AI agents: complete recall + precise r
 - `Mnemosyne-Recursive-Memory-System-Design.md` — the v1 design document (superseded by v2; v2 reframes the system as a "self-optimizing compiler for experience," adds the belief-revision core, branchable memory, fidelity-tiered forgetting, confidence/abstention, and a full implementation + build plan).
 - `Mnemosyne-Architecture-Blueprint.html` — the v1 interactive architecture explorer (open in a browser). Visual companion only; the v2 document is authoritative.
 
+**Forward program (extends v2):**
+
+- **`cognitive-architecture/`** — the brain‑grounded cognitive‑architecture program: vision & honesty charter, the element‑by‑element brain↔system design, the accepted decision (ADR‑001), the **G0** benchmark gate, and a glossary. Builds on this blueprint (innovations I1–I12) and the `eval/` lane; start at `cognitive-architecture/README.md`.
+
 ## The one-paragraph summary
 
 MemPalace remembers (lossless verbatim), GBrain organizes (compiled current truth + hybrid retrieval). Mnemosyne keeps both — an immutable, content-addressed evidence ledger plus rebuildable typed projections — and adds what neither has: a truth-maintenance + AGM belief-revision core (clean updates, no silent corruption), git-like branchable memory (reversible by construction), bitemporal "as-of-time" queries, fidelity-tiered forgetting, calibrated confidence with abstention, a dual user model that adapts to you, and a profile-guided loop that improves its own policies — all under a structurally-enforced safety invariant.

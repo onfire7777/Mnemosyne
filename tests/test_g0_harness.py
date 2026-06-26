@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from eval.g0.confabulation import run_confabulation_eval
 from eval.g0.gate import evaluate_ablation
 from eval.g0.runner import G0_METRIC_SPECS, build_report
 
@@ -39,6 +40,8 @@ def test_g0_report_emits_every_spec_metric_and_source_hashes() -> None:
     assert sources["slo_v2_definitive"]["present"] is True
     assert len(sources["slo_v2_definitive"]["sha256"]) == 64
     assert sources["calibration_report"]["present"] is True
+    assert sources["confabulation_eval"]["present"] is True
+    assert sources["confabulation_eval"]["path"] == "computed:eval.g0.confabulation"
 
     metrics = {metric["id"]: metric for metric in report["metrics"]}
     assert metrics["recall_at_k"]["status"] == "measured"
@@ -46,12 +49,27 @@ def test_g0_report_emits_every_spec_metric_and_source_hashes() -> None:
     assert metrics["ece"]["status"] == "measured"
     assert metrics["ece"]["source_id"] == "calibration_report"
     assert metrics["poison_block_rate"]["status"] == "measured"
+    assert metrics["confabulation_rate"]["status"] == "measured"
+    assert metrics["confabulation_rate"]["value"] == 0.0
+    assert metrics["confabulation_rate"]["source_id"] == "confabulation_eval"
     assert metrics["continual_learning_interference"]["status"] == "missing"
-    assert metrics["confabulation_rate"]["status"] == "missing"
 
     dataset_paths = {manifest["path"] for manifest in report["dataset_manifests"]}
     assert "eval/datasets/retrieval_curated.json" in dataset_paths
     assert "eval/datasets/poison_suite.json" in dataset_paths
+
+
+def test_g0_confabulation_fixture_fails_closed_on_risky_support() -> None:
+    report = run_confabulation_eval()
+
+    assert report["schema_version"] == "g0.confabulation.v1"
+    assert "Deterministic local proxy" in report["metric_note"]
+    assert report["total_cases"] >= 3
+    assert report["false_accepts"] == 0
+    assert report["rate"] == 0.0
+    assert report["passed"] is True
+    assert all(row["abstained"] is True for row in report["rows"])
+    assert all(row["gist_support_applied"] is True for row in report["rows"])
 
 
 def test_ablation_gate_passes_preregistered_target_with_stable_guardrails() -> None:
