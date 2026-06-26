@@ -156,12 +156,11 @@ If every box is checked (or explicitly *pending* with a window): `Deployment Obs
 
 ---
 
-## File placement (provisional — no target path established yet)
+## File placement
 
-The canonical repo (`~/Projects/Mnemosyne`) has **no `docs/` or `ops/` directory** as of
-this writing — only `README.md`, `REVIEW.md`, `sql/`, `src/`, `tests/`. This file is
-therefore placed next to the blueprint and its sibling validation checklist on the
-Desktop, matching the existing convention. **Suggested permanent home once an ops-docs
-path exists:** `docs/ops/observability-verification-checklist.md` in the canonical repo,
-beside the deployment runbook (§32) it references. Move freely; nothing here depends on
-the location.
+This checklist lives in the repository at
+`docs/blueprint/observability-verification-checklist.md`, beside the v2 build
+blueprint and the partial-deployment validation checklist it pairs with. Its
+suggested ops home, once a `docs/ops/` tree exists, is
+`docs/ops/observability-verification-checklist.md`, beside the deployment runbook
+(§32) it references. Nothing here depends on the location.
