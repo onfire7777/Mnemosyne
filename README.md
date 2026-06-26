@@ -13,6 +13,16 @@ Mnemosyne (`mnemosyne-memory`, v0.1.0) implements the **Mnemosyne v2 build bluep
 
 ---
 
+## Source Blueprint
+
+The implementation target is the Mnemosyne v2 blueprint. The repo keeps a
+self-contained documentation mirror under [`docs/blueprint/`](docs/blueprint/)
+so GitHub, CI, and future agents can audit implementation claims without
+depending on a local desktop path. On this workstation, that mirror matches the
+planning source in `/Users/admin/Desktop/Mnemosyne`.
+
+---
+
 ## Why Mnemosyne
 
 - **Evidence is immutable; projections are rebuildable.** Beliefs are *compiled* from content-addressed evidence, so retraction, erasure, and re-derivation are first-class — not bolt-ons.
