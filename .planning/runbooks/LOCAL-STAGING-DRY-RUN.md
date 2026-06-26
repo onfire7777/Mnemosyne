@@ -40,7 +40,7 @@ The wrapper enforces the sanctioned operator path:
   passwords
 - verifies manifest coverage for `PRODUCTION_RELEASE_REQUIRED_COMMANDS`
 - runs `deployment-soak --soak-manifest <manifest> --evidence-dir <dir>`
-- runs `release-audit --require-production-validated --require-provider-forbid-local`
+- runs `release-audit --evidence-manifest "$OUT_ROOT/evidence/manifest.json" --require-production-validated --require-provider-forbid-local`
 
 ## Commands Run
 
@@ -91,4 +91,4 @@ This run proves the evidence mechanics against real local services only. The
 operator still must run the production manifest through
 `infra/scripts/capture-production-evidence.sh` against deployed infrastructure,
 with `production_validated=true`, `target_environment="production"`, non-local
-providers, and `release-audit --require-production-validated --require-provider-forbid-local`.
+providers, and `release-audit --evidence-manifest "$OUT_ROOT/evidence/manifest.json" --require-production-validated --require-provider-forbid-local`.

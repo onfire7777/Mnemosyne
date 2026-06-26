@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 
@@ -46,7 +47,11 @@ def test_every_row_runbook_points_to_universal_preflight_capture_flow() -> None:
         assert "`redaction_scan_ok=true`" in text, path
         assert "`bundle-manifest.json`/fingerprint" in text, path
         assert "passing `production-evidence-verify`" in text, path
-        assert "release-audit --require-production-validated --require-provider-forbid-local" in text, path
+        assert (
+            'release-audit --evidence-manifest "$OUT_ROOT/evidence/manifest.json" '
+            "--require-production-validated --require-provider-forbid-local"
+            in text
+        ), path
 
 
 def test_runbook_index_and_ops_handoff_document_preflight_scope() -> None:
@@ -64,7 +69,7 @@ def test_runbook_index_and_ops_handoff_document_preflight_scope() -> None:
         assert "absolute external" in text, path
         assert "outside the repository" in text, path
         assert (
-            "release-audit --require-production-validated --require-provider-forbid-local"
+            "release-audit --evidence-manifest"
             in normalized
         ), path
 
@@ -84,6 +89,25 @@ def test_production_evidence_docs_require_manifest_bound_release_audit() -> None
     assert "source-soak-manifest.json" in runbook_index
     assert "source/operator command-profile" in runbook_index
     assert "release-audit --evidence-manifest" in ops_handoff
+
+
+def test_operator_docs_do_not_use_unbound_production_release_audit() -> None:
+    docs = [
+        REPO / "infra" / "PRODUCTION-EVIDENCE.md",
+        REPO / ".planning" / "OPS-HANDOFF-AND-OWNERSHIP.md",
+        RUNBOOK_DIR / "README.md",
+        RUNBOOK_DIR / "LOCAL-STAGING-DRY-RUN.md",
+        *sorted(RUNBOOK_DIR.glob("row-*.md")),
+    ]
+    unbound_pattern = re.compile(
+        r"release-audit\s+(?![^`\\n]*--evidence-manifest)"
+        r"(?=[^`\\n]*--require-production-validated)"
+        r"(?=[^`\\n]*--require-provider-forbid-local)",
+    )
+
+    for path in docs:
+        text = path.read_text(encoding="utf-8")
+        assert not unbound_pattern.search(text), path
 
 
 def test_production_evidence_input_dir_is_not_capture_output() -> None:
