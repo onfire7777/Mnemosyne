@@ -20,6 +20,9 @@ python eval/run_eval.py
 # Fast smoke run (skips the synthetic + latency-heavy suites)
 python eval/run_eval.py --quick
 
+# G0 cognitive-architecture baseline + ablation gate report
+python -m eval.g0.runner --write-baseline
+
 # Unit + integration tests for the harness itself
 python -m pytest eval/tests/ -v
 ```
