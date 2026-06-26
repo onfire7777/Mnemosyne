@@ -22,6 +22,7 @@ from typing import Any, Callable
 
 from eval.g0.confabulation import run_confabulation_eval
 from eval.g0.continual_learning import run_continual_learning_eval
+from eval.g0.deep_latency import run_deep_latency_eval
 
 G0_METRIC_SPECS: tuple[dict[str, Any], ...] = (
     {
@@ -162,6 +163,7 @@ SOURCE_PATHS = {
 
 DATASET_PATHS = (
     "eval/datasets/continual_learning_interference.json",
+    "eval/datasets/deep_latency.json",
     "eval/datasets/retrieval_curated.json",
     "eval/datasets/poison_suite.json",
     "eval/datasets/belief_cases.json",
@@ -212,6 +214,13 @@ def build_report(
         "confabulation_eval",
         "computed:eval.g0.confabulation",
         confabulation_report,
+    )
+    deep_latency_report = run_deep_latency_eval()
+    sources["deep_latency_eval"] = _computed_source(
+        repo_root,
+        "deep_latency_eval",
+        "computed:eval.g0.deep_latency",
+        deep_latency_report,
     )
     metrics = [_build_metric(spec, sources) for spec in G0_METRIC_SPECS]
     measured = sum(1 for metric in metrics if metric["status"] == "measured")
@@ -341,6 +350,7 @@ def _build_metric(spec: dict[str, Any], sources: dict[str, Source]) -> dict[str,
         "confabulation_rate": _metric_confabulation_rate,
         "poison_block_rate": _metric_poison_block_rate,
         "fast_path_p95_ms": _metric_fast_path_p95,
+        "deep_path_p95_ms": _metric_deep_path_p95,
     }
     base = {
         "id": spec["id"],
@@ -487,6 +497,20 @@ def _metric_fast_path_p95(spec: dict[str, Any], sources: dict[str, Source]) -> d
     warm = sources.get("warm_latency")
     value = _nested(warm.data if warm else None, "components", "engine_fast_path_total", "p95_ms")
     return _measured(spec, value, "warm_latency", "/components/engine_fast_path_total/p95_ms")
+
+
+def _metric_deep_path_p95(spec: dict[str, Any], sources: dict[str, Source]) -> dict[str, Any]:
+    value = _source_data(sources, "deep_latency_eval", "p95_ms")
+    return _measured(
+        spec,
+        value,
+        "deep_latency_eval",
+        "/p95_ms",
+        note=(
+            "Measured by the local G0 deep-search timing fixture over a versioned "
+            "graph-backed corpus; reported-only, not production latency evidence."
+        ),
+    )
 
 
 def _measured(

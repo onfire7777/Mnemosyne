@@ -14,7 +14,7 @@
       "reranker_provider": "cross-encoder/ms-marco-MiniLM-L-6-v2"
     },
     "name": "baseline-0",
-    "pinned_commit": "e45268b4273eb88081c37bb8ef08652ca7cd1f77",
+    "pinned_commit": "8ecb42379b224e30e15dea664e69eba11edad6c8",
     "seeds": {
       "harness_bootstrap_mean": 1234,
       "harness_bootstrap_percentile": 4321,
@@ -32,7 +32,7 @@
     "confabulation_eval": {
       "definition": "False-accept rate on cases where the only support is generated, low-fidelity, or explicitly confabulation-risk provenance.",
       "false_accepts": 0,
-      "generated_at": "2026-06-26T04:44:53.489594+00:00",
+      "generated_at": "2026-06-26T04:54:09.163633+00:00",
       "metric": "confabulation_rate",
       "metric_note": "Deterministic local proxy for the full G0 provenance-entailment and sampled-audit confabulation metric; this proves the live retrieval/abstention rail fails closed on generated or risky support without introducing a network or LLM evaluator.",
       "passed": true,
@@ -102,7 +102,7 @@
       "before_accuracy": 1.0,
       "dataset_path": "/Users/admin/Mnemosyne/eval/datasets/continual_learning_interference.json",
       "definition": "Backward-transfer accuracy drop on earlier task queries after sequentially ingesting later task blocks.",
-      "generated_at": "2026-06-26T04:44:53.488663+00:00",
+      "generated_at": "2026-06-26T04:54:09.162457+00:00",
       "interference": 0.0,
       "metric": "continual_learning_interference",
       "metric_note": "Deterministic local proxy for the full sequential task-block G0 benchmark; this records whether the live LocalMemoryEngine retrieval path retains earlier task accuracy after later overlapping ingests.",
@@ -208,14 +208,164 @@
       "schema_version": "g0.continual_learning.v1",
       "target": 0.0,
       "total_cases": 3
+    },
+    "deep_latency_eval": {
+      "dataset_path": "/Users/admin/Mnemosyne/eval/datasets/deep_latency.json",
+      "definition": "95th-percentile latency for local graph-backed deep-search queries.",
+      "generated_at": "2026-06-26T04:54:09.170265+00:00",
+      "max_ms": 0.696875,
+      "metric": "deep_path_p95_ms",
+      "metric_note": "Local reported-only deep-search timing fixture. It measures the live LocalMemoryEngine deep path over a versioned graph corpus; it is not production infrastructure evidence.",
+      "p50_ms": 0.384417,
+      "p95_ms": 0.696875,
+      "query_count": 15,
+      "rounds": 5,
+      "rows": [
+        {
+          "abstained": true,
+          "duration_ms": 0.696875,
+          "graph_hits": 1,
+          "hit_count": 1,
+          "query": "why does Aurora depend on Zephyr",
+          "query_index": 1,
+          "round": 1
+        },
+        {
+          "abstained": true,
+          "duration_ms": 0.422125,
+          "graph_hits": 1,
+          "hit_count": 1,
+          "query": "how does Borealis connect to Atlas",
+          "query_index": 2,
+          "round": 1
+        },
+        {
+          "abstained": true,
+          "duration_ms": 0.471375,
+          "graph_hits": 1,
+          "hit_count": 1,
+          "query": "what path links Cerulean to Helios",
+          "query_index": 3,
+          "round": 1
+        },
+        {
+          "abstained": true,
+          "duration_ms": 0.384417,
+          "graph_hits": 1,
+          "hit_count": 1,
+          "query": "why does Aurora depend on Zephyr",
+          "query_index": 1,
+          "round": 2
+        },
+        {
+          "abstained": true,
+          "duration_ms": 0.369625,
+          "graph_hits": 1,
+          "hit_count": 1,
+          "query": "how does Borealis connect to Atlas",
+          "query_index": 2,
+          "round": 2
+        },
+        {
+          "abstained": true,
+          "duration_ms": 0.357792,
+          "graph_hits": 1,
+          "hit_count": 1,
+          "query": "what path links Cerulean to Helios",
+          "query_index": 3,
+          "round": 2
+        },
+        {
+          "abstained": true,
+          "duration_ms": 0.356667,
+          "graph_hits": 1,
+          "hit_count": 1,
+          "query": "why does Aurora depend on Zephyr",
+          "query_index": 1,
+          "round": 3
+        },
+        {
+          "abstained": true,
+          "duration_ms": 0.351417,
+          "graph_hits": 1,
+          "hit_count": 1,
+          "query": "how does Borealis connect to Atlas",
+          "query_index": 2,
+          "round": 3
+        },
+        {
+          "abstained": true,
+          "duration_ms": 0.396375,
+          "graph_hits": 1,
+          "hit_count": 1,
+          "query": "what path links Cerulean to Helios",
+          "query_index": 3,
+          "round": 3
+        },
+        {
+          "abstained": true,
+          "duration_ms": 0.522583,
+          "graph_hits": 1,
+          "hit_count": 1,
+          "query": "why does Aurora depend on Zephyr",
+          "query_index": 1,
+          "round": 4
+        },
+        {
+          "abstained": true,
+          "duration_ms": 0.390917,
+          "graph_hits": 1,
+          "hit_count": 1,
+          "query": "how does Borealis connect to Atlas",
+          "query_index": 2,
+          "round": 4
+        },
+        {
+          "abstained": true,
+          "duration_ms": 0.512167,
+          "graph_hits": 1,
+          "hit_count": 1,
+          "query": "what path links Cerulean to Helios",
+          "query_index": 3,
+          "round": 4
+        },
+        {
+          "abstained": true,
+          "duration_ms": 0.364417,
+          "graph_hits": 1,
+          "hit_count": 1,
+          "query": "why does Aurora depend on Zephyr",
+          "query_index": 1,
+          "round": 5
+        },
+        {
+          "abstained": true,
+          "duration_ms": 0.356666,
+          "graph_hits": 1,
+          "hit_count": 1,
+          "query": "how does Borealis connect to Atlas",
+          "query_index": 2,
+          "round": 5
+        },
+        {
+          "abstained": true,
+          "duration_ms": 0.355958,
+          "graph_hits": 1,
+          "hit_count": 1,
+          "query": "what path links Cerulean to Helios",
+          "query_index": 3,
+          "round": 5
+        }
+      ],
+      "schema_version": "g0.deep_latency.v1",
+      "unique_queries": 3
     }
   },
   "coverage": {
     "gate_ready": false,
-    "measured": 11,
-    "missing": 3,
+    "measured": 12,
+    "missing": 2,
     "missing_metric_ids": [
-      "deep_path_p95_ms",
       "cost_usd_per_1k_queries",
       "controller_watts_per_dollar"
     ],
@@ -232,6 +382,16 @@
       "present": true,
       "sha256": "4cf4f3b5db704548dac13caceb79856c9469bc45c77295a46225e838fc756f93",
       "tenant": "g0-continual-learning"
+    },
+    {
+      "bytes": 847,
+      "counts": {
+        "queries": 3
+      },
+      "path": "eval/datasets/deep_latency.json",
+      "present": true,
+      "sha256": "a46ff5575f07eb209375f3f71115804e963ec1aa24fd2d37f472f3709de51c4d",
+      "tenant": "g0-deep-latency"
     },
     {
       "bytes": 3702,
@@ -293,7 +453,7 @@
     "preregistration_required": true,
     "rule": "ship iff a preregistered target metric improves by its margin and no guardrail regresses"
   },
-  "generated_at": "2026-06-26T04:44:53.645922+00:00",
+  "generated_at": "2026-06-26T04:54:09.220010+00:00",
   "headline_slos": {
     "ece": {
       "blueprint_metric": "ECE",
@@ -541,16 +701,16 @@
       "blueprint_metric": "deep-path P95 latency",
       "class": "reported",
       "direction": "decrease",
-      "evidence_path": null,
+      "evidence_path": "/p95_ms",
       "id": "deep_path_p95_ms",
       "label": "deep-path P95 latency",
-      "notes": "No current artifact computes this G0 metric yet.",
+      "notes": "Measured by the local G0 deep-search timing fixture over a versioned graph-backed corpus; reported-only, not production latency evidence.",
       "pass": null,
-      "source_id": null,
-      "status": "missing",
+      "source_id": "deep_latency_eval",
+      "status": "measured",
       "target": null,
       "target_op": null,
-      "value": null
+      "value": 0.696875
     },
     {
       "blueprint_metric": "cost",
@@ -621,18 +781,25 @@
       "sha256": "aee46e3a0908f5e44edff596e1206e6aecc10234c1e24af953f623e929a958a6"
     },
     {
-      "generated_at": "2026-06-26T04:44:53.488663+00:00",
+      "generated_at": "2026-06-26T04:54:09.162457+00:00",
       "id": "continual_learning_eval",
       "path": "computed:eval.g0.continual_learning",
       "present": true,
-      "sha256": "6ab9dac3efb4048479fa457400f7afb2d45da4cd300811f1ebc422bd398ac007"
+      "sha256": "a8506fdfd70e03d032d8b6ec79808b836a508523ac7bee97362f4c65c883b4e4"
     },
     {
-      "generated_at": "2026-06-26T04:44:53.489594+00:00",
+      "generated_at": "2026-06-26T04:54:09.163633+00:00",
       "id": "confabulation_eval",
       "path": "computed:eval.g0.confabulation",
       "present": true,
-      "sha256": "b651497a234c1985fb2cf6ce154c4167319f2ee397d993a354dc3437d651f822"
+      "sha256": "877acca40a05288f0dd2956ad14a7b94b65cd1ee9f2890b0ca0921e331b251fb"
+    },
+    {
+      "generated_at": "2026-06-26T04:54:09.170265+00:00",
+      "id": "deep_latency_eval",
+      "path": "computed:eval.g0.deep_latency",
+      "present": true,
+      "sha256": "9af93c60f66dcaa8fbaa6d4644a7013c89ea8650f76d3d184c1284126f6c71fb"
     }
   ]
 }

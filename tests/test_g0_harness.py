@@ -4,6 +4,7 @@ from pathlib import Path
 
 from eval.g0.confabulation import run_confabulation_eval
 from eval.g0.continual_learning import run_continual_learning_eval
+from eval.g0.deep_latency import run_deep_latency_eval
 from eval.g0.gate import evaluate_ablation
 from eval.g0.runner import G0_METRIC_SPECS, build_report
 
@@ -45,6 +46,8 @@ def test_g0_report_emits_every_spec_metric_and_source_hashes() -> None:
     assert sources["continual_learning_eval"]["path"] == "computed:eval.g0.continual_learning"
     assert sources["confabulation_eval"]["present"] is True
     assert sources["confabulation_eval"]["path"] == "computed:eval.g0.confabulation"
+    assert sources["deep_latency_eval"]["present"] is True
+    assert sources["deep_latency_eval"]["path"] == "computed:eval.g0.deep_latency"
 
     metrics = {metric["id"]: metric for metric in report["metrics"]}
     assert metrics["recall_at_k"]["status"] == "measured"
@@ -58,10 +61,13 @@ def test_g0_report_emits_every_spec_metric_and_source_hashes() -> None:
     assert metrics["confabulation_rate"]["status"] == "measured"
     assert metrics["confabulation_rate"]["value"] == 0.0
     assert metrics["confabulation_rate"]["source_id"] == "confabulation_eval"
-    assert metrics["deep_path_p95_ms"]["status"] == "missing"
+    assert metrics["deep_path_p95_ms"]["status"] == "measured"
+    assert metrics["deep_path_p95_ms"]["value"] > 0.0
+    assert metrics["deep_path_p95_ms"]["source_id"] == "deep_latency_eval"
 
     dataset_paths = {manifest["path"] for manifest in report["dataset_manifests"]}
     assert "eval/datasets/continual_learning_interference.json" in dataset_paths
+    assert "eval/datasets/deep_latency.json" in dataset_paths
     assert "eval/datasets/retrieval_curated.json" in dataset_paths
     assert "eval/datasets/poison_suite.json" in dataset_paths
 
@@ -92,6 +98,17 @@ def test_g0_confabulation_fixture_fails_closed_on_risky_support() -> None:
     assert report["passed"] is True
     assert all(row["abstained"] is True for row in report["rows"])
     assert all(row["gist_support_applied"] is True for row in report["rows"])
+
+
+def test_g0_deep_latency_fixture_records_graph_backed_deep_search() -> None:
+    report = run_deep_latency_eval()
+
+    assert report["schema_version"] == "g0.deep_latency.v1"
+    assert report["query_count"] >= 3
+    assert report["p95_ms"] > 0.0
+    assert report["max_ms"] >= report["p50_ms"]
+    assert "not production infrastructure evidence" in report["metric_note"]
+    assert all(row["graph_hits"] >= 1 for row in report["rows"])
 
 
 def test_ablation_gate_passes_preregistered_target_with_stable_guardrails() -> None:
