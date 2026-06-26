@@ -525,6 +525,7 @@ class LocalMemoryEngine:
             incoming.transaction_time = utc_now()
             requested_status = incoming.status
             incoming.status = "active" if incoming.status == "candidate" else incoming.status
+            self._apply_projection_reality_monitoring(incoming)
             self._apply_schema_fast_path_projection_status(incoming, requested_status=requested_status)
             peers = [
                 item
@@ -544,6 +545,7 @@ class LocalMemoryEngine:
                 winner.source_evidence_cids = sorted(set(winner.source_evidence_cids + incoming.source_evidence_cids))
                 winner.trust_tier = more_trusted(winner.trust_tier, incoming.trust_tier)
                 winner.last_accessed = utc_now()
+                self._apply_projection_reality_monitoring(winner)
                 self._audit(
                     winner.tenant_id,
                     "engine",
@@ -694,6 +696,74 @@ class LocalMemoryEngine:
             schema_fast_path["reason"] = "corroborated_schema_fast_path"
         calibration["schema_fast_path"] = schema_fast_path
         incoming.calibration = calibration
+
+    def _apply_projection_reality_monitoring(self, assertion: Assertion) -> None:
+        calibration = dict(assertion.calibration)
+        monitoring = self._projection_reality_monitoring_for_sources(
+            tenant_id=assertion.tenant_id,
+            branch=assertion.branch,
+            source_evidence_cids=assertion.source_evidence_cids,
+        )
+        calibration["reality_monitoring"] = monitoring
+        calibration["reality_class"] = monitoring["reality_class"]
+        assertion.calibration = calibration
+
+    def _projection_reality_monitoring_for_sources(
+        self,
+        *,
+        tenant_id: str,
+        branch: str,
+        source_evidence_cids: list[str],
+    ) -> dict[str, Any]:
+        classes: dict[str, int] = {}
+        source_classes: dict[str, str] = {}
+        for cid in sorted({str(item) for item in source_evidence_cids if item}):
+            ev = self.evidence.get(self._evidence_key(tenant_id, branch, cid))
+            reality_class = self._classify_evidence_reality(ev) if ev is not None and not ev.erased else "unknown"
+            classes[reality_class] = classes.get(reality_class, 0) + 1
+            source_classes[cid] = reality_class
+        risky = {"self_generated", "simulated", "externally_suggested"}
+        grounded_count = classes.get("grounded", 0)
+        risky_count = sum(classes.get(item, 0) for item in risky)
+        if not source_classes:
+            reality_class = "unknown"
+        elif grounded_count:
+            reality_class = "grounded"
+        elif classes.get("simulated", 0):
+            reality_class = "simulated"
+        elif classes.get("self_generated", 0):
+            reality_class = "self_generated"
+        elif classes.get("externally_suggested", 0):
+            reality_class = "externally_suggested"
+        else:
+            reality_class = "unknown"
+        return {
+            "source": "g1_projection_reality_monitoring",
+            "applied": True,
+            "reality_class": reality_class,
+            "classes": classes,
+            "source_classes": source_classes,
+            "source_count": len(source_classes),
+            "grounded_source_count": grounded_count,
+            "risky_source_count": risky_count,
+            "missing_source_count": classes.get("unknown", 0),
+            "mixed": bool(grounded_count and risky_count),
+        }
+
+    @classmethod
+    def _projection_reality_monitoring_from_calibration(cls, calibration: dict[str, Any]) -> dict[str, Any]:
+        monitoring = calibration.get("reality_monitoring") if isinstance(calibration, dict) else None
+        if isinstance(monitoring, dict):
+            normalized = cls._normalise_reality_class(monitoring.get("reality_class")) or "unknown"
+            return {**monitoring, "reality_class": normalized}
+        normalized = cls._normalise_reality_class(monitoring) or cls._normalise_reality_class(
+            calibration.get("reality_class") if isinstance(calibration, dict) else None
+        )
+        return {
+            "source": "legacy_or_unclassified_projection",
+            "applied": False,
+            "reality_class": normalized or "grounded",
+        }
 
     def add_relation(self, relation: Relation, branch: str = "main") -> str:
         with self._lock:
@@ -1652,6 +1722,7 @@ class LocalMemoryEngine:
                 continue
             if assertion.trust_tier > max_trust or assertion.sensitivity > max_sensitivity:
                 continue
+            reality_monitoring = self._projection_reality_monitoring_from_calibration(assertion.calibration)
             hits.append(
                 Hit(
                     id=assertion.id,
@@ -1667,11 +1738,8 @@ class LocalMemoryEngine:
                     metadata={
                         "status": assertion.status,
                         "confidence": assertion.confidence,
-                        "reality_class": self._normalise_reality_class(
-                            assertion.calibration.get("reality_class")
-                            or assertion.calibration.get("reality_monitoring")
-                        )
-                        or "grounded",
+                        "reality_class": reality_monitoring["reality_class"],
+                        "reality_monitoring": reality_monitoring,
                         "last_accessed": assertion.last_accessed.isoformat() if assertion.last_accessed else None,
                         "access_count": assertion.access_count,
                     },

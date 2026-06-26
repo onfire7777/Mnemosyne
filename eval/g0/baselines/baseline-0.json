@@ -487,12 +487,12 @@
   },
   "coverage": {
     "gate_ready": false,
-    "measured": 13,
+    "measured": 14,
     "missing": 1,
     "missing_metric_ids": [
       "controller_watts_per_dollar"
     ],
-    "total": 14
+    "total": 15
   },
   "dataset_manifests": [
     {
@@ -799,6 +799,21 @@
       "status": "measured",
       "target": 0.0,
       "target_op": "<=",
+      "value": 0.0
+    },
+    {
+      "blueprint_metric": "projection-level reality monitoring",
+      "class": "target",
+      "direction": "increase",
+      "evidence_path": "/recall",
+      "id": "projection_reality_abstention_recall",
+      "label": "projection-reality abstention recall",
+      "notes": "Baseline-0 records the pre-G1 projection behavior: assertion hits did not derive their own reality-monitoring class from source evidence, so projection-level abstention recall is zero.",
+      "pass": false,
+      "source_id": "projection_reality_eval",
+      "status": "measured",
+      "target": 1.0,
+      "target_op": ">=",
       "value": 0.0
     },
     {

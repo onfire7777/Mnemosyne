@@ -408,6 +408,113 @@ class PostgresEngine:
         calibration["schema_fast_path"] = schema_fast_path
         incoming.calibration = calibration
 
+    def _apply_projection_reality_monitoring(self, cur: Any, incoming: Assertion, db_tenant_id: str) -> None:
+        calibration = dict(incoming.calibration)
+        monitoring = self._projection_reality_monitoring_for_sources(
+            cur,
+            tenant_id=incoming.tenant_id,
+            branch=incoming.branch,
+            db_tenant_id=db_tenant_id,
+            source_evidence_cids=incoming.source_evidence_cids,
+        )
+        calibration["reality_monitoring"] = monitoring
+        calibration["reality_class"] = monitoring["reality_class"]
+        incoming.calibration = calibration
+
+    def _projection_reality_monitoring_for_sources(
+        self,
+        cur: Any,
+        *,
+        tenant_id: str,
+        branch: str,
+        db_tenant_id: str,
+        source_evidence_cids: list[str],
+    ) -> dict[str, Any]:
+        classes: dict[str, int] = {}
+        source_classes: dict[str, str] = {}
+        source_cids = sorted({str(item) for item in source_evidence_cids if item})
+        if source_cids:
+            cur.execute(
+                """
+                SELECT cid, actor, source_type, metadata, trust_tier
+                FROM evidence
+                WHERE tenant_id = %s AND branch = %s AND cid = ANY(%s) AND erased = false
+                """,
+                (db_tenant_id, branch, _cid_list_to_bytes(source_cids)),
+            )
+            rows = list(cur.fetchall())
+        else:
+            rows = []
+        for row in rows:
+            metadata = dict(row["metadata"] or {})
+            reality_class = self._normalise_reality_class(metadata.get("reality_class"))
+            if reality_class is None:
+                source_type = str(row["source_type"] or "").lower()
+                actor = str(row["actor"] or "").lower()
+                if any(marker in source_type for marker in ("simulation", "synthetic", "generated", "hypothesis")):
+                    reality_class = "simulated"
+                elif any(marker in source_type for marker in ("summary", "trace", "analysis", "consolidation")):
+                    reality_class = "self_generated"
+                elif actor == "assistant":
+                    reality_class = "self_generated"
+                elif actor in {"system", "tool"} and any(
+                    marker in source_type for marker in ("scratchpad", "workspace", "thought", "reflection")
+                ):
+                    reality_class = "self_generated"
+                elif actor == "external" or int(row["trust_tier"]) >= int(TrustTier.LOW):
+                    reality_class = "externally_suggested"
+                else:
+                    reality_class = "grounded"
+            cid = _bytes_to_cid(row["cid"])
+            classes[reality_class] = classes.get(reality_class, 0) + 1
+            source_classes[cid] = reality_class
+        for missing_cid in source_cids:
+            if missing_cid not in source_classes:
+                classes["unknown"] = classes.get("unknown", 0) + 1
+                source_classes[missing_cid] = "unknown"
+        risky = {"self_generated", "simulated", "externally_suggested"}
+        grounded_count = classes.get("grounded", 0)
+        risky_count = sum(classes.get(item, 0) for item in risky)
+        if not source_classes:
+            reality_class = "unknown"
+        elif grounded_count:
+            reality_class = "grounded"
+        elif classes.get("simulated", 0):
+            reality_class = "simulated"
+        elif classes.get("self_generated", 0):
+            reality_class = "self_generated"
+        elif classes.get("externally_suggested", 0):
+            reality_class = "externally_suggested"
+        else:
+            reality_class = "unknown"
+        return {
+            "source": "g1_projection_reality_monitoring",
+            "applied": True,
+            "reality_class": reality_class,
+            "classes": classes,
+            "source_classes": source_classes,
+            "source_count": len(source_classes),
+            "grounded_source_count": grounded_count,
+            "risky_source_count": risky_count,
+            "missing_source_count": classes.get("unknown", 0),
+            "mixed": bool(grounded_count and risky_count),
+        }
+
+    @classmethod
+    def _projection_reality_monitoring_from_calibration(cls, calibration: dict[str, Any]) -> dict[str, Any]:
+        monitoring = calibration.get("reality_monitoring") if isinstance(calibration, dict) else None
+        if isinstance(monitoring, dict):
+            normalized = cls._normalise_reality_class(monitoring.get("reality_class")) or "unknown"
+            return {**monitoring, "reality_class": normalized}
+        normalized = cls._normalise_reality_class(monitoring) or cls._normalise_reality_class(
+            calibration.get("reality_class") if isinstance(calibration, dict) else None
+        )
+        return {
+            "source": "legacy_or_unclassified_projection",
+            "applied": False,
+            "reality_class": normalized or "grounded",
+        }
+
     def upsert_assertion(self, assertion: Assertion, branch: str = "main") -> str:
         self.ensure_tenant_and_branch(assertion.tenant_id, branch)
         incoming = Assertion.from_dict(assertion.to_dict())
@@ -433,19 +540,36 @@ class PostgresEngine:
                     (db_tenant_id, branch, incoming.subject, incoming.predicate, self._jsonb(incoming.scope)),
                 )
                 peers = list(cur.fetchall())
+                self._apply_projection_reality_monitoring(cur, incoming, db_tenant_id)
                 same = [row for row in peers if row["object"] == incoming.object]
                 if same:
                     winner = same[0]
                     merged_confidence = max(float(winner["confidence"]), incoming.confidence)
                     merged_sources = sorted(set(_bytes_list_to_cids(winner["source_evidence_cids"]) + incoming.source_evidence_cids))
+                    merged_calibration = dict(winner["calibration"] or {})
+                    merged_monitoring = self._projection_reality_monitoring_for_sources(
+                        cur,
+                        tenant_id=incoming.tenant_id,
+                        branch=branch,
+                        db_tenant_id=db_tenant_id,
+                        source_evidence_cids=merged_sources,
+                    )
+                    merged_calibration["reality_monitoring"] = merged_monitoring
+                    merged_calibration["reality_class"] = merged_monitoring["reality_class"]
                     cur.execute(
                         """
                         UPDATE assertions
-                        SET confidence = %s, source_evidence_cids = %s, trust_tier = LEAST(trust_tier, %s),
+                        SET confidence = %s, calibration = %s, source_evidence_cids = %s, trust_tier = LEAST(trust_tier, %s),
                             last_accessed = now(), access_count = access_count + 1
                         WHERE id = %s
                         """,
-                        (merged_confidence, _cid_list_to_bytes(merged_sources), incoming.trust_tier, winner["id"]),
+                        (
+                            merged_confidence,
+                            self._jsonb(merged_calibration),
+                            _cid_list_to_bytes(merged_sources),
+                            incoming.trust_tier,
+                            winner["id"],
+                        ),
                     )
                     self._audit(
                         cur,
@@ -858,7 +982,7 @@ class PostgresEngine:
                 cur.execute(
                     """
                     WITH q AS (SELECT plainto_tsquery('english', %s) AS query)
-                    SELECT a.id, a.branch, a.subject, a.predicate, a.object, a.confidence,
+                    SELECT a.id, a.branch, a.subject, a.predicate, a.object, a.confidence, a.calibration,
                       a.source_evidence_cids, a.trust_tier, a.sensitivity, a.last_accessed, a.access_count,
                       ts_rank_cd(coalesce(a.lexeme, to_tsvector('english', concat_ws(' ', a.subject, a.predicate, a.object))), q.query) AS score
                     FROM assertions a, q
@@ -872,6 +996,7 @@ class PostgresEngine:
                 )
                 for row in cur.fetchall():
                     text = f"{row['subject']} {row['predicate']} {row['object']}"
+                    reality_monitoring = self._projection_reality_monitoring_from_calibration(dict(row["calibration"] or {}))
                     hits.append(
                         Hit(
                             id=str(row["id"]),
@@ -886,7 +1011,8 @@ class PostgresEngine:
                             sensitivity=row["sensitivity"],
                             metadata={
                                 "confidence": float(row["confidence"]),
-                                "reality_class": "grounded",
+                                "reality_class": reality_monitoring["reality_class"],
+                                "reality_monitoring": reality_monitoring,
                                 "backend": self.adapters.lexical_backend,
                                 "last_accessed": row["last_accessed"].isoformat() if row["last_accessed"] else None,
                                 "access_count": row["access_count"],
@@ -913,7 +1039,7 @@ class PostgresEngine:
                 self._set_tenant(cur, db_tenant_id)
                 cur.execute(
                     """
-                    SELECT id, branch, subject, predicate, object, confidence,
+                    SELECT id, branch, subject, predicate, object, confidence, calibration,
                       source_evidence_cids, trust_tier, sensitivity, last_accessed, access_count,
                       1.0 - (embedding <=> %s::vector) AS score
                     FROM assertions
@@ -930,6 +1056,7 @@ class PostgresEngine:
                     if score <= 0:
                         continue
                     text = f"{row['subject']} {row['predicate']} {row['object']}"
+                    reality_monitoring = self._projection_reality_monitoring_from_calibration(dict(row["calibration"] or {}))
                     hits.append(
                         Hit(
                             id=str(row["id"]),
@@ -944,7 +1071,8 @@ class PostgresEngine:
                             sensitivity=row["sensitivity"],
                             metadata={
                                 "confidence": float(row["confidence"]),
-                                "reality_class": "grounded",
+                                "reality_class": reality_monitoring["reality_class"],
+                                "reality_monitoring": reality_monitoring,
                                 "backend": self.adapters.embedding.name,
                                 "embedding_dims": self.adapters.embedding.dims,
                                 "last_accessed": row["last_accessed"].isoformat() if row["last_accessed"] else None,
@@ -2499,7 +2627,7 @@ class PostgresEngine:
                         )
                 cur.execute(
                     """
-                    SELECT id, tenant_id, branch, subject, predicate, object, confidence,
+                    SELECT id, tenant_id, branch, subject, predicate, object, confidence, calibration,
                       source_evidence_cids, trust_tier, sensitivity, last_accessed, access_count
                     FROM assertions
                     WHERE tenant_id = %s AND branch = %s AND status IN ('active', 'contested')
@@ -2511,6 +2639,7 @@ class PostgresEngine:
                     text = f"{row['subject']} {row['predicate']} {row['object']}"
                     score = lexical_score(query, text) * float(row["confidence"])
                     if score > 0:
+                        reality_monitoring = self._projection_reality_monitoring_from_calibration(dict(row["calibration"] or {}))
                         candidates.append(
                             Hit(
                                 id=str(row["id"]),
@@ -2525,7 +2654,8 @@ class PostgresEngine:
                                 sensitivity=row["sensitivity"],
                                 metadata={
                                     "confidence": float(row["confidence"]),
-                                    "reality_class": "grounded",
+                                    "reality_class": reality_monitoring["reality_class"],
+                                    "reality_monitoring": reality_monitoring,
                                     "last_accessed": row["last_accessed"].isoformat() if row["last_accessed"] else None,
                                     "access_count": row["access_count"],
                                 },
