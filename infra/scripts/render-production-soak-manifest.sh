@@ -114,6 +114,21 @@ if not template_path.is_file():
 
 template_text = template_path.read_text(encoding="utf-8")
 required = sorted(set(placeholder_re.findall(template_text)))
+validation_categories = [
+    "required_placeholders_present",
+    "rendered_manifest_has_no_unresolved_placeholders",
+    "production_validation_scope",
+    "frozen_command_profile",
+    "external_input_artifact_custody",
+    "external_c2pa_tool",
+    "operator_capture_and_offline_verify",
+]
+next_steps = [
+    "Copy infra/templates/production-render.env.example outside the repo and fill every MNEMOSYNE_PROD_* value.",
+    "Set MNEMOSYNE_PROD_EVIDENCE_DIR to an absolute external directory containing the listed production input artifacts.",
+    "Re-run infra/scripts/render-production-soak-manifest.sh --check-environment until ok=true.",
+    "Render with --output to an external path, run infra/scripts/capture-production-evidence.sh, then verify the bundle with production-evidence-verify.",
+]
 
 if list_placeholders:
     print(json.dumps({"template": str(template_path), "placeholders": required}, indent=2))
@@ -129,8 +144,11 @@ if check_environment:
         "present": present,
         "missing": missing,
         "values_redacted": True,
+        "validation_categories": validation_categories,
+        "next_steps": next_steps,
     }
     if missing:
+        payload["blocked_reason"] = "missing_required_environment"
         print(json.dumps(payload, indent=2))
         raise SystemExit(78)
 
@@ -504,7 +522,11 @@ if check_environment:
         "missing_input_artifacts": missing_input_artifacts,
         "input_artifact_errors": input_artifact_errors,
         "input_artifacts_complete": not missing_input_artifacts and not input_artifact_errors,
+        "validation_categories": validation_categories,
+        "next_steps": next_steps,
     }
+    if missing_input_artifacts or input_artifact_errors:
+        payload["blocked_reason"] = "missing_or_invalid_input_artifacts"
     print(json.dumps(payload, indent=2))
     if missing_input_artifacts or input_artifact_errors:
         raise SystemExit(78)
