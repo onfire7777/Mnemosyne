@@ -58,6 +58,6 @@ the structured wave results. The injection is not present in any committed file 
 ## The remaining path to full 1:1 parity
 The mandatory Tier A source reconciliation list is now closed and locally/clean-Postgres verified.
 Full 1:1 parity now reduces to Tier B production operator evidence: run the existing
-`deployment-soak --evidence-dir` and `release-audit --require-production-validated --require-provider-forbid-local` path against real
+`deployment-soak --evidence-dir` and `release-audit --evidence-manifest "$OUT_ROOT/evidence/manifest.json" --require-production-validated --require-provider-forbid-local` path against real
 deployed infrastructure, then re-run the strict parity audit and sign off v1.0. Optional FR-20/FR-21
 work remains outside the mandatory v1.0 source-wiring list unless the final audit raises it.

@@ -22,7 +22,7 @@ good release artifact.
 7. Run `infra/scripts/capture-production-evidence.sh "$SOAK_MANIFEST" "$OUT_ROOT"`;
    `OUT_ROOT` must be a new or empty absolute external custody path outside the
    repository, and the capture wrapper writes the production bundle there.
-8. Require `release-audit --require-production-validated --require-provider-forbid-local` to pass before
+8. Require `release-audit --evidence-manifest "$OUT_ROOT/evidence/manifest.json" --require-production-validated --require-provider-forbid-local` to pass before
    declaring the rollback accepted.
 
 ## Canary-Abort Procedure
@@ -122,7 +122,7 @@ fingerprints stay bound.
 
 Rollback drills are accepted only when captured by
 `infra/scripts/capture-production-evidence.sh` and accepted by
-`release-audit --require-production-validated --require-provider-forbid-local`.
+`release-audit --evidence-manifest "$OUT_ROOT/evidence/manifest.json" --require-production-validated --require-provider-forbid-local`.
 
 Local tests and compose smoke runs can prove mechanics, but they do not replace
 operator-captured production rollback evidence.
@@ -135,4 +135,4 @@ operator-captured production rollback evidence.
 - Gate commands rerun after the revert.
 - Redaction applied to tokens, keys, raw prompts, documents, queries, and
   credentials.
-- `release-audit --require-production-validated --require-provider-forbid-local` passes over the bundle.
+- `release-audit --evidence-manifest "$OUT_ROOT/evidence/manifest.json" --require-production-validated --require-provider-forbid-local` passes over the bundle.

@@ -54,6 +54,8 @@ The G1 seed is a confidence-bearing discriminator that tags each representation 
 
 The initial implementation is deterministic and provenance/source based. A learned discriminator may replace the scorer only if it keeps the same output contract and passes the preregistered G0 target-up / guardrail-not-down gate. This supports HOT-2 and the anti-hallucination mechanism: unknown, self-generated, or externally suggested support must flow into abstention unless grounded evidence is present.
 
+Runtime retrieval reports include these calibrated monitor labels under `explain.reality_monitoring.shadow_tags` with `shadow_only=true` and `critical_path=false`. Existing abstention still keys off the established grounded/support rails until a future gated promotion explicitly changes that contract.
+
 ## 4. Interoceptive Proto-Self
 
 The proto-self is a shadow service that models internal operating state:

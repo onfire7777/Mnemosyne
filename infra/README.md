@@ -98,7 +98,7 @@ open ./infra/PRODUCTION-EVIDENCE.md
 retrieval-provider metadata reporting, and C2PA trust verification. It does not
 prove live ParadeDB/AGE/pgvector retrieval and does not claim production
 validation; production parity still requires operator-captured
-`release-audit --require-production-validated --require-provider-forbid-local` evidence against deployed
+`release-audit --evidence-manifest "$OUT_ROOT/evidence/manifest.json" --require-production-validated --require-provider-forbid-local` evidence against deployed
 infrastructure.
 
 For production Tier-B evidence, render the production soak manifest outside the
@@ -145,7 +145,7 @@ unscannable retained artifacts, and non-empty output roots; and requires the
 exact production release command profile, with no missing,
 duplicate, or unknown commands, before running `deployment-soak --evidence-dir`
 followed by
-`release-audit --require-production-validated --require-provider-forbid-local`.
+`release-audit --evidence-manifest "$OUT_ROOT/evidence/manifest.json" --require-production-validated --require-provider-forbid-local`.
 The deployment evidence manifest binds its report and check artifacts with
 SHA-256 digests; release-audit verifies those digests, rejects artifact paths
 that resolve outside the evidence bundle, and confirms retained check JSON

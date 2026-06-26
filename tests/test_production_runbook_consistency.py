@@ -92,12 +92,21 @@ def test_production_evidence_docs_require_manifest_bound_release_audit() -> None
 
 
 def test_operator_docs_do_not_use_unbound_production_release_audit() -> None:
+    phase_dir = REPO / ".planning" / "phases" / "06-exact-blueprint-runtime-parity"
     docs = [
         REPO / "infra" / "PRODUCTION-EVIDENCE.md",
+        REPO / "infra" / "README.md",
+        REPO / "docs" / "ROADMAP-TO-100.md",
+        REPO / "docs" / "STATE-OF-COMPLETION.md",
         REPO / ".planning" / "OPS-HANDOFF-AND-OWNERSHIP.md",
+        REPO / ".planning" / "PARTIAL-ITEMS-KEY-SCHEMA.md",
+        REPO / ".planning" / "ROADMAP.md",
+        REPO / ".planning" / "ROLLBACK.md",
+        REPO / ".planning" / "STATE.md",
         RUNBOOK_DIR / "README.md",
         RUNBOOK_DIR / "LOCAL-STAGING-DRY-RUN.md",
         *sorted(RUNBOOK_DIR.glob("row-*.md")),
+        *sorted(phase_dir.glob("06-*.md")),
     ]
     unbound_pattern = re.compile(
         r"release-audit\s+(?![^`\\n]*--evidence-manifest)"
@@ -108,6 +117,7 @@ def test_operator_docs_do_not_use_unbound_production_release_audit() -> None:
     for path in docs:
         text = path.read_text(encoding="utf-8")
         assert not unbound_pattern.search(text), path
+        assert '--evidence-manifest "/evidence/manifest.json"' not in text, path
 
 
 def test_production_evidence_input_dir_is_not_capture_output() -> None:

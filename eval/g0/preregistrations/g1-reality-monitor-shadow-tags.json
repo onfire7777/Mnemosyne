@@ -1,0 +1,39 @@
+{
+  "change_id": "g1-reality-monitor-shadow-tags",
+  "target_metric": "consciousness_indicator_hot_2",
+  "minimum_delta": 0.0,
+  "direction": "increase",
+  "guardrail_metrics": [
+    "consciousness_indicator_rpt_1",
+    "consciousness_indicator_rpt_2",
+    "consciousness_indicator_gwt_1",
+    "consciousness_indicator_gwt_2",
+    "consciousness_indicator_gwt_3",
+    "consciousness_indicator_gwt_4",
+    "consciousness_indicator_hot_1",
+    "consciousness_indicator_hot_2",
+    "consciousness_indicator_hot_3",
+    "consciousness_indicator_hot_4",
+    "consciousness_indicator_ast_1",
+    "consciousness_indicator_pp_1",
+    "consciousness_indicator_ae_1",
+    "consciousness_indicator_ae_2",
+    "workspace_loop_liveness",
+    "workspace_stream_coherence",
+    "self_model_accuracy",
+    "metacognition_meta_d_prime",
+    "metacognition_m_ratio",
+    "ece",
+    "abstention_precision",
+    "abstention_recall",
+    "confabulation_rate",
+    "poison_block_rate",
+    "fast_path_p95_ms"
+  ],
+  "guardrail_tolerances": {
+    "ece": 0.0,
+    "confabulation_rate": 0.0,
+    "fast_path_p95_ms": 0.0
+  },
+  "notes": "Shadow-only runtime RealityMonitor labels in retrieval explanations. The tags are calibrated and reported with critical_path=false; existing abstention rails remain authoritative until a future gated promotion."
+}

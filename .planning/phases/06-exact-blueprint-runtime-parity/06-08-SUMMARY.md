@@ -42,4 +42,4 @@ Completed the 06-08 local-staging dry-run checkpoint.
 
 - This is staging proof only. The 10 strict audit rows remain Partial until the
   operator runs production evidence capture against deployed infrastructure with
-  `production_validated=true` and `release-audit --require-production-validated --require-provider-forbid-local`.
+  `production_validated=true` and `release-audit --evidence-manifest "$OUT_ROOT/evidence/manifest.json" --require-production-validated --require-provider-forbid-local`.
