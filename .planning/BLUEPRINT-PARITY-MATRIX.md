@@ -1,16 +1,18 @@
 # Mnemosyne — Blueprint Parity Matrix
 
 **Maintained by:** AUX-DOCS lane (traceability synthesis). **This is a read-and-track artifact, not a spec.**
-**Date:** 2026-06-23 (last full sync; for the final 2026-06-24 status defer to the strict parity audit cited below) · **Repo:** `~/Projects/Mnemosyne` (canonical) → `github.com/onfire7777/Mnemosyne`.
+**Date:** 2026-06-26 sync note over 2026-06-23 traceability matrix; current repo root: `/Users/admin/Mnemosyne` → `github.com/onfire7777/Mnemosyne`.
 **Goal it serves:** exact 1:1 parity with `Mnemosyne-v2-Build-Blueprint.md` (§1–§38 + Appendices A–E).
 
 > **Supersession note (2026-06-25):** this matrix is retained as a traceability
 > synthesis. The current status source is
 > `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md` plus `.planning/STATE.md` and
-> `docs/ROADMAP-TO-100.md`. Older rows below that describe ECE/G2 as failing or
+> `docs/ROADMAP-TO-100.md`. Older rows below that describe ECE/G2 as failing,
+> Tier-A rails as open, or
 > operator-deferred are superseded by the 2026-06-24/25 updates: mandatory Tier A
 > wirings are closed, all 6 headline SLOs are proven locally/compose, and the
-> remaining 10 rows are Tier B operator production-evidence blockers.
+> remaining local work is to keep proof artifacts current while Tier B operator
+> production-evidence rows remain the blocking parity class.
 
 ## Purpose & method
 
@@ -141,9 +143,9 @@ several carry production-evidence gates (release-audit / provider-check / OIDC-J
 | §30.3 belief revision | `belief` | ✅ | ADD/UPDATE/SUPERSEDE/NOOP/CONTEST + TMS cascade. |
 | §30.4 retrieval fast path | `retrieval`, `engine` | 🟡 | #29 cheap classifier `route()` vs hardcoded `deep` bool. |
 | §30.5 consolidation worker | `consolidation` | ✅ | candidate-until-gate; `projection_recompute`. |
-| §30.6 promotion gate + branches | `gate`, `engine` | ✅ (🟡) | #19 counterfactual replay not wired into gate. |
+| §30.6 promotion gate + branches | `gate`, `engine` | ✅ | Counterfactual replay scorer is wired into the gate surface; cold-loop promotion remains rail-gated. |
 | §30.7 agent-facing API / MCP tools | `mcp_tools`, `mcp_server`, `cli` | ✅ | Every blueprint-named tool in TOOL_SPEC; CLI parity. **No parity gaps (CC-MCP).** |
-| §31 configuration & invariant rails | `policy`, `security`, `config/drift-baseline.toml` | 🟡 | #22 pin §31 numeric rail VALUES as live config-drift constants (AUX-DOCS×CC-LS). |
+| §31 configuration & invariant rails | `policy`, `security`, `config/drift-baseline.toml` | ✅ | Numeric rail values are mirrored by config drift tests; remaining evidence gaps are operator-run Tier B, not missing local constants. |
 | §33 testing & eval harness | `eval`, `benchmarks`, `tests/` | 🟡 | #10 recall@k/nDCG, #21 ECE/poison-block/TTL-lift metrics. |
 
 ---
@@ -317,27 +319,27 @@ The code seam exists and the deterministic local behavior is correct and tested;
 
 ---
 
-## 13. Remaining open parity checklist (authoritative — AUX-XREF, from completion-tree `xfail(strict)` markers)
+## 13. Historical Tier-A checklist status
 
-The only blueprint gaps still genuinely open (suite otherwise green; operator-evidence excluded). Each has a built-in acceptance signal: wire the `src` enforcement and the strict-xfail flips to **XPASS** (then remove the xfail note). Owning lane in brackets — these are *not* AUX-DOCS items; this matrix tracks them.
+This section is no longer the authoritative open-gap list. It is retained to
+prevent older `xfail(strict)` notes from reopening closed Tier-A work. The
+current open status is controlled by `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md`,
+`.planning/STATE.md`, and `docs/ROADMAP-TO-100.md`.
 
-| Open item | Rail / ref | Wire (src) — lane | Acceptance marker |
-|---|---|---|---|
-| `min_corroboration_for_delete=2` gate on hard-delete | §31 RAIL-2 / FR-8 / OQ6 | `engine.forget` + `postgres_engine.forget` HARD_DELETE_LEGAL — [CC-RT/B1 + CC-PG/B4] | `tests/completion/erasure/test_corroborated_erasure.py` + `tests/completion/rails` |
-| consolidation cadence bound (≤5 steps OR 24h) | §21 | `consolidation` — [CC-BC/B12] | `tests/completion/rails/test_consolidation_cadence_bounds.py` |
-| supersession-rate 0.05 pass-level rail | §31 | belief/consolidation — [CC-BC/B12] | `tests/completion/rails/test_supersession_rate.py` |
-| recompute memo / dirty-check substrate (memo_hit_rate=0) | I6 / OQ3 | consolidation/belief — [CC-BC/B12] | `eval/benches/bench_oq3` |
-| ACT-R power-law demotion (currently `exp(-age/45)`) | OQ4 (low-pri) | `lifecycle.py` — [CC-BC/B12] | — |
-| untrusted→system_prompt pass-level rail | §27 / I11 | `security` — [CC-SEC/B10] | `tests/completion/rails/test_untrusted_to_system_prompt.py` |
-| JWKS `enc`-key rejection (real `src` bug) | §27 (live-evidence deferred) | `oidc_jwks.py` — [CC-SEC/B10] | `infra` `validate-keycloak.sh` fails-closed |
-| counterfactual-replay scorer attached to gate hook by default | I12 / §30.6 | self_optimization/gate — [CC-LS/B2] | OQ2 'cf term wired into gate' → True |
+| Historical item | Current status | Acceptance signal |
+|---|---|---|
+| `min_corroboration_for_delete=2` gate on hard-delete | Closed locally | `tests/completion/erasure/test_corroborated_erasure.py` + `tests/completion/rails` |
+| consolidation cadence bound (≤5 steps OR 24h) | Closed locally | `tests/completion/rails/test_consolidation_cadence_bounds.py` |
+| supersession-rate 0.05 pass-level rail | Closed locally | `tests/completion/rails/test_supersession_rate.py` |
+| recompute memo / dirty-check substrate | Closed locally | projection recompute fingerprint/memo path; strict audit and state updates |
+| ACT-R power-law demotion | Closed locally | `OperatingPolicy.actr_decay` + lifecycle coverage |
+| untrusted→system_prompt pass-level rail | Closed locally | `tests/completion/rails/test_untrusted_to_system_prompt.py` |
+| JWKS `enc`-key rejection | Closed locally; live IdP evidence still Tier B | Keycloak/OIDC interop coverage + ops validation surface |
+| counterfactual-replay scorer attached to gate hook | Closed locally | `replay_predicted_lift` surfaced by promotion gate/runtime tests |
 
-**Superseded headline-SLO note:** the older ECE/G2 operator-deferral language is
-historical. Current controlling docs record recall, nDCG, G2 lift, poison block,
-warm P95, and ECE as proven. Do not use this matrix section to reopen Tier A SLO
-work; only production-scale operator reruns remain under Tier B.
-
-Re-verification: ping Builder 7 to re-check any item once its enforcement is wired.
+**Current blocker class:** Tier B operator production evidence. Do not use this
+historical matrix section to reopen closed Tier-A code work; use the strict audit
+and roadmap for remaining real-infrastructure captures.
 
 ---
 

@@ -88,8 +88,11 @@ def test_g1_reality_monitoring_accepts_evidence_grounded_alias() -> None:
     assert result.hits[0].id == cid
     assert result.explain["reality_monitoring"]["classes"]["grounded"] >= 1
     assert result.explain["reality_monitoring"]["ungrounded_only"] is False
-    assert result.explain["reality_monitoring"]["shadow_only"] is True
-    assert result.explain["reality_monitoring"]["critical_path"] is False
+    assert result.explain["reality_monitoring"]["shadow_only"] is False
+    assert result.explain["reality_monitoring"]["critical_path"] is True
+    assert result.explain["reality_monitoring"]["abstention_gate"]["critical_path"] is True
+    assert result.explain["reality_monitoring"]["shadow_tags_shadow_only"] is True
+    assert result.explain["reality_monitoring"]["shadow_tags_critical_path"] is False
     shadow_tag = result.explain["reality_monitoring"]["shadow_tags"][cid]
     assert shadow_tag["reality_class"] == "evidence_grounded"
     assert shadow_tag["calibrated"] is True
@@ -98,7 +101,8 @@ def test_g1_reality_monitoring_accepts_evidence_grounded_alias() -> None:
         "postgresql://example.invalid/mnemosyne",
     )._reality_monitoring_report(result.hits)
     assert postgres_report["shadow_tags"][cid]["reality_class"] == "evidence_grounded"
-    assert postgres_report["critical_path"] is False
+    assert postgres_report["critical_path"] is True
+    assert postgres_report["shadow_tags_critical_path"] is False
 
 
 def test_g1_projection_reality_monitoring_abstains_on_self_generated_assertion() -> None:

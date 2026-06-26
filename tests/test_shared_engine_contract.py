@@ -723,31 +723,24 @@ def test_shared_engine_contract_deep_search_abstains_on_summary_derived_graph_su
     )
     summary = next(item for item in summary_run.pass_results if item["name"] == "summarizer")["details"]
 
-    # Withhold the raw source so only the generated gist summary and its
-    # summary-derived-gist provenance relation remain reachable. This is the
-    # exact condition the abstention rail guards: when the original source is
-    # unavailable and only gist-tier support is retrievable, deep_search must
-    # abstain. The trust filter alone does not exclude the tier-0 raw source
-    # (min_trust_tier maps to max_trust, which keeps it), so without withholding
-    # it the raw source stays retrievable and can non-deterministically win a
-    # context-budget slot, making the rail fire only by luck.
+    # Withhold the raw source so only the generated gist summary remains
+    # reachable. The graph relation is source-backed by the withheld evidence and
+    # must now be suppressed by the graph trust boundary, while the gist summary
+    # still forces abstention.
     engine.update_evidence_metadata(
         tenant, raw_cid, {"quarantine_reason": "source-withheld-for-gist-contract"}
     )
 
     result = engine.deep_search(raw_cid, tenant, filt={"min_trust_tier": 2})
-    relation_hit = next(hit for hit in result.hits if hit.kind == "relation")
+    relation_hits = [hit for hit in result.hits if hit.kind == "relation"]
 
     assert result.hits
     assert any(hit.id == summary["summary_cid"] for hit in result.hits)
-    assert relation_hit.metadata["predicate"] == "summary-derived-gist"
-    assert relation_hit.metadata["source"] == raw_cid
-    assert relation_hit.metadata["target"] == summary["summary_cid"]
-    assert raw_cid in relation_hit.metadata["source_evidence_cids"]
+    assert relation_hits == []
     assert result.abstained is True
     assert result.uncertainty_note == "Only gist-tier memory support was retrieved; inspect source evidence before answering."
     assert result.explain["gist_support"]["applied"] is True
-    assert set(result.explain["gist_support"]["gist_hit_ids"]) == {summary["summary_cid"], relation_hit.id}
+    assert result.explain["gist_support"]["gist_hit_ids"] == [summary["summary_cid"]]
 
 
 def test_shared_engine_contract_abstains_on_trace_or_confabulation_risk_support(

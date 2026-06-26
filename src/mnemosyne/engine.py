@@ -174,6 +174,7 @@ class MemoryEngine(Protocol):
         tenant_id: str | None = None,
         branch: str | None = None,
         use_cache: bool = False,
+        filt: dict[str, Any] | None = None,
     ) -> list[Hit]:
         raise NotImplementedError
 
@@ -911,6 +912,7 @@ class LocalMemoryEngine:
         tenant_id: str | None = None,
         branch: str | None = None,
         use_cache: bool = False,
+        filt: dict[str, Any] | None = None,
     ) -> list[Hit]:
         seed_set = {seed.lower() for seed in seeds}
         if not seed_set:
@@ -933,13 +935,18 @@ class LocalMemoryEngine:
                 adapter_name="graph",
             )
             return self._mark_retrieved_text_as_data(hits)
+        graph_filter = dict(filt or {})
+        include_quarantined = bool(graph_filter.get("include_quarantined", False))
+        default_max_trust = int(TrustTier.UNTRUSTED_EXTERNAL) if include_quarantined else self.policy.max_trust_tier
+        max_trust = int(graph_filter.get("max_trust_tier", graph_filter.get("min_trust_tier", default_max_trust)))
+        max_sensitivity = int(graph_filter.get("max_sensitivity", self.policy.max_sensitivity))
 
         def matches_seed(node: str) -> bool:
             node_lower = node.lower()
             return node_lower in seed_set or bool(set(tokenize(node_lower)) & seed_set)
 
         adjacency: dict[str, set[str]] = defaultdict(set)
-        relation_by_pair: dict[tuple[str, str], Relation] = {}
+        relation_by_pair: dict[tuple[str, str], tuple[Relation, dict[str, Any]]] = {}
         for rel in self.relations.values():
             if tenant_id is not None and rel.tenant_id != tenant_id:
                 continue
@@ -947,10 +954,19 @@ class LocalMemoryEngine:
                 continue
             if not self._valid_at(rel.valid_from, rel.valid_to, moment):
                 continue
+            security = self._relation_hit_security(
+                rel,
+                branch=rel.branch,
+                include_quarantined=include_quarantined,
+                max_trust=max_trust,
+                max_sensitivity=max_sensitivity,
+            )
+            if security is None:
+                continue
             adjacency[rel.source.lower()].add(rel.target.lower())
             adjacency[rel.target.lower()].add(rel.source.lower())
-            relation_by_pair[(rel.source.lower(), rel.target.lower())] = rel
-            relation_by_pair[(rel.target.lower(), rel.source.lower())] = rel
+            relation_by_pair[(rel.source.lower(), rel.target.lower())] = (rel, security)
+            relation_by_pair[(rel.target.lower(), rel.source.lower())] = (rel, security)
         ranks = {node: (1.0 if matches_seed(node) else 0.0) for node in adjacency}
         for seed in seed_set:
             ranks.setdefault(seed, 1.0)
@@ -967,8 +983,9 @@ class LocalMemoryEngine:
         for node, score in sorted(ranks.items(), key=lambda item: item[1], reverse=True):
             if matches_seed(node) or score <= 0:
                 continue
-            rel = next((relation_by_pair[pair] for pair in relation_by_pair if pair[0] == node or pair[1] == node), None)
-            if rel:
+            relation_row = next((relation_by_pair[pair] for pair in relation_by_pair if pair[0] == node or pair[1] == node), None)
+            if relation_row:
+                rel, security = relation_row
                 hits.append(
                     Hit(
                         id=rel.id,
@@ -979,12 +996,17 @@ class LocalMemoryEngine:
                         score=score,
                         channel="graph_ppr",
                         provenance=rel.source_evidence_cids,
+                        trust_tier=security["trust_tier"],
+                        sensitivity=security["sensitivity"],
                         metadata={
                             "source": rel.source,
                             "predicate": rel.predicate,
                             "target": rel.target,
                             "confidence": rel.confidence,
                             "source_evidence_cids": list(rel.source_evidence_cids),
+                            "reality_class": security["reality_class"],
+                            "source_evidence_status": security["source_evidence_status"],
+                            "source_evidence_security": security["source_evidence_security"],
                         },
                     )
                 )
@@ -998,7 +1020,11 @@ class LocalMemoryEngine:
         k = self.policy.deep_top_k if deep else self.policy.top_k
         dense = self.vector_search(query, self.policy.rerank_width, effective_filter)
         lexical = self.lexical_search(query, self.policy.rerank_width, effective_filter)
-        graph = self.graph_ppr(tokenize(query), max(4, k // 2), tenant_id=tenant_id, branch=branch) if deep else []
+        graph = (
+            self.graph_ppr(tokenize(query), max(4, k // 2), tenant_id=tenant_id, branch=branch, filt=effective_filter)
+            if deep
+            else []
+        )
         fused = self._rrf([dense, lexical, graph], k=max(k * 2, self.policy.rerank_width))
         reranked = self.adapters.reranker.rerank(query, fused, k=max(k * 2, k))
         reranked, schema_fast_path = schema_fast_path_rerank(query, reranked, self.policy)
@@ -1252,6 +1278,73 @@ class LocalMemoryEngine:
             return "externally_suggested"
         return "grounded"
 
+    def _relation_hit_security(
+        self,
+        relation: Relation,
+        *,
+        branch: str,
+        include_quarantined: bool,
+        max_trust: int,
+        max_sensitivity: int,
+    ) -> dict[str, Any] | None:
+        source_cids = [cid for cid in relation.source_evidence_cids if cid]
+        if not source_cids:
+            return {
+                "trust_tier": 0,
+                "sensitivity": 0,
+                "reality_class": "unknown",
+                "source_evidence_status": "no_source_evidence",
+                "source_evidence_security": [],
+            }
+
+        source_rows: list[Evidence] = []
+        for cid in source_cids:
+            ev = self.evidence.get(self._evidence_key(relation.tenant_id, branch, cid))
+            if ev is None or ev.erased:
+                return None
+            if not include_quarantined and ev.metadata.get("quarantine_reason"):
+                return None
+            if is_retired_summary_metadata(ev.metadata):
+                return None
+            source_rows.append(ev)
+
+        trust_tier = max(int(ev.trust_tier) for ev in source_rows)
+        sensitivity = max(int(ev.sensitivity) for ev in source_rows)
+        if trust_tier > max_trust or sensitivity > max_sensitivity:
+            return None
+
+        reality_classes = [self._classify_evidence_reality(ev) for ev in source_rows]
+        return {
+            "trust_tier": trust_tier,
+            "sensitivity": sensitivity,
+            "reality_class": self._aggregate_reality_classes(reality_classes),
+            "source_evidence_status": "source_evidence_visible",
+            "source_evidence_security": [
+                {
+                    "cid": ev.cid,
+                    "trust_tier": int(ev.trust_tier),
+                    "sensitivity": int(ev.sensitivity),
+                    "reality_class": self._classify_evidence_reality(ev),
+                }
+                for ev in source_rows
+            ],
+        }
+
+    @staticmethod
+    def _aggregate_reality_classes(classes: list[str]) -> str:
+        normalized = [item for item in classes if item]
+        if not normalized:
+            return "unknown"
+        if "grounded" in normalized:
+            return "grounded"
+        if "self_generated" in normalized:
+            return "self_generated"
+        if "simulated" in normalized:
+            return "simulated"
+        if "externally_suggested" in normalized:
+            return "externally_suggested"
+        return "unknown"
+
     def _reality_monitoring_report(self, hits: list[Hit]) -> dict[str, Any]:
         risky = {"self_generated", "simulated", "externally_suggested"}
         ungrounded = risky | {"unknown"}
@@ -1282,9 +1375,17 @@ class LocalMemoryEngine:
             "grounded_source_count": len(grounded_cids),
             "risky_hit_ids": risky_hit_ids,
             "ungrounded_only": ungrounded_only,
-            "shadow_only": True,
-            "critical_path": False,
+            "shadow_only": False,
+            "critical_path": True,
+            "abstention_gate": {
+                "critical_path": True,
+                "shadow_only": False,
+                "trigger": "ungrounded_only",
+                "active": ungrounded_only,
+            },
             "shadow_source": "RealityMonitor",
+            "shadow_tags_shadow_only": True,
+            "shadow_tags_critical_path": False,
             "shadow_tags": shadow_tags,
         }
 

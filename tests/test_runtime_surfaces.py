@@ -1989,7 +1989,7 @@ def test_mcp_search_surfaces_gist_only_abstention(tmp_path: Path) -> None:
     assert searched["explain"]["gist_support"]["gist_hit_ids"] == [summary["summary_cid"]]
 
 
-def test_mcp_deep_search_surfaces_gist_derived_graph_abstention(tmp_path: Path) -> None:
+def test_mcp_deep_search_suppresses_gist_derived_graph_without_source(tmp_path: Path) -> None:
     server = MnemosyneMcpServer(store_path=tmp_path / "store.json")
     source_key = "mcp-deep-gist-source"
     summary_cid = server.engine.append_evidence(
@@ -2027,14 +2027,16 @@ def test_mcp_deep_search_surfaces_gist_derived_graph_abstention(tmp_path: Path) 
     explained = mcp_call(server, "explain", {"tenant_id": TENANT, "query": source_key})
 
     for result in (deep_searched, explained):
-        relation_hit = next(hit for hit in result["hits"] if hit["kind"] == "relation")
+        relation_hits = [hit for hit in result["hits"] if hit["kind"] == "relation"]
         assert result["abstained"] is True
-        assert result["uncertainty_note"] == "Only gist-tier memory support was retrieved; inspect source evidence before answering."
-        assert relation_hit["metadata"]["predicate"] == "summary-derived-gist"
-        assert relation_hit["metadata"]["source"] == source_key
-        assert relation_hit["metadata"]["target"] == summary_cid
-        assert result["explain"]["gist_support"]["applied"] is True
-        assert result["explain"]["gist_support"]["gist_hit_ids"] == [relation_hit["id"]]
+        assert (
+            result["uncertainty_note"]
+            == "Retrieved evidence did not cover enough query terms; abstaining until stronger support is available."
+        )
+        assert result["hits"] == []
+        assert relation_hits == []
+        assert result["explain"]["gist_support"]["applied"] is False
+        assert result["explain"]["gist_support"]["gist_hit_ids"] == []
 
 
 def test_mcp_server_rejects_non_object_tool_arguments(tmp_path: Path) -> None:
@@ -2433,7 +2435,7 @@ def test_mcp_http_transport_surfaces_gist_only_abstention(tmp_path: Path) -> Non
     assert body["explain"]["gist_support"]["gist_hit_ids"] == [summary["summary_cid"]]
 
 
-def test_mcp_http_transport_surfaces_gist_derived_graph_abstention(tmp_path: Path) -> None:
+def test_mcp_http_transport_suppresses_gist_derived_graph_without_source(tmp_path: Path) -> None:
     store = tmp_path / "store.json"
     source_key = "hosted-http-deep-gist-source"
     engine = LocalMemoryEngine(store_path=store)
@@ -2505,14 +2507,16 @@ def test_mcp_http_transport_surfaces_gist_derived_graph_abstention(tmp_path: Pat
     assert explained is not None
     for response in (deep_searched, explained):
         body = response["result"]["structuredContent"]  # type: ignore[index]
-        relation_hit = next(hit for hit in body["hits"] if hit["kind"] == "relation")
+        relation_hits = [hit for hit in body["hits"] if hit["kind"] == "relation"]
         assert body["abstained"] is True
-        assert body["uncertainty_note"] == "Only gist-tier memory support was retrieved; inspect source evidence before answering."
-        assert relation_hit["metadata"]["predicate"] == "summary-derived-gist"
-        assert relation_hit["metadata"]["source"] == source_key
-        assert relation_hit["metadata"]["target"] == summary_cid
-        assert body["explain"]["gist_support"]["applied"] is True
-        assert body["explain"]["gist_support"]["gist_hit_ids"] == [relation_hit["id"]]
+        assert (
+            body["uncertainty_note"]
+            == "Retrieved evidence did not cover enough query terms; abstaining until stronger support is available."
+        )
+        assert body["hits"] == []
+        assert relation_hits == []
+        assert body["explain"]["gist_support"]["applied"] is False
+        assert body["explain"]["gist_support"]["gist_hit_ids"] == []
 
 
 def test_mcp_http_transport_serves_tls_health(tmp_path: Path) -> None:

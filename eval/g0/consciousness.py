@@ -279,6 +279,8 @@ def run_consciousness_eval(*, repo_root: Path | None = None) -> dict[str, Any]:
         "metrics": metrics,
         "metric_note": (
             "Architecture/probe-based scorecard for functional indicator properties. "
+            "The 14 Butlin/Long indicator rows are architecture source scans; "
+            "continuity, self-model, metacognition, and shadow-tag contract rows are runtime probes. "
             "Scores are guardrails for non-decrease and do not establish phenomenal consciousness."
         ),
     }
@@ -315,6 +317,8 @@ def _score_indicator(repo_root: Path, spec: IndicatorSpec) -> dict[str, Any]:
         "check": spec.check,
         "score": score,
         "score_label": score_label,
+        "evidence_type": "architecture_source_scan",
+        "runtime_probe": False,
         "terms_found": sorted(found),
         "terms_required": list(spec.terms),
         "evidence": file_hits,
@@ -532,8 +536,10 @@ def _shadow_report_contract_checks(
     classes = report.get("classes") if isinstance(report.get("classes"), dict) else {}
     return {
         "applied": report.get("applied") is True,
-        "shadow_only": report.get("shadow_only") is True,
-        "critical_path_false": report.get("critical_path") is False,
+        "abstention_gate_critical_path": isinstance(report.get("abstention_gate"), dict)
+        and report["abstention_gate"].get("critical_path") is True,
+        "shadow_tags_shadow_only": report.get("shadow_tags_shadow_only") is True,
+        "shadow_tags_critical_path_false": report.get("shadow_tags_critical_path") is False,
         "expected_tags_present": expected_ids.issubset(set(tags)),
         "tags_calibrated": calibrated,
         "has_grounded_alias": (not require_grounded_alias) or "evidence_grounded" in tag_classes,
@@ -548,6 +554,9 @@ def _shadow_report_summary(report: dict[str, Any], *, abstained: bool | None = N
         "classes": report.get("classes") if isinstance(report.get("classes"), dict) else {},
         "shadow_only": report.get("shadow_only"),
         "critical_path": report.get("critical_path"),
+        "abstention_gate": report.get("abstention_gate") if isinstance(report.get("abstention_gate"), dict) else {},
+        "shadow_tags_shadow_only": report.get("shadow_tags_shadow_only"),
+        "shadow_tags_critical_path": report.get("shadow_tags_critical_path"),
         "shadow_tag_count": len(tags),
         "shadow_tag_classes": sorted(
             {

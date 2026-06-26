@@ -55,7 +55,7 @@ The G1 seed is a confidence-bearing discriminator that tags each representation 
 
 The initial implementation is deterministic and provenance/source based. A learned discriminator may replace the scorer only if it keeps the same output contract and passes the preregistered G0 target-up / guardrail-not-down gate. This supports HOT-2 and the anti-hallucination mechanism: unknown, self-generated, or externally suggested support must flow into abstention unless grounded evidence is present.
 
-Runtime retrieval reports include these calibrated monitor labels under `explain.reality_monitoring.shadow_tags` with `shadow_only=true` and `critical_path=false`. Existing abstention still keys off the established grounded/support rails until a future gated promotion explicitly changes that contract.
+Runtime retrieval reports include these calibrated monitor labels under `explain.reality_monitoring.shadow_tags` with `shadow_tags_shadow_only=true` and `shadow_tags_critical_path=false`. The abstention gate that consumes the derived `ungrounded_only` rail is explicitly reported as critical path under `explain.reality_monitoring.abstention_gate`; the learned/shadow tag details remain advisory until a future gated promotion explicitly changes that contract.
 The G0 metric `reality_monitor_shadow_tag_contract` exercises the local retrieval path and the Postgres report contract to verify calibrated shadow tags, evidence-grounded alias handling, and non-critical-path status.
 
 ## 4. Interoceptive Proto-Self
