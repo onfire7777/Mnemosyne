@@ -1398,6 +1398,48 @@ def test_shared_engine_contract_postgres_cached_ppr_is_default_off_and_equivalen
     assert signature(cached_after_change) == signature(recursive_after_change)
 
 
+def test_shared_engine_contract_postgres_cached_ppr_invalidates_source_custody_change(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, user = engine_bundle
+    if not isinstance(engine, PostgresEngine):
+        pytest.skip("cached PPR is a Postgres materialization path")
+    cid = _append_evidence(
+        engine,
+        tenant,
+        user,
+        "Cached graph PPR custody source links a materialized seed to its target.",
+    )
+    seed = f"cached ppr custody seed {uuid4()}"
+    relation_id = engine.add_relation(
+        Relation(
+            tenant_id=tenant,
+            source=seed,
+            predicate="points_to",
+            target="cached ppr custody target",
+            source_evidence_cids=[cid],
+            access_policy={"tenant": tenant},
+        )
+    )
+
+    refresh = engine.refresh_graph_ppr_cache([seed], 5, tenant_id=tenant, branch="main")
+    cached_before = engine.graph_ppr([seed], 5, tenant_id=tenant, branch="main", use_cache=True)
+    updated = engine.update_evidence_metadata(
+        tenant,
+        cid,
+        {"quarantine_reason": "cache custody regression"},
+        branch="main",
+    )
+    live_after = engine.graph_ppr([seed], 5, tenant_id=tenant, branch="main")
+    cached_after = engine.graph_ppr([seed], 5, tenant_id=tenant, branch="main", use_cache=True)
+
+    assert refresh["refreshed"] is True
+    assert relation_id in {hit.id for hit in cached_before}
+    assert updated is True
+    assert relation_id not in {hit.id for hit in live_after}
+    assert [hit.id for hit in cached_after] == [hit.id for hit in live_after]
+
+
 def test_shared_engine_contract_postgres_cached_ppr_requires_sufficient_depth(
     engine_bundle: tuple[Any, str, str],
 ) -> None:
@@ -1503,12 +1545,14 @@ def test_shared_engine_contract_direct_primitives_honor_k_limit(engine_bundle: t
 
 
 def test_shared_engine_contract_graph_ppr_skips_expired_relations_by_default(engine_bundle: tuple[Any, str, str]) -> None:
-    engine, tenant, _user = engine_bundle
+    engine, tenant, user = engine_bundle
     now = datetime.now(UTC)
     expired_from = now - timedelta(days=3)
     expired_to = now - timedelta(days=2)
     active_from = now - timedelta(days=1)
     seed = f"temporal seed {uuid4()}"
+    expired_cid = _append_evidence(engine, tenant, user, "Expired graph relation backing evidence.")
+    active_cid = _append_evidence(engine, tenant, user, "Active graph relation backing evidence.")
     expired_id = engine.add_relation(
         Relation(
             tenant_id=tenant,
@@ -1517,6 +1561,7 @@ def test_shared_engine_contract_graph_ppr_skips_expired_relations_by_default(eng
             target="expired graph target",
             valid_from=expired_from,
             valid_to=expired_to,
+            source_evidence_cids=[expired_cid],
             access_policy={"tenant": tenant},
         )
     )
@@ -1527,6 +1572,7 @@ def test_shared_engine_contract_graph_ppr_skips_expired_relations_by_default(eng
             predicate="active_edge",
             target="active graph target",
             valid_from=active_from,
+            source_evidence_cids=[active_cid],
             access_policy={"tenant": tenant},
         )
     )

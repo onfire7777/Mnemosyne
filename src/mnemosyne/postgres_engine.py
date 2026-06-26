@@ -1243,6 +1243,7 @@ class PostgresEngine:
         default_max_trust = int(TrustTier.UNTRUSTED_EXTERNAL) if include_quarantined else self.policy.max_trust_tier
         max_trust = int(graph_filter.get("max_trust_tier", graph_filter.get("min_trust_tier", default_max_trust)))
         max_sensitivity = int(graph_filter.get("max_sensitivity", self.policy.max_sensitivity))
+        db_tenant_id = _stable_uuid("tenant", tenant_id)
         if self.adapters.graph_retriever is not None:
             hits = self.adapters.graph_retriever.search(
                 seeds,
@@ -1250,6 +1251,7 @@ class PostgresEngine:
                 branch=branch,
                 k=k,
                 as_of=moment,
+                filt=graph_filter,
             )
             hits = validate_adapter_hit_scope(
                 hits,
@@ -1258,8 +1260,15 @@ class PostgresEngine:
                 k=k,
                 adapter_name="graph",
             )
+            hits = self._filter_graph_adapter_hits(
+                hits,
+                db_tenant_id=db_tenant_id,
+                branch=branch,
+                include_quarantined=include_quarantined,
+                max_trust=max_trust,
+                max_sensitivity=max_sensitivity,
+            )
             return self._mark_retrieved_text_as_data(hits)
-        db_tenant_id = _stable_uuid("tenant", tenant_id)
         if use_cache:
             cached_hits = self._read_graph_ppr_cache(
                 seed_set=seed_set,
@@ -1269,6 +1278,9 @@ class PostgresEngine:
                 branch=branch,
                 moment=moment,
                 as_of=as_of,
+                include_quarantined=include_quarantined,
+                max_trust=max_trust,
+                max_sensitivity=max_sensitivity,
             )
             if cached_hits is not None:
                 return self._mark_retrieved_text_as_data(cached_hits)
@@ -1439,7 +1451,16 @@ class PostgresEngine:
         branch: str,
         moment: datetime,
         as_of: datetime | None,
+        include_quarantined: bool,
+        max_trust: int,
+        max_sensitivity: int,
     ) -> list[Hit] | None:
+        if (
+            include_quarantined
+            or max_trust != int(self.policy.max_trust_tier)
+            or max_sensitivity != int(self.policy.max_sensitivity)
+        ):
+            return None
         relation_fingerprint = self._graph_ppr_relation_fingerprint(db_tenant_id, branch, moment)
         seed_hash = _graph_ppr_seed_hash(seed_set)
         as_of_key = _graph_ppr_as_of_key(as_of, moment)
@@ -1484,6 +1505,24 @@ class PostgresEngine:
                     (db_tenant_id, branch, moment, moment),
                 )
                 rows = cur.fetchall()
+                source_cid_bytes: set[bytes] = set()
+                for row in rows:
+                    for cid_value in row.get("source_evidence_cids") or []:
+                        raw = cid_value.tobytes() if isinstance(cid_value, memoryview) else cid_value
+                        if raw:
+                            source_cid_bytes.add(bytes(raw))
+                evidence_by_cid: dict[str, dict[str, Any]] = {}
+                if source_cid_bytes:
+                    cur.execute(
+                        """
+                        SELECT cid, trust_tier, sensitivity, metadata, erased, source_type, actor
+                        FROM evidence
+                        WHERE tenant_id = %s AND branch = %s AND cid = ANY(%s::bytea[])
+                        ORDER BY cid
+                        """,
+                        (db_tenant_id, branch, sorted(source_cid_bytes)),
+                    )
+                    evidence_by_cid = {_bytes_to_cid(row["cid"]): dict(row) for row in cur.fetchall()}
         payload = [
             {
                 "id": str(row["id"]),
@@ -1495,6 +1534,21 @@ class PostgresEngine:
                 "valid_from": dt_to_json(row["valid_from"]),
                 "valid_to": dt_to_json(row["valid_to"]),
                 "source_evidence_cids": _bytes_list_to_cids(row["source_evidence_cids"]),
+                "source_evidence_custody": [
+                    {
+                        "cid": cid,
+                        "present": cid in evidence_by_cid,
+                        "trust_tier": int(evidence_by_cid[cid].get("trust_tier") or 0) if cid in evidence_by_cid else None,
+                        "sensitivity": int(evidence_by_cid[cid].get("sensitivity") or 0) if cid in evidence_by_cid else None,
+                        "metadata": dict(evidence_by_cid[cid].get("metadata") or {}) if cid in evidence_by_cid else None,
+                        "erased": bool(evidence_by_cid[cid].get("erased")) if cid in evidence_by_cid else None,
+                        "source_type": str(evidence_by_cid[cid].get("source_type") or "")
+                        if cid in evidence_by_cid
+                        else None,
+                        "actor": str(evidence_by_cid[cid].get("actor") or "") if cid in evidence_by_cid else None,
+                    }
+                    for cid in _bytes_list_to_cids(row["source_evidence_cids"])
+                ],
             }
             for row in rows
         ]
@@ -1904,6 +1958,91 @@ class PostgresEngine:
             return "externally_suggested"
         return "grounded"
 
+    @staticmethod
+    def _hit_source_evidence_cids(hit: Hit) -> list[str]:
+        raw = hit.metadata.get("source_evidence_cids")
+        if isinstance(raw, list | tuple):
+            return [str(cid) for cid in raw if str(cid)]
+        if isinstance(raw, str) and raw:
+            return [raw]
+        return [str(cid) for cid in hit.provenance if str(cid)]
+
+    def _filter_graph_adapter_hits(
+        self,
+        hits: list[Hit],
+        *,
+        db_tenant_id: str,
+        branch: str,
+        include_quarantined: bool,
+        max_trust: int,
+        max_sensitivity: int,
+    ) -> list[Hit]:
+        relation_source_cids: set[str] = set()
+        source_cids_by_hit: dict[str, list[str]] = {}
+        for hit in hits:
+            if hit.kind != "relation":
+                continue
+            source_cids = self._hit_source_evidence_cids(hit)
+            source_cids_by_hit[hit.id] = source_cids
+            relation_source_cids.update(source_cids)
+
+        evidence_by_cid: dict[str, dict[str, Any]] = {}
+        if relation_source_cids:
+            source_cid_bytes = [
+                cid_bytes
+                for cid in sorted(relation_source_cids)
+                if (cid_bytes := _cid_bytes_or_none(cid)) is not None
+            ]
+            try:
+                with self.connect() as conn:
+                    with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                        self._set_tenant(cur, db_tenant_id)
+                        cur.execute(
+                            """
+                            SELECT cid, trust_tier, sensitivity, metadata, erased, source_type, actor
+                            FROM evidence
+                            WHERE tenant_id = %s AND branch = %s AND cid = ANY(%s::bytea[])
+                            """,
+                            (db_tenant_id, branch, source_cid_bytes),
+                        )
+                        evidence_by_cid = {_bytes_to_cid(row["cid"]): dict(row) for row in cur.fetchall()}
+            except PostgresUnavailableError:
+                evidence_by_cid = {}
+            except self._psycopg.Error:
+                evidence_by_cid = {}
+
+        filtered: list[Hit] = []
+        for hit in hits:
+            if hit.kind != "relation":
+                if hit.trust_tier <= max_trust and hit.sensitivity <= max_sensitivity:
+                    filtered.append(hit)
+                continue
+            source_cids = source_cids_by_hit.get(hit.id, [])
+            source_cid_bytes = [
+                cid_bytes for cid in source_cids if (cid_bytes := _cid_bytes_or_none(cid)) is not None
+            ]
+            security = self._relation_hit_security_from_rows(
+                {"source_evidence_cids": source_cid_bytes},
+                evidence_by_cid,
+                include_quarantined=include_quarantined,
+                max_trust=max_trust,
+                max_sensitivity=max_sensitivity,
+            )
+            if security is None:
+                continue
+            hit.trust_tier = int(security["trust_tier"])
+            hit.sensitivity = int(security["sensitivity"])
+            hit.provenance = list(source_cids)
+            hit.metadata = {
+                **hit.metadata,
+                "source_evidence_cids": list(source_cids),
+                "source_evidence_status": security["source_evidence_status"],
+                "source_evidence_security": security["source_evidence_security"],
+                "reality_class": security["reality_class"],
+            }
+            filtered.append(hit)
+        return filtered
+
     def _relation_hit_security_from_rows(
         self,
         relation: dict[str, Any],
@@ -1915,13 +2054,7 @@ class PostgresEngine:
     ) -> dict[str, Any] | None:
         source_cids = _bytes_list_to_cids(relation.get("source_evidence_cids"))
         if not source_cids:
-            return {
-                "trust_tier": 0,
-                "sensitivity": 0,
-                "reality_class": "unknown",
-                "source_evidence_status": "no_source_evidence",
-                "source_evidence_security": [],
-            }
+            return None
 
         source_rows: list[tuple[str, dict[str, Any], dict[str, Any]]] = []
         for cid in source_cids:

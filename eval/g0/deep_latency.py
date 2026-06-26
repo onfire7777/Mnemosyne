@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from mnemosyne.engine import LocalMemoryEngine
-from mnemosyne.models import Relation
+from mnemosyne.models import Evidence, Relation
 
 
 DEFAULT_DATASET_PATH = Path(__file__).resolve().parents[1] / "datasets" / "deep_latency.json"
@@ -29,13 +29,24 @@ def run_deep_latency_eval(dataset_path: Path | None = None) -> dict[str, Any]:
     tenant = dataset["tenant"]
     engine = LocalMemoryEngine()
     for relation in dataset["relations"]:
+        cid = engine.append_evidence(
+            Evidence(
+                tenant_id=tenant,
+                user_id="g0-deep-latency",
+                actor="user",
+                source_type="eval-fixture",
+                content=f"{relation['source']} {relation['predicate']} {relation['target']}.",
+                trust_tier=0,
+                access_policy={"tenant": tenant},
+            )
+        )
         engine.add_relation(
             Relation(
                 tenant_id=tenant,
                 source=relation["source"],
                 predicate=relation["predicate"],
                 target=relation["target"],
-                source_evidence_cids=[],
+                source_evidence_cids=[cid],
                 access_policy={"tenant": tenant},
             )
         )

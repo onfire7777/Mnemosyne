@@ -442,6 +442,7 @@ class GraphRetriever(Protocol):
         branch: str,
         k: int,
         as_of: datetime | None = None,
+        filt: Mapping[str, object] | None = None,
     ) -> list[Hit]:
         """Return graph hits for tenant-scoped seed terms."""
 
@@ -813,6 +814,7 @@ class CommandGraphRetriever:
         branch: str,
         k: int,
         as_of: datetime | None = None,
+        filt: Mapping[str, object] | None = None,
     ) -> list[Hit]:
         payload: dict[str, object] = {
             "role": "graph_ppr",
@@ -820,6 +822,7 @@ class CommandGraphRetriever:
             "tenant_id": tenant_id,
             "branch": branch,
             "k": k,
+            "filter": dict(filt or {}),
         }
         if as_of is not None:
             payload["as_of"] = as_of.isoformat()

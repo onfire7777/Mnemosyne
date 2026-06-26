@@ -164,6 +164,7 @@ class _AdapterParityLexicalRetriever:
 class _AdapterParityGraphRetriever:
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
+        self.source_evidence_cids: list[str] = []
 
     def search(
         self,
@@ -173,6 +174,7 @@ class _AdapterParityGraphRetriever:
         branch: str,
         k: int,
         as_of: datetime | None = None,
+        filt: dict[str, Any] | None = None,
     ) -> list[Hit]:
         self.calls.append(
             {
@@ -181,6 +183,7 @@ class _AdapterParityGraphRetriever:
                 "branch": branch,
                 "k": k,
                 "as_of_present": as_of is not None,
+                "filter": dict(filt or {}),
             }
         )
         return [
@@ -192,7 +195,12 @@ class _AdapterParityGraphRetriever:
                 text="Configured graph adapter returns the jade beacon relation.",
                 score=0.91,
                 channel="command_graph_ppr",
-                metadata={"backend": "apache-age", "command_retrieval": True},
+                provenance=list(self.source_evidence_cids),
+                metadata={
+                    "backend": "apache-age",
+                    "command_retrieval": True,
+                    "source_evidence_cids": list(self.source_evidence_cids),
+                },
             )
         ]
 
@@ -530,6 +538,30 @@ def test_parity_graph_ppr_filters_relation_source_trust_boundary() -> None:
     assert local["permissive_source_security"][0]["trust_tier"] == 5
 
 
+def test_parity_graph_ppr_suppresses_unbacked_relations() -> None:
+    harness = _harness("relation-unbacked")
+
+    def scenario(engine: Any, tenant: str, _user: str) -> dict[str, Any]:
+        relation_id = engine.add_relation(
+            Relation(
+                tenant_id=tenant,
+                source="unbacked seed",
+                predicate="points_to",
+                target="unbacked target",
+                source_evidence_cids=[],
+                access_policy={"tenant": tenant},
+            )
+        )
+        hits = engine.graph_ppr(["unbacked seed"], 5, tenant_id=tenant, branch="main")
+        return {
+            "relation_id": relation_id,
+            "relation_ids": sorted(hit.id for hit in hits if hit.kind == "relation"),
+        }
+
+    local = harness.run("graph_ppr_unbacked_relation", scenario)
+    assert local["relation_id"] not in local["relation_ids"]
+
+
 def test_parity_deep_search_abstains_on_self_generated_graph_relation() -> None:
     harness = _harness("relation-reality")
 
@@ -578,6 +610,12 @@ def test_parity_graph_ppr_skips_expired_relations() -> None:
 
     def scenario(engine: Any, tenant: str, user: str) -> dict[str, Any]:
         seed = "temporal seed"
+        expired_cid = engine.append_evidence(
+            _evidence(tenant, user, "Expired temporal graph relation backing evidence.")
+        )
+        active_cid = engine.append_evidence(
+            _evidence(tenant, user, "Active temporal graph relation backing evidence.")
+        )
         engine.add_relation(
             Relation(
                 tenant_id=tenant,
@@ -586,6 +624,7 @@ def test_parity_graph_ppr_skips_expired_relations() -> None:
                 target="expired target",
                 valid_from=now - timedelta(days=3),
                 valid_to=now - timedelta(days=2),
+                source_evidence_cids=[expired_cid],
                 access_policy={"tenant": tenant},
             )
         )
@@ -596,6 +635,7 @@ def test_parity_graph_ppr_skips_expired_relations() -> None:
                 predicate="active_edge",
                 target="active target",
                 valid_from=now - timedelta(days=1),
+                source_evidence_cids=[active_cid],
                 access_policy={"tenant": tenant},
             )
         )
@@ -768,6 +808,10 @@ def test_parity_retrieve_with_configured_lexical_graph_adapters_enabled() -> Non
         lexical: _AdapterParityLexicalRetriever,
         graph: _AdapterParityGraphRetriever,
     ) -> dict[str, Any]:
+        adapter_source_cid = engine.append_evidence(
+            _evidence(tenant, user, "Adapter graph relation is backed by visible source evidence.")
+        )
+        graph.source_evidence_cids = [adapter_source_cid]
         engine.append_evidence(_evidence(tenant, user, "Native fallback evidence should not hide adapter retrieval."))
 
         direct_lexical = engine.lexical_search(
@@ -814,6 +858,8 @@ def test_parity_retrieve_with_configured_lexical_graph_adapters_enabled() -> Non
             "graph_called": bool(graph.calls),
             "lexical_filter_tenant": lexical.calls[0]["filter"].get("tenant_id") if lexical.calls else None,
             "graph_as_of_present": graph.calls[0]["as_of_present"] if graph.calls else None,
+            "graph_filter_tenant_seen": any(call["filter"].get("tenant_id") == tenant for call in graph.calls),
+            "graph_source_status": graph_hits[0].metadata.get("source_evidence_status") if graph_hits else None,
             "retrieved_text_marked_data": all(
                 marker.get("instruction_authority") == "none" for marker in retrieved_text_markers
             ),
@@ -841,6 +887,8 @@ def test_parity_retrieve_with_configured_lexical_graph_adapters_enabled() -> Non
     assert local["graph_called"] is True
     assert local["lexical_filter_tenant"] == tenant
     assert local["graph_as_of_present"] is True
+    assert local["graph_filter_tenant_seen"] is True
+    assert local["graph_source_status"] == "source_evidence_visible"
     assert local["retrieved_text_marked_data"] is True
     assert local["retrieved_text_has_data_role"] is True
 

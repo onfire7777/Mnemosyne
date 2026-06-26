@@ -26,6 +26,8 @@ Take the best mechanisms of human memory and the latest memory science, make eac
 
 New readers: 00 → 01 → 02 → 03 → 04 → 06. Implementers start at 03 (decision), 04 (gate), then 06 (scorecard and workspace addendum).
 
+Operational handoff: `CODEX-HANDOFF.md` records the verified repo root, current implementation status, and next safe work queue. It is not a normative design document.
+
 ## Non‑negotiables (apply to every doc and every gate)
 
 1. **Reliability is the invariant.** No change ships if it regresses faithfulness, calibration, or a §31 rail.
