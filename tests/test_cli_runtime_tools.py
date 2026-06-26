@@ -6050,6 +6050,36 @@ def test_cli_production_evidence_verify_rejects_tampered_operator_manifest(tmp_p
     assert "bundle_fingerprint_mismatch" not in codes
 
 
+def test_cli_production_evidence_verify_rejects_tampered_source_soak_manifest(tmp_path: Path) -> None:
+    bundle_dir, _bundle_fingerprint = write_production_evidence_bundle(tmp_path)
+    source_manifest_path = bundle_dir / "source-soak-manifest.json"
+    source_manifest = json.loads(source_manifest_path.read_text(encoding="utf-8"))
+    source_manifest["validation_scope"]["operator_asserted"] = False
+    source_manifest["checks"] = source_manifest["checks"][:-1]
+    source_manifest_path.write_text(
+        json.dumps(source_manifest, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    rewrite_production_bundle_manifest(bundle_dir)
+
+    result = run_raw_cli(
+        tmp_path / "verify-store.json",
+        "production-evidence-verify",
+        str(bundle_dir),
+    )
+    payload = json.loads(result.stdout)
+    codes = {finding["code"] for finding in payload["findings"]}
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert payload["checks"]["source_soak_manifest"] is False
+    assert "source_soak_manifest_attestation_missing" in codes
+    assert "source_soak_manifest_required_commands_missing" in codes
+    assert "source_manifest_command_profile_mismatch" in codes
+    assert "bundle_file_sha256_mismatch" not in codes
+    assert "bundle_fingerprint_mismatch" not in codes
+
+
 def test_cli_production_evidence_verify_rejects_tampered_deployment_soak_manifest(tmp_path: Path) -> None:
     bundle_dir, _bundle_fingerprint = write_production_evidence_bundle(tmp_path)
     wrong_manifest_path = tmp_path / "outside" / "operator-soak-manifest.json"
