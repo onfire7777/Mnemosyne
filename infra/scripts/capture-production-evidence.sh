@@ -171,7 +171,11 @@ from mnemosyne.evidence_redaction import (  # noqa: E402
 
 manifest_path = Path(os.environ["MANIFEST_PATH"])
 out_root = Path(os.environ["OUT_ROOT"])
-manifest_text = manifest_path.read_text(encoding="utf-8")
+try:
+    manifest_text = manifest_path.read_text(encoding="utf-8")
+except (OSError, UnicodeDecodeError) as exc:
+    print(f"ERROR: production soak manifest cannot be read: {exc}", file=sys.stderr)
+    sys.exit(65)
 unresolved_placeholders = sorted(set(re.findall(r"MNEMOSYNE_PROD_[A-Z0-9_]+", manifest_text)))
 if unresolved_placeholders or "MNEMOSYNE_PROD_" in manifest_text:
     print(
@@ -205,7 +209,11 @@ if manifest_findings:
     )
     sys.exit(65)
 
-manifest = json.loads(manifest_text)
+try:
+    manifest = json.loads(manifest_text)
+except json.JSONDecodeError as exc:
+    print(f"ERROR: production soak manifest is not valid JSON: {exc}", file=sys.stderr)
+    sys.exit(65)
 
 scope = manifest.get("validation_scope", {})
 if not isinstance(scope, dict):

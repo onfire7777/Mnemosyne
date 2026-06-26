@@ -80,20 +80,20 @@ This is the **bulk of the remaining percentage** and the universal blocker on al
 | # | Parity row | Real infra to stand up | Canonical capture |
 |---|---|---|---|
 | B1 | Production Postgres retrieval | Deployed **ParadeDB BM25** + **Apache AGE** graph + **pgvector** + reranker adapters | Full 28-command production manifest via `infra/PRODUCTION-EVIDENCE.md`; row signal: `retrieval-ops-check` evidence bundle |
-| B2 | Tenant isolation & auth | Live **Keycloak** IdP/JWKS now passes locally; still needs production IdP/JWKS, **Vault** session-secret custody/rotation, **KMS** key provider, TLS cert lifecycle | Full 28-command production manifest via `infra/PRODUCTION-EVIDENCE.md`; row signals: `auth-ops-check`, `tls-lifecycle-ops-check` |
-| B3 | CLI/MCP runtime | Official **StreamableHTTP/SSE** transport + stateless soak on a real deployed endpoint | Full 28-command production manifest via `infra/PRODUCTION-EVIDENCE.md`; row signal: hosted MCP soak evidence |
-| B4 | Embedding/reranker providers | Real **embedding + cross-encoder + image/audio embedding** endpoints behind the HTTP adapter boundary | Full 28-command production manifest via `infra/PRODUCTION-EVIDENCE.md`; row signal: `provider-check` |
-| B5 | Entity resolution | Real deployed **entity-resolver** behind the command boundary | Full 28-command production manifest via `infra/PRODUCTION-EVIDENCE.md`; row signal: `provider-check` |
-| B6 | Consolidation model providers | Real **extractor + summarizer** model deployments with prompt-boundary enforcement | Full 28-command production manifest via `infra/PRODUCTION-EVIDENCE.md`; row signal: `provider-check` |
-| B7 | Provenance (FR-19) | Real **C2PA trust-root** validation (c2patool PASS locally; needs deployed trust roots) | Full 28-command production manifest via `infra/PRODUCTION-EVIDENCE.md`; row signal: privacy/provenance evidence |
-| B8 | Parametric (FR-21) | Isolated **LoRA / test-time-training** deployment + protected-suite + production rollback (GPU) | Full 28-command production manifest via `infra/PRODUCTION-EVIDENCE.md`; row signal: trainer evidence |
-| B9 | Privacy ops | Production **residency-policy** + **legal-erasure / operator-delete** (KMS-backed) operations | Full 28-command production manifest via `infra/PRODUCTION-EVIDENCE.md`; row signal: `privacy-ops-check` |
-| B10 | Worker / observability | Real **worker supervision/deployment** + deployment observability; headline SLOs demonstrated on **real production** (not the completion harness) | Full 28-command production manifest via `infra/PRODUCTION-EVIDENCE.md`; row signals: `worker-run`, `ops-report`, `ops-dashboard-check` |
+| B2 | Tenant isolation and auth | Live **Keycloak** IdP/JWKS now passes locally; still needs production IdP/JWKS, **Vault** session-secret custody/rotation, **KMS** key provider, TLS cert lifecycle | Full 28-command production manifest via `infra/PRODUCTION-EVIDENCE.md`; row signals: `auth-ops-check`, `tls-lifecycle-ops-check` |
+| B3 | CLI/MCP runtime coverage | Official **StreamableHTTP/SSE** transport + stateless soak on a real deployed endpoint | Full 28-command production manifest via `infra/PRODUCTION-EVIDENCE.md`; row signal: hosted MCP soak evidence |
+| B4 | Consolidation role pipeline | Real supervised workers plus extractor, summarizer, entity-resolver, embedding, protected-suite, projection, calibration, lifecycle, ops-report, and deployment-control surfaces | Full 28-command production manifest via `infra/PRODUCTION-EVIDENCE.md`; row signals: `consolidation-ops-check`, `worker-ops-check` |
+| B5 | Signed provenance | Real **C2PA verifier**, trust-root rotation, quarantine, ingestion, alerting, and deployment-policy evidence | Full 28-command production manifest via `infra/PRODUCTION-EVIDENCE.md`; row signal: `provenance-ops-check` |
+| B6 | Multimodal retrieval | Real image/audio/video extractor, media-embedding, encrypted object-store, retrieval, and media-job deployments | Full 28-command production manifest via `infra/PRODUCTION-EVIDENCE.md`; row signal: `multimodal-ops-check` |
+| B7 | Privacy and erasure | Production **KMS/HSM/Vault** lifecycle, strict residency-policy, tombstone recompute, legal hard-delete, and operator-delete operations | Full 28-command production manifest via `infra/PRODUCTION-EVIDENCE.md`; row signal: `privacy-ops-check` |
+| B8 | Observability dashboards | Real hosted dashboard or signed dashboard package with tripwires, freshness, access controls, alert routing, and source snapshot fingerprinting | Full 28-command production manifest via `infra/PRODUCTION-EVIDENCE.md`; row signal: `ops-dashboard-check` |
+| B9 | Parametric tier | Isolated **LoRA / test-time-training** trainer deployment, protected-suite gate, immutable artifacts, rollback drill, and production canary/alert evidence | Full 28-command production manifest via `infra/PRODUCTION-EVIDENCE.md`; row signal: `parametric-trainer-check` |
+| B10 | Live parity suite | Final Local/Postgres runtime parity against concrete production adapters enabled where available | Full 28-command production manifest via `infra/PRODUCTION-EVIDENCE.md`; row signal: production `release-audit --require-production-validated --require-provider-forbid-local` |
 
 ### TIER C — Final sign-off after Tier B evidence
 
-- **FR-20 multimodal** (N5) — local image/audio/video breadth is validated; production extractor/embedder/object-store/retrieval evidence remains operator-run under B6.
-- **FR-21 real LoRA** (N2, GPU) — local trainer/protected-suite/rollback validation is done; deployed GPU trainer evidence remains operator-run under B8.
+- **FR-20 multimodal** (N5) — local image/audio/video breadth is validated; production extractor/embedder/object-store/retrieval evidence remains operator-run under B6 / row 06.
+- **FR-21 real LoRA** (N2, GPU) — local trainer/protected-suite/rollback validation is done; deployed GPU trainer evidence remains operator-run under B9 / row 09.
 - **Final 1:1 sign-off:** re-run `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md`, flip the 10 rows Partial→Done, supersede with a v1.0 release attestation.
 
 ---
