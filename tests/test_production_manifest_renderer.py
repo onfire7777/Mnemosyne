@@ -157,6 +157,11 @@ def test_renderer_check_environment_reports_missing_without_output() -> None:
     assert proc.returncode == 78
     assert payload["ok"] is False
     assert payload["values_redacted"] is True
+    assert payload["blocked_reason"] == "missing_required_environment"
+    assert "required_placeholders_present" in payload["validation_categories"]
+    assert "external_input_artifact_custody" in payload["validation_categories"]
+    assert any("production-render.env.example" in step for step in payload["next_steps"])
+    assert any("production-evidence-verify" in step for step in payload["next_steps"])
     assert "MNEMOSYNE_PROD_EVIDENCE_DIR" in payload["missing"]
     assert payload["present"] == []
     assert proc.stderr == ""
@@ -183,6 +188,8 @@ def test_renderer_check_environment_passes_without_writing_manifest(tmp_path: Pa
     assert payload["c2pa_tool_external"] is True
     assert payload["missing"] == []
     assert payload["input_artifacts_complete"] is True
+    assert "operator_capture_and_offline_verify" in payload["validation_categories"]
+    assert any("capture-production-evidence.sh" in step for step in payload["next_steps"])
     assert payload["missing_input_artifacts"] == []
     assert payload["input_artifact_errors"] == []
     assert payload["required_input_artifact_count"] == len(REQUIRED_PRODUCTION_INPUT_ARTIFACTS)
@@ -207,6 +214,7 @@ def test_renderer_check_environment_fails_on_missing_input_artifacts(tmp_path: P
 
     assert proc.returncode == 78
     assert payload["ok"] is False
+    assert payload["blocked_reason"] == "missing_or_invalid_input_artifacts"
     assert payload["input_artifacts_complete"] is False
     assert sorted(payload["missing_input_artifacts"]) == sorted(REQUIRED_PRODUCTION_INPUT_ARTIFACTS)
     assert payload["input_artifact_errors"] == []
