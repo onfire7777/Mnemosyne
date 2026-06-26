@@ -77,7 +77,8 @@ and COMPLETE what already exists, coordinate, and never `git add -A`.
 - **D-06:** Verify and, where incomplete, complete `infra/scripts/capture-production-evidence.sh`
   (already exists) so it runs the sanctioned path: operator evidence → `deployment-soak
   --evidence-dir` with `production_validated=true, target_environment=production,
-  operator_asserted=true` → `release-audit --require-production-validated
+  operator_asserted=true` → `release-audit --evidence-manifest
+  "$OUT_ROOT/evidence/manifest.json" --require-production-validated
   --require-provider-forbid-local`. Coordinate with the active session; do not rewrite its work.
 - **D-07:** Prove the **full LOCAL-staging dry-run end-to-end** and capture the fingerprint:
   `infra/scripts/setup-all.sh` + `infra/validate/validate-all.sh` pass; `deployment-soak

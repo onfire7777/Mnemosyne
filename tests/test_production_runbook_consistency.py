@@ -42,6 +42,8 @@ def test_every_row_runbook_points_to_universal_preflight_capture_flow() -> None:
             in text
         ), path
         assert "reviewers must run" in text, path
+        assert "retained `source-soak-manifest.json` custody" in text, path
+        assert "source/operator command-profile agreement" in text, path
         assert "offline custody verification must pass before this row can flip Done" in text, path
         assert "`release_audit_ok=true`" in text, path
         assert "`redaction_scan_ok=true`" in text, path
@@ -78,6 +80,7 @@ def test_production_evidence_docs_require_manifest_bound_release_audit() -> None
     production_evidence = (REPO / "infra" / "PRODUCTION-EVIDENCE.md").read_text(
         encoding="utf-8",
     )
+    infra_readme = (REPO / "infra" / "README.md").read_text(encoding="utf-8")
     runbook_index = (RUNBOOK_DIR / "README.md").read_text(encoding="utf-8")
     ops_handoff = (REPO / ".planning" / "OPS-HANDOFF-AND-OWNERSHIP.md").read_text(
         encoding="utf-8",
@@ -86,6 +89,8 @@ def test_production_evidence_docs_require_manifest_bound_release_audit() -> None
     assert "release-audit --evidence-manifest" in production_evidence
     assert "source-soak-manifest.json" in production_evidence
     assert "source/operator command-profile agreement" in production_evidence
+    assert "source-soak-manifest.json" in infra_readme
+    assert "source/operator command-profile agreement" in infra_readme
     assert "source-soak-manifest.json" in runbook_index
     assert "source/operator command-profile" in runbook_index
     assert "release-audit --evidence-manifest" in ops_handoff

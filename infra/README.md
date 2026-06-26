@@ -156,8 +156,9 @@ without contacting production or rerunning deployment soak.
 Use `--preflight-only` to validate and copy the rendered manifest without
 running production checks; preflight output plus `redaction-scan.json` is setup
 proof only, not production parity evidence. Successful full capture writes
-`bundle-manifest.json` with SHA-256 hashes for retained artifacts and surfaces
-its `bundle_fingerprint` in `summary.json` for operator handoff custody.
+`bundle-manifest.json` with SHA-256 hashes for retained artifacts, keeps
+`source-soak-manifest.json` for source/operator command-profile agreement, and
+surfaces its `bundle_fingerprint` in `summary.json` for operator handoff custody.
 Put secrets in environment variables, files, or command-backed providers, not
 in manifest `args`.
 

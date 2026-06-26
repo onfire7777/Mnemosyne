@@ -86,6 +86,7 @@ def test_g0_report_emits_every_spec_metric_and_source_hashes() -> None:
     assert metrics["workspace_loop_liveness"]["value"] == 1.0
     assert metrics["self_model_accuracy"]["value"] == 1.0
     assert metrics["metacognition_m_ratio"]["value"] == 1.0
+    assert metrics["reality_monitor_shadow_tag_contract"]["value"] == 1.0
 
     dataset_paths = {manifest["path"] for manifest in report["dataset_manifests"]}
     assert "eval/datasets/continual_learning_interference.json" in dataset_paths
@@ -180,6 +181,13 @@ def test_g0_consciousness_scorecard_reports_indicator_properties() -> None:
     assert report["metrics"]["self_model_accuracy"] == 1.0
     assert report["metrics"]["metacognition_meta_d_prime"] == 1.0
     assert report["metrics"]["metacognition_m_ratio"] == 1.0
+    assert report["metrics"]["reality_monitor_shadow_tag_contract"] == 1.0
+    shadow_contract = report["reality_monitor_shadow_tag_contract"]
+    assert shadow_contract["score"] == 1.0
+    assert all(shadow_contract["checks"].values())
+    assert shadow_contract["local"]["abstained"] is False
+    assert shadow_contract["local"]["critical_path"] is False
+    assert shadow_contract["postgres"]["critical_path"] is False
 
 
 def test_g0_report_measures_controller_watts_with_explicit_telemetry(tmp_path: Path) -> None:

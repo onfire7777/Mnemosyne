@@ -532,6 +532,17 @@ if check_environment:
         raise SystemExit(78)
     raise SystemExit(0)
 
+if missing_input_artifacts or input_artifact_errors:
+    print(
+        "ERROR: refusing to write production soak manifest with missing or invalid input artifacts",
+        file=sys.stderr,
+    )
+    for relative_path in missing_input_artifacts:
+        print(f"  - missing input artifact: {relative_path}", file=sys.stderr)
+    for error in input_artifact_errors:
+        print(f"  - invalid input artifact: {error}", file=sys.stderr)
+    raise SystemExit(78)
+
 output_path.parent.mkdir(parents=True, exist_ok=True)
 tmp_path = output_path.with_name(f".{output_path.name}.tmp")
 tmp_path.write_text(rendered_text, encoding="utf-8")

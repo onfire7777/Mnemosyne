@@ -1,6 +1,6 @@
 {
   "change_id": "g1-reality-monitor-shadow-tags",
-  "target_metric": "consciousness_indicator_hot_2",
+  "target_metric": "reality_monitor_shadow_tag_contract",
   "minimum_delta": 0.0,
   "direction": "increase",
   "guardrail_metrics": [
@@ -23,6 +23,7 @@
     "self_model_accuracy",
     "metacognition_meta_d_prime",
     "metacognition_m_ratio",
+    "reality_monitor_shadow_tag_contract",
     "ece",
     "abstention_precision",
     "abstention_recall",

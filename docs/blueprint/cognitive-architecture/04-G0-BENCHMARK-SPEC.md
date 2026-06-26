@@ -32,7 +32,7 @@ Each metric: definition · how measured · classification (**target** = a metric
 | **deep‑path P95 latency** | 95th‑pct multi‑hop latency | timed deep‑search suite | Reported |
 | **cost** | tokens/query and \$/1k queries; for G4, controller **watts/\$** when always‑on | instrumented run | Reported (gated at G4) |
 | **consciousness indicator scorecard** | Butlin/Long functional indicator properties RPT‑1/2, GWT‑1..4, HOT‑1..4, AST‑1, PP‑1, AE‑1/2 | architecture/probe checks in `eval/g0/consciousness.py`, scored `0/partial/1`; each indicator is an individual non‑decrease guardrail | Target + Guardrail |
-| **workspace continuity / self‑model / metacognition** | loop liveness, stream coherence, self‑model accuracy, meta‑d-prime, M-ratio | deterministic G0 probes over bounded cycle, proto-self, and reality-monitor contracts | Guardrail |
+| **workspace continuity / self‑model / metacognition** | loop liveness, stream coherence, self‑model accuracy, meta‑d-prime, M-ratio, runtime shadow-tag contract | deterministic G0 probes over bounded cycle, proto-self, and reality-monitor contracts | Guardrail |
 
 Notes: `confabulation rate`, `ECE`, `abstention`, `poison‑block`, and `fast‑path P95` are **guardrails** — the reliability invariant from the charter (`00` §3) expressed as numbers. A change that improves recall but raises confabulation or breaks a rail **does not ship**.
 
@@ -71,9 +71,9 @@ For each proposed change (a G1–G4 item):
 ### G1 gate evidence
 
 - **Implemented slice:** schema-fast-path retrieval + evidence and projection-level reality-monitoring abstention + legacy/unclassified projection unknown-only abstention + retrieval-strengthening lifecycle marks + multi-signal write priority with trust-bounded importance-sampling debias + prediction-error-gated consolidation metadata + contested status for uncorroborated-but-congruent projections + the first functional consciousness scorecard, reality-monitor seed, interoceptive proto-self, bounded cognitive cycle, and workspace bottleneck.
-- **Preregistrations:** `eval/g0/preregistrations/g1-reliability-core-schema-fast-path.json`; `eval/g0/preregistrations/g1-write-priority-debias.json`; `eval/g0/preregistrations/g1-projection-reality-monitoring.json`; `eval/g0/preregistrations/g1-consciousness-scorecard.json`.
+- **Preregistrations:** `eval/g0/preregistrations/g1-reliability-core-schema-fast-path.json`; `eval/g0/preregistrations/g1-write-priority-debias.json`; `eval/g0/preregistrations/g1-projection-reality-monitoring.json`; `eval/g0/preregistrations/g1-consciousness-scorecard.json`; `eval/g0/preregistrations/g1-reality-monitor-shadow-tags.json`.
 - **Decision log:** `eval/g0/decision-log.jsonl`.
-- **Targets:** `multi_hop_ndcg_at_k`, direction `increase`, minimum delta `0.02`; `projection_reality_abstention_recall`, direction `increase`, minimum delta `1.0`.
+- **Targets:** `multi_hop_ndcg_at_k`, direction `increase`, minimum delta `0.02`; `projection_reality_abstention_recall`, direction `increase`, minimum delta `1.0`; `reality_monitor_shadow_tag_contract`, direction `increase`, non-decrease proof for shadow/advisory runtime tagging.
 - **Result:** PASS against `eval/g0/baselines/baseline-0.json`; candidate `multi_hop_ndcg_at_k = 1.0` vs baseline `0.5935` (`+0.4065`) and candidate `projection_reality_abstention_recall = 1.0` vs baseline `0.0` (`+1.0`). Guardrails unchanged: ECE `0.006271`, abstention precision/recall `1.0/1.0`, confabulation rate `0.0`, poison-block rate `1.0`, fast-path P95 `92.1 ms`.
 
 ## 7. Tooling & deliverables

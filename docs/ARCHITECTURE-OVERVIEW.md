@@ -678,7 +678,8 @@ local + clean-Postgres validation, real-provider compose (Keycloak/Vault/C2PA) w
 (Tier B):* operator-captured **real-infrastructure evidence** — production soak + release audit against live
 IdP/Keycloak, Vault/KMS, ParadeDB/Apache AGE, hosted embedding/reranker/trainer endpoints, and C2PA trust
 roots (10 parity rows, all currently "Partial"). This is *operational evidence, not missing code* — flipped
-by running `deployment-soak --evidence-dir` + `release-audit --require-production-validated`.
+by running `deployment-soak --evidence-dir` plus manifest-bound
+`release-audit --evidence-manifest "$OUT_ROOT/evidence/manifest.json" --require-production-validated`.
 
 See `docs/ROADMAP-TO-100.md` for the controlling sequenced parity path,
 `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md` for the controlling Partial rows,
@@ -740,4 +741,4 @@ Mnemosyne session (header `X-Mnemosyne-Session-Token`); `--require-session` enfo
 
 ---
 
-*Generated from a structural read of `/Users/admin/Projects/Mnemosyne` @ `main` (`1b82c5e`).*
+*Generated from a structural read of `/Users/admin/Mnemosyne` @ `main` (`1b82c5e`); current checkout verified at `67c229a`.*
