@@ -1,6 +1,6 @@
 # Production Evidence Capture Runbook
 
-This runbook is the operator handoff for flipping the remaining Tier B parity rows from Partial to Done. It does not add a new gate; it uses the existing `deployment-soak` plus `release-audit --require-production-validated --require-provider-forbid-local` path.
+This runbook is the operator handoff for flipping the remaining Tier B parity rows from Partial to Done. It does not add a new gate; it uses the existing `deployment-soak` evidence bundle plus manifest-bound `release-audit --evidence-manifest ... --require-production-validated --require-provider-forbid-local` path.
 
 ## Preconditions
 

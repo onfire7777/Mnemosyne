@@ -24,7 +24,8 @@ CLI commands consumed by `deployment-soak` and `release-audit`.
   split and `--option=value` forms, rejects unscannable retained artifacts,
   rejects repo-local or non-empty output roots, supports `--preflight-only`
   setup validation, runs `deployment-soak --evidence-dir` from the copied
-  `operator-soak-manifest.json`, and then runs `release-audit
+  `operator-soak-manifest.json`, and then runs
+  `release-audit --evidence-manifest "$OUT_ROOT/evidence/manifest.json"
   --require-production-validated --require-provider-forbid-local`. Successful
   preflight and capture runs write `redaction-scan.json`; successful full
   captures bind the deployment report/check artifacts with manifest SHA-256

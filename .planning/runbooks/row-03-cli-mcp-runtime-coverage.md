@@ -44,7 +44,7 @@ After capture, reviewers must run `"$PYTHON" -m mnemosyne.cli production-evidenc
 
 Operator runs the gates against real infra, evidence is redacted, the outputs
 are included in `deployment-soak --evidence-dir` with production scope and
-operator attestation, and `release-audit --require-production-validated --require-provider-forbid-local` passes
+operator attestation, and `release-audit --evidence-manifest "$OUT_ROOT/evidence/manifest.json" --require-production-validated --require-provider-forbid-local` passes
 with required output shapes present and empty findings.
 
 Done when hosted JSON-RPC and StreamableHTTP soak evidence is in the bundle and
@@ -55,7 +55,7 @@ The full wrapper summary must have `release_audit_ok=true`,
 
 ## Operator Resume Signal
 
-After `release-audit --require-production-validated --require-provider-forbid-local`
+After `release-audit --evidence-manifest "$OUT_ROOT/evidence/manifest.json" --require-production-validated --require-provider-forbid-local`
 passes for row 3 and `production-evidence-verify` passes for the retained
 bundle, resume the parity handoff with `row-3 evidence captured`.
 Use `skip operator gates` only to explicitly defer this production evidence pass.

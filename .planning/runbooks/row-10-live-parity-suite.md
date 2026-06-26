@@ -50,7 +50,7 @@ After capture, reviewers must run `"$PYTHON" -m mnemosyne.cli production-evidenc
 
 Operator runs the suite and gate against real infra, evidence is redacted, the
 outputs are included in `deployment-soak --evidence-dir` with production scope
-and operator attestation, and `release-audit --require-production-validated --require-provider-forbid-local`
+and operator attestation, and `release-audit --evidence-manifest "$OUT_ROOT/evidence/manifest.json" --require-production-validated --require-provider-forbid-local`
 passes with required output shapes present and empty findings.
 
 Done when every engine/runtime method is green with production adapters enabled,
@@ -64,7 +64,7 @@ The full wrapper summary must have `release_audit_ok=true`,
 
 After all 10 strict-audit rows are Done, attestation is recorded, and the final
 live parity suite evidence bundle passes
-`release-audit --require-production-validated --require-provider-forbid-local`
+`release-audit --evidence-manifest "$OUT_ROOT/evidence/manifest.json" --require-production-validated --require-provider-forbid-local`
 plus `production-evidence-verify`, resume the v1.0 handoff with
 `v1.0 signed off`.
 Use `skip operator gates` only to explicitly defer the production evidence pass.
