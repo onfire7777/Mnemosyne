@@ -4470,7 +4470,9 @@ def test_cli_search_surfaces_gist_only_abstention(tmp_path: Path) -> None:
     assert result["explain"]["gist_support"]["gist_hit_ids"] == [summary["cid"]]
 
 
-def test_cli_deep_search_and_explain_surface_gist_derived_graph_abstention(tmp_path: Path) -> None:
+def test_cli_deep_search_and_explain_suppress_gist_derived_graph_without_source(
+    tmp_path: Path,
+) -> None:
     store = tmp_path / "mnemosyne.json"
     source_key = "cli-deep-gist-source"
     engine = LocalMemoryEngine(store_path=store)
@@ -4509,14 +4511,16 @@ def test_cli_deep_search_and_explain_surface_gist_derived_graph_abstention(tmp_p
     explained = run_cli(store, "explain", "--tenant", TENANT, "--query", source_key)
 
     for result in (deep_searched, explained):
-        relation_hit = next(hit for hit in result["hits"] if hit["kind"] == "relation")
+        relation_hits = [hit for hit in result["hits"] if hit["kind"] == "relation"]
         assert result["abstained"] is True
-        assert result["uncertainty_note"] == "Only gist-tier memory support was retrieved; inspect source evidence before answering."
-        assert relation_hit["metadata"]["predicate"] == "summary-derived-gist"
-        assert relation_hit["metadata"]["source"] == source_key
-        assert relation_hit["metadata"]["target"] == summary_cid
-        assert result["explain"]["gist_support"]["applied"] is True
-        assert result["explain"]["gist_support"]["gist_hit_ids"] == [relation_hit["id"]]
+        assert (
+            result["uncertainty_note"]
+            == "Retrieved evidence did not cover enough query terms; abstaining until stronger support is available."
+        )
+        assert result["hits"] == []
+        assert relation_hits == []
+        assert result["explain"]["gist_support"]["applied"] is False
+        assert result["explain"]["gist_support"]["gist_hit_ids"] == []
 
 
 def test_cli_consolidation_uses_command_extractor_and_summarizer(tmp_path: Path) -> None:
@@ -6075,6 +6079,35 @@ def test_cli_production_evidence_verify_rejects_tampered_source_soak_manifest(tm
     assert payload["checks"]["source_soak_manifest"] is False
     assert "source_soak_manifest_attestation_missing" in codes
     assert "source_soak_manifest_required_commands_missing" in codes
+    assert "source_manifest_command_profile_mismatch" in codes
+    assert "bundle_file_sha256_mismatch" not in codes
+    assert "bundle_fingerprint_mismatch" not in codes
+
+
+def test_cli_production_evidence_verify_rejects_source_soak_arg_drift(
+    tmp_path: Path,
+) -> None:
+    bundle_dir, _bundle_fingerprint = write_production_evidence_bundle(tmp_path)
+    source_manifest_path = bundle_dir / "source-soak-manifest.json"
+    source_manifest = json.loads(source_manifest_path.read_text(encoding="utf-8"))
+    source_manifest["checks"][0]["args"] = ["--same-command-different-source-target"]
+    source_manifest_path.write_text(
+        json.dumps(source_manifest, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    rewrite_production_bundle_manifest(bundle_dir)
+
+    result = run_raw_cli(
+        tmp_path / "verify-store.json",
+        "production-evidence-verify",
+        str(bundle_dir),
+    )
+    payload = json.loads(result.stdout)
+    codes = {finding["code"] for finding in payload["findings"]}
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert payload["checks"]["source_soak_manifest"] is False
     assert "source_manifest_command_profile_mismatch" in codes
     assert "bundle_file_sha256_mismatch" not in codes
     assert "bundle_fingerprint_mismatch" not in codes

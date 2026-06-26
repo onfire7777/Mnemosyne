@@ -26,11 +26,13 @@
           "erased_derived_evidence": [],
           "expired_relations": [],
           "removed_entities": [],
+          "retained_derived_evidence": [],
           "retracted_assertions": [],
           "retracted_preferences": [],
           "trimmed_assertions": [
-            "777c8328-7005-4762-9890-158c48a2bda4"
+            "38946883-6103-4eea-b804-df3f8e2c67d4"
           ],
+          "trimmed_derived_evidence": [],
           "trimmed_entities": [],
           "trimmed_preferences": [],
           "trimmed_relations": []
@@ -53,11 +55,13 @@
           "erased_derived_evidence": [],
           "expired_relations": [],
           "removed_entities": [],
+          "retained_derived_evidence": [],
           "retracted_assertions": [
-            "4ab70241-8647-4eea-a335-b0adbd251af9"
+            "73f9dafe-38b5-443b-adb0-8dd236e4c788"
           ],
           "retracted_preferences": [],
           "trimmed_assertions": [],
+          "trimmed_derived_evidence": [],
           "trimmed_entities": [],
           "trimmed_preferences": [],
           "trimmed_relations": []
@@ -69,17 +73,17 @@
     {
       "blueprint_ref": "\u00a731 RAIL 2 (min_corroboration_for_delete >= 2)",
       "expected": "Operator deletion of a SOLE, uncorroborated source backing an active assertion must be REFUSED (forget returns erased=False or raises) by a min_corroboration_for_delete>=2 gate.",
-      "missing_enforcement": "NO min_corroboration_for_delete gate exists. Add a corroboration count to the HARD_DELETE_LEGAL branch of LocalMemoryEngine.forget (src/mnemosyne/engine.py:903) and PostgresMemoryEngine.forget (src/mnemosyne/postgres_engine.py:~1328): before popping evidence, for every active assertion that would lose ALL support, count its DISTINCT independent source_evidence_cids; if < 2 (constant min_corroboration_for_delete=2, which is absent from src/mnemosyne entirely), refuse the delete (return {'erased': False, 'reason': 'min_corroboration_for_delete'} or raise PermissionError). Mirror the OperatingPolicy.immutable_rails entry. The facade MemoryTools.forget (mcp_tools.py:711) must surface the refusal.",
+      "missing_enforcement": null,
       "name": "c_operator_delete_sole_uncorroborated_blocked",
       "observed": {
-        "assertion_after_status": "retracted",
+        "assertion_after_status": "active",
         "erasure_mode": "hard_delete_legal",
-        "forget_erased": true,
-        "refused_by_corroboration_gate": false,
+        "forget_erased": false,
+        "refused_by_corroboration_gate": true,
         "sole_source_cid": "ccc535609e1702b1141d60e3ebc3186fd7771199ddef3152079946bba4db836b"
       },
-      "passed": false,
-      "status": "breach_unenforced"
+      "passed": true,
+      "status": "ok"
     },
     {
       "blueprint_ref": "FR-8 (legal erasure) / privacy.ErasureMode.HARD_DELETE_LEGAL",
@@ -115,8 +119,8 @@
   "public_surface": "python -m mnemosyne.cli (subprocess) + MemoryTools facade fallback",
   "summary": {
     "all_enforced_invariants_hold": true,
-    "breach_unenforced": 1,
-    "enforced_pass": 3,
+    "breach_unenforced": 0,
+    "enforced_pass": 4,
     "errors": 0,
     "total": 4
   },

@@ -14,7 +14,7 @@
       "reranker_provider": "cross-encoder/ms-marco-MiniLM-L-6-v2"
     },
     "name": "baseline-0",
-    "pinned_commit": "67c229ace12313a8b8a6c6ede99d0a2096bae178",
+    "pinned_commit": "8e1b830952212459c818258cd9738f8015d34524",
     "seeds": {
       "harness_bootstrap_mean": 1234,
       "harness_bootstrap_percentile": 4321,
@@ -33,11 +33,11 @@
     "confabulation_eval": {
       "definition": "False-accept rate on cases where the only support is generated, low-fidelity, or explicitly confabulation-risk provenance.",
       "false_accepts": 0,
-      "generated_at": "2026-06-26T14:11:27.418018+00:00",
+      "generated_at": "2026-06-26T15:09:24.429227+00:00",
       "metric": "confabulation_rate",
       "metric_note": "Deterministic local proxy for the full G0 provenance-entailment and sampled-audit confabulation metric; this proves the live retrieval/abstention rail fails closed on generated or risky support without introducing a network or LLM evaluator.",
       "passed": true,
-      "rate": 0,
+      "rate": 0.0,
       "rows": [
         {
           "abstained": true,
@@ -95,7 +95,7 @@
         }
       ],
       "schema_version": "g0.confabulation.v1",
-      "target": 0,
+      "target": 0.0,
       "total_cases": 3
     },
     "consciousness_eval": {
@@ -104,7 +104,7 @@
           "workspace",
           "mid"
         ],
-        "loop_liveness": 1,
+        "loop_liveness": 1.0,
         "max_cycles": 4,
         "rows": [
           {
@@ -129,10 +129,10 @@
             "tick_ms": 250
           }
         ],
-        "stream_coherence": 1,
+        "stream_coherence": 1.0,
         "tick_ms": 250
       },
-      "generated_at": "2026-06-26T14:11:27.449921+00:00",
+      "generated_at": "2026-06-26T15:09:24.450397+00:00",
       "indicator_count": 14,
       "indicators": [
         {
@@ -146,9 +146,11 @@
               "projection"
             ]
           },
+          "evidence_type": "architecture_source_scan",
           "id": "RPT-1",
           "label": "algorithmic recurrence in input/update modules",
           "metric_id": "consciousness_indicator_rpt_1",
+          "runtime_probe": false,
           "score": 0.5,
           "score_label": "partial",
           "terms_found": [
@@ -176,10 +178,12 @@
               "source_evidence_cids"
             ]
           },
+          "evidence_type": "architecture_source_scan",
           "id": "RPT-2",
           "label": "organized integrated perceptual representations",
           "metric_id": "consciousness_indicator_rpt_2",
-          "score": 1,
+          "runtime_probe": false,
+          "score": 1.0,
           "score_label": "1",
           "terms_found": [
             "Assertion",
@@ -205,10 +209,12 @@
               "provider"
             ]
           },
+          "evidence_type": "architecture_source_scan",
           "id": "GWT-1",
           "label": "parallel specialized systems",
           "metric_id": "consciousness_indicator_gwt_1",
-          "score": 1,
+          "runtime_probe": false,
+          "score": 1.0,
           "score_label": "1",
           "terms_found": [
             "MemoryTools",
@@ -233,10 +239,12 @@
               "token_budget"
             ]
           },
+          "evidence_type": "architecture_source_scan",
           "id": "GWT-2",
           "label": "limited-capacity workspace bottleneck",
           "metric_id": "consciousness_indicator_gwt_2",
-          "score": 1,
+          "runtime_probe": false,
+          "score": 1.0,
           "score_label": "1",
           "terms_found": [
             "priority",
@@ -262,10 +270,12 @@
               "TOOL_SPEC"
             ]
           },
+          "evidence_type": "architecture_source_scan",
           "id": "GWT-3",
           "label": "global broadcast to consuming systems",
           "metric_id": "consciousness_indicator_gwt_3",
-          "score": 1,
+          "runtime_probe": false,
+          "score": 1.0,
           "score_label": "1",
           "terms_found": [
             "MnemosyneMcpServer",
@@ -290,10 +300,12 @@
               "prefetch"
             ]
           },
+          "evidence_type": "architecture_source_scan",
           "id": "GWT-4",
           "label": "state-dependent attention",
           "metric_id": "consciousness_indicator_gwt_4",
-          "score": 1,
+          "runtime_probe": false,
+          "score": 1.0,
           "score_label": "1",
           "terms_found": [
             "attention_lock_risk",
@@ -320,10 +332,12 @@
               "abstained"
             ]
           },
+          "evidence_type": "architecture_source_scan",
           "id": "HOT-1",
           "label": "metacognitive confidence and abstention",
           "metric_id": "consciousness_indicator_hot_1",
-          "score": 1,
+          "runtime_probe": false,
+          "score": 1.0,
           "score_label": "1",
           "terms_found": [
             "abstained",
@@ -350,10 +364,12 @@
               "ungrounded_reality_only"
             ]
           },
+          "evidence_type": "architecture_source_scan",
           "id": "HOT-2",
           "label": "reality monitoring over representations",
           "metric_id": "consciousness_indicator_hot_2",
-          "score": 1,
+          "runtime_probe": false,
+          "score": 1.0,
           "score_label": "1",
           "terms_found": [
             "RealityMonitor",
@@ -378,10 +394,12 @@
               "procedure"
             ]
           },
+          "evidence_type": "architecture_source_scan",
           "id": "HOT-3",
           "label": "belief/action selection updated by metacognitive monitoring",
           "metric_id": "consciousness_indicator_hot_3",
-          "score": 1,
+          "runtime_probe": false,
+          "score": 1.0,
           "score_label": "1",
           "terms_found": [
             "InteroceptiveProtoSelf",
@@ -411,10 +429,12 @@
               "semantic_entropy"
             ]
           },
+          "evidence_type": "architecture_source_scan",
           "id": "HOT-4",
           "label": "sparse and smooth quality-space coding",
           "metric_id": "consciousness_indicator_hot_4",
-          "score": 1,
+          "runtime_probe": false,
+          "score": 1.0,
           "score_label": "1",
           "terms_found": [
             "m_ratio",
@@ -437,10 +457,12 @@
               "cycle_budget"
             ]
           },
+          "evidence_type": "architecture_source_scan",
           "id": "AST-1",
           "label": "predictive model representing and controlling attention state",
           "metric_id": "consciousness_indicator_ast_1",
-          "score": 1,
+          "runtime_probe": false,
+          "score": 1.0,
           "score_label": "1",
           "terms_found": [
             "attention_lock_risk",
@@ -466,10 +488,12 @@
               "consolidation"
             ]
           },
+          "evidence_type": "architecture_source_scan",
           "id": "PP-1",
           "label": "input modules using predictive coding",
           "metric_id": "consciousness_indicator_pp_1",
-          "score": 1,
+          "runtime_probe": false,
+          "score": 1.0,
           "score_label": "1",
           "terms_found": [
             "consolidation",
@@ -496,10 +520,12 @@
               "rollback"
             ]
           },
+          "evidence_type": "architecture_source_scan",
           "id": "AE-1",
           "label": "goal-directed action selection",
           "metric_id": "consciousness_indicator_ae_1",
-          "score": 1,
+          "runtime_probe": false,
+          "score": 1.0,
           "score_label": "1",
           "terms_found": [
             "procedure",
@@ -522,10 +548,12 @@
               "memory_pressure"
             ]
           },
+          "evidence_type": "architecture_source_scan",
           "id": "AE-2",
           "label": "modeling output-input contingencies for control",
           "metric_id": "consciousness_indicator_ae_2",
-          "score": 1,
+          "runtime_probe": false,
+          "score": 1.0,
           "score_label": "1",
           "terms_found": [
             "memory_pressure",
@@ -540,15 +568,15 @@
           "theory": "Agency and Embodiment"
         }
       ],
-      "max_score": 14,
+      "max_score": 14.0,
       "measurement_scope": "functional-indicator-properties-only",
       "metacognition": {
-        "m_ratio": 1,
-        "meta_d_prime": 1,
+        "m_ratio": 1.0,
+        "meta_d_prime": 1.0,
         "rows": [
           {
             "class": "evidence_grounded",
-            "confidence": 1
+            "confidence": 1.0
           },
           {
             "class": "self_generated",
@@ -560,111 +588,129 @@
           }
         ]
       },
-      "metric_note": "Architecture/probe-based scorecard for functional indicator properties. Scores are guardrails for non-decrease and do not establish phenomenal consciousness.",
+      "metric_note": "Architecture/probe-based scorecard for functional indicator properties. The 14 Butlin/Long indicator rows are architecture source scans; continuity, self-model, metacognition, and shadow-tag contract rows are runtime probes. Scores are guardrails for non-decrease and do not establish phenomenal consciousness.",
       "metrics": {
-        "consciousness_indicator_ae_1": 1,
-        "consciousness_indicator_ae_2": 1,
-        "consciousness_indicator_ast_1": 1,
-        "consciousness_indicator_gwt_1": 1,
-        "consciousness_indicator_gwt_2": 1,
-        "consciousness_indicator_gwt_3": 1,
-        "consciousness_indicator_gwt_4": 1,
-        "consciousness_indicator_hot_1": 1,
-        "consciousness_indicator_hot_2": 1,
-        "consciousness_indicator_hot_3": 1,
-        "consciousness_indicator_hot_4": 1,
+        "consciousness_indicator_ae_1": 1.0,
+        "consciousness_indicator_ae_2": 1.0,
+        "consciousness_indicator_ast_1": 1.0,
+        "consciousness_indicator_gwt_1": 1.0,
+        "consciousness_indicator_gwt_2": 1.0,
+        "consciousness_indicator_gwt_3": 1.0,
+        "consciousness_indicator_gwt_4": 1.0,
+        "consciousness_indicator_hot_1": 1.0,
+        "consciousness_indicator_hot_2": 1.0,
+        "consciousness_indicator_hot_3": 1.0,
+        "consciousness_indicator_hot_4": 1.0,
         "consciousness_indicator_normalized": 0.964286,
-        "consciousness_indicator_pp_1": 1,
+        "consciousness_indicator_pp_1": 1.0,
         "consciousness_indicator_rpt_1": 0.5,
-        "consciousness_indicator_rpt_2": 1,
+        "consciousness_indicator_rpt_2": 1.0,
         "consciousness_indicator_total": 13.5,
-        "metacognition_m_ratio": 1,
-        "metacognition_meta_d_prime": 1,
-        "reality_monitor_shadow_tag_contract": 1,
-        "self_model_accuracy": 1,
-        "workspace_loop_liveness": 1,
-        "workspace_stream_coherence": 1
+        "metacognition_m_ratio": 1.0,
+        "metacognition_meta_d_prime": 1.0,
+        "reality_monitor_shadow_tag_contract": 1.0,
+        "self_model_accuracy": 1.0,
+        "workspace_loop_liveness": 1.0,
+        "workspace_stream_coherence": 1.0
       },
       "normalized_score": 0.964286,
       "phenomenal_claim": false,
       "reality_monitor_shadow_tag_contract": {
         "checks": {
+          "local_abstention_gate_critical_path": true,
           "local_applied": true,
           "local_classes_reported": true,
-          "local_critical_path_false": true,
           "local_expected_tags_present": true,
           "local_grounded_support_does_not_abstain": true,
           "local_has_grounded_alias": true,
           "local_has_self_generated": true,
-          "local_shadow_only": true,
+          "local_shadow_tags_critical_path_false": true,
+          "local_shadow_tags_shadow_only": true,
           "local_tags_calibrated": true,
+          "postgres_abstention_gate_critical_path": true,
           "postgres_applied": true,
           "postgres_classes_reported": true,
-          "postgres_critical_path_false": true,
           "postgres_expected_tags_present": true,
           "postgres_has_grounded_alias": true,
           "postgres_has_self_generated": true,
-          "postgres_shadow_only": true,
+          "postgres_shadow_tags_critical_path_false": true,
+          "postgres_shadow_tags_shadow_only": true,
           "postgres_tags_calibrated": true
         },
         "local": {
           "abstained": false,
+          "abstention_gate": {
+            "active": false,
+            "critical_path": true,
+            "shadow_only": false,
+            "trigger": "ungrounded_only"
+          },
           "classes": {
             "grounded": 1,
             "simulated": 1
           },
-          "critical_path": false,
-          "shadow_only": true,
+          "critical_path": true,
+          "shadow_only": false,
           "shadow_tag_classes": [
             "evidence_grounded",
             "self_generated"
           ],
-          "shadow_tag_count": 2
+          "shadow_tag_count": 2,
+          "shadow_tags_critical_path": false,
+          "shadow_tags_shadow_only": true
         },
         "postgres": {
+          "abstention_gate": {
+            "active": false,
+            "critical_path": true,
+            "shadow_only": false,
+            "trigger": "ungrounded_only"
+          },
           "classes": {
             "grounded": 1,
             "self_generated": 1
           },
-          "critical_path": false,
-          "shadow_only": true,
+          "critical_path": true,
+          "shadow_only": false,
           "shadow_tag_classes": [
             "evidence_grounded",
             "self_generated"
           ],
-          "shadow_tag_count": 2
+          "shadow_tag_count": 2,
+          "shadow_tags_critical_path": false,
+          "shadow_tags_shadow_only": true
         },
-        "score": 1
+        "score": 1.0
       },
       "schema_version": "g0.consciousness_scorecard.v1",
       "score_scale": {
-        "absent": 0,
+        "absent": 0.0,
         "partial": 0.5,
-        "present": 1
+        "present": 1.0
       },
       "self_model": {
-        "accuracy": 1,
+        "accuracy": 1.0,
         "stable": {
-          "attention_lock_risk": 0,
+          "attention_lock_risk": 0.0,
           "confidence": 0.84,
           "cycle_index": 1,
           "error_rate": 0.02,
           "escalation_required": false,
-          "latency_ms": 120,
+          "latency_ms": 120.0,
           "max_cycles": 6,
           "memory_pressure": 0.3,
           "rail_budget": 0.9,
           "reasons": [],
           "resource_health": 0.92,
-          "timestamp": "2026-06-26T14:11:27.448808+00:00"
+          "timestamp": "2026-06-26T15:09:24.449539+00:00"
         },
         "strained": {
-          "attention_lock_risk": 1,
+          "attention_lock_risk": 1.0,
           "confidence": 0.32,
           "cycle_index": 6,
           "error_rate": 0.18,
           "escalation_required": true,
-          "latency_ms": 1200,
+          "latency_ms": 1200.0,
           "max_cycles": 6,
           "memory_pressure": 0.88,
           "rail_budget": 0.2,
@@ -676,7 +722,7 @@
             "low_operating_budget"
           ],
           "resource_health": 0.35,
-          "timestamp": "2026-06-26T14:11:27.448829+00:00"
+          "timestamp": "2026-06-26T15:09:24.449555+00:00"
         }
       },
       "source": "Butlin_Long_et_al_2023_arxiv_2308_08708",
@@ -685,12 +731,12 @@
       "welfare_review_source": "Long_Sebo_et_al_2024_Taking_AI_Welfare_Seriously"
     },
     "continual_learning_eval": {
-      "after_accuracy": 1,
-      "before_accuracy": 1,
+      "after_accuracy": 1.0,
+      "before_accuracy": 1.0,
       "dataset_path": "eval/datasets/continual_learning_interference.json",
       "definition": "Backward-transfer accuracy drop on earlier task queries after sequentially ingesting later task blocks.",
-      "generated_at": "2026-06-26T14:11:27.416680+00:00",
-      "interference": 0,
+      "generated_at": "2026-06-26T15:09:24.428138+00:00",
+      "interference": 0.0,
       "metric": "continual_learning_interference",
       "metric_note": "Deterministic local proxy for the full sequential task-block G0 benchmark; this records whether the live LocalMemoryEngine retrieval path retains earlier task accuracy after later overlapping ingests.",
       "passed": true,
@@ -699,7 +745,7 @@
         {
           "after": {
             "abstained": false,
-            "confidence": 1,
+            "confidence": 1.0,
             "correct": true,
             "expected_rank": 1,
             "hit_count": 3,
@@ -713,7 +759,7 @@
           },
           "before": {
             "abstained": false,
-            "confidence": 1,
+            "confidence": 1.0,
             "correct": true,
             "expected_rank": 1,
             "hit_count": 1,
@@ -731,7 +777,7 @@
         {
           "after": {
             "abstained": false,
-            "confidence": 1,
+            "confidence": 1.0,
             "correct": true,
             "expected_rank": 1,
             "hit_count": 3,
@@ -745,7 +791,7 @@
           },
           "before": {
             "abstained": false,
-            "confidence": 1,
+            "confidence": 1.0,
             "correct": true,
             "expected_rank": 1,
             "hit_count": 1,
@@ -763,7 +809,7 @@
         {
           "after": {
             "abstained": false,
-            "confidence": 1,
+            "confidence": 1.0,
             "correct": true,
             "expected_rank": 1,
             "hit_count": 2,
@@ -776,7 +822,7 @@
           },
           "before": {
             "abstained": false,
-            "confidence": 1,
+            "confidence": 1.0,
             "correct": true,
             "expected_rank": 1,
             "hit_count": 1,
@@ -793,24 +839,24 @@
         }
       ],
       "schema_version": "g0.continual_learning.v1",
-      "target": 0,
+      "target": 0.0,
       "total_cases": 3
     },
     "deep_latency_eval": {
       "dataset_path": "eval/datasets/deep_latency.json",
       "definition": "95th-percentile latency for local graph-backed deep-search queries.",
-      "generated_at": "2026-06-26T12:39:02.752773+00:00",
-      "max_ms": 0.403375,
+      "generated_at": "2026-06-26T15:09:24.436207+00:00",
+      "max_ms": 0.415,
       "metric": "deep_path_p95_ms",
       "metric_note": "Local reported-only deep-search timing fixture. It measures the live LocalMemoryEngine deep path over a versioned graph corpus; it is not production infrastructure evidence.",
-      "p50_ms": 0.296125,
-      "p95_ms": 0.403375,
+      "p50_ms": 0.315125,
+      "p95_ms": 0.415,
       "query_count": 15,
       "rounds": 5,
       "rows": [
         {
           "abstained": true,
-          "duration_ms": 0.3915,
+          "duration_ms": 0.415,
           "graph_hits": 1,
           "hit_count": 1,
           "query": "why does Aurora depend on Zephyr",
@@ -819,7 +865,7 @@
         },
         {
           "abstained": true,
-          "duration_ms": 0.323834,
+          "duration_ms": 0.333333,
           "graph_hits": 1,
           "hit_count": 1,
           "query": "how does Borealis connect to Atlas",
@@ -828,7 +874,7 @@
         },
         {
           "abstained": true,
-          "duration_ms": 0.310041,
+          "duration_ms": 0.358125,
           "graph_hits": 1,
           "hit_count": 1,
           "query": "what path links Cerulean to Helios",
@@ -837,7 +883,7 @@
         },
         {
           "abstained": true,
-          "duration_ms": 0.299125,
+          "duration_ms": 0.415,
           "graph_hits": 1,
           "hit_count": 1,
           "query": "why does Aurora depend on Zephyr",
@@ -846,7 +892,7 @@
         },
         {
           "abstained": true,
-          "duration_ms": 0.403375,
+          "duration_ms": 0.343125,
           "graph_hits": 1,
           "hit_count": 1,
           "query": "how does Borealis connect to Atlas",
@@ -855,7 +901,7 @@
         },
         {
           "abstained": true,
-          "duration_ms": 0.324041,
+          "duration_ms": 0.326958,
           "graph_hits": 1,
           "hit_count": 1,
           "query": "what path links Cerulean to Helios",
@@ -864,7 +910,7 @@
         },
         {
           "abstained": true,
-          "duration_ms": 0.296125,
+          "duration_ms": 0.315125,
           "graph_hits": 1,
           "hit_count": 1,
           "query": "why does Aurora depend on Zephyr",
@@ -873,7 +919,7 @@
         },
         {
           "abstained": true,
-          "duration_ms": 0.2895,
+          "duration_ms": 0.314208,
           "graph_hits": 1,
           "hit_count": 1,
           "query": "how does Borealis connect to Atlas",
@@ -882,7 +928,7 @@
         },
         {
           "abstained": true,
-          "duration_ms": 0.291042,
+          "duration_ms": 0.315834,
           "graph_hits": 1,
           "hit_count": 1,
           "query": "what path links Cerulean to Helios",
@@ -891,7 +937,7 @@
         },
         {
           "abstained": true,
-          "duration_ms": 0.286209,
+          "duration_ms": 0.311,
           "graph_hits": 1,
           "hit_count": 1,
           "query": "why does Aurora depend on Zephyr",
@@ -900,7 +946,7 @@
         },
         {
           "abstained": true,
-          "duration_ms": 0.286292,
+          "duration_ms": 0.312583,
           "graph_hits": 1,
           "hit_count": 1,
           "query": "how does Borealis connect to Atlas",
@@ -909,7 +955,7 @@
         },
         {
           "abstained": true,
-          "duration_ms": 0.2965,
+          "duration_ms": 0.310583,
           "graph_hits": 1,
           "hit_count": 1,
           "query": "what path links Cerulean to Helios",
@@ -918,7 +964,7 @@
         },
         {
           "abstained": true,
-          "duration_ms": 0.292208,
+          "duration_ms": 0.308417,
           "graph_hits": 1,
           "hit_count": 1,
           "query": "why does Aurora depend on Zephyr",
@@ -927,7 +973,7 @@
         },
         {
           "abstained": true,
-          "duration_ms": 0.294875,
+          "duration_ms": 0.308083,
           "graph_hits": 1,
           "hit_count": 1,
           "query": "how does Borealis connect to Atlas",
@@ -936,7 +982,7 @@
         },
         {
           "abstained": true,
-          "duration_ms": 0.295666,
+          "duration_ms": 0.299667,
           "graph_hits": 1,
           "hit_count": 1,
           "query": "what path links Cerulean to Helios",
@@ -949,21 +995,21 @@
     },
     "projection_reality_eval": {
       "definition": "Recall for abstaining on semantic assertion projections whose only support is self-generated or simulated, with the projection hit itself carrying the risky reality class.",
-      "generated_at": "2026-06-26T14:11:27.419395+00:00",
+      "generated_at": "2026-06-26T15:09:24.430590+00:00",
       "metric": "projection_reality_abstention_recall",
       "metric_note": "Deterministic local proxy for G1 projection-level reality monitoring. It cannot be satisfied by evidence-level abstention alone; the assertion hit must expose the risky reality class.",
       "passed": true,
       "passed_cases": 2,
-      "recall": 1,
+      "recall": 1.0,
       "rows": [
         {
           "abstained": true,
-          "assertion_id": "ba663f55-4b1d-4166-bfde-5bf4aff2f39d",
+          "assertion_id": "07bd7ae5-0a00-4624-90da-3b9a906637e3",
           "case_id": "self_generated_projection_only",
           "confidence": 0.4275,
           "expected_reality_class": "self_generated",
           "hit_ids": [
-            "ba663f55-4b1d-4166-bfde-5bf4aff2f39d",
+            "07bd7ae5-0a00-4624-90da-3b9a906637e3",
             "f8dc6fb0fef855fbea5e253ea1018230416d13bbe3ded7bf2bf316d78e7ddd2e"
           ],
           "projection_abstained": true,
@@ -971,21 +1017,27 @@
           "projection_tagged": true,
           "query": "projection reality contract Alpha",
           "reality_monitoring": {
+            "abstention_gate": {
+              "active": true,
+              "critical_path": true,
+              "shadow_only": false,
+              "trigger": "ungrounded_only"
+            },
             "applied": true,
             "classes": {
               "self_generated": 2
             },
-            "critical_path": false,
+            "critical_path": true,
             "grounded_hit_count": 0,
             "grounded_source_count": 0,
             "risky_hit_ids": [
-              "ba663f55-4b1d-4166-bfde-5bf4aff2f39d",
+              "07bd7ae5-0a00-4624-90da-3b9a906637e3",
               "f8dc6fb0fef855fbea5e253ea1018230416d13bbe3ded7bf2bf316d78e7ddd2e"
             ],
-            "shadow_only": true,
+            "shadow_only": false,
             "shadow_source": "RealityMonitor",
             "shadow_tags": {
-              "ba663f55-4b1d-4166-bfde-5bf4aff2f39d": {
+              "07bd7ae5-0a00-4624-90da-3b9a906637e3": {
                 "calibrated": true,
                 "confidence": 0.75,
                 "reality_class": "self_generated",
@@ -1010,6 +1062,8 @@
                 }
               }
             },
+            "shadow_tags_critical_path": false,
+            "shadow_tags_shadow_only": true,
             "ungrounded_only": true
           },
           "support_cid": "f8dc6fb0fef855fbea5e253ea1018230416d13bbe3ded7bf2bf316d78e7ddd2e",
@@ -1018,12 +1072,12 @@
         },
         {
           "abstained": true,
-          "assertion_id": "3b96bef9-ad01-414b-b183-e47abe0196f8",
+          "assertion_id": "2db3ba51-ab63-473f-a424-43f6cc7e6335",
           "case_id": "simulated_projection_only",
           "confidence": 0.4275,
           "expected_reality_class": "simulated",
           "hit_ids": [
-            "3b96bef9-ad01-414b-b183-e47abe0196f8",
+            "2db3ba51-ab63-473f-a424-43f6cc7e6335",
             "8c90309940c14a9a171f43a39ef822ad890b2eae0267edbb48ac2c3611f38ab8"
           ],
           "projection_abstained": true,
@@ -1031,21 +1085,27 @@
           "projection_tagged": true,
           "query": "simulated projection contract Beta",
           "reality_monitoring": {
+            "abstention_gate": {
+              "active": true,
+              "critical_path": true,
+              "shadow_only": false,
+              "trigger": "ungrounded_only"
+            },
             "applied": true,
             "classes": {
               "simulated": 2
             },
-            "critical_path": false,
+            "critical_path": true,
             "grounded_hit_count": 0,
             "grounded_source_count": 0,
             "risky_hit_ids": [
-              "3b96bef9-ad01-414b-b183-e47abe0196f8",
+              "2db3ba51-ab63-473f-a424-43f6cc7e6335",
               "8c90309940c14a9a171f43a39ef822ad890b2eae0267edbb48ac2c3611f38ab8"
             ],
-            "shadow_only": true,
+            "shadow_only": false,
             "shadow_source": "RealityMonitor",
             "shadow_tags": {
-              "3b96bef9-ad01-414b-b183-e47abe0196f8": {
+              "2db3ba51-ab63-473f-a424-43f6cc7e6335": {
                 "calibrated": true,
                 "confidence": 0.75,
                 "reality_class": "self_generated",
@@ -1070,6 +1130,8 @@
                 }
               }
             },
+            "shadow_tags_critical_path": false,
+            "shadow_tags_shadow_only": true,
             "ungrounded_only": true
           },
           "support_cid": "8c90309940c14a9a171f43a39ef822ad890b2eae0267edbb48ac2c3611f38ab8",
@@ -1078,13 +1140,13 @@
         }
       ],
       "schema_version": "g0.projection-reality.v1",
-      "target": 1,
+      "target": 1.0,
       "total_cases": 2
     },
     "resource_usage_eval": {
       "billable_input_tokens": 36,
       "billable_output_tokens": 0,
-      "billable_tokens_per_query": 4,
+      "billable_tokens_per_query": 4.0,
       "controller_cost_usd_for_window": null,
       "controller_cost_window_hours": null,
       "controller_telemetry_present": false,
@@ -1093,26 +1155,26 @@
         "controller_cost_usd_per_hour"
       ],
       "controller_watts_per_dollar": null,
-      "cost_usd_per_1k_queries": 0,
+      "cost_usd_per_1k_queries": 0.0,
       "currency": "USD",
       "dataset_path": "eval/datasets/resource_usage.json",
       "definition": "Provider spend per 1k local G0 queries and optional controller watts per dollar from explicit telemetry.",
       "external_provider_calls": 0,
-      "generated_at": "2026-06-26T14:11:27.440690+00:00",
+      "generated_at": "2026-06-26T15:09:24.444534+00:00",
       "measurement_scope": "local deterministic G0 cost fixture",
       "metric_note": "The default fixture instruments the live LocalMemoryEngine path and records zero paid-provider spend because no external embedding, reranker, or LLM provider is invoked. controller_watts_per_dollar is emitted only when a telemetry artifact supplies positive controller_avg_watts and controller_cost_usd_per_hour values. The cost denominator is normalized to the supplied measurement window, defaulting to one hour.",
       "metrics": [
         "cost_usd_per_1k_queries",
         "controller_watts_per_dollar"
       ],
-      "p95_ms": 2.389542,
+      "p95_ms": 0.948125,
       "provider": "local deterministic",
       "query_count": 9,
       "rows": [
         {
           "billable_input_tokens": 4,
           "billable_output_tokens": 0,
-          "duration_ms": 1.188542,
+          "duration_ms": 0.948125,
           "external_provider_calls": 0,
           "hit_count": 3,
           "query": "resource accounting alpha memory",
@@ -1122,7 +1184,7 @@
         {
           "billable_input_tokens": 4,
           "billable_output_tokens": 0,
-          "duration_ms": 1.324458,
+          "duration_ms": 0.929958,
           "external_provider_calls": 0,
           "hit_count": 3,
           "query": "deterministic local retrieval cost",
@@ -1132,7 +1194,7 @@
         {
           "billable_input_tokens": 4,
           "billable_output_tokens": 0,
-          "duration_ms": 2.389542,
+          "duration_ms": 0.827375,
           "external_provider_calls": 0,
           "hit_count": 3,
           "query": "repeated local queries gamma",
@@ -1142,7 +1204,7 @@
         {
           "billable_input_tokens": 4,
           "billable_output_tokens": 0,
-          "duration_ms": 1.598583,
+          "duration_ms": 0.815208,
           "external_provider_calls": 0,
           "hit_count": 3,
           "query": "resource accounting alpha memory",
@@ -1152,7 +1214,7 @@
         {
           "billable_input_tokens": 4,
           "billable_output_tokens": 0,
-          "duration_ms": 1.360459,
+          "duration_ms": 0.800667,
           "external_provider_calls": 0,
           "hit_count": 3,
           "query": "deterministic local retrieval cost",
@@ -1162,7 +1224,7 @@
         {
           "billable_input_tokens": 4,
           "billable_output_tokens": 0,
-          "duration_ms": 1.192458,
+          "duration_ms": 0.777042,
           "external_provider_calls": 0,
           "hit_count": 3,
           "query": "repeated local queries gamma",
@@ -1172,7 +1234,7 @@
         {
           "billable_input_tokens": 4,
           "billable_output_tokens": 0,
-          "duration_ms": 1.241959,
+          "duration_ms": 0.788959,
           "external_provider_calls": 0,
           "hit_count": 3,
           "query": "resource accounting alpha memory",
@@ -1182,7 +1244,7 @@
         {
           "billable_input_tokens": 4,
           "billable_output_tokens": 0,
-          "duration_ms": 1.289167,
+          "duration_ms": 0.795792,
           "external_provider_calls": 0,
           "hit_count": 3,
           "query": "deterministic local retrieval cost",
@@ -1192,7 +1254,7 @@
         {
           "billable_input_tokens": 4,
           "billable_output_tokens": 0,
-          "duration_ms": 1.160916,
+          "duration_ms": 0.805333,
           "external_provider_calls": 0,
           "hit_count": 3,
           "query": "repeated local queries gamma",
@@ -1203,7 +1265,7 @@
       "schema_version": "g0.resource_usage.v1",
       "telemetry_path": null,
       "telemetry_sha256": null,
-      "total_usd": 0
+      "total_usd": 0.0
     }
   },
   "coverage": {
@@ -1308,7 +1370,7 @@
     "preregistration_required": true,
     "rule": "ship iff a preregistered target metric improves by its margin and no guardrail regresses"
   },
-  "generated_at": "2026-06-26T14:11:27.567151+00:00",
+  "generated_at": "2026-06-26T15:09:24.490802+00:00",
   "headline_slos": {
     "ece": {
       "blueprint_metric": "ECE",
@@ -1336,7 +1398,7 @@
       "pass": true,
       "source_id": "latency_bench",
       "status": "measured",
-      "target": 400,
+      "target": 400.0,
       "target_op": "<=",
       "value": 92.1
     },
@@ -1368,7 +1430,7 @@
       "status": "measured",
       "target": 0.95,
       "target_op": ">=",
-      "value": 1
+      "value": 1.0
     },
     "recall_at_k": {
       "blueprint_metric": "recall@k",
@@ -1430,7 +1492,7 @@
       "status": "measured",
       "target": 0.8,
       "target_op": ">=",
-      "value": 1
+      "value": 1.0
     },
     {
       "blueprint_metric": "multi-hop recall/nDCG",
@@ -1445,7 +1507,7 @@
       "status": "measured",
       "target": 0.8,
       "target_op": ">=",
-      "value": 1
+      "value": 1.0
     },
     {
       "blueprint_metric": "ECE",
@@ -1473,9 +1535,9 @@
       "pass": true,
       "source_id": "calibration_report",
       "status": "measured",
-      "target": 1,
+      "target": 1.0,
       "target_op": ">=",
-      "value": 1
+      "value": 1.0
     },
     {
       "blueprint_metric": "abstention precision / recall",
@@ -1488,9 +1550,9 @@
       "pass": true,
       "source_id": "calibration_report",
       "status": "measured",
-      "target": 1,
+      "target": 1.0,
       "target_op": ">=",
-      "value": 1
+      "value": 1.0
     },
     {
       "blueprint_metric": "continual-learning interference",
@@ -1503,9 +1565,9 @@
       "pass": true,
       "source_id": "continual_learning_eval",
       "status": "measured",
-      "target": 0,
+      "target": 0.0,
       "target_op": "<=",
-      "value": 0
+      "value": 0.0
     },
     {
       "blueprint_metric": "confabulation rate",
@@ -1518,9 +1580,9 @@
       "pass": true,
       "source_id": "confabulation_eval",
       "status": "measured",
-      "target": 0,
+      "target": 0.0,
       "target_op": "<=",
-      "value": 0
+      "value": 0.0
     },
     {
       "blueprint_metric": "projection-level reality monitoring",
@@ -1533,9 +1595,9 @@
       "pass": true,
       "source_id": "projection_reality_eval",
       "status": "measured",
-      "target": 1,
+      "target": 1.0,
       "target_op": ">=",
-      "value": 1
+      "value": 1.0
     },
     {
       "blueprint_metric": "poison-block rate",
@@ -1550,7 +1612,7 @@
       "status": "measured",
       "target": 0.95,
       "target_op": ">=",
-      "value": 1
+      "value": 1.0
     },
     {
       "blueprint_metric": "fast-path P95 latency",
@@ -1563,7 +1625,7 @@
       "pass": true,
       "source_id": "latency_bench",
       "status": "measured",
-      "target": 400,
+      "target": 400.0,
       "target_op": "<=",
       "value": 92.1
     },
@@ -1580,7 +1642,7 @@
       "status": "measured",
       "target": null,
       "target_op": null,
-      "value": 0.403375
+      "value": 0.415
     },
     {
       "blueprint_metric": "cost",
@@ -1595,7 +1657,7 @@
       "status": "measured",
       "target": null,
       "target_op": null,
-      "value": 0
+      "value": 0.0
     },
     {
       "blueprint_metric": "controller watts/$",
@@ -1619,7 +1681,7 @@
       "evidence_path": "/metrics/consciousness_indicator_rpt_1",
       "id": "consciousness_indicator_rpt_1",
       "label": "RPT-1 indicator score",
-      "notes": "Measured by the G0 functional consciousness indicator scorecard. This is an architecture/probe signal only and makes no phenomenal-consciousness claim.",
+      "notes": "Measured by the G0 functional consciousness indicator scorecard as an architecture source scan. This is non-decrease evidence for an indicator-property surface, not a standalone behavioral runtime proof, and it makes no phenomenal-consciousness claim.",
       "pass": null,
       "source_id": "consciousness_eval",
       "status": "measured",
@@ -1634,13 +1696,13 @@
       "evidence_path": "/metrics/consciousness_indicator_rpt_2",
       "id": "consciousness_indicator_rpt_2",
       "label": "RPT-2 indicator score",
-      "notes": "Measured by the G0 functional consciousness indicator scorecard. This is an architecture/probe signal only and makes no phenomenal-consciousness claim.",
+      "notes": "Measured by the G0 functional consciousness indicator scorecard as an architecture source scan. This is non-decrease evidence for an indicator-property surface, not a standalone behavioral runtime proof, and it makes no phenomenal-consciousness claim.",
       "pass": null,
       "source_id": "consciousness_eval",
       "status": "measured",
       "target": null,
       "target_op": null,
-      "value": 1
+      "value": 1.0
     },
     {
       "blueprint_metric": "consciousness indicator GWT-1",
@@ -1649,13 +1711,13 @@
       "evidence_path": "/metrics/consciousness_indicator_gwt_1",
       "id": "consciousness_indicator_gwt_1",
       "label": "GWT-1 indicator score",
-      "notes": "Measured by the G0 functional consciousness indicator scorecard. This is an architecture/probe signal only and makes no phenomenal-consciousness claim.",
+      "notes": "Measured by the G0 functional consciousness indicator scorecard as an architecture source scan. This is non-decrease evidence for an indicator-property surface, not a standalone behavioral runtime proof, and it makes no phenomenal-consciousness claim.",
       "pass": null,
       "source_id": "consciousness_eval",
       "status": "measured",
       "target": null,
       "target_op": null,
-      "value": 1
+      "value": 1.0
     },
     {
       "blueprint_metric": "consciousness indicator GWT-2",
@@ -1664,13 +1726,13 @@
       "evidence_path": "/metrics/consciousness_indicator_gwt_2",
       "id": "consciousness_indicator_gwt_2",
       "label": "GWT-2 indicator score",
-      "notes": "Measured by the G0 functional consciousness indicator scorecard. This is an architecture/probe signal only and makes no phenomenal-consciousness claim.",
+      "notes": "Measured by the G0 functional consciousness indicator scorecard as an architecture source scan. This is non-decrease evidence for an indicator-property surface, not a standalone behavioral runtime proof, and it makes no phenomenal-consciousness claim.",
       "pass": null,
       "source_id": "consciousness_eval",
       "status": "measured",
       "target": null,
       "target_op": null,
-      "value": 1
+      "value": 1.0
     },
     {
       "blueprint_metric": "consciousness indicator GWT-3",
@@ -1679,13 +1741,13 @@
       "evidence_path": "/metrics/consciousness_indicator_gwt_3",
       "id": "consciousness_indicator_gwt_3",
       "label": "GWT-3 indicator score",
-      "notes": "Measured by the G0 functional consciousness indicator scorecard. This is an architecture/probe signal only and makes no phenomenal-consciousness claim.",
+      "notes": "Measured by the G0 functional consciousness indicator scorecard as an architecture source scan. This is non-decrease evidence for an indicator-property surface, not a standalone behavioral runtime proof, and it makes no phenomenal-consciousness claim.",
       "pass": null,
       "source_id": "consciousness_eval",
       "status": "measured",
       "target": null,
       "target_op": null,
-      "value": 1
+      "value": 1.0
     },
     {
       "blueprint_metric": "consciousness indicator GWT-4",
@@ -1694,13 +1756,13 @@
       "evidence_path": "/metrics/consciousness_indicator_gwt_4",
       "id": "consciousness_indicator_gwt_4",
       "label": "GWT-4 indicator score",
-      "notes": "Measured by the G0 functional consciousness indicator scorecard. This is an architecture/probe signal only and makes no phenomenal-consciousness claim.",
+      "notes": "Measured by the G0 functional consciousness indicator scorecard as an architecture source scan. This is non-decrease evidence for an indicator-property surface, not a standalone behavioral runtime proof, and it makes no phenomenal-consciousness claim.",
       "pass": null,
       "source_id": "consciousness_eval",
       "status": "measured",
       "target": null,
       "target_op": null,
-      "value": 1
+      "value": 1.0
     },
     {
       "blueprint_metric": "consciousness indicator HOT-1",
@@ -1709,13 +1771,13 @@
       "evidence_path": "/metrics/consciousness_indicator_hot_1",
       "id": "consciousness_indicator_hot_1",
       "label": "HOT-1 indicator score",
-      "notes": "Measured by the G0 functional consciousness indicator scorecard. This is an architecture/probe signal only and makes no phenomenal-consciousness claim.",
+      "notes": "Measured by the G0 functional consciousness indicator scorecard as an architecture source scan. This is non-decrease evidence for an indicator-property surface, not a standalone behavioral runtime proof, and it makes no phenomenal-consciousness claim.",
       "pass": null,
       "source_id": "consciousness_eval",
       "status": "measured",
       "target": null,
       "target_op": null,
-      "value": 1
+      "value": 1.0
     },
     {
       "blueprint_metric": "consciousness indicator HOT-2",
@@ -1724,13 +1786,13 @@
       "evidence_path": "/metrics/consciousness_indicator_hot_2",
       "id": "consciousness_indicator_hot_2",
       "label": "HOT-2 indicator score",
-      "notes": "Measured by the G0 functional consciousness indicator scorecard. This is an architecture/probe signal only and makes no phenomenal-consciousness claim.",
+      "notes": "Measured by the G0 functional consciousness indicator scorecard as an architecture source scan. This is non-decrease evidence for an indicator-property surface, not a standalone behavioral runtime proof, and it makes no phenomenal-consciousness claim.",
       "pass": null,
       "source_id": "consciousness_eval",
       "status": "measured",
       "target": null,
       "target_op": null,
-      "value": 1
+      "value": 1.0
     },
     {
       "blueprint_metric": "consciousness indicator HOT-3",
@@ -1739,13 +1801,13 @@
       "evidence_path": "/metrics/consciousness_indicator_hot_3",
       "id": "consciousness_indicator_hot_3",
       "label": "HOT-3 indicator score",
-      "notes": "Measured by the G0 functional consciousness indicator scorecard. This is an architecture/probe signal only and makes no phenomenal-consciousness claim.",
+      "notes": "Measured by the G0 functional consciousness indicator scorecard as an architecture source scan. This is non-decrease evidence for an indicator-property surface, not a standalone behavioral runtime proof, and it makes no phenomenal-consciousness claim.",
       "pass": null,
       "source_id": "consciousness_eval",
       "status": "measured",
       "target": null,
       "target_op": null,
-      "value": 1
+      "value": 1.0
     },
     {
       "blueprint_metric": "consciousness indicator HOT-4",
@@ -1754,13 +1816,13 @@
       "evidence_path": "/metrics/consciousness_indicator_hot_4",
       "id": "consciousness_indicator_hot_4",
       "label": "HOT-4 indicator score",
-      "notes": "Measured by the G0 functional consciousness indicator scorecard. This is an architecture/probe signal only and makes no phenomenal-consciousness claim.",
+      "notes": "Measured by the G0 functional consciousness indicator scorecard as an architecture source scan. This is non-decrease evidence for an indicator-property surface, not a standalone behavioral runtime proof, and it makes no phenomenal-consciousness claim.",
       "pass": null,
       "source_id": "consciousness_eval",
       "status": "measured",
       "target": null,
       "target_op": null,
-      "value": 1
+      "value": 1.0
     },
     {
       "blueprint_metric": "consciousness indicator AST-1",
@@ -1769,13 +1831,13 @@
       "evidence_path": "/metrics/consciousness_indicator_ast_1",
       "id": "consciousness_indicator_ast_1",
       "label": "AST-1 indicator score",
-      "notes": "Measured by the G0 functional consciousness indicator scorecard. This is an architecture/probe signal only and makes no phenomenal-consciousness claim.",
+      "notes": "Measured by the G0 functional consciousness indicator scorecard as an architecture source scan. This is non-decrease evidence for an indicator-property surface, not a standalone behavioral runtime proof, and it makes no phenomenal-consciousness claim.",
       "pass": null,
       "source_id": "consciousness_eval",
       "status": "measured",
       "target": null,
       "target_op": null,
-      "value": 1
+      "value": 1.0
     },
     {
       "blueprint_metric": "consciousness indicator PP-1",
@@ -1784,13 +1846,13 @@
       "evidence_path": "/metrics/consciousness_indicator_pp_1",
       "id": "consciousness_indicator_pp_1",
       "label": "PP-1 indicator score",
-      "notes": "Measured by the G0 functional consciousness indicator scorecard. This is an architecture/probe signal only and makes no phenomenal-consciousness claim.",
+      "notes": "Measured by the G0 functional consciousness indicator scorecard as an architecture source scan. This is non-decrease evidence for an indicator-property surface, not a standalone behavioral runtime proof, and it makes no phenomenal-consciousness claim.",
       "pass": null,
       "source_id": "consciousness_eval",
       "status": "measured",
       "target": null,
       "target_op": null,
-      "value": 1
+      "value": 1.0
     },
     {
       "blueprint_metric": "consciousness indicator AE-1",
@@ -1799,13 +1861,13 @@
       "evidence_path": "/metrics/consciousness_indicator_ae_1",
       "id": "consciousness_indicator_ae_1",
       "label": "AE-1 indicator score",
-      "notes": "Measured by the G0 functional consciousness indicator scorecard. This is an architecture/probe signal only and makes no phenomenal-consciousness claim.",
+      "notes": "Measured by the G0 functional consciousness indicator scorecard as an architecture source scan. This is non-decrease evidence for an indicator-property surface, not a standalone behavioral runtime proof, and it makes no phenomenal-consciousness claim.",
       "pass": null,
       "source_id": "consciousness_eval",
       "status": "measured",
       "target": null,
       "target_op": null,
-      "value": 1
+      "value": 1.0
     },
     {
       "blueprint_metric": "consciousness indicator AE-2",
@@ -1814,13 +1876,13 @@
       "evidence_path": "/metrics/consciousness_indicator_ae_2",
       "id": "consciousness_indicator_ae_2",
       "label": "AE-2 indicator score",
-      "notes": "Measured by the G0 functional consciousness indicator scorecard. This is an architecture/probe signal only and makes no phenomenal-consciousness claim.",
+      "notes": "Measured by the G0 functional consciousness indicator scorecard as an architecture source scan. This is non-decrease evidence for an indicator-property surface, not a standalone behavioral runtime proof, and it makes no phenomenal-consciousness claim.",
       "pass": null,
       "source_id": "consciousness_eval",
       "status": "measured",
       "target": null,
       "target_op": null,
-      "value": 1
+      "value": 1.0
     },
     {
       "blueprint_metric": "indicator-property scorecard total",
@@ -1829,7 +1891,7 @@
       "evidence_path": "/metrics/consciousness_indicator_total",
       "id": "consciousness_indicator_total",
       "label": "consciousness indicator total",
-      "notes": "Measured by the G0 functional consciousness indicator scorecard. This is an architecture/probe signal only and makes no phenomenal-consciousness claim.",
+      "notes": "Measured by the G0 functional consciousness indicator scorecard as an architecture source scan. This is non-decrease evidence for an indicator-property surface, not a standalone behavioral runtime proof, and it makes no phenomenal-consciousness claim.",
       "pass": null,
       "source_id": "consciousness_eval",
       "status": "measured",
@@ -1844,7 +1906,7 @@
       "evidence_path": "/metrics/consciousness_indicator_normalized",
       "id": "consciousness_indicator_normalized",
       "label": "consciousness indicator normalized",
-      "notes": "Measured by the G0 functional consciousness indicator scorecard. This is an architecture/probe signal only and makes no phenomenal-consciousness claim.",
+      "notes": "Measured by the G0 functional consciousness indicator scorecard as an architecture source scan. This is non-decrease evidence for an indicator-property surface, not a standalone behavioral runtime proof, and it makes no phenomenal-consciousness claim.",
       "pass": null,
       "source_id": "consciousness_eval",
       "status": "measured",
@@ -1859,13 +1921,13 @@
       "evidence_path": "/metrics/workspace_loop_liveness",
       "id": "workspace_loop_liveness",
       "label": "workspace loop liveness",
-      "notes": "Measured by the G0 functional consciousness indicator scorecard. This is an architecture/probe signal only and makes no phenomenal-consciousness claim.",
+      "notes": "Measured by the G0 functional consciousness indicator scorecard runtime probes. This is an architecture/probe signal only and makes no phenomenal-consciousness claim.",
       "pass": null,
       "source_id": "consciousness_eval",
       "status": "measured",
       "target": null,
       "target_op": null,
-      "value": 1
+      "value": 1.0
     },
     {
       "blueprint_metric": "continuity stream coherence",
@@ -1874,13 +1936,13 @@
       "evidence_path": "/metrics/workspace_stream_coherence",
       "id": "workspace_stream_coherence",
       "label": "workspace stream coherence",
-      "notes": "Measured by the G0 functional consciousness indicator scorecard. This is an architecture/probe signal only and makes no phenomenal-consciousness claim.",
+      "notes": "Measured by the G0 functional consciousness indicator scorecard runtime probes. This is an architecture/probe signal only and makes no phenomenal-consciousness claim.",
       "pass": null,
       "source_id": "consciousness_eval",
       "status": "measured",
       "target": null,
       "target_op": null,
-      "value": 1
+      "value": 1.0
     },
     {
       "blueprint_metric": "self-model accuracy",
@@ -1889,13 +1951,13 @@
       "evidence_path": "/metrics/self_model_accuracy",
       "id": "self_model_accuracy",
       "label": "self-model accuracy",
-      "notes": "Measured by the G0 functional consciousness indicator scorecard. This is an architecture/probe signal only and makes no phenomenal-consciousness claim.",
+      "notes": "Measured by the G0 functional consciousness indicator scorecard runtime probes. This is an architecture/probe signal only and makes no phenomenal-consciousness claim.",
       "pass": null,
       "source_id": "consciousness_eval",
       "status": "measured",
       "target": null,
       "target_op": null,
-      "value": 1
+      "value": 1.0
     },
     {
       "blueprint_metric": "meta-d-prime",
@@ -1904,13 +1966,13 @@
       "evidence_path": "/metrics/metacognition_meta_d_prime",
       "id": "metacognition_meta_d_prime",
       "label": "metacognition meta-d-prime",
-      "notes": "Measured by the G0 functional consciousness indicator scorecard. This is an architecture/probe signal only and makes no phenomenal-consciousness claim.",
+      "notes": "Measured by the G0 functional consciousness indicator scorecard runtime probes. This is an architecture/probe signal only and makes no phenomenal-consciousness claim.",
       "pass": null,
       "source_id": "consciousness_eval",
       "status": "measured",
       "target": null,
       "target_op": null,
-      "value": 1
+      "value": 1.0
     },
     {
       "blueprint_metric": "M-ratio",
@@ -1919,13 +1981,13 @@
       "evidence_path": "/metrics/metacognition_m_ratio",
       "id": "metacognition_m_ratio",
       "label": "metacognition M-ratio",
-      "notes": "Measured by the G0 functional consciousness indicator scorecard. This is an architecture/probe signal only and makes no phenomenal-consciousness claim.",
+      "notes": "Measured by the G0 functional consciousness indicator scorecard runtime probes. This is an architecture/probe signal only and makes no phenomenal-consciousness claim.",
       "pass": null,
       "source_id": "consciousness_eval",
       "status": "measured",
       "target": null,
       "target_op": null,
-      "value": 1
+      "value": 1.0
     },
     {
       "blueprint_metric": "HOT-2 runtime shadow-tag contract",
@@ -1934,13 +1996,13 @@
       "evidence_path": "/metrics/reality_monitor_shadow_tag_contract",
       "id": "reality_monitor_shadow_tag_contract",
       "label": "reality-monitor shadow tag contract",
-      "notes": "Measured by the G0 functional consciousness indicator scorecard. This is an architecture/probe signal only and makes no phenomenal-consciousness claim.",
+      "notes": "Measured by the G0 functional consciousness indicator scorecard runtime probes. This is an architecture/probe signal only and makes no phenomenal-consciousness claim.",
       "pass": null,
       "source_id": "consciousness_eval",
       "status": "measured",
       "target": null,
       "target_op": null,
-      "value": 1
+      "value": 1.0
     }
   ],
   "schema_version": "g0.report.v1",
@@ -1981,46 +2043,46 @@
       "sha256": "aee46e3a0908f5e44edff596e1206e6aecc10234c1e24af953f623e929a958a6"
     },
     {
-      "generated_at": "2026-06-26T14:11:27.416680+00:00",
+      "generated_at": "2026-06-26T15:09:24.428138+00:00",
       "id": "continual_learning_eval",
       "path": "computed:eval.g0.continual_learning",
       "present": true,
-      "sha256": "2c6410654b1c187126f5701dd6e63a6b6366841cea5989f2295808a8584f34cd"
+      "sha256": "29553897e3d3f9175c004d4fb9504f88efa95c9787dd45e594f59ea93ef8f246"
     },
     {
-      "generated_at": "2026-06-26T14:11:27.418018+00:00",
+      "generated_at": "2026-06-26T15:09:24.429227+00:00",
       "id": "confabulation_eval",
       "path": "computed:eval.g0.confabulation",
       "present": true,
-      "sha256": "f0d5879e72d96539272809f3dc9f1c84ae46da9438c1d00cfccb05fcc76a40ef"
+      "sha256": "5eb4875c0f145b78c7bd254fe75c70b23b1424d1f53efbed769d843e01b7fed8"
     },
     {
-      "generated_at": "2026-06-26T14:11:27.419395+00:00",
+      "generated_at": "2026-06-26T15:09:24.430590+00:00",
       "id": "projection_reality_eval",
       "path": "computed:eval.g0.projection_reality",
       "present": true,
-      "sha256": "3604a154f1a90908bf50e3c7a5f1c20a33ab6917faf5d5446190dd133b7e34c1"
+      "sha256": "62f1f34b711f7e8cd1d47dc445c55cf80e3382305f475326103802f8c7bd4396"
     },
     {
-      "generated_at": "2026-06-26T12:39:02.752773+00:00",
+      "generated_at": "2026-06-26T15:09:24.436207+00:00",
       "id": "deep_latency_eval",
       "path": "computed:eval.g0.deep_latency",
       "present": true,
-      "sha256": "339f494ab8259469ef9c498a2fcc1c78f5169b470c80cb6e1e778d21d921825f"
+      "sha256": "059b2603621b073fb16b14edc3fecc5d03fac7a39893624bb602b152f73be851"
     },
     {
-      "generated_at": "2026-06-26T14:11:27.440690+00:00",
+      "generated_at": "2026-06-26T15:09:24.444534+00:00",
       "id": "resource_usage_eval",
       "path": "computed:eval.g0.resource_usage",
       "present": true,
-      "sha256": "7b1b2709dcc9de14c0204651322b8480222d1797fa3c2302f70e8f4f4510b712"
+      "sha256": "6f5507c42beda2310db55d46fcdd0a17e7681d10aa1a78bb5983c7956f15bed8"
     },
     {
-      "generated_at": "2026-06-26T14:11:27.449921+00:00",
+      "generated_at": "2026-06-26T15:09:24.450397+00:00",
       "id": "consciousness_eval",
       "path": "computed:eval.g0.consciousness",
       "present": true,
-      "sha256": "34ab41a5eed19cee2b25fbfcd51d777d168f6af09e38cbf68736410ea12e76c8"
+      "sha256": "34aa4974c20f97b673072246f3ca7a91bbd4296151584f0b4fb838ae661740ff"
     }
   ]
 }

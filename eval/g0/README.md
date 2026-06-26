@@ -7,13 +7,12 @@ existing eval lane instead of forking it.
 Run:
 
 ```bash
-python -m eval.g0.runner --write-baseline
+python -m eval.g0.runner
 ```
 
 This writes:
 
 - `eval/g0/reports/report.json` and `report.md`
-- `eval/g0/baselines/baseline-0.json` when `--write-baseline` is used
 - an embedded computed `continual_learning_eval` fixture measuring the current
   backward-transfer accuracy drop after later overlapping ingests
 - an embedded computed `confabulation_eval` fixture measuring the current
@@ -30,6 +29,11 @@ This writes:
   indicator-property scorecard, continuity probes, self-model accuracy, and
   metacognition metrics; these are architecture/probe signals only and do not
   claim phenomenal consciousness
+
+`eval/g0/baselines/baseline-0.json` is the frozen baseline custody artifact.
+Do not rewrite it during normal G1+ development. Use `--write-baseline` only
+when intentionally creating a new named baseline under a reviewed baseline
+rollover decision.
 
 To measure `controller_watts_per_dollar`, pass a local telemetry artifact:
 
@@ -67,3 +71,11 @@ python -m eval.g0.gate \
 
 The gate fails unless the preregistered target metric improves by its margin and
 every guardrail metric remains non-regressed.
+
+CI enforces the committed gate in two ways:
+
+- every preregistration in `eval/g0/preregistrations/` must have a passing
+  historical decision in `eval/g0/decision-log.jsonl`
+- the current in-process candidate report must replay every committed
+  preregistration with `minimum_delta=0` so accepted targets and guardrails
+  cannot regress silently

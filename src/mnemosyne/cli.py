@@ -8,6 +8,7 @@ import ipaddress
 import json
 import math
 import os
+import re
 import socket
 import ssl
 import subprocess
@@ -10909,9 +10910,82 @@ def _production_evidence_manifest_commands(manifest: Mapping[str, Any] | None) -
     return commands
 
 
+def _production_evidence_manifest_path_rewrites(preflight: Mapping[str, Any] | None) -> dict[str, str]:
+    if preflight is None:
+        return {}
+    input_artifacts = preflight.get("required_input_artifacts")
+    if not isinstance(input_artifacts, list):
+        return {}
+    rewrites: dict[str, str] = {}
+    for artifact in input_artifacts:
+        if not isinstance(artifact, Mapping):
+            continue
+        source_path = artifact.get("path")
+        snapshot_path = artifact.get("snapshot_path")
+        if isinstance(source_path, str) and source_path and isinstance(snapshot_path, str) and snapshot_path:
+            rewrites[str(Path(source_path).expanduser().resolve(strict=False))] = str(
+                Path(snapshot_path).expanduser().resolve(strict=False)
+            )
+        files = artifact.get("files")
+        if not isinstance(files, list):
+            continue
+        for file_entry in files:
+            if not isinstance(file_entry, Mapping):
+                continue
+            source_file = file_entry.get("source_path")
+            snapshot_file = file_entry.get("snapshot_path")
+            if isinstance(source_file, str) and source_file and isinstance(snapshot_file, str) and snapshot_file:
+                rewrites[str(Path(source_file).expanduser().resolve(strict=False))] = str(
+                    Path(snapshot_file).expanduser().resolve(strict=False)
+                )
+    return rewrites
+
+
+def _production_evidence_normalize_manifest_value(value: Any, *, path_rewrites: Mapping[str, str]) -> Any:
+    if isinstance(value, str):
+        normalized = value
+        for source_path, snapshot_path in sorted(path_rewrites.items(), key=lambda item: len(item[0]), reverse=True):
+            pattern = re.compile(rf"(?<![\w.-]){re.escape(source_path)}(?=$|[\s\"',;:\]\)]|[/\\])")
+            normalized = pattern.sub(snapshot_path, normalized)
+        return normalized
+    if isinstance(value, list):
+        return [_production_evidence_normalize_manifest_value(item, path_rewrites=path_rewrites) for item in value]
+    if isinstance(value, Mapping):
+        return {
+            str(key): _production_evidence_normalize_manifest_value(inner, path_rewrites=path_rewrites)
+            for key, inner in sorted(value.items(), key=lambda item: str(item[0]))
+        }
+    return value
+
+
+def _production_evidence_manifest_check_profile(
+    manifest: Mapping[str, Any] | None,
+    *,
+    path_rewrites: Mapping[str, str] | None = None,
+) -> list[dict[str, Any]]:
+    if manifest is None:
+        return []
+    checks = manifest.get("checks")
+    if not isinstance(checks, list):
+        return []
+    rewrites = path_rewrites or {}
+    profile: list[dict[str, Any]] = []
+    for check in checks:
+        if not isinstance(check, Mapping):
+            continue
+        profile.append(
+            _production_evidence_normalize_manifest_value(
+                dict(check),
+                path_rewrites=rewrites,
+            )
+        )
+    return profile
+
+
 def _verify_production_evidence_source_soak_manifest(
     source_manifest: Mapping[str, Any] | None,
     operator_manifest: Mapping[str, Any] | None,
+    preflight: Mapping[str, Any] | None,
     findings: list[dict[str, Any]],
 ) -> bool:
     ok = _verify_production_evidence_operator_manifest(
@@ -10924,12 +10998,18 @@ def _verify_production_evidence_source_soak_manifest(
         return False
     source_commands = _production_evidence_manifest_commands(source_manifest)
     operator_commands = _production_evidence_manifest_commands(operator_manifest)
-    if source_commands != operator_commands:
+    path_rewrites = _production_evidence_manifest_path_rewrites(preflight)
+    source_profile = _production_evidence_manifest_check_profile(source_manifest, path_rewrites=path_rewrites)
+    operator_profile = _production_evidence_manifest_check_profile(operator_manifest)
+    if source_commands != operator_commands or source_profile != operator_profile:
         ok = False
         _production_evidence_finding(
             findings,
             "source_manifest_command_profile_mismatch",
-            "source-soak-manifest.json command profile must match operator-soak-manifest.json",
+            (
+                "source-soak-manifest.json command and argument profile must match "
+                "operator-soak-manifest.json after retained input-artifact path rewrites"
+            ),
         )
     return ok
 
@@ -11173,6 +11253,7 @@ def cmd_production_evidence_verify(args: argparse.Namespace) -> None:
     source_soak_manifest_ok = _verify_production_evidence_source_soak_manifest(
         source_soak_manifest,
         operator_manifest,
+        preflight,
         findings,
     )
     input_artifact_custody_ok = _verify_production_evidence_input_artifact_custody(

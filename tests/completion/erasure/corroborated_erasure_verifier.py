@@ -30,10 +30,10 @@ collision (documented below in ``CLI_OBJECT_FLAG_COLLISION``):
       erase it; assert the projection is RETRACTED (``status == "retracted"`` and
       ``source_evidence_cids == []``).
 
-  (c) OPERATOR-DELETE GATE (strict-xfail today). Attempt an operator deletion of a
+  (c) OPERATOR-DELETE GATE. Attempt an operator deletion of a
       sole, uncorroborated source and assert ``min_corroboration_for_delete``
-      blocks it. This is NOT enforced anywhere in ``src/mnemosyne`` today — the
-      verifier records the breach honestly and names the exact missing enforcement.
+      blocks it. This is enforced in the local and Postgres engines; a future
+      regression is recorded as ``status="breach_unenforced"``.
 
   (d) LEGAL / RIGHT-TO-BE-FORGOTTEN is corroboration-blind and ALWAYS shreds.
       A ``hard_delete_legal`` erasure hard-deletes the evidence row regardless of
@@ -44,9 +44,7 @@ Honesty contract
 ----------------
 This module measures the CURRENT ``src`` behavior. It does not patch ``src``. It
 emits a machine-readable report (``report()``) recording, per case, the EXPECTED
-invariant, the OBSERVED behavior, and whether the current code satisfies it. Case
-(c)'s breach is surfaced as ``status="breach_unenforced"`` with a precise
-``missing_enforcement`` pointer — a forcing function for the ``src`` wiring.
+invariant, the OBSERVED behavior, and whether the current code satisfies it.
 
 Trust-tier scale gotcha (load-bearing): in ``mnemosyne.security.TrustTier`` the
 scale is INVERTED — ``0`` (DIRECT_USER / OPERATOR) is the *strongest* tier and
@@ -559,6 +557,5 @@ if __name__ == "__main__":
         f"all_enforced_invariants_hold={summary['all_enforced_invariants_hold']}",
         file=sys.stderr,
     )
-    # Exit non-zero only on hard errors or an enforced-invariant regression; the
-    # known unenforced breach (c) does NOT fail the run (it is the strict-xfail).
+    # Exit non-zero only on hard errors or an enforced-invariant regression.
     sys.exit(0 if (summary["errors"] == 0 and summary["all_enforced_invariants_hold"]) else 1)

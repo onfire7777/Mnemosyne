@@ -186,8 +186,12 @@ def test_g0_consciousness_scorecard_reports_indicator_properties() -> None:
     assert shadow_contract["score"] == 1.0
     assert all(shadow_contract["checks"].values())
     assert shadow_contract["local"]["abstained"] is False
-    assert shadow_contract["local"]["critical_path"] is False
-    assert shadow_contract["postgres"]["critical_path"] is False
+    assert shadow_contract["local"]["critical_path"] is True
+    assert shadow_contract["local"]["abstention_gate"]["critical_path"] is True
+    assert shadow_contract["local"]["shadow_tags_critical_path"] is False
+    assert shadow_contract["postgres"]["critical_path"] is True
+    assert shadow_contract["postgres"]["abstention_gate"]["critical_path"] is True
+    assert shadow_contract["postgres"]["shadow_tags_critical_path"] is False
 
 
 def test_g0_report_measures_controller_watts_with_explicit_telemetry(tmp_path: Path) -> None:
@@ -304,3 +308,40 @@ def test_ablation_gate_fails_guardrail_regression_and_missing_metrics() -> None:
     assert decision.passed is False
     assert any("ece" in reason for reason in decision.reasons)
     assert any("confabulation_rate" in reason for reason in decision.reasons)
+
+
+def test_committed_g0_preregistrations_have_passing_decisions() -> None:
+    decision_log = REPO_ROOT / "eval/g0/decision-log.jsonl"
+    decisions = [
+        json.loads(line)
+        for line in decision_log.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    passed_by_change: dict[str, list[dict]] = {}
+    for decision in decisions:
+        if decision.get("passed") is True:
+            passed_by_change.setdefault(str(decision.get("change_id")), []).append(decision)
+
+    for prereg_path in sorted((REPO_ROOT / "eval/g0/preregistrations").glob("*.json")):
+        prereg = json.loads(prereg_path.read_text(encoding="utf-8"))
+        change_id = str(prereg["change_id"])
+        target_metric = str(prereg["target_metric"])
+        minimum_delta = float(prereg.get("minimum_delta", 0.0))
+        matching = [
+            decision
+            for decision in passed_by_change.get(change_id, [])
+            if decision.get("target_metric") == target_metric
+            and float(decision.get("target_delta") or 0.0) >= minimum_delta
+        ]
+        assert matching, f"{prereg_path.name} has no passing decision-log entry"
+
+
+def test_current_g0_candidate_replays_preregistrations_without_regression() -> None:
+    baseline = json.loads((REPO_ROOT / "eval/g0/baselines/baseline-0.json").read_text(encoding="utf-8"))
+    candidate = build_report(REPO_ROOT, baseline_name="candidate-current")
+
+    for prereg_path in sorted((REPO_ROOT / "eval/g0/preregistrations").glob("*.json")):
+        prereg = json.loads(prereg_path.read_text(encoding="utf-8"))
+        non_regression_prereg = {**prereg, "minimum_delta": 0.0}
+        decision = evaluate_ablation(baseline, candidate, non_regression_prereg)
+        assert decision.passed, f"{prereg_path.name} regressed current G0 candidate: {decision.reasons}"

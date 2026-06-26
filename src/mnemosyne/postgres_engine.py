@@ -1225,6 +1225,7 @@ class PostgresEngine:
         tenant_id: str | None = None,
         branch: str | None = None,
         use_cache: bool = False,
+        filt: dict[str, Any] | None = None,
     ) -> list[Hit]:
         seed_set = {seed.lower() for seed in seeds}
         if not seed_set or not tenant_id:
@@ -1237,6 +1238,11 @@ class PostgresEngine:
         branch = str(branch or "main")
         moment = as_of or utc_now()
         moment = moment.astimezone(UTC) if moment.tzinfo else moment.replace(tzinfo=UTC)
+        graph_filter = dict(filt or {})
+        include_quarantined = bool(graph_filter.get("include_quarantined", False))
+        default_max_trust = int(TrustTier.UNTRUSTED_EXTERNAL) if include_quarantined else self.policy.max_trust_tier
+        max_trust = int(graph_filter.get("max_trust_tier", graph_filter.get("min_trust_tier", default_max_trust)))
+        max_sensitivity = int(graph_filter.get("max_sensitivity", self.policy.max_sensitivity))
         if self.adapters.graph_retriever is not None:
             hits = self.adapters.graph_retriever.search(
                 seeds,
@@ -1280,11 +1286,39 @@ class PostgresEngine:
                     """,
                     (db_tenant_id, branch, moment, moment),
                 )
-                for row in cur.fetchall():
+                relation_rows = [dict(row) for row in cur.fetchall()]
+                relation_source_cids: set[bytes] = set()
+                for row in relation_rows:
+                    for cid_value in row.get("source_evidence_cids") or []:
+                        raw = cid_value.tobytes() if isinstance(cid_value, memoryview) else cid_value
+                        if raw:
+                            relation_source_cids.add(bytes(raw))
+                evidence_by_cid: dict[str, dict[str, Any]] = {}
+                if relation_source_cids:
+                    cur.execute(
+                        """
+                        SELECT cid, metadata, trust_tier, sensitivity, erased, actor, source_type
+                        FROM evidence
+                        WHERE tenant_id = %s AND branch = %s AND cid = ANY(%s::bytea[])
+                        """,
+                        (db_tenant_id, branch, list(relation_source_cids)),
+                    )
+                    evidence_by_cid = {_bytes_to_cid(row["cid"]): dict(row) for row in cur.fetchall()}
+                for row in relation_rows:
+                    security = self._relation_hit_security_from_rows(
+                        row,
+                        evidence_by_cid,
+                        include_quarantined=include_quarantined,
+                        max_trust=max_trust,
+                        max_sensitivity=max_sensitivity,
+                    )
+                    if security is None:
+                        continue
                     source = row["source"].lower()
                     target = row["target"].lower()
                     adjacency[source].add(target)
                     adjacency[target].add(source)
+                    row["hit_security"] = security
                     relation_by_pair[(source, target)] = dict(row)
                     relation_by_pair[(target, source)] = dict(row)
         ranks = {node: (1.0 if matches_seed(node) else 0.0) for node in adjacency}
@@ -1306,6 +1340,7 @@ class PostgresEngine:
             rel = next((relation_by_pair[pair] for pair in relation_by_pair if pair[0] == node or pair[1] == node), None)
             if not rel:
                 continue
+            security = rel["hit_security"]
             hits.append(
                 Hit(
                     id=str(rel["id"]),
@@ -1316,6 +1351,8 @@ class PostgresEngine:
                     score=float(score) * float(rel["confidence"]),
                     channel="postgres_graph_ppr",
                     provenance=_bytes_list_to_cids(rel["source_evidence_cids"]),
+                    trust_tier=security["trust_tier"],
+                    sensitivity=security["sensitivity"],
                     metadata={
                         "source": rel["source"],
                         "predicate": rel["predicate"],
@@ -1323,6 +1360,9 @@ class PostgresEngine:
                         "confidence": float(rel["confidence"]),
                         "source_evidence_cids": _bytes_list_to_cids(rel["source_evidence_cids"]),
                         "backend": self.adapters.graph_backend,
+                        "reality_class": security["reality_class"],
+                        "source_evidence_status": security["source_evidence_status"],
+                        "source_evidence_security": security["source_evidence_security"],
                     },
                 )
             )
@@ -1489,7 +1529,11 @@ class PostgresEngine:
         k = self.policy.deep_top_k if deep else self.policy.top_k
         dense = self.vector_search(query, self.policy.rerank_width, effective_filter)
         lexical = self.lexical_search(query, self.policy.rerank_width, effective_filter)
-        graph = self.graph_ppr(tokenize(query), max(4, k // 2), tenant_id=tenant_id, branch=branch) if deep else []
+        graph = (
+            self.graph_ppr(tokenize(query), max(4, k // 2), tenant_id=tenant_id, branch=branch, filt=effective_filter)
+            if deep
+            else []
+        )
         fused = self._rrf([dense, lexical, graph], k=max(k * 2, self.policy.rerank_width))
         reranked = self.adapters.reranker.rerank(query, fused, k=max(k * 2, k))
         reranked, schema_fast_path = schema_fast_path_rerank(query, reranked, self.policy)
@@ -1860,6 +1904,74 @@ class PostgresEngine:
             return "externally_suggested"
         return "grounded"
 
+    def _relation_hit_security_from_rows(
+        self,
+        relation: dict[str, Any],
+        evidence_by_cid: dict[str, dict[str, Any]],
+        *,
+        include_quarantined: bool,
+        max_trust: int,
+        max_sensitivity: int,
+    ) -> dict[str, Any] | None:
+        source_cids = _bytes_list_to_cids(relation.get("source_evidence_cids"))
+        if not source_cids:
+            return {
+                "trust_tier": 0,
+                "sensitivity": 0,
+                "reality_class": "unknown",
+                "source_evidence_status": "no_source_evidence",
+                "source_evidence_security": [],
+            }
+
+        source_rows: list[tuple[str, dict[str, Any], dict[str, Any]]] = []
+        for cid in source_cids:
+            row = evidence_by_cid.get(cid)
+            if row is None or bool(row.get("erased")):
+                return None
+            metadata = dict(row.get("metadata") or {})
+            if not include_quarantined and metadata.get("quarantine_reason"):
+                return None
+            if is_retired_summary_metadata(metadata):
+                return None
+            source_rows.append((cid, row, metadata))
+
+        trust_tier = max(int(row.get("trust_tier") or 0) for _, row, _ in source_rows)
+        sensitivity = max(int(row.get("sensitivity") or 0) for _, row, _ in source_rows)
+        if trust_tier > max_trust or sensitivity > max_sensitivity:
+            return None
+
+        reality_classes = [self._classify_evidence_row_reality(row, metadata) for _, row, metadata in source_rows]
+        return {
+            "trust_tier": trust_tier,
+            "sensitivity": sensitivity,
+            "reality_class": self._aggregate_reality_classes(reality_classes),
+            "source_evidence_status": "source_evidence_visible",
+            "source_evidence_security": [
+                {
+                    "cid": cid,
+                    "trust_tier": int(row.get("trust_tier") or 0),
+                    "sensitivity": int(row.get("sensitivity") or 0),
+                    "reality_class": self._classify_evidence_row_reality(row, metadata),
+                }
+                for cid, row, metadata in source_rows
+            ],
+        }
+
+    @staticmethod
+    def _aggregate_reality_classes(classes: list[str]) -> str:
+        normalized = [item for item in classes if item]
+        if not normalized:
+            return "unknown"
+        if "grounded" in normalized:
+            return "grounded"
+        if "self_generated" in normalized:
+            return "self_generated"
+        if "simulated" in normalized:
+            return "simulated"
+        if "externally_suggested" in normalized:
+            return "externally_suggested"
+        return "unknown"
+
     def _reality_monitoring_report(self, hits: list[Hit]) -> dict[str, Any]:
         risky = {"self_generated", "simulated", "externally_suggested"}
         ungrounded = risky | {"unknown"}
@@ -1889,9 +2001,17 @@ class PostgresEngine:
             "grounded_source_count": len(grounded_cids),
             "risky_hit_ids": risky_hit_ids,
             "ungrounded_only": ungrounded_only,
-            "shadow_only": True,
-            "critical_path": False,
+            "shadow_only": False,
+            "critical_path": True,
+            "abstention_gate": {
+                "critical_path": True,
+                "shadow_only": False,
+                "trigger": "ungrounded_only",
+                "active": ungrounded_only,
+            },
             "shadow_source": "RealityMonitor",
+            "shadow_tags_shadow_only": True,
+            "shadow_tags_critical_path": False,
             "shadow_tags": shadow_tags,
         }
 

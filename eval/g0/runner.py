@@ -622,15 +622,24 @@ def _metric_controller_watts_per_dollar(
 def _metric_consciousness_scorecard(spec: dict[str, Any], sources: dict[str, Source]) -> dict[str, Any]:
     metric_id = spec["id"]
     value = _source_data(sources, "consciousness_eval", "metrics", metric_id)
+    if metric_id.startswith("consciousness_indicator_"):
+        note = (
+            "Measured by the G0 functional consciousness indicator scorecard as an "
+            "architecture source scan. This is non-decrease evidence for an "
+            "indicator-property surface, not a standalone behavioral runtime proof, "
+            "and it makes no phenomenal-consciousness claim."
+        )
+    else:
+        note = (
+            "Measured by the G0 functional consciousness indicator scorecard runtime probes. "
+            "This is an architecture/probe signal only and makes no phenomenal-consciousness claim."
+        )
     return _measured(
         spec,
         value,
         "consciousness_eval",
         f"/metrics/{metric_id}",
-        note=(
-            "Measured by the G0 functional consciousness indicator scorecard. "
-            "This is an architecture/probe signal only and makes no phenomenal-consciousness claim."
-        ),
+        note=note,
     )
 
 

@@ -39,6 +39,12 @@ jobs:
         run: python -m pytest
       - name: Drift checks only (explicit gate)
         run: python -m pytest tests/test_config_drift.py -q
+      - name: G0 preregistration gate replay
+        run: >-
+          python -m pytest
+          tests/test_g0_harness.py::test_committed_g0_preregistrations_have_passing_decisions
+          tests/test_g0_harness.py::test_current_g0_candidate_replays_preregistrations_without_regression
+          -q
 
   postgres:
     name: Postgres integration

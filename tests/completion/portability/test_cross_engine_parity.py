@@ -478,6 +478,100 @@ def test_parity_add_relation_and_graph_ppr() -> None:
     assert local["tenants"] == [harness.tenant]
 
 
+def test_parity_graph_ppr_filters_relation_source_trust_boundary() -> None:
+    harness = _harness("relation-security")
+
+    def scenario(engine: Any, tenant: str, user: str) -> dict[str, Any]:
+        cid = engine.append_evidence(
+            _evidence(
+                tenant,
+                user,
+                "Restricted graph relation backing evidence.",
+                trust_tier=5,
+                sensitivity=4,
+            )
+        )
+        relation_id = engine.add_relation(
+            Relation(
+                tenant_id=tenant,
+                source="restricted seed",
+                predicate="points_to",
+                target="restricted target",
+                source_evidence_cids=[cid],
+                access_policy={"tenant": tenant},
+            )
+        )
+        default_hits = engine.graph_ppr(["restricted seed"], 5, tenant_id=tenant, branch="main")
+        permissive_hits = engine.graph_ppr(
+            ["restricted seed"],
+            5,
+            tenant_id=tenant,
+            branch="main",
+            filt={"max_trust_tier": 5, "max_sensitivity": 4},
+        )
+        permissive_hit = next(hit for hit in permissive_hits if hit.id == relation_id)
+        return {
+            "default_relation_ids": sorted(hit.id for hit in default_hits if hit.kind == "relation"),
+            "permissive_relation_ids": sorted(hit.id for hit in permissive_hits if hit.kind == "relation"),
+            "permissive_trust_tier": permissive_hit.trust_tier,
+            "permissive_sensitivity": permissive_hit.sensitivity,
+            "permissive_reality_class": permissive_hit.metadata.get("reality_class"),
+            "permissive_source_status": permissive_hit.metadata.get("source_evidence_status"),
+            "permissive_source_security": permissive_hit.metadata.get("source_evidence_security"),
+        }
+
+    local = harness.run("graph_ppr_relation_source_trust_boundary", scenario)
+    assert local["default_relation_ids"] == []
+    assert len(local["permissive_relation_ids"]) == 1
+    assert local["permissive_trust_tier"] == 5
+    assert local["permissive_sensitivity"] == 4
+    assert local["permissive_reality_class"] == "externally_suggested"
+    assert local["permissive_source_status"] == "source_evidence_visible"
+    assert local["permissive_source_security"][0]["trust_tier"] == 5
+
+
+def test_parity_deep_search_abstains_on_self_generated_graph_relation() -> None:
+    harness = _harness("relation-reality")
+
+    def scenario(engine: Any, tenant: str, user: str) -> dict[str, Any]:
+        cid = engine.append_evidence(
+            _evidence(
+                tenant,
+                user,
+                "Synthetic graph relation backing evidence.",
+                actor="system",
+                source_type="generated-summary",
+                metadata={"reality_class": "self_generated"},
+            )
+        )
+        engine.add_relation(
+            Relation(
+                tenant_id=tenant,
+                source="synthetic seed",
+                predicate="points_to",
+                target="MirageTarget",
+                source_evidence_cids=[cid],
+                access_policy={"tenant": tenant},
+            )
+        )
+        result = engine.deep_search("synthetic seed", tenant)
+        relation_hit = next(hit for hit in result.hits if hit.kind == "relation")
+        return {
+            "abstained": result.abstained,
+            "uncertainty_note": result.uncertainty_note,
+            "ungrounded_only": result.explain["reality_monitoring"]["ungrounded_only"],
+            "relation_reality_class": relation_hit.metadata.get("reality_class"),
+            "relation_trust_tier": relation_hit.trust_tier,
+            "relation_sensitivity": relation_hit.sensitivity,
+        }
+
+    local = harness.run("deep_search_self_generated_graph_relation", scenario)
+    assert local["abstained"] is True
+    assert local["ungrounded_only"] is True
+    assert local["relation_reality_class"] == "self_generated"
+    assert "grounded evidence" in local["uncertainty_note"]
+
+
 def test_parity_graph_ppr_skips_expired_relations() -> None:
     harness = _harness("relation-temporal")
     now = datetime(2026, 6, 10, tzinfo=UTC)
