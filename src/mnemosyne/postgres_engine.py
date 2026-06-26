@@ -1333,6 +1333,42 @@ class PostgresEngine:
                     row["hit_security"] = security
                     relation_by_pair[(source, target)] = dict(row)
                     relation_by_pair[(target, source)] = dict(row)
+        hits: list[Hit] = []
+        seen_relation_ids: set[str] = set()
+        for rel in {str(row["id"]): row for row in relation_by_pair.values()}.values():
+            if not (matches_seed(str(rel["source"])) and matches_seed(str(rel["target"]))):
+                continue
+            relation_id = str(rel["id"])
+            seen_relation_ids.add(relation_id)
+            security = rel["hit_security"]
+            hits.append(
+                Hit(
+                    id=relation_id,
+                    kind="relation",
+                    tenant_id=tenant_id,
+                    branch=rel["branch"],
+                    text=f"{rel['source']} {rel['predicate']} {rel['target']}",
+                    score=float(rel["confidence"]),
+                    channel="postgres_graph_ppr",
+                    provenance=_bytes_list_to_cids(rel["source_evidence_cids"]),
+                    trust_tier=security["trust_tier"],
+                    sensitivity=security["sensitivity"],
+                    metadata={
+                        "source": rel["source"],
+                        "predicate": rel["predicate"],
+                        "target": rel["target"],
+                        "confidence": float(rel["confidence"]),
+                        "source_evidence_cids": _bytes_list_to_cids(rel["source_evidence_cids"]),
+                        "backend": self.adapters.graph_backend,
+                        "reality_class": security["reality_class"],
+                        "source_evidence_status": security["source_evidence_status"],
+                        "source_evidence_security": security["source_evidence_security"],
+                        "direct_seed_relation": True,
+                    },
+                )
+            )
+            if len(hits) >= k:
+                return self._mark_retrieved_text_as_data(hits)
         ranks = {node: (1.0 if matches_seed(node) else 0.0) for node in adjacency}
         for seed in seed_set:
             ranks.setdefault(seed, 1.0)
@@ -1345,17 +1381,20 @@ class PostgresEngine:
                 for neighbor in neighbors:
                     next_ranks[neighbor] = next_ranks.get(neighbor, 0.0) + share
             ranks = next_ranks
-        hits: list[Hit] = []
         for node, score in sorted(ranks.items(), key=lambda item: item[1], reverse=True):
             if matches_seed(node) or score <= 0:
                 continue
             rel = next((relation_by_pair[pair] for pair in relation_by_pair if pair[0] == node or pair[1] == node), None)
             if not rel:
                 continue
+            relation_id = str(rel["id"])
+            if relation_id in seen_relation_ids:
+                continue
+            seen_relation_ids.add(relation_id)
             security = rel["hit_security"]
             hits.append(
                 Hit(
-                    id=str(rel["id"]),
+                    id=relation_id,
                     kind="relation",
                     tenant_id=tenant_id,
                     branch=rel["branch"],
@@ -2014,8 +2053,6 @@ class PostgresEngine:
         filtered: list[Hit] = []
         for hit in hits:
             if hit.kind != "relation":
-                if hit.trust_tier <= max_trust and hit.sensitivity <= max_sensitivity:
-                    filtered.append(hit)
                 continue
             source_cids = source_cids_by_hit.get(hit.id, [])
             source_cid_bytes = [
@@ -2095,7 +2132,7 @@ class PostgresEngine:
         normalized = [item for item in classes if item]
         if not normalized:
             return "unknown"
-        if "grounded" in normalized:
+        if all(item == "grounded" for item in normalized):
             return "grounded"
         if "self_generated" in normalized:
             return "self_generated"

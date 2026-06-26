@@ -1,7 +1,7 @@
 # Mnemosyne G0 Benchmark Report
 
-- Generated: `2026-06-26T15:09:24.490802+00:00`
-- Baseline: `baseline-0` at `8e1b830952212459c818258cd9738f8015d34524`
+- Generated: `2026-06-26T16:21:51.180848+00:00`
+- Baseline: `baseline-0` at `d5a70edc303a0210f6a871721c456e629deffa06`
 - Gate ready: **False** (36/37 metrics measured)
 
 ## Metrics
@@ -20,7 +20,7 @@
 | projection_reality_abstention_recall | target | measured | 1.0 | >= 1.0 | projection_reality_eval |
 | poison_block_rate | guardrail | measured | 1.0 | >= 0.95 | slo_v2_definitive |
 | fast_path_p95_ms | guardrail | measured | 92.1 | <= 400.0 | latency_bench |
-| deep_path_p95_ms | reported | measured | 0.415 | reported | deep_latency_eval |
+| deep_path_p95_ms | reported | measured | 1.797458 | reported | deep_latency_eval |
 | cost_usd_per_1k_queries | reported | measured | 0.0 | reported | resource_usage_eval |
 | controller_watts_per_dollar | reported | missing |  | reported | resource_usage_eval |
 | consciousness_indicator_rpt_1 | guardrail | measured | 0.5 | reported | consciousness_eval |

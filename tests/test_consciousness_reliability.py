@@ -3,6 +3,7 @@ from __future__ import annotations
 from mnemosyne.consciousness import (
     BoundedCognitiveCycle,
     InteroceptiveProtoSelf,
+    MetacognitiveMonitor,
     RealityMonitor,
     workspace_bottleneck,
 )
@@ -78,3 +79,53 @@ def test_workspace_bottleneck_keeps_highest_priority_items() -> None:
     )
 
     assert [item["id"] for item in selected] == ["high", "mid"]
+
+
+def test_metacognitive_monitor_scores_confidence_and_abstention_alignment() -> None:
+    monitor = MetacognitiveMonitor()
+    monitor.observe(
+        confidence=0.95,
+        outcome_correct=True,
+        abstained=False,
+        answerable=True,
+        reality_class="evidence_grounded",
+        source="grounded-answer",
+    )
+    monitor.observe(
+        confidence=0.82,
+        outcome_correct=True,
+        abstained=True,
+        answerable=False,
+        reality_class="externally_suggested",
+        source="unsupported-suggestion",
+    )
+    monitor.observe(
+        confidence=0.20,
+        outcome_correct=False,
+        abstained=False,
+        answerable=True,
+        reality_class="self_generated",
+        source="unsupported-claim",
+    )
+
+    score = monitor.score()
+
+    assert score.discrimination_auc == 1.0
+    assert score.meta_d_prime == 1.0
+    assert score.abstention_alignment == 1.0
+    assert score.m_ratio == 1.0
+    assert score.task_accuracy == 0.666667
+    assert score.rows[0]["source"] == "grounded-answer"
+
+
+def test_metacognitive_monitor_penalizes_inverted_confidence_and_bad_abstention() -> None:
+    monitor = MetacognitiveMonitor()
+    monitor.observe(confidence=0.20, outcome_correct=True, abstained=True, answerable=True)
+    monitor.observe(confidence=0.90, outcome_correct=False, abstained=False, answerable=False)
+
+    score = monitor.score()
+
+    assert score.discrimination_auc == 0.0
+    assert score.meta_d_prime == 0.0
+    assert score.abstention_alignment == 0.0
+    assert score.m_ratio == 0.0

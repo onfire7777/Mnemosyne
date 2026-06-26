@@ -17,6 +17,7 @@ from typing import Any
 from mnemosyne.consciousness import (
     BoundedCognitiveCycle,
     InteroceptiveProtoSelf,
+    MetacognitiveMonitor,
     RealityMonitor,
     workspace_bottleneck,
 )
@@ -383,39 +384,33 @@ def _self_model_probe() -> dict[str, Any]:
 
 
 def _metacognition_probe() -> dict[str, Any]:
-    monitor = RealityMonitor()
-    grounded = monitor.tag(
-        source_type="operator-evidence",
-        actor="user",
-        trust_tier=0,
-        metadata={"reality_class": "evidence_grounded"},
-        provenance_count=2,
+    monitor = MetacognitiveMonitor()
+    monitor.observe(
+        confidence=0.96,
+        outcome_correct=True,
+        abstained=False,
+        answerable=True,
+        reality_class="evidence_grounded",
+        source="grounded-answer",
     )
-    generated = monitor.tag(
-        source_type="generated-summary",
-        actor="assistant",
-        trust_tier=1,
-        metadata={},
-        provenance_count=0,
+    monitor.observe(
+        confidence=0.88,
+        outcome_correct=True,
+        abstained=True,
+        answerable=False,
+        reality_class="externally_suggested",
+        source="unsupported-external-suggestion",
     )
-    external = monitor.tag(
-        source_type="external-suggestion",
-        actor="external",
-        trust_tier=2,
-        metadata={},
-        provenance_count=0,
+    monitor.observe(
+        confidence=0.24,
+        outcome_correct=False,
+        abstained=False,
+        answerable=True,
+        reality_class="self_generated",
+        source="unsupported-self-generated-claim",
     )
-    correct_order = grounded.confidence > generated.confidence - 0.30 and generated.confidence >= external.confidence - 0.20
-    meta_d_prime = 1.0 if correct_order else 0.5
-    return {
-        "meta_d_prime": meta_d_prime,
-        "m_ratio": round(meta_d_prime / 1.0, 6),
-        "rows": [
-            {"class": grounded.reality_class, "confidence": grounded.confidence},
-            {"class": generated.reality_class, "confidence": generated.confidence},
-            {"class": external.reality_class, "confidence": external.confidence},
-        ],
-    }
+    score = monitor.score()
+    return asdict(score)
 
 
 def _shadow_tag_contract_probe() -> dict[str, Any]:

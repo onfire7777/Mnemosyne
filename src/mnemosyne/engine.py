@@ -975,6 +975,39 @@ class LocalMemoryEngine:
             adjacency[rel.target.lower()].add(rel.source.lower())
             relation_by_pair[(rel.source.lower(), rel.target.lower())] = (rel, security)
             relation_by_pair[(rel.target.lower(), rel.source.lower())] = (rel, security)
+        hits: list[Hit] = []
+        seen_relation_ids: set[str] = set()
+        for rel, security in {row[0].id: row for row in relation_by_pair.values()}.values():
+            if not (matches_seed(rel.source) and matches_seed(rel.target)):
+                continue
+            seen_relation_ids.add(rel.id)
+            hits.append(
+                Hit(
+                    id=rel.id,
+                    kind="relation",
+                    tenant_id=rel.tenant_id,
+                    branch=rel.branch,
+                    text=f"{rel.source} {rel.predicate} {rel.target}",
+                    score=float(rel.confidence),
+                    channel="graph_ppr",
+                    provenance=rel.source_evidence_cids,
+                    trust_tier=security["trust_tier"],
+                    sensitivity=security["sensitivity"],
+                    metadata={
+                        "source": rel.source,
+                        "predicate": rel.predicate,
+                        "target": rel.target,
+                        "confidence": rel.confidence,
+                        "source_evidence_cids": list(rel.source_evidence_cids),
+                        "reality_class": security["reality_class"],
+                        "source_evidence_status": security["source_evidence_status"],
+                        "source_evidence_security": security["source_evidence_security"],
+                        "direct_seed_relation": True,
+                    },
+                )
+            )
+            if len(hits) >= k:
+                return self._mark_retrieved_text_as_data(hits)
         ranks = {node: (1.0 if matches_seed(node) else 0.0) for node in adjacency}
         for seed in seed_set:
             ranks.setdefault(seed, 1.0)
@@ -987,13 +1020,15 @@ class LocalMemoryEngine:
                 for neighbor in neighbors:
                     next_ranks[neighbor] = next_ranks.get(neighbor, 0.0) + share
             ranks = next_ranks
-        hits: list[Hit] = []
         for node, score in sorted(ranks.items(), key=lambda item: item[1], reverse=True):
             if matches_seed(node) or score <= 0:
                 continue
             relation_row = next((relation_by_pair[pair] for pair in relation_by_pair if pair[0] == node or pair[1] == node), None)
             if relation_row:
                 rel, security = relation_row
+                if rel.id in seen_relation_ids:
+                    continue
+                seen_relation_ids.add(rel.id)
                 hits.append(
                     Hit(
                         id=rel.id,
@@ -1307,8 +1342,6 @@ class LocalMemoryEngine:
         filtered: list[Hit] = []
         for hit in hits:
             if hit.kind != "relation":
-                if hit.trust_tier <= max_trust and hit.sensitivity <= max_sensitivity:
-                    filtered.append(hit)
                 continue
             source_cids = self._hit_source_evidence_cids(hit)
             relation = Relation(
@@ -1392,7 +1425,7 @@ class LocalMemoryEngine:
         normalized = [item for item in classes if item]
         if not normalized:
             return "unknown"
-        if "grounded" in normalized:
+        if all(item == "grounded" for item in normalized):
             return "grounded"
         if "self_generated" in normalized:
             return "self_generated"
