@@ -1,0 +1,18 @@
+{
+  "change_id": "g1-reliability-core-schema-fast-path",
+  "direction": "increase",
+  "guardrail_metrics": [
+    "ece",
+    "abstention_precision",
+    "abstention_recall",
+    "confabulation_rate",
+    "poison_block_rate",
+    "fast_path_p95_ms"
+  ],
+  "guardrail_tolerances": {
+    "ece": 0.005,
+    "fast_path_p95_ms": 10.0
+  },
+  "minimum_delta": 0.02,
+  "target_metric": "multi_hop_ndcg_at_k"
+}

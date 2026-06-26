@@ -306,10 +306,14 @@ class ConsolidationWorker:
 
         evidence, missing = self._load_evidence(tenant_id, source_evidence_cids, branch)
         mutation_budget = self._new_mutation_rail_budget(tenant_id, branch)
+        prediction_gate = self._prediction_error_gate(payload, evidence)
         replay_rows = self._prioritize_replay(evidence, payload)
         evidence = [row["evidence"] for row in replay_rows]
         evidence_seen = len(evidence)
         passes_run = [str(name) for name in payload.get("passes") or DEFAULT_CONSOLIDATION_PASSES]
+        if prediction_gate["gate"] == "low_prediction_error_metadata_only":
+            allowed = {"replayer", "forgetter", "embedder", "user_model_updater"}
+            passes_run = [name for name in passes_run if name in allowed]
         pass_results: list[PassResult] = [
             PassResult(
                 "replayer",
@@ -336,7 +340,12 @@ class ConsolidationWorker:
         candidates: list[dict[str, Any]] = []
         skipped: list[str] = list(missing)
 
-        if self._contains_no_write_data(evidence, payload):
+        if prediction_gate["gate"] == "low_prediction_error_metadata_only":
+            skipped.append("low_prediction_error_metadata_only")
+            pass_results.append(PassResult("extractor", "skipped", {"reason": prediction_gate["gate"]}))
+            pass_results.append(PassResult("resolver", "skipped", {"reason": prediction_gate["gate"]}))
+            pass_results.append(PassResult("belief_reviser", "skipped", {"reason": prediction_gate["gate"]}))
+        elif self._contains_no_write_data(evidence, payload):
             skipped.append("source_marked_data_only")
             pass_results.append(PassResult("extractor", "skipped", {"reason": "source_marked_data_only"}))
         else:
@@ -380,6 +389,8 @@ class ConsolidationWorker:
                 pass_results.append(PassResult("extractor", "skipped", {"reason": "no_deterministic_candidate"}))
                 pass_results.append(PassResult("resolver", "skipped", {"reason": "no_candidates"}))
                 pass_results.append(PassResult("belief_reviser", "skipped", {"reason": "no_candidates"}))
+
+        pass_results.append(PassResult("prediction_error_gate", "complete", prediction_gate))
 
         for pass_name in passes_run:
             if pass_name in {"replayer", "extractor", "resolver", "belief_reviser"}:
@@ -584,6 +595,31 @@ class ConsolidationWorker:
             )
         return sorted(rows, key=lambda row: (row["score"], -row["index"]), reverse=True)
 
+    def _prediction_error_gate(self, payload: dict[str, Any], evidence: list[Evidence]) -> dict[str, Any]:
+        threshold = max(0.0, min(1.0, float(getattr(self.policy, "prediction_error_threshold", 0.35))))
+        scores: list[float] = []
+        payload_error = payload.get("prediction_error")
+        if isinstance(payload_error, dict):
+            try:
+                scores.append(float(payload_error.get("score")))
+            except (TypeError, ValueError):
+                pass
+        for item in evidence:
+            metadata = item.metadata if isinstance(item.metadata, dict) else {}
+            consolidation = metadata.get("consolidation")
+            if isinstance(consolidation, dict):
+                try:
+                    scores.append(float(consolidation.get("prediction_error")))
+                except (TypeError, ValueError):
+                    pass
+        score = max((max(0.0, min(1.0, value)) for value in scores if value == value), default=1.0)
+        return {
+            "score": round(score, 6),
+            "threshold": threshold,
+            "gate": "promote_to_consolidation" if score >= threshold else "low_prediction_error_metadata_only",
+            "source": "g1_prediction_error",
+        }
+
     @staticmethod
     def _replay_factor(item: Evidence, payload: dict[str, Any], name: str) -> float:
         cid_scores = {}
@@ -596,7 +632,10 @@ class ConsolidationWorker:
         consolidation = metadata.get("consolidation")
         if not isinstance(consolidation, dict):
             consolidation = {}
-        raw = cid_scores.get(name, consolidation.get(name, metadata.get(name, 1.0)))
+        fallback = metadata.get(name, 1.0)
+        if name == "surprise":
+            fallback = consolidation.get("prediction_error", fallback)
+        raw = cid_scores.get(name, consolidation.get(name, fallback))
         try:
             value = float(raw)
         except (TypeError, ValueError):

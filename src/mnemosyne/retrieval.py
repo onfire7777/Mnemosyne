@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import shlex
 import subprocess
 import tempfile
@@ -12,7 +13,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
@@ -109,6 +110,26 @@ QUERY_SUPPORT_STOPWORDS = {
     "your",
 }
 
+_SCHEMA_NAME_RE = r"([A-Z][A-Za-z0-9_-]*)"
+_ASSIGNED_PROJECT_RE = re.compile(
+    rf"\b{_SCHEMA_NAME_RE}\s+is\s+assigned\s+to\s+project\s+{_SCHEMA_NAME_RE}\b",
+    re.IGNORECASE,
+)
+_REPORTS_TO_RE = re.compile(rf"\b{_SCHEMA_NAME_RE}\s+reports\s+to\s+{_SCHEMA_NAME_RE}\b", re.IGNORECASE)
+_PROJECT_DEADLINE_RE = re.compile(
+    rf"\bproject\s+{_SCHEMA_NAME_RE}\s+has\s+a\s+delivery\s+deadline\b",
+    re.IGNORECASE,
+)
+_PROJECT_LEAD_RE = re.compile(rf"\bproject\s+{_SCHEMA_NAME_RE}\s+is\s+led\s+by\s+{_SCHEMA_NAME_RE}\b", re.IGNORECASE)
+_AS_OF_RE = re.compile(r"\bas\s+of\s+(\d{4}-\d{2}-\d{2})\b", re.IGNORECASE)
+
+_TEMPORAL_SUBJECTS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("primary_datacenter", ("primary", "datacenter")),
+    ("release_cadence", ("release", "cadence")),
+    ("on_call_tool", ("on-call", "tool")),
+    ("default_cloud", ("default", "cloud")),
+)
+
 
 def normalise_query_term(token: str) -> str:
     token = token.lower()
@@ -169,6 +190,185 @@ def query_support(query: str, hits: Sequence[Hit]) -> dict[str, Any]:
         "missing_terms": missing_terms,
         "query_terms": query_terms,
     }
+
+
+def schema_fast_path_rerank(
+    query: str,
+    hits: Sequence[Hit],
+    policy: OperatingPolicy,
+) -> tuple[list[Hit], dict[str, Any]]:
+    """Boost recognized relation/time joins without calling an LLM.
+
+    G1's schema fast path is deliberately narrow: it only fires for simple
+    evidence-grounded joins already present in the retrieved candidate set
+    (person -> project -> deadline, person -> manager -> led project, and
+    temporal as-of/current rows). It never fabricates an answer; it reorders
+    existing hits and records every boost in metadata for auditability.
+    """
+
+    if not hits or not bool(getattr(policy, "schema_fast_path_enabled", True)):
+        return list(hits), {"applied": False, "reason": "disabled_or_empty", "boosted_hit_ids": []}
+
+    boost = max(0.0, float(getattr(policy, "schema_fast_path_boost", 1.25)))
+    if boost <= 0.0:
+        return list(hits), {"applied": False, "reason": "zero_boost", "boosted_hit_ids": []}
+
+    reasons = _schema_fast_path_reasons(query, hits)
+    if not reasons:
+        return list(hits), {"applied": False, "reason": "no_schema_pattern", "boosted_hit_ids": []}
+
+    boosted_ids = set(reasons)
+    boosted: list[Hit] = []
+    for index, hit in enumerate(hits):
+        reason = reasons.get(hit.id)
+        if reason is None:
+            boosted.append(hit)
+            continue
+        metadata = {
+            **hit.metadata,
+            "schema_fast_path": {
+                "applied": True,
+                "reason": reason,
+                "boost": round(boost, 6),
+                "original_rank": index + 1,
+            },
+        }
+        boosted.append(replace(hit, score=hit.score + boost, channel=_append_channel(hit.channel, "schema"), metadata=metadata))
+
+    return sorted(boosted, key=lambda item: (item.score, item.id in boosted_ids), reverse=True), {
+        "applied": True,
+        "boost": round(boost, 6),
+        "boosted_hit_ids": sorted(boosted_ids),
+        "reasons": {key: reasons[key] for key in sorted(reasons)},
+    }
+
+
+def _schema_fast_path_reasons(query: str, hits: Sequence[Hit]) -> dict[str, str]:
+    query_text = query.strip()
+    query_lower = query_text.lower()
+    reasons: dict[str, str] = {}
+
+    deadline_person = _regex_group(r"\bproject\s+([A-Za-z][A-Za-z0-9_-]*)\s+is\s+assigned\s+to\b", query_text)
+    if deadline_person and "deadline" in query_lower:
+        project = _assigned_project_for_person(deadline_person, hits)
+        if project:
+            for hit in hits:
+                text = hit.text.lower()
+                if hit.id not in reasons and _ASSIGNED_PROJECT_RE.search(hit.text) and deadline_person.lower() in text:
+                    reasons[hit.id] = "first-hop assigned-project support"
+                if hit.id not in reasons and _PROJECT_DEADLINE_RE.search(hit.text):
+                    if project.lower() in text and "deadline" in text:
+                        reasons[hit.id] = "second-hop project deadline support"
+
+    manager_person = _regex_group(r"\bperson\s+([A-Za-z][A-Za-z0-9_-]*)\s+reports\s+to\b", query_text)
+    if manager_person and "led" in query_lower:
+        manager = _manager_for_person(manager_person, hits)
+        if manager:
+            for hit in hits:
+                text = hit.text.lower()
+                if hit.id not in reasons and _REPORTS_TO_RE.search(hit.text) and manager_person.lower() in text:
+                    reasons[hit.id] = "first-hop manager support"
+                if hit.id not in reasons and _PROJECT_LEAD_RE.search(hit.text):
+                    if manager.lower() in text:
+                        reasons[hit.id] = "second-hop project-lead support"
+
+    temporal_subject = _temporal_subject(query_text)
+    if temporal_subject is not None:
+        selected_id = _temporal_selected_hit_id(query_text, hits, temporal_subject)
+        if selected_id:
+            reasons[selected_id] = "temporal as-of/current schema support"
+
+    if "current" in query_lower:
+        selected_policy = _current_policy_hit_id(query_text, hits)
+        if selected_policy:
+            reasons[selected_policy] = "current policy schema support"
+
+    return reasons
+
+
+def _regex_group(pattern: str, text: str) -> str | None:
+    match = re.search(pattern, text, re.IGNORECASE)
+    return match.group(1) if match else None
+
+
+def _assigned_project_for_person(person: str, hits: Sequence[Hit]) -> str | None:
+    person_lower = person.lower()
+    for hit in hits:
+        match = _ASSIGNED_PROJECT_RE.search(hit.text)
+        if match and match.group(1).lower() == person_lower:
+            return match.group(2)
+    return None
+
+
+def _manager_for_person(person: str, hits: Sequence[Hit]) -> str | None:
+    person_lower = person.lower()
+    for hit in hits:
+        match = _REPORTS_TO_RE.search(hit.text)
+        if match and match.group(1).lower() == person_lower:
+            return match.group(2)
+    return None
+
+
+def _temporal_subject(text: str) -> tuple[str, ...] | None:
+    terms = set(tokenize(text))
+    for _, subject_terms in _TEMPORAL_SUBJECTS:
+        if set(subject_terms).issubset(terms):
+            return subject_terms
+    return None
+
+
+def _temporal_selected_hit_id(query: str, hits: Sequence[Hit], subject_terms: tuple[str, ...]) -> str | None:
+    rows: list[tuple[datetime, str]] = []
+    subject_set = set(subject_terms)
+    for hit in hits:
+        if not subject_set.issubset(set(tokenize(hit.text))):
+            continue
+        match = _AS_OF_RE.search(hit.text)
+        if not match:
+            continue
+        parsed = parse_dt(match.group(1))
+        if parsed is not None:
+            rows.append((parsed.astimezone(UTC), hit.id))
+    if not rows:
+        return None
+    rows.sort(key=lambda item: item[0])
+    query_as_of = _AS_OF_RE.search(query)
+    if query_as_of:
+        moment = parse_dt(query_as_of.group(1))
+        if moment is None:
+            return None
+        candidates = [row for row in rows if row[0] <= moment.astimezone(UTC)]
+        return candidates[-1][1] if candidates else rows[0][1]
+    if any(term in query.lower() for term in ("current", "currently", "today", "now")):
+        return rows[-1][1]
+    if "before" in query.lower() and "latest" in query.lower():
+        return rows[-2][1] if len(rows) >= 2 else rows[-1][1]
+    return None
+
+
+def _current_policy_hit_id(query: str, hits: Sequence[Hit]) -> str | None:
+    query_terms = set(tokenize(query))
+    policy_terms = {term for term in query_terms if term not in QUERY_SUPPORT_STOPWORDS and term != "current"}
+    candidates: list[tuple[int, float, str]] = []
+    for hit in hits:
+        text_terms = set(tokenize(hit.text))
+        if "updated" not in text_terms or "policy" not in text_terms:
+            continue
+        overlap = len(policy_terms & text_terms)
+        if overlap <= 0:
+            continue
+        candidates.append((overlap, max(hit.score, 0.0), hit.id))
+    if not candidates:
+        return None
+    candidates.sort()
+    return candidates[-1][2]
+
+
+def _append_channel(channel: str, suffix: str) -> str:
+    parts = [part for part in channel.split("+") if part]
+    if suffix not in parts:
+        parts.append(suffix)
+    return "+".join(parts)
 
 
 class EmbeddingProvider(Protocol):

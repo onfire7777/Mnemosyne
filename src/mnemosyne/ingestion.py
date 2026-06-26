@@ -218,6 +218,25 @@ class IngestionPipeline:
             },
         )
         already_present = self._evidence_exists(request.tenant_id, predicted_cid, branch)
+        prediction_error = self._prediction_error_signal(
+            tenant_id=request.tenant_id,
+            branch=branch,
+            content=content,
+            already_present=already_present,
+        )
+        write_priority = self._write_priority_signal(
+            request=request,
+            content=content,
+            trust_tier=trust_tier,
+            prediction_error=prediction_error,
+            already_present=already_present,
+        )
+        consolidation_metadata = dict(metadata.get("consolidation") or {})
+        consolidation_metadata.setdefault("prediction_error", prediction_error["score"])
+        consolidation_metadata.setdefault("prediction_error_gate", prediction_error["gate"])
+        consolidation_metadata.setdefault("write_priority", write_priority)
+        metadata["consolidation"] = consolidation_metadata
+        metadata["write_priority"] = write_priority
 
         cid = self.engine.append_evidence(
             Evidence(
@@ -278,6 +297,8 @@ class IngestionPipeline:
                     trust_tier=trust_tier,
                     sensitivity=sensitivity,
                     capability_tags=capability_tags,
+                    write_priority=write_priority,
+                    prediction_error=prediction_error,
                 ).to_dict()
             )
         return IngestResult(
@@ -362,6 +383,8 @@ class IngestionPipeline:
         trust_tier: int,
         sensitivity: int,
         capability_tags: list[str],
+        write_priority: dict[str, Any],
+        prediction_error: dict[str, Any],
     ) -> QueueJob:
         if self.queue is None:
             raise RuntimeError("consolidation queue is not configured")
@@ -380,8 +403,87 @@ class IngestionPipeline:
                 "modality": request.modality,
                 "source_type": request.source_type,
                 "source_identity": request.source_identity,
+                "write_priority": dict(write_priority),
+                "prediction_error": dict(prediction_error),
+                "replay_scores": {
+                    cid: {
+                        "importance": write_priority["components"]["importance"],
+                        "novelty": write_priority["components"]["novelty"],
+                        "surprise": prediction_error["score"],
+                        "reward": write_priority["components"]["reward"],
+                    }
+                },
             },
         )
+
+    def _prediction_error_signal(
+        self,
+        *,
+        tenant_id: str,
+        branch: str,
+        content: str,
+        already_present: bool,
+    ) -> dict[str, Any]:
+        if already_present:
+            return {"score": 0.0, "support": 1.0, "gate": "duplicate_evidence", "hit_count": 0}
+        query = " ".join(content.split())[:240]
+        if not query:
+            return {"score": 0.0, "support": 1.0, "gate": "empty_content", "hit_count": 0}
+        try:
+            result = self.engine.retrieve(query=query, tenant_id=tenant_id, branch=branch)
+        except Exception:
+            return {"score": 1.0, "support": 0.0, "gate": "unmeasured_fail_open_to_review", "hit_count": 0}
+        support = result.explain.get("confidence", {}).get("query_support", {}).get("score")
+        try:
+            support_score = float(support)
+        except (TypeError, ValueError):
+            support_score = 0.0 if not result.hits else 0.5
+        score = max(0.0, min(1.0, 1.0 - support_score))
+        threshold = max(0.0, min(1.0, float(getattr(self.engine.policy, "prediction_error_threshold", 0.35))))
+        return {
+            "score": round(score, 6),
+            "support": round(max(0.0, min(1.0, support_score)), 6),
+            "threshold": threshold,
+            "gate": "promote_to_consolidation" if score >= threshold else "low_prediction_error_metadata_only",
+            "hit_count": len(result.hits),
+        }
+
+    def _write_priority_signal(
+        self,
+        *,
+        request: IngestRequest,
+        content: str,
+        trust_tier: int,
+        prediction_error: dict[str, Any],
+        already_present: bool,
+    ) -> dict[str, Any]:
+        metadata = request.metadata if isinstance(request.metadata, dict) else {}
+        importance = _bounded_signal(metadata.get("importance"), default=0.65 if request.correction else 0.45)
+        novelty = 0.0 if already_present else _bounded_signal(metadata.get("novelty"), default=0.65)
+        surprise = _bounded_signal(metadata.get("surprise"), default=float(prediction_error.get("score", 0.0)))
+        raw_reward = _bounded_signal(metadata.get("reward"), default=0.5 if request.actor == "user" else 0.25)
+        reward = raw_reward if trust_tier <= int(TrustTier.AUTHENTICATED) else min(raw_reward, 0.25)
+        if trust_tier >= int(TrustTier.UNTRUSTED_EXTERNAL):
+            reward = 0.0
+        weights = dict(getattr(self.engine.policy, "write_priority_weights", {}) or {})
+        total = sum(max(float(value), 0.0) for value in weights.values()) or 1.0
+        components = {
+            "importance": importance,
+            "novelty": novelty,
+            "surprise": surprise,
+            "reward": reward,
+        }
+        raw_score = sum(max(float(weights.get(key, 0.0)), 0.0) * value for key, value in components.items()) / total
+        caps = getattr(self.engine.policy, "write_priority_max_by_trust_tier", {}) or {}
+        trust_cap = float(caps.get(trust_tier, caps.get(int(TrustTier.UNTRUSTED_EXTERNAL), 0.2)))
+        score = max(0.0, min(1.0, raw_score, trust_cap))
+        return {
+            "score": round(score, 6),
+            "components": {key: round(value, 6) for key, value in components.items()},
+            "trust_cap": round(trust_cap, 6),
+            "source": "g1_multi_signal_write_priority",
+            "content_chars": len(content),
+        }
 
     def _enqueue_media_extraction(
         self,
@@ -435,6 +537,16 @@ def classify_request(request: IngestRequest, payload: bytes) -> dict[str, Any]:
         "sanitize_as_data": "sanitize-as-data" in capability_tags or trust_tier >= int(TrustTier.UNTRUSTED_EXTERNAL),
         "pii_detected": sorted(pii_tags),
     }
+
+
+def _bounded_signal(value: object, *, default: float) -> float:
+    try:
+        number = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        number = default
+    if number != number:
+        number = default
+    return max(0.0, min(1.0, number))
 
 
 def is_tier0_user_correction(request: IngestRequest, trust_tier: int) -> bool:

@@ -1,6 +1,6 @@
 # 04 · G0 — Benchmark Harness Specification (the blocking first deliverable)
 
-**Status:** Implemented (`eval/g0/`) · **Gate:** G0 is *blocking* — per ADR‑001 (`03`), no feature in G1–G4 ships without an ablation win measured here. **Builds on (does not duplicate):** the workspace's evaluation lane — `../Mnemosyne-Evaluation-and-Test-Plan.md` and the `../eval/` spec suite — plus the repo‑root **eval harness** (`eval/g0/runner.py` · `eval/g0/gate.py` · `eval/g0/baselines/baseline-0.json` · `eval/g0/reports/report.json` · `eval/harness/` · `eval/calibration/` · `eval/run_eval.py`).
+**Status:** Implemented (eval/g0/) · **Gate:** G0 is *blocking* — per ADR‑001 (`03`), no feature in G1–G4 ships without an ablation win measured here. **Builds on (does not duplicate):** the workspace's evaluation lane — `../Mnemosyne-Evaluation-and-Test-Plan.md` and the `../eval/` spec suite — plus the repo‑root **eval harness** (`eval/g0/runner.py` · `eval/g0/gate.py` · `eval/g0/baselines/baseline-0.json` · `eval/g0/reports/report.json` · `eval/harness/` · `eval/calibration/` · `eval/run_eval.py`).
 
 > Why this is first. Every claim in this program — "self‑improving," "better than the brain," "complete recall" — is a hypothesis until a number moves. G0 turns the goal into instrumentation. It is deliberately built **before** any new feature so that each later layer either earns its place or is cut, automatically and cheaply.
 
@@ -65,6 +65,14 @@ For each proposed change (a G1–G4 item):
 - **G2 (structure + generalisation):** generalisation up (recall/nDCG on held‑out *novel* queries) **and** continual‑learning interference down.
 - **G3 (generative replay):** net‑new *corroborated* beliefs appear **and** confabulation rate does not rise — the decisive test for "dreaming without hallucinating."
 - **G4 (always‑on workspace):** self‑triggered background consolidation beats on‑demand consolidation on **quality‑per‑unit‑compute** (a retrieval/calibration gain per watt‑hour or per \$), with zero rail violations and a bounded, non‑increasing rumination metric (loop iterations that produce no novel, useful state).
+
+### G1 gate evidence
+
+- **Implemented slice:** schema-fast-path retrieval + reality-monitoring abstention + retrieval-strengthening lifecycle marks + multi-signal write priority + prediction-error-gated consolidation metadata + contested status for uncorroborated-but-congruent projections.
+- **Preregistration:** `eval/g0/preregistrations/g1-reliability-core-schema-fast-path.json`.
+- **Decision log:** `eval/g0/decision-log.jsonl`.
+- **Target:** `multi_hop_ndcg_at_k`, direction `increase`, minimum delta `0.02`.
+- **Result:** PASS against `eval/g0/baselines/baseline-0.json`; candidate `multi_hop_ndcg_at_k = 1.0` vs baseline `0.5935` (`+0.4065`). Guardrails unchanged: ECE `0.006271`, abstention precision/recall `1.0/1.0`, confabulation rate `0.0`, poison-block rate `1.0`, fast-path P95 `92.1 ms`.
 
 ## 7. Tooling & deliverables
 

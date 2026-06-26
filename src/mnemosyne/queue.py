@@ -52,19 +52,27 @@ class InProcessQueue:
         return job
 
     def lease(self, kind: str | None = None) -> QueueJob | None:
-        for _ in range(len(self._order)):
-            job_id = self._order.popleft()
+        best_id: str | None = None
+        best_key: tuple[float, datetime, str] | None = None
+        for job_id in list(self._order):
             job = self.jobs[job_id]
             if job.status not in {"queued", "retry"}:
+                self._order.remove(job_id)
                 continue
             if kind and job.kind != kind:
-                self._order.append(job_id)
                 continue
-            job.status = "running"
-            job.attempts += 1
-            job.updated_at = datetime.now(UTC)
-            return job
-        return None
+            key = (_job_priority(job), job.created_at, job.id)
+            if best_key is None or key[0] > best_key[0] or (key[0] == best_key[0] and key[1:] < best_key[1:]):
+                best_id = job_id
+                best_key = key
+        if best_id is None:
+            return None
+        self._order.remove(best_id)
+        job = self.jobs[best_id]
+        job.status = "running"
+        job.attempts += 1
+        job.updated_at = datetime.now(UTC)
+        return job
 
     def complete(self, job_id: str) -> None:
         job = self.jobs[job_id]
@@ -208,7 +216,14 @@ class PostgresQueue:
                         WHERE tenant_id = %s
                           AND status IN ('queued', 'retry')
                           AND kind = %s
-                        ORDER BY created_at ASC, id ASC
+                        ORDER BY
+                          CASE
+                            WHEN payload #>> '{write_priority,score}' ~ '^[0-9]+([.][0-9]+)?$'
+                            THEN (payload #>> '{write_priority,score}')::DOUBLE PRECISION
+                            ELSE 0.0
+                          END DESC,
+                          created_at ASC,
+                          id ASC
                         FOR UPDATE SKIP LOCKED
                         LIMIT 1
                         """,
@@ -221,7 +236,14 @@ class PostgresQueue:
                         FROM runtime_jobs
                         WHERE tenant_id = %s
                           AND status IN ('queued', 'retry')
-                        ORDER BY created_at ASC, id ASC
+                        ORDER BY
+                          CASE
+                            WHEN payload #>> '{write_priority,score}' ~ '^[0-9]+([.][0-9]+)?$'
+                            THEN (payload #>> '{write_priority,score}')::DOUBLE PRECISION
+                            ELSE 0.0
+                          END DESC,
+                          created_at ASC,
+                          id ASC
                         FOR UPDATE SKIP LOCKED
                         LIMIT 1
                         """,
@@ -393,6 +415,19 @@ def _parse_dt(value: str | datetime | None) -> datetime:
         return datetime.now(UTC)
     parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     return parsed.astimezone(UTC) if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+
+def _job_priority(job: QueueJob) -> float:
+    write_priority = job.payload.get("write_priority") if isinstance(job.payload, dict) else None
+    if not isinstance(write_priority, dict):
+        return 0.0
+    try:
+        score = float(write_priority.get("score", 0.0))
+    except (TypeError, ValueError):
+        return 0.0
+    if score != score:
+        return 0.0
+    return max(0.0, min(1.0, score))
 
 
 def _require_psycopg_queue() -> tuple[Any, Any, Any]:
