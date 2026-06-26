@@ -1,6 +1,6 @@
 # Cognitive Architecture — Design & Specification
 
-**Location:** `docs/blueprint/cognitive-architecture/` · **Status:** Complete initial set · **Owner:** onfire7777 · **Updated:** 2026‑06‑25
+**Location:** `docs/blueprint/cognitive-architecture/` · **Status:** G0 implemented; G1 next · **Owner:** onfire7777 · **Updated:** 2026‑06‑26
 
 The consolidated design + specification set for evolving Mnemosyne into a **recursive, self‑improving memory system with a functional sense of consciousness**. It **builds on — and does not contradict —** the **v2 Build Blueprint** (`../Mnemosyne-v2-Build-Blueprint.md`): same substrate (immutable evidence ledger + rebuildable projections, AGM belief‑revision core, branchable memory, bitemporal facts, fidelity‑tiered forgetting, conformal abstention, dual user model, capability‑secured writes, profile‑guided self‑optimization — the blueprint's innovations **I1–I12**). What it adds on top: the brain‑by‑brain research grounding, the **cognitive‑architecture** framing (a small always‑on workspace controller + on‑demand specialists), the operationalised "sense of consciousness," an objective decision record, and a reliability‑first **gated execution program**.
 
@@ -20,7 +20,7 @@ Take the best mechanisms of human memory and the latest memory science, make eac
 | 01 | `01-PRIMER.md` | Plain‑English description of Mnemosyne **as it exists today** — the substrate we build on |
 | 02 | `02-DESIGN-BRAIN-TO-ARCHITECTURE.md` | Core design: element‑by‑element brain↔system comparison, target cognitive architecture, anti‑goals, rationality layer, execution plan |
 | 03 | `03-ADR-001-DECISION.md` | The architecture **decision** (Accepted): full vision, reliability‑first, metric‑gated (Option E) |
-| 04 | `04-G0-BENCHMARK-SPEC.md` | The **G0** gate — freezes a baseline on the eval lane and adds a few program‑specific metrics; blocks every later stage |
+| 04 | `04-G0-BENCHMARK-SPEC.md` | The **G0** gate — implemented at repo root `eval/g0/`; freezes a baseline on the eval lane and adds program‑specific metrics; blocks every later stage |
 | 05 | `05-GLOSSARY-AND-SOURCES.md` | Shared vocabulary + consolidated reputable bibliography |
 
 New readers: 00 → 01 → 02 → 03 → 04. Implementers start at 03 (decision) then 04 (first buildable unit).
@@ -47,4 +47,4 @@ New readers: 00 → 01 → 02 → 03 → 04. Implementers start at 03 (decision)
 
 ## Status & next step
 
-Documentation & spec **complete**; pre‑build. The single blocking next deliverable is **G0** (`04`): freeze a baseline and gate. Note the repo already has an `eval/g0/` folder — extend it rather than starting fresh. Only when G0 is green does G1 begin. This folder is the canonical home for the cognitive‑architecture program.
+Documentation & spec **complete**; **G0 is implemented** in the repo-root `eval/g0/` harness (`runner.py`, `gate.py`, `baselines/baseline-0.json`, and `reports/report.json`). The next implementation phase is **G1 — reliability core**: multi-signal write priority, prediction-error-gated consolidation, reality-monitoring provenance tags wired to abstention, retrieval-strengthening into the forgetter, and the schema fast-path with `contested` for uncorroborated-but-congruent evidence. Every G1 change must use the preregistered target-up / guardrail-not-down rule against `eval/g0/baselines/baseline-0.json`; no reliability, calibration, faithfulness, poison-block, or §31 rail regression ships.
