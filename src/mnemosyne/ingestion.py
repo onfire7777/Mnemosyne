@@ -477,10 +477,26 @@ class IngestionPipeline:
         caps = getattr(self.engine.policy, "write_priority_max_by_trust_tier", {}) or {}
         trust_cap = float(caps.get(trust_tier, caps.get(int(TrustTier.UNTRUSTED_EXTERNAL), 0.2)))
         score = max(0.0, min(1.0, raw_score, trust_cap))
+        floors = getattr(self.engine.policy, "write_priority_debias_floor_by_trust_tier", {}) or {}
+        debias_floor = max(0.0, min(1.0, float(floors.get(trust_tier, 0.0))))
+        effective_score = max(score, min(trust_cap, debias_floor))
+        sampling_probability = max(effective_score, 1.0e-6)
+        max_weight = max(1.0, float(getattr(self.engine.policy, "write_priority_debias_max_weight", 20.0)))
+        importance_weight = min(max_weight, 1.0 / sampling_probability)
         return {
             "score": round(score, 6),
+            "raw_score": round(max(0.0, min(1.0, raw_score)), 6),
+            "effective_score": round(effective_score, 6),
             "components": {key: round(value, 6) for key, value in components.items()},
             "trust_cap": round(trust_cap, 6),
+            "debias": {
+                "source": "g1_importance_sampling_debias",
+                "floor": round(debias_floor, 6),
+                "sampling_probability": round(sampling_probability, 6),
+                "importance_weight": round(importance_weight, 6),
+                "max_weight": round(max_weight, 6),
+                "applied": effective_score > score,
+            },
             "source": "g1_multi_signal_write_priority",
             "content_chars": len(content),
         }

@@ -87,6 +87,48 @@ def test_g1_retrieval_strengthens_evidence_lifecycle_metadata() -> None:
     assert ev.metadata["lifecycle"]["salience"] > 0.5
 
 
+def test_g1_retrieval_strengthening_feeds_forgetter_retention() -> None:
+    engine = LocalMemoryEngine()
+    cid = _append(
+        engine,
+        "Retrieval strengthened demotion guard should stay verbatim.",
+        metadata={
+            "lifecycle": {
+                "tier": "verbatim",
+                "salience": 0.1,
+                "importance": 0.0,
+                "access_count": 0,
+                "last_accessed": "2025-01-01T00:00:00+00:00",
+            }
+        },
+    )
+
+    result = engine.retrieve("Retrieval strengthened demotion guard", TENANT)
+    ev = engine.get_evidence(TENANT, cid)
+    assert ev is not None
+    refreshed_at = ev.metadata["lifecycle"]["last_accessed"]
+    worker = ConsolidationWorker(engine, [], consolidation_min_steps=0)
+
+    sweep = worker.run_queue_payload(
+        {
+            "tenant_id": TENANT,
+            "user_id": USER,
+            "branch": "main",
+            "source_evidence_cids": [cid],
+            "passes": ["forgetter"],
+            "now": refreshed_at,
+            "utility_threshold": 0.18,
+        }
+    )
+    forgetter = next(item for item in sweep.pass_results if item["name"] == "forgetter")
+    state = forgetter["details"]["states"][0]
+
+    assert result.explain["read_marks"]["evidence"] >= 1
+    assert state["from_tier"] == "verbatim"
+    assert state["to_tier"] == "verbatim"
+    assert state["demoted"] is False
+
+
 def test_g1_postgres_read_marks_ignore_provider_local_hit_ids() -> None:
     engine = PostgresEngine("postgresql://unused")
     marks = engine._record_retrieval_access(  # noqa: SLF001 - regression for command adapter ids.
@@ -144,6 +186,18 @@ def test_g1_queue_leases_highest_write_priority_first() -> None:
     assert second is not None and second.id == low.id
 
 
+def test_g1_queue_uses_debiased_effective_write_priority() -> None:
+    queue = InProcessQueue()
+    raw_only = queue.enqueue("consolidate", {"write_priority": {"score": 0.04}})
+    debiased = queue.enqueue("consolidate", {"write_priority": {"score": 0.01, "effective_score": 0.05}})
+
+    first = queue.lease("consolidate")
+    second = queue.lease("consolidate")
+
+    assert first is not None and first.id == debiased.id
+    assert second is not None and second.id == raw_only.id
+
+
 def test_g1_ingestion_persists_priority_and_prediction_error_metadata() -> None:
     engine = LocalMemoryEngine()
     queue = InProcessQueue()
@@ -165,6 +219,8 @@ def test_g1_ingestion_persists_priority_and_prediction_error_metadata() -> None:
     assert ev is not None
     assert ev.metadata["write_priority"]["source"] == "g1_multi_signal_write_priority"
     assert 0.0 <= ev.metadata["write_priority"]["score"] <= 1.0
+    assert ev.metadata["write_priority"]["effective_score"] >= ev.metadata["write_priority"]["score"]
+    assert ev.metadata["write_priority"]["debias"]["source"] == "g1_importance_sampling_debias"
     assert ev.metadata["consolidation"]["prediction_error_gate"] in {
         "promote_to_consolidation",
         "low_prediction_error_metadata_only",
@@ -172,6 +228,67 @@ def test_g1_ingestion_persists_priority_and_prediction_error_metadata() -> None:
     assert job is not None
     assert job.payload["write_priority"]["score"] == ev.metadata["write_priority"]["score"]
     assert job.payload["prediction_error"]["score"] == ev.metadata["consolidation"]["prediction_error"]
+
+
+def test_g1_write_priority_debias_floor_is_trust_bounded() -> None:
+    engine = LocalMemoryEngine()
+    queue = InProcessQueue()
+    pipeline = IngestionPipeline(engine, queue=queue)
+
+    result = pipeline.ingest(
+        IngestRequest(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="chat",
+            content="Low signal but trusted evidence should retain a small sampling floor.",
+            metadata={"importance": 0.0, "novelty": 0.0, "surprise": 0.0, "reward": 0.0},
+        )
+    )
+    ev = engine.get_evidence(TENANT, result.cid)
+
+    assert ev is not None
+    assert ev.metadata["write_priority"]["score"] == 0.0
+    assert ev.metadata["write_priority"]["effective_score"] == 0.05
+    assert ev.metadata["write_priority"]["debias"]["applied"] is True
+    assert ev.metadata["write_priority"]["debias"]["sampling_probability"] == 0.05
+    assert ev.metadata["write_priority"]["debias"]["importance_weight"] == 20.0
+
+
+def test_g1_importance_sampling_debias_weights_long_tail_writes() -> None:
+    engine = LocalMemoryEngine()
+    queue = InProcessQueue()
+    pipeline = IngestionPipeline(engine, queue=queue)
+
+    low = pipeline.ingest(
+        IngestRequest(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="chat",
+            content="Low priority trusted write gets correction weight.",
+            metadata={"importance": 0.0, "novelty": 0.0, "surprise": 0.0, "reward": 0.0},
+        )
+    )
+    high = pipeline.ingest(
+        IngestRequest(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="chat",
+            content="High priority trusted write keeps a small correction weight.",
+            metadata={"importance": 1.0, "novelty": 1.0, "surprise": 1.0, "reward": 1.0},
+        )
+    )
+    low_ev = engine.get_evidence(TENANT, low.cid)
+    high_ev = engine.get_evidence(TENANT, high.cid)
+
+    assert low_ev is not None
+    assert high_ev is not None
+    low_debias = low_ev.metadata["write_priority"]["debias"]
+    high_debias = high_ev.metadata["write_priority"]["debias"]
+    assert low_debias["importance_weight"] > high_debias["importance_weight"]
+    assert high_debias["importance_weight"] == 1.0
 
 
 def test_g1_prediction_error_gate_skips_candidate_extraction_for_low_error() -> None:

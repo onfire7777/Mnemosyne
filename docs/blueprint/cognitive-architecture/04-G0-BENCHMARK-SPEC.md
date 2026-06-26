@@ -68,8 +68,8 @@ For each proposed change (a G1–G4 item):
 
 ### G1 gate evidence
 
-- **Implemented slice:** schema-fast-path retrieval + reality-monitoring abstention + retrieval-strengthening lifecycle marks + multi-signal write priority + prediction-error-gated consolidation metadata + contested status for uncorroborated-but-congruent projections.
-- **Preregistration:** `eval/g0/preregistrations/g1-reliability-core-schema-fast-path.json`.
+- **Implemented slice:** schema-fast-path retrieval + reality-monitoring abstention + retrieval-strengthening lifecycle marks + multi-signal write priority with trust-bounded importance-sampling debias + prediction-error-gated consolidation metadata + contested status for uncorroborated-but-congruent projections.
+- **Preregistrations:** `eval/g0/preregistrations/g1-reliability-core-schema-fast-path.json`; `eval/g0/preregistrations/g1-write-priority-debias.json`.
 - **Decision log:** `eval/g0/decision-log.jsonl`.
 - **Target:** `multi_hop_ndcg_at_k`, direction `increase`, minimum delta `0.02`.
 - **Result:** PASS against `eval/g0/baselines/baseline-0.json`; candidate `multi_hop_ndcg_at_k = 1.0` vs baseline `0.5935` (`+0.4065`). Guardrails unchanged: ECE `0.006271`, abstention precision/recall `1.0/1.0`, confabulation rate `0.0`, poison-block rate `1.0`, fast-path P95 `92.1 ms`.

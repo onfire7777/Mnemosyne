@@ -206,6 +206,19 @@ def test_postgres_queue_lifecycle_and_tenant_isolation_live() -> None:
     assert other_queue.snapshot() == {}
 
 
+def test_postgres_queue_leases_debiased_effective_write_priority_live() -> None:
+    tenant = f"tenant-queue-debias-live-{uuid4()}"
+    queue = PostgresQueue(live_dsn(), tenant_id=tenant)
+    raw_only = queue.enqueue("consolidate", {"write_priority": {"score": 0.04}})
+    debiased = queue.enqueue("consolidate", {"write_priority": {"score": 0.01, "effective_score": 0.05}})
+
+    first = queue.lease("consolidate")
+    second = queue.lease("consolidate")
+
+    assert first is not None and first.id == debiased.id
+    assert second is not None and second.id == raw_only.id
+
+
 def test_postgres_queue_worker_persists_retry_and_dead_failures_live() -> None:
     tenant = f"tenant-queue-failure-{uuid4()}"
     other_tenant = f"tenant-queue-failure-other-{uuid4()}"

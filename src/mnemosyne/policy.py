@@ -60,6 +60,17 @@ class OperatingPolicy:
             5: 0.2,
         }
     )
+    write_priority_debias_floor_by_trust_tier: dict[int, float] = field(
+        default_factory=lambda: {
+            0: 0.05,
+            1: 0.04,
+            2: 0.03,
+            3: 0.02,
+            4: 0.01,
+            5: 0.0,
+        }
+    )
+    write_priority_debias_max_weight: float = 20.0
     # §31 / FR-17 / OQ2 immutable rail gate, default off. Kept outside
     # immutable_rails so the all-true rail map remains byte-stable.
     cold_loop_counterfactual_trusted: bool = False
