@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import hashlib
+import json
+import subprocess
+import sys
 from pathlib import Path
 
 from eval.g0.confabulation import run_confabulation_eval
 from eval.g0.continual_learning import run_continual_learning_eval
 from eval.g0.deep_latency import run_deep_latency_eval
 from eval.g0.gate import evaluate_ablation
+from eval.g0.resource_usage import run_resource_usage_eval
 from eval.g0.runner import G0_METRIC_SPECS, build_report
 
 
@@ -37,6 +42,7 @@ def test_g0_report_emits_every_spec_metric_and_source_hashes() -> None:
     assert report["coverage"]["measured"] > 0
     assert report["coverage"]["missing"] > 0
     assert report["coverage"]["gate_ready"] is False
+    assert report["coverage"]["missing_metric_ids"] == ["controller_watts_per_dollar"]
 
     sources = {source["id"]: source for source in report["sources"]}
     assert sources["slo_v2_definitive"]["present"] is True
@@ -48,6 +54,8 @@ def test_g0_report_emits_every_spec_metric_and_source_hashes() -> None:
     assert sources["confabulation_eval"]["path"] == "computed:eval.g0.confabulation"
     assert sources["deep_latency_eval"]["present"] is True
     assert sources["deep_latency_eval"]["path"] == "computed:eval.g0.deep_latency"
+    assert sources["resource_usage_eval"]["present"] is True
+    assert sources["resource_usage_eval"]["path"] == "computed:eval.g0.resource_usage"
 
     metrics = {metric["id"]: metric for metric in report["metrics"]}
     assert metrics["recall_at_k"]["status"] == "measured"
@@ -64,10 +72,17 @@ def test_g0_report_emits_every_spec_metric_and_source_hashes() -> None:
     assert metrics["deep_path_p95_ms"]["status"] == "measured"
     assert metrics["deep_path_p95_ms"]["value"] > 0.0
     assert metrics["deep_path_p95_ms"]["source_id"] == "deep_latency_eval"
+    assert metrics["cost_usd_per_1k_queries"]["status"] == "measured"
+    assert metrics["cost_usd_per_1k_queries"]["value"] == 0.0
+    assert metrics["cost_usd_per_1k_queries"]["source_id"] == "resource_usage_eval"
+    assert metrics["controller_watts_per_dollar"]["status"] == "missing"
+    assert metrics["controller_watts_per_dollar"]["source_id"] == "resource_usage_eval"
+    assert "requires explicit" in metrics["controller_watts_per_dollar"]["notes"]
 
     dataset_paths = {manifest["path"] for manifest in report["dataset_manifests"]}
     assert "eval/datasets/continual_learning_interference.json" in dataset_paths
     assert "eval/datasets/deep_latency.json" in dataset_paths
+    assert "eval/datasets/resource_usage.json" in dataset_paths
     assert "eval/datasets/retrieval_curated.json" in dataset_paths
     assert "eval/datasets/poison_suite.json" in dataset_paths
 
@@ -77,6 +92,7 @@ def test_g0_continual_learning_fixture_preserves_earlier_task_accuracy() -> None
 
     assert report["schema_version"] == "g0.continual_learning.v1"
     assert "Deterministic local proxy" in report["metric_note"]
+    assert report["dataset_path"] == "eval/datasets/continual_learning_interference.json"
     assert report["total_cases"] >= 3
     assert report["before_accuracy"] == 1.0
     assert report["after_accuracy"] == 1.0
@@ -104,11 +120,94 @@ def test_g0_deep_latency_fixture_records_graph_backed_deep_search() -> None:
     report = run_deep_latency_eval()
 
     assert report["schema_version"] == "g0.deep_latency.v1"
+    assert report["dataset_path"] == "eval/datasets/deep_latency.json"
     assert report["query_count"] >= 3
     assert report["p95_ms"] > 0.0
     assert report["max_ms"] >= report["p50_ms"]
     assert "not production infrastructure evidence" in report["metric_note"]
     assert all(row["graph_hits"] >= 1 for row in report["rows"])
+
+
+def test_g0_resource_usage_fixture_records_local_provider_cost() -> None:
+    report = run_resource_usage_eval()
+
+    assert report["schema_version"] == "g0.resource_usage.v1"
+    assert report["query_count"] >= 3
+    assert report["external_provider_calls"] == 0
+    assert report["cost_usd_per_1k_queries"] == 0.0
+    assert report["controller_watts_per_dollar"] is None
+    assert report["controller_telemetry_present"] is False
+    assert "zero paid-provider spend" in report["metric_note"]
+    assert all(row["external_provider_calls"] == 0 for row in report["rows"])
+
+
+def test_g0_resource_usage_fixture_computes_controller_watts_with_explicit_telemetry(tmp_path: Path) -> None:
+    telemetry = tmp_path / "controller-telemetry.json"
+    telemetry_text = '{"controller_avg_watts": 12.5, "controller_cost_usd_per_hour": 0.25}\n'
+    telemetry.write_text(telemetry_text, encoding="utf-8")
+
+    report = run_resource_usage_eval(telemetry_path=telemetry)
+
+    assert report["controller_telemetry_present"] is True
+    assert report["controller_watts_per_dollar"] == 50.0
+    assert report["controller_cost_window_hours"] == 1.0
+    assert report["controller_cost_usd_for_window"] == 0.25
+    assert report["telemetry_sha256"] == hashlib.sha256(telemetry_text.encode()).hexdigest()
+    assert report["telemetry_path"] == telemetry.name
+    assert report["dataset_path"] == "eval/datasets/resource_usage.json"
+
+
+def test_g0_report_measures_controller_watts_with_explicit_telemetry(tmp_path: Path) -> None:
+    telemetry = tmp_path / "controller-telemetry.json"
+    telemetry.write_text(
+        '{"controller_avg_watts": 12.5, "controller_cost_usd_per_hour": 0.25}\n',
+        encoding="utf-8",
+    )
+
+    report = build_report(REPO_ROOT, baseline_name="baseline-0", controller_telemetry_path=telemetry)
+    metrics = {metric["id"]: metric for metric in report["metrics"]}
+    computed = report["computed_evidence"]["resource_usage_eval"]
+
+    assert report["coverage"]["missing"] == 0
+    assert report["coverage"]["gate_ready"] is True
+    assert report["coverage"]["missing_metric_ids"] == []
+    assert metrics["controller_watts_per_dollar"]["status"] == "measured"
+    assert metrics["controller_watts_per_dollar"]["value"] == 50.0
+    assert computed["controller_telemetry_present"] is True
+    assert computed["telemetry_sha256"] == hashlib.sha256(telemetry.read_bytes()).hexdigest()
+
+
+def test_g0_runner_cli_accepts_controller_telemetry(tmp_path: Path) -> None:
+    telemetry = tmp_path / "controller-telemetry.json"
+    out_dir = tmp_path / "g0-report"
+    telemetry.write_text(
+        '{"controller_avg_watts": 12.5, "controller_cost_usd_per_hour": 0.25}\n',
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "eval.g0.runner",
+            "--repo-root",
+            str(REPO_ROOT),
+            "--out-dir",
+            str(out_dir),
+            "--controller-telemetry",
+            str(telemetry),
+        ],
+        cwd=REPO_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    report = json.loads((out_dir / "report.json").read_text(encoding="utf-8"))
+
+    assert "G0 coverage: 14/14 measured; gate_ready=True" in result.stdout
+    assert report["coverage"]["gate_ready"] is True
+    assert report["computed_evidence"]["resource_usage_eval"]["controller_watts_per_dollar"] == 50.0
 
 
 def test_ablation_gate_passes_preregistered_target_with_stable_guardrails() -> None:

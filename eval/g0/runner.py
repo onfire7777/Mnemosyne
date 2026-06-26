@@ -23,6 +23,7 @@ from typing import Any, Callable
 from eval.g0.confabulation import run_confabulation_eval
 from eval.g0.continual_learning import run_continual_learning_eval
 from eval.g0.deep_latency import run_deep_latency_eval
+from eval.g0.resource_usage import run_resource_usage_eval
 
 G0_METRIC_SPECS: tuple[dict[str, Any], ...] = (
     {
@@ -164,6 +165,7 @@ SOURCE_PATHS = {
 DATASET_PATHS = (
     "eval/datasets/continual_learning_interference.json",
     "eval/datasets/deep_latency.json",
+    "eval/datasets/resource_usage.json",
     "eval/datasets/retrieval_curated.json",
     "eval/datasets/poison_suite.json",
     "eval/datasets/belief_cases.json",
@@ -196,6 +198,7 @@ def build_report(
     *,
     baseline_name: str = "baseline-0",
     pinned_commit: str | None = None,
+    controller_telemetry_path: Path | None = None,
 ) -> dict[str, Any]:
     """Build a complete G0 report from existing eval artifacts."""
 
@@ -221,6 +224,13 @@ def build_report(
         "deep_latency_eval",
         "computed:eval.g0.deep_latency",
         deep_latency_report,
+    )
+    resource_usage_report = run_resource_usage_eval(telemetry_path=controller_telemetry_path)
+    sources["resource_usage_eval"] = _computed_source(
+        repo_root,
+        "resource_usage_eval",
+        "computed:eval.g0.resource_usage",
+        resource_usage_report,
     )
     metrics = [_build_metric(spec, sources) for spec in G0_METRIC_SPECS]
     measured = sum(1 for metric in metrics if metric["status"] == "measured")
@@ -351,6 +361,8 @@ def _build_metric(spec: dict[str, Any], sources: dict[str, Source]) -> dict[str,
         "poison_block_rate": _metric_poison_block_rate,
         "fast_path_p95_ms": _metric_fast_path_p95,
         "deep_path_p95_ms": _metric_deep_path_p95,
+        "cost_usd_per_1k_queries": _metric_cost_usd_per_1k_queries,
+        "controller_watts_per_dollar": _metric_controller_watts_per_dollar,
     }
     base = {
         "id": spec["id"],
@@ -511,6 +523,50 @@ def _metric_deep_path_p95(spec: dict[str, Any], sources: dict[str, Source]) -> d
             "graph-backed corpus; reported-only, not production latency evidence."
         ),
     )
+
+
+def _metric_cost_usd_per_1k_queries(spec: dict[str, Any], sources: dict[str, Source]) -> dict[str, Any]:
+    value = _source_data(sources, "resource_usage_eval", "cost_usd_per_1k_queries")
+    return _measured(
+        spec,
+        value,
+        "resource_usage_eval",
+        "/cost_usd_per_1k_queries",
+        note=(
+            "Measured by the local G0 resource-usage fixture as paid-provider "
+            "spend per 1k queries. The default local backend reports zero "
+            "provider spend because it invokes no paid embedding, reranker, or "
+            "LLM service."
+        ),
+    )
+
+
+def _metric_controller_watts_per_dollar(
+    spec: dict[str, Any],
+    sources: dict[str, Source],
+) -> dict[str, Any]:
+    value = _source_data(sources, "resource_usage_eval", "controller_watts_per_dollar")
+    if value is not None:
+        return _measured(
+            spec,
+            value,
+            "resource_usage_eval",
+            "/controller_watts_per_dollar",
+            note=(
+                "Measured from explicit controller power/cost telemetry attached "
+                "to the G0 resource-usage fixture."
+            ),
+        )
+    return {
+        "status": "missing",
+        "source_id": "resource_usage_eval",
+        "evidence_path": "/controller_watts_per_dollar",
+        "notes": (
+            "Resource fixture ran, but controller watts/$ requires explicit "
+            "controller_avg_watts and controller_cost_usd_per_hour telemetry; "
+            "no default estimate is used."
+        ),
+    }
 
 
 def _measured(
@@ -695,6 +751,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--out-dir", type=Path, default=Path("eval/g0/reports"))
     parser.add_argument("--baseline-name", default="baseline-0")
     parser.add_argument("--pinned-commit", help="override the git HEAD recorded as the baseline commit")
+    parser.add_argument(
+        "--controller-telemetry",
+        type=Path,
+        help=(
+            "optional JSON artifact with controller_avg_watts and "
+            "controller_cost_usd_per_hour for controller_watts_per_dollar"
+        ),
+    )
     parser.add_argument("--write-baseline", action="store_true", help="also write eval/g0/baselines/<name>.json")
     parser.add_argument("--print-json", action="store_true")
     return parser.parse_args(argv)
@@ -703,7 +767,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     repo_root = args.repo_root.resolve()
-    report = build_report(repo_root, baseline_name=args.baseline_name, pinned_commit=args.pinned_commit)
+    report = build_report(
+        repo_root,
+        baseline_name=args.baseline_name,
+        pinned_commit=args.pinned_commit,
+        controller_telemetry_path=args.controller_telemetry,
+    )
     paths = write_report(report, repo_root / args.out_dir, write_baseline=args.write_baseline)
     if args.print_json:
         print(json.dumps(report, indent=2, sort_keys=True))

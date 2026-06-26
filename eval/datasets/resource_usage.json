@@ -1,0 +1,36 @@
+{
+  "schema_version": "g0.resource_usage_dataset.v1",
+  "tenant": "g0-resource-tenant",
+  "rounds": 3,
+  "measurement_scope": "local deterministic G0 cost fixture",
+  "cost_model": {
+    "provider": "local deterministic",
+    "currency": "USD",
+    "billable_input_usd_per_1k_tokens": 0.0,
+    "billable_output_usd_per_1k_tokens": 0.0,
+    "fixed_usd_per_query": 0.0,
+    "notes": "The default G0 local path does not call a paid embedding, reranker, or LLM provider. Provider-backed runs must supply a non-zero telemetry artifact instead of editing this fixture."
+  },
+  "corpus": [
+    {
+      "case_id": "retrieval_cost_alpha",
+      "content": "G0 local resource accounting alpha memory is stored without a paid provider call.",
+      "source_type": "g0-resource-fixture"
+    },
+    {
+      "case_id": "retrieval_cost_beta",
+      "content": "G0 local resource accounting beta memory confirms deterministic local retrieval cost.",
+      "source_type": "g0-resource-fixture"
+    },
+    {
+      "case_id": "retrieval_cost_gamma",
+      "content": "G0 local resource accounting gamma memory exercises repeated local queries.",
+      "source_type": "g0-resource-fixture"
+    }
+  ],
+  "queries": [
+    "resource accounting alpha memory",
+    "deterministic local retrieval cost",
+    "repeated local queries gamma"
+  ]
+}

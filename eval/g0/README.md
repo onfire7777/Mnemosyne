@@ -22,6 +22,34 @@ This writes:
   metric
 - an embedded computed `deep_latency_eval` fixture recording reported-only
   local deep-search P95 latency over a versioned graph corpus
+- an embedded computed `resource_usage_eval` fixture recording paid-provider
+  spend per 1k local G0 queries; controller watts/$ remains unmeasured unless
+  an explicit power/cost telemetry artifact is supplied, because the harness
+  does not estimate power data
+
+To measure `controller_watts_per_dollar`, pass a local telemetry artifact:
+
+```bash
+python -m eval.g0.runner \
+  --controller-telemetry /secure/path/controller-telemetry.json \
+  --write-baseline
+```
+
+The telemetry JSON must contain positive numeric values:
+
+```json
+{
+  "controller_avg_watts": 12.5,
+  "controller_cost_usd_per_hour": 0.25,
+  "controller_cost_window_hours": 1.0
+}
+```
+
+`controller_cost_window_hours` is optional and defaults to `1.0`; the reported
+watts/$ denominator is `controller_cost_usd_per_hour * controller_cost_window_hours`.
+The report records the telemetry basename and SHA-256, not the absolute source
+path. Do not commit operational power/cost telemetry unless it is intentionally
+sanitized fixture data.
 
 Evaluate a preregistered ablation:
 
