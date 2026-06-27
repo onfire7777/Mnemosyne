@@ -68,3 +68,29 @@ This checkpoint verified the deterministic local scaffold and initial GitHub pro
 - CLI `session-exchange` and hosted HTTP `/session/exchange` validate OIDC/JWKS IdP tokens and mint bounded Mnemosyne signed-session tokens for the existing CLI/MCP authorization path; bounded JWKS loading, cache TTL refresh, refresh-on-unknown-`kid` rotation, fail-closed authz policy mapping, redacted `idp-authz-policy-check` validation/audit summaries, fingerprint-acknowledged `idp-authz-policy-rollout-check` diffs with claim-simulation change gates, command-backed session-secret custody for CLI/MCP signing and verification plus provider-check OIDC/JWKS/authz-policy/session-secret preflight, hosted HTTP TLS/client-certificate enforcement, TLS endpoint certificate-chain checks, TLS rotation-plan and lifecycle evidence validation, redacted live IdP/JWKS token validation, official SDK StreamableHTTP adapter validation, local hosted HTTP soak coverage, local legacy SSE handshake validation, manifest-driven deployment soak orchestration, local worker supervision, and worker deployment evidence validation are locally covered, while operator-run validation against production credentials/endpoints and production evidence-producing operations remains outside this superseded checkpoint.
 - CLI `provider-check` fails command KMS providers that retain keys after claimed shred success.
 - `gsd-sdk roadmap analyze` reported 6/6 original scaffold phases complete; strict blueprint parity remains reopened.
+
+---
+
+## vNext — Unified Cognitive Substrate (planned)
+
+**Status:** planned — not started (queued as Phase 7; post-v1.0)
+**Spec:** `docs/superpowers/specs/2026-06-27-unified-cognitive-substrate-design.md`
+**Roadmap:** `.planning/ROADMAP.md` → Phase 7 · **Plans:** `.planning/phases/07-unified-cognitive-substrate/`
+
+Turn the consciousness layer from a default-off shadow lane into a single, always-on, deeply-integrated cognitive substrate with **zero compromise to memory reliability**. Replaces the `shadow_only` / `enabled` toggles with one continuous, derived **Standing** signal `(groundedness ⟂ salience)`, runs the cognitive loop always-on via a tiered heartbeat, and lets autonomy grow only as corroboration earns it — all above the unbreakable §31-rails + immutable-ledger floor. This is the ADR-001 **Option E** destination and continues the G1→G4 program; it supersedes the *staging model* of the G4 shadow service, not the substrate, the rails, or the honesty charter.
+
+### Relationship to v1.0
+Post-v1.0. Does not block, and is not blocked by, the v1.0 strict-parity sign-off (the 10 Partial production-evidence rows). Phase 7 plan `07-01` is additive and byte-stable.
+
+### Success Criteria (what must be TRUE)
+- `Standing` is the single derived decision signal; P1 is byte-stable (zero divergence vs the boolean path).
+- Standing is `(groundedness ⟂ salience)`; answer-authority depends on `groundedness` only; only **independent** external evidence raises groundedness; a permanent **evidence-dominance gap** holds (self < external, always).
+- The cognitive loop is always-on via a tiered heartbeat with **hard** anti-rumination + proto-self; self-generation budget, answer-grounding floor, broadcast-as-data, and a fail-closed circuit-breaker hold; rumination ~ 0 and heartbeat compute bounded.
+- Autonomy grows only as external corroboration earns it; an adversarial echo-chamber/sleeper corpus cannot raise a credential (Goodhart meta-rail).
+- **No operational on/off toggle remains** (only the fail-closed floor fuse); every reliability guardrail (ECE, confabulation, poison-block, recall/nDCG, P95, 7 rails, 14 indicators) stays green; honesty charter intact (functional only; welfare flag stays; no phenomenal claim).
+
+### Plans
+- `07-01` … `07-05` in `.planning/phases/07-unified-cognitive-substrate/` (P1 byte-stable Standing → P5 retire toggles). Each preregisters a G0 gate; no plan ships on a guardrail regression. Toggle removal (P5) pauses for an owner checkpoint.
+
+### Verification (planned gates)
+- `eval/g0/preregistrations/g5-*.json` (bytestable-parity, continuous, always-on-heartbeat, earned-autonomy, toggle-retirement) — each must pass target-up / guardrails-not-down against `eval/g0/baselines/baseline-0.json`.
