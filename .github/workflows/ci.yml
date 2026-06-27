@@ -26,9 +26,9 @@ jobs:
       - name: Install uv
         run: python -m pip install pip==26.1.2 uv==0.11.16
       - name: Sync locked lint environment
-        run: uv sync --frozen --group dev
+        run: uv sync --locked --group dev
       - name: ruff check
-        run: uv run ruff check .
+        run: uv run --locked ruff check .
 
   test:
     name: Unit + drift checks
@@ -44,14 +44,14 @@ jobs:
         run: python -m pip install pip==26.1.2 uv==0.11.16
       - name: Sync locked test environment
         run: |
-          uv sync --frozen --extra mcp --group dev
+          uv sync --locked --extra mcp --group dev
       - name: Run test suite (local backend; live-Postgres tests self-skip)
-        run: uv run python -m pytest
+        run: uv run --locked python -m pytest
       - name: Drift checks only (explicit gate)
-        run: uv run python -m pytest tests/test_config_drift.py -q
+        run: uv run --locked python -m pytest tests/test_config_drift.py -q
       - name: G0 preregistration gate replay
         run: >-
-          uv run python -m pytest
+          uv run --locked python -m pytest
           tests/test_g0_harness.py::test_committed_g0_preregistrations_have_passing_decisions
           tests/test_g0_harness.py::test_current_g0_candidate_replays_preregistrations_without_regression
           -q
@@ -86,8 +86,8 @@ jobs:
         run: python -m pip install pip==26.1.2 uv==0.11.16
       - name: Sync locked Postgres test environment
         run: |
-          uv sync --frozen --extra mcp --extra postgres --group dev
+          uv sync --locked --extra mcp --extra postgres --group dev
       - name: Load canonical schema
         run: psql "$MNEMOSYNE_POSTGRES_DSN" -f sql/schema.sql
       - name: Run Postgres-backed live tests
-        run: uv run python -m pytest tests/test_postgres_engine_live.py -q
+        run: uv run --locked python -m pytest tests/test_postgres_engine_live.py -q

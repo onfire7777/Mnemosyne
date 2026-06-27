@@ -66,16 +66,15 @@ flowchart TD
 
 ```bash
 # 1. Environment
-python3 -m venv .venv
-. .venv/bin/activate
-python -m pip install --upgrade pip
+python3 -m pip install --user pip==26.1.2 uv==0.11.16
 
-# 2. Install (editable). Extras: [mcp] = MCP server, [postgres] = PG backend.
-python -m pip install -e '.[mcp]'        # local + MCP
-# python -m pip install -e '.[mcp,postgres]'   # add the Postgres backend
+# 2. Sync the locked editable environment. Extras: mcp = MCP server,
+# postgres = PG backend.
+uv sync --locked --extra mcp --group dev
+# uv sync --locked --extra mcp --extra postgres --group dev
 
 # 3. Run the local test suite (no Postgres DSN → live-DB tests skip)
-python -m pytest
+uv run --locked python -m pytest
 
 # 4. Capture a memory and search it (in-memory backend, no services needed)
 mneme capture --tenant tenant-a --user user-a --source-type chat \
@@ -83,24 +82,25 @@ mneme capture --tenant tenant-a --user user-a --source-type chat \
 mneme search --tenant tenant-a --query "preferred database"
 ```
 
-After `pip install`, the two console-script entry points are on your `PATH`:
+After `uv sync`, the two console-script entry points are available through
+`uv run`:
 
 | Command    | Entry point                  | Purpose                |
 | ---------- | ---------------------------- | ---------------------- |
 | `mneme`    | `mnemosyne.cli:main`         | Memory CLI (91 subcommands) |
 | `mneme-mcp`| `mnemosyne.mcp_server:main`  | MCP server (48 tools)  |
 
-> The module form `python -m mnemosyne.cli …` is equivalent to `mneme …` and works without installation; this README uses the installed scripts.
+> The module form `uv run --locked python -m mnemosyne.cli …` is equivalent to `uv run --locked mneme …`.
 
 ### PostgreSQL backend
 
-Requires the `postgres` extra (`pip install -e '.[postgres]'`). The Postgres engine adds tenant **row-level security**, SQL **FTS**, **pgvector** assertion/evidence search, recursive **graph/PPR**, `as-of` time travel, and durable queue leasing.
+Requires the `postgres` extra (`uv sync --locked --extra mcp --extra postgres --group dev`). The Postgres engine adds tenant **row-level security**, SQL **FTS**, **pgvector** assertion/evidence search, recursive **graph/PPR**, `as-of` time travel, and durable queue leasing.
 
 ```bash
 docker compose up -d postgres
 export MNEMOSYNE_POSTGRES_DSN=postgresql://mnemosyne:mnemosyne-local-dev@127.0.0.1:54329/mnemosyne
 
-mneme --backend postgres search --tenant tenant-a --query "preferred database"
+uv run --locked mneme --backend postgres search --tenant tenant-a --query "preferred database"
 
 # Durable queue + bounded consolidation worker
 mneme --backend postgres --queue-backend postgres \
@@ -294,7 +294,8 @@ Controlling artifacts: [`docs/ROADMAP-TO-100.md`](docs/ROADMAP-TO-100.md) (blend
 - With Docker-compose Postgres running and the DSN set, the live tests in `tests/test_postgres_engine_live.py` and `tests/test_shared_engine_contract.py` additionally run, covering tenant RLS, FTS, pgvector search, recursive graph/PPR, bitemporal supersession, branch/merge/discard, tombstone + hard-delete forget modes, command-backed KMS, and **local↔Postgres parity** of the engine contract.
 
 ```bash
-python -m pytest          # local gate (live-DB tests skip without a DSN)
+uv sync --locked --extra mcp --group dev
+uv run --locked python -m pytest          # local gate (live-DB tests skip without a DSN)
 ```
 
 ---

@@ -43,7 +43,7 @@ from mnemosyne.consolidation import (
     ProcedureInducer,
 )
 from mnemosyne.engine import LocalMemoryEngine, MemoryEngine
-from mnemosyne.evidence_redaction import scan_evidence_paths
+from mnemosyne.evidence_redaction import manifest_argument_secret_errors, scan_evidence_paths
 from mnemosyne.eval import run_seed_suite
 from mnemosyne.gate import RegressionCase
 from mnemosyne.ingestion import IngestionPipeline
@@ -10288,8 +10288,30 @@ def _verify_production_evidence_bundle_manifest(
     return manifest_fingerprint, actual_files
 
 
+def _production_evidence_summary_expected_paths(bundle_dir: Path) -> dict[str, Path]:
+    return {
+        "out_root": bundle_dir,
+        "operator_manifest": bundle_dir / "operator-soak-manifest.json",
+        "evidence_manifest": bundle_dir / "evidence" / "manifest.json",
+        "redaction_scan": bundle_dir / "redaction-scan.json",
+        "bundle_manifest": bundle_dir / "bundle-manifest.json",
+    }
+
+
+def _production_evidence_iso_datetime_ok(value: Any) -> bool:
+    if not isinstance(value, str):
+        return False
+    try:
+        datetime.fromisoformat(value)
+    except ValueError:
+        return False
+    return True
+
+
 def _verify_production_evidence_summary(
+    *,
     summary: Mapping[str, Any] | None,
+    bundle_dir: Path,
     findings: list[dict[str, Any]],
 ) -> None:
     if summary is None:
@@ -10302,6 +10324,26 @@ def _verify_production_evidence_summary(
     for key, message in expected_truthy.items():
         if summary.get(key) is not True:
             _production_evidence_finding(findings, f"summary_{key}_missing", message)
+    for key, expected_path in _production_evidence_summary_expected_paths(bundle_dir).items():
+        if not _production_evidence_path_matches(summary.get(key), expected_path=expected_path):
+            _production_evidence_finding(
+                findings,
+                f"summary_{key}_invalid",
+                f"summary.json {key} must resolve to the retained production evidence path",
+            )
+    completed_at = summary.get("completed_at")
+    if not isinstance(completed_at, str):
+        _production_evidence_finding(
+            findings,
+            "summary_completed_at_missing",
+            "summary.json requires completed_at",
+        )
+    elif not _production_evidence_iso_datetime_ok(completed_at):
+        _production_evidence_finding(
+            findings,
+            "summary_completed_at_invalid",
+            "summary.json completed_at must be an ISO-8601 timestamp",
+        )
     if summary.get("release_audit_findings") != []:
         _production_evidence_finding(
             findings,
@@ -10310,13 +10352,19 @@ def _verify_production_evidence_summary(
         )
 
 
-def _production_evidence_summary_ok(summary: Mapping[str, Any] | None) -> bool:
+def _production_evidence_summary_ok(summary: Mapping[str, Any] | None, *, bundle_dir: Path) -> bool:
+    if summary is None:
+        return False
     return (
-        summary is not None
-        and summary.get("redaction_scan_ok") is True
+        summary.get("redaction_scan_ok") is True
         and summary.get("deployment_soak_ok") is True
         and summary.get("release_audit_ok") is True
         and summary.get("release_audit_findings") == []
+        and _production_evidence_iso_datetime_ok(summary.get("completed_at"))
+        and all(
+            _production_evidence_path_matches(summary.get(key), expected_path=expected_path)
+            for key, expected_path in _production_evidence_summary_expected_paths(bundle_dir).items()
+        )
     )
 
 
@@ -10830,6 +10878,14 @@ def _verify_production_evidence_operator_manifest(
             f"{code_prefix}_unresolved_placeholder",
             f"{label} contains unresolved production placeholders",
         )
+    secret_argument_errors = manifest_argument_secret_errors(operator_manifest)
+    for error in secret_argument_errors:
+        ok = False
+        _production_evidence_finding(
+            findings,
+            f"{code_prefix}_secret_argument",
+            f"{label} {error}",
+        )
 
     validation_scope = operator_manifest.get("validation_scope")
     if not isinstance(validation_scope, Mapping):
@@ -10888,6 +10944,16 @@ def _verify_production_evidence_operator_manifest(
                 findings,
                 f"{code_prefix}_command_invalid",
                 f"{label} checks[{index}].command must be a non-empty string",
+            )
+            continue
+        try:
+            _deployment_check_spec(index, dict(check), default_timeout=30.0)
+        except ValueError as exc:
+            ok = False
+            _production_evidence_finding(
+                findings,
+                f"{code_prefix}_check_spec_invalid",
+                f"{label} checks[{index}] failed deployment-soak preflight validation: {exc}",
             )
             continue
         commands.append(command)
@@ -11071,9 +11137,225 @@ def _production_evidence_path_matches(path_value: Any, *, expected_path: Path) -
         return False
 
 
+def _verify_production_evidence_manifest_contract(
+    *,
+    evidence_manifest: Mapping[str, Any] | None,
+    deployment_soak: Mapping[str, Any] | None,
+    findings: list[dict[str, Any]],
+) -> bool:
+    if evidence_manifest is None:
+        return False
+    ok = True
+    expected_count = len(PRODUCTION_RELEASE_REQUIRED_COMMANDS)
+    if evidence_manifest.get("kind") != "mnemosyne.deployment_soak_evidence":
+        ok = False
+        _production_evidence_finding(
+            findings,
+            "evidence_manifest_kind_invalid",
+            "evidence/manifest.json has unsupported kind",
+        )
+    if evidence_manifest.get("version") != 1:
+        ok = False
+        _production_evidence_finding(
+            findings,
+            "evidence_manifest_version_invalid",
+            "evidence/manifest.json requires version 1",
+        )
+    if evidence_manifest.get("ok") is not True:
+        ok = False
+        _production_evidence_finding(
+            findings,
+            "evidence_manifest_not_ok",
+            "evidence/manifest.json must confirm ok=true",
+        )
+
+    validation_scope = evidence_manifest.get("validation_scope")
+    if not isinstance(validation_scope, Mapping):
+        ok = False
+        _production_evidence_finding(
+            findings,
+            "evidence_manifest_validation_scope_missing",
+            "evidence/manifest.json is missing validation_scope",
+        )
+    else:
+        if validation_scope.get("production_validated") is not True:
+            ok = False
+            _production_evidence_finding(
+                findings,
+                "evidence_manifest_production_validation_missing",
+                "evidence/manifest.json is not production validated",
+            )
+        if validation_scope.get("target_environment") != "production":
+            ok = False
+            _production_evidence_finding(
+                findings,
+                "evidence_manifest_target_missing",
+                "evidence/manifest.json did not target production",
+            )
+        if validation_scope.get("operator_asserted") is not True:
+            ok = False
+            _production_evidence_finding(
+                findings,
+                "evidence_manifest_operator_attestation_missing",
+                "evidence/manifest.json is missing operator attestation",
+            )
+
+    if not _release_redaction_ok(evidence_manifest):
+        ok = False
+        _production_evidence_finding(
+            findings,
+            "evidence_manifest_redaction_missing",
+            "evidence/manifest.json redaction flags are incomplete",
+        )
+
+    summary = evidence_manifest.get("summary")
+    if not isinstance(summary, Mapping):
+        ok = False
+        _production_evidence_finding(
+            findings,
+            "evidence_manifest_summary_missing",
+            "evidence/manifest.json is missing summary",
+        )
+    else:
+        if summary.get("checks") != expected_count:
+            ok = False
+            _production_evidence_finding(
+                findings,
+                "evidence_manifest_summary_check_count_mismatch",
+                "evidence/manifest.json summary.checks does not match the frozen production command set",
+            )
+        if summary.get("required_failures") != 0:
+            ok = False
+            _production_evidence_finding(
+                findings,
+                "evidence_manifest_required_failures_present",
+                "evidence/manifest.json summary reports required failures",
+            )
+        if deployment_soak is not None and deployment_soak.get("summary") != summary:
+            ok = False
+            _production_evidence_finding(
+                findings,
+                "evidence_manifest_summary_mismatch",
+                "evidence/manifest.json summary must match deployment-soak.stdout.json summary",
+            )
+
+    checks = evidence_manifest.get("checks")
+    report_checks = deployment_soak.get("checks") if isinstance(deployment_soak, Mapping) else None
+    if not isinstance(checks, list) or not checks:
+        ok = False
+        _production_evidence_finding(
+            findings,
+            "evidence_manifest_checks_missing",
+            "evidence/manifest.json requires a non-empty checks array",
+        )
+        return False
+    if len(checks) != expected_count:
+        ok = False
+        _production_evidence_finding(
+            findings,
+            "evidence_manifest_check_count_mismatch",
+            "evidence/manifest.json checks do not match the frozen production command set",
+        )
+    commands: list[str] = []
+    for index, check in enumerate(checks, start=1):
+        if not isinstance(check, Mapping):
+            ok = False
+            _production_evidence_finding(
+                findings,
+                "evidence_manifest_check_invalid",
+                f"evidence/manifest.json checks[{index}] must be an object",
+            )
+            continue
+        command = check.get("command")
+        if not isinstance(command, str) or not command:
+            ok = False
+            _production_evidence_finding(
+                findings,
+                "evidence_manifest_command_invalid",
+                f"evidence/manifest.json checks[{index}].command must be a non-empty string",
+            )
+        else:
+            commands.append(command)
+        if check.get("ok") is not True:
+            ok = False
+            _production_evidence_finding(
+                findings,
+                "evidence_manifest_check_not_ok",
+                f"evidence/manifest.json checks[{index}] is not ok",
+            )
+        if check.get("required") is not True:
+            ok = False
+            _production_evidence_finding(
+                findings,
+                "evidence_manifest_check_not_required",
+                f"evidence/manifest.json checks[{index}] must be required for production evidence",
+            )
+        if not isinstance(check.get("path"), str) or not check.get("path"):
+            ok = False
+            _production_evidence_finding(
+                findings,
+                "evidence_manifest_check_path_missing",
+                f"evidence/manifest.json checks[{index}] requires a retained check path",
+            )
+        check_sha256 = check.get("sha256")
+        if not isinstance(check_sha256, str) or not check_sha256.startswith("sha256:"):
+            ok = False
+            _production_evidence_finding(
+                findings,
+                "evidence_manifest_check_sha256_missing",
+                f"evidence/manifest.json checks[{index}] requires a sha256 digest",
+            )
+        if isinstance(report_checks, list) and index <= len(report_checks) and isinstance(report_checks[index - 1], Mapping):
+            report_check = report_checks[index - 1]
+            evidence_metadata = {
+                key: check.get(key)
+                for key in ("index", "name", "command", "ok", "required", "evidence_class")
+            }
+            report_metadata = {
+                key: report_check.get(key)
+                for key in ("index", "name", "command", "ok", "required", "evidence_class")
+            }
+            if evidence_metadata != report_metadata:
+                ok = False
+                _production_evidence_finding(
+                    findings,
+                    "evidence_manifest_check_metadata_mismatch",
+                    "evidence/manifest.json check metadata must match deployment-soak.stdout.json checks",
+                )
+                break
+    required_commands = set(PRODUCTION_RELEASE_REQUIRED_COMMANDS)
+    provided_commands = set(commands)
+    missing = sorted(required_commands - provided_commands)
+    extra = sorted(provided_commands - required_commands)
+    duplicates = sorted({command for command in commands if commands.count(command) > 1})
+    if missing:
+        ok = False
+        _production_evidence_finding(
+            findings,
+            "evidence_manifest_required_commands_missing",
+            "evidence/manifest.json is missing production commands: " + ", ".join(missing),
+        )
+    if extra:
+        ok = False
+        _production_evidence_finding(
+            findings,
+            "evidence_manifest_unknown_commands",
+            "evidence/manifest.json contains unknown production commands: " + ", ".join(extra),
+        )
+    if duplicates:
+        ok = False
+        _production_evidence_finding(
+            findings,
+            "evidence_manifest_duplicate_commands",
+            "evidence/manifest.json contains duplicate production commands: " + ", ".join(duplicates),
+        )
+    return ok
+
+
 def _verify_production_evidence_deployment_soak_manifest(
     *,
     expected_manifest_path: Path,
+    bundle_dir: Path,
     deployment_soak: Mapping[str, Any] | None,
     evidence_manifest: Mapping[str, Any] | None,
     findings: list[dict[str, Any]],
@@ -11124,7 +11406,54 @@ def _verify_production_evidence_deployment_soak_manifest(
                 "evidence_manifest_source_manifest_invalid",
                 "evidence/manifest.json source_manifest must resolve to the retained operator-soak-manifest.json",
             )
+        files = evidence_manifest.get("files")
+        if not isinstance(files, Mapping):
+            ok = False
+            _production_evidence_finding(
+                findings,
+                "evidence_manifest_files_missing",
+                "evidence/manifest.json is missing files",
+            )
+        else:
+            manifest_path = bundle_dir / "evidence" / "manifest.json"
+            try:
+                report_path = _release_manifest_path(manifest_path, files.get("report"), "files.report")
+                _verify_release_manifest_file(
+                    path=report_path,
+                    expected_sha256=_release_manifest_expected_sha256(
+                        files.get("report_sha256"),
+                        "files.report_sha256",
+                    ),
+                    label="files.report",
+                )
+                report_payload = json.loads(report_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError, SystemExit) as exc:
+                ok = False
+                _production_evidence_finding(
+                    findings,
+                    "evidence_manifest_report_replay_failed",
+                    f"evidence/manifest.json report replay failed: {exc}",
+                )
+            else:
+                if not isinstance(report_payload, Mapping):
+                    ok = False
+                    _production_evidence_finding(
+                        findings,
+                        "evidence_manifest_report_invalid",
+                        "evidence/manifest.json files.report must contain a JSON object",
+                    )
+                elif deployment_soak is not None and dict(report_payload) != dict(deployment_soak):
+                    ok = False
+                    _production_evidence_finding(
+                        findings,
+                        "deployment_soak_stdout_report_mismatch",
+                        "deployment-soak.stdout.json must equal the digest-bound evidence/manifest.json files.report",
+                    )
     return ok
+
+
+def _normalized_release_audit_for_compare(report: Mapping[str, Any]) -> Any:
+    return _normalize_release_fingerprint_value(report)
 
 
 def _verify_production_evidence_release_audit(
@@ -11142,6 +11471,20 @@ def _verify_production_evidence_release_audit(
             "deployment-soak.stdout.json is not ok",
         )
     if release_audit is not None:
+        required_sections = {
+            "source": Mapping,
+            "summary": Mapping,
+            "commands": list,
+            "provider": Mapping,
+        }
+        for key, expected_type in required_sections.items():
+            value = release_audit.get(key)
+            if not isinstance(value, expected_type) or (isinstance(value, list | Mapping) and not value):
+                _production_evidence_finding(
+                    findings,
+                    f"release_audit_{key}_missing",
+                    f"release-audit.json is missing {key}",
+                )
         if release_audit.get("ok") is not True:
             _production_evidence_finding(findings, "release_audit_not_ok", "release-audit.json is not ok")
         if release_audit.get("findings") != []:
@@ -11228,6 +11571,14 @@ def _verify_production_evidence_release_audit(
             "release_audit_fingerprint_mismatch",
             "offline release-audit replay fingerprint does not match release-audit.json",
         )
+    if release_audit is not None and _normalized_release_audit_for_compare(
+        release_audit
+    ) != _normalized_release_audit_for_compare(recomputed):
+        _production_evidence_finding(
+            findings,
+            "release_audit_replay_mismatch",
+            "release-audit.json must match the offline replay aside from path-like volatile fields",
+        )
     if summary is not None and summary.get("release_audit_fingerprint") != recomputed.get("fingerprint"):
         _production_evidence_finding(
             findings,
@@ -11290,7 +11641,11 @@ def cmd_production_evidence_verify(args: argparse.Namespace) -> None:
         "source_soak_manifest",
         findings,
     )
-    _verify_production_evidence_summary(summary, findings)
+    _verify_production_evidence_summary(
+        summary=summary,
+        bundle_dir=resolved_bundle_dir,
+        findings=findings,
+    )
     preflight_ok = _verify_production_evidence_preflight(
         preflight,
         bundle_dir=resolved_bundle_dir,
@@ -11311,8 +11666,14 @@ def cmd_production_evidence_verify(args: argparse.Namespace) -> None:
     )
     deployment_soak_manifest_ok = _verify_production_evidence_deployment_soak_manifest(
         expected_manifest_path=resolved_bundle_dir / "operator-soak-manifest.json",
+        bundle_dir=resolved_bundle_dir,
         deployment_soak=deployment_soak,
         evidence_manifest=evidence_manifest,
+        findings=findings,
+    )
+    evidence_manifest_ok = _verify_production_evidence_manifest_contract(
+        evidence_manifest=evidence_manifest,
+        deployment_soak=deployment_soak,
         findings=findings,
     )
     bundle_fingerprint = None
@@ -11350,7 +11711,7 @@ def cmd_production_evidence_verify(args: argparse.Namespace) -> None:
         if isinstance(recomputed_release_audit, Mapping)
         else None,
         "checks": {
-            "summary": _production_evidence_summary_ok(summary),
+            "summary": _production_evidence_summary_ok(summary, bundle_dir=resolved_bundle_dir),
             "preflight": preflight_ok,
             "redaction_scan": redaction_scan_ok,
             "bundle_manifest": bundle_manifest is not None and bundle_fingerprint is not None,
@@ -11358,6 +11719,7 @@ def cmd_production_evidence_verify(args: argparse.Namespace) -> None:
             "source_soak_manifest": source_soak_manifest_ok,
             "input_artifact_custody": input_artifact_custody_ok,
             "deployment_soak_manifest": deployment_soak_manifest_ok,
+            "evidence_manifest": evidence_manifest_ok,
             "deployment_soak_stdout": deployment_soak is not None and deployment_soak.get("ok") is True,
             "release_audit_replay": isinstance(recomputed_release_audit, Mapping)
             and recomputed_release_audit.get("ok") is True,

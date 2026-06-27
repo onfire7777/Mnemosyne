@@ -5812,6 +5812,8 @@ def write_release_report(
             {
                 "kind": "mnemosyne.deployment_soak_evidence",
                 "version": 1,
+                "created_at": datetime.now(UTC).isoformat(),
+                "ok": True,
                 "files": {
                     "report": report_path.name,
                     "report_sha256": "sha256:" + sha256(report_path.read_bytes()).hexdigest(),
@@ -5995,6 +5997,7 @@ def write_production_evidence_bundle(tmp_path: Path) -> tuple[Path, str]:
                 "release_audit_ok": True,
                 "release_audit_fingerprint": release_audit["fingerprint"],
                 "release_audit_findings": [],
+                "completed_at": datetime.now(UTC).isoformat(),
             },
             indent=2,
             sort_keys=True,
@@ -6152,6 +6155,7 @@ def test_cli_production_evidence_verify_accepts_captured_bundle(tmp_path: Path) 
         "source_soak_manifest": True,
         "input_artifact_custody": True,
         "deployment_soak_manifest": True,
+        "evidence_manifest": True,
         "deployment_soak_stdout": True,
         "release_audit_replay": True,
     }
@@ -6328,6 +6332,33 @@ def test_cli_production_evidence_verify_rejects_tampered_deployment_soak_manifes
     assert "bundle_fingerprint_mismatch" not in codes
 
 
+def test_cli_production_evidence_verify_rejects_divergent_deployment_stdout(tmp_path: Path) -> None:
+    bundle_dir, _bundle_fingerprint = write_production_evidence_bundle(tmp_path)
+    deployment_soak_path = bundle_dir / "deployment-soak.stdout.json"
+    deployment_soak = json.loads(deployment_soak_path.read_text(encoding="utf-8"))
+    deployment_soak["checks"] = []
+    deployment_soak_path.write_text(
+        json.dumps(deployment_soak, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    rewrite_production_redaction_scan(bundle_dir)
+    rewrite_production_bundle_manifest(bundle_dir)
+
+    result = run_raw_cli(
+        tmp_path / "verify-store.json",
+        "production-evidence-verify",
+        str(bundle_dir),
+    )
+    payload = json.loads(result.stdout)
+    codes = {finding["code"] for finding in payload["findings"]}
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert "deployment_soak_stdout_report_mismatch" in codes
+    assert "bundle_file_sha256_mismatch" not in codes
+    assert "bundle_fingerprint_mismatch" not in codes
+
+
 def test_cli_production_evidence_verify_rejects_tampered_preflight(tmp_path: Path) -> None:
     bundle_dir, _bundle_fingerprint = write_production_evidence_bundle(tmp_path)
     preflight_path = bundle_dir / "preflight.json"
@@ -6391,6 +6422,40 @@ def test_cli_production_evidence_verify_rejects_external_preflight_paths(
     assert "preflight_copied_manifest_invalid" in codes
     assert "preflight_redaction_scan_invalid" in codes
     assert "bundle_file_sha256_mismatch" not in codes
+
+
+def test_cli_production_evidence_verify_rejects_secret_args_in_retained_manifests(
+    tmp_path: Path,
+) -> None:
+    bundle_dir, _bundle_fingerprint = write_production_evidence_bundle(tmp_path)
+    for manifest_name in ("operator-soak-manifest.json", "source-soak-manifest.json"):
+        manifest_path = bundle_dir / manifest_name
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["checks"][0]["args"] = ["--token", "redacted-placeholder"]
+        manifest_path.write_text(
+            json.dumps(manifest, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+    rewrite_production_redaction_scan(bundle_dir)
+    rewrite_production_bundle_manifest(bundle_dir)
+
+    result = run_raw_cli(
+        tmp_path / "verify-store.json",
+        "production-evidence-verify",
+        str(bundle_dir),
+    )
+    payload = json.loads(result.stdout)
+    codes = {finding["code"] for finding in payload["findings"]}
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert payload["checks"]["operator_manifest"] is False
+    assert payload["checks"]["source_soak_manifest"] is False
+    assert "operator_manifest_secret_argument" in codes
+    assert "source_soak_manifest_secret_argument" in codes
+    assert "source_manifest_command_profile_mismatch" not in codes
+    assert "bundle_file_sha256_mismatch" not in codes
+    assert "bundle_fingerprint_mismatch" not in codes
 
 
 def test_cli_production_evidence_verify_rejects_tampered_input_artifact_metadata(
@@ -6633,6 +6698,122 @@ def test_cli_production_evidence_verify_summary_check_requires_full_summary_cont
     assert payload["ok"] is False
     assert payload["checks"]["summary"] is False
     assert "summary_deployment_soak_ok_missing" in codes
+
+
+def test_cli_production_evidence_verify_rejects_skeletal_summary_contract(tmp_path: Path) -> None:
+    bundle_dir, _bundle_fingerprint = write_production_evidence_bundle(tmp_path)
+    summary_path = bundle_dir / "summary.json"
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    summary_path.write_text(
+        json.dumps(
+            {
+                "bundle_fingerprint": summary["bundle_fingerprint"],
+                "redaction_scan_ok": True,
+                "deployment_soak_ok": True,
+                "release_audit_ok": True,
+                "release_audit_fingerprint": summary["release_audit_fingerprint"],
+                "release_audit_findings": [],
+            },
+            indent=2,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    result = run_raw_cli(
+        tmp_path / "verify-store.json",
+        "production-evidence-verify",
+        str(bundle_dir),
+    )
+    payload = json.loads(result.stdout)
+    codes = {finding["code"] for finding in payload["findings"]}
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert payload["checks"]["summary"] is False
+    assert "summary_out_root_invalid" in codes
+    assert "summary_operator_manifest_invalid" in codes
+    assert "summary_completed_at_missing" in codes
+
+
+def test_cli_production_evidence_verify_rejects_skeletal_release_audit(tmp_path: Path) -> None:
+    bundle_dir, _bundle_fingerprint = write_production_evidence_bundle(tmp_path)
+    release_audit_path = bundle_dir / "release-audit.json"
+    release_audit = json.loads(release_audit_path.read_text(encoding="utf-8"))
+    release_audit_path.write_text(
+        json.dumps(
+            {
+                "ok": True,
+                "fingerprint": release_audit["fingerprint"],
+                "findings": [],
+                "requirements": release_audit["requirements"],
+                "validation_scope": release_audit["validation_scope"],
+            },
+            indent=2,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    rewrite_production_redaction_scan(bundle_dir)
+    rewrite_production_bundle_manifest(bundle_dir)
+
+    result = run_raw_cli(
+        tmp_path / "verify-store.json",
+        "production-evidence-verify",
+        str(bundle_dir),
+    )
+    payload = json.loads(result.stdout)
+    codes = {finding["code"] for finding in payload["findings"]}
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert "release_audit_source_missing" in codes
+    assert "release_audit_summary_missing" in codes
+    assert "release_audit_commands_missing" in codes
+    assert "release_audit_provider_missing" in codes
+    assert "release_audit_replay_mismatch" in codes
+    assert "bundle_file_sha256_mismatch" not in codes
+    assert "bundle_fingerprint_mismatch" not in codes
+
+
+def test_cli_production_evidence_verify_rejects_skeletal_evidence_manifest(tmp_path: Path) -> None:
+    bundle_dir, _bundle_fingerprint = write_production_evidence_bundle(tmp_path)
+    evidence_manifest_path = bundle_dir / "evidence" / "manifest.json"
+    evidence_manifest = json.loads(evidence_manifest_path.read_text(encoding="utf-8"))
+    evidence_manifest_path.write_text(
+        json.dumps(
+            {
+                "kind": evidence_manifest["kind"],
+                "source_manifest": evidence_manifest["source_manifest"],
+                "files": evidence_manifest["files"],
+                "checks": evidence_manifest["checks"],
+            },
+            indent=2,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    rewrite_production_redaction_scan(bundle_dir)
+    rewrite_production_bundle_manifest(bundle_dir)
+
+    result = run_raw_cli(
+        tmp_path / "verify-store.json",
+        "production-evidence-verify",
+        str(bundle_dir),
+    )
+    payload = json.loads(result.stdout)
+    codes = {finding["code"] for finding in payload["findings"]}
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert payload["checks"]["evidence_manifest"] is False
+    assert "evidence_manifest_version_invalid" in codes
+    assert "evidence_manifest_not_ok" in codes
+    assert "evidence_manifest_validation_scope_missing" in codes
+    assert "evidence_manifest_redaction_missing" in codes
+    assert "evidence_manifest_summary_missing" in codes
+    assert "bundle_file_sha256_mismatch" not in codes
+    assert "bundle_fingerprint_mismatch" not in codes
 
 
 def test_cli_production_evidence_verify_rejects_unmanifested_artifacts(tmp_path: Path) -> None:
