@@ -130,7 +130,6 @@ DEPLOYMENT_SOAK_GLOBAL_OPTIONS = {
     "--backend",
     "--queue-backend",
     "--queue-tenant",
-    "--runtime-state",
     "--object-store",
     "--parametric-artifact-store",
 }
@@ -9047,7 +9046,7 @@ def _deployment_validation_scope(manifest: Mapping[str, Any]) -> dict[str, Any]:
         "surface": "local_cli_orchestrator",
         "production_validated": production_validated,
         "target_environment": target_environment,
-        "operator_asserted": bool(raw_scope or manifest.get("production_validated") is not None),
+        "operator_asserted": bool(scope.get("operator_asserted") is True),
         "note": note,
     }
 

@@ -129,7 +129,7 @@ them outside the repository with
 ## Deployment-Soak Global Placement Options
 
 These are manifest placement options, not secrets: `--backend`,
-`--queue-backend`, `--queue-tenant`, `--runtime-state`, `--object-store`, and
+`--queue-backend`, `--queue-tenant`, `--object-store`, and
 `--parametric-artifact-store`. Put only non-secret selectors and store names in
 the manifest. Secret-bearing values stay in environment, mounted files, Vault,
 Keycloak, KMS, or command providers.

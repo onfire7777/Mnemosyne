@@ -31,8 +31,14 @@ if [ -z "${PYTHON}" ]; then
 fi
 MN=("${PYTHON}" -m mnemosyne.cli)
 
-# shellcheck source=/dev/null
-source "${VAULT_OUT}/vault.env"
+assignments="$("${PYTHON}" "${INFRA_DIR}/scripts/load-env.py" "${VAULT_OUT}/vault.env" \
+  VAULT_ADDR \
+  VAULT_TOKEN \
+  MNEMOSYNE_VAULT_TRANSIT_KEY \
+  MNEMOSYNE_OBJECT_KEY_COMMAND)"
+while IFS= read -r assignment; do
+  [ -n "${assignment}" ] && export "${assignment?}"
+done <<< "${assignments}"
 export MNEMOSYNE_VAULT_WRAP_DIR="${WORK}/wrapped-keys"
 
 OBJECT_STORE="${WORK}/objects"
@@ -41,9 +47,12 @@ KEY_CMD="${MNEMOSYNE_OBJECT_KEY_COMMAND}"
 echo "==> Sanity: provider responds to a manual get_or_create_key ..."
 SAMPLE="$(printf '{"tenant_id":"tenant-a","cid":"deadbeef"}' \
   | "${PYTHON}" "${KEY_CMD}" get_or_create_key)"
-echo "${SAMPLE}" | jq -e '.key | type == "string"' >/dev/null \
-  && echo "    OK: Vault wrapped a real 32-byte data key." \
-  || { echo "    FAIL: provider did not return a key." >&2; exit 1; }
+if echo "${SAMPLE}" | jq -e '.key | type == "string"' >/dev/null; then
+  echo "    OK: Vault wrapped a real 32-byte data key."
+else
+  echo "    FAIL: provider did not return a key." >&2
+  exit 1
+fi
 # Clean up that probe key so it does not linger.
 printf '{"tenant_id":"tenant-a","cid":"deadbeef"}' | "${PYTHON}" "${KEY_CMD}" shred_key >/dev/null || true
 
@@ -57,13 +66,17 @@ RESULT="$( cd "${REPO_DIR}" && "${MN[@]}" \
     --object-key-timeout 30 \
     provider-check )"
 echo "${RESULT}" | jq '.checks.object_key_manager'
-echo "${RESULT}" | jq -e '
+if echo "${RESULT}" | jq -e '
   .ok == true
   and .checks.object_key_manager.ok == true
   and .checks.object_key_manager.post_shred_verified == true
-' >/dev/null \
-  && echo "    OK: real KMS wrap/unwrap consistent; crypto-shred verified." \
-  || { echo "    FAIL: object-key manager health check failed." >&2; echo "${RESULT}"; exit 1; }
+' >/dev/null; then
+  echo "    OK: real KMS wrap/unwrap consistent; crypto-shred verified."
+else
+  echo "    FAIL: object-key manager health check failed." >&2
+  echo "${RESULT}"
+  exit 1
+fi
 
 echo
 echo "==> End-to-end: ingest an encrypted payload, read it back, then forget ..."
@@ -79,9 +92,11 @@ INGEST="$( cd "${REPO_DIR}" && "${MN[@]}" \
     ingest --tenant tenant-a --user user-a --actor external \
       --source-type file --file "${SECRET_FILE}" --modality binary --trust-tier 3 )"
 echo "${INGEST}" | jq '{ok, evidence_id: (.evidence_id // .id // .evidence.id)}' 2>/dev/null || echo "${INGEST}" | head -c 400
-echo "${INGEST}" | jq -e '.ok != false' >/dev/null \
-  && echo "    OK: payload ingested and encrypted via Vault-wrapped key." \
-  || { echo "    NOTE: ingest returned a non-ok payload; inspect above." ; }
+if echo "${INGEST}" | jq -e '.ok != false' >/dev/null; then
+  echo "    OK: payload ingested and encrypted via Vault-wrapped key."
+else
+  echo "    NOTE: ingest returned a non-ok payload; inspect above."
+fi
 
 echo
 echo "==> Confirming the on-disk object is ciphertext (not plaintext) ..."

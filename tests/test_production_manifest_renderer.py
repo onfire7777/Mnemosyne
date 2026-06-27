@@ -20,7 +20,6 @@ REQUIRED_PRODUCTION_INPUT_ARTIFACTS = [
     "belief-revision-cases.json",
     "calibration-dataset.json",
     "consolidation-ops-bundle.json",
-    "dashboard-package",
     "forgetting-policy-cases.json",
     "hosted-llm-manifest.json",
     "idp-authz-policy-simulation.json",
@@ -31,7 +30,6 @@ REQUIRED_PRODUCTION_INPUT_ARTIFACTS = [
     "parametric-trainer-bundle.json",
     "policy-ops-bundle.json",
     "privacy-ops-bundle.json",
-    "protected-gate-cases.json",
     "provider-manifest.production.json",
     "provenance-ops-bundle.json",
     "provenance-trust-suite.json",
@@ -126,10 +124,6 @@ def _populate_required_input_artifacts(env: dict[str, str], *, suite_payload: st
     evidence_dir = Path(env["MNEMOSYNE_PROD_EVIDENCE_DIR"])
     for relative_path in REQUIRED_PRODUCTION_INPUT_ARTIFACTS:
         path = evidence_dir / relative_path
-        if relative_path == "dashboard-package":
-            path.mkdir(parents=True, exist_ok=True)
-            (path / "manifest.json").write_text("{}\n", encoding="utf-8")
-            continue
         path.parent.mkdir(parents=True, exist_ok=True)
         if relative_path == "provenance-trust-suite.json":
             path.write_text(suite_payload, encoding="utf-8")
@@ -607,6 +601,33 @@ def test_renderer_refuses_repo_local_output() -> None:
     assert "refusing to write production manifest inside the repository" in proc.stderr
 
 
+def test_renderer_rejects_secret_bearing_manifest_args(tmp_path: Path) -> None:
+    output = tmp_path / "secure" / "production-soak-manifest.json"
+    env = _filled_render_env(tmp_path)
+    _populate_required_input_artifacts(env)
+    template = tmp_path / "production-soak-manifest.template.json"
+    payload = json.loads(
+        (REPO / "infra" / "templates" / "production-soak-manifest.template.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    payload["checks"][0]["global_args"] = ["--postgres-dsn", "postgresql://db/prod"]
+    template.write_text(json.dumps(payload), encoding="utf-8")
+
+    proc = subprocess.run(
+        [str(RENDERER), "--output", str(output), "--template", str(template)],
+        cwd=REPO,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert proc.returncode == 78
+    assert not output.exists()
+    assert "secret-bearing option --postgres-dsn" in proc.stderr
+
+
 def test_renderer_refuses_repo_local_production_input_dir(tmp_path: Path) -> None:
     env = _filled_render_env(tmp_path)
     env["MNEMOSYNE_PROD_EVIDENCE_DIR"] = str(REPO / "production-input-artifacts")
@@ -694,3 +715,21 @@ def test_renderer_writes_private_valid_manifest_outside_repo(tmp_path: Path) -> 
     assert {check["command"] for check in manifest["checks"]} == set(
         PRODUCTION_RELEASE_REQUIRED_COMMANDS
     )
+    flattened_tokens = [
+        token
+        for check in manifest["checks"]
+        for field in ("global_args", "args")
+        for token in check.get(field, [])
+    ]
+    assert "--runtime-state" not in flattened_tokens
+    gate_suite = next(
+        check for check in manifest["checks"] if check["command"] == "gate-suite-check"
+    )
+    assert gate_suite["args"] == ["--include-cases", "--min-cases", "30", "--min-protected", "20"]
+    ops_dashboard = next(
+        check for check in manifest["checks"] if check["command"] == "ops-dashboard-check"
+    )
+    assert "--dashboard-url" in ops_dashboard["args"]
+    assert "--dashboard-package-dir" not in ops_dashboard["args"]
+    ops_report = next(check for check in manifest["checks"] if check["command"] == "ops-report")
+    assert ops_report["args"] == ["--tenant", env["MNEMOSYNE_PROD_TENANT"]]

@@ -81,8 +81,7 @@ if [ -z "${SCOPED_TOKEN}" ] || [ "${SCOPED_TOKEN}" = "null" ]; then
 fi
 
 cat > "${OUT_DIR}/vault.env" <<EOF
-# Source this before running the command-backed object-key provider.
-#   source infra/vault/out/vault.env
+# Load with infra/scripts/load-env.py; do not shell-source generated env files.
 export VAULT_ADDR="${VAULT_ADDR_HOST}"
 export VAULT_TOKEN="${SCOPED_TOKEN}"
 export MNEMOSYNE_VAULT_TRANSIT_KEY="${KEY_NAME}"

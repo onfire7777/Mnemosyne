@@ -19,7 +19,6 @@ Options:
   --template PATH       Template path. Defaults to infra/templates/production-soak-manifest.template.json.
   --output PATH         Destination manifest path. Required unless --list-placeholders or --check-environment is used.
   --force              Overwrite OUT if it already exists.
-  --allow-repo-output  Permit writing OUT inside this repository. Default is to refuse.
   --list-placeholders  Print required MNEMOSYNE_PROD_* placeholder names as JSON.
   --check-environment  Validate required MNEMOSYNE_PROD_* keys without writing a manifest.
   -h, --help           Show this help text.
@@ -33,7 +32,6 @@ REPO_DIR="$(cd "${INFRA_DIR}/.." && pwd)"
 TEMPLATE="${REPO_DIR}/infra/templates/production-soak-manifest.template.json"
 OUTPUT=""
 FORCE=0
-ALLOW_REPO_OUTPUT=0
 LIST_PLACEHOLDERS=0
 CHECK_ENVIRONMENT=0
 
@@ -49,10 +47,6 @@ while [ "$#" -gt 0 ]; do
       ;;
     --force)
       FORCE=1
-      shift
-      ;;
-    --allow-repo-output)
-      ALLOW_REPO_OUTPUT=1
       shift
       ;;
     --list-placeholders)
@@ -84,7 +78,7 @@ if [ -z "${PYTHON}" ]; then
   fi
 fi
 
-export TEMPLATE OUTPUT FORCE ALLOW_REPO_OUTPUT LIST_PLACEHOLDERS CHECK_ENVIRONMENT REPO_DIR
+export TEMPLATE OUTPUT FORCE LIST_PLACEHOLDERS CHECK_ENVIRONMENT REPO_DIR
 
 "${PYTHON}" - <<'PY'
 import json
@@ -99,11 +93,14 @@ repo_dir = Path(os.environ["REPO_DIR"]).resolve()
 sys.path.insert(0, str(repo_dir / "src"))
 
 from mnemosyne.cli import PRODUCTION_RELEASE_REQUIRED_COMMANDS  # noqa: E402
+from mnemosyne.evidence_redaction import (  # noqa: E402
+    manifest_argument_secret_errors,
+    redaction_findings,
+)
 
 template_path = Path(os.environ["TEMPLATE"]).expanduser().resolve()
 output_raw = os.environ.get("OUTPUT", "")
 force = os.environ.get("FORCE") == "1"
-allow_repo_output = os.environ.get("ALLOW_REPO_OUTPUT") == "1"
 list_placeholders = os.environ.get("LIST_PLACEHOLDERS") == "1"
 check_environment = os.environ.get("CHECK_ENVIRONMENT") == "1"
 placeholder_re = re.compile(r"MNEMOSYNE_PROD_[A-Z0-9_]+")
@@ -164,10 +161,10 @@ if not check_environment:
     except ValueError:
         inside_repo = False
 
-    if inside_repo and not allow_repo_output:
+    if inside_repo:
         print(
             "ERROR: refusing to write production manifest inside the repository; "
-            "choose an external path or pass --allow-repo-output",
+            "choose an external custody path",
             file=sys.stderr,
         )
         raise SystemExit(73)
@@ -283,6 +280,24 @@ if leftovers or "MNEMOSYNE_PROD_" in rendered_text:
     print("ERROR: unresolved production placeholders remain after rendering:", file=sys.stderr)
     for name in leftovers or ["MNEMOSYNE_PROD_"]:
         print(f"  - {name}", file=sys.stderr)
+    raise SystemExit(78)
+
+manifest_findings = redaction_findings(str(template_path), rendered_text)
+manifest_secret_errors = manifest_argument_secret_errors(rendered_manifest)
+if manifest_findings or manifest_secret_errors:
+    print("ERROR: rendered production manifest contains secret-bearing material:", file=sys.stderr)
+    for finding in manifest_findings:
+        print(
+            f"  - {finding['source']}:{finding['line']} {finding['kind']}",
+            file=sys.stderr,
+        )
+    for error in manifest_secret_errors:
+        print(f"  - {error}", file=sys.stderr)
+    print(
+        "Move credentials to environment variables, mounted files, Vault/KMS, or "
+        "command providers before rendering.",
+        file=sys.stderr,
+    )
     raise SystemExit(78)
 
 scope = rendered_manifest.get("validation_scope", {})

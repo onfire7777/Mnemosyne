@@ -43,9 +43,12 @@ findings: []
 Run from `/Users/admin/Mnemosyne` after `./infra/scripts/setup-all.sh`:
 
 ```bash
-source infra/keycloak/out/oidc.env
-source infra/vault/out/vault.env
-source infra/c2pa/out/provenance.env
+python3 infra/scripts/load-env.py infra/keycloak/out/oidc.env \
+  MNEMOSYNE_IDP_ISSUER MNEMOSYNE_IDP_AUDIENCE MNEMOSYNE_IDP_JWKS_URL
+python3 infra/scripts/load-env.py infra/vault/out/vault.env \
+  VAULT_ADDR VAULT_TOKEN MNEMOSYNE_OBJECT_KEY_COMMAND
+python3 infra/scripts/load-env.py infra/c2pa/out/provenance.env \
+  MNEMOSYNE_C2PA_TOOL MNEMOSYNE_PROVENANCE_TRUST_POLICY C2PA_SIGNED_ASSET
 export MNEMOSYNE_IDP_TOKEN="$(./infra/scripts/keycloak-token.sh agent-a agent-a-password)"
 export MNEMOSYNE_OBJECT_STORE_ENCRYPTION=aesgcm
 

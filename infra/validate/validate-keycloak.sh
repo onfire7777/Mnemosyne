@@ -25,8 +25,24 @@ if [ -z "${PYTHON}" ]; then
 fi
 MN=("${PYTHON}" -m mnemosyne.cli)
 
-# shellcheck source=/dev/null
-source "${KC_OUT}/oidc.env"
+assignments="$("${PYTHON}" "${INFRA_DIR}/scripts/load-env.py" "${KC_OUT}/oidc.env" \
+  MNEMOSYNE_IDP_ISSUER \
+  MNEMOSYNE_IDP_AUDIENCE \
+  MNEMOSYNE_IDP_JWKS_URL \
+  MNEMOSYNE_IDP_ALLOW_INSECURE_JWKS_URL \
+  MNEMOSYNE_IDP_TENANT_CLAIM \
+  MNEMOSYNE_IDP_USER_CLAIM \
+  MNEMOSYNE_IDP_ROLE_CLAIM \
+  MNEMOSYNE_IDP_TRUST_CLAIM \
+  MNEMOSYNE_IDP_SESSION_ID_CLAIM \
+  MNEMOSYNE_IDP_ALGORITHMS \
+  MNEMOSYNE_IDP_TOKEN \
+  KEYCLOAK_TOKEN_URL \
+  KEYCLOAK_CLIENT_ID \
+  KEYCLOAK_CLIENT_SECRET)"
+while IFS= read -r assignment; do
+  [ -n "${assignment}" ] && export "${assignment?}"
+done <<< "${assignments}"
 
 echo "==> Minting a fresh ID token (agent-a) ..."
 FRESH_TOKEN="$("${INFRA_DIR}/scripts/keycloak-token.sh" agent-a agent-a-password)"
@@ -61,14 +77,18 @@ echo "${RESULT}" > "${KC_OUT}/session-exchange.json"
 
 echo
 echo "==> Asserting claim mapping (tenant-a / agent / trust 3) ..."
-echo "${RESULT}" | jq -e '
+if echo "${RESULT}" | jq -e '
   .ok == true
   and .identity.tenant_id == "tenant-a"
   and .identity.role == "agent"
   and .identity.source_trust_tier == 3
   and (.session_token | type == "string")
-' >/dev/null && echo "    OK: real OIDC token exchanged into a Mnemosyne session." \
-  || { echo "    FAIL: claim mapping mismatch." >&2; exit 1; }
+' >/dev/null; then
+  echo "    OK: real OIDC token exchanged into a Mnemosyne session."
+else
+  echo "    FAIL: claim mapping mismatch." >&2
+  exit 1
+fi
 
 echo
 echo "==> Negative test: a token with the wrong audience must be rejected ..."

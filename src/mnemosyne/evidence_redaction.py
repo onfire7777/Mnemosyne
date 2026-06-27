@@ -3,10 +3,47 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import Pattern
+from typing import Mapping, Pattern
+from urllib.parse import urlparse
 
 
 MAX_SCAN_BYTES = 5 * 1024 * 1024
+SECRET_ARGUMENT_OPTIONS = frozenset(
+    {
+        "--api-key",
+        "--auth-header",
+        "--auth-token",
+        "--authorization",
+        "--bearer-token",
+        "--client-secret",
+        "--connection-string",
+        "--database-url",
+        "--dsn",
+        "--idp-token",
+        "--key",
+        "--mcp-session-token",
+        "--password",
+        "--postgres-dsn",
+        "--private-key",
+        "--secret",
+        "--session-secret",
+        "--session-token",
+        "--token",
+        "--vault-token",
+    }
+)
+SECRET_ARGUMENT_MARKERS = (
+    "api-key",
+    "authorization",
+    "bearer-token",
+    "connection-string",
+    "database-url",
+    "password",
+    "private-key",
+    "secret",
+    "session-token",
+    "vault-token",
+)
 
 SECRET_PATTERNS: tuple[tuple[str, Pattern[str]], ...] = (
     (
@@ -33,7 +70,70 @@ SECRET_PATTERNS: tuple[tuple[str, Pattern[str]], ...] = (
         "openai_api_key",
         re.compile(r"\bsk-(?!ant-)(?:proj-)?[A-Za-z0-9_-]{20,}\b"),
     ),
+    (
+        "vault_token",
+        re.compile(r"\bhv[bs]\.[A-Za-z0-9_-]{20,}\b"),
+    ),
+    (
+        "authorization_bearer",
+        re.compile(r"(?i)\bauthorization\b\s*[:=]\s*[\"']?bearer\s+[A-Za-z0-9._~+/=-]{12,}"),
+    ),
+    (
+        "url_userinfo",
+        re.compile(r"\b[A-Za-z][A-Za-z0-9+.-]*://[^\s\"'/?#@]+:[^\s\"'/?#@]+@"),
+    ),
 )
+
+
+def is_secret_argument_option(option_name: str) -> bool:
+    normalized = option_name.strip().lower()
+    if normalized in SECRET_ARGUMENT_OPTIONS:
+        return True
+    if not normalized.startswith("--"):
+        return False
+    if normalized.endswith("-dsn"):
+        return True
+    return any(marker in normalized for marker in SECRET_ARGUMENT_MARKERS)
+
+
+def url_contains_userinfo(value: str) -> bool:
+    parsed = urlparse(value)
+    return bool(parsed.scheme and parsed.netloc and (parsed.username or parsed.password))
+
+
+def manifest_argument_secret_errors(manifest: Mapping[str, object]) -> list[str]:
+    errors: list[str] = []
+    checks = manifest.get("checks")
+    if not isinstance(checks, list):
+        return errors
+    for check_index, check in enumerate(checks, start=1):
+        if not isinstance(check, Mapping):
+            continue
+        for field in ("args", "global_args"):
+            values = check.get(field, [])
+            if not isinstance(values, list):
+                continue
+            for value_index, value in enumerate(values):
+                if not isinstance(value, str):
+                    continue
+                option_name, separator, option_value = value.partition("=")
+                label = f"checks[{check_index}].{field}[{value_index}]"
+                if option_name.startswith("--") and is_secret_argument_option(option_name):
+                    errors.append(
+                        f"{label} contains secret-bearing option {option_name}; "
+                        "use environment, files, or command providers instead"
+                    )
+                if separator and url_contains_userinfo(option_value):
+                    errors.append(
+                        f"{label} contains URL userinfo in option value; "
+                        "move credentials to environment, files, or command providers"
+                    )
+                elif not separator and url_contains_userinfo(value):
+                    errors.append(
+                        f"{label} contains URL userinfo; move credentials to "
+                        "environment, files, or command providers"
+                    )
+    return errors
 
 
 def redaction_findings(source: str, text: str) -> list[dict[str, object]]:

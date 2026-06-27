@@ -5349,6 +5349,7 @@ def test_cli_deployment_soak_preserves_operator_production_scope(tmp_path: Path)
                 "validation_scope": {
                     "production_validated": True,
                     "target_environment": "production",
+                    "operator_asserted": True,
                     "note": "operator verified production endpoints",
                 },
                 "checks": [
@@ -5378,6 +5379,48 @@ def test_cli_deployment_soak_preserves_operator_production_scope(tmp_path: Path)
     assert report["validation_scope"]["target_environment"] == "production"
     assert report["validation_scope"]["operator_asserted"] is True
     assert report["validation_scope"]["note"] == "operator verified production endpoints"
+
+
+def test_cli_deployment_soak_preserves_false_operator_attestation(tmp_path: Path) -> None:
+    manifest_path = tmp_path / "deployment-soak.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "validation_scope": {
+                    "production_validated": True,
+                    "target_environment": "production",
+                    "operator_asserted": False,
+                },
+                "checks": [
+                    {
+                        "name": "local-worker",
+                        "command": "worker-run",
+                        "args": [
+                            "--max-cycles",
+                            "1",
+                            "--idle-exit-after",
+                            "1",
+                            "--poll-interval",
+                            "0",
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = run_cli(
+        tmp_path / "mnemosyne.json",
+        "deployment-soak",
+        "--soak-manifest",
+        str(manifest_path),
+    )
+
+    assert report["ok"] is True
+    assert report["validation_scope"]["production_validated"] is True
+    assert report["validation_scope"]["target_environment"] == "production"
+    assert report["validation_scope"]["operator_asserted"] is False
 
 
 def release_check(command: str, stdout_json: dict | None = None, *, ok: bool = True) -> dict:

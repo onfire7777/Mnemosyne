@@ -26,8 +26,16 @@ if [ -z "${PYTHON}" ]; then
 fi
 MN=("${PYTHON}" -m mnemosyne.cli)
 
-# shellcheck source=/dev/null
-source "${C2PA_OUT}/provenance.env"
+assignments="$("${PYTHON}" "${INFRA_DIR}/scripts/load-env.py" "${C2PA_OUT}/provenance.env" \
+  MNEMOSYNE_C2PA_TOOL \
+  MNEMOSYNE_PROVENANCE_TRUST_POLICY \
+  MNEMOSYNE_TRUSTED_PROVENANCE_ROOTS \
+  C2PA_TRUST_ROOT \
+  C2PATOOL_IMAGE \
+  C2PA_SIGNED_ASSET)"
+while IFS= read -r assignment; do
+  [ -n "${assignment}" ] && export "${assignment?}"
+done <<< "${assignments}"
 
 SIGNED="${C2PA_OUT}/asset.signed.jpg"
 [ -f "${SIGNED}" ] || { echo "ERROR: ${SIGNED} missing; run setup-c2pa.sh first." >&2; exit 1; }
@@ -57,14 +65,18 @@ echo "==> Asserting the manifest verified, was TRUSTED, and NOT quarantined ..."
 # defaults missing → true, then OR-merged in for_context) force issuer trust on.
 # If `trusted` is false the asset is quarantined; assert it positively here so a
 # regression of the trust path is caught, not silently downgraded.
-echo "${INGEST}" | jq -e '
+if echo "${INGEST}" | jq -e '
   .quarantined == false
   and .provenance.valid == true
   and .provenance.trusted == true
   and .provenance.quarantine == false
-' >/dev/null \
-  && echo "    OK: real C2PA manifest verified, trusted, and bound to the asset bytes." \
-  || { echo "    FAIL: signed asset did not verify as valid+trusted+not-quarantined." >&2; echo "${INGEST}" | jq '.provenance // .'; exit 1; }
+' >/dev/null; then
+  echo "    OK: real C2PA manifest verified, trusted, and bound to the asset bytes."
+else
+  echo "    FAIL: signed asset did not verify as valid+trusted+not-quarantined." >&2
+  echo "${INGEST}" | jq '.provenance // .'
+  exit 1
+fi
 
 echo "==> Provenance trust decision:"
 echo "${INGEST}" | jq '{quarantined, valid: .provenance.valid, trusted: .provenance.trusted, reason: .provenance.reason}'

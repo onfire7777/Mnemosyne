@@ -91,8 +91,8 @@ open ./infra/PRODUCTION-EVIDENCE.md
 ./infra/scripts/down.sh
 ```
 
-`capture-local-evidence.sh` writes to a timestamped
-`/tmp/mnemosyne-tierb-local-evidence-*` directory, runs
+`capture-local-evidence.sh` writes to a new, non-symlinked, timestamped
+`/tmp/mnemosyne-tierb-local-evidence-*` directory outside the repository, runs
 `deployment-soak --evidence-dir`, and then runs scoped
 `release-audit --allow-provider-local` for Keycloak, Vault/KMS provider,
 retrieval-provider metadata reporting, and C2PA trust verification. It does not
@@ -191,8 +191,12 @@ Ports are offset from defaults to avoid clashes:
 It writes `infra/keycloak/out/oidc.env`:
 
 ```bash
-source infra/keycloak/out/oidc.env     # MNEMOSYNE_IDP_ISSUER / AUDIENCE / JWKS_URL / TOKEN ...
+python3 infra/scripts/load-env.py infra/keycloak/out/oidc.env \
+  MNEMOSYNE_IDP_ISSUER MNEMOSYNE_IDP_AUDIENCE MNEMOSYNE_IDP_JWKS_URL
 ```
+
+Local capture and validation scripts load this file through the strict
+allowlisted parser above; do not shell-source generated provider env files.
 
 ### Use it with Mnemosyne
 
@@ -238,8 +242,12 @@ policy `mnemosyne-transit`, and mints a scoped token. It writes
 `infra/vault/out/vault.env`:
 
 ```bash
-source infra/vault/out/vault.env       # VAULT_ADDR / VAULT_TOKEN / MNEMOSYNE_OBJECT_KEY_COMMAND
+python3 infra/scripts/load-env.py infra/vault/out/vault.env \
+  VAULT_ADDR VAULT_TOKEN MNEMOSYNE_OBJECT_KEY_COMMAND
 ```
+
+The parser rejects symlinks, group/world-accessible files, unexpected keys, and
+shell-executable dotenv syntax before exporting values.
 
 ### The provider (`vault-object-key-provider.py`)
 
@@ -297,7 +305,8 @@ same as crypto-shred.
 4. writes the trust policy + `infra/c2pa/out/provenance.env`:
 
 ```bash
-source infra/c2pa/out/provenance.env   # MNEMOSYNE_C2PA_TOOL / TRUST_POLICY / TRUSTED_ROOTS / C2PA_TRUST_ROOT
+python3 infra/scripts/load-env.py infra/c2pa/out/provenance.env \
+  MNEMOSYNE_C2PA_TOOL MNEMOSYNE_PROVENANCE_TRUST_POLICY C2PA_SIGNED_ASSET
 ```
 
 ### How the wrapper satisfies the contract
@@ -394,7 +403,8 @@ Docker:
   it manually before health.
 - **`session exchange denied: ... audience is not allowed`**: the token's `aud`
   must equal `--idp-audience`. The realm's audience mapper sets `aud=mnemosyne`.
-- **Vault `permission denied`**: re-source `vault/out/vault.env`; the scoped
-  token has a 24h TTL — re-run `setup-vault.sh` to mint a fresh one.
+- **Vault `permission denied`**: reload `vault/out/vault.env` through
+  `infra/scripts/load-env.py`; the scoped token has a 24h TTL, so re-run
+  `setup-vault.sh` to mint a fresh one.
 - **c2patool image build fails offline**: the Dockerfile compiles c2patool from
   crates.io, which needs network on first build. Cached afterwards.
