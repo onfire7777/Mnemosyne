@@ -47,7 +47,13 @@ from mnemosyne.retrieval import (
     validate_adapter_hit_scope,
     workspace_broadcast_from_context,
 )
-from mnemosyne.security import TrustTier, more_trusted, sanitize_retrieved_text, trust_weight
+from mnemosyne.security import (
+    TrustTier,
+    assemble_system_prompt as assemble_guarded_system_prompt,
+    more_trusted,
+    sanitize_retrieved_text,
+    trust_weight,
+)
 from mnemosyne.text import approx_tokens, cosine, lexical_score, tokenize
 
 
@@ -658,26 +664,7 @@ class LocalMemoryEngine:
         enforcement point: ingestion already tags untrusted content data-only, but
         nothing previously refused routing a flagged hit into a system-prompt sink.
         """
-        instruction_sinks = {"system_prompt", "system", "developer", "instruction", "tool"}
-        privileged = str(sink).strip().lower() in instruction_sinks
-        admissible: list[str] = []
-        for hit in hits or []:
-            trust_tier = int(getattr(hit, "trust_tier", 0))
-            metadata = getattr(hit, "metadata", None)
-            metadata = metadata if isinstance(metadata, dict) else {}
-            tags = set(metadata.get("capability_tags", []) or [])
-            flagged = bool(metadata.get("sanitize_as_data")) or "sanitize-as-data" in tags
-            untrusted = trust_tier >= int(TrustTier.UNTRUSTED_EXTERNAL) or flagged
-            if privileged and untrusted:
-                raise PermissionError(
-                    "§31 rail untrusted_to_system_prompt: refusing to route untrusted hit "
-                    f"{getattr(hit, 'id', '?')!r} into the {sink!r} sink"
-                )
-            if not untrusted:
-                text = getattr(hit, "text", "")
-                if text:
-                    admissible.append(str(text))
-        return "\n".join(admissible)
+        return assemble_guarded_system_prompt(hits or [], sink=str(sink).strip().lower())
 
     def _rebalance_contested(self, items: list[Assertion]) -> None:
         total = sum(max(item.confidence, 0.01) for item in items)

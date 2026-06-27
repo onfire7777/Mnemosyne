@@ -204,8 +204,11 @@ class PromotionGate:
                 failed.append(rail_violation)
                 protected_regressions.append(rail_violation)
                 promoted = False
-        if promoted and self.require_ignition and not self.ignition_status().ready:
-            promoted = False
+        if promoted and self.require_ignition:
+            ignition = self.ignition_status()
+            if not ignition.ready:
+                failed.append("ignition_not_ready: " + "; ".join(ignition.blocking_reasons))
+                promoted = False
         rollback_branch = None
         if promoted:
             self._merge(branch, tenant_id)

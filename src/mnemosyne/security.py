@@ -1026,7 +1026,9 @@ class QuarantineBoundary:
 
 #: Sinks whose content is treated as *instruction* and must never receive
 #: untrusted/retrieved data (blueprint §27/I11 RAIL-6, the MemoryTrap fix).
-INSTRUCTION_SINKS: frozenset[str] = frozenset({"system_prompt", "policy", "safety_rail"})
+INSTRUCTION_SINKS: frozenset[str] = frozenset(
+    {"system_prompt", "system", "developer", "instruction", "tool", "policy", "safety_rail"}
+)
 
 
 def is_safe_for_system_prompt(trust_tier: int, capability_tags: Sequence[str] | None = None) -> bool:
@@ -1069,11 +1071,20 @@ def assemble_system_prompt(
     parts: list[str] = []
     if base_instructions:
         parts.append(str(base_instructions))
-    guarded = sink in INSTRUCTION_SINKS
+    guarded = str(sink).strip().lower() in INSTRUCTION_SINKS
     for hit in hits:  # type: ignore[attr-defined]
         trust_tier = int(getattr(hit, "trust_tier", int(TrustTier.UNTRUSTED_EXTERNAL)))
         metadata = getattr(hit, "metadata", None)
-        tags = metadata.get("capability_tags") if isinstance(metadata, Mapping) else None
+        tags: list[str] = []
+        if isinstance(metadata, Mapping):
+            top_tags = metadata.get("capability_tags")
+            if isinstance(top_tags, Sequence) and not isinstance(top_tags, (str, bytes)):
+                tags.extend(str(tag) for tag in top_tags)
+            retrieved_text = metadata.get("retrieved_text")
+            if isinstance(retrieved_text, Mapping):
+                retrieved_tags = retrieved_text.get("capability_tags")
+                if isinstance(retrieved_tags, Sequence) and not isinstance(retrieved_tags, (str, bytes)):
+                    tags.extend(str(tag) for tag in retrieved_tags)
         if guarded and not is_safe_for_system_prompt(trust_tier, tags):
             raise SystemPromptSinkError(
                 "untrusted or sanitized retrieved data may not enter the "

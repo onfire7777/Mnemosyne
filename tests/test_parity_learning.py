@@ -463,6 +463,7 @@ def test_counterfactual_evaluate_requires_gate_and_replay() -> None:
                 protected=True,
             )
         ],
+        require_ignition=False,
     )
     variant = PolicyVariant(
         "safe",
@@ -536,6 +537,7 @@ def test_evaluate_variant_consumes_cf_proxy_by_default_and_fails_closed() -> Non
                 protected=True,
             )
         ],
+        require_ignition=False,
     )
     variant = PolicyVariant(
         "safe", {"base_level": 0.35, "semantic": 0.35, "importance": 0.20, "recency": 0.10}, 0.45, 8
@@ -563,6 +565,7 @@ def test_evaluate_variant_can_promote_with_explicit_authorized_cf_hook() -> None
                 protected=True,
             )
         ],
+        require_ignition=False,
     )
     variant = PolicyVariant(
         "safe", {"base_level": 0.35, "semantic": 0.35, "importance": 0.20, "recency": 0.10}, 0.45, 8
@@ -579,6 +582,39 @@ def test_evaluate_variant_can_promote_with_explicit_authorized_cf_hook() -> None
     assert result.counterfactual is not None
     assert result.counterfactual["passed"] is True
     assert result.promoted is True
+
+
+def test_evaluate_variant_requires_ignition_by_default_with_authorized_cf_hook() -> None:
+    engine = _replay_engine()
+    optimizer = ShadowPolicyOptimizer(
+        engine,
+        [
+            RegressionCase(
+                id="case-authorized-cf-no-ignition",
+                signature="policy retrieval activation confidence",
+                query="immutable rails",
+                expected_substring="immutable rails",
+                protected=True,
+            )
+        ],
+    )
+    variant = PolicyVariant(
+        "safe", {"base_level": 0.35, "semantic": 0.35, "importance": 0.20, "recency": 0.10}, 0.45, 8
+    )
+    result = optimizer.evaluate_variant(
+        TENANT,
+        variant,
+        counterfactual_hook=lambda *_args: CounterfactualVerdict(
+            passed=True,
+            predicted_lift=0.0,
+            reason="authorized fixture",
+        ),
+    )
+
+    assert result.counterfactual is not None
+    assert result.counterfactual["passed"] is True
+    assert result.promoted is False
+    assert any("ignition_not_ready" in item for item in result.failed_cases)
 
 
 def test_oq2_gap_threshold_is_the_single_source_of_truth() -> None:

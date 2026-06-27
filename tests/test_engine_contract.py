@@ -897,7 +897,9 @@ def test_promotion_gate_requires_ignition_before_merge_when_enabled() -> None:
     shadow_status = shadow_gate.ignition_status()
     assert shadow_status.ready is False
     assert shadow_status.n_active == 0
-    assert shadow_gate.evaluate(TENANT, candidate("shadow-branch"), apply).promoted is False
+    shadow_result = shadow_gate.evaluate(TENANT, candidate("shadow-branch"), apply)
+    assert shadow_result.promoted is False
+    assert any("ignition_not_ready" in item for item in shadow_result.failed_cases)
 
     active_suite = [
         case(i, origin="curated", protected=(i == 0)) for i in range(25)

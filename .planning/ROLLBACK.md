@@ -25,6 +25,10 @@ good release artifact.
    production bundle there.
 8. Require `release-audit --evidence-manifest "$OUT_ROOT/evidence/manifest.json" --require-production-validated --require-provider-forbid-local` to pass before
    declaring the rollback accepted.
+9. Retain `summary.json`, `preflight.json`, `redaction-scan.json`,
+   `bundle-manifest.json`, `source-soak-manifest.json`,
+   `operator-soak-manifest.json`, and `input-artifacts/` so
+   `production-evidence-verify` can recheck rollback custody offline.
 
 ## Canary-Abort Procedure
 

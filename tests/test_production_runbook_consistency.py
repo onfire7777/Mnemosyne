@@ -42,7 +42,12 @@ def test_every_row_runbook_points_to_universal_preflight_capture_flow() -> None:
             in text
         ), path
         assert "reviewers must run" in text, path
-        assert "retained `source-soak-manifest.json` custody" in text, path
+        assert "retained `preflight.json`" in text, path
+        assert "`redaction-scan.json`" in text, path
+        assert "`bundle-manifest.json`" in text, path
+        assert "`source-soak-manifest.json`" in text, path
+        assert "`operator-soak-manifest.json`" in text, path
+        assert "`input-artifacts/` custody" in text, path
         assert "source/operator command-profile agreement" in text, path
         assert "offline custody verification must pass before this row can flip Done" in text, path
         assert "`release_audit_ok=true`" in text, path
