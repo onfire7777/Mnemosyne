@@ -29,6 +29,7 @@ from eval.g0.dreamer import run_dreamer_eval
 from eval.g0.projection_reality import run_projection_reality_eval
 from eval.g0.resource_usage import run_resource_usage_eval
 from eval.g0.shadow_workspace import run_shadow_workspace_eval
+from eval.g0.standing_calibration import run_standing_calibration_eval
 from eval.g0.standing_parity import run_standing_parity_eval
 
 G0_METRIC_SPECS: tuple[dict[str, Any], ...] = (
@@ -130,6 +131,51 @@ G0_METRIC_SPECS: tuple[dict[str, Any], ...] = (
         "target": 0.0,
         "target_op": "<=",
         "blueprint_metric": "G5 Standing byte-stable parity",
+    },
+    {
+        "id": "standing_calibration_error",
+        "label": "Standing calibration error",
+        "class": "target",
+        "direction": "decrease",
+        "target": 0.05,
+        "target_op": "<=",
+        "blueprint_metric": "G5 Standing continuous calibration",
+    },
+    {
+        "id": "standing_conformal_coverage",
+        "label": "Standing conformal coverage",
+        "class": "guardrail",
+        "direction": "increase",
+        "target": 0.95,
+        "target_op": ">=",
+        "blueprint_metric": "G5 Standing conformal coverage",
+    },
+    {
+        "id": "standing_salience_invariance_contract",
+        "label": "Standing salience-invariance contract",
+        "class": "guardrail",
+        "direction": "increase",
+        "target": 1.0,
+        "target_op": ">=",
+        "blueprint_metric": "G5 Standing H2 salience exclusion",
+    },
+    {
+        "id": "standing_independent_corroboration_contract",
+        "label": "Standing independent-corroboration contract",
+        "class": "guardrail",
+        "direction": "increase",
+        "target": 1.0,
+        "target_op": ">=",
+        "blueprint_metric": "G5 Standing H1 independent corroboration",
+    },
+    {
+        "id": "standing_evidence_dominance_gap",
+        "label": "Standing evidence-dominance gap",
+        "class": "guardrail",
+        "direction": "increase",
+        "target": 0.02,
+        "target_op": ">=",
+        "blueprint_metric": "G5 Standing H3 evidence-dominance gap",
     },
     {
         "id": "poison_block_rate",
@@ -340,6 +386,13 @@ def build_report(
         "standing_parity_eval",
         "computed:eval.g0.standing_parity",
         standing_parity_report,
+    )
+    standing_calibration_report = run_standing_calibration_eval(repo_root=repo_root)
+    sources["standing_calibration_eval"] = _computed_source(
+        repo_root,
+        "standing_calibration_eval",
+        "computed:eval.g0.standing_calibration",
+        standing_calibration_report,
     )
     deep_latency_report = run_deep_latency_eval()
     sources["deep_latency_eval"] = _computed_source(
@@ -580,6 +633,11 @@ def _build_metric(spec: dict[str, Any], sources: dict[str, Source]) -> dict[str,
         "confabulation_rate": _metric_confabulation_rate,
         "projection_reality_abstention_recall": _metric_projection_reality_abstention_recall,
         "standing_decision_divergence": _metric_standing_decision_divergence,
+        "standing_calibration_error": _metric_standing_calibration,
+        "standing_conformal_coverage": _metric_standing_calibration,
+        "standing_salience_invariance_contract": _metric_standing_calibration,
+        "standing_independent_corroboration_contract": _metric_standing_calibration,
+        "standing_evidence_dominance_gap": _metric_standing_calibration,
         "poison_block_rate": _metric_poison_block_rate,
         "fast_path_p95_ms": _metric_fast_path_p95,
         "deep_path_p95_ms": _metric_deep_path_p95,
@@ -753,6 +811,25 @@ def _metric_standing_decision_divergence(
             "Measured by the G0 Standing parity fixture as the divergence rate "
             "between existing boolean reality/shadow decisions and the derived "
             "Standing authority mirror. P1 requires exactly 0.0."
+        ),
+    )
+
+
+def _metric_standing_calibration(
+    spec: dict[str, Any],
+    sources: dict[str, Source],
+) -> dict[str, Any]:
+    metric_id = spec["id"]
+    value = _source_data(sources, "standing_calibration_eval", metric_id)
+    return _measured(
+        spec,
+        value,
+        "standing_calibration_eval",
+        f"/{metric_id}",
+        note=(
+            "Measured by the G0 Standing continuous fixture. This is a "
+            "deterministic local probe of H1/H2/H3/H7 contracts and not "
+            "production operator calibration evidence."
         ),
     )
 

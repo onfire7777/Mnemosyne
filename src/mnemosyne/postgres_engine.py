@@ -46,7 +46,7 @@ from mnemosyne.retrieval import (
     validate_adapter_hit_scope,
     workspace_broadcast_from_context,
 )
-from mnemosyne.security import TrustTier, sanitize_retrieved_text, trust_weight
+from mnemosyne.security import TrustTier, is_write_tainted, sanitize_retrieved_text, trust_weight
 from mnemosyne.standing import standing, standing_abstention_report
 from mnemosyne.text import approx_tokens, cosine, hashing_embedding, lexical_score, tokenize
 
@@ -379,6 +379,8 @@ class PostgresEngine:
         incoming: Assertion,
         *,
         requested_status: str,
+        cur: Any | None = None,
+        db_tenant_id: str | None = None,
     ) -> None:
         if not bool(getattr(self.policy, "schema_fast_path_enabled", True)):
             return
@@ -397,11 +399,31 @@ class PostgresEngine:
         if not congruent:
             return
         minimum = max(1, int(getattr(self.policy, "schema_fast_path_min_corroboration", 2)))
-        corroboration = len(set(incoming.source_evidence_cids))
+        if cur is not None and db_tenant_id is not None:
+            corroboration_report = self._independent_corroboration_report(
+                cur,
+                tenant_id=incoming.tenant_id,
+                branch=incoming.branch,
+                db_tenant_id=db_tenant_id,
+                source_evidence_cids=incoming.source_evidence_cids,
+            )
+        else:
+            raw_count = len({cid for cid in incoming.source_evidence_cids if cid})
+            corroboration_report = {
+                "independent_corroboration_count": raw_count,
+                "independent_corroboration_weight": min(raw_count, 5) / 5.0,
+                "rejected_corroboration_count": 0,
+                "rejected_corroborators": [],
+            }
+        corroboration = int(corroboration_report["independent_corroboration_count"])
         schema_fast_path.update(
             {
                 "schema_congruent": True,
                 "corroboration_count": corroboration,
+                "raw_source_count": len({cid for cid in incoming.source_evidence_cids if cid}),
+                "independent_corroboration_weight": corroboration_report["independent_corroboration_weight"],
+                "rejected_corroboration_count": corroboration_report["rejected_corroboration_count"],
+                "rejected_corroborators": corroboration_report["rejected_corroborators"],
                 "min_corroboration": minimum,
             }
         )
@@ -509,7 +531,6 @@ class PostgresEngine:
         incoming.branch = branch
         requested_status = incoming.status
         incoming.status = "active" if incoming.status == "candidate" else incoming.status
-        self._apply_schema_fast_path_projection_status(incoming, requested_status=requested_status)
         incoming.transaction_time = utc_now()
         db_tenant_id = _stable_uuid("tenant", incoming.tenant_id)
         db_user_id = _stable_uuid("user", incoming.user_id) if incoming.user_id else None
@@ -517,6 +538,13 @@ class PostgresEngine:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
                 self._ensure_entity_registry_schema(cur)
                 self._set_tenant(cur, db_tenant_id)
+                self._apply_projection_reality_monitoring(cur, incoming, db_tenant_id)
+                self._apply_schema_fast_path_projection_status(
+                    incoming,
+                    requested_status=requested_status,
+                    cur=cur,
+                    db_tenant_id=db_tenant_id,
+                )
                 cur.execute(
                     """
                     SELECT * FROM assertions
@@ -528,7 +556,6 @@ class PostgresEngine:
                     (db_tenant_id, branch, incoming.subject, incoming.predicate, self._jsonb(incoming.scope)),
                 )
                 peers = list(cur.fetchall())
-                self._apply_projection_reality_monitoring(cur, incoming, db_tenant_id)
                 same = [row for row in peers if row["object"] == incoming.object]
                 if same:
                     winner = same[0]
@@ -1619,7 +1646,7 @@ class PostgresEngine:
         reranked = self.adapters.reranker.rerank(query, fused, k=max(k * 2, k))
         reranked, schema_fast_path = schema_fast_path_rerank(query, reranked, self.policy)
         diversified = self._mmr(query, reranked, k=max(k, 1))
-        activated = apply_activation_scores(diversified, self.policy)
+        activated = self._apply_standing_scores(apply_activation_scores(diversified, self.policy))
         ordered = self._u_curve_order(activated)
         ordered, schema_fast_path_final = schema_fast_path_rerank(query, ordered, self.policy)
         schema_fast_path = self._merge_schema_fast_path_reports(schema_fast_path, schema_fast_path_final)
@@ -1669,7 +1696,10 @@ class PostgresEngine:
         if gist_only:
             note = "Only gist-tier memory support was retrieved; inspect source evidence before answering."
         elif ungrounded_reality_only:
-            note = "Retrieved support is self-generated or externally suggested only; abstaining until grounded evidence is available."
+            note = (
+                "Retrieved support has low groundedness or insufficient independent "
+                "external support; abstaining until grounded evidence is available."
+            )
         elif insufficient_support:
             note = "Retrieved evidence did not cover enough query terms; abstaining until stronger support is available."
         elif abstained:
@@ -2080,6 +2110,7 @@ class PostgresEngine:
                 "source_evidence_cids": list(source_cids),
                 "source_evidence_status": security["source_evidence_status"],
                 "source_evidence_security": security["source_evidence_security"],
+                "independent_corroboration": security["independent_corroboration"],
                 "reality_class": security["reality_class"],
             }
             filtered.append(hit)
@@ -2116,11 +2147,16 @@ class PostgresEngine:
             return None
 
         reality_classes = [self._classify_evidence_row_reality(row, metadata) for _, row, metadata in source_rows]
+        corroboration = self._independent_corroboration_report_from_rows(
+            [row for _, row, _ in source_rows],
+            missing_cids=[],
+        )
         return {
             "trust_tier": trust_tier,
             "sensitivity": sensitivity,
             "reality_class": self._aggregate_reality_classes(reality_classes),
             "source_evidence_status": "source_evidence_visible",
+            "independent_corroboration": corroboration,
             "source_evidence_security": [
                 {
                     "cid": cid,
@@ -2131,6 +2167,228 @@ class PostgresEngine:
                 for cid, row, metadata in source_rows
             ],
         }
+
+    def _standing_signals_for_hit(self, hit: Hit, reality_class: str) -> dict[str, Any]:
+        activation = hit.metadata.get("activation") if isinstance(hit.metadata, dict) else {}
+        lifecycle = hit.metadata.get("lifecycle") if isinstance(hit.metadata, dict) else {}
+        lifecycle = lifecycle if isinstance(lifecycle, dict) else {}
+        source_cids = self._hit_source_evidence_cids(hit)
+        if hit.kind == "evidence" and hit.id:
+            source_cids = sorted(set(source_cids + [hit.id]))
+        corroboration = hit.metadata.get("independent_corroboration") if isinstance(hit.metadata, dict) else None
+        if not isinstance(corroboration, dict):
+            try:
+                with self.connect() as conn:
+                    with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                        db_tenant_id = _stable_uuid("tenant", hit.tenant_id)
+                        self._set_tenant(cur, db_tenant_id)
+                        corroboration = self._independent_corroboration_report(
+                            cur,
+                            tenant_id=hit.tenant_id,
+                            branch=hit.branch,
+                            db_tenant_id=db_tenant_id,
+                            source_evidence_cids=source_cids,
+                        )
+            except Exception:
+                corroboration = self._fallback_independent_corroboration_report(
+                    hit,
+                    reality_class=reality_class,
+                    source_evidence_cids=source_cids,
+                )
+        return {
+            "reality_class": reality_class,
+            "trust_tier": hit.trust_tier,
+            "calibrated_confidence": hit.metadata.get("confidence", 0.0),
+            "corroboration_count": len(source_cids),
+            "independent_corroboration_count": corroboration["independent_corroboration_count"],
+            "independent_corroboration_weight": corroboration["independent_corroboration_weight"],
+            "self_generated_corroboration_count": corroboration["self_generated_corroboration_count"],
+            "rejected_corroboration_count": corroboration["rejected_corroboration_count"],
+            "contradiction_pressure": 1.0 if hit.metadata.get("status") == "contested" else 0.0,
+            "groundedness_decay": lifecycle.get("decay", lifecycle.get("groundedness_decay", 0.0)),
+            "activation": activation.get("score") if isinstance(activation, dict) else 0.0,
+            "lifecycle_salience": lifecycle.get("salience", 0.0),
+        }
+
+    @staticmethod
+    def _fallback_independent_corroboration_report(
+        hit: Hit,
+        *,
+        reality_class: str,
+        source_evidence_cids: list[str],
+    ) -> dict[str, Any]:
+        source_cids = sorted({str(item) for item in source_evidence_cids if item})
+        if reality_class == "grounded":
+            weight = trust_weight(int(hit.trust_tier))
+            accepted = [
+                {
+                    "cid": cid,
+                    "root": cid,
+                    "trust_tier": int(hit.trust_tier),
+                    "weight": round(weight, 6),
+                    "source": "metadata_fallback",
+                }
+                for cid in source_cids
+            ]
+            return {
+                "independent_corroboration_count": len(accepted),
+                "independent_corroboration_weight": round(min(weight * len(accepted), 5.0) / 5.0, 6),
+                "self_generated_corroboration_count": 0,
+                "rejected_corroboration_count": 0,
+                "accepted_corroborators": accepted,
+                "rejected_corroborators": [],
+            }
+        rejected = [
+            {"cid": cid, "reason": f"not_grounded:{reality_class}", "reality_class": reality_class}
+            for cid in source_cids
+        ]
+        return {
+            "independent_corroboration_count": 0,
+            "independent_corroboration_weight": 0.0,
+            "self_generated_corroboration_count": len(source_cids) if reality_class in {"self_generated", "simulated"} else 0,
+            "rejected_corroboration_count": len(rejected),
+            "accepted_corroborators": [],
+            "rejected_corroborators": rejected,
+        }
+
+    def _independent_corroboration_report(
+        self,
+        cur: Any,
+        *,
+        tenant_id: str,
+        branch: str,
+        db_tenant_id: str,
+        source_evidence_cids: list[str],
+    ) -> dict[str, Any]:
+        _ = tenant_id
+        source_cids = sorted({str(item) for item in source_evidence_cids if item})
+        if source_cids:
+            cur.execute(
+                """
+                SELECT cid, actor, source_type, source_identity, content_pointer,
+                  metadata, trust_tier, erased, capability_tags
+                FROM evidence
+                WHERE tenant_id = %s AND branch = %s AND cid = ANY(%s)
+                """,
+                (db_tenant_id, branch, _cid_list_to_bytes(source_cids)),
+            )
+            rows = list(cur.fetchall())
+        else:
+            rows = []
+        found = {_bytes_to_cid(row["cid"]) for row in rows}
+        missing = [cid for cid in source_cids if cid not in found]
+        return self._independent_corroboration_report_from_rows(rows, missing_cids=missing)
+
+    def _independent_corroboration_report_from_rows(
+        self,
+        rows: list[dict[str, Any]],
+        *,
+        missing_cids: list[str],
+    ) -> dict[str, Any]:
+        roots: set[str] = set()
+        accepted: list[dict[str, Any]] = []
+        rejected: list[dict[str, Any]] = []
+        self_generated_count = 0
+        trust_sum = 0.0
+        for row in rows:
+            cid = _bytes_to_cid(row["cid"]) if row.get("cid") is not None else ""
+            metadata = dict(row.get("metadata") or {})
+            reason = None
+            if bool(row.get("erased")):
+                reason = "erased"
+            elif metadata.get("quarantine_reason"):
+                reason = "quarantined"
+            elif is_retired_summary_metadata(metadata):
+                reason = "retired"
+            elif is_write_tainted(list(row.get("capability_tags") or [])):
+                reason = "sanitized_data_only"
+            reality_class = self._classify_evidence_row_reality(row, metadata)
+            if reason is None and reality_class != "grounded":
+                reason = f"not_grounded:{reality_class}"
+                if reality_class in {"self_generated", "simulated"}:
+                    self_generated_count += 1
+            if reason is None and self._has_self_generated_ancestor(metadata):
+                reason = "shares_self_generated_ancestor"
+            root = self._independent_source_key(row, cid)
+            if reason is None and root in roots:
+                reason = "duplicate_source_root"
+            if reason is not None:
+                rejected.append({"cid": cid, "reason": reason, "reality_class": reality_class})
+                continue
+            roots.add(root)
+            trust_tier = int(row.get("trust_tier") or 0)
+            weight = trust_weight(trust_tier)
+            trust_sum += weight
+            accepted.append(
+                {
+                    "cid": cid,
+                    "root": root,
+                    "trust_tier": trust_tier,
+                    "weight": round(weight, 6),
+                }
+            )
+        for cid in missing_cids:
+            rejected.append({"cid": cid, "reason": "missing", "reality_class": "unknown"})
+        return {
+            "independent_corroboration_count": len(accepted),
+            "independent_corroboration_weight": round(min(trust_sum, 5.0) / 5.0, 6),
+            "self_generated_corroboration_count": self_generated_count,
+            "rejected_corroboration_count": len(rejected),
+            "accepted_corroborators": accepted,
+            "rejected_corroborators": rejected,
+        }
+
+    @staticmethod
+    def _has_self_generated_ancestor(metadata: dict[str, Any]) -> bool:
+        keys = (
+            "self_generated_ancestor_cids",
+            "self_generated_ancestors",
+            "derived_from_self_cids",
+            "source_self_cids",
+        )
+        for key in keys:
+            value = metadata.get(key)
+            if isinstance(value, list | tuple | set) and any(str(item) for item in value):
+                return True
+            if isinstance(value, str) and value.strip():
+                return True
+        provenance = metadata.get("provenance")
+        if isinstance(provenance, dict):
+            return bool(provenance.get("self_generated") or provenance.get("self_generated_ancestor"))
+        return False
+
+    @staticmethod
+    def _independent_source_key(row: dict[str, Any], cid: str) -> str:
+        identity = row.get("source_identity") or row.get("content_pointer") or cid
+        return f"{row.get('source_type') or 'evidence'}:{identity}"
+
+    def _apply_standing_scores(self, hits: list[Hit]) -> list[Hit]:
+        weighted: list[Hit] = []
+        for hit in hits:
+            reality_class = self._normalise_reality_class(hit.metadata.get("reality_class")) or "unknown"
+            score = standing(self._standing_signals_for_hit(hit, reality_class))
+            multiplier = 0.75 + 0.20 * score.groundedness + 0.05 * score.salience
+            metadata = {
+                **hit.metadata,
+                "standing": score.to_dict(),
+                "standing_rank_multiplier": round(multiplier, 6),
+            }
+            weighted.append(
+                Hit(
+                    id=hit.id,
+                    kind=hit.kind,
+                    tenant_id=hit.tenant_id,
+                    branch=hit.branch,
+                    text=hit.text,
+                    score=max(hit.score, 0.0) * multiplier,
+                    channel=hit.channel,
+                    provenance=list(hit.provenance),
+                    trust_tier=hit.trust_tier,
+                    sensitivity=hit.sensitivity,
+                    metadata=metadata,
+                )
+            )
+        return sorted(weighted, key=lambda item: item.score, reverse=True)
 
     @staticmethod
     def _aggregate_reality_classes(classes: list[str]) -> str:
@@ -2167,17 +2425,7 @@ class PostgresEngine:
                     grounded_cids.add(hit.id)
             elif reality_class in ungrounded:
                 risky_hit_ids.append(hit.id)
-            activation = hit.metadata.get("activation") if isinstance(hit.metadata, dict) else {}
-            score = standing(
-                {
-                    "reality_class": reality_class,
-                    "trust_tier": hit.trust_tier,
-                    "calibrated_confidence": hit.metadata.get("confidence", 0.0),
-                    "corroboration_count": len(hit.provenance) + (1 if hit.kind == "evidence" and hit.id else 0),
-                    "contradiction_pressure": 1.0 if hit.metadata.get("status") == "contested" else 0.0,
-                    "activation": activation.get("score") if isinstance(activation, dict) else 0.0,
-                }
-            )
+            score = standing(self._standing_signals_for_hit(hit, reality_class))
             standing_rows.append(
                 {
                     "hit_id": hit.id or f"{hit.kind}:{index}",
@@ -2198,6 +2446,10 @@ class PostgresEngine:
             "boolean_ungrounded_only": ungrounded_only,
             "standing_ungrounded_only": standing_report["abstention_gate"]["active"],
             "zero_divergence": standing_report["abstention_gate"]["active"] is ungrounded_only,
+        }
+        standing_report["legacy_reality_monitoring"] = {
+            "ungrounded_only": ungrounded_only,
+            "explain_only": True,
         }
         return {
             "applied": True,

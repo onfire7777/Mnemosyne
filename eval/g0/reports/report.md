@@ -1,8 +1,8 @@
 # Mnemosyne G0 Benchmark Report
 
-- Generated: `2026-06-27T20:04:15.408785+00:00`
+- Generated: `2026-06-27T20:32:31.835211+00:00`
 - Baseline: `baseline-0` at `67c229ace12313a8b8a6c6ede99d0a2096bae178`
-- Gate ready: **False** (46/47 metrics measured)
+- Gate ready: **False** (51/52 metrics measured)
 
 ## Metrics
 
@@ -19,9 +19,14 @@
 | confabulation_rate | guardrail | measured | 0.0 | <= 0.0 | confabulation_eval |
 | projection_reality_abstention_recall | target | measured | 1.0 | >= 1.0 | projection_reality_eval |
 | standing_decision_divergence | target | measured | 0.0 | <= 0.0 | standing_parity_eval |
+| standing_calibration_error | target | measured | 0.025 | <= 0.05 | standing_calibration_eval |
+| standing_conformal_coverage | guardrail | measured | 1.0 | >= 0.95 | standing_calibration_eval |
+| standing_salience_invariance_contract | guardrail | measured | 1.0 | >= 1.0 | standing_calibration_eval |
+| standing_independent_corroboration_contract | guardrail | measured | 1.0 | >= 1.0 | standing_calibration_eval |
+| standing_evidence_dominance_gap | guardrail | measured | 0.95 | >= 0.02 | standing_calibration_eval |
 | poison_block_rate | guardrail | measured | 1.0 | >= 0.95 | slo_v2_definitive |
 | fast_path_p95_ms | guardrail | measured | 92.1 | <= 400.0 | latency_bench |
-| deep_path_p95_ms | reported | measured | 8.830667 | reported | deep_latency_eval |
+| deep_path_p95_ms | reported | measured | 2.003833 | reported | deep_latency_eval |
 | cost_usd_per_1k_queries | reported | measured | 0.0 | reported | resource_usage_eval |
 | controller_watts_per_dollar | reported | missing |  | reported | resource_usage_eval |
 | dreamer_shadow_corroborated_candidate_yield | target | measured | 1.0 | reported | dreamer_eval |
@@ -89,8 +94,9 @@ Intentional missing metrics:
 | g4-workspace-advisory-promotion-gate | eval/g0/preregistrations/g4-workspace-advisory-promotion-gate.json | 2026-06-27T01:58:31.506244+00:00 | True | workspace_advisory_promotion_gate_contract | 1.0 | not_required |
 | g4-workspace-retrieval-controller-gate | eval/g0/preregistrations/g4-workspace-retrieval-controller-gate.json | 2026-06-27T02:20:47.375104+00:00 | True | workspace_retrieval_controller_contract | 1.0 | not_required |
 | g5-standing-byte-stable-parity | eval/g0/preregistrations/g5-standing-byte-stable-parity.json | 2026-06-27T20:04:06.834283+00:00 | True | standing_decision_divergence | 0.0 | not_required |
+| g5-standing-continuous | eval/g0/preregistrations/g5-standing-continuous.json |  | None | standing_calibration_error |  | not_required |
 
 ## Artifact Custody
 
-- Source commit at generation: `f70e9dba7407de55af61c5b14ea1cef0c246e9b6`
+- Source commit at generation: `0a73f08b1db4fe2fbace6522e484a93419d20c8d`
 - Note: Committed G0 reports are source-tree custody snapshots. The commit that contains a report cannot be embedded in that report before the commit exists; use git log to identify the containing artifact commit.
