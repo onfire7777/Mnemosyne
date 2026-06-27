@@ -46,9 +46,9 @@ P0/P1 are all covered by gating or shadow tests. P2 are *design-for* — coverag
 | FR-3 Hybrid retrieval | P0 | M-RECALL@K, M-NDCG@K, M-CTX-PRECISION, M-TOKEN-EFF, M-FASTP95 | T-RET, T-PERF | S4 | 1 / gating |
 | FR-4 Provenance & explain | P0 | M-PROV-COMPLETE, M-EXPLAIN-COV | T-RET, T-EVD | S11 | 1 / gating |
 | FR-5 Typed user model | P0 | M-APPLY-ACC, M-PROTECTED-REG | T-PER | S7 | 3 / gating |
-| FR-6 Security/isolation | P0 | M-POISON-BLOCK, M-AUDIT-COMPLETE, M-BENIGN-DROP | T-SEC, T-INV | S8 | 0(iso)–3 / gating |
-| FR-7 Pref/policy enforcement | P0 | M-POISON-BLOCK, M-CONTRA-RES(trust) | T-SEC, T-INV | S8 | 3 / gating |
-| FR-8 Erasure | P0 | M-ERASURE | T-ERA | S10 | 1 / gating |
+| FR-6 Confidence & abstention | P0 | M-ECE, M-ABST-PREC | T-CAL | S5, S6 | 2 / gating |
+| FR-7 Security baseline | P0 | M-POISON-BLOCK, M-AUDIT-COMPLETE, M-BENIGN-DROP | T-SEC, T-INV | S8 | 0(iso)–3 / gating |
+| FR-8 User controls / erasure | P0 | M-ERASURE, M-AUDIT-COMPLETE | T-ERA | S10 | 1 / gating |
 | FR-9 MCP/CLI contract | P0 | (all MCP-driven cases), M-FASTP95 | all domains, T-PERF | S1–S12 | 0 / gating |
 | FR-10 Belief core (TMS+AGM) | P1 | M-AGM-CONF, M-CASCADE-CORR, M-CONTRA-RES | T-UPD, T-CON | S2, S6 | 2 / gating |
 | FR-11 Temporal graph + PPR | P1 | M-RECALL@K(graph chan), M-FASTP95(PPR) | T-RET, T-PERF | S11 | 2 / gating (PPR latency = §17 open q) |

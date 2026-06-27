@@ -9,6 +9,9 @@ from mnemosyne.engine import LocalMemoryEngine
 
 CaseTier = Literal["smoke", "core", "archive"]
 CaseOrigin = Literal["curated", "genuine", "synthetic"]
+VALID_CASE_ORIGINS = frozenset({"curated", "genuine", "synthetic"})
+GATING_CASE_ORIGINS = frozenset({"curated", "genuine"})
+VALID_CASE_MODES = frozenset({"shadow", "active"})
 
 
 @dataclass(slots=True)
@@ -21,6 +24,12 @@ class RegressionCase:
     protected: bool = False
     origin: CaseOrigin = "curated"
     mode: Literal["shadow", "active"] = "active"
+
+    def __post_init__(self) -> None:
+        if self.origin not in VALID_CASE_ORIGINS:
+            raise ValueError(f"regression case origin must be one of {sorted(VALID_CASE_ORIGINS)}")
+        if self.mode not in VALID_CASE_MODES:
+            raise ValueError(f"regression case mode must be one of {sorted(VALID_CASE_MODES)}")
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -134,12 +143,12 @@ class PromotionGate:
         protected_present = False
         for case in self.cases:
             origin = getattr(case, "origin", "curated")
-            if origin not in counts:
-                origin = "curated"
             if getattr(case, "mode", "active") != "active":
                 continue
+            if origin not in counts:
+                continue
             counts[origin] += 1
-            if origin != "synthetic" and case.protected:
+            if origin in GATING_CASE_ORIGINS and case.protected:
                 protected_present = True
         n_active = counts["curated"] + counts["genuine"]
         blocking: list[str] = []

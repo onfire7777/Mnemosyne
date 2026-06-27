@@ -11,7 +11,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Protocol, Sequence
 
-from mnemosyne.gate import GateResult, RegressionCase
+from mnemosyne.gate import GATING_CASE_ORIGINS, GateResult, RegressionCase
 from mnemosyne.ids import new_id
 from mnemosyne.learning import Lesson, Procedure
 from mnemosyne.security import INSTRUCTION_SINKS
@@ -88,7 +88,7 @@ def protected_suite_report(cases: Sequence[RegressionCase]) -> dict[str, Any]:
 
 def protected_suite_is_gating(cases: Sequence[RegressionCase]) -> bool:
     protected = [case for case in cases if case.protected]
-    return bool(protected) and all(case.origin != "synthetic" and case.mode == "active" for case in protected)
+    return bool(protected) and all(case.origin in GATING_CASE_ORIGINS and case.mode == "active" for case in protected)
 
 
 class ParametricTrainer(Protocol):
