@@ -117,6 +117,33 @@ def test_sandboxed_dreamer_rejects_forged_mapping_access_policy() -> None:
     assert report.source_count == 0
 
 
+def test_sandboxed_dreamer_rejects_evidence_without_explicit_access_policy() -> None:
+    report = SandboxedDreamer().dream(
+        [
+            Evidence(
+                tenant_id="tenant-dreamer",
+                user_id="user-dreamer",
+                actor="user",
+                source_type="operator-evidence",
+                content="Missing policy source A should not count.",
+                cid="cidv1:missing-policy-a",
+            ),
+            Evidence(
+                tenant_id="tenant-dreamer",
+                user_id="user-dreamer",
+                actor="user",
+                source_type="operator-evidence",
+                content="Missing policy source B should not count.",
+                cid="cidv1:missing-policy-b",
+            ),
+        ],
+        tenant_id="tenant-dreamer",
+    )
+
+    assert report.candidates == ()
+    assert report.source_count == 0
+
+
 def test_shadow_workspace_controller_recruits_dreamer_off_critical_path() -> None:
     report = ShadowWorkspaceController(max_workspace_items=1).run_shadow_cycle(
         tenant_id="tenant-workspace",

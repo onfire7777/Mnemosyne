@@ -118,7 +118,7 @@ class SandboxedDreamer:
 
 def _coerce_source(item: Evidence | Mapping[str, Any], *, max_chars: int) -> dict[str, str]:
     if isinstance(item, Evidence):
-        access_tenant = item.access_policy.get("tenant") or item.tenant_id
+        access_tenant = item.access_policy.get("tenant")
         return {
             "cid": str(item.cid or ""),
             "content": item.content[:max_chars],

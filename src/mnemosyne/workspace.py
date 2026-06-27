@@ -7,9 +7,10 @@ specialists on the answer critical path or mutate production memory.
 
 from __future__ import annotations
 
-import hashlib
 from dataclasses import asdict, dataclass, field
-from typing import Any, Mapping, Sequence
+import hashlib
+from itertools import islice
+from typing import Any, Iterable, Mapping, Sequence
 
 from .consciousness import BoundedCognitiveCycle, InteroceptiveProtoSelf, ProtoSelfSnapshot, workspace_bottleneck
 from .dreamer import DreamReport, SandboxedDreamer
@@ -68,6 +69,7 @@ class WorkspaceCycleReport:
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
+        data["selected_items"] = [_redacted_selected_item(item) for item in self.selected_items]
         data["proto_self"] = asdict(self.proto_self)
         data["specialist_invocations"] = [item.to_dict() for item in self.specialist_invocations]
         return data
@@ -136,6 +138,16 @@ class ShadowWorkspaceController:
     max_evidence_items: int = 16
     dreamer_name: str = "dreamer.shadow"
 
+    def __post_init__(self) -> None:
+        _require_positive_int("max_workspace_items", self.max_workspace_items)
+        _require_positive_int("max_cycles", self.max_cycles)
+        _require_positive_int("tick_ms", self.tick_ms)
+        _require_positive_int("max_idle_ticks", self.max_idle_ticks)
+        _require_positive_int("max_items_per_tick", self.max_items_per_tick)
+        _require_positive_int("max_item_content_chars", self.max_item_content_chars)
+        if self.max_evidence_items < 0:
+            raise ValueError("max_evidence_items must be non-negative")
+
     def run_shadow_cycle(
         self,
         *,
@@ -169,7 +181,7 @@ class ShadowWorkspaceController:
         self,
         *,
         tenant_id: str,
-        item_ticks: Sequence[Sequence[WorkspaceItem | Mapping[str, Any]]],
+        item_ticks: Sequence[Iterable[WorkspaceItem | Mapping[str, Any]]],
         evidence: Sequence[Evidence | Mapping[str, Any]] = (),
         confidence: float = 0.75,
         resource_health: float = 0.9,
@@ -193,7 +205,8 @@ class ShadowWorkspaceController:
         non_useful_ticks = 0
         stopped_reason = "max_cycles"
         for tick_index in range(1, self.max_cycles + 1):
-            source_items = list(item_ticks[tick_index - 1]) if tick_index - 1 < len(item_ticks) else []
+            raw_tick_items = item_ticks[tick_index - 1] if tick_index - 1 < len(item_ticks) else ()
+            source_items = _bounded_items(raw_tick_items, limit=self.max_items_per_tick)
             idle_generated = not source_items
             if idle_generated:
                 idle_ticks += 1
@@ -337,6 +350,14 @@ def _item_to_row(
     return row
 
 
+def _bounded_items(
+    items: Iterable[WorkspaceItem | Mapping[str, Any]],
+    *,
+    limit: int,
+) -> list[WorkspaceItem | Mapping[str, Any]]:
+    return list(islice(iter(items), max(0, limit)))
+
+
 def _bounded_evidence(
     evidence: Sequence[Evidence | Mapping[str, Any]],
     *,
@@ -345,8 +366,21 @@ def _bounded_evidence(
     return tuple(evidence[: max(0, limit)])
 
 
+def _require_positive_int(name: str, value: int) -> None:
+    if int(value) <= 0:
+        raise ValueError(f"{name} must be positive")
+
+
 def _bounded_text(text: str, *, max_chars: int = 512) -> str:
     return text if len(text) <= max_chars else text[:max_chars]
+
+
+def _redacted_selected_item(row: Mapping[str, Any]) -> dict[str, Any]:
+    data = dict(row)
+    text = str(data.pop("content", "") or "")
+    data["content_chars"] = len(text)
+    data["content_ref"] = _redact_trace_content(text) if text else ""
+    return data
 
 
 def _redact_trace_content(text: str) -> str:
@@ -356,17 +390,38 @@ def _redact_trace_content(text: str) -> str:
     return f"[shadow-trace-redacted:{digest}:chars={len(text)}]"
 
 
+def _validate_raw_item(tenant_id: str, item: WorkspaceItem | Mapping[str, Any]) -> None:
+    if isinstance(item, WorkspaceItem):
+        _validate_item_metadata(tenant_id, item.metadata)
+        return
+    for key in ("tenant_id", "tenant"):
+        value = item.get(key)
+        if value is not None and str(value) != tenant_id:
+            raise ValueError("workspace item tenant does not match stream tenant")
+    access_policy = item.get("access_policy")
+    _validate_access_policy(tenant_id, access_policy)
+    metadata = item.get("metadata") if isinstance(item.get("metadata"), Mapping) else {}
+    _validate_item_metadata(tenant_id, metadata)
+
+
 def _validate_selected_items(tenant_id: str, rows: Sequence[dict[str, Any]]) -> None:
     for row in rows:
         metadata = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
-        item_tenant = metadata.get("tenant_id") or metadata.get("tenant")
-        if item_tenant is not None and str(item_tenant) != tenant_id:
-            raise ValueError("workspace item tenant does not match stream tenant")
-        access_policy = metadata.get("access_policy")
-        if isinstance(access_policy, Mapping):
-            policy_tenant = access_policy.get("tenant")
-            if policy_tenant is not None and str(policy_tenant) != tenant_id:
-                raise ValueError("workspace item access policy does not match stream tenant")
+        _validate_item_metadata(tenant_id, metadata)
+
+
+def _validate_item_metadata(tenant_id: str, metadata: Mapping[str, Any]) -> None:
+    item_tenant = metadata.get("tenant_id") or metadata.get("tenant")
+    if item_tenant is not None and str(item_tenant) != tenant_id:
+        raise ValueError("workspace item tenant does not match stream tenant")
+    _validate_access_policy(tenant_id, metadata.get("access_policy"))
+
+
+def _validate_access_policy(tenant_id: str, access_policy: object) -> None:
+    if isinstance(access_policy, Mapping):
+        policy_tenant = access_policy.get("tenant")
+        if policy_tenant is not None and str(policy_tenant) != tenant_id:
+            raise ValueError("workspace item access policy does not match stream tenant")
 
 
 def _selected_rows(
@@ -377,7 +432,10 @@ def _selected_rows(
     max_workspace_items: int,
     max_chars: int,
 ) -> list[dict[str, Any]]:
-    rows = [_item_to_row(item, max_chars=max_chars) for item in items[: max(0, max_items)]]
+    bounded = _bounded_items(items, limit=max_items)
+    for item in bounded:
+        _validate_raw_item(tenant_id, item)
+    rows = [_item_to_row(item, max_chars=max_chars) for item in bounded]
     _validate_selected_items(tenant_id, rows)
     return workspace_bottleneck(rows, limit=max_workspace_items)
 
@@ -441,6 +499,7 @@ def _cycle_consistency(
     previous_links = [entry.previous_focus_id for entry in trace[1:]]
     expected_previous = [entry.focus_id for entry in trace[:-1]]
     checks = {
+        "cycle_executed": bool(cycles) and bool(trace),
         "cycle_indexes_monotonic": cycle_indexes == list(range(1, len(cycles) + 1)),
         "trace_ticks_monotonic": tick_indexes == list(range(1, len(trace) + 1)),
         "previous_focus_chain": previous_links == expected_previous,
