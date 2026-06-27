@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import platform
 import subprocess
@@ -428,7 +429,7 @@ def write_report(report: dict[str, Any], out_dir: Path, *, write_baseline: bool 
     out_dir.mkdir(parents=True, exist_ok=True)
     json_path = out_dir / "report.json"
     md_path = out_dir / "report.md"
-    text = json.dumps(report, indent=2, sort_keys=True)
+    text = json.dumps(report, indent=2, sort_keys=True, allow_nan=False)
     json_path.write_text(text + "\n")
     md_path.write_text(render_markdown(report))
     paths = {"json": json_path, "markdown": md_path}
@@ -496,7 +497,7 @@ def render_markdown(report: dict[str, Any]) -> str:
             "",
             "## Gate Decisions",
             "",
-            "| Change | Preregistration | Latest decision | Passed | Target | Delta | Controller telemetry |",
+            "| Change | Preregistration | Latest decision | Passed | Target | Delta | Current report controller telemetry |",
             "|---|---|---|---|---|---:|---|",
         ]
     )
@@ -507,7 +508,7 @@ def render_markdown(report: dict[str, Any]) -> str:
             f"| {decision['change_id']} | {decision['preregistration_path']} | "
             f"{generated} | {decision['latest_decision_passed']} | "
             f"{decision['target_metric']} | {delta} | "
-            f"{decision['controller_telemetry_status']} |"
+            f"{decision['current_report_controller_telemetry_status']} |"
         )
     lines.extend(
         [
@@ -965,7 +966,9 @@ def _measured(
 ) -> dict[str, Any]:
     if value is None:
         return {}
-    numeric = float(value)
+    numeric = _finite_float(value)
+    if numeric is None:
+        return {}
     passed = _passes(numeric, spec.get("target"), spec.get("target_op"))
     return {
         "status": "measured",
@@ -980,7 +983,9 @@ def _measured(
 def _passes(value: float, target: Any, op: str | None) -> bool | None:
     if target is None or op is None:
         return None
-    target_f = float(target)
+    target_f = _finite_float(target)
+    if target_f is None:
+        raise ValueError(f"non-finite target for op {op!r}: {target!r}")
     if op == ">=":
         return value >= target_f
     if op == "<=":
@@ -1001,8 +1006,18 @@ def _load_source(repo_root: Path, source_id: str, relative_path: str) -> Source:
 
 
 def _computed_source(repo_root: Path, source_id: str, label: str, data: dict[str, Any]) -> Source:
-    encoded = json.dumps(data, sort_keys=True, separators=(",", ":"))
+    encoded = json.dumps(data, sort_keys=True, separators=(",", ":"), allow_nan=False)
     return Source(source_id, label, repo_root, data, _sha256_text(encoded))
+
+
+def _finite_float(value: Any) -> float | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    return numeric if math.isfinite(numeric) else None
 
 
 def _source_summary(source: Source) -> dict[str, Any]:
@@ -1138,7 +1153,7 @@ def _gate_decision_summary(repo_root: Path, metrics: list[dict[str, Any]]) -> li
                 "minimum_delta": prereg.get("minimum_delta"),
                 "direction": prereg.get("direction"),
                 "requires_controller_telemetry": requires_controller,
-                "controller_telemetry_status": controller_status,
+                "current_report_controller_telemetry_status": controller_status,
                 "latest_decision_present": latest is not None,
                 "latest_decision_generated_at": latest.get("generated_at") if latest else None,
                 "latest_decision_passed": latest.get("passed") if latest else None,
@@ -1234,7 +1249,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     paths = write_report(report, repo_root / args.out_dir, write_baseline=args.write_baseline)
     if args.print_json:
-        print(json.dumps(report, indent=2, sort_keys=True))
+        print(json.dumps(report, indent=2, sort_keys=True, allow_nan=False))
     else:
         print(f"G0 report: {paths['json']}")
         print(f"G0 markdown: {paths['markdown']}")

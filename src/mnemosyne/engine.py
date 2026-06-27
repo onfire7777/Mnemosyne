@@ -1510,8 +1510,15 @@ class LocalMemoryEngine:
             metadata={"reality_class": metadata.get("reality_class")},
             provenance_count=len(hit.provenance),
         )
+        explicit_class = str(metadata.get("reality_class") or "").strip().lower().replace("-", "_")
+        source_type = str(metadata.get("source_type") or hit.kind).strip().lower()
+        preserve_simulated = explicit_class in {"simulated", "simulation"} and (
+            hit.kind == "assertion"
+            or any(marker in source_type for marker in ("simulation", "synthetic", "generated", "hypothesis"))
+        )
+        reality_class = "simulated" if preserve_simulated else tag.reality_class
         return {
-            "reality_class": tag.reality_class,
+            "reality_class": reality_class,
             "confidence": tag.confidence,
             "calibrated": tag.calibrated,
             "signals": tag.signals,

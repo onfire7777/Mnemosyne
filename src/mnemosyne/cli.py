@@ -10801,7 +10801,7 @@ def _verify_production_evidence_redaction_scan(
         _production_evidence_finding(
             findings,
             "redaction_scan_scanned_files_mismatch",
-            "redaction-scan.json scanned_files do not match bundle-manifest artifacts",
+            "redaction-scan.json scanned_files do not match bundle-manifest artifacts except redaction-scan.json",
         )
     if recomputed_scanned is not None and recomputed_scanned != expected_scanned:
         ok = False

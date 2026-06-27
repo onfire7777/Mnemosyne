@@ -1,7 +1,7 @@
 # Mnemosyne G0 Benchmark Report
 
-- Generated: `2026-06-27T03:31:28.086935+00:00`
-- Baseline: `baseline-0` at `351a33a6c81d6068cfd920b34e449e1d9765fd88`
+- Generated: `2026-06-27T04:18:39.374173+00:00`
+- Baseline: `baseline-0` at `318c5b99269850dc06c5f333f31ccf186585f5a2`
 - Gate ready: **False** (45/46 metrics measured)
 
 ## Metrics
@@ -20,7 +20,7 @@
 | projection_reality_abstention_recall | target | measured | 1.0 | >= 1.0 | projection_reality_eval |
 | poison_block_rate | guardrail | measured | 1.0 | >= 0.95 | slo_v2_definitive |
 | fast_path_p95_ms | guardrail | measured | 92.1 | <= 400.0 | latency_bench |
-| deep_path_p95_ms | reported | measured | 1.820167 | reported | deep_latency_eval |
+| deep_path_p95_ms | reported | measured | 1.807083 | reported | deep_latency_eval |
 | cost_usd_per_1k_queries | reported | measured | 0.0 | reported | resource_usage_eval |
 | controller_watts_per_dollar | reported | missing |  | reported | resource_usage_eval |
 | dreamer_shadow_corroborated_candidate_yield | target | measured | 1.0 | reported | dreamer_eval |
@@ -68,7 +68,7 @@ Intentional missing metrics:
 
 ## Gate Decisions
 
-| Change | Preregistration | Latest decision | Passed | Target | Delta | Controller telemetry |
+| Change | Preregistration | Latest decision | Passed | Target | Delta | Current report controller telemetry |
 |---|---|---|---|---|---:|---|
 | g1-consciousness-scorecard | eval/g0/preregistrations/g1-consciousness-scorecard.json | 2026-06-26T14:32:59.693114+00:00 | True | consciousness_indicator_total | 0.0 | not_required |
 | g1-projection-reality-monitoring | eval/g0/preregistrations/g1-projection-reality-monitoring.json | 2026-06-26T07:36:22.371036+00:00 | True | projection_reality_abstention_recall | 1.0 | not_required |
@@ -82,5 +82,5 @@ Intentional missing metrics:
 
 ## Artifact Custody
 
-- Source commit at generation: `351a33a6c81d6068cfd920b34e449e1d9765fd88`
+- Source commit at generation: `318c5b99269850dc06c5f333f31ccf186585f5a2`
 - Note: Committed G0 reports are source-tree custody snapshots. The commit that contains a report cannot be embedded in that report before the commit exists; use git log to identify the containing artifact commit.

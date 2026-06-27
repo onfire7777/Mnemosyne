@@ -441,7 +441,7 @@ def _shadow_tag_contract_probe() -> dict[str, Any]:
             tenant_id=tenant,
             user_id="g0",
             actor="assistant",
-            source_type="generated-summary",
+            source_type="analysis-summary",
             content=(
                 "G0 shadow monitor contract Calypso generated caveat is a "
                 "self-generated summary and must remain shadow-only."
@@ -483,7 +483,7 @@ def _shadow_tag_contract_probe() -> dict[str, Any]:
                 trust_tier=1,
                 metadata={
                     "actor": "assistant",
-                    "source_type": "generated-summary",
+                    "source_type": "analysis-summary",
                     "reality_class": "self_generated",
                 },
             ),

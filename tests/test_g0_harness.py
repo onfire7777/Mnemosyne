@@ -6,13 +6,15 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from eval.g0.confabulation import run_confabulation_eval
 from eval.g0.consciousness import INDICATORS, run_consciousness_eval
 from eval.g0.continual_learning import run_continual_learning_eval
 from eval.g0.deep_latency import run_deep_latency_eval
 from eval.g0.gate import evaluate_ablation
 from eval.g0.resource_usage import run_resource_usage_eval
-from eval.g0.runner import G0_METRIC_SPECS, build_report, render_markdown
+from eval.g0.runner import G0_METRIC_SPECS, build_report, render_markdown, write_report
 from eval.g0.shadow_workspace import run_shadow_workspace_eval
 
 
@@ -137,10 +139,27 @@ def test_g0_report_emits_every_spec_metric_and_source_hashes() -> None:
         == 1.0
     )
     assert report["computed_evidence"]["shadow_workspace_eval"]["workspace_retrieval_controller_contract"] == 1.0
+    projection_rows = report["computed_evidence"]["projection_reality_eval"]["rows"]
+    simulated_row = next(row for row in projection_rows if row["case_id"] == "simulated_projection_only")
+    assert {
+        tag["reality_class"]
+        for tag in simulated_row["reality_monitoring"]["shadow_tags"].values()
+    } == {"simulated"}
+    generated_simulated_row = next(
+        row for row in projection_rows if row["case_id"] == "generated_simulated_projection_only"
+    )
+    assert generated_simulated_row["projection_reality_class"] == "simulated"
+    assert {
+        tag["reality_class"]
+        for tag in generated_simulated_row["reality_monitoring"]["shadow_tags"].values()
+    } == {"simulated"}
     decisions = {row["change_id"]: row for row in report["gate_decisions"]}
     assert decisions["g4-workspace-retrieval-controller-gate"]["latest_decision_passed"] is True
     assert decisions["g4-workspace-retrieval-controller-gate"]["latest_target_delta"] == 1.0
-    assert decisions["g4-workspace-retrieval-controller-gate"]["controller_telemetry_status"] == "not_required"
+    assert (
+        decisions["g4-workspace-retrieval-controller-gate"]["current_report_controller_telemetry_status"]
+        == "not_required"
+    )
     assert decisions["g4-shadow-continuous-workspace-loop"]["requires_controller_telemetry"] is False
     rendered = render_markdown(report)
     assert "## Gate Decisions" in rendered
@@ -488,6 +507,65 @@ def test_ablation_gate_requires_controller_telemetry_when_preregistered() -> Non
 
     assert decision.passed is False
     assert any("requires_controller_telemetry is true" in reason for reason in decision.reasons)
+
+    measured_without_value = {
+        **missing_controller,
+        "status": "measured",
+        "value": None,
+    }
+    bogus = evaluate_ablation(
+        _report([_metric("workspace_loop_liveness", 1.0, cls="target", direction="increase"), measured_without_value]),
+        _report([_metric("workspace_loop_liveness", 1.1, cls="target", direction="increase"), measured_without_value]),
+        {
+            "change_id": "future-promoted-workspace-loop",
+            "target_metric": "workspace_loop_liveness",
+            "direction": "increase",
+            "minimum_delta": 0.01,
+            "requires_controller_telemetry": True,
+        },
+    )
+
+    assert bogus.passed is False
+    assert any("numeric values" in reason for reason in bogus.reasons)
+
+    for bad_value in ("NaN", float("nan"), "Infinity", float("inf"), "-Infinity", float("-inf")):
+        non_finite = {
+            **missing_controller,
+            "status": "measured",
+            "value": bad_value,
+        }
+        non_finite_decision = evaluate_ablation(
+            _report(
+                [
+                    _metric("workspace_loop_liveness", 1.0, cls="target", direction="increase"),
+                    non_finite,
+                ]
+            ),
+            _report(
+                [
+                    _metric("workspace_loop_liveness", 1.1, cls="target", direction="increase"),
+                    non_finite,
+                ]
+            ),
+            {
+                "change_id": "future-promoted-workspace-loop",
+                "target_metric": "workspace_loop_liveness",
+                "direction": "increase",
+                "minimum_delta": 0.01,
+                "requires_controller_telemetry": True,
+            },
+        )
+
+        assert non_finite_decision.passed is False
+        assert any("numeric values" in reason for reason in non_finite_decision.reasons)
+
+
+def test_g0_report_writer_rejects_non_finite_json(tmp_path: Path) -> None:
+    report = build_report(REPO_ROOT, baseline_name="baseline-0")
+    report["metrics"][0]["value"] = float("nan")
+
+    with pytest.raises(ValueError, match="Out of range float values"):
+        write_report(report, tmp_path)
 
 
 def test_committed_g0_preregistrations_have_passing_decisions() -> None:

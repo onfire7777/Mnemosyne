@@ -379,6 +379,44 @@ def test_capture_production_evidence_preflight_records_input_artifacts(
     assert redaction_scan["skipped_files"] == []
 
 
+def test_capture_production_evidence_preflight_records_equals_form_input_artifacts(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "production-soak.json"
+    out_root = tmp_path / "capture"
+    artifact = tmp_path / "production-inputs" / "cases.json"
+    artifact.parent.mkdir()
+    artifact.write_text('{"ok": true}\n', encoding="utf-8")
+
+    def add_external_artifact_path(payload: dict[str, Any]) -> None:
+        payload["checks"][0]["args"] = [f"--cases={artifact}"]
+
+    _minimal_production_manifest(manifest, mutate=add_external_artifact_path)
+
+    proc = subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "--preflight-only",
+            str(manifest),
+            str(out_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    stdout = json.loads(proc.stdout)
+    copied_manifest = json.loads(
+        (out_root / "operator-soak-manifest.json").read_text(encoding="utf-8")
+    )
+    input_artifact = stdout["required_input_artifacts"][0]
+
+    assert input_artifact["path"] == str(artifact)
+    assert input_artifact["snapshot_path"].startswith(str(out_root / "input-artifacts"))
+    assert copied_manifest["checks"][0]["args"] == [f"--cases={input_artifact['snapshot_path']}"]
+
+
 def test_capture_production_evidence_preflight_does_not_snapshot_tool_executable(
     tmp_path: Path,
 ) -> None:

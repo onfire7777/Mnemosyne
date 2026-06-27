@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -83,10 +84,12 @@ def evaluate_ablation(
             and isinstance(cand_controller, dict)
             and _is_measured(base_controller)
             and _is_measured(cand_controller)
+            and _metric_value(base_controller) is not None
+            and _metric_value(cand_controller) is not None
         ):
             reasons.append(
                 "requires_controller_telemetry is true, but "
-                "controller_watts_per_dollar is not measured in both reports"
+                "controller_watts_per_dollar is not measured with numeric values in both reports"
             )
     base_target = baseline.get(str(target_id))
     cand_target = candidate.get(str(target_id))
@@ -97,9 +100,9 @@ def evaluate_ablation(
         reasons.append(f"target metric {target_id!r} is not measured in both reports")
         return AblationDecision(False, change_id, str(target_id), reasons, None, guardrail_results)
 
-    margin = float(preregistration.get("minimum_delta", 0.0))
-    if margin < 0:
-        reasons.append("minimum_delta must be non-negative")
+    margin = _finite_float(preregistration.get("minimum_delta", 0.0))
+    if margin is None or margin < 0:
+        reasons.append("minimum_delta must be a finite non-negative number")
         return AblationDecision(False, change_id, str(target_id), reasons, None, guardrail_results)
 
     direction = str(preregistration.get("direction") or cand_target.get("direction") or "")
@@ -148,9 +151,16 @@ def evaluate_ablation(
             "baseline": None,
             "candidate": None,
             "delta": None,
-            "tolerance": float(guardrail_tolerances.get(gid, 0.0)),
+            "tolerance": None,
             "reason": "",
         }
+        tolerance = _finite_float(guardrail_tolerances.get(gid, 0.0))
+        if tolerance is None:
+            result["reason"] = "non-finite tolerance"
+            reasons.append(f"guardrail {gid!r} has a non-finite tolerance")
+            guardrail_results.append(result)
+            continue
+        result["tolerance"] = tolerance
         if base_guard is None or cand_guard is None:
             result["reason"] = "missing from baseline or candidate"
             reasons.append(f"guardrail {gid!r} missing from baseline or candidate")
@@ -173,7 +183,6 @@ def evaluate_ablation(
         result["candidate"] = cand_guard_value
         result["delta"] = cand_guard_value - base_guard_value
         guard_direction = str(cand_guard.get("direction") or base_guard.get("direction") or "")
-        tolerance = float(result["tolerance"])
         if guard_direction == "increase":
             passed = cand_guard_value + tolerance >= base_guard_value
         elif guard_direction == "decrease":
@@ -209,17 +218,28 @@ def _is_measured(metric: dict[str, Any]) -> bool:
 
 
 def _metric_value(metric: dict[str, Any]) -> float | None:
-    value = metric.get("value")
+    return _finite_float(metric.get("value"))
+
+
+def _finite_float(value: Any) -> float | None:
     if isinstance(value, bool) or value is None:
         return None
     try:
-        return float(value)
+        numeric = float(value)
     except (TypeError, ValueError):
         return None
+    return numeric if math.isfinite(numeric) else None
 
 
 def _load_json(path: Path) -> dict[str, Any]:
-    return json.loads(path.read_text())
+    return json.loads(
+        path.read_text(),
+        parse_constant=lambda constant: _reject_non_finite_json_constant(constant, path),
+    )
+
+
+def _reject_non_finite_json_constant(constant: str, path: Path) -> None:
+    raise ValueError(f"non-finite JSON value {constant!r} in {path}")
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -243,9 +263,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.decision_log:
         args.decision_log.parent.mkdir(parents=True, exist_ok=True)
         with args.decision_log.open("a") as fh:
-            fh.write(json.dumps(decision_json, sort_keys=True) + "\n")
+            fh.write(json.dumps(decision_json, sort_keys=True, allow_nan=False) + "\n")
     if args.print_json:
-        print(json.dumps(decision_json, indent=2, sort_keys=True))
+        print(json.dumps(decision_json, indent=2, sort_keys=True, allow_nan=False))
     else:
         verdict = "PASS" if decision.passed else "FAIL"
         print(f"G0 ablation gate: {verdict} ({decision.change_id})")

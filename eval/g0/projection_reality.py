@@ -41,6 +41,17 @@ PROJECTION_REALITY_CASES: tuple[dict[str, Any], ...] = (
         "actor": "system",
         "source_type": "simulation",
     },
+    {
+        "id": "generated_simulated_projection_only",
+        "query": "generated simulated projection contract Gamma",
+        "subject": "generated simulated projection contract",
+        "predicate": "is",
+        "object": "Gamma",
+        "support": "Generated simulation-only seed for projection reality case three.",
+        "support_reality_class": "simulated",
+        "actor": "system",
+        "source_type": "generated-summary",
+    },
 )
 
 

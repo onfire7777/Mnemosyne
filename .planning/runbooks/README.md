@@ -70,7 +70,8 @@ CLI commands consumed by `deployment-soak` and `release-audit`.
   soak manifest or committed docs; production bundles must keep
   `redaction-scan.json` at `ok: true` with no skipped files and a
   `scanned_files` list matching the retained `bundle-manifest.json` artifact
-  set, plus the `summary.json` `bundle_fingerprint` for handoff custody.
+  set except `redaction-scan.json` itself, plus the `summary.json`
+  `bundle_fingerprint` for handoff custody.
 - After capture, select the repo interpreter with
   `PYTHON="${PYTHON:-$(if [ -x .venv/bin/python ]; then printf '%s' .venv/bin/python; else command -v python3; fi)}"`;
   set `BUNDLE_DIR=/secure/path/to/mnemosyne-production-evidence`; derive
