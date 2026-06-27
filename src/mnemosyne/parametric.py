@@ -14,6 +14,7 @@ from typing import Any, Protocol, Sequence
 from mnemosyne.gate import GateResult, RegressionCase
 from mnemosyne.ids import new_id
 from mnemosyne.learning import Lesson, Procedure
+from mnemosyne.security import INSTRUCTION_SINKS
 
 
 @dataclass(slots=True)
@@ -139,7 +140,8 @@ class ParametricInvariantRails:
         trust_delta = metadata.get("trust_tier_delta")
         if isinstance(trust_delta, (int, float)) and not isinstance(trust_delta, bool) and trust_delta < 0:
             raise ValueError("parametric invariant rail violated: trust tier cannot be widened")
-        if metadata.get("target_sink") == "system_prompt" or metadata.get("untrusted_to_system_prompt") is True:
+        target_sink = str(metadata.get("target_sink", "")).strip().lower()
+        if target_sink in INSTRUCTION_SINKS or metadata.get("untrusted_to_system_prompt") is True:
             raise ValueError("parametric invariant rail violated: untrusted_to_system_prompt is forbidden")
         if metadata.get("eval_source_overlap") is True:
             raise ValueError("parametric invariant rail violated: source data overlaps evaluation suite")

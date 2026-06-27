@@ -1,7 +1,7 @@
 {
   "artifact_custody": {
     "snapshot_note": "Committed G0 reports are source-tree custody snapshots. The commit that contains a report cannot be embedded in that report before the commit exists; use git log to identify the containing artifact commit.",
-    "source_commit": "c6934f0196393262ddf96d61ce7fc1ee1887217e"
+    "source_commit": "92984b69b73fa75bfc4edc9ce5630e3042c65057"
   },
   "baseline": {
     "environment": {
@@ -37,7 +37,7 @@
     "confabulation_eval": {
       "definition": "False-accept rate on cases where the only support is generated, low-fidelity, or explicitly confabulation-risk provenance.",
       "false_accepts": 0,
-      "generated_at": "2026-06-27T17:26:57.645283+00:00",
+      "generated_at": "2026-06-27T17:55:47.066621+00:00",
       "metric": "confabulation_rate",
       "metric_note": "Deterministic local proxy for the full G0 provenance-entailment and sampled-audit confabulation metric; this proves the live retrieval/abstention rail fails closed on generated or risky support without introducing a network or LLM evaluator.",
       "passed": true,
@@ -227,7 +227,7 @@
           "shadow_only": true
         }
       },
-      "generated_at": "2026-06-27T17:26:57.707203+00:00",
+      "generated_at": "2026-06-27T17:55:47.144075+00:00",
       "indicator_count": 14,
       "indicators": [
         {
@@ -813,7 +813,7 @@
           "rail_budget": 0.9,
           "reasons": [],
           "resource_health": 0.92,
-          "timestamp": "2026-06-27T17:26:57.705092+00:00"
+          "timestamp": "2026-06-27T17:55:47.143000+00:00"
         },
         "strained": {
           "attention_lock_risk": 1.0,
@@ -833,7 +833,7 @@
             "low_operating_budget"
           ],
           "resource_health": 0.35,
-          "timestamp": "2026-06-27T17:26:57.705100+00:00"
+          "timestamp": "2026-06-27T17:55:47.143011+00:00"
         }
       },
       "source": "Butlin_Long_et_al_2023_arxiv_2308_08708",
@@ -846,7 +846,7 @@
       "before_accuracy": 1.0,
       "dataset_path": "eval/datasets/continual_learning_interference.json",
       "definition": "Backward-transfer accuracy drop on earlier task queries after sequentially ingesting later task blocks.",
-      "generated_at": "2026-06-27T17:26:57.643733+00:00",
+      "generated_at": "2026-06-27T17:55:47.062769+00:00",
       "interference": 0.0,
       "metric": "continual_learning_interference",
       "metric_note": "Deterministic local proxy for the full sequential task-block G0 benchmark; this records whether the live LocalMemoryEngine retrieval path retains earlier task accuracy after later overlapping ingests.",
@@ -956,18 +956,18 @@
     "deep_latency_eval": {
       "dataset_path": "eval/datasets/deep_latency.json",
       "definition": "95th-percentile latency for local graph-backed deep-search queries.",
-      "generated_at": "2026-06-27T17:26:57.681049+00:00",
-      "max_ms": 5.463875,
+      "generated_at": "2026-06-27T17:55:47.104283+00:00",
+      "max_ms": 3.614625,
       "metric": "deep_path_p95_ms",
       "metric_note": "Local reported-only deep-search timing fixture. It measures the live LocalMemoryEngine deep path over a versioned graph corpus; it is not production infrastructure evidence.",
-      "p50_ms": 1.664958,
-      "p95_ms": 5.463875,
+      "p50_ms": 1.878542,
+      "p95_ms": 3.614625,
       "query_count": 15,
       "rounds": 5,
       "rows": [
         {
           "abstained": false,
-          "duration_ms": 1.610542,
+          "duration_ms": 2.01375,
           "graph_hits": 2,
           "hit_count": 4,
           "query": "why does Aurora depend on Zephyr",
@@ -976,7 +976,7 @@
         },
         {
           "abstained": false,
-          "duration_ms": 2.201667,
+          "duration_ms": 2.775791,
           "graph_hits": 2,
           "hit_count": 4,
           "query": "how does Borealis connect to Atlas",
@@ -985,7 +985,7 @@
         },
         {
           "abstained": true,
-          "duration_ms": 2.135292,
+          "duration_ms": 1.790917,
           "graph_hits": 2,
           "hit_count": 5,
           "query": "what path links Cerulean to Helios",
@@ -994,7 +994,7 @@
         },
         {
           "abstained": false,
-          "duration_ms": 1.544625,
+          "duration_ms": 1.351625,
           "graph_hits": 2,
           "hit_count": 4,
           "query": "why does Aurora depend on Zephyr",
@@ -1003,7 +1003,7 @@
         },
         {
           "abstained": false,
-          "duration_ms": 1.532417,
+          "duration_ms": 1.443958,
           "graph_hits": 2,
           "hit_count": 4,
           "query": "how does Borealis connect to Atlas",
@@ -1012,7 +1012,7 @@
         },
         {
           "abstained": true,
-          "duration_ms": 2.079167,
+          "duration_ms": 1.878542,
           "graph_hits": 2,
           "hit_count": 5,
           "query": "what path links Cerulean to Helios",
@@ -1021,7 +1021,7 @@
         },
         {
           "abstained": false,
-          "duration_ms": 1.524542,
+          "duration_ms": 1.614041,
           "graph_hits": 2,
           "hit_count": 4,
           "query": "why does Aurora depend on Zephyr",
@@ -1030,7 +1030,7 @@
         },
         {
           "abstained": false,
-          "duration_ms": 1.589208,
+          "duration_ms": 1.565125,
           "graph_hits": 2,
           "hit_count": 4,
           "query": "how does Borealis connect to Atlas",
@@ -1039,7 +1039,7 @@
         },
         {
           "abstained": true,
-          "duration_ms": 2.401666,
+          "duration_ms": 2.586708,
           "graph_hits": 2,
           "hit_count": 5,
           "query": "what path links Cerulean to Helios",
@@ -1048,7 +1048,7 @@
         },
         {
           "abstained": false,
-          "duration_ms": 1.617583,
+          "duration_ms": 3.0055,
           "graph_hits": 2,
           "hit_count": 4,
           "query": "why does Aurora depend on Zephyr",
@@ -1057,7 +1057,7 @@
         },
         {
           "abstained": false,
-          "duration_ms": 1.664958,
+          "duration_ms": 1.593292,
           "graph_hits": 2,
           "hit_count": 4,
           "query": "how does Borealis connect to Atlas",
@@ -1066,7 +1066,7 @@
         },
         {
           "abstained": true,
-          "duration_ms": 2.143667,
+          "duration_ms": 2.022458,
           "graph_hits": 2,
           "hit_count": 5,
           "query": "what path links Cerulean to Helios",
@@ -1075,7 +1075,7 @@
         },
         {
           "abstained": false,
-          "duration_ms": 1.546625,
+          "duration_ms": 1.591875,
           "graph_hits": 2,
           "hit_count": 4,
           "query": "why does Aurora depend on Zephyr",
@@ -1084,7 +1084,7 @@
         },
         {
           "abstained": false,
-          "duration_ms": 5.463875,
+          "duration_ms": 2.507208,
           "graph_hits": 2,
           "hit_count": 4,
           "query": "how does Borealis connect to Atlas",
@@ -1093,7 +1093,7 @@
         },
         {
           "abstained": true,
-          "duration_ms": 3.211625,
+          "duration_ms": 3.614625,
           "graph_hits": 2,
           "hit_count": 5,
           "query": "what path links Cerulean to Helios",
@@ -1208,7 +1208,7 @@
         "role": "dreamer",
         "shadow_only": true
       },
-      "generated_at": "2026-06-27T17:26:57.692090+00:00",
+      "generated_at": "2026-06-27T17:55:47.117761+00:00",
       "metric_note": "Measures whether the sandboxed dreamer can produce corroborated replay candidates without mutating the ledger or entering the answer critical path.",
       "schema_version": "g0.dreamer_shadow_ablation.v1",
       "shadow_contract": 1.0,
@@ -1238,7 +1238,7 @@
           "rail_budget": 0.96,
           "reasons": [],
           "resource_health": 0.94,
-          "timestamp": "2026-06-27T17:26:57.691817+00:00"
+          "timestamp": "2026-06-27T17:55:47.117527+00:00"
         },
         "selected_item_ids": [
           "high",
@@ -1249,7 +1249,7 @@
     },
     "projection_reality_eval": {
       "definition": "Recall for abstaining on semantic assertion projections whose only support is self-generated or simulated, with the projection hit itself carrying the risky reality class.",
-      "generated_at": "2026-06-27T17:26:57.648051+00:00",
+      "generated_at": "2026-06-27T17:55:47.068425+00:00",
       "metric": "projection_reality_abstention_recall",
       "metric_note": "Deterministic local proxy for G1 projection-level reality monitoring. It cannot be satisfied by evidence-level abstention alone; the assertion hit must expose the risky reality class.",
       "passed": true,
@@ -1258,12 +1258,12 @@
       "rows": [
         {
           "abstained": true,
-          "assertion_id": "b652e65d-f29b-4bb8-b942-af1d333aed83",
+          "assertion_id": "b63df77b-7fae-42ac-aba2-5b35584f2c9d",
           "case_id": "self_generated_projection_only",
           "confidence": 0.4275,
           "expected_reality_class": "self_generated",
           "hit_ids": [
-            "b652e65d-f29b-4bb8-b942-af1d333aed83",
+            "b63df77b-7fae-42ac-aba2-5b35584f2c9d",
             "f8dc6fb0fef855fbea5e253ea1018230416d13bbe3ded7bf2bf316d78e7ddd2e"
           ],
           "projection_abstained": true,
@@ -1285,13 +1285,13 @@
             "grounded_hit_count": 0,
             "grounded_source_count": 0,
             "risky_hit_ids": [
-              "b652e65d-f29b-4bb8-b942-af1d333aed83",
+              "b63df77b-7fae-42ac-aba2-5b35584f2c9d",
               "f8dc6fb0fef855fbea5e253ea1018230416d13bbe3ded7bf2bf316d78e7ddd2e"
             ],
             "shadow_only": false,
             "shadow_source": "RealityMonitor",
             "shadow_tags": {
-              "b652e65d-f29b-4bb8-b942-af1d333aed83": {
+              "b63df77b-7fae-42ac-aba2-5b35584f2c9d": {
                 "calibrated": true,
                 "confidence": 0.75,
                 "reality_class": "self_generated",
@@ -1328,12 +1328,12 @@
         },
         {
           "abstained": true,
-          "assertion_id": "45c1ac9a-cd26-4c25-9091-6301fc325c50",
+          "assertion_id": "e366620f-9b65-4ba6-914c-c2fdc684d703",
           "case_id": "simulated_projection_only",
           "confidence": 0.4275,
           "expected_reality_class": "simulated",
           "hit_ids": [
-            "45c1ac9a-cd26-4c25-9091-6301fc325c50",
+            "e366620f-9b65-4ba6-914c-c2fdc684d703",
             "8c90309940c14a9a171f43a39ef822ad890b2eae0267edbb48ac2c3611f38ab8"
           ],
           "projection_abstained": true,
@@ -1355,25 +1355,12 @@
             "grounded_hit_count": 0,
             "grounded_source_count": 0,
             "risky_hit_ids": [
-              "45c1ac9a-cd26-4c25-9091-6301fc325c50",
+              "e366620f-9b65-4ba6-914c-c2fdc684d703",
               "8c90309940c14a9a171f43a39ef822ad890b2eae0267edbb48ac2c3611f38ab8"
             ],
             "shadow_only": false,
             "shadow_source": "RealityMonitor",
             "shadow_tags": {
-              "45c1ac9a-cd26-4c25-9091-6301fc325c50": {
-                "calibrated": true,
-                "confidence": 0.75,
-                "reality_class": "simulated",
-                "signals": {
-                  "actor": "",
-                  "explicit_label": true,
-                  "explicit_label_conflict": false,
-                  "provenance_count": 1,
-                  "source_type": "assertion",
-                  "trust_tier": 0
-                }
-              },
               "8c90309940c14a9a171f43a39ef822ad890b2eae0267edbb48ac2c3611f38ab8": {
                 "calibrated": true,
                 "confidence": 0.75,
@@ -1384,6 +1371,19 @@
                   "explicit_label_conflict": false,
                   "provenance_count": 1,
                   "source_type": "simulation",
+                  "trust_tier": 0
+                }
+              },
+              "e366620f-9b65-4ba6-914c-c2fdc684d703": {
+                "calibrated": true,
+                "confidence": 0.75,
+                "reality_class": "simulated",
+                "signals": {
+                  "actor": "",
+                  "explicit_label": true,
+                  "explicit_label_conflict": false,
+                  "provenance_count": 1,
+                  "source_type": "assertion",
                   "trust_tier": 0
                 }
               }
@@ -1398,12 +1398,12 @@
         },
         {
           "abstained": true,
-          "assertion_id": "3e52b460-7b64-4713-8451-4678136f47b2",
+          "assertion_id": "40361439-5faf-46ce-839a-567999638b3e",
           "case_id": "generated_simulated_projection_only",
           "confidence": 0.4275,
           "expected_reality_class": "simulated",
           "hit_ids": [
-            "3e52b460-7b64-4713-8451-4678136f47b2",
+            "40361439-5faf-46ce-839a-567999638b3e",
             "6338422a623a5b778673209c6e713180a384d4982cf364bf95eea94efc29b07f"
           ],
           "projection_abstained": true,
@@ -1425,13 +1425,13 @@
             "grounded_hit_count": 0,
             "grounded_source_count": 0,
             "risky_hit_ids": [
-              "3e52b460-7b64-4713-8451-4678136f47b2",
+              "40361439-5faf-46ce-839a-567999638b3e",
               "6338422a623a5b778673209c6e713180a384d4982cf364bf95eea94efc29b07f"
             ],
             "shadow_only": false,
             "shadow_source": "RealityMonitor",
             "shadow_tags": {
-              "3e52b460-7b64-4713-8451-4678136f47b2": {
+              "40361439-5faf-46ce-839a-567999638b3e": {
                 "calibrated": true,
                 "confidence": 0.75,
                 "reality_class": "simulated",
@@ -1488,21 +1488,21 @@
       "dataset_path": "eval/datasets/resource_usage.json",
       "definition": "Provider spend per 1k local G0 queries and optional controller watts per dollar from explicit telemetry.",
       "external_provider_calls": 0,
-      "generated_at": "2026-06-27T17:26:57.691126+00:00",
+      "generated_at": "2026-06-27T17:55:47.116404+00:00",
       "measurement_scope": "local deterministic G0 cost fixture",
       "metric_note": "The default fixture instruments the live LocalMemoryEngine path and records zero paid-provider spend because no external embedding, reranker, or LLM provider is invoked. controller_watts_per_dollar is emitted only when a telemetry artifact supplies positive controller_avg_watts and controller_cost_usd_per_hour values. The cost denominator is normalized to the supplied measurement window, defaulting to one hour.",
       "metrics": [
         "cost_usd_per_1k_queries",
         "controller_watts_per_dollar"
       ],
-      "p95_ms": 1.1265,
+      "p95_ms": 4.296083,
       "provider": "local deterministic",
       "query_count": 9,
       "rows": [
         {
           "billable_input_tokens": 4,
           "billable_output_tokens": 0,
-          "duration_ms": 1.079083,
+          "duration_ms": 1.145833,
           "external_provider_calls": 0,
           "hit_count": 3,
           "query": "resource accounting alpha memory",
@@ -1512,7 +1512,7 @@
         {
           "billable_input_tokens": 4,
           "billable_output_tokens": 0,
-          "duration_ms": 1.026167,
+          "duration_ms": 4.296083,
           "external_provider_calls": 0,
           "hit_count": 3,
           "query": "deterministic local retrieval cost",
@@ -1522,7 +1522,7 @@
         {
           "billable_input_tokens": 4,
           "billable_output_tokens": 0,
-          "duration_ms": 1.006625,
+          "duration_ms": 1.010042,
           "external_provider_calls": 0,
           "hit_count": 3,
           "query": "repeated local queries gamma",
@@ -1532,7 +1532,7 @@
         {
           "billable_input_tokens": 4,
           "billable_output_tokens": 0,
-          "duration_ms": 0.993792,
+          "duration_ms": 0.833292,
           "external_provider_calls": 0,
           "hit_count": 3,
           "query": "resource accounting alpha memory",
@@ -1542,7 +1542,7 @@
         {
           "billable_input_tokens": 4,
           "billable_output_tokens": 0,
-          "duration_ms": 1.065041,
+          "duration_ms": 0.816708,
           "external_provider_calls": 0,
           "hit_count": 3,
           "query": "deterministic local retrieval cost",
@@ -1552,7 +1552,7 @@
         {
           "billable_input_tokens": 4,
           "billable_output_tokens": 0,
-          "duration_ms": 1.1265,
+          "duration_ms": 0.804459,
           "external_provider_calls": 0,
           "hit_count": 3,
           "query": "repeated local queries gamma",
@@ -1562,7 +1562,7 @@
         {
           "billable_input_tokens": 4,
           "billable_output_tokens": 0,
-          "duration_ms": 1.044458,
+          "duration_ms": 0.794833,
           "external_provider_calls": 0,
           "hit_count": 3,
           "query": "resource accounting alpha memory",
@@ -1572,7 +1572,7 @@
         {
           "billable_input_tokens": 4,
           "billable_output_tokens": 0,
-          "duration_ms": 1.00975,
+          "duration_ms": 0.801333,
           "external_provider_calls": 0,
           "hit_count": 3,
           "query": "deterministic local retrieval cost",
@@ -1582,7 +1582,7 @@
         {
           "billable_input_tokens": 4,
           "billable_output_tokens": 0,
-          "duration_ms": 0.998875,
+          "duration_ms": 0.79675,
           "external_provider_calls": 0,
           "hit_count": 3,
           "query": "repeated local queries gamma",
@@ -1712,7 +1712,7 @@
       "dataset_path": "eval/datasets/shadow_workspace_loop.json",
       "definition": "Shadow-only bounded multi-tick workspace service fixture.",
       "expected_cycle_count": 4,
-      "generated_at": "2026-06-27T17:26:57.700103+00:00",
+      "generated_at": "2026-06-27T17:55:47.127430+00:00",
       "metric_note": "Measures useful state progression across an explicitly-started bounded shadow workspace service, plus anti-rumination shutdown. It does not count dreamer candidate yield and makes no phenomenal-consciousness claim.",
       "rumination_probe": {
         "critical_path": false,
@@ -2423,7 +2423,7 @@
       "target_metric": "workspace_retrieval_controller_contract"
     }
   ],
-  "generated_at": "2026-06-27T17:26:57.889650+00:00",
+  "generated_at": "2026-06-27T17:55:47.235538+00:00",
   "headline_slos": {
     "ece": {
       "blueprint_metric": "ECE",
@@ -2695,7 +2695,7 @@
       "status": "measured",
       "target": null,
       "target_op": null,
-      "value": 5.463875
+      "value": 3.614625
     },
     {
       "blueprint_metric": "cost",
@@ -3231,60 +3231,60 @@
       "sha256": "aee46e3a0908f5e44edff596e1206e6aecc10234c1e24af953f623e929a958a6"
     },
     {
-      "generated_at": "2026-06-27T17:26:57.643733+00:00",
+      "generated_at": "2026-06-27T17:55:47.062769+00:00",
       "id": "continual_learning_eval",
       "path": "computed:eval.g0.continual_learning",
       "present": true,
-      "sha256": "0284638fcc99c7816470ce6d3fb1daae63bb7d74e6d212e4bdc0ef86498ee598"
+      "sha256": "d5ea6eece238d25104f84aeae58f466230e5b5e12b7d0fea56e90fde33e228c4"
     },
     {
-      "generated_at": "2026-06-27T17:26:57.645283+00:00",
+      "generated_at": "2026-06-27T17:55:47.066621+00:00",
       "id": "confabulation_eval",
       "path": "computed:eval.g0.confabulation",
       "present": true,
-      "sha256": "bb23d94b72593c0b2eaa397e760ecb3f39b8b2acdcf878305d299950fb60a7d2"
+      "sha256": "72e68222fa1cdebcc584da2f12ed302eaa5fdf486e1eeb2ed1e0d48374817ff2"
     },
     {
-      "generated_at": "2026-06-27T17:26:57.648051+00:00",
+      "generated_at": "2026-06-27T17:55:47.068425+00:00",
       "id": "projection_reality_eval",
       "path": "computed:eval.g0.projection_reality",
       "present": true,
-      "sha256": "352e8a2d0551fc4be2693ce0cb2b460dfcb1965a1ca5c233b49db8367eafc21b"
+      "sha256": "f047dcda2ab676102ff3c646208850ebcff6be99835643df0b63c494bbb48b52"
     },
     {
-      "generated_at": "2026-06-27T17:26:57.681049+00:00",
+      "generated_at": "2026-06-27T17:55:47.104283+00:00",
       "id": "deep_latency_eval",
       "path": "computed:eval.g0.deep_latency",
       "present": true,
-      "sha256": "0dfd048319b3600ccb522278b75c0358fd3a26fa1f7c19d875afa8efd0f437e0"
+      "sha256": "6cdc62fe9c834c04c5f4ef3793e3ec62cbc9e9a3515338b9ef342c218451ae4f"
     },
     {
-      "generated_at": "2026-06-27T17:26:57.691126+00:00",
+      "generated_at": "2026-06-27T17:55:47.116404+00:00",
       "id": "resource_usage_eval",
       "path": "computed:eval.g0.resource_usage",
       "present": true,
-      "sha256": "a41c5bf55d17def42e71a7f69ded570e0cd20b3456a5c2d55912735e70f13702"
+      "sha256": "a22752243b1084773f5caa48356168aea419f9d032b9f788dee6bc2605544bb1"
     },
     {
-      "generated_at": "2026-06-27T17:26:57.692090+00:00",
+      "generated_at": "2026-06-27T17:55:47.117761+00:00",
       "id": "dreamer_eval",
       "path": "computed:eval.g0.dreamer",
       "present": true,
-      "sha256": "5809d67daecbd839ad8bed26e5043909301a985cf4d2ee84d5ad08c6f7f565a6"
+      "sha256": "10f7371e79175b217fde4e3a5fa60efe6d39de7a2c045979ce0b83b0987b2de3"
     },
     {
-      "generated_at": "2026-06-27T17:26:57.700103+00:00",
+      "generated_at": "2026-06-27T17:55:47.127430+00:00",
       "id": "shadow_workspace_eval",
       "path": "computed:eval.g0.shadow_workspace",
       "present": true,
-      "sha256": "69e35215375deb787be9c993a1cd4c66d38b703004929e0b0bac94b5cc469529"
+      "sha256": "1dda615ac50eabdb9766a18318e280a1a1ad3d7449607612d4c61764d8669913"
     },
     {
-      "generated_at": "2026-06-27T17:26:57.707203+00:00",
+      "generated_at": "2026-06-27T17:55:47.144075+00:00",
       "id": "consciousness_eval",
       "path": "computed:eval.g0.consciousness",
       "present": true,
-      "sha256": "994feca9f6e570844f60c0b84a3780e6f28bb4e18f3bbab313330453a903388e"
+      "sha256": "7d79d98ebf3628f24d16a6db3bedfa83c60f3becaa4ea98099012beee24c41b6"
     }
   ]
 }

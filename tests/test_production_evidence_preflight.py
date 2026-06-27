@@ -2627,6 +2627,20 @@ exec "$REAL_PYTHON" "$@"
     assert stdout == summary
     assert summary["bundle_manifest"] == str(out_root / "bundle-manifest.json")
     assert summary["bundle_fingerprint"].startswith("sha256:")
+    assert summary["offline_verify"] == {
+        "bundle_dir": str(out_root),
+        "expected_bundle_fingerprint": summary["bundle_fingerprint"],
+        "argv": [
+            "python",
+            "-m",
+            "mnemosyne.cli",
+            "production-evidence-verify",
+            str(out_root),
+            "--expected-bundle-fingerprint",
+            summary["bundle_fingerprint"],
+        ],
+        "note": "Custody review only; does not rerun production checks or flip audit rows.",
+    }
     assert bundle_manifest["schema"] == "mnemosyne.production-evidence-bundle.v1"
     assert bundle_manifest["artifact_count"] == len(bundle_manifest["files"])
     assert bundle_manifest["fingerprint"] == summary["bundle_fingerprint"]

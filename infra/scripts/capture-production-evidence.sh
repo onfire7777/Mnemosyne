@@ -1112,6 +1112,20 @@ summary = {
     "release_audit_fingerprint": audit.get("fingerprint"),
     "release_audit_findings": audit.get("findings", []),
     "completed_at": __import__("datetime").datetime.now(__import__("datetime").UTC).isoformat(),
+    "offline_verify": {
+        "bundle_dir": str(out_root),
+        "expected_bundle_fingerprint": bundle_fingerprint,
+        "argv": [
+            "python",
+            "-m",
+            "mnemosyne.cli",
+            "production-evidence-verify",
+            str(out_root),
+            "--expected-bundle-fingerprint",
+            bundle_fingerprint,
+        ],
+        "note": "Custody review only; does not rerun production checks or flip audit rows.",
+    },
 }
 (out_root / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
 print(json.dumps(summary, indent=2))

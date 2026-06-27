@@ -363,7 +363,7 @@ def build_report(
     measured = sum(1 for metric in metrics if metric["status"] == "measured")
     missing = len(metrics) - measured
     intentionally_missing = _intentionally_missing_metrics(metrics)
-    source_commit = pinned_commit or _git(repo_root, "rev-parse", "HEAD")
+    source_commit = _git(repo_root, "rev-parse", "HEAD")
     baseline_commit = pinned_commit or _baseline_pinned_commit(repo_root, baseline_name) or source_commit
     tag_target = _git(repo_root, "rev-list", "-n", "1", baseline_name, check=False)
     dataset_manifests = [_dataset_manifest(repo_root, rel) for rel in DATASET_PATHS]
@@ -1251,7 +1251,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--repo-root", type=Path, default=Path(__file__).resolve().parents[2])
     parser.add_argument("--out-dir", type=Path, default=Path("eval/g0/reports"))
     parser.add_argument("--baseline-name", default="baseline-0")
-    parser.add_argument("--pinned-commit", help="override the git HEAD recorded as the baseline commit")
+    parser.add_argument("--pinned-commit", help="override the baseline pinned commit recorded in the report")
     parser.add_argument(
         "--controller-telemetry",
         type=Path,

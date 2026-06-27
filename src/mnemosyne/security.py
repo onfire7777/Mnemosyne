@@ -933,20 +933,21 @@ class SecurityPolicy:
         # write path even if it carries an elevated role/trust claim.
         if is_write_tainted(source_capability_tags):
             return CapabilityDecision(False, "tainted data carries no write authority (data is not instruction)", role, source_trust_tier, operation)
+        normalized_sink = str(target_sink).strip().lower() if target_sink is not None else None
         if operation in self.consolidator_only_ops and role not in {"consolidator", "operator"}:
             return CapabilityDecision(False, "operation requires consolidator write authority", "consolidator", 0, operation)
-        if target_sink in {"policy", "system_prompt", "safety_rail"}:
+        if normalized_sink in INSTRUCTION_SINKS:
             if role != "operator" or not meets_trust(source_trust_tier, self.min_policy_write_trust):
                 return CapabilityDecision(False, "policy and safety rails require operator authority", "operator", self.min_policy_write_trust, operation)
-        if target_sink == "preference" and not meets_trust(source_trust_tier, self.min_preference_write_trust):
+        if normalized_sink == "preference" and not meets_trust(source_trust_tier, self.min_preference_write_trust):
             return CapabilityDecision(False, "preference writes require user-authored or stronger evidence", "agent", self.min_preference_write_trust, operation)
-        if target_sink == "belief" and not meets_trust(source_trust_tier, self.min_belief_write_trust):
+        if normalized_sink == "belief" and not meets_trust(source_trust_tier, self.min_belief_write_trust):
             return CapabilityDecision(False, "belief writes require normal-or-stronger source trust", "agent", self.min_belief_write_trust, operation)
-        if target_sink == "belief_correction" and not meets_trust(source_trust_tier, self.min_correction_write_trust):
+        if normalized_sink == "belief_correction" and not meets_trust(source_trust_tier, self.min_correction_write_trust):
             return CapabilityDecision(False, "belief corrections require user-authored or stronger evidence", "agent", self.min_correction_write_trust, operation)
-        if target_sink == "branch" and not meets_trust(source_trust_tier, self.min_branch_write_trust):
+        if normalized_sink == "branch" and not meets_trust(source_trust_tier, self.min_branch_write_trust):
             return CapabilityDecision(False, "branch writes require normal-or-stronger source trust", "agent", self.min_branch_write_trust, operation)
-        if target_sink == "branch_promotion" and (role not in {"consolidator", "operator"} or not meets_trust(source_trust_tier, self.min_branch_promotion_trust)):
+        if normalized_sink == "branch_promotion" and (role not in {"consolidator", "operator"} or not meets_trust(source_trust_tier, self.min_branch_promotion_trust)):
             return CapabilityDecision(False, "branch promotion requires operator/consolidator authority and user-authored trust", "consolidator", self.min_branch_promotion_trust, operation)
         if destructive and (role not in {"consolidator", "operator"} or not meets_trust(source_trust_tier, self.min_destructive_trust)):
             return CapabilityDecision(False, "destructive writes require mediated high-trust authority", "consolidator", self.min_destructive_trust, operation)
