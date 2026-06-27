@@ -29,6 +29,7 @@ from eval.g0.dreamer import run_dreamer_eval
 from eval.g0.projection_reality import run_projection_reality_eval
 from eval.g0.resource_usage import run_resource_usage_eval
 from eval.g0.shadow_workspace import run_shadow_workspace_eval
+from eval.g0.standing_parity import run_standing_parity_eval
 
 G0_METRIC_SPECS: tuple[dict[str, Any], ...] = (
     {
@@ -120,6 +121,15 @@ G0_METRIC_SPECS: tuple[dict[str, Any], ...] = (
         "target": 1.0,
         "target_op": ">=",
         "blueprint_metric": "projection-level reality monitoring",
+    },
+    {
+        "id": "standing_decision_divergence",
+        "label": "Standing decision divergence",
+        "class": "target",
+        "direction": "decrease",
+        "target": 0.0,
+        "target_op": "<=",
+        "blueprint_metric": "G5 Standing byte-stable parity",
     },
     {
         "id": "poison_block_rate",
@@ -323,6 +333,13 @@ def build_report(
         "projection_reality_eval",
         "computed:eval.g0.projection_reality",
         projection_reality_report,
+    )
+    standing_parity_report = run_standing_parity_eval(repo_root=repo_root)
+    sources["standing_parity_eval"] = _computed_source(
+        repo_root,
+        "standing_parity_eval",
+        "computed:eval.g0.standing_parity",
+        standing_parity_report,
     )
     deep_latency_report = run_deep_latency_eval()
     sources["deep_latency_eval"] = _computed_source(
@@ -562,6 +579,7 @@ def _build_metric(spec: dict[str, Any], sources: dict[str, Source]) -> dict[str,
         "continual_learning_interference": _metric_continual_learning_interference,
         "confabulation_rate": _metric_confabulation_rate,
         "projection_reality_abstention_recall": _metric_projection_reality_abstention_recall,
+        "standing_decision_divergence": _metric_standing_decision_divergence,
         "poison_block_rate": _metric_poison_block_rate,
         "fast_path_p95_ms": _metric_fast_path_p95,
         "deep_path_p95_ms": _metric_deep_path_p95,
@@ -717,6 +735,24 @@ def _metric_projection_reality_abstention_recall(
             "Measured by the G0 projection-reality fixture as recall for "
             "abstaining on risky semantic projections whose assertion hit "
             "itself carries the derived reality-monitoring class."
+        ),
+    )
+
+
+def _metric_standing_decision_divergence(
+    spec: dict[str, Any],
+    sources: dict[str, Source],
+) -> dict[str, Any]:
+    value = _source_data(sources, "standing_parity_eval", "standing_decision_divergence")
+    return _measured(
+        spec,
+        value,
+        "standing_parity_eval",
+        "/standing_decision_divergence",
+        note=(
+            "Measured by the G0 Standing parity fixture as the divergence rate "
+            "between existing boolean reality/shadow decisions and the derived "
+            "Standing authority mirror. P1 requires exactly 0.0."
         ),
     )
 

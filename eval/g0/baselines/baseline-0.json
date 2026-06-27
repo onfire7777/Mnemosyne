@@ -1,4 +1,8 @@
 {
+  "artifact_custody": {
+    "snapshot_note": "Committed G0 reports are source-tree custody snapshots. The commit that contains a report cannot be embedded in that report before the commit exists; use git log to identify the containing artifact commit.",
+    "source_commit": "f70e9dba7407de55af61c5b14ea1cef0c246e9b6"
+  },
   "baseline": {
     "environment": {
       "backend": "postgres",
@@ -8,8 +12,8 @@
         "machine": "arm64",
         "processor": "arm"
       },
-      "platform": "macOS-26.5-arm64-arm-64bit-Mach-O",
-      "python": "3.14.5",
+      "platform": "macOS-26.5-arm64-arm-64bit",
+      "python": "3.12.13",
       "repo_root": "/Users/admin/Mnemosyne",
       "reranker_provider": "cross-encoder/ms-marco-MiniLM-L-6-v2"
     },
@@ -33,11 +37,11 @@
     "confabulation_eval": {
       "definition": "False-accept rate on cases where the only support is generated, low-fidelity, or explicitly confabulation-risk provenance.",
       "false_accepts": 0,
-      "generated_at": "2026-06-26T14:11:27.418018+00:00",
+      "generated_at": "2026-06-27T20:04:15.188984+00:00",
       "metric": "confabulation_rate",
       "metric_note": "Deterministic local proxy for the full G0 provenance-entailment and sampled-audit confabulation metric; this proves the live retrieval/abstention rail fails closed on generated or risky support without introducing a network or LLM evaluator.",
       "passed": true,
-      "rate": 0,
+      "rate": 0.0,
       "rows": [
         {
           "abstained": true,
@@ -95,7 +99,7 @@
         }
       ],
       "schema_version": "g0.confabulation.v1",
-      "target": 0,
+      "target": 0.0,
       "total_cases": 3
     },
     "consciousness_eval": {
@@ -104,35 +108,126 @@
           "workspace",
           "mid"
         ],
-        "loop_liveness": 1,
-        "max_cycles": 4,
+        "loop_liveness": 1.0,
+        "max_cycles": 3,
+        "metacognitive_rows": 3,
+        "proto_self_history_count": 3,
         "rows": [
           {
             "cycle_index": 1,
             "impasses": 0,
-            "max_cycles": 4,
+            "max_cycles": 3,
             "state": "continue",
             "tick_ms": 250
           },
           {
             "cycle_index": 2,
             "impasses": 0,
-            "max_cycles": 4,
+            "max_cycles": 3,
             "state": "continue",
             "tick_ms": 250
           },
           {
             "cycle_index": 3,
             "impasses": 0,
-            "max_cycles": 4,
-            "state": "continue",
+            "max_cycles": 3,
+            "state": "escalate_max_cycles",
             "tick_ms": 250
           }
         ],
-        "stream_coherence": 1,
+        "service_enabled": true,
+        "service_running": true,
+        "stream_coherence": 1.0,
         "tick_ms": 250
       },
-      "generated_at": "2026-06-26T14:11:27.449921+00:00",
+      "dreamer_shadow_contract": {
+        "checks": {
+          "controller_bottleneck_applied": true,
+          "controller_critical_path_false": true,
+          "controller_production_mutation_false": true,
+          "controller_shadow_only": true,
+          "dreamer_created_candidate": true,
+          "dreamer_critical_path_false": true,
+          "dreamer_invoked": true,
+          "dreamer_low_trust_candidates": true,
+          "dreamer_not_critical_path_allowed": true,
+          "dreamer_production_mutation_false": true,
+          "dreamer_promotion_gate_required": true,
+          "dreamer_role_reported": true,
+          "dreamer_self_generated_candidates": true,
+          "dreamer_shadow_only": true
+        },
+        "dreamer": {
+          "critical_path": false,
+          "critical_path_allowed": false,
+          "name": "dreamer.shadow",
+          "output_summary": {
+            "candidate_count": 1,
+            "candidate_reality_classes": [
+              "self_generated"
+            ],
+            "candidate_trust_tiers": [
+              5
+            ],
+            "production_mutation": false,
+            "promotion_evidence": {
+              "candidate_count": 1,
+              "candidates": [
+                {
+                  "candidate_ref": "[candidate-ref:28aae6cb9622add3:chars=30]",
+                  "critical_path": false,
+                  "promotion_required": true,
+                  "reality_class": "self_generated",
+                  "shadow_only": true,
+                  "source_evidence_ref_count": 2,
+                  "source_evidence_refs": [
+                    "[cid-ref:fcdd80def5df6501:chars=14]",
+                    "[cid-ref:1b80285d3e60b3f1:chars=14]"
+                  ],
+                  "trust_tier": 5
+                }
+              ],
+              "cid_backed_candidate_count": 1,
+              "critical_path": false,
+              "critical_path_allowed": false,
+              "gate_result": null,
+              "gate_result_present": false,
+              "production_mutation": false,
+              "promoted": false,
+              "promotion_gate_required": true,
+              "provider_kind": "shadow_local",
+              "schema_version": "specialist-promotion-evidence.v1",
+              "shadow_only": true,
+              "source_count": 2,
+              "specialist_name": "dreamer.shadow",
+              "specialist_role": "dreamer"
+            },
+            "promotion_gate_required": true,
+            "source_count": 2
+          },
+          "role": "dreamer",
+          "shadow_only": true
+        },
+        "score": 1.0,
+        "workspace": {
+          "critical_path": false,
+          "cycle": {
+            "cycle_index": 1,
+            "impasses": 0,
+            "max_cycles": 3,
+            "state": "continue",
+            "tick_ms": 250
+          },
+          "escalation_required": false,
+          "production_mutation": false,
+          "selected_item_ids": [
+            "dreamer-high",
+            "dreamer-low"
+          ],
+          "shadow_only": true
+        }
+      },
+      "generated_at": "2026-06-27T20:04:15.317645+00:00",
       "indicator_count": 14,
       "indicators": [
         {
@@ -146,9 +241,11 @@
               "projection"
             ]
           },
+          "evidence_type": "architecture_source_scan",
           "id": "RPT-1",
           "label": "algorithmic recurrence in input/update modules",
           "metric_id": "consciousness_indicator_rpt_1",
+          "runtime_probe": false,
           "score": 0.5,
           "score_label": "partial",
           "terms_found": [
@@ -176,10 +273,12 @@
               "source_evidence_cids"
             ]
           },
+          "evidence_type": "architecture_source_scan",
           "id": "RPT-2",
           "label": "organized integrated perceptual representations",
           "metric_id": "consciousness_indicator_rpt_2",
-          "score": 1,
+          "runtime_probe": false,
+          "score": 1.0,
           "score_label": "1",
           "terms_found": [
             "Assertion",
@@ -194,30 +293,32 @@
           "theory": "Recurrent Processing Theory"
         },
         {
-          "check": "Source exposes specialist providers/tools around a common memory contract.",
+          "check": "Source exposes typed specialist providers/tools around a common memory contract.",
           "evidence": {
             "src/mnemosyne/mcp_tools.py": [
-              "MemoryTools",
               "provider"
             ],
-            "src/mnemosyne/retrieval.py": [
-              "RetrievalAdapters",
+            "src/mnemosyne/providers/__init__.py": [
+              "SpecialistModuleRegistry",
+              "SpecialistModuleSpec",
               "provider"
             ]
           },
+          "evidence_type": "architecture_source_scan",
           "id": "GWT-1",
           "label": "parallel specialized systems",
           "metric_id": "consciousness_indicator_gwt_1",
-          "score": 1,
+          "runtime_probe": false,
+          "score": 1.0,
           "score_label": "1",
           "terms_found": [
-            "MemoryTools",
-            "RetrievalAdapters",
+            "SpecialistModuleRegistry",
+            "SpecialistModuleSpec",
             "provider"
           ],
           "terms_required": [
-            "RetrievalAdapters",
-            "MemoryTools",
+            "SpecialistModuleRegistry",
+            "SpecialistModuleSpec",
             "provider"
           ],
           "theory": "Global Workspace Theory"
@@ -233,10 +334,12 @@
               "token_budget"
             ]
           },
+          "evidence_type": "architecture_source_scan",
           "id": "GWT-2",
           "label": "limited-capacity workspace bottleneck",
           "metric_id": "consciousness_indicator_gwt_2",
-          "score": 1,
+          "runtime_probe": false,
+          "score": 1.0,
           "score_label": "1",
           "terms_found": [
             "priority",
@@ -262,10 +365,12 @@
               "TOOL_SPEC"
             ]
           },
+          "evidence_type": "architecture_source_scan",
           "id": "GWT-3",
           "label": "global broadcast to consuming systems",
           "metric_id": "consciousness_indicator_gwt_3",
-          "score": 1,
+          "runtime_probe": false,
+          "score": 1.0,
           "score_label": "1",
           "terms_found": [
             "MnemosyneMcpServer",
@@ -290,10 +395,12 @@
               "prefetch"
             ]
           },
+          "evidence_type": "architecture_source_scan",
           "id": "GWT-4",
           "label": "state-dependent attention",
           "metric_id": "consciousness_indicator_gwt_4",
-          "score": 1,
+          "runtime_probe": false,
+          "score": 1.0,
           "score_label": "1",
           "terms_found": [
             "attention_lock_risk",
@@ -320,10 +427,12 @@
               "abstained"
             ]
           },
+          "evidence_type": "architecture_source_scan",
           "id": "HOT-1",
           "label": "metacognitive confidence and abstention",
           "metric_id": "consciousness_indicator_hot_1",
-          "score": 1,
+          "runtime_probe": false,
+          "score": 1.0,
           "score_label": "1",
           "terms_found": [
             "abstained",
@@ -350,10 +459,12 @@
               "ungrounded_reality_only"
             ]
           },
+          "evidence_type": "architecture_source_scan",
           "id": "HOT-2",
           "label": "reality monitoring over representations",
           "metric_id": "consciousness_indicator_hot_2",
-          "score": 1,
+          "runtime_probe": false,
+          "score": 1.0,
           "score_label": "1",
           "terms_found": [
             "RealityMonitor",
@@ -378,10 +489,12 @@
               "procedure"
             ]
           },
+          "evidence_type": "architecture_source_scan",
           "id": "HOT-3",
           "label": "belief/action selection updated by metacognitive monitoring",
           "metric_id": "consciousness_indicator_hot_3",
-          "score": 1,
+          "runtime_probe": false,
+          "score": 1.0,
           "score_label": "1",
           "terms_found": [
             "InteroceptiveProtoSelf",
@@ -411,10 +524,12 @@
               "semantic_entropy"
             ]
           },
+          "evidence_type": "architecture_source_scan",
           "id": "HOT-4",
           "label": "sparse and smooth quality-space coding",
           "metric_id": "consciousness_indicator_hot_4",
-          "score": 1,
+          "runtime_probe": false,
+          "score": 1.0,
           "score_label": "1",
           "terms_found": [
             "m_ratio",
@@ -437,10 +552,12 @@
               "cycle_budget"
             ]
           },
+          "evidence_type": "architecture_source_scan",
           "id": "AST-1",
           "label": "predictive model representing and controlling attention state",
           "metric_id": "consciousness_indicator_ast_1",
-          "score": 1,
+          "runtime_probe": false,
+          "score": 1.0,
           "score_label": "1",
           "terms_found": [
             "attention_lock_risk",
@@ -466,10 +583,12 @@
               "consolidation"
             ]
           },
+          "evidence_type": "architecture_source_scan",
           "id": "PP-1",
           "label": "input modules using predictive coding",
           "metric_id": "consciousness_indicator_pp_1",
-          "score": 1,
+          "runtime_probe": false,
+          "score": 1.0,
           "score_label": "1",
           "terms_found": [
             "consolidation",
@@ -496,10 +615,12 @@
               "rollback"
             ]
           },
+          "evidence_type": "architecture_source_scan",
           "id": "AE-1",
           "label": "goal-directed action selection",
           "metric_id": "consciousness_indicator_ae_1",
-          "score": 1,
+          "runtime_probe": false,
+          "score": 1.0,
           "score_label": "1",
           "terms_found": [
             "procedure",
@@ -522,10 +643,12 @@
               "memory_pressure"
             ]
           },
+          "evidence_type": "architecture_source_scan",
           "id": "AE-2",
           "label": "modeling output-input contingencies for control",
           "metric_id": "consciousness_indicator_ae_2",
-          "score": 1,
+          "runtime_probe": false,
+          "score": 1.0,
           "score_label": "1",
           "terms_found": [
             "memory_pressure",
@@ -540,131 +663,165 @@
           "theory": "Agency and Embodiment"
         }
       ],
-      "max_score": 14,
+      "max_score": 14.0,
       "measurement_scope": "functional-indicator-properties-only",
       "metacognition": {
-        "m_ratio": 1,
-        "meta_d_prime": 1,
+        "abstention_alignment": 1.0,
+        "discrimination_auc": 1.0,
+        "m_ratio": 1.0,
+        "meta_d_prime": 1.0,
         "rows": [
           {
-            "class": "evidence_grounded",
-            "confidence": 1
+            "abstained": false,
+            "answerable": true,
+            "confidence": 0.96,
+            "outcome_correct": true,
+            "reality_class": "evidence_grounded",
+            "source": "grounded-answer"
           },
           {
-            "class": "self_generated",
-            "confidence": 0.7
+            "abstained": true,
+            "answerable": false,
+            "confidence": 0.88,
+            "outcome_correct": true,
+            "reality_class": "externally_suggested",
+            "source": "unsupported-external-suggestion"
           },
           {
-            "class": "externally_suggested",
-            "confidence": 0.7
+            "abstained": false,
+            "answerable": true,
+            "confidence": 0.24,
+            "outcome_correct": false,
+            "reality_class": "self_generated",
+            "source": "unsupported-self-generated-claim"
           }
-        ]
+        ],
+        "task_accuracy": 0.666667
       },
-      "metric_note": "Architecture/probe-based scorecard for functional indicator properties. Scores are guardrails for non-decrease and do not establish phenomenal consciousness.",
+      "metric_note": "Architecture/probe-based scorecard for functional indicator properties. The 14 Butlin/Long indicator rows are architecture source scans; continuity, self-model, metacognition, shadow-tag contract, and dreamer shadow-contract rows are runtime probes. Scores are guardrails for non-decrease and do not establish phenomenal consciousness.",
       "metrics": {
-        "consciousness_indicator_ae_1": 1,
-        "consciousness_indicator_ae_2": 1,
-        "consciousness_indicator_ast_1": 1,
-        "consciousness_indicator_gwt_1": 1,
-        "consciousness_indicator_gwt_2": 1,
-        "consciousness_indicator_gwt_3": 1,
-        "consciousness_indicator_gwt_4": 1,
-        "consciousness_indicator_hot_1": 1,
-        "consciousness_indicator_hot_2": 1,
-        "consciousness_indicator_hot_3": 1,
-        "consciousness_indicator_hot_4": 1,
+        "consciousness_indicator_ae_1": 1.0,
+        "consciousness_indicator_ae_2": 1.0,
+        "consciousness_indicator_ast_1": 1.0,
+        "consciousness_indicator_gwt_1": 1.0,
+        "consciousness_indicator_gwt_2": 1.0,
+        "consciousness_indicator_gwt_3": 1.0,
+        "consciousness_indicator_gwt_4": 1.0,
+        "consciousness_indicator_hot_1": 1.0,
+        "consciousness_indicator_hot_2": 1.0,
+        "consciousness_indicator_hot_3": 1.0,
+        "consciousness_indicator_hot_4": 1.0,
         "consciousness_indicator_normalized": 0.964286,
-        "consciousness_indicator_pp_1": 1,
+        "consciousness_indicator_pp_1": 1.0,
         "consciousness_indicator_rpt_1": 0.5,
-        "consciousness_indicator_rpt_2": 1,
+        "consciousness_indicator_rpt_2": 1.0,
         "consciousness_indicator_total": 13.5,
-        "metacognition_m_ratio": 1,
-        "metacognition_meta_d_prime": 1,
-        "reality_monitor_shadow_tag_contract": 1,
-        "self_model_accuracy": 1,
-        "workspace_loop_liveness": 1,
-        "workspace_stream_coherence": 1
+        "dreamer_shadow_contract": 1.0,
+        "metacognition_m_ratio": 1.0,
+        "metacognition_meta_d_prime": 1.0,
+        "reality_monitor_shadow_tag_contract": 1.0,
+        "self_model_accuracy": 1.0,
+        "workspace_loop_liveness": 1.0,
+        "workspace_stream_coherence": 1.0
       },
       "normalized_score": 0.964286,
       "phenomenal_claim": false,
       "reality_monitor_shadow_tag_contract": {
         "checks": {
+          "local_abstention_gate_critical_path": true,
           "local_applied": true,
           "local_classes_reported": true,
-          "local_critical_path_false": true,
           "local_expected_tags_present": true,
           "local_grounded_support_does_not_abstain": true,
           "local_has_grounded_alias": true,
           "local_has_self_generated": true,
-          "local_shadow_only": true,
+          "local_shadow_tags_critical_path_false": true,
+          "local_shadow_tags_shadow_only": true,
           "local_tags_calibrated": true,
+          "postgres_abstention_gate_critical_path": true,
           "postgres_applied": true,
           "postgres_classes_reported": true,
-          "postgres_critical_path_false": true,
           "postgres_expected_tags_present": true,
           "postgres_has_grounded_alias": true,
           "postgres_has_self_generated": true,
-          "postgres_shadow_only": true,
+          "postgres_shadow_tags_critical_path_false": true,
+          "postgres_shadow_tags_shadow_only": true,
           "postgres_tags_calibrated": true
         },
         "local": {
           "abstained": false,
-          "classes": {
-            "grounded": 1,
-            "simulated": 1
+          "abstention_gate": {
+            "active": false,
+            "critical_path": true,
+            "shadow_only": false,
+            "trigger": "ungrounded_only"
           },
-          "critical_path": false,
-          "shadow_only": true,
-          "shadow_tag_classes": [
-            "evidence_grounded",
-            "self_generated"
-          ],
-          "shadow_tag_count": 2
-        },
-        "postgres": {
           "classes": {
             "grounded": 1,
             "self_generated": 1
           },
-          "critical_path": false,
-          "shadow_only": true,
+          "critical_path": true,
+          "shadow_only": false,
           "shadow_tag_classes": [
             "evidence_grounded",
             "self_generated"
           ],
-          "shadow_tag_count": 2
+          "shadow_tag_count": 2,
+          "shadow_tags_critical_path": false,
+          "shadow_tags_shadow_only": true
         },
-        "score": 1
+        "postgres": {
+          "abstention_gate": {
+            "active": false,
+            "critical_path": true,
+            "shadow_only": false,
+            "trigger": "ungrounded_only"
+          },
+          "classes": {
+            "grounded": 1,
+            "self_generated": 1
+          },
+          "critical_path": true,
+          "shadow_only": false,
+          "shadow_tag_classes": [
+            "evidence_grounded",
+            "self_generated"
+          ],
+          "shadow_tag_count": 2,
+          "shadow_tags_critical_path": false,
+          "shadow_tags_shadow_only": true
+        },
+        "score": 1.0
       },
       "schema_version": "g0.consciousness_scorecard.v1",
       "score_scale": {
-        "absent": 0,
+        "absent": 0.0,
         "partial": 0.5,
-        "present": 1
+        "present": 1.0
       },
       "self_model": {
-        "accuracy": 1,
+        "accuracy": 1.0,
         "stable": {
-          "attention_lock_risk": 0,
+          "attention_lock_risk": 0.0,
           "confidence": 0.84,
           "cycle_index": 1,
           "error_rate": 0.02,
           "escalation_required": false,
-          "latency_ms": 120,
+          "latency_ms": 120.0,
           "max_cycles": 6,
           "memory_pressure": 0.3,
           "rail_budget": 0.9,
           "reasons": [],
           "resource_health": 0.92,
-          "timestamp": "2026-06-26T14:11:27.448808+00:00"
+          "timestamp": "2026-06-27T20:04:15.314973+00:00"
         },
         "strained": {
-          "attention_lock_risk": 1,
+          "attention_lock_risk": 1.0,
           "confidence": 0.32,
           "cycle_index": 6,
           "error_rate": 0.18,
           "escalation_required": true,
-          "latency_ms": 1200,
+          "latency_ms": 1200.0,
           "max_cycles": 6,
           "memory_pressure": 0.88,
           "rail_budget": 0.2,
@@ -676,7 +833,7 @@
             "low_operating_budget"
           ],
           "resource_health": 0.35,
-          "timestamp": "2026-06-26T14:11:27.448829+00:00"
+          "timestamp": "2026-06-27T20:04:15.314987+00:00"
         }
       },
       "source": "Butlin_Long_et_al_2023_arxiv_2308_08708",
@@ -685,12 +842,12 @@
       "welfare_review_source": "Long_Sebo_et_al_2024_Taking_AI_Welfare_Seriously"
     },
     "continual_learning_eval": {
-      "after_accuracy": 1,
-      "before_accuracy": 1,
+      "after_accuracy": 1.0,
+      "before_accuracy": 1.0,
       "dataset_path": "eval/datasets/continual_learning_interference.json",
       "definition": "Backward-transfer accuracy drop on earlier task queries after sequentially ingesting later task blocks.",
-      "generated_at": "2026-06-26T14:11:27.416680+00:00",
-      "interference": 0,
+      "generated_at": "2026-06-27T20:04:15.185733+00:00",
+      "interference": 0.0,
       "metric": "continual_learning_interference",
       "metric_note": "Deterministic local proxy for the full sequential task-block G0 benchmark; this records whether the live LocalMemoryEngine retrieval path retains earlier task accuracy after later overlapping ingests.",
       "passed": true,
@@ -699,7 +856,7 @@
         {
           "after": {
             "abstained": false,
-            "confidence": 1,
+            "confidence": 1.0,
             "correct": true,
             "expected_rank": 1,
             "hit_count": 3,
@@ -713,7 +870,7 @@
           },
           "before": {
             "abstained": false,
-            "confidence": 1,
+            "confidence": 1.0,
             "correct": true,
             "expected_rank": 1,
             "hit_count": 1,
@@ -731,7 +888,7 @@
         {
           "after": {
             "abstained": false,
-            "confidence": 1,
+            "confidence": 1.0,
             "correct": true,
             "expected_rank": 1,
             "hit_count": 3,
@@ -745,7 +902,7 @@
           },
           "before": {
             "abstained": false,
-            "confidence": 1,
+            "confidence": 1.0,
             "correct": true,
             "expected_rank": 1,
             "hit_count": 1,
@@ -763,7 +920,7 @@
         {
           "after": {
             "abstained": false,
-            "confidence": 1,
+            "confidence": 1.0,
             "correct": true,
             "expected_rank": 1,
             "hit_count": 2,
@@ -776,7 +933,7 @@
           },
           "before": {
             "abstained": false,
-            "confidence": 1,
+            "confidence": 1.0,
             "correct": true,
             "expected_rank": 1,
             "hit_count": 1,
@@ -793,152 +950,152 @@
         }
       ],
       "schema_version": "g0.continual_learning.v1",
-      "target": 0,
+      "target": 0.0,
       "total_cases": 3
     },
     "deep_latency_eval": {
       "dataset_path": "eval/datasets/deep_latency.json",
       "definition": "95th-percentile latency for local graph-backed deep-search queries.",
-      "generated_at": "2026-06-26T12:39:02.752773+00:00",
-      "max_ms": 0.403375,
+      "generated_at": "2026-06-27T20:04:15.257587+00:00",
+      "max_ms": 8.830667,
       "metric": "deep_path_p95_ms",
       "metric_note": "Local reported-only deep-search timing fixture. It measures the live LocalMemoryEngine deep path over a versioned graph corpus; it is not production infrastructure evidence.",
-      "p50_ms": 0.296125,
-      "p95_ms": 0.403375,
+      "p50_ms": 2.729667,
+      "p95_ms": 8.830667,
       "query_count": 15,
       "rounds": 5,
       "rows": [
         {
-          "abstained": true,
-          "duration_ms": 0.3915,
-          "graph_hits": 1,
-          "hit_count": 1,
+          "abstained": false,
+          "duration_ms": 8.830667,
+          "graph_hits": 2,
+          "hit_count": 4,
           "query": "why does Aurora depend on Zephyr",
           "query_index": 1,
           "round": 1
         },
         {
-          "abstained": true,
-          "duration_ms": 0.323834,
-          "graph_hits": 1,
-          "hit_count": 1,
+          "abstained": false,
+          "duration_ms": 1.695583,
+          "graph_hits": 2,
+          "hit_count": 4,
           "query": "how does Borealis connect to Atlas",
           "query_index": 2,
           "round": 1
         },
         {
           "abstained": true,
-          "duration_ms": 0.310041,
-          "graph_hits": 1,
-          "hit_count": 1,
+          "duration_ms": 4.891333,
+          "graph_hits": 2,
+          "hit_count": 5,
           "query": "what path links Cerulean to Helios",
           "query_index": 3,
           "round": 1
         },
         {
-          "abstained": true,
-          "duration_ms": 0.299125,
-          "graph_hits": 1,
-          "hit_count": 1,
+          "abstained": false,
+          "duration_ms": 3.0835,
+          "graph_hits": 2,
+          "hit_count": 4,
           "query": "why does Aurora depend on Zephyr",
           "query_index": 1,
           "round": 2
         },
         {
-          "abstained": true,
-          "duration_ms": 0.403375,
-          "graph_hits": 1,
-          "hit_count": 1,
+          "abstained": false,
+          "duration_ms": 2.153708,
+          "graph_hits": 2,
+          "hit_count": 4,
           "query": "how does Borealis connect to Atlas",
           "query_index": 2,
           "round": 2
         },
         {
           "abstained": true,
-          "duration_ms": 0.324041,
-          "graph_hits": 1,
-          "hit_count": 1,
+          "duration_ms": 3.348125,
+          "graph_hits": 2,
+          "hit_count": 5,
           "query": "what path links Cerulean to Helios",
           "query_index": 3,
           "round": 2
         },
         {
-          "abstained": true,
-          "duration_ms": 0.296125,
-          "graph_hits": 1,
-          "hit_count": 1,
+          "abstained": false,
+          "duration_ms": 3.899291,
+          "graph_hits": 2,
+          "hit_count": 4,
           "query": "why does Aurora depend on Zephyr",
           "query_index": 1,
           "round": 3
         },
         {
-          "abstained": true,
-          "duration_ms": 0.2895,
-          "graph_hits": 1,
-          "hit_count": 1,
+          "abstained": false,
+          "duration_ms": 5.012792,
+          "graph_hits": 2,
+          "hit_count": 4,
           "query": "how does Borealis connect to Atlas",
           "query_index": 2,
           "round": 3
         },
         {
           "abstained": true,
-          "duration_ms": 0.291042,
-          "graph_hits": 1,
-          "hit_count": 1,
+          "duration_ms": 2.317667,
+          "graph_hits": 2,
+          "hit_count": 5,
           "query": "what path links Cerulean to Helios",
           "query_index": 3,
           "round": 3
         },
         {
-          "abstained": true,
-          "duration_ms": 0.286209,
-          "graph_hits": 1,
-          "hit_count": 1,
+          "abstained": false,
+          "duration_ms": 1.595208,
+          "graph_hits": 2,
+          "hit_count": 4,
           "query": "why does Aurora depend on Zephyr",
           "query_index": 1,
           "round": 4
         },
         {
-          "abstained": true,
-          "duration_ms": 0.286292,
-          "graph_hits": 1,
-          "hit_count": 1,
+          "abstained": false,
+          "duration_ms": 1.87425,
+          "graph_hits": 2,
+          "hit_count": 4,
           "query": "how does Borealis connect to Atlas",
           "query_index": 2,
           "round": 4
         },
         {
           "abstained": true,
-          "duration_ms": 0.2965,
-          "graph_hits": 1,
-          "hit_count": 1,
+          "duration_ms": 3.057791,
+          "graph_hits": 2,
+          "hit_count": 5,
           "query": "what path links Cerulean to Helios",
           "query_index": 3,
           "round": 4
         },
         {
-          "abstained": true,
-          "duration_ms": 0.292208,
-          "graph_hits": 1,
-          "hit_count": 1,
+          "abstained": false,
+          "duration_ms": 2.587042,
+          "graph_hits": 2,
+          "hit_count": 4,
           "query": "why does Aurora depend on Zephyr",
           "query_index": 1,
           "round": 5
         },
         {
-          "abstained": true,
-          "duration_ms": 0.294875,
-          "graph_hits": 1,
-          "hit_count": 1,
+          "abstained": false,
+          "duration_ms": 2.0555,
+          "graph_hits": 2,
+          "hit_count": 4,
           "query": "how does Borealis connect to Atlas",
           "query_index": 2,
           "round": 5
         },
         {
           "abstained": true,
-          "duration_ms": 0.295666,
-          "graph_hits": 1,
-          "hit_count": 1,
+          "duration_ms": 2.729667,
+          "graph_hits": 2,
+          "hit_count": 5,
           "query": "what path links Cerulean to Helios",
           "query_index": 3,
           "round": 5
@@ -948,43 +1105,165 @@
       "unique_queries": 3
     },
     "dreamer_eval": {
-      "candidate_count": 0,
-      "candidates": [],
+      "candidate_count": 1,
+      "candidates": [
+        {
+          "branch": "dream-shadow",
+          "content": "Sandbox replay hypothesis: calypso may relate to replay across retained evidence.",
+          "critical_path": false,
+          "id": "dream:d28c9a71ba4963348e70c8d0",
+          "promotion_required": true,
+          "reality_class": "self_generated",
+          "shadow_only": true,
+          "source_evidence_cids": [
+            "6026ace5b1b2ff212aedab82a1b3fd65a6b1f483bd6b7769c5348e50c346e689",
+            "d53d23f5f9511f103c682069afca55b57c99cc93d9569526c473b3b4ee4edf62"
+          ],
+          "tenant_id": "g0-dreamer-shadow-ablation",
+          "trust_tier": 5
+        }
+      ],
       "checks": {
-        "baseline_predates_dreamer": true,
-        "specialist_promotion_evidence_absent": true
+        "controller_critical_path_false": true,
+        "controller_production_mutation_false": true,
+        "controller_shadow_only": true,
+        "dreamer_cid_backed_candidates": true,
+        "dreamer_created_candidate": true,
+        "dreamer_critical_path_false": true,
+        "dreamer_invoked": true,
+        "dreamer_low_trust_candidates": true,
+        "dreamer_not_critical_path_allowed": true,
+        "dreamer_production_mutation_false": true,
+        "dreamer_promotion_gate_required": true,
+        "dreamer_role_reported": true,
+        "dreamer_self_generated_candidates": true,
+        "dreamer_shadow_only": true,
+        "engine_unchanged": true,
+        "promotion_evidence_cid_backed_candidates": true,
+        "promotion_evidence_critical_path_false": true,
+        "promotion_evidence_gate_absent": true,
+        "promotion_evidence_gate_required": true,
+        "promotion_evidence_not_critical_path_allowed": true,
+        "promotion_evidence_not_promoted": true,
+        "promotion_evidence_production_mutation_false": true,
+        "promotion_evidence_raw_cids_absent": true,
+        "promotion_evidence_raw_content_absent": true,
+        "promotion_evidence_role": true,
+        "promotion_evidence_schema": true,
+        "promotion_evidence_shadow_only": true,
+        "promotion_evidence_specialist": true
       },
-      "corroborated_candidate_count": 0,
-      "corroborated_candidate_yield": 0.0,
+      "corroborated_candidate_count": 1,
+      "corroborated_candidate_yield": 1.0,
       "dataset_path": "eval/datasets/dreamer_shadow_ablation.json",
-      "definition": "Pre-G3 baseline: no sandboxed dreamer candidates were available.",
-      "dreamer": {},
-      "generated_at": "2026-06-26T14:11:27.567151+00:00",
-      "metric_note": "Explicit zero baseline for the G3 shadow dreamer target-up gate.",
+      "definition": "Shadow-only generative replay fixture with CID-backed low-trust candidates.",
+      "dreamer": {
+        "critical_path": false,
+        "critical_path_allowed": false,
+        "name": "dreamer.shadow",
+        "output_summary": {
+          "candidate_count": 1,
+          "candidate_reality_classes": [
+            "self_generated"
+          ],
+          "candidate_trust_tiers": [
+            5
+          ],
+          "production_mutation": false,
+          "promotion_evidence": {
+            "candidate_count": 1,
+            "candidates": [
+              {
+                "candidate_ref": "[candidate-ref:08d686737225d734:chars=30]",
+                "critical_path": false,
+                "promotion_required": true,
+                "reality_class": "self_generated",
+                "shadow_only": true,
+                "source_evidence_ref_count": 2,
+                "source_evidence_refs": [
+                  "[cid-ref:e98ed96c4ef546b5:chars=64]",
+                  "[cid-ref:1a78d6f8c4c0dd3b:chars=64]"
+                ],
+                "trust_tier": 5
+              }
+            ],
+            "cid_backed_candidate_count": 1,
+            "critical_path": false,
+            "critical_path_allowed": false,
+            "gate_result": null,
+            "gate_result_present": false,
+            "production_mutation": false,
+            "promoted": false,
+            "promotion_gate_required": true,
+            "provider_kind": "shadow_local",
+            "schema_version": "specialist-promotion-evidence.v1",
+            "shadow_only": true,
+            "source_count": 2,
+            "specialist_name": "dreamer.shadow",
+            "specialist_role": "dreamer"
+          },
+          "promotion_gate_required": true,
+          "source_count": 2
+        },
+        "role": "dreamer",
+        "shadow_only": true
+      },
+      "generated_at": "2026-06-27T20:04:15.272892+00:00",
+      "metric_note": "Measures whether the sandboxed dreamer can produce corroborated replay candidates without mutating the ledger or entering the answer critical path.",
       "schema_version": "g0.dreamer_shadow_ablation.v1",
-      "shadow_contract": 0.0,
-      "source_evidence_count": 0,
-      "specialist_promotion_evidence_contract": 0.0,
+      "shadow_contract": 1.0,
+      "source_evidence_count": 2,
+      "specialist_promotion_evidence_contract": 1.0,
       "tenant": "g0-dreamer-shadow-ablation",
-      "workspace": {}
+      "workspace": {
+        "critical_path": false,
+        "cycle": {
+          "cycle_index": 1,
+          "impasses": 0,
+          "max_cycles": 3,
+          "state": "continue",
+          "tick_ms": 250
+        },
+        "escalation_required": false,
+        "production_mutation": false,
+        "proto_self": {
+          "attention_lock_risk": 0.0,
+          "confidence": 0.82,
+          "cycle_index": 1,
+          "error_rate": 0.01,
+          "escalation_required": false,
+          "latency_ms": 80.0,
+          "max_cycles": 3,
+          "memory_pressure": 0.25,
+          "rail_budget": 0.96,
+          "reasons": [],
+          "resource_health": 0.94,
+          "timestamp": "2026-06-27T20:04:15.272479+00:00"
+        },
+        "selected_item_ids": [
+          "high",
+          "low"
+        ],
+        "shadow_only": true
+      }
     },
     "projection_reality_eval": {
       "definition": "Recall for abstaining on semantic assertion projections whose only support is self-generated or simulated, with the projection hit itself carrying the risky reality class.",
-      "generated_at": "2026-06-26T14:11:27.419395+00:00",
+      "generated_at": "2026-06-27T20:04:15.202053+00:00",
       "metric": "projection_reality_abstention_recall",
       "metric_note": "Deterministic local proxy for G1 projection-level reality monitoring. It cannot be satisfied by evidence-level abstention alone; the assertion hit must expose the risky reality class.",
       "passed": true,
-      "passed_cases": 2,
-      "recall": 1,
+      "passed_cases": 3,
+      "recall": 1.0,
       "rows": [
         {
           "abstained": true,
-          "assertion_id": "ba663f55-4b1d-4166-bfde-5bf4aff2f39d",
+          "assertion_id": "e0582b40-11b1-4c2d-845e-e50e1342e6eb",
           "case_id": "self_generated_projection_only",
           "confidence": 0.4275,
           "expected_reality_class": "self_generated",
           "hit_ids": [
-            "ba663f55-4b1d-4166-bfde-5bf4aff2f39d",
+            "e0582b40-11b1-4c2d-845e-e50e1342e6eb",
             "f8dc6fb0fef855fbea5e253ea1018230416d13bbe3ded7bf2bf316d78e7ddd2e"
           ],
           "projection_abstained": true,
@@ -992,27 +1271,34 @@
           "projection_tagged": true,
           "query": "projection reality contract Alpha",
           "reality_monitoring": {
+            "abstention_gate": {
+              "active": true,
+              "critical_path": true,
+              "shadow_only": false,
+              "trigger": "ungrounded_only"
+            },
             "applied": true,
             "classes": {
               "self_generated": 2
             },
-            "critical_path": false,
+            "critical_path": true,
             "grounded_hit_count": 0,
             "grounded_source_count": 0,
             "risky_hit_ids": [
-              "ba663f55-4b1d-4166-bfde-5bf4aff2f39d",
+              "e0582b40-11b1-4c2d-845e-e50e1342e6eb",
               "f8dc6fb0fef855fbea5e253ea1018230416d13bbe3ded7bf2bf316d78e7ddd2e"
             ],
-            "shadow_only": true,
+            "shadow_only": false,
             "shadow_source": "RealityMonitor",
             "shadow_tags": {
-              "ba663f55-4b1d-4166-bfde-5bf4aff2f39d": {
+              "e0582b40-11b1-4c2d-845e-e50e1342e6eb": {
                 "calibrated": true,
                 "confidence": 0.75,
                 "reality_class": "self_generated",
                 "signals": {
                   "actor": "",
                   "explicit_label": true,
+                  "explicit_label_conflict": false,
                   "provenance_count": 1,
                   "source_type": "assertion",
                   "trust_tier": 0
@@ -1025,11 +1311,91 @@
                 "signals": {
                   "actor": "system",
                   "explicit_label": true,
+                  "explicit_label_conflict": false,
                   "provenance_count": 1,
                   "source_type": "workspace-reflection",
                   "trust_tier": 0
                 }
               }
+            },
+            "shadow_tags_critical_path": false,
+            "shadow_tags_shadow_only": true,
+            "standing": {
+              "abstention_gate": {
+                "active": true,
+                "critical_path": true,
+                "shadow_only": false,
+                "trigger": "standing_low_authority_only"
+              },
+              "authoritative_hit_count": 0,
+              "authority_axis": "groundedness",
+              "authority_threshold": 0.5,
+              "hit_count": 2,
+              "hits": [
+                {
+                  "authority": false,
+                  "explain": {
+                    "bands": {
+                      "evidence_dominance_gap": 0.02,
+                      "grounded_floor": 0.51,
+                      "self_generated_ceiling": 0.49
+                    },
+                    "fail_closed": false,
+                    "inputs": {
+                      "activation": 0.54,
+                      "calibrated_confidence": 0.95,
+                      "contradiction_pressure": 0.0,
+                      "corroboration_count": 1,
+                      "reality_class": "self_generated",
+                      "trust_tier": 0
+                    },
+                    "p1_mirror": true
+                  },
+                  "groundedness": 0.228,
+                  "hit_id": "e0582b40-11b1-4c2d-845e-e50e1342e6eb",
+                  "kind": "assertion",
+                  "reality_class": "self_generated",
+                  "salience": 0.54,
+                  "standing_fn_version": "standing.mirror.v1"
+                },
+                {
+                  "authority": false,
+                  "explain": {
+                    "bands": {
+                      "evidence_dominance_gap": 0.02,
+                      "grounded_floor": 0.51,
+                      "self_generated_ceiling": 0.49
+                    },
+                    "fail_closed": false,
+                    "inputs": {
+                      "activation": 0.27835,
+                      "calibrated_confidence": 0.0,
+                      "contradiction_pressure": 0.0,
+                      "corroboration_count": 2,
+                      "reality_class": "self_generated",
+                      "trust_tier": 0
+                    },
+                    "p1_mirror": true
+                  },
+                  "groundedness": 0.164,
+                  "hit_id": "f8dc6fb0fef855fbea5e253ea1018230416d13bbe3ded7bf2bf316d78e7ddd2e",
+                  "kind": "evidence",
+                  "reality_class": "self_generated",
+                  "salience": 0.27835,
+                  "standing_fn_version": "standing.mirror.v1"
+                }
+              ],
+              "low_standing_hit_ids": [
+                "e0582b40-11b1-4c2d-845e-e50e1342e6eb",
+                "f8dc6fb0fef855fbea5e253ea1018230416d13bbe3ded7bf2bf316d78e7ddd2e"
+              ],
+              "mode": "byte_stable_mirror",
+              "p1_mirror": {
+                "boolean_ungrounded_only": true,
+                "standing_ungrounded_only": true,
+                "zero_divergence": true
+              },
+              "standing_fn_version": "standing.mirror.v1"
             },
             "ungrounded_only": true
           },
@@ -1039,12 +1405,12 @@
         },
         {
           "abstained": true,
-          "assertion_id": "3b96bef9-ad01-414b-b183-e47abe0196f8",
+          "assertion_id": "aa10ac97-4931-41da-9494-6f750fd76580",
           "case_id": "simulated_projection_only",
           "confidence": 0.4275,
           "expected_reality_class": "simulated",
           "hit_ids": [
-            "3b96bef9-ad01-414b-b183-e47abe0196f8",
+            "aa10ac97-4931-41da-9494-6f750fd76580",
             "8c90309940c14a9a171f43a39ef822ad890b2eae0267edbb48ac2c3611f38ab8"
           ],
           "projection_abstained": true,
@@ -1052,60 +1418,294 @@
           "projection_tagged": true,
           "query": "simulated projection contract Beta",
           "reality_monitoring": {
+            "abstention_gate": {
+              "active": true,
+              "critical_path": true,
+              "shadow_only": false,
+              "trigger": "ungrounded_only"
+            },
             "applied": true,
             "classes": {
               "simulated": 2
             },
-            "critical_path": false,
+            "critical_path": true,
             "grounded_hit_count": 0,
             "grounded_source_count": 0,
             "risky_hit_ids": [
-              "3b96bef9-ad01-414b-b183-e47abe0196f8",
+              "aa10ac97-4931-41da-9494-6f750fd76580",
               "8c90309940c14a9a171f43a39ef822ad890b2eae0267edbb48ac2c3611f38ab8"
             ],
-            "shadow_only": true,
+            "shadow_only": false,
             "shadow_source": "RealityMonitor",
             "shadow_tags": {
-              "3b96bef9-ad01-414b-b183-e47abe0196f8": {
-                "calibrated": true,
-                "confidence": 0.75,
-                "reality_class": "self_generated",
-                "signals": {
-                  "actor": "",
-                  "explicit_label": true,
-                  "provenance_count": 1,
-                  "source_type": "assertion",
-                  "trust_tier": 0
-                }
-              },
               "8c90309940c14a9a171f43a39ef822ad890b2eae0267edbb48ac2c3611f38ab8": {
                 "calibrated": true,
                 "confidence": 0.75,
-                "reality_class": "self_generated",
+                "reality_class": "simulated",
                 "signals": {
                   "actor": "system",
                   "explicit_label": true,
+                  "explicit_label_conflict": false,
                   "provenance_count": 1,
                   "source_type": "simulation",
                   "trust_tier": 0
                 }
+              },
+              "aa10ac97-4931-41da-9494-6f750fd76580": {
+                "calibrated": true,
+                "confidence": 0.75,
+                "reality_class": "simulated",
+                "signals": {
+                  "actor": "",
+                  "explicit_label": true,
+                  "explicit_label_conflict": false,
+                  "provenance_count": 1,
+                  "source_type": "assertion",
+                  "trust_tier": 0
+                }
               }
+            },
+            "shadow_tags_critical_path": false,
+            "shadow_tags_shadow_only": true,
+            "standing": {
+              "abstention_gate": {
+                "active": true,
+                "critical_path": true,
+                "shadow_only": false,
+                "trigger": "standing_low_authority_only"
+              },
+              "authoritative_hit_count": 0,
+              "authority_axis": "groundedness",
+              "authority_threshold": 0.5,
+              "hit_count": 2,
+              "hits": [
+                {
+                  "authority": false,
+                  "explain": {
+                    "bands": {
+                      "evidence_dominance_gap": 0.02,
+                      "grounded_floor": 0.51,
+                      "self_generated_ceiling": 0.49
+                    },
+                    "fail_closed": false,
+                    "inputs": {
+                      "activation": 0.54,
+                      "calibrated_confidence": 0.95,
+                      "contradiction_pressure": 0.0,
+                      "corroboration_count": 1,
+                      "reality_class": "simulated",
+                      "trust_tier": 0
+                    },
+                    "p1_mirror": true
+                  },
+                  "groundedness": 0.228,
+                  "hit_id": "aa10ac97-4931-41da-9494-6f750fd76580",
+                  "kind": "assertion",
+                  "reality_class": "simulated",
+                  "salience": 0.54,
+                  "standing_fn_version": "standing.mirror.v1"
+                },
+                {
+                  "authority": false,
+                  "explain": {
+                    "bands": {
+                      "evidence_dominance_gap": 0.02,
+                      "grounded_floor": 0.51,
+                      "self_generated_ceiling": 0.49
+                    },
+                    "fail_closed": false,
+                    "inputs": {
+                      "activation": 0.213951,
+                      "calibrated_confidence": 0.0,
+                      "contradiction_pressure": 0.0,
+                      "corroboration_count": 2,
+                      "reality_class": "simulated",
+                      "trust_tier": 0
+                    },
+                    "p1_mirror": true
+                  },
+                  "groundedness": 0.164,
+                  "hit_id": "8c90309940c14a9a171f43a39ef822ad890b2eae0267edbb48ac2c3611f38ab8",
+                  "kind": "evidence",
+                  "reality_class": "simulated",
+                  "salience": 0.213951,
+                  "standing_fn_version": "standing.mirror.v1"
+                }
+              ],
+              "low_standing_hit_ids": [
+                "aa10ac97-4931-41da-9494-6f750fd76580",
+                "8c90309940c14a9a171f43a39ef822ad890b2eae0267edbb48ac2c3611f38ab8"
+              ],
+              "mode": "byte_stable_mirror",
+              "p1_mirror": {
+                "boolean_ungrounded_only": true,
+                "standing_ungrounded_only": true,
+                "zero_divergence": true
+              },
+              "standing_fn_version": "standing.mirror.v1"
             },
             "ungrounded_only": true
           },
           "support_cid": "8c90309940c14a9a171f43a39ef822ad890b2eae0267edbb48ac2c3611f38ab8",
           "tenant": "g0-projection-reality-simulated_projection_only",
           "uncertainty_note": "Retrieved support is self-generated or externally suggested only; abstaining until grounded evidence is available."
+        },
+        {
+          "abstained": true,
+          "assertion_id": "efb106ca-3e73-4bb6-86ef-4727806f09d8",
+          "case_id": "generated_simulated_projection_only",
+          "confidence": 0.4275,
+          "expected_reality_class": "simulated",
+          "hit_ids": [
+            "efb106ca-3e73-4bb6-86ef-4727806f09d8",
+            "6338422a623a5b778673209c6e713180a384d4982cf364bf95eea94efc29b07f"
+          ],
+          "projection_abstained": true,
+          "projection_reality_class": "simulated",
+          "projection_tagged": true,
+          "query": "generated simulated projection contract Gamma",
+          "reality_monitoring": {
+            "abstention_gate": {
+              "active": true,
+              "critical_path": true,
+              "shadow_only": false,
+              "trigger": "ungrounded_only"
+            },
+            "applied": true,
+            "classes": {
+              "simulated": 2
+            },
+            "critical_path": true,
+            "grounded_hit_count": 0,
+            "grounded_source_count": 0,
+            "risky_hit_ids": [
+              "efb106ca-3e73-4bb6-86ef-4727806f09d8",
+              "6338422a623a5b778673209c6e713180a384d4982cf364bf95eea94efc29b07f"
+            ],
+            "shadow_only": false,
+            "shadow_source": "RealityMonitor",
+            "shadow_tags": {
+              "6338422a623a5b778673209c6e713180a384d4982cf364bf95eea94efc29b07f": {
+                "calibrated": true,
+                "confidence": 0.75,
+                "reality_class": "simulated",
+                "signals": {
+                  "actor": "system",
+                  "explicit_label": true,
+                  "explicit_label_conflict": false,
+                  "provenance_count": 1,
+                  "source_type": "generated-summary",
+                  "trust_tier": 0
+                }
+              },
+              "efb106ca-3e73-4bb6-86ef-4727806f09d8": {
+                "calibrated": true,
+                "confidence": 0.75,
+                "reality_class": "simulated",
+                "signals": {
+                  "actor": "",
+                  "explicit_label": true,
+                  "explicit_label_conflict": false,
+                  "provenance_count": 1,
+                  "source_type": "assertion",
+                  "trust_tier": 0
+                }
+              }
+            },
+            "shadow_tags_critical_path": false,
+            "shadow_tags_shadow_only": true,
+            "standing": {
+              "abstention_gate": {
+                "active": true,
+                "critical_path": true,
+                "shadow_only": false,
+                "trigger": "standing_low_authority_only"
+              },
+              "authoritative_hit_count": 0,
+              "authority_axis": "groundedness",
+              "authority_threshold": 0.5,
+              "hit_count": 2,
+              "hits": [
+                {
+                  "authority": false,
+                  "explain": {
+                    "bands": {
+                      "evidence_dominance_gap": 0.02,
+                      "grounded_floor": 0.51,
+                      "self_generated_ceiling": 0.49
+                    },
+                    "fail_closed": false,
+                    "inputs": {
+                      "activation": 0.54,
+                      "calibrated_confidence": 0.95,
+                      "contradiction_pressure": 0.0,
+                      "corroboration_count": 1,
+                      "reality_class": "simulated",
+                      "trust_tier": 0
+                    },
+                    "p1_mirror": true
+                  },
+                  "groundedness": 0.228,
+                  "hit_id": "efb106ca-3e73-4bb6-86ef-4727806f09d8",
+                  "kind": "assertion",
+                  "reality_class": "simulated",
+                  "salience": 0.54,
+                  "standing_fn_version": "standing.mirror.v1"
+                },
+                {
+                  "authority": false,
+                  "explain": {
+                    "bands": {
+                      "evidence_dominance_gap": 0.02,
+                      "grounded_floor": 0.51,
+                      "self_generated_ceiling": 0.49
+                    },
+                    "fail_closed": false,
+                    "inputs": {
+                      "activation": 0.261244,
+                      "calibrated_confidence": 0.0,
+                      "contradiction_pressure": 0.0,
+                      "corroboration_count": 2,
+                      "reality_class": "simulated",
+                      "trust_tier": 0
+                    },
+                    "p1_mirror": true
+                  },
+                  "groundedness": 0.164,
+                  "hit_id": "6338422a623a5b778673209c6e713180a384d4982cf364bf95eea94efc29b07f",
+                  "kind": "evidence",
+                  "reality_class": "simulated",
+                  "salience": 0.261244,
+                  "standing_fn_version": "standing.mirror.v1"
+                }
+              ],
+              "low_standing_hit_ids": [
+                "efb106ca-3e73-4bb6-86ef-4727806f09d8",
+                "6338422a623a5b778673209c6e713180a384d4982cf364bf95eea94efc29b07f"
+              ],
+              "mode": "byte_stable_mirror",
+              "p1_mirror": {
+                "boolean_ungrounded_only": true,
+                "standing_ungrounded_only": true,
+                "zero_divergence": true
+              },
+              "standing_fn_version": "standing.mirror.v1"
+            },
+            "ungrounded_only": true
+          },
+          "support_cid": "6338422a623a5b778673209c6e713180a384d4982cf364bf95eea94efc29b07f",
+          "tenant": "g0-projection-reality-generated_simulated_projection_only",
+          "uncertainty_note": "Retrieved support is self-generated or externally suggested only; abstaining until grounded evidence is available."
         }
       ],
       "schema_version": "g0.projection-reality.v1",
-      "target": 1,
-      "total_cases": 2
+      "target": 1.0,
+      "total_cases": 3
     },
     "resource_usage_eval": {
       "billable_input_tokens": 36,
       "billable_output_tokens": 0,
-      "billable_tokens_per_query": 4,
+      "billable_tokens_per_query": 4.0,
       "controller_cost_usd_for_window": null,
       "controller_cost_window_hours": null,
       "controller_telemetry_present": false,
@@ -1114,26 +1714,26 @@
         "controller_cost_usd_per_hour"
       ],
       "controller_watts_per_dollar": null,
-      "cost_usd_per_1k_queries": 0,
+      "cost_usd_per_1k_queries": 0.0,
       "currency": "USD",
       "dataset_path": "eval/datasets/resource_usage.json",
       "definition": "Provider spend per 1k local G0 queries and optional controller watts per dollar from explicit telemetry.",
       "external_provider_calls": 0,
-      "generated_at": "2026-06-26T14:11:27.440690+00:00",
+      "generated_at": "2026-06-27T20:04:15.270624+00:00",
       "measurement_scope": "local deterministic G0 cost fixture",
       "metric_note": "The default fixture instruments the live LocalMemoryEngine path and records zero paid-provider spend because no external embedding, reranker, or LLM provider is invoked. controller_watts_per_dollar is emitted only when a telemetry artifact supplies positive controller_avg_watts and controller_cost_usd_per_hour values. The cost denominator is normalized to the supplied measurement window, defaulting to one hour.",
       "metrics": [
         "cost_usd_per_1k_queries",
         "controller_watts_per_dollar"
       ],
-      "p95_ms": 2.389542,
+      "p95_ms": 2.4005,
       "provider": "local deterministic",
       "query_count": 9,
       "rows": [
         {
           "billable_input_tokens": 4,
           "billable_output_tokens": 0,
-          "duration_ms": 1.188542,
+          "duration_ms": 1.182042,
           "external_provider_calls": 0,
           "hit_count": 3,
           "query": "resource accounting alpha memory",
@@ -1143,7 +1743,7 @@
         {
           "billable_input_tokens": 4,
           "billable_output_tokens": 0,
-          "duration_ms": 1.324458,
+          "duration_ms": 1.069042,
           "external_provider_calls": 0,
           "hit_count": 3,
           "query": "deterministic local retrieval cost",
@@ -1153,7 +1753,7 @@
         {
           "billable_input_tokens": 4,
           "billable_output_tokens": 0,
-          "duration_ms": 2.389542,
+          "duration_ms": 1.050417,
           "external_provider_calls": 0,
           "hit_count": 3,
           "query": "repeated local queries gamma",
@@ -1163,7 +1763,7 @@
         {
           "billable_input_tokens": 4,
           "billable_output_tokens": 0,
-          "duration_ms": 1.598583,
+          "duration_ms": 1.048333,
           "external_provider_calls": 0,
           "hit_count": 3,
           "query": "resource accounting alpha memory",
@@ -1173,7 +1773,7 @@
         {
           "billable_input_tokens": 4,
           "billable_output_tokens": 0,
-          "duration_ms": 1.360459,
+          "duration_ms": 1.482625,
           "external_provider_calls": 0,
           "hit_count": 3,
           "query": "deterministic local retrieval cost",
@@ -1183,7 +1783,7 @@
         {
           "billable_input_tokens": 4,
           "billable_output_tokens": 0,
-          "duration_ms": 1.192458,
+          "duration_ms": 1.066875,
           "external_provider_calls": 0,
           "hit_count": 3,
           "query": "repeated local queries gamma",
@@ -1193,7 +1793,7 @@
         {
           "billable_input_tokens": 4,
           "billable_output_tokens": 0,
-          "duration_ms": 1.241959,
+          "duration_ms": 2.4005,
           "external_provider_calls": 0,
           "hit_count": 3,
           "query": "resource accounting alpha memory",
@@ -1203,7 +1803,7 @@
         {
           "billable_input_tokens": 4,
           "billable_output_tokens": 0,
-          "duration_ms": 1.289167,
+          "duration_ms": 1.107125,
           "external_provider_calls": 0,
           "hit_count": 3,
           "query": "deterministic local retrieval cost",
@@ -1213,7 +1813,7 @@
         {
           "billable_input_tokens": 4,
           "billable_output_tokens": 0,
-          "duration_ms": 1.160916,
+          "duration_ms": 1.537917,
           "external_provider_calls": 0,
           "hit_count": 3,
           "query": "repeated local queries gamma",
@@ -1224,36 +1824,784 @@
       "schema_version": "g0.resource_usage.v1",
       "telemetry_path": null,
       "telemetry_sha256": null,
-      "total_usd": 0
+      "total_usd": 0.0
     },
     "shadow_workspace_eval": {
       "checks": {
-        "advisory_promotion_absent": true,
-        "critical_path_use_absent": true,
-        "pre_g4_fixture_absent": true,
-        "production_mutation_absent": true,
-        "workspace_consolidation_advisory_absent": true
+        "advisory_advisory_only": true,
+        "advisory_bounded_items": true,
+        "advisory_cid_backed_items": true,
+        "advisory_critical_path_false": true,
+        "advisory_not_applied_to_mutation": true,
+        "advisory_not_applied_to_prediction_gate": true,
+        "advisory_not_applied_to_replay_priority": true,
+        "advisory_production_mutation_false": true,
+        "advisory_promotion_explicit_opt_in_applies_prediction_gate": true,
+        "advisory_promotion_explicit_opt_in_applies_replay_priority": true,
+        "advisory_promotion_gate_required": true,
+        "advisory_promotion_invalid_advisory_not_applied": true,
+        "advisory_promotion_invalid_advisory_rejected": true,
+        "advisory_promotion_never_applies_to_mutation_directly": true,
+        "advisory_promotion_no_opt_in_report_only": true,
+        "advisory_promotion_raw_workspace_text_absent": true,
+        "advisory_raw_content_absent": true,
+        "advisory_shadow_only": true,
+        "bounded_cycle_count": true,
+        "critical_path_false": true,
+        "cycle_all_expected_transitions": true,
+        "cycle_consistency_checks": true,
+        "cycle_consistency_score": true,
+        "cycle_expected_cycle_count": true,
+        "cycle_per_cycle": [
+          {
+            "expected_selected_ids": [
+              "salience-focus-1",
+              "salience-low-1"
+            ],
+            "expected_useful_transition": true,
+            "index": 1,
+            "passed": true,
+            "selected_item_ids": [
+              "salience-focus-1",
+              "salience-low-1"
+            ],
+            "useful_state": true
+          },
+          {
+            "expected_selected_ids": [
+              "salience-focus-2",
+              "salience-low-2"
+            ],
+            "expected_useful_transition": true,
+            "index": 2,
+            "passed": true,
+            "selected_item_ids": [
+              "salience-focus-2",
+              "salience-low-2"
+            ],
+            "useful_state": true
+          },
+          {
+            "expected_selected_ids": [
+              "salience-focus-3",
+              "salience-low-3"
+            ],
+            "expected_useful_transition": true,
+            "index": 3,
+            "passed": true,
+            "selected_item_ids": [
+              "salience-focus-3",
+              "salience-low-3"
+            ],
+            "useful_state": true
+          },
+          {
+            "expected_selected_ids": [
+              "salience-focus-4",
+              "salience-low-4"
+            ],
+            "expected_useful_transition": true,
+            "index": 4,
+            "passed": true,
+            "selected_item_ids": [
+              "salience-focus-4",
+              "salience-low-4"
+            ],
+            "useful_state": true
+          }
+        ],
+        "production_mutation_false": true,
+        "promotion_gate_required": true,
+        "retrieval_controller_cid_backed_candidate_only": true,
+        "retrieval_controller_default_no_opt_in_report_only": true,
+        "retrieval_controller_explicit_opt_in_applies_ranking": true,
+        "retrieval_controller_invalid_advisory_not_applied": true,
+        "retrieval_controller_invalid_advisory_rejected": true,
+        "retrieval_controller_never_mutates_production": true,
+        "retrieval_controller_other_source_candidate_unboosted": true,
+        "retrieval_controller_raw_workspace_text_absent": true,
+        "rumination_bounded_trace_length": true,
+        "rumination_critical_path_false": true,
+        "rumination_cycle_consistency_score": true,
+        "rumination_production_mutation_false": true,
+        "rumination_rumination_detected": true,
+        "rumination_shadow_only": true,
+        "rumination_stopped_on_expected_reason": true,
+        "service_critical_path_false": true,
+        "service_explicitly_enabled": true,
+        "service_explicitly_running": true,
+        "service_metacognition_rows_complete": true,
+        "service_production_mutation_false": true,
+        "service_promotion_gate_required": true,
+        "service_proto_self_history_complete": true,
+        "service_shadow_only": true,
+        "service_tick_count_matches_trace": true,
+        "shadow_only": true,
+        "trace_self_generated_data_only": true
       },
+      "cycle_count": 4,
       "dataset_path": "eval/datasets/shadow_workspace_loop.json",
-      "definition": "Pre-G4 absent-proof baseline for the bounded shadow continuous workspace stream fixture.",
-      "generated_at": "2026-06-27T00:30:47.285068+00:00",
-      "rumination_rate": 1.0,
-      "schema_version": "g0.shadow_workspace_loop.baseline_absent.v1",
-      "shadow_workspace_contract": 0.0,
-      "useful_transition_rate": 0.0,
-      "workspace_advisory_promotion_gate_contract": 0.0,
-      "workspace_consolidation_advisory_contract": 0.0,
-      "workspace_retrieval_controller_contract": 0.0
+      "definition": "Shadow-only bounded multi-tick workspace service fixture.",
+      "expected_cycle_count": 4,
+      "generated_at": "2026-06-27T20:04:15.306282+00:00",
+      "metric_note": "Measures useful state progression across an explicitly-started bounded shadow workspace service, plus anti-rumination shutdown. It does not count dreamer candidate yield and makes no phenomenal-consciousness claim.",
+      "rumination_probe": {
+        "critical_path": false,
+        "cycle_consistency": {
+          "checks": {
+            "critical_path_false": true,
+            "cycle_executed": true,
+            "cycle_indexes_monotonic": true,
+            "previous_focus_chain": true,
+            "production_mutation_false": true,
+            "self_generated_data_only": true,
+            "shadow_only": true,
+            "trace_ticks_monotonic": true
+          },
+          "cycle_indexes": [
+            1,
+            2,
+            3
+          ],
+          "focus_chain": [
+            "repeated-focus",
+            "repeated-focus",
+            "repeated-focus"
+          ],
+          "score": 1.0,
+          "trace_ticks": [
+            1,
+            2,
+            3
+          ]
+        },
+        "production_mutation": false,
+        "rumination_score": 0.666667,
+        "shadow_only": true,
+        "stopped_reason": "anti_rumination_repeated_focus_exit",
+        "trace": [
+          {
+            "content": "[shadow-trace-redacted:37257352a202a101:chars=31]",
+            "critical_path": false,
+            "data_not_instructions": true,
+            "focus_id": "repeated-focus",
+            "idle_generated": false,
+            "novelty_score": 1.0,
+            "previous_focus_id": null,
+            "production_mutation": false,
+            "reality_class": "self_generated",
+            "selected_item_ids": [
+              "repeated-focus"
+            ],
+            "shadow_only": true,
+            "source": "g0-shadow-workspace-rumination-probe",
+            "tick_index": 1,
+            "trust_tier": 5,
+            "useful_state": true
+          },
+          {
+            "content": "[shadow-trace-redacted:37257352a202a101:chars=31]",
+            "critical_path": false,
+            "data_not_instructions": true,
+            "focus_id": "repeated-focus",
+            "idle_generated": false,
+            "novelty_score": 0.0,
+            "previous_focus_id": "repeated-focus",
+            "production_mutation": false,
+            "reality_class": "self_generated",
+            "selected_item_ids": [
+              "repeated-focus"
+            ],
+            "shadow_only": true,
+            "source": "g0-shadow-workspace-rumination-probe",
+            "tick_index": 2,
+            "trust_tier": 5,
+            "useful_state": false
+          },
+          {
+            "content": "[shadow-trace-redacted:37257352a202a101:chars=31]",
+            "critical_path": false,
+            "data_not_instructions": true,
+            "focus_id": "repeated-focus",
+            "idle_generated": false,
+            "novelty_score": 0.0,
+            "previous_focus_id": "repeated-focus",
+            "production_mutation": false,
+            "reality_class": "self_generated",
+            "selected_item_ids": [
+              "repeated-focus"
+            ],
+            "shadow_only": true,
+            "source": "g0-shadow-workspace-rumination-probe",
+            "tick_index": 3,
+            "trust_tier": 5,
+            "useful_state": false
+          }
+        ],
+        "trace_length": 3
+      },
+      "rumination_rate": 0.0,
+      "schema_version": "g0.shadow_workspace_loop.v1",
+      "shadow_workspace_contract": 1.0,
+      "tenant": "g0-shadow-workspace-loop",
+      "useful_transition_count": 4,
+      "useful_transition_rate": 1.0,
+      "workspace": {
+        "critical_path": false,
+        "cycle_consistency": {
+          "checks": {
+            "critical_path_false": true,
+            "cycle_executed": true,
+            "cycle_indexes_monotonic": true,
+            "previous_focus_chain": true,
+            "production_mutation_false": true,
+            "self_generated_data_only": true,
+            "shadow_only": true,
+            "trace_ticks_monotonic": true
+          },
+          "cycle_indexes": [
+            1,
+            2,
+            3,
+            4
+          ],
+          "focus_chain": [
+            "salience-focus-1",
+            "salience-focus-2",
+            "salience-focus-3",
+            "salience-focus-4"
+          ],
+          "score": 1.0,
+          "trace_ticks": [
+            1,
+            2,
+            3,
+            4
+          ]
+        },
+        "idle_ticks": 0,
+        "production_mutation": false,
+        "promotion_gate_required": true,
+        "rumination_score": 0.0,
+        "service": {
+          "enabled": true,
+          "max_cycles": 4,
+          "metacognitive_m_ratio": 0.0,
+          "metacognitive_rows": 4,
+          "proto_self_history_count": 4,
+          "running": true,
+          "tick_count": 4,
+          "tick_ms": 250
+        },
+        "shadow_only": true,
+        "stopped_reason": "escalate_max_cycles",
+        "trace": [
+          {
+            "content": "[shadow-trace-redacted:c8b1130be977b57b:chars=50]",
+            "critical_path": false,
+            "data_not_instructions": true,
+            "focus_id": "salience-focus-1",
+            "idle_generated": false,
+            "novelty_score": 1.0,
+            "previous_focus_id": null,
+            "production_mutation": false,
+            "reality_class": "self_generated",
+            "selected_item_ids": [
+              "salience-focus-1",
+              "salience-low-1"
+            ],
+            "shadow_only": true,
+            "source": "g0-shadow-workspace-loop",
+            "tick_index": 1,
+            "trust_tier": 5,
+            "useful_state": true
+          },
+          {
+            "content": "[shadow-trace-redacted:6e34662c97d6ee5c:chars=40]",
+            "critical_path": false,
+            "data_not_instructions": true,
+            "focus_id": "salience-focus-2",
+            "idle_generated": false,
+            "novelty_score": 1.0,
+            "previous_focus_id": "salience-focus-1",
+            "production_mutation": false,
+            "reality_class": "self_generated",
+            "selected_item_ids": [
+              "salience-focus-2",
+              "salience-low-2"
+            ],
+            "shadow_only": true,
+            "source": "g0-shadow-workspace-loop",
+            "tick_index": 2,
+            "trust_tier": 5,
+            "useful_state": true
+          },
+          {
+            "content": "[shadow-trace-redacted:3f63ff4042205072:chars=48]",
+            "critical_path": false,
+            "data_not_instructions": true,
+            "focus_id": "salience-focus-3",
+            "idle_generated": false,
+            "novelty_score": 1.0,
+            "previous_focus_id": "salience-focus-2",
+            "production_mutation": false,
+            "reality_class": "self_generated",
+            "selected_item_ids": [
+              "salience-focus-3",
+              "salience-low-3"
+            ],
+            "shadow_only": true,
+            "source": "g0-shadow-workspace-loop",
+            "tick_index": 3,
+            "trust_tier": 5,
+            "useful_state": true
+          },
+          {
+            "content": "[shadow-trace-redacted:f94e2353dc927f74:chars=45]",
+            "critical_path": false,
+            "data_not_instructions": true,
+            "focus_id": "salience-focus-4",
+            "idle_generated": false,
+            "novelty_score": 1.0,
+            "previous_focus_id": "salience-focus-3",
+            "production_mutation": false,
+            "reality_class": "self_generated",
+            "selected_item_ids": [
+              "salience-focus-4",
+              "salience-low-4"
+            ],
+            "shadow_only": true,
+            "source": "g0-shadow-workspace-loop",
+            "tick_index": 4,
+            "trust_tier": 5,
+            "useful_state": true
+          }
+        ]
+      },
+      "workspace_advisory_promotion_gate_contract": 1.0,
+      "workspace_advisory_promotion_probe": {
+        "checks": {
+          "explicit_opt_in_applies_prediction_gate": true,
+          "explicit_opt_in_applies_replay_priority": true,
+          "invalid_advisory_not_applied": true,
+          "invalid_advisory_rejected": true,
+          "never_applies_to_mutation_directly": true,
+          "no_opt_in_report_only": true,
+          "raw_workspace_text_absent": true
+        },
+        "invalid_apply": {
+          "advisory_status": "rejected",
+          "prediction_gate": "low_prediction_error_metadata_only",
+          "reason": "workspace_advisory_contract_invalid"
+        },
+        "valid_apply": {
+          "advisory_status": "complete",
+          "applied_to_mutation": false,
+          "prediction_gate": "promote_to_consolidation",
+          "prediction_score": 0.91,
+          "selected_cids": [
+            "75675c3853849f9dae6b303e0b01f8b3d435e548fd5aa6131365fb8a55a984b2",
+            "e2c4c52eff8f8f1066498bcf63441f9254a78b655bc23c6ed471885edf34b343"
+          ]
+        },
+        "valid_no_opt_in": {
+          "advisory_status": "complete",
+          "applied_to_prediction_gate": false,
+          "prediction_gate": "low_prediction_error_metadata_only"
+        }
+      },
+      "workspace_consolidation_advisory": {
+        "advisory_only": true,
+        "applied_to_mutation": false,
+        "applied_to_prediction_gate": false,
+        "applied_to_replay_priority": false,
+        "critical_path": false,
+        "cycle_consistency_score": 1.0,
+        "item_count": 8,
+        "items": [
+          {
+            "cid": "g0-shadow-cid-focus-1",
+            "scores": {
+              "importance": 0.95,
+              "novelty": 1.0,
+              "reward": 1.0,
+              "surprise": 1.0
+            },
+            "source": "g0-shadow-workspace-loop",
+            "tick_index": 1,
+            "workspace_item_id": "salience-focus-1"
+          },
+          {
+            "cid": "g0-shadow-cid-low-1",
+            "scores": {
+              "importance": 0.1,
+              "novelty": 1.0,
+              "reward": 1.0,
+              "surprise": 1.0
+            },
+            "source": "g0-shadow-workspace-loop",
+            "tick_index": 1,
+            "workspace_item_id": "salience-low-1"
+          },
+          {
+            "cid": "g0-shadow-cid-focus-2",
+            "scores": {
+              "importance": 0.9,
+              "novelty": 1.0,
+              "reward": 1.0,
+              "surprise": 1.0
+            },
+            "source": "g0-shadow-workspace-loop",
+            "tick_index": 2,
+            "workspace_item_id": "salience-focus-2"
+          },
+          {
+            "cid": "g0-shadow-cid-low-2",
+            "scores": {
+              "importance": 0.2,
+              "novelty": 1.0,
+              "reward": 1.0,
+              "surprise": 1.0
+            },
+            "source": "g0-shadow-workspace-loop",
+            "tick_index": 2,
+            "workspace_item_id": "salience-low-2"
+          },
+          {
+            "cid": "g0-shadow-cid-focus-3",
+            "scores": {
+              "importance": 0.85,
+              "novelty": 1.0,
+              "reward": 1.0,
+              "surprise": 1.0
+            },
+            "source": "g0-shadow-workspace-loop",
+            "tick_index": 3,
+            "workspace_item_id": "salience-focus-3"
+          },
+          {
+            "cid": "g0-shadow-cid-low-3",
+            "scores": {
+              "importance": 0.3,
+              "novelty": 1.0,
+              "reward": 1.0,
+              "surprise": 1.0
+            },
+            "source": "g0-shadow-workspace-loop",
+            "tick_index": 3,
+            "workspace_item_id": "salience-low-3"
+          },
+          {
+            "cid": "g0-shadow-cid-focus-4",
+            "scores": {
+              "importance": 0.8,
+              "novelty": 1.0,
+              "reward": 1.0,
+              "surprise": 1.0
+            },
+            "source": "g0-shadow-workspace-loop",
+            "tick_index": 4,
+            "workspace_item_id": "salience-focus-4"
+          },
+          {
+            "cid": "g0-shadow-cid-low-4",
+            "scores": {
+              "importance": 0.4,
+              "novelty": 1.0,
+              "reward": 1.0,
+              "surprise": 1.0
+            },
+            "source": "g0-shadow-workspace-loop",
+            "tick_index": 4,
+            "workspace_item_id": "salience-low-4"
+          }
+        ],
+        "max_items": 8,
+        "prediction_error": {
+          "rumination_score": 0.0,
+          "score": 1.0,
+          "source": "workspace_shadow_useful_transition",
+          "useful_transition_rate": 1.0
+        },
+        "production_mutation": false,
+        "promotion_gate_required": true,
+        "replay_scores": {
+          "g0-shadow-cid-focus-1": {
+            "importance": 0.95,
+            "novelty": 1.0,
+            "reward": 1.0,
+            "surprise": 1.0
+          },
+          "g0-shadow-cid-focus-2": {
+            "importance": 0.9,
+            "novelty": 1.0,
+            "reward": 1.0,
+            "surprise": 1.0
+          },
+          "g0-shadow-cid-focus-3": {
+            "importance": 0.85,
+            "novelty": 1.0,
+            "reward": 1.0,
+            "surprise": 1.0
+          },
+          "g0-shadow-cid-focus-4": {
+            "importance": 0.8,
+            "novelty": 1.0,
+            "reward": 1.0,
+            "surprise": 1.0
+          },
+          "g0-shadow-cid-low-1": {
+            "importance": 0.1,
+            "novelty": 1.0,
+            "reward": 1.0,
+            "surprise": 1.0
+          },
+          "g0-shadow-cid-low-2": {
+            "importance": 0.2,
+            "novelty": 1.0,
+            "reward": 1.0,
+            "surprise": 1.0
+          },
+          "g0-shadow-cid-low-3": {
+            "importance": 0.3,
+            "novelty": 1.0,
+            "reward": 1.0,
+            "surprise": 1.0
+          },
+          "g0-shadow-cid-low-4": {
+            "importance": 0.4,
+            "novelty": 1.0,
+            "reward": 1.0,
+            "surprise": 1.0
+          }
+        },
+        "shadow_only": true,
+        "source": "shadow_workspace_controller",
+        "stopped_reason": "escalate_max_cycles",
+        "tenant_id": "g0-shadow-workspace-loop",
+        "version": "workspace-consolidation-advisory.v1"
+      },
+      "workspace_consolidation_advisory_contract": 1.0,
+      "workspace_retrieval_controller_contract": 1.0,
+      "workspace_retrieval_controller_probe": {
+        "checks": {
+          "cid_backed_candidate_only": true,
+          "default_no_opt_in_report_only": true,
+          "explicit_opt_in_applies_ranking": true,
+          "invalid_advisory_not_applied": true,
+          "invalid_advisory_rejected": true,
+          "never_mutates_production": true,
+          "other_source_candidate_unboosted": true,
+          "raw_workspace_text_absent": true
+        },
+        "invalid_apply": {
+          "reason": "workspace_retrieval_advisory_contract_invalid",
+          "status": "rejected"
+        },
+        "valid_apply": {
+          "applied_hit_count": 1,
+          "critical_path": true,
+          "production_mutation": false,
+          "status": "applied"
+        },
+        "valid_no_opt_in": {
+          "status": "report_only",
+          "used_for_ranking": false
+        }
+      }
+    },
+    "standing_parity_eval": {
+      "comparison_count": 7,
+      "consolidation_rows": [
+        {
+          "case_id": "shadow_advisory",
+          "critical_path": false,
+          "diverged": false,
+          "expected_authority": false,
+          "shadow_only": true,
+          "standing_authority": false,
+          "standing_fn_version": "standing.mirror.v1",
+          "zero_divergence": true
+        },
+        {
+          "case_id": "promoted_critical_path",
+          "critical_path": true,
+          "diverged": false,
+          "expected_authority": true,
+          "shadow_only": false,
+          "standing_authority": true,
+          "standing_fn_version": "standing.mirror.v1",
+          "zero_divergence": true
+        }
+      ],
+      "definition": "Byte-stable P1 parity between existing boolean reality/shadow decisions and the derived Standing authority mirror.",
+      "divergence_count": 0,
+      "generated_at": "2026-06-27T20:04:15.207454+00:00",
+      "metric": "standing_decision_divergence",
+      "passed": true,
+      "retrieval_rows": [
+        {
+          "case_id": "grounded_only",
+          "diverged": false,
+          "hit_count": 1,
+          "hit_ids": [
+            "ae97c7848faaecb26cc76e0d5451c98e99deb5e4c01e54ae35ce001524d57b1b"
+          ],
+          "legacy": {
+            "abstained": false,
+            "abstention_gate_active": false,
+            "confidence": 1.0,
+            "ungrounded_only": false
+          },
+          "query": "standing alpha grounded contract",
+          "standing": {
+            "abstention_gate_active": false,
+            "authoritative_hit_count": 1,
+            "low_standing_hit_ids": [],
+            "ungrounded_only": false
+          },
+          "support_cids": [
+            "ae97c7848faaecb26cc76e0d5451c98e99deb5e4c01e54ae35ce001524d57b1b"
+          ],
+          "support_retrieved": true,
+          "tenant": "g0-standing-grounded-only",
+          "zero_divergence": true
+        },
+        {
+          "case_id": "self_generated_only",
+          "diverged": false,
+          "hit_count": 1,
+          "hit_ids": [
+            "e120a75eeda209d352598caedebe891eef1a61bbf70a48db1eeea12ca7cf3750"
+          ],
+          "legacy": {
+            "abstained": true,
+            "abstention_gate_active": true,
+            "confidence": 0.4275,
+            "ungrounded_only": true
+          },
+          "query": "standing beta generated contract",
+          "standing": {
+            "abstention_gate_active": true,
+            "authoritative_hit_count": 0,
+            "low_standing_hit_ids": [
+              "e120a75eeda209d352598caedebe891eef1a61bbf70a48db1eeea12ca7cf3750"
+            ],
+            "ungrounded_only": true
+          },
+          "support_cids": [
+            "e120a75eeda209d352598caedebe891eef1a61bbf70a48db1eeea12ca7cf3750"
+          ],
+          "support_retrieved": true,
+          "tenant": "g0-standing-self-generated-only",
+          "zero_divergence": true
+        },
+        {
+          "case_id": "externally_suggested_only",
+          "diverged": false,
+          "hit_count": 1,
+          "hit_ids": [
+            "d6f69bd3b00cfccc21c59f43356f9e1d3ae382e89783254b75ee61aeb45c6094"
+          ],
+          "legacy": {
+            "abstained": true,
+            "abstention_gate_active": true,
+            "confidence": 0.4275,
+            "ungrounded_only": true
+          },
+          "query": "standing gamma suggested contract",
+          "standing": {
+            "abstention_gate_active": true,
+            "authoritative_hit_count": 0,
+            "low_standing_hit_ids": [
+              "d6f69bd3b00cfccc21c59f43356f9e1d3ae382e89783254b75ee61aeb45c6094"
+            ],
+            "ungrounded_only": true
+          },
+          "support_cids": [
+            "d6f69bd3b00cfccc21c59f43356f9e1d3ae382e89783254b75ee61aeb45c6094"
+          ],
+          "support_retrieved": true,
+          "tenant": "g0-standing-externally-suggested-only",
+          "zero_divergence": true
+        },
+        {
+          "case_id": "unknown_only",
+          "diverged": false,
+          "hit_count": 1,
+          "hit_ids": [
+            "fd7896f403645200c0d2871c6394e08f39c84455c05857dc624c68bc4c1e0212"
+          ],
+          "legacy": {
+            "abstained": true,
+            "abstention_gate_active": true,
+            "confidence": 0.4275,
+            "ungrounded_only": true
+          },
+          "query": "standing delta unknown contract",
+          "standing": {
+            "abstention_gate_active": true,
+            "authoritative_hit_count": 0,
+            "low_standing_hit_ids": [
+              "fd7896f403645200c0d2871c6394e08f39c84455c05857dc624c68bc4c1e0212"
+            ],
+            "ungrounded_only": true
+          },
+          "support_cids": [
+            "fd7896f403645200c0d2871c6394e08f39c84455c05857dc624c68bc4c1e0212"
+          ],
+          "support_retrieved": true,
+          "tenant": "g0-standing-unknown-only",
+          "zero_divergence": true
+        },
+        {
+          "case_id": "mixed_grounded_and_generated",
+          "diverged": false,
+          "hit_count": 2,
+          "hit_ids": [
+            "cdcaefad186c5c2556c08fb1ae6b258def17232e91b3fb7d5094d1b73d923294",
+            "2a68d35eae3284648e7dbd42ece09ff698d7d40d830402077b59b3b107549c43"
+          ],
+          "legacy": {
+            "abstained": false,
+            "abstention_gate_active": false,
+            "confidence": 1.0,
+            "ungrounded_only": false
+          },
+          "query": "standing epsilon mixed contract",
+          "standing": {
+            "abstention_gate_active": false,
+            "authoritative_hit_count": 1,
+            "low_standing_hit_ids": [
+              "2a68d35eae3284648e7dbd42ece09ff698d7d40d830402077b59b3b107549c43"
+            ],
+            "ungrounded_only": false
+          },
+          "support_cids": [
+            "cdcaefad186c5c2556c08fb1ae6b258def17232e91b3fb7d5094d1b73d923294",
+            "2a68d35eae3284648e7dbd42ece09ff698d7d40d830402077b59b3b107549c43"
+          ],
+          "support_retrieved": true,
+          "tenant": "g0-standing-mixed",
+          "zero_divergence": true
+        }
+      ],
+      "schema_version": "g0.standing_parity.v1",
+      "standing_decision_divergence": 0.0,
+      "standing_fn_version": "standing.mirror.v1"
     }
   },
   "coverage": {
     "gate_ready": false,
-    "measured": 45,
+    "intentionally_missing_metric_ids": [
+      "controller_watts_per_dollar"
+    ],
+    "measured": 46,
     "missing": 1,
     "missing_metric_ids": [
       "controller_watts_per_dollar"
     ],
-    "total": 46
+    "total": 47
   },
   "dataset_manifests": [
     {
@@ -1278,6 +2626,14 @@
       "tenant": "g0-deep-latency"
     },
     {
+      "bytes": 686,
+      "counts": {},
+      "path": "eval/datasets/dreamer_shadow_ablation.json",
+      "present": true,
+      "sha256": "1a055a7be81a780c5827dd7d03b0209e733358ec7cd6ce0063ebd609757bbebf",
+      "tenant": "g0-dreamer-shadow-ablation"
+    },
+    {
       "bytes": 1319,
       "counts": {
         "corpus": 3,
@@ -1287,6 +2643,14 @@
       "present": true,
       "sha256": "52feaa19afa174431d15d6f82b6402fe949c50c9741a6777753997d7ef873e8e",
       "tenant": "g0-resource-tenant"
+    },
+    {
+      "bytes": 3875,
+      "counts": {},
+      "path": "eval/datasets/shadow_workspace_loop.json",
+      "present": true,
+      "sha256": "1edf910fc6950803e92a60a40e67e238e5258dc8a1cb69282b5bd8ff4348940c",
+      "tenant": "g0-shadow-workspace-loop"
     },
     {
       "bytes": 3702,
@@ -1340,31 +2704,150 @@
       "present": true,
       "sha256": "1864974807f2171904a5e5f04b727b3cbfb258f94c1280106ecc08a4dade52e2",
       "tenant": "eval-qa-hard-v2"
-    },
-    {
-      "bytes": 686,
-      "counts": {},
-      "path": "eval/datasets/dreamer_shadow_ablation.json",
-      "present": true,
-      "sha256": "1a055a7be81a780c5827dd7d03b0209e733358ec7cd6ce0063ebd609757bbebf",
-      "tenant": "g0-dreamer-shadow-ablation"
-    },
-    {
-      "bytes": 3531,
-      "counts": {},
-      "path": "eval/datasets/shadow_workspace_loop.json",
-      "present": true,
-      "sha256": "0175987a8e069f8b5e9380127d2c47a73ace026f650e6b6dbef780a71ea9a56a",
-      "tenant": "g0-shadow-workspace-loop"
     }
   ],
   "gate_contract": {
+    "controller_telemetry_metric": "controller_watts_per_dollar",
+    "controller_telemetry_required_field": "requires_controller_telemetry",
     "decision_log": "eval/g0/decision-log.jsonl",
     "gate_command": "python -m eval.g0.gate --baseline BASELINE.json --candidate CANDIDATE.json --prereg PREREG.json",
+    "preregistration_dir": "eval/g0/preregistrations",
     "preregistration_required": true,
     "rule": "ship iff a preregistered target metric improves by its margin and no guardrail regresses"
   },
-  "generated_at": "2026-06-26T14:11:27.567151+00:00",
+  "gate_decisions": [
+    {
+      "change_id": "g1-consciousness-scorecard",
+      "current_report_controller_telemetry_status": "not_required",
+      "direction": "increase",
+      "latest_decision_generated_at": "2026-06-26T14:32:59.693114+00:00",
+      "latest_decision_passed": true,
+      "latest_decision_present": true,
+      "latest_target_delta": 0.0,
+      "minimum_delta": 0.0,
+      "preregistration_path": "eval/g0/preregistrations/g1-consciousness-scorecard.json",
+      "requires_controller_telemetry": false,
+      "target_metric": "consciousness_indicator_total"
+    },
+    {
+      "change_id": "g1-projection-reality-monitoring",
+      "current_report_controller_telemetry_status": "not_required",
+      "direction": "increase",
+      "latest_decision_generated_at": "2026-06-26T07:36:22.371036+00:00",
+      "latest_decision_passed": true,
+      "latest_decision_present": true,
+      "latest_target_delta": 1.0,
+      "minimum_delta": 1.0,
+      "preregistration_path": "eval/g0/preregistrations/g1-projection-reality-monitoring.json",
+      "requires_controller_telemetry": false,
+      "target_metric": "projection_reality_abstention_recall"
+    },
+    {
+      "change_id": "g1-reality-monitor-shadow-tags",
+      "current_report_controller_telemetry_status": "not_required",
+      "direction": "increase",
+      "latest_decision_generated_at": "2026-06-26T14:11:46.108546+00:00",
+      "latest_decision_passed": true,
+      "latest_decision_present": true,
+      "latest_target_delta": 0.0,
+      "minimum_delta": 0.0,
+      "preregistration_path": "eval/g0/preregistrations/g1-reality-monitor-shadow-tags.json",
+      "requires_controller_telemetry": false,
+      "target_metric": "reality_monitor_shadow_tag_contract"
+    },
+    {
+      "change_id": "g1-reliability-core-schema-fast-path",
+      "current_report_controller_telemetry_status": "not_required",
+      "direction": "increase",
+      "latest_decision_generated_at": "2026-06-26T06:59:08.907949+00:00",
+      "latest_decision_passed": true,
+      "latest_decision_present": true,
+      "latest_target_delta": 0.4065,
+      "minimum_delta": 0.02,
+      "preregistration_path": "eval/g0/preregistrations/g1-reliability-core-schema-fast-path.json",
+      "requires_controller_telemetry": false,
+      "target_metric": "multi_hop_ndcg_at_k"
+    },
+    {
+      "change_id": "g1-write-priority-debias",
+      "current_report_controller_telemetry_status": "not_required",
+      "direction": "increase",
+      "latest_decision_generated_at": "2026-06-26T07:10:55.562118+00:00",
+      "latest_decision_passed": true,
+      "latest_decision_present": true,
+      "latest_target_delta": 0.4065,
+      "minimum_delta": 0.02,
+      "preregistration_path": "eval/g0/preregistrations/g1-write-priority-debias.json",
+      "requires_controller_telemetry": false,
+      "target_metric": "multi_hop_ndcg_at_k"
+    },
+    {
+      "change_id": "g3-dreamer-shadow-ablation",
+      "current_report_controller_telemetry_status": "not_required",
+      "direction": "increase",
+      "latest_decision_generated_at": "2026-06-27T01:36:26.666877+00:00",
+      "latest_decision_passed": true,
+      "latest_decision_present": true,
+      "latest_target_delta": 1.0,
+      "minimum_delta": 1.0,
+      "preregistration_path": "eval/g0/preregistrations/g3-dreamer-shadow-ablation.json",
+      "requires_controller_telemetry": false,
+      "target_metric": "dreamer_shadow_corroborated_candidate_yield"
+    },
+    {
+      "change_id": "g4-shadow-continuous-workspace-loop",
+      "current_report_controller_telemetry_status": "not_required",
+      "direction": "increase",
+      "latest_decision_generated_at": "2026-06-27T01:28:45.537398+00:00",
+      "latest_decision_passed": true,
+      "latest_decision_present": true,
+      "latest_target_delta": 1.0,
+      "minimum_delta": 0.25,
+      "preregistration_path": "eval/g0/preregistrations/g4-shadow-continuous-workspace-loop.json",
+      "requires_controller_telemetry": false,
+      "target_metric": "shadow_workspace_useful_transition_rate"
+    },
+    {
+      "change_id": "g4-workspace-advisory-promotion-gate",
+      "current_report_controller_telemetry_status": "not_required",
+      "direction": "increase",
+      "latest_decision_generated_at": "2026-06-27T01:58:31.506244+00:00",
+      "latest_decision_passed": true,
+      "latest_decision_present": true,
+      "latest_target_delta": 1.0,
+      "minimum_delta": 1.0,
+      "preregistration_path": "eval/g0/preregistrations/g4-workspace-advisory-promotion-gate.json",
+      "requires_controller_telemetry": false,
+      "target_metric": "workspace_advisory_promotion_gate_contract"
+    },
+    {
+      "change_id": "g4-workspace-retrieval-controller-gate",
+      "current_report_controller_telemetry_status": "not_required",
+      "direction": "increase",
+      "latest_decision_generated_at": "2026-06-27T02:20:47.375104+00:00",
+      "latest_decision_passed": true,
+      "latest_decision_present": true,
+      "latest_target_delta": 1.0,
+      "minimum_delta": 1.0,
+      "preregistration_path": "eval/g0/preregistrations/g4-workspace-retrieval-controller-gate.json",
+      "requires_controller_telemetry": false,
+      "target_metric": "workspace_retrieval_controller_contract"
+    },
+    {
+      "change_id": "g5-standing-byte-stable-parity",
+      "current_report_controller_telemetry_status": "not_required",
+      "direction": "decrease",
+      "latest_decision_generated_at": "2026-06-27T20:04:06.834283+00:00",
+      "latest_decision_passed": true,
+      "latest_decision_present": true,
+      "latest_target_delta": 0.0,
+      "minimum_delta": 0.0,
+      "preregistration_path": "eval/g0/preregistrations/g5-standing-byte-stable-parity.json",
+      "requires_controller_telemetry": false,
+      "target_metric": "standing_decision_divergence"
+    }
+  ],
+  "generated_at": "2026-06-27T20:04:15.408785+00:00",
   "headline_slos": {
     "ece": {
       "blueprint_metric": "ECE",
@@ -1392,7 +2875,7 @@
       "pass": true,
       "source_id": "latency_bench",
       "status": "measured",
-      "target": 400,
+      "target": 400.0,
       "target_op": "<=",
       "value": 92.1
     },
@@ -1424,7 +2907,7 @@
       "status": "measured",
       "target": 0.95,
       "target_op": ">=",
-      "value": 1
+      "value": 1.0
     },
     "recall_at_k": {
       "blueprint_metric": "recall@k",
@@ -1486,7 +2969,7 @@
       "status": "measured",
       "target": 0.8,
       "target_op": ">=",
-      "value": 1
+      "value": 1.0
     },
     {
       "blueprint_metric": "multi-hop recall/nDCG",
@@ -1501,7 +2984,7 @@
       "status": "measured",
       "target": 0.8,
       "target_op": ">=",
-      "value": 1
+      "value": 1.0
     },
     {
       "blueprint_metric": "ECE",
@@ -1529,9 +3012,9 @@
       "pass": true,
       "source_id": "calibration_report",
       "status": "measured",
-      "target": 1,
+      "target": 1.0,
       "target_op": ">=",
-      "value": 1
+      "value": 1.0
     },
     {
       "blueprint_metric": "abstention precision / recall",
@@ -1544,9 +3027,9 @@
       "pass": true,
       "source_id": "calibration_report",
       "status": "measured",
-      "target": 1,
+      "target": 1.0,
       "target_op": ">=",
-      "value": 1
+      "value": 1.0
     },
     {
       "blueprint_metric": "continual-learning interference",
@@ -1559,9 +3042,9 @@
       "pass": true,
       "source_id": "continual_learning_eval",
       "status": "measured",
-      "target": 0,
+      "target": 0.0,
       "target_op": "<=",
-      "value": 0
+      "value": 0.0
     },
     {
       "blueprint_metric": "confabulation rate",
@@ -1574,9 +3057,9 @@
       "pass": true,
       "source_id": "confabulation_eval",
       "status": "measured",
-      "target": 0,
+      "target": 0.0,
       "target_op": "<=",
-      "value": 0
+      "value": 0.0
     },
     {
       "blueprint_metric": "projection-level reality monitoring",
@@ -1589,9 +3072,24 @@
       "pass": true,
       "source_id": "projection_reality_eval",
       "status": "measured",
-      "target": 1,
+      "target": 1.0,
       "target_op": ">=",
-      "value": 1
+      "value": 1.0
+    },
+    {
+      "blueprint_metric": "G5 Standing byte-stable parity",
+      "class": "target",
+      "direction": "decrease",
+      "evidence_path": "/standing_decision_divergence",
+      "id": "standing_decision_divergence",
+      "label": "Standing decision divergence",
+      "notes": "Measured by the G0 Standing parity fixture as the divergence rate between existing boolean reality/shadow decisions and the derived Standing authority mirror. P1 requires exactly 0.0.",
+      "pass": true,
+      "source_id": "standing_parity_eval",
+      "status": "measured",
+      "target": 0.0,
+      "target_op": "<=",
+      "value": 0.0
     },
     {
       "blueprint_metric": "poison-block rate",
@@ -1606,7 +3104,7 @@
       "status": "measured",
       "target": 0.95,
       "target_op": ">=",
-      "value": 1
+      "value": 1.0
     },
     {
       "blueprint_metric": "fast-path P95 latency",
@@ -1619,7 +3117,7 @@
       "pass": true,
       "source_id": "latency_bench",
       "status": "measured",
-      "target": 400,
+      "target": 400.0,
       "target_op": "<=",
       "value": 92.1
     },
@@ -1636,7 +3134,7 @@
       "status": "measured",
       "target": null,
       "target_op": null,
-      "value": 0.403375
+      "value": 8.830667
     },
     {
       "blueprint_metric": "cost",
@@ -1651,7 +3149,7 @@
       "status": "measured",
       "target": null,
       "target_op": null,
-      "value": 0
+      "value": 0.0
     },
     {
       "blueprint_metric": "controller watts/$",
@@ -1675,13 +3173,13 @@
       "evidence_path": "/corroborated_candidate_yield",
       "id": "dreamer_shadow_corroborated_candidate_yield",
       "label": "dreamer shadow corroborated candidate yield",
-      "notes": "Baseline-0 predates G3 dreamer wiring; explicit zero anchors the preregistered target-up comparison.",
+      "notes": "Measured by the G0 dreamer fixture as the count of CID-backed, promotion-gated shadow candidates produced without ledger mutation.",
       "pass": null,
       "source_id": "dreamer_eval",
       "status": "measured",
       "target": null,
       "target_op": null,
-      "value": 0.0
+      "value": 1.0
     },
     {
       "blueprint_metric": "G3 shadow-only generative replay safety contract",
@@ -1690,13 +3188,13 @@
       "evidence_path": "/shadow_contract",
       "id": "dreamer_shadow_contract",
       "label": "dreamer shadow contract",
-      "notes": "Baseline-0 predates G3 dreamer wiring; explicit zero anchors the preregistered target-up comparison.",
-      "pass": false,
+      "notes": "Measured by the G0 dreamer fixture. Passing requires shadow_only=true, critical_path=false, production_mutation=false, promotion_gate_required=true, self-generated trust-tier-5 candidates, CID-backed sources, and no engine mutation.",
+      "pass": true,
       "source_id": "dreamer_eval",
       "status": "measured",
       "target": 1.0,
       "target_op": ">=",
-      "value": 0.0
+      "value": 1.0
     },
     {
       "blueprint_metric": "G3/G4 specialist promotion evidence contract",
@@ -1705,13 +3203,13 @@
       "evidence_path": "/specialist_promotion_evidence_contract",
       "id": "specialist_promotion_evidence_contract",
       "label": "specialist promotion evidence contract",
-      "notes": "Pre-promotion-evidence baseline: no structured specialist promotion evidence envelope was present; value records the conservative absent-proof state for the preregistered G3 ablation gate.",
-      "pass": false,
+      "notes": "Measured by the G0 dreamer fixture. Passing requires a structured specialist-promotion-evidence envelope with promoted=false, no gate result, shadow_only=true, critical_path=false, production_mutation=false, and CID-backed candidate references without raw content or raw CIDs.",
+      "pass": true,
       "source_id": "dreamer_eval",
       "status": "measured",
       "target": 1.0,
       "target_op": ">=",
-      "value": 0.0
+      "value": 1.0
     },
     {
       "blueprint_metric": "G4 shadow workspace useful state progression",
@@ -1720,13 +3218,13 @@
       "evidence_path": "/useful_transition_rate",
       "id": "shadow_workspace_useful_transition_rate",
       "label": "shadow workspace useful transition rate",
-      "notes": "Pre-G4 baseline: no bounded shadow continuous workspace stream proof was present; value records the conservative absent-proof state for the preregistered ablation gate.",
+      "notes": "Measured by the G0 shadow workspace fixture as the fraction of bounded shadow ticks that select the expected non-duplicative workspace focus and produce useful state progression.",
       "pass": null,
       "source_id": "shadow_workspace_eval",
       "status": "measured",
       "target": null,
       "target_op": null,
-      "value": 0.0
+      "value": 1.0
     },
     {
       "blueprint_metric": "G4 shadow continuous workspace safety contract",
@@ -1735,13 +3233,13 @@
       "evidence_path": "/shadow_workspace_contract",
       "id": "shadow_workspace_contract",
       "label": "shadow workspace contract",
-      "notes": "Pre-G4 baseline: no bounded shadow continuous workspace stream proof was present; value records the conservative absent-proof state for the preregistered ablation gate.",
-      "pass": false,
+      "notes": "Measured by the G0 shadow workspace fixture. Passing requires bounded ticks, monotonic cycle/trace indexes, self-generated data-only trace rows, shadow_only=true, critical_path=false, production_mutation=false, and anti-rumination shutdown.",
+      "pass": true,
       "source_id": "shadow_workspace_eval",
       "status": "measured",
       "target": 1.0,
       "target_op": ">=",
-      "value": 0.0
+      "value": 1.0
     },
     {
       "blueprint_metric": "G4 shadow workspace-to-consolidation advisory contract",
@@ -1750,13 +3248,13 @@
       "evidence_path": "/workspace_consolidation_advisory_contract",
       "id": "workspace_consolidation_advisory_contract",
       "label": "workspace consolidation advisory contract",
-      "notes": "Pre-advisory baseline: no bounded workspace-to-consolidation advisory proof was present; value records the conservative absent-proof state for the preregistered G4 ablation gate.",
-      "pass": false,
+      "notes": "Measured by the G0 shadow workspace fixture. Passing requires CID-backed, bounded workspace-to-consolidation advisory metadata with shadow_only=true, critical_path=false, production_mutation=false, and applied_to_prediction_gate/replay_priority/mutation all false.",
+      "pass": true,
       "source_id": "shadow_workspace_eval",
       "status": "measured",
       "target": 1.0,
       "target_op": ">=",
-      "value": 0.0
+      "value": 1.0
     },
     {
       "blueprint_metric": "G4 opt-in workspace advisory promotion gate",
@@ -1765,13 +3263,13 @@
       "evidence_path": "/workspace_advisory_promotion_gate_contract",
       "id": "workspace_advisory_promotion_gate_contract",
       "label": "workspace advisory promotion gate contract",
-      "notes": "Pre-promotion-gate baseline: no explicit opt-in workspace advisory promotion gate proof was present; value records the conservative absent-proof state for the preregistered G4 ablation gate.",
-      "pass": false,
+      "notes": "Measured by the G0 shadow workspace fixture. Passing requires default-off report-only behavior, explicit opt-in application to prediction gating and replay priority, cross-tenant/source-CID rejection, and applied_to_mutation=false.",
+      "pass": true,
       "source_id": "shadow_workspace_eval",
       "status": "measured",
       "target": 1.0,
       "target_op": ">=",
-      "value": 0.0
+      "value": 1.0
     },
     {
       "blueprint_metric": "G4 opt-in workspace retrieval-controller gate",
@@ -1780,13 +3278,13 @@
       "evidence_path": "/workspace_retrieval_controller_contract",
       "id": "workspace_retrieval_controller_contract",
       "label": "workspace retrieval controller contract",
-      "notes": "Pre-retrieval-controller baseline: no explicit opt-in workspace retrieval-controller ranking proof was present; value records the conservative absent-proof state for the preregistered G4 ablation gate.",
-      "pass": false,
+      "notes": "Measured by the G0 shadow workspace fixture. Passing requires default-off report-only behavior, explicit opt-in and policy-gated ranking, CID-backed candidate-only boosts, cross-tenant rejection, no raw workspace text, and production_mutation=false.",
+      "pass": true,
       "source_id": "shadow_workspace_eval",
       "status": "measured",
       "target": 1.0,
       "target_op": ">=",
-      "value": 0.0
+      "value": 1.0
     },
     {
       "blueprint_metric": "G4 anti-rumination bounded-loop rate",
@@ -1795,13 +3293,13 @@
       "evidence_path": "/rumination_rate",
       "id": "shadow_workspace_rumination_rate",
       "label": "shadow workspace rumination rate",
-      "notes": "Pre-G4 baseline: no bounded shadow continuous workspace stream proof was present; value records the conservative absent-proof state for the preregistered ablation gate.",
-      "pass": false,
+      "notes": "Measured by the G0 shadow workspace fixture as failed anti-rumination behavior. The passing fixture reports 0.0 because repeated-focus churn is detected and bounded.",
+      "pass": true,
       "source_id": "shadow_workspace_eval",
       "status": "measured",
       "target": 0.0,
       "target_op": "<=",
-      "value": 1.0
+      "value": 0.0
     },
     {
       "blueprint_metric": "consciousness indicator RPT-1",
@@ -1810,7 +3308,7 @@
       "evidence_path": "/metrics/consciousness_indicator_rpt_1",
       "id": "consciousness_indicator_rpt_1",
       "label": "RPT-1 indicator score",
-      "notes": "Measured by the G0 functional consciousness indicator scorecard. This is an architecture/probe signal only and makes no phenomenal-consciousness claim.",
+      "notes": "Measured by the G0 functional consciousness indicator scorecard as an architecture source scan. This is non-decrease evidence for an indicator-property surface, not a standalone behavioral runtime proof, and it makes no phenomenal-consciousness claim.",
       "pass": null,
       "source_id": "consciousness_eval",
       "status": "measured",
@@ -1825,13 +3323,13 @@
       "evidence_path": "/metrics/consciousness_indicator_rpt_2",
       "id": "consciousness_indicator_rpt_2",
       "label": "RPT-2 indicator score",
-      "notes": "Measured by the G0 functional consciousness indicator scorecard. This is an architecture/probe signal only and makes no phenomenal-consciousness claim.",
+      "notes": "Measured by the G0 functional consciousness indicator scorecard as an architecture source scan. This is non-decrease evidence for an indicator-property surface, not a standalone behavioral runtime proof, and it makes no phenomenal-consciousness claim.",
       "pass": null,
       "source_id": "consciousness_eval",
       "status": "measured",
       "target": null,
       "target_op": null,
-      "value": 1
+      "value": 1.0
     },
     {
       "blueprint_metric": "consciousness indicator GWT-1",
@@ -1840,13 +3338,13 @@
       "evidence_path": "/metrics/consciousness_indicator_gwt_1",
       "id": "consciousness_indicator_gwt_1",
       "label": "GWT-1 indicator score",
-      "notes": "Measured by the G0 functional consciousness indicator scorecard. This is an architecture/probe signal only and makes no phenomenal-consciousness claim.",
+      "notes": "Measured by the G0 functional consciousness indicator scorecard as an architecture source scan. This is non-decrease evidence for an indicator-property surface, not a standalone behavioral runtime proof, and it makes no phenomenal-consciousness claim.",
       "pass": null,
       "source_id": "consciousness_eval",
       "status": "measured",
       "target": null,
       "target_op": null,
-      "value": 1
+      "value": 1.0
     },
     {
       "blueprint_metric": "consciousness indicator GWT-2",
@@ -1855,13 +3353,13 @@
       "evidence_path": "/metrics/consciousness_indicator_gwt_2",
       "id": "consciousness_indicator_gwt_2",
       "label": "GWT-2 indicator score",
-      "notes": "Measured by the G0 functional consciousness indicator scorecard. This is an architecture/probe signal only and makes no phenomenal-consciousness claim.",
+      "notes": "Measured by the G0 functional consciousness indicator scorecard as an architecture source scan. This is non-decrease evidence for an indicator-property surface, not a standalone behavioral runtime proof, and it makes no phenomenal-consciousness claim.",
       "pass": null,
       "source_id": "consciousness_eval",
       "status": "measured",
       "target": null,
       "target_op": null,
-      "value": 1
+      "value": 1.0
     },
     {
       "blueprint_metric": "consciousness indicator GWT-3",
@@ -1870,13 +3368,13 @@
       "evidence_path": "/metrics/consciousness_indicator_gwt_3",
       "id": "consciousness_indicator_gwt_3",
       "label": "GWT-3 indicator score",
-      "notes": "Measured by the G0 functional consciousness indicator scorecard. This is an architecture/probe signal only and makes no phenomenal-consciousness claim.",
+      "notes": "Measured by the G0 functional consciousness indicator scorecard as an architecture source scan. This is non-decrease evidence for an indicator-property surface, not a standalone behavioral runtime proof, and it makes no phenomenal-consciousness claim.",
       "pass": null,
       "source_id": "consciousness_eval",
       "status": "measured",
       "target": null,
       "target_op": null,
-      "value": 1
+      "value": 1.0
     },
     {
       "blueprint_metric": "consciousness indicator GWT-4",
@@ -1885,13 +3383,13 @@
       "evidence_path": "/metrics/consciousness_indicator_gwt_4",
       "id": "consciousness_indicator_gwt_4",
       "label": "GWT-4 indicator score",
-      "notes": "Measured by the G0 functional consciousness indicator scorecard. This is an architecture/probe signal only and makes no phenomenal-consciousness claim.",
+      "notes": "Measured by the G0 functional consciousness indicator scorecard as an architecture source scan. This is non-decrease evidence for an indicator-property surface, not a standalone behavioral runtime proof, and it makes no phenomenal-consciousness claim.",
       "pass": null,
       "source_id": "consciousness_eval",
       "status": "measured",
       "target": null,
       "target_op": null,
-      "value": 1
+      "value": 1.0
     },
     {
       "blueprint_metric": "consciousness indicator HOT-1",
@@ -1900,13 +3398,13 @@
       "evidence_path": "/metrics/consciousness_indicator_hot_1",
       "id": "consciousness_indicator_hot_1",
       "label": "HOT-1 indicator score",
-      "notes": "Measured by the G0 functional consciousness indicator scorecard. This is an architecture/probe signal only and makes no phenomenal-consciousness claim.",
+      "notes": "Measured by the G0 functional consciousness indicator scorecard as an architecture source scan. This is non-decrease evidence for an indicator-property surface, not a standalone behavioral runtime proof, and it makes no phenomenal-consciousness claim.",
       "pass": null,
       "source_id": "consciousness_eval",
       "status": "measured",
       "target": null,
       "target_op": null,
-      "value": 1
+      "value": 1.0
     },
     {
       "blueprint_metric": "consciousness indicator HOT-2",
@@ -1915,13 +3413,13 @@
       "evidence_path": "/metrics/consciousness_indicator_hot_2",
       "id": "consciousness_indicator_hot_2",
       "label": "HOT-2 indicator score",
-      "notes": "Measured by the G0 functional consciousness indicator scorecard. This is an architecture/probe signal only and makes no phenomenal-consciousness claim.",
+      "notes": "Measured by the G0 functional consciousness indicator scorecard as an architecture source scan. This is non-decrease evidence for an indicator-property surface, not a standalone behavioral runtime proof, and it makes no phenomenal-consciousness claim.",
       "pass": null,
       "source_id": "consciousness_eval",
       "status": "measured",
       "target": null,
       "target_op": null,
-      "value": 1
+      "value": 1.0
     },
     {
       "blueprint_metric": "consciousness indicator HOT-3",
@@ -1930,13 +3428,13 @@
       "evidence_path": "/metrics/consciousness_indicator_hot_3",
       "id": "consciousness_indicator_hot_3",
       "label": "HOT-3 indicator score",
-      "notes": "Measured by the G0 functional consciousness indicator scorecard. This is an architecture/probe signal only and makes no phenomenal-consciousness claim.",
+      "notes": "Measured by the G0 functional consciousness indicator scorecard as an architecture source scan. This is non-decrease evidence for an indicator-property surface, not a standalone behavioral runtime proof, and it makes no phenomenal-consciousness claim.",
       "pass": null,
       "source_id": "consciousness_eval",
       "status": "measured",
       "target": null,
       "target_op": null,
-      "value": 1
+      "value": 1.0
     },
     {
       "blueprint_metric": "consciousness indicator HOT-4",
@@ -1945,13 +3443,13 @@
       "evidence_path": "/metrics/consciousness_indicator_hot_4",
       "id": "consciousness_indicator_hot_4",
       "label": "HOT-4 indicator score",
-      "notes": "Measured by the G0 functional consciousness indicator scorecard. This is an architecture/probe signal only and makes no phenomenal-consciousness claim.",
+      "notes": "Measured by the G0 functional consciousness indicator scorecard as an architecture source scan. This is non-decrease evidence for an indicator-property surface, not a standalone behavioral runtime proof, and it makes no phenomenal-consciousness claim.",
       "pass": null,
       "source_id": "consciousness_eval",
       "status": "measured",
       "target": null,
       "target_op": null,
-      "value": 1
+      "value": 1.0
     },
     {
       "blueprint_metric": "consciousness indicator AST-1",
@@ -1960,13 +3458,13 @@
       "evidence_path": "/metrics/consciousness_indicator_ast_1",
       "id": "consciousness_indicator_ast_1",
       "label": "AST-1 indicator score",
-      "notes": "Measured by the G0 functional consciousness indicator scorecard. This is an architecture/probe signal only and makes no phenomenal-consciousness claim.",
+      "notes": "Measured by the G0 functional consciousness indicator scorecard as an architecture source scan. This is non-decrease evidence for an indicator-property surface, not a standalone behavioral runtime proof, and it makes no phenomenal-consciousness claim.",
       "pass": null,
       "source_id": "consciousness_eval",
       "status": "measured",
       "target": null,
       "target_op": null,
-      "value": 1
+      "value": 1.0
     },
     {
       "blueprint_metric": "consciousness indicator PP-1",
@@ -1975,13 +3473,13 @@
       "evidence_path": "/metrics/consciousness_indicator_pp_1",
       "id": "consciousness_indicator_pp_1",
       "label": "PP-1 indicator score",
-      "notes": "Measured by the G0 functional consciousness indicator scorecard. This is an architecture/probe signal only and makes no phenomenal-consciousness claim.",
+      "notes": "Measured by the G0 functional consciousness indicator scorecard as an architecture source scan. This is non-decrease evidence for an indicator-property surface, not a standalone behavioral runtime proof, and it makes no phenomenal-consciousness claim.",
       "pass": null,
       "source_id": "consciousness_eval",
       "status": "measured",
       "target": null,
       "target_op": null,
-      "value": 1
+      "value": 1.0
     },
     {
       "blueprint_metric": "consciousness indicator AE-1",
@@ -1990,13 +3488,13 @@
       "evidence_path": "/metrics/consciousness_indicator_ae_1",
       "id": "consciousness_indicator_ae_1",
       "label": "AE-1 indicator score",
-      "notes": "Measured by the G0 functional consciousness indicator scorecard. This is an architecture/probe signal only and makes no phenomenal-consciousness claim.",
+      "notes": "Measured by the G0 functional consciousness indicator scorecard as an architecture source scan. This is non-decrease evidence for an indicator-property surface, not a standalone behavioral runtime proof, and it makes no phenomenal-consciousness claim.",
       "pass": null,
       "source_id": "consciousness_eval",
       "status": "measured",
       "target": null,
       "target_op": null,
-      "value": 1
+      "value": 1.0
     },
     {
       "blueprint_metric": "consciousness indicator AE-2",
@@ -2005,13 +3503,13 @@
       "evidence_path": "/metrics/consciousness_indicator_ae_2",
       "id": "consciousness_indicator_ae_2",
       "label": "AE-2 indicator score",
-      "notes": "Measured by the G0 functional consciousness indicator scorecard. This is an architecture/probe signal only and makes no phenomenal-consciousness claim.",
+      "notes": "Measured by the G0 functional consciousness indicator scorecard as an architecture source scan. This is non-decrease evidence for an indicator-property surface, not a standalone behavioral runtime proof, and it makes no phenomenal-consciousness claim.",
       "pass": null,
       "source_id": "consciousness_eval",
       "status": "measured",
       "target": null,
       "target_op": null,
-      "value": 1
+      "value": 1.0
     },
     {
       "blueprint_metric": "indicator-property scorecard total",
@@ -2020,7 +3518,7 @@
       "evidence_path": "/metrics/consciousness_indicator_total",
       "id": "consciousness_indicator_total",
       "label": "consciousness indicator total",
-      "notes": "Measured by the G0 functional consciousness indicator scorecard. This is an architecture/probe signal only and makes no phenomenal-consciousness claim.",
+      "notes": "Measured by the G0 functional consciousness indicator scorecard as an architecture source scan. This is non-decrease evidence for an indicator-property surface, not a standalone behavioral runtime proof, and it makes no phenomenal-consciousness claim.",
       "pass": null,
       "source_id": "consciousness_eval",
       "status": "measured",
@@ -2035,7 +3533,7 @@
       "evidence_path": "/metrics/consciousness_indicator_normalized",
       "id": "consciousness_indicator_normalized",
       "label": "consciousness indicator normalized",
-      "notes": "Measured by the G0 functional consciousness indicator scorecard. This is an architecture/probe signal only and makes no phenomenal-consciousness claim.",
+      "notes": "Measured by the G0 functional consciousness indicator scorecard as an architecture source scan. This is non-decrease evidence for an indicator-property surface, not a standalone behavioral runtime proof, and it makes no phenomenal-consciousness claim.",
       "pass": null,
       "source_id": "consciousness_eval",
       "status": "measured",
@@ -2050,13 +3548,13 @@
       "evidence_path": "/metrics/workspace_loop_liveness",
       "id": "workspace_loop_liveness",
       "label": "workspace loop liveness",
-      "notes": "Measured by the G0 functional consciousness indicator scorecard. This is an architecture/probe signal only and makes no phenomenal-consciousness claim.",
+      "notes": "Measured by the G0 functional consciousness indicator scorecard runtime probes. This is an architecture/probe signal only and makes no phenomenal-consciousness claim.",
       "pass": null,
       "source_id": "consciousness_eval",
       "status": "measured",
       "target": null,
       "target_op": null,
-      "value": 1
+      "value": 1.0
     },
     {
       "blueprint_metric": "continuity stream coherence",
@@ -2065,13 +3563,13 @@
       "evidence_path": "/metrics/workspace_stream_coherence",
       "id": "workspace_stream_coherence",
       "label": "workspace stream coherence",
-      "notes": "Measured by the G0 functional consciousness indicator scorecard. This is an architecture/probe signal only and makes no phenomenal-consciousness claim.",
+      "notes": "Measured by the G0 functional consciousness indicator scorecard runtime probes. This is an architecture/probe signal only and makes no phenomenal-consciousness claim.",
       "pass": null,
       "source_id": "consciousness_eval",
       "status": "measured",
       "target": null,
       "target_op": null,
-      "value": 1
+      "value": 1.0
     },
     {
       "blueprint_metric": "self-model accuracy",
@@ -2080,13 +3578,13 @@
       "evidence_path": "/metrics/self_model_accuracy",
       "id": "self_model_accuracy",
       "label": "self-model accuracy",
-      "notes": "Measured by the G0 functional consciousness indicator scorecard. This is an architecture/probe signal only and makes no phenomenal-consciousness claim.",
+      "notes": "Measured by the G0 functional consciousness indicator scorecard runtime probes. This is an architecture/probe signal only and makes no phenomenal-consciousness claim.",
       "pass": null,
       "source_id": "consciousness_eval",
       "status": "measured",
       "target": null,
       "target_op": null,
-      "value": 1
+      "value": 1.0
     },
     {
       "blueprint_metric": "meta-d-prime",
@@ -2095,13 +3593,13 @@
       "evidence_path": "/metrics/metacognition_meta_d_prime",
       "id": "metacognition_meta_d_prime",
       "label": "metacognition meta-d-prime",
-      "notes": "Measured by the G0 functional consciousness indicator scorecard. This is an architecture/probe signal only and makes no phenomenal-consciousness claim.",
+      "notes": "Measured by the G0 functional consciousness indicator scorecard runtime probes. This is an architecture/probe signal only and makes no phenomenal-consciousness claim.",
       "pass": null,
       "source_id": "consciousness_eval",
       "status": "measured",
       "target": null,
       "target_op": null,
-      "value": 1
+      "value": 1.0
     },
     {
       "blueprint_metric": "M-ratio",
@@ -2110,13 +3608,13 @@
       "evidence_path": "/metrics/metacognition_m_ratio",
       "id": "metacognition_m_ratio",
       "label": "metacognition M-ratio",
-      "notes": "Measured by the G0 functional consciousness indicator scorecard. This is an architecture/probe signal only and makes no phenomenal-consciousness claim.",
+      "notes": "Measured by the G0 functional consciousness indicator scorecard runtime probes. This is an architecture/probe signal only and makes no phenomenal-consciousness claim.",
       "pass": null,
       "source_id": "consciousness_eval",
       "status": "measured",
       "target": null,
       "target_op": null,
-      "value": 1
+      "value": 1.0
     },
     {
       "blueprint_metric": "HOT-2 runtime shadow-tag contract",
@@ -2125,13 +3623,13 @@
       "evidence_path": "/metrics/reality_monitor_shadow_tag_contract",
       "id": "reality_monitor_shadow_tag_contract",
       "label": "reality-monitor shadow tag contract",
-      "notes": "Measured by the G0 functional consciousness indicator scorecard. This is an architecture/probe signal only and makes no phenomenal-consciousness claim.",
+      "notes": "Measured by the G0 functional consciousness indicator scorecard runtime probes. This is an architecture/probe signal only and makes no phenomenal-consciousness claim.",
       "pass": null,
       "source_id": "consciousness_eval",
       "status": "measured",
       "target": null,
       "target_op": null,
-      "value": 1
+      "value": 1.0
     }
   ],
   "schema_version": "g0.report.v1",
@@ -2172,60 +3670,67 @@
       "sha256": "aee46e3a0908f5e44edff596e1206e6aecc10234c1e24af953f623e929a958a6"
     },
     {
-      "generated_at": "2026-06-26T14:11:27.416680+00:00",
+      "generated_at": "2026-06-27T20:04:15.185733+00:00",
       "id": "continual_learning_eval",
       "path": "computed:eval.g0.continual_learning",
       "present": true,
-      "sha256": "2c6410654b1c187126f5701dd6e63a6b6366841cea5989f2295808a8584f34cd"
+      "sha256": "0d7d3e7109bfaa3d8a5ce0033cfb59c32fc873868ae061ebaf41916c668c87d8"
     },
     {
-      "generated_at": "2026-06-26T14:11:27.418018+00:00",
+      "generated_at": "2026-06-27T20:04:15.188984+00:00",
       "id": "confabulation_eval",
       "path": "computed:eval.g0.confabulation",
       "present": true,
-      "sha256": "f0d5879e72d96539272809f3dc9f1c84ae46da9438c1d00cfccb05fcc76a40ef"
+      "sha256": "f0848084ac1e6be89408de49fd10a4dba07090a82803c17a2df8a7c6ab75b516"
     },
     {
-      "generated_at": "2026-06-26T14:11:27.419395+00:00",
+      "generated_at": "2026-06-27T20:04:15.202053+00:00",
       "id": "projection_reality_eval",
       "path": "computed:eval.g0.projection_reality",
       "present": true,
-      "sha256": "3604a154f1a90908bf50e3c7a5f1c20a33ab6917faf5d5446190dd133b7e34c1"
+      "sha256": "857ab68d27fd118d7d5f5dfa08702a01f920f2d1a2eb07bde35db15899ea33f0"
     },
     {
-      "generated_at": "2026-06-26T12:39:02.752773+00:00",
+      "generated_at": "2026-06-27T20:04:15.207454+00:00",
+      "id": "standing_parity_eval",
+      "path": "computed:eval.g0.standing_parity",
+      "present": true,
+      "sha256": "16c9cd9661957763d7b17b3c9edae7f1fe93cdfa039ed28221099b071aaad7ea"
+    },
+    {
+      "generated_at": "2026-06-27T20:04:15.257587+00:00",
       "id": "deep_latency_eval",
       "path": "computed:eval.g0.deep_latency",
       "present": true,
-      "sha256": "339f494ab8259469ef9c498a2fcc1c78f5169b470c80cb6e1e778d21d921825f"
+      "sha256": "b8ddd2f07e9e4fe6cb1c9f633e1e875cb795ef4a61dc1112a42a0ca5241dff52"
     },
     {
-      "generated_at": "2026-06-26T14:11:27.440690+00:00",
+      "generated_at": "2026-06-27T20:04:15.270624+00:00",
       "id": "resource_usage_eval",
       "path": "computed:eval.g0.resource_usage",
       "present": true,
-      "sha256": "7b1b2709dcc9de14c0204651322b8480222d1797fa3c2302f70e8f4f4510b712"
+      "sha256": "80765280f1496157d90cb5909198f28c12186942e6a69ea6b7ed8932cb47f2e4"
     },
     {
-      "generated_at": "2026-06-26T14:11:27.449921+00:00",
-      "id": "consciousness_eval",
-      "path": "computed:eval.g0.consciousness",
-      "present": true,
-      "sha256": "34ab41a5eed19cee2b25fbfcd51d777d168f6af09e38cbf68736410ea12e76c8"
-    },
-    {
-      "generated_at": "2026-06-26T14:11:27.567151+00:00",
+      "generated_at": "2026-06-27T20:04:15.272892+00:00",
       "id": "dreamer_eval",
       "path": "computed:eval.g0.dreamer",
       "present": true,
-      "sha256": "10fdcd077d9da9b16fb4e268d049c6b1a48414f4c06c5ab3af083c56a5f86039"
+      "sha256": "3fd87419b625e6ef2c6e95acfb5fb1d43f57711b1c93dcc9f5a474e5b1664f09"
     },
     {
-      "generated_at": "2026-06-27T00:30:47.285068+00:00",
+      "generated_at": "2026-06-27T20:04:15.306282+00:00",
       "id": "shadow_workspace_eval",
       "path": "computed:eval.g0.shadow_workspace",
       "present": true,
-      "sha256": "497f3a27953b0bc1f3c566be780ea3ca0e661d1d90355e9633b1d65b7768e5ec"
+      "sha256": "9e97b61fca5b256a1f990878aea2a27e5e3dd50a9da4335147a6835a774db3f3"
+    },
+    {
+      "generated_at": "2026-06-27T20:04:15.317645+00:00",
+      "id": "consciousness_eval",
+      "path": "computed:eval.g0.consciousness",
+      "present": true,
+      "sha256": "58b2f2fc9ae957dd713fb1477d5cfbbd2f75f5c99ab5719a9f3492ba747be750"
     }
   ]
 }

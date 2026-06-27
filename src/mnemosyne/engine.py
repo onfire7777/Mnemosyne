@@ -54,6 +54,7 @@ from mnemosyne.security import (
     sanitize_retrieved_text,
     trust_weight,
 )
+from mnemosyne.standing import standing, standing_abstention_report
 from mnemosyne.text import approx_tokens, cosine, lexical_score, tokenize
 
 
@@ -1108,7 +1109,10 @@ class LocalMemoryEngine:
         gist_support = gist_support_report(budgeted)
         gist_only = bool(gist_support["applied"])
         reality_monitoring = self._reality_monitoring_report(budgeted)
-        ungrounded_reality_only = bool(reality_monitoring["ungrounded_only"])
+        standing_report = reality_monitoring["standing"]
+        ungrounded_reality_only = bool(standing_report["abstention_gate"]["active"])
+        if ungrounded_reality_only != bool(reality_monitoring["ungrounded_only"]):
+            raise AssertionError("Standing P1 mirror diverged from reality-monitoring abstention gate")
         if gist_only:
             confidence = min(confidence, threshold * 0.95)
         if ungrounded_reality_only:
@@ -1166,6 +1170,7 @@ class LocalMemoryEngine:
                 "semantic_entropy": entropy,
                 "gist_support": gist_support,
                 "reality_monitoring": reality_monitoring,
+                "standing": standing_report,
                 "schema_fast_path": schema_fast_path,
                 "workspace_broadcast": workspace_broadcast,
                 "workspace_retrieval_advisory": workspace_retrieval_advisory,
@@ -1465,6 +1470,7 @@ class LocalMemoryEngine:
         grounded_cids: set[str] = set()
         risky_hit_ids: list[str] = []
         shadow_tags: dict[str, dict[str, Any]] = {}
+        standing_rows: list[dict[str, Any]] = []
         monitor = RealityMonitor()
         for index, hit in enumerate(hits):
             raw = hit.metadata.get("reality_class")
@@ -1478,9 +1484,38 @@ class LocalMemoryEngine:
                     grounded_cids.add(hit.id)
             elif reality_class in ungrounded:
                 risky_hit_ids.append(hit.id)
+            activation = hit.metadata.get("activation") if isinstance(hit.metadata, dict) else {}
+            score = standing(
+                {
+                    "reality_class": reality_class,
+                    "trust_tier": hit.trust_tier,
+                    "calibrated_confidence": hit.metadata.get("confidence", 0.0),
+                    "corroboration_count": len(hit.provenance) + (1 if hit.kind == "evidence" and hit.id else 0),
+                    "contradiction_pressure": 1.0 if hit.metadata.get("status") == "contested" else 0.0,
+                    "activation": activation.get("score") if isinstance(activation, dict) else 0.0,
+                }
+            )
+            standing_rows.append(
+                {
+                    "hit_id": hit.id or f"{hit.kind}:{index}",
+                    "kind": hit.kind,
+                    "authority": score.authority,
+                    "groundedness": score.groundedness,
+                    "salience": score.salience,
+                    "standing_fn_version": score.standing_fn_version,
+                    "reality_class": reality_class,
+                    "explain": score.explain,
+                }
+            )
         hit_count = len(hits)
         grounded = counts.get("grounded", 0)
         ungrounded_only = hit_count > 0 and grounded == 0 and any(counts.get(item, 0) for item in ungrounded)
+        standing_report = standing_abstention_report(standing_rows)
+        standing_report["p1_mirror"] = {
+            "boolean_ungrounded_only": ungrounded_only,
+            "standing_ungrounded_only": standing_report["abstention_gate"]["active"],
+            "zero_divergence": standing_report["abstention_gate"]["active"] is ungrounded_only,
+        }
         return {
             "applied": True,
             "classes": counts,
@@ -1500,6 +1535,7 @@ class LocalMemoryEngine:
             "shadow_tags_shadow_only": True,
             "shadow_tags_critical_path": False,
             "shadow_tags": shadow_tags,
+            "standing": standing_report,
         }
 
     @staticmethod
