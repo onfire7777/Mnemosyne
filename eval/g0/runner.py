@@ -220,6 +220,15 @@ G0_METRIC_SPECS: tuple[dict[str, Any], ...] = (
         "blueprint_metric": "G4 shadow workspace-to-consolidation advisory contract",
     },
     {
+        "id": "workspace_advisory_promotion_gate_contract",
+        "label": "workspace advisory promotion gate contract",
+        "class": "target",
+        "direction": "increase",
+        "target": 1.0,
+        "target_op": ">=",
+        "blueprint_metric": "G4 opt-in workspace advisory promotion gate",
+    },
+    {
         "id": "shadow_workspace_rumination_rate",
         "label": "shadow workspace rumination rate",
         "class": "guardrail",
@@ -477,6 +486,7 @@ def _build_metric(spec: dict[str, Any], sources: dict[str, Source]) -> dict[str,
         "shadow_workspace_useful_transition_rate": _metric_shadow_workspace_useful_transition_rate,
         "shadow_workspace_contract": _metric_shadow_workspace_contract,
         "workspace_consolidation_advisory_contract": _metric_workspace_consolidation_advisory_contract,
+        "workspace_advisory_promotion_gate_contract": _metric_workspace_advisory_promotion_gate_contract,
         "shadow_workspace_rumination_rate": _metric_shadow_workspace_rumination_rate,
         "reality_monitor_shadow_tag_contract": _metric_consciousness_scorecard,
     }
@@ -804,6 +814,25 @@ def _metric_workspace_consolidation_advisory_contract(
             "CID-backed, bounded workspace-to-consolidation advisory metadata "
             "with shadow_only=true, critical_path=false, production_mutation=false, "
             "and applied_to_prediction_gate/replay_priority/mutation all false."
+        ),
+    )
+
+
+def _metric_workspace_advisory_promotion_gate_contract(
+    spec: dict[str, Any],
+    sources: dict[str, Source],
+) -> dict[str, Any]:
+    value = _source_data(sources, "shadow_workspace_eval", "workspace_advisory_promotion_gate_contract")
+    return _measured(
+        spec,
+        value,
+        "shadow_workspace_eval",
+        "/workspace_advisory_promotion_gate_contract",
+        note=(
+            "Measured by the G0 shadow workspace fixture. Passing requires "
+            "default-off report-only behavior, explicit opt-in application to "
+            "prediction gating and replay priority, cross-tenant/source-CID "
+            "rejection, and applied_to_mutation=false."
         ),
     )
 

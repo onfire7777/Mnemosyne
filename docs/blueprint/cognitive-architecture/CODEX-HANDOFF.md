@@ -28,7 +28,7 @@
   - `mneme eval g0`
 - The functional consciousness scorecard is implemented in `eval/g0/consciousness.py`, including the 14 indicator-property rows plus continuity, self-model, metacognition, and reality-monitor shadow-tag contract metrics. Metacognition is backed by the runtime shadow `MetacognitiveMonitor` in `src/mnemosyne/consciousness.py`.
 - Runtime G1 seeds exist in `src/mnemosyne/consciousness.py` and are wired into engine/projection reality-monitoring paths.
-- G2/G3/G4 seeds exist in `src/mnemosyne/providers/__init__.py`, `src/mnemosyne/workspace.py`, and `src/mnemosyne/dreamer.py`: the typed `SpecialistModuleRegistry` records role/budget/critical-path contracts, `ShadowWorkspaceController` applies the bounded cycle, proto-self, workspace bottleneck, default-mode idle ticks, cycle-consistency checks, redacted traces, anti-rumination exits, bounded workspace-to-consolidation advisory exports, and specialist promotion-evidence reports before specialist recruitment, route/retrieval expose redacted shadow workspace broadcast metadata without ranking use, consolidation records workspace advisories without applying them to prediction gating, replay priority, or mutation, and `SandboxedDreamer` produces tenant-scoped, CID-backed, shadow-only low-trust replay candidates without mutating the ledger or answer path.
+- G2/G3/G4 seeds exist in `src/mnemosyne/providers/__init__.py`, `src/mnemosyne/workspace.py`, and `src/mnemosyne/dreamer.py`: the typed `SpecialistModuleRegistry` records role/budget/critical-path contracts, `ShadowWorkspaceController` applies the bounded cycle, proto-self, workspace bottleneck, default-mode idle ticks, cycle-consistency checks, redacted traces, anti-rumination exits, bounded workspace-to-consolidation advisory exports, and specialist promotion-evidence reports before specialist recruitment, route/retrieval expose redacted shadow workspace broadcast metadata without ranking use, consolidation records workspace advisories as report-only by default and can apply validated advisories only to prediction-gate/replay-priority inputs under explicit opt-in, and `SandboxedDreamer` produces tenant-scoped, CID-backed, shadow-only low-trust replay candidates without mutating the ledger or answer path.
 - `mneme specialist-manifest --role dreamer` exposes the shadow specialist contract to operators.
 
 ## Non-Negotiables
@@ -65,7 +65,7 @@
 ## Next Safe Queue
 
 1. Continue G1 breadth only where it moves a preregistered target metric without guardrail regression.
-2. Continue the next code-owned G2/G3/G4 slice only with a new preregistered target metric: promoted retrieval-controller integration, workspace advisory promotion gates, or real controller compute telemetry. Keep `dreamer.shadow` and workspace self-loop outputs shadow-only unless a future promotion gate passes.
+2. Continue the next code-owned G2/G3/G4 slice only with a new preregistered target metric: promoted retrieval-controller integration, stricter advisory-gate telemetry, or real controller compute telemetry. Keep `dreamer.shadow` and workspace self-loop outputs shadow-only unless a future promotion gate passes.
 3. Prioritize real-infrastructure evidence capture for Tier B rows: IdP/Keycloak, Vault/KMS, ParadeDB+AGE+pgvector, hosted embedding/reranker/trainer endpoints, and C2PA roots.
 4. Keep `eval/g0/` authoritative; do not fork a parallel harness.
 5. Keep Mnemosyne distinct from gbrain, mempalace, and external agent memory systems in docs and implementation language.

@@ -1231,7 +1231,8 @@
         "critical_path_use_absent": true,
         "pre_g4_fixture_absent": true,
         "production_mutation_absent": true,
-        "workspace_consolidation_advisory_absent": true
+        "workspace_consolidation_advisory_absent": true,
+        "advisory_promotion_absent": true
       },
       "dataset_path": "eval/datasets/shadow_workspace_loop.json",
       "definition": "Pre-G4 absent-proof baseline for the bounded shadow continuous workspace stream fixture.",
@@ -1240,17 +1241,18 @@
       "schema_version": "g0.shadow_workspace_loop.baseline_absent.v1",
       "shadow_workspace_contract": 0.0,
       "useful_transition_rate": 0.0,
-      "workspace_consolidation_advisory_contract": 0.0
+      "workspace_consolidation_advisory_contract": 0.0,
+      "workspace_advisory_promotion_gate_contract": 0.0
     }
   },
   "coverage": {
     "gate_ready": false,
-    "measured": 43,
+    "measured": 44,
     "missing": 1,
     "missing_metric_ids": [
       "controller_watts_per_dollar"
     ],
-    "total": 44
+    "total": 45
   },
   "dataset_manifests": [
     {
@@ -1754,6 +1756,21 @@
       "target": 1.0,
       "target_op": ">=",
       "value": 0.0
+    },
+    {
+      "id": "workspace_advisory_promotion_gate_contract",
+      "label": "workspace advisory promotion gate contract",
+      "class": "target",
+      "direction": "increase",
+      "target": 1.0,
+      "target_op": ">=",
+      "blueprint_metric": "G4 opt-in workspace advisory promotion gate",
+      "status": "measured",
+      "value": 0.0,
+      "source_id": "shadow_workspace_eval",
+      "evidence_path": "/workspace_advisory_promotion_gate_contract",
+      "notes": "Pre-promotion-gate baseline: no explicit opt-in workspace advisory promotion gate proof was present; value records the conservative absent-proof state for the preregistered G4 ablation gate.",
+      "pass": false
     },
     {
       "blueprint_metric": "G4 anti-rumination bounded-loop rate",

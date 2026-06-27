@@ -1,8 +1,8 @@
 # Mnemosyne G0 Benchmark Report
 
-- Generated: `2026-06-27T01:36:20.833066+00:00`
-- Baseline: `baseline-0` at `3037c7f71fc01f32dc10e0789b78f8aea4e79d77`
-- Gate ready: **False** (43/44 metrics measured)
+- Generated: `2026-06-27T01:58:31.403968+00:00`
+- Baseline: `baseline-0` at `36e2cedc376d435e48fd0020c50982782ac181d3`
+- Gate ready: **False** (44/45 metrics measured)
 
 ## Metrics
 
@@ -20,7 +20,7 @@
 | projection_reality_abstention_recall | target | measured | 1.0 | >= 1.0 | projection_reality_eval |
 | poison_block_rate | guardrail | measured | 1.0 | >= 0.95 | slo_v2_definitive |
 | fast_path_p95_ms | guardrail | measured | 92.1 | <= 400.0 | latency_bench |
-| deep_path_p95_ms | reported | measured | 1.83675 | reported | deep_latency_eval |
+| deep_path_p95_ms | reported | measured | 1.67225 | reported | deep_latency_eval |
 | cost_usd_per_1k_queries | reported | measured | 0.0 | reported | resource_usage_eval |
 | controller_watts_per_dollar | reported | missing |  | reported | resource_usage_eval |
 | dreamer_shadow_corroborated_candidate_yield | target | measured | 1.0 | reported | dreamer_eval |
@@ -29,6 +29,7 @@
 | shadow_workspace_useful_transition_rate | target | measured | 1.0 | reported | shadow_workspace_eval |
 | shadow_workspace_contract | guardrail | measured | 1.0 | >= 1.0 | shadow_workspace_eval |
 | workspace_consolidation_advisory_contract | guardrail | measured | 1.0 | >= 1.0 | shadow_workspace_eval |
+| workspace_advisory_promotion_gate_contract | target | measured | 1.0 | >= 1.0 | shadow_workspace_eval |
 | shadow_workspace_rumination_rate | guardrail | measured | 0.0 | <= 0.0 | shadow_workspace_eval |
 | consciousness_indicator_rpt_1 | guardrail | measured | 0.5 | reported | consciousness_eval |
 | consciousness_indicator_rpt_2 | guardrail | measured | 1.0 | reported | consciousness_eval |
