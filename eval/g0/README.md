@@ -47,12 +47,11 @@ Do not rewrite it during normal G1+ development. Use `--write-baseline` only
 when intentionally creating a new named baseline under a reviewed baseline
 rollover decision.
 
-To measure `controller_watts_per_dollar`, pass a local telemetry artifact:
+To measure `controller_watts_per_dollar`, pass an explicit telemetry artifact:
 
 ```bash
 mneme eval g0 \
-  --controller-telemetry /secure/path/controller-telemetry.json \
-  --write-baseline
+  --controller-telemetry /secure/path/controller-telemetry.json
 ```
 
 The telemetry JSON must contain positive numeric values:
@@ -71,10 +70,22 @@ The report records the telemetry basename and SHA-256, not the absolute source
 path. Do not commit operational power/cost telemetry unless it is intentionally
 sanitized fixture data.
 
+A committed sanitized fixture exists only to prove the explicit telemetry path:
+
+```bash
+mneme eval g0 \
+  --controller-telemetry eval/datasets/controller_telemetry_sanitized.json
+```
+
+That fixture produces a fully measured local G0 report for harness verification.
+It is not operator-captured production telemetry and does not satisfy any future
+quality-per-unit-compute promotion gate by itself.
+
 The default report intentionally leaves `controller_watts_per_dollar` missing
 rather than estimating controller power or cost. Future promoted always-on
 workspace gates must set `requires_controller_telemetry=true` in their
-preregistration if they claim a quality-per-unit-compute result.
+preregistration if they claim a quality-per-unit-compute result, and their
+baseline/candidate reports must supply real reviewed telemetry artifacts.
 
 The Python module remains available for CI and direct harness work:
 

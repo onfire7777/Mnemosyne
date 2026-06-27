@@ -23,6 +23,7 @@ from eval.g0.unified_substrate import run_unified_substrate_eval
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+CONTROLLER_TELEMETRY_FIXTURE = REPO_ROOT / "eval/datasets/controller_telemetry_sanitized.json"
 
 
 def _report(metrics: list[dict]) -> dict:
@@ -501,6 +502,26 @@ def test_g0_report_measures_controller_watts_with_explicit_telemetry(tmp_path: P
     assert metrics["controller_watts_per_dollar"]["value"] == 50.0
     assert computed["controller_telemetry_present"] is True
     assert computed["telemetry_sha256"] == hashlib.sha256(telemetry.read_bytes()).hexdigest()
+
+
+def test_g0_report_measures_controller_watts_with_committed_fixture() -> None:
+    report = build_report(
+        REPO_ROOT,
+        baseline_name="baseline-0",
+        controller_telemetry_path=CONTROLLER_TELEMETRY_FIXTURE,
+    )
+    metrics = {metric["id"]: metric for metric in report["metrics"]}
+    computed = report["computed_evidence"]["resource_usage_eval"]
+
+    assert report["coverage"]["missing"] == 0
+    assert report["coverage"]["gate_ready"] is True
+    assert metrics["controller_watts_per_dollar"]["status"] == "measured"
+    assert metrics["controller_watts_per_dollar"]["value"] == 50.0
+    assert computed["controller_telemetry_present"] is True
+    assert computed["telemetry_path"] == CONTROLLER_TELEMETRY_FIXTURE.name
+    assert computed["telemetry_sha256"] == hashlib.sha256(
+        CONTROLLER_TELEMETRY_FIXTURE.read_bytes()
+    ).hexdigest()
 
 
 def test_g0_runner_cli_accepts_controller_telemetry(tmp_path: Path) -> None:

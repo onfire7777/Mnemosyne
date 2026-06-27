@@ -161,9 +161,9 @@ No upgrade is accepted without moving one of these against a frozen baseline, vi
 Framing is **decided**: research vehicle, product‑grade verification. Sequence:
 
 - [x] **G0 — Benchmarks first (blocking).** Implemented at repo root `eval/g0/`: harness + frozen baseline for recall@k / nDCG@k (incl. hard multi‑hop), ECE + abstention precision/recall, continual‑learning interference, confabulation rate (answers unsupported by provenance), P95 latency, paid-provider cost, and controller watts/$ when explicit telemetry is supplied. No feature ships without an ablation win here.
-- [ ] **G1 — Reliability core.** Multi‑signal write priority; prediction‑error‑gated consolidation; reality‑monitoring tags wired to abstention; retrieval‑strengthening; schema fast‑path (`contested` for uncorroborated‑but‑congruent).
-- [ ] **G2 — Structure + generalisation.** Refactor `providers` → typed **specialist‑module registry**; advance embeddings + the fenced parametric "semantic cortex"; meta‑d′ self‑monitoring.
-- [ ] **G3 — Generative replay, sandboxed.** Low‑trust recombination, gate‑promoted only; must not raise the confabulation rate.
-- [ ] **G4 — Always‑on workspace controller.** Behind a written go/no‑go: self‑triggered background autonomy must beat on‑demand consolidation on quality‑per‑unit‑compute, or it does not ship. Anti‑rumination regulator bound to R7.
-- [ ] Independently reproduce the headline SLOs before citing them.
-- [ ] Keep the phenomenal‑consciousness claim out of all docs and UX; report only measured functional signatures.
+- [x] **G1 — Reliability core.** Local/gated slices are implemented: multi‑signal write priority; prediction‑error‑gated consolidation metadata; reality‑monitoring tags wired to abstention; retrieval‑strengthening; schema fast‑path; and `contested` status for uncorroborated‑but‑congruent projections.
+- [ ] **G2 — Structure + generalisation.** Local foundations are wired (typed specialist registry, metacognition metrics, parametric/semantic-cortex rails), but strict parity still depends on Tier‑B production evidence for deployed backing services and optional production adapters.
+- [x] **G3 — Generative replay, sandboxed.** Shadow, low‑trust, CID‑backed replay is gate‑measured without confabulation regression; promotion remains gated and non-critical-path.
+- [ ] **G4 — Always‑on workspace controller.** The Phase 7 heartbeat safety floor is gate‑proven with bounded compute and rumination `0.0`; promoted quality‑per‑unit‑compute still requires reviewed controller telemetry, and final no-toggle retirement remains behind the P5 owner checkpoint.
+- [x] Independently reproduce the headline SLOs before citing them.
+- [x] Keep the phenomenal‑consciousness claim out of all docs and UX; report only measured functional signatures.
