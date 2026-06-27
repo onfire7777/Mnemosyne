@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
@@ -24,6 +25,9 @@ from mnemosyne.text import cosine, hashing_embedding, lexical_score, tokenize
 
 
 QUERY_SUPPORT_THRESHOLD = 2.0 / 3.0
+WORKSPACE_BROADCAST_MAX_ITEMS = 4
+WORKSPACE_BROADCAST_MAX_CONTENT_CHARS = 160
+WORKSPACE_BROADCAST_FILTER_KEYS = ("workspace_broadcast", "workspace_focus")
 QUERY_SUPPORT_STOPWORDS = {
     "a",
     "about",
@@ -129,6 +133,78 @@ _TEMPORAL_SUBJECTS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("on_call_tool", ("on-call", "tool")),
     ("default_cloud", ("default", "cloud")),
 )
+
+
+def workspace_broadcast_from_context(ctx: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Return redacted shadow workspace broadcast metadata from route/retrieval context."""
+
+    raw = None
+    if isinstance(ctx, Mapping):
+        for key in WORKSPACE_BROADCAST_FILTER_KEYS:
+            if key in ctx:
+                raw = ctx.get(key)
+                break
+    items = _workspace_broadcast_items(raw)
+    return {
+        "applied": bool(items),
+        "source": "workspace_context",
+        "shadow_only": True,
+        "critical_path": False,
+        "used_for_ranking": False,
+        "max_items": WORKSPACE_BROADCAST_MAX_ITEMS,
+        "item_count": len(items),
+        "items": items,
+    }
+
+
+def strip_workspace_broadcast_filter(filt: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Remove shadow workspace keys before adapter/search filters are evaluated."""
+
+    clean = dict(filt or {})
+    for key in WORKSPACE_BROADCAST_FILTER_KEYS:
+        clean.pop(key, None)
+    return clean
+
+
+def _workspace_broadcast_items(raw: object) -> list[dict[str, Any]]:
+    if raw is None:
+        return []
+    if isinstance(raw, Mapping):
+        if isinstance(raw.get("items"), Sequence) and not isinstance(raw.get("items"), (str, bytes, bytearray)):
+            candidates = list(raw.get("items", []))
+        elif isinstance(raw.get("selected_items"), Sequence) and not isinstance(raw.get("selected_items"), (str, bytes, bytearray)):
+            candidates = list(raw.get("selected_items", []))
+        elif isinstance(raw.get("trace"), Sequence) and not isinstance(raw.get("trace"), (str, bytes, bytearray)):
+            candidates = list(raw.get("trace", []))
+        else:
+            candidates = [raw]
+    elif isinstance(raw, Sequence) and not isinstance(raw, (str, bytes, bytearray)):
+        candidates = list(raw)
+    else:
+        candidates = [raw]
+    return [
+        _workspace_broadcast_item(item, index=index)
+        for index, item in enumerate(candidates[:WORKSPACE_BROADCAST_MAX_ITEMS])
+    ]
+
+
+def _workspace_broadcast_item(item: object, *, index: int) -> dict[str, Any]:
+    if isinstance(item, Mapping):
+        item_id = str(item.get("id") or item.get("focus_id") or f"workspace-focus-{index + 1}")
+        text = str(item.get("content") or item.get("text") or "")
+        source = str(item.get("source") or item.get("reality_class") or "workspace")
+    else:
+        item_id = f"workspace-focus-{index + 1}"
+        text = str(item or "")
+        source = "workspace"
+    text = text[:WORKSPACE_BROADCAST_MAX_CONTENT_CHARS]
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16] if text else ""
+    return {
+        "id": item_id,
+        "source": source,
+        "content_chars": len(text),
+        "content_ref": f"[workspace-broadcast-redacted:{digest}:chars={len(text)}]" if text else "",
+    }
 
 
 def normalise_query_term(token: str) -> str:
