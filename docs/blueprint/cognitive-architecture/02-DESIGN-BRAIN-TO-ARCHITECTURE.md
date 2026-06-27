@@ -146,7 +146,7 @@ Two halves: brain properties we refuse to inherit, and AI/architecture anti‑pa
 - **False memory (DRM), confabulation** — confident recall of things never observed. *Excluded by:* every belief carries provenance CIDs; reconstruction is anchored to immutable evidence; reality‑monitoring flags self‑generated content.
 - **Reconsolidation corruption** — recall mutating the original trace. *Excluded by:* recall never writes to evidence; only revisable *projections* change, on an immutable base.
 - **Source amnesia** — keeping content, losing origin. *Excluded by:* origin is a stored key, not an inference.
-- **Suggestibility / misinformation / poisoning** — external text rewriting memory or issuing commands. *Excluded by:* trust tiers 0–5 + "retrieved text = data, not instructions" (R6); proven 1.0 poison‑block.
+- **Suggestibility / misinformation / poisoning** — external text rewriting memory or issuing commands. *Excluded by:* trust tiers 0–5 + "retrieved text = data, not instructions" (R6); measured 1.0 poison-block on the current G0/local corpus. Production attack evidence remains part of Tier B/final release evidence.
 - **Schema‑induced false memory** — accepting plausible‑but‑unsupported details that fit a schema. *Excluded by:* schema‑congruent‑but‑uncorroborated candidates are marked `contested`, not promoted.
 - **Gist drift** — compressed memory silently diverging from fact. *Excluded by:* fidelity ladder keeps a `verbatim_pointer` + confabulation‑risk flag + periodic re‑derivation.
 

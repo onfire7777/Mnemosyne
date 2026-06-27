@@ -1,5 +1,7 @@
 # Codex Handoff
 
+**Latest verified code/runtime baseline:** 2026-06-27 · `b8e43de` (`test(g0): add sanitized controller telemetry fixture`) with GitHub CI `28305065678` passing. Later docs-only commits may sit above this baseline.
+
 **Canonical checkout:** `/Users/admin/Mnemosyne` on `main`, tracking `origin/main` (`github.com/onfire7777/Mnemosyne`). This is now the single local checkout.
 
 **Path note:** the earlier duplicate clones (`/Users/admin/Projects/Mnemosyne`, `…/Mnemosyne-completion`, `…/Mnemosyne-lane-a`) and the historical `/Users/admin/Desktop/Mnemosyne/` planning folder were consolidated and removed on 2026-06-26. Full git bundles were archived first under `~/Mnemosyne-consolidation-archive-20260626-151915/`, so every branch is recoverable from `origin` or that archive. GitHub (`origin/main`) is the source of truth.
@@ -26,6 +28,7 @@
 - The G0 harness is implemented under `eval/g0/` and can be run through both:
   - `python -m eval.g0.runner`
   - `mneme eval g0`
+- `eval/datasets/controller_telemetry_sanitized.json` is a committed sanitized fixture for proving the explicit `--controller-telemetry` path. The default no-telemetry report remains intentionally not `gate_ready` (`69/70`), while the explicit fixture path produces a fully measured local report (`70/70`). This is harness verification only, not production power/cost evidence.
 - The functional consciousness scorecard is implemented in `eval/g0/consciousness.py`, including the 14 indicator-property rows plus continuity, self-model, metacognition, and reality-monitor shadow-tag contract metrics. Metacognition is backed by the runtime shadow `MetacognitiveMonitor` in `src/mnemosyne/consciousness.py`.
 - Runtime G1 seeds exist in `src/mnemosyne/consciousness.py` and are wired into engine/projection reality-monitoring paths.
 - G2/G3/G4 seeds exist in `src/mnemosyne/providers/__init__.py`, `src/mnemosyne/workspace.py`, and `src/mnemosyne/dreamer.py`: the typed `SpecialistModuleRegistry` records role/budget/critical-path contracts, `ShadowWorkspaceController` applies the bounded cycle, proto-self, workspace bottleneck, default-mode idle ticks, cycle-consistency checks, redacted traces, anti-rumination exits, bounded workspace-to-consolidation advisory exports, and specialist promotion-evidence reports before specialist recruitment, `ShadowWorkspaceService` is an explicit default-off wrapper that must be enabled/started before ticking and records proto-self plus metacognitive loop state, route/retrieval expose redacted shadow workspace broadcast metadata without ranking use, retrieval can apply a separate CID-backed `workspace-retrieval-advisory.v1` only when policy and request explicitly opt in, consolidation records workspace advisories as report-only by default and can apply validated advisories only to prediction-gate/replay-priority inputs under explicit opt-in, and `SandboxedDreamer` produces tenant-scoped, CID-backed, shadow-only low-trust replay candidates without mutating the ledger or answer path.
@@ -40,7 +43,19 @@
 - Generativity, self-loop, and imagination remain shadow/advisory and off the answer critical path until promoted by gates.
 - Graph retrieval must fail closed unless relation hits are backed by visible source evidence under the active trust, sensitivity, quarantine, and branch policy.
 
-## Verified This Pass
+## Latest Verified Snapshot
+
+- `b8e43de` is pushed to `origin/main`; local and remote heads match.
+- GitHub CI `28305065678` passed: ruff, unit/drift checks with G0 preregistration replay, and Postgres integration.
+- Focused G0 telemetry fixture tests pass:
+  - `tests/test_g0_harness.py::test_g0_report_emits_every_spec_metric_and_source_hashes`
+  - `tests/test_g0_harness.py::test_g0_report_measures_controller_watts_with_committed_fixture`
+  - `tests/test_g0_harness.py::test_g0_runner_cli_accepts_controller_telemetry`
+- Direct G0 fixture run with `--controller-telemetry eval/datasets/controller_telemetry_sanitized.json` reports `70/70 measured; gate_ready=True`.
+- Direct default G0 run still reports `69/70 measured; gate_ready=False`; no controller power/cost estimate is fabricated.
+- Full local pytest and full ruff passed before the commit.
+
+## Prior Verified History
 
 - Full pytest suite passes locally with `.venv/bin/python -m pytest -q`.
 - Graph relation retrieval now suppresses unbacked relations by default.
