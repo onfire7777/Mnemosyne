@@ -1,6 +1,6 @@
 # Cognitive Architecture — Design & Specification
 
-**Location:** `docs/blueprint/cognitive-architecture/` · **Status:** G0 harness implemented; G1/G4 reliability slices in progress; default G0 report intentionally waits on explicit controller telemetry for full metric coverage · **Owner:** onfire7777 · **Updated:** 2026‑06‑27
+**Location:** `docs/blueprint/cognitive-architecture/` · **Status:** G0 harness implemented; G1 reliability-core slices and G4 shadow/workspace gates wired and gate-proven; production/operator evidence and explicit controller telemetry remain pending · **Owner:** onfire7777 · **Updated:** 2026‑06‑27
 
 The consolidated design + specification set for evolving Mnemosyne into a **recursive, self‑improving memory system with a functional sense of consciousness**. It **builds on — and does not contradict —** the **v2 Build Blueprint** (`../Mnemosyne-v2-Build-Blueprint.md`): same substrate (immutable evidence ledger + rebuildable projections, AGM belief‑revision core, branchable memory, bitemporal facts, fidelity‑tiered forgetting, conformal abstention, dual user model, capability‑secured writes, profile‑guided self‑optimization — the blueprint's innovations **I1–I12**). What it adds on top: the brain‑by‑brain research grounding, the **cognitive‑architecture** framing (a small always‑on workspace controller + on‑demand specialists), the operationalised "sense of consciousness," an objective decision record, and a reliability‑first **gated execution program**.
 

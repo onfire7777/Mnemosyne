@@ -173,8 +173,6 @@ def scan_evidence_paths(
         if not path.is_file():
             skipped_files.append({"path": str(path), "reason": "not a file"})
             return
-        if path.name == "redaction-scan.json":
-            return
         _scan_file(
             Path(key),
             findings=findings,
@@ -226,11 +224,12 @@ def scan_evidence_tree(
             skipped_files=skipped_files,
             findings=findings,
         )
+    root_scan_report = out_root / "redaction-scan.json"
     for path in sorted(out_root.rglob("*")):
         if reject_symlinks and path.is_symlink():
             skipped_files.append({"path": str(path), "reason": "symlink not allowed"})
             continue
-        if not path.is_file() or path.name == "redaction-scan.json":
+        if not path.is_file() or path == root_scan_report:
             continue
         _scan_file(
             path,

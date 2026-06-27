@@ -22,7 +22,7 @@ CLI commands consumed by `deployment-soak` and `release-audit`.
   placeholders, rejects duplicate or unknown production commands, rejects
   high-confidence secret material, rejects secret-bearing manifest options in
   split and `--option=value` forms, rejects unscannable retained artifacts,
-  rejects repo-local or non-empty output roots, supports `--preflight-only`
+  rejects repo-local or pre-existing output roots, supports `--preflight-only`
   setup validation, runs `deployment-soak --evidence-dir` from the copied
   `operator-soak-manifest.json`, and then runs
   `release-audit --evidence-manifest "$OUT_ROOT/evidence/manifest.json"

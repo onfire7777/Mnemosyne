@@ -33,7 +33,7 @@ paths outside the evidence bundle, and fails if retained check JSON diverges
 from the audited report.
 
 Post-plan redaction-skip hardening now fails closed when any generated evidence
-file is skipped by redaction scanning and rejects non-empty output roots before
+file is skipped by redaction scanning and rejects pre-existing output roots before
 capture starts. `summary.json` and `bundle-manifest.json` are written only after
 the generated bundle has no redaction findings and no skipped files.
 
@@ -134,7 +134,7 @@ Checked 2026-06-25 during renderer hardening:
   material in the rendered manifest, writes `redaction-scan.json` during
   preflight, rejects unscannable generated evidence, and scans generated text
   evidence before writing `summary.json`.
-- `infra/scripts/capture-production-evidence.sh` rejects non-empty output roots
+- `infra/scripts/capture-production-evidence.sh` rejects pre-existing output roots
   so stale files cannot be fingerprinted into a successful capture.
 - `infra/scripts/capture-production-evidence.sh` rejects manual manifests with
   duplicate or unknown production commands, matching the renderer.

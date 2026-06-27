@@ -11029,6 +11029,14 @@ def _verify_production_evidence_source_soak_manifest(
     path_rewrites = _production_evidence_manifest_path_rewrites(preflight)
     source_profile = _production_evidence_manifest_check_profile(source_manifest, path_rewrites=path_rewrites)
     operator_profile = _production_evidence_manifest_check_profile(operator_manifest)
+    source_payload = _production_evidence_normalize_manifest_value(
+        dict(source_manifest),
+        path_rewrites=path_rewrites,
+    )
+    operator_payload = _production_evidence_normalize_manifest_value(
+        dict(operator_manifest),
+        path_rewrites={},
+    )
     if source_commands != operator_commands or source_profile != operator_profile:
         ok = False
         _production_evidence_finding(
@@ -11037,6 +11045,16 @@ def _verify_production_evidence_source_soak_manifest(
             (
                 "source-soak-manifest.json command and argument profile must match "
                 "operator-soak-manifest.json after retained input-artifact path rewrites"
+            ),
+        )
+    if source_payload != operator_payload:
+        ok = False
+        _production_evidence_finding(
+            findings,
+            "source_manifest_payload_mismatch",
+            (
+                "source-soak-manifest.json payload must match operator-soak-manifest.json "
+                "after retained input-artifact path rewrites"
             ),
         )
     return ok

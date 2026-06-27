@@ -134,7 +134,8 @@ def test_production_evidence_input_dir_is_not_capture_output() -> None:
     assert "capture output is passed separately as `OUT_ROOT`" in env_doc
     assert "absolute external directory" in rollback_doc
     assert "must not point inside the" in rollback_doc
-    assert "new or empty absolute external custody path outside the" in rollback_doc
+    assert "new absolute external custody path outside the" in rollback_doc
+    assert "must not already exist" in rollback_doc
     assert "validates local real-service mechanics" in infra_readme
     assert "not production validation" in infra_readme
 

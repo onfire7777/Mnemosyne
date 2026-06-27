@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
+
+import pytest
 
 
 REPO = Path(__file__).resolve().parents[1]
@@ -20,7 +23,33 @@ def test_production_and_local_evidence_capture_reject_repo_local_outputs() -> No
 
     assert "umask 077" in local
     assert "refusing to write local-staging evidence inside the repository" in local
+    assert "local-staging evidence output root cannot be a symlink" in local
     assert 'chmod 700 "${OUT_ROOT}"' in local
+
+
+def test_capture_local_evidence_rejects_symlinked_output_root(tmp_path: Path) -> None:
+    target_root = tmp_path / "real-local-capture"
+    out_root = tmp_path / "linked-local-capture"
+    target_root.mkdir()
+    try:
+        out_root.symlink_to(target_root, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"symlink setup unavailable: {exc}")
+
+    proc = subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "capture-local-evidence.sh"),
+            str(out_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert proc.returncode == 65
+    assert "local-staging evidence output root cannot be a symlink" in proc.stderr
+    assert not (target_root / "manifest.json").exists()
 
 
 def test_generated_secret_material_uses_private_modes() -> None:

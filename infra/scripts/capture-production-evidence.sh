@@ -122,15 +122,9 @@ else:
     sys.exit(65)
 PY
 )"
-if [ -e "${OUT_ROOT}" ]; then
-  if [ ! -d "${OUT_ROOT}" ]; then
-    echo "ERROR: production evidence output path exists and is not a directory: ${OUT_ROOT}" >&2
-    exit 65
-  fi
-  if [ -n "$(find "${OUT_ROOT}" -mindepth 1 -maxdepth 1 -print -quit)" ]; then
-    echo "ERROR: production evidence output directory must be empty: ${OUT_ROOT}" >&2
-    exit 65
-  fi
+if [ -e "${OUT_ROOT}" ] || [ -L "${OUT_ROOT}" ]; then
+  echo "ERROR: production evidence output root must not already exist: ${OUT_ROOT}" >&2
+  exit 65
 fi
 
 MANIFEST_PATH="$(cd "$(dirname "${MANIFEST}")" && pwd)/$(basename "${MANIFEST}")"
@@ -815,7 +809,27 @@ def _snapshot_file_entries(original_root: Path, snapshot_root: Path) -> list[dic
         )
     return files
 
-out_root.mkdir(parents=True, exist_ok=True)
+try:
+    out_root.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
+    out_root.mkdir(mode=0o700, exist_ok=False)
+except FileExistsError:
+    print(
+        f"ERROR: production evidence output root must not already exist: {out_root}",
+        file=sys.stderr,
+    )
+    sys.exit(65)
+except OSError as exc:
+    print(
+        f"ERROR: failed to create production evidence output root {out_root}: {exc}",
+        file=sys.stderr,
+    )
+    sys.exit(65)
+if out_root.is_symlink() or not out_root.is_dir():
+    print(
+        f"ERROR: production evidence output root is not a regular directory: {out_root}",
+        file=sys.stderr,
+    )
+    sys.exit(65)
 out_root.chmod(0o700)
 snapshot_root = out_root / "input-artifacts"
 snapshot_root.mkdir(mode=0o700, exist_ok=True)

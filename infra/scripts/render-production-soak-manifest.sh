@@ -326,6 +326,28 @@ def is_url(value: str) -> bool:
     parsed = urlparse(value)
     return bool(parsed.scheme and parsed.netloc)
 
+input_artifact_errors: list[str] = []
+
+def evidence_relative_path(value: str, *, label: str) -> tuple[Path, str] | None:
+    candidate = Path(value).expanduser()
+    if not candidate.is_absolute():
+        return None
+    resolved = candidate.resolve(strict=False)
+    try:
+        lexical_relative = candidate.relative_to(evidence_dir)
+    except ValueError:
+        lexical_relative = None
+    if lexical_relative is not None and ".." in lexical_relative.parts:
+        input_artifact_errors.append(f"{label} must not contain '..' path segments")
+        return None
+    try:
+        relative = resolved.relative_to(evidence_dir_resolved)
+    except ValueError:
+        if lexical_relative is not None:
+            input_artifact_errors.append(f"{label} must resolve under MNEMOSYNE_PROD_EVIDENCE_DIR")
+        return None
+    return resolved, relative.as_posix()
+
 def collect_manifest_input_artifacts(manifest_payload: dict[str, Any]) -> list[dict[str, object]]:
     artifacts: dict[str, dict[str, object]] = {}
     if not isinstance(evidence_dir_resolved, Path):
@@ -337,15 +359,10 @@ def collect_manifest_input_artifacts(manifest_payload: dict[str, Any]) -> list[d
         candidate = Path(value).expanduser()
         if not candidate.is_absolute():
             return
-        resolved = candidate.resolve(strict=False)
-        try:
-            relative = candidate.relative_to(evidence_dir)
-        except ValueError:
-            try:
-                relative = resolved.relative_to(evidence_dir_resolved)
-            except ValueError:
-                return
-        relative_name = relative.as_posix()
+        relative_result = evidence_relative_path(value, label=f"{check_name} {option}")
+        if relative_result is None:
+            return
+        resolved, relative_name = relative_result
         artifact = artifacts.setdefault(
             str(resolved),
             {
@@ -406,7 +423,6 @@ def collect_manifest_input_artifacts(manifest_payload: dict[str, Any]) -> list[d
     return sorted(artifacts.values(), key=lambda item: str(item["relative_path"]))
 
 input_artifacts = collect_manifest_input_artifacts(rendered_manifest)
-input_artifact_errors: list[str] = []
 
 def artifact_relative_name(value: str) -> str:
     candidate = Path(value).expanduser()
@@ -427,16 +443,16 @@ def record_suite_nested_artifact(value: object, *, suite_name: str, field: str) 
     if not candidate.is_absolute():
         input_artifact_errors.append(f"{suite_name} {field} must be an absolute external path")
         return
-    resolved = candidate.resolve(strict=False)
-    try:
-        relative = candidate.relative_to(evidence_dir)
-    except ValueError:
-        try:
-            relative = resolved.relative_to(evidence_dir_resolved)
-        except ValueError:
+    error_count = len(input_artifact_errors)
+    relative_result = evidence_relative_path(
+        str(candidate),
+        label=f"{suite_name} {field}",
+    )
+    if relative_result is None:
+        if len(input_artifact_errors) == error_count:
             input_artifact_errors.append(f"{suite_name} {field} must live under MNEMOSYNE_PROD_EVIDENCE_DIR")
-            return
-    relative_name = relative.as_posix()
+        return
+    resolved, relative_name = relative_result
     artifact = {
         "relative_path": relative_name,
         "checks": [
