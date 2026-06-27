@@ -9,7 +9,7 @@ from typing import Any
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.ids import new_id
 from mnemosyne.ingestion import IngestRequest, IngestionPipeline
-from mnemosyne.gate import GateResult, RegressionCase
+from mnemosyne.gate import GATING_CASE_ORIGINS, GateResult, RegressionCase
 from mnemosyne.learning import LearningSystem, Trajectory, counterfactual_replay_score
 from mnemosyne.media_limits import DEFAULT_MAX_INGEST_BYTES, enforce_byte_limit
 from mnemosyne.models import Assertion, Evidence, Preference, Relation, parse_dt
@@ -315,6 +315,11 @@ class MemoryTools:
         source_identity: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        enforce_byte_limit(
+            content.encode("utf-8"),
+            limit=getattr(self.ingestion, "max_ingest_bytes", DEFAULT_MAX_INGEST_BYTES),
+            label="capture content",
+        )
         cid = self.engine.append_evidence(
             Evidence(
                 tenant_id=tenant_id,
@@ -1244,7 +1249,7 @@ class MemoryTools:
             persisted = [
                 case
                 for case in self.runtime_state.load_gate_cases()
-                if case.protected and case.origin != "synthetic" and case.mode == "active"
+                if case.protected and case.origin in GATING_CASE_ORIGINS and case.mode == "active"
             ]
             if persisted:
                 return persisted[:protected_case_count], "runtime_state"

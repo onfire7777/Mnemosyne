@@ -913,6 +913,30 @@ def test_promotion_gate_requires_ignition_before_merge_when_enabled() -> None:
     assert active_gate.evaluate(TENANT, candidate("active-branch"), apply).promoted is True
 
 
+@pytest.mark.parametrize(
+    ("patch", "message"),
+    [
+        ({"origin": "runtime-state"}, "origin must be one of"),
+        ({"mode": "audit"}, "mode must be one of"),
+    ],
+)
+def test_regression_case_rejects_invalid_origin_and_mode(patch: dict[str, str], message: str) -> None:
+    from mnemosyne.gate import RegressionCase
+
+    data = {
+        "id": "bad-case",
+        "signature": "bad signature",
+        "query": "query",
+        "expected_substring": "expected",
+    }
+    data.update(patch)
+
+    with pytest.raises(ValueError, match=message):
+        RegressionCase.from_dict(data)
+    with pytest.raises(ValueError, match=message):
+        RegressionCase(**data)  # type: ignore[arg-type]
+
+
 def test_route_classifier_picks_fast_vs_deep_without_an_llm() -> None:
     """§30.4/§22.1: a cheap heuristic ``route()`` classifies fast-vs-deep retrieval
     (never an LLM call on the fast path), replacing a hardcoded ``deep`` bool."""

@@ -1987,11 +1987,8 @@ def cmd_parametric_trainer_check(args: argparse.Namespace) -> None:
         findings=findings,
     )
     source = str(protected_suite.get("source") or "").strip()
-    synthetic_override = (
-        protected_suite.get("synthetic_operator_override") is True
-        or bundle.get("synthetic_protected_suite_operator_override") is True
-    )
-    source_ok = bool(source) and (source.lower() != "synthetic" or synthetic_override)
+    source_is_synthetic = source.lower() == "synthetic"
+    source_ok = bool(source) and not source_is_synthetic
     case_id_counts_ok = len(case_ids) == case_count and len(protected_case_ids) == protected_case_count
     protected_ids_subset_ok = set(protected_case_ids).issubset(set(case_ids))
     suite_ok = (
@@ -2013,8 +2010,8 @@ def cmd_parametric_trainer_check(args: argparse.Namespace) -> None:
         findings.append(_parametric_finding("suite_tier_missing", f"protected suite missing tiers: {', '.join(missing_tiers)}"))
     if not source:
         findings.append(_parametric_finding("suite_source_missing", "protected suite source is required"))
-    if source.lower() == "synthetic" and not synthetic_override:
-        findings.append(_parametric_finding("suite_source_synthetic", "production protected suite cannot be synthetic without operator override"))
+    if source_is_synthetic:
+        findings.append(_parametric_finding("suite_source_synthetic", "production protected suite cannot be synthetic"))
     if len(case_ids) != case_count:
         findings.append(_parametric_finding("suite_case_ids_mismatch", "protected suite case_ids count must match case_count"))
     if len(protected_case_ids) != protected_case_count:
@@ -2030,7 +2027,7 @@ def cmd_parametric_trainer_check(args: argparse.Namespace) -> None:
             "case_count": case_count,
             "protected_case_count": protected_case_count,
             "source": source,
-            "synthetic_override": synthetic_override,
+            "source_synthetic": source_is_synthetic,
             "missing_tiers": missing_tiers,
             "fingerprint_present": bool(protected_suite.get("fingerprint")),
             "case_id_count_matches": case_id_counts_ok,

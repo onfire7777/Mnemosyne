@@ -33,8 +33,9 @@ The `eval/` suite is the **validation lane**. It proves the system behaves corre
 - **FR-3 Hybrid retrieval** — dense+lexical+(graph), RRF fusion, access/trust filter, cross-encoder rerank, MMR dedup, U-curve ordering, token budget. *AC:* results carry provenance tags; no result violates caller permissions/trust threshold; context ≤ configured budget.
 - **FR-4 Provenance & explainability** — every derived item links to source evidence; `explain` returns per-stage attribution. *AC:* for any returned fact, `explain` returns source evidence ids + retrieval stages.
 - **FR-5 Typed user model** — six categories w/ scope/confidence/validity/override; explicit edits authoritative; hard instructions outrank inferences. *AC:* explicit preference + conflicting inferred one ⇒ explicit wins, inference retired.
-- **FR-6 (security)** — isolation, capability/provenance, sanitize, audit log. *AC:* MINJA-style poisoned shared-memory attempt across users ⇒ isolation prevents cross-user effect; retrieved untrusted content never executed as instruction.
-- **FR-7** preference/policy enforcement; **FR-8 Erasure** — *AC:* delete ⇒ evidence crypto-shredded and all derived projections/indexes/caches invalidated/recomputed.
+- **FR-6 Confidence & abstention** — calibrated confidence plus abstention when evidence is weak or conflicting. *AC:* ECE stays within gate and low-confidence answers abstain instead of hallucinating.
+- **FR-7 Security baseline** — isolation, capability/provenance, sanitize, audit log. *AC:* MINJA-style poisoned shared-memory attempt across users ⇒ isolation prevents cross-user effect; retrieved untrusted content never executed as instruction.
+- **FR-8 User controls / erasure** — *AC:* delete ⇒ evidence crypto-shredded and all derived projections/indexes/caches invalidated/recomputed.
 - **FR-9 MCP/CLI contract** — stable agent-facing surface. *AC:* an MCP agent can capture/search/deep_search/explain/correct/forget without knowing internals.
 
 **P1 (should-have):** FR-10 belief core (TMS+AGM, cascade, multi-hypothesis); FR-11 temporal entity graph + PPR; FR-12 consolidation warm loop; FR-13/14 gated learning (workflow induction + lesson distillation); FR-15 branchable memory; FR-16 latent advisory user embedding.

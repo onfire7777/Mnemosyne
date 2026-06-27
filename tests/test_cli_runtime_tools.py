@@ -3647,6 +3647,30 @@ def test_cli_ingest_rejects_oversized_file_before_read(tmp_path: Path) -> None:
     assert exported["evidence"] == []
 
 
+def test_cli_capture_rejects_oversized_content_before_write(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+
+    result = run_raw_cli(
+        store,
+        "--max-ingest-bytes",
+        "4",
+        "capture",
+        "--tenant",
+        TENANT,
+        "--user",
+        USER,
+        "--source-type",
+        "chat",
+        "--content",
+        "12345",
+    )
+    exported = run_cli(store, "export", "--tenant", TENANT)
+
+    assert result.returncode == 1
+    assert "capture content exceeds byte limit" in result.stderr
+    assert exported["evidence"] == []
+
+
 def test_cli_ingest_c2pa_trust_policy_quarantines_untrusted_signer(tmp_path: Path) -> None:
     store = tmp_path / "mnemosyne.json"
     asset = tmp_path / "capture.bin"
@@ -9705,6 +9729,27 @@ def test_cli_parametric_trainer_check_fails_closed_on_bad_bundle(tmp_path: Path)
     assert "gate_margin_too_low" in codes
     assert "rail_eval_overlap_invalid" in codes
     assert "redaction_raw_field_present" in codes
+
+
+def test_cli_parametric_trainer_check_rejects_synthetic_suite_even_with_override(tmp_path: Path) -> None:
+    payload = parametric_trainer_bundle()
+    payload["protected_suite"]["source"] = "synthetic"
+    payload["protected_suite"]["synthetic_operator_override"] = True
+    payload["synthetic_protected_suite_operator_override"] = True
+    bundle = tmp_path / "synthetic-parametric-trainer.json"
+    bundle.write_text(json.dumps(payload), encoding="utf-8")
+
+    result = run_raw_cli(tmp_path / "mnemosyne.json", "parametric-trainer-check", "--bundle", str(bundle))
+    report = json.loads(result.stdout)
+    codes = {finding["code"] for finding in report["findings"]}
+    suite_check = next(item for item in report["checks"] if item["name"] == "protected_suite")
+
+    assert result.returncode == 1
+    assert report["ok"] is False
+    assert "suite_source_synthetic" in codes
+    assert suite_check["ok"] is False
+    assert suite_check["source"] == "synthetic"
+    assert suite_check["source_synthetic"] is True
 
 
 def test_cli_preference_write_requires_explicit_or_high_trust_source(tmp_path: Path) -> None:
