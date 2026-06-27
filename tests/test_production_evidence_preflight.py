@@ -180,6 +180,34 @@ def test_capture_production_evidence_rejects_repo_local_output_root(tmp_path: Pa
             shutil.rmtree(out_root)
 
 
+def test_capture_production_evidence_rejects_symlinked_output_root(tmp_path: Path) -> None:
+    manifest = tmp_path / "production-soak.json"
+    target_root = tmp_path / "real-capture"
+    out_root = tmp_path / "linked-capture"
+    target_root.mkdir()
+    try:
+        out_root.symlink_to(target_root, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"symlink setup unavailable: {exc}")
+    _minimal_production_manifest(manifest)
+
+    proc = subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "--preflight-only",
+            str(manifest),
+            str(out_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+    )
+
+    assert proc.returncode == 65
+    assert "production evidence output root cannot be a symlink" in proc.stderr
+    assert not (target_root / "preflight.json").exists()
+
+
 def test_capture_production_evidence_rejects_repo_local_soak_manifest(tmp_path: Path) -> None:
     manifest = REPO / ".tmp-production-soak-manifest.json"
     out_root = tmp_path / "capture"
@@ -424,6 +452,53 @@ def test_capture_production_evidence_preflight_records_input_artifacts(
     assert (out_root / "source-soak-manifest.json").exists()
     assert input_artifacts[0]["snapshot_path"] in redaction_scan["scanned_files"]
     assert redaction_scan["skipped_files"] == []
+
+
+def test_capture_production_evidence_preflight_records_manifest_input_artifacts(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "production-soak.json"
+    out_root = tmp_path / "capture"
+    artifact = tmp_path / "production-inputs" / "row-10-full-suite-evidence.json"
+    artifact.parent.mkdir()
+    artifact.write_text('{"full_suite": true}\n', encoding="utf-8")
+
+    def add_manifest_input_artifact(payload: dict[str, Any]) -> None:
+        payload["checks"][0]["input_artifacts"] = [str(artifact)]
+
+    _minimal_production_manifest(manifest, mutate=add_manifest_input_artifact)
+
+    proc = subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "--preflight-only",
+            str(manifest),
+            str(out_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    stdout = json.loads(proc.stdout)
+    copied_manifest = json.loads(
+        (out_root / "operator-soak-manifest.json").read_text(encoding="utf-8")
+    )
+    redaction_scan = json.loads(
+        (out_root / "redaction-scan.json").read_text(encoding="utf-8")
+    )
+    input_artifacts = stdout["required_input_artifacts"]
+
+    assert len(input_artifacts) == 1
+    assert input_artifacts[0]["path"] == str(artifact)
+    assert input_artifacts[0]["kind"] == "file"
+    assert input_artifacts[0]["labels"] == ["checks[1].input_artifacts"]
+    assert copied_manifest["checks"][0]["input_artifacts"] == [
+        input_artifacts[0]["snapshot_path"]
+    ]
+    assert copied_manifest["checks"][0]["args"] == []
+    assert input_artifacts[0]["snapshot_path"] in redaction_scan["scanned_files"]
 
 
 def test_capture_production_evidence_preflight_records_equals_form_input_artifacts(

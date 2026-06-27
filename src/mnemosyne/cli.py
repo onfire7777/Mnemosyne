@@ -11223,6 +11223,8 @@ def _verify_production_evidence_release_audit(
 def cmd_production_evidence_verify(args: argparse.Namespace) -> None:
     bundle_dir = Path(args.bundle_dir).expanduser()
     findings: list[dict[str, Any]] = []
+    if bundle_dir.is_symlink():
+        raise SystemExit("production evidence bundle path must not be a symlink")
     try:
         resolved_bundle_dir = bundle_dir.resolve(strict=True)
     except OSError as exc:

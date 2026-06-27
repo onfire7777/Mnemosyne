@@ -15,6 +15,9 @@
     {
       "name": "belief-revision",
       "command": "belief-revision-check",
+      "input_artifacts": [
+        "MNEMOSYNE_PROD_EVIDENCE_DIR/row-10-full-suite-evidence.json"
+      ],
       "args": [
         "--cases",
         "MNEMOSYNE_PROD_EVIDENCE_DIR/belief-revision-cases.json",

@@ -135,7 +135,9 @@ manifest-referenced relative input artifacts in that directory, and the external
 executable C2PA verifier before rendering. Its JSON includes
 `required_input_artifacts_detail` and `missing_input_artifacts_detail` entries
 with relative path, existence, and check/command/option references so operators
-can repair missing inputs without exposing absolute custody paths.
+can repair missing inputs without exposing absolute custody paths. Check-level
+`input_artifacts` metadata is included in the same custody inventory for
+evidence that must be retained but is not passed as a command argument.
 
 The renderer replaces non-secret `MNEMOSYNE_PROD_*` placeholders from the
 operator environment and validates production scope plus the full command

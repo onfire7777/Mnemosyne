@@ -19,7 +19,13 @@ Run for the row-10 operator evidence pass:
 
 The full suite is not itself one of the frozen 28 production soak manifest
 commands, so retain its redacted output and coverage summary as row-10 input
-evidence before running the production soak/profile process.
+evidence before running the production soak/profile process. Place that
+redacted suite artifact at
+`$MNEMOSYNE_PROD_EVIDENCE_DIR/row-10-full-suite-evidence.json` before rendering
+the production soak manifest; the template retains it through
+`checks[].input_artifacts` so preflight snapshots, hashes, redaction-scans, and
+custody-verifies it without adding a new command-line argument to
+`belief-revision-check`.
 
 ## Redaction Requirement
 
@@ -63,9 +69,11 @@ The full wrapper summary must have `release_audit_ok=true`,
 
 ## Operator Resume Signal
 
-After all 10 strict-audit rows are Done, attestation is recorded, and the final
-live parity suite evidence bundle passes
+Resume this row after the operator reports `row-10 evidence captured` and the
+final live parity suite evidence bundle passes
 `release-audit --evidence-manifest "$OUT_ROOT/evidence/manifest.json" --require-production-validated --require-provider-forbid-local`
-plus `production-evidence-verify`, resume the v1.0 handoff with
-`v1.0 signed off`.
+plus `production-evidence-verify`.
+
+After all 10 strict-audit rows are Done and attestation is recorded, resume the
+v1.0 handoff with `v1.0 signed off`.
 Use `skip operator gates` only to explicitly defer the production evidence pass.
