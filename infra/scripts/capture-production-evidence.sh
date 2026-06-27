@@ -170,6 +170,7 @@ from mnemosyne.cli import (  # noqa: E402
     PRODUCTION_RELEASE_REQUIRED_COMMANDS,
 )
 from mnemosyne.evidence_redaction import (  # noqa: E402
+    manifest_argument_secret_errors,
     redaction_findings,
     scan_evidence_paths,
     write_redaction_scan,
@@ -245,18 +246,6 @@ required_artifacts: dict[str, dict[str, object]] = {}
 artifact_occurrences: list[dict[str, object]] = []
 executable_tool_references: dict[str, dict[str, object]] = {}
 suite_case_artifact_rewrites: dict[str, list[dict[str, object]]] = {}
-sensitive_options = {
-    "--auth-token",
-    "--idp-token",
-    "--session-secret",
-    "--session-token",
-    "--token",
-    "--password",
-    "--client-secret",
-    "--secret",
-    "--private-key",
-    "--key",
-}
 file_suffixes = {
     ".csv",
     ".crt",
@@ -540,10 +529,11 @@ for index, check in enumerate(checks, start=1):
             continue
         for value_index, value in enumerate(values):
             option_name, separator, option_value = value.partition("=")
-            if option_name in sensitive_options:
+            if command == "ops-report" and option_name == "--dashboard-package-dir":
                 errors.append(
-                    f"checks[{index}].{field} contains secret-bearing option {option_name}; "
-                    "use environment, files, or command providers instead"
+                    f"checks[{index}].{field} contains ops-report output option "
+                    "--dashboard-package-dir; production capture must not write "
+                    "generated dashboard packages into input-artifact custody"
                 )
             if option_name in executable_path_options and separator:
                 _validate_executable_tool_path(
@@ -577,6 +567,13 @@ for index, check in enumerate(checks, start=1):
                 previous_value = values[value_index - 1]
                 if previous_value.startswith("--") and "=" not in previous_value:
                     previous_option = previous_value
+            if command == "ops-report" and previous_option == "--dashboard-package-dir":
+                errors.append(
+                    f"checks[{index}].{field} contains ops-report output option "
+                    "--dashboard-package-dir; production capture must not write "
+                    "generated dashboard packages into input-artifact custody"
+                )
+                continue
             if previous_option in executable_path_options:
                 _validate_executable_tool_path(
                     value,
@@ -701,6 +698,7 @@ for index, check in enumerate(checks, start=1):
                 )
 
 required_commands = set(PRODUCTION_RELEASE_REQUIRED_COMMANDS)
+errors.extend(manifest_argument_secret_errors(manifest))
 missing = sorted(required_commands - commands)
 if missing:
     errors.append("manifest is missing production release commands: " + ", ".join(missing))

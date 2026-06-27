@@ -106,8 +106,7 @@ print(json.dumps({k: claims.get(k) for k in keep}, indent=2, sort_keys=True))
 PY
 
 cat > "${OUT_DIR}/oidc.env" <<EOF
-# Source this file before running Mnemosyne session-exchange / idp-jwks-live-check.
-#   source infra/keycloak/out/oidc.env
+# Load with infra/scripts/load-env.py; do not shell-source generated env files.
 export MNEMOSYNE_IDP_ISSUER="${ISSUER}"
 export MNEMOSYNE_IDP_AUDIENCE="${AUDIENCE}"
 export MNEMOSYNE_IDP_JWKS_URL="${JWKS_URL}"

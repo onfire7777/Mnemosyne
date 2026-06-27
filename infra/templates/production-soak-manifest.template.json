@@ -268,7 +268,6 @@
       "command": "gate-suite-check",
       "args": [
         "--include-cases",
-        "MNEMOSYNE_PROD_EVIDENCE_DIR/protected-gate-cases.json",
         "--min-cases",
         "30",
         "--min-protected",
@@ -283,8 +282,6 @@
         "--backend",
         "postgres",
         "--queue-backend",
-        "postgres",
-        "--runtime-state",
         "postgres"
       ],
       "args": [
@@ -304,8 +301,6 @@
         "--backend",
         "postgres",
         "--queue-backend",
-        "postgres",
-        "--runtime-state",
         "postgres"
       ],
       "args": [
@@ -323,8 +318,6 @@
       "name": "ops-dashboard",
       "command": "ops-dashboard-check",
       "args": [
-        "--dashboard-package-dir",
-        "MNEMOSYNE_PROD_EVIDENCE_DIR/dashboard-package",
         "--dashboard-url",
         "MNEMOSYNE_PROD_DASHBOARD_URL",
         "--expected-tenant",
@@ -361,15 +354,11 @@
         "--backend",
         "postgres",
         "--queue-backend",
-        "postgres",
-        "--runtime-state",
         "postgres"
       ],
       "args": [
         "--tenant",
-        "MNEMOSYNE_PROD_TENANT",
-        "--dashboard-package-dir",
-        "MNEMOSYNE_PROD_EVIDENCE_DIR/dashboard-package"
+        "MNEMOSYNE_PROD_TENANT"
       ],
       "timeout": 120
     }

@@ -48,7 +48,12 @@ else:
     sys.exit(65)
 PY
 )"
-mkdir -p "${OUT_ROOT}"
+if [ -e "${OUT_ROOT}" ] || [ -L "${OUT_ROOT}" ]; then
+  echo "ERROR: local-staging evidence output root must not already exist: ${OUT_ROOT}" >&2
+  exit 65
+fi
+mkdir -p "$(dirname "${OUT_ROOT}")"
+mkdir -m 700 "${OUT_ROOT}"
 chmod 700 "${OUT_ROOT}"
 
 for required in \
@@ -62,12 +67,43 @@ do
   fi
 done
 
-# shellcheck source=/dev/null
-source "${INFRA_DIR}/keycloak/out/oidc.env"
-# shellcheck source=/dev/null
-source "${INFRA_DIR}/vault/out/vault.env"
-# shellcheck source=/dev/null
-source "${INFRA_DIR}/c2pa/out/provenance.env"
+load_env_file() {
+  local env_file="$1"
+  shift
+  local assignments
+  assignments="$("${PYTHON}" "${INFRA_DIR}/scripts/load-env.py" "${env_file}" "$@")"
+  while IFS= read -r assignment; do
+    [ -n "${assignment}" ] && export "${assignment?}"
+  done <<< "${assignments}"
+}
+
+load_env_file "${INFRA_DIR}/keycloak/out/oidc.env" \
+  MNEMOSYNE_IDP_ISSUER \
+  MNEMOSYNE_IDP_AUDIENCE \
+  MNEMOSYNE_IDP_JWKS_URL \
+  MNEMOSYNE_IDP_ALLOW_INSECURE_JWKS_URL \
+  MNEMOSYNE_IDP_TENANT_CLAIM \
+  MNEMOSYNE_IDP_USER_CLAIM \
+  MNEMOSYNE_IDP_ROLE_CLAIM \
+  MNEMOSYNE_IDP_TRUST_CLAIM \
+  MNEMOSYNE_IDP_SESSION_ID_CLAIM \
+  MNEMOSYNE_IDP_ALGORITHMS \
+  MNEMOSYNE_IDP_TOKEN \
+  KEYCLOAK_TOKEN_URL \
+  KEYCLOAK_CLIENT_ID \
+  KEYCLOAK_CLIENT_SECRET
+load_env_file "${INFRA_DIR}/vault/out/vault.env" \
+  VAULT_ADDR \
+  VAULT_TOKEN \
+  MNEMOSYNE_VAULT_TRANSIT_KEY \
+  MNEMOSYNE_OBJECT_KEY_COMMAND
+load_env_file "${INFRA_DIR}/c2pa/out/provenance.env" \
+  MNEMOSYNE_C2PA_TOOL \
+  MNEMOSYNE_PROVENANCE_TRUST_POLICY \
+  MNEMOSYNE_TRUSTED_PROVENANCE_ROOTS \
+  C2PA_TRUST_ROOT \
+  C2PATOOL_IMAGE \
+  C2PA_SIGNED_ASSET
 
 MNEMOSYNE_IDP_TOKEN="$("${INFRA_DIR}/scripts/keycloak-token.sh" agent-a agent-a-password)"
 export MNEMOSYNE_IDP_TOKEN

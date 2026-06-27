@@ -19,6 +19,10 @@ The generated evidence uses local Keycloak, Vault transit, retrieval-provider
 metadata, and the local C2PA helper. It does not flip any strict audit row from
 Partial to Done.
 
+The local staging output root must be a new, non-symlinked directory outside
+the repository. This keeps the local proof aligned with the production custody
+contract without treating local evidence as production validation.
+
 ## Production Harness Verification
 
 Result: verified-as-is.

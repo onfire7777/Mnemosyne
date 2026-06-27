@@ -221,8 +221,7 @@ cat > "${OUT_DIR}/trust-policy.json" <<EOF
 EOF
 
 cat > "${OUT_DIR}/provenance.env" <<EOF
-# Source before running ingest with real C2PA verification.
-#   source infra/c2pa/out/provenance.env
+# Load with infra/scripts/load-env.py; do not shell-source generated env files.
 # The C2PA verify wrapper (runs the real c2patool, then binds the report).
 export MNEMOSYNE_C2PA_TOOL="${C2PA_DIR}/c2pa-verify-host.sh"
 export MNEMOSYNE_PROVENANCE_TRUST_POLICY="${OUT_DIR}/trust-policy.json"

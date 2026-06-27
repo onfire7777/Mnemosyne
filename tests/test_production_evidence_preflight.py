@@ -106,6 +106,27 @@ def test_redaction_tree_scan_scans_nested_redaction_scan_files(tmp_path: Path) -
     assert str(root_scan) not in scan["scanned_files"]
 
 
+def test_redaction_scan_detects_dsn_vault_and_bearer_secret_shapes(tmp_path: Path) -> None:
+    evidence = tmp_path / "evidence.txt"
+    evidence.write_text(
+        "\n".join(
+            [
+                "database=postgresql://mnemosyne:secret-password@db.example.invalid/prod",
+                "vault_token=hvs.abcdefghijklmnopqrstuvwxyz0123456789",
+                "Authorization: Bearer abcdefghijklmnopqrstuvwxyz0123456789",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    scan = scan_evidence_paths([evidence], scope="test")
+    kinds = {finding["kind"] for finding in scan["findings"]}
+
+    assert scan["ok"] is False
+    assert {"url_userinfo", "vault_token", "authorization_bearer"} <= kinds
+
+
 def test_capture_production_evidence_preflight_only_stops_before_soak(tmp_path: Path) -> None:
     manifest = tmp_path / "production-soak.json"
     out_root = tmp_path / "capture"
@@ -354,6 +375,64 @@ def test_capture_production_evidence_preflight_rejects_secret_option_equals_form
     assert not out_root.exists()
 
 
+def test_capture_production_evidence_preflight_rejects_dsn_secret_option(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "production-soak.json"
+    out_root = tmp_path / "capture"
+
+    def add_secret_option(payload: dict[str, Any]) -> None:
+        payload["checks"][0]["global_args"] = ["--postgres-dsn", "postgresql://db/prod"]
+
+    _minimal_production_manifest(manifest, mutate=add_secret_option)
+
+    proc = subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "--preflight-only",
+            str(manifest),
+            str(out_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+    )
+
+    assert proc.returncode == 65
+    assert "secret-bearing option --postgres-dsn" in proc.stderr
+    assert not out_root.exists()
+
+
+def test_capture_production_evidence_preflight_rejects_url_userinfo(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "production-soak.json"
+    out_root = tmp_path / "capture"
+
+    def add_url_userinfo(payload: dict[str, Any]) -> None:
+        payload["checks"][0]["args"] = [
+            "--cases=https://operator:secret@example.invalid/cases.json"
+        ]
+
+    _minimal_production_manifest(manifest, mutate=add_url_userinfo)
+
+    proc = subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "--preflight-only",
+            str(manifest),
+            str(out_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+    )
+
+    assert proc.returncode == 65
+    assert "url_userinfo" in proc.stderr
+    assert not out_root.exists()
+
+
 def test_capture_production_evidence_preflight_rejects_repo_local_artifact_path(
     tmp_path: Path,
 ) -> None:
@@ -467,6 +546,40 @@ def test_capture_production_evidence_preflight_records_input_artifacts(
     assert (out_root / "source-soak-manifest.json").exists()
     assert input_artifacts[0]["snapshot_path"] in redaction_scan["scanned_files"]
     assert redaction_scan["skipped_files"] == []
+
+
+def test_capture_production_evidence_preflight_rejects_ops_report_package_output(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "production-soak.json"
+    out_root = tmp_path / "capture"
+
+    def add_ops_report_package_output(payload: dict[str, Any]) -> None:
+        check = next(item for item in payload["checks"] if item["command"] == "ops-report")
+        check["args"] = [
+            "--tenant",
+            "tenant-prod",
+            "--dashboard-package-dir",
+            str(tmp_path / "production-inputs" / "dashboard-package"),
+        ]
+
+    _minimal_production_manifest(manifest, mutate=add_ops_report_package_output)
+
+    proc = subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "--preflight-only",
+            str(manifest),
+            str(out_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+    )
+
+    assert proc.returncode == 65
+    assert "ops-report output option --dashboard-package-dir" in proc.stderr
+    assert not out_root.exists()
 
 
 def test_capture_production_evidence_preflight_records_manifest_input_artifacts(
