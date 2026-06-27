@@ -1150,13 +1150,22 @@ def test_load_engine_threads_retrieval_adapters_into_local_backend(tmp_path: Pat
     assert engine.adapters.reranker.embedding_provider is engine.adapters.embedding
 
 
-def test_cli_parser_requires_exact_object_option_for_assert() -> None:
+@pytest.mark.parametrize(
+    ("command", "extra_args"),
+    [
+        ("assert", []),
+        ("propose", ["--user", USER]),
+        ("correct", ["--user", USER, "--correction", "parser correction"]),
+    ],
+)
+def test_cli_parser_requires_exact_object_option(command: str, extra_args: list[str]) -> None:
     parser = build_parser()
     parsed = parser.parse_args(
         [
-            "assert",
+            command,
             "--tenant",
             TENANT,
+            *extra_args,
             "--subject",
             "parser subject",
             "--predicate",
@@ -1170,9 +1179,10 @@ def test_cli_parser_requires_exact_object_option_for_assert() -> None:
     with pytest.raises(SystemExit):
         parser.parse_args(
             [
-                "assert",
+                command,
                 "--tenant",
                 TENANT,
+                *extra_args,
                 "--subject",
                 "parser subject",
                 "--predicate",
@@ -1181,6 +1191,82 @@ def test_cli_parser_requires_exact_object_option_for_assert() -> None:
                 "parser object",
             ]
         )
+
+
+def test_cli_object_option_works_with_global_object_store_flags(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    object_store = tmp_path / "objects"
+
+    asserted = run_cli(
+        store,
+        "--object-store",
+        str(object_store),
+        "assert",
+        "--tenant",
+        TENANT,
+        "--user",
+        USER,
+        "--subject",
+        "parser subject",
+        "--predicate",
+        "has",
+        "--object",
+        "parser object",
+        "--trust-tier",
+        "0",
+        "--role",
+        "operator",
+        "--source-trust-tier",
+        "0",
+    )
+    proposed = run_cli(
+        store,
+        "--object-store",
+        str(object_store),
+        "propose",
+        "--tenant",
+        TENANT,
+        "--user",
+        USER,
+        "--subject",
+        "parser subject",
+        "--predicate",
+        "supports",
+        "--object",
+        "proposal object",
+        "--trust-tier",
+        "0",
+        "--role",
+        "operator",
+        "--source-trust-tier",
+        "0",
+    )
+    corrected = run_cli(
+        store,
+        "--object-store",
+        str(object_store),
+        "correct",
+        "--tenant",
+        TENANT,
+        "--user",
+        USER,
+        "--subject",
+        "parser subject",
+        "--predicate",
+        "has",
+        "--object",
+        "parser object",
+        "--correction",
+        "parser correction",
+        "--role",
+        "operator",
+        "--source-trust-tier",
+        "0",
+    )
+
+    assert asserted["security"]["allowed"] is True
+    assert proposed["status"] == "proposed"
+    assert corrected["security"]["operation"] == "correct"
 
 
 def test_cli_session_exchange_exposes_jwks_rotation_flags() -> None:
