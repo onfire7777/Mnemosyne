@@ -18,6 +18,7 @@ from mnemosyne.lifecycle import FidelityTier, LifecycleState, apply_rehearsal_sc
 from mnemosyne.models import Assertion, Evidence, Relation, utc_now
 from mnemosyne.retrieval import is_retired_summary_metadata
 from mnemosyne.security import SecurityPolicy, TrustTier
+from mnemosyne.standing import standing_from_shadow_flag
 from mnemosyne.text import hashing_embedding
 from mnemosyne.user_model import LatentUserProfile, UserModel
 
@@ -762,6 +763,14 @@ class ConsolidationWorker:
             "applied_to_replay_priority": False,
             "applied_to_mutation": False,
         }
+        details["standing"] = standing_from_shadow_flag(
+            shadow_only=details["shadow_only"],
+            critical_path=details["critical_path"],
+        )
+        contract["standing_mirrors_shadow_contract"] = (
+            details["standing"]["mirror"]["standing_authority_matches_boolean"] is True
+            and details["standing"]["authority"] is False
+        )
         status = "complete" if all(contract.values()) else "rejected"
         details["accepted"] = status == "complete"
         if status == "rejected":

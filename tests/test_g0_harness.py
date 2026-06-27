@@ -16,6 +16,7 @@ from eval.g0.gate import evaluate_ablation
 from eval.g0.resource_usage import run_resource_usage_eval
 from eval.g0.runner import G0_METRIC_SPECS, build_report, render_markdown, write_report
 from eval.g0.shadow_workspace import run_shadow_workspace_eval
+from eval.g0.standing_parity import run_standing_parity_eval
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -81,6 +82,8 @@ def test_g0_report_emits_every_spec_metric_and_source_hashes() -> None:
     assert sources["shadow_workspace_eval"]["path"] == "computed:eval.g0.shadow_workspace"
     assert sources["consciousness_eval"]["present"] is True
     assert sources["consciousness_eval"]["path"] == "computed:eval.g0.consciousness"
+    assert sources["standing_parity_eval"]["present"] is True
+    assert sources["standing_parity_eval"]["path"] == "computed:eval.g0.standing_parity"
 
     metrics = {metric["id"]: metric for metric in report["metrics"]}
     assert metrics["recall_at_k"]["status"] == "measured"
@@ -94,6 +97,9 @@ def test_g0_report_emits_every_spec_metric_and_source_hashes() -> None:
     assert metrics["confabulation_rate"]["status"] == "measured"
     assert metrics["confabulation_rate"]["value"] == 0.0
     assert metrics["confabulation_rate"]["source_id"] == "confabulation_eval"
+    assert metrics["standing_decision_divergence"]["status"] == "measured"
+    assert metrics["standing_decision_divergence"]["value"] == 0.0
+    assert metrics["standing_decision_divergence"]["source_id"] == "standing_parity_eval"
     assert metrics["deep_path_p95_ms"]["status"] == "measured"
     assert metrics["deep_path_p95_ms"]["value"] > 0.0
     assert metrics["deep_path_p95_ms"]["source_id"] == "deep_latency_eval"
@@ -138,6 +144,7 @@ def test_g0_report_emits_every_spec_metric_and_source_hashes() -> None:
     assert metrics["reality_monitor_shadow_tag_contract"]["value"] == 1.0
     assert report["computed_evidence"]["consciousness_eval"]["dreamer_shadow_contract"]["score"] == 1.0
     assert report["computed_evidence"]["dreamer_eval"]["specialist_promotion_evidence_contract"] == 1.0
+    assert report["computed_evidence"]["standing_parity_eval"]["standing_decision_divergence"] == 0.0
     assert report["computed_evidence"]["shadow_workspace_eval"]["shadow_workspace_contract"] == 1.0
     assert (
         report["computed_evidence"]["shadow_workspace_eval"]["workspace_consolidation_advisory_contract"]
@@ -241,6 +248,18 @@ def test_g0_resource_usage_fixture_records_local_provider_cost() -> None:
     assert report["controller_telemetry_present"] is False
     assert "zero paid-provider spend" in report["metric_note"]
     assert all(row["external_provider_calls"] == 0 for row in report["rows"])
+
+
+def test_g0_standing_parity_fixture_reports_zero_decision_divergence() -> None:
+    report = run_standing_parity_eval(repo_root=REPO_ROOT)
+
+    assert report["schema_version"] == "g0.standing_parity.v1"
+    assert report["metric"] == "standing_decision_divergence"
+    assert report["standing_decision_divergence"] == 0.0
+    assert report["divergence_count"] == 0
+    assert report["passed"] is True
+    assert all(row["zero_divergence"] for row in report["retrieval_rows"])
+    assert all(row["zero_divergence"] for row in report["consolidation_rows"])
 
 
 def test_g0_resource_usage_fixture_computes_controller_watts_with_explicit_telemetry(tmp_path: Path) -> None:

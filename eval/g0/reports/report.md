@@ -1,8 +1,8 @@
 # Mnemosyne G0 Benchmark Report
 
-- Generated: `2026-06-27T17:55:47.235538+00:00`
+- Generated: `2026-06-27T20:04:15.408785+00:00`
 - Baseline: `baseline-0` at `67c229ace12313a8b8a6c6ede99d0a2096bae178`
-- Gate ready: **False** (45/46 metrics measured)
+- Gate ready: **False** (46/47 metrics measured)
 
 ## Metrics
 
@@ -18,9 +18,10 @@
 | continual_learning_interference | target | measured | 0.0 | <= 0.0 | continual_learning_eval |
 | confabulation_rate | guardrail | measured | 0.0 | <= 0.0 | confabulation_eval |
 | projection_reality_abstention_recall | target | measured | 1.0 | >= 1.0 | projection_reality_eval |
+| standing_decision_divergence | target | measured | 0.0 | <= 0.0 | standing_parity_eval |
 | poison_block_rate | guardrail | measured | 1.0 | >= 0.95 | slo_v2_definitive |
 | fast_path_p95_ms | guardrail | measured | 92.1 | <= 400.0 | latency_bench |
-| deep_path_p95_ms | reported | measured | 3.614625 | reported | deep_latency_eval |
+| deep_path_p95_ms | reported | measured | 8.830667 | reported | deep_latency_eval |
 | cost_usd_per_1k_queries | reported | measured | 0.0 | reported | resource_usage_eval |
 | controller_watts_per_dollar | reported | missing |  | reported | resource_usage_eval |
 | dreamer_shadow_corroborated_candidate_yield | target | measured | 1.0 | reported | dreamer_eval |
@@ -87,8 +88,9 @@ Intentional missing metrics:
 | g4-shadow-continuous-workspace-loop | eval/g0/preregistrations/g4-shadow-continuous-workspace-loop.json | 2026-06-27T01:28:45.537398+00:00 | True | shadow_workspace_useful_transition_rate | 1.0 | not_required |
 | g4-workspace-advisory-promotion-gate | eval/g0/preregistrations/g4-workspace-advisory-promotion-gate.json | 2026-06-27T01:58:31.506244+00:00 | True | workspace_advisory_promotion_gate_contract | 1.0 | not_required |
 | g4-workspace-retrieval-controller-gate | eval/g0/preregistrations/g4-workspace-retrieval-controller-gate.json | 2026-06-27T02:20:47.375104+00:00 | True | workspace_retrieval_controller_contract | 1.0 | not_required |
+| g5-standing-byte-stable-parity | eval/g0/preregistrations/g5-standing-byte-stable-parity.json | 2026-06-27T20:04:06.834283+00:00 | True | standing_decision_divergence | 0.0 | not_required |
 
 ## Artifact Custody
 
-- Source commit at generation: `92984b69b73fa75bfc4edc9ce5630e3042c65057`
+- Source commit at generation: `f70e9dba7407de55af61c5b14ea1cef0c246e9b6`
 - Note: Committed G0 reports are source-tree custody snapshots. The commit that contains a report cannot be embedded in that report before the commit exists; use git log to identify the containing artifact commit.
