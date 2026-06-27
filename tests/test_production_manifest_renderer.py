@@ -628,6 +628,33 @@ def test_renderer_rejects_secret_bearing_manifest_args(tmp_path: Path) -> None:
     assert "secret-bearing option --postgres-dsn" in proc.stderr
 
 
+def test_renderer_rejects_token_suffix_manifest_args(tmp_path: Path) -> None:
+    output = tmp_path / "secure" / "production-soak-manifest.json"
+    env = _filled_render_env(tmp_path)
+    _populate_required_input_artifacts(env)
+    template = tmp_path / "production-soak-manifest.template.json"
+    payload = json.loads(
+        (REPO / "infra" / "templates" / "production-soak-manifest.template.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    payload["checks"][0]["args"] = ["--github-token", "from-env-instead"]
+    template.write_text(json.dumps(payload), encoding="utf-8")
+
+    proc = subprocess.run(
+        [str(RENDERER), "--output", str(output), "--template", str(template)],
+        cwd=REPO,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert proc.returncode == 78
+    assert not output.exists()
+    assert "secret-bearing option --github-token" in proc.stderr
+
+
 def test_renderer_refuses_repo_local_production_input_dir(tmp_path: Path) -> None:
     env = _filled_render_env(tmp_path)
     env["MNEMOSYNE_PROD_EVIDENCE_DIR"] = str(REPO / "production-input-artifacts")

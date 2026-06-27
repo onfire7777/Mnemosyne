@@ -45,10 +45,10 @@ them outside the repository with
 | `MNEMOSYNE_PROD_IDP_AUDIENCE` | Production IdP token audience | IdP client config | IdP/JWKS gates |
 | `MNEMOSYNE_PROD_IDP_ISSUER` | Production IdP issuer URL | IdP realm config | IdP/JWKS gates |
 | `MNEMOSYNE_PROD_IDP_JWKS_URL` | Production JWKS endpoint | IdP realm config | IdP/JWKS gates |
-| `MNEMOSYNE_PROD_MCP_HTTP_BASE_URL` | Hosted JSON-RPC MCP base URL | Deployment metadata | MCP ops gate |
+| `MNEMOSYNE_PROD_MCP_HTTP_BASE_URL` | Hosted JSON-RPC MCP base URL | Deployment metadata | `mcp-http-soak`; `mcp-ops-check` consumes `mcp-ops-bundle.json` |
 | `MNEMOSYNE_PROD_MCP_HTTP_HEALTH_URL` | Hosted JSON-RPC MCP health URL | Deployment metadata | MCP HTTP soak |
 | `MNEMOSYNE_PROD_MCP_HTTP_RPC_URL` | Hosted JSON-RPC MCP RPC URL | Deployment metadata | MCP HTTP soak |
-| `MNEMOSYNE_PROD_MCP_STREAMABLE_HTTP_BASE_URL` | Hosted SDK StreamableHTTP base URL | Deployment metadata | MCP ops gate |
+| `MNEMOSYNE_PROD_MCP_STREAMABLE_HTTP_BASE_URL` | Hosted SDK StreamableHTTP base URL | Deployment metadata | `mcp-streamable-http-soak`; `mcp-ops-check` consumes `mcp-ops-bundle.json` |
 | `MNEMOSYNE_PROD_MCP_STREAMABLE_HTTP_HEALTH_URL` | Hosted SDK StreamableHTTP health URL | Deployment metadata | StreamableHTTP soak |
 | `MNEMOSYNE_PROD_MCP_STREAMABLE_HTTP_URL` | Hosted SDK StreamableHTTP endpoint URL | Deployment metadata | StreamableHTTP soak |
 | `MNEMOSYNE_PROD_OPERATOR_NAME` | Human operator display name | Release metadata | operator attestation |

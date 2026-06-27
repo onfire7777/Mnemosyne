@@ -26,11 +26,11 @@ binding results, quarantine outcomes, and rotation evidence.
 
 Use the universal Tier B production capture flow in `infra/PRODUCTION-EVIDENCE.md`:
 render the production soak manifest to `SOAK_MANIFEST`, run
-`infra/scripts/capture-production-evidence.sh --preflight-only "$SOAK_MANIFEST" "$PREFLIGHT_OUT_ROOT"`
+`infra/scripts/capture-production-evidence.sh --preflight-only "$SOAK_MANIFEST" "$PRECHECK_OUTPUT_ROOT"`
 as setup proof only, then run
 `infra/scripts/capture-production-evidence.sh "$SOAK_MANIFEST" "$OUT_ROOT"` for the real
 `deployment-soak` + `release-audit` capture. The preflight output does not flip this row to Done.
-Use absolute external paths outside the repo for `SOAK_MANIFEST`, `PREFLIGHT_OUT_ROOT`, `OUT_ROOT`, and the `MNEMOSYNE_PROD_EVIDENCE_DIR` input-artifact directory.
+Use absolute external paths outside the repo for `SOAK_MANIFEST`, `PRECHECK_OUTPUT_ROOT`, `OUT_ROOT`, and the `MNEMOSYNE_PROD_EVIDENCE_DIR` input-artifact directory.
 After capture, reviewers must run `"$PYTHON" -m mnemosyne.cli production-evidence-verify` with the retained
 `summary.json` `bundle_fingerprint`, retained `preflight.json`, `redaction-scan.json`,
 `bundle-manifest.json`, `source-soak-manifest.json`, `operator-soak-manifest.json`,

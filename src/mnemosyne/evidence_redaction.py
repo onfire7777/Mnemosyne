@@ -86,12 +86,16 @@ SECRET_PATTERNS: tuple[tuple[str, Pattern[str]], ...] = (
 
 
 def is_secret_argument_option(option_name: str) -> bool:
-    normalized = option_name.strip().lower()
-    if normalized in SECRET_ARGUMENT_OPTIONS:
+    normalized = option_name.strip().lower().replace("_", "-")
+    normalized_option = normalized.split("=", 1)[0]
+    if normalized_option in SECRET_ARGUMENT_OPTIONS:
         return True
-    if not normalized.startswith("--"):
+    if not normalized_option.startswith("--"):
         return False
-    if normalized.endswith("-dsn"):
+    option_body = normalized_option[2:]
+    if re.search(r"(?:^|-)token(?:$|-)", option_body):
+        return True
+    if option_body.endswith("-dsn"):
         return True
     return any(marker in normalized for marker in SECRET_ARGUMENT_MARKERS)
 
