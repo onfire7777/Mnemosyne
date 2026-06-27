@@ -9,10 +9,13 @@ material.
 
 Use `infra/templates/production-soak-manifest.template.json` as the command
 shape. Copy `infra/templates/production-render.env.example` outside the
-repository, fill the blank non-secret values there, then render with
+repository, fill the blank non-secret values there, export or source that
+external copy into the current shell, then render with
 `infra/scripts/render-production-soak-manifest.sh --check-environment` and
 `infra/scripts/render-production-soak-manifest.sh --output /secure/path/to/production-soak-manifest.json`
 before running `infra/scripts/capture-production-evidence.sh`.
+The renderer reads the current process environment; it does not accept an
+`--env-file` argument.
 The check command prints key names only; it also verifies the production input
 directory exists outside the repo and the C2PA verifier path is an external
 executable. A green check also means every manifest-referenced file or
@@ -187,6 +190,8 @@ The only production acceptance path is:
 2. `infra/scripts/capture-production-evidence.sh` run against that manifest.
 3. `release-audit` reports `ok: true` with
    `--require-production-validated --require-provider-forbid-local`.
+4. `production-evidence-verify` passes offline against the retained output
+   bundle and expected `summary.json` `bundle_fingerprint`.
 
 ## Hard Rules
 

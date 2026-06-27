@@ -191,8 +191,12 @@ Ports are offset from defaults to avoid clashes:
 It writes `infra/keycloak/out/oidc.env`:
 
 ```bash
-python3 infra/scripts/load-env.py infra/keycloak/out/oidc.env \
-  MNEMOSYNE_IDP_ISSUER MNEMOSYNE_IDP_AUDIENCE MNEMOSYNE_IDP_JWKS_URL
+while IFS= read -r assignment; do
+  [ -n "${assignment}" ] && export "${assignment?}"
+done < <(
+  python3 infra/scripts/load-env.py infra/keycloak/out/oidc.env \
+    MNEMOSYNE_IDP_ISSUER MNEMOSYNE_IDP_AUDIENCE MNEMOSYNE_IDP_JWKS_URL
+)
 ```
 
 Local capture and validation scripts load this file through the strict
@@ -242,8 +246,12 @@ policy `mnemosyne-transit`, and mints a scoped token. It writes
 `infra/vault/out/vault.env`:
 
 ```bash
-python3 infra/scripts/load-env.py infra/vault/out/vault.env \
-  VAULT_ADDR VAULT_TOKEN MNEMOSYNE_OBJECT_KEY_COMMAND
+while IFS= read -r assignment; do
+  [ -n "${assignment}" ] && export "${assignment?}"
+done < <(
+  python3 infra/scripts/load-env.py infra/vault/out/vault.env \
+    VAULT_ADDR VAULT_TOKEN MNEMOSYNE_OBJECT_KEY_COMMAND
+)
 ```
 
 The parser rejects symlinks, group/world-accessible files, unexpected keys, and
@@ -305,8 +313,12 @@ same as crypto-shred.
 4. writes the trust policy + `infra/c2pa/out/provenance.env`:
 
 ```bash
-python3 infra/scripts/load-env.py infra/c2pa/out/provenance.env \
-  MNEMOSYNE_C2PA_TOOL MNEMOSYNE_PROVENANCE_TRUST_POLICY C2PA_SIGNED_ASSET
+while IFS= read -r assignment; do
+  [ -n "${assignment}" ] && export "${assignment?}"
+done < <(
+  python3 infra/scripts/load-env.py infra/c2pa/out/provenance.env \
+    MNEMOSYNE_C2PA_TOOL MNEMOSYNE_PROVENANCE_TRUST_POLICY C2PA_SIGNED_ASSET
+)
 ```
 
 ### How the wrapper satisfies the contract

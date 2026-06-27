@@ -284,6 +284,17 @@ def _resolve_checked(path: Path, *, label: str, strict: bool = False) -> Path | 
         errors.append(f"{label} contains invalid path {path}: {exc}")
         return None
 
+def _reject_symlinked_input_path(path: Path, *, label: str) -> bool:
+    try:
+        is_symlink = path.is_symlink()
+    except (OSError, RuntimeError, ValueError) as exc:
+        errors.append(f"{label} contains invalid path {path}: {exc}")
+        return True
+    if is_symlink:
+        errors.append(f"{label} points to a symlinked input artifact path: {path}; use a regular external file or directory")
+        return True
+    return False
+
 def _record_required_artifact(
     resolved: Path,
     *,
@@ -315,6 +326,8 @@ def _validate_external_file_path(
     path = Path(value).expanduser()
     if not path.is_absolute():
         errors.append(f"{label} contains relative production artifact path {value}; use an absolute external path")
+        return
+    if _reject_symlinked_input_path(path, label=label):
         return
     resolved = _resolve_checked(path, label=label)
     if resolved is None:
@@ -348,6 +361,8 @@ def _validate_nested_input_artifact_path(value: object, *, label: str) -> Path |
     if not path.is_absolute():
         errors.append(f"{label} contains relative input artifact path {value}; use an absolute external path")
         return None
+    if _reject_symlinked_input_path(path, label=label):
+        return None
     resolved = _resolve_checked(path, label=label)
     if resolved is None:
         return None
@@ -375,6 +390,8 @@ def _validate_manifest_input_artifact_path(
     path = Path(value).expanduser()
     if not path.is_absolute():
         errors.append(f"{label} contains relative input artifact path {value}; use an absolute external path")
+        return
+    if _reject_symlinked_input_path(path, label=label):
         return
     resolved = _resolve_checked(path, label=label)
     if resolved is None:
@@ -471,6 +488,8 @@ def _parse_provenance_suite_path(suite_value: str, *, label: str) -> tuple[Path,
     path = Path(suite_value).expanduser()
     if not path.is_absolute():
         errors.append(f"{label} contains relative provenance trust suite path {suite_value}; use an absolute external path")
+        return None
+    if _reject_symlinked_input_path(path, label=label):
         return None
     resolved = _resolve_checked(path, label=label)
     if resolved is None:
