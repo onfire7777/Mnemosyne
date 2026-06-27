@@ -326,7 +326,7 @@ def test_capture_production_evidence_preflight_rejects_secret_option_name(
     out_root = tmp_path / "capture"
 
     def add_secret_option(payload: dict[str, Any]) -> None:
-        payload["checks"][0]["args"] = ["--idp-token", "from-env-instead"]
+        payload["checks"][0]["args"] = ["--access-token", "from-env-instead"]
 
     _minimal_production_manifest(manifest, mutate=add_secret_option)
 
@@ -343,7 +343,7 @@ def test_capture_production_evidence_preflight_rejects_secret_option_name(
     )
 
     assert proc.returncode == 65
-    assert "secret-bearing option --idp-token" in proc.stderr
+    assert "secret-bearing option --access-token" in proc.stderr
     assert not out_root.exists()
 
 
@@ -354,7 +354,7 @@ def test_capture_production_evidence_preflight_rejects_secret_option_equals_form
     out_root = tmp_path / "capture"
 
     def add_secret_option(payload: dict[str, Any]) -> None:
-        payload["checks"][0]["args"] = ["--auth-token=plain-placeholder-secret"]
+        payload["checks"][0]["args"] = ["--api-token=from-env-instead"]
 
     _minimal_production_manifest(manifest, mutate=add_secret_option)
 
@@ -371,7 +371,7 @@ def test_capture_production_evidence_preflight_rejects_secret_option_equals_form
     )
 
     assert proc.returncode == 65
-    assert "secret-bearing option --auth-token" in proc.stderr
+    assert "secret-bearing option --api-token" in proc.stderr
     assert not out_root.exists()
 
 
@@ -382,7 +382,7 @@ def test_capture_production_evidence_preflight_rejects_dsn_secret_option(
     out_root = tmp_path / "capture"
 
     def add_secret_option(payload: dict[str, Any]) -> None:
-        payload["checks"][0]["global_args"] = ["--postgres-dsn", "postgresql://db/prod"]
+        payload["checks"][0]["global_args"] = ["--postgres-dsn=from-env-instead"]
 
     _minimal_production_manifest(manifest, mutate=add_secret_option)
 

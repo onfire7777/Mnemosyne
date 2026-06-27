@@ -26,7 +26,7 @@ def test_every_row_runbook_points_to_universal_preflight_capture_flow() -> None:
         assert "infra/PRODUCTION-EVIDENCE.md" in text, path
         assert (
             'infra/scripts/capture-production-evidence.sh --preflight-only "$SOAK_MANIFEST" '
-            '"$PREFLIGHT_OUT_ROOT"'
+            '"$PRECHECK_OUTPUT_ROOT"'
             in text
         ), path
         assert "setup proof only" in text, path
@@ -37,7 +37,7 @@ def test_every_row_runbook_points_to_universal_preflight_capture_flow() -> None:
         ), path
         assert (
             "Use absolute external paths outside the repo for `SOAK_MANIFEST`, "
-            "`PREFLIGHT_OUT_ROOT`, `OUT_ROOT`, and the "
+            "`PRECHECK_OUTPUT_ROOT`, `OUT_ROOT`, and the "
             "`MNEMOSYNE_PROD_EVIDENCE_DIR` input-artifact directory."
             in text
         ), path
