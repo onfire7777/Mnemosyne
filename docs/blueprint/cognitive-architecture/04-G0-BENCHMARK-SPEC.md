@@ -75,7 +75,7 @@ For each proposed change (a G1–G4 item):
 - **Decision log:** `eval/g0/decision-log.jsonl`.
 - **Targets:** `multi_hop_ndcg_at_k`, direction `increase`, minimum delta `0.02`; `projection_reality_abstention_recall`, direction `increase`, minimum delta `1.0`; `reality_monitor_shadow_tag_contract`, direction `increase`, non-decrease proof for shadow/advisory runtime tagging.
 - **Result:** Accepted G1/G3/G4/G5 decisions are recorded in `eval/g0/decision-log.jsonl` and summarized in report `gate_decisions`. Fresh gates compare a candidate report to the current accepted `eval/g0/baselines/baseline-0.json`; older slices whose target values have already been folded into that baseline are not expected to replay as new target-up deltas. Current replayable gates show Standing divergence `0.0`, Standing calibration error `0.025`, always-on heartbeat contract `1.0`, always-on rumination rate `0.0`, earned-autonomy external expansion `0.24`, credential external-only/holdout/provenance-domain/bounded-decay contracts `1.0`, credential evidence-dominance gap `0.05`, echo-chamber uplift `0.0`, Standing observability trace contract `1.0`, Standing erasure cascade contract `1.0`, and belief Standing cascade contract `1.0`, with guardrails unchanged: ECE `0.006271`, abstention precision/recall `1.0/1.0`, confabulation rate `0.0`, poison-block rate `1.0`, and fast-path P95 `92.1 ms`.
-- **Controller telemetry:** Current G4 gates are shadow/advisory gates and explicitly set `requires_controller_telemetry=false`; a future promoted always-on workspace gate that claims quality-per-unit-compute must set `requires_controller_telemetry=true`, and `eval/g0/gate.py` then fails closed unless `controller_watts_per_dollar` is measured in both baseline and candidate reports.
+- **Controller telemetry:** Current G4 gates are shadow/advisory gates and explicitly set `requires_controller_telemetry=false`; a future promoted always-on workspace gate that claims quality-per-unit-compute must set `requires_controller_telemetry=true`, and `eval/g0/gate.py` then fails closed unless `controller_watts_per_dollar` is measured in both baseline and candidate reports. The harness has an explicit sanitized fixture at `eval/datasets/controller_telemetry_sanitized.json` for deterministic local verification of this path; production quality-per-unit-compute claims still require reviewed operator telemetry, not the sanitized fixture.
 
 ## 7. Tooling & deliverables
 
@@ -86,7 +86,7 @@ For each proposed change (a G1–G4 item):
 
 ## 8. Definition of done for G0
 
-- [x] Harness runs reproducibly and emits `report.json` with every §2 metric slot. The default local report marks `controller_watts_per_dollar` missing until an explicit telemetry artifact is supplied; `--controller-telemetry` produces a fully measured report.
+- [x] Harness runs reproducibly and emits `report.json` with every §2 metric slot. The default local report marks `controller_watts_per_dollar` missing until an explicit telemetry artifact is supplied; `--controller-telemetry` produces a fully measured report, including via the sanitized fixture `eval/datasets/controller_telemetry_sanitized.json`.
 - [x] `mneme eval g0` runs the G0 harness from the project CLI while preserving the direct `python -m eval.g0.runner` path for CI and reviewed baseline custody work.
 - [x] `baseline‑0` recorded with pinned commit/seeds/env.
 - [x] Adversarial/poison set wired to the poison‑block + R6 checks.
