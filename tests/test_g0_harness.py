@@ -12,7 +12,7 @@ from eval.g0.continual_learning import run_continual_learning_eval
 from eval.g0.deep_latency import run_deep_latency_eval
 from eval.g0.gate import evaluate_ablation
 from eval.g0.resource_usage import run_resource_usage_eval
-from eval.g0.runner import G0_METRIC_SPECS, build_report
+from eval.g0.runner import G0_METRIC_SPECS, build_report, render_markdown
 from eval.g0.shadow_workspace import run_shadow_workspace_eval
 
 
@@ -45,6 +45,12 @@ def test_g0_report_emits_every_spec_metric_and_source_hashes() -> None:
     assert report["coverage"]["missing"] > 0
     assert report["coverage"]["gate_ready"] is False
     assert report["coverage"]["missing_metric_ids"] == ["controller_watts_per_dollar"]
+    assert report["coverage"]["intentionally_missing_metric_ids"] == ["controller_watts_per_dollar"]
+    assert report["gate_contract"]["preregistration_dir"] == "eval/g0/preregistrations"
+    assert report["gate_contract"]["decision_log"] == "eval/g0/decision-log.jsonl"
+    assert report["gate_contract"]["controller_telemetry_required_field"] == "requires_controller_telemetry"
+    assert report["artifact_custody"]["source_commit"]
+    assert "cannot be embedded" in report["artifact_custody"]["snapshot_note"]
 
     sources = {source["id"]: source for source in report["sources"]}
     assert sources["slo_v2_definitive"]["present"] is True
@@ -131,6 +137,15 @@ def test_g0_report_emits_every_spec_metric_and_source_hashes() -> None:
         == 1.0
     )
     assert report["computed_evidence"]["shadow_workspace_eval"]["workspace_retrieval_controller_contract"] == 1.0
+    decisions = {row["change_id"]: row for row in report["gate_decisions"]}
+    assert decisions["g4-workspace-retrieval-controller-gate"]["latest_decision_passed"] is True
+    assert decisions["g4-workspace-retrieval-controller-gate"]["latest_target_delta"] == 1.0
+    assert decisions["g4-workspace-retrieval-controller-gate"]["controller_telemetry_status"] == "not_required"
+    assert decisions["g4-shadow-continuous-workspace-loop"]["requires_controller_telemetry"] is False
+    rendered = render_markdown(report)
+    assert "## Gate Decisions" in rendered
+    assert "## Artifact Custody" in rendered
+    assert "g4-workspace-retrieval-controller-gate" in rendered
 
     dataset_paths = {manifest["path"] for manifest in report["dataset_manifests"]}
     assert "eval/datasets/continual_learning_interference.json" in dataset_paths
@@ -433,6 +448,46 @@ def test_ablation_gate_fails_unknown_guardrail_direction() -> None:
 
     assert decision.passed is False
     assert any("unsupported direction" in reason for reason in decision.reasons)
+
+
+def test_ablation_gate_requires_controller_telemetry_when_preregistered() -> None:
+    missing_controller = {
+        **_metric(
+            "controller_watts_per_dollar",
+            0.0,
+            cls="reported",
+            direction="decrease",
+        ),
+        "status": "missing",
+        "value": None,
+    }
+    baseline = _report(
+        [
+            _metric("workspace_loop_liveness", 1.0, cls="target", direction="increase"),
+            missing_controller,
+        ]
+    )
+    candidate = _report(
+        [
+            _metric("workspace_loop_liveness", 1.1, cls="target", direction="increase"),
+            missing_controller,
+        ]
+    )
+
+    decision = evaluate_ablation(
+        baseline,
+        candidate,
+        {
+            "change_id": "future-promoted-workspace-loop",
+            "target_metric": "workspace_loop_liveness",
+            "direction": "increase",
+            "minimum_delta": 0.01,
+            "requires_controller_telemetry": True,
+        },
+    )
+
+    assert decision.passed is False
+    assert any("requires_controller_telemetry is true" in reason for reason in decision.reasons)
 
 
 def test_committed_g0_preregistrations_have_passing_decisions() -> None:

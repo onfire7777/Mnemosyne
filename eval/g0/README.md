@@ -32,6 +32,8 @@ This writes:
 - an embedded computed `shadow_workspace_eval` fixture recording the bounded
   shadow workspace stream, consolidation advisory, advisory-promotion gate,
   retrieval-controller gate, and anti-rumination contracts
+- a `gate_decisions` custody section summarizing the latest decision-log entry
+  for every preregistration in `eval/g0/preregistrations/`
 
 `eval/g0/baselines/baseline-0.json` is the frozen baseline custody artifact.
 Do not rewrite it during normal G1+ development. Use `--write-baseline` only
@@ -61,6 +63,11 @@ watts/$ denominator is `controller_cost_usd_per_hour * controller_cost_window_ho
 The report records the telemetry basename and SHA-256, not the absolute source
 path. Do not commit operational power/cost telemetry unless it is intentionally
 sanitized fixture data.
+
+The default report intentionally leaves `controller_watts_per_dollar` missing
+rather than estimating controller power or cost. Future promoted always-on G4
+gates must set `requires_controller_telemetry=true` in their preregistration if
+they claim a quality-per-unit-compute result.
 
 The Python module remains available for CI and direct harness work:
 

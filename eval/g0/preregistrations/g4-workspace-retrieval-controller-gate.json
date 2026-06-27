@@ -3,6 +3,7 @@
   "target_metric": "workspace_retrieval_controller_contract",
   "direction": "increase",
   "minimum_delta": 1.0,
+  "requires_controller_telemetry": false,
   "guardrail_metrics": [
     "workspace_advisory_promotion_gate_contract",
     "workspace_consolidation_advisory_contract",

@@ -3,6 +3,7 @@
   "target_metric": "shadow_workspace_useful_transition_rate",
   "direction": "increase",
   "minimum_delta": 0.25,
+  "requires_controller_telemetry": false,
   "guardrail_metrics": [
     "shadow_workspace_contract",
     "workspace_consolidation_advisory_contract",
