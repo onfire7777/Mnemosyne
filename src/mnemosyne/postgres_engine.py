@@ -48,7 +48,12 @@ from mnemosyne.retrieval import (
     workspace_broadcast_from_context,
 )
 from mnemosyne.security import TrustTier, is_write_tainted, sanitize_retrieved_text, trust_weight
-from mnemosyne.standing import standing, standing_abstention_report
+from mnemosyne.standing import (
+    standing,
+    standing_abstention_report,
+    standing_erasure_cascade_report,
+    standing_observability_record,
+)
 from mnemosyne.text import approx_tokens, cosine, hashing_embedding, lexical_score, tokenize
 from mnemosyne.workspace import self_generation_budget_report
 
@@ -2494,10 +2499,22 @@ class PostgresEngine:
             reality_class = self._normalise_reality_class(hit.metadata.get("reality_class")) or "unknown"
             score = standing(self._standing_signals_for_hit(hit, reality_class))
             multiplier = 0.75 + 0.20 * score.groundedness + 0.05 * score.salience
+            source_cids = self._hit_source_evidence_cids(hit)
+            if hit.kind == "evidence" and hit.id:
+                source_cids = sorted(set(source_cids + [hit.id]))
             metadata = {
                 **hit.metadata,
                 "standing": score.to_dict(),
                 "standing_rank_multiplier": round(multiplier, 6),
+                "standing_observability": standing_observability_record(
+                    target_id=hit.id,
+                    kind=hit.kind,
+                    tenant_id=hit.tenant_id,
+                    branch=hit.branch,
+                    source_evidence_cids=source_cids,
+                    score=score,
+                    surface="retrieval.rank",
+                ),
             }
             weighted.append(
                 Hit(
@@ -2713,7 +2730,7 @@ class PostgresEngine:
                 self._set_tenant(cur, db_tenant_id)
                 cur.execute(
                     """
-                    SELECT cid, source_type, trust_tier, capability_tags
+                    SELECT cid, source_type, trust_tier, capability_tags, metadata
                     FROM evidence
                     WHERE tenant_id = %s AND branch = %s AND cid = %s
                     """,
@@ -2724,7 +2741,7 @@ class PostgresEngine:
                     return {"erased": False, "reason": "evidence_not_found", "cid": cid, "erasure_mode": mode.value}
                 cur.execute(
                     """
-                    SELECT cid, metadata
+                    SELECT cid, metadata, source_type
                     FROM evidence
                     WHERE tenant_id = %s AND branch = %s
                       AND erased = false
@@ -2732,7 +2749,17 @@ class PostgresEngine:
                     """,
                     (db_tenant_id, branch, cid_bytes),
                 )
-                candidates = [(bytes(row["cid"]), dict(row["metadata"] or {})) for row in cur.fetchall()]
+                candidate_rows = list(cur.fetchall())
+                candidates = [(bytes(row["cid"]), dict(row["metadata"] or {})) for row in candidate_rows]
+                cascade_metadata: dict[str, dict[str, Any]] = {
+                    cid: {**dict(evidence_row.get("metadata") or {}), "source_type": evidence_row["source_type"]}
+                }
+                for row in candidate_rows:
+                    row_cid = _bytes_to_cid(row["cid"])
+                    cascade_metadata[row_cid] = {
+                        **dict(row.get("metadata") or {}),
+                        "source_type": row.get("source_type") or "",
+                    }
                 legal_blind = mode is ErasureMode.HARD_DELETE_LEGAL and requested_by == "legal"
                 if legal_blind:
                     derived_cid_bytes, derived_cids, retained_metadata = _derived_evidence_forget_plan(
@@ -2749,6 +2776,21 @@ class PostgresEngine:
                     _bytes_to_cid(item) for item in retained_metadata
                 )
                 propagated["trimmed_derived_evidence"] = list(propagated["retained_derived_evidence"])
+                retained_cascade_metadata = {
+                    _bytes_to_cid(retained_bytes): {
+                        **dict(metadata),
+                        "source_type": cascade_metadata.get(_bytes_to_cid(retained_bytes), {}).get("source_type", ""),
+                    }
+                    for retained_bytes, metadata in retained_metadata.items()
+                }
+                propagated["standing_cascade"] = standing_erasure_cascade_report(
+                    source_cid=cid,
+                    erasure_mode=mode.value,
+                    affected_cids=affected_cids | set(propagated["retained_derived_evidence"]),
+                    erased_derived_cids=derived_cids,
+                    retained_metadata_by_cid=retained_cascade_metadata,
+                    metadata_by_cid=cascade_metadata,
+                )
                 if mode is ErasureMode.HARD_DELETE_LEGAL and requested_by != "legal":
                     minimum = self.policy.min_corroboration_for_delete
                     cur.execute(
