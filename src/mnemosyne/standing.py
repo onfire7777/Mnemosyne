@@ -101,6 +101,7 @@ def standing(unit_signals: Mapping[str, Any] | None) -> Standing:
     activation = _bounded_unit(signals.get("activation"), default=0.0)
     lifecycle_salience = _bounded_unit(signals.get("lifecycle_salience"), default=0.0)
     explicit_salience = _bounded_unit(signals.get("salience"), default=0.0)
+    birth_groundedness = _optional_bounded_unit(signals.get("birth_groundedness"))
 
     external_grounded = reality_class == "grounded"
     trust_component = (5 - trust_tier) / 5.0
@@ -120,8 +121,11 @@ def standing(unit_signals: Mapping[str, Any] | None) -> Standing:
         )
         groundedness = max(GROUNDED_FLOOR, min(1.0, raw_groundedness))
     else:
+        self_birth_groundedness = 0.08
+        if birth_groundedness is not None:
+            self_birth_groundedness = min(SELF_GENERATED_CEILING, birth_groundedness)
         raw_groundedness = (
-            0.08
+            self_birth_groundedness
             + 0.08 * calibrated_confidence
             + 0.06 * trust_component
             - 0.16 * contradiction_pressure
@@ -146,6 +150,8 @@ def standing(unit_signals: Mapping[str, Any] | None) -> Standing:
             "contradiction_pressure": _fixed(contradiction_pressure),
             "groundedness_decay": _fixed(groundedness_decay),
             "activation": salience,
+            "birth_groundedness": _fixed(self_birth_groundedness if not external_grounded else GROUNDED_FLOOR),
+            "credential_birth_groundedness_applied": birth_groundedness is not None and not external_grounded,
         },
         "bands": {
             "grounded_floor": GROUNDED_FLOOR,
@@ -159,6 +165,7 @@ def standing(unit_signals: Mapping[str, Any] | None) -> Standing:
         "h1_independent_external_only": True,
         "h2_authority_uses_groundedness_only": True,
         "h3_evidence_dominance_gap": True,
+        "h11_earned_autonomy_bounded": birth_groundedness is None or groundedness <= SELF_GENERATED_CEILING,
     }
     return Standing(
         groundedness=groundedness,
@@ -235,6 +242,18 @@ def _bounded_unit(value: Any, *, default: float) -> float:
         return default
     if numeric != numeric:
         return default
+    return max(0.0, min(1.0, numeric))
+
+
+def _optional_bounded_unit(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    if numeric != numeric:
+        return None
     return max(0.0, min(1.0, numeric))
 
 

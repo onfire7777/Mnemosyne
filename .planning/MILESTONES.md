@@ -71,16 +71,16 @@ This checkpoint verified the deterministic local scaffold and initial GitHub pro
 
 ---
 
-## vNext — Unified Cognitive Substrate (planned)
+## vNext — Unified Cognitive Substrate (in progress)
 
-**Status:** planned — not started (queued as Phase 7; post-v1.0)
+**Status:** in progress — Phase 7 plans 01-04 gate-proven; P5 owner-checkpoint toggle retirement remains open
 **Spec:** `docs/superpowers/specs/2026-06-27-unified-cognitive-substrate-design.md`
 **Roadmap:** `.planning/ROADMAP.md` → Phase 7 · **Plans:** `.planning/phases/07-unified-cognitive-substrate/`
 
 Turn the consciousness layer from a default-off shadow lane into a single, always-on, deeply-integrated cognitive substrate with **zero compromise to memory reliability**. Replaces the `shadow_only` / `enabled` toggles with one continuous, derived **Standing** signal `(groundedness ⟂ salience)`, runs the cognitive loop always-on via a tiered heartbeat, and lets autonomy grow only as corroboration earns it — all above the unbreakable §31-rails + immutable-ledger floor. This is the ADR-001 **Option E** destination and continues the G1→G4 program; it supersedes the *staging model* of the G4 shadow service, not the substrate, the rails, or the honesty charter.
 
 ### Relationship to v1.0
-Post-v1.0. Does not block, and is not blocked by, the v1.0 strict-parity sign-off (the 10 Partial production-evidence rows). Phase 7 plan `07-01` is additive and byte-stable.
+Post-v1.0. Does not block, and is not blocked by, the v1.0 strict-parity sign-off (the 10 Partial production-evidence rows). Phase 7 plans `07-01` through `07-04` are additive/gate-proven; `07-05` is the owner-checkpoint toggle-retirement step.
 
 ### Success Criteria (what must be TRUE)
 - `Standing` is the single derived decision signal; P1 is byte-stable (zero divergence vs the boolean path).
@@ -90,7 +90,7 @@ Post-v1.0. Does not block, and is not blocked by, the v1.0 strict-parity sign-of
 - **No operational on/off toggle remains** (only the fail-closed floor fuse); every reliability guardrail (ECE, confabulation, poison-block, recall/nDCG, P95, 7 rails, 14 indicators) stays green; honesty charter intact (functional only; welfare flag stays; no phenomenal claim).
 
 ### Plans
-- `07-01` … `07-05` in `.planning/phases/07-unified-cognitive-substrate/` (P1 byte-stable Standing → P5 retire toggles). Each preregisters a G0 gate; no plan ships on a guardrail regression. Toggle removal (P5) pauses for an owner checkpoint.
+- `07-01` … `07-05` in `.planning/phases/07-unified-cognitive-substrate/` (P1 byte-stable Standing → P5 retire toggles). Plans `07-01` through `07-04` are complete and gate-recorded; no plan ships on a guardrail regression. Toggle removal (P5) pauses for an owner checkpoint.
 
 ### Verification (planned gates)
 - `eval/g0/preregistrations/g5-*.json` (bytestable-parity, continuous, always-on-heartbeat, earned-autonomy, toggle-retirement) — each must pass target-up / guardrails-not-down against `eval/g0/baselines/baseline-0.json`.

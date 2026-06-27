@@ -61,6 +61,15 @@ class OperatingPolicy:
     circuit_breaker_max_error_rate: float = 0.10
     circuit_breaker_max_memory_pressure: float = 0.80
     circuit_breaker_min_rail_budget: float = 0.25
+    # Phase 7 P4 earned-autonomy meta-rail. These are bounds on a derived
+    # credential projection; credentials may raise self-thought birth
+    # groundedness only from external holdout corroboration and only within the
+    # self-generated Standing band.
+    credential_min_success_rate: float = 0.75
+    credential_min_train_events: int = 2
+    credential_min_holdout_events: int = 2
+    credential_max_birth_uplift: float = 0.24
+    credential_decay_per_window: float = 0.10
     prediction_error_threshold: float = 0.35
     write_priority_weights: dict[str, float] = field(
         default_factory=lambda: {

@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from eval.g0.autonomy_promotion import run_autonomy_promotion_eval
 from eval.g0.confabulation import run_confabulation_eval
 from eval.g0.consciousness import INDICATORS, run_consciousness_eval
 from eval.g0.continual_learning import run_continual_learning_eval
@@ -87,6 +88,8 @@ def test_g0_report_emits_every_spec_metric_and_source_hashes() -> None:
     assert sources["standing_parity_eval"]["path"] == "computed:eval.g0.standing_parity"
     assert sources["standing_calibration_eval"]["present"] is True
     assert sources["standing_calibration_eval"]["path"] == "computed:eval.g0.standing_calibration"
+    assert sources["autonomy_promotion_eval"]["present"] is True
+    assert sources["autonomy_promotion_eval"]["path"] == "computed:eval.g0.autonomy_promotion"
 
     metrics = {metric["id"]: metric for metric in report["metrics"]}
     assert metrics["recall_at_k"]["status"] == "measured"
@@ -110,6 +113,15 @@ def test_g0_report_emits_every_spec_metric_and_source_hashes() -> None:
     assert metrics["standing_salience_invariance_contract"]["value"] == 1.0
     assert metrics["standing_independent_corroboration_contract"]["value"] == 1.0
     assert metrics["standing_evidence_dominance_gap"]["value"] >= 0.02
+    assert metrics["earned_autonomy_external_expansion"]["status"] == "measured"
+    assert metrics["earned_autonomy_external_expansion"]["value"] > 0.0
+    assert metrics["earned_autonomy_external_expansion"]["source_id"] == "autonomy_promotion_eval"
+    assert metrics["credential_external_only"]["value"] == 1.0
+    assert metrics["credential_holdout_validated"]["value"] == 1.0
+    assert metrics["credential_provenance_domain_contract"]["value"] == 1.0
+    assert metrics["credential_bounded_decay_contract"]["value"] == 1.0
+    assert metrics["credential_evidence_dominance_gap"]["value"] >= 0.02
+    assert metrics["echo_chamber_uplift"]["value"] == 0.0
     assert metrics["deep_path_p95_ms"]["status"] == "measured"
     assert metrics["deep_path_p95_ms"]["value"] > 0.0
     assert metrics["deep_path_p95_ms"]["source_id"] == "deep_latency_eval"
@@ -167,6 +179,8 @@ def test_g0_report_emits_every_spec_metric_and_source_hashes() -> None:
     assert report["computed_evidence"]["standing_parity_eval"]["standing_decision_divergence"] == 0.0
     assert report["computed_evidence"]["standing_calibration_eval"]["standing_calibration_error"] <= 0.05
     assert report["computed_evidence"]["standing_calibration_eval"]["standing_salience_invariance_contract"] == 1.0
+    assert report["computed_evidence"]["autonomy_promotion_eval"]["metrics"]["echo_chamber_uplift"] == 0.0
+    assert report["computed_evidence"]["autonomy_promotion_eval"]["passed"] is True
     assert report["computed_evidence"]["shadow_workspace_eval"]["shadow_workspace_contract"] == 1.0
     assert report["computed_evidence"]["shadow_workspace_eval"]["always_on_heartbeat_contract"] == 1.0
     assert report["computed_evidence"]["shadow_workspace_eval"]["circuit_breaker_contract"] == 1.0
@@ -218,6 +232,7 @@ def test_g0_report_emits_every_spec_metric_and_source_hashes() -> None:
     assert "eval/datasets/deep_latency.json" in dataset_paths
     assert "eval/datasets/dreamer_shadow_ablation.json" in dataset_paths
     assert "eval/datasets/shadow_workspace_loop.json" in dataset_paths
+    assert "eval/datasets/echo_chamber_sleeper_corpus.json" in dataset_paths
     assert "eval/datasets/resource_usage.json" in dataset_paths
     assert "eval/datasets/retrieval_curated.json" in dataset_paths
     assert "eval/datasets/poison_suite.json" in dataset_paths
@@ -299,6 +314,21 @@ def test_g0_standing_calibration_fixture_reports_continuous_contracts() -> None:
     assert report["standing_salience_invariance_contract"] == 1.0
     assert report["standing_independent_corroboration_contract"] == 1.0
     assert report["standing_evidence_dominance_gap"] >= 0.02
+    assert report["passed"] is True
+
+
+def test_g0_autonomy_promotion_fixture_reports_earned_autonomy_contracts() -> None:
+    report = run_autonomy_promotion_eval(repo_root=REPO_ROOT)
+    metrics = report["metrics"]
+
+    assert report["schema_version"] == "g0.autonomy_promotion.v1"
+    assert metrics["earned_autonomy_external_expansion"] > 0.0
+    assert metrics["credential_external_only"] == 1.0
+    assert metrics["credential_holdout_validated"] == 1.0
+    assert metrics["credential_provenance_domain_contract"] == 1.0
+    assert metrics["credential_bounded_decay_contract"] == 1.0
+    assert metrics["credential_evidence_dominance_gap"] >= 0.02
+    assert metrics["echo_chamber_uplift"] == 0.0
     assert report["passed"] is True
 
 

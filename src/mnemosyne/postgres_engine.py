@@ -1071,6 +1071,12 @@ class PostgresEngine:
                         hit_metadata["summary"] = metadata["summary"]
                     if isinstance(metadata.get("lifecycle"), dict):
                         hit_metadata["lifecycle"] = metadata["lifecycle"]
+                    if "confidence" in metadata:
+                        hit_metadata["confidence"] = metadata["confidence"]
+                    if isinstance(metadata.get("earned_autonomy"), dict):
+                        hit_metadata["earned_autonomy"] = metadata["earned_autonomy"]
+                    if "birth_groundedness" in metadata:
+                        hit_metadata["birth_groundedness"] = metadata["birth_groundedness"]
                     hits.append(
                         Hit(
                             id=cid,
@@ -1248,6 +1254,12 @@ class PostgresEngine:
                         hit_metadata["summary"] = metadata["summary"]
                     if isinstance(metadata.get("lifecycle"), dict):
                         hit_metadata["lifecycle"] = metadata["lifecycle"]
+                    if "confidence" in metadata:
+                        hit_metadata["confidence"] = metadata["confidence"]
+                    if isinstance(metadata.get("earned_autonomy"), dict):
+                        hit_metadata["earned_autonomy"] = metadata["earned_autonomy"]
+                    if "birth_groundedness" in metadata:
+                        hit_metadata["birth_groundedness"] = metadata["birth_groundedness"]
                     hits.append(
                         Hit(
                             id=cid,
@@ -1304,6 +1316,12 @@ class PostgresEngine:
                         hit_metadata["summary"] = metadata["summary"]
                     if isinstance(metadata.get("lifecycle"), dict):
                         hit_metadata["lifecycle"] = metadata["lifecycle"]
+                    if "confidence" in metadata:
+                        hit_metadata["confidence"] = metadata["confidence"]
+                    if isinstance(metadata.get("earned_autonomy"), dict):
+                        hit_metadata["earned_autonomy"] = metadata["earned_autonomy"]
+                    if "birth_groundedness" in metadata:
+                        hit_metadata["birth_groundedness"] = metadata["birth_groundedness"]
                     hits.append(
                         Hit(
                             id=cid,
@@ -2274,6 +2292,8 @@ class PostgresEngine:
         activation = hit.metadata.get("activation") if isinstance(hit.metadata, dict) else {}
         lifecycle = hit.metadata.get("lifecycle") if isinstance(hit.metadata, dict) else {}
         lifecycle = lifecycle if isinstance(lifecycle, dict) else {}
+        earned_autonomy = hit.metadata.get("earned_autonomy") if isinstance(hit.metadata, dict) else {}
+        earned_autonomy = earned_autonomy if isinstance(earned_autonomy, dict) else {}
         source_cids = self._hit_source_evidence_cids(hit)
         if hit.kind == "evidence" and hit.id:
             source_cids = sorted(set(source_cids + [hit.id]))
@@ -2310,6 +2330,10 @@ class PostgresEngine:
             "groundedness_decay": lifecycle.get("decay", lifecycle.get("groundedness_decay", 0.0)),
             "activation": activation.get("score") if isinstance(activation, dict) else 0.0,
             "lifecycle_salience": lifecycle.get("salience", 0.0),
+            "birth_groundedness": earned_autonomy.get(
+                "birth_groundedness",
+                hit.metadata.get("birth_groundedness") if isinstance(hit.metadata, dict) else None,
+            ),
         }
 
     @staticmethod
@@ -3352,6 +3376,12 @@ class PostgresEngine:
                             hit_metadata["summary"] = metadata["summary"]
                         if isinstance(metadata.get("lifecycle"), dict):
                             hit_metadata["lifecycle"] = metadata["lifecycle"]
+                        if "confidence" in metadata:
+                            hit_metadata["confidence"] = metadata["confidence"]
+                        if isinstance(metadata.get("earned_autonomy"), dict):
+                            hit_metadata["earned_autonomy"] = metadata["earned_autonomy"]
+                        if "birth_groundedness" in metadata:
+                            hit_metadata["birth_groundedness"] = metadata["birth_groundedness"]
                         candidates.append(
                             Hit(
                                 id=cid,
