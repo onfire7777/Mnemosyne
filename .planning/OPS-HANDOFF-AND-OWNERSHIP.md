@@ -36,7 +36,7 @@ Mnemosyne depends on gbrain, mempalace, or any external memory system.
 |---|---|---|---|---|
 | **A** | Memory schema | Bridgememory hub structure + field/key definitions | Entry body/front-matter rendering, entry content | `Desktop/Bridgememory/.bridgememory/{_layout.json,index.json}` |
 | **B** | Memory entry templating | Entry front-matter + body template, naming, cross-links | Hub layout/index, the field-set definition | `Desktop/Bridgememory/.bridgememory/*.md` |
-| **C** | Runbooks | Step-by-step deploy/operate procedure per surface; which gate cmd to run + in what order | Secret values, dashboard internals, rollback specifics (reference only) | `.planning/runbooks/` *(to be created by Lane C)* |
+| **C** | Runbooks | Step-by-step deploy/operate procedure per surface; which gate cmd to run + in what order | Secret values, dashboard internals, rollback specifics (reference only) | `.planning/runbooks/` *(index + row runbooks present; keep synchronized with capture wrapper)* |
 | **D** | Env & secrets guidance | Env-var catalog, Vault/Keycloak wiring, provisioning steps — **no secret values** | Operational sequencing, monitoring, rollback | `.planning/ENV-AND-SECRETS.md` *(Lane D)* |
 | **E** | Observability | Live dashboards, alert routing, SLO monitors; `ops-report` + `ops-dashboard-check` live wiring | Deploy steps, rollback, secret provisioning | hosted dashboard URL/package |
 | **F** | Rollback | Revert procedures, canary-abort, rollback drills + drill evidence | Forward deploy steps, monitoring authorship | `.planning/ROLLBACK.md` *(Lane F)* + `parametric-trainer-check` rollback drill |

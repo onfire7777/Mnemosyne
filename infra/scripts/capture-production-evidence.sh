@@ -9,11 +9,15 @@ Usage:
 
 Runs the existing production evidence path:
   1. Validate that SOAK_MANIFEST is explicitly production-scoped.
-  2. Run deployment-soak with --evidence-dir.
-  3. Run release-audit with --evidence-manifest "$OUT_ROOT/evidence/manifest.json",
+  2. Copy source-soak-manifest.json and operator-soak-manifest.json, snapshot
+     referenced external input artifacts under OUT_ROOT/input-artifacts, and
+     rewrite the copied operator manifest to those retained snapshots.
+  3. Preflight redaction-scan the retained manifest and input artifacts.
+  4. Run deployment-soak with --evidence-dir.
+  5. Run release-audit with --evidence-manifest "$OUT_ROOT/evidence/manifest.json",
      --require-production-validated, and --require-provider-forbid-local.
-  4. Redaction-scan generated evidence and fail on findings or skipped files.
-  5. Write bundle-manifest.json and summary.json with bundle_fingerprint.
+  6. Redaction-scan generated evidence and fail on findings or skipped files.
+  7. Write bundle-manifest.json and summary.json with bundle_fingerprint.
 
 Reviewers can recheck a completed bundle offline with:
   PYTHON="${PYTHON:-$(if [ -x .venv/bin/python ]; then printf '%s' .venv/bin/python; else command -v python3; fi)}"
@@ -30,7 +34,9 @@ files, or command providers; do not put tokens directly in manifest args.
 
 Options:
   --preflight-only  Validate and copy the manifest, write preflight.json, then
-                    exit before deployment-soak or release-audit runs.
+                    exit before deployment-soak or release-audit runs. Preflight
+                    writes source/operator manifest copies, retained input
+                    artifact snapshots, and redaction-scan.json for setup proof.
 USAGE
 }
 
@@ -497,6 +503,16 @@ for index, check in enumerate(checks, start=1):
                 )
                 continue
             if command == "provenance-trust-check" and option_name == "--suite" and separator:
+                _validate_external_file_path(
+                    option_value,
+                    check_index=index - 1,
+                    field=field,
+                    value_index=value_index,
+                    label=f"checks[{index}].{field}",
+                    replacement_prefix=f"{option_name}=",
+                )
+                continue
+            if separator:
                 _validate_external_file_path(
                     option_value,
                     check_index=index - 1,
