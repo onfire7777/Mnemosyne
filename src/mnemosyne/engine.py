@@ -36,6 +36,7 @@ from mnemosyne.retrieval import (
     QUERY_SUPPORT_THRESHOLD,
     RetrievalAdapters,
     activation_explain,
+    apply_workspace_retrieval_advisory,
     apply_activation_scores,
     gist_support_report,
     is_retired_summary_metadata,
@@ -1085,6 +1086,13 @@ class LocalMemoryEngine:
         ordered = self._u_curve_order(activated)
         ordered, schema_fast_path_final = schema_fast_path_rerank(query, ordered, self.policy)
         schema_fast_path = self._merge_schema_fast_path_reports(schema_fast_path, schema_fast_path_final)
+        ordered, workspace_retrieval_advisory = apply_workspace_retrieval_advisory(
+            ordered,
+            filt,
+            tenant_id=tenant_id,
+            branch=branch,
+            policy=self.policy,
+        )
         budgeted, used = self._fit_budget(ordered, self.policy.token_budget)
         budgeted = self._mark_retrieved_text_as_data(budgeted)
         read_marks = self._record_retrieval_access(budgeted)
@@ -1158,6 +1166,7 @@ class LocalMemoryEngine:
                 "reality_monitoring": reality_monitoring,
                 "schema_fast_path": schema_fast_path,
                 "workspace_broadcast": workspace_broadcast,
+                "workspace_retrieval_advisory": workspace_retrieval_advisory,
                 "read_marks": read_marks,
                 "adapters": {
                     "embedding": self.adapters.embedding.name,

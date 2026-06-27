@@ -15,6 +15,7 @@ from typing import Any
 from mnemosyne.consolidation import ConsolidationWorker
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.models import Evidence
+from mnemosyne.policy import OperatingPolicy
 from mnemosyne.workspace import ShadowWorkspaceController, WorkspaceItem
 
 
@@ -51,12 +52,15 @@ def run_shadow_workspace_eval(*, repo_root: Path | None = None) -> dict[str, Any
     advisory_checks = _advisory_checks(advisory, dataset)
     advisory_promotion_probe = _workspace_advisory_promotion_probe(tenant)
     advisory_promotion_checks = advisory_promotion_probe["checks"]
+    retrieval_controller_probe = _workspace_retrieval_controller_probe(tenant)
+    retrieval_controller_checks = retrieval_controller_probe["checks"]
     rumination_payload = _run_rumination_probe(controller, tenant, dataset.get("rumination_probe", {}))
     rumination_checks = _rumination_checks(rumination_payload, dataset.get("rumination_probe", {}))
     all_contract_checks = {
         **contract_checks,
         **{f"advisory_{key}": value for key, value in advisory_checks.items()},
         **{f"advisory_promotion_{key}": value for key, value in advisory_promotion_checks.items()},
+        **{f"retrieval_controller_{key}": value for key, value in retrieval_controller_checks.items()},
         **{f"cycle_{key}": value for key, value in useful_checks.items()},
         **{f"rumination_{key}": value for key, value in rumination_checks.items()},
     }
@@ -91,6 +95,9 @@ def run_shadow_workspace_eval(*, repo_root: Path | None = None) -> dict[str, Any
         "workspace_advisory_promotion_gate_contract": 1.0
         if all(_flatten_bool_checks(advisory_promotion_checks))
         else 0.0,
+        "workspace_retrieval_controller_contract": 1.0
+        if all(_flatten_bool_checks(retrieval_controller_checks))
+        else 0.0,
         "checks": all_contract_checks,
         "workspace": {
             "stopped_reason": payload["stopped_reason"],
@@ -105,6 +112,7 @@ def run_shadow_workspace_eval(*, repo_root: Path | None = None) -> dict[str, Any
         },
         "workspace_consolidation_advisory": advisory,
         "workspace_advisory_promotion_probe": advisory_promotion_probe,
+        "workspace_retrieval_controller_probe": retrieval_controller_probe,
         "rumination_probe": rumination_payload,
     }
 
@@ -343,6 +351,133 @@ def _promotion_probe_advisory(*, tenant: str, cid: str, prediction_score: float)
         "item_count": 1,
         "max_items": 4,
     }
+
+
+def _workspace_retrieval_controller_probe(tenant: str) -> dict[str, Any]:
+    raw_marker = "workspace retrieval raw marker must not leak"
+    policy = OperatingPolicy(
+        workspace_retrieval_advisory_enabled=True,
+        workspace_retrieval_advisory_max_boost=1.0,
+    )
+    engine = LocalMemoryEngine(policy=policy)
+    cold_cid = engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id="g0-shadow-workspace",
+            actor="user",
+            source_type="g0-fixture",
+            content="G0 workspace retrieval baseline signal is archived.",
+            trust_tier=0,
+            access_policy={"tenant": tenant},
+        )
+    )
+    focus_cid = engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id="g0-shadow-workspace",
+            actor="user",
+            source_type="g0-fixture",
+            content="G0 workspace retrieval promoted focus is validated.",
+            trust_tier=0,
+            access_policy={"tenant": tenant},
+        )
+    )
+    advisory = _retrieval_probe_advisory(tenant=tenant, cid=focus_cid, raw_marker=raw_marker)
+    query = "g0 workspace retrieval signal"
+    baseline = engine.retrieve(query, tenant_id=tenant).to_dict()
+    no_opt_in = engine.retrieve(query, tenant_id=tenant, filt={"workspace_retrieval_advisory": advisory}).to_dict()
+    apply_result = engine.retrieve(
+        query,
+        tenant_id=tenant,
+        filt={
+            "workspace_retrieval_advisory": advisory,
+            "apply_workspace_retrieval_advisory": True,
+        },
+    ).to_dict()
+    invalid = _retrieval_probe_advisory(tenant="other-tenant", cid=focus_cid, raw_marker=raw_marker)
+    rejected = engine.retrieve(
+        query,
+        tenant_id=tenant,
+        filt={
+            "workspace_retrieval_advisory": invalid,
+            "apply_workspace_retrieval_advisory": True,
+        },
+    ).to_dict()
+
+    baseline_focus = _hit_by_id(baseline, focus_cid)
+    applied_focus = _hit_by_id(apply_result, focus_cid)
+    no_opt_focus = _hit_by_id(no_opt_in, focus_cid)
+    applied_report = apply_result["explain"]["workspace_retrieval_advisory"]
+    no_opt_report = no_opt_in["explain"]["workspace_retrieval_advisory"]
+    rejected_report = rejected["explain"]["workspace_retrieval_advisory"]
+    checks = {
+        "default_no_opt_in_report_only": no_opt_report["status"] == "report_only"
+        and no_opt_report["used_for_ranking"] is False
+        and "workspace_retrieval_advisory" not in no_opt_focus.get("metadata", {}),
+        "explicit_opt_in_applies_ranking": applied_report["status"] == "applied"
+        and applied_report["used_for_ranking"] is True
+        and applied_report["critical_path"] is True
+        and float(applied_focus["score"]) > float(baseline_focus["score"])
+        and "workspace" in str(applied_focus["channel"]).split("+"),
+        "cid_backed_candidate_only": applied_report["applied_hit_count"] == 1
+        and applied_focus["metadata"]["workspace_retrieval_advisory"]["applied"] is True,
+        "never_mutates_production": applied_report["production_mutation"] is False,
+        "invalid_advisory_rejected": rejected_report["status"] == "rejected",
+        "invalid_advisory_not_applied": rejected_report["used_for_ranking"] is False,
+        "raw_workspace_text_absent": raw_marker not in str(no_opt_in)
+        and raw_marker not in str(apply_result)
+        and raw_marker not in str(rejected),
+        "other_source_candidate_unboosted": "workspace_retrieval_advisory"
+        not in _hit_by_id(apply_result, cold_cid).get("metadata", {}),
+    }
+    return {
+        "valid_no_opt_in": {
+            "status": no_opt_report["status"],
+            "used_for_ranking": no_opt_report["used_for_ranking"],
+        },
+        "valid_apply": {
+            "status": applied_report["status"],
+            "critical_path": applied_report["critical_path"],
+            "production_mutation": applied_report["production_mutation"],
+            "applied_hit_count": applied_report["applied_hit_count"],
+        },
+        "invalid_apply": {
+            "status": rejected_report["status"],
+            "reason": rejected_report["reason"],
+        },
+        "checks": checks,
+    }
+
+
+def _retrieval_probe_advisory(*, tenant: str, cid: str, raw_marker: str) -> dict[str, Any]:
+    return {
+        "version": "workspace-retrieval-advisory.v1",
+        "source": "shadow_workspace_controller",
+        "tenant_id": tenant,
+        "branch": "main",
+        "shadow_only": True,
+        "critical_path": False,
+        "production_mutation": False,
+        "advisory_only": True,
+        "promotion_gate_required": True,
+        "applied_to_ranking": False,
+        "applied_to_mutation": False,
+        "items": [
+            {
+                "cid": cid,
+                "workspace_item_id": "g0-retrieval-focus",
+                "priority": 1.0,
+                "content": raw_marker,
+            }
+        ],
+    }
+
+
+def _hit_by_id(payload: dict[str, Any], hit_id: str) -> dict[str, Any]:
+    for hit in payload.get("hits", []):
+        if isinstance(hit, dict) and hit.get("id") == hit_id:
+            return hit
+    return {}
 
 
 def _passes_by_name(result: dict[str, Any]) -> dict[str, dict[str, Any]]:

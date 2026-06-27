@@ -29,6 +29,9 @@ This writes:
   indicator-property scorecard, continuity probes, self-model accuracy, and
   metacognition metrics; these are architecture/probe signals only and do not
   claim phenomenal consciousness
+- an embedded computed `shadow_workspace_eval` fixture recording the bounded
+  shadow workspace stream, consolidation advisory, advisory-promotion gate,
+  retrieval-controller gate, and anti-rumination contracts
 
 `eval/g0/baselines/baseline-0.json` is the frozen baseline custody artifact.
 Do not rewrite it during normal G1+ development. Use `--write-baseline` only

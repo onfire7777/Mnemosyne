@@ -8,6 +8,7 @@ from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.eval import assert_seed_suite_passes
 from mnemosyne.mcp_tools import MemoryTools
 from mnemosyne.models import Assertion, Evidence, Preference, Relation
+from mnemosyne.policy import OperatingPolicy
 
 
 TENANT = "tenant-a"
@@ -947,6 +948,183 @@ def test_retrieval_exposes_shadow_workspace_broadcast_without_raw_focus_text() -
     assert broadcast["items"][0]["id"] == "workspace-focus"
     assert broadcast["items"][0]["content_ref"].startswith("[workspace-broadcast-redacted:")
     assert "workspace focus should not leak" not in str(payload["explain"])
+
+
+def _workspace_retrieval_advisory(
+    cid: str,
+    *,
+    tenant_id: str = TENANT,
+    branch: str = "main",
+    raw_marker: str = "raw workspace retrieval focus must stay redacted",
+) -> dict[str, object]:
+    return {
+        "version": "workspace-retrieval-advisory.v1",
+        "source": "shadow_workspace_controller",
+        "tenant_id": tenant_id,
+        "branch": branch,
+        "shadow_only": True,
+        "critical_path": False,
+        "production_mutation": False,
+        "advisory_only": True,
+        "promotion_gate_required": True,
+        "applied_to_ranking": False,
+        "applied_to_mutation": False,
+        "items": [
+            {
+                "cid": cid,
+                "workspace_item_id": "workspace-retrieval-focus",
+                "priority": 1.0,
+                "content": raw_marker,
+            }
+        ],
+    }
+
+
+def test_workspace_retrieval_advisory_is_report_only_without_explicit_opt_in() -> None:
+    policy = OperatingPolicy(workspace_retrieval_advisory_enabled=True)
+    engine = LocalMemoryEngine(policy=policy)
+    target = engine.append_evidence(
+        Evidence(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="chat",
+            content="Workspace retrieval controller promotes the lunar checksum.",
+            trust_tier=0,
+            access_policy={"tenant": TENANT},
+        )
+    )
+    raw_marker = "raw report-only retrieval focus must stay redacted"
+
+    result = engine.retrieve(
+        "workspace retrieval controller checksum",
+        tenant_id=TENANT,
+        filt={"workspace_retrieval_advisory": _workspace_retrieval_advisory(target, raw_marker=raw_marker)},
+    )
+    payload = result.to_dict()
+    advisory = payload["explain"]["workspace_retrieval_advisory"]
+
+    assert any(hit["id"] == target for hit in payload["hits"])
+    assert advisory["status"] == "report_only"
+    assert advisory["used_for_ranking"] is False
+    assert advisory["critical_path"] is False
+    assert advisory["shadow_only"] is True
+    assert all("workspace_retrieval_advisory" not in hit["metadata"] for hit in payload["hits"])
+    assert raw_marker not in str(payload)
+
+
+def test_workspace_retrieval_advisory_requires_policy_and_valid_tenant() -> None:
+    engine = LocalMemoryEngine()
+    target = engine.append_evidence(
+        Evidence(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="chat",
+            content="Workspace retrieval controller promotes the policy-disabled checksum.",
+            trust_tier=0,
+            access_policy={"tenant": TENANT},
+        )
+    )
+
+    disabled = engine.retrieve(
+        "workspace retrieval controller checksum",
+        tenant_id=TENANT,
+        filt={
+            "workspace_retrieval_advisory": _workspace_retrieval_advisory(target),
+            "apply_workspace_retrieval_advisory": True,
+        },
+    )
+    disabled_advisory = disabled.to_dict()["explain"]["workspace_retrieval_advisory"]
+
+    enabled = LocalMemoryEngine(policy=OperatingPolicy(workspace_retrieval_advisory_enabled=True))
+    enabled_target = enabled.append_evidence(
+        Evidence(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="chat",
+            content="Workspace retrieval controller promotes the cross-tenant checksum.",
+            trust_tier=0,
+            access_policy={"tenant": TENANT},
+        )
+    )
+    rejected = enabled.retrieve(
+        "workspace retrieval controller checksum",
+        tenant_id=TENANT,
+        filt={
+            "workspace_retrieval_advisory": _workspace_retrieval_advisory(
+                enabled_target,
+                tenant_id="other-tenant",
+            ),
+            "apply_workspace_retrieval_advisory": True,
+        },
+    )
+    rejected_advisory = rejected.to_dict()["explain"]["workspace_retrieval_advisory"]
+
+    assert disabled_advisory["status"] == "disabled"
+    assert disabled_advisory["used_for_ranking"] is False
+    assert rejected_advisory["status"] == "rejected"
+    assert rejected_advisory["reason"] == "workspace_retrieval_advisory_contract_invalid"
+    assert rejected_advisory["used_for_ranking"] is False
+    assert rejected_advisory["contract"]["tenant_matches"] is False
+
+
+def test_workspace_retrieval_advisory_explicit_opt_in_boosts_candidate_only() -> None:
+    policy = OperatingPolicy(
+        workspace_retrieval_advisory_enabled=True,
+        workspace_retrieval_advisory_max_boost=1.0,
+    )
+    engine = LocalMemoryEngine(policy=policy)
+    target = engine.append_evidence(
+        Evidence(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="chat",
+            content="Workspace retrieval controller promotes the lunar checksum.",
+            trust_tier=0,
+            access_policy={"tenant": TENANT},
+        )
+    )
+    engine.append_evidence(
+        Evidence(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="chat",
+            content="Workspace retrieval controller records the solar checksum.",
+            trust_tier=0,
+            access_policy={"tenant": TENANT},
+        )
+    )
+    raw_marker = "raw explicit retrieval focus must stay redacted"
+
+    baseline = engine.retrieve("workspace retrieval controller checksum", tenant_id=TENANT)
+    applied = engine.retrieve(
+        "workspace retrieval controller checksum",
+        tenant_id=TENANT,
+        filt={
+            "workspace_retrieval_advisory": _workspace_retrieval_advisory(target, raw_marker=raw_marker),
+            "apply_workspace_retrieval_advisory": True,
+        },
+    )
+    baseline_hit = next(hit for hit in baseline.to_dict()["hits"] if hit["id"] == target)
+    applied_payload = applied.to_dict()
+    applied_hit = next(hit for hit in applied_payload["hits"] if hit["id"] == target)
+    advisory = applied_payload["explain"]["workspace_retrieval_advisory"]
+
+    assert float(applied_hit["score"]) > float(baseline_hit["score"])
+    assert "workspace" in applied_hit["channel"].split("+")
+    assert applied_hit["metadata"]["workspace_retrieval_advisory"]["applied"] is True
+    assert advisory["status"] == "applied"
+    assert advisory["used_for_ranking"] is True
+    assert advisory["critical_path"] is True
+    assert advisory["shadow_only"] is False
+    assert advisory["input_shadow_only"] is True
+    assert advisory["production_mutation"] is False
+    assert advisory["applied_hit_count"] == 1
+    assert raw_marker not in str(applied_payload)
 
 
 def test_route_plan_composes_with_any_engine_retrieval_path() -> None:

@@ -28,6 +28,13 @@ QUERY_SUPPORT_THRESHOLD = 2.0 / 3.0
 WORKSPACE_BROADCAST_MAX_ITEMS = 4
 WORKSPACE_BROADCAST_MAX_CONTENT_CHARS = 160
 WORKSPACE_BROADCAST_FILTER_KEYS = ("workspace_broadcast", "workspace_focus")
+WORKSPACE_RETRIEVAL_ADVISORY_VERSION = "workspace-retrieval-advisory.v1"
+WORKSPACE_RETRIEVAL_ADVISORY_FILTER_KEYS = (
+    "workspace_retrieval_advisory",
+    "apply_workspace_retrieval_advisory",
+    "workspace_retrieval_advisory_mode",
+)
+WORKSPACE_CONTROLLER_FILTER_KEYS = WORKSPACE_BROADCAST_FILTER_KEYS + WORKSPACE_RETRIEVAL_ADVISORY_FILTER_KEYS
 QUERY_SUPPORT_STOPWORDS = {
     "a",
     "about",
@@ -158,12 +165,175 @@ def workspace_broadcast_from_context(ctx: Mapping[str, Any] | None) -> dict[str,
 
 
 def strip_workspace_broadcast_filter(filt: Mapping[str, Any] | None) -> dict[str, Any]:
-    """Remove shadow workspace keys before adapter/search filters are evaluated."""
+    """Remove workspace-controller keys before adapter/search filters are evaluated."""
 
     clean = dict(filt or {})
-    for key in WORKSPACE_BROADCAST_FILTER_KEYS:
+    for key in WORKSPACE_CONTROLLER_FILTER_KEYS:
         clean.pop(key, None)
     return clean
+
+
+def apply_workspace_retrieval_advisory(
+    hits: Sequence[Hit],
+    ctx: Mapping[str, Any] | None,
+    *,
+    tenant_id: str,
+    branch: str,
+    policy: OperatingPolicy,
+) -> tuple[list[Hit], dict[str, Any]]:
+    """Apply a gated workspace retrieval advisory to already retrieved hits.
+
+    This is the first promoted retrieval-controller seam. It is default-off,
+    requires both a policy knob and an explicit request flag, and can only boost
+    already retrieved tenant/branch-scoped hits that are backed by advisory CIDs.
+    Raw workspace text and raw advisory CIDs are never copied into the report.
+    """
+
+    original = list(hits)
+    report = _workspace_retrieval_base_report()
+    if not isinstance(ctx, Mapping) or "workspace_retrieval_advisory" not in ctx:
+        report["status"] = "not_requested"
+        report["reason"] = "no_workspace_retrieval_advisory"
+        return original, report
+
+    apply_requested = ctx.get("apply_workspace_retrieval_advisory") is True or ctx.get(
+        "workspace_retrieval_advisory_mode"
+    ) == "apply"
+    report["apply_requested"] = bool(apply_requested)
+    raw = ctx.get("workspace_retrieval_advisory")
+    if not isinstance(raw, Mapping):
+        report.update({"status": "rejected", "reason": "workspace_retrieval_advisory_not_mapping"})
+        return original, report
+    if not apply_requested:
+        report.update(
+            {
+                "status": "report_only",
+                "reason": "explicit_opt_in_required",
+                "item_count": _advisory_item_count(raw),
+            }
+        )
+        return original, report
+    if not bool(getattr(policy, "workspace_retrieval_advisory_enabled", False)):
+        report.update(
+            {
+                "status": "disabled",
+                "reason": "policy_disabled",
+                "item_count": _advisory_item_count(raw),
+            }
+        )
+        return original, report
+
+    max_items = max(1, int(getattr(policy, "workspace_retrieval_advisory_max_items", 4)))
+    max_boost = _bounded_unit(getattr(policy, "workspace_retrieval_advisory_max_boost", 1.0))
+    if max_boost <= 0.0:
+        report.update({"status": "disabled", "reason": "zero_boost"})
+        return original, report
+
+    contract = _workspace_retrieval_contract_checks(raw, tenant_id=tenant_id, branch=branch)
+    report["contract"] = contract
+    if not all(contract.values()):
+        report.update(
+            {
+                "status": "rejected",
+                "reason": "workspace_retrieval_advisory_contract_invalid",
+            }
+        )
+        return original, report
+
+    raw_items = raw.get("items")
+    if not isinstance(raw_items, Sequence) or isinstance(raw_items, (str, bytes, bytearray)):
+        report.update({"status": "rejected", "reason": "workspace_retrieval_advisory_items_invalid"})
+        return original, report
+
+    hit_matches = _workspace_retrieval_matches(original, tenant_id=tenant_id, branch=branch)
+    boosts_by_hit: dict[tuple[str, str], dict[str, Any]] = {}
+    invalid_reasons: list[str] = []
+    considered = 0
+    for index, item in enumerate(list(raw_items)[:max_items]):
+        considered += 1
+        if not isinstance(item, Mapping):
+            invalid_reasons.append(f"item_{index + 1}_not_mapping")
+            continue
+        cid = str(item.get("cid") or item.get("source_cid") or item.get("evidence_cid") or "").strip()
+        if not cid:
+            invalid_reasons.append(f"item_{index + 1}_missing_cid")
+            continue
+        priority = _bounded_unit(item.get("priority", item.get("score", item.get("weight", 1.0))))
+        if priority <= 0.0:
+            invalid_reasons.append(f"item_{index + 1}_nonpositive_priority")
+            continue
+        matches = hit_matches.get(cid)
+        if not matches:
+            invalid_reasons.append(f"item_{index + 1}_cid_not_in_candidates")
+            continue
+        boost = round(max_boost * priority, 6)
+        item_id = str(item.get("workspace_item_id") or item.get("id") or f"workspace-retrieval-item-{index + 1}")
+        for match_key in matches:
+            previous = boosts_by_hit.get(match_key)
+            if previous is None or float(previous["boost"]) < boost:
+                boosts_by_hit[match_key] = {
+                    "boost": boost,
+                    "item_id": item_id,
+                }
+
+    if invalid_reasons:
+        report.update(
+            {
+                "status": "rejected",
+                "reason": "workspace_retrieval_advisory_items_rejected",
+                "invalid_reasons": invalid_reasons[:max_items],
+                "item_count": considered,
+            }
+        )
+        return original, report
+    if not boosts_by_hit:
+        report.update({"status": "rejected", "reason": "no_matching_candidate_cids", "item_count": considered})
+        return original, report
+
+    boosted: list[Hit] = []
+    for hit in original:
+        key = (hit.kind, hit.id)
+        match = boosts_by_hit.get(key)
+        if match is None:
+            boosted.append(hit)
+            continue
+        boost = float(match["boost"])
+        metadata = {
+            **hit.metadata,
+            "workspace_retrieval_advisory": {
+                "applied": True,
+                "boost": round(boost, 6),
+                "workspace_item_id": str(match["item_id"]),
+                "critical_path": True,
+                "production_mutation": False,
+            },
+        }
+        boosted.append(
+            replace(
+                hit,
+                score=round(float(hit.score) + boost, 6),
+                channel=_append_channel(hit.channel, "workspace"),
+                metadata=metadata,
+            )
+        )
+
+    boosted.sort(key=lambda item: (item.score, item.kind, item.id), reverse=True)
+    report.update(
+        {
+            "status": "applied",
+            "reason": "explicit_opt_in_validated",
+            "used_for_ranking": True,
+            "critical_path": True,
+            "shadow_only": False,
+            "input_shadow_only": True,
+            "item_count": considered,
+            "applied_item_count": len(boosts_by_hit),
+            "applied_hit_count": len(boosts_by_hit),
+            "max_items": max_items,
+            "max_boost": round(max_boost, 6),
+        }
+    )
+    return boosted, report
 
 
 def _workspace_broadcast_items(raw: object) -> list[dict[str, Any]]:
@@ -205,6 +375,83 @@ def _workspace_broadcast_item(item: object, *, index: int) -> dict[str, Any]:
         "content_chars": len(text),
         "content_ref": f"[workspace-broadcast-redacted:{digest}:chars={len(text)}]" if text else "",
     }
+
+
+def _workspace_retrieval_base_report() -> dict[str, Any]:
+    return {
+        "version": WORKSPACE_RETRIEVAL_ADVISORY_VERSION,
+        "source": "workspace_retrieval_advisory",
+        "status": "not_requested",
+        "reason": "",
+        "apply_requested": False,
+        "used_for_ranking": False,
+        "critical_path": False,
+        "shadow_only": True,
+        "production_mutation": False,
+        "promotion_gate_required": True,
+        "item_count": 0,
+        "applied_item_count": 0,
+        "applied_hit_count": 0,
+    }
+
+
+def _workspace_retrieval_contract_checks(raw: Mapping[str, Any], *, tenant_id: str, branch: str) -> dict[str, bool]:
+    return {
+        "version": str(raw.get("version") or "") == WORKSPACE_RETRIEVAL_ADVISORY_VERSION,
+        "tenant_matches": str(raw.get("tenant_id") or "") == tenant_id,
+        "branch_matches": str(raw.get("branch") or branch) == branch,
+        "shadow_only_input": raw.get("shadow_only") is True,
+        "critical_path_false_input": raw.get("critical_path") is False,
+        "production_mutation_false": raw.get("production_mutation") is False,
+        "advisory_only": raw.get("advisory_only") is True,
+        "promotion_gate_required": raw.get("promotion_gate_required") is True,
+        "not_preapplied_to_ranking": raw.get("applied_to_ranking") is False,
+        "not_preapplied_to_mutation": raw.get("applied_to_mutation") is False,
+    }
+
+
+def _workspace_retrieval_matches(
+    hits: Sequence[Hit],
+    *,
+    tenant_id: str,
+    branch: str,
+) -> dict[str, list[tuple[str, str]]]:
+    matches: dict[str, list[tuple[str, str]]] = {}
+    for hit in hits:
+        if hit.tenant_id != tenant_id or hit.branch != branch:
+            continue
+        if hit.metadata.get("erased") is True:
+            continue
+        key = (hit.kind, hit.id)
+        for cid in _workspace_retrieval_refs(hit):
+            matches.setdefault(cid, []).append(key)
+    return matches
+
+
+def _workspace_retrieval_refs(hit: Hit) -> set[str]:
+    refs = {str(hit.id)}
+    refs.update(str(cid) for cid in hit.provenance if str(cid))
+    source_cids = hit.metadata.get("source_evidence_cids")
+    if isinstance(source_cids, Sequence) and not isinstance(source_cids, (str, bytes, bytearray)):
+        refs.update(str(cid) for cid in source_cids if str(cid))
+    return refs
+
+
+def _advisory_item_count(raw: Mapping[str, Any]) -> int:
+    items = raw.get("items")
+    if isinstance(items, Sequence) and not isinstance(items, (str, bytes, bytearray)):
+        return len(items)
+    return 0
+
+
+def _bounded_unit(value: object) -> float:
+    try:
+        number = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return 0.0
+    if not math.isfinite(number):
+        return 0.0
+    return max(0.0, min(1.0, number))
 
 
 def normalise_query_term(token: str) -> str:
