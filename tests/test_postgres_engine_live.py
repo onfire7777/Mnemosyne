@@ -944,9 +944,13 @@ def test_postgres_mcp_runtime_state_persists_profile_learning_and_command_parame
     assert artifact["adapter_kind"] == "postgres-command-parametric-adapter"
     assert artifact["metrics"]["provider_invoked"] == 1.0
     assert artifact["metrics"]["source_count"] == 2.0
-    assert evaluated["promoted"] is True
+    assert evaluated["promoted"] is False
+    assert evaluated["protected_suite"]["source"] == "synthetic"
+    assert evaluated["protected_suite"]["gating"] is False
     assert rolled_back["rollback_ref"] == f"postgres-provider-rollback-{artifact['id']}"
     assert rolled_back["protected_suite"]["source"] == "synthetic"
+    assert rolled_back["protected_suite"]["gating"] is False
+    assert rolled_back["rollback"]["rollback_verified"] is False
     assert [call["action"] for call in provider_calls] == ["propose", "rollback"]
     assert provider_calls[0]["tenant_id"] == tenant
     assert provider_calls[0]["source_ids"] == [lesson["id"], procedure["id"]]

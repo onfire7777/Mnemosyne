@@ -364,3 +364,42 @@ def test_parametric_facade_rollback_drill_authorization_and_evidence_shape(tmp_p
             role="operator",
             source_trust_tier=5,
         )
+
+
+def test_parametric_facade_treats_synthetic_protected_suite_as_non_gating(tmp_path: Path) -> None:
+    engine = LocalMemoryEngine()
+    learning = LearningSystem(engine)
+    lesson = _active_lesson()
+    procedure = _active_procedure()
+    learning.lessons[lesson.id] = lesson
+    learning.procedures[procedure.id] = procedure
+    tier, _ = _parametric_tier(tmp_path)
+    tools = MemoryTools(engine, learning=learning, parametric=tier)
+
+    proposed = tools.parametric_propose(TENANT, role="operator", source_trust_tier=0)
+    evaluated = tools.parametric_evaluate(
+        proposed["artifact_uri"],
+        role="operator",
+        source_trust_tier=0,
+        protected_case_count=2,
+    )
+    rolled_back = tools.parametric_rollback(
+        proposed["artifact_uri"],
+        reason="synthetic suite must not verify rollback",
+        role="operator",
+        source_trust_tier=0,
+        protected_case_count=2,
+    )
+
+    assert evaluated["promoted"] is False
+    assert evaluated["artifact"]["status"] == "shadow"
+    assert evaluated["reason"] == "active non-synthetic protected regression suite required"
+    assert evaluated["protected_suite"]["source"] == "synthetic"
+    assert evaluated["protected_suite"]["gating"] is False
+    assert evaluated["protected_suite"]["origin_counts"] == {"synthetic": 2}
+    rollback = rolled_back["rollback"]
+    assert rolled_back["protected_suite"]["source"] == "synthetic"
+    assert rolled_back["protected_suite"]["gating"] is False
+    assert rollback["rollback_verified"] is False
+    assert rollback["protected_suite_passed"] is False
+    assert rollback["protected_suite_gating"] is False

@@ -18,6 +18,7 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
+from mnemosyne.media_limits import DEFAULT_MAX_INGEST_BYTES, enforce_byte_limit, validate_byte_limit
 from mnemosyne.models import Hit, parse_dt, utc_now
 from mnemosyne.policy import OperatingPolicy
 from mnemosyne.security import trust_weight
@@ -995,7 +996,14 @@ class CommandMediaEmbeddingProvider:
 
     name = "command-media-embedding"
 
-    def __init__(self, command: str | Sequence[str], *, dims: int = 1024, timeout_seconds: float = 30.0):
+    def __init__(
+        self,
+        command: str | Sequence[str],
+        *,
+        dims: int = 1024,
+        timeout_seconds: float = 30.0,
+        max_media_bytes: int = DEFAULT_MAX_INGEST_BYTES,
+    ):
         self.command = shlex.split(command) if isinstance(command, str) else list(command)
         if not self.command:
             raise ValueError("media embedding command must not be empty")
@@ -1005,6 +1013,7 @@ class CommandMediaEmbeddingProvider:
             raise ValueError("media embedding timeout must be positive")
         self.dims = dims
         self.timeout_seconds = timeout_seconds
+        self.max_media_bytes = validate_byte_limit(max_media_bytes, name="max_media_bytes")
 
     def embed_media(
         self,
@@ -1014,6 +1023,7 @@ class CommandMediaEmbeddingProvider:
         modality: str,
         metadata: dict[str, object] | None = None,
     ) -> list[float]:
+        enforce_byte_limit(payload, limit=self.max_media_bytes, label="media embedding payload")
         with tempfile.NamedTemporaryFile() as tmp:
             tmp.write(payload)
             tmp.flush()

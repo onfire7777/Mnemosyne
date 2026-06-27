@@ -1,6 +1,6 @@
 # Mnemosyne — Roadmap to 100% Blueprint Parity
 
-**Authored:** 2026-06-24 · **Last updated:** 2026-06-27 · **Current baseline:** `main` at `e6a71d8` after G1 reliability-core wiring, G4 shadow workspace/advisory/retrieval-controller gates, production manifest rendering, Rail 6 instruction-sink alias hardening, shadow-policy restoration hardening, G0 source-custody pin override repair, operator handoff hardening, summary-level offline custody instructions, offline custody verification, and G0 resource-cost instrumentation
+**Authored:** 2026-06-24 · **Last updated:** 2026-06-27 · **Current baseline:** `main` after G1 reliability-core wiring, G4 shadow workspace/advisory/retrieval-controller gates, production manifest rendering, Rail 6 instruction-sink alias hardening, shadow-policy restoration hardening, G0 source-custody pin override repair, parametric synthetic-suite hardening, strict calibration-label parsing, shared media-ingest byte caps, operator handoff hardening, summary-level offline custody instructions, offline custody verification, and G0 resource-cost instrumentation
 **Controlling status doc:** `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md` (10 gap rows, all "Partial")
 **Verdict source:** blended completion **~82%** as of 2026-06-26 (up from a long ~70% plateau, broken by the 2026-06-24 Tier A wirings) — this doc explains *why it sat at ~70%*, *what moved it to ~82%*, and *exactly what flips it to 100%*.
 

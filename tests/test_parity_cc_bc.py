@@ -32,6 +32,7 @@ from mnemosyne.belief import (
 from mnemosyne.calibration import (
     CalibrationExample,
     CalibrationSet,
+    calibration_examples_from_rows,
     conformal_prediction_set,
     conformal_should_abstain,
     conformal_threshold,
@@ -122,6 +123,14 @@ def test_calibration_example_from_mapping_validates_and_clamps() -> None:
         CalibrationExample.from_mapping({"confidence": 0.5})
     with pytest.raises(ValueError):
         CalibrationExample.from_mapping({"confidence": 0.5, "correct": True, "prediction_set_size": -1})
+
+
+@pytest.mark.parametrize("bad_correct", ["false", "true", 0, 1, None])
+def test_calibration_example_requires_json_boolean_correct_labels(bad_correct: object) -> None:
+    with pytest.raises(ValueError, match="correct must be a JSON boolean"):
+        CalibrationExample.from_mapping({"confidence": 0.5, "correct": bad_correct})
+    with pytest.raises(ValueError, match="correct must be a JSON boolean"):
+        calibration_examples_from_rows([{"confidence": 0.5, "correct": bad_correct}])
 
 
 def test_tune_calibration_set_accepts_well_separated_examples() -> None:

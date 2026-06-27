@@ -30,6 +30,7 @@ from mnemosyne.cli import (
     load_engine,
 )
 from mnemosyne.engine import LocalMemoryEngine
+from mnemosyne.learning import LearningSystem, Lesson, Procedure
 from mnemosyne.mcp_server import MnemosyneMcpServer, build_http_server, build_sdk_streamable_http_app
 from mnemosyne.models import Evidence, Relation
 from mnemosyne.postgres_engine import PostgresEngine
@@ -40,6 +41,7 @@ from mnemosyne.retrieval import (
     LocalSimilarityReranker,
     RetrievalAdapters,
 )
+from mnemosyne.runtime_state import RuntimeState
 from mnemosyne.security import SessionIdentity, SessionTokenVerifier
 
 
@@ -3613,6 +3615,36 @@ def test_cli_ingests_binary_file_with_c2pa_verifier(tmp_path: Path) -> None:
     assert "asset-bound-provenance" in evidence["capability_tags"]
     assert evidence["metadata"]["derived_text_sources"] == ["description"]
     assert search["hits"][0]["id"] == ingested["cid"]
+
+
+def test_cli_ingest_rejects_oversized_file_before_read(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    asset = tmp_path / "oversized.bin"
+    asset.write_bytes(b"12345")
+
+    result = run_raw_cli(
+        store,
+        "--max-ingest-bytes",
+        "4",
+        "ingest",
+        "--tenant",
+        TENANT,
+        "--user",
+        USER,
+        "--source-type",
+        "camera",
+        "--file",
+        str(asset),
+        "--modality",
+        "binary",
+        "--media-type",
+        "application/octet-stream",
+    )
+    exported = run_cli(store, "export", "--tenant", TENANT)
+
+    assert result.returncode == 1
+    assert "ingest file exceeds byte limit" in result.stderr
+    assert exported["evidence"] == []
 
 
 def test_cli_ingest_c2pa_trust_policy_quarantines_untrusted_signer(tmp_path: Path) -> None:
@@ -8844,6 +8876,26 @@ def test_cli_calibration_tune_fails_closed_on_high_confidence_errors(tmp_path: P
     assert exported["calibrations"] == []
 
 
+def test_cli_calibration_tune_rejects_string_boolean_labels(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    dataset = tmp_path / "bad-calibration-labels.json"
+    dataset.write_text(json.dumps([{"confidence": 0.99, "correct": "false"}]), encoding="utf-8")
+
+    result = run_raw_cli(
+        store,
+        "calibration-tune",
+        "--tenant",
+        TENANT,
+        "--dataset",
+        str(dataset),
+    )
+    exported = run_cli(store, "export", "--tenant", TENANT)
+
+    assert result.returncode == 1
+    assert "correct must be a JSON boolean" in result.stderr
+    assert exported["calibrations"] == []
+
+
 def belief_revision_cases(*, wrong_supersession_expectation: bool = False) -> list[dict]:
     return [
         {
@@ -10388,7 +10440,7 @@ def test_cli_parametric_tier_can_use_command_provider(tmp_path: Path) -> None:
         "--artifact-uri",
         artifact["artifact_uri"],
         "--protected-case-count",
-        "9",
+        "1",
         *PARAMETRIC_AUTH,
     )
     rolled_back = run_cli(
@@ -10428,6 +10480,63 @@ def test_cli_parametric_commands_require_operator_authorization(tmp_path: Path) 
 
     assert result.returncode != 0
     assert "parametric-propose requires --role and --source-trust-tier or --session-token." in result.stderr
+
+
+def test_cli_parametric_synthetic_suite_is_shadow_only_and_unverified(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    runtime_state = RuntimeState.from_store_path(store)
+    assert runtime_state is not None
+    learning = LearningSystem(LocalMemoryEngine(store_path=store))
+    lesson = Lesson(
+        tenant_id=TENANT,
+        lesson_type="corrective",
+        failure_signature="parametric-synthetic-suite",
+        content="Never promote from synthetic protected cases.",
+        status="active",
+    )
+    procedure = Procedure(
+        tenant_id=TENANT,
+        kind="checklist",
+        name="synthetic-suite-guard",
+        body="Require persisted curated protected cases.",
+        signature={"failure_signature": lesson.failure_signature},
+        status="validated",
+    )
+    learning.lessons[lesson.id] = lesson
+    learning.procedures[procedure.id] = procedure
+    runtime_state.save_learning(learning)
+
+    artifact = run_cli(store, "parametric-propose", "--tenant", TENANT, *PARAMETRIC_AUTH)
+    evaluated = run_cli(
+        store,
+        "parametric-evaluate",
+        "--artifact-uri",
+        artifact["artifact_uri"],
+        "--protected-case-count",
+        "1",
+        *PARAMETRIC_AUTH,
+    )
+    rolled_back = run_cli(
+        store,
+        "parametric-rollback",
+        "--artifact-uri",
+        artifact["artifact_uri"],
+        "--reason",
+        "synthetic suite rollback smoke",
+        "--protected-case-count",
+        "1",
+        *PARAMETRIC_AUTH,
+    )
+
+    assert evaluated["promoted"] is False
+    assert evaluated["artifact"]["status"] == "shadow"
+    assert evaluated["protected_suite"]["source"] == "synthetic"
+    assert evaluated["protected_suite"]["gating"] is False
+    assert evaluated["protected_suite"]["origin_counts"] == {"synthetic": 1}
+    assert rolled_back["protected_suite"]["source"] == "synthetic"
+    assert rolled_back["protected_suite"]["gating"] is False
+    assert rolled_back["rollback"]["rollback_verified"] is False
+    assert rolled_back["rollback"]["protected_suite_passed"] is False
 
 
 def test_cli_learning_activation_commands_require_authorization_context(tmp_path: Path) -> None:
@@ -11035,6 +11144,21 @@ def test_cli_profile_graph_learning_and_parametric_flows_persist(tmp_path: Path)
             ]
         ),
         *PARAMETRIC_AUTH,
+    )
+    run_cli(
+        store,
+        "gate-case-add",
+        "--id",
+        "case-parametric-cli",
+        "--signature",
+        "date math deploy",
+        "--query",
+        "lesson off by one day",
+        "--expected-substring",
+        "verify with tools",
+        "--tier",
+        "core",
+        "--protected",
     )
     artifact = run_cli(store, "parametric-propose", "--tenant", TENANT, *PARAMETRIC_AUTH)
     artifact_path = store.with_suffix(store.suffix + ".parametric") / TENANT / f"{artifact['id']}.json"

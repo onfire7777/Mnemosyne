@@ -34,6 +34,7 @@ from mnemosyne.mcp_server import (
 )
 from mnemosyne.consolidation import ConsolidationWorker
 from mnemosyne.engine import LocalMemoryEngine
+from mnemosyne.gate import RegressionCase
 from mnemosyne.mcp_tools import MemoryTools, TOOL_SPEC
 from mnemosyne.models import Assertion, Evidence, Hit, Relation
 from mnemosyne.postgres_engine import PostgresEngine, _bytes_to_cid, _cid_to_bytes, _stable_uuid, _uuid_or_none, _vector_literal
@@ -3113,6 +3114,20 @@ def test_mcp_server_persists_parametric_artifacts_and_rolls_back(tmp_path: Path)
             **PARAMETRIC_AUTH,
         },
     )
+    assert server.runtime_state is not None
+    server.runtime_state.save_gate_cases(
+        [
+            RegressionCase(
+                id="mcp-parametric-case",
+                signature="MCP parametric rollback",
+                query="regression verify tools durable memory",
+                expected_substring="verify with tools",
+                tier="core",
+                protected=True,
+                origin="curated",
+            )
+        ]
+    )
 
     artifact = mcp_call(server, "parametric_propose", {"tenant_id": TENANT, **PARAMETRIC_AUTH})
     artifact_path = store.with_suffix(store.suffix + ".parametric") / TENANT / f"{artifact['id']}.json"
@@ -3206,7 +3221,10 @@ def test_mcp_server_parametric_tier_can_use_command_provider(tmp_path: Path) -> 
     assert rolled_back["rollback_ref"] == f"provider-rollback-{artifact['id']}"
     assert rolled_back["metrics"]["provider_rolled_back"] == 1.0
     assert rolled_back["protected_suite"]["source"] == "synthetic"
+    assert rolled_back["protected_suite"]["gating"] is False
     assert rolled_back["protected_suite"]["protected_case_ids"] == ["parametric-protected-0"]
+    assert rolled_back["rollback"]["rollback_verified"] is False
+    assert rolled_back["rollback"]["protected_suite_passed"] is False
     assert rollback_record["payload"]["provider"]["rollback_ref"] == f"provider-rollback-{artifact['id']}"
     assert rollback_record["payload"]["protected_suite"]["protected_case_ids"] == ["parametric-protected-0"]
     assert [call["action"] for call in calls] == ["propose", "rollback"]
