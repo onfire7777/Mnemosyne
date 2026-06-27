@@ -58,6 +58,10 @@ def test_g0_report_emits_every_spec_metric_and_source_hashes() -> None:
     )
     assert report["baseline"]["pinned_commit"] == baseline_payload["baseline"]["pinned_commit"]
     assert report["artifact_custody"]["source_commit"] != report["baseline"]["pinned_commit"]
+    pinned_override = "f" * 40
+    pinned_report = build_report(REPO_ROOT, baseline_name="baseline-0", pinned_commit=pinned_override)
+    assert pinned_report["baseline"]["pinned_commit"] == pinned_override
+    assert pinned_report["artifact_custody"]["source_commit"] == report["artifact_custody"]["source_commit"]
 
     sources = {source["id"]: source for source in report["sources"]}
     assert sources["slo_v2_definitive"]["present"] is True

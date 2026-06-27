@@ -11,7 +11,7 @@ from mnemosyne.graph import LocalRelationGraphAdapter, benchmark_graph_adapter
 from mnemosyne.lifecycle import FidelityTier, LifecycleState, demotion_decision, sole_support_requires_abstention
 from mnemosyne.mcp_tools import MemoryTools
 from mnemosyne.models import Assertion, Evidence, Relation
-from mnemosyne.security import SecurityPolicy, sanitize_retrieved_text
+from mnemosyne.security import INSTRUCTION_SINKS, SecurityPolicy, sanitize_retrieved_text
 from mnemosyne.self_optimization import (
     CounterfactualVerdict,
     PolicyVariant,
@@ -113,6 +113,34 @@ def test_security_policy_blocks_untrusted_preference_and_policy_writes() -> None
     assert branch_promotion.allowed is False
     assert sanitized["instruction_authority"] == "none"
     assert sanitized["kind"] == "retrieved_memory_data"
+
+
+@pytest.mark.parametrize("target_sink", sorted(INSTRUCTION_SINKS))
+def test_security_policy_blocks_instruction_sink_alias_writes(target_sink: str) -> None:
+    policy = SecurityPolicy()
+
+    agent_write = policy.authorize_write(
+        operation="write_instruction_sink",
+        role="agent",
+        source_trust_tier=0,
+        target_sink=target_sink,
+    )
+    low_trust_operator_write = policy.authorize_write(
+        operation="write_instruction_sink",
+        role="operator",
+        source_trust_tier=5,
+        target_sink=f" {target_sink.upper()} ",
+    )
+    operator_write = policy.authorize_write(
+        operation="write_instruction_sink",
+        role="operator",
+        source_trust_tier=0,
+        target_sink=target_sink,
+    )
+
+    assert agent_write.allowed is False
+    assert low_trust_operator_write.allowed is False
+    assert operator_write.allowed is True
 
 
 def test_memory_tools_fail_closed_for_untrusted_preference_and_forget() -> None:

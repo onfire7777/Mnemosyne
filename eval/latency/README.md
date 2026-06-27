@@ -102,15 +102,14 @@ Reading (honest):
 
 Numbers vary by hardware (CPU vs GPU/MPS) and concurrency; re-run to refresh.
 
-## What would close the gap (priority order)
+## What remains to close the latency gap (priority order)
 
-1. **Local engine embedding seam (the keystone `src` fix).** `LocalMemoryEngine`
-   ignores the HTTP retrieval adapters today: `cli.load_engine` returns
-   `LocalMemoryEngine(store_path=...)` with **no** `adapters=` (only the Postgres
-   branch passes them), and `LocalMemoryEngine.vector_search` / `_mmr` hardwire
-   `hashing_embedding`. Adding an embedding-provider seam lets the engine (a) embed
-   the query in-process and (b) **cache doc embeddings at capture time**, so reads
-   embed only the query — removing the per-doc model cost from the read path.
+1. **Provider latency mitigation.** The local backend now receives the configured
+   retrieval adapters through `cli.load_engine(..., adapters=...)`, and
+   `LocalMemoryEngine.vector_search` embeds through `self.adapters.embedding`. The
+   remaining fast-path gap is provider cost: a synchronous CPU HTTP model
+   round-trip can still dominate P95 unless the deployed provider is low-latency
+   or colocated.
 2. **Embedding cache** (query→vector, and persist doc vectors at capture): repeat /
    near-repeat queries skip the model entirely → cache-hit P95 of single-digit ms.
 3. **In-process + batched model**: co-locate the embedder in the server process (no
@@ -119,8 +118,9 @@ Numbers vary by hardware (CPU vs GPU/MPS) and concurrency; re-run to refresh.
 4. **ANN prefilter, rerank only top-N**: keep the cross-encoder off the hot path so
    model cost scales with candidate count, not corpus size.
 
-These are measurement findings, not edits — see `reconciliation_items` in the task
-output / the bench's report `verdicts` for the precise `src` wiring.
+These are measurement findings, not production-evidence claims. Historical reports
+under `eval/latency/reports/` preserve the pre-seam wording from the run date; use
+this README and the current `bench.py` generator for present-state guidance.
 
 ---
 

@@ -250,6 +250,9 @@ def test_parametric_rails_accept_compliant_proposal() -> None:
         ({}, {"monotonic_trust": False}),  # trust must be monotonic
         ({}, {"trust_tier_delta": -1}),  # trust tier may not widen
         ({}, {"target_sink": "system_prompt"}),  # untrusted->system-prompt forbidden
+        ({}, {"target_sink": "developer"}),  # instruction-sink aliases are forbidden
+        ({}, {"target_sink": " Instruction "}),
+        ({}, {"target_sink": "tool"}),
         ({}, {"untrusted_to_system_prompt": True}),
         ({}, {"eval_source_overlap": True}),  # training data may not overlap eval suite
     ],
@@ -488,6 +491,48 @@ def test_self_model_replay_pairs_roundtrip() -> None:
     assert pairs == [(0.2, 0.18), (-0.1, -0.12)]
     # recording pairs must not perturb bandit policy-outcome scoring
     assert store.outcomes(TENANT) == []
+
+
+def test_shadow_policy_optimizer_restores_existing_policy_after_evaluation() -> None:
+    engine = _replay_engine()
+    engine.policy.top_k = 37
+    engine.policy.abstention_threshold = 0.33
+    engine.policy.activation_weights = {"base_level": 0.4, "semantic": 0.3, "importance": 0.2, "recency": 0.1}
+    original_policy = engine.policy
+    original_snapshot = original_policy.to_dict()
+    optimizer = ShadowPolicyOptimizer(
+        engine,
+        [
+            RegressionCase(
+                id="case-policy-restore",
+                signature="policy retrieval activation confidence",
+                query="immutable rails",
+                expected_substring="immutable rails",
+                protected=True,
+            )
+        ],
+        require_ignition=False,
+    )
+    variant = PolicyVariant(
+        "safe",
+        {"base_level": 0.35, "semantic": 0.35, "importance": 0.20, "recency": 0.10},
+        0.45,
+        8,
+    )
+
+    result = optimizer.evaluate_variant(
+        TENANT,
+        variant,
+        counterfactual_hook=lambda *_args: CounterfactualVerdict(
+            passed=True,
+            predicted_lift=0.0,
+            reason="authorized fixture",
+        ),
+    )
+
+    assert result.promoted is True
+    assert engine.policy is original_policy
+    assert engine.policy.to_dict() == original_snapshot
 
 
 def test_default_cf_hook_fails_closed_until_window_then_gates() -> None:

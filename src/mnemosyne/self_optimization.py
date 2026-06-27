@@ -288,10 +288,15 @@ class ShadowPolicyOptimizer:
             engine.policy.abstention_threshold = variant.abstention_threshold
             engine.policy.top_k = variant.top_k
 
+        original_policy = self.engine.policy
+        original_snapshot = original_policy.to_dict()
         try:
             result = gate.evaluate(tenant_id, candidate, apply)
         finally:
-            self.engine.policy = OperatingPolicy()
+            restored = OperatingPolicy.from_dict(original_snapshot)
+            for key, value in restored.to_dict().items():
+                setattr(original_policy, key, value)
+            self.engine.policy = original_policy
         return result
 
     def propose_variant(self, tenant_id: str, metric: str = "retrieval_quality") -> PolicyVariant:

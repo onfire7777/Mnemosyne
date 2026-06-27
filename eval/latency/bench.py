@@ -33,16 +33,13 @@ What is measured per call, under concurrent load (N clients x M queries):
   * ``total_ms``  — ``embed_ms + engine_ms``: the intended long-lived fast-path
     (embed the query, then retrieve), the number to compare to the §15/§16 budget.
 
-Honesty note (the forcing function). With ``--backend local`` the CLI builds the
-HTTP embedding/reranker adapters but **never passes them to ``LocalMemoryEngine``**
-(`load_engine` returns ``LocalMemoryEngine(store_path=...)`` with no ``adapters=``;
-``LocalMemoryEngine.__init__`` has no embedding seam and hardwires
-``hashing_embedding`` in ``vector_search``/``_mmr``). So in the local engine the
-embed round-trip we measure does NOT currently feed retrieval — it is the cost the
-fast path *would* pay once the engine adapter seam is wired (see RECONCILIATION in
-the report). The bench measures both the real warm embed cost AND the real warm
-engine cost and composes them, so the number is the honest warm-server fast-path
-latency for the wired design, and the report states the precise src change needed.
+Current seam note. With ``--backend local`` the CLI now passes the configured
+retrieval adapters into ``LocalMemoryEngine`` and vector search embeds through
+``self.adapters.embedding``. This bench still reports ``embed_ms`` separately so a
+provider-backed run can distinguish model/provider latency from pure engine
+latency. If ``fast_path_total`` is over budget, the remaining gap is provider
+latency mitigation (cache, colocate, batch, or reduce rerank scope), not a missing
+local-engine adapter seam.
 
 Reuses: the Wave-1 metrics module (percentiles + bootstrap CIs), the Wave-1
 embedding service, the curated retrieval dataset, and the production HTTP adapter.
@@ -614,11 +611,10 @@ def _honest_narrative(r: dict[str, Any]) -> str:
             f"**fast_path_total P95 {total_p95} ms still exceeds the 300-400 ms budget** even warm. "
             f"This is reported honestly: a per-request synchronous model-inference round-trip does not "
             f"fit a 300-400 ms fast-path budget on this hardware. Gap-closers, in priority order:"
-            f"\n  1. **Local engine embedding seam (the keystone src fix).** `LocalMemoryEngine` "
-            f"ignores HTTP adapters today (`load_engine` passes no `adapters=`; `vector_search`/`_mmr` "
-            f"hardwire `hashing_embedding`). Wiring an in-process embedding provider removes the HTTP "
-            f"hop entirely for the local backend and lets the engine cache doc embeddings at capture "
-            f"time so reads embed only the query."
+            f"\n  1. **Provider latency mitigation.** The local backend now receives configured "
+            f"retrieval adapters through `load_engine(..., adapters=...)`, and vector search embeds "
+            f"through `self.adapters.embedding`. The remaining gap is provider cost: use a "
+            f"low-latency or colocated provider so the hot path does not pay a slow HTTP/CPU round-trip."
             f"\n  2. **Embedding cache.** Cache query->vector (and persist doc vectors at capture) so "
             f"repeat/near-repeat queries skip the model entirely — turns the embed P95 into a cache-hit "
             f"P95 of single-digit ms."
