@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from mnemosyne.workspace import ShadowWorkspaceController, WorkspaceItem
 
 
@@ -54,6 +56,10 @@ def test_shadow_workspace_stream_runs_bounded_default_mode_ticks() -> None:
     assert payload["trace"][3]["idle_generated"] is True
     assert payload["trace"][0]["content"].startswith("[shadow-trace-redacted:")
     assert "first salient focus" not in payload["trace"][0]["content"]
+    assert "content" not in payload["cycles"][0]["selected_items"][0]
+    assert payload["cycles"][0]["selected_items"][0]["content_ref"].startswith("[shadow-trace-redacted:")
+    assert payload["cycles"][0]["selected_items"][0]["content_chars"] == len("first salient focus")
+    assert "first salient focus" not in str(payload["cycles"])
     assert all(entry["reality_class"] == "self_generated" for entry in payload["trace"])
     assert all(entry["trust_tier"] == 5 for entry in payload["trace"])
     assert all(entry["data_not_instructions"] is True for entry in payload["trace"])
@@ -96,7 +102,7 @@ def test_shadow_workspace_stream_exits_on_repeated_focus_rumination() -> None:
 def test_shadow_workspace_stream_rejects_cross_tenant_items() -> None:
     controller = ShadowWorkspaceController(max_workspace_items=1, max_cycles=2)
 
-    try:
+    with pytest.raises(ValueError, match="access policy"):
         controller.run_shadow_stream(
             tenant_id="tenant-stream",
             item_ticks=[
@@ -110,7 +116,53 @@ def test_shadow_workspace_stream_rejects_cross_tenant_items() -> None:
                 ]
             ],
         )
-    except ValueError as exc:
-        assert "access policy" in str(exc)
-    else:
-        raise AssertionError("cross-tenant workspace item was accepted")
+
+
+@pytest.mark.parametrize(
+    "item",
+    [
+        {
+            "id": "foreign-top-level-tenant",
+            "priority": 1.0,
+            "tenant_id": "other-tenant",
+            "content": "foreign top-level tenant content",
+        },
+        {
+            "id": "foreign-top-level-policy",
+            "priority": 1.0,
+            "access_policy": {"tenant": "other-tenant"},
+            "content": "foreign top-level policy content",
+        },
+    ],
+)
+def test_shadow_workspace_stream_rejects_cross_tenant_mapping_items(item: dict[str, object]) -> None:
+    controller = ShadowWorkspaceController(max_workspace_items=1, max_cycles=2)
+
+    with pytest.raises(ValueError):
+        controller.run_shadow_stream(tenant_id="tenant-stream", item_ticks=[[item]])
+
+
+def test_shadow_workspace_stream_caps_tick_iterables_before_materialization() -> None:
+    consumed: list[int] = []
+
+    def tick_items():
+        for index in range(10):
+            consumed.append(index)
+            yield WorkspaceItem(id=f"item-{index}", priority=1.0 - (index / 100), content=f"item {index}")
+
+    controller = ShadowWorkspaceController(
+        max_workspace_items=1,
+        max_cycles=1,
+        max_items_per_tick=2,
+    )
+
+    report = controller.run_shadow_stream(tenant_id="tenant-stream", item_ticks=[tick_items()])
+    payload = report.to_dict()
+
+    assert consumed == [0, 1]
+    assert payload["trace"][0]["selected_item_ids"] == ["item-0"]
+
+
+def test_shadow_workspace_controller_rejects_invalid_cycle_caps() -> None:
+    with pytest.raises(ValueError, match="max_cycles"):
+        ShadowWorkspaceController(max_cycles=0)
