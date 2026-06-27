@@ -20,6 +20,7 @@ from mnemosyne.self_optimization import (
     ShadowPolicyOptimizer,
     within_invariant_rails,
 )
+from mnemosyne.workspace import ShadowWorkspaceController, WorkspaceItem
 
 
 TENANT = "tenant-b"
@@ -348,6 +349,59 @@ def test_consolidation_worker_promotes_through_gate() -> None:
 
     assert result.promoted is True
     assert engine.retrieve("recurring workflow", TENANT).hits
+
+
+def test_consolidation_worker_records_workspace_advisory_without_promoting_it() -> None:
+    engine = LocalMemoryEngine()
+    evidence_cid = engine.append_evidence(
+        Evidence(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="episode",
+            content="The advisory workflow should remain gated by explicit prediction error.",
+            trust_tier=0,
+            access_policy={"tenant": TENANT},
+        )
+    )
+    workspace_report = ShadowWorkspaceController(max_workspace_items=1, max_cycles=2).run_shadow_stream(
+        tenant_id=TENANT,
+        item_ticks=[
+            [
+                WorkspaceItem(
+                    id="workspace-advisory-focus",
+                    priority=1.0,
+                    content="private advisory text must not enter the consolidation report",
+                    metadata={"cid": evidence_cid, "tenant_id": TENANT},
+                )
+            ]
+        ],
+    )
+    worker = ConsolidationWorker(engine, [])
+
+    result = worker.run_queue_payload(
+        {
+            "tenant_id": TENANT,
+            "branch": "main",
+            "source_evidence_cids": [evidence_cid],
+            "prediction_error": {"score": 0.0},
+            "workspace_advisory": workspace_report.to_consolidation_advisory(),
+        }
+    )
+    payload = result.to_dict()
+    passes = {item["name"]: item for item in payload["pass_results"]}
+
+    advisory = passes["workspace_advisory"]
+    assert advisory["status"] == "complete"
+    assert advisory["details"]["accepted"] is True
+    assert advisory["details"]["candidate_cids"] == [evidence_cid]
+    assert advisory["details"]["applied_to_prediction_gate"] is False
+    assert advisory["details"]["applied_to_replay_priority"] is False
+    assert advisory["details"]["applied_to_mutation"] is False
+    assert passes["prediction_error_gate"]["details"]["score"] == 0.0
+    assert passes["prediction_error_gate"]["details"]["gate"] == "low_prediction_error_metadata_only"
+    assert "low_prediction_error_metadata_only" in payload["skipped"]
+    assert "private advisory text" not in str(payload)
 
 
 def test_shadow_policy_optimizer_accepts_only_variants_inside_rails() -> None:

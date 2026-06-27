@@ -51,6 +51,24 @@ def _positive_int(value: object, *, default: int, minimum: int = 1) -> int:
     return max(minimum, parsed)
 
 
+def _bounded_unit(value: object, *, default: float = 0.0) -> float:
+    try:
+        parsed = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        parsed = default
+    if parsed != parsed:
+        parsed = default
+    return round(max(0.0, min(1.0, parsed)), 6)
+
+
+def _non_negative_int(value: object, *, default: int = 0) -> int:
+    try:
+        parsed = int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        parsed = default
+    return max(0, parsed)
+
+
 @dataclass(slots=True)
 class ConsolidationJob:
     tenant_id: str
@@ -314,7 +332,15 @@ class ConsolidationWorker:
         if prediction_gate["gate"] == "low_prediction_error_metadata_only":
             allowed = {"replayer", "forgetter", "embedder", "user_model_updater"}
             passes_run = [name for name in passes_run if name in allowed]
-        pass_results: list[PassResult] = [
+        pass_results: list[PassResult] = []
+        skipped: list[str] = list(missing)
+        workspace_advisory = self._workspace_advisory_report(payload)
+        if workspace_advisory is not None:
+            pass_results.append(workspace_advisory)
+            if workspace_advisory.status == "rejected":
+                skipped.append("workspace_advisory_contract_invalid")
+
+        pass_results.append(
             PassResult(
                 "replayer",
                 "complete",
@@ -335,10 +361,9 @@ class ConsolidationWorker:
                     ],
                 },
             )
-        ]
+        )
         candidate_results: list[dict[str, Any]] = []
         candidates: list[dict[str, Any]] = []
-        skipped: list[str] = list(missing)
 
         if prediction_gate["gate"] == "low_prediction_error_metadata_only":
             skipped.append("low_prediction_error_metadata_only")
@@ -619,6 +644,54 @@ class ConsolidationWorker:
             "gate": "promote_to_consolidation" if score >= threshold else "low_prediction_error_metadata_only",
             "source": "g1_prediction_error",
         }
+
+    def _workspace_advisory_report(self, payload: dict[str, Any]) -> PassResult | None:
+        raw = payload.get("workspace_consolidation_advisory", payload.get("workspace_advisory"))
+        if raw is None:
+            return None
+        if not isinstance(raw, dict):
+            return PassResult(
+                "workspace_advisory",
+                "rejected",
+                {
+                    "reason": "workspace_advisory_not_mapping",
+                    "applied_to_prediction_gate": False,
+                    "applied_to_replay_priority": False,
+                    "applied_to_mutation": False,
+                },
+            )
+        contract = {
+            "shadow_only": raw.get("shadow_only") is True,
+            "critical_path_false": raw.get("critical_path") is False,
+            "production_mutation_false": raw.get("production_mutation") is False,
+            "advisory_only": raw.get("advisory_only") is True,
+        }
+        prediction_error = raw.get("prediction_error") if isinstance(raw.get("prediction_error"), dict) else {}
+        replay_scores = raw.get("replay_scores") if isinstance(raw.get("replay_scores"), dict) else {}
+        candidate_cids = sorted(str(cid) for cid in replay_scores.keys() if cid)[:16]
+        status = "complete" if all(contract.values()) else "rejected"
+        details = {
+            "source": str(raw.get("source") or "workspace_advisory"),
+            "version": str(raw.get("version") or ""),
+            "accepted": status == "complete",
+            "contract": contract,
+            "shadow_only": raw.get("shadow_only") is True,
+            "critical_path": raw.get("critical_path") is True,
+            "production_mutation": raw.get("production_mutation") is True,
+            "promotion_gate_required": raw.get("promotion_gate_required") is True,
+            "prediction_error": {
+                "score": _bounded_unit(prediction_error.get("score")),
+                "source": str(prediction_error.get("source") or "workspace_advisory"),
+            },
+            "candidate_cids": candidate_cids,
+            "item_count": _non_negative_int(raw.get("item_count"), default=len(candidate_cids)),
+            "applied_to_prediction_gate": False,
+            "applied_to_replay_priority": False,
+            "applied_to_mutation": False,
+        }
+        if status == "rejected":
+            details["reason"] = "workspace_advisory_contract_invalid"
+        return PassResult("workspace_advisory", status, details)
 
     @staticmethod
     def _replay_factor(item: Evidence, payload: dict[str, Any], name: str) -> float:

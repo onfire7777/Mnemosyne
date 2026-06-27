@@ -17,6 +17,8 @@ from .dreamer import DreamReport, SandboxedDreamer
 from .models import Evidence
 from .providers import SpecialistModuleRegistry, default_registry
 
+WORKSPACE_CONSOLIDATION_ADVISORY_VERSION = "workspace-consolidation-advisory.v1"
+
 
 @dataclass(frozen=True, slots=True)
 class WorkspaceItem:
@@ -122,6 +124,15 @@ class WorkspaceStreamReport:
         data["cycles"] = [cycle.to_dict() for cycle in self.cycles]
         data["trace"] = [entry.to_dict() for entry in self.trace]
         return data
+
+    def to_consolidation_advisory(self, *, max_items: int = 8) -> dict[str, Any]:
+        """Return bounded shadow-only consolidation advice.
+
+        The advisory is evidence for a future promotion gate. It intentionally
+        does not authorize production mutation or live consolidation steering.
+        """
+
+        return workspace_consolidation_advisory(self, max_items=max_items)
 
 
 @dataclass(slots=True)
@@ -540,3 +551,104 @@ def _dreamer_invocation(spec: Any, report: DreamReport) -> SpecialistInvocation:
             "candidate_trust_tiers": sorted({candidate.trust_tier for candidate in report.candidates}),
         },
     )
+
+
+def workspace_consolidation_advisory(
+    report: WorkspaceStreamReport,
+    *,
+    max_items: int = 8,
+) -> dict[str, Any]:
+    """Convert a shadow workspace stream into bounded consolidation advice."""
+
+    limit = max(0, int(max_items))
+    trace_by_tick = {entry.tick_index: entry for entry in report.trace}
+    items: list[dict[str, Any]] = []
+    seen_cids: set[str] = set()
+    for cycle in report.cycles:
+        tick_index = int(cycle.cycle.get("cycle_index") or len(items) + 1)
+        trace_entry = trace_by_tick.get(tick_index)
+        novelty = _clamp01(trace_entry.novelty_score if trace_entry else 0.0)
+        useful_state = bool(trace_entry.useful_state) if trace_entry else False
+        for selected in cycle.selected_items:
+            if len(items) >= limit:
+                break
+            cid = _advisory_cid(selected)
+            if not cid or cid in seen_cids:
+                continue
+            seen_cids.add(cid)
+            priority = _clamp01(selected.get("priority", 0.0))
+            surprise = _clamp01((0.50 + 0.50 * novelty) if useful_state else (0.25 * novelty))
+            scores = {
+                "importance": round(priority, 6),
+                "novelty": round(novelty, 6),
+                "surprise": round(surprise, 6),
+                "reward": 1.0,
+            }
+            items.append(
+                {
+                    "cid": cid,
+                    "workspace_item_id": str(selected.get("id") or ""),
+                    "source": str(selected.get("source") or "workspace"),
+                    "tick_index": tick_index,
+                    "scores": scores,
+                }
+            )
+    useful_count = sum(1 for entry in report.trace if entry.useful_state)
+    trace_count = len(report.trace)
+    useful_transition_rate = _clamp01(useful_count / trace_count) if trace_count else 0.0
+    max_surprise = max((row["scores"]["surprise"] for row in items), default=0.0)
+    prediction_error_score = round(_clamp01(max(useful_transition_rate, max_surprise)), 6)
+    replay_scores = {row["cid"]: dict(row["scores"]) for row in items}
+    return {
+        "version": WORKSPACE_CONSOLIDATION_ADVISORY_VERSION,
+        "source": "shadow_workspace_controller",
+        "tenant_id": report.tenant_id,
+        "shadow_only": True,
+        "critical_path": False,
+        "production_mutation": False,
+        "advisory_only": True,
+        "promotion_gate_required": True,
+        "applied_to_prediction_gate": False,
+        "applied_to_replay_priority": False,
+        "applied_to_mutation": False,
+        "prediction_error": {
+            "score": prediction_error_score,
+            "source": "workspace_shadow_useful_transition",
+            "useful_transition_rate": round(useful_transition_rate, 6),
+            "rumination_score": float(report.rumination_score),
+        },
+        "replay_scores": replay_scores,
+        "items": items,
+        "item_count": len(items),
+        "max_items": limit,
+        "stopped_reason": report.stopped_reason,
+        "cycle_consistency_score": report.cycle_consistency.get("score"),
+    }
+
+
+def _advisory_cid(row: Mapping[str, Any]) -> str:
+    for key in ("cid", "evidence_cid", "source_cid", "source_evidence_cid"):
+        value = row.get(key)
+        if value:
+            return str(value)
+    metadata = row.get("metadata") if isinstance(row.get("metadata"), Mapping) else {}
+    for key in ("cid", "evidence_cid", "source_cid", "source_evidence_cid"):
+        value = metadata.get(key)
+        if value:
+            return str(value)
+    source_cids = metadata.get("source_evidence_cids")
+    if isinstance(source_cids, Sequence) and not isinstance(source_cids, (str, bytes)):
+        for value in source_cids:
+            if value:
+                return str(value)
+    return ""
+
+
+def _clamp01(value: object) -> float:
+    try:
+        parsed = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return 0.0
+    if parsed != parsed:
+        return 0.0
+    return max(0.0, min(1.0, parsed))

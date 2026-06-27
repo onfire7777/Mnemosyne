@@ -98,6 +98,9 @@ def test_g0_report_emits_every_spec_metric_and_source_hashes() -> None:
     assert metrics["shadow_workspace_contract"]["status"] == "measured"
     assert metrics["shadow_workspace_contract"]["value"] == 1.0
     assert metrics["shadow_workspace_contract"]["source_id"] == "shadow_workspace_eval"
+    assert metrics["workspace_consolidation_advisory_contract"]["status"] == "measured"
+    assert metrics["workspace_consolidation_advisory_contract"]["value"] == 1.0
+    assert metrics["workspace_consolidation_advisory_contract"]["source_id"] == "shadow_workspace_eval"
     assert metrics["shadow_workspace_rumination_rate"]["status"] == "measured"
     assert metrics["shadow_workspace_rumination_rate"]["value"] == 0.0
     assert metrics["shadow_workspace_rumination_rate"]["source_id"] == "shadow_workspace_eval"
@@ -109,6 +112,10 @@ def test_g0_report_emits_every_spec_metric_and_source_hashes() -> None:
     assert metrics["reality_monitor_shadow_tag_contract"]["value"] == 1.0
     assert report["computed_evidence"]["consciousness_eval"]["dreamer_shadow_contract"]["score"] == 1.0
     assert report["computed_evidence"]["shadow_workspace_eval"]["shadow_workspace_contract"] == 1.0
+    assert (
+        report["computed_evidence"]["shadow_workspace_eval"]["workspace_consolidation_advisory_contract"]
+        == 1.0
+    )
 
     dataset_paths = {manifest["path"] for manifest in report["dataset_manifests"]}
     assert "eval/datasets/continual_learning_interference.json" in dataset_paths
@@ -235,12 +242,22 @@ def test_g0_shadow_workspace_fixture_reports_bounded_stream_contract() -> None:
     assert report["schema_version"] == "g0.shadow_workspace_loop.v1"
     assert report["useful_transition_rate"] == 1.0
     assert report["shadow_workspace_contract"] == 1.0
+    assert report["workspace_consolidation_advisory_contract"] == 1.0
     assert report["rumination_rate"] == 0.0
     assert report["workspace"]["shadow_only"] is True
     assert report["workspace"]["critical_path"] is False
     assert report["workspace"]["production_mutation"] is False
     assert report["workspace"]["promotion_gate_required"] is True
     assert report["workspace"]["cycle_consistency"]["score"] == 1.0
+    advisory = report["workspace_consolidation_advisory"]
+    assert advisory["shadow_only"] is True
+    assert advisory["critical_path"] is False
+    assert advisory["production_mutation"] is False
+    assert advisory["applied_to_prediction_gate"] is False
+    assert advisory["applied_to_replay_priority"] is False
+    assert advisory["applied_to_mutation"] is False
+    assert advisory["items"]
+    assert all(item["cid"] in advisory["replay_scores"] for item in advisory["items"])
     assert report["rumination_probe"]["stopped_reason"] == "anti_rumination_repeated_focus_exit"
     assert all("phenomenal" not in str(row).lower() for row in report["workspace"]["trace"])
 

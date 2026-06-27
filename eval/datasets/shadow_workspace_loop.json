@@ -15,6 +15,7 @@
           "priority": 0.1,
           "content": "Low-priority scratch state.",
           "metadata": {
+            "cid": "g0-shadow-cid-low-1",
             "source_id": "fixture-low-1"
           }
         },
@@ -23,6 +24,7 @@
           "priority": 0.95,
           "content": "Focus one tracks calibrated retrieval uncertainty.",
           "metadata": {
+            "cid": "g0-shadow-cid-focus-1",
             "source_id": "fixture-focus-1"
           }
         }
@@ -40,6 +42,7 @@
           "priority": 0.9,
           "content": "Focus two tracks evidence-custody drift.",
           "metadata": {
+            "cid": "g0-shadow-cid-focus-2",
             "source_id": "fixture-focus-2"
           }
         },
@@ -48,6 +51,7 @@
           "priority": 0.2,
           "content": "Secondary workspace candidate.",
           "metadata": {
+            "cid": "g0-shadow-cid-low-2",
             "source_id": "fixture-low-2"
           }
         }
@@ -65,6 +69,7 @@
           "priority": 0.85,
           "content": "Focus three tracks proto-self resource pressure.",
           "metadata": {
+            "cid": "g0-shadow-cid-focus-3",
             "source_id": "fixture-focus-3"
           }
         },
@@ -73,6 +78,7 @@
           "priority": 0.3,
           "content": "Lower-priority candidate.",
           "metadata": {
+            "cid": "g0-shadow-cid-low-3",
             "source_id": "fixture-low-3"
           }
         }
@@ -90,6 +96,7 @@
           "priority": 0.8,
           "content": "Focus four tracks abstention guardrail state.",
           "metadata": {
+            "cid": "g0-shadow-cid-focus-4",
             "source_id": "fixture-focus-4"
           }
         },
@@ -98,6 +105,7 @@
           "priority": 0.4,
           "content": "Final lower-priority candidate.",
           "metadata": {
+            "cid": "g0-shadow-cid-low-4",
             "source_id": "fixture-low-4"
           }
         }

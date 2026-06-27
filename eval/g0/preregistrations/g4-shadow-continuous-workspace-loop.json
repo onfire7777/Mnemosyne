@@ -5,6 +5,7 @@
   "minimum_delta": 0.25,
   "guardrail_metrics": [
     "shadow_workspace_contract",
+    "workspace_consolidation_advisory_contract",
     "shadow_workspace_rumination_rate",
     "workspace_loop_liveness",
     "workspace_stream_coherence",
@@ -23,6 +24,7 @@
   ],
   "guardrail_tolerances": {
     "shadow_workspace_contract": 0.0,
+    "workspace_consolidation_advisory_contract": 0.0,
     "shadow_workspace_rumination_rate": 0.0,
     "workspace_loop_liveness": 0.0,
     "workspace_stream_coherence": 0.0,
