@@ -9,7 +9,7 @@ memories surface. Salience is deliberately excluded from authority.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any, Iterable, Mapping
 
 
 STANDING_FN_VERSION = "standing.continuous.v1"
@@ -226,6 +226,121 @@ def standing_abstention_report(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def standing_observability_record(
+    *,
+    target_id: str,
+    kind: str,
+    tenant_id: str,
+    branch: str,
+    source_evidence_cids: Iterable[Any],
+    score: Standing,
+    surface: str,
+) -> dict[str, Any]:
+    """Return a replayable trace for one derived Standing value.
+
+    This is intentionally metadata, not authority. The record gives operators a
+    stable place to find the derived value, the provenance used to recompute it,
+    and the fact that replay is bitemporal/projection-based.
+    """
+
+    source_cids = _sorted_texts(source_evidence_cids)
+    return {
+        "schema_version": "standing.observability.v1",
+        "standing_fn_version": score.standing_fn_version,
+        "surface": str(surface or "unknown"),
+        "target": {
+            "id": str(target_id or ""),
+            "kind": str(kind or "unknown"),
+            "tenant_id": str(tenant_id or ""),
+            "branch": str(branch or "main"),
+        },
+        "values": {
+            "groundedness": score.groundedness,
+            "salience": score.salience,
+            "authority": score.authority,
+        },
+        "source_evidence_cids": source_cids,
+        "provenance_available": bool(source_cids),
+        "derived": True,
+        "writes_evidence": False,
+        "replayable": True,
+        "bitemporal_replay": {
+            "supported": True,
+            "projection_recomputes_from_ledger": True,
+        },
+        "h12_observability": True,
+    }
+
+
+def standing_erasure_cascade_report(
+    *,
+    source_cid: str,
+    erasure_mode: str,
+    affected_cids: Iterable[Any],
+    erased_derived_cids: Iterable[Any],
+    retained_metadata_by_cid: Mapping[str, Mapping[str, Any]] | None = None,
+    metadata_by_cid: Mapping[str, Mapping[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Return the H8/H12 audit projection for an erasure cascade.
+
+    Standing is recomputed on read, so erasure does not mutate a stored Standing
+    column. The cascade report records exactly which derived units were erased
+    or source-trimmed, and marks self-derivations as demoted/erased so the audit
+    log is replayable.
+    """
+
+    retained = {str(cid): dict(metadata) for cid, metadata in (retained_metadata_by_cid or {}).items()}
+    metadata = {str(cid): dict(value) for cid, value in (metadata_by_cid or {}).items()}
+    erased = _sorted_texts(erased_derived_cids)
+    actions: list[dict[str, Any]] = []
+    for cid in erased:
+        before = metadata.get(cid, {})
+        self_derivation = _metadata_is_self_derivation(before)
+        actions.append(
+            {
+                "cid": cid,
+                "action": "erased_self_derivation" if self_derivation else "erased_derived",
+                "self_derivation": self_derivation,
+                "source_evidence_cids_before": _metadata_source_cids(before),
+                "source_evidence_cids_after": [],
+                "standing_recomputed_on_read": True,
+            }
+        )
+    for cid, after in sorted(retained.items()):
+        before = metadata.get(cid, {})
+        self_derivation = _metadata_is_self_derivation(before) or _metadata_is_self_derivation(after)
+        actions.append(
+            {
+                "cid": cid,
+                "action": "trimmed_self_derivation" if self_derivation else "trimmed_derived",
+                "self_derivation": self_derivation,
+                "source_evidence_cids_before": _metadata_source_cids(before),
+                "source_evidence_cids_after": _metadata_source_cids(after),
+                "standing_recomputed_on_read": True,
+            }
+        )
+    return {
+        "schema_version": "standing.erasure-cascade.v1",
+        "standing_fn_version": STANDING_FN_VERSION,
+        "source_cid": str(source_cid or ""),
+        "erasure_mode": str(erasure_mode or ""),
+        "affected_cids": _sorted_texts(affected_cids),
+        "erased_derived_cids": erased,
+        "retained_derived_cids": sorted(retained),
+        "self_derivation_actions": [item for item in actions if item["self_derivation"]],
+        "derived_actions": actions,
+        "standing_recomputed_on_read": True,
+        "cascade_bounded_by_single_forget": True,
+        "h8_cascade_to_self_derivations": True,
+        "h12_observable_replayable_reversible": str(erasure_mode) != "hard_delete_legal",
+        "reversibility": {
+            "ledger_rebuild_supported": str(erasure_mode) != "hard_delete_legal",
+            "tombstone_modes_reversible": str(erasure_mode) != "hard_delete_legal",
+            "hard_delete_legal_is_intentionally_irreversible": str(erasure_mode) == "hard_delete_legal",
+        },
+    }
+
+
 def _normalise_reality_class(value: Any) -> str:
     raw = str(value or "").strip().lower().replace("-", "_")
     if raw in {item.replace("-", "_") for item in _GROUNDED_CLASSES}:
@@ -233,6 +348,42 @@ def _normalise_reality_class(value: Any) -> str:
     if raw in {item.replace("-", "_") for item in _UNGROUNDED_CLASSES}:
         return raw
     return "unknown"
+
+
+def _metadata_source_cids(metadata: Mapping[str, Any]) -> list[str]:
+    sources: set[str] = set()
+    single = metadata.get("source_evidence_cid")
+    if single:
+        sources.add(str(single))
+    values = metadata.get("source_evidence_cids")
+    if isinstance(values, list | tuple | set):
+        sources.update(str(item) for item in values if str(item))
+    summary = metadata.get("summary")
+    if isinstance(summary, Mapping):
+        summary_values = summary.get("source_evidence_cids")
+        if isinstance(summary_values, list | tuple | set):
+            sources.update(str(item) for item in summary_values if str(item))
+    return sorted(sources)
+
+
+def _metadata_is_self_derivation(metadata: Mapping[str, Any]) -> bool:
+    reality_class = _normalise_reality_class(metadata.get("reality_class"))
+    if reality_class in {"self_generated", "simulated"}:
+        return True
+    if isinstance(metadata.get("self_generation_lifecycle"), Mapping):
+        return True
+    source_type = str(metadata.get("source_type") or metadata.get("source") or "").lower()
+    if any(marker in source_type for marker in ("summary", "trace", "analysis", "consolidation", "reflection")):
+        return True
+    summary = metadata.get("summary")
+    if isinstance(summary, Mapping):
+        summary_source = str(summary.get("source") or summary.get("kind") or "").lower()
+        return any(marker in summary_source for marker in ("summary", "consolidation", "reflection"))
+    return False
+
+
+def _sorted_texts(values: Iterable[Any]) -> list[str]:
+    return sorted({str(item) for item in values if str(item)})
 
 
 def _bounded_unit(value: Any, *, default: float) -> float:

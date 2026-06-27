@@ -56,7 +56,12 @@ from mnemosyne.security import (
     sanitize_retrieved_text,
     trust_weight,
 )
-from mnemosyne.standing import standing, standing_abstention_report
+from mnemosyne.standing import (
+    standing,
+    standing_abstention_report,
+    standing_erasure_cascade_report,
+    standing_observability_record,
+)
 from mnemosyne.text import approx_tokens, cosine, lexical_score, tokenize
 from mnemosyne.workspace import self_generation_budget_report
 
@@ -1673,10 +1678,22 @@ class LocalMemoryEngine:
             reality_class = self._normalise_reality_class(hit.metadata.get("reality_class")) or "unknown"
             score = standing(self._standing_signals_for_hit(hit, reality_class))
             multiplier = 0.75 + 0.20 * score.groundedness + 0.05 * score.salience
+            source_cids = self._hit_source_evidence_cids(hit)
+            if hit.kind == "evidence" and hit.id:
+                source_cids = sorted(set(source_cids + [hit.id]))
             metadata = {
                 **hit.metadata,
                 "standing": score.to_dict(),
                 "standing_rank_multiplier": round(multiplier, 6),
+                "standing_observability": standing_observability_record(
+                    target_id=hit.id,
+                    kind=hit.kind,
+                    tenant_id=hit.tenant_id,
+                    branch=hit.branch,
+                    source_evidence_cids=source_cids,
+                    score=score,
+                    surface="retrieval.rank",
+                ),
             }
             weighted.append(
                 Hit(
@@ -1899,6 +1916,11 @@ class LocalMemoryEngine:
             else:
                 derived_cids, retained_derived = self._derived_evidence_forget_plan(tenant_id, branch, cid)
             affected_cids = {cid, *derived_cids}
+            cascade_metadata: dict[str, dict[str, Any]] = {}
+            for affected_cid in affected_cids | set(retained_derived):
+                affected = self.evidence.get(self._evidence_key(tenant_id, branch, affected_cid))
+                if affected:
+                    cascade_metadata[affected_cid] = {**dict(affected.metadata), "source_type": affected.source_type}
             if mode is ErasureMode.HARD_DELETE_LEGAL and requested_by != "legal":
                 # §31 RAIL-2 / FR-8 (min_corroboration_for_delete): an operator-initiated
                 # hard delete must not strand a projection. Refuse when removing this source
@@ -1942,6 +1964,13 @@ class LocalMemoryEngine:
                 retained = self.evidence.get(self._evidence_key(tenant_id, branch, retained_cid))
                 if retained:
                     retained.metadata = metadata
+            retained_cascade_metadata = {
+                retained_cid: {
+                    **dict(metadata),
+                    "source_type": cascade_metadata.get(retained_cid, {}).get("source_type", ""),
+                }
+                for retained_cid, metadata in retained_derived.items()
+            }
             propagated: dict[str, Any] = {
                 "retracted_assertions": [],
                 "trimmed_assertions": [],
@@ -1955,6 +1984,14 @@ class LocalMemoryEngine:
                 "retained_derived_evidence": sorted(retained_derived),
                 "trimmed_derived_evidence": sorted(retained_derived),
             }
+            propagated["standing_cascade"] = standing_erasure_cascade_report(
+                source_cid=cid,
+                erasure_mode=mode.value,
+                affected_cids=affected_cids | set(retained_derived),
+                erased_derived_cids=derived_cids,
+                retained_metadata_by_cid=retained_cascade_metadata,
+                metadata_by_cid=cascade_metadata,
+            )
             for assertion in self.assertions.values():
                 if assertion.tenant_id != tenant_id or assertion.branch != branch:
                     continue

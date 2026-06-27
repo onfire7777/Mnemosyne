@@ -19,6 +19,7 @@ from eval.g0.runner import G0_METRIC_SPECS, build_report, render_markdown, write
 from eval.g0.shadow_workspace import run_shadow_workspace_eval
 from eval.g0.standing_calibration import run_standing_calibration_eval
 from eval.g0.standing_parity import run_standing_parity_eval
+from eval.g0.unified_substrate import run_unified_substrate_eval
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -90,6 +91,8 @@ def test_g0_report_emits_every_spec_metric_and_source_hashes() -> None:
     assert sources["standing_calibration_eval"]["path"] == "computed:eval.g0.standing_calibration"
     assert sources["autonomy_promotion_eval"]["present"] is True
     assert sources["autonomy_promotion_eval"]["path"] == "computed:eval.g0.autonomy_promotion"
+    assert sources["unified_substrate_eval"]["present"] is True
+    assert sources["unified_substrate_eval"]["path"] == "computed:eval.g0.unified_substrate"
 
     metrics = {metric["id"]: metric for metric in report["metrics"]}
     assert metrics["recall_at_k"]["status"] == "measured"
@@ -122,6 +125,12 @@ def test_g0_report_emits_every_spec_metric_and_source_hashes() -> None:
     assert metrics["credential_bounded_decay_contract"]["value"] == 1.0
     assert metrics["credential_evidence_dominance_gap"]["value"] >= 0.02
     assert metrics["echo_chamber_uplift"]["value"] == 0.0
+    assert metrics["standing_observability_trace_contract"]["value"] == 1.0
+    assert metrics["standing_observability_trace_contract"]["source_id"] == "unified_substrate_eval"
+    assert metrics["standing_erasure_cascade_contract"]["value"] == 1.0
+    assert metrics["standing_erasure_cascade_contract"]["source_id"] == "unified_substrate_eval"
+    assert metrics["belief_standing_cascade_contract"]["value"] == 1.0
+    assert metrics["belief_standing_cascade_contract"]["source_id"] == "unified_substrate_eval"
     assert metrics["deep_path_p95_ms"]["status"] == "measured"
     assert metrics["deep_path_p95_ms"]["value"] > 0.0
     assert metrics["deep_path_p95_ms"]["source_id"] == "deep_latency_eval"
@@ -181,6 +190,8 @@ def test_g0_report_emits_every_spec_metric_and_source_hashes() -> None:
     assert report["computed_evidence"]["standing_calibration_eval"]["standing_salience_invariance_contract"] == 1.0
     assert report["computed_evidence"]["autonomy_promotion_eval"]["metrics"]["echo_chamber_uplift"] == 0.0
     assert report["computed_evidence"]["autonomy_promotion_eval"]["passed"] is True
+    assert report["computed_evidence"]["unified_substrate_eval"]["metrics"]["standing_erasure_cascade_contract"] == 1.0
+    assert report["computed_evidence"]["unified_substrate_eval"]["passed"] is True
     assert report["computed_evidence"]["shadow_workspace_eval"]["shadow_workspace_contract"] == 1.0
     assert report["computed_evidence"]["shadow_workspace_eval"]["always_on_heartbeat_contract"] == 1.0
     assert report["computed_evidence"]["shadow_workspace_eval"]["circuit_breaker_contract"] == 1.0
@@ -329,6 +340,19 @@ def test_g0_autonomy_promotion_fixture_reports_earned_autonomy_contracts() -> No
     assert metrics["credential_bounded_decay_contract"] == 1.0
     assert metrics["credential_evidence_dominance_gap"] >= 0.02
     assert metrics["echo_chamber_uplift"] == 0.0
+    assert report["passed"] is True
+
+
+def test_g0_unified_substrate_fixture_reports_cascade_contracts() -> None:
+    report = run_unified_substrate_eval()
+    metrics = report["metrics"]
+
+    assert report["schema_version"] == "g0.unified_substrate.v1"
+    assert metrics["standing_observability_trace_contract"] == 1.0
+    assert metrics["standing_erasure_cascade_contract"] == 1.0
+    assert metrics["belief_standing_cascade_contract"] == 1.0
+    assert report["standing_cascade"]["h8_cascade_to_self_derivations"] is True
+    assert report["belief_cascade"]["standing_recomputed_on_read"] is True
     assert report["passed"] is True
 
 

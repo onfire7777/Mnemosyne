@@ -32,6 +32,7 @@ from eval.g0.resource_usage import run_resource_usage_eval
 from eval.g0.shadow_workspace import run_shadow_workspace_eval
 from eval.g0.standing_calibration import run_standing_calibration_eval
 from eval.g0.standing_parity import run_standing_parity_eval
+from eval.g0.unified_substrate import run_unified_substrate_eval
 
 G0_METRIC_SPECS: tuple[dict[str, Any], ...] = (
     {
@@ -404,6 +405,33 @@ G0_METRIC_SPECS: tuple[dict[str, Any], ...] = (
         "blueprint_metric": "G5 H11 adversarial echo-chamber/sleeper corpus",
     },
     {
+        "id": "standing_observability_trace_contract",
+        "label": "Standing observability trace contract",
+        "class": "guardrail",
+        "direction": "increase",
+        "target": 1.0,
+        "target_op": ">=",
+        "blueprint_metric": "G5 H12 Standing observability and replay trace",
+    },
+    {
+        "id": "standing_erasure_cascade_contract",
+        "label": "Standing erasure cascade contract",
+        "class": "target",
+        "direction": "increase",
+        "target": 1.0,
+        "target_op": ">=",
+        "blueprint_metric": "G5 H8 erasure cascade to Standing and self-derivations",
+    },
+    {
+        "id": "belief_standing_cascade_contract",
+        "label": "belief Standing cascade contract",
+        "class": "guardrail",
+        "direction": "increase",
+        "target": 1.0,
+        "target_op": ">=",
+        "blueprint_metric": "G5 H8/H12 belief cascade replayability",
+    },
+    {
         "id": "workspace_consolidation_advisory_contract",
         "label": "workspace consolidation advisory contract",
         "class": "guardrail",
@@ -537,6 +565,13 @@ def build_report(
         "autonomy_promotion_eval",
         "computed:eval.g0.autonomy_promotion",
         autonomy_promotion_report,
+    )
+    unified_substrate_report = run_unified_substrate_eval()
+    sources["unified_substrate_eval"] = _computed_source(
+        repo_root,
+        "unified_substrate_eval",
+        "computed:eval.g0.unified_substrate",
+        unified_substrate_report,
     )
     deep_latency_report = run_deep_latency_eval()
     sources["deep_latency_eval"] = _computed_source(
@@ -789,6 +824,9 @@ def _build_metric(spec: dict[str, Any], sources: dict[str, Source]) -> dict[str,
         "credential_bounded_decay_contract": _metric_autonomy_promotion,
         "credential_evidence_dominance_gap": _metric_autonomy_promotion,
         "echo_chamber_uplift": _metric_autonomy_promotion,
+        "standing_observability_trace_contract": _metric_unified_substrate,
+        "standing_erasure_cascade_contract": _metric_unified_substrate,
+        "belief_standing_cascade_contract": _metric_unified_substrate,
         "poison_block_rate": _metric_poison_block_rate,
         "fast_path_p95_ms": _metric_fast_path_p95,
         "deep_path_p95_ms": _metric_deep_path_p95,
@@ -1038,6 +1076,38 @@ def _metric_autonomy_promotion(
         spec,
         value,
         "autonomy_promotion_eval",
+        f"/metrics/{metric_id}",
+        note=notes.get(metric_id),
+    )
+
+
+def _metric_unified_substrate(
+    spec: dict[str, Any],
+    sources: dict[str, Source],
+) -> dict[str, Any]:
+    metric_id = spec["id"]
+    value = _source_data(sources, "unified_substrate_eval", "metrics", metric_id)
+    notes = {
+        "standing_observability_trace_contract": (
+            "Measured by the G0 unified-substrate fixture. Passing requires "
+            "retrieval Standing metadata to include replayable H12 provenance "
+            "and derived-value trace fields."
+        ),
+        "standing_erasure_cascade_contract": (
+            "Measured by the G0 unified-substrate fixture. Passing requires a "
+            "source erasure to cascade to a self-derived memory and emit the "
+            "Standing erasure-cascade audit report."
+        ),
+        "belief_standing_cascade_contract": (
+            "Measured by the G0 unified-substrate fixture. Passing requires "
+            "belief dependency invalidation to record Standing recompute/replay "
+            "metadata on retracted dependents."
+        ),
+    }
+    return _measured(
+        spec,
+        value,
+        "unified_substrate_eval",
         f"/metrics/{metric_id}",
         note=notes.get(metric_id),
     )

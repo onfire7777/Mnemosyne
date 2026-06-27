@@ -1,0 +1,9 @@
+{
+  "change_id": "g5-unified-substrate-cascade",
+  "target_metric": "standing_erasure_cascade_contract",
+  "minimum_delta": 0.0,
+  "direction": "increase",
+  "enforce_target": true,
+  "requires_controller_telemetry": false,
+  "notes": "Preregister the pre-owner-checkpoint Phase 7 P5 slice. This gate proves H8/H12 Standing observability, erasure cascade to self-derivations, and belief-cascade replay metadata before operational toggle retirement. It is not the final no-toggle gate; shadow_only/service.enabled removal still requires the owner checkpoint."
+}

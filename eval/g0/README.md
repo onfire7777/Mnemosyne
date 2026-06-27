@@ -36,6 +36,9 @@ This writes:
   P4 earned-autonomy contract: external-only credentials, holdout validation,
   provenance-assigned domains, bounded/decay-ready uplift, evidence-dominance
   gap preservation, and zero echo-chamber/sleeper uplift
+- an embedded computed `unified_substrate_eval` fixture recording the Phase 7
+  P5 pre-checkpoint contracts: replayable Standing observability, erasure
+  cascade to self-derivations, and belief-cascade Standing recompute metadata
 - a `gate_decisions` custody section summarizing the latest decision-log entry
   for every preregistration in `eval/g0/preregistrations/`
 

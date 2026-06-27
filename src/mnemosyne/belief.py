@@ -11,6 +11,7 @@ from typing import Any
 
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.models import Assertion, BeliefRevisionReport, Contradiction, Justification, parse_dt, utc_now
+from mnemosyne.standing import STANDING_FN_VERSION
 
 # AGM theory-change operation for each belief-core classification.
 # ADD/UPDATE add a belief consistent with the current set (expansion);
@@ -200,12 +201,41 @@ class BeliefRevisionCore:
                 if assertion.tenant_id == tenant_id and assertion.id == current and assertion.status != "retracted":
                     assertion.status = "retracted"
                     assertion.calibration["invalidated_reason"] = reason
+                    assertion.calibration["standing_cascade"] = {
+                        "schema_version": "standing.belief-cascade.v1",
+                        "standing_fn_version": STANDING_FN_VERSION,
+                        "dependency_root_assertion_id": assertion_id,
+                        "action": "assertion_retracted",
+                        "reason": reason,
+                        "standing_recomputed_on_read": True,
+                        "bitemporal_replay": True,
+                        "h8_cascade_to_dependents": True,
+                        "h12_observable_replayable_reversible": True,
+                    }
                     invalidated.append(current)
                     self.engine.assertions[key] = assertion
             for dependent in dependencies.get(current, []):
                 queue.append(dependent)
         if invalidated:
-            self.engine._audit(tenant_id, "belief-core", "cascade_invalidate", assertion_id, {"invalidated": invalidated, "reason": reason})
+            self.engine._audit(
+                tenant_id,
+                "belief-core",
+                "cascade_invalidate",
+                assertion_id,
+                {
+                    "invalidated": invalidated,
+                    "reason": reason,
+                    "standing_cascade": {
+                        "schema_version": "standing.belief-cascade.v1",
+                        "standing_fn_version": STANDING_FN_VERSION,
+                        "dependency_root_assertion_id": assertion_id,
+                        "retracted_assertions": invalidated,
+                        "standing_recomputed_on_read": True,
+                        "h8_cascade_to_dependents": True,
+                        "h12_observable_replayable_reversible": True,
+                    },
+                },
+            )
             self.engine._persist()
         return invalidated
 
