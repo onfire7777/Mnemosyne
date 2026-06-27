@@ -129,6 +129,12 @@ EXPECTED_BUNDLE_FINGERPRINT="$("$PYTHON" -c 'import json, pathlib, sys; print(js
   --expected-bundle-fingerprint "$EXPECTED_BUNDLE_FINGERPRINT"
 ```
 
+The completed production bundle must retain `summary.json`, `preflight.json`,
+`redaction-scan.json`, `bundle-manifest.json`, `source-soak-manifest.json`,
+`operator-soak-manifest.json`, and `input-artifacts/` custody. Those artifacts
+are the offline handoff surface for `production-evidence-verify`; they do not
+replace operator capture against deployed infrastructure.
+
 `--check-environment` writes no files and prints no values. It verifies required
 `MNEMOSYNE_PROD_*` key names, the external production input directory, the
 manifest-referenced relative input artifacts in that directory, and the external

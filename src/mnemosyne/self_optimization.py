@@ -247,11 +247,13 @@ class ShadowPolicyOptimizer:
         cases: list[RegressionCase],
         self_model: SelfModelStore | None = None,
         bandit: ContextualBanditLearner | None = None,
+        require_ignition: bool = True,
     ):
         self.engine = engine
         self.cases = cases
         self.self_model = self_model or SelfModelStore()
         self.bandit = bandit or ContextualBanditLearner(self.self_model)
+        self.require_ignition = require_ignition
 
     def evaluate_variant(
         self,
@@ -276,6 +278,7 @@ class ShadowPolicyOptimizer:
             self.engine,
             self.cases,
             counterfactual_hook=counterfactual_hook or default_counterfactual_hook(self.self_model),
+            require_ignition=self.require_ignition,
         )
 
         def apply(engine: LocalMemoryEngine, branch: str) -> None:

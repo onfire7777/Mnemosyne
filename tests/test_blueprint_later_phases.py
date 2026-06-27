@@ -601,6 +601,7 @@ def test_shadow_policy_optimizer_accepts_only_variants_inside_rails() -> None:
                 protected=True,
             )
         ],
+        require_ignition=False,
     )
     valid = PolicyVariant(
         id="valid",

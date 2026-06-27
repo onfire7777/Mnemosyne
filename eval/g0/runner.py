@@ -363,7 +363,8 @@ def build_report(
     measured = sum(1 for metric in metrics if metric["status"] == "measured")
     missing = len(metrics) - measured
     intentionally_missing = _intentionally_missing_metrics(metrics)
-    commit = pinned_commit or _git(repo_root, "rev-parse", "HEAD")
+    source_commit = pinned_commit or _git(repo_root, "rev-parse", "HEAD")
+    baseline_commit = pinned_commit or _baseline_pinned_commit(repo_root, baseline_name) or source_commit
     tag_target = _git(repo_root, "rev-list", "-n", "1", baseline_name, check=False)
     dataset_manifests = [_dataset_manifest(repo_root, rel) for rel in DATASET_PATHS]
     gate_decisions = _gate_decision_summary(repo_root, metrics)
@@ -379,7 +380,7 @@ def build_report(
         ],
         "baseline": {
             "name": baseline_name,
-            "pinned_commit": commit,
+            "pinned_commit": baseline_commit,
             "tag_exists": bool(tag_target),
             "tag_target": tag_target or None,
             "seeds": DEFAULT_SEEDS,
@@ -412,7 +413,7 @@ def build_report(
         },
         "gate_decisions": gate_decisions,
         "artifact_custody": {
-            "source_commit": commit,
+            "source_commit": source_commit,
             "snapshot_note": (
                 "Committed G0 reports are source-tree custody snapshots. The "
                 "commit that contains a report cannot be embedded in that report "
@@ -423,6 +424,18 @@ def build_report(
     }
     report["headline_slos"] = _headline_slos(report)
     return report
+
+
+def _baseline_pinned_commit(repo_root: Path, baseline_name: str) -> str | None:
+    baseline_path = repo_root / "eval" / "g0" / "baselines" / f"{baseline_name}.json"
+    if not baseline_path.exists():
+        return None
+    try:
+        payload = json.loads(baseline_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    pinned = payload.get("baseline", {}).get("pinned_commit")
+    return pinned if isinstance(pinned, str) and pinned else None
 
 
 def write_report(report: dict[str, Any], out_dir: Path, *, write_baseline: bool = False) -> dict[str, Path]:
@@ -488,6 +501,20 @@ def render_markdown(report: dict[str, Any]) -> str:
         )
         for metric_id in report["coverage"]["intentionally_missing_metric_ids"]:
             lines.append(f"- `{metric_id}`")
+    consciousness = report.get("computed_evidence", {}).get("consciousness_eval")
+    if isinstance(consciousness, dict):
+        lines.extend(
+            [
+                "",
+                "## Functional Consciousness Scope",
+                "",
+                f"- Measurement scope: `{consciousness.get('measurement_scope')}`",
+                f"- Phenomenal claim: `{consciousness.get('phenomenal_claim')}`",
+                f"- Welfare review flag: `{consciousness.get('welfare_review_flag')}`",
+                f"- Welfare review source: `{consciousness.get('welfare_review_source')}`",
+                "- This is a human-review trigger for functional indicator scores, not a welfare conclusion.",
+            ]
+        )
     lines.extend(
         [
             "",

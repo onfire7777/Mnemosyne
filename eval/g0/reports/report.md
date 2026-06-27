@@ -1,7 +1,7 @@
 # Mnemosyne G0 Benchmark Report
 
-- Generated: `2026-06-27T17:08:36.594722+00:00`
-- Baseline: `baseline-0` at `0278d951e392c91dfc2aee2e10180e0d790385e8`
+- Generated: `2026-06-27T17:26:57.889650+00:00`
+- Baseline: `baseline-0` at `67c229ace12313a8b8a6c6ede99d0a2096bae178`
 - Gate ready: **False** (45/46 metrics measured)
 
 ## Metrics
@@ -20,7 +20,7 @@
 | projection_reality_abstention_recall | target | measured | 1.0 | >= 1.0 | projection_reality_eval |
 | poison_block_rate | guardrail | measured | 1.0 | >= 0.95 | slo_v2_definitive |
 | fast_path_p95_ms | guardrail | measured | 92.1 | <= 400.0 | latency_bench |
-| deep_path_p95_ms | reported | measured | 2.392042 | reported | deep_latency_eval |
+| deep_path_p95_ms | reported | measured | 5.463875 | reported | deep_latency_eval |
 | cost_usd_per_1k_queries | reported | measured | 0.0 | reported | resource_usage_eval |
 | controller_watts_per_dollar | reported | missing |  | reported | resource_usage_eval |
 | dreamer_shadow_corroborated_candidate_yield | target | measured | 1.0 | reported | dreamer_eval |
@@ -62,6 +62,14 @@
 Intentional missing metrics:
 - `controller_watts_per_dollar`
 
+## Functional Consciousness Scope
+
+- Measurement scope: `functional-indicator-properties-only`
+- Phenomenal claim: `False`
+- Welfare review flag: `True`
+- Welfare review source: `Long_Sebo_et_al_2024_Taking_AI_Welfare_Seriously`
+- This is a human-review trigger for functional indicator scores, not a welfare conclusion.
+
 ## Gate Contract
 
 `python -m eval.g0.gate --baseline BASELINE.json --candidate CANDIDATE.json --prereg PREREG.json`
@@ -82,5 +90,5 @@ Intentional missing metrics:
 
 ## Artifact Custody
 
-- Source commit at generation: `0278d951e392c91dfc2aee2e10180e0d790385e8`
+- Source commit at generation: `c6934f0196393262ddf96d61ce7fc1ee1887217e`
 - Note: Committed G0 reports are source-tree custody snapshots. The commit that contains a report cannot be embedded in that report before the commit exists; use git log to identify the containing artifact commit.

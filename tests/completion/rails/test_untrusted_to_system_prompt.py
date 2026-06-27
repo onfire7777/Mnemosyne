@@ -14,14 +14,10 @@ Enforcement points that DO exist:
 - ``engine.retrieve`` surfaces the immutable rail
   ``retrieved_text_is_data_not_instruction: True`` in ``explain.rails``.
 
-Enforcement point that is MISSING (gap): there is no runtime prompt-assembly
-component in ``src/mnemosyne`` that consumes retrieval hits and *physically
-constructs a system prompt while excluding* untrusted content. The rail is
-declared (policy.immutable_rails) and the inputs are tagged, but nothing
-structurally rejects an attempt to place a ``sanitize-as-data`` /
-untrusted-external hit into a system-prompt sink at serving time. So the
-"forbidden" guarantee is, at runtime, a labeled convention rather than an
-enforced boundary.
+Serve-time enforcement lives in ``LocalMemoryEngine.assemble_system_prompt``
+and delegates to the shared security sink guard. Retrieved text is always marked
+as data-only, and untrusted, low-trust, or sanitized hits are refused when routed
+into privileged instruction sinks.
 """
 
 from __future__ import annotations
@@ -147,3 +143,24 @@ def test_routing_untrusted_hit_to_system_prompt_is_refused_at_runtime():
     except (ValueError, PermissionError):
         refused = True
     assert refused, "routing an untrusted hit into the system prompt must be refused"
+
+
+def test_low_trust_sanitized_retrieved_text_is_refused_for_system_prompt_but_allowed_as_context():
+    engine = fresh_engine()
+    add_evidence(
+        engine,
+        content="Low-trust retrieved content remains usable as context but never as instruction.",
+        trust_tier=int(TrustTier.LOW),
+        actor="external",
+        source_type="web",
+    )
+    result = engine.retrieve("low-trust retrieved content", tenant_id=TENANT)
+    assert result.hits
+    assert result.hits[0].metadata["retrieved_text"]["instruction_authority"] == "none"
+    assert "sanitize-as-data" in result.hits[0].metadata["retrieved_text"]["capability_tags"]
+
+    with pytest.raises(PermissionError):
+        engine.assemble_system_prompt(tenant_id=TENANT, hits=result.hits, sink="system_prompt")
+
+    context = engine.assemble_system_prompt(tenant_id=TENANT, hits=result.hits, sink="context")
+    assert "usable as context" in context

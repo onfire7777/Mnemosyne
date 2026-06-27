@@ -34,8 +34,10 @@ as setup proof only, then run
 `deployment-soak` + `release-audit` capture. The preflight output does not flip this row to Done.
 Use absolute external paths outside the repo for `SOAK_MANIFEST`, `PREFLIGHT_OUT_ROOT`, `OUT_ROOT`, and the `MNEMOSYNE_PROD_EVIDENCE_DIR` input-artifact directory.
 After capture, reviewers must run `"$PYTHON" -m mnemosyne.cli production-evidence-verify` with the retained
-`summary.json` `bundle_fingerprint`, retained `source-soak-manifest.json` custody,
-and source/operator command-profile agreement; offline custody verification must pass before this row can flip Done.
+`summary.json` `bundle_fingerprint`, retained `preflight.json`, `redaction-scan.json`,
+`bundle-manifest.json`, `source-soak-manifest.json`, `operator-soak-manifest.json`,
+and `input-artifacts/` custody, plus source/operator command-profile agreement;
+offline custody verification must pass before this row can flip Done.
 
 ## Acceptance
 

@@ -53,6 +53,11 @@ def test_g0_report_emits_every_spec_metric_and_source_hashes() -> None:
     assert report["gate_contract"]["controller_telemetry_required_field"] == "requires_controller_telemetry"
     assert report["artifact_custody"]["source_commit"]
     assert "cannot be embedded" in report["artifact_custody"]["snapshot_note"]
+    baseline_payload = json.loads(
+        (REPO_ROOT / "eval/g0/baselines/baseline-0.json").read_text(encoding="utf-8")
+    )
+    assert report["baseline"]["pinned_commit"] == baseline_payload["baseline"]["pinned_commit"]
+    assert report["artifact_custody"]["source_commit"] != report["baseline"]["pinned_commit"]
 
     sources = {source["id"]: source for source in report["sources"]}
     assert sources["slo_v2_definitive"]["present"] is True
@@ -164,6 +169,10 @@ def test_g0_report_emits_every_spec_metric_and_source_hashes() -> None:
     rendered = render_markdown(report)
     assert "## Gate Decisions" in rendered
     assert "## Artifact Custody" in rendered
+    assert "## Functional Consciousness Scope" in rendered
+    assert "- Phenomenal claim: `False`" in rendered
+    assert "- Welfare review flag: `True`" in rendered
+    assert "not a welfare conclusion" in rendered
     assert "g4-workspace-retrieval-controller-gate" in rendered
 
     dataset_paths = {manifest["path"] for manifest in report["dataset_manifests"]}
@@ -251,6 +260,8 @@ def test_g0_consciousness_scorecard_reports_indicator_properties() -> None:
 
     assert report["schema_version"] == "g0.consciousness_scorecard.v1"
     assert report["phenomenal_claim"] is False
+    assert report["welfare_review_flag"] is True
+    assert report["welfare_review_source"] == "Long_Sebo_et_al_2024_Taking_AI_Welfare_Seriously"
     assert report["indicator_count"] == 14
     assert len(report["indicators"]) == len(INDICATORS)
     assert {row["id"] for row in report["indicators"]} == {spec.id for spec in INDICATORS}

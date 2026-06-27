@@ -117,6 +117,7 @@ def test_policy_canary_promotion_fails_closed_until_replay_is_proven() -> None:
                 protected=True,
             )
         ],
+        require_ignition=False,
     )
     variant = PolicyVariant(
         id="safe",
@@ -147,6 +148,7 @@ def test_policy_canary_promotion_can_use_explicit_authorized_counterfactual_hook
                 protected=True,
             )
         ],
+        require_ignition=False,
     )
     variant = PolicyVariant(
         id="safe",
