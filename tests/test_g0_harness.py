@@ -411,6 +411,49 @@ def test_ablation_gate_passes_preregistered_target_with_stable_guardrails() -> N
     assert all(result["passed"] for result in decision.guardrail_results)
 
 
+def test_ablation_gate_rejects_duplicate_metric_ids() -> None:
+    baseline = _report(
+        [
+            _metric("recall_at_k", 0.80, cls="target", direction="increase"),
+            _metric("recall_at_k", 0.81, cls="target", direction="increase"),
+        ]
+    )
+    candidate = _report(
+        [_metric("recall_at_k", 0.84, cls="target", direction="increase")]
+    )
+
+    with pytest.raises(ValueError, match="baseline contains duplicate metric id 'recall_at_k'"):
+        evaluate_ablation(
+            baseline,
+            candidate,
+            {
+                "change_id": "duplicate-metric-test",
+                "target_metric": "recall_at_k",
+                "minimum_delta": 0.01,
+            },
+        )
+
+
+def test_ablation_gate_rejects_missing_metric_ids() -> None:
+    baseline = _report(
+        [_metric("recall_at_k", 0.80, cls="target", direction="increase")]
+    )
+    candidate = _report(
+        [{"class": "target", "direction": "increase", "status": "measured", "value": 0.84}]
+    )
+
+    with pytest.raises(ValueError, match=r"candidate metrics\[0\] has missing id"):
+        evaluate_ablation(
+            baseline,
+            candidate,
+            {
+                "change_id": "missing-metric-id-test",
+                "target_metric": "recall_at_k",
+                "minimum_delta": 0.01,
+            },
+        )
+
+
 def test_ablation_gate_fails_guardrail_regression_and_missing_metrics() -> None:
     baseline = _report(
         [

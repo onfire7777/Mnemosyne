@@ -9,7 +9,10 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Any, Callable
 
+import pytest
+
 from mnemosyne.cli import PRODUCTION_RELEASE_REQUIRED_COMMANDS
+from mnemosyne.evidence_redaction import scan_evidence_paths, scan_evidence_tree
 
 
 REPO = Path(__file__).resolve().parents[1]
@@ -42,6 +45,50 @@ def _minimal_production_manifest(
     if mutate is not None:
         mutate(manifest)
     path.write_text(json.dumps(manifest), encoding="utf-8")
+
+
+def test_redaction_scan_rejects_symlinked_tree_root(tmp_path: Path) -> None:
+    external = tmp_path / "external"
+    external.mkdir()
+    (external / "operator-note.txt").write_text("non-secret operator note\n", encoding="utf-8")
+    linked_root = tmp_path / "linked-root"
+    try:
+        linked_root.symlink_to(external, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"symlink setup unavailable: {exc}")
+
+    scan = scan_evidence_paths(
+        [linked_root],
+        scope="preflight",
+        reject_symlinks=True,
+    )
+
+    assert scan["ok"] is False
+    assert scan["findings"] == []
+    assert scan["scanned_files"] == []
+    assert scan["skipped_files"] == [
+        {"path": str(linked_root), "reason": "symlink not allowed"}
+    ]
+
+
+def test_redaction_tree_scan_rejects_symlinked_output_root(tmp_path: Path) -> None:
+    external = tmp_path / "external-output-root"
+    external.mkdir()
+    (external / "retained-artifact.txt").write_text("retained artifact\n", encoding="utf-8")
+    out_root = tmp_path / "linked-output-root"
+    try:
+        out_root.symlink_to(external, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"symlink setup unavailable: {exc}")
+
+    scan = scan_evidence_tree(out_root)
+
+    assert scan["ok"] is False
+    assert scan["findings"] == []
+    assert scan["scanned_files"] == []
+    assert scan["skipped_files"] == [
+        {"path": str(out_root), "reason": "symlink not allowed"}
+    ]
 
 
 def test_capture_production_evidence_preflight_only_stops_before_soak(tmp_path: Path) -> None:
@@ -1808,6 +1855,117 @@ exec "$REAL_PYTHON" "$@"
     assert redaction_scan["ok"] is False
     assert redaction_scan["findings"][0]["kind"] == "jwt"
     assert not (out_root / "summary.json").exists()
+
+
+def test_capture_production_evidence_fails_if_generated_bundle_contains_symlink(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "production-soak.json"
+    out_root = tmp_path / "capture"
+    fake_python = tmp_path / "fake-python"
+    outside = tmp_path / "outside-generated-artifact.txt"
+    outside.write_text("outside generated artifact\n", encoding="utf-8")
+    probe = tmp_path / "symlink-probe"
+    try:
+        probe.symlink_to(outside)
+        probe.unlink()
+    except OSError as exc:
+        pytest.skip(f"symlink setup unavailable: {exc}")
+    _minimal_production_manifest(manifest)
+    fake_python.write_text(
+        f"""#!/usr/bin/env bash
+set -euo pipefail
+REAL_PYTHON={json.dumps(sys.executable)}
+if [ "${{1:-}}" = "-" ]; then
+  exec "$REAL_PYTHON" "$@"
+fi
+if [ "${{1:-}}" = "-m" ] && [ "${{2:-}}" = "mnemosyne.cli" ]; then
+  shift 2
+  mode=""
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --store)
+        shift 2
+        ;;
+      deployment-soak)
+        mode="soak"
+        shift
+        break
+        ;;
+      release-audit)
+        mode="audit"
+        shift
+        break
+        ;;
+      *)
+        shift
+        ;;
+    esac
+  done
+  if [ "$mode" = "soak" ]; then
+    evidence_dir=""
+    soak_manifest=""
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --soak-manifest)
+          soak_manifest="$2"
+          shift 2
+          ;;
+        --evidence-dir)
+          evidence_dir="$2"
+          shift 2
+          ;;
+        *)
+          shift
+          ;;
+      esac
+    done
+    mkdir -p "$evidence_dir"
+    printf '%s\n' "$soak_manifest" > "$evidence_dir/soak-manifest-path.txt"
+    cat > "$evidence_dir/manifest.json" <<'JSON'
+{{"ok": true, "validation_scope": {{"production_validated": true, "target_environment": "production", "operator_asserted": true}}, "checks": []}}
+JSON
+    ln -s {json.dumps(str(outside))} "$evidence_dir/escaped-generated-artifact.txt"
+    printf '%s\\n' '{{"ok": true}}'
+    exit 0
+  fi
+  if [ "$mode" = "audit" ]; then
+    printf '%s\\n' '{{"ok": true, "fingerprint": "fake-fingerprint", "findings": []}}'
+    exit 0
+  fi
+fi
+exec "$REAL_PYTHON" "$@"
+""",
+        encoding="utf-8",
+    )
+    fake_python.chmod(0o755)
+
+    proc = subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            str(manifest),
+            str(out_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        env={**os.environ, "MNEMOSYNE_PYTHON": str(fake_python)},
+    )
+
+    redaction_scan = json.loads((out_root / "redaction-scan.json").read_text(encoding="utf-8"))
+    assert proc.returncode == 65
+    assert "production evidence bundle contains unscanned files" in proc.stderr
+    assert "escaped-generated-artifact.txt" in proc.stderr
+    assert redaction_scan["ok"] is False
+    assert redaction_scan["findings"] == []
+    skipped_symlink = next(
+        skipped
+        for skipped in redaction_scan["skipped_files"]
+        if skipped["path"].endswith("escaped-generated-artifact.txt")
+    )
+    assert skipped_symlink["reason"] == "symlink not allowed"
+    assert not (out_root / "summary.json").exists()
+    assert not (out_root / "bundle-manifest.json").exists()
 
 
 def test_capture_production_evidence_fails_if_generated_bundle_contains_unscanned_file(

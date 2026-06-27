@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import stat
 from datetime import UTC, datetime
 
 import pytest
@@ -82,6 +84,52 @@ def test_local_engine_loads_export_json_branch_shape(tmp_path) -> None:
     assert loaded.get_evidence(TENANT, cid) is not None
     assert loaded.get_evidence(TENANT, cid, branch="candidate") is not None
     assert any(item["name"] == "main" and item["tenant_id"] == TENANT for item in loaded.export_all()["branches"])
+
+
+def test_local_engine_persistent_store_is_private(tmp_path) -> None:
+    previous_umask = os.umask(0o022)
+    try:
+        store = tmp_path / "state" / "mnemosyne.json"
+        engine = LocalMemoryEngine(store)
+        engine.append_evidence(
+            Evidence(
+                tenant_id=TENANT,
+                user_id=USER,
+                actor="user",
+                source_type="chat",
+                content="Persistent local memory must not be world-readable.",
+                trust_tier=0,
+                access_policy={"tenant": TENANT},
+            )
+        )
+    finally:
+        os.umask(previous_umask)
+
+    assert stat.S_IMODE(store.parent.stat().st_mode) == 0o700
+    assert stat.S_IMODE(store.stat().st_mode) == 0o600
+
+
+def test_local_engine_preserves_existing_store_parent_permissions(tmp_path) -> None:
+    parent = tmp_path / "shared-state"
+    parent.mkdir()
+    parent.chmod(0o755)
+    store = parent / "mnemosyne.json"
+
+    engine = LocalMemoryEngine(store)
+    engine.append_evidence(
+        Evidence(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="chat",
+            content="Existing store parent permissions are operator-managed.",
+            trust_tier=0,
+            access_policy={"tenant": TENANT},
+        )
+    )
+
+    assert stat.S_IMODE(parent.stat().st_mode) == 0o755
+    assert stat.S_IMODE(store.stat().st_mode) == 0o600
 
 
 def test_local_engine_uses_configured_retrieval_adapters() -> None:
