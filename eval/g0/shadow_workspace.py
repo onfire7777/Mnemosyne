@@ -12,6 +12,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from mnemosyne.consolidation import ConsolidationWorker
+from mnemosyne.engine import LocalMemoryEngine
+from mnemosyne.models import Evidence
 from mnemosyne.workspace import ShadowWorkspaceController, WorkspaceItem
 
 
@@ -46,11 +49,14 @@ def run_shadow_workspace_eval(*, repo_root: Path | None = None) -> dict[str, Any
     useful_checks = _useful_transition_checks(dataset.get("cycles", []), payload)
     contract_checks = _contract_checks(payload, dataset.get("contract_expected", {}))
     advisory_checks = _advisory_checks(advisory, dataset)
+    advisory_promotion_probe = _workspace_advisory_promotion_probe(tenant)
+    advisory_promotion_checks = advisory_promotion_probe["checks"]
     rumination_payload = _run_rumination_probe(controller, tenant, dataset.get("rumination_probe", {}))
     rumination_checks = _rumination_checks(rumination_payload, dataset.get("rumination_probe", {}))
     all_contract_checks = {
         **contract_checks,
         **{f"advisory_{key}": value for key, value in advisory_checks.items()},
+        **{f"advisory_promotion_{key}": value for key, value in advisory_promotion_checks.items()},
         **{f"cycle_{key}": value for key, value in useful_checks.items()},
         **{f"rumination_{key}": value for key, value in rumination_checks.items()},
     }
@@ -82,6 +88,9 @@ def run_shadow_workspace_eval(*, repo_root: Path | None = None) -> dict[str, Any
         "workspace_consolidation_advisory_contract": 1.0
         if all(_flatten_bool_checks(advisory_checks))
         else 0.0,
+        "workspace_advisory_promotion_gate_contract": 1.0
+        if all(_flatten_bool_checks(advisory_promotion_checks))
+        else 0.0,
         "checks": all_contract_checks,
         "workspace": {
             "stopped_reason": payload["stopped_reason"],
@@ -95,6 +104,7 @@ def run_shadow_workspace_eval(*, repo_root: Path | None = None) -> dict[str, Any
             "trace": payload["trace"],
         },
         "workspace_consolidation_advisory": advisory,
+        "workspace_advisory_promotion_probe": advisory_promotion_probe,
         "rumination_probe": rumination_payload,
     }
 
@@ -188,6 +198,158 @@ def _advisory_checks(advisory: dict[str, Any], dataset: dict[str, Any]) -> dict[
         "cid_backed_items": bool(item_cids) and all(cid in replay_scores for cid in item_cids),
         "bounded_items": len(items) <= int(advisory.get("max_items") or 0),
         "raw_content_absent": all(text and text not in str(advisory) for text in raw_content),
+    }
+
+
+def _workspace_advisory_promotion_probe(tenant: str) -> dict[str, Any]:
+    engine = LocalMemoryEngine()
+    cold_cid = engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id="g0-shadow-workspace",
+            actor="user",
+            source_type="g0-fixture",
+            content="G0 cold workflow is archival.",
+            trust_tier=0,
+            access_policy={"tenant": tenant},
+        )
+    )
+    hot_cid = engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id="g0-shadow-workspace",
+            actor="user",
+            source_type="g0-fixture",
+            content="G0 advisory catalyst is validated.",
+            trust_tier=0,
+            access_policy={"tenant": tenant},
+        )
+    )
+    advisory = _promotion_probe_advisory(tenant=tenant, cid=hot_cid, prediction_score=0.91)
+    common_payload = {
+        "tenant_id": tenant,
+        "branch": "main",
+        "source_evidence_cids": [cold_cid, hot_cid],
+        "prediction_error": {"score": 0.0},
+        "replay_scores": {
+            cold_cid: {"importance": 0.1, "novelty": 0.1, "surprise": 0.1, "reward": 0.1},
+            hot_cid: {"importance": 0.1, "novelty": 0.1, "surprise": 0.1, "reward": 0.1},
+        },
+        "workspace_advisory": advisory,
+    }
+    no_opt_in = ConsolidationWorker(engine, []).run_queue_payload(dict(common_payload)).to_dict()
+    apply_result = (
+        ConsolidationWorker(engine, [])
+        .run_queue_payload({**common_payload, "apply_workspace_advisory": True})
+        .to_dict()
+    )
+    invalid = _promotion_probe_advisory(tenant="other-tenant", cid=hot_cid, prediction_score=1.0)
+    invalid["replay_scores"]["not-source-cid"] = {
+        "importance": 1.0,
+        "novelty": 1.0,
+        "surprise": 1.0,
+        "reward": 1.0,
+    }
+    rejected = (
+        ConsolidationWorker(engine, [])
+        .run_queue_payload(
+            {
+                **common_payload,
+                "workspace_advisory": invalid,
+                "apply_workspace_advisory": True,
+            }
+        )
+        .to_dict()
+    )
+
+    no_opt_in_passes = _passes_by_name(no_opt_in)
+    apply_passes = _passes_by_name(apply_result)
+    rejected_passes = _passes_by_name(rejected)
+    raw_marker = "workspace promotion raw marker must not leak"
+    checks = {
+        "no_opt_in_report_only": no_opt_in_passes["workspace_advisory"]["details"][
+            "applied_to_prediction_gate"
+        ]
+        is False
+        and no_opt_in_passes["prediction_error_gate"]["details"]["gate"]
+        == "low_prediction_error_metadata_only",
+        "explicit_opt_in_applies_prediction_gate": apply_passes["workspace_advisory"]["details"][
+            "applied_to_prediction_gate"
+        ]
+        is True
+        and apply_passes["prediction_error_gate"]["details"]["score"] == 0.91
+        and apply_passes["prediction_error_gate"]["details"]["gate"] == "promote_to_consolidation",
+        "explicit_opt_in_applies_replay_priority": apply_passes["workspace_advisory"]["details"][
+            "applied_to_replay_priority"
+        ]
+        is True
+        and apply_passes["replayer"]["details"]["selected_cids"][0] == hot_cid,
+        "never_applies_to_mutation_directly": apply_passes["workspace_advisory"]["details"][
+            "applied_to_mutation"
+        ]
+        is False,
+        "invalid_advisory_rejected": rejected_passes["workspace_advisory"]["status"] == "rejected",
+        "invalid_advisory_not_applied": rejected_passes["workspace_advisory"]["details"][
+            "applied_to_prediction_gate"
+        ]
+        is False
+        and rejected_passes["prediction_error_gate"]["details"]["gate"]
+        == "low_prediction_error_metadata_only",
+        "raw_workspace_text_absent": raw_marker not in str(no_opt_in)
+        and raw_marker not in str(apply_result)
+        and raw_marker not in str(rejected),
+    }
+    return {
+        "valid_no_opt_in": {
+            "advisory_status": no_opt_in_passes["workspace_advisory"]["status"],
+            "prediction_gate": no_opt_in_passes["prediction_error_gate"]["details"]["gate"],
+            "applied_to_prediction_gate": no_opt_in_passes["workspace_advisory"]["details"][
+                "applied_to_prediction_gate"
+            ],
+        },
+        "valid_apply": {
+            "advisory_status": apply_passes["workspace_advisory"]["status"],
+            "prediction_gate": apply_passes["prediction_error_gate"]["details"]["gate"],
+            "prediction_score": apply_passes["prediction_error_gate"]["details"]["score"],
+            "selected_cids": apply_passes["replayer"]["details"]["selected_cids"],
+            "applied_to_mutation": apply_passes["workspace_advisory"]["details"]["applied_to_mutation"],
+        },
+        "invalid_apply": {
+            "advisory_status": rejected_passes["workspace_advisory"]["status"],
+            "prediction_gate": rejected_passes["prediction_error_gate"]["details"]["gate"],
+            "reason": rejected_passes["workspace_advisory"]["details"].get("reason"),
+        },
+        "checks": checks,
+    }
+
+
+def _promotion_probe_advisory(*, tenant: str, cid: str, prediction_score: float) -> dict[str, Any]:
+    scores = {"importance": 1.0, "novelty": 1.0, "surprise": 1.0, "reward": 1.0}
+    return {
+        "version": "workspace-consolidation-advisory.v1",
+        "source": "shadow_workspace_controller",
+        "tenant_id": tenant,
+        "shadow_only": True,
+        "critical_path": False,
+        "production_mutation": False,
+        "advisory_only": True,
+        "promotion_gate_required": True,
+        "applied_to_prediction_gate": False,
+        "applied_to_replay_priority": False,
+        "applied_to_mutation": False,
+        "prediction_error": {"score": prediction_score, "source": "workspace_shadow_useful_transition"},
+        "replay_scores": {cid: dict(scores)},
+        "items": [{"cid": cid, "workspace_item_id": "g0-advisory-focus", "scores": dict(scores)}],
+        "item_count": 1,
+        "max_items": 4,
+    }
+
+
+def _passes_by_name(result: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return {
+        str(item["name"]): item
+        for item in result.get("pass_results", [])
+        if isinstance(item, dict) and "name" in item
     }
 
 

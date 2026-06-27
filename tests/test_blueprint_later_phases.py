@@ -27,6 +27,50 @@ TENANT = "tenant-b"
 USER = "user-b"
 
 
+def _workspace_advisory_payload(
+    *,
+    cid: str,
+    tenant_id: str = TENANT,
+    prediction_score: float = 0.9,
+    priority: float = 1.0,
+) -> dict:
+    scores = {
+        "importance": priority,
+        "novelty": priority,
+        "surprise": priority,
+        "reward": priority,
+    }
+    return {
+        "version": "workspace-consolidation-advisory.v1",
+        "source": "shadow_workspace_controller",
+        "tenant_id": tenant_id,
+        "shadow_only": True,
+        "critical_path": False,
+        "production_mutation": False,
+        "advisory_only": True,
+        "promotion_gate_required": True,
+        "applied_to_prediction_gate": False,
+        "applied_to_replay_priority": False,
+        "applied_to_mutation": False,
+        "prediction_error": {
+            "score": prediction_score,
+            "source": "workspace_shadow_useful_transition",
+        },
+        "replay_scores": {cid: scores},
+        "items": [
+            {
+                "cid": cid,
+                "workspace_item_id": "advisory-focus",
+                "source": "workspace",
+                "tick_index": 1,
+                "scores": scores,
+            }
+        ],
+        "item_count": 1,
+        "max_items": 4,
+    }
+
+
 def test_security_policy_blocks_untrusted_preference_and_policy_writes() -> None:
     policy = SecurityPolicy()
 
@@ -402,6 +446,122 @@ def test_consolidation_worker_records_workspace_advisory_without_promoting_it() 
     assert passes["prediction_error_gate"]["details"]["gate"] == "low_prediction_error_metadata_only"
     assert "low_prediction_error_metadata_only" in payload["skipped"]
     assert "private advisory text" not in str(payload)
+
+
+def test_consolidation_worker_applies_workspace_advisory_only_with_explicit_opt_in() -> None:
+    engine = LocalMemoryEngine()
+    cold_cid = engine.append_evidence(
+        Evidence(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="episode",
+            content="Cold workflow is archival.",
+            trust_tier=0,
+            access_policy={"tenant": TENANT},
+        )
+    )
+    hot_cid = engine.append_evidence(
+        Evidence(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="episode",
+            content="Advisory catalyst is validated.",
+            trust_tier=0,
+            access_policy={"tenant": TENANT},
+        )
+    )
+    worker = ConsolidationWorker(engine, [])
+
+    result = worker.run_queue_payload(
+        {
+            "tenant_id": TENANT,
+            "branch": "main",
+            "source_evidence_cids": [cold_cid, hot_cid],
+            "prediction_error": {"score": 0.0},
+            "replay_scores": {
+                cold_cid: {"importance": 0.1, "novelty": 0.1, "surprise": 0.1, "reward": 0.1},
+                hot_cid: {"importance": 0.1, "novelty": 0.1, "surprise": 0.1, "reward": 0.1},
+            },
+            "workspace_advisory": _workspace_advisory_payload(cid=hot_cid, prediction_score=0.91),
+            "apply_workspace_advisory": True,
+        }
+    )
+    payload = result.to_dict()
+    passes = {item["name"]: item for item in payload["pass_results"]}
+
+    advisory = passes["workspace_advisory"]
+    assert advisory["status"] == "complete"
+    assert advisory["details"]["accepted"] is True
+    assert advisory["details"]["apply_requested"] is True
+    assert advisory["details"]["applied_to_prediction_gate"] is True
+    assert advisory["details"]["applied_to_replay_priority"] is True
+    assert advisory["details"]["applied_to_mutation"] is False
+    assert advisory["details"]["effective_prediction_error_score"] == 0.91
+    assert passes["prediction_error_gate"]["details"]["score"] == 0.91
+    assert passes["prediction_error_gate"]["details"]["gate"] == "promote_to_consolidation"
+    assert passes["replayer"]["details"]["selected_cids"][0] == hot_cid
+    assert passes["replayer"]["details"]["scores"][0]["score"] == 1.0
+    assert payload["candidate_results"]
+    assert all("promoted" in candidate for candidate in payload["candidate_results"])
+    assert "low_prediction_error_metadata_only" not in payload["skipped"]
+    assert "private advisory text" not in str(payload)
+
+
+def test_consolidation_worker_rejects_invalid_workspace_advisory_application() -> None:
+    engine = LocalMemoryEngine()
+    evidence_cid = engine.append_evidence(
+        Evidence(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="episode",
+            content="Invalid advisory remains metadata only.",
+            trust_tier=0,
+            access_policy={"tenant": TENANT},
+        )
+    )
+    invalid = _workspace_advisory_payload(
+        cid=evidence_cid,
+        tenant_id="other-tenant",
+        prediction_score=1.5,
+    )
+    invalid["replay_scores"]["not-a-source-cid"] = {
+        "importance": 1.0,
+        "novelty": 1.0,
+        "surprise": 1.0,
+        "reward": 1.0,
+    }
+    worker = ConsolidationWorker(engine, [])
+
+    result = worker.run_queue_payload(
+        {
+            "tenant_id": TENANT,
+            "branch": "main",
+            "source_evidence_cids": [evidence_cid],
+            "prediction_error": {"score": 0.0},
+            "workspace_advisory": invalid,
+            "apply_workspace_advisory": True,
+        }
+    )
+    payload = result.to_dict()
+    passes = {item["name"]: item for item in payload["pass_results"]}
+
+    advisory = passes["workspace_advisory"]
+    assert advisory["status"] == "rejected"
+    assert advisory["details"]["accepted"] is False
+    assert advisory["details"]["apply_requested"] is True
+    assert advisory["details"]["contract"]["tenant_matches"] is False
+    assert advisory["details"]["contract"]["source_cids_only"] is False
+    assert advisory["details"]["contract"]["bounded_prediction_error"] is False
+    assert advisory["details"]["prediction_error"]["score"] == 0.0
+    assert advisory["details"]["applied_to_prediction_gate"] is False
+    assert advisory["details"]["applied_to_replay_priority"] is False
+    assert passes["prediction_error_gate"]["details"]["score"] == 0.0
+    assert passes["prediction_error_gate"]["details"]["gate"] == "low_prediction_error_metadata_only"
+    assert "workspace_advisory_contract_invalid" in payload["skipped"]
+    assert "low_prediction_error_metadata_only" in payload["skipped"]
 
 
 def test_shadow_policy_optimizer_accepts_only_variants_inside_rails() -> None:

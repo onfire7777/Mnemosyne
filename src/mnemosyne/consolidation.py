@@ -35,6 +35,7 @@ DEFAULT_CONSOLIDATION_PASSES = [
     "promotion_gate",
     "user_model_updater",
 ]
+REPLAY_PRIORITY_FACTORS = ("importance", "novelty", "surprise", "reward")
 
 
 def _summary_source_fingerprint(source_cids: Sequence[str], *, level: int = 1) -> str:
@@ -324,8 +325,20 @@ class ConsolidationWorker:
 
         evidence, missing = self._load_evidence(tenant_id, source_evidence_cids, branch)
         mutation_budget = self._new_mutation_rail_budget(tenant_id, branch)
-        prediction_gate = self._prediction_error_gate(payload, evidence)
-        replay_rows = self._prioritize_replay(evidence, payload)
+        workspace_advisory = self._workspace_advisory_report(
+            payload,
+            tenant_id=tenant_id,
+            source_evidence_cids=source_evidence_cids,
+        )
+        effective_payload = (
+            self._apply_workspace_advisory(payload, workspace_advisory.details)
+            if workspace_advisory is not None
+            and workspace_advisory.status == "complete"
+            and workspace_advisory.details.get("apply_requested") is True
+            else payload
+        )
+        prediction_gate = self._prediction_error_gate(effective_payload, evidence)
+        replay_rows = self._prioritize_replay(evidence, effective_payload)
         evidence = [row["evidence"] for row in replay_rows]
         evidence_seen = len(evidence)
         passes_run = [str(name) for name in payload.get("passes") or DEFAULT_CONSOLIDATION_PASSES]
@@ -334,8 +347,14 @@ class ConsolidationWorker:
             passes_run = [name for name in passes_run if name in allowed]
         pass_results: list[PassResult] = []
         skipped: list[str] = list(missing)
-        workspace_advisory = self._workspace_advisory_report(payload)
         if workspace_advisory is not None:
+            if (
+                workspace_advisory.status == "complete"
+                and workspace_advisory.details.get("apply_requested") is True
+            ):
+                workspace_advisory.details["applied_to_prediction_gate"] = True
+                workspace_advisory.details["applied_to_replay_priority"] = True
+                workspace_advisory.details["effective_prediction_error_score"] = prediction_gate["score"]
             pass_results.append(workspace_advisory)
             if workspace_advisory.status == "rejected":
                 skipped.append("workspace_advisory_contract_invalid")
@@ -600,12 +619,7 @@ class ConsolidationWorker:
     def _prioritize_replay(self, evidence: list[Evidence], payload: dict[str, Any]) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
         for index, item in enumerate(evidence):
-            factors = {
-                "importance": self._replay_factor(item, payload, "importance"),
-                "novelty": self._replay_factor(item, payload, "novelty"),
-                "surprise": self._replay_factor(item, payload, "surprise"),
-                "reward": self._replay_factor(item, payload, "reward"),
-            }
+            factors = {name: self._replay_factor(item, payload, name) for name in REPLAY_PRIORITY_FACTORS}
             score = 1.0
             for value in factors.values():
                 score *= value
@@ -645,50 +659,111 @@ class ConsolidationWorker:
             "source": "g1_prediction_error",
         }
 
-    def _workspace_advisory_report(self, payload: dict[str, Any]) -> PassResult | None:
+    def _workspace_advisory_report(
+        self,
+        payload: dict[str, Any],
+        *,
+        tenant_id: str,
+        source_evidence_cids: Sequence[str],
+    ) -> PassResult | None:
         raw = payload.get("workspace_consolidation_advisory", payload.get("workspace_advisory"))
         if raw is None:
             return None
+        apply_requested = payload.get("apply_workspace_advisory") is True or payload.get(
+            "workspace_advisory_mode"
+        ) == "apply"
         if not isinstance(raw, dict):
             return PassResult(
                 "workspace_advisory",
                 "rejected",
                 {
                     "reason": "workspace_advisory_not_mapping",
+                    "accepted": False,
+                    "apply_requested": apply_requested,
                     "applied_to_prediction_gate": False,
                     "applied_to_replay_priority": False,
                     "applied_to_mutation": False,
                 },
             )
+        source_cid_set = {str(cid) for cid in source_evidence_cids}
         contract = {
+            "tenant_matches": str(raw.get("tenant_id") or "") == tenant_id,
             "shadow_only": raw.get("shadow_only") is True,
             "critical_path_false": raw.get("critical_path") is False,
             "production_mutation_false": raw.get("production_mutation") is False,
             "advisory_only": raw.get("advisory_only") is True,
+            "promotion_gate_required": raw.get("promotion_gate_required") is True,
+            "not_preapplied": raw.get("applied_to_prediction_gate") is False
+            and raw.get("applied_to_replay_priority") is False
+            and raw.get("applied_to_mutation") is False,
         }
         prediction_error = raw.get("prediction_error") if isinstance(raw.get("prediction_error"), dict) else {}
+        try:
+            prediction_score_raw = float(prediction_error.get("score"))
+        except (TypeError, ValueError):
+            prediction_score_raw = None
+        prediction_score_valid = (
+            prediction_score_raw is not None
+            and prediction_score_raw == prediction_score_raw
+            and 0.0 <= prediction_score_raw <= 1.0
+        )
+        contract["bounded_prediction_error"] = prediction_score_valid
         replay_scores = raw.get("replay_scores") if isinstance(raw.get("replay_scores"), dict) else {}
+        items = raw.get("items") if isinstance(raw.get("items"), list) else []
         candidate_cids = sorted(str(cid) for cid in replay_scores.keys() if cid)[:16]
-        status = "complete" if all(contract.values()) else "rejected"
+        item_cids = {
+            str(item.get("cid") or "")
+            for item in items
+            if isinstance(item, dict) and str(item.get("cid") or "")
+        }
+        replay_cids = {str(cid) for cid in replay_scores.keys() if cid}
+        candidate_cid_set = item_cids | replay_cids
+        contract["source_cids_only"] = bool(candidate_cid_set) and candidate_cid_set <= source_cid_set
+        normalized_replay_scores: dict[str, dict[str, float]] = {}
+        scores_valid = True
+        for cid, raw_scores in replay_scores.items():
+            cid_text = str(cid)
+            if cid_text not in source_cid_set or not isinstance(raw_scores, dict):
+                scores_valid = False
+                continue
+            normalized_scores: dict[str, float] = {}
+            for factor in REPLAY_PRIORITY_FACTORS:
+                if factor not in raw_scores:
+                    continue
+                try:
+                    parsed = float(raw_scores[factor])
+                except (TypeError, ValueError):
+                    scores_valid = False
+                    continue
+                if parsed != parsed or parsed < 0.0 or parsed > 1.0:
+                    scores_valid = False
+                    continue
+                normalized_scores[factor] = round(parsed, 6)
+            if normalized_scores:
+                normalized_replay_scores[cid_text] = normalized_scores
+        contract["bounded_replay_scores"] = scores_valid
         details = {
             "source": str(raw.get("source") or "workspace_advisory"),
             "version": str(raw.get("version") or ""),
-            "accepted": status == "complete",
             "contract": contract,
             "shadow_only": raw.get("shadow_only") is True,
             "critical_path": raw.get("critical_path") is True,
             "production_mutation": raw.get("production_mutation") is True,
             "promotion_gate_required": raw.get("promotion_gate_required") is True,
+            "apply_requested": apply_requested,
             "prediction_error": {
-                "score": _bounded_unit(prediction_error.get("score")),
+                "score": round(prediction_score_raw, 6) if prediction_score_valid else 0.0,
                 "source": str(prediction_error.get("source") or "workspace_advisory"),
             },
+            "replay_scores": normalized_replay_scores,
             "candidate_cids": candidate_cids,
             "item_count": _non_negative_int(raw.get("item_count"), default=len(candidate_cids)),
             "applied_to_prediction_gate": False,
             "applied_to_replay_priority": False,
             "applied_to_mutation": False,
         }
+        status = "complete" if all(contract.values()) else "rejected"
+        details["accepted"] = status == "complete"
         if status == "rejected":
             details["reason"] = "workspace_advisory_contract_invalid"
         return PassResult("workspace_advisory", status, details)
@@ -713,7 +788,51 @@ class ConsolidationWorker:
             value = float(raw)
         except (TypeError, ValueError):
             value = 1.0
-        return round(value, 6)
+        return _bounded_unit(value, default=1.0)
+
+    def _apply_workspace_advisory(
+        self,
+        payload: dict[str, Any],
+        advisory_details: dict[str, Any],
+    ) -> dict[str, Any]:
+        effective = dict(payload)
+        advisory_error = advisory_details.get("prediction_error")
+        if isinstance(advisory_error, dict):
+            payload_error = payload.get("prediction_error") if isinstance(payload.get("prediction_error"), dict) else {}
+            payload_score = _bounded_unit(payload_error.get("score"))
+            advisory_score = _bounded_unit(advisory_error.get("score"))
+            merged_error = dict(payload_error)
+            merged_error["score"] = max(payload_score, advisory_score)
+            merged_error["source"] = "workspace_advisory_max_merge"
+            merged_error["payload_score"] = payload_score
+            merged_error["workspace_advisory_score"] = advisory_score
+            effective["prediction_error"] = merged_error
+
+        merged_replay_scores: dict[str, dict[str, float]] = {}
+        payload_scores = payload.get("replay_scores")
+        if isinstance(payload_scores, dict):
+            for cid, raw_scores in payload_scores.items():
+                if not isinstance(raw_scores, dict):
+                    continue
+                merged_replay_scores[str(cid)] = {
+                    factor: _bounded_unit(raw_scores.get(factor), default=1.0)
+                    for factor in REPLAY_PRIORITY_FACTORS
+                    if factor in raw_scores
+                }
+        advisory_scores = advisory_details.get("replay_scores")
+        if isinstance(advisory_scores, dict):
+            for cid, raw_scores in advisory_scores.items():
+                if not isinstance(raw_scores, dict):
+                    continue
+                row = dict(merged_replay_scores.get(str(cid), {}))
+                for factor in REPLAY_PRIORITY_FACTORS:
+                    if factor in raw_scores:
+                        row[factor] = max(row.get(factor, 0.0), _bounded_unit(raw_scores.get(factor)))
+                if row:
+                    merged_replay_scores[str(cid)] = row
+        if merged_replay_scores:
+            effective["replay_scores"] = merged_replay_scores
+        return effective
 
     def _distill_lessons(self, tenant_id: str, candidates: list[dict[str, Any]]) -> dict[str, Any]:
         if self.learning is None or not candidates:

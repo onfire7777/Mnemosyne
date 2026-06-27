@@ -104,6 +104,9 @@ def test_g0_report_emits_every_spec_metric_and_source_hashes() -> None:
     assert metrics["workspace_consolidation_advisory_contract"]["status"] == "measured"
     assert metrics["workspace_consolidation_advisory_contract"]["value"] == 1.0
     assert metrics["workspace_consolidation_advisory_contract"]["source_id"] == "shadow_workspace_eval"
+    assert metrics["workspace_advisory_promotion_gate_contract"]["status"] == "measured"
+    assert metrics["workspace_advisory_promotion_gate_contract"]["value"] == 1.0
+    assert metrics["workspace_advisory_promotion_gate_contract"]["source_id"] == "shadow_workspace_eval"
     assert metrics["shadow_workspace_rumination_rate"]["status"] == "measured"
     assert metrics["shadow_workspace_rumination_rate"]["value"] == 0.0
     assert metrics["shadow_workspace_rumination_rate"]["source_id"] == "shadow_workspace_eval"
@@ -118,6 +121,10 @@ def test_g0_report_emits_every_spec_metric_and_source_hashes() -> None:
     assert report["computed_evidence"]["shadow_workspace_eval"]["shadow_workspace_contract"] == 1.0
     assert (
         report["computed_evidence"]["shadow_workspace_eval"]["workspace_consolidation_advisory_contract"]
+        == 1.0
+    )
+    assert (
+        report["computed_evidence"]["shadow_workspace_eval"]["workspace_advisory_promotion_gate_contract"]
         == 1.0
     )
 
@@ -252,6 +259,7 @@ def test_g0_shadow_workspace_fixture_reports_bounded_stream_contract() -> None:
     assert report["useful_transition_rate"] == 1.0
     assert report["shadow_workspace_contract"] == 1.0
     assert report["workspace_consolidation_advisory_contract"] == 1.0
+    assert report["workspace_advisory_promotion_gate_contract"] == 1.0
     assert report["rumination_rate"] == 0.0
     assert report["workspace"]["shadow_only"] is True
     assert report["workspace"]["critical_path"] is False
