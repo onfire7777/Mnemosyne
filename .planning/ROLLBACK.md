@@ -20,8 +20,9 @@ good release artifact.
    referenced by `MNEMOSYNE_PROD_EVIDENCE_DIR`; it must not point inside the
    repository.
 7. Run `infra/scripts/capture-production-evidence.sh "$SOAK_MANIFEST" "$OUT_ROOT"`;
-   `OUT_ROOT` must be a new or empty absolute external custody path outside the
-   repository, and the capture wrapper writes the production bundle there.
+   `OUT_ROOT` must be a new absolute external custody path outside the
+   repository and must not already exist; the capture wrapper writes the
+   production bundle there.
 8. Require `release-audit --evidence-manifest "$OUT_ROOT/evidence/manifest.json" --require-production-validated --require-provider-forbid-local` to pass before
    declaring the rollback accepted.
 

@@ -22,7 +22,15 @@ OUT_ROOT="$("${PYTHON}" - "${OUT_ROOT_RAW}" "${REPO_DIR}" <<'PY'
 from pathlib import Path
 import sys
 
-out_root = Path(sys.argv[1]).expanduser().resolve(strict=False)
+out_root_raw = Path(sys.argv[1]).expanduser()
+if out_root_raw.is_symlink():
+    print(
+        f"ERROR: local-staging evidence output root cannot be a symlink: {out_root_raw}",
+        file=sys.stderr,
+    )
+    sys.exit(65)
+
+out_root = out_root_raw.resolve(strict=False)
 repo_dir = Path(sys.argv[2]).resolve()
 try:
     out_root.relative_to(repo_dir)
@@ -61,7 +69,8 @@ source "${INFRA_DIR}/vault/out/vault.env"
 # shellcheck source=/dev/null
 source "${INFRA_DIR}/c2pa/out/provenance.env"
 
-export MNEMOSYNE_IDP_TOKEN="$("${INFRA_DIR}/scripts/keycloak-token.sh" agent-a agent-a-password)"
+MNEMOSYNE_IDP_TOKEN="$("${INFRA_DIR}/scripts/keycloak-token.sh" agent-a agent-a-password)"
+export MNEMOSYNE_IDP_TOKEN
 export MNEMOSYNE_OBJECT_STORE_ENCRYPTION="aesgcm"
 export MNEMOSYNE_OBJECT_STORE="${OUT_ROOT}/objects"
 export OUT_ROOT REPO_DIR INFRA_DIR

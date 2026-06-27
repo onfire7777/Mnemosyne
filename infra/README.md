@@ -146,7 +146,7 @@ refuses manifests unless `validation_scope.production_validated=true`,
 `validation_scope.target_environment="production"`, and
 `validation_scope.operator_asserted=true`; rejects unresolved production
 placeholders, secret-bearing CLI options, high-confidence secret material,
-unscannable retained artifacts, and non-empty output roots; and requires the
+unscannable retained artifacts, and pre-existing output roots; and requires the
 exact production release command profile, with no missing,
 duplicate, or unknown commands, before running `deployment-soak --evidence-dir`
 followed by

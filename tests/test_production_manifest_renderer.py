@@ -343,6 +343,79 @@ def test_renderer_check_environment_fails_on_invalid_provenance_suite_asset_path
     assert proc.stderr == ""
 
 
+def test_renderer_check_environment_rejects_escaped_manifest_artifact_path(
+    tmp_path: Path,
+) -> None:
+    env = _filled_render_env(tmp_path)
+    _populate_required_input_artifacts(env)
+    outside_artifact = Path(env["MNEMOSYNE_PROD_EVIDENCE_DIR"]).parent / "outside-auth-ops-bundle.json"
+    outside_artifact.write_text("{}\n", encoding="utf-8")
+    template = tmp_path / "production-soak-manifest.template.json"
+    template.write_text(
+        (REPO / "infra" / "templates" / "production-soak-manifest.template.json")
+        .read_text(encoding="utf-8")
+        .replace(
+            "MNEMOSYNE_PROD_EVIDENCE_DIR/auth-ops-bundle.json",
+            "MNEMOSYNE_PROD_EVIDENCE_DIR/../outside-auth-ops-bundle.json",
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    proc = subprocess.run(
+        [str(RENDERER), "--check-environment", "--template", str(template)],
+        cwd=REPO,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    payload = json.loads(proc.stdout)
+
+    assert proc.returncode == 78
+    assert payload["ok"] is False
+    assert payload["blocked_reason"] == "missing_or_invalid_input_artifacts"
+    assert any(
+        "must not contain '..' path segments" in error
+        for error in payload["input_artifact_errors"]
+    )
+
+
+def test_renderer_check_environment_rejects_escaped_provenance_suite_asset_path(
+    tmp_path: Path,
+) -> None:
+    env = _filled_render_env(tmp_path)
+    evidence_dir = Path(env["MNEMOSYNE_PROD_EVIDENCE_DIR"])
+    outside_asset = evidence_dir.parent / "outside-suite-asset.txt"
+    outside_asset.write_text("asset\n", encoding="utf-8")
+    _populate_required_input_artifacts(
+        env,
+        suite_payload=json.dumps(
+            {"cases": [{"asset_path": str(evidence_dir / ".." / outside_asset.name)}]}
+        )
+        + "\n",
+    )
+
+    proc = subprocess.run(
+        [str(RENDERER), "--check-environment"],
+        cwd=REPO,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    payload = json.loads(proc.stdout)
+
+    assert proc.returncode == 78
+    assert payload["ok"] is False
+    assert payload["blocked_reason"] == "missing_or_invalid_input_artifacts"
+    assert payload["input_artifact_errors"] == [
+        "provenance-trust-suite.json cases[0].asset_path must not contain '..' path segments"
+    ]
+
+
 def test_renderer_check_environment_accepts_provenance_suite_assets(
     tmp_path: Path,
 ) -> None:

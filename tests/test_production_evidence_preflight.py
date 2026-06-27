@@ -91,6 +91,21 @@ def test_redaction_tree_scan_rejects_symlinked_output_root(tmp_path: Path) -> No
     ]
 
 
+def test_redaction_tree_scan_scans_nested_redaction_scan_files(tmp_path: Path) -> None:
+    out_root = tmp_path / "capture"
+    nested = out_root / "input-artifacts" / "redaction-scan.json"
+    root_scan = out_root / "redaction-scan.json"
+    nested.parent.mkdir(parents=True)
+    nested.write_text("nested retained artifact\n", encoding="utf-8")
+    root_scan.write_text('{"ok": true}\n', encoding="utf-8")
+
+    scan = scan_evidence_tree(out_root)
+
+    assert scan["ok"] is True
+    assert str(nested) in scan["scanned_files"]
+    assert str(root_scan) not in scan["scanned_files"]
+
+
 def test_capture_production_evidence_preflight_only_stops_before_soak(tmp_path: Path) -> None:
     manifest = tmp_path / "production-soak.json"
     out_root = tmp_path / "capture"
@@ -258,7 +273,7 @@ def test_capture_production_evidence_preflight_rejects_unrendered_template(tmp_p
     assert not out_root.exists()
 
 
-def test_capture_production_evidence_rejects_nonempty_output_root(tmp_path: Path) -> None:
+def test_capture_production_evidence_rejects_existing_output_root(tmp_path: Path) -> None:
     manifest = tmp_path / "production-soak.json"
     out_root = tmp_path / "capture"
     out_root.mkdir()
@@ -278,7 +293,7 @@ def test_capture_production_evidence_rejects_nonempty_output_root(tmp_path: Path
     )
 
     assert proc.returncode == 65
-    assert "output directory must be empty" in proc.stderr
+    assert "output root must not already exist" in proc.stderr
     assert not (out_root / "preflight.json").exists()
     assert not (out_root / "redaction-scan.json").exists()
 
@@ -1928,6 +1943,98 @@ exec "$REAL_PYTHON" "$@"
     assert "high-confidence secret material found in the production evidence bundle" in proc.stderr
     assert "jwt" in proc.stderr
     assert redaction_scan["ok"] is False
+    assert redaction_scan["findings"][0]["kind"] == "jwt"
+    assert not (out_root / "summary.json").exists()
+
+
+def test_capture_production_evidence_scans_nested_redaction_scan_artifact(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "production-soak.json"
+    out_root = tmp_path / "capture"
+    fake_python = tmp_path / "fake-python"
+    _minimal_production_manifest(manifest)
+    fake_python.write_text(
+        f"""#!/usr/bin/env bash
+set -euo pipefail
+REAL_PYTHON={json.dumps(sys.executable)}
+if [ "${{1:-}}" = "-" ]; then
+  exec "$REAL_PYTHON" "$@"
+fi
+if [ "${{1:-}}" = "-m" ] && [ "${{2:-}}" = "mnemosyne.cli" ]; then
+  shift 2
+  mode=""
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --store)
+        shift 2
+        ;;
+      deployment-soak)
+        mode="soak"
+        shift
+        break
+        ;;
+      release-audit)
+        mode="audit"
+        shift
+        break
+        ;;
+      *)
+        shift
+        ;;
+    esac
+  done
+  if [ "$mode" = "soak" ]; then
+    evidence_dir=""
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --evidence-dir)
+          evidence_dir="$2"
+          shift 2
+          ;;
+        *)
+          shift
+          ;;
+      esac
+    done
+    mkdir -p "$evidence_dir"
+    cat > "$evidence_dir/manifest.json" <<'JSON'
+{{"ok": true, "validation_scope": {{"production_validated": true, "target_environment": "production", "operator_asserted": true}}, "checks": []}}
+JSON
+    cat > "$evidence_dir/redaction-scan.json" <<'JSON'
+{{"token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJvcGVyYXRvciIsImlhdCI6MTcwMDAwMDAwMH0.MDEyMzQ1Njc4OWFiY2RlZg"}}
+JSON
+    printf '%s\\n' '{{"ok": true}}'
+    exit 0
+  fi
+  if [ "$mode" = "audit" ]; then
+    printf '%s\\n' '{{"ok": true, "fingerprint": "fake-fingerprint", "findings": []}}'
+    exit 0
+  fi
+fi
+exec "$REAL_PYTHON" "$@"
+""",
+        encoding="utf-8",
+    )
+    fake_python.chmod(0o755)
+
+    proc = subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            str(manifest),
+            str(out_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        env={**os.environ, "MNEMOSYNE_PYTHON": str(fake_python)},
+    )
+
+    redaction_scan = json.loads((out_root / "redaction-scan.json").read_text(encoding="utf-8"))
+    assert proc.returncode == 65
+    assert "high-confidence secret material found in the production evidence bundle" in proc.stderr
+    assert redaction_scan["ok"] is False
+    assert redaction_scan["findings"][0]["source"].endswith("evidence/redaction-scan.json")
     assert redaction_scan["findings"][0]["kind"] == "jwt"
     assert not (out_root / "summary.json").exists()
 

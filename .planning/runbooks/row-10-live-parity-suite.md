@@ -56,8 +56,9 @@ and source/operator command-profile agreement; offline custody verification must
 ## Acceptance
 
 Operator runs the suite and gate against real infra, evidence is redacted, the
-outputs are included in `deployment-soak --evidence-dir` with production scope
-and operator attestation, and `release-audit --evidence-manifest "$OUT_ROOT/evidence/manifest.json" --require-production-validated --require-provider-forbid-local`
+suite artifact is retained through `checks[].input_artifacts` under
+`OUT_ROOT/input-artifacts/`, `deployment-soak` runs with production scope and
+operator attestation, and `release-audit --evidence-manifest "$OUT_ROOT/evidence/manifest.json" --require-production-validated --require-provider-forbid-local`
 passes with required output shapes present and empty findings.
 
 Done when every engine/runtime method is green with production adapters enabled,

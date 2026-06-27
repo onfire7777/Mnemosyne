@@ -311,6 +311,8 @@
       "args": [
         "--max-cycles",
         "3",
+        "--poll-interval",
+        "1",
         "--limit",
         "10",
         "--fail-on-dead"
