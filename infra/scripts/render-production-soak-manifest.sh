@@ -504,6 +504,11 @@ missing_input_artifacts = [
     for artifact in input_artifacts
     if not bool(artifact.get("exists"))
 ]
+missing_input_artifact_details = [
+    artifact
+    for artifact in input_artifacts
+    if not bool(artifact.get("exists"))
+]
 
 if check_environment:
     payload = {
@@ -519,7 +524,9 @@ if check_environment:
         "required_input_artifacts": [
             str(artifact["relative_path"]) for artifact in input_artifacts
         ],
+        "required_input_artifacts_detail": input_artifacts,
         "missing_input_artifacts": missing_input_artifacts,
+        "missing_input_artifacts_detail": missing_input_artifact_details,
         "input_artifact_errors": input_artifact_errors,
         "input_artifacts_complete": not missing_input_artifacts and not input_artifact_errors,
         "validation_categories": validation_categories,

@@ -17,8 +17,9 @@ The check command prints key names only; it also verifies the production input
 directory exists outside the repo and the C2PA verifier path is an external
 executable. A green check also means every manifest-referenced file or
 directory under `MNEMOSYNE_PROD_EVIDENCE_DIR` exists. Missing production inputs
-are reported by relative artifact name only; configured absolute path values
-remain redacted.
+are reported by relative artifact name only, with redacted detail entries that
+show the check/command/option requiring each artifact; configured absolute path
+values remain redacted.
 
 Secrets and credentials must be supplied outside manifest `args` and
 `global_args`, using runtime environment variables or provider custody files.
