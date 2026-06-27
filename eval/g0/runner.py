@@ -229,6 +229,15 @@ G0_METRIC_SPECS: tuple[dict[str, Any], ...] = (
         "blueprint_metric": "G4 opt-in workspace advisory promotion gate",
     },
     {
+        "id": "workspace_retrieval_controller_contract",
+        "label": "workspace retrieval controller contract",
+        "class": "target",
+        "direction": "increase",
+        "target": 1.0,
+        "target_op": ">=",
+        "blueprint_metric": "G4 opt-in workspace retrieval-controller gate",
+    },
+    {
         "id": "shadow_workspace_rumination_rate",
         "label": "shadow workspace rumination rate",
         "class": "guardrail",
@@ -487,6 +496,7 @@ def _build_metric(spec: dict[str, Any], sources: dict[str, Source]) -> dict[str,
         "shadow_workspace_contract": _metric_shadow_workspace_contract,
         "workspace_consolidation_advisory_contract": _metric_workspace_consolidation_advisory_contract,
         "workspace_advisory_promotion_gate_contract": _metric_workspace_advisory_promotion_gate_contract,
+        "workspace_retrieval_controller_contract": _metric_workspace_retrieval_controller_contract,
         "shadow_workspace_rumination_rate": _metric_shadow_workspace_rumination_rate,
         "reality_monitor_shadow_tag_contract": _metric_consciousness_scorecard,
     }
@@ -833,6 +843,25 @@ def _metric_workspace_advisory_promotion_gate_contract(
             "default-off report-only behavior, explicit opt-in application to "
             "prediction gating and replay priority, cross-tenant/source-CID "
             "rejection, and applied_to_mutation=false."
+        ),
+    )
+
+
+def _metric_workspace_retrieval_controller_contract(
+    spec: dict[str, Any],
+    sources: dict[str, Source],
+) -> dict[str, Any]:
+    value = _source_data(sources, "shadow_workspace_eval", "workspace_retrieval_controller_contract")
+    return _measured(
+        spec,
+        value,
+        "shadow_workspace_eval",
+        "/workspace_retrieval_controller_contract",
+        note=(
+            "Measured by the G0 shadow workspace fixture. Passing requires "
+            "default-off report-only behavior, explicit opt-in and policy-gated "
+            "ranking, CID-backed candidate-only boosts, cross-tenant rejection, "
+            "no raw workspace text, and production_mutation=false."
         ),
     )
 

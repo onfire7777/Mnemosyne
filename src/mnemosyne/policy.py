@@ -41,6 +41,11 @@ class OperatingPolicy:
     schema_fast_path_enabled: bool = True
     schema_fast_path_boost: float = 1.25
     schema_fast_path_min_corroboration: int = 2
+    # G4 workspace-controller retrieval promotion is default-off and requires
+    # an explicit request flag before it can affect answer-path ranking.
+    workspace_retrieval_advisory_enabled: bool = False
+    workspace_retrieval_advisory_max_items: int = 4
+    workspace_retrieval_advisory_max_boost: float = 1.0
     prediction_error_threshold: float = 0.35
     write_priority_weights: dict[str, float] = field(
         default_factory=lambda: {
