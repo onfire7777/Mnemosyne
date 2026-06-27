@@ -58,6 +58,9 @@ def evaluate_ablation(
     - ``guardrail_metrics``: explicit guardrail ids. Defaults to every metric
       classified as a guardrail in either the baseline or candidate report.
     - ``guardrail_tolerances``: id -> allowed absolute regression amount.
+    - ``requires_controller_telemetry``: when true, both reports must measure
+      ``controller_watts_per_dollar``. This is required for future promoted
+      always-on workspace gates; shadow-only G4 gates should leave it false.
     """
 
     change_id = str(preregistration.get("change_id") or "unregistered-change")
@@ -71,6 +74,20 @@ def evaluate_ablation(
 
     baseline = _metric_map(baseline_report)
     candidate = _metric_map(candidate_report)
+    if preregistration.get("requires_controller_telemetry") is True:
+        controller_metric = "controller_watts_per_dollar"
+        base_controller = baseline.get(controller_metric)
+        cand_controller = candidate.get(controller_metric)
+        if not (
+            isinstance(base_controller, dict)
+            and isinstance(cand_controller, dict)
+            and _is_measured(base_controller)
+            and _is_measured(cand_controller)
+        ):
+            reasons.append(
+                "requires_controller_telemetry is true, but "
+                "controller_watts_per_dollar is not measured in both reports"
+            )
     base_target = baseline.get(str(target_id))
     cand_target = candidate.get(str(target_id))
     if base_target is None or cand_target is None:

@@ -75,6 +75,7 @@ For each proposed change (a G1–G4 item):
 - **Decision log:** `eval/g0/decision-log.jsonl`.
 - **Targets:** `multi_hop_ndcg_at_k`, direction `increase`, minimum delta `0.02`; `projection_reality_abstention_recall`, direction `increase`, minimum delta `1.0`; `reality_monitor_shadow_tag_contract`, direction `increase`, non-decrease proof for shadow/advisory runtime tagging.
 - **Result:** PASS against `eval/g0/baselines/baseline-0.json`; candidate `multi_hop_ndcg_at_k = 1.0` vs baseline `0.5935` (`+0.4065`), candidate `projection_reality_abstention_recall = 1.0` vs baseline `0.0` (`+1.0`), and candidate `workspace_retrieval_controller_contract = 1.0` vs baseline `0.0` (`+1.0`). Guardrails unchanged: ECE `0.006271`, abstention precision/recall `1.0/1.0`, confabulation rate `0.0`, poison-block rate `1.0`, fast-path P95 `92.1 ms`.
+- **Controller telemetry:** Current G4 gates are shadow/advisory gates and explicitly set `requires_controller_telemetry=false`; a future promoted always-on workspace gate that claims quality-per-unit-compute must set `requires_controller_telemetry=true`, and `eval/g0/gate.py` then fails closed unless `controller_watts_per_dollar` is measured in both baseline and candidate reports.
 
 ## 7. Tooling & deliverables
 
@@ -89,7 +90,11 @@ For each proposed change (a G1–G4 item):
 - [x] `mneme eval g0` runs the G0 harness from the project CLI while preserving the direct `python -m eval.g0.runner` path for CI and reviewed baseline custody work.
 - [x] `baseline‑0` recorded with pinned commit/seeds/env.
 - [x] Adversarial/poison set wired to the poison‑block + R6 checks.
-- [x] Gate script enforces "target‑up, guardrail‑not‑down," with pre‑registration.
+- [x] Gate script enforces "target‑up, guardrail‑not‑down," with pre‑registration, decision-log custody summaries, and explicit controller-telemetry requirements for future promoted always-on G4 gates.
 - [x] Independently reproduce the wiki's headline SLOs (recall, nDCG, ECE, poison‑block, P95) inside this harness before citing them anywhere.
 
-Only when this is green does G1 begin.
+G1+ work may proceed only through this harness: each shipped slice needs a
+pre-registered passing gate, no guardrail regression, and no fabricated
+coverage. The default no-telemetry G0 report is intentionally not full-coverage
+`gate_ready`; supply explicit controller telemetry only when a gate actually
+claims quality-per-unit-compute.

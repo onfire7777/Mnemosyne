@@ -268,6 +268,8 @@ DATASET_PATHS = (
     "eval/datasets/v2/retrieval_v2.json",
     "eval/datasets/v2/qa_hard_v2.json",
 )
+PREREGISTRATION_DIR = Path("eval/g0/preregistrations")
+DECISION_LOG_PATH = Path("eval/g0/decision-log.jsonl")
 
 DEFAULT_SEEDS = {
     "harness_bootstrap_mean": 1234,
@@ -359,9 +361,11 @@ def build_report(
     metrics = [_build_metric(spec, sources) for spec in G0_METRIC_SPECS]
     measured = sum(1 for metric in metrics if metric["status"] == "measured")
     missing = len(metrics) - measured
+    intentionally_missing = _intentionally_missing_metrics(metrics)
     commit = pinned_commit or _git(repo_root, "rev-parse", "HEAD")
     tag_target = _git(repo_root, "rev-list", "-n", "1", baseline_name, check=False)
     dataset_manifests = [_dataset_manifest(repo_root, rel) for rel in DATASET_PATHS]
+    gate_decisions = _gate_decision_summary(repo_root, metrics)
 
     report = {
         "schema_version": "g0.report.v1",
@@ -394,12 +398,26 @@ def build_report(
             "missing": missing,
             "gate_ready": missing == 0,
             "missing_metric_ids": [m["id"] for m in metrics if m["status"] != "measured"],
+            "intentionally_missing_metric_ids": intentionally_missing,
         },
         "gate_contract": {
             "preregistration_required": True,
             "rule": "ship iff a preregistered target metric improves by its margin and no guardrail regresses",
             "gate_command": "python -m eval.g0.gate --baseline BASELINE.json --candidate CANDIDATE.json --prereg PREREG.json",
-            "decision_log": "eval/g0/decision-log.jsonl",
+            "decision_log": DECISION_LOG_PATH.as_posix(),
+            "preregistration_dir": PREREGISTRATION_DIR.as_posix(),
+            "controller_telemetry_required_field": "requires_controller_telemetry",
+            "controller_telemetry_metric": "controller_watts_per_dollar",
+        },
+        "gate_decisions": gate_decisions,
+        "artifact_custody": {
+            "source_commit": commit,
+            "snapshot_note": (
+                "Committed G0 reports are source-tree custody snapshots. The "
+                "commit that contains a report cannot be embedded in that report "
+                "before the commit exists; use git log to identify the containing "
+                "artifact commit."
+            ),
         },
     }
     report["headline_slos"] = _headline_slos(report)
@@ -460,12 +478,44 @@ def render_markdown(report: dict[str, Any]) -> str:
             lines.append(f"- `{metric['id']}`: {metric['notes']}")
     else:
         lines.append("- None")
+    if report["coverage"].get("intentionally_missing_metric_ids"):
+        lines.extend(
+            [
+                "",
+                "Intentional missing metrics:",
+            ]
+        )
+        for metric_id in report["coverage"]["intentionally_missing_metric_ids"]:
+            lines.append(f"- `{metric_id}`")
     lines.extend(
         [
             "",
             "## Gate Contract",
             "",
             f"`{report['gate_contract']['gate_command']}`",
+            "",
+            "## Gate Decisions",
+            "",
+            "| Change | Preregistration | Latest decision | Passed | Target | Delta | Controller telemetry |",
+            "|---|---|---|---|---|---:|---|",
+        ]
+    )
+    for decision in report.get("gate_decisions", []):
+        generated = decision.get("latest_decision_generated_at") or ""
+        delta = "" if decision.get("latest_target_delta") is None else str(decision["latest_target_delta"])
+        lines.append(
+            f"| {decision['change_id']} | {decision['preregistration_path']} | "
+            f"{generated} | {decision['latest_decision_passed']} | "
+            f"{decision['target_metric']} | {delta} | "
+            f"{decision['controller_telemetry_status']} |"
+        )
+    lines.extend(
+        [
+            "",
+            "## Artifact Custody",
+            "",
+            f"- Source commit at generation: `{report['artifact_custody']['source_commit']}`",
+            f"- Note: {report['artifact_custody']['snapshot_note']}",
             "",
         ]
     )
@@ -1039,6 +1089,79 @@ def _headline_slos(report: dict[str, Any]) -> dict[str, Any]:
     ]
     metric_map = {m["id"]: m for m in report["metrics"]}
     return {metric_id: metric_map[metric_id] for metric_id in ids}
+
+
+def _intentionally_missing_metrics(metrics: list[dict[str, Any]]) -> list[str]:
+    intentional: list[str] = []
+    for metric in metrics:
+        if metric.get("status") == "measured":
+            continue
+        if metric.get("id") == "controller_watts_per_dollar":
+            intentional.append(str(metric["id"]))
+    return intentional
+
+
+def _gate_decision_summary(repo_root: Path, metrics: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    prereg_dir = repo_root / PREREGISTRATION_DIR
+    decision_log = repo_root / DECISION_LOG_PATH
+    decisions = _load_decision_log(decision_log)
+    latest_by_key: dict[tuple[str, str], dict[str, Any]] = {}
+    for decision in decisions:
+        change_id = str(decision.get("change_id") or "")
+        target_metric = str(decision.get("target_metric") or "")
+        if not change_id or not target_metric:
+            continue
+        key = (change_id, target_metric)
+        previous = latest_by_key.get(key)
+        if previous is None or str(decision.get("generated_at") or "") >= str(previous.get("generated_at") or ""):
+            latest_by_key[key] = decision
+
+    metric_map = {str(metric.get("id")): metric for metric in metrics if isinstance(metric, dict)}
+    controller_metric = metric_map.get("controller_watts_per_dollar", {})
+    controller_measured = controller_metric.get("status") == "measured"
+    rows: list[dict[str, Any]] = []
+    for prereg_path in sorted(prereg_dir.glob("*.json")):
+        prereg = json.loads(prereg_path.read_text(encoding="utf-8"))
+        change_id = str(prereg.get("change_id") or prereg_path.stem)
+        target_metric = str(prereg.get("target_metric") or "")
+        latest = latest_by_key.get((change_id, target_metric))
+        requires_controller = prereg.get("requires_controller_telemetry") is True
+        if requires_controller:
+            controller_status = "measured" if controller_measured else "required_missing"
+        else:
+            controller_status = "not_required"
+        rows.append(
+            {
+                "preregistration_path": prereg_path.relative_to(repo_root).as_posix(),
+                "change_id": change_id,
+                "target_metric": target_metric,
+                "minimum_delta": prereg.get("minimum_delta"),
+                "direction": prereg.get("direction"),
+                "requires_controller_telemetry": requires_controller,
+                "controller_telemetry_status": controller_status,
+                "latest_decision_present": latest is not None,
+                "latest_decision_generated_at": latest.get("generated_at") if latest else None,
+                "latest_decision_passed": latest.get("passed") if latest else None,
+                "latest_target_delta": latest.get("target_delta") if latest else None,
+            }
+        )
+    return rows
+
+
+def _load_decision_log(path: Path) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    decisions: list[dict[str, Any]] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            decisions.append(payload)
+    return decisions
 
 
 def _source_data(sources: dict[str, Source], source_id: str, *path: str) -> Any:
