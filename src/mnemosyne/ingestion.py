@@ -10,6 +10,7 @@ from typing import Any, Literal
 from mnemosyne.consolidation import CONSOLIDATE_EVIDENCE_JOB, DEFAULT_CONSOLIDATION_PASSES
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.ids import content_cid
+from mnemosyne.media_limits import DEFAULT_MAX_INGEST_BYTES, enforce_byte_limit, validate_byte_limit
 from mnemosyne.media import MEDIA_EXTRACT_JOB, extract_derived_text
 from mnemosyne.models import Assertion, Evidence, Resource
 from mnemosyne.privacy import (
@@ -88,6 +89,7 @@ class IngestionPipeline:
         allowed_residency_transfers: tuple[str, ...] = (),
         require_runtime_residency: bool = False,
         media_embedding_provider: MediaEmbeddingProvider | None = None,
+        max_ingest_bytes: int = DEFAULT_MAX_INGEST_BYTES,
     ):
         self.engine = engine
         self.object_store = object_store or LocalObjectStore(Path(".mnemosyne/objects"))
@@ -99,9 +101,11 @@ class IngestionPipeline:
         self.allowed_residency_transfers = normalize_residency_transfers(tuple(allowed_residency_transfers))
         self.require_runtime_residency = require_runtime_residency
         self.media_embedding_provider = media_embedding_provider
+        self.max_ingest_bytes = validate_byte_limit(max_ingest_bytes, name="max_ingest_bytes")
 
     def ingest(self, request: IngestRequest, branch: str = "main") -> IngestResult:
         payload = request.payload_bytes()
+        enforce_byte_limit(payload, limit=self.max_ingest_bytes, label="ingest payload")
         provenance = self.provenance_verifier.verify(payload, _provenance_manifest_for_request(request))
         classification = classify_request(request, payload)
         residency = normalize_residency(

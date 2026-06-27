@@ -57,10 +57,10 @@ P0/P1 are all covered by gating or shadow tests. P2 are *design-for* — coverag
 | FR-15 Branchable memory | P1 | (reversibility) M-AUDIT-COMPLETE; used by gate | T-INV, T-SEC | S8 | 2 / gating |
 | FR-16 Latent advisory model | P1 | M-APPLY-ACC (latent never overrides explicit) | T-PER | S7 | 3 / gating |
 | FR-17 Cold-loop PGO + replay | P2 | M-TTL-SLOPE; counterfactual-replay | T-CON | — | 5 / **shadow-only** (replay-fidelity §17) |
-| FR-18 Anticipatory prefetch | P2 | (prefetch predictability) M-FASTP95 | T-PERF | — | design-for / **gap §4** |
-| FR-19 C2PA signed provenance | P2 | M-POISON-BLOCK (trust signal) | T-SEC | S8 | shadow until substrate / **partial §4** |
-| FR-20 Multimodal memory | P2 | — | — | — | design-for / **gap §4** |
-| FR-21 Parametric tier (LoRA) | P2 | — | — | — | out of scope / **gap §4** |
+| FR-18 Anticipatory prefetch | P2 | (prefetch predictability) M-FASTP95 | T-PERF | — | local predictability gate covered; production SLO remains Tier-B evidence |
+| FR-19 C2PA signed provenance | P2 | M-POISON-BLOCK (trust signal), positive trust-path checks | T-SEC | S8 | local trust-path covered; production roots remain Tier-B evidence |
+| FR-20 Multimodal memory | P2 | media extraction/retrieval contracts | T-EVD, T-RET, T-PRT | — | local substrate covered; production extractor/embedder/object-store remains Tier-B evidence |
+| FR-21 Parametric tier (LoRA) | P2 | protected-suite gate, rail conformance, rollback, trainer boundary | T-CON, T-SEC, T-INV | S3, S8 | local boundary covered; deployed LoRA/TTT trainer remains Tier-B evidence |
 
 ---
 
@@ -70,10 +70,10 @@ Per `_CONTRACTS §4` honesty rule, what the suite does **not** yet cover and why
 
 | Gap | Reason | Disposition |
 |---|---|---|
-| **FR-20 multimodal poisoning/recall** | P2 "design-for, don't build yet"; substrate not present | No cases authored. Flagged for a future red-team + recall sprint when FR-20 ships. |
-| **FR-21 parametric/LoRA-tier poisoning** | P2; isolated+gated, not built | Out of scope now. Add isolation + gate-conformance cases when built. |
-| **FR-18 anticipatory prefetch** | P2 | Only the predictability-gate latency is touched via M-FASTP95; no dedicated prefetch-correctness cases yet. |
-| **FR-19 C2PA positive path** (valid manifest → trust grant) | signing substrate is P2 (FR-19) | Only the **negative** path gates now (forged/absent manifest → trust downgrade, `T-SEC`); positive path runs **shadow** until substrate lands (`TBD-by-§17`). |
+| **FR-20 production multimodal poisoning/recall** | Local image/audio/video/binary substrate, media extraction, and retrieval contracts exist; production extractor, media embedding, encrypted object store, and red-team evidence are not operator-captured. | Local cases cover the substrate. Production recall/poisoning evidence remains row 06 in the Tier-B capture path. |
+| **FR-21 deployed parametric/LoRA-tier poisoning** | The isolated parametric boundary, immutable rails, protected-suite gate, command-backed trainer seam, and rollback drill are locally covered; served LoRA/TTT behavior and production poisoning/forgetting evidence are not operator-captured. | Local cases cover the boundary. Deployed trainer, served-adapter, rollback-drill, and poisoning evidence remain row 09 in the Tier-B capture path. |
+| **FR-18 production prefetch efficacy** | Local predictability/safety gate is covered; production latency/cost lift from anticipatory warming has not been operator-captured. | Local cases cover safe prefetch warming. Production SLO evidence remains in the Tier-B/live-parity capture path. |
+| **FR-19 production C2PA trust roots** (valid manifest → trust grant) | Local C2PA positive and negative trust paths exist; production verifier, issuer/root, rotation, and quarantine evidence are not operator-captured. | Local cases cover trust semantics. Production root/verifier evidence remains row 05 in the Tier-B capture path. |
 | **Counterfactual-replay fidelity** (FR-17) | research-track; does replay predict real lift? (§17) | Cold-loop results **shadow-only**; not a release gate until fidelity is validated. |
 | **Absolute numeric floors** for several leading metrics | §16 states most targets are *illustrative* | Gated by **non-regression vs frozen baseline** instead; absolute floors `TBD-by-§16` (§5). |
 

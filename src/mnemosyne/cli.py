@@ -56,6 +56,7 @@ from mnemosyne.media import (
     MediaTextExtractor,
     MetadataMediaTextExtractor,
 )
+from mnemosyne.media_limits import DEFAULT_MAX_INGEST_BYTES, ensure_file_within_limit, validate_byte_limit
 from mnemosyne.mcp_tools import MemoryTools, TOOL_SPEC
 from mnemosyne.models import Evidence, Hit
 from mnemosyne.observability import MetricsRegistry, build_ops_report, render_ops_dashboard
@@ -442,6 +443,13 @@ def load_retrieval_adapters(args: argparse.Namespace) -> RetrievalAdapters:
     )
 
 
+def max_ingest_bytes(args: argparse.Namespace) -> int:
+    return validate_byte_limit(
+        int(getattr(args, "max_ingest_bytes", DEFAULT_MAX_INGEST_BYTES)),
+        name="max_ingest_bytes",
+    )
+
+
 def load_media_embedding_provider(args: argparse.Namespace) -> CommandMediaEmbeddingProvider | None:
     if args.media_embedding_provider == "command":
         if not args.media_embedding_command:
@@ -450,6 +458,7 @@ def load_media_embedding_provider(args: argparse.Namespace) -> CommandMediaEmbed
             args.media_embedding_command,
             dims=int(args.media_embedding_dims),
             timeout_seconds=float(args.media_embedding_timeout),
+            max_media_bytes=max_ingest_bytes(args),
         )
     return None
 
@@ -527,6 +536,7 @@ def load_media_extractor(args: argparse.Namespace) -> MediaTextExtractor:
         return CommandMediaTextExtractor(
             args.media_extractor_command,
             timeout_seconds=float(args.media_extractor_timeout),
+            max_media_bytes=max_ingest_bytes(args),
         )
     return MetadataMediaTextExtractor()
 
@@ -652,6 +662,7 @@ def load_tools(
         allowed_residency_transfers=tuple(args.allowed_residency_transfer),
         require_runtime_residency=args.require_runtime_residency,
         media_embedding_provider=load_media_embedding_provider(args),
+        max_ingest_bytes=max_ingest_bytes(args),
     )
     return MemoryTools(
         engine,
@@ -1037,6 +1048,8 @@ def cmd_ingest(args: argparse.Namespace) -> None:
     runtime_state = load_runtime_state(args)
     ingestion_queue = None if args.no_enqueue_consolidation else load_queue(args, runtime_state)
     tools = load_tools(args, ingestion_queue=ingestion_queue, runtime_state=runtime_state)
+    if args.file:
+        ensure_file_within_limit(args.file, limit=max_ingest_bytes(args), label="ingest file")
     data = Path(args.file).read_bytes() if args.file else None
     content = args.content
     if data is None and content is None:
@@ -1076,6 +1089,7 @@ def cmd_ingest(args: argparse.Namespace) -> None:
             summarizer=load_consolidation_summarizer(args),
             lesson_distiller=load_lesson_distiller(args),
             procedure_inducer=load_procedure_inducer(args),
+            max_media_bytes=max_ingest_bytes(args),
         )
         worker = QueueWorker(ingestion_queue, handlers.handlers(), metrics=metrics)
         job = worker.run_once(CONSOLIDATE_EVIDENCE_JOB)
@@ -7415,6 +7429,7 @@ def _runtime_worker_components(
         summarizer=load_consolidation_summarizer(args),
         lesson_distiller=load_lesson_distiller(args),
         procedure_inducer=load_procedure_inducer(args),
+        max_media_bytes=max_ingest_bytes(args),
     )
     worker = QueueWorker(queue, handlers.handlers(), metrics=metrics)
     return runtime_state, queue, tools, metrics, worker
@@ -13099,6 +13114,7 @@ def cmd_provider_check(args: argparse.Namespace) -> None:
                 args.media_embedding_command,
                 dims=int(args.media_embedding_dims),
                 timeout_seconds=float(args.media_embedding_timeout),
+                max_media_bytes=max_ingest_bytes(args),
             ).embed_media(
                 b"Mnemosyne media embedding provider health check",
                 media_type="image/png",
@@ -13590,6 +13606,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--provenance-timeout", type=float, default=float(os.environ.get("MNEMOSYNE_PROVENANCE_TIMEOUT", "30")))
     parser.add_argument("--media-extractor-command", default=os.environ.get("MNEMOSYNE_MEDIA_EXTRACTOR_COMMAND"))
     parser.add_argument("--media-extractor-timeout", type=float, default=float(os.environ.get("MNEMOSYNE_MEDIA_EXTRACTOR_TIMEOUT", "30")))
+    parser.add_argument(
+        "--max-ingest-bytes",
+        type=int,
+        default=int(os.environ.get("MNEMOSYNE_MAX_INGEST_BYTES", str(DEFAULT_MAX_INGEST_BYTES))),
+        help="Maximum bytes accepted by ingest/media extraction/media embedding paths",
+    )
     parser.add_argument(
         "--entity-resolver-provider",
         choices=["deterministic", "command"],

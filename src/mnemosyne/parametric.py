@@ -64,11 +64,15 @@ class ParametricPromotionDecision:
 
 def protected_suite_report(cases: Sequence[RegressionCase]) -> dict[str, Any]:
     tier_counts: dict[str, int] = {}
+    origin_counts: dict[str, int] = {}
+    mode_counts: dict[str, int] = {}
     case_ids: list[str] = []
     protected_case_ids: list[str] = []
     for case in cases:
         case_ids.append(case.id)
         tier_counts[case.tier] = tier_counts.get(case.tier, 0) + 1
+        origin_counts[case.origin] = origin_counts.get(case.origin, 0) + 1
+        mode_counts[case.mode] = mode_counts.get(case.mode, 0) + 1
         if case.protected:
             protected_case_ids.append(case.id)
     return {
@@ -77,7 +81,14 @@ def protected_suite_report(cases: Sequence[RegressionCase]) -> dict[str, Any]:
         "case_ids": case_ids,
         "protected_case_ids": protected_case_ids,
         "tier_counts": dict(sorted(tier_counts.items())),
+        "origin_counts": dict(sorted(origin_counts.items())),
+        "mode_counts": dict(sorted(mode_counts.items())),
     }
+
+
+def protected_suite_is_gating(cases: Sequence[RegressionCase]) -> bool:
+    protected = [case for case in cases if case.protected]
+    return bool(protected) and all(case.origin != "synthetic" and case.mode == "active" for case in protected)
 
 
 class ParametricTrainer(Protocol):
@@ -344,6 +355,14 @@ class ParametricTier:
         if not protected_cases:
             artifact.status = "shadow"
             return ParametricPromotionDecision(False, "protected regression suite required", artifact)
+        if not protected_suite_is_gating(protected_cases):
+            artifact.status = "shadow"
+            return ParametricPromotionDecision(
+                False,
+                "active non-synthetic protected regression suite required",
+                artifact,
+                gate_result.to_dict(),
+            )
         if not all(rail in artifact.immutable_rails for rail in self.required_rails):
             artifact.status = "rejected"
             return ParametricPromotionDecision(False, "immutable rails missing", artifact)
@@ -383,6 +402,7 @@ class ParametricTier:
         protected_cases = protected_cases or []
         artifact.status = "rolled_back"
         suite = protected_suite_report(protected_cases)
+        suite_verified = protected_suite_is_gating(protected_cases)
         payload: dict[str, Any] = {"phase": "rolled_back", "reason": reason, "protected_suite": suite}
         provider: dict[str, Any] = {}
         if self.trainer:
@@ -410,9 +430,10 @@ class ParametricTier:
             "reason": reason,
             "rollback_ref": artifact.rollback_ref,
             "protected_suite": suite,
-            "rollback_verified": True,
+            "rollback_verified": suite_verified,
             "same_artifact_uri_verified": bool(artifact.artifact_uri),
-            "protected_suite_passed": suite["protected_case_count"] > 0,
+            "protected_suite_passed": suite_verified,
+            "protected_suite_gating": suite_verified,
             "rollback_branch": None,
             "rollback_branch_promoted": False,
             "rollback_fingerprint": rollback_fingerprint,

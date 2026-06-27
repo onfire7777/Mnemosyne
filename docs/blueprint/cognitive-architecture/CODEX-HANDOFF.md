@@ -36,7 +36,7 @@
 - Build and measure functional indicator properties only.
 - Never claim phenomenal consciousness, subjective experience, sentience, or welfare status.
 - If indicator scores become high, flag the welfare question for human review; do not draw a welfare conclusion.
-- No G1-G4 change ships unless it satisfies the preregistered target-up / guardrail-not-down rule against `eval/g0/baselines/baseline-0.json`.
+- No G1-G4 change ships unless it satisfies the preregistered target-up / guardrail-not-down rule against the current accepted `eval/g0/baselines/baseline-0.json`; accepted older slices remain traceable through `eval/g0/decision-log.jsonl` and report `gate_decisions` once their target values are folded into the baseline.
 - Generativity, self-loop, and imagination remain shadow/advisory and off the answer critical path until promoted by gates.
 - Graph retrieval must fail closed unless relation hits are backed by visible source evidence under the active trust, sensitivity, quarantine, and branch policy.
 
@@ -62,6 +62,9 @@
 - Workspace stream reports now export bounded `workspace-consolidation-advisory.v1` evidence, and consolidation records it as a shadow-only `workspace_advisory` pass while leaving live prediction-error gating, replay priority, and mutation untouched.
 - Dreamer specialist invocations now report `specialist-promotion-evidence.v1` with redacted candidate/source refs, `promoted=false`, and `gate_result=null`; G0 records it through `specialist_promotion_evidence_contract`.
 - Workspace retrieval-controller promotion now has a default-off `workspace-retrieval-advisory.v1` seam: provider filters strip all workspace-controller keys, normal broadcast remains `used_for_ranking=false`, and only explicit policy plus request opt-in can boost already-retrieved tenant/branch-scoped CID-backed candidates. G0 records it through `workspace_retrieval_controller_contract`, and `eval/g0/preregistrations/g4-workspace-retrieval-controller-gate.json` passes with target delta `+1.0` and guardrails stable.
+- Parametric promotion now treats synthetic/shadow protected-suite fallbacks as non-gating: `parametric_evaluate` cannot promote without persisted active non-synthetic protected cases, and rollback evidence reports `rollback_verified=false` when only synthetic cases are present.
+- Calibration datasets now require `correct` to be a real JSON boolean; strings like `"false"` and numeric truthy/falsy labels are rejected before calibration is tuned or persisted.
+- Multimodal/local media byte caps are enforced across CLI file ingest, MCP/base64 ingest, ingestion/object-store/provider calls, runtime media-extract jobs, and command media embedder/extractor temp-file boundaries.
 
 ## Next Safe Queue
 

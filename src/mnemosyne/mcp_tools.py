@@ -11,9 +11,10 @@ from mnemosyne.ids import new_id
 from mnemosyne.ingestion import IngestRequest, IngestionPipeline
 from mnemosyne.gate import GateResult, RegressionCase
 from mnemosyne.learning import LearningSystem, Trajectory, counterfactual_replay_score
+from mnemosyne.media_limits import DEFAULT_MAX_INGEST_BYTES, enforce_byte_limit
 from mnemosyne.models import Assertion, Evidence, Preference, Relation, parse_dt
 from mnemosyne.observability import MetricsRegistry
-from mnemosyne.parametric import ParametricTier, protected_suite_report
+from mnemosyne.parametric import ParametricTier, protected_suite_is_gating, protected_suite_report
 from mnemosyne.prefetch import AnticipatoryPrefetcher, PrefetchCandidate
 from mnemosyne.privacy import ErasureMode
 from mnemosyne.runtime_state import RuntimeState
@@ -349,10 +350,25 @@ class MemoryTools:
         sensitivity: int = 0,
     ) -> dict[str, Any]:
         if isinstance(data, str):
+            max_bytes = getattr(self.ingestion, "max_ingest_bytes", DEFAULT_MAX_INGEST_BYTES)
             try:
-                data = base64.b64decode(data.encode("ascii"), validate=True)
+                encoded = data.encode("ascii")
+            except UnicodeEncodeError as exc:
+                raise ValueError("ingest data must be base64-encoded when sent as a string") from exc
+            max_encoded = ((max_bytes + 2) // 3) * 4
+            if len(encoded) > max_encoded:
+                raise ValueError(f"ingest data exceeds byte limit ({len(encoded)} base64 bytes > {max_encoded})")
+            try:
+                data = base64.b64decode(encoded, validate=True)
             except Exception as exc:
                 raise ValueError("ingest data must be base64-encoded when sent as a string") from exc
+            enforce_byte_limit(data, limit=max_bytes, label="ingest data")
+        elif data is not None:
+            enforce_byte_limit(
+                data,
+                limit=getattr(self.ingestion, "max_ingest_bytes", DEFAULT_MAX_INGEST_BYTES),
+                label="ingest data",
+            )
         if content is None and data is None:
             raise ValueError("ingest requires content or data")
         return self.ingestion.ingest(
@@ -1225,9 +1241,13 @@ class MemoryTools:
         if protected_case_count < 0:
             raise ValueError("protected_case_count must be non-negative")
         if self.runtime_state:
-            persisted = [case for case in self.runtime_state.load_gate_cases() if case.protected]
+            persisted = [
+                case
+                for case in self.runtime_state.load_gate_cases()
+                if case.protected and case.origin != "synthetic" and case.mode == "active"
+            ]
             if persisted:
-                return persisted, "runtime_state"
+                return persisted[:protected_case_count], "runtime_state"
         return (
             [
                 RegressionCase(
@@ -1236,6 +1256,8 @@ class MemoryTools:
                     query="parametric protected",
                     expected_substring="protected",
                     protected=True,
+                    origin="synthetic",
+                    mode="shadow",
                 )
                 for index in range(protected_case_count)
             ],
@@ -1261,13 +1283,24 @@ class MemoryTools:
         )
         artifact = self.parametric.artifact_store.load_artifact(artifact_uri)
         cases, suite_source = self._parametric_protected_cases(protected_case_count)
+        protected_count = len([case for case in cases if case.protected])
+        suite_gating = (
+            suite_source == "runtime_state"
+            and protected_suite_is_gating(cases)
+            and protected_case_count > 0
+            and protected_count >= protected_case_count
+        )
+        effective_promoted = gate_promoted and suite_gating
+        regressions = list(protected_regressions or [])
+        if gate_promoted and not suite_gating:
+            regressions.append("protected-suite-non-gating")
         gate = GateResult(
             candidate_id=artifact.id,
-            promoted=gate_promoted,
-            protected_regressions=protected_regressions or [],
+            promoted=effective_promoted,
+            protected_regressions=regressions,
             failed_cases=[],
-            passed_cases=[case.id for case in cases],
-            margin=1.0 if gate_promoted else 0.0,
+            passed_cases=[case.id for case in cases] if suite_gating else [],
+            margin=1.0 if effective_promoted else 0.0,
             rollback_branch=None,
         )
         decision = self.parametric.evaluate(artifact, gate, cases)
@@ -1275,7 +1308,12 @@ class MemoryTools:
         self._save_metrics()
         result = decision.to_dict()
         result["security"] = security
-        result["protected_suite"] = {"source": suite_source, **protected_suite_report(cases)}
+        result["protected_suite"] = {
+            "source": suite_source,
+            "gating": suite_gating,
+            "required_protected_case_count": protected_case_count,
+            **protected_suite_report(cases),
+        }
         return result
 
     def parametric_rollback(
@@ -1297,12 +1335,24 @@ class MemoryTools:
         )
         artifact = self.parametric.artifact_store.load_artifact(artifact_uri)
         cases, suite_source = self._parametric_protected_cases(protected_case_count)
+        protected_count = len([case for case in cases if case.protected])
+        suite_gating = (
+            suite_source == "runtime_state"
+            and protected_suite_is_gating(cases)
+            and protected_case_count > 0
+            and protected_count >= protected_case_count
+        )
         rolled_back = self.parametric.rollback(artifact, reason, protected_cases=cases)
         self.metrics.record_gate(promoted=False, rolled_back=True)
         self._save_metrics()
         result = rolled_back.to_dict()
         result["security"] = security
-        result["protected_suite"] = {"source": suite_source, **protected_suite_report(cases)}
+        result["protected_suite"] = {
+            "source": suite_source,
+            "gating": suite_gating,
+            "required_protected_case_count": protected_case_count,
+            **protected_suite_report(cases),
+        }
         rollback_record = dict(result.get("rail_report", {}).get("rollback") or {})
         if rollback_record:
             rollback_record["rollback_provider_authorized"] = security.get("allowed") is True

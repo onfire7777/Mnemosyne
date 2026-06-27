@@ -23,6 +23,7 @@ from mnemosyne.eval import run_seed_suite
 from mnemosyne.gate import RegressionCase
 from mnemosyne.lifecycle import FidelityTier, LifecycleState, apply_rehearsal_schedule, demotion_decision
 from mnemosyne.media import MEDIA_EXTRACT_JOB, MediaTextExtractor, MetadataMediaTextExtractor
+from mnemosyne.media_limits import DEFAULT_MAX_INGEST_BYTES, enforce_byte_limit, validate_byte_limit
 from mnemosyne.models import Evidence, Relation
 from mnemosyne.observability import MetricsRegistry
 from mnemosyne.queue import InProcessQueue
@@ -62,12 +63,14 @@ class RuntimeJobHandlers:
         summarizer: EvidenceSummarizer | None = None,
         lesson_distiller: LessonDistiller | None = None,
         procedure_inducer: ProcedureInducer | None = None,
+        max_media_bytes: int = DEFAULT_MAX_INGEST_BYTES,
     ):
         self.engine = engine
         self.queue = queue
         self.metrics = metrics or MetricsRegistry()
         self.object_store = object_store or LocalObjectStore(".mnemosyne/objects")
         self.media_extractor = media_extractor or MetadataMediaTextExtractor()
+        self.max_media_bytes = validate_byte_limit(max_media_bytes, name="max_media_bytes")
         self.learning = learning
         self.gate_cases = gate_cases or []
         self._projection_recompute_memo: set[str] = set()
@@ -174,8 +177,10 @@ class RuntimeJobHandlers:
         modality = str(payload.get("modality") or getattr(source, "modality", "binary"))
         metadata = dict(getattr(source, "metadata", {}) or {})
         metadata.update(payload.get("metadata", {}) or {})
+        media_payload = self.object_store.read_bytes(content_pointer)
+        enforce_byte_limit(media_payload, limit=self.max_media_bytes, label="media extraction payload")
         extracted = self.media_extractor.extract(
-            self.object_store.read_bytes(content_pointer),
+            media_payload,
             media_type=media_type,
             modality=modality,
             metadata=metadata,

@@ -2412,14 +2412,14 @@ def test_shared_engine_contract_memory_tools_parametric_facades(
         artifact_uri=artifact["artifact_uri"],
         role="operator",
         source_trust_tier=0,
-        protected_case_count=3,
+        protected_case_count=1,
     )
     rolled_back = tools.parametric_rollback(
         artifact_uri=artifact["artifact_uri"],
         reason="shared protected-suite rollback drill",
         role="operator",
         source_trust_tier=0,
-        protected_case_count=3,
+        protected_case_count=1,
     )
 
     assert attribution["trajectory_id"] == trajectory["id"]

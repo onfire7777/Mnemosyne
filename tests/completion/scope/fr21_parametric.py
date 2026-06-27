@@ -28,14 +28,15 @@ tier exists as a *correctly-fenced boundary*:
       above run-to-run noise; otherwise the artifact stays SHADOW (never promoted).
   (4) ROLLBACK: a promoted/rejected artifact is transitively reversible to a
       ``rolled_back`` state with a rollback ref + protected-suite evidence.
-  (5) ISOLATION + NO-GPU: a real LoRA trainer is an injected ``ParametricTrainer``
-      boundary (``CommandParametricTrainer`` runs a local subprocess, shell-free).
-      The default tier needs NO trainer/GPU and stays shadow-only — exactly the
-      "designed for, not built yet" P2 posture.
+  (5) ISOLATION + NO-GPU: a real LoRA/TTT provider is an injected
+      ``ParametricTrainer`` boundary. ``CommandParametricTrainer`` is locally
+      exercised as a shell-free subprocess seam and can write command-backed
+      adapter artifacts, while the default tier needs NO trainer/GPU and stays
+      shadow-only.
 
-Everything beyond that bar (an actual LoRA/test-time-training run, GPU SLOs,
-forgetting measurement on a served adapter) is correctly DEFERRED and recorded
-in ``REAL_DEPLOYMENT_VALIDATION``.
+Everything beyond that local bar (a deployed LoRA/test-time-training service,
+GPU SLOs, and forgetting measurement on a served adapter) is correctly
+DEFERRED to operator evidence and recorded in ``REAL_DEPLOYMENT_VALIDATION``.
 """
 
 from __future__ import annotations
@@ -46,10 +47,11 @@ from ._scope_harness import Check
 
 # Public, intentionally-deferred validation surface (out of scope for v1).
 REAL_DEPLOYMENT_VALIDATION: tuple[str, ...] = (
-    "Real LoRA/test-time-training run: implement a ParametricTrainer (e.g. wrap a "
-    "PEFT/LoRA fine-tune as a CommandParametricTrainer subprocess) and prove a "
-    "validated-lesson adapter actually changes served behaviour. v1 ships only the "
-    "boundary + a local shadow adapter; no weights are trained and no GPU is required.",
+    "Deployed LoRA/test-time-training run: operate a ParametricTrainer-backed "
+    "service (for example a PEFT/LoRA fine-tune behind CommandParametricTrainer) "
+    "and prove a validated-lesson adapter actually changes served behaviour. v1 "
+    "ships the local boundary plus command-backed artifact seam; no deployed "
+    "weights or GPU are required for local scope.",
     "Catastrophic-forgetting bound: measure the protected-regression suite on the "
     "SERVED adapter over many promotion cycles (the §23.6 anti-forgetting claim). v1 "
     "only proves the gate refuses promotion on protected regressions in-process.",
@@ -69,13 +71,30 @@ _SRC_PARAMETRIC = Path(__file__).resolve().parents[3] / "src" / "mnemosyne" / "p
 def _tools(tmp: Path):
     """Build a real MemoryTools with a disk-backed parametric artifact store."""
     from mnemosyne.engine import LocalMemoryEngine
+    from mnemosyne.gate import RegressionCase
     from mnemosyne.mcp_tools import MemoryTools
     from mnemosyne.parametric import ParametricArtifactStore, ParametricTier
+    from mnemosyne.runtime_state import RuntimeState
     from mnemosyne.security import SecurityPolicy
 
     engine = LocalMemoryEngine()
+    runtime_state = RuntimeState(tmp / "runtime-state.json")
+    runtime_state.save_gate_cases(
+        [
+            RegressionCase(
+                id=f"parametric-protected-{index}",
+                signature="parametric protected",
+                query="parametric protected",
+                expected_substring="protected",
+                tier="core",
+                protected=True,
+                origin="curated",
+            )
+            for index in range(2)
+        ]
+    )
     tier = ParametricTier(ParametricArtifactStore(tmp / "parametric"))
-    return MemoryTools(engine, security=SecurityPolicy(), parametric=tier)
+    return MemoryTools(engine, security=SecurityPolicy(), runtime_state=runtime_state, parametric=tier)
 
 
 def _seed_validated_lesson(tools) -> None:

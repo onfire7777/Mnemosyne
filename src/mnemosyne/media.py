@@ -9,6 +9,8 @@ import tempfile
 from dataclasses import asdict, dataclass, field
 from typing import Any, Protocol
 
+from mnemosyne.media_limits import DEFAULT_MAX_INGEST_BYTES, enforce_byte_limit, validate_byte_limit
+
 
 MEDIA_EXTRACT_JOB = "media_extract"
 DERIVED_TEXT_FIELDS = (
@@ -61,11 +63,17 @@ class MetadataMediaTextExtractor:
 class CommandMediaTextExtractor:
     """Run an operator-configured local media extractor without invoking a shell."""
 
-    def __init__(self, command: str | list[str], timeout_seconds: float = 30.0):
+    def __init__(
+        self,
+        command: str | list[str],
+        timeout_seconds: float = 30.0,
+        max_media_bytes: int = DEFAULT_MAX_INGEST_BYTES,
+    ):
         self.command = shlex.split(command) if isinstance(command, str) else list(command)
         if not self.command:
             raise ValueError("media extractor command must not be empty")
         self.timeout_seconds = timeout_seconds
+        self.max_media_bytes = validate_byte_limit(max_media_bytes, name="max_media_bytes")
 
     def extract(
         self,
@@ -75,6 +83,7 @@ class CommandMediaTextExtractor:
         modality: str,
         metadata: dict[str, Any],
     ) -> MediaExtractionResult:
+        enforce_byte_limit(payload, limit=self.max_media_bytes, label="media extraction payload")
         suffix = _suffix_for_media_type(media_type)
         with tempfile.NamedTemporaryFile(suffix=suffix) as tmp:
             tmp.write(payload)

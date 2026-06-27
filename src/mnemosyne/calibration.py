@@ -30,12 +30,15 @@ class CalibrationExample:
         if "correct" not in row:
             raise ValueError("calibration example requires correct")
         confidence = max(0.0, min(1.0, float(row["confidence"])))
+        correct = row["correct"]
+        if type(correct) is not bool:
+            raise ValueError("calibration example correct must be a JSON boolean")
         prediction_set_size = int(row.get("prediction_set_size", 1))
         if prediction_set_size < 0:
             raise ValueError("calibration example prediction_set_size must be non-negative")
         return cls(
             confidence=confidence,
-            correct=bool(row["correct"]),
+            correct=correct,
             prediction_set_size=prediction_set_size,
         )
 

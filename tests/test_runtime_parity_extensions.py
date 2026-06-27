@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import os
 import json
 import shlex
@@ -36,12 +37,14 @@ from mnemosyne.jobs import (
 from mnemosyne.learning import LearningSystem, Lesson, Procedure, Trajectory
 from mnemosyne.lifecycle import FidelityTier
 from mnemosyne.media import MEDIA_EXTRACT_JOB, MediaExtractionResult
+from mnemosyne.mcp_tools import MemoryTools
 from mnemosyne.models import Assertion, Contradiction, Evidence, Preference, Relation
 from mnemosyne.observability import MetricsRegistry, build_ops_report, render_ops_dashboard
 from mnemosyne.parametric import ParametricArtifactStore, ParametricTier
 from mnemosyne.prefetch import AnticipatoryPrefetcher, PrefetchCandidate
 from mnemosyne.provenance import C2paToolVerifier, ProvenanceTrustPolicy, SignedProvenanceVerifier
 from mnemosyne.queue import InProcessQueue, QueueWorker
+from mnemosyne.retrieval import CommandMediaEmbeddingProvider
 from mnemosyne.runtime_state import RuntimeState
 from mnemosyne.storage import EncryptedLocalObjectStore, JsonKeyManager, LocalObjectStore
 from mnemosyne.text import hashing_embedding
@@ -74,8 +77,10 @@ def test_a11_hosted_mcp_local_readiness_commands_are_registered() -> None:
 class StaticMediaExtractor:
     def __init__(self, text: str):
         self.text = text
+        self.calls = 0
 
     def extract(self, payload: bytes, *, media_type: str, modality: str, metadata: dict):
+        self.calls += 1
         return MediaExtractionResult(
             text=self.text,
             sources=["test_extractor"],
@@ -778,6 +783,103 @@ def test_ingestion_indexes_raw_media_embedding_before_extraction(tmp_path) -> No
     assert hits.hits[0].id == result.cid
     assert "dense_media" in hits.hits[0].channel
     assert hits.hits[0].metadata["stored_media_embedding"] is True
+
+
+def test_ingestion_rejects_oversized_media_before_object_store_or_embedding(tmp_path) -> None:
+    engine = LocalMemoryEngine()
+    object_store = LocalObjectStore(tmp_path / "objects")
+    media_embedding = StaticMediaEmbeddingProvider("oversized")
+    pipeline = IngestionPipeline(
+        engine,
+        object_store,
+        media_embedding_provider=media_embedding,
+        max_ingest_bytes=4,
+    )
+
+    with pytest.raises(ValueError, match="ingest payload exceeds byte limit"):
+        pipeline.ingest(
+            IngestRequest(
+                tenant_id=TENANT,
+                user_id=USER,
+                actor="user",
+                source_type="camera",
+                data=b"12345",
+                modality="image",
+                media_type="image/png",
+            )
+        )
+
+    assert media_embedding.calls == []
+    assert list((tmp_path / "objects").rglob("*")) == []
+
+
+def test_mcp_ingest_rejects_oversized_base64_before_pipeline_decode(tmp_path) -> None:
+    ingestion = IngestionPipeline(LocalMemoryEngine(), LocalObjectStore(tmp_path / "objects"), max_ingest_bytes=4)
+    tools = MemoryTools(ingestion.engine, ingestion=ingestion)
+    encoded = base64.b64encode(b"12345").decode("ascii")
+
+    with pytest.raises(ValueError, match="ingest data exceeds byte limit"):
+        tools.ingest(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="camera",
+            data=encoded,
+            modality="image",
+            media_type="image/png",
+        )
+
+
+def test_media_extract_job_rejects_oversized_payload_before_extractor(tmp_path) -> None:
+    engine = LocalMemoryEngine()
+    object_store = LocalObjectStore(tmp_path / "objects")
+    media = object_store.put_bytes(b"12345", tenant_id=TENANT, kind="image", media_type="image/png")
+    source_cid = engine.append_evidence(
+        Evidence(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="camera",
+            content="",
+            content_pointer=media.uri,
+            modality="image",
+            metadata={"media_type": "image/png"},
+            trust_tier=1,
+            access_policy={"tenant": TENANT},
+        )
+    )
+    extractor = StaticMediaExtractor("should not run")
+    handlers = RuntimeJobHandlers(
+        engine,
+        InProcessQueue(),
+        object_store=object_store,
+        media_extractor=extractor,
+        max_media_bytes=4,
+    )
+
+    with pytest.raises(ValueError, match="media extraction payload exceeds byte limit"):
+        handlers.run_media_extract({"tenant_id": TENANT, "source_evidence_cid": source_cid})
+
+    assert extractor.calls == 0
+
+
+def test_command_media_embedding_rejects_oversized_payload_before_tempfile(tmp_path) -> None:
+    marker = tmp_path / "called"
+    script = tmp_path / "media-embed.py"
+    script.write_text(
+        "import pathlib, sys\npathlib.Path(sys.argv[1]).write_text('called')\nprint('{\"embedding\":[1.0]}')\n",
+        encoding="utf-8",
+    )
+    provider = CommandMediaEmbeddingProvider(
+        [sys.executable, str(script), str(marker)],
+        dims=1,
+        max_media_bytes=4,
+    )
+
+    with pytest.raises(ValueError, match="media embedding payload exceeds byte limit"):
+        provider.embed_media(b"12345", media_type="image/png", modality="image")
+
+    assert not marker.exists()
 
 
 @pytest.mark.parametrize(
