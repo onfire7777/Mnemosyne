@@ -78,7 +78,7 @@ STRONG_TRUST = 0
 # parser and subparsers, so global ``--object-store`` / ``--object-key-*`` flags
 # no longer collide with the subcommand ``--object`` flag.
 CLI_OBJECT_FLAG_STATUS = (
-    "mneme {assert,propose} --object <v> is parsed exactly; argparse abbreviation "
+    "mneme {assert,propose,correct} --object <v> is parsed exactly; argparse abbreviation "
     "matching is disabled for the top-level parser and subparsers."
 )
 

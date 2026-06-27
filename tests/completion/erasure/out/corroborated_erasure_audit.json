@@ -115,7 +115,7 @@
       "status": "ok"
     }
   ],
-  "cli_object_option_status": "mneme {assert,propose} --object <v> is parsed exactly; argparse abbreviation matching is disabled for the top-level parser and subparsers.",
+  "cli_object_option_status": "mneme {assert,propose,correct} --object <v> is parsed exactly; argparse abbreviation matching is disabled for the top-level parser and subparsers.",
   "public_surface": "python -m mnemosyne.cli (subprocess)",
   "summary": {
     "all_enforced_invariants_hold": true,
