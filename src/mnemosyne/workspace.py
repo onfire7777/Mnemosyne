@@ -12,7 +12,14 @@ import hashlib
 from itertools import islice
 from typing import Any, Iterable, Mapping, Sequence
 
-from .consciousness import BoundedCognitiveCycle, InteroceptiveProtoSelf, ProtoSelfSnapshot, workspace_bottleneck
+from .consciousness import (
+    BoundedCognitiveCycle,
+    InteroceptiveProtoSelf,
+    MetacognitiveMonitor,
+    MetacognitiveScore,
+    ProtoSelfSnapshot,
+    workspace_bottleneck,
+)
 from .dreamer import DreamReport, SandboxedDreamer
 from .models import Evidence
 from .providers import SpecialistModuleRegistry, default_registry
@@ -134,6 +141,47 @@ class WorkspaceStreamReport:
         """
 
         return workspace_consolidation_advisory(self, max_items=max_items)
+
+
+@dataclass(frozen=True, slots=True)
+class ShadowWorkspaceServiceReport:
+    """Stateful shadow-loop service report.
+
+    This is still advisory-only. The service makes the continuous workspace loop
+    explicit and measurable without creating a daemon, mutating memory, or
+    joining the answer critical path.
+    """
+
+    tenant_id: str
+    stream: WorkspaceStreamReport
+    proto_self_history: tuple[ProtoSelfSnapshot, ...]
+    metacognition: MetacognitiveScore
+    enabled: bool
+    running: bool
+    tick_ms: int
+    max_cycles: int
+    tick_count: int
+    shadow_only: bool = True
+    critical_path: bool = False
+    production_mutation: bool = False
+    promotion_gate_required: bool = True
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "tenant_id": self.tenant_id,
+            "stream": self.stream.to_dict(),
+            "proto_self_history": [asdict(row) for row in self.proto_self_history],
+            "metacognition": asdict(self.metacognition),
+            "enabled": self.enabled,
+            "running": self.running,
+            "tick_ms": self.tick_ms,
+            "max_cycles": self.max_cycles,
+            "tick_count": self.tick_count,
+            "shadow_only": self.shadow_only,
+            "critical_path": self.critical_path,
+            "production_mutation": self.production_mutation,
+            "promotion_gate_required": self.promotion_gate_required,
+        }
 
 
 @dataclass(slots=True)
@@ -341,6 +389,174 @@ class ShadowWorkspaceController:
             critical_path=critical_path,
             escalation_required=escalation_required,
         )
+
+
+@dataclass(slots=True)
+class ShadowWorkspaceService:
+    """Default-off continuous workspace service wrapper.
+
+    The service persists proto-self snapshots and feeds a metacognitive monitor
+    from each bounded shadow tick. It never starts automatically: callers must
+    opt in with ``enabled=True`` and ``start()`` before any loop can run.
+    """
+
+    controller: ShadowWorkspaceController = field(default_factory=ShadowWorkspaceController)
+    enabled: bool = False
+    monitor: MetacognitiveMonitor = field(default_factory=MetacognitiveMonitor)
+    proto_self_history: list[ProtoSelfSnapshot] = field(default_factory=list)
+    running: bool = False
+    tick_index: int = 0
+    previous_focus_id: str | None = None
+
+    def start(self) -> None:
+        if not self.enabled:
+            raise RuntimeError("shadow workspace service is disabled by default")
+        self.running = True
+
+    def stop(self) -> None:
+        self.running = False
+
+    def run_shadow_loop(
+        self,
+        *,
+        tenant_id: str,
+        item_ticks: Sequence[Iterable[WorkspaceItem | Mapping[str, Any]]],
+        evidence: Sequence[Evidence | Mapping[str, Any]] = (),
+        confidence: float = 0.75,
+        resource_health: float = 0.9,
+        error_rate: float = 0.0,
+        latency_ms: float = 0.0,
+        memory_pressure: float = 0.0,
+        rail_budget: float = 1.0,
+    ) -> ShadowWorkspaceServiceReport:
+        """Run the explicit shadow service loop and update service state."""
+
+        self._require_running()
+        stream = self.controller.run_shadow_stream(
+            tenant_id=tenant_id,
+            item_ticks=item_ticks,
+            evidence=evidence,
+            confidence=confidence,
+            resource_health=resource_health,
+            error_rate=error_rate,
+            latency_ms=latency_ms,
+            memory_pressure=memory_pressure,
+            rail_budget=rail_budget,
+        )
+        if stream.trace:
+            self.tick_index += len(stream.trace)
+            self.previous_focus_id = stream.trace[-1].focus_id
+        self._observe_stream(stream)
+        return ShadowWorkspaceServiceReport(
+            tenant_id=tenant_id,
+            stream=stream,
+            proto_self_history=tuple(self.proto_self_history),
+            metacognition=self.monitor.score(),
+            enabled=self.enabled,
+            running=self.running,
+            tick_ms=self.controller.tick_ms,
+            max_cycles=self.controller.max_cycles,
+            tick_count=len(stream.trace),
+            shadow_only=stream.shadow_only,
+            critical_path=stream.critical_path,
+            production_mutation=stream.production_mutation,
+            promotion_gate_required=stream.promotion_gate_required,
+        )
+
+    def tick(
+        self,
+        *,
+        tenant_id: str,
+        items: Iterable[WorkspaceItem | Mapping[str, Any]],
+        evidence: Sequence[Evidence | Mapping[str, Any]] = (),
+        confidence: float = 0.75,
+        resource_health: float = 0.9,
+        error_rate: float = 0.0,
+        latency_ms: float = 0.0,
+        memory_pressure: float = 0.0,
+        rail_budget: float = 1.0,
+    ) -> ShadowWorkspaceServiceReport:
+        """Run one explicit shadow service tick."""
+
+        self._require_running()
+        self.tick_index += 1
+        source_items = _bounded_items(items, limit=self.controller.max_items_per_tick)
+        idle_generated = not source_items
+        if idle_generated:
+            source_items = [
+                _idle_workspace_item(
+                    tenant_id=tenant_id,
+                    tick_index=self.tick_index,
+                    previous_focus_id=self.previous_focus_id,
+                )
+            ]
+        cycle = self.controller.run_shadow_cycle(
+            tenant_id=tenant_id,
+            items=source_items,
+            evidence=evidence,
+            confidence=confidence,
+            resource_health=resource_health,
+            error_rate=error_rate,
+            latency_ms=latency_ms,
+            memory_pressure=memory_pressure,
+            rail_budget=rail_budget,
+        )
+        trace = _trace_entry(
+            tick_index=self.tick_index,
+            report=cycle,
+            previous_focus_id=self.previous_focus_id,
+            idle_generated=idle_generated,
+        )
+        self.previous_focus_id = trace.focus_id
+        stream = WorkspaceStreamReport(
+            tenant_id=tenant_id,
+            cycles=(cycle,),
+            trace=(trace,),
+            cycle_consistency=_cycle_consistency((cycle,), (trace,)),
+            stopped_reason=str(cycle.cycle.get("state") or "continue"),
+            idle_ticks=int(idle_generated),
+            rumination_score=0.0 if trace.useful_state else 1.0,
+            shadow_only=cycle.shadow_only,
+            critical_path=cycle.critical_path,
+            production_mutation=cycle.production_mutation,
+        )
+        self._observe_stream(stream)
+        return ShadowWorkspaceServiceReport(
+            tenant_id=tenant_id,
+            stream=stream,
+            proto_self_history=tuple(self.proto_self_history),
+            metacognition=self.monitor.score(),
+            enabled=self.enabled,
+            running=self.running,
+            tick_ms=self.controller.tick_ms,
+            max_cycles=self.controller.max_cycles,
+            tick_count=1,
+            shadow_only=stream.shadow_only,
+            critical_path=stream.critical_path,
+            production_mutation=stream.production_mutation,
+            promotion_gate_required=stream.promotion_gate_required,
+        )
+
+    def _require_running(self) -> None:
+        if not self.enabled:
+            raise RuntimeError("shadow workspace service is disabled by default")
+        if not self.running:
+            raise RuntimeError("shadow workspace service must be started before ticking")
+
+    def _observe_stream(self, stream: WorkspaceStreamReport) -> None:
+        for cycle, trace in zip(stream.cycles, stream.trace, strict=True):
+            self.proto_self_history.append(cycle.proto_self)
+            answerable = not trace.idle_generated
+            abstained = bool(trace.idle_generated or cycle.escalation_required)
+            outcome_correct = bool(trace.useful_state or (abstained and not answerable))
+            self.monitor.observe(
+                confidence=cycle.proto_self.confidence,
+                outcome_correct=outcome_correct,
+                abstained=abstained,
+                answerable=answerable,
+                reality_class=trace.reality_class,
+                source="shadow-workspace-service",
+            )
 
 
 def _item_to_row(

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from mnemosyne.workspace import ShadowWorkspaceController, WorkspaceItem
+from mnemosyne.workspace import ShadowWorkspaceController, ShadowWorkspaceService, WorkspaceItem
 
 
 def test_shadow_workspace_stream_runs_bounded_default_mode_ticks() -> None:
@@ -199,3 +199,72 @@ def test_shadow_workspace_stream_exports_bounded_consolidation_advisory() -> Non
     assert advisory["replay_scores"]["cid-advisory-a"]["importance"] == 0.91
     assert advisory["items"][0]["workspace_item_id"] == "focus-advisory"
     assert "raw workspace advisory content" not in str(advisory)
+
+
+def test_shadow_workspace_service_is_default_off_and_feeds_runtime_state() -> None:
+    controller = ShadowWorkspaceController(max_workspace_items=1, max_cycles=3, max_idle_ticks=2)
+    disabled = ShadowWorkspaceService(controller=controller)
+
+    with pytest.raises(RuntimeError, match="disabled by default"):
+        disabled.tick(
+            tenant_id="tenant-stream",
+            items=[WorkspaceItem(id="focus", priority=1.0, content="not allowed before enable")],
+        )
+
+    service = ShadowWorkspaceService(controller=controller, enabled=True)
+    with pytest.raises(RuntimeError, match="started"):
+        service.tick(
+            tenant_id="tenant-stream",
+            items=[WorkspaceItem(id="focus", priority=1.0, content="not allowed before start")],
+        )
+
+    service.start()
+    single = service.tick(
+        tenant_id="tenant-stream",
+        items=[WorkspaceItem(id="focus-single", priority=0.8, content="single tick content stays redacted")],
+    ).to_dict()
+
+    assert single["tick_count"] == 1
+    assert len(single["stream"]["trace"]) == 1
+    assert len(single["proto_self_history"]) == 1
+    assert "single tick content" not in str(single)
+
+    loop_service = ShadowWorkspaceService(controller=controller, enabled=True)
+    loop_service.start()
+    report = loop_service.run_shadow_loop(
+        tenant_id="tenant-stream",
+        item_ticks=[
+            [
+                WorkspaceItem(
+                    id="focus-service",
+                    priority=0.94,
+                    content="service focus content must stay redacted",
+                    metadata={"tenant_id": "tenant-stream"},
+                )
+            ]
+        ],
+        confidence=0.83,
+        resource_health=0.91,
+        error_rate=0.02,
+        latency_ms=90.0,
+        memory_pressure=0.22,
+        rail_budget=0.95,
+    )
+    payload = report.to_dict()
+
+    assert payload["enabled"] is True
+    assert payload["running"] is True
+    assert payload["shadow_only"] is True
+    assert payload["critical_path"] is False
+    assert payload["production_mutation"] is False
+    assert payload["promotion_gate_required"] is True
+    assert payload["tick_count"] == len(payload["stream"]["trace"])
+    assert len(payload["proto_self_history"]) == payload["tick_count"]
+    assert payload["proto_self_history"][0]["confidence"] == 0.83
+    assert len(payload["metacognition"]["rows"]) == payload["tick_count"]
+    assert payload["metacognition"]["rows"][0]["source"] == "shadow-workspace-service"
+    assert payload["metacognition"]["m_ratio"] >= 0.0
+    assert "service focus content" not in str(payload)
+
+    loop_service.stop()
+    assert loop_service.running is False
