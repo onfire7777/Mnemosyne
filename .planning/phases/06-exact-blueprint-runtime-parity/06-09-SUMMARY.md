@@ -45,6 +45,12 @@ sizes/SHA-256 hashes, captured `release-audit.json`, optional expected
 `evidence/manifest.json`. This is not a new production gate and does not replace
 operator capture against deployed infrastructure.
 
+Post-plan reviewer-handoff hardening now writes `summary.json.offline_verify`
+after a successful full capture. It records the captured `bundle_dir`, expected
+bundle fingerprint, an argv-style `production-evidence-verify` command, and a
+custody-only note so reviewers can replay the offline verifier without
+reconstructing the command from prose.
+
 ## Executor Readiness
 
 Verified present:
@@ -143,6 +149,8 @@ Checked 2026-06-25 during renderer hardening:
   and unexpected commands outside the frozen production profile.
 - Successful full captures now write `bundle-manifest.json` with per-artifact
   SHA-256 hashes and copy its fingerprint into `summary.json`.
+- Successful full captures now write `summary.json.offline_verify` with the
+  exact offline verifier handoff command and expected bundle fingerprint.
 - `deployment-soak --evidence-dir` writes SHA-256 digests for its report/check
   JSON artifacts, and `release-audit --evidence-manifest` rejects missing or
   mismatched digests, artifact path escape, and report/check content divergence.
