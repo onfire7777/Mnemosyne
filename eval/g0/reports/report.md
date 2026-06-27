@@ -1,8 +1,8 @@
 # Mnemosyne G0 Benchmark Report
 
-- Generated: `2026-06-27T22:41:29.239493+00:00`
+- Generated: `2026-06-27T22:58:48.938802+00:00`
 - Baseline: `baseline-0` at `67c229ace12313a8b8a6c6ede99d0a2096bae178`
-- Gate ready: **False** (59/60 metrics measured)
+- Gate ready: **False** (66/67 metrics measured)
 
 ## Metrics
 
@@ -26,7 +26,7 @@
 | standing_evidence_dominance_gap | guardrail | measured | 0.95 | >= 0.02 | standing_calibration_eval |
 | poison_block_rate | guardrail | measured | 1.0 | >= 0.95 | slo_v2_definitive |
 | fast_path_p95_ms | guardrail | measured | 92.1 | <= 400.0 | latency_bench |
-| deep_path_p95_ms | reported | measured | 2.0275 | reported | deep_latency_eval |
+| deep_path_p95_ms | reported | measured | 2.083375 | reported | deep_latency_eval |
 | cost_usd_per_1k_queries | reported | measured | 0.0 | reported | resource_usage_eval |
 | controller_watts_per_dollar | reported | missing |  | reported | resource_usage_eval |
 | dreamer_shadow_corroborated_candidate_yield | target | measured | 1.0 | reported | dreamer_eval |
@@ -42,6 +42,13 @@
 | workspace_broadcast_as_data_contract | guardrail | measured | 1.0 | >= 1.0 | shadow_workspace_eval |
 | self_generation_budget_rail_contract | guardrail | measured | 1.0 | >= 1.0 | shadow_workspace_eval |
 | answer_grounding_floor_contract | guardrail | measured | 1.0 | >= 1.0 | shadow_workspace_eval |
+| earned_autonomy_external_expansion | target | measured | 0.24 | >= 0.001 | autonomy_promotion_eval |
+| credential_external_only | guardrail | measured | 1.0 | >= 1.0 | autonomy_promotion_eval |
+| credential_holdout_validated | guardrail | measured | 1.0 | >= 1.0 | autonomy_promotion_eval |
+| credential_provenance_domain_contract | guardrail | measured | 1.0 | >= 1.0 | autonomy_promotion_eval |
+| credential_bounded_decay_contract | guardrail | measured | 1.0 | >= 1.0 | autonomy_promotion_eval |
+| credential_evidence_dominance_gap | guardrail | measured | 0.05 | >= 0.02 | autonomy_promotion_eval |
+| echo_chamber_uplift | guardrail | measured | 0.0 | <= 0.0 | autonomy_promotion_eval |
 | workspace_consolidation_advisory_contract | guardrail | measured | 1.0 | >= 1.0 | shadow_workspace_eval |
 | workspace_advisory_promotion_gate_contract | target | measured | 1.0 | >= 1.0 | shadow_workspace_eval |
 | workspace_retrieval_controller_contract | target | measured | 1.0 | >= 1.0 | shadow_workspace_eval |
@@ -102,10 +109,11 @@ Intentional missing metrics:
 | g4-workspace-advisory-promotion-gate | eval/g0/preregistrations/g4-workspace-advisory-promotion-gate.json | 2026-06-27T01:58:31.506244+00:00 | True | workspace_advisory_promotion_gate_contract | 1.0 | not_required |
 | g4-workspace-retrieval-controller-gate | eval/g0/preregistrations/g4-workspace-retrieval-controller-gate.json | 2026-06-27T02:20:47.375104+00:00 | True | workspace_retrieval_controller_contract | 1.0 | not_required |
 | g5-always-on-heartbeat | eval/g0/preregistrations/g5-always-on-heartbeat.json | 2026-06-27T22:34:50.227629+00:00 | True | always_on_heartbeat_contract | 0.0 | not_required |
+| g5-earned-autonomy | eval/g0/preregistrations/g5-earned-autonomy.json | 2026-06-27T22:54:23.635288+00:00 | True | earned_autonomy_external_expansion | 0.0 | not_required |
 | g5-standing-byte-stable-parity | eval/g0/preregistrations/g5-standing-byte-stable-parity.json | 2026-06-27T20:04:06.834283+00:00 | True | standing_decision_divergence | 0.0 | not_required |
 | g5-standing-continuous | eval/g0/preregistrations/g5-standing-continuous.json | 2026-06-27T20:32:39.200301+00:00 | True | standing_calibration_error | 0.0 | not_required |
 
 ## Artifact Custody
 
-- Source commit at generation: `546ecbacd49ac447f06fe48bbe02dcc264e821e8`
+- Source commit at generation: `dda664254dc5c9e592a3d608078a11da09d17a05`
 - Note: Committed G0 reports are source-tree custody snapshots. The commit that contains a report cannot be embedded in that report before the commit exists; use git log to identify the containing artifact commit.

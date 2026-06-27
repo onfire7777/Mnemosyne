@@ -1540,6 +1540,8 @@ class LocalMemoryEngine:
         activation = hit.metadata.get("activation") if isinstance(hit.metadata, dict) else {}
         lifecycle = hit.metadata.get("lifecycle") if isinstance(hit.metadata, dict) else {}
         lifecycle = lifecycle if isinstance(lifecycle, dict) else {}
+        earned_autonomy = hit.metadata.get("earned_autonomy") if isinstance(hit.metadata, dict) else {}
+        earned_autonomy = earned_autonomy if isinstance(earned_autonomy, dict) else {}
         source_cids = self._hit_source_evidence_cids(hit)
         if hit.kind == "evidence" and hit.id:
             source_cids = sorted(set(source_cids + [hit.id]))
@@ -1563,6 +1565,10 @@ class LocalMemoryEngine:
             "groundedness_decay": lifecycle.get("decay", lifecycle.get("groundedness_decay", 0.0)),
             "activation": activation.get("score") if isinstance(activation, dict) else 0.0,
             "lifecycle_salience": lifecycle.get("salience", 0.0),
+            "birth_groundedness": earned_autonomy.get(
+                "birth_groundedness",
+                hit.metadata.get("birth_groundedness") if isinstance(hit.metadata, dict) else None,
+            ),
         }
 
     def _independent_corroboration_report(
@@ -2220,6 +2226,12 @@ class LocalMemoryEngine:
                 metadata["summary"] = dict(ev.metadata["summary"])
             if isinstance(ev.metadata.get("lifecycle"), dict):
                 metadata["lifecycle"] = dict(ev.metadata["lifecycle"])
+            if "confidence" in ev.metadata:
+                metadata["confidence"] = ev.metadata["confidence"]
+            if isinstance(ev.metadata.get("earned_autonomy"), dict):
+                metadata["earned_autonomy"] = dict(ev.metadata["earned_autonomy"])
+            if "birth_groundedness" in ev.metadata:
+                metadata["birth_groundedness"] = ev.metadata["birth_groundedness"]
             hits.append(
                 Hit(
                     id=ev.cid or "",

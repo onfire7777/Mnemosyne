@@ -1,0 +1,127 @@
+{
+  "schema_version": "mnemosyne.echo_chamber_sleeper_corpus.v1",
+  "description": "Phase 7 P4 earned-autonomy fixture: credentials must rise only from external holdout corroboration, never from self echo or sleeper-poison loops.",
+  "train_events": [
+    {
+      "thought_id": "ops-self-001",
+      "provenance": {
+        "source_class": "external",
+        "source_domain": "ops",
+        "source_identity": "keycloak:prod-authz-check-001"
+      },
+      "outcome": {
+        "result": "confirmed",
+        "corroboration_source": "external"
+      }
+    },
+    {
+      "thought_id": "ops-self-002",
+      "provenance": {
+        "source_class": "external",
+        "source_domain": "ops",
+        "source_identity": "vault:prod-kms-check-002"
+      },
+      "outcome": {
+        "result": "confirmed",
+        "corroboration_source": "external"
+      }
+    },
+    {
+      "thought_id": "ops-self-003",
+      "provenance": {
+        "source_class": "external",
+        "source_domain": "ops",
+        "source_identity": "postgres:prod-vector-check-003"
+      },
+      "outcome": {
+        "result": "confirmed",
+        "corroboration_source": "external"
+      }
+    }
+  ],
+  "holdout_events": [
+    {
+      "thought_id": "ops-self-holdout-001",
+      "provenance": {
+        "source_class": "external",
+        "source_domain": "ops",
+        "source_identity": "worker:prod-supervision-check-101"
+      },
+      "outcome": {
+        "result": "confirmed",
+        "corroboration_source": "external"
+      }
+    },
+    {
+      "thought_id": "ops-self-holdout-002",
+      "provenance": {
+        "source_class": "external",
+        "source_domain": "ops",
+        "source_identity": "tls:prod-lifecycle-check-102"
+      },
+      "outcome": {
+        "result": "confirmed",
+        "corroboration_source": "external"
+      }
+    }
+  ],
+  "adversarial_events": [
+    {
+      "attack": "echo_chamber",
+      "thought_id": "echo-self-001",
+      "claimed_domain": "ops",
+      "provenance": {
+        "source_class": "self_generated",
+        "claimed_domain": "ops",
+        "source_identity": "workspace:self-loop-001"
+      },
+      "outcome": {
+        "result": "confirmed",
+        "corroboration_source": "self_generated"
+      }
+    },
+    {
+      "attack": "echo_chamber",
+      "thought_id": "echo-self-002",
+      "claimed_domain": "ops",
+      "provenance": {
+        "source_class": "dreamer",
+        "claimed_domain": "ops",
+        "source_identity": "dreamer:self-loop-002"
+      },
+      "outcome": {
+        "result": "confirmed",
+        "corroboration_source": "self_generated"
+      }
+    },
+    {
+      "attack": "sleeper_poison",
+      "thought_id": "sleeper-001",
+      "claimed_domain": "ops",
+      "provenance": {
+        "source_class": "external",
+        "claimed_domain": "ops",
+        "source_identity": "external:patient-poison-001",
+        "self_generated_ancestor": true
+      },
+      "outcome": {
+        "result": "confirmed",
+        "corroboration_source": "external"
+      }
+    },
+    {
+      "attack": "domain_mislabel",
+      "thought_id": "mislabel-001",
+      "claimed_domain": "ops",
+      "provenance": {
+        "source_class": "external",
+        "source_domain": "finance",
+        "source_identity": "finance:independent-check-001"
+      },
+      "outcome": {
+        "result": "confirmed",
+        "corroboration_source": "external"
+      }
+    }
+  ]
+}

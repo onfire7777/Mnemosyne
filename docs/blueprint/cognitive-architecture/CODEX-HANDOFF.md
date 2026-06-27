@@ -22,7 +22,7 @@
 
 - `06-CONSCIOUSNESS-AND-CONTINUOUS-WORKSPACE.md` is already in the repo and tracked.
 - `04-G0-BENCHMARK-SPEC.md` is already updated to `Implemented (eval/g0/)`.
-- `README.md` and the current roadmap treat G0 plus the shadow G1-G4 cognitive seeds as wired and gate-measured; strict parity is now blocked on Tier-B operator-captured production evidence, not additional speculative cognitive code.
+- `README.md` and the current roadmap treat G0, the G1-G4 cognitive seeds, and Phase 7 plans 01-04 as wired and gate-measured. Strict v1.0 parity is still blocked on Tier-B operator-captured production evidence; Phase 7 P5 remains open for the owner-checkpoint no-toggle retirement.
 - The G0 harness is implemented under `eval/g0/` and can be run through both:
   - `python -m eval.g0.runner`
   - `mneme eval g0`
@@ -36,7 +36,7 @@
 - Build and measure functional indicator properties only.
 - Never claim phenomenal consciousness, subjective experience, sentience, or welfare status.
 - If indicator scores become high, flag the welfare question for human review; do not draw a welfare conclusion.
-- No G1-G4 change ships unless it satisfies the preregistered target-up / guardrail-not-down rule against the current accepted `eval/g0/baselines/baseline-0.json`; accepted older slices remain traceable through `eval/g0/decision-log.jsonl` and report `gate_decisions` once their target values are folded into the baseline.
+- No G1-G4 or Phase 7 cognitive-substrate change ships unless it satisfies the preregistered target-up / guardrail-not-down rule against the current accepted `eval/g0/baselines/baseline-0.json`; accepted older slices remain traceable through `eval/g0/decision-log.jsonl` and report `gate_decisions` once their target values are folded into the baseline.
 - Generativity, self-loop, and imagination remain shadow/advisory and off the answer critical path until promoted by gates.
 - Graph retrieval must fail closed unless relation hits are backed by visible source evidence under the active trust, sensitivity, quarantine, and branch policy.
 
@@ -65,11 +65,12 @@
 - Parametric promotion now treats synthetic/shadow protected-suite fallbacks as non-gating: `parametric_evaluate` cannot promote without persisted active non-synthetic protected cases, and rollback evidence reports `rollback_verified=false` when only synthetic cases are present.
 - Calibration datasets now require `correct` to be a real JSON boolean; strings like `"false"` and numeric truthy/falsy labels are rejected before calibration is tuned or persisted.
 - Multimodal/local media byte caps are enforced across CLI file ingest, MCP/base64 ingest, ingestion/object-store/provider calls, runtime media-extract jobs, and command media embedder/extractor temp-file boundaries.
+- Phase 7 plans 01-04 are gate-recorded. `Standing` is byte-stable and continuous, the always-on heartbeat safety floor is measured, and earned-autonomy credentials are external-only, holdout-validated, provenance-domain assigned, bounded/decay-ready, and adversarially checked with `echo_chamber_uplift=0.0`.
 
 ## Next Safe Queue
 
 1. Prioritize real-infrastructure evidence capture for Tier B rows: IdP/Keycloak, Vault/KMS, ParadeDB+AGE+pgvector, hosted embedding/reranker/trainer endpoints, C2PA roots, hosted dashboards, supervised workers, and production rollback drills.
 2. Use the sanctioned production path only: render the external production manifest from exported non-secret environment values, run `infra/scripts/capture-production-evidence.sh`, require strict `release-audit`, then run offline `production-evidence-verify` against the retained bundle fingerprint.
-3. Reopen G1-G4 code only if a new strict-audit finding or preregistered target-up/guardrail-not-down slice demands it; generativity and workspace self-loop outputs remain shadow/advisory until promoted by gates.
+3. Reopen G1-G4 or Phase 7 code only if a new strict-audit finding or preregistered target-up/guardrail-not-down slice demands it. Phase 7 P5 is the remaining cognitive-substrate implementation checkpoint and must pause for owner approval before deleting `shadow_only`/`enabled` operational toggles.
 4. Keep `eval/g0/` authoritative; do not fork a parallel harness.
 5. Keep Mnemosyne distinct from gbrain, mempalace, and external agent memory systems in docs and implementation language.
