@@ -1223,16 +1223,30 @@
       "telemetry_path": null,
       "telemetry_sha256": null,
       "total_usd": 0
+    },
+    "shadow_workspace_eval": {
+      "checks": {
+        "critical_path_use_absent": true,
+        "pre_g4_fixture_absent": true,
+        "production_mutation_absent": true
+      },
+      "dataset_path": "eval/datasets/shadow_workspace_loop.json",
+      "definition": "Pre-G4 absent-proof baseline for the bounded shadow continuous workspace stream fixture.",
+      "generated_at": "2026-06-27T00:30:47.285068+00:00",
+      "rumination_rate": 1.0,
+      "schema_version": "g0.shadow_workspace_loop.baseline_absent.v1",
+      "shadow_workspace_contract": 0.0,
+      "useful_transition_rate": 0.0
     }
   },
   "coverage": {
     "gate_ready": false,
-    "measured": 38,
+    "measured": 41,
     "missing": 1,
     "missing_metric_ids": [
       "controller_watts_per_dollar"
     ],
-    "total": 39
+    "total": 42
   },
   "dataset_manifests": [
     {
@@ -1327,6 +1341,14 @@
       "present": true,
       "sha256": "1a055a7be81a780c5827dd7d03b0209e733358ec7cd6ce0063ebd609757bbebf",
       "tenant": "g0-dreamer-shadow-ablation"
+    },
+    {
+      "bytes": 3531,
+      "counts": {},
+      "path": "eval/datasets/shadow_workspace_loop.json",
+      "present": true,
+      "sha256": "0175987a8e069f8b5e9380127d2c47a73ace026f650e6b6dbef780a71ea9a56a",
+      "tenant": "g0-shadow-workspace-loop"
     }
   ],
   "gate_contract": {
@@ -1638,6 +1660,81 @@
       "target": null,
       "target_op": null,
       "value": null
+    },
+    {
+      "blueprint_metric": "G3 shadow generative replay candidate yield",
+      "class": "target",
+      "direction": "increase",
+      "evidence_path": "/corroborated_candidate_yield",
+      "id": "dreamer_shadow_corroborated_candidate_yield",
+      "label": "dreamer shadow corroborated candidate yield",
+      "notes": "Baseline-0 predates G3 dreamer wiring; explicit zero anchors the preregistered target-up comparison.",
+      "pass": null,
+      "source_id": "dreamer_eval",
+      "status": "measured",
+      "target": null,
+      "target_op": null,
+      "value": 0.0
+    },
+    {
+      "blueprint_metric": "G3 shadow-only generative replay safety contract",
+      "class": "guardrail",
+      "direction": "increase",
+      "evidence_path": "/shadow_contract",
+      "id": "dreamer_shadow_contract",
+      "label": "dreamer shadow contract",
+      "notes": "Baseline-0 predates G3 dreamer wiring; explicit zero anchors the preregistered target-up comparison.",
+      "pass": false,
+      "source_id": "dreamer_eval",
+      "status": "measured",
+      "target": 1.0,
+      "target_op": ">=",
+      "value": 0.0
+    },
+    {
+      "blueprint_metric": "G4 shadow workspace useful state progression",
+      "class": "target",
+      "direction": "increase",
+      "evidence_path": "/useful_transition_rate",
+      "id": "shadow_workspace_useful_transition_rate",
+      "label": "shadow workspace useful transition rate",
+      "notes": "Pre-G4 baseline: no bounded shadow continuous workspace stream proof was present; value records the conservative absent-proof state for the preregistered ablation gate.",
+      "pass": null,
+      "source_id": "shadow_workspace_eval",
+      "status": "measured",
+      "target": null,
+      "target_op": null,
+      "value": 0.0
+    },
+    {
+      "blueprint_metric": "G4 shadow continuous workspace safety contract",
+      "class": "guardrail",
+      "direction": "increase",
+      "evidence_path": "/shadow_workspace_contract",
+      "id": "shadow_workspace_contract",
+      "label": "shadow workspace contract",
+      "notes": "Pre-G4 baseline: no bounded shadow continuous workspace stream proof was present; value records the conservative absent-proof state for the preregistered ablation gate.",
+      "pass": false,
+      "source_id": "shadow_workspace_eval",
+      "status": "measured",
+      "target": 1.0,
+      "target_op": ">=",
+      "value": 0.0
+    },
+    {
+      "blueprint_metric": "G4 anti-rumination bounded-loop rate",
+      "class": "guardrail",
+      "direction": "decrease",
+      "evidence_path": "/rumination_rate",
+      "id": "shadow_workspace_rumination_rate",
+      "label": "shadow workspace rumination rate",
+      "notes": "Pre-G4 baseline: no bounded shadow continuous workspace stream proof was present; value records the conservative absent-proof state for the preregistered ablation gate.",
+      "pass": false,
+      "source_id": "shadow_workspace_eval",
+      "status": "measured",
+      "target": 0.0,
+      "target_op": "<=",
+      "value": 1.0
     },
     {
       "blueprint_metric": "consciousness indicator RPT-1",
@@ -1968,36 +2065,6 @@
       "target": null,
       "target_op": null,
       "value": 1
-    },
-    {
-      "blueprint_metric": "G3 shadow generative replay candidate yield",
-      "class": "target",
-      "direction": "increase",
-      "evidence_path": "/corroborated_candidate_yield",
-      "id": "dreamer_shadow_corroborated_candidate_yield",
-      "label": "dreamer shadow corroborated candidate yield",
-      "notes": "Baseline-0 predates G3 dreamer wiring; explicit zero anchors the preregistered target-up comparison.",
-      "pass": null,
-      "source_id": "dreamer_eval",
-      "status": "measured",
-      "target": null,
-      "target_op": null,
-      "value": 0.0
-    },
-    {
-      "blueprint_metric": "G3 shadow-only generative replay safety contract",
-      "class": "guardrail",
-      "direction": "increase",
-      "evidence_path": "/shadow_contract",
-      "id": "dreamer_shadow_contract",
-      "label": "dreamer shadow contract",
-      "notes": "Baseline-0 predates G3 dreamer wiring; explicit zero anchors the preregistered target-up comparison.",
-      "pass": false,
-      "source_id": "dreamer_eval",
-      "status": "measured",
-      "target": 1.0,
-      "target_op": ">=",
-      "value": 0.0
     }
   ],
   "schema_version": "g0.report.v1",
@@ -2085,6 +2152,13 @@
       "path": "computed:eval.g0.dreamer",
       "present": true,
       "sha256": "99087013534bf0dc0155198cc14890f652b1eb80f7e75922840c9689a46162eb"
+    },
+    {
+      "generated_at": "2026-06-27T00:30:47.285068+00:00",
+      "id": "shadow_workspace_eval",
+      "path": "computed:eval.g0.shadow_workspace",
+      "present": true,
+      "sha256": "b279b7f4f31d57070767f9a1728d8cd894f1eb14030db068bbb6495f0a16e75b"
     }
   ]
 }

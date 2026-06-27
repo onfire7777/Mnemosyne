@@ -28,7 +28,7 @@
   - `mneme eval g0`
 - The functional consciousness scorecard is implemented in `eval/g0/consciousness.py`, including the 14 indicator-property rows plus continuity, self-model, metacognition, and reality-monitor shadow-tag contract metrics. Metacognition is backed by the runtime shadow `MetacognitiveMonitor` in `src/mnemosyne/consciousness.py`.
 - Runtime G1 seeds exist in `src/mnemosyne/consciousness.py` and are wired into engine/projection reality-monitoring paths.
-- G2/G3 seeds exist in `src/mnemosyne/providers/__init__.py`, `src/mnemosyne/workspace.py`, and `src/mnemosyne/dreamer.py`: the typed `SpecialistModuleRegistry` records role/budget/critical-path contracts, `ShadowWorkspaceController` applies the bounded cycle, proto-self, and workspace bottleneck before specialist recruitment, and `SandboxedDreamer` produces tenant-scoped, CID-backed, shadow-only low-trust replay candidates without mutating the ledger or answer path.
+- G2/G3/G4 seeds exist in `src/mnemosyne/providers/__init__.py`, `src/mnemosyne/workspace.py`, and `src/mnemosyne/dreamer.py`: the typed `SpecialistModuleRegistry` records role/budget/critical-path contracts, `ShadowWorkspaceController` applies the bounded cycle, proto-self, workspace bottleneck, default-mode idle ticks, cycle-consistency checks, redacted traces, and anti-rumination exits before specialist recruitment, and `SandboxedDreamer` produces tenant-scoped, CID-backed, shadow-only low-trust replay candidates without mutating the ledger or answer path.
 - `mneme specialist-manifest --role dreamer` exposes the shadow specialist contract to operators.
 
 ## Non-Negotiables
@@ -50,6 +50,11 @@
 - G0 deep-latency fixtures and graph-channel tests now use real backing evidence CIDs.
 - G2/G3 foundation adds typed specialist module manifests, a bounded shadow workspace controller, and a preregistered dreamer shadow ablation gate while keeping generative replay off the answer critical path.
 - `eval/g0/preregistrations/g3-dreamer-shadow-ablation.json` passes with `dreamer_shadow_corroborated_candidate_yield` improving from `0.0` to `1.0` and no ECE, abstention, confabulation, poison-block, fast-path latency, reality-monitor, or dreamer-contract regression.
+- G4 shadow continuous-workspace seed adds `eval/g0/shadow_workspace.py`, `eval/datasets/shadow_workspace_loop.json`, and `eval/g0/preregistrations/g4-shadow-continuous-workspace-loop.json`.
+- `eval/g0/preregistrations/g4-shadow-continuous-workspace-loop.json` passes with `shadow_workspace_useful_transition_rate` improving from `0.0` to `1.0`; guardrails hold for `shadow_workspace_contract`, `shadow_workspace_rumination_rate`, workspace continuity/coherence, self-model/metacognition, reality-monitor, dreamer-contract, ECE, abstention, confabulation, poison-block, fast-path latency, and cost.
+- Dreamer mapped evidence now requires matching `access_policy.tenant`, preventing forged tenant IDs from entering replay.
+- Reality-monitor classification now rejects forged grounded labels when actor/source/trust signals indicate external, generated, synthetic, or otherwise ungrounded support.
+- Shadow workspace traces redact selected content and reject cross-tenant item access policies before bottleneck selection.
 - `external` reality-class aliases normalize to `externally_suggested`, not `grounded`, and continue to trigger abstention when grounded evidence is absent.
 - The default policy counterfactual replay hook now fails closed until real replay pairs prove fidelity; promotion-path tests use an explicit authorized hook.
 - The replay-fidelity source probe now verifies the real gate wiring and fail-closed default rather than treating counterfactual replay as merely informational.
@@ -58,7 +63,7 @@
 ## Next Safe Queue
 
 1. Continue G1 breadth only where it moves a preregistered target metric without guardrail regression.
-2. Continue the next code-owned G2/G3 slice only with a new preregistered target metric: promotion-path evidence for specialists, broader workspace orchestration, or retrieval-controller integration. Keep `dreamer.shadow` shadow-only unless a future promotion gate passes.
+2. Continue the next code-owned G2/G3/G4 slice only with a new preregistered target metric: promotion-path evidence for specialists, retrieval-controller integration, workspace-to-consolidation shadow advisory evidence, or real controller compute telemetry. Keep `dreamer.shadow` and workspace self-loop outputs shadow-only unless a future promotion gate passes.
 3. Prioritize real-infrastructure evidence capture for Tier B rows: IdP/Keycloak, Vault/KMS, ParadeDB+AGE+pgvector, hosted embedding/reranker/trainer endpoints, and C2PA roots.
 4. Keep `eval/g0/` authoritative; do not fork a parallel harness.
 5. Keep Mnemosyne distinct from gbrain, mempalace, and external agent memory systems in docs and implementation language.

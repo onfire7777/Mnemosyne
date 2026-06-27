@@ -62,6 +62,8 @@ class SandboxedDreamer:
 
     max_candidates: int = 3
     min_sources: int = 2
+    max_sources: int = 64
+    max_source_chars: int = 4096
 
     def dream(
         self,
@@ -71,11 +73,14 @@ class SandboxedDreamer:
         branch: str = "dream-shadow",
         max_candidates: int | None = None,
     ) -> DreamReport:
-        usable = [_coerce_source(item) for item in evidence]
+        usable = [_coerce_source(item, max_chars=self.max_source_chars) for item in evidence[: self.max_sources]]
         usable = [
             item
             for item in usable
-            if item["cid"] and item["content"] and item["tenant_id"] == tenant_id
+            if item["cid"]
+            and item["content"]
+            and item["tenant_id"] == tenant_id
+            and item["access_tenant"] == tenant_id
         ]
         if len(usable) < self.min_sources:
             return DreamReport(tenant_id=tenant_id, branch=branch, candidates=(), source_count=len(usable))
@@ -111,13 +116,22 @@ class SandboxedDreamer:
         )
 
 
-def _coerce_source(item: Evidence | Mapping[str, Any]) -> dict[str, str]:
+def _coerce_source(item: Evidence | Mapping[str, Any], *, max_chars: int) -> dict[str, str]:
     if isinstance(item, Evidence):
-        return {"cid": str(item.cid or ""), "content": item.content, "tenant_id": item.tenant_id}
+        access_tenant = item.access_policy.get("tenant") or item.tenant_id
+        return {
+            "cid": str(item.cid or ""),
+            "content": item.content[:max_chars],
+            "tenant_id": item.tenant_id,
+            "access_tenant": str(access_tenant or ""),
+        }
+    access_policy = item.get("access_policy") if isinstance(item.get("access_policy"), Mapping) else {}
+    access_tenant = access_policy.get("tenant") if isinstance(access_policy, Mapping) else None
     return {
         "cid": str(item.get("cid") or ""),
-        "content": str(item.get("content") or ""),
+        "content": str(item.get("content") or "")[:max_chars],
         "tenant_id": str(item.get("tenant_id") or ""),
+        "access_tenant": str(access_tenant or ""),
     }
 
 

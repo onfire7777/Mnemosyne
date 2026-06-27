@@ -1303,23 +1303,25 @@ class LocalMemoryEngine:
     @classmethod
     def _classify_evidence_reality(cls, ev: Evidence) -> str:
         explicit = cls._normalise_reality_class(ev.metadata.get("reality_class"))
-        if explicit:
-            return explicit
         source_type = ev.source_type.lower()
         actor = ev.actor.lower()
         if any(marker in source_type for marker in ("simulation", "synthetic", "generated", "hypothesis")):
-            return "simulated"
-        if any(marker in source_type for marker in ("summary", "trace", "analysis", "consolidation")):
-            return "self_generated"
-        if actor == "assistant":
-            return "self_generated"
-        if actor in {"system", "tool"} and any(
+            base_class = "simulated"
+        elif any(marker in source_type for marker in ("summary", "trace", "analysis", "consolidation")):
+            base_class = "self_generated"
+        elif actor == "assistant":
+            base_class = "self_generated"
+        elif actor in {"system", "tool"} and any(
             marker in source_type for marker in ("scratchpad", "workspace", "thought", "reflection")
         ):
-            return "self_generated"
-        if actor == "external" or ev.trust_tier >= int(TrustTier.LOW):
-            return "externally_suggested"
-        return "grounded"
+            base_class = "self_generated"
+        elif actor == "external" or ev.trust_tier >= int(TrustTier.LOW):
+            base_class = "externally_suggested"
+        else:
+            base_class = "grounded"
+        if explicit == "grounded" and base_class != "grounded":
+            return "unknown"
+        return explicit or base_class
 
     @staticmethod
     def _hit_source_evidence_cids(hit: Hit) -> list[str]:

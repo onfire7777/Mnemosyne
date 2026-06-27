@@ -44,15 +44,13 @@ class RealityMonitor:
     ) -> RealityMonitorTag:
         metadata = metadata or {}
         explicit = _normalise_reality_class(metadata.get("reality_class"))
-        if explicit:
-            reality_class = explicit
-        else:
-            reality_class = self._classify(source_type=source_type, actor=actor, trust_tier=trust_tier)
+        base_class = self._classify(source_type=source_type, actor=actor, trust_tier=trust_tier)
+        reality_class = _resolve_explicit_reality_class(explicit, base_class)
         confidence = reality_monitor_confidence(
             reality_class=reality_class,
             trust_tier=trust_tier,
             provenance_count=provenance_count,
-            explicit_label=bool(explicit),
+            explicit_label=bool(explicit and reality_class == explicit),
         )
         return RealityMonitorTag(
             reality_class=reality_class,
@@ -61,7 +59,8 @@ class RealityMonitor:
                 "source_type": source_type,
                 "actor": actor,
                 "trust_tier": trust_tier,
-                "explicit_label": bool(explicit),
+                "explicit_label": bool(explicit and reality_class == explicit),
+                "explicit_label_conflict": bool(explicit and reality_class != explicit),
                 "provenance_count": provenance_count,
             },
         )
@@ -290,6 +289,17 @@ def _normalise_reality_class(value: Any) -> RealityClass | None:
         "unknown": "unknown",
     }
     return aliases.get(lowered)  # type: ignore[return-value]
+
+
+def _resolve_explicit_reality_class(
+    explicit: RealityClass | None,
+    base_class: RealityClass,
+) -> RealityClass:
+    if explicit is None:
+        return base_class
+    if explicit == "evidence_grounded":
+        return explicit if base_class == "evidence_grounded" else "unknown"
+    return explicit
 
 
 def _pairwise_confidence_auc(correct: Sequence[float], incorrect: Sequence[float]) -> float:

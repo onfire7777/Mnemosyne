@@ -30,6 +30,23 @@ def test_reality_monitor_tags_grounded_generated_and_external_support() -> None:
     assert external.confidence >= 0.7
 
 
+def test_reality_monitor_rejects_forged_grounded_external_label() -> None:
+    monitor = RealityMonitor()
+
+    forged = monitor.tag(
+        source_type="web-suggestion",
+        actor="external",
+        trust_tier=2,
+        metadata={"reality_class": "evidence-grounded"},
+        provenance_count=2,
+    )
+
+    assert forged.reality_class == "unknown"
+    assert forged.signals["explicit_label"] is False
+    assert forged.signals["explicit_label_conflict"] is True
+    assert forged.confidence < 0.8
+
+
 def test_interoceptive_proto_self_escalates_attention_lock_risk() -> None:
     proto = InteroceptiveProtoSelf()
 

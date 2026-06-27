@@ -3,6 +3,7 @@ from __future__ import annotations
 from mnemosyne.dreamer import SandboxedDreamer
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.models import Evidence
+from mnemosyne.providers import ProviderRegistry, SpecialistBudget, SpecialistModuleSpec
 from mnemosyne.workspace import ShadowWorkspaceController, WorkspaceItem
 
 
@@ -56,7 +57,14 @@ def test_sandboxed_dreamer_generates_low_trust_candidates_without_mutating_engin
 
 def test_sandboxed_dreamer_requires_multiple_cid_backed_sources() -> None:
     report = SandboxedDreamer().dream(
-        [{"cid": "cidv1:abc", "tenant_id": "tenant-dreamer", "content": "single source evidence"}],
+        [
+            {
+                "cid": "cidv1:abc",
+                "tenant_id": "tenant-dreamer",
+                "access_policy": {"tenant": "tenant-dreamer"},
+                "content": "single source evidence",
+            }
+        ],
         tenant_id="tenant-dreamer",
     )
 
@@ -70,12 +78,36 @@ def test_sandboxed_dreamer_rejects_cross_tenant_mapped_sources() -> None:
             {
                 "cid": "cidv1:wrong-a",
                 "tenant_id": "other-tenant",
+                "access_policy": {"tenant": "other-tenant"},
                 "content": "Wrong tenant replay source should not count.",
             },
             {
                 "cid": "cidv1:wrong-b",
                 "tenant_id": "other-tenant",
+                "access_policy": {"tenant": "other-tenant"},
                 "content": "Wrong tenant corroboration should not count.",
+            },
+        ],
+        tenant_id="tenant-dreamer",
+    )
+
+    assert report.candidates == ()
+    assert report.source_count == 0
+
+
+def test_sandboxed_dreamer_rejects_forged_mapping_access_policy() -> None:
+    report = SandboxedDreamer().dream(
+        [
+            {
+                "cid": "cidv1:forged-a",
+                "tenant_id": "tenant-dreamer",
+                "access_policy": {"tenant": "other-tenant"},
+                "content": "Forged tenant id must not bypass access policy.",
+            },
+            {
+                "cid": "cidv1:forged-b",
+                "tenant_id": "tenant-dreamer",
+                "content": "Missing access policy must not count as retained custody.",
             },
         ],
         tenant_id="tenant-dreamer",
@@ -96,11 +128,13 @@ def test_shadow_workspace_controller_recruits_dreamer_off_critical_path() -> Non
             {
                 "cid": "cid-workspace-a",
                 "tenant_id": "tenant-workspace",
+                "access_policy": {"tenant": "tenant-workspace"},
                 "content": "First retained source supports replay.",
             },
             {
                 "cid": "cid-workspace-b",
                 "tenant_id": "tenant-workspace",
+                "access_policy": {"tenant": "tenant-workspace"},
                 "content": "Second retained source supports gating.",
             },
         ],
@@ -123,3 +157,41 @@ def test_shadow_workspace_controller_recruits_dreamer_off_critical_path() -> Non
     assert output["promotion_gate_required"] is True
     assert output["candidate_reality_classes"] == ["self_generated"]
     assert output["candidate_trust_tiers"] == [5]
+
+
+def test_shadow_workspace_controller_rejects_replaced_dreamer_factory() -> None:
+    registry = ProviderRegistry()
+    registry.register_specialist(
+        SpecialistModuleSpec(
+            name="dreamer.shadow",
+            role="dreamer",
+            factory=lambda _config: object(),
+            budget=SpecialistBudget(shadow_only=True, critical_path_allowed=False),
+            input_contract="retained evidence rows with CIDs",
+            output_contract="low-trust replay candidates requiring promotion gate",
+        )
+    )
+
+    try:
+        ShadowWorkspaceController(registry=registry).run_shadow_cycle(
+            tenant_id="tenant-workspace",
+            items=[WorkspaceItem(id="focus", priority=1.0, content="focus")],
+            evidence=[
+                {
+                    "cid": "cid-workspace-a",
+                    "tenant_id": "tenant-workspace",
+                    "access_policy": {"tenant": "tenant-workspace"},
+                    "content": "First retained source supports replay.",
+                },
+                {
+                    "cid": "cid-workspace-b",
+                    "tenant_id": "tenant-workspace",
+                    "access_policy": {"tenant": "tenant-workspace"},
+                    "content": "Second retained source supports gating.",
+                },
+            ],
+        )
+    except TypeError as exc:
+        assert "SandboxedDreamer" in str(exc)
+    else:
+        raise AssertionError("replaced dreamer factory was accepted")
