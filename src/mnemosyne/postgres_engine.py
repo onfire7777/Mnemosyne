@@ -41,7 +41,9 @@ from mnemosyne.retrieval import (
     query_support,
     schema_fast_path_rerank,
     semantic_entropy,
+    strip_workspace_broadcast_filter,
     validate_adapter_hit_scope,
+    workspace_broadcast_from_context,
 )
 from mnemosyne.security import TrustTier, sanitize_retrieved_text, trust_weight
 from mnemosyne.text import approx_tokens, cosine, hashing_embedding, lexical_score, tokenize
@@ -1600,7 +1602,8 @@ class PostgresEngine:
                 return [_row_to_assertion(row) for row in cur.fetchall()]
 
     def retrieve(self, query: str, tenant_id: str, branch: str = "main", deep: bool = False, filt: dict[str, Any] | None = None) -> RetrievalResult:
-        effective_filter = dict(filt or {})
+        workspace_broadcast = workspace_broadcast_from_context(filt)
+        effective_filter = strip_workspace_broadcast_filter(filt)
         effective_filter.update({"tenant_id": tenant_id, "branch": branch})
         k = self.policy.deep_top_k if deep else self.policy.top_k
         dense = self.vector_search(query, self.policy.rerank_width, effective_filter)
@@ -1691,6 +1694,7 @@ class PostgresEngine:
                 "gist_support": gist_support,
                 "reality_monitoring": reality_monitoring,
                 "schema_fast_path": schema_fast_path,
+                "workspace_broadcast": workspace_broadcast,
                 "read_marks": read_marks,
                 "adapters": {
                     "embedding": self.adapters.embedding.name,

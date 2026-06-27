@@ -881,6 +881,74 @@ def test_route_classifier_picks_fast_vs_deep_without_an_llm() -> None:
     assert "override" in forced.reason.lower()
 
 
+def test_route_records_shadow_workspace_broadcast_without_raw_focus_text() -> None:
+    from mnemosyne.engine import route
+
+    plan = route(
+        "what is the deployment target",
+        ctx={
+            "workspace_focus": [
+                {
+                    "id": "focus-a",
+                    "content": "private focus text should stay redacted",
+                    "source": "workspace-test",
+                }
+            ]
+        },
+    )
+
+    broadcast = plan.signals["workspace_broadcast"]
+
+    assert plan.mode == "fast"
+    assert broadcast["applied"] is True
+    assert broadcast["shadow_only"] is True
+    assert broadcast["critical_path"] is False
+    assert broadcast["used_for_ranking"] is False
+    assert broadcast["item_count"] == 1
+    assert broadcast["items"][0]["id"] == "focus-a"
+    assert broadcast["items"][0]["source"] == "workspace-test"
+    assert broadcast["items"][0]["content_ref"].startswith("[workspace-broadcast-redacted:")
+    assert "private focus text" not in str(broadcast)
+
+
+def test_retrieval_exposes_shadow_workspace_broadcast_without_raw_focus_text() -> None:
+    engine = LocalMemoryEngine()
+    tools = MemoryTools(engine)
+    cid = tools.capture(
+        tenant_id=TENANT,
+        user_id=USER,
+        actor="user",
+        source_type="chat",
+        content="The deployment target is local-first Postgres.",
+        trust_tier=0,
+    )["cid"]
+
+    result = engine.retrieve(
+        "deployment target Postgres",
+        tenant_id=TENANT,
+        filt={
+            "workspace_focus": [
+                {
+                    "focus_id": "workspace-focus",
+                    "content": "workspace focus should not leak into retrieval explain",
+                    "source": "shadow-workspace",
+                }
+            ]
+        },
+    )
+    payload = result.to_dict()
+    broadcast = payload["explain"]["workspace_broadcast"]
+
+    assert any(hit["id"] == cid for hit in payload["hits"])
+    assert broadcast["applied"] is True
+    assert broadcast["shadow_only"] is True
+    assert broadcast["critical_path"] is False
+    assert broadcast["used_for_ranking"] is False
+    assert broadcast["items"][0]["id"] == "workspace-focus"
+    assert broadcast["items"][0]["content_ref"].startswith("[workspace-broadcast-redacted:")
+    assert "workspace focus should not leak" not in str(payload["explain"])
+
+
 def test_route_plan_composes_with_any_engine_retrieval_path() -> None:
     """``route()`` is engine-agnostic: its plan drives either retrieval path on any
     ``MemoryEngine`` implementation, so the runtime routes without backend coupling."""

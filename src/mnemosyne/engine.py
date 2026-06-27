@@ -42,7 +42,9 @@ from mnemosyne.retrieval import (
     query_support,
     schema_fast_path_rerank,
     semantic_entropy,
+    strip_workspace_broadcast_filter,
     validate_adapter_hit_scope,
+    workspace_broadcast_from_context,
 )
 from mnemosyne.security import TrustTier, more_trusted, sanitize_retrieved_text, trust_weight
 from mnemosyne.text import approx_tokens, cosine, lexical_score, tokenize
@@ -107,9 +109,14 @@ def route(query: str, ctx: dict[str, Any] | None = None) -> RoutePlan:
     from the backend.
     """
     ctx = ctx or {}
+    workspace_broadcast = workspace_broadcast_from_context(ctx)
     override = ctx.get("mode")
     if override in ("fast", "deep"):
-        return RoutePlan(override, f"explicit mode override -> {override}", {"override": override})
+        return RoutePlan(
+            override,
+            f"explicit mode override -> {override}",
+            {"override": override, "workspace_broadcast": workspace_broadcast},
+        )
 
     normalized = query.lower().strip()
     tokens = normalized.split()
@@ -123,6 +130,7 @@ def route(query: str, ctx: dict[str, Any] | None = None) -> RoutePlan:
         "long_query": long_query,
         "required_accuracy": ctx.get("required_accuracy"),
         "as_of": as_of_requested,
+        "workspace_broadcast": workspace_broadcast,
     }
 
     if matched_markers:
@@ -1058,7 +1066,8 @@ class LocalMemoryEngine:
         return self._mark_retrieved_text_as_data(hits)
 
     def retrieve(self, query: str, tenant_id: str, branch: str = "main", deep: bool = False, filt: dict[str, Any] | None = None) -> RetrievalResult:
-        effective_filter = dict(filt or {})
+        workspace_broadcast = workspace_broadcast_from_context(filt)
+        effective_filter = strip_workspace_broadcast_filter(filt)
         effective_filter.update({"tenant_id": tenant_id, "branch": branch})
         k = self.policy.deep_top_k if deep else self.policy.top_k
         dense = self.vector_search(query, self.policy.rerank_width, effective_filter)
@@ -1148,6 +1157,7 @@ class LocalMemoryEngine:
                 "gist_support": gist_support,
                 "reality_monitoring": reality_monitoring,
                 "schema_fast_path": schema_fast_path,
+                "workspace_broadcast": workspace_broadcast,
                 "read_marks": read_marks,
                 "adapters": {
                     "embedding": self.adapters.embedding.name,
