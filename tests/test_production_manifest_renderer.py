@@ -36,6 +36,7 @@ REQUIRED_PRODUCTION_INPUT_ARTIFACTS = [
     "provenance-ops-bundle.json",
     "provenance-trust-suite.json",
     "retrieval-ops-bundle.json",
+    "row-10-full-suite-evidence.json",
     "tls-candidate.pem",
     "tls-current.pem",
     "tls-lifecycle-bundle.json",
@@ -220,6 +221,11 @@ def test_renderer_check_environment_passes_without_writing_manifest(tmp_path: Pa
     for detail in details.values():
         _assert_artifact_detail_shape(detail)
         assert detail["exists"] is True
+    assert {
+        "name": "belief-revision",
+        "command": "belief-revision-check",
+        "option": "input_artifacts[0]",
+    } in details["row-10-full-suite-evidence.json"]["checks"]
     assert sorted(payload["present"]) == _placeholders()
     assert not list(tmp_path.glob("*.json"))
 

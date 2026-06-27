@@ -394,6 +394,15 @@ def collect_manifest_input_artifacts(manifest_payload: dict[str, Any]) -> list[d
                         )
                     continue
                 record(value, check_name=check_name, command=command, option=option)
+        input_artifacts = check.get("input_artifacts", [])
+        if isinstance(input_artifacts, list) and all(isinstance(v, str) for v in input_artifacts):
+            for index, value in enumerate(input_artifacts):
+                record(
+                    value,
+                    check_name=check_name,
+                    command=command,
+                    option=f"input_artifacts[{index}]",
+                )
     return sorted(artifacts.values(), key=lambda item: str(item["relative_path"]))
 
 input_artifacts = collect_manifest_input_artifacts(rendered_manifest)

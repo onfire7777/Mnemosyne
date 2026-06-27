@@ -6115,6 +6115,24 @@ def test_cli_production_evidence_verify_accepts_captured_bundle(tmp_path: Path) 
     assert report["findings"] == []
 
 
+def test_cli_production_evidence_verify_rejects_symlinked_bundle_root(tmp_path: Path) -> None:
+    bundle_dir, _bundle_fingerprint = write_production_evidence_bundle(tmp_path)
+    linked_bundle = tmp_path / "linked-production-evidence"
+    try:
+        linked_bundle.symlink_to(bundle_dir, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"symlink setup unavailable: {exc}")
+
+    result = run_raw_cli(
+        tmp_path / "verify-store.json",
+        "production-evidence-verify",
+        str(linked_bundle),
+    )
+
+    assert result.returncode == 1
+    assert "production evidence bundle path must not be a symlink" in result.stderr
+
+
 def test_cli_production_evidence_verify_rejects_tampered_operator_manifest(tmp_path: Path) -> None:
     bundle_dir, _bundle_fingerprint = write_production_evidence_bundle(tmp_path)
     operator_manifest_path = bundle_dir / "operator-soak-manifest.json"

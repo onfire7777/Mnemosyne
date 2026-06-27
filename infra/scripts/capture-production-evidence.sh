@@ -97,7 +97,14 @@ OUT_ROOT="$("${PYTHON}" - "${OUT_ROOT_RAW}" "${REPO_DIR}" <<'PY'
 from pathlib import Path
 import sys
 
-out_root = Path(sys.argv[1]).expanduser().resolve(strict=False)
+out_root_raw = Path(sys.argv[1]).expanduser()
+if out_root_raw.is_symlink():
+    print(
+        f"ERROR: production evidence output root cannot be a symlink: {out_root_raw}",
+        file=sys.stderr,
+    )
+    sys.exit(65)
+out_root = out_root_raw.resolve(strict=False)
 repo_dir = Path(sys.argv[2]).resolve()
 try:
     out_root.relative_to(repo_dir)
@@ -369,6 +376,43 @@ def _validate_nested_input_artifact_path(value: object, *, label: str) -> Path |
     errors.append(f"{label} points inside the repository: {resolved}; use an external custody path")
     return None
 
+def _validate_manifest_input_artifact_path(
+    value: object,
+    *,
+    check_index: int,
+    value_index: int,
+    label: str,
+) -> None:
+    if not isinstance(value, str) or not value.strip():
+        errors.append(f"{label} must contain non-empty absolute external paths")
+        return
+    if _is_url(value):
+        errors.append(f"{label} contains URL input artifact path; use an absolute external path")
+        return
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        errors.append(f"{label} contains relative input artifact path {value}; use an absolute external path")
+        return
+    resolved = _resolve_checked(path, label=label)
+    if resolved is None:
+        return
+    try:
+        resolved.relative_to(repo_dir.resolve())
+    except ValueError:
+        _record_required_artifact(
+            resolved,
+            label=label,
+            occurrence={
+                "path": str(resolved),
+                "check_index": check_index,
+                "field": "input_artifacts",
+                "value_index": value_index,
+                "label": label,
+            },
+        )
+        return
+    errors.append(f"{label} points inside the repository: {resolved}; use an external custody path")
+
 def _validate_executable_tool_path(
     value: str,
     *,
@@ -483,6 +527,18 @@ for index, check in enumerate(checks, start=1):
         errors.append(f"checks[{index}].command must be a string")
     check_args = check.get("args", [])
     check_global_args = check.get("global_args", [])
+    input_artifacts = check.get("input_artifacts", [])
+    if "input_artifacts" in check:
+        if not isinstance(input_artifacts, list) or not all(isinstance(v, str) for v in input_artifacts):
+            errors.append(f"checks[{index}].input_artifacts must be an array of strings")
+        else:
+            for value_index, value in enumerate(input_artifacts):
+                _validate_manifest_input_artifact_path(
+                    value,
+                    check_index=index - 1,
+                    value_index=value_index,
+                    label=f"checks[{index}].input_artifacts",
+                )
     for field in ("args", "global_args"):
         values = check.get(field, [])
         if not isinstance(values, list) or not all(isinstance(v, str) for v in values):

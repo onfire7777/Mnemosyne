@@ -32,7 +32,9 @@ CLI commands consumed by `deployment-soak` and `release-audit`.
   digests, reject path escape and report/check divergence during release audit,
   snapshot manifest-referenced input artifacts under `OUT_ROOT/input-artifacts/`,
   rewrite the copied operator manifest to those staged paths, and also write
-  `bundle-manifest.json` with SHA-256 hashes for retained artifacts.
+  `bundle-manifest.json` with SHA-256 hashes for retained artifacts. Check-level
+  `input_artifacts` metadata is retained through the same custody path for row
+  evidence that is not a command-line argument.
 - Executable tool paths such as `MNEMOSYNE_PROD_C2PA_TOOL` are validated as
   absolute, external, executable tool references and recorded in
   `preflight.json`; they are not snapshotted as evidence input artifacts.

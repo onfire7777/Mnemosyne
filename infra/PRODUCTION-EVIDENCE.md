@@ -50,8 +50,9 @@ existence of manifest-referenced input artifacts, and a high-confidence
 redaction scan over the rendered manifest plus staged snapshots of those
 referenced inputs. It writes `preflight.json`, `redaction-scan.json`, a
 `source-soak-manifest.json` copy of the rendered source manifest, and a copied
-operator manifest whose artifact arguments point at `OUT_ROOT/input-artifacts/`
-snapshots. It then exits before `deployment-soak` or `release-audit` runs. Full
+operator manifest whose artifact arguments and custody-only `input_artifacts`
+metadata point at `OUT_ROOT/input-artifacts/` snapshots. It then exits before
+`deployment-soak` or `release-audit` runs. Full
 capture executes that copied operator manifest from `OUT_ROOT`, not the mutable
 source path. A passing preflight is setup proof only; it does not flip any
 strict-audit row to Done.

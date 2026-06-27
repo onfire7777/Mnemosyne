@@ -1,6 +1,6 @@
 {
   "meta": {
-    "generated_at": "2026-06-22T00:21:47.437211+00:00",
+    "generated_at": "2026-06-27T08:04:57.608216+00:00",
     "component": "scope-conformance/FR-20+FR-21",
     "measures": "current src/mnemosyne against the INTENTIONALLY-LIMITED v1 bar",
     "blueprint_refs": [
@@ -59,7 +59,7 @@
           "name": "substrate_extends_via_media_extract_job",
           "bar": "v1 bar (N5 keystone): image ingest WITHOUT caller text enqueues+runs media_extract onto the SAME ledger.",
           "passed": true,
-          "note": "image ingest -> evidence(modality=image) -> media_extract job -> derived text evidence(modality=text) on the SAME ledger (3 jobs run)",
+          "note": "image ingest -> evidence(modality=image) -> media_extract job -> derived text evidence(modality=text) on the SAME ledger (2 jobs run)",
           "error": ""
         },
         {
@@ -141,7 +141,7 @@
           "name": "rollback_is_reversible_with_evidence",
           "bar": "v1 bar: a promoted adapter rolls back to a reversible state with ref + evidence.",
           "passed": true,
-          "note": "promoted -> rolled_back with ref=rollback-a19158a6-... + protected-suite evidence",
+          "note": "promoted -> rolled_back with ref=rollback-311a87d9-... + protected-suite evidence",
           "error": ""
         },
         {

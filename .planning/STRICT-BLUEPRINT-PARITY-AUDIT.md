@@ -136,10 +136,10 @@ local blueprint/documentation folder, not a repo-owned generated artifact.
 
 The earlier `.planning/v1.0-MILESTONE-AUDIT.md` remains useful as evidence that the local deterministic scaffold passed its original milestone suite. It is not sufficient evidence for the user's current exact 1:1 blueprint parity objective.
 
-## Next Required Implementation Slice
+## Next Required Ops/Evidence Slice
 
 1. Keep the compose Docker/Postgres full-suite evidence current and expand it only when new engine/runtime surfaces are introduced.
 2. Run provider checks against real production embedding, cross-encoder, image/audio embedding, extractor, summarizer, and entity-resolver deployments plus calibration datasets, including deployed prompt-boundary enforcement for model-backed consolidation wrappers.
-3. Run hosted HTTP JSON-RPC, official StreamableHTTP/SSE, IdP/JWKS rotation, `tls-lifecycle-ops-check`, and stateless soak validation against real deployed endpoints.
+3. Run hosted HTTP JSON-RPC, official StreamableHTTP, IdP/JWKS rotation, `tls-lifecycle-ops-check`, and stateless soak validation against real deployed endpoints; include legacy SSE only if the deployed surface intentionally exposes it.
 4. Validate real secret-manager-backed session-secret command deployment/rotation before making any production multi-tenant claim.
 5. Validate real isolated LoRA/test-time-training deployments behind the command-backed parametric provider boundary, including deployed protected-suite management and production rollback orchestration.

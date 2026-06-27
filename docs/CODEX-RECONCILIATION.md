@@ -35,8 +35,8 @@ Optional/review-only items remain:
 
 | Item | Current handling |
 |---|---|
-| A11 official hosted MCP StreamableHTTP/SSE evidence | Keep behind Tier B production evidence unless the strict audit demands source work. |
-| A12 materialized cached-PPR column | Keep behind Tier B production evidence unless the strict audit demands source work. |
+| A11 hosted MCP JSON-RPC/official StreamableHTTP evidence | Keep behind Tier B production evidence unless the strict audit demands source work; include legacy SSE only if the deployed surface intentionally exposes it. |
+| A12 materialized cached-PPR column | Done on `main`; keep any further cached-read latency reporting behind Tier B evidence unless the strict audit demands source work. |
 | FR-20 multimodal breadth | Optional / post-v1 unless the final parity audit raises it. |
 | FR-21 real LoRA / test-time-training deployment | Optional / GPU-backed production evidence; overlaps Tier B trainer evidence. |
 
