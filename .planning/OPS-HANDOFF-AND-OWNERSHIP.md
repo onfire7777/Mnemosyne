@@ -40,7 +40,7 @@ Mnemosyne depends on gbrain, mempalace, or any external memory system.
 | **D** | Env & secrets guidance | Env-var catalog, Vault/Keycloak wiring, provisioning steps — **no secret values** | Operational sequencing, monitoring, rollback | `.planning/ENV-AND-SECRETS.md` *(Lane D)* |
 | **E** | Observability | Live dashboards, alert routing, SLO monitors; `ops-report` + `ops-dashboard-check` live wiring | Deploy steps, rollback, secret provisioning | hosted dashboard URL; package input only if pre-existing external custody evidence |
 | **F** | Rollback | Revert procedures, canary-abort, rollback drills + drill evidence | Forward deploy steps, monitoring authorship | `.planning/ROLLBACK.md` *(Lane F)* + `parametric-trainer-check` rollback drill |
-| **G** | Final validation | Aggregating gate evidence → `deployment-soak` → `release-audit` sign-off; Live-parity test sweep (sanctioned code) | Producing per-area evidence (each row's lane owns that); authoring runbooks | `release-audit`, `deployment-soak --evidence-dir` |
+| **G** | Final validation | Aggregating gate evidence → `deployment-soak` → `release-audit` sign-off; live-parity validation/evidence sweep; code only if a new strict-audit finding reopens code scope | Producing per-area evidence (each row's lane owns that); authoring runbooks | `release-audit`, `deployment-soak --evidence-dir` |
 
 **This file (the registry) is owned by the coordinator lane (G) and is read-only to A–F.**
 
@@ -61,7 +61,7 @@ Gate commands already exist and are frozen. Work = run each against real infra a
 | 7 | Privacy & erasure | `privacy-ops-check` (+ `policy-ops-check`, `forgetting-policy-check`) | Real KMS (Vault) + residency policy ops | C,D,F,G | KMS lifecycle/shred + residency + tombstone/hard-delete evidence; `release-audit` ok |
 | 8 | Observability dashboards | `ops-dashboard-check` (+ `ops-report`) | Hosted production dashboard URL; package mode only for pre-existing external input evidence, not `ops-report --dashboard-package-dir` generation during capture | E (primary), G | hosted-dashboard ops evidence in bundle; `release-audit` ok |
 | 9 | Parametric tier | `parametric-trainer-check` (+ `hosted-llm-check`, `calibration-tune`) | Deployed LoRA/TTT trainer + rollback orchestration | C,D,F,G | trainer deploy + protected-suite + rollback-drill evidence; `release-audit` ok |
-| 10 | Live parity suite | full compose-Postgres suite + `belief-revision-check` | Optional production adapters enabled | G (sanctioned code) | Local/Postgres direct configured lexical/graph adapter parity is now covered; final done still requires every engine/runtime method green with production adapters enabled |
+| 10 | Live parity suite | full compose-Postgres suite + `belief-revision-check` | Optional production adapters enabled | G validation/evidence sweep; code only if a new strict-audit finding reopens code scope | Local/Postgres direct configured lexical/graph adapter parity is now covered; final done still requires every engine/runtime method green with production adapters enabled |
 
 **Universal acceptance pattern (every row):** operator runs the gate against real infra → evidence redacted → wrapper includes it in `deployment-soak --evidence-dir` (production scope + operator attestation) → `release-audit --evidence-manifest "$OUT_ROOT/evidence/manifest.json" --require-production-validated --require-provider-forbid-local` passes with that command's output shape present and `findings` empty → `production-evidence-verify` passes offline against the retained bundle fingerprint.
 

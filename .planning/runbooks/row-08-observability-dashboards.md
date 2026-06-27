@@ -2,13 +2,15 @@
 
 ## Objective
 
-Prove hosted dashboard packaging, metrics taxonomy, alert routing, and
-production ops reporting.
+Prove hosted production dashboard availability, metrics taxonomy, alert
+routing, and production ops reporting.
 
 ## Real-Infra Dependency
 
-Hosted production dashboard URL or hosted dashboard package plus live ops report
-inputs.
+Hosted production dashboard URL plus live ops report inputs. A dashboard
+package can appear only as retained pre-existing external input evidence for
+`ops-dashboard-check`; production capture must not generate one with
+`ops-report --dashboard-package-dir`.
 
 ## Gate Commands
 
@@ -20,8 +22,9 @@ Run in the production soak profile:
 ## Redaction Requirement
 
 Evidence must not include private tenant data, raw queries, raw memory content,
-or dashboard secrets. Store hosted URL/package metadata, metrics taxonomy,
-redacted counters, alert-route verification, and findings.
+or dashboard secrets. Store hosted URL metadata, optional retained external
+package metadata, metrics taxonomy, redacted counters, alert-route
+verification, and findings.
 
 ## Production Capture
 
