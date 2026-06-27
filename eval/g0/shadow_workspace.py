@@ -1,8 +1,9 @@
 """G0 shadow continuous workspace loop fixture.
 
-This fixture measures only the bounded, shadow-only workspace stream contract.
-It does not start an always-on daemon, promote self-generated content, mutate
-the ledger, or put workspace outputs on the answer critical path.
+This fixture measures only the bounded, explicitly-started, shadow-only
+workspace service contract. It does not auto-start a daemon, promote
+self-generated content, mutate the ledger, or put workspace outputs on the
+answer critical path.
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ from mnemosyne.consolidation import ConsolidationWorker
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.models import Evidence
 from mnemosyne.policy import OperatingPolicy
-from mnemosyne.workspace import ShadowWorkspaceController, WorkspaceItem
+from mnemosyne.workspace import ShadowWorkspaceController, ShadowWorkspaceService, WorkspaceItem
 
 
 DATASET_PATH = Path("eval/datasets/shadow_workspace_loop.json")
@@ -34,8 +35,10 @@ def run_shadow_workspace_eval(*, repo_root: Path | None = None) -> dict[str, Any
         max_idle_ticks=int(controller_config.get("max_idle_ticks", 2)),
         tick_ms=int(controller_config.get("tick_ms", 250)),
     )
+    service = ShadowWorkspaceService(controller=controller, enabled=True)
+    service.start()
     item_ticks = [_items_from_cycle(cycle) for cycle in dataset.get("cycles", [])]
-    report = controller.run_shadow_stream(
+    service_report = service.run_shadow_loop(
         tenant_id=tenant,
         item_ticks=item_ticks,
         confidence=0.82,
@@ -45,10 +48,13 @@ def run_shadow_workspace_eval(*, repo_root: Path | None = None) -> dict[str, Any
         memory_pressure=0.25,
         rail_budget=0.96,
     )
+    report = service_report.stream
     payload = report.to_dict()
+    service_payload = service_report.to_dict()
     advisory = report.to_consolidation_advisory()
     useful_checks = _useful_transition_checks(dataset.get("cycles", []), payload)
     contract_checks = _contract_checks(payload, dataset.get("contract_expected", {}))
+    service_checks = _service_checks(service_payload)
     advisory_checks = _advisory_checks(advisory, dataset)
     advisory_promotion_probe = _workspace_advisory_promotion_probe(tenant)
     advisory_promotion_checks = advisory_promotion_probe["checks"]
@@ -58,6 +64,7 @@ def run_shadow_workspace_eval(*, repo_root: Path | None = None) -> dict[str, Any
     rumination_checks = _rumination_checks(rumination_payload, dataset.get("rumination_probe", {}))
     all_contract_checks = {
         **contract_checks,
+        **{f"service_{key}": value for key, value in service_checks.items()},
         **{f"advisory_{key}": value for key, value in advisory_checks.items()},
         **{f"advisory_promotion_{key}": value for key, value in advisory_promotion_checks.items()},
         **{f"retrieval_controller_{key}": value for key, value in retrieval_controller_checks.items()},
@@ -76,9 +83,9 @@ def run_shadow_workspace_eval(*, repo_root: Path | None = None) -> dict[str, Any
         "schema_version": "g0.shadow_workspace_loop.v1",
         "generated_at": datetime.now(UTC).isoformat(),
         "dataset_path": DATASET_PATH.as_posix(),
-        "definition": "Shadow-only bounded multi-tick workspace stream fixture.",
+        "definition": "Shadow-only bounded multi-tick workspace service fixture.",
         "metric_note": (
-            "Measures useful state progression across bounded shadow workspace ticks, "
+            "Measures useful state progression across an explicitly-started bounded shadow workspace service, "
             "plus anti-rumination shutdown. It does not count dreamer candidate yield "
             "and makes no phenomenal-consciousness claim."
         ),
@@ -100,6 +107,16 @@ def run_shadow_workspace_eval(*, repo_root: Path | None = None) -> dict[str, Any
         else 0.0,
         "checks": all_contract_checks,
         "workspace": {
+            "service": {
+                "enabled": service_payload["enabled"],
+                "running": service_payload["running"],
+                "tick_ms": service_payload["tick_ms"],
+                "max_cycles": service_payload["max_cycles"],
+                "tick_count": service_payload["tick_count"],
+                "proto_self_history_count": len(service_payload["proto_self_history"]),
+                "metacognitive_rows": len(service_payload["metacognition"]["rows"]),
+                "metacognitive_m_ratio": service_payload["metacognition"]["m_ratio"],
+            },
             "stopped_reason": payload["stopped_reason"],
             "idle_ticks": payload["idle_ticks"],
             "rumination_score": payload["rumination_score"],
@@ -114,6 +131,27 @@ def run_shadow_workspace_eval(*, repo_root: Path | None = None) -> dict[str, Any
         "workspace_advisory_promotion_probe": advisory_promotion_probe,
         "workspace_retrieval_controller_probe": retrieval_controller_probe,
         "rumination_probe": rumination_payload,
+    }
+
+
+def _service_checks(payload: dict[str, Any]) -> dict[str, bool]:
+    stream = payload.get("stream") if isinstance(payload.get("stream"), dict) else {}
+    proto_history = payload.get("proto_self_history") if isinstance(payload.get("proto_self_history"), list) else []
+    metacognition = payload.get("metacognition") if isinstance(payload.get("metacognition"), dict) else {}
+    trace = stream.get("trace") if isinstance(stream.get("trace"), list) else []
+    raw_rows = metacognition.get("rows")
+    rows = raw_rows if isinstance(raw_rows, (list, tuple)) else []
+    tick_count = int(payload.get("tick_count") or 0)
+    return {
+        "explicitly_enabled": payload.get("enabled") is True,
+        "explicitly_running": payload.get("running") is True,
+        "shadow_only": payload.get("shadow_only") is True,
+        "critical_path_false": payload.get("critical_path") is False,
+        "production_mutation_false": payload.get("production_mutation") is False,
+        "promotion_gate_required": payload.get("promotion_gate_required") is True,
+        "tick_count_matches_trace": tick_count == len(trace),
+        "proto_self_history_complete": len(proto_history) == len(trace),
+        "metacognition_rows_complete": len(rows) == len(trace),
     }
 
 

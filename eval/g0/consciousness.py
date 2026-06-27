@@ -15,15 +15,13 @@ from pathlib import Path
 from typing import Any
 
 from mnemosyne.consciousness import (
-    BoundedCognitiveCycle,
     InteroceptiveProtoSelf,
     MetacognitiveMonitor,
-    workspace_bottleneck,
 )
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.models import Evidence, Hit
 from mnemosyne.postgres_engine import PostgresEngine
-from mnemosyne.workspace import ShadowWorkspaceController, WorkspaceItem
+from mnemosyne.workspace import ShadowWorkspaceController, ShadowWorkspaceService, WorkspaceItem
 
 
 @dataclass(frozen=True, slots=True)
@@ -331,28 +329,36 @@ def _score_indicator(repo_root: Path, spec: IndicatorSpec) -> dict[str, Any]:
 
 
 def _continuity_probe() -> dict[str, Any]:
-    cycle = BoundedCognitiveCycle(max_cycles=4, tick_ms=250)
-    selected = workspace_bottleneck(
-        [
-            {"id": "low", "priority": 0.1},
-            {"id": "workspace", "priority": 0.9},
-            {"id": "mid", "priority": 0.5},
+    controller = ShadowWorkspaceController(max_cycles=3, tick_ms=250, max_workspace_items=2, max_idle_ticks=2)
+    service = ShadowWorkspaceService(controller=controller, enabled=True)
+    service.start()
+    report = service.run_shadow_loop(
+        tenant_id="g0-consciousness-continuity",
+        item_ticks=[
+            [
+                WorkspaceItem(id="low", priority=0.1, content="low-priority context"),
+                WorkspaceItem(id="workspace", priority=0.9, content="workspace service focus"),
+                WorkspaceItem(id="mid", priority=0.5, content="mid-priority context"),
+            ],
+            [WorkspaceItem(id="workspace-next", priority=0.8, content="next workspace service focus")],
+            [WorkspaceItem(id="workspace-final", priority=0.7, content="final workspace service focus")],
         ],
-        limit=2,
     )
-    rows = [
-        cycle.tick(coherent=True, progressed=True),
-        cycle.tick(coherent=True, progressed=True),
-        cycle.tick(coherent=True, progressed=True),
-    ]
-    live_ticks = sum(1 for row in rows if row["state"] == "continue")
+    payload = report.to_dict()
+    stream = payload["stream"]
+    rows = [cycle["cycle"] for cycle in stream["cycles"]]
+    live_ticks = sum(1 for row in rows if row["state"] != "shadow_only")
     coherence = sum(1 for row in rows if row["state"] != "shadow_only") / len(rows)
     return {
         "loop_liveness": round(live_ticks / len(rows), 6),
         "stream_coherence": round(coherence, 6),
-        "tick_ms": cycle.tick_ms,
-        "max_cycles": cycle.max_cycles,
-        "bottleneck_selected_ids": [item["id"] for item in selected],
+        "tick_ms": payload["tick_ms"],
+        "max_cycles": payload["max_cycles"],
+        "service_enabled": payload["enabled"],
+        "service_running": payload["running"],
+        "proto_self_history_count": len(payload["proto_self_history"]),
+        "metacognitive_rows": len(payload["metacognition"]["rows"]),
+        "bottleneck_selected_ids": stream["trace"][0]["selected_item_ids"],
         "rows": rows,
     }
 

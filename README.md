@@ -77,9 +77,9 @@ uv sync --locked --extra mcp --group dev
 uv run --locked python -m pytest
 
 # 4. Capture a memory and search it (in-memory backend, no services needed)
-mneme capture --tenant tenant-a --user user-a --source-type chat \
+uv run --locked mneme capture --tenant tenant-a --user user-a --source-type chat \
   --content "The preferred database is Postgres." --trust-tier 0
-mneme search --tenant tenant-a --query "preferred database"
+uv run --locked mneme search --tenant tenant-a --query "preferred database"
 ```
 
 After `uv sync`, the two console-script entry points are available through
@@ -289,9 +289,9 @@ Controlling artifacts: [`docs/ROADMAP-TO-100.md`](docs/ROADMAP-TO-100.md) (blend
 
 ## Testing & CI
 
-- `.github/workflows/ci.yml` installs the committed `uv.lock` environment and runs **ruff** lint, the full **pytest** suite (configuration / invariant-rail drift checks included), and a **Postgres integration** job on every push and pull request.
+- `.github/workflows/ci.yml` installs the committed `uv.lock` environment and runs **ruff** lint, the full **pytest** suite (configuration / invariant-rail drift checks included), and a **Postgres integration** job on pushes to `main` and pull requests.
 - With `MNEMOSYNE_POSTGRES_DSN` **unset**, the suite runs the local deterministic tests and skips live-DB integration tests — this no-DSN run is one required CI gate and must stay green.
-- With Docker-compose Postgres running and the DSN set, the live tests in `tests/test_postgres_engine_live.py` and `tests/test_shared_engine_contract.py` additionally run, covering tenant RLS, FTS, pgvector search, recursive graph/PPR, bitemporal supersession, branch/merge/discard, tombstone + hard-delete forget modes, command-backed KMS, and **local↔Postgres parity** of the engine contract.
+- With Docker-compose Postgres running and the DSN set, the local full suite additionally runs live coverage in `tests/test_postgres_engine_live.py` and `tests/test_shared_engine_contract.py`, covering tenant RLS, FTS, pgvector search, recursive graph/PPR, bitemporal supersession, branch/merge/discard, tombstone + hard-delete forget modes, command-backed KMS, and **local↔Postgres parity** of the engine contract. CI runs the dedicated `tests/test_postgres_engine_live.py` Postgres job as the always-on live-DB gate.
 
 ```bash
 uv sync --locked --extra mcp --group dev

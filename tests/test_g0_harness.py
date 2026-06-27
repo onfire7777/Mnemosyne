@@ -258,6 +258,9 @@ def test_g0_consciousness_scorecard_reports_indicator_properties() -> None:
     assert report["metrics"]["consciousness_indicator_total"] == report["total_score"]
     assert report["metrics"]["workspace_loop_liveness"] == 1.0
     assert report["metrics"]["workspace_stream_coherence"] == 1.0
+    assert report["continuity"]["service_enabled"] is True
+    assert report["continuity"]["service_running"] is True
+    assert report["continuity"]["proto_self_history_count"] == report["continuity"]["metacognitive_rows"]
     assert report["metrics"]["self_model_accuracy"] == 1.0
     assert report["metrics"]["metacognition_meta_d_prime"] == 1.0
     assert report["metrics"]["metacognition_m_ratio"] == 1.0
@@ -304,6 +307,10 @@ def test_g0_shadow_workspace_fixture_reports_bounded_stream_contract() -> None:
     assert report["workspace"]["critical_path"] is False
     assert report["workspace"]["production_mutation"] is False
     assert report["workspace"]["promotion_gate_required"] is True
+    assert report["workspace"]["service"]["enabled"] is True
+    assert report["workspace"]["service"]["running"] is True
+    assert report["workspace"]["service"]["tick_count"] == report["workspace"]["service"]["proto_self_history_count"]
+    assert report["workspace"]["service"]["tick_count"] == report["workspace"]["service"]["metacognitive_rows"]
     assert report["workspace"]["cycle_consistency"]["score"] == 1.0
     advisory = report["workspace_consolidation_advisory"]
     assert advisory["shadow_only"] is True
