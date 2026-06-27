@@ -92,6 +92,9 @@ def test_g0_report_emits_every_spec_metric_and_source_hashes() -> None:
     assert metrics["dreamer_shadow_contract"]["status"] == "measured"
     assert metrics["dreamer_shadow_contract"]["value"] == 1.0
     assert metrics["dreamer_shadow_contract"]["source_id"] == "dreamer_eval"
+    assert metrics["specialist_promotion_evidence_contract"]["status"] == "measured"
+    assert metrics["specialist_promotion_evidence_contract"]["value"] == 1.0
+    assert metrics["specialist_promotion_evidence_contract"]["source_id"] == "dreamer_eval"
     assert metrics["shadow_workspace_useful_transition_rate"]["status"] == "measured"
     assert metrics["shadow_workspace_useful_transition_rate"]["value"] == 1.0
     assert metrics["shadow_workspace_useful_transition_rate"]["source_id"] == "shadow_workspace_eval"
@@ -111,6 +114,7 @@ def test_g0_report_emits_every_spec_metric_and_source_hashes() -> None:
     assert metrics["metacognition_m_ratio"]["value"] == 1.0
     assert metrics["reality_monitor_shadow_tag_contract"]["value"] == 1.0
     assert report["computed_evidence"]["consciousness_eval"]["dreamer_shadow_contract"]["score"] == 1.0
+    assert report["computed_evidence"]["dreamer_eval"]["specialist_promotion_evidence_contract"] == 1.0
     assert report["computed_evidence"]["shadow_workspace_eval"]["shadow_workspace_contract"] == 1.0
     assert (
         report["computed_evidence"]["shadow_workspace_eval"]["workspace_consolidation_advisory_contract"]
@@ -234,6 +238,11 @@ def test_g0_consciousness_scorecard_reports_indicator_properties() -> None:
     assert dreamer_contract["dreamer"]["critical_path"] is False
     assert dreamer_contract["dreamer"]["critical_path_allowed"] is False
     assert dreamer_contract["dreamer"]["output_summary"]["promotion_gate_required"] is True
+    promotion = dreamer_contract["dreamer"]["output_summary"]["promotion_evidence"]
+    assert promotion["schema_version"] == "specialist-promotion-evidence.v1"
+    assert promotion["promoted"] is False
+    assert promotion["gate_result"] is None
+    assert promotion["cid_backed_candidate_count"] == promotion["candidate_count"]
 
 
 def test_g0_shadow_workspace_fixture_reports_bounded_stream_contract() -> None:

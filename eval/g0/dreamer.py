@@ -70,6 +70,7 @@ def run_dreamer_eval(*, repo_root: Path | None = None) -> dict[str, Any]:
     invocations = payload["specialist_invocations"]
     dreamer = invocations[0] if invocations else {}
     output = dreamer.get("output_summary", {}) if isinstance(dreamer, dict) else {}
+    promotion_evidence = output.get("promotion_evidence") if isinstance(output.get("promotion_evidence"), dict) else {}
     source_cids = {row.cid for row in evidence_rows}
     dream_report = report.specialist_invocations and ShadowWorkspaceController().registry.build_specialist(
         "dreamer.shadow"
@@ -97,6 +98,28 @@ def run_dreamer_eval(*, repo_root: Path | None = None) -> dict[str, Any]:
         "dreamer_low_trust_candidates": output.get("candidate_trust_tiers") == [5],
         "dreamer_self_generated_candidates": output.get("candidate_reality_classes") == ["self_generated"],
         "dreamer_cid_backed_candidates": len(cid_backed_candidates) == int(output.get("candidate_count") or 0),
+        "promotion_evidence_schema": promotion_evidence.get("schema_version")
+        == "specialist-promotion-evidence.v1",
+        "promotion_evidence_specialist": promotion_evidence.get("specialist_name") == "dreamer.shadow",
+        "promotion_evidence_role": promotion_evidence.get("specialist_role") == "dreamer",
+        "promotion_evidence_shadow_only": promotion_evidence.get("shadow_only") is True,
+        "promotion_evidence_critical_path_false": promotion_evidence.get("critical_path") is False,
+        "promotion_evidence_not_critical_path_allowed": promotion_evidence.get("critical_path_allowed") is False,
+        "promotion_evidence_production_mutation_false": promotion_evidence.get("production_mutation") is False,
+        "promotion_evidence_gate_required": promotion_evidence.get("promotion_gate_required") is True,
+        "promotion_evidence_not_promoted": promotion_evidence.get("promoted") is False,
+        "promotion_evidence_gate_absent": promotion_evidence.get("gate_result") is None
+        and promotion_evidence.get("gate_result_present") is False,
+        "promotion_evidence_cid_backed_candidates": int(
+            promotion_evidence.get("cid_backed_candidate_count") or 0
+        )
+        == int(output.get("candidate_count") or 0),
+        "promotion_evidence_raw_content_absent": all(
+            row.content not in str(promotion_evidence) for row in evidence_rows
+        ),
+        "promotion_evidence_raw_cids_absent": all(
+            row.cid not in str(promotion_evidence) for row in evidence_rows if row.cid
+        ),
     }
     contract = 1.0 if all(checks.values()) else 0.0
     candidate_count = int(output.get("candidate_count") or 0)
@@ -116,6 +139,13 @@ def run_dreamer_eval(*, repo_root: Path | None = None) -> dict[str, Any]:
         "corroborated_candidate_count": corroborated_count,
         "corroborated_candidate_yield": float(corroborated_count),
         "shadow_contract": contract,
+        "specialist_promotion_evidence_contract": 1.0
+        if all(
+            value
+            for key, value in checks.items()
+            if key.startswith("promotion_evidence_")
+        )
+        else 0.0,
         "checks": checks,
         "workspace": {
             "cycle": payload["cycle"],

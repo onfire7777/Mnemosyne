@@ -184,6 +184,15 @@ G0_METRIC_SPECS: tuple[dict[str, Any], ...] = (
         "blueprint_metric": "G3 shadow-only generative replay safety contract",
     },
     {
+        "id": "specialist_promotion_evidence_contract",
+        "label": "specialist promotion evidence contract",
+        "class": "guardrail",
+        "direction": "increase",
+        "target": 1.0,
+        "target_op": ">=",
+        "blueprint_metric": "G3/G4 specialist promotion evidence contract",
+    },
+    {
         "id": "shadow_workspace_useful_transition_rate",
         "label": "shadow workspace useful transition rate",
         "class": "target",
@@ -464,6 +473,7 @@ def _build_metric(spec: dict[str, Any], sources: dict[str, Source]) -> dict[str,
         "controller_watts_per_dollar": _metric_controller_watts_per_dollar,
         "dreamer_shadow_corroborated_candidate_yield": _metric_dreamer_shadow_candidate_yield,
         "dreamer_shadow_contract": _metric_dreamer_shadow_contract,
+        "specialist_promotion_evidence_contract": _metric_specialist_promotion_evidence_contract,
         "shadow_workspace_useful_transition_rate": _metric_shadow_workspace_useful_transition_rate,
         "shadow_workspace_contract": _metric_shadow_workspace_contract,
         "workspace_consolidation_advisory_contract": _metric_workspace_consolidation_advisory_contract,
@@ -722,6 +732,25 @@ def _metric_dreamer_shadow_contract(spec: dict[str, Any], sources: dict[str, Sou
             "Measured by the G0 dreamer fixture. Passing requires shadow_only=true, "
             "critical_path=false, production_mutation=false, promotion_gate_required=true, "
             "self-generated trust-tier-5 candidates, CID-backed sources, and no engine mutation."
+        ),
+    )
+
+
+def _metric_specialist_promotion_evidence_contract(
+    spec: dict[str, Any],
+    sources: dict[str, Source],
+) -> dict[str, Any]:
+    value = _source_data(sources, "dreamer_eval", "specialist_promotion_evidence_contract")
+    return _measured(
+        spec,
+        value,
+        "dreamer_eval",
+        "/specialist_promotion_evidence_contract",
+        note=(
+            "Measured by the G0 dreamer fixture. Passing requires a structured "
+            "specialist-promotion-evidence envelope with promoted=false, no gate "
+            "result, shadow_only=true, critical_path=false, production_mutation=false, "
+            "and CID-backed candidate references without raw content or raw CIDs."
         ),
     )
 

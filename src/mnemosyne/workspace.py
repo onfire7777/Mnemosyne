@@ -18,6 +18,7 @@ from .models import Evidence
 from .providers import SpecialistModuleRegistry, default_registry
 
 WORKSPACE_CONSOLIDATION_ADVISORY_VERSION = "workspace-consolidation-advisory.v1"
+SPECIALIST_PROMOTION_EVIDENCE_VERSION = "specialist-promotion-evidence.v1"
 
 
 @dataclass(frozen=True, slots=True)
@@ -401,6 +402,14 @@ def _redact_trace_content(text: str) -> str:
     return f"[shadow-trace-redacted:{digest}:chars={len(text)}]"
 
 
+def _redacted_ref(value: str, *, prefix: str) -> str:
+    text = str(value or "")
+    if not text:
+        return ""
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+    return f"[{prefix}-ref:{digest}:chars={len(text)}]"
+
+
 def _validate_raw_item(tenant_id: str, item: WorkspaceItem | Mapping[str, Any]) -> None:
     if isinstance(item, WorkspaceItem):
         _validate_item_metadata(tenant_id, item.metadata)
@@ -549,8 +558,47 @@ def _dreamer_invocation(spec: Any, report: DreamReport) -> SpecialistInvocation:
             "promotion_gate_required": report.promotion_gate_required,
             "candidate_reality_classes": sorted({candidate.reality_class for candidate in report.candidates}),
             "candidate_trust_tiers": sorted({candidate.trust_tier for candidate in report.candidates}),
+            "promotion_evidence": _specialist_promotion_evidence(spec, report),
         },
     )
+
+
+def _specialist_promotion_evidence(spec: Any, report: DreamReport) -> dict[str, Any]:
+    candidates = []
+    for candidate in report.candidates:
+        source_refs = [_redacted_ref(cid, prefix="cid") for cid in candidate.source_evidence_cids]
+        candidates.append(
+            {
+                "candidate_ref": _redacted_ref(candidate.id, prefix="candidate"),
+                "source_evidence_ref_count": len(source_refs),
+                "source_evidence_refs": source_refs,
+                "reality_class": candidate.reality_class,
+                "trust_tier": candidate.trust_tier,
+                "shadow_only": candidate.shadow_only,
+                "promotion_required": candidate.promotion_required,
+                "critical_path": candidate.critical_path,
+            }
+        )
+    return {
+        "schema_version": SPECIALIST_PROMOTION_EVIDENCE_VERSION,
+        "specialist_name": spec.name,
+        "specialist_role": str(spec.role),
+        "provider_kind": str(getattr(spec, "provider_kind", "")),
+        "shadow_only": report.shadow_only,
+        "critical_path": report.critical_path,
+        "critical_path_allowed": bool(spec.budget.critical_path_allowed),
+        "production_mutation": report.production_mutation,
+        "promotion_gate_required": report.promotion_gate_required,
+        "promoted": False,
+        "gate_result": None,
+        "gate_result_present": False,
+        "candidate_count": len(candidates),
+        "source_count": report.source_count,
+        "cid_backed_candidate_count": sum(
+            1 for item in candidates if int(item["source_evidence_ref_count"]) >= 2
+        ),
+        "candidates": candidates,
+    }
 
 
 def workspace_consolidation_advisory(
