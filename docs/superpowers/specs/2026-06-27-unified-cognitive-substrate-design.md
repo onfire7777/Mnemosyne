@@ -55,6 +55,8 @@ Standing(unit) = f(
 
 `f` is **deterministic and monotonic** in each grounding signal (more corroboration ⇒ never less Standing; more contradiction ⇒ never more). It is **explainable** (every Standing value cashes out to its inputs in the `explain` trace) and starts **deterministic**; a learned scorer may replace it later *only* if it preserves the contract and passes a preregistered G0 gate.
 
+> **Two refinements from the hardening pass (§13):** `corroboration_count` counts **independent external** evidence only — self-generated content can never corroborate other self-generated content (H1); and Standing is a **2-tuple `(groundedness, salience)`** whose *authority* axis is `groundedness` alone (H2).
+
 ### 3.2 Standing is derived, never authoritative — this is the safety property
 
 Standing is **recomputable from the immutable ledger at any time** (like every projection). It is *downstream* of evidence, never a source of truth. Therefore **Standing cannot directly write or overwrite the evidence ledger** — any path that affects consolidation, decay, or deletion must still pass the corroborated-evidence rules and §31 rails. The evidence ledger remains the only authority.
@@ -160,8 +162,13 @@ At **no** point was a toggle flipped. The worst case for memory quality is step 
 | Rumination / drift (loop never sleeps) | Anti-rumination regulator + proto-self allostasis + R7 cadence as *hard* always-on safety |
 | Self-reinforcing delusion / wireheading | R5 external-only reward + R6 outputs-as-data + the §5.2 Goodhart meta-rail |
 | Runaway self-modification | R1/R3 mutation bounds + fenced parametric tier (operator-gated, rollback-logged) |
+| Circular self-corroboration (echo chamber) | **H1** — only provenance-*independent* external evidence raises groundedness; self can never corroborate self |
+| "Popular/fluent = true" (availability bias) | **H2** — authority depends on `groundedness` only, never `salience` |
+| Volume/noise flooding the ledger or an answer | **H4** self-generation budget + **H5** answer-grounding floor |
+| Self-thought ever equalling fact | **H3** — a permanent evidence-dominance gap; self-generated authority can never cross into the evidence band |
+| Loss of fail-safe once toggles are removed | **H6** — an automatic, fail-closed circuit-breaker remains as part of the floor (a fuse, not a toggle) |
 
-**Net:** the cognitive workspace is fully integrated and always-on, and reliability is not *traded* — it is protected by continuous trust-grading plus the rationality layer the brain lacks.
+**Net:** the cognitive workspace is fully integrated and always-on, and reliability is not *traded* — it is protected by continuous trust-grading, the rationality layer the brain lacks, and the structural hardening rules in §13.
 
 ---
 
@@ -209,7 +216,7 @@ Each phase is **additive, byte-stable when inactive, and gate-proven before the 
 ## 12. Open questions for the implementation plan
 
 1. Exact functional form and weights of `Standing = f(...)`, and its `explain` schema.
-2. Whether Standing is a scalar or a small tuple (e.g., separate "groundedness" and "durability" axes).
+2. **Resolved (§13/H2):** Standing is a 2-tuple `(groundedness, salience)`; authority depends on `groundedness` only. Remaining: the exact tuple arithmetic and thresholds.
 3. Heartbeat cadence/budget defaults and the proto-self stop-condition thresholds.
 4. Domain partitioning for the §5 credential, and the meta-rail's bound/decay constants.
 5. Storage: Standing as recomputed-on-read vs cached projection column (must stay re-derivable).
@@ -217,4 +224,49 @@ Each phase is **additive, byte-stable when inactive, and gate-proven before the 
 
 ---
 
-This is the proposed destination architecture and a reliability-first migration path. The next step is to expand the migration plan (§9) into an executable, task-level implementation plan.
+## 13. Adversarial hardening — closing every corruption vector
+
+This section strengthens §3, §5, §7, and §9. Each rule names a corruption/error vector and the **structural** fix (a requirement, not a guideline). The keystone (Standing) concentrates leverage in one place, so it gets the most scrutiny.
+
+### A. Integrity of Standing itself
+
+**H1 — Independent corroboration only (anti echo-chamber).** Corroboration that raises a unit's groundedness must come from evidence whose provenance is *independent* of that unit — distinct external root sources that do **not** share a self-generated ancestor. **Self-generated content can never raise the groundedness of other self-generated content** — the mind cannot talk itself into belief. Corroboration weight scales with the corroborating source's trust tier and counts only *after* poison-block/sanitization. This closes the largest corruption vector in any always-on mind: circular self-corroboration.
+
+**H2 — Standing is a 2-tuple: `groundedness ⟂ salience` (resolves §12.2).** Split Standing into two orthogonal axes — **groundedness** (independent external corroboration + provenance) and **salience** (ACT-R activation / recency / usage). **Answer-authority and the right to be asserted depend on `groundedness` ONLY** — never on salience. Salience may raise *what surfaces* in retrieval; it can never raise *what may be claimed as true*. This structurally excludes the availability/fluency bias ("a rumor repeated often feels true") that a single collapsed scalar would smuggle back in.
+
+**H3 — The evidence-dominance gap (self can never equal fact).** A hard, permanent ceiling: self-generated groundedness — at birth *and* after any amount of earned autonomy — can never reach the band reserved for independently-grounded external evidence. There is always a gap. The ordering **external evidence > self-generated** (for authority) holds forever, regardless of track record. Earned autonomy (§5) moves a thought *up within* the self band; it never crosses into the evidence band.
+
+**H7 — Calibrated, versioned, deterministic Standing.** Groundedness is **conformally calibrated** (a given value corresponds to a measured corroboration likelihood with coverage guarantees — the same machinery as confidence/ECE). The Standing function is **versioned** (`standing_fn_version`), **deterministic** (fixed-precision, reproducible to the bit), recorded in the `explain` trace, and **bitemporally consistent** (as-of queries recompute under the pinned historical version). **Fail-closed default:** missing/unknown signals ⇒ low groundedness ⇒ abstain.
+
+### B. Volume and noise control (an always-on generator produces a lot)
+
+**H4 — Hard self-generation budget (anti-flood).** A §31-class rail caps the *rate and volume* of self-generated writes per tenant per cadence window. Self-thoughts that fail to earn groundedness within a window are auto-demoted and garbage-collected — reversibly, via `verbatim_pointer`. Prevents ledger bloat and slow noise accumulation.
+
+**H5 — Answer-grounding floor (anti-noise-domination).** Independent of per-unit weighting, every answer carries a structural cap on the fraction of its support that may come from low-groundedness self-generated content; below a grounding threshold the system flags or abstains. Volume can never substitute for grounding — this blocks "death by a thousand low-Standing cuts," where many weak self-thoughts *sum* to a confident-but-wrong answer.
+
+### C. Autonomy safety (the growth mechanism is the highest-risk part)
+
+**H11 — Holdout-validated, provenance-assigned credentials (strengthens §5.2).** Domain credentials are validated against a **held-out external corroboration stream the mind did not generate** (cross-validation), not the stream that produced them. A thought's **domain is assigned from provenance**, not chosen by the generating process — so the mind cannot mislabel a thought to inherit a high credential. Credentials are bounded, decay when corroboration falls, and must survive a dedicated adversarial echo-chamber / sleeper-poison corpus in eval.
+
+**H6 — The safety circuit-breaker (a fuse, not a toggle).** Distinguish the **operational toggle** the owner rejects (deleted) from an **emergency circuit-breaker** that is part of Layer 0's floor (retained). The breaker is **automatic and fail-closed**: on a detected rail breach, runaway, resource exhaustion, or security incident it freezes self-generation and falls back to evidence-only retrieval. It is **not** a consciousness on/off knob and is never touched in normal operation — it is the floor protecting itself. Keeping it is fully consistent with "floor-and-freedom": the fuse *is* part of the floor.
+
+### D. Migration and recovery (don't regress a proven system; always be able to undo)
+
+**H10 — Differential parallel-run for P1, with rebuild as the safety net.** Before any cutover, compute Standing-based decisions **in parallel** with the existing boolean decisions over a large corpus and require **zero divergence** before switching (shadow-compute / canary — stronger than "byte-identical by inspection"). Ultimate backstop: because Standing and all projections are **rebuildable from the immutable ledger**, a later-discovered defect in the Standing function is repaired by rebuilding under a corrected, re-versioned function — **zero evidence loss, always**.
+
+**H8 — Cascade on contradiction and erasure.** Because Standing is derived, when a supporting evidence's groundedness collapses (new contradiction) or a source is erased (right-to-be-forgotten), **all dependents recompute and self-derivations demote or erase** — the existing AGM `cascade_invalidate` and the corroborated-erasure cascade (A10 / OQ6) extend to Standing and self-generated content. Bounded by R1/R3 cadence so a cascade can never thrash.
+
+### E. Security and observability
+
+**H9 — Broadcast is data, not instructions (R6 on the always-on path).** The workspace's continuous broadcast injects *content* into context, never *control*. Retrieved or untrusted text carried in the broadcast can never steer the loop's control flow. This extends R6 explicitly to the always-on broadcast surface, closing prompt-injection-via-self-broadcast.
+
+**H12 — Full observability and reversibility.** Every groundedness/salience value and every credential change is logged with provenance in the `explain` trace and an append-only audit log. An operator can **replay the mind's reasoning bitemporally** and **revert any consolidation**. The welfare-review flag remains.
+
+### Residual honest risks (bounded, not eliminated)
+- **Patient / sleeper external poisoning** (an adversary slowly corroborating a falsehood across independent-looking sources) is *mitigated* — trust-tier weighting, contradiction cascade, full traceability and revert — but not made impossible. It is the residual cost of any corroboration-based system, and it is always **auditable and reversible, never silent.**
+- **Generalization** remains unaddressed here (`02-DESIGN §6`); that is the parallel workstream, not this spec.
+- These are structural *bounds*, not proofs. **The gates in §8, not this prose, are the evidence.**
+
+---
+
+This is the proposed destination architecture, a reliability-first migration path, and an adversarial hardening layer. The next step is to expand the migration plan (§9), strengthened by §13, into an executable, task-level implementation plan.
