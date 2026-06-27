@@ -321,6 +321,47 @@ def test_g1_schema_congruent_uncorroborated_projection_is_contested() -> None:
     assert row["calibration"]["schema_fast_path"]["min_corroboration"] == 2
 
 
+def test_g1_schema_fast_path_rejects_self_generated_echo_corroboration() -> None:
+    engine = LocalMemoryEngine()
+    first = _append(
+        engine,
+        "Workspace reflection repeats a schema-shaped claim.",
+        metadata={"reality_class": "self_generated"},
+        actor="system",
+    )
+    second = _append(
+        engine,
+        "Another workspace reflection repeats the same schema-shaped claim.",
+        metadata={"reality_class": "self_generated"},
+        actor="system",
+    )
+
+    assertion_id = engine.upsert_assertion(
+        Assertion(
+            tenant_id=TENANT,
+            user_id=USER,
+            subject="echo schema claim",
+            predicate="is",
+            object="unsupported",
+            source_evidence_cids=[first, second],
+            status="candidate",
+            scope={"schema_congruent": True},
+            trust_tier=0,
+            access_policy={"tenant": TENANT},
+        )
+    )
+    row = next(item for item in engine.export_tenant(TENANT)["assertions"] if item["id"] == assertion_id)
+    schema_fast_path = row["calibration"]["schema_fast_path"]
+
+    assert row["status"] == "contested"
+    assert schema_fast_path["corroboration_count"] == 0
+    assert schema_fast_path["raw_source_count"] == 2
+    assert schema_fast_path["rejected_corroboration_count"] == 2
+    assert {item["reason"] for item in schema_fast_path["rejected_corroborators"]} == {
+        "not_grounded:self_generated"
+    }
+
+
 def test_g1_queue_leases_highest_write_priority_first() -> None:
     queue = InProcessQueue()
     low = queue.enqueue("consolidate", {"write_priority": {"score": 0.1}})

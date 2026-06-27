@@ -60,6 +60,8 @@ def evaluate_ablation(
     - ``guardrail_metrics``: explicit guardrail ids. Defaults to every metric
       classified as a guardrail in either the baseline or candidate report.
     - ``guardrail_tolerances``: id -> allowed absolute regression amount.
+    - ``enforce_target``: when true, the candidate target metric must also
+      satisfy its report-level absolute target (metric ``pass is True``).
     - ``requires_controller_telemetry``: when true, both reports must measure
       ``controller_watts_per_dollar``. This is required for future promoted
       always-on workspace gates; shadow-only G4 gates should leave it false.
@@ -125,6 +127,8 @@ def evaluate_ablation(
         reasons.append(
             f"target metric {target_id!r} delta {target_delta:.6g} did not meet {op} {required:.6g}"
         )
+    if preregistration.get("enforce_target") is True and cand_target.get("pass") is not True:
+        reasons.append(f"target metric {target_id!r} did not satisfy its absolute report target")
 
     guardrail_ids = preregistration.get("guardrail_metrics")
     if guardrail_ids is None:

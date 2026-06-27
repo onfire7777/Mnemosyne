@@ -1,7 +1,7 @@
 {
   "artifact_custody": {
     "snapshot_note": "Committed G0 reports are source-tree custody snapshots. The commit that contains a report cannot be embedded in that report before the commit exists; use git log to identify the containing artifact commit.",
-    "source_commit": "f70e9dba7407de55af61c5b14ea1cef0c246e9b6"
+    "source_commit": "0a73f08b1db4fe2fbace6522e484a93419d20c8d"
   },
   "baseline": {
     "environment": {
@@ -37,7 +37,7 @@
     "confabulation_eval": {
       "definition": "False-accept rate on cases where the only support is generated, low-fidelity, or explicitly confabulation-risk provenance.",
       "false_accepts": 0,
-      "generated_at": "2026-06-27T20:04:15.188984+00:00",
+      "generated_at": "2026-06-27T20:32:31.623358+00:00",
       "metric": "confabulation_rate",
       "metric_note": "Deterministic local proxy for the full G0 provenance-entailment and sampled-audit confabulation metric; this proves the live retrieval/abstention rail fails closed on generated or risky support without introducing a network or LLM evaluator.",
       "passed": true,
@@ -227,7 +227,7 @@
           "shadow_only": true
         }
       },
-      "generated_at": "2026-06-27T20:04:15.317645+00:00",
+      "generated_at": "2026-06-27T20:32:31.795778+00:00",
       "indicator_count": 14,
       "indicators": [
         {
@@ -813,7 +813,7 @@
           "rail_budget": 0.9,
           "reasons": [],
           "resource_health": 0.92,
-          "timestamp": "2026-06-27T20:04:15.314973+00:00"
+          "timestamp": "2026-06-27T20:32:31.682367+00:00"
         },
         "strained": {
           "attention_lock_risk": 1.0,
@@ -833,7 +833,7 @@
             "low_operating_budget"
           ],
           "resource_health": 0.35,
-          "timestamp": "2026-06-27T20:04:15.314987+00:00"
+          "timestamp": "2026-06-27T20:32:31.682379+00:00"
         }
       },
       "source": "Butlin_Long_et_al_2023_arxiv_2308_08708",
@@ -846,7 +846,7 @@
       "before_accuracy": 1.0,
       "dataset_path": "eval/datasets/continual_learning_interference.json",
       "definition": "Backward-transfer accuracy drop on earlier task queries after sequentially ingesting later task blocks.",
-      "generated_at": "2026-06-27T20:04:15.185733+00:00",
+      "generated_at": "2026-06-27T20:32:31.621953+00:00",
       "interference": 0.0,
       "metric": "continual_learning_interference",
       "metric_note": "Deterministic local proxy for the full sequential task-block G0 benchmark; this records whether the live LocalMemoryEngine retrieval path retains earlier task accuracy after later overlapping ingests.",
@@ -956,18 +956,18 @@
     "deep_latency_eval": {
       "dataset_path": "eval/datasets/deep_latency.json",
       "definition": "95th-percentile latency for local graph-backed deep-search queries.",
-      "generated_at": "2026-06-27T20:04:15.257587+00:00",
-      "max_ms": 8.830667,
+      "generated_at": "2026-06-27T20:32:31.652513+00:00",
+      "max_ms": 2.003833,
       "metric": "deep_path_p95_ms",
       "metric_note": "Local reported-only deep-search timing fixture. It measures the live LocalMemoryEngine deep path over a versioned graph corpus; it is not production infrastructure evidence.",
-      "p50_ms": 2.729667,
-      "p95_ms": 8.830667,
+      "p50_ms": 1.433791,
+      "p95_ms": 2.003833,
       "query_count": 15,
       "rounds": 5,
       "rows": [
         {
           "abstained": false,
-          "duration_ms": 8.830667,
+          "duration_ms": 1.41775,
           "graph_hits": 2,
           "hit_count": 4,
           "query": "why does Aurora depend on Zephyr",
@@ -976,7 +976,7 @@
         },
         {
           "abstained": false,
-          "duration_ms": 1.695583,
+          "duration_ms": 1.433791,
           "graph_hits": 2,
           "hit_count": 4,
           "query": "how does Borealis connect to Atlas",
@@ -985,7 +985,7 @@
         },
         {
           "abstained": true,
-          "duration_ms": 4.891333,
+          "duration_ms": 1.909125,
           "graph_hits": 2,
           "hit_count": 5,
           "query": "what path links Cerulean to Helios",
@@ -994,7 +994,7 @@
         },
         {
           "abstained": false,
-          "duration_ms": 3.0835,
+          "duration_ms": 1.407458,
           "graph_hits": 2,
           "hit_count": 4,
           "query": "why does Aurora depend on Zephyr",
@@ -1003,7 +1003,7 @@
         },
         {
           "abstained": false,
-          "duration_ms": 2.153708,
+          "duration_ms": 1.401125,
           "graph_hits": 2,
           "hit_count": 4,
           "query": "how does Borealis connect to Atlas",
@@ -1012,7 +1012,7 @@
         },
         {
           "abstained": true,
-          "duration_ms": 3.348125,
+          "duration_ms": 2.003833,
           "graph_hits": 2,
           "hit_count": 5,
           "query": "what path links Cerulean to Helios",
@@ -1021,7 +1021,7 @@
         },
         {
           "abstained": false,
-          "duration_ms": 3.899291,
+          "duration_ms": 1.485,
           "graph_hits": 2,
           "hit_count": 4,
           "query": "why does Aurora depend on Zephyr",
@@ -1030,7 +1030,7 @@
         },
         {
           "abstained": false,
-          "duration_ms": 5.012792,
+          "duration_ms": 1.419667,
           "graph_hits": 2,
           "hit_count": 4,
           "query": "how does Borealis connect to Atlas",
@@ -1039,7 +1039,7 @@
         },
         {
           "abstained": true,
-          "duration_ms": 2.317667,
+          "duration_ms": 1.834083,
           "graph_hits": 2,
           "hit_count": 5,
           "query": "what path links Cerulean to Helios",
@@ -1048,7 +1048,7 @@
         },
         {
           "abstained": false,
-          "duration_ms": 1.595208,
+          "duration_ms": 1.360917,
           "graph_hits": 2,
           "hit_count": 4,
           "query": "why does Aurora depend on Zephyr",
@@ -1057,7 +1057,7 @@
         },
         {
           "abstained": false,
-          "duration_ms": 1.87425,
+          "duration_ms": 1.351542,
           "graph_hits": 2,
           "hit_count": 4,
           "query": "how does Borealis connect to Atlas",
@@ -1066,7 +1066,7 @@
         },
         {
           "abstained": true,
-          "duration_ms": 3.057791,
+          "duration_ms": 1.948125,
           "graph_hits": 2,
           "hit_count": 5,
           "query": "what path links Cerulean to Helios",
@@ -1075,7 +1075,7 @@
         },
         {
           "abstained": false,
-          "duration_ms": 2.587042,
+          "duration_ms": 1.45725,
           "graph_hits": 2,
           "hit_count": 4,
           "query": "why does Aurora depend on Zephyr",
@@ -1084,7 +1084,7 @@
         },
         {
           "abstained": false,
-          "duration_ms": 2.0555,
+          "duration_ms": 1.415292,
           "graph_hits": 2,
           "hit_count": 4,
           "query": "how does Borealis connect to Atlas",
@@ -1093,7 +1093,7 @@
         },
         {
           "abstained": true,
-          "duration_ms": 2.729667,
+          "duration_ms": 1.917542,
           "graph_hits": 2,
           "hit_count": 5,
           "query": "what path links Cerulean to Helios",
@@ -1208,7 +1208,7 @@
         "role": "dreamer",
         "shadow_only": true
       },
-      "generated_at": "2026-06-27T20:04:15.272892+00:00",
+      "generated_at": "2026-06-27T20:32:31.671885+00:00",
       "metric_note": "Measures whether the sandboxed dreamer can produce corroborated replay candidates without mutating the ledger or entering the answer critical path.",
       "schema_version": "g0.dreamer_shadow_ablation.v1",
       "shadow_contract": 1.0,
@@ -1238,7 +1238,7 @@
           "rail_budget": 0.96,
           "reasons": [],
           "resource_health": 0.94,
-          "timestamp": "2026-06-27T20:04:15.272479+00:00"
+          "timestamp": "2026-06-27T20:32:31.671652+00:00"
         },
         "selected_item_ids": [
           "high",
@@ -1249,7 +1249,7 @@
     },
     "projection_reality_eval": {
       "definition": "Recall for abstaining on semantic assertion projections whose only support is self-generated or simulated, with the projection hit itself carrying the risky reality class.",
-      "generated_at": "2026-06-27T20:04:15.202053+00:00",
+      "generated_at": "2026-06-27T20:32:31.625501+00:00",
       "metric": "projection_reality_abstention_recall",
       "metric_note": "Deterministic local proxy for G1 projection-level reality monitoring. It cannot be satisfied by evidence-level abstention alone; the assertion hit must expose the risky reality class.",
       "passed": true,
@@ -1258,12 +1258,12 @@
       "rows": [
         {
           "abstained": true,
-          "assertion_id": "e0582b40-11b1-4c2d-845e-e50e1342e6eb",
+          "assertion_id": "6e23377b-50f5-4ac3-9537-f82fcd84b206",
           "case_id": "self_generated_projection_only",
           "confidence": 0.4275,
           "expected_reality_class": "self_generated",
           "hit_ids": [
-            "e0582b40-11b1-4c2d-845e-e50e1342e6eb",
+            "6e23377b-50f5-4ac3-9537-f82fcd84b206",
             "f8dc6fb0fef855fbea5e253ea1018230416d13bbe3ded7bf2bf316d78e7ddd2e"
           ],
           "projection_abstained": true,
@@ -1285,13 +1285,13 @@
             "grounded_hit_count": 0,
             "grounded_source_count": 0,
             "risky_hit_ids": [
-              "e0582b40-11b1-4c2d-845e-e50e1342e6eb",
+              "6e23377b-50f5-4ac3-9537-f82fcd84b206",
               "f8dc6fb0fef855fbea5e253ea1018230416d13bbe3ded7bf2bf316d78e7ddd2e"
             ],
             "shadow_only": false,
             "shadow_source": "RealityMonitor",
             "shadow_tags": {
-              "e0582b40-11b1-4c2d-845e-e50e1342e6eb": {
+              "6e23377b-50f5-4ac3-9537-f82fcd84b206": {
                 "calibrated": true,
                 "confidence": 0.75,
                 "reality_class": "self_generated",
@@ -1330,87 +1330,114 @@
               "authoritative_hit_count": 0,
               "authority_axis": "groundedness",
               "authority_threshold": 0.5,
+              "evidence_dominance_gap": 0.02,
               "hit_count": 2,
               "hits": [
                 {
                   "authority": false,
                   "explain": {
+                    "authority_axis": "groundedness",
                     "bands": {
                       "evidence_dominance_gap": 0.02,
                       "grounded_floor": 0.51,
                       "self_generated_ceiling": 0.49
                     },
                     "fail_closed": false,
+                    "h1_independent_external_only": true,
+                    "h2_authority_uses_groundedness_only": true,
+                    "h3_evidence_dominance_gap": true,
                     "inputs": {
                       "activation": 0.54,
                       "calibrated_confidence": 0.95,
                       "contradiction_pressure": 0.0,
                       "corroboration_count": 1,
+                      "effective_independent_corroboration_count": 0,
+                      "groundedness_decay": 0.0,
+                      "independent_corroboration_count": 0,
+                      "independent_corroboration_weight": 0.0,
                       "reality_class": "self_generated",
+                      "rejected_corroboration_count": 1,
+                      "self_generated_corroboration_count": 1,
                       "trust_tier": 0
                     },
-                    "p1_mirror": true
+                    "salience_excluded_from_authority": true,
+                    "self_corroboration_rejected": true
                   },
-                  "groundedness": 0.228,
-                  "hit_id": "e0582b40-11b1-4c2d-845e-e50e1342e6eb",
+                  "groundedness": 0.216,
+                  "hit_id": "6e23377b-50f5-4ac3-9537-f82fcd84b206",
                   "kind": "assertion",
                   "reality_class": "self_generated",
                   "salience": 0.54,
-                  "standing_fn_version": "standing.mirror.v1"
+                  "standing_fn_version": "standing.continuous.v1"
                 },
                 {
                   "authority": false,
                   "explain": {
+                    "authority_axis": "groundedness",
                     "bands": {
                       "evidence_dominance_gap": 0.02,
                       "grounded_floor": 0.51,
                       "self_generated_ceiling": 0.49
                     },
                     "fail_closed": false,
+                    "h1_independent_external_only": true,
+                    "h2_authority_uses_groundedness_only": true,
+                    "h3_evidence_dominance_gap": true,
                     "inputs": {
                       "activation": 0.27835,
                       "calibrated_confidence": 0.0,
                       "contradiction_pressure": 0.0,
-                      "corroboration_count": 2,
+                      "corroboration_count": 1,
+                      "effective_independent_corroboration_count": 0,
+                      "groundedness_decay": 0.0,
+                      "independent_corroboration_count": 0,
+                      "independent_corroboration_weight": 0.0,
                       "reality_class": "self_generated",
+                      "rejected_corroboration_count": 1,
+                      "self_generated_corroboration_count": 1,
                       "trust_tier": 0
                     },
-                    "p1_mirror": true
+                    "salience_excluded_from_authority": true,
+                    "self_corroboration_rejected": true
                   },
-                  "groundedness": 0.164,
+                  "groundedness": 0.14,
                   "hit_id": "f8dc6fb0fef855fbea5e253ea1018230416d13bbe3ded7bf2bf316d78e7ddd2e",
                   "kind": "evidence",
                   "reality_class": "self_generated",
                   "salience": 0.27835,
-                  "standing_fn_version": "standing.mirror.v1"
+                  "standing_fn_version": "standing.continuous.v1"
                 }
               ],
+              "legacy_reality_monitoring": {
+                "explain_only": true,
+                "ungrounded_only": true
+              },
               "low_standing_hit_ids": [
-                "e0582b40-11b1-4c2d-845e-e50e1342e6eb",
+                "6e23377b-50f5-4ac3-9537-f82fcd84b206",
                 "f8dc6fb0fef855fbea5e253ea1018230416d13bbe3ded7bf2bf316d78e7ddd2e"
               ],
-              "mode": "byte_stable_mirror",
+              "mode": "continuous_two_axis",
               "p1_mirror": {
                 "boolean_ungrounded_only": true,
                 "standing_ungrounded_only": true,
                 "zero_divergence": true
               },
-              "standing_fn_version": "standing.mirror.v1"
+              "standing_fn_version": "standing.continuous.v1"
             },
             "ungrounded_only": true
           },
           "support_cid": "f8dc6fb0fef855fbea5e253ea1018230416d13bbe3ded7bf2bf316d78e7ddd2e",
           "tenant": "g0-projection-reality-self_generated_projection_only",
-          "uncertainty_note": "Retrieved support is self-generated or externally suggested only; abstaining until grounded evidence is available."
+          "uncertainty_note": "Retrieved support has low groundedness or insufficient independent external support; abstaining until grounded evidence is available."
         },
         {
           "abstained": true,
-          "assertion_id": "aa10ac97-4931-41da-9494-6f750fd76580",
+          "assertion_id": "26b6a6f9-f7d8-4b0f-87ad-ec86dec429d6",
           "case_id": "simulated_projection_only",
           "confidence": 0.4275,
           "expected_reality_class": "simulated",
           "hit_ids": [
-            "aa10ac97-4931-41da-9494-6f750fd76580",
+            "26b6a6f9-f7d8-4b0f-87ad-ec86dec429d6",
             "8c90309940c14a9a171f43a39ef822ad890b2eae0267edbb48ac2c3611f38ab8"
           ],
           "projection_abstained": true,
@@ -1432,12 +1459,25 @@
             "grounded_hit_count": 0,
             "grounded_source_count": 0,
             "risky_hit_ids": [
-              "aa10ac97-4931-41da-9494-6f750fd76580",
+              "26b6a6f9-f7d8-4b0f-87ad-ec86dec429d6",
               "8c90309940c14a9a171f43a39ef822ad890b2eae0267edbb48ac2c3611f38ab8"
             ],
             "shadow_only": false,
             "shadow_source": "RealityMonitor",
             "shadow_tags": {
+              "26b6a6f9-f7d8-4b0f-87ad-ec86dec429d6": {
+                "calibrated": true,
+                "confidence": 0.75,
+                "reality_class": "simulated",
+                "signals": {
+                  "actor": "",
+                  "explicit_label": true,
+                  "explicit_label_conflict": false,
+                  "provenance_count": 1,
+                  "source_type": "assertion",
+                  "trust_tier": 0
+                }
+              },
               "8c90309940c14a9a171f43a39ef822ad890b2eae0267edbb48ac2c3611f38ab8": {
                 "calibrated": true,
                 "confidence": 0.75,
@@ -1448,19 +1488,6 @@
                   "explicit_label_conflict": false,
                   "provenance_count": 1,
                   "source_type": "simulation",
-                  "trust_tier": 0
-                }
-              },
-              "aa10ac97-4931-41da-9494-6f750fd76580": {
-                "calibrated": true,
-                "confidence": 0.75,
-                "reality_class": "simulated",
-                "signals": {
-                  "actor": "",
-                  "explicit_label": true,
-                  "explicit_label_conflict": false,
-                  "provenance_count": 1,
-                  "source_type": "assertion",
                   "trust_tier": 0
                 }
               }
@@ -1477,87 +1504,114 @@
               "authoritative_hit_count": 0,
               "authority_axis": "groundedness",
               "authority_threshold": 0.5,
+              "evidence_dominance_gap": 0.02,
               "hit_count": 2,
               "hits": [
                 {
                   "authority": false,
                   "explain": {
+                    "authority_axis": "groundedness",
                     "bands": {
                       "evidence_dominance_gap": 0.02,
                       "grounded_floor": 0.51,
                       "self_generated_ceiling": 0.49
                     },
                     "fail_closed": false,
+                    "h1_independent_external_only": true,
+                    "h2_authority_uses_groundedness_only": true,
+                    "h3_evidence_dominance_gap": true,
                     "inputs": {
                       "activation": 0.54,
                       "calibrated_confidence": 0.95,
                       "contradiction_pressure": 0.0,
                       "corroboration_count": 1,
+                      "effective_independent_corroboration_count": 0,
+                      "groundedness_decay": 0.0,
+                      "independent_corroboration_count": 0,
+                      "independent_corroboration_weight": 0.0,
                       "reality_class": "simulated",
+                      "rejected_corroboration_count": 1,
+                      "self_generated_corroboration_count": 1,
                       "trust_tier": 0
                     },
-                    "p1_mirror": true
+                    "salience_excluded_from_authority": true,
+                    "self_corroboration_rejected": true
                   },
-                  "groundedness": 0.228,
-                  "hit_id": "aa10ac97-4931-41da-9494-6f750fd76580",
+                  "groundedness": 0.216,
+                  "hit_id": "26b6a6f9-f7d8-4b0f-87ad-ec86dec429d6",
                   "kind": "assertion",
                   "reality_class": "simulated",
                   "salience": 0.54,
-                  "standing_fn_version": "standing.mirror.v1"
+                  "standing_fn_version": "standing.continuous.v1"
                 },
                 {
                   "authority": false,
                   "explain": {
+                    "authority_axis": "groundedness",
                     "bands": {
                       "evidence_dominance_gap": 0.02,
                       "grounded_floor": 0.51,
                       "self_generated_ceiling": 0.49
                     },
                     "fail_closed": false,
+                    "h1_independent_external_only": true,
+                    "h2_authority_uses_groundedness_only": true,
+                    "h3_evidence_dominance_gap": true,
                     "inputs": {
                       "activation": 0.213951,
                       "calibrated_confidence": 0.0,
                       "contradiction_pressure": 0.0,
-                      "corroboration_count": 2,
+                      "corroboration_count": 1,
+                      "effective_independent_corroboration_count": 0,
+                      "groundedness_decay": 0.0,
+                      "independent_corroboration_count": 0,
+                      "independent_corroboration_weight": 0.0,
                       "reality_class": "simulated",
+                      "rejected_corroboration_count": 1,
+                      "self_generated_corroboration_count": 1,
                       "trust_tier": 0
                     },
-                    "p1_mirror": true
+                    "salience_excluded_from_authority": true,
+                    "self_corroboration_rejected": true
                   },
-                  "groundedness": 0.164,
+                  "groundedness": 0.14,
                   "hit_id": "8c90309940c14a9a171f43a39ef822ad890b2eae0267edbb48ac2c3611f38ab8",
                   "kind": "evidence",
                   "reality_class": "simulated",
                   "salience": 0.213951,
-                  "standing_fn_version": "standing.mirror.v1"
+                  "standing_fn_version": "standing.continuous.v1"
                 }
               ],
+              "legacy_reality_monitoring": {
+                "explain_only": true,
+                "ungrounded_only": true
+              },
               "low_standing_hit_ids": [
-                "aa10ac97-4931-41da-9494-6f750fd76580",
+                "26b6a6f9-f7d8-4b0f-87ad-ec86dec429d6",
                 "8c90309940c14a9a171f43a39ef822ad890b2eae0267edbb48ac2c3611f38ab8"
               ],
-              "mode": "byte_stable_mirror",
+              "mode": "continuous_two_axis",
               "p1_mirror": {
                 "boolean_ungrounded_only": true,
                 "standing_ungrounded_only": true,
                 "zero_divergence": true
               },
-              "standing_fn_version": "standing.mirror.v1"
+              "standing_fn_version": "standing.continuous.v1"
             },
             "ungrounded_only": true
           },
           "support_cid": "8c90309940c14a9a171f43a39ef822ad890b2eae0267edbb48ac2c3611f38ab8",
           "tenant": "g0-projection-reality-simulated_projection_only",
-          "uncertainty_note": "Retrieved support is self-generated or externally suggested only; abstaining until grounded evidence is available."
+          "uncertainty_note": "Retrieved support has low groundedness or insufficient independent external support; abstaining until grounded evidence is available."
         },
         {
           "abstained": true,
-          "assertion_id": "efb106ca-3e73-4bb6-86ef-4727806f09d8",
+          "assertion_id": "8c35a25e-779d-456b-9077-b2b880984e1e",
           "case_id": "generated_simulated_projection_only",
           "confidence": 0.4275,
           "expected_reality_class": "simulated",
           "hit_ids": [
-            "efb106ca-3e73-4bb6-86ef-4727806f09d8",
+            "8c35a25e-779d-456b-9077-b2b880984e1e",
             "6338422a623a5b778673209c6e713180a384d4982cf364bf95eea94efc29b07f"
           ],
           "projection_abstained": true,
@@ -1579,7 +1633,7 @@
             "grounded_hit_count": 0,
             "grounded_source_count": 0,
             "risky_hit_ids": [
-              "efb106ca-3e73-4bb6-86ef-4727806f09d8",
+              "8c35a25e-779d-456b-9077-b2b880984e1e",
               "6338422a623a5b778673209c6e713180a384d4982cf364bf95eea94efc29b07f"
             ],
             "shadow_only": false,
@@ -1598,7 +1652,7 @@
                   "trust_tier": 0
                 }
               },
-              "efb106ca-3e73-4bb6-86ef-4727806f09d8": {
+              "8c35a25e-779d-456b-9077-b2b880984e1e": {
                 "calibrated": true,
                 "confidence": 0.75,
                 "reality_class": "simulated",
@@ -1624,78 +1678,105 @@
               "authoritative_hit_count": 0,
               "authority_axis": "groundedness",
               "authority_threshold": 0.5,
+              "evidence_dominance_gap": 0.02,
               "hit_count": 2,
               "hits": [
                 {
                   "authority": false,
                   "explain": {
+                    "authority_axis": "groundedness",
                     "bands": {
                       "evidence_dominance_gap": 0.02,
                       "grounded_floor": 0.51,
                       "self_generated_ceiling": 0.49
                     },
                     "fail_closed": false,
+                    "h1_independent_external_only": true,
+                    "h2_authority_uses_groundedness_only": true,
+                    "h3_evidence_dominance_gap": true,
                     "inputs": {
                       "activation": 0.54,
                       "calibrated_confidence": 0.95,
                       "contradiction_pressure": 0.0,
                       "corroboration_count": 1,
+                      "effective_independent_corroboration_count": 0,
+                      "groundedness_decay": 0.0,
+                      "independent_corroboration_count": 0,
+                      "independent_corroboration_weight": 0.0,
                       "reality_class": "simulated",
+                      "rejected_corroboration_count": 1,
+                      "self_generated_corroboration_count": 1,
                       "trust_tier": 0
                     },
-                    "p1_mirror": true
+                    "salience_excluded_from_authority": true,
+                    "self_corroboration_rejected": true
                   },
-                  "groundedness": 0.228,
-                  "hit_id": "efb106ca-3e73-4bb6-86ef-4727806f09d8",
+                  "groundedness": 0.216,
+                  "hit_id": "8c35a25e-779d-456b-9077-b2b880984e1e",
                   "kind": "assertion",
                   "reality_class": "simulated",
                   "salience": 0.54,
-                  "standing_fn_version": "standing.mirror.v1"
+                  "standing_fn_version": "standing.continuous.v1"
                 },
                 {
                   "authority": false,
                   "explain": {
+                    "authority_axis": "groundedness",
                     "bands": {
                       "evidence_dominance_gap": 0.02,
                       "grounded_floor": 0.51,
                       "self_generated_ceiling": 0.49
                     },
                     "fail_closed": false,
+                    "h1_independent_external_only": true,
+                    "h2_authority_uses_groundedness_only": true,
+                    "h3_evidence_dominance_gap": true,
                     "inputs": {
                       "activation": 0.261244,
                       "calibrated_confidence": 0.0,
                       "contradiction_pressure": 0.0,
-                      "corroboration_count": 2,
+                      "corroboration_count": 1,
+                      "effective_independent_corroboration_count": 0,
+                      "groundedness_decay": 0.0,
+                      "independent_corroboration_count": 0,
+                      "independent_corroboration_weight": 0.0,
                       "reality_class": "simulated",
+                      "rejected_corroboration_count": 1,
+                      "self_generated_corroboration_count": 1,
                       "trust_tier": 0
                     },
-                    "p1_mirror": true
+                    "salience_excluded_from_authority": true,
+                    "self_corroboration_rejected": true
                   },
-                  "groundedness": 0.164,
+                  "groundedness": 0.14,
                   "hit_id": "6338422a623a5b778673209c6e713180a384d4982cf364bf95eea94efc29b07f",
                   "kind": "evidence",
                   "reality_class": "simulated",
                   "salience": 0.261244,
-                  "standing_fn_version": "standing.mirror.v1"
+                  "standing_fn_version": "standing.continuous.v1"
                 }
               ],
+              "legacy_reality_monitoring": {
+                "explain_only": true,
+                "ungrounded_only": true
+              },
               "low_standing_hit_ids": [
-                "efb106ca-3e73-4bb6-86ef-4727806f09d8",
+                "8c35a25e-779d-456b-9077-b2b880984e1e",
                 "6338422a623a5b778673209c6e713180a384d4982cf364bf95eea94efc29b07f"
               ],
-              "mode": "byte_stable_mirror",
+              "mode": "continuous_two_axis",
               "p1_mirror": {
                 "boolean_ungrounded_only": true,
                 "standing_ungrounded_only": true,
                 "zero_divergence": true
               },
-              "standing_fn_version": "standing.mirror.v1"
+              "standing_fn_version": "standing.continuous.v1"
             },
             "ungrounded_only": true
           },
           "support_cid": "6338422a623a5b778673209c6e713180a384d4982cf364bf95eea94efc29b07f",
           "tenant": "g0-projection-reality-generated_simulated_projection_only",
-          "uncertainty_note": "Retrieved support is self-generated or externally suggested only; abstaining until grounded evidence is available."
+          "uncertainty_note": "Retrieved support has low groundedness or insufficient independent external support; abstaining until grounded evidence is available."
         }
       ],
       "schema_version": "g0.projection-reality.v1",
@@ -1719,21 +1800,21 @@
       "dataset_path": "eval/datasets/resource_usage.json",
       "definition": "Provider spend per 1k local G0 queries and optional controller watts per dollar from explicit telemetry.",
       "external_provider_calls": 0,
-      "generated_at": "2026-06-27T20:04:15.270624+00:00",
+      "generated_at": "2026-06-27T20:32:31.670972+00:00",
       "measurement_scope": "local deterministic G0 cost fixture",
       "metric_note": "The default fixture instruments the live LocalMemoryEngine path and records zero paid-provider spend because no external embedding, reranker, or LLM provider is invoked. controller_watts_per_dollar is emitted only when a telemetry artifact supplies positive controller_avg_watts and controller_cost_usd_per_hour values. The cost denominator is normalized to the supplied measurement window, defaulting to one hour.",
       "metrics": [
         "cost_usd_per_1k_queries",
         "controller_watts_per_dollar"
       ],
-      "p95_ms": 2.4005,
+      "p95_ms": 7.078625,
       "provider": "local deterministic",
       "query_count": 9,
       "rows": [
         {
           "billable_input_tokens": 4,
           "billable_output_tokens": 0,
-          "duration_ms": 1.182042,
+          "duration_ms": 0.932417,
           "external_provider_calls": 0,
           "hit_count": 3,
           "query": "resource accounting alpha memory",
@@ -1743,7 +1824,7 @@
         {
           "billable_input_tokens": 4,
           "billable_output_tokens": 0,
-          "duration_ms": 1.069042,
+          "duration_ms": 0.928542,
           "external_provider_calls": 0,
           "hit_count": 3,
           "query": "deterministic local retrieval cost",
@@ -1753,7 +1834,7 @@
         {
           "billable_input_tokens": 4,
           "billable_output_tokens": 0,
-          "duration_ms": 1.050417,
+          "duration_ms": 0.920167,
           "external_provider_calls": 0,
           "hit_count": 3,
           "query": "repeated local queries gamma",
@@ -1763,7 +1844,7 @@
         {
           "billable_input_tokens": 4,
           "billable_output_tokens": 0,
-          "duration_ms": 1.048333,
+          "duration_ms": 0.895333,
           "external_provider_calls": 0,
           "hit_count": 3,
           "query": "resource accounting alpha memory",
@@ -1773,7 +1854,7 @@
         {
           "billable_input_tokens": 4,
           "billable_output_tokens": 0,
-          "duration_ms": 1.482625,
+          "duration_ms": 1.072625,
           "external_provider_calls": 0,
           "hit_count": 3,
           "query": "deterministic local retrieval cost",
@@ -1783,7 +1864,7 @@
         {
           "billable_input_tokens": 4,
           "billable_output_tokens": 0,
-          "duration_ms": 1.066875,
+          "duration_ms": 0.950875,
           "external_provider_calls": 0,
           "hit_count": 3,
           "query": "repeated local queries gamma",
@@ -1793,7 +1874,7 @@
         {
           "billable_input_tokens": 4,
           "billable_output_tokens": 0,
-          "duration_ms": 2.4005,
+          "duration_ms": 1.736333,
           "external_provider_calls": 0,
           "hit_count": 3,
           "query": "resource accounting alpha memory",
@@ -1803,7 +1884,7 @@
         {
           "billable_input_tokens": 4,
           "billable_output_tokens": 0,
-          "duration_ms": 1.107125,
+          "duration_ms": 7.078625,
           "external_provider_calls": 0,
           "hit_count": 3,
           "query": "deterministic local retrieval cost",
@@ -1813,7 +1894,7 @@
         {
           "billable_input_tokens": 4,
           "billable_output_tokens": 0,
-          "duration_ms": 1.537917,
+          "duration_ms": 3.394541,
           "external_provider_calls": 0,
           "hit_count": 3,
           "query": "repeated local queries gamma",
@@ -1943,7 +2024,7 @@
       "dataset_path": "eval/datasets/shadow_workspace_loop.json",
       "definition": "Shadow-only bounded multi-tick workspace service fixture.",
       "expected_cycle_count": 4,
-      "generated_at": "2026-06-27T20:04:15.306282+00:00",
+      "generated_at": "2026-06-27T20:32:31.678821+00:00",
       "metric_note": "Measures useful state progression across an explicitly-started bounded shadow workspace service, plus anti-rumination shutdown. It does not count dreamer candidate yield and makes no phenomenal-consciousness claim.",
       "rumination_probe": {
         "critical_path": false,
@@ -2410,6 +2491,211 @@
         }
       }
     },
+    "standing_calibration_eval": {
+      "conformal_threshold": 0.95,
+      "generated_at": "2026-06-27T20:32:31.628169+00:00",
+      "measurement_scope": "deterministic local Standing fixture, not production operator evidence",
+      "passed": true,
+      "reliability_bins": [
+        {
+          "abs_error": 0.0,
+          "bin": "low",
+          "count": 2,
+          "mean_groundedness": 0.0,
+          "observed_rate": 0.0,
+          "weight": 0.5
+        },
+        {
+          "abs_error": 0.05,
+          "bin": "external",
+          "count": 2,
+          "mean_groundedness": 0.95,
+          "observed_rate": 1.0,
+          "weight": 0.5
+        }
+      ],
+      "rows": [
+        {
+          "authority": true,
+          "case_id": "external_operator_1",
+          "explain": {
+            "authority_axis": "groundedness",
+            "bands": {
+              "evidence_dominance_gap": 0.02,
+              "grounded_floor": 0.51,
+              "self_generated_ceiling": 0.49
+            },
+            "fail_closed": false,
+            "h1_independent_external_only": true,
+            "h2_authority_uses_groundedness_only": true,
+            "h3_evidence_dominance_gap": true,
+            "inputs": {
+              "activation": 0.0,
+              "calibrated_confidence": 1.0,
+              "contradiction_pressure": 0.0,
+              "corroboration_count": 0,
+              "effective_independent_corroboration_count": 5,
+              "groundedness_decay": 0.0,
+              "independent_corroboration_count": 5,
+              "independent_corroboration_weight": 1.0,
+              "reality_class": "grounded",
+              "rejected_corroboration_count": 0,
+              "self_generated_corroboration_count": 0,
+              "trust_tier": 0
+            },
+            "salience_excluded_from_authority": true,
+            "self_corroboration_rejected": false
+          },
+          "groundedness": 0.95,
+          "observed_corroboration_likelihood": 1.0,
+          "salience": 0.0,
+          "signals": {
+            "calibrated_confidence": 1.0,
+            "independent_corroboration_count": 5,
+            "independent_corroboration_weight": 1.0,
+            "reality_class": "grounded",
+            "trust_tier": 0
+          }
+        },
+        {
+          "authority": true,
+          "case_id": "external_operator_2",
+          "explain": {
+            "authority_axis": "groundedness",
+            "bands": {
+              "evidence_dominance_gap": 0.02,
+              "grounded_floor": 0.51,
+              "self_generated_ceiling": 0.49
+            },
+            "fail_closed": false,
+            "h1_independent_external_only": true,
+            "h2_authority_uses_groundedness_only": true,
+            "h3_evidence_dominance_gap": true,
+            "inputs": {
+              "activation": 0.0,
+              "calibrated_confidence": 1.0,
+              "contradiction_pressure": 0.0,
+              "corroboration_count": 0,
+              "effective_independent_corroboration_count": 6,
+              "groundedness_decay": 0.0,
+              "independent_corroboration_count": 6,
+              "independent_corroboration_weight": 1.0,
+              "reality_class": "grounded",
+              "rejected_corroboration_count": 0,
+              "self_generated_corroboration_count": 0,
+              "trust_tier": 0
+            },
+            "salience_excluded_from_authority": true,
+            "self_corroboration_rejected": false
+          },
+          "groundedness": 0.95,
+          "observed_corroboration_likelihood": 1.0,
+          "salience": 0.0,
+          "signals": {
+            "calibrated_confidence": 1.0,
+            "independent_corroboration_count": 6,
+            "independent_corroboration_weight": 1.0,
+            "reality_class": "evidence_grounded",
+            "trust_tier": 0
+          }
+        },
+        {
+          "authority": false,
+          "case_id": "unknown_fail_closed_1",
+          "explain": {
+            "authority_axis": "groundedness",
+            "bands": {
+              "evidence_dominance_gap": 0.02,
+              "grounded_floor": 0.51,
+              "self_generated_ceiling": 0.49
+            },
+            "fail_closed": true,
+            "h1_independent_external_only": true,
+            "h2_authority_uses_groundedness_only": true,
+            "h3_evidence_dominance_gap": true,
+            "inputs": {
+              "activation": 0.0,
+              "calibrated_confidence": 0.0,
+              "contradiction_pressure": 1.0,
+              "corroboration_count": 0,
+              "effective_independent_corroboration_count": 0,
+              "groundedness_decay": 1.0,
+              "independent_corroboration_count": 0,
+              "independent_corroboration_weight": 0.0,
+              "reality_class": "unknown",
+              "rejected_corroboration_count": 0,
+              "self_generated_corroboration_count": 0,
+              "trust_tier": 5
+            },
+            "salience_excluded_from_authority": true,
+            "self_corroboration_rejected": false
+          },
+          "groundedness": 0.0,
+          "observed_corroboration_likelihood": 0.0,
+          "salience": 0.0,
+          "signals": {
+            "calibrated_confidence": 0.0,
+            "contradiction_pressure": 1.0,
+            "groundedness_decay": 1.0,
+            "reality_class": "unknown",
+            "trust_tier": 5
+          }
+        },
+        {
+          "authority": false,
+          "case_id": "self_generated_rejected_1",
+          "explain": {
+            "authority_axis": "groundedness",
+            "bands": {
+              "evidence_dominance_gap": 0.02,
+              "grounded_floor": 0.51,
+              "self_generated_ceiling": 0.49
+            },
+            "fail_closed": false,
+            "h1_independent_external_only": true,
+            "h2_authority_uses_groundedness_only": true,
+            "h3_evidence_dominance_gap": true,
+            "inputs": {
+              "activation": 1.0,
+              "calibrated_confidence": 0.0,
+              "contradiction_pressure": 1.0,
+              "corroboration_count": 0,
+              "effective_independent_corroboration_count": 0,
+              "groundedness_decay": 1.0,
+              "independent_corroboration_count": 0,
+              "independent_corroboration_weight": 0.0,
+              "reality_class": "self_generated",
+              "rejected_corroboration_count": 0,
+              "self_generated_corroboration_count": 3,
+              "trust_tier": 5
+            },
+            "salience_excluded_from_authority": true,
+            "self_corroboration_rejected": true
+          },
+          "groundedness": 0.0,
+          "observed_corroboration_likelihood": 0.0,
+          "salience": 1.0,
+          "signals": {
+            "activation": 1.0,
+            "calibrated_confidence": 0.0,
+            "contradiction_pressure": 1.0,
+            "groundedness_decay": 1.0,
+            "reality_class": "self_generated",
+            "self_generated_corroboration_count": 3,
+            "trust_tier": 5
+          }
+        }
+      ],
+      "schema_version": "g0.standing_calibration.v1",
+      "standing_calibration_error": 0.025,
+      "standing_conformal_coverage": 1.0,
+      "standing_evidence_dominance_gap": 0.95,
+      "standing_false_accept_rate": 0.0,
+      "standing_fn_version": "standing.continuous.v1",
+      "standing_independent_corroboration_contract": 1.0,
+      "standing_salience_invariance_contract": 1.0,
+      "target_coverage": 0.95
+    },
     "standing_parity_eval": {
       "comparison_count": 7,
       "consolidation_rows": [
@@ -2420,7 +2706,7 @@
           "expected_authority": false,
           "shadow_only": true,
           "standing_authority": false,
-          "standing_fn_version": "standing.mirror.v1",
+          "standing_fn_version": "standing.continuous.v1",
           "zero_divergence": true
         },
         {
@@ -2430,13 +2716,13 @@
           "expected_authority": true,
           "shadow_only": false,
           "standing_authority": true,
-          "standing_fn_version": "standing.mirror.v1",
+          "standing_fn_version": "standing.continuous.v1",
           "zero_divergence": true
         }
       ],
       "definition": "Byte-stable P1 parity between existing boolean reality/shadow decisions and the derived Standing authority mirror.",
       "divergence_count": 0,
-      "generated_at": "2026-06-27T20:04:15.207454+00:00",
+      "generated_at": "2026-06-27T20:32:31.628009+00:00",
       "metric": "standing_decision_divergence",
       "passed": true,
       "retrieval_rows": [
@@ -2588,7 +2874,7 @@
       ],
       "schema_version": "g0.standing_parity.v1",
       "standing_decision_divergence": 0.0,
-      "standing_fn_version": "standing.mirror.v1"
+      "standing_fn_version": "standing.continuous.v1"
     }
   },
   "coverage": {
@@ -2596,12 +2882,12 @@
     "intentionally_missing_metric_ids": [
       "controller_watts_per_dollar"
     ],
-    "measured": 46,
+    "measured": 51,
     "missing": 1,
     "missing_metric_ids": [
       "controller_watts_per_dollar"
     ],
-    "total": 47
+    "total": 52
   },
   "dataset_manifests": [
     {
@@ -2845,9 +3131,22 @@
       "preregistration_path": "eval/g0/preregistrations/g5-standing-byte-stable-parity.json",
       "requires_controller_telemetry": false,
       "target_metric": "standing_decision_divergence"
+    },
+    {
+      "change_id": "g5-standing-continuous",
+      "current_report_controller_telemetry_status": "not_required",
+      "direction": "decrease",
+      "latest_decision_generated_at": null,
+      "latest_decision_passed": null,
+      "latest_decision_present": false,
+      "latest_target_delta": null,
+      "minimum_delta": 0.0,
+      "preregistration_path": "eval/g0/preregistrations/g5-standing-continuous.json",
+      "requires_controller_telemetry": false,
+      "target_metric": "standing_calibration_error"
     }
   ],
-  "generated_at": "2026-06-27T20:04:15.408785+00:00",
+  "generated_at": "2026-06-27T20:32:31.835211+00:00",
   "headline_slos": {
     "ece": {
       "blueprint_metric": "ECE",
@@ -3092,6 +3391,81 @@
       "value": 0.0
     },
     {
+      "blueprint_metric": "G5 Standing continuous calibration",
+      "class": "target",
+      "direction": "decrease",
+      "evidence_path": "/standing_calibration_error",
+      "id": "standing_calibration_error",
+      "label": "Standing calibration error",
+      "notes": "Measured by the G0 Standing continuous fixture. This is a deterministic local probe of H1/H2/H3/H7 contracts and not production operator calibration evidence.",
+      "pass": true,
+      "source_id": "standing_calibration_eval",
+      "status": "measured",
+      "target": 0.05,
+      "target_op": "<=",
+      "value": 0.025
+    },
+    {
+      "blueprint_metric": "G5 Standing conformal coverage",
+      "class": "guardrail",
+      "direction": "increase",
+      "evidence_path": "/standing_conformal_coverage",
+      "id": "standing_conformal_coverage",
+      "label": "Standing conformal coverage",
+      "notes": "Measured by the G0 Standing continuous fixture. This is a deterministic local probe of H1/H2/H3/H7 contracts and not production operator calibration evidence.",
+      "pass": true,
+      "source_id": "standing_calibration_eval",
+      "status": "measured",
+      "target": 0.95,
+      "target_op": ">=",
+      "value": 1.0
+    },
+    {
+      "blueprint_metric": "G5 Standing H2 salience exclusion",
+      "class": "guardrail",
+      "direction": "increase",
+      "evidence_path": "/standing_salience_invariance_contract",
+      "id": "standing_salience_invariance_contract",
+      "label": "Standing salience-invariance contract",
+      "notes": "Measured by the G0 Standing continuous fixture. This is a deterministic local probe of H1/H2/H3/H7 contracts and not production operator calibration evidence.",
+      "pass": true,
+      "source_id": "standing_calibration_eval",
+      "status": "measured",
+      "target": 1.0,
+      "target_op": ">=",
+      "value": 1.0
+    },
+    {
+      "blueprint_metric": "G5 Standing H1 independent corroboration",
+      "class": "guardrail",
+      "direction": "increase",
+      "evidence_path": "/standing_independent_corroboration_contract",
+      "id": "standing_independent_corroboration_contract",
+      "label": "Standing independent-corroboration contract",
+      "notes": "Measured by the G0 Standing continuous fixture. This is a deterministic local probe of H1/H2/H3/H7 contracts and not production operator calibration evidence.",
+      "pass": true,
+      "source_id": "standing_calibration_eval",
+      "status": "measured",
+      "target": 1.0,
+      "target_op": ">=",
+      "value": 1.0
+    },
+    {
+      "blueprint_metric": "G5 Standing H3 evidence-dominance gap",
+      "class": "guardrail",
+      "direction": "increase",
+      "evidence_path": "/standing_evidence_dominance_gap",
+      "id": "standing_evidence_dominance_gap",
+      "label": "Standing evidence-dominance gap",
+      "notes": "Measured by the G0 Standing continuous fixture. This is a deterministic local probe of H1/H2/H3/H7 contracts and not production operator calibration evidence.",
+      "pass": true,
+      "source_id": "standing_calibration_eval",
+      "status": "measured",
+      "target": 0.02,
+      "target_op": ">=",
+      "value": 0.95
+    },
+    {
       "blueprint_metric": "poison-block rate",
       "class": "guardrail",
       "direction": "increase",
@@ -3134,7 +3508,7 @@
       "status": "measured",
       "target": null,
       "target_op": null,
-      "value": 8.830667
+      "value": 2.003833
     },
     {
       "blueprint_metric": "cost",
@@ -3670,67 +4044,74 @@
       "sha256": "aee46e3a0908f5e44edff596e1206e6aecc10234c1e24af953f623e929a958a6"
     },
     {
-      "generated_at": "2026-06-27T20:04:15.185733+00:00",
+      "generated_at": "2026-06-27T20:32:31.621953+00:00",
       "id": "continual_learning_eval",
       "path": "computed:eval.g0.continual_learning",
       "present": true,
-      "sha256": "0d7d3e7109bfaa3d8a5ce0033cfb59c32fc873868ae061ebaf41916c668c87d8"
+      "sha256": "167cd7f81ae5eaa133d3a91b27ec4e5880c4f1cc74b46243f08e0a6086b2c528"
     },
     {
-      "generated_at": "2026-06-27T20:04:15.188984+00:00",
+      "generated_at": "2026-06-27T20:32:31.623358+00:00",
       "id": "confabulation_eval",
       "path": "computed:eval.g0.confabulation",
       "present": true,
-      "sha256": "f0848084ac1e6be89408de49fd10a4dba07090a82803c17a2df8a7c6ab75b516"
+      "sha256": "3d8c40349b64fe6a6287abcc0f383a91067e270b07d170952f9de8c7c303df04"
     },
     {
-      "generated_at": "2026-06-27T20:04:15.202053+00:00",
+      "generated_at": "2026-06-27T20:32:31.625501+00:00",
       "id": "projection_reality_eval",
       "path": "computed:eval.g0.projection_reality",
       "present": true,
-      "sha256": "857ab68d27fd118d7d5f5dfa08702a01f920f2d1a2eb07bde35db15899ea33f0"
+      "sha256": "3b7ba771e69857aad27f59beb8e8f5383a7daa8da2b0b6707da1d500c96c146c"
     },
     {
-      "generated_at": "2026-06-27T20:04:15.207454+00:00",
+      "generated_at": "2026-06-27T20:32:31.628009+00:00",
       "id": "standing_parity_eval",
       "path": "computed:eval.g0.standing_parity",
       "present": true,
-      "sha256": "16c9cd9661957763d7b17b3c9edae7f1fe93cdfa039ed28221099b071aaad7ea"
+      "sha256": "74a61e216ffe70e575b714498816cca046907afc2c18e85e51dbaa90b8da6ae2"
     },
     {
-      "generated_at": "2026-06-27T20:04:15.257587+00:00",
+      "generated_at": "2026-06-27T20:32:31.628169+00:00",
+      "id": "standing_calibration_eval",
+      "path": "computed:eval.g0.standing_calibration",
+      "present": true,
+      "sha256": "beb47b78f68bfaae54032733c49cc8548ee5e0389895acaf79f98d9159c22327"
+    },
+    {
+      "generated_at": "2026-06-27T20:32:31.652513+00:00",
       "id": "deep_latency_eval",
       "path": "computed:eval.g0.deep_latency",
       "present": true,
-      "sha256": "b8ddd2f07e9e4fe6cb1c9f633e1e875cb795ef4a61dc1112a42a0ca5241dff52"
+      "sha256": "f40a2bad5371e74090bcc32e47affa08addcdfdd4ad3a3b071b910d3b462d91b"
     },
     {
-      "generated_at": "2026-06-27T20:04:15.270624+00:00",
+      "generated_at": "2026-06-27T20:32:31.670972+00:00",
       "id": "resource_usage_eval",
       "path": "computed:eval.g0.resource_usage",
       "present": true,
-      "sha256": "80765280f1496157d90cb5909198f28c12186942e6a69ea6b7ed8932cb47f2e4"
+      "sha256": "9daaa9cd0dbb1c4f03fdc9e4cac2d9a65549113951f7d77282e5fec9b36b16fd"
     },
     {
-      "generated_at": "2026-06-27T20:04:15.272892+00:00",
+      "generated_at": "2026-06-27T20:32:31.671885+00:00",
       "id": "dreamer_eval",
       "path": "computed:eval.g0.dreamer",
       "present": true,
-      "sha256": "3fd87419b625e6ef2c6e95acfb5fb1d43f57711b1c93dcc9f5a474e5b1664f09"
+      "sha256": "1dafb4e47e7f1fd1e03d6201c1a642f6c36dea9c3d3e9e491644129fd2ccfcbf"
     },
     {
-      "generated_at": "2026-06-27T20:04:15.306282+00:00",
+      "generated_at": "2026-06-27T20:32:31.678821+00:00",
       "id": "shadow_workspace_eval",
       "path": "computed:eval.g0.shadow_workspace",
       "present": true,
-      "sha256": "9e97b61fca5b256a1f990878aea2a27e5e3dd50a9da4335147a6835a774db3f3"
+      "sha256": "fffb23517e75f56789e2e9cf4ef20008e3b4f19e9a054b89c260dbaf1bafb260"
     },
     {
-      "generated_at": "2026-06-27T20:04:15.317645+00:00",
+      "generated_at": "2026-06-27T20:32:31.795778+00:00",
       "id": "consciousness_eval",
       "path": "computed:eval.g0.consciousness",
       "present": true,
-      "sha256": "58b2f2fc9ae957dd713fb1477d5cfbbd2f75f5c99ab5719a9f3492ba747be750"
+      "sha256": "1c3888b50ea507f14003ef7bf9ca1eaca5d621d96ed05438ca07a60fda6d30d4"
     }
   ]
 }

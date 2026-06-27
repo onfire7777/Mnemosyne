@@ -16,6 +16,7 @@ from eval.g0.gate import evaluate_ablation
 from eval.g0.resource_usage import run_resource_usage_eval
 from eval.g0.runner import G0_METRIC_SPECS, build_report, render_markdown, write_report
 from eval.g0.shadow_workspace import run_shadow_workspace_eval
+from eval.g0.standing_calibration import run_standing_calibration_eval
 from eval.g0.standing_parity import run_standing_parity_eval
 
 
@@ -84,6 +85,8 @@ def test_g0_report_emits_every_spec_metric_and_source_hashes() -> None:
     assert sources["consciousness_eval"]["path"] == "computed:eval.g0.consciousness"
     assert sources["standing_parity_eval"]["present"] is True
     assert sources["standing_parity_eval"]["path"] == "computed:eval.g0.standing_parity"
+    assert sources["standing_calibration_eval"]["present"] is True
+    assert sources["standing_calibration_eval"]["path"] == "computed:eval.g0.standing_calibration"
 
     metrics = {metric["id"]: metric for metric in report["metrics"]}
     assert metrics["recall_at_k"]["status"] == "measured"
@@ -100,6 +103,13 @@ def test_g0_report_emits_every_spec_metric_and_source_hashes() -> None:
     assert metrics["standing_decision_divergence"]["status"] == "measured"
     assert metrics["standing_decision_divergence"]["value"] == 0.0
     assert metrics["standing_decision_divergence"]["source_id"] == "standing_parity_eval"
+    assert metrics["standing_calibration_error"]["status"] == "measured"
+    assert metrics["standing_calibration_error"]["value"] <= 0.05
+    assert metrics["standing_calibration_error"]["source_id"] == "standing_calibration_eval"
+    assert metrics["standing_conformal_coverage"]["value"] >= 0.95
+    assert metrics["standing_salience_invariance_contract"]["value"] == 1.0
+    assert metrics["standing_independent_corroboration_contract"]["value"] == 1.0
+    assert metrics["standing_evidence_dominance_gap"]["value"] >= 0.02
     assert metrics["deep_path_p95_ms"]["status"] == "measured"
     assert metrics["deep_path_p95_ms"]["value"] > 0.0
     assert metrics["deep_path_p95_ms"]["source_id"] == "deep_latency_eval"
@@ -145,6 +155,8 @@ def test_g0_report_emits_every_spec_metric_and_source_hashes() -> None:
     assert report["computed_evidence"]["consciousness_eval"]["dreamer_shadow_contract"]["score"] == 1.0
     assert report["computed_evidence"]["dreamer_eval"]["specialist_promotion_evidence_contract"] == 1.0
     assert report["computed_evidence"]["standing_parity_eval"]["standing_decision_divergence"] == 0.0
+    assert report["computed_evidence"]["standing_calibration_eval"]["standing_calibration_error"] <= 0.05
+    assert report["computed_evidence"]["standing_calibration_eval"]["standing_salience_invariance_contract"] == 1.0
     assert report["computed_evidence"]["shadow_workspace_eval"]["shadow_workspace_contract"] == 1.0
     assert (
         report["computed_evidence"]["shadow_workspace_eval"]["workspace_consolidation_advisory_contract"]
@@ -260,6 +272,19 @@ def test_g0_standing_parity_fixture_reports_zero_decision_divergence() -> None:
     assert report["passed"] is True
     assert all(row["zero_divergence"] for row in report["retrieval_rows"])
     assert all(row["zero_divergence"] for row in report["consolidation_rows"])
+
+
+def test_g0_standing_calibration_fixture_reports_continuous_contracts() -> None:
+    report = run_standing_calibration_eval(repo_root=REPO_ROOT)
+
+    assert report["schema_version"] == "g0.standing_calibration.v1"
+    assert report["standing_calibration_error"] <= 0.05
+    assert report["standing_conformal_coverage"] >= 0.95
+    assert report["standing_false_accept_rate"] == 0.0
+    assert report["standing_salience_invariance_contract"] == 1.0
+    assert report["standing_independent_corroboration_contract"] == 1.0
+    assert report["standing_evidence_dominance_gap"] >= 0.02
+    assert report["passed"] is True
 
 
 def test_g0_resource_usage_fixture_computes_controller_watts_with_explicit_telemetry(tmp_path: Path) -> None:
@@ -450,6 +475,40 @@ def test_ablation_gate_passes_preregistered_target_with_stable_guardrails() -> N
     assert decision.target_delta is not None
     assert decision.target_delta > 0.03
     assert all(result["passed"] for result in decision.guardrail_results)
+
+
+def test_ablation_gate_can_enforce_absolute_target_pass() -> None:
+    baseline = _report(
+        [
+            {
+                **_metric("standing_calibration_error", 0.09, cls="target", direction="decrease"),
+                "pass": False,
+            }
+        ]
+    )
+    candidate = _report(
+        [
+            {
+                **_metric("standing_calibration_error", 0.08, cls="target", direction="decrease"),
+                "pass": False,
+            }
+        ]
+    )
+
+    decision = evaluate_ablation(
+        baseline,
+        candidate,
+        {
+            "change_id": "absolute-target-test",
+            "target_metric": "standing_calibration_error",
+            "direction": "decrease",
+            "minimum_delta": 0.0,
+            "enforce_target": True,
+        },
+    )
+
+    assert decision.passed is False
+    assert any("absolute report target" in reason for reason in decision.reasons)
 
 
 def test_ablation_gate_rejects_duplicate_metric_ids() -> None:
