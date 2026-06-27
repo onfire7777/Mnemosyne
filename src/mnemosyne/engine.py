@@ -338,7 +338,11 @@ class LocalMemoryEngine:
     def _persist(self) -> None:
         if not self.store_path:
             return
-        self.store_path.parent.mkdir(parents=True, exist_ok=True)
+        parent = self.store_path.parent
+        parent_created = not parent.exists()
+        parent.mkdir(parents=True, exist_ok=True)
+        if parent_created:
+            parent.chmod(0o700)
         data = {
             "policy": self.policy.to_dict(),
             "branches": self.branches,
@@ -355,8 +359,19 @@ class LocalMemoryEngine:
             "merge_log": self.merge_log,
         }
         tmp = self.store_path.with_suffix(self.store_path.suffix + ".tmp")
-        tmp.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
+        payload = json.dumps(data, indent=2, sort_keys=True)
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(payload)
+                fh.flush()
+                os.fsync(fh.fileno())
+        except Exception:
+            tmp.unlink(missing_ok=True)
+            raise
+        tmp.chmod(0o600)
         tmp.replace(self.store_path)
+        self.store_path.chmod(0o600)
 
     def _load(self) -> None:
         data = json.loads(self.store_path.read_text(encoding="utf-8"))

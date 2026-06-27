@@ -965,7 +965,21 @@ if not redaction_scan["ok"]:
 
 excluded_manifest_paths = {"bundle-manifest.json", "summary.json"}
 bundle_files = []
-for file_path in sorted(path for path in out_root.rglob("*") if path.is_file()):
+if out_root.is_symlink():
+    print(
+        f"ERROR: production evidence output root cannot be a symlink: {out_root}",
+        file=sys.stderr,
+    )
+    sys.exit(65)
+for file_path in sorted(out_root.rglob("*")):
+    if file_path.is_symlink():
+        print(
+            f"ERROR: production evidence bundle contains a symlink: {file_path}",
+            file=sys.stderr,
+        )
+        sys.exit(65)
+    if not file_path.is_file():
+        continue
     rel_path = file_path.relative_to(out_root).as_posix()
     if rel_path in excluded_manifest_paths:
         continue

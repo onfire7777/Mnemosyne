@@ -14,8 +14,10 @@ jobs:
     name: Lint (ruff)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v6
+      # actions/checkout v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      # actions/setup-python v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
           python-version: "3.12"
       - name: Install ruff
@@ -27,8 +29,10 @@ jobs:
     name: Unit + drift checks
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v6
+      # actions/checkout v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      # actions/setup-python v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
           python-version: "3.12"
       - name: Install package and test deps
@@ -51,7 +55,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: pgvector/pgvector:pg16
+        image: pgvector/pgvector:pg16@sha256:9073dff8ba54ee8cefcfec5bc2a1269fc9f3aeecbd431eb892549d9b83dc1325
         env:
           POSTGRES_DB: mnemosyne
           POSTGRES_USER: mnemosyne
@@ -66,8 +70,10 @@ jobs:
     env:
       MNEMOSYNE_POSTGRES_DSN: postgresql://mnemosyne:mnemosyne-local-dev@localhost:5432/mnemosyne
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v6
+      # actions/checkout v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      # actions/setup-python v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
           python-version: "3.12"
       - name: Install package with Postgres + MCP extras

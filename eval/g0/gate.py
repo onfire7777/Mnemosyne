@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -73,8 +74,8 @@ def evaluate_ablation(
         reasons.append("missing preregistration.target_metric")
         return AblationDecision(False, change_id, None, reasons, None, guardrail_results)
 
-    baseline = _metric_map(baseline_report)
-    candidate = _metric_map(candidate_report)
+    baseline = _metric_map(baseline_report, label="baseline")
+    candidate = _metric_map(candidate_report, label="candidate")
     if preregistration.get("requires_controller_telemetry") is True:
         controller_metric = "controller_watts_per_dollar"
         base_controller = baseline.get(controller_metric)
@@ -208,9 +209,19 @@ def evaluate_ablation(
     )
 
 
-def _metric_map(report: dict[str, Any]) -> dict[str, dict[str, Any]]:
+def _metric_map(report: dict[str, Any], *, label: str = "report") -> dict[str, dict[str, Any]]:
     metrics = report.get("metrics") or []
-    return {str(metric.get("id")): metric for metric in metrics if isinstance(metric, dict)}
+    mapped: dict[str, dict[str, Any]] = {}
+    for index, metric in enumerate(metrics):
+        if not isinstance(metric, dict):
+            raise ValueError(f"{label} metrics[{index}] must be an object")
+        metric_id = metric.get("id")
+        if not isinstance(metric_id, str) or not metric_id.strip():
+            raise ValueError(f"{label} metrics[{index}] has missing id")
+        if metric_id in mapped:
+            raise ValueError(f"{label} contains duplicate metric id {metric_id!r}")
+        mapped[metric_id] = metric
+    return mapped
 
 
 def _is_measured(metric: dict[str, Any]) -> bool:
@@ -254,11 +265,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    decision = evaluate_ablation(
-        _load_json(args.baseline),
-        _load_json(args.candidate),
-        _load_json(args.prereg),
-    )
+    try:
+        decision = evaluate_ablation(
+            _load_json(args.baseline),
+            _load_json(args.candidate),
+            _load_json(args.prereg),
+        )
+    except ValueError as exc:
+        print(f"G0 ablation gate input error: {exc}", file=sys.stderr)
+        return 2
     decision_json = decision.as_dict()
     if args.decision_log:
         args.decision_log.parent.mkdir(parents=True, exist_ok=True)

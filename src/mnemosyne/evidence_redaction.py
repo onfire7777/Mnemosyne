@@ -184,6 +184,9 @@ def scan_evidence_paths(
         )
 
     for root in sorted(paths, key=lambda item: str(item)):
+        if reject_symlinks and root.is_symlink():
+            skipped_files.append({"path": str(root), "reason": "symlink not allowed"})
+            continue
         if root.is_dir():
             children = sorted(root.rglob("*"))
             has_candidate = False
@@ -210,11 +213,23 @@ def scan_evidence_tree(
     *,
     scope: str = "capture",
     max_scan_bytes: int = MAX_SCAN_BYTES,
+    reject_symlinks: bool = True,
 ) -> dict[str, object]:
     findings: list[dict[str, object]] = []
     scanned_files: list[str] = []
     skipped_files: list[dict[str, str]] = []
+    if reject_symlinks and out_root.is_symlink():
+        skipped_files.append({"path": str(out_root), "reason": "symlink not allowed"})
+        return redaction_scan(
+            scope=scope,
+            scanned_files=scanned_files,
+            skipped_files=skipped_files,
+            findings=findings,
+        )
     for path in sorted(out_root.rglob("*")):
+        if reject_symlinks and path.is_symlink():
+            skipped_files.append({"path": str(path), "reason": "symlink not allowed"})
+            continue
         if not path.is_file() or path.name == "redaction-scan.json":
             continue
         _scan_file(
