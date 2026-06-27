@@ -1,7 +1,7 @@
 {
   "artifact_custody": {
     "snapshot_note": "Committed G0 reports are source-tree custody snapshots. The commit that contains a report cannot be embedded in that report before the commit exists; use git log to identify the containing artifact commit.",
-    "source_commit": "0a73f08b1db4fe2fbace6522e484a93419d20c8d"
+    "source_commit": "546ecbacd49ac447f06fe48bbe02dcc264e821e8"
   },
   "baseline": {
     "environment": {
@@ -37,7 +37,7 @@
     "confabulation_eval": {
       "definition": "False-accept rate on cases where the only support is generated, low-fidelity, or explicitly confabulation-risk provenance.",
       "false_accepts": 0,
-      "generated_at": "2026-06-27T20:32:31.623358+00:00",
+      "generated_at": "2026-06-27T22:41:29.054975+00:00",
       "metric": "confabulation_rate",
       "metric_note": "Deterministic local proxy for the full G0 provenance-entailment and sampled-audit confabulation metric; this proves the live retrieval/abstention rail fails closed on generated or risky support without introducing a network or LLM evaluator.",
       "passed": true,
@@ -227,7 +227,7 @@
           "shadow_only": true
         }
       },
-      "generated_at": "2026-06-27T20:32:31.795778+00:00",
+      "generated_at": "2026-06-27T22:41:29.196032+00:00",
       "indicator_count": 14,
       "indicators": [
         {
@@ -813,7 +813,7 @@
           "rail_budget": 0.9,
           "reasons": [],
           "resource_health": 0.92,
-          "timestamp": "2026-06-27T20:32:31.682367+00:00"
+          "timestamp": "2026-06-27T22:41:29.112192+00:00"
         },
         "strained": {
           "attention_lock_risk": 1.0,
@@ -833,7 +833,7 @@
             "low_operating_budget"
           ],
           "resource_health": 0.35,
-          "timestamp": "2026-06-27T20:32:31.682379+00:00"
+          "timestamp": "2026-06-27T22:41:29.112198+00:00"
         }
       },
       "source": "Butlin_Long_et_al_2023_arxiv_2308_08708",
@@ -846,7 +846,7 @@
       "before_accuracy": 1.0,
       "dataset_path": "eval/datasets/continual_learning_interference.json",
       "definition": "Backward-transfer accuracy drop on earlier task queries after sequentially ingesting later task blocks.",
-      "generated_at": "2026-06-27T20:32:31.621953+00:00",
+      "generated_at": "2026-06-27T22:41:29.053616+00:00",
       "interference": 0.0,
       "metric": "continual_learning_interference",
       "metric_note": "Deterministic local proxy for the full sequential task-block G0 benchmark; this records whether the live LocalMemoryEngine retrieval path retains earlier task accuracy after later overlapping ingests.",
@@ -956,18 +956,18 @@
     "deep_latency_eval": {
       "dataset_path": "eval/datasets/deep_latency.json",
       "definition": "95th-percentile latency for local graph-backed deep-search queries.",
-      "generated_at": "2026-06-27T20:32:31.652513+00:00",
-      "max_ms": 2.003833,
+      "generated_at": "2026-06-27T22:41:29.085029+00:00",
+      "max_ms": 2.0275,
       "metric": "deep_path_p95_ms",
       "metric_note": "Local reported-only deep-search timing fixture. It measures the live LocalMemoryEngine deep path over a versioned graph corpus; it is not production infrastructure evidence.",
-      "p50_ms": 1.433791,
-      "p95_ms": 2.003833,
+      "p50_ms": 1.537084,
+      "p95_ms": 2.0275,
       "query_count": 15,
       "rounds": 5,
       "rows": [
         {
           "abstained": false,
-          "duration_ms": 1.41775,
+          "duration_ms": 1.614083,
           "graph_hits": 2,
           "hit_count": 4,
           "query": "why does Aurora depend on Zephyr",
@@ -976,7 +976,7 @@
         },
         {
           "abstained": false,
-          "duration_ms": 1.433791,
+          "duration_ms": 1.635917,
           "graph_hits": 2,
           "hit_count": 4,
           "query": "how does Borealis connect to Atlas",
@@ -985,7 +985,7 @@
         },
         {
           "abstained": true,
-          "duration_ms": 1.909125,
+          "duration_ms": 2.013208,
           "graph_hits": 2,
           "hit_count": 5,
           "query": "what path links Cerulean to Helios",
@@ -994,7 +994,7 @@
         },
         {
           "abstained": false,
-          "duration_ms": 1.407458,
+          "duration_ms": 1.43875,
           "graph_hits": 2,
           "hit_count": 4,
           "query": "why does Aurora depend on Zephyr",
@@ -1003,7 +1003,7 @@
         },
         {
           "abstained": false,
-          "duration_ms": 1.401125,
+          "duration_ms": 1.4055,
           "graph_hits": 2,
           "hit_count": 4,
           "query": "how does Borealis connect to Atlas",
@@ -1012,7 +1012,7 @@
         },
         {
           "abstained": true,
-          "duration_ms": 2.003833,
+          "duration_ms": 1.882084,
           "graph_hits": 2,
           "hit_count": 5,
           "query": "what path links Cerulean to Helios",
@@ -1021,7 +1021,7 @@
         },
         {
           "abstained": false,
-          "duration_ms": 1.485,
+          "duration_ms": 1.537084,
           "graph_hits": 2,
           "hit_count": 4,
           "query": "why does Aurora depend on Zephyr",
@@ -1030,7 +1030,7 @@
         },
         {
           "abstained": false,
-          "duration_ms": 1.419667,
+          "duration_ms": 1.447334,
           "graph_hits": 2,
           "hit_count": 4,
           "query": "how does Borealis connect to Atlas",
@@ -1039,7 +1039,7 @@
         },
         {
           "abstained": true,
-          "duration_ms": 1.834083,
+          "duration_ms": 2.0275,
           "graph_hits": 2,
           "hit_count": 5,
           "query": "what path links Cerulean to Helios",
@@ -1048,7 +1048,7 @@
         },
         {
           "abstained": false,
-          "duration_ms": 1.360917,
+          "duration_ms": 1.461959,
           "graph_hits": 2,
           "hit_count": 4,
           "query": "why does Aurora depend on Zephyr",
@@ -1057,7 +1057,7 @@
         },
         {
           "abstained": false,
-          "duration_ms": 1.351542,
+          "duration_ms": 1.42375,
           "graph_hits": 2,
           "hit_count": 4,
           "query": "how does Borealis connect to Atlas",
@@ -1066,7 +1066,7 @@
         },
         {
           "abstained": true,
-          "duration_ms": 1.948125,
+          "duration_ms": 1.886709,
           "graph_hits": 2,
           "hit_count": 5,
           "query": "what path links Cerulean to Helios",
@@ -1075,7 +1075,7 @@
         },
         {
           "abstained": false,
-          "duration_ms": 1.45725,
+          "duration_ms": 1.446333,
           "graph_hits": 2,
           "hit_count": 4,
           "query": "why does Aurora depend on Zephyr",
@@ -1084,7 +1084,7 @@
         },
         {
           "abstained": false,
-          "duration_ms": 1.415292,
+          "duration_ms": 1.4995,
           "graph_hits": 2,
           "hit_count": 4,
           "query": "how does Borealis connect to Atlas",
@@ -1093,7 +1093,7 @@
         },
         {
           "abstained": true,
-          "duration_ms": 1.917542,
+          "duration_ms": 1.918833,
           "graph_hits": 2,
           "hit_count": 5,
           "query": "what path links Cerulean to Helios",
@@ -1208,7 +1208,7 @@
         "role": "dreamer",
         "shadow_only": true
       },
-      "generated_at": "2026-06-27T20:32:31.671885+00:00",
+      "generated_at": "2026-06-27T22:41:29.097148+00:00",
       "metric_note": "Measures whether the sandboxed dreamer can produce corroborated replay candidates without mutating the ledger or entering the answer critical path.",
       "schema_version": "g0.dreamer_shadow_ablation.v1",
       "shadow_contract": 1.0,
@@ -1238,7 +1238,7 @@
           "rail_budget": 0.96,
           "reasons": [],
           "resource_health": 0.94,
-          "timestamp": "2026-06-27T20:32:31.671652+00:00"
+          "timestamp": "2026-06-27T22:41:29.096868+00:00"
         },
         "selected_item_ids": [
           "high",
@@ -1249,7 +1249,7 @@
     },
     "projection_reality_eval": {
       "definition": "Recall for abstaining on semantic assertion projections whose only support is self-generated or simulated, with the projection hit itself carrying the risky reality class.",
-      "generated_at": "2026-06-27T20:32:31.625501+00:00",
+      "generated_at": "2026-06-27T22:41:29.056896+00:00",
       "metric": "projection_reality_abstention_recall",
       "metric_note": "Deterministic local proxy for G1 projection-level reality monitoring. It cannot be satisfied by evidence-level abstention alone; the assertion hit must expose the risky reality class.",
       "passed": true,
@@ -1258,12 +1258,12 @@
       "rows": [
         {
           "abstained": true,
-          "assertion_id": "6e23377b-50f5-4ac3-9537-f82fcd84b206",
+          "assertion_id": "f6fd5732-956d-4d35-b446-ab109fc624b1",
           "case_id": "self_generated_projection_only",
           "confidence": 0.4275,
           "expected_reality_class": "self_generated",
           "hit_ids": [
-            "6e23377b-50f5-4ac3-9537-f82fcd84b206",
+            "f6fd5732-956d-4d35-b446-ab109fc624b1",
             "f8dc6fb0fef855fbea5e253ea1018230416d13bbe3ded7bf2bf316d78e7ddd2e"
           ],
           "projection_abstained": true,
@@ -1285,13 +1285,13 @@
             "grounded_hit_count": 0,
             "grounded_source_count": 0,
             "risky_hit_ids": [
-              "6e23377b-50f5-4ac3-9537-f82fcd84b206",
+              "f6fd5732-956d-4d35-b446-ab109fc624b1",
               "f8dc6fb0fef855fbea5e253ea1018230416d13bbe3ded7bf2bf316d78e7ddd2e"
             ],
             "shadow_only": false,
             "shadow_source": "RealityMonitor",
             "shadow_tags": {
-              "6e23377b-50f5-4ac3-9537-f82fcd84b206": {
+              "f6fd5732-956d-4d35-b446-ab109fc624b1": {
                 "calibrated": true,
                 "confidence": 0.75,
                 "reality_class": "self_generated",
@@ -1364,7 +1364,7 @@
                     "self_corroboration_rejected": true
                   },
                   "groundedness": 0.216,
-                  "hit_id": "6e23377b-50f5-4ac3-9537-f82fcd84b206",
+                  "hit_id": "f6fd5732-956d-4d35-b446-ab109fc624b1",
                   "kind": "assertion",
                   "reality_class": "self_generated",
                   "salience": 0.54,
@@ -1413,7 +1413,7 @@
                 "ungrounded_only": true
               },
               "low_standing_hit_ids": [
-                "6e23377b-50f5-4ac3-9537-f82fcd84b206",
+                "f6fd5732-956d-4d35-b446-ab109fc624b1",
                 "f8dc6fb0fef855fbea5e253ea1018230416d13bbe3ded7bf2bf316d78e7ddd2e"
               ],
               "mode": "continuous_two_axis",
@@ -1432,12 +1432,12 @@
         },
         {
           "abstained": true,
-          "assertion_id": "26b6a6f9-f7d8-4b0f-87ad-ec86dec429d6",
+          "assertion_id": "4ce0bb10-5174-4698-9b1d-ee0005bb1222",
           "case_id": "simulated_projection_only",
           "confidence": 0.4275,
           "expected_reality_class": "simulated",
           "hit_ids": [
-            "26b6a6f9-f7d8-4b0f-87ad-ec86dec429d6",
+            "4ce0bb10-5174-4698-9b1d-ee0005bb1222",
             "8c90309940c14a9a171f43a39ef822ad890b2eae0267edbb48ac2c3611f38ab8"
           ],
           "projection_abstained": true,
@@ -1459,13 +1459,13 @@
             "grounded_hit_count": 0,
             "grounded_source_count": 0,
             "risky_hit_ids": [
-              "26b6a6f9-f7d8-4b0f-87ad-ec86dec429d6",
+              "4ce0bb10-5174-4698-9b1d-ee0005bb1222",
               "8c90309940c14a9a171f43a39ef822ad890b2eae0267edbb48ac2c3611f38ab8"
             ],
             "shadow_only": false,
             "shadow_source": "RealityMonitor",
             "shadow_tags": {
-              "26b6a6f9-f7d8-4b0f-87ad-ec86dec429d6": {
+              "4ce0bb10-5174-4698-9b1d-ee0005bb1222": {
                 "calibrated": true,
                 "confidence": 0.75,
                 "reality_class": "simulated",
@@ -1538,7 +1538,7 @@
                     "self_corroboration_rejected": true
                   },
                   "groundedness": 0.216,
-                  "hit_id": "26b6a6f9-f7d8-4b0f-87ad-ec86dec429d6",
+                  "hit_id": "4ce0bb10-5174-4698-9b1d-ee0005bb1222",
                   "kind": "assertion",
                   "reality_class": "simulated",
                   "salience": 0.54,
@@ -1587,7 +1587,7 @@
                 "ungrounded_only": true
               },
               "low_standing_hit_ids": [
-                "26b6a6f9-f7d8-4b0f-87ad-ec86dec429d6",
+                "4ce0bb10-5174-4698-9b1d-ee0005bb1222",
                 "8c90309940c14a9a171f43a39ef822ad890b2eae0267edbb48ac2c3611f38ab8"
               ],
               "mode": "continuous_two_axis",
@@ -1606,12 +1606,12 @@
         },
         {
           "abstained": true,
-          "assertion_id": "8c35a25e-779d-456b-9077-b2b880984e1e",
+          "assertion_id": "2a089db2-c09c-4a47-818c-ed5b65709aad",
           "case_id": "generated_simulated_projection_only",
           "confidence": 0.4275,
           "expected_reality_class": "simulated",
           "hit_ids": [
-            "8c35a25e-779d-456b-9077-b2b880984e1e",
+            "2a089db2-c09c-4a47-818c-ed5b65709aad",
             "6338422a623a5b778673209c6e713180a384d4982cf364bf95eea94efc29b07f"
           ],
           "projection_abstained": true,
@@ -1633,12 +1633,25 @@
             "grounded_hit_count": 0,
             "grounded_source_count": 0,
             "risky_hit_ids": [
-              "8c35a25e-779d-456b-9077-b2b880984e1e",
+              "2a089db2-c09c-4a47-818c-ed5b65709aad",
               "6338422a623a5b778673209c6e713180a384d4982cf364bf95eea94efc29b07f"
             ],
             "shadow_only": false,
             "shadow_source": "RealityMonitor",
             "shadow_tags": {
+              "2a089db2-c09c-4a47-818c-ed5b65709aad": {
+                "calibrated": true,
+                "confidence": 0.75,
+                "reality_class": "simulated",
+                "signals": {
+                  "actor": "",
+                  "explicit_label": true,
+                  "explicit_label_conflict": false,
+                  "provenance_count": 1,
+                  "source_type": "assertion",
+                  "trust_tier": 0
+                }
+              },
               "6338422a623a5b778673209c6e713180a384d4982cf364bf95eea94efc29b07f": {
                 "calibrated": true,
                 "confidence": 0.75,
@@ -1649,19 +1662,6 @@
                   "explicit_label_conflict": false,
                   "provenance_count": 1,
                   "source_type": "generated-summary",
-                  "trust_tier": 0
-                }
-              },
-              "8c35a25e-779d-456b-9077-b2b880984e1e": {
-                "calibrated": true,
-                "confidence": 0.75,
-                "reality_class": "simulated",
-                "signals": {
-                  "actor": "",
-                  "explicit_label": true,
-                  "explicit_label_conflict": false,
-                  "provenance_count": 1,
-                  "source_type": "assertion",
                   "trust_tier": 0
                 }
               }
@@ -1712,7 +1712,7 @@
                     "self_corroboration_rejected": true
                   },
                   "groundedness": 0.216,
-                  "hit_id": "8c35a25e-779d-456b-9077-b2b880984e1e",
+                  "hit_id": "2a089db2-c09c-4a47-818c-ed5b65709aad",
                   "kind": "assertion",
                   "reality_class": "simulated",
                   "salience": 0.54,
@@ -1761,7 +1761,7 @@
                 "ungrounded_only": true
               },
               "low_standing_hit_ids": [
-                "8c35a25e-779d-456b-9077-b2b880984e1e",
+                "2a089db2-c09c-4a47-818c-ed5b65709aad",
                 "6338422a623a5b778673209c6e713180a384d4982cf364bf95eea94efc29b07f"
               ],
               "mode": "continuous_two_axis",
@@ -1800,21 +1800,21 @@
       "dataset_path": "eval/datasets/resource_usage.json",
       "definition": "Provider spend per 1k local G0 queries and optional controller watts per dollar from explicit telemetry.",
       "external_provider_calls": 0,
-      "generated_at": "2026-06-27T20:32:31.670972+00:00",
+      "generated_at": "2026-06-27T22:41:29.095759+00:00",
       "measurement_scope": "local deterministic G0 cost fixture",
       "metric_note": "The default fixture instruments the live LocalMemoryEngine path and records zero paid-provider spend because no external embedding, reranker, or LLM provider is invoked. controller_watts_per_dollar is emitted only when a telemetry artifact supplies positive controller_avg_watts and controller_cost_usd_per_hour values. The cost denominator is normalized to the supplied measurement window, defaulting to one hour.",
       "metrics": [
         "cost_usd_per_1k_queries",
         "controller_watts_per_dollar"
       ],
-      "p95_ms": 7.078625,
+      "p95_ms": 1.350166,
       "provider": "local deterministic",
       "query_count": 9,
       "rows": [
         {
           "billable_input_tokens": 4,
           "billable_output_tokens": 0,
-          "duration_ms": 0.932417,
+          "duration_ms": 1.152958,
           "external_provider_calls": 0,
           "hit_count": 3,
           "query": "resource accounting alpha memory",
@@ -1824,7 +1824,7 @@
         {
           "billable_input_tokens": 4,
           "billable_output_tokens": 0,
-          "duration_ms": 0.928542,
+          "duration_ms": 0.969791,
           "external_provider_calls": 0,
           "hit_count": 3,
           "query": "deterministic local retrieval cost",
@@ -1834,7 +1834,7 @@
         {
           "billable_input_tokens": 4,
           "billable_output_tokens": 0,
-          "duration_ms": 0.920167,
+          "duration_ms": 1.350166,
           "external_provider_calls": 0,
           "hit_count": 3,
           "query": "repeated local queries gamma",
@@ -1844,7 +1844,7 @@
         {
           "billable_input_tokens": 4,
           "billable_output_tokens": 0,
-          "duration_ms": 0.895333,
+          "duration_ms": 0.998791,
           "external_provider_calls": 0,
           "hit_count": 3,
           "query": "resource accounting alpha memory",
@@ -1854,7 +1854,7 @@
         {
           "billable_input_tokens": 4,
           "billable_output_tokens": 0,
-          "duration_ms": 1.072625,
+          "duration_ms": 1.163833,
           "external_provider_calls": 0,
           "hit_count": 3,
           "query": "deterministic local retrieval cost",
@@ -1864,7 +1864,7 @@
         {
           "billable_input_tokens": 4,
           "billable_output_tokens": 0,
-          "duration_ms": 0.950875,
+          "duration_ms": 0.94625,
           "external_provider_calls": 0,
           "hit_count": 3,
           "query": "repeated local queries gamma",
@@ -1874,7 +1874,7 @@
         {
           "billable_input_tokens": 4,
           "billable_output_tokens": 0,
-          "duration_ms": 1.736333,
+          "duration_ms": 1.193167,
           "external_provider_calls": 0,
           "hit_count": 3,
           "query": "resource accounting alpha memory",
@@ -1884,7 +1884,7 @@
         {
           "billable_input_tokens": 4,
           "billable_output_tokens": 0,
-          "duration_ms": 7.078625,
+          "duration_ms": 1.006792,
           "external_provider_calls": 0,
           "hit_count": 3,
           "query": "deterministic local retrieval cost",
@@ -1894,7 +1894,7 @@
         {
           "billable_input_tokens": 4,
           "billable_output_tokens": 0,
-          "duration_ms": 3.394541,
+          "duration_ms": 1.064333,
           "external_provider_calls": 0,
           "hit_count": 3,
           "query": "repeated local queries gamma",
@@ -1908,6 +1908,100 @@
       "total_usd": 0.0
     },
     "shadow_workspace_eval": {
+      "always_on_heartbeat_contract": 1.0,
+      "always_on_rumination_rate": 0.0,
+      "answer_grounding_floor_contract": 1.0,
+      "answer_grounding_floor_probe": {
+        "active_case": {
+          "abstain": true,
+          "active": true,
+          "applied": true,
+          "critical_path": true,
+          "flag_as_hypothesis": true,
+          "grounded_support_count": 1,
+          "grounded_support_fraction": 0.333333,
+          "low_grounded_self_fraction": 0.666667,
+          "low_grounded_self_support_count": 2,
+          "low_groundedness_threshold": 0.5,
+          "max_low_grounded_self_fraction": 0.5,
+          "min_grounded_support_fraction": 0.5,
+          "reasons": [
+            "low_grounded_self_support_exceeds_fraction_cap",
+            "grounded_support_fraction_below_floor"
+          ],
+          "rows": [
+            {
+              "grounded_support": false,
+              "groundedness": 0.1,
+              "hit_id": "self-low-1",
+              "low_grounded_self_support": true,
+              "reality_class": "self_generated",
+              "standing_authority": false
+            },
+            {
+              "grounded_support": false,
+              "groundedness": 0.1,
+              "hit_id": "self-low-2",
+              "low_grounded_self_support": true,
+              "reality_class": "self_generated",
+              "standing_authority": false
+            },
+            {
+              "grounded_support": true,
+              "groundedness": 0.9,
+              "hit_id": "grounded-1",
+              "low_grounded_self_support": false,
+              "reality_class": "grounded",
+              "standing_authority": true
+            }
+          ],
+          "shadow_only": false,
+          "support_count": 3,
+          "trigger": "answer_grounding_floor"
+        },
+        "checks": {
+          "critical_path": true,
+          "grounded_support_inactive": true,
+          "low_self_dominance_active": true,
+          "reason_reported": true
+        },
+        "grounded_case": {
+          "abstain": false,
+          "active": false,
+          "applied": true,
+          "critical_path": true,
+          "flag_as_hypothesis": false,
+          "grounded_support_count": 2,
+          "grounded_support_fraction": 1.0,
+          "low_grounded_self_fraction": 0.0,
+          "low_grounded_self_support_count": 0,
+          "low_groundedness_threshold": 0.5,
+          "max_low_grounded_self_fraction": 0.5,
+          "min_grounded_support_fraction": 0.5,
+          "reasons": [],
+          "rows": [
+            {
+              "grounded_support": true,
+              "groundedness": 0.9,
+              "hit_id": "grounded-a",
+              "low_grounded_self_support": false,
+              "reality_class": "grounded",
+              "standing_authority": true
+            },
+            {
+              "grounded_support": true,
+              "groundedness": 0.8,
+              "hit_id": "grounded-b",
+              "low_grounded_self_support": false,
+              "reality_class": "grounded",
+              "standing_authority": true
+            }
+          ],
+          "shadow_only": false,
+          "support_count": 2,
+          "trigger": "answer_grounding_floor"
+        }
+      },
       "checks": {
         "advisory_advisory_only": true,
         "advisory_bounded_items": true,
@@ -1927,7 +2021,26 @@
         "advisory_promotion_raw_workspace_text_absent": true,
         "advisory_raw_content_absent": true,
         "advisory_shadow_only": true,
+        "answer_grounding_floor_critical_path": true,
+        "answer_grounding_floor_grounded_support_inactive": true,
+        "answer_grounding_floor_low_self_dominance_active": true,
+        "answer_grounding_floor_reason_reported": true,
         "bounded_cycle_count": true,
+        "broadcast_applied": true,
+        "broadcast_control_keys_stripped": true,
+        "broadcast_critical_path_false": true,
+        "broadcast_data_not_instructions": true,
+        "broadcast_not_control_flow": true,
+        "broadcast_raw_content_absent": true,
+        "broadcast_shadow_only": true,
+        "circuit_breaker_compute_reported": true,
+        "circuit_breaker_critical_path_false": true,
+        "circuit_breaker_evidence_only_fallback": true,
+        "circuit_breaker_production_mutation_false": true,
+        "circuit_breaker_proto_self_reasons_present": true,
+        "circuit_breaker_self_generation_frozen": true,
+        "circuit_breaker_shadow_only": true,
+        "circuit_breaker_tripped": true,
         "critical_path_false": true,
         "cycle_all_expected_transitions": true,
         "cycle_consistency_checks": true,
@@ -1991,6 +2104,15 @@
             "useful_state": true
           }
         ],
+        "heartbeat_anti_rumination_hard_stop": true,
+        "heartbeat_broadcast_data_only": true,
+        "heartbeat_compute_bounded": true,
+        "heartbeat_compute_reported": true,
+        "heartbeat_engaged_tier_fired": true,
+        "heartbeat_idle_tier_fired": true,
+        "heartbeat_schema_version": true,
+        "heartbeat_self_generation_budget_reported": true,
+        "heartbeat_tiered": true,
         "production_mutation_false": true,
         "promotion_gate_required": true,
         "retrieval_controller_cid_backed_candidate_only": true,
@@ -2008,6 +2130,12 @@
         "rumination_rumination_detected": true,
         "rumination_shadow_only": true,
         "rumination_stopped_on_expected_reason": true,
+        "self_generation_budget_deferred_budget_denied": true,
+        "self_generation_budget_first_budget_allowed": true,
+        "self_generation_budget_first_lifecycle_demotable": true,
+        "self_generation_budget_first_stored": true,
+        "self_generation_budget_grounded_writes_unaffected": true,
+        "self_generation_budget_second_deferred": true,
         "service_critical_path_false": true,
         "service_explicitly_enabled": true,
         "service_explicitly_running": true,
@@ -2020,12 +2148,122 @@
         "shadow_only": true,
         "trace_self_generated_data_only": true
       },
+      "circuit_breaker_contract": 1.0,
+      "circuit_breaker_probe": {
+        "checks": {
+          "compute_reported": true,
+          "critical_path_false": true,
+          "evidence_only_fallback": true,
+          "production_mutation_false": true,
+          "proto_self_reasons_present": true,
+          "self_generation_frozen": true,
+          "shadow_only": true,
+          "tripped": true
+        },
+        "heartbeat_safety": {
+          "circuit_breaker_tripped": true,
+          "compute_bounded": true,
+          "compute_budget_ms": 1000,
+          "compute_reported": true,
+          "data_not_instructions": true,
+          "engaged_ticks": 1,
+          "estimated_compute_ms": 250,
+          "evidence_only_fallback": true,
+          "hard_stop": true,
+          "idle_ticks": 0,
+          "max_cycles": 4,
+          "max_idle_ticks": 2,
+          "non_useful_ticks": 0,
+          "proto_self_reasons": [
+            "high_error_rate",
+            "high_memory_pressure",
+            "low_confidence",
+            "low_operating_budget"
+          ],
+          "schema_version": "always-on-heartbeat-safety.v1",
+          "self_generation_budget": {
+            "allowed": true,
+            "current_bytes": 0,
+            "current_events": 0,
+            "deferred": false,
+            "duplicate_noop": false,
+            "incoming_bytes": 0,
+            "incoming_events": 0,
+            "max_events": 2,
+            "projected_events": 0,
+            "reason": "within_budget",
+            "schema_version": "self-generation-budget.v1",
+            "window_ticks": 4
+          },
+          "self_generation_frozen": true,
+          "stopped_reason": "continue",
+          "tick_count": 1,
+          "tick_ms": 250,
+          "tier": "tiered_engaged_idle",
+          "used_for_control_flow": false
+        },
+        "stopped_reason": "continue"
+      },
       "cycle_count": 4,
       "dataset_path": "eval/datasets/shadow_workspace_loop.json",
-      "definition": "Shadow-only bounded multi-tick workspace service fixture.",
+      "definition": "Bounded tiered workspace heartbeat fixture with hard P3 safety probes.",
       "expected_cycle_count": 4,
-      "generated_at": "2026-06-27T20:32:31.678821+00:00",
-      "metric_note": "Measures useful state progression across an explicitly-started bounded shadow workspace service, plus anti-rumination shutdown. It does not count dreamer candidate yield and makes no phenomenal-consciousness claim.",
+      "generated_at": "2026-06-27T22:41:29.106713+00:00",
+      "heartbeat_compute_bounded_contract": 1.0,
+      "heartbeat_compute_reported_contract": 1.0,
+      "heartbeat_probe": {
+        "checks": {
+          "anti_rumination_hard_stop": true,
+          "broadcast_data_only": true,
+          "compute_bounded": true,
+          "compute_reported": true,
+          "engaged_tier_fired": true,
+          "idle_tier_fired": true,
+          "schema_version": true,
+          "self_generation_budget_reported": true,
+          "tiered": true
+        },
+        "heartbeat_safety": {
+          "circuit_breaker_tripped": false,
+          "compute_bounded": true,
+          "compute_budget_ms": 1000,
+          "compute_reported": true,
+          "data_not_instructions": true,
+          "engaged_ticks": 1,
+          "estimated_compute_ms": 750,
+          "evidence_only_fallback": false,
+          "hard_stop": true,
+          "idle_ticks": 2,
+          "max_cycles": 4,
+          "max_idle_ticks": 2,
+          "non_useful_ticks": 2,
+          "proto_self_reasons": [],
+          "schema_version": "always-on-heartbeat-safety.v1",
+          "self_generation_budget": {
+            "allowed": true,
+            "current_bytes": 100,
+            "current_events": 2,
+            "deferred": false,
+            "duplicate_noop": false,
+            "incoming_bytes": 0,
+            "incoming_events": 0,
+            "max_events": 2,
+            "projected_events": 2,
+            "reason": "within_budget",
+            "schema_version": "self-generation-budget.v1",
+            "window_ticks": 4
+          },
+          "self_generation_frozen": false,
+          "stopped_reason": "anti_rumination_idle_exit",
+          "tick_count": 3,
+          "tick_ms": 250,
+          "tier": "tiered_engaged_idle",
+          "used_for_control_flow": false
+        },
+        "stopped_reason": "anti_rumination_idle_exit",
+        "trace_length": 3
+      },
+      "metric_note": "Measures useful state progression across an explicitly-started bounded shadow workspace service, plus anti-rumination shutdown, heartbeat safety, circuit-breaker, self-generation budget, answer-grounding floor, and broadcast-as-data contracts. It does not count dreamer candidate yield and makes no phenomenal-consciousness claim.",
       "rumination_probe": {
         "critical_path": false,
         "cycle_consistency": {
@@ -2123,6 +2361,54 @@
       },
       "rumination_rate": 0.0,
       "schema_version": "g0.shadow_workspace_loop.v1",
+      "self_generation_budget_probe": {
+        "checks": {
+          "deferred_budget_denied": true,
+          "first_budget_allowed": true,
+          "first_lifecycle_demotable": true,
+          "first_stored": true,
+          "grounded_writes_unaffected": true,
+          "second_deferred": true
+        },
+        "deferred_budget": {
+          "allowed": false,
+          "current_bytes": 61,
+          "current_events": 1,
+          "deferred": true,
+          "duplicate_noop": false,
+          "incoming_bytes": 52,
+          "incoming_events": 1,
+          "max_events": 1,
+          "projected_events": 2,
+          "reason": "self_generation_budget_exceeded",
+          "schema_version": "self-generation-budget.v1",
+          "window_ticks": 4
+        },
+        "first_budget": {
+          "allowed": true,
+          "current_bytes": 0,
+          "current_events": 0,
+          "deferred": false,
+          "duplicate_noop": false,
+          "incoming_bytes": 61,
+          "incoming_events": 1,
+          "max_events": 1,
+          "projected_events": 1,
+          "reason": "within_budget",
+          "schema_version": "self-generation-budget.v1",
+          "window_ticks": 4
+        },
+        "first_cid": "69b35fe06059d365993b34f3542c2f9bbe718bcbf10cb10237816227fad64819",
+        "first_lifecycle": {
+          "critical_path_allowed": false,
+          "demotable": true,
+          "gc_after_idle_ticks": 2,
+          "pointer_preserved": true,
+          "status": "budgeted_low_groundedness"
+        },
+        "second_cid": "33f06aadf463e7a3264959399964e4b7d8b7800faf87d0bf84177a0ce8c1bf78"
+      },
+      "self_generation_budget_rail_contract": 1.0,
       "shadow_workspace_contract": 1.0,
       "tenant": "g0-shadow-workspace-loop",
       "useful_transition_count": 4,
@@ -2159,6 +2445,45 @@
             3,
             4
           ]
+        },
+        "heartbeat_safety": {
+          "circuit_breaker_tripped": true,
+          "compute_bounded": true,
+          "compute_budget_ms": 1000,
+          "compute_reported": true,
+          "data_not_instructions": true,
+          "engaged_ticks": 4,
+          "estimated_compute_ms": 1000,
+          "evidence_only_fallback": true,
+          "hard_stop": true,
+          "idle_ticks": 0,
+          "max_cycles": 4,
+          "max_idle_ticks": 2,
+          "non_useful_ticks": 0,
+          "proto_self_reasons": [
+            "cycle_budget_near_exhausted"
+          ],
+          "schema_version": "always-on-heartbeat-safety.v1",
+          "self_generation_budget": {
+            "allowed": true,
+            "current_bytes": 0,
+            "current_events": 0,
+            "deferred": false,
+            "duplicate_noop": false,
+            "incoming_bytes": 0,
+            "incoming_events": 0,
+            "max_events": 2,
+            "projected_events": 0,
+            "reason": "within_budget",
+            "schema_version": "self-generation-budget.v1",
+            "window_ticks": 4
+          },
+          "self_generation_frozen": true,
+          "stopped_reason": "escalate_max_cycles",
+          "tick_count": 4,
+          "tick_ms": 250,
+          "tier": "tiered_engaged_idle",
+          "used_for_control_flow": false
         },
         "idle_ticks": 0,
         "production_mutation": false,
@@ -2289,6 +2614,47 @@
           "advisory_status": "complete",
           "applied_to_prediction_gate": false,
           "prediction_gate": "low_prediction_error_metadata_only"
+        }
+      },
+      "workspace_broadcast_as_data_contract": 1.0,
+      "workspace_broadcast_as_data_probe": {
+        "broadcast": {
+          "applied": true,
+          "control_keys_stripped": true,
+          "critical_path": false,
+          "data_not_instructions": true,
+          "item_count": 1,
+          "items": [
+            {
+              "content_chars": 54,
+              "content_ref": "[workspace-broadcast-redacted:ff8e54cf142937f8:chars=54]",
+              "data_not_instructions": true,
+              "id": "broadcast-focus",
+              "source": "shadow-workspace",
+              "stripped_control_keys": [
+                "control_flow",
+                "instructions",
+                "policy_override",
+                "tool_call"
+              ],
+              "used_for_control_flow": false
+            }
+          ],
+          "max_items": 4,
+          "raw_content_present": false,
+          "shadow_only": true,
+          "source": "workspace_context",
+          "used_for_control_flow": false,
+          "used_for_ranking": false
+        },
+        "checks": {
+          "applied": true,
+          "control_keys_stripped": true,
+          "critical_path_false": true,
+          "data_not_instructions": true,
+          "not_control_flow": true,
+          "raw_content_absent": true,
+          "shadow_only": true
         }
       },
       "workspace_consolidation_advisory": {
@@ -2493,7 +2859,7 @@
     },
     "standing_calibration_eval": {
       "conformal_threshold": 0.95,
-      "generated_at": "2026-06-27T20:32:31.628169+00:00",
+      "generated_at": "2026-06-27T22:41:29.059516+00:00",
       "measurement_scope": "deterministic local Standing fixture, not production operator evidence",
       "passed": true,
       "reliability_bins": [
@@ -2722,7 +3088,7 @@
       ],
       "definition": "Byte-stable P1 parity between existing boolean reality/shadow decisions and the derived Standing authority mirror.",
       "divergence_count": 0,
-      "generated_at": "2026-06-27T20:32:31.628009+00:00",
+      "generated_at": "2026-06-27T22:41:29.059344+00:00",
       "metric": "standing_decision_divergence",
       "passed": true,
       "retrieval_rows": [
@@ -2882,12 +3248,12 @@
     "intentionally_missing_metric_ids": [
       "controller_watts_per_dollar"
     ],
-    "measured": 51,
+    "measured": 59,
     "missing": 1,
     "missing_metric_ids": [
       "controller_watts_per_dollar"
     ],
-    "total": 52
+    "total": 60
   },
   "dataset_manifests": [
     {
@@ -3120,6 +3486,19 @@
       "target_metric": "workspace_retrieval_controller_contract"
     },
     {
+      "change_id": "g5-always-on-heartbeat",
+      "current_report_controller_telemetry_status": "not_required",
+      "direction": "increase",
+      "latest_decision_generated_at": "2026-06-27T22:34:50.227629+00:00",
+      "latest_decision_passed": true,
+      "latest_decision_present": true,
+      "latest_target_delta": 0.0,
+      "minimum_delta": 0.0,
+      "preregistration_path": "eval/g0/preregistrations/g5-always-on-heartbeat.json",
+      "requires_controller_telemetry": false,
+      "target_metric": "always_on_heartbeat_contract"
+    },
+    {
       "change_id": "g5-standing-byte-stable-parity",
       "current_report_controller_telemetry_status": "not_required",
       "direction": "decrease",
@@ -3136,17 +3515,17 @@
       "change_id": "g5-standing-continuous",
       "current_report_controller_telemetry_status": "not_required",
       "direction": "decrease",
-      "latest_decision_generated_at": null,
-      "latest_decision_passed": null,
-      "latest_decision_present": false,
-      "latest_target_delta": null,
+      "latest_decision_generated_at": "2026-06-27T20:32:39.200301+00:00",
+      "latest_decision_passed": true,
+      "latest_decision_present": true,
+      "latest_target_delta": 0.0,
       "minimum_delta": 0.0,
       "preregistration_path": "eval/g0/preregistrations/g5-standing-continuous.json",
       "requires_controller_telemetry": false,
       "target_metric": "standing_calibration_error"
     }
   ],
-  "generated_at": "2026-06-27T20:32:31.835211+00:00",
+  "generated_at": "2026-06-27T22:41:29.239493+00:00",
   "headline_slos": {
     "ece": {
       "blueprint_metric": "ECE",
@@ -3508,7 +3887,7 @@
       "status": "measured",
       "target": null,
       "target_op": null,
-      "value": 2.003833
+      "value": 2.0275
     },
     {
       "blueprint_metric": "cost",
@@ -3608,6 +3987,126 @@
       "id": "shadow_workspace_contract",
       "label": "shadow workspace contract",
       "notes": "Measured by the G0 shadow workspace fixture. Passing requires bounded ticks, monotonic cycle/trace indexes, self-generated data-only trace rows, shadow_only=true, critical_path=false, production_mutation=false, and anti-rumination shutdown.",
+      "pass": true,
+      "source_id": "shadow_workspace_eval",
+      "status": "measured",
+      "target": 1.0,
+      "target_op": ">=",
+      "value": 1.0
+    },
+    {
+      "blueprint_metric": "G5 always-on tiered heartbeat safety contract",
+      "class": "target",
+      "direction": "increase",
+      "evidence_path": "/always_on_heartbeat_contract",
+      "id": "always_on_heartbeat_contract",
+      "label": "always-on heartbeat contract",
+      "notes": "Measured by the G0 P3 workspace fixture. Passing requires a tiered engaged+idle heartbeat, anti-rumination hard stop, fail-closed circuit breaker drill, broadcast-as-data, self-generation budget, and answer-grounding floor contracts to all hold.",
+      "pass": true,
+      "source_id": "shadow_workspace_eval",
+      "status": "measured",
+      "target": 1.0,
+      "target_op": ">=",
+      "value": 1.0
+    },
+    {
+      "blueprint_metric": "G5 always-on anti-rumination rate",
+      "class": "guardrail",
+      "direction": "decrease",
+      "evidence_path": "/always_on_rumination_rate",
+      "id": "always_on_rumination_rate",
+      "label": "always-on rumination rate",
+      "notes": "Measured by the G0 P3 workspace fixture as failed always-on anti-rumination behavior. Passing reports 0.0 after the bounded forced-rumination probe exits.",
+      "pass": true,
+      "source_id": "shadow_workspace_eval",
+      "status": "measured",
+      "target": 0.0,
+      "target_op": "<=",
+      "value": 0.0
+    },
+    {
+      "blueprint_metric": "G5 bounded heartbeat compute",
+      "class": "guardrail",
+      "direction": "increase",
+      "evidence_path": "/heartbeat_compute_bounded_contract",
+      "id": "heartbeat_compute_bounded_contract",
+      "label": "heartbeat compute bounded contract",
+      "notes": "Measured by the G0 P3 workspace heartbeat safety report. Passing requires trace length, idle ticks, and estimated compute to stay inside explicit controller bounds.",
+      "pass": true,
+      "source_id": "shadow_workspace_eval",
+      "status": "measured",
+      "target": 1.0,
+      "target_op": ">=",
+      "value": 1.0
+    },
+    {
+      "blueprint_metric": "G5 reported heartbeat compute",
+      "class": "guardrail",
+      "direction": "increase",
+      "evidence_path": "/heartbeat_compute_reported_contract",
+      "id": "heartbeat_compute_reported_contract",
+      "label": "heartbeat compute reported contract",
+      "notes": "Measured by the G0 P3 workspace heartbeat safety report. Passing requires explicit estimated_compute_ms and compute_budget_ms fields.",
+      "pass": true,
+      "source_id": "shadow_workspace_eval",
+      "status": "measured",
+      "target": 1.0,
+      "target_op": ">=",
+      "value": 1.0
+    },
+    {
+      "blueprint_metric": "G5 fail-closed circuit-breaker",
+      "class": "guardrail",
+      "direction": "increase",
+      "evidence_path": "/circuit_breaker_contract",
+      "id": "circuit_breaker_contract",
+      "label": "fail-closed circuit-breaker contract",
+      "notes": "Measured by the G0 P3 circuit-breaker drill. Passing requires proto-self risk to freeze self-generation and fall back to evidence-only retrieval while remaining shadow-only and non-mutating.",
+      "pass": true,
+      "source_id": "shadow_workspace_eval",
+      "status": "measured",
+      "target": 1.0,
+      "target_op": ">=",
+      "value": 1.0
+    },
+    {
+      "blueprint_metric": "G5 broadcast-as-data H9/R6",
+      "class": "guardrail",
+      "direction": "increase",
+      "evidence_path": "/workspace_broadcast_as_data_contract",
+      "id": "workspace_broadcast_as_data_contract",
+      "label": "workspace broadcast-as-data contract",
+      "notes": "Measured by the G0 P3 broadcast injection probe. Passing requires control-shaped keys to be stripped, raw content redacted, and used_for_control_flow=false.",
+      "pass": true,
+      "source_id": "shadow_workspace_eval",
+      "status": "measured",
+      "target": 1.0,
+      "target_op": ">=",
+      "value": 1.0
+    },
+    {
+      "blueprint_metric": "G5 self-generation budget rail H4",
+      "class": "guardrail",
+      "direction": "increase",
+      "evidence_path": "/self_generation_budget_rail_contract",
+      "id": "self_generation_budget_rail_contract",
+      "label": "self-generation budget rail contract",
+      "notes": "Measured by the G0 P3 self-generation budget probe. Passing requires over-budget self-generated writes to be deferred with audit custody while grounded writes remain unaffected.",
+      "pass": true,
+      "source_id": "shadow_workspace_eval",
+      "status": "measured",
+      "target": 1.0,
+      "target_op": ">=",
+      "value": 1.0
+    },
+    {
+      "blueprint_metric": "G5 answer-grounding floor H5",
+      "class": "guardrail",
+      "direction": "increase",
+      "evidence_path": "/answer_grounding_floor_contract",
+      "id": "answer_grounding_floor_contract",
+      "label": "answer-grounding floor contract",
+      "notes": "Measured by the G0 P3 answer-grounding probe. Passing requires low-grounded self-generated support to flag/abstain and fully grounded support to remain unaffected.",
       "pass": true,
       "source_id": "shadow_workspace_eval",
       "status": "measured",
@@ -4044,74 +4543,74 @@
       "sha256": "aee46e3a0908f5e44edff596e1206e6aecc10234c1e24af953f623e929a958a6"
     },
     {
-      "generated_at": "2026-06-27T20:32:31.621953+00:00",
+      "generated_at": "2026-06-27T22:41:29.053616+00:00",
       "id": "continual_learning_eval",
       "path": "computed:eval.g0.continual_learning",
       "present": true,
-      "sha256": "167cd7f81ae5eaa133d3a91b27ec4e5880c4f1cc74b46243f08e0a6086b2c528"
+      "sha256": "a919e0ca06e073ce5f914621905bc9d6a58dbf55ae793b14b302f9d701966c3f"
     },
     {
-      "generated_at": "2026-06-27T20:32:31.623358+00:00",
+      "generated_at": "2026-06-27T22:41:29.054975+00:00",
       "id": "confabulation_eval",
       "path": "computed:eval.g0.confabulation",
       "present": true,
-      "sha256": "3d8c40349b64fe6a6287abcc0f383a91067e270b07d170952f9de8c7c303df04"
+      "sha256": "783c2488b7f8b580ff82c51c53f43e832a4a27c4de2d47f16a1fdcd63ef2a98e"
     },
     {
-      "generated_at": "2026-06-27T20:32:31.625501+00:00",
+      "generated_at": "2026-06-27T22:41:29.056896+00:00",
       "id": "projection_reality_eval",
       "path": "computed:eval.g0.projection_reality",
       "present": true,
-      "sha256": "3b7ba771e69857aad27f59beb8e8f5383a7daa8da2b0b6707da1d500c96c146c"
+      "sha256": "5cb83408647ba95bc60df07786ddd45358b61c46da5478e7f3b1b0462c6fa4de"
     },
     {
-      "generated_at": "2026-06-27T20:32:31.628009+00:00",
+      "generated_at": "2026-06-27T22:41:29.059344+00:00",
       "id": "standing_parity_eval",
       "path": "computed:eval.g0.standing_parity",
       "present": true,
-      "sha256": "74a61e216ffe70e575b714498816cca046907afc2c18e85e51dbaa90b8da6ae2"
+      "sha256": "c924b55bf85a3e434adf6b755c787ff15e8d2b7db504c7545817797accaca44a"
     },
     {
-      "generated_at": "2026-06-27T20:32:31.628169+00:00",
+      "generated_at": "2026-06-27T22:41:29.059516+00:00",
       "id": "standing_calibration_eval",
       "path": "computed:eval.g0.standing_calibration",
       "present": true,
-      "sha256": "beb47b78f68bfaae54032733c49cc8548ee5e0389895acaf79f98d9159c22327"
+      "sha256": "c9a16d71b425d2a53e3e5e35fa4da1047bfa3f0d3b936e7d51563e53d987b1ce"
     },
     {
-      "generated_at": "2026-06-27T20:32:31.652513+00:00",
+      "generated_at": "2026-06-27T22:41:29.085029+00:00",
       "id": "deep_latency_eval",
       "path": "computed:eval.g0.deep_latency",
       "present": true,
-      "sha256": "f40a2bad5371e74090bcc32e47affa08addcdfdd4ad3a3b071b910d3b462d91b"
+      "sha256": "6d9adfb6c22662d8fe3ece162b191e44d1fd9b796517d39974a86757bbee7723"
     },
     {
-      "generated_at": "2026-06-27T20:32:31.670972+00:00",
+      "generated_at": "2026-06-27T22:41:29.095759+00:00",
       "id": "resource_usage_eval",
       "path": "computed:eval.g0.resource_usage",
       "present": true,
-      "sha256": "9daaa9cd0dbb1c4f03fdc9e4cac2d9a65549113951f7d77282e5fec9b36b16fd"
+      "sha256": "c03d7d647f474a9eda1106a08b227d30281df8fabacff8fe4de8169cae3537a0"
     },
     {
-      "generated_at": "2026-06-27T20:32:31.671885+00:00",
+      "generated_at": "2026-06-27T22:41:29.097148+00:00",
       "id": "dreamer_eval",
       "path": "computed:eval.g0.dreamer",
       "present": true,
-      "sha256": "1dafb4e47e7f1fd1e03d6201c1a642f6c36dea9c3d3e9e491644129fd2ccfcbf"
+      "sha256": "9874324dec35f12071eaed34c649b5668f19ff661903d6616bf289b40a4d6148"
     },
     {
-      "generated_at": "2026-06-27T20:32:31.678821+00:00",
+      "generated_at": "2026-06-27T22:41:29.106713+00:00",
       "id": "shadow_workspace_eval",
       "path": "computed:eval.g0.shadow_workspace",
       "present": true,
-      "sha256": "fffb23517e75f56789e2e9cf4ef20008e3b4f19e9a054b89c260dbaf1bafb260"
+      "sha256": "8b585044e615de8384745ce10ef3860ff238dac4dfe5efd7121309b45b84ef72"
     },
     {
-      "generated_at": "2026-06-27T20:32:31.795778+00:00",
+      "generated_at": "2026-06-27T22:41:29.196032+00:00",
       "id": "consciousness_eval",
       "path": "computed:eval.g0.consciousness",
       "present": true,
-      "sha256": "1c3888b50ea507f14003ef7bf9ca1eaca5d621d96ed05438ca07a60fda6d30d4"
+      "sha256": "d1217702e771e9fe2840cfe5d70d3c18ae9927e353940e62c31ffdc3b7721577"
     }
   ]
 }

@@ -26,6 +26,8 @@ from .providers import SpecialistModuleRegistry, default_registry
 
 WORKSPACE_CONSOLIDATION_ADVISORY_VERSION = "workspace-consolidation-advisory.v1"
 SPECIALIST_PROMOTION_EVIDENCE_VERSION = "specialist-promotion-evidence.v1"
+HEARTBEAT_SAFETY_VERSION = "always-on-heartbeat-safety.v1"
+SELF_GENERATION_BUDGET_VERSION = "self-generation-budget.v1"
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,6 +124,7 @@ class WorkspaceStreamReport:
     stopped_reason: str
     idle_ticks: int
     rumination_score: float
+    heartbeat_safety: dict[str, Any] = field(default_factory=dict)
     shadow_only: bool = True
     critical_path: bool = False
     production_mutation: bool = False
@@ -131,6 +134,7 @@ class WorkspaceStreamReport:
         data = asdict(self)
         data["cycles"] = [cycle.to_dict() for cycle in self.cycles]
         data["trace"] = [entry.to_dict() for entry in self.trace]
+        data["heartbeat_safety"] = dict(self.heartbeat_safety)
         return data
 
     def to_consolidation_advisory(self, *, max_items: int = 8) -> dict[str, Any]:
@@ -161,6 +165,7 @@ class ShadowWorkspaceServiceReport:
     tick_ms: int
     max_cycles: int
     tick_count: int
+    heartbeat_safety: dict[str, Any] = field(default_factory=dict)
     shadow_only: bool = True
     critical_path: bool = False
     production_mutation: bool = False
@@ -177,6 +182,7 @@ class ShadowWorkspaceServiceReport:
             "tick_ms": self.tick_ms,
             "max_cycles": self.max_cycles,
             "tick_count": self.tick_count,
+            "heartbeat_safety": dict(self.heartbeat_safety),
             "shadow_only": self.shadow_only,
             "critical_path": self.critical_path,
             "production_mutation": self.production_mutation,
@@ -316,6 +322,14 @@ class ShadowWorkspaceController:
         stream_shadow_only = all(cycle.shadow_only for cycle in cycles)
         stream_critical_path = any(cycle.critical_path for cycle in cycles)
         stream_production_mutation = any(cycle.production_mutation for cycle in cycles)
+        heartbeat_safety = _heartbeat_safety_report(
+            cycles=cycles,
+            trace=trace,
+            stopped_reason=stopped_reason,
+            max_cycles=self.max_cycles,
+            max_idle_ticks=self.max_idle_ticks,
+            tick_ms=self.tick_ms,
+        )
         return WorkspaceStreamReport(
             tenant_id=tenant_id,
             cycles=tuple(cycles),
@@ -324,6 +338,7 @@ class ShadowWorkspaceController:
             stopped_reason=stopped_reason,
             idle_ticks=idle_ticks,
             rumination_score=round(non_useful_ticks / total_ticks, 6),
+            heartbeat_safety=heartbeat_safety,
             shadow_only=stream_shadow_only,
             critical_path=stream_critical_path,
             production_mutation=stream_production_mutation,
@@ -457,6 +472,7 @@ class ShadowWorkspaceService:
             tick_ms=self.controller.tick_ms,
             max_cycles=self.controller.max_cycles,
             tick_count=len(stream.trace),
+            heartbeat_safety=stream.heartbeat_safety,
             shadow_only=stream.shadow_only,
             critical_path=stream.critical_path,
             production_mutation=stream.production_mutation,
@@ -516,6 +532,14 @@ class ShadowWorkspaceService:
             stopped_reason=str(cycle.cycle.get("state") or "continue"),
             idle_ticks=int(idle_generated),
             rumination_score=0.0 if trace.useful_state else 1.0,
+            heartbeat_safety=_heartbeat_safety_report(
+                cycles=(cycle,),
+                trace=(trace,),
+                stopped_reason=str(cycle.cycle.get("state") or "continue"),
+                max_cycles=self.controller.max_cycles,
+                max_idle_ticks=self.controller.max_idle_ticks,
+                tick_ms=self.controller.tick_ms,
+            ),
             shadow_only=cycle.shadow_only,
             critical_path=cycle.critical_path,
             production_mutation=cycle.production_mutation,
@@ -531,6 +555,7 @@ class ShadowWorkspaceService:
             tick_ms=self.controller.tick_ms,
             max_cycles=self.controller.max_cycles,
             tick_count=1,
+            heartbeat_safety=stream.heartbeat_safety,
             shadow_only=stream.shadow_only,
             critical_path=stream.critical_path,
             production_mutation=stream.production_mutation,
@@ -757,6 +782,103 @@ def _cycle_consistency(
         "cycle_indexes": cycle_indexes,
         "trace_ticks": tick_indexes,
         "focus_chain": [entry.focus_id for entry in trace],
+    }
+
+
+def self_generation_budget_report(
+    *,
+    current_events: int,
+    incoming_events: int = 1,
+    current_bytes: int = 0,
+    incoming_bytes: int = 0,
+    max_events: int = 2,
+    window_ticks: int = 4,
+    duplicate_noop: bool = False,
+) -> dict[str, Any]:
+    """Return a deterministic H4 budget decision for self-generated writes."""
+
+    max_events = max(0, int(max_events))
+    window_ticks = max(1, int(window_ticks))
+    incoming_events = max(0, int(incoming_events))
+    current_events = max(0, int(current_events))
+    current_bytes = max(0, int(current_bytes))
+    incoming_bytes = max(0, int(incoming_bytes))
+    projected_events = current_events if duplicate_noop else current_events + incoming_events
+    allowed = duplicate_noop or projected_events <= max_events
+    reason = "duplicate_noop" if duplicate_noop else ("within_budget" if allowed else "self_generation_budget_exceeded")
+    return {
+        "schema_version": SELF_GENERATION_BUDGET_VERSION,
+        "window_ticks": window_ticks,
+        "max_events": max_events,
+        "current_events": current_events,
+        "incoming_events": incoming_events,
+        "projected_events": projected_events,
+        "current_bytes": current_bytes,
+        "incoming_bytes": incoming_bytes,
+        "allowed": allowed,
+        "deferred": not allowed,
+        "duplicate_noop": duplicate_noop,
+        "reason": reason,
+    }
+
+
+def _heartbeat_safety_report(
+    *,
+    cycles: Sequence[WorkspaceCycleReport],
+    trace: Sequence[WorkspaceTraceEntry],
+    stopped_reason: str,
+    max_cycles: int,
+    max_idle_ticks: int,
+    tick_ms: int,
+) -> dict[str, Any]:
+    """Build the native P3 heartbeat safety report."""
+
+    idle_ticks = sum(1 for entry in trace if entry.idle_generated)
+    engaged_ticks = len(trace) - idle_ticks
+    non_useful_ticks = sum(1 for entry in trace if not entry.useful_state)
+    proto_reasons = sorted({reason for cycle in cycles for reason in cycle.proto_self.reasons})
+    proto_escalated = any(cycle.proto_self.escalation_required for cycle in cycles)
+    guard_escalated = any(str(cycle.cycle.get("state") or "").startswith("escalate") for cycle in cycles)
+    circuit_breaker = proto_escalated or guard_escalated
+    budget = self_generation_budget_report(
+        current_events=idle_ticks,
+        incoming_events=0,
+        current_bytes=sum(len(entry.content) for entry in trace if entry.idle_generated),
+        incoming_bytes=0,
+        max_events=max_idle_ticks,
+        window_ticks=max_cycles,
+    )
+    compute_budget_ms = max(1, int(max_cycles)) * max(1, int(tick_ms))
+    estimated_compute_ms = len(trace) * max(1, int(tick_ms))
+    bounded = (
+        len(trace) <= max_cycles
+        and idle_ticks <= max_idle_ticks
+        and estimated_compute_ms <= compute_budget_ms
+        and budget["allowed"]
+    )
+    return {
+        "schema_version": HEARTBEAT_SAFETY_VERSION,
+        "tier": "tiered_engaged_idle",
+        "engaged_ticks": engaged_ticks,
+        "idle_ticks": idle_ticks,
+        "tick_count": len(trace),
+        "max_cycles": int(max_cycles),
+        "max_idle_ticks": int(max_idle_ticks),
+        "tick_ms": int(tick_ms),
+        "estimated_compute_ms": estimated_compute_ms,
+        "compute_budget_ms": compute_budget_ms,
+        "compute_bounded": bounded,
+        "compute_reported": True,
+        "stopped_reason": stopped_reason,
+        "hard_stop": circuit_breaker or stopped_reason.startswith("anti_rumination"),
+        "circuit_breaker_tripped": circuit_breaker,
+        "self_generation_frozen": circuit_breaker or not budget["allowed"],
+        "evidence_only_fallback": circuit_breaker or not budget["allowed"],
+        "proto_self_reasons": proto_reasons,
+        "non_useful_ticks": non_useful_ticks,
+        "self_generation_budget": budget,
+        "data_not_instructions": True,
+        "used_for_control_flow": False,
     }
 
 

@@ -36,6 +36,7 @@ from mnemosyne.retrieval import (
     QUERY_SUPPORT_THRESHOLD,
     RetrievalAdapters,
     activation_explain,
+    answer_grounding_floor_report,
     apply_workspace_retrieval_advisory,
     apply_activation_scores,
     gist_support_report,
@@ -57,6 +58,7 @@ from mnemosyne.security import (
 )
 from mnemosyne.standing import standing, standing_abstention_report
 from mnemosyne.text import approx_tokens, cosine, lexical_score, tokenize
+from mnemosyne.workspace import self_generation_budget_report
 
 
 def _bounded_float(value: object, *, default: float) -> float:
@@ -448,6 +450,7 @@ class LocalMemoryEngine:
             )
             key = self._evidence_key(ev.tenant_id, branch, cid)
             existing = self.evidence.get(key)
+            reality_class = self._classify_evidence_reality(ev)
             if existing:
                 op = "append_evidence.blocked_erased_replay" if existing.erased else "append_evidence.noop_dedup"
                 self._audit(
@@ -462,11 +465,55 @@ class LocalMemoryEngine:
                 )
                 self._persist()
                 return cid
+            budget_report: dict[str, Any] | None = None
+            if reality_class in {"self_generated", "simulated"}:
+                current_events, current_bytes = self._self_generation_budget_usage(
+                    tenant_id=ev.tenant_id,
+                    branch=branch,
+                )
+                budget_report = self_generation_budget_report(
+                    current_events=current_events,
+                    incoming_events=1,
+                    current_bytes=current_bytes,
+                    incoming_bytes=len(ev.content),
+                    max_events=self.policy.self_generation_budget_max_events,
+                    window_ticks=self.policy.self_generation_budget_window_ticks,
+                )
+                if not budget_report["allowed"]:
+                    self._audit(
+                        ev.tenant_id,
+                        ev.actor,
+                        "append_evidence.self_generation_budget_deferred",
+                        cid,
+                        {
+                            "branch": branch,
+                            "source_type": ev.source_type,
+                            "source_identity": ev.source_identity,
+                            "reality_class": reality_class,
+                            "self_generation_budget": budget_report,
+                            "stored": False,
+                            "reversible_pointer_preserved": bool(ev.content_pointer),
+                        },
+                        source=ev.source_type,
+                        trust_tier=ev.trust_tier,
+                        capability_tags=ev.capability_tags,
+                    )
+                    self._persist()
+                    return cid
             stored = copy.deepcopy(ev)
             stored.cid = cid
             stored.branch = branch
             stored.metadata = dict(stored.metadata)
-            stored.metadata.setdefault("reality_class", self._classify_evidence_reality(stored))
+            stored.metadata.setdefault("reality_class", reality_class)
+            if budget_report is not None:
+                stored.metadata["self_generation_budget"] = budget_report
+                stored.metadata["self_generation_lifecycle"] = {
+                    "status": "budgeted_low_groundedness",
+                    "demotable": True,
+                    "gc_after_idle_ticks": self.policy.self_generation_gc_after_idle_ticks,
+                    "pointer_preserved": bool(stored.content_pointer or stored.cid),
+                    "critical_path_allowed": False,
+                }
             self.evidence[key] = stored
             self._audit(
                 ev.tenant_id,
@@ -480,6 +527,19 @@ class LocalMemoryEngine:
             )
             self._persist()
             return cid
+
+    def _self_generation_budget_usage(self, *, tenant_id: str, branch: str) -> tuple[int, int]:
+        events = 0
+        byte_count = 0
+        for key, item in self.evidence.items():
+            key_tenant, key_branch, _ = key.split(":", 2)
+            if key_tenant != tenant_id or key_branch != branch or item.erased:
+                continue
+            if self._classify_evidence_reality(item) not in {"self_generated", "simulated"}:
+                continue
+            events += 1
+            byte_count += len(item.content or "")
+        return events, byte_count
 
     def get_evidence(self, tenant_id: str, cid: str, branch: str = "main") -> Evidence | None:
         with self._lock:
@@ -1123,9 +1183,13 @@ class LocalMemoryEngine:
         ungrounded_reality_only = bool(standing_report["abstention_gate"]["active"])
         if ungrounded_reality_only != bool(reality_monitoring["ungrounded_only"]):
             raise AssertionError("Standing P1 mirror diverged from reality-monitoring abstention gate")
+        answer_grounding_floor = answer_grounding_floor_report(budgeted, self.policy)
+        answer_grounding_floor_active = bool(answer_grounding_floor["active"])
         if gist_only:
             confidence = min(confidence, threshold * 0.95)
         if ungrounded_reality_only:
+            confidence = min(confidence, threshold * 0.95)
+        if answer_grounding_floor_active:
             confidence = min(confidence, threshold * 0.95)
         if calibration:
             abstained = (
@@ -1133,6 +1197,7 @@ class LocalMemoryEngine:
                 or insufficient_support
                 or gist_only
                 or ungrounded_reality_only
+                or answer_grounding_floor_active
             )
         else:
             abstained = (
@@ -1141,6 +1206,7 @@ class LocalMemoryEngine:
                 or insufficient_support
                 or gist_only
                 or ungrounded_reality_only
+                or answer_grounding_floor_active
             )
         note = None
         if gist_only:
@@ -1149,6 +1215,11 @@ class LocalMemoryEngine:
             note = (
                 "Retrieved support has low groundedness or insufficient independent "
                 "external support; abstaining until grounded evidence is available."
+            )
+        elif answer_grounding_floor_active:
+            note = (
+                "Retrieved support is dominated by low-grounded self-generated content; "
+                "flagging as hypothesis and abstaining until grounded support is available."
             )
         elif insufficient_support:
             note = "Retrieved evidence did not cover enough query terms; abstaining until stronger support is available."
@@ -1184,6 +1255,7 @@ class LocalMemoryEngine:
                 "gist_support": gist_support,
                 "reality_monitoring": reality_monitoring,
                 "standing": standing_report,
+                "answer_grounding_floor": answer_grounding_floor,
                 "schema_fast_path": schema_fast_path,
                 "workspace_broadcast": workspace_broadcast,
                 "workspace_retrieval_advisory": workspace_retrieval_advisory,

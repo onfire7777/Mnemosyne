@@ -46,6 +46,21 @@ class OperatingPolicy:
     workspace_retrieval_advisory_enabled: bool = False
     workspace_retrieval_advisory_max_items: int = 4
     workspace_retrieval_advisory_max_boost: float = 1.0
+    # Phase 7 P3 always-on workspace rails. These are hard safety bounds, not
+    # ranking knobs: self-generated work is capped per tenant/window, weak
+    # self-content cannot dominate answer support, and circuit-breaker breaches
+    # freeze self-generation into evidence-only retrieval.
+    self_generation_budget_max_events: int = 16
+    self_generation_budget_window_ticks: int = 4
+    self_generation_gc_after_idle_ticks: int = 2
+    answer_low_grounded_self_max_fraction: float = 0.5
+    answer_grounding_min_grounded_fraction: float = 0.5
+    answer_grounding_low_groundedness_threshold: float = 0.5
+    circuit_breaker_max_attention_lock_risk: float = 0.5
+    circuit_breaker_min_resource_health: float = 0.5
+    circuit_breaker_max_error_rate: float = 0.10
+    circuit_breaker_max_memory_pressure: float = 0.80
+    circuit_breaker_min_rail_budget: float = 0.25
     prediction_error_threshold: float = 0.35
     write_priority_weights: dict[str, float] = field(
         default_factory=lambda: {

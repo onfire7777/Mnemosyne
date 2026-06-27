@@ -158,7 +158,11 @@ def workspace_broadcast_from_context(ctx: Mapping[str, Any] | None) -> dict[str,
         "source": "workspace_context",
         "shadow_only": True,
         "critical_path": False,
+        "data_not_instructions": True,
+        "used_for_control_flow": False,
         "used_for_ranking": False,
+        "control_keys_stripped": True,
+        "raw_content_present": False,
         "max_items": WORKSPACE_BROADCAST_MAX_ITEMS,
         "item_count": len(items),
         "items": items,
@@ -172,6 +176,88 @@ def strip_workspace_broadcast_filter(filt: Mapping[str, Any] | None) -> dict[str
     for key in WORKSPACE_CONTROLLER_FILTER_KEYS:
         clean.pop(key, None)
     return clean
+
+
+def answer_grounding_floor_report(
+    hits: Sequence[Hit],
+    policy: OperatingPolicy,
+) -> dict[str, Any]:
+    """Return the H5 answer-grounding floor report for a support set.
+
+    Low-grounded self-generated support may be retrieved as hypothesis data, but
+    it cannot dominate an answer. The report is deterministic and critical-path:
+    engines use ``active`` to flag/abstain before returning a result.
+    """
+
+    rows: list[dict[str, Any]] = []
+    low_self = 0
+    grounded = 0
+    support_count = len(hits)
+    low_threshold = _bounded_unit(
+        getattr(policy, "answer_grounding_low_groundedness_threshold", 0.5),
+    )
+    max_self_fraction = _bounded_unit(
+        getattr(policy, "answer_low_grounded_self_max_fraction", 0.5),
+    )
+    min_grounded_fraction = _bounded_unit(
+        getattr(policy, "answer_grounding_min_grounded_fraction", 0.5),
+    )
+    for index, hit in enumerate(hits):
+        metadata = hit.metadata if isinstance(hit.metadata, Mapping) else {}
+        standing_payload = metadata.get("standing") if isinstance(metadata.get("standing"), Mapping) else {}
+        raw_groundedness = standing_payload.get("groundedness", 0.0)
+        try:
+            groundedness = _bounded_unit(float(raw_groundedness))
+        except (TypeError, ValueError):
+            groundedness = 0.0
+        reality_class = _normalise_retrieval_reality_class(metadata.get("reality_class"))
+        authority = bool(standing_payload.get("authority")) if standing_payload else groundedness >= low_threshold
+        low_self_support = reality_class in {"self_generated", "simulated"} and groundedness < low_threshold
+        grounded_support = authority and reality_class == "grounded"
+        if low_self_support:
+            low_self += 1
+        if grounded_support:
+            grounded += 1
+        rows.append(
+            {
+                "hit_id": hit.id or f"{hit.kind}:{index}",
+                "reality_class": reality_class,
+                "groundedness": round(groundedness, 6),
+                "standing_authority": authority,
+                "low_grounded_self_support": low_self_support,
+                "grounded_support": grounded_support,
+            }
+        )
+    denominator = max(1, support_count)
+    low_self_fraction = round(low_self / denominator, 6)
+    grounded_fraction = round(grounded / denominator, 6)
+    weak_self_dominates = low_self_fraction > max_self_fraction
+    grounded_floor_failed = low_self > 0 and grounded_fraction < min_grounded_fraction
+    active = support_count > 0 and (weak_self_dominates or grounded_floor_failed)
+    reasons: list[str] = []
+    if weak_self_dominates:
+        reasons.append("low_grounded_self_support_exceeds_fraction_cap")
+    if grounded_floor_failed:
+        reasons.append("grounded_support_fraction_below_floor")
+    return {
+        "applied": True,
+        "critical_path": True,
+        "shadow_only": False,
+        "trigger": "answer_grounding_floor",
+        "active": active,
+        "flag_as_hypothesis": active,
+        "abstain": active,
+        "support_count": support_count,
+        "low_grounded_self_support_count": low_self,
+        "grounded_support_count": grounded,
+        "low_grounded_self_fraction": low_self_fraction,
+        "grounded_support_fraction": grounded_fraction,
+        "max_low_grounded_self_fraction": max_self_fraction,
+        "min_grounded_support_fraction": min_grounded_fraction,
+        "low_groundedness_threshold": low_threshold,
+        "reasons": reasons,
+        "rows": rows,
+    }
 
 
 def apply_workspace_retrieval_advisory(
@@ -364,10 +450,25 @@ def _workspace_broadcast_item(item: object, *, index: int) -> dict[str, Any]:
         item_id = str(item.get("id") or item.get("focus_id") or f"workspace-focus-{index + 1}")
         text = str(item.get("content") or item.get("text") or "")
         source = str(item.get("source") or item.get("reality_class") or "workspace")
+        stripped = sorted(
+            str(key)
+            for key in item
+            if str(key)
+            in {
+                "apply_workspace_retrieval_advisory",
+                "workspace_retrieval_advisory_mode",
+                "control_flow",
+                "instructions",
+                "policy_override",
+                "system_prompt",
+                "tool_call",
+            }
+        )
     else:
         item_id = f"workspace-focus-{index + 1}"
         text = str(item or "")
         source = "workspace"
+        stripped = []
     text = text[:WORKSPACE_BROADCAST_MAX_CONTENT_CHARS]
     digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16] if text else ""
     return {
@@ -375,6 +476,9 @@ def _workspace_broadcast_item(item: object, *, index: int) -> dict[str, Any]:
         "source": source,
         "content_chars": len(text),
         "content_ref": f"[workspace-broadcast-redacted:{digest}:chars={len(text)}]" if text else "",
+        "data_not_instructions": True,
+        "used_for_control_flow": False,
+        "stripped_control_keys": stripped,
     }
 
 
@@ -453,6 +557,22 @@ def _bounded_unit(value: object) -> float:
     if not math.isfinite(number):
         return 0.0
     return max(0.0, min(1.0, number))
+
+
+def _normalise_retrieval_reality_class(value: Any) -> str:
+    if not isinstance(value, str):
+        return "unknown"
+    lowered = value.strip().lower().replace("-", "_")
+    aliases = {
+        "evidence_grounded": "grounded",
+        "grounded": "grounded",
+        "self_generated": "self_generated",
+        "simulated": "self_generated",
+        "externally_suggested": "externally_suggested",
+        "external": "externally_suggested",
+        "unknown": "unknown",
+    }
+    return aliases.get(lowered, "unknown")
 
 
 def normalise_query_term(token: str) -> str:
