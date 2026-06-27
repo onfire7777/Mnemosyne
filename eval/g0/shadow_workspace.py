@@ -42,12 +42,15 @@ def run_shadow_workspace_eval(*, repo_root: Path | None = None) -> dict[str, Any
         rail_budget=0.96,
     )
     payload = report.to_dict()
+    advisory = report.to_consolidation_advisory()
     useful_checks = _useful_transition_checks(dataset.get("cycles", []), payload)
     contract_checks = _contract_checks(payload, dataset.get("contract_expected", {}))
+    advisory_checks = _advisory_checks(advisory, dataset)
     rumination_payload = _run_rumination_probe(controller, tenant, dataset.get("rumination_probe", {}))
     rumination_checks = _rumination_checks(rumination_payload, dataset.get("rumination_probe", {}))
     all_contract_checks = {
         **contract_checks,
+        **{f"advisory_{key}": value for key, value in advisory_checks.items()},
         **{f"cycle_{key}": value for key, value in useful_checks.items()},
         **{f"rumination_{key}": value for key, value in rumination_checks.items()},
     }
@@ -76,6 +79,9 @@ def run_shadow_workspace_eval(*, repo_root: Path | None = None) -> dict[str, Any
         "useful_transition_rate": useful_transition_rate,
         "rumination_rate": rumination_rate,
         "shadow_workspace_contract": 1.0 if all(_flatten_bool_checks(all_contract_checks)) else 0.0,
+        "workspace_consolidation_advisory_contract": 1.0
+        if all(_flatten_bool_checks(advisory_checks))
+        else 0.0,
         "checks": all_contract_checks,
         "workspace": {
             "stopped_reason": payload["stopped_reason"],
@@ -88,6 +94,7 @@ def run_shadow_workspace_eval(*, repo_root: Path | None = None) -> dict[str, Any
             "cycle_consistency": payload["cycle_consistency"],
             "trace": payload["trace"],
         },
+        "workspace_consolidation_advisory": advisory,
         "rumination_probe": rumination_payload,
     }
 
@@ -155,6 +162,32 @@ def _contract_checks(payload: dict[str, Any], expected: dict[str, Any]) -> dict[
             and entry.get("data_not_instructions") is True
             for entry in trace
         ),
+    }
+
+
+def _advisory_checks(advisory: dict[str, Any], dataset: dict[str, Any]) -> dict[str, Any]:
+    replay_scores = advisory.get("replay_scores") if isinstance(advisory.get("replay_scores"), dict) else {}
+    items = advisory.get("items") if isinstance(advisory.get("items"), list) else []
+    raw_content = [
+        str(item.get("content") or "")
+        for cycle in dataset.get("cycles", [])
+        if isinstance(cycle, dict)
+        for item in cycle.get("items", [])
+        if isinstance(item, dict)
+    ]
+    item_cids = [str(item.get("cid") or "") for item in items if isinstance(item, dict)]
+    return {
+        "shadow_only": advisory.get("shadow_only") is True,
+        "critical_path_false": advisory.get("critical_path") is False,
+        "production_mutation_false": advisory.get("production_mutation") is False,
+        "advisory_only": advisory.get("advisory_only") is True,
+        "promotion_gate_required": advisory.get("promotion_gate_required") is True,
+        "not_applied_to_prediction_gate": advisory.get("applied_to_prediction_gate") is False,
+        "not_applied_to_replay_priority": advisory.get("applied_to_replay_priority") is False,
+        "not_applied_to_mutation": advisory.get("applied_to_mutation") is False,
+        "cid_backed_items": bool(item_cids) and all(cid in replay_scores for cid in item_cids),
+        "bounded_items": len(items) <= int(advisory.get("max_items") or 0),
+        "raw_content_absent": all(text and text not in str(advisory) for text in raw_content),
     }
 
 

@@ -166,3 +166,36 @@ def test_shadow_workspace_stream_caps_tick_iterables_before_materialization() ->
 def test_shadow_workspace_controller_rejects_invalid_cycle_caps() -> None:
     with pytest.raises(ValueError, match="max_cycles"):
         ShadowWorkspaceController(max_cycles=0)
+
+
+def test_shadow_workspace_stream_exports_bounded_consolidation_advisory() -> None:
+    controller = ShadowWorkspaceController(max_workspace_items=1, max_cycles=2)
+
+    report = controller.run_shadow_stream(
+        tenant_id="tenant-stream",
+        item_ticks=[
+            [
+                WorkspaceItem(
+                    id="focus-advisory",
+                    priority=0.91,
+                    content="raw workspace advisory content must stay private",
+                    metadata={"cid": "cid-advisory-a", "tenant_id": "tenant-stream"},
+                )
+            ]
+        ],
+    )
+
+    advisory = report.to_consolidation_advisory()
+
+    assert advisory["shadow_only"] is True
+    assert advisory["critical_path"] is False
+    assert advisory["production_mutation"] is False
+    assert advisory["advisory_only"] is True
+    assert advisory["promotion_gate_required"] is True
+    assert advisory["applied_to_prediction_gate"] is False
+    assert advisory["applied_to_replay_priority"] is False
+    assert advisory["applied_to_mutation"] is False
+    assert advisory["prediction_error"]["score"] == 1.0
+    assert advisory["replay_scores"]["cid-advisory-a"]["importance"] == 0.91
+    assert advisory["items"][0]["workspace_item_id"] == "focus-advisory"
+    assert "raw workspace advisory content" not in str(advisory)

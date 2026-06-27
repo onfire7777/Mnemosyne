@@ -202,6 +202,15 @@ G0_METRIC_SPECS: tuple[dict[str, Any], ...] = (
         "blueprint_metric": "G4 shadow continuous workspace safety contract",
     },
     {
+        "id": "workspace_consolidation_advisory_contract",
+        "label": "workspace consolidation advisory contract",
+        "class": "guardrail",
+        "direction": "increase",
+        "target": 1.0,
+        "target_op": ">=",
+        "blueprint_metric": "G4 shadow workspace-to-consolidation advisory contract",
+    },
+    {
         "id": "shadow_workspace_rumination_rate",
         "label": "shadow workspace rumination rate",
         "class": "guardrail",
@@ -457,6 +466,7 @@ def _build_metric(spec: dict[str, Any], sources: dict[str, Source]) -> dict[str,
         "dreamer_shadow_contract": _metric_dreamer_shadow_contract,
         "shadow_workspace_useful_transition_rate": _metric_shadow_workspace_useful_transition_rate,
         "shadow_workspace_contract": _metric_shadow_workspace_contract,
+        "workspace_consolidation_advisory_contract": _metric_workspace_consolidation_advisory_contract,
         "shadow_workspace_rumination_rate": _metric_shadow_workspace_rumination_rate,
         "reality_monitor_shadow_tag_contract": _metric_consciousness_scorecard,
     }
@@ -746,6 +756,25 @@ def _metric_shadow_workspace_contract(spec: dict[str, Any], sources: dict[str, S
             "bounded ticks, monotonic cycle/trace indexes, self-generated "
             "data-only trace rows, shadow_only=true, critical_path=false, "
             "production_mutation=false, and anti-rumination shutdown."
+        ),
+    )
+
+
+def _metric_workspace_consolidation_advisory_contract(
+    spec: dict[str, Any],
+    sources: dict[str, Source],
+) -> dict[str, Any]:
+    value = _source_data(sources, "shadow_workspace_eval", "workspace_consolidation_advisory_contract")
+    return _measured(
+        spec,
+        value,
+        "shadow_workspace_eval",
+        "/workspace_consolidation_advisory_contract",
+        note=(
+            "Measured by the G0 shadow workspace fixture. Passing requires "
+            "CID-backed, bounded workspace-to-consolidation advisory metadata "
+            "with shadow_only=true, critical_path=false, production_mutation=false, "
+            "and applied_to_prediction_gate/replay_priority/mutation all false."
         ),
     )
 

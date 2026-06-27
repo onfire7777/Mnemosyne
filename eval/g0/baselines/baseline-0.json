@@ -1228,7 +1228,8 @@
       "checks": {
         "critical_path_use_absent": true,
         "pre_g4_fixture_absent": true,
-        "production_mutation_absent": true
+        "production_mutation_absent": true,
+        "workspace_consolidation_advisory_absent": true
       },
       "dataset_path": "eval/datasets/shadow_workspace_loop.json",
       "definition": "Pre-G4 absent-proof baseline for the bounded shadow continuous workspace stream fixture.",
@@ -1236,17 +1237,18 @@
       "rumination_rate": 1.0,
       "schema_version": "g0.shadow_workspace_loop.baseline_absent.v1",
       "shadow_workspace_contract": 0.0,
-      "useful_transition_rate": 0.0
+      "useful_transition_rate": 0.0,
+      "workspace_consolidation_advisory_contract": 0.0
     }
   },
   "coverage": {
     "gate_ready": false,
-    "measured": 41,
+    "measured": 42,
     "missing": 1,
     "missing_metric_ids": [
       "controller_watts_per_dollar"
     ],
-    "total": 42
+    "total": 43
   },
   "dataset_manifests": [
     {
@@ -1722,6 +1724,21 @@
       "value": 0.0
     },
     {
+      "blueprint_metric": "G4 shadow workspace-to-consolidation advisory contract",
+      "class": "guardrail",
+      "direction": "increase",
+      "evidence_path": "/workspace_consolidation_advisory_contract",
+      "id": "workspace_consolidation_advisory_contract",
+      "label": "workspace consolidation advisory contract",
+      "notes": "Pre-advisory baseline: no bounded workspace-to-consolidation advisory proof was present; value records the conservative absent-proof state for the preregistered G4 ablation gate.",
+      "pass": false,
+      "source_id": "shadow_workspace_eval",
+      "status": "measured",
+      "target": 1.0,
+      "target_op": ">=",
+      "value": 0.0
+    },
+    {
       "blueprint_metric": "G4 anti-rumination bounded-loop rate",
       "class": "guardrail",
       "direction": "decrease",
@@ -2158,7 +2175,7 @@
       "id": "shadow_workspace_eval",
       "path": "computed:eval.g0.shadow_workspace",
       "present": true,
-      "sha256": "b279b7f4f31d57070767f9a1728d8cd894f1eb14030db068bbb6495f0a16e75b"
+      "sha256": "497f3a27953b0bc1f3c566be780ea3ca0e661d1d90355e9633b1d65b7768e5ec"
     }
   ]
 }
