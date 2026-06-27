@@ -42,6 +42,8 @@ Hence "memory **compiler**": evidence is source, beliefs are the compiled output
 
 Two interchangeable backends sit behind one contract: an in‑memory **Local** engine (dev/offline) and a durable **Postgres + pgvector** engine (production), proven behaviorally identical by parity tests.
 
-## What it is *not* yet
+## What is implemented, but still gated/pending
 
-It is a strong **passive substrate**: it stores, consolidates, retrieves, and abstains well. It does **not** yet have an always‑on cognitive loop, generative "dreaming," a typed specialist‑module registry, or the full self‑* recursion. Adding those — reliability‑first and metric‑gated — is the subject of `02‑DESIGN`, `03‑ADR‑001`, and `04‑G0‑BENCHMARK‑SPEC`.
+Mnemosyne is no longer only a passive substrate. The typed specialist registry, sandboxed dreamer, shadow workspace controller/service, Standing signal, always-on heartbeat safety floor, earned-autonomy credentials, and the P5 H8/H12 cascade/observability pre-check are implemented and G0-gated. What remains open is final P5 no-toggle retirement behind the owner checkpoint plus Tier B operator-captured production evidence for v1.0 parity.
+
+The loop, generative replay, and self-recursive paths remain reliability-gated, low-trust, and shadow/advisory unless a preregistered gate promotes a narrow behavior without guardrail regression. This document describes functional architecture only; it never claims phenomenal or subjective consciousness.

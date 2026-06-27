@@ -6,6 +6,10 @@
 completion-planning pass. For current status and remaining work, use
 `docs/ROADMAP-TO-100.md` plus the controlling
 `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md`.
+**Do not execute as the current plan:** the local `docker-compose` flip path
+and FR-3 keystone sequence below are superseded. Local readiness can support
+staging confidence, but it does not flip strict-audit Partial rows by itself;
+production/operator-captured evidence is required.
 **Consolidated at the time:** the earlier `Mnemosyne-PROGRESS-PLAN.md` (now removed).
 **Why this exists:** the prior plan was derived from `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md` (a
 *secondary* artifact). This plan is built directly from the blueprint's own requirement sections
@@ -186,10 +190,11 @@ Action: a single ABI‑diff test that fails if any tool/signature drifts from §
 - **G8 portability** = the *same* shared suite passes on the local single‑binary AND multi‑tenant
   Postgres. Already partly proven (63→all live tests under `MNEMOSYNE_POSTGRES_DSN`). Broaden the
   shared suite across every engine method.
-- **Stand up the real "production" deps locally in `docker-compose`** so the Partial rows flip
-  without cloud: **Keycloak** (real OIDC/JWKS for FR‑7/9 auth), **Vault** (real KMS/secret rotation),
-  real **`c2patool`** + signed assets (FR‑19), and the **real embedding/cross‑encoder service**
-  (FR‑3). The genuine *production soak* + hosted‑MCP transport still want a small deployed target.
+- **Superseded:** standing up real deps locally in `docker-compose` is staging
+  proof only. It no longer flips Partial rows by itself. Use the current
+  production-evidence lane and operator-captured bundles for Keycloak/OIDC,
+  Vault/KMS, C2PA roots, hosted embedding/reranker/trainer services, worker
+  supervision, and deployed retrieval surfaces.
 
 ---
 
@@ -221,8 +226,8 @@ Per §12 non‑goals; building these is scope drift, not progress:
 
 ```
 P0 (safety, do first):  §D invariant‑rail enforcement+breach tests   ║  §E harness skeleton + suite‑ignition (decide N)
-P1 (keystone):          FR‑3 real embeddings + cross‑encoder ─────────► unlocks FR‑6 (ECE), G2 (+15%), retrieval SLOs
-P1 (real services):     docker‑compose Keycloak/Vault/c2patool ───────► flips FR‑7/9/19 to Validated
+P1 (historical):         FR‑3 real embeddings + cross‑encoder framing is superseded; local embedding/ECE/source wirings are closed
+P1 (real services):     local docker-compose readiness is staging proof only; operator production evidence flips the strict-audit rows
 P1 (prove engineering): run §E across G1–G8 phase‑exit gates ─────────► Phases 0–3 provably DONE
 P2 (depth):             FR‑12 real entity resolution + multi‑level RAPTOR ; FR‑11 PPR latency benchmark (§J‑1)
 P2 (research bar):      FR‑17 cold loop shadow‑mode + canary + tripwires + counterfactual‑replay fidelity (NOT proven‑lift)
