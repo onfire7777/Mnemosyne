@@ -35,6 +35,7 @@ from mnemosyne.retrieval import (
     QUERY_SUPPORT_THRESHOLD,
     RetrievalAdapters,
     activation_explain,
+    answer_grounding_floor_report,
     apply_workspace_retrieval_advisory,
     apply_activation_scores,
     gist_support_report,
@@ -49,6 +50,7 @@ from mnemosyne.retrieval import (
 from mnemosyne.security import TrustTier, is_write_tainted, sanitize_retrieved_text, trust_weight
 from mnemosyne.standing import standing, standing_abstention_report
 from mnemosyne.text import approx_tokens, cosine, hashing_embedding, lexical_score, tokenize
+from mnemosyne.workspace import self_generation_budget_report
 
 
 class PostgresUnavailableError(RuntimeError):
@@ -183,7 +185,8 @@ class PostgresEngine:
         db_user_id = _stable_uuid("user", ev.user_id)
         db_session_id = _stable_uuid("session", ev.session_id) if ev.session_id else None
         metadata = {**ev.metadata, "_external_tenant_id": ev.tenant_id, "_external_user_id": ev.user_id}
-        metadata.setdefault("reality_class", self._classify_evidence_reality(ev))
+        reality_class = self._classify_evidence_reality(ev)
+        metadata.setdefault("reality_class", reality_class)
         if ev.session_id:
             metadata["_external_session_id"] = ev.session_id
         cid = content_cid(
@@ -196,15 +199,67 @@ class PostgresEngine:
             },
         )
         cid_bytes = _cid_to_bytes(cid)
-        if ev.embedding is not None:
-            metadata["_mnemosyne_embedding_explicit"] = True
-            embedding = _vector_literal(ev.embedding)
-        else:
-            embedding = _vector_literal(self.adapters.embedding.embed(ev.content)) if ev.content else None
         with self.connect() as conn:
             with conn.cursor() as cur:
                 self._set_tenant(cur, db_tenant_id)
                 self._ensure_evidence_vector_schema(cur)
+                duplicate_noop = self._evidence_row_exists(
+                    cur,
+                    tenant_id=db_tenant_id,
+                    branch=branch,
+                    cid_bytes=cid_bytes,
+                )
+                budget_report: dict[str, Any] | None = None
+                if reality_class in {"self_generated", "simulated"}:
+                    current_events, current_bytes = self._self_generation_budget_usage(
+                        cur,
+                        tenant_id=db_tenant_id,
+                        branch=branch,
+                    )
+                    budget_report = self_generation_budget_report(
+                        current_events=current_events,
+                        incoming_events=1,
+                        current_bytes=current_bytes,
+                        incoming_bytes=len(ev.content),
+                        max_events=self.policy.self_generation_budget_max_events,
+                        window_ticks=self.policy.self_generation_budget_window_ticks,
+                        duplicate_noop=duplicate_noop,
+                    )
+                    if not budget_report["allowed"]:
+                        self._audit(
+                            cur,
+                            db_tenant_id,
+                            ev.actor,
+                            "append_evidence.self_generation_budget_deferred",
+                            cid,
+                            {
+                                "branch": branch,
+                                "source_type": ev.source_type,
+                                "source_identity": ev.source_identity,
+                                "reality_class": reality_class,
+                                "self_generation_budget": budget_report,
+                                "stored": False,
+                                "reversible_pointer_preserved": bool(ev.content_pointer),
+                            },
+                            source=ev.source_type,
+                            trust_tier=ev.trust_tier,
+                            capability_tags=ev.capability_tags,
+                        )
+                        return cid
+                    if not duplicate_noop:
+                        metadata["self_generation_budget"] = budget_report
+                        metadata["self_generation_lifecycle"] = {
+                            "status": "budgeted_low_groundedness",
+                            "demotable": True,
+                            "gc_after_idle_ticks": self.policy.self_generation_gc_after_idle_ticks,
+                            "pointer_preserved": bool(ev.content_pointer or cid),
+                            "critical_path_allowed": False,
+                        }
+                if ev.embedding is not None:
+                    metadata["_mnemosyne_embedding_explicit"] = True
+                    embedding = _vector_literal(ev.embedding)
+                else:
+                    embedding = _vector_literal(self.adapters.embedding.embed(ev.content)) if ev.content else None
                 cur.execute(
                     """
                     INSERT INTO evidence (
@@ -252,6 +307,41 @@ class PostgresEngine:
                     capability_tags=ev.capability_tags,
                 )
         return cid
+
+    def _evidence_row_exists(self, cur: Any, *, tenant_id: UUID, branch: str, cid_bytes: bytes) -> bool:
+        cur.execute(
+            "SELECT 1 FROM evidence WHERE tenant_id = %s AND branch = %s AND cid = %s LIMIT 1",
+            (tenant_id, branch, cid_bytes),
+        )
+        return cur.fetchone() is not None
+
+    def _self_generation_budget_usage(self, cur: Any, *, tenant_id: UUID, branch: str) -> tuple[int, int]:
+        cur.execute(
+            """
+            SELECT COUNT(*)::int AS event_count,
+                   COALESCE(SUM(LENGTH(COALESCE(content, ''))), 0)::int AS byte_count
+            FROM evidence
+            WHERE tenant_id = %s
+              AND branch = %s
+              AND erased = false
+              AND (
+                COALESCE(metadata->>'reality_class', '') IN ('self_generated', 'simulated')
+                OR lower(actor::text) = 'assistant'
+                OR lower(source_type) LIKE '%%summary%%'
+                OR lower(source_type) LIKE '%%trace%%'
+                OR lower(source_type) LIKE '%%analysis%%'
+                OR lower(source_type) LIKE '%%consolidation%%'
+                OR lower(source_type) LIKE '%%simulation%%'
+                OR lower(source_type) LIKE '%%synthetic%%'
+                OR lower(source_type) LIKE '%%hypothesis%%'
+              )
+            """,
+            (tenant_id, branch),
+        )
+        row = cur.fetchone()
+        if not row:
+            return 0, 0
+        return int(row[0] or 0), int(row[1] or 0)
 
     def get_evidence(self, tenant_id: str, cid: str, branch: str = "main") -> Evidence | None:
         db_tenant_id = _stable_uuid("tenant", tenant_id)
@@ -1674,9 +1764,13 @@ class PostgresEngine:
         ungrounded_reality_only = bool(standing_report["abstention_gate"]["active"])
         if ungrounded_reality_only != bool(reality_monitoring["ungrounded_only"]):
             raise AssertionError("Standing P1 mirror diverged from reality-monitoring abstention gate")
+        answer_grounding_floor = answer_grounding_floor_report(budgeted, self.policy)
+        answer_grounding_floor_active = bool(answer_grounding_floor["active"])
         if gist_only:
             confidence = min(confidence, threshold * 0.95)
         if ungrounded_reality_only:
+            confidence = min(confidence, threshold * 0.95)
+        if answer_grounding_floor_active:
             confidence = min(confidence, threshold * 0.95)
         if calibration:
             abstained = (
@@ -1684,6 +1778,7 @@ class PostgresEngine:
                 or insufficient_support
                 or gist_only
                 or ungrounded_reality_only
+                or answer_grounding_floor_active
             )
         else:
             abstained = (
@@ -1692,6 +1787,7 @@ class PostgresEngine:
                 or insufficient_support
                 or gist_only
                 or ungrounded_reality_only
+                or answer_grounding_floor_active
             )
         if gist_only:
             note = "Only gist-tier memory support was retrieved; inspect source evidence before answering."
@@ -1699,6 +1795,11 @@ class PostgresEngine:
             note = (
                 "Retrieved support has low groundedness or insufficient independent "
                 "external support; abstaining until grounded evidence is available."
+            )
+        elif answer_grounding_floor_active:
+            note = (
+                "Retrieved support is dominated by low-grounded self-generated content; "
+                "flagging as hypothesis and abstaining until grounded support is available."
             )
         elif insufficient_support:
             note = "Retrieved evidence did not cover enough query terms; abstaining until stronger support is available."
@@ -1736,6 +1837,7 @@ class PostgresEngine:
                 "gist_support": gist_support,
                 "reality_monitoring": reality_monitoring,
                 "standing": standing_report,
+                "answer_grounding_floor": answer_grounding_floor,
                 "schema_fast_path": schema_fast_path,
                 "workspace_broadcast": workspace_broadcast,
                 "workspace_retrieval_advisory": workspace_retrieval_advisory,

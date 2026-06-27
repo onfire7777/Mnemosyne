@@ -134,6 +134,16 @@ def test_g0_report_emits_every_spec_metric_and_source_hashes() -> None:
     assert metrics["shadow_workspace_contract"]["status"] == "measured"
     assert metrics["shadow_workspace_contract"]["value"] == 1.0
     assert metrics["shadow_workspace_contract"]["source_id"] == "shadow_workspace_eval"
+    assert metrics["always_on_heartbeat_contract"]["status"] == "measured"
+    assert metrics["always_on_heartbeat_contract"]["value"] == 1.0
+    assert metrics["always_on_heartbeat_contract"]["source_id"] == "shadow_workspace_eval"
+    assert metrics["always_on_rumination_rate"]["value"] == 0.0
+    assert metrics["heartbeat_compute_bounded_contract"]["value"] == 1.0
+    assert metrics["heartbeat_compute_reported_contract"]["value"] == 1.0
+    assert metrics["circuit_breaker_contract"]["value"] == 1.0
+    assert metrics["workspace_broadcast_as_data_contract"]["value"] == 1.0
+    assert metrics["self_generation_budget_rail_contract"]["value"] == 1.0
+    assert metrics["answer_grounding_floor_contract"]["value"] == 1.0
     assert metrics["workspace_consolidation_advisory_contract"]["status"] == "measured"
     assert metrics["workspace_consolidation_advisory_contract"]["value"] == 1.0
     assert metrics["workspace_consolidation_advisory_contract"]["source_id"] == "shadow_workspace_eval"
@@ -158,6 +168,11 @@ def test_g0_report_emits_every_spec_metric_and_source_hashes() -> None:
     assert report["computed_evidence"]["standing_calibration_eval"]["standing_calibration_error"] <= 0.05
     assert report["computed_evidence"]["standing_calibration_eval"]["standing_salience_invariance_contract"] == 1.0
     assert report["computed_evidence"]["shadow_workspace_eval"]["shadow_workspace_contract"] == 1.0
+    assert report["computed_evidence"]["shadow_workspace_eval"]["always_on_heartbeat_contract"] == 1.0
+    assert report["computed_evidence"]["shadow_workspace_eval"]["circuit_breaker_contract"] == 1.0
+    assert report["computed_evidence"]["shadow_workspace_eval"]["workspace_broadcast_as_data_contract"] == 1.0
+    assert report["computed_evidence"]["shadow_workspace_eval"]["self_generation_budget_rail_contract"] == 1.0
+    assert report["computed_evidence"]["shadow_workspace_eval"]["answer_grounding_floor_contract"] == 1.0
     assert (
         report["computed_evidence"]["shadow_workspace_eval"]["workspace_consolidation_advisory_contract"]
         == 1.0
@@ -358,6 +373,14 @@ def test_g0_shadow_workspace_fixture_reports_bounded_stream_contract() -> None:
     assert report["schema_version"] == "g0.shadow_workspace_loop.v1"
     assert report["useful_transition_rate"] == 1.0
     assert report["shadow_workspace_contract"] == 1.0
+    assert report["always_on_heartbeat_contract"] == 1.0
+    assert report["always_on_rumination_rate"] == 0.0
+    assert report["heartbeat_compute_bounded_contract"] == 1.0
+    assert report["heartbeat_compute_reported_contract"] == 1.0
+    assert report["circuit_breaker_contract"] == 1.0
+    assert report["workspace_broadcast_as_data_contract"] == 1.0
+    assert report["self_generation_budget_rail_contract"] == 1.0
+    assert report["answer_grounding_floor_contract"] == 1.0
     assert report["workspace_consolidation_advisory_contract"] == 1.0
     assert report["workspace_advisory_promotion_gate_contract"] == 1.0
     assert report["workspace_retrieval_controller_contract"] == 1.0
@@ -371,6 +394,13 @@ def test_g0_shadow_workspace_fixture_reports_bounded_stream_contract() -> None:
     assert report["workspace"]["service"]["tick_count"] == report["workspace"]["service"]["proto_self_history_count"]
     assert report["workspace"]["service"]["tick_count"] == report["workspace"]["service"]["metacognitive_rows"]
     assert report["workspace"]["cycle_consistency"]["score"] == 1.0
+    heartbeat = report["heartbeat_probe"]["heartbeat_safety"]
+    assert heartbeat["schema_version"] == "always-on-heartbeat-safety.v1"
+    assert heartbeat["engaged_ticks"] >= 1
+    assert heartbeat["idle_ticks"] >= 1
+    assert heartbeat["compute_bounded"] is True
+    assert heartbeat["compute_reported"] is True
+    assert heartbeat["used_for_control_flow"] is False
     advisory = report["workspace_consolidation_advisory"]
     assert advisory["shadow_only"] is True
     assert advisory["critical_path"] is False
@@ -387,7 +417,15 @@ def test_g0_shadow_workspace_fixture_reports_bounded_stream_contract() -> None:
     assert retrieval_probe["valid_apply"]["production_mutation"] is False
     assert retrieval_probe["invalid_apply"]["status"] == "rejected"
     assert all(retrieval_probe["checks"].values())
+    assert all(report["circuit_breaker_probe"]["checks"].values())
+    assert report["circuit_breaker_probe"]["heartbeat_safety"]["circuit_breaker_tripped"] is True
+    assert all(report["workspace_broadcast_as_data_probe"]["checks"].values())
+    assert all(report["self_generation_budget_probe"]["checks"].values())
+    assert report["self_generation_budget_probe"]["deferred_budget"]["deferred"] is True
+    assert all(report["answer_grounding_floor_probe"]["checks"].values())
+    assert report["answer_grounding_floor_probe"]["active_case"]["abstain"] is True
     assert report["rumination_probe"]["stopped_reason"] == "anti_rumination_repeated_focus_exit"
+    assert all(report["checks"].values())
     assert all("phenomenal" not in str(row).lower() for row in report["workspace"]["trace"])
 
 
