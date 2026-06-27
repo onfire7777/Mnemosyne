@@ -62,8 +62,10 @@ and confirms `MNEMOSYNE_PROD_EVIDENCE_DIR` is an existing external directory and
 `MNEMOSYNE_PROD_C2PA_TOOL` is an existing external executable. It also renders
 the manifest in memory, derives the required input artifacts under
 `MNEMOSYNE_PROD_EVIDENCE_DIR`, and fails if any are missing. It reports only
-relative artifact names and redacted status fields, not configured absolute
-paths or secret values.
+relative artifact names, per-artifact `exists` status, and the manifest
+check/command/option references that require each artifact via
+`required_input_artifacts_detail` and `missing_input_artifacts_detail`; it does
+not print configured absolute paths or secret values.
 
 The wrapper performs these steps:
 

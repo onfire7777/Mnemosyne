@@ -43,6 +43,26 @@ REQUIRED_PRODUCTION_INPUT_ARTIFACTS = [
 ]
 
 
+def _detail_by_path(payload: dict[str, object]) -> dict[str, dict[str, object]]:
+    details = payload["required_input_artifacts_detail"]
+    assert isinstance(details, list)
+    return {str(item["relative_path"]): item for item in details if isinstance(item, dict)}
+
+
+def _assert_artifact_detail_shape(item: dict[str, object]) -> None:
+    assert set(item) == {"relative_path", "checks", "exists"}
+    assert isinstance(item["relative_path"], str)
+    assert item["relative_path"]
+    assert not Path(item["relative_path"]).is_absolute()
+    assert isinstance(item["exists"], bool)
+    assert isinstance(item["checks"], list)
+    assert item["checks"]
+    for check in item["checks"]:
+        assert isinstance(check, dict)
+        assert set(check) == {"name", "command", "option"}
+        assert all(isinstance(check[key], str) for key in ("name", "command", "option"))
+
+
 def _renderer_base_env() -> dict[str, str]:
     return {
         "PATH": os.environ.get("PATH", ""),
@@ -191,9 +211,15 @@ def test_renderer_check_environment_passes_without_writing_manifest(tmp_path: Pa
     assert "operator_capture_and_offline_verify" in payload["validation_categories"]
     assert any("capture-production-evidence.sh" in step for step in payload["next_steps"])
     assert payload["missing_input_artifacts"] == []
+    assert payload["missing_input_artifacts_detail"] == []
     assert payload["input_artifact_errors"] == []
     assert payload["required_input_artifact_count"] == len(REQUIRED_PRODUCTION_INPUT_ARTIFACTS)
     assert sorted(payload["required_input_artifacts"]) == sorted(REQUIRED_PRODUCTION_INPUT_ARTIFACTS)
+    details = _detail_by_path(payload)
+    assert sorted(details) == sorted(REQUIRED_PRODUCTION_INPUT_ARTIFACTS)
+    for detail in details.values():
+        _assert_artifact_detail_shape(detail)
+        assert detail["exists"] is True
     assert sorted(payload["present"]) == _placeholders()
     assert not list(tmp_path.glob("*.json"))
 
@@ -219,6 +245,15 @@ def test_renderer_check_environment_fails_on_missing_input_artifacts(tmp_path: P
     assert sorted(payload["missing_input_artifacts"]) == sorted(REQUIRED_PRODUCTION_INPUT_ARTIFACTS)
     assert payload["input_artifact_errors"] == []
     assert payload["required_input_artifact_count"] == len(REQUIRED_PRODUCTION_INPUT_ARTIFACTS)
+    assert sorted(
+        item["relative_path"]
+        for item in payload["missing_input_artifacts_detail"]
+    ) == sorted(REQUIRED_PRODUCTION_INPUT_ARTIFACTS)
+    details = _detail_by_path(payload)
+    assert sorted(details) == sorted(REQUIRED_PRODUCTION_INPUT_ARTIFACTS)
+    for detail in details.values():
+        _assert_artifact_detail_shape(detail)
+        assert detail["exists"] is False
     assert env["MNEMOSYNE_PROD_EVIDENCE_DIR"] not in proc.stdout
     assert env["MNEMOSYNE_PROD_C2PA_TOOL"] not in proc.stdout
     assert proc.stderr == ""
@@ -250,6 +285,15 @@ def test_renderer_check_environment_fails_on_missing_provenance_suite_asset(
     assert payload["input_artifacts_complete"] is False
     assert "missing-suite-asset.txt" in payload["missing_input_artifacts"]
     assert "missing-suite-asset.txt" in payload["required_input_artifacts"]
+    detail = _detail_by_path(payload)["missing-suite-asset.txt"]
+    _assert_artifact_detail_shape(detail)
+    assert detail["exists"] is False
+    assert {
+        "name": "provenance-trust",
+        "command": "provenance-trust-check",
+        "option": "cases[0].asset_path",
+    } in detail["checks"]
+    assert payload["missing_input_artifacts_detail"] == [detail]
     assert payload["input_artifact_errors"] == []
     assert env["MNEMOSYNE_PROD_EVIDENCE_DIR"] not in proc.stdout
     assert env["MNEMOSYNE_PROD_C2PA_TOOL"] not in proc.stdout
@@ -283,6 +327,7 @@ def test_renderer_check_environment_fails_on_invalid_provenance_suite_asset_path
     assert payload["blocked_reason"] == "missing_or_invalid_input_artifacts"
     assert payload["input_artifacts_complete"] is False
     assert payload["missing_input_artifacts"] == []
+    assert payload["missing_input_artifacts_detail"] == []
     assert payload["input_artifact_errors"] == [
         "provenance-trust-suite.json cases[0].asset_path must live under "
         "MNEMOSYNE_PROD_EVIDENCE_DIR"
@@ -333,6 +378,19 @@ def test_renderer_check_environment_accepts_provenance_suite_assets(
     assert payload["input_artifact_errors"] == []
     assert "suite-asset.txt" in payload["required_input_artifacts"]
     assert "suite-c2pa-asset.txt" in payload["required_input_artifacts"]
+    details = _detail_by_path(payload)
+    for relative_path, option in (
+        ("suite-asset.txt", "cases[0].asset_path"),
+        ("suite-c2pa-asset.txt", "cases[0].c2pa_asset_path"),
+    ):
+        detail = details[relative_path]
+        _assert_artifact_detail_shape(detail)
+        assert detail["exists"] is True
+        assert {
+            "name": "provenance-trust",
+            "command": "provenance-trust-check",
+            "option": option,
+        } in detail["checks"]
     assert payload["required_input_artifact_count"] == len(REQUIRED_PRODUCTION_INPUT_ARTIFACTS) + 2
     assert env["MNEMOSYNE_PROD_EVIDENCE_DIR"] not in proc.stdout
     assert env["MNEMOSYNE_PROD_C2PA_TOOL"] not in proc.stdout
