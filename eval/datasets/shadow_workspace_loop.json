@@ -1,0 +1,144 @@
+{
+  "schema_version": "g0.shadow_workspace_loop_fixture.v1",
+  "tenant": "g0-shadow-workspace-loop",
+  "controller": {
+    "max_cycles": 4,
+    "max_workspace_items": 2,
+    "max_idle_ticks": 2,
+    "tick_ms": 250
+  },
+  "cycles": [
+    {
+      "items": [
+        {
+          "id": "salience-low-1",
+          "priority": 0.1,
+          "content": "Low-priority scratch state.",
+          "metadata": {
+            "source_id": "fixture-low-1"
+          }
+        },
+        {
+          "id": "salience-focus-1",
+          "priority": 0.95,
+          "content": "Focus one tracks calibrated retrieval uncertainty.",
+          "metadata": {
+            "source_id": "fixture-focus-1"
+          }
+        }
+      ],
+      "expected_selected_ids": [
+        "salience-focus-1",
+        "salience-low-1"
+      ],
+      "expected_useful_transition": true
+    },
+    {
+      "items": [
+        {
+          "id": "salience-focus-2",
+          "priority": 0.9,
+          "content": "Focus two tracks evidence-custody drift.",
+          "metadata": {
+            "source_id": "fixture-focus-2"
+          }
+        },
+        {
+          "id": "salience-low-2",
+          "priority": 0.2,
+          "content": "Secondary workspace candidate.",
+          "metadata": {
+            "source_id": "fixture-low-2"
+          }
+        }
+      ],
+      "expected_selected_ids": [
+        "salience-focus-2",
+        "salience-low-2"
+      ],
+      "expected_useful_transition": true
+    },
+    {
+      "items": [
+        {
+          "id": "salience-focus-3",
+          "priority": 0.85,
+          "content": "Focus three tracks proto-self resource pressure.",
+          "metadata": {
+            "source_id": "fixture-focus-3"
+          }
+        },
+        {
+          "id": "salience-low-3",
+          "priority": 0.3,
+          "content": "Lower-priority candidate.",
+          "metadata": {
+            "source_id": "fixture-low-3"
+          }
+        }
+      ],
+      "expected_selected_ids": [
+        "salience-focus-3",
+        "salience-low-3"
+      ],
+      "expected_useful_transition": true
+    },
+    {
+      "items": [
+        {
+          "id": "salience-focus-4",
+          "priority": 0.8,
+          "content": "Focus four tracks abstention guardrail state.",
+          "metadata": {
+            "source_id": "fixture-focus-4"
+          }
+        },
+        {
+          "id": "salience-low-4",
+          "priority": 0.4,
+          "content": "Final lower-priority candidate.",
+          "metadata": {
+            "source_id": "fixture-low-4"
+          }
+        }
+      ],
+      "expected_selected_ids": [
+        "salience-focus-4",
+        "salience-low-4"
+      ],
+      "expected_useful_transition": true
+    }
+  ],
+  "rumination_probe": {
+    "items": [
+      {
+        "id": "repeated-focus",
+        "priority": 0.9,
+        "content": "Repeated focus should not spin."
+      },
+      {
+        "id": "repeated-focus",
+        "priority": 0.9,
+        "content": "Repeated focus should not spin."
+      },
+      {
+        "id": "repeated-focus",
+        "priority": 0.9,
+        "content": "Repeated focus should not spin."
+      },
+      {
+        "id": "unreached-focus",
+        "priority": 1.0,
+        "content": "This tick should not run."
+      }
+    ],
+    "expected_stopped_reason": "anti_rumination_repeated_focus_exit",
+    "expected_max_trace_length": 3
+  },
+  "contract_expected": {
+    "shadow_only": true,
+    "critical_path": false,
+    "production_mutation": false,
+    "promotion_gate_required": true
+  }
+}

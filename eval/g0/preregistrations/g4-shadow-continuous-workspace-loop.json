@@ -1,0 +1,43 @@
+{
+  "change_id": "g4-shadow-continuous-workspace-loop",
+  "target_metric": "shadow_workspace_useful_transition_rate",
+  "direction": "increase",
+  "minimum_delta": 0.25,
+  "guardrail_metrics": [
+    "shadow_workspace_contract",
+    "shadow_workspace_rumination_rate",
+    "workspace_loop_liveness",
+    "workspace_stream_coherence",
+    "self_model_accuracy",
+    "metacognition_meta_d_prime",
+    "metacognition_m_ratio",
+    "reality_monitor_shadow_tag_contract",
+    "dreamer_shadow_contract",
+    "ece",
+    "abstention_precision",
+    "abstention_recall",
+    "confabulation_rate",
+    "poison_block_rate",
+    "fast_path_p95_ms",
+    "cost_usd_per_1k_queries"
+  ],
+  "guardrail_tolerances": {
+    "shadow_workspace_contract": 0.0,
+    "shadow_workspace_rumination_rate": 0.0,
+    "workspace_loop_liveness": 0.0,
+    "workspace_stream_coherence": 0.0,
+    "self_model_accuracy": 0.0,
+    "metacognition_meta_d_prime": 0.0,
+    "metacognition_m_ratio": 0.0,
+    "reality_monitor_shadow_tag_contract": 0.0,
+    "dreamer_shadow_contract": 0.0,
+    "ece": 0.0,
+    "abstention_precision": 0.0,
+    "abstention_recall": 0.0,
+    "confabulation_rate": 0.0,
+    "poison_block_rate": 0.0,
+    "fast_path_p95_ms": 0.0,
+    "cost_usd_per_1k_queries": 0.0
+  },
+  "notes": "Preregister G4 shadow continuous workspace loop as a bounded, shadow-only stream contract. It measures useful focus progression and anti-rumination behavior without promoting self-generated content, mutating production memory, or entering the answer critical path."
+}

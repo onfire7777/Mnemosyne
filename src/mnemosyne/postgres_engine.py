@@ -448,24 +448,7 @@ class PostgresEngine:
             rows = []
         for row in rows:
             metadata = dict(row["metadata"] or {})
-            reality_class = self._normalise_reality_class(metadata.get("reality_class"))
-            if reality_class is None:
-                source_type = str(row["source_type"] or "").lower()
-                actor = str(row["actor"] or "").lower()
-                if any(marker in source_type for marker in ("simulation", "synthetic", "generated", "hypothesis")):
-                    reality_class = "simulated"
-                elif any(marker in source_type for marker in ("summary", "trace", "analysis", "consolidation")):
-                    reality_class = "self_generated"
-                elif actor == "assistant":
-                    reality_class = "self_generated"
-                elif actor in {"system", "tool"} and any(
-                    marker in source_type for marker in ("scratchpad", "workspace", "thought", "reflection")
-                ):
-                    reality_class = "self_generated"
-                elif actor == "external" or int(row["trust_tier"]) >= int(TrustTier.LOW):
-                    reality_class = "externally_suggested"
-                else:
-                    reality_class = "grounded"
+            reality_class = self._classify_evidence_row_reality(row, metadata)
             cid = _bytes_to_cid(row["cid"])
             classes[reality_class] = classes.get(reality_class, 0) + 1
             source_classes[cid] = reality_class
@@ -1957,45 +1940,49 @@ class PostgresEngine:
     @classmethod
     def _classify_evidence_reality(cls, ev: Evidence) -> str:
         explicit = cls._normalise_reality_class(ev.metadata.get("reality_class"))
-        if explicit:
-            return explicit
         source_type = ev.source_type.lower()
         actor = ev.actor.lower()
         if any(marker in source_type for marker in ("simulation", "synthetic", "generated", "hypothesis")):
-            return "simulated"
-        if any(marker in source_type for marker in ("summary", "trace", "analysis", "consolidation")):
-            return "self_generated"
-        if actor == "assistant":
-            return "self_generated"
-        if actor in {"system", "tool"} and any(
+            base_class = "simulated"
+        elif any(marker in source_type for marker in ("summary", "trace", "analysis", "consolidation")):
+            base_class = "self_generated"
+        elif actor == "assistant":
+            base_class = "self_generated"
+        elif actor in {"system", "tool"} and any(
             marker in source_type for marker in ("scratchpad", "workspace", "thought", "reflection")
         ):
-            return "self_generated"
-        if actor == "external" or ev.trust_tier >= int(TrustTier.LOW):
-            return "externally_suggested"
-        return "grounded"
+            base_class = "self_generated"
+        elif actor == "external" or ev.trust_tier >= int(TrustTier.LOW):
+            base_class = "externally_suggested"
+        else:
+            base_class = "grounded"
+        if explicit == "grounded" and base_class != "grounded":
+            return "unknown"
+        return explicit or base_class
 
     @classmethod
     def _classify_evidence_row_reality(cls, row: dict[str, Any], metadata: dict[str, Any]) -> str:
         explicit = cls._normalise_reality_class(metadata.get("reality_class"))
-        if explicit:
-            return explicit
         source_type = str(row.get("source_type") or "").lower()
         actor = str(row.get("actor") or "").lower()
         trust_tier = int(row.get("trust_tier") or 0)
         if any(marker in source_type for marker in ("simulation", "synthetic", "generated", "hypothesis")):
-            return "simulated"
-        if any(marker in source_type for marker in ("summary", "trace", "analysis", "consolidation")):
-            return "self_generated"
-        if actor == "assistant":
-            return "self_generated"
-        if actor in {"system", "tool"} and any(
+            base_class = "simulated"
+        elif any(marker in source_type for marker in ("summary", "trace", "analysis", "consolidation")):
+            base_class = "self_generated"
+        elif actor == "assistant":
+            base_class = "self_generated"
+        elif actor in {"system", "tool"} and any(
             marker in source_type for marker in ("scratchpad", "workspace", "thought", "reflection")
         ):
-            return "self_generated"
-        if actor == "external" or trust_tier >= int(TrustTier.LOW):
-            return "externally_suggested"
-        return "grounded"
+            base_class = "self_generated"
+        elif actor == "external" or trust_tier >= int(TrustTier.LOW):
+            base_class = "externally_suggested"
+        else:
+            base_class = "grounded"
+        if explicit == "grounded" and base_class != "grounded":
+            return "unknown"
+        return explicit or base_class
 
     @staticmethod
     def _hit_source_evidence_cids(hit: Hit) -> list[str]:

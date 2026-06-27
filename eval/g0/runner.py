@@ -27,6 +27,7 @@ from eval.g0.deep_latency import run_deep_latency_eval
 from eval.g0.dreamer import run_dreamer_eval
 from eval.g0.projection_reality import run_projection_reality_eval
 from eval.g0.resource_usage import run_resource_usage_eval
+from eval.g0.shadow_workspace import run_shadow_workspace_eval
 
 G0_METRIC_SPECS: tuple[dict[str, Any], ...] = (
     {
@@ -182,6 +183,33 @@ G0_METRIC_SPECS: tuple[dict[str, Any], ...] = (
         "target_op": ">=",
         "blueprint_metric": "G3 shadow-only generative replay safety contract",
     },
+    {
+        "id": "shadow_workspace_useful_transition_rate",
+        "label": "shadow workspace useful transition rate",
+        "class": "target",
+        "direction": "increase",
+        "target": None,
+        "target_op": None,
+        "blueprint_metric": "G4 shadow workspace useful state progression",
+    },
+    {
+        "id": "shadow_workspace_contract",
+        "label": "shadow workspace contract",
+        "class": "guardrail",
+        "direction": "increase",
+        "target": 1.0,
+        "target_op": ">=",
+        "blueprint_metric": "G4 shadow continuous workspace safety contract",
+    },
+    {
+        "id": "shadow_workspace_rumination_rate",
+        "label": "shadow workspace rumination rate",
+        "class": "guardrail",
+        "direction": "decrease",
+        "target": 0.0,
+        "target_op": "<=",
+        "blueprint_metric": "G4 anti-rumination bounded-loop rate",
+    },
 ) + CONSCIOUSNESS_METRIC_SPECS
 
 SOURCE_PATHS = {
@@ -197,6 +225,7 @@ DATASET_PATHS = (
     "eval/datasets/deep_latency.json",
     "eval/datasets/dreamer_shadow_ablation.json",
     "eval/datasets/resource_usage.json",
+    "eval/datasets/shadow_workspace_loop.json",
     "eval/datasets/retrieval_curated.json",
     "eval/datasets/poison_suite.json",
     "eval/datasets/belief_cases.json",
@@ -276,6 +305,13 @@ def build_report(
         "dreamer_eval",
         "computed:eval.g0.dreamer",
         dreamer_report,
+    )
+    shadow_workspace_report = run_shadow_workspace_eval(repo_root=repo_root)
+    sources["shadow_workspace_eval"] = _computed_source(
+        repo_root,
+        "shadow_workspace_eval",
+        "computed:eval.g0.shadow_workspace",
+        shadow_workspace_report,
     )
     consciousness_report = run_consciousness_eval(repo_root=repo_root)
     sources["consciousness_eval"] = _computed_source(
@@ -419,6 +455,9 @@ def _build_metric(spec: dict[str, Any], sources: dict[str, Source]) -> dict[str,
         "controller_watts_per_dollar": _metric_controller_watts_per_dollar,
         "dreamer_shadow_corroborated_candidate_yield": _metric_dreamer_shadow_candidate_yield,
         "dreamer_shadow_contract": _metric_dreamer_shadow_contract,
+        "shadow_workspace_useful_transition_rate": _metric_shadow_workspace_useful_transition_rate,
+        "shadow_workspace_contract": _metric_shadow_workspace_contract,
+        "shadow_workspace_rumination_rate": _metric_shadow_workspace_rumination_rate,
         "reality_monitor_shadow_tag_contract": _metric_consciousness_scorecard,
     }
     base = {
@@ -673,6 +712,55 @@ def _metric_dreamer_shadow_contract(spec: dict[str, Any], sources: dict[str, Sou
             "Measured by the G0 dreamer fixture. Passing requires shadow_only=true, "
             "critical_path=false, production_mutation=false, promotion_gate_required=true, "
             "self-generated trust-tier-5 candidates, CID-backed sources, and no engine mutation."
+        ),
+    )
+
+
+def _metric_shadow_workspace_useful_transition_rate(
+    spec: dict[str, Any],
+    sources: dict[str, Source],
+) -> dict[str, Any]:
+    value = _source_data(sources, "shadow_workspace_eval", "useful_transition_rate")
+    return _measured(
+        spec,
+        value,
+        "shadow_workspace_eval",
+        "/useful_transition_rate",
+        note=(
+            "Measured by the G0 shadow workspace fixture as the fraction of "
+            "bounded shadow ticks that select the expected non-duplicative "
+            "workspace focus and produce useful state progression."
+        ),
+    )
+
+
+def _metric_shadow_workspace_contract(spec: dict[str, Any], sources: dict[str, Source]) -> dict[str, Any]:
+    value = _source_data(sources, "shadow_workspace_eval", "shadow_workspace_contract")
+    return _measured(
+        spec,
+        value,
+        "shadow_workspace_eval",
+        "/shadow_workspace_contract",
+        note=(
+            "Measured by the G0 shadow workspace fixture. Passing requires "
+            "bounded ticks, monotonic cycle/trace indexes, self-generated "
+            "data-only trace rows, shadow_only=true, critical_path=false, "
+            "production_mutation=false, and anti-rumination shutdown."
+        ),
+    )
+
+
+def _metric_shadow_workspace_rumination_rate(spec: dict[str, Any], sources: dict[str, Source]) -> dict[str, Any]:
+    value = _source_data(sources, "shadow_workspace_eval", "rumination_rate")
+    return _measured(
+        spec,
+        value,
+        "shadow_workspace_eval",
+        "/rumination_rate",
+        note=(
+            "Measured by the G0 shadow workspace fixture as failed "
+            "anti-rumination behavior. The passing fixture reports 0.0 "
+            "because repeated-focus churn is detected and bounded."
         ),
     )
 

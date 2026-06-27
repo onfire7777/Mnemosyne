@@ -13,6 +13,7 @@ from eval.g0.deep_latency import run_deep_latency_eval
 from eval.g0.gate import evaluate_ablation
 from eval.g0.resource_usage import run_resource_usage_eval
 from eval.g0.runner import G0_METRIC_SPECS, build_report
+from eval.g0.shadow_workspace import run_shadow_workspace_eval
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -59,6 +60,8 @@ def test_g0_report_emits_every_spec_metric_and_source_hashes() -> None:
     assert sources["resource_usage_eval"]["path"] == "computed:eval.g0.resource_usage"
     assert sources["dreamer_eval"]["present"] is True
     assert sources["dreamer_eval"]["path"] == "computed:eval.g0.dreamer"
+    assert sources["shadow_workspace_eval"]["present"] is True
+    assert sources["shadow_workspace_eval"]["path"] == "computed:eval.g0.shadow_workspace"
     assert sources["consciousness_eval"]["present"] is True
     assert sources["consciousness_eval"]["path"] == "computed:eval.g0.consciousness"
 
@@ -89,6 +92,15 @@ def test_g0_report_emits_every_spec_metric_and_source_hashes() -> None:
     assert metrics["dreamer_shadow_contract"]["status"] == "measured"
     assert metrics["dreamer_shadow_contract"]["value"] == 1.0
     assert metrics["dreamer_shadow_contract"]["source_id"] == "dreamer_eval"
+    assert metrics["shadow_workspace_useful_transition_rate"]["status"] == "measured"
+    assert metrics["shadow_workspace_useful_transition_rate"]["value"] == 1.0
+    assert metrics["shadow_workspace_useful_transition_rate"]["source_id"] == "shadow_workspace_eval"
+    assert metrics["shadow_workspace_contract"]["status"] == "measured"
+    assert metrics["shadow_workspace_contract"]["value"] == 1.0
+    assert metrics["shadow_workspace_contract"]["source_id"] == "shadow_workspace_eval"
+    assert metrics["shadow_workspace_rumination_rate"]["status"] == "measured"
+    assert metrics["shadow_workspace_rumination_rate"]["value"] == 0.0
+    assert metrics["shadow_workspace_rumination_rate"]["source_id"] == "shadow_workspace_eval"
     assert metrics["consciousness_indicator_total"]["status"] == "measured"
     assert metrics["consciousness_indicator_total"]["source_id"] == "consciousness_eval"
     assert metrics["workspace_loop_liveness"]["value"] == 1.0
@@ -96,11 +108,13 @@ def test_g0_report_emits_every_spec_metric_and_source_hashes() -> None:
     assert metrics["metacognition_m_ratio"]["value"] == 1.0
     assert metrics["reality_monitor_shadow_tag_contract"]["value"] == 1.0
     assert report["computed_evidence"]["consciousness_eval"]["dreamer_shadow_contract"]["score"] == 1.0
+    assert report["computed_evidence"]["shadow_workspace_eval"]["shadow_workspace_contract"] == 1.0
 
     dataset_paths = {manifest["path"] for manifest in report["dataset_manifests"]}
     assert "eval/datasets/continual_learning_interference.json" in dataset_paths
     assert "eval/datasets/deep_latency.json" in dataset_paths
     assert "eval/datasets/dreamer_shadow_ablation.json" in dataset_paths
+    assert "eval/datasets/shadow_workspace_loop.json" in dataset_paths
     assert "eval/datasets/resource_usage.json" in dataset_paths
     assert "eval/datasets/retrieval_curated.json" in dataset_paths
     assert "eval/datasets/poison_suite.json" in dataset_paths
@@ -213,6 +227,22 @@ def test_g0_consciousness_scorecard_reports_indicator_properties() -> None:
     assert dreamer_contract["dreamer"]["critical_path"] is False
     assert dreamer_contract["dreamer"]["critical_path_allowed"] is False
     assert dreamer_contract["dreamer"]["output_summary"]["promotion_gate_required"] is True
+
+
+def test_g0_shadow_workspace_fixture_reports_bounded_stream_contract() -> None:
+    report = run_shadow_workspace_eval(repo_root=REPO_ROOT)
+
+    assert report["schema_version"] == "g0.shadow_workspace_loop.v1"
+    assert report["useful_transition_rate"] == 1.0
+    assert report["shadow_workspace_contract"] == 1.0
+    assert report["rumination_rate"] == 0.0
+    assert report["workspace"]["shadow_only"] is True
+    assert report["workspace"]["critical_path"] is False
+    assert report["workspace"]["production_mutation"] is False
+    assert report["workspace"]["promotion_gate_required"] is True
+    assert report["workspace"]["cycle_consistency"]["score"] == 1.0
+    assert report["rumination_probe"]["stopped_reason"] == "anti_rumination_repeated_focus_exit"
+    assert all("phenomenal" not in str(row).lower() for row in report["workspace"]["trace"])
 
 
 def test_g0_report_measures_controller_watts_with_explicit_telemetry(tmp_path: Path) -> None:

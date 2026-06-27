@@ -105,6 +105,22 @@ def test_g1_reality_monitoring_accepts_evidence_grounded_alias() -> None:
     assert postgres_report["shadow_tags_critical_path"] is False
 
 
+def test_g1_reality_monitoring_rejects_forged_grounded_label() -> None:
+    forged = Evidence(
+        tenant_id=TENANT,
+        user_id=USER,
+        actor="external",
+        source_type="web-suggestion",
+        content="Externally suggested content must not self-attest as grounded.",
+        metadata={"reality_class": "evidence_grounded"},
+        trust_tier=2,
+        access_policy={"tenant": TENANT},
+    )
+
+    assert LocalMemoryEngine._classify_evidence_reality(forged) == "unknown"
+    assert PostgresEngine._classify_evidence_reality(forged) == "unknown"
+
+
 def test_g1_projection_reality_monitoring_abstains_on_self_generated_assertion() -> None:
     engine = LocalMemoryEngine()
     cid = _append(

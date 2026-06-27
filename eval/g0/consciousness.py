@@ -592,11 +592,13 @@ def _dreamer_shadow_contract_probe() -> dict[str, Any]:
             {
                 "cid": "cid-g0-dream-a",
                 "tenant_id": "g0-dreamer-shadow-contract",
+                "access_policy": {"tenant": "g0-dreamer-shadow-contract"},
                 "content": "Calypso replay evidence anchors source-custody retention.",
             },
             {
                 "cid": "cid-g0-dream-b",
                 "tenant_id": "g0-dreamer-shadow-contract",
+                "access_policy": {"tenant": "g0-dreamer-shadow-contract"},
                 "content": "Orion replay evidence anchors promotion-gated hypotheses.",
             },
         ],

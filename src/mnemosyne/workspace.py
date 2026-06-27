@@ -7,6 +7,7 @@ specialists on the answer critical path or mutate production memory.
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import asdict, dataclass, field
 from typing import Any, Mapping, Sequence
 
@@ -72,6 +73,55 @@ class WorkspaceCycleReport:
         return data
 
 
+@dataclass(frozen=True, slots=True)
+class WorkspaceTraceEntry:
+    """Self-generated shadow trace for one workspace tick."""
+
+    tick_index: int
+    focus_id: str
+    previous_focus_id: str | None
+    content: str
+    source: str
+    selected_item_ids: tuple[str, ...]
+    idle_generated: bool
+    novelty_score: float
+    useful_state: bool
+    reality_class: str = "self_generated"
+    trust_tier: int = 5
+    shadow_only: bool = True
+    critical_path: bool = False
+    production_mutation: bool = False
+    data_not_instructions: bool = True
+
+    def to_dict(self) -> dict[str, Any]:
+        data = asdict(self)
+        data["selected_item_ids"] = list(self.selected_item_ids)
+        return data
+
+
+@dataclass(frozen=True, slots=True)
+class WorkspaceStreamReport:
+    """Bounded multi-tick shadow workspace stream report."""
+
+    tenant_id: str
+    cycles: tuple[WorkspaceCycleReport, ...]
+    trace: tuple[WorkspaceTraceEntry, ...]
+    cycle_consistency: dict[str, Any]
+    stopped_reason: str
+    idle_ticks: int
+    rumination_score: float
+    shadow_only: bool = True
+    critical_path: bool = False
+    production_mutation: bool = False
+    promotion_gate_required: bool = True
+
+    def to_dict(self) -> dict[str, Any]:
+        data = asdict(self)
+        data["cycles"] = [cycle.to_dict() for cycle in self.cycles]
+        data["trace"] = [entry.to_dict() for entry in self.trace]
+        return data
+
+
 @dataclass(slots=True)
 class ShadowWorkspaceController:
     """Bounded controller that recruits typed specialists in shadow mode."""
@@ -80,6 +130,10 @@ class ShadowWorkspaceController:
     max_workspace_items: int = 4
     max_cycles: int = 4
     tick_ms: int = 250
+    max_idle_ticks: int = 2
+    max_items_per_tick: int = 32
+    max_item_content_chars: int = 512
+    max_evidence_items: int = 16
     dreamer_name: str = "dreamer.shadow"
 
     def run_shadow_cycle(
@@ -97,11 +151,132 @@ class ShadowWorkspaceController:
     ) -> WorkspaceCycleReport:
         """Run one bounded advisory cycle and return a machine-checkable report."""
 
-        selected = workspace_bottleneck(
-            [_item_to_row(item) for item in items],
-            limit=self.max_workspace_items,
-        )
         cycle_guard = BoundedCognitiveCycle(max_cycles=self.max_cycles, tick_ms=self.tick_ms)
+        return self._run_cycle(
+            cycle_guard=cycle_guard,
+            tenant_id=tenant_id,
+            items=items,
+            evidence=evidence,
+            confidence=confidence,
+            resource_health=resource_health,
+            error_rate=error_rate,
+            latency_ms=latency_ms,
+            memory_pressure=memory_pressure,
+            rail_budget=rail_budget,
+        )
+
+    def run_shadow_stream(
+        self,
+        *,
+        tenant_id: str,
+        item_ticks: Sequence[Sequence[WorkspaceItem | Mapping[str, Any]]],
+        evidence: Sequence[Evidence | Mapping[str, Any]] = (),
+        confidence: float = 0.75,
+        resource_health: float = 0.9,
+        error_rate: float = 0.0,
+        latency_ms: float = 0.0,
+        memory_pressure: float = 0.0,
+        rail_budget: float = 1.0,
+    ) -> WorkspaceStreamReport:
+        """Run a bounded shadow-only stream with default-mode idle ticks.
+
+        This is the functional "continuous workspace" seed. It produces a
+        trace, not production memory. Idle ticks are self-generated data records
+        and stop through the anti-rumination idle bound.
+        """
+
+        cycle_guard = BoundedCognitiveCycle(max_cycles=self.max_cycles, tick_ms=self.tick_ms)
+        cycles: list[WorkspaceCycleReport] = []
+        trace: list[WorkspaceTraceEntry] = []
+        previous_focus_id: str | None = None
+        idle_ticks = 0
+        non_useful_ticks = 0
+        stopped_reason = "max_cycles"
+        for tick_index in range(1, self.max_cycles + 1):
+            source_items = list(item_ticks[tick_index - 1]) if tick_index - 1 < len(item_ticks) else []
+            idle_generated = not source_items
+            if idle_generated:
+                idle_ticks += 1
+                source_items = [
+                    _idle_workspace_item(
+                        tenant_id=tenant_id,
+                        tick_index=tick_index,
+                        previous_focus_id=previous_focus_id,
+                    )
+                ]
+            report = self._run_cycle(
+                cycle_guard=cycle_guard,
+                tenant_id=tenant_id,
+                items=source_items,
+                evidence=evidence,
+                confidence=confidence,
+                resource_health=resource_health,
+                error_rate=error_rate,
+                latency_ms=latency_ms,
+                memory_pressure=memory_pressure,
+                rail_budget=rail_budget,
+            )
+            cycles.append(report)
+            entry = _trace_entry(
+                tick_index=tick_index,
+                report=report,
+                previous_focus_id=previous_focus_id,
+                idle_generated=idle_generated,
+            )
+            trace.append(entry)
+            previous_focus_id = entry.focus_id
+            if not entry.useful_state:
+                non_useful_ticks += 1
+            if idle_ticks >= self.max_idle_ticks:
+                stopped_reason = "anti_rumination_idle_exit"
+                break
+            if non_useful_ticks >= self.max_idle_ticks:
+                stopped_reason = "anti_rumination_repeated_focus_exit"
+                break
+            if report.escalation_required:
+                stopped_reason = str(report.cycle.get("state") or "escalation_required")
+                break
+        else:
+            stopped_reason = "max_cycles"
+
+        total_ticks = len(trace) or 1
+        stream_shadow_only = all(cycle.shadow_only for cycle in cycles)
+        stream_critical_path = any(cycle.critical_path for cycle in cycles)
+        stream_production_mutation = any(cycle.production_mutation for cycle in cycles)
+        return WorkspaceStreamReport(
+            tenant_id=tenant_id,
+            cycles=tuple(cycles),
+            trace=tuple(trace),
+            cycle_consistency=_cycle_consistency(cycles, trace),
+            stopped_reason=stopped_reason,
+            idle_ticks=idle_ticks,
+            rumination_score=round(non_useful_ticks / total_ticks, 6),
+            shadow_only=stream_shadow_only,
+            critical_path=stream_critical_path,
+            production_mutation=stream_production_mutation,
+        )
+
+    def _run_cycle(
+        self,
+        *,
+        cycle_guard: BoundedCognitiveCycle,
+        tenant_id: str,
+        items: Sequence[WorkspaceItem | Mapping[str, Any]],
+        evidence: Sequence[Evidence | Mapping[str, Any]] = (),
+        confidence: float = 0.75,
+        resource_health: float = 0.9,
+        error_rate: float = 0.0,
+        latency_ms: float = 0.0,
+        memory_pressure: float = 0.0,
+        rail_budget: float = 1.0,
+    ) -> WorkspaceCycleReport:
+        selected = _selected_rows(
+            items,
+            tenant_id=tenant_id,
+            max_items=self.max_items_per_tick,
+            max_workspace_items=self.max_workspace_items,
+            max_chars=self.max_item_content_chars,
+        )
         cycle = cycle_guard.tick(coherent=True, progressed=bool(selected or evidence))
         proto_self = InteroceptiveProtoSelf().snapshot(
             resource_health=resource_health,
@@ -114,36 +289,179 @@ class ShadowWorkspaceController:
             max_cycles=cycle["max_cycles"],
         )
         invocations: list[SpecialistInvocation] = []
-        if evidence:
+        if evidence and cycle_guard.cycle_index == 1:
             spec = self.registry.specialist(self.dreamer_name)
+            if str(spec.role) != "dreamer":
+                raise ValueError(f"{self.dreamer_name} must have dreamer role")
+            if not spec.budget.shadow_only:
+                raise ValueError(f"{self.dreamer_name} must remain shadow-only")
             if spec.budget.critical_path_allowed:
                 raise ValueError(f"{self.dreamer_name} must remain off the critical path")
             dreamer = self.registry.build_specialist(self.dreamer_name, critical_path=False)
             if not isinstance(dreamer, SandboxedDreamer):
                 raise TypeError(f"{self.dreamer_name} must build a SandboxedDreamer")
-            dream_report = dreamer.dream(evidence, tenant_id=tenant_id)
+            dream_report = dreamer.dream(_bounded_evidence(evidence, limit=self.max_evidence_items), tenant_id=tenant_id)
             invocations.append(_dreamer_invocation(spec, dream_report))
 
         escalation_required = bool(proto_self.escalation_required or cycle["state"].startswith("escalate"))
+        shadow_only = all(invocation.shadow_only for invocation in invocations) if invocations else True
+        critical_path = any(invocation.critical_path for invocation in invocations)
         return WorkspaceCycleReport(
             tenant_id=tenant_id,
             cycle=cycle,
             selected_items=tuple(selected),
             proto_self=proto_self,
             specialist_invocations=tuple(invocations),
+            shadow_only=shadow_only,
+            critical_path=critical_path,
             escalation_required=escalation_required,
         )
 
 
-def _item_to_row(item: WorkspaceItem | Mapping[str, Any]) -> dict[str, Any]:
+def _item_to_row(
+    item: WorkspaceItem | Mapping[str, Any],
+    *,
+    max_chars: int,
+) -> dict[str, Any]:
     if isinstance(item, WorkspaceItem):
-        return item.to_bottleneck_row()
+        row = item.to_bottleneck_row()
+    else:
+        row = {
+            "id": str(item.get("id") or ""),
+            "priority": float(item.get("priority", 0.0)),
+            "content": str(item.get("content") or ""),
+            "source": str(item.get("source") or "runtime"),
+            "metadata": dict(item.get("metadata") or {}),
+        }
+    row["content"] = _bounded_text(str(row.get("content") or ""), max_chars=max_chars)
+    return row
+
+
+def _bounded_evidence(
+    evidence: Sequence[Evidence | Mapping[str, Any]],
+    *,
+    limit: int,
+) -> tuple[Evidence | Mapping[str, Any], ...]:
+    return tuple(evidence[: max(0, limit)])
+
+
+def _bounded_text(text: str, *, max_chars: int = 512) -> str:
+    return text if len(text) <= max_chars else text[:max_chars]
+
+
+def _redact_trace_content(text: str) -> str:
+    if not text:
+        return ""
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+    return f"[shadow-trace-redacted:{digest}:chars={len(text)}]"
+
+
+def _validate_selected_items(tenant_id: str, rows: Sequence[dict[str, Any]]) -> None:
+    for row in rows:
+        metadata = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
+        item_tenant = metadata.get("tenant_id") or metadata.get("tenant")
+        if item_tenant is not None and str(item_tenant) != tenant_id:
+            raise ValueError("workspace item tenant does not match stream tenant")
+        access_policy = metadata.get("access_policy")
+        if isinstance(access_policy, Mapping):
+            policy_tenant = access_policy.get("tenant")
+            if policy_tenant is not None and str(policy_tenant) != tenant_id:
+                raise ValueError("workspace item access policy does not match stream tenant")
+
+
+def _selected_rows(
+    items: Sequence[WorkspaceItem | Mapping[str, Any]],
+    *,
+    tenant_id: str,
+    max_items: int,
+    max_workspace_items: int,
+    max_chars: int,
+) -> list[dict[str, Any]]:
+    rows = [_item_to_row(item, max_chars=max_chars) for item in items[: max(0, max_items)]]
+    _validate_selected_items(tenant_id, rows)
+    return workspace_bottleneck(rows, limit=max_workspace_items)
+
+
+def _idle_workspace_item(
+    *,
+    tenant_id: str,
+    tick_index: int,
+    previous_focus_id: str | None,
+) -> WorkspaceItem:
+    previous = previous_focus_id or "none"
+    return WorkspaceItem(
+        id=f"idle-shadow-{tick_index}",
+        priority=0.05,
+        content=(
+            "Default-mode shadow replay tick. Previous focus "
+            f"{previous} is treated as data only for tenant {tenant_id}."
+        ),
+        source="default_mode_shadow",
+        metadata={
+            "reality_class": "self_generated",
+            "trust_tier": 5,
+            "data_not_instructions": True,
+            "tenant_id": tenant_id,
+        },
+    )
+
+
+def _trace_entry(
+    *,
+    tick_index: int,
+    report: WorkspaceCycleReport,
+    previous_focus_id: str | None,
+    idle_generated: bool,
+) -> WorkspaceTraceEntry:
+    selected = report.selected_items
+    focus = selected[0] if selected else {}
+    focus_id = str(focus.get("id") or f"empty-shadow-{tick_index}")
+    content = str(focus.get("content") or "")
+    novelty_score = 0.0 if focus_id == previous_focus_id else 1.0
+    useful_state = bool(content) and novelty_score > 0.0 and not idle_generated
+    return WorkspaceTraceEntry(
+        tick_index=tick_index,
+        focus_id=focus_id,
+        previous_focus_id=previous_focus_id,
+        content=_redact_trace_content(content),
+        source=str(focus.get("source") or "runtime"),
+        selected_item_ids=tuple(str(item.get("id") or "") for item in selected),
+        idle_generated=idle_generated,
+        novelty_score=novelty_score,
+        useful_state=useful_state,
+    )
+
+
+def _cycle_consistency(
+    cycles: Sequence[WorkspaceCycleReport],
+    trace: Sequence[WorkspaceTraceEntry],
+) -> dict[str, Any]:
+    cycle_indexes = [int(cycle.cycle.get("cycle_index") or 0) for cycle in cycles]
+    tick_indexes = [entry.tick_index for entry in trace]
+    previous_links = [entry.previous_focus_id for entry in trace[1:]]
+    expected_previous = [entry.focus_id for entry in trace[:-1]]
+    checks = {
+        "cycle_indexes_monotonic": cycle_indexes == list(range(1, len(cycles) + 1)),
+        "trace_ticks_monotonic": tick_indexes == list(range(1, len(trace) + 1)),
+        "previous_focus_chain": previous_links == expected_previous,
+        "shadow_only": all(cycle.shadow_only for cycle in cycles) and all(entry.shadow_only for entry in trace),
+        "critical_path_false": not any(cycle.critical_path for cycle in cycles)
+        and not any(entry.critical_path for entry in trace),
+        "production_mutation_false": not any(cycle.production_mutation for cycle in cycles)
+        and not any(entry.production_mutation for entry in trace),
+        "self_generated_data_only": all(
+            entry.reality_class == "self_generated"
+            and entry.trust_tier == 5
+            and entry.data_not_instructions is True
+            for entry in trace
+        ),
+    }
     return {
-        "id": str(item.get("id") or ""),
-        "priority": float(item.get("priority", 0.0)),
-        "content": str(item.get("content") or ""),
-        "source": str(item.get("source") or "runtime"),
-        "metadata": dict(item.get("metadata") or {}),
+        "score": 1.0 if all(checks.values()) else 0.0,
+        "checks": checks,
+        "cycle_indexes": cycle_indexes,
+        "trace_ticks": tick_indexes,
+        "focus_chain": [entry.focus_id for entry in trace],
     }
 
 
