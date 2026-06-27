@@ -5,6 +5,7 @@
   "direction": "increase",
   "guardrail_metrics": [
     "dreamer_shadow_contract",
+    "specialist_promotion_evidence_contract",
     "reality_monitor_shadow_tag_contract",
     "ece",
     "abstention_precision",
@@ -15,6 +16,7 @@
   ],
   "guardrail_tolerances": {
     "dreamer_shadow_contract": 0.0,
+    "specialist_promotion_evidence_contract": 0.0,
     "reality_monitor_shadow_tag_contract": 0.0,
     "ece": 0.0,
     "confabulation_rate": 0.0,

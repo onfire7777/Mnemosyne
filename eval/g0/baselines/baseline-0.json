@@ -951,7 +951,8 @@
       "candidate_count": 0,
       "candidates": [],
       "checks": {
-        "baseline_predates_dreamer": true
+        "baseline_predates_dreamer": true,
+        "specialist_promotion_evidence_absent": true
       },
       "corroborated_candidate_count": 0,
       "corroborated_candidate_yield": 0.0,
@@ -963,6 +964,7 @@
       "schema_version": "g0.dreamer_shadow_ablation.v1",
       "shadow_contract": 0.0,
       "source_evidence_count": 0,
+      "specialist_promotion_evidence_contract": 0.0,
       "tenant": "g0-dreamer-shadow-ablation",
       "workspace": {}
     },
@@ -1243,12 +1245,12 @@
   },
   "coverage": {
     "gate_ready": false,
-    "measured": 42,
+    "measured": 43,
     "missing": 1,
     "missing_metric_ids": [
       "controller_watts_per_dollar"
     ],
-    "total": 43
+    "total": 44
   },
   "dataset_manifests": [
     {
@@ -1686,6 +1688,21 @@
       "id": "dreamer_shadow_contract",
       "label": "dreamer shadow contract",
       "notes": "Baseline-0 predates G3 dreamer wiring; explicit zero anchors the preregistered target-up comparison.",
+      "pass": false,
+      "source_id": "dreamer_eval",
+      "status": "measured",
+      "target": 1.0,
+      "target_op": ">=",
+      "value": 0.0
+    },
+    {
+      "blueprint_metric": "G3/G4 specialist promotion evidence contract",
+      "class": "guardrail",
+      "direction": "increase",
+      "evidence_path": "/specialist_promotion_evidence_contract",
+      "id": "specialist_promotion_evidence_contract",
+      "label": "specialist promotion evidence contract",
+      "notes": "Pre-promotion-evidence baseline: no structured specialist promotion evidence envelope was present; value records the conservative absent-proof state for the preregistered G3 ablation gate.",
       "pass": false,
       "source_id": "dreamer_eval",
       "status": "measured",
@@ -2168,7 +2185,7 @@
       "id": "dreamer_eval",
       "path": "computed:eval.g0.dreamer",
       "present": true,
-      "sha256": "99087013534bf0dc0155198cc14890f652b1eb80f7e75922840c9689a46162eb"
+      "sha256": "10fdcd077d9da9b16fb4e268d049c6b1a48414f4c06c5ab3af083c56a5f86039"
     },
     {
       "generated_at": "2026-06-27T00:30:47.285068+00:00",

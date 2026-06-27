@@ -184,6 +184,25 @@ def test_shadow_workspace_controller_recruits_dreamer_off_critical_path() -> Non
     assert output["promotion_gate_required"] is True
     assert output["candidate_reality_classes"] == ["self_generated"]
     assert output["candidate_trust_tiers"] == [5]
+    promotion = output["promotion_evidence"]
+    assert promotion["schema_version"] == "specialist-promotion-evidence.v1"
+    assert promotion["specialist_name"] == "dreamer.shadow"
+    assert promotion["specialist_role"] == "dreamer"
+    assert promotion["shadow_only"] is True
+    assert promotion["critical_path"] is False
+    assert promotion["critical_path_allowed"] is False
+    assert promotion["production_mutation"] is False
+    assert promotion["promotion_gate_required"] is True
+    assert promotion["promoted"] is False
+    assert promotion["gate_result"] is None
+    assert promotion["gate_result_present"] is False
+    assert promotion["candidate_count"] == 1
+    assert promotion["cid_backed_candidate_count"] == 1
+    assert promotion["candidates"][0]["source_evidence_ref_count"] == 2
+    assert all(ref.startswith("[cid-ref:") for ref in promotion["candidates"][0]["source_evidence_refs"])
+    assert "First retained source" not in str(promotion)
+    assert "Second retained source" not in str(promotion)
+    assert "cid-workspace-a" not in str(promotion)
 
 
 def test_shadow_workspace_controller_rejects_replaced_dreamer_factory() -> None:
