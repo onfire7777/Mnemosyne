@@ -266,6 +266,12 @@
     {
       "name": "gate-suite",
       "command": "gate-suite-check",
+      "global_args": [
+        "--backend",
+        "postgres",
+        "--queue-tenant",
+        "MNEMOSYNE_PROD_TENANT"
+      ],
       "args": [
         "--include-cases",
         "--min-cases",
@@ -301,7 +307,9 @@
         "--backend",
         "postgres",
         "--queue-backend",
-        "postgres"
+        "postgres",
+        "--queue-tenant",
+        "MNEMOSYNE_PROD_TENANT"
       ],
       "args": [
         "--max-cycles",

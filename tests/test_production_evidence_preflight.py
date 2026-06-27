@@ -548,6 +548,78 @@ def test_capture_production_evidence_preflight_records_input_artifacts(
     assert redaction_scan["skipped_files"] == []
 
 
+def test_capture_production_evidence_preflight_rejects_symlinked_argument_artifact(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "production-soak.json"
+    out_root = tmp_path / "capture"
+    artifact = tmp_path / "production-inputs" / "cases.json"
+    linked_artifact = tmp_path / "production-inputs" / "linked-cases.json"
+    artifact.parent.mkdir()
+    artifact.write_text('{"ok": true}\n', encoding="utf-8")
+    try:
+        linked_artifact.symlink_to(artifact)
+    except OSError as exc:
+        pytest.skip(f"symlink setup unavailable: {exc}")
+
+    def add_external_artifact_path(payload: dict[str, Any]) -> None:
+        payload["checks"][0]["args"] = ["--cases", str(linked_artifact)]
+
+    _minimal_production_manifest(manifest, mutate=add_external_artifact_path)
+
+    proc = subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "--preflight-only",
+            str(manifest),
+            str(out_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+    )
+
+    assert proc.returncode == 65
+    assert "symlinked input artifact path" in proc.stderr
+    assert not out_root.exists()
+
+
+def test_capture_production_evidence_preflight_rejects_symlinked_manifest_artifact(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "production-soak.json"
+    out_root = tmp_path / "capture"
+    artifact_dir = tmp_path / "production-inputs" / "gate-suite"
+    linked_dir = tmp_path / "production-inputs" / "linked-gate-suite"
+    artifact_dir.mkdir(parents=True)
+    (artifact_dir / "cases.json").write_text('{"ok": true}\n', encoding="utf-8")
+    try:
+        linked_dir.symlink_to(artifact_dir, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"symlink setup unavailable: {exc}")
+
+    def add_manifest_input_artifact(payload: dict[str, Any]) -> None:
+        payload["checks"][0]["input_artifacts"] = [str(linked_dir)]
+
+    _minimal_production_manifest(manifest, mutate=add_manifest_input_artifact)
+
+    proc = subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "--preflight-only",
+            str(manifest),
+            str(out_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+    )
+
+    assert proc.returncode == 65
+    assert "symlinked input artifact path" in proc.stderr
+    assert not out_root.exists()
+
+
 def test_capture_production_evidence_preflight_rejects_ops_report_package_output(
     tmp_path: Path,
 ) -> None:
@@ -985,6 +1057,103 @@ def test_capture_production_evidence_preflight_snapshots_provenance_suite_assets
         "asset.json",
         "provenance-trust-suite.json",
     }
+
+
+def test_capture_production_evidence_preflight_rejects_symlinked_provenance_suite(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "production-soak.json"
+    out_root = tmp_path / "capture"
+    suite = tmp_path / "production-inputs" / "provenance-trust-suite.json"
+    linked_suite = tmp_path / "production-inputs" / "linked-suite.json"
+    suite.parent.mkdir()
+    suite.write_text('{"cases": []}\n', encoding="utf-8")
+    try:
+        linked_suite.symlink_to(suite)
+    except OSError as exc:
+        pytest.skip(f"symlink setup unavailable: {exc}")
+
+    def add_suite_path(payload: dict[str, Any]) -> None:
+        check = next(
+            item
+            for item in payload["checks"]
+            if item["command"] == "provenance-trust-check"
+        )
+        check["args"] = ["--suite", str(linked_suite)]
+
+    _minimal_production_manifest(manifest, mutate=add_suite_path)
+
+    proc = subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "--preflight-only",
+            str(manifest),
+            str(out_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+    )
+
+    assert proc.returncode == 65
+    assert "symlinked input artifact path" in proc.stderr
+    assert not out_root.exists()
+
+
+def test_capture_production_evidence_preflight_rejects_symlinked_suite_asset(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "production-soak.json"
+    out_root = tmp_path / "capture"
+    tool = tmp_path / "bin" / "c2patool"
+    asset = tmp_path / "production-inputs" / "asset.json"
+    linked_asset = tmp_path / "production-inputs" / "linked-asset.json"
+    suite = tmp_path / "production-inputs" / "provenance-trust-suite.json"
+    tool.parent.mkdir()
+    asset.parent.mkdir()
+    tool.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    tool.chmod(0o755)
+    asset.write_text('{"asset":"redacted-c2pa-fixture"}\n', encoding="utf-8")
+    try:
+        linked_asset.symlink_to(asset)
+    except OSError as exc:
+        pytest.skip(f"symlink setup unavailable: {exc}")
+    suite.write_text(
+        json.dumps(
+            {
+                "name": "production-c2pa",
+                "tool": str(tool),
+                "cases": [{"id": "asset-bound", "asset_path": str(linked_asset)}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def add_suite_path(payload: dict[str, Any]) -> None:
+        check = next(
+            item
+            for item in payload["checks"]
+            if item["command"] == "provenance-trust-check"
+        )
+        check["args"] = ["--suite", str(suite)]
+
+    _minimal_production_manifest(manifest, mutate=add_suite_path)
+
+    proc = subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "--preflight-only",
+            str(manifest),
+            str(out_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+    )
+
+    assert proc.returncode == 65
+    assert "symlinked input artifact path" in proc.stderr
+    assert not out_root.exists()
 
 
 def test_capture_production_evidence_preflight_rewrites_equals_form_suite_path(

@@ -22,7 +22,7 @@
 
 - `06-CONSCIOUSNESS-AND-CONTINUOUS-WORKSPACE.md` is already in the repo and tracked.
 - `04-G0-BENCHMARK-SPEC.md` is already updated to `Implemented (eval/g0/)`.
-- `README.md` is already updated to `G0 implemented; G1 next/in progress`.
+- `README.md` and the current roadmap treat G0 plus the shadow G1-G4 cognitive seeds as wired and gate-measured; strict parity is now blocked on Tier-B operator-captured production evidence, not additional speculative cognitive code.
 - The G0 harness is implemented under `eval/g0/` and can be run through both:
   - `python -m eval.g0.runner`
   - `mneme eval g0`
@@ -65,8 +65,8 @@
 
 ## Next Safe Queue
 
-1. Continue G1 breadth only where it moves a preregistered target metric without guardrail regression.
-2. Continue the next code-owned G2/G3/G4 slice only with a new preregistered target metric: stricter advisory-gate telemetry, real controller compute telemetry, or another narrow promotion that keeps `dreamer.shadow` and workspace self-loop outputs shadow-only unless a future gate passes.
-3. Prioritize real-infrastructure evidence capture for Tier B rows: IdP/Keycloak, Vault/KMS, ParadeDB+AGE+pgvector, hosted embedding/reranker/trainer endpoints, and C2PA roots.
+1. Prioritize real-infrastructure evidence capture for Tier B rows: IdP/Keycloak, Vault/KMS, ParadeDB+AGE+pgvector, hosted embedding/reranker/trainer endpoints, C2PA roots, hosted dashboards, supervised workers, and production rollback drills.
+2. Use the sanctioned production path only: render the external production manifest from exported non-secret environment values, run `infra/scripts/capture-production-evidence.sh`, require strict `release-audit`, then run offline `production-evidence-verify` against the retained bundle fingerprint.
+3. Reopen G1-G4 code only if a new strict-audit finding or preregistered target-up/guardrail-not-down slice demands it; generativity and workspace self-loop outputs remain shadow/advisory until promoted by gates.
 4. Keep `eval/g0/` authoritative; do not fork a parallel harness.
 5. Keep Mnemosyne distinct from gbrain, mempalace, and external agent memory systems in docs and implementation language.

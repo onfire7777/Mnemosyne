@@ -289,7 +289,7 @@ Controlling artifacts: [`docs/ROADMAP-TO-100.md`](docs/ROADMAP-TO-100.md) (blend
 
 ## Testing & CI
 
-- `.github/workflows/ci.yml` runs **ruff** lint, the full **pytest** suite (configuration / invariant-rail drift checks included), and a **Postgres integration** job on every push and pull request.
+- `.github/workflows/ci.yml` installs the committed `uv.lock` environment and runs **ruff** lint, the full **pytest** suite (configuration / invariant-rail drift checks included), and a **Postgres integration** job on every push and pull request.
 - With `MNEMOSYNE_POSTGRES_DSN` **unset**, the suite runs the local deterministic tests and skips live-DB integration tests — this no-DSN run is one required CI gate and must stay green.
 - With Docker-compose Postgres running and the DSN set, the live tests in `tests/test_postgres_engine_live.py` and `tests/test_shared_engine_contract.py` additionally run, covering tenant RLS, FTS, pgvector search, recursive graph/PPR, bitemporal supersession, branch/merge/discard, tombstone + hard-delete forget modes, command-backed KMS, and **local↔Postgres parity** of the engine contract.
 

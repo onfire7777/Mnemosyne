@@ -95,4 +95,6 @@ This run proves the evidence mechanics against real local services only. The
 operator still must run the production manifest through
 `infra/scripts/capture-production-evidence.sh` against deployed infrastructure,
 with `production_validated=true`, `target_environment="production"`, non-local
-providers, and `release-audit --evidence-manifest "$OUT_ROOT/evidence/manifest.json" --require-production-validated --require-provider-forbid-local`.
+providers, `release-audit --evidence-manifest "$OUT_ROOT/evidence/manifest.json" --require-production-validated --require-provider-forbid-local`,
+and offline `production-evidence-verify` against the retained bundle
+fingerprint.

@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -20,10 +23,12 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
           python-version: "3.12"
-      - name: Install ruff
-        run: python -m pip install --upgrade pip ruff
+      - name: Install uv
+        run: python -m pip install pip==26.1.2 uv==0.11.16
+      - name: Sync locked lint environment
+        run: uv sync --frozen --group dev
       - name: ruff check
-        run: ruff check .
+        run: uv run ruff check .
 
   test:
     name: Unit + drift checks
@@ -35,17 +40,18 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
           python-version: "3.12"
-      - name: Install package and test deps
+      - name: Install uv
+        run: python -m pip install pip==26.1.2 uv==0.11.16
+      - name: Sync locked test environment
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e '.[mcp]' pytest
+          uv sync --frozen --extra mcp --group dev
       - name: Run test suite (local backend; live-Postgres tests self-skip)
-        run: python -m pytest
+        run: uv run python -m pytest
       - name: Drift checks only (explicit gate)
-        run: python -m pytest tests/test_config_drift.py -q
+        run: uv run python -m pytest tests/test_config_drift.py -q
       - name: G0 preregistration gate replay
         run: >-
-          python -m pytest
+          uv run python -m pytest
           tests/test_g0_harness.py::test_committed_g0_preregistrations_have_passing_decisions
           tests/test_g0_harness.py::test_current_g0_candidate_replays_preregistrations_without_regression
           -q
@@ -76,11 +82,12 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
           python-version: "3.12"
-      - name: Install package with Postgres + MCP extras
+      - name: Install uv
+        run: python -m pip install pip==26.1.2 uv==0.11.16
+      - name: Sync locked Postgres test environment
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e '.[mcp,postgres]' pytest
+          uv sync --frozen --extra mcp --extra postgres --group dev
       - name: Load canonical schema
         run: psql "$MNEMOSYNE_POSTGRES_DSN" -f sql/schema.sql
       - name: Run Postgres-backed live tests
-        run: python -m pytest tests/test_postgres_engine_live.py -q
+        run: uv run python -m pytest tests/test_postgres_engine_live.py -q

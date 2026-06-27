@@ -725,7 +725,22 @@ def test_renderer_writes_private_valid_manifest_outside_repo(tmp_path: Path) -> 
     gate_suite = next(
         check for check in manifest["checks"] if check["command"] == "gate-suite-check"
     )
+    assert gate_suite["global_args"] == [
+        "--backend",
+        "postgres",
+        "--queue-tenant",
+        env["MNEMOSYNE_PROD_TENANT"],
+    ]
     assert gate_suite["args"] == ["--include-cases", "--min-cases", "30", "--min-protected", "20"]
+    worker_run = next(check for check in manifest["checks"] if check["command"] == "worker-run")
+    assert worker_run["global_args"] == [
+        "--backend",
+        "postgres",
+        "--queue-backend",
+        "postgres",
+        "--queue-tenant",
+        env["MNEMOSYNE_PROD_TENANT"],
+    ]
     ops_dashboard = next(
         check for check in manifest["checks"] if check["command"] == "ops-dashboard-check"
     )
