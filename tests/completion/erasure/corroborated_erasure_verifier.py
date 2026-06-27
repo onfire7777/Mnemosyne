@@ -14,11 +14,9 @@ Blueprint refs
 What this verifier proves (adversarial round-trip)
 --------------------------------------------------
 Four cases, each driven end-to-end through the **public surface** the blueprint
-promises to agents — the ``python -m mnemosyne.cli`` subprocess for every step
-that the CLI can express, falling back to the public ``MemoryTools`` facade
-(the *exact* object ``cmd_assert`` / ``cmd_propose`` dispatch to) for the single
-step the current CLI cannot express because of a real argparse-abbreviation
-collision (documented below in ``CLI_OBJECT_FLAG_COLLISION``):
+promises to agents — the ``python -m mnemosyne.cli`` subprocess for every step,
+including assertion creation through the exact ``assert --object`` flag that used
+to be blocked by argparse abbreviation matching.
 
   (a) RETAIN + TRIM. Ingest a projection derived from TWO independent
       corroborating sources; legally/operationally erase ONE source; assert the
@@ -75,21 +73,13 @@ USER = "user-erasure"
 # Strongest trust tier (DIRECT_USER/OPERATOR == 0); belief writes require <= NORMAL(3).
 STRONG_TRUST = 0
 
-# -- The documented public-CLI defect that forces the single facade fallback. ----
-# The top-level parser registers global ``--object-store`` / ``--object-key-*``
-# flags (cli.py ~4319). argparse abbreviation-matching makes the subcommand flag
-# ``--object`` (on ``assert`` / ``propose``, cli.py:4689,4765) *ambiguous* against
-# those globals, so ``mneme assert ... --object France`` exits with
-# ``error: ambiguous option: --object``. Until that is fixed, no corroborated
-# assertion can be created through the CLI. We therefore create the assertion via
-# the public ``MemoryTools.assert_fact`` (the exact callable ``cmd_assert`` wraps),
-# and drive *every other* step (capture / ingest / forget / get / export) through
-# the real CLI subprocess.
-CLI_OBJECT_FLAG_COLLISION = (
-    "mneme {assert,propose} --object <v> -> argparse 'ambiguous option: --object' "
-    "(collides with global --object-store/--object-key-* registered in cli.py:~4319). "
-    "Assertion creation falls back to the public MemoryTools.assert_fact facade "
-    "(== cmd_assert dispatch target); all other steps stay on the CLI subprocess."
+# -- Public CLI assertion path status. ------------------------------------------
+# ``build_parser`` disables argparse abbreviation matching on both the top-level
+# parser and subparsers, so global ``--object-store`` / ``--object-key-*`` flags
+# no longer collide with the subcommand ``--object`` flag.
+CLI_OBJECT_FLAG_STATUS = (
+    "mneme {assert,propose} --object <v> is parsed exactly; argparse abbreviation "
+    "matching is disabled for the top-level parser and subparsers."
 )
 
 
@@ -132,8 +122,8 @@ class AuditReport:
         return {
             "audit": "corroborated_erasure",
             "blueprint_refs": ["OQ6", "FR-8", "§31 RAIL 2 (min_corroboration_for_delete)"],
-            "public_surface": "python -m mnemosyne.cli (subprocess) + MemoryTools facade fallback",
-            "cli_object_flag_collision": CLI_OBJECT_FLAG_COLLISION,
+            "public_surface": "python -m mnemosyne.cli (subprocess)",
+            "cli_object_option_status": CLI_OBJECT_FLAG_STATUS,
             "trust_tier_scale": "INVERTED: 0=DIRECT_USER/OPERATOR strongest, 5=UNTRUSTED weakest",
             "cases": [
                 {
@@ -201,37 +191,6 @@ class CorroboratedErasureVerifier:
                 return json.loads(stdout[start : end + 1])
             raise RuntimeError(f"CLI emitted non-JSON for {command}: {stdout[-500:]!r}")
 
-    # ---- public facade fallback (the exact cmd_assert dispatch target) ----------
-
-    def _facade(self):
-        """Build a FRESH MemoryTools that loads the CURRENT on-disk store.
-
-        Critical: this is rebuilt on every call. The CLI subprocesses and this
-        in-process facade share one JSON store but hold independent engine
-        instances. A cached facade engine would carry stale in-memory state and,
-        on its next ``_persist()``, clobber evidence the CLI captured after it was
-        constructed. Reloading from disk per call makes the facade a faithful
-        read-modify-write against the latest CLI-written state — exactly how the
-        CLI itself behaves (every ``mneme`` invocation reloads the store).
-        """
-        # The facade runs IN THIS process (unlike the CLI subprocess), so make the
-        # in-repo package importable without an install step. Mirrors the
-        # PYTHONPATH the CLI seam injects via _env().
-        if str(_SRC) not in sys.path:
-            sys.path.insert(0, str(_SRC))
-        from mnemosyne.engine import LocalMemoryEngine
-        from mnemosyne.ingestion import IngestionPipeline
-        from mnemosyne.mcp_tools import MemoryTools
-        from mnemosyne.storage import LocalObjectStore
-
-        engine = LocalMemoryEngine(store_path=self.store)  # loads existing store if present
-        try:
-            obj = LocalObjectStore(root=self.object_store)
-        except TypeError:  # pragma: no cover - signature drift guard
-            obj = LocalObjectStore(self.object_store)
-        ingestion = IngestionPipeline(engine, object_store=obj)
-        return MemoryTools(engine, ingestion=ingestion)
-
     def assert_fact(
         self,
         subject: str,
@@ -241,22 +200,26 @@ class CorroboratedErasureVerifier:
         *,
         confidence: float = 0.9,
     ) -> str:
-        """Create a corroborated assertion on ``main`` via the public facade.
+        """Create a corroborated assertion on ``main`` through the public CLI.
 
-        This is the documented fallback for the ``--object`` CLI collision. It is
-        still the *public* ABI: ``cmd_assert`` calls ``tools.assert_fact`` with
-        these exact arguments. The write lands in the same store the CLI reads.
+        This keeps the audit on the same subprocess boundary agents and operators
+        use, including the formerly colliding ``assert --object`` flag.
         """
-        result = self._facade().assert_fact(
-            tenant_id=TENANT,
-            subject=subject,
-            predicate=predicate,
-            object_value=obj,
-            source_evidence_cids=source_evidence_cids,
-            confidence=confidence,
-            trust_tier=STRONG_TRUST,
-            role="operator",
-            source_trust_tier=STRONG_TRUST,
+        evidence_args: list[str] = []
+        for cid in source_evidence_cids:
+            evidence_args.extend(["--evidence-cid", cid])
+        result = self.cli(
+            "assert",
+            "--tenant", TENANT,
+            "--user", USER,
+            "--subject", subject,
+            "--predicate", predicate,
+            "--object", obj,
+            *evidence_args,
+            "--confidence", str(confidence),
+            "--trust-tier", str(STRONG_TRUST),
+            "--role", "operator",
+            "--source-trust-tier", str(STRONG_TRUST),
         )
         return result["id"]
 

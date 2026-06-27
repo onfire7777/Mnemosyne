@@ -4,9 +4,8 @@ Blueprint: OQ6 / FR-8 (transitive forget + corroboration) and §31 RAIL 2
 (``min_corroboration_for_delete``).
 
 This is the pytest face of ``corroborated_erasure_verifier.py``. Each case drives
-the REAL ``python -m mnemosyne.cli`` subprocess (plus the public ``MemoryTools``
-facade for the single CLI-blocked assertion step — see
-``CLI_OBJECT_FLAG_COLLISION``). No ``src/mnemosyne`` module is patched.
+the REAL ``python -m mnemosyne.cli`` subprocess, including assertion creation via
+``assert --object``. No ``src/mnemosyne`` module is patched.
 
 Four cases:
   (a) corroborated projection -> erase ONE source -> RETAINED + provenance trimmed.

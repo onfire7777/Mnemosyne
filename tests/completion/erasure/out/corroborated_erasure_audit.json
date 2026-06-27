@@ -30,7 +30,7 @@
           "retracted_assertions": [],
           "retracted_preferences": [],
           "trimmed_assertions": [
-            "38946883-6103-4eea-b804-df3f8e2c67d4"
+            "84392b8e-e63a-4c85-8534-4b9ece0a5e25"
           ],
           "trimmed_derived_evidence": [],
           "trimmed_entities": [],
@@ -57,7 +57,7 @@
           "removed_entities": [],
           "retained_derived_evidence": [],
           "retracted_assertions": [
-            "73f9dafe-38b5-443b-adb0-8dd236e4c788"
+            "1856e372-b548-4c7a-98ec-1ec9495db9a4"
           ],
           "retracted_preferences": [],
           "trimmed_assertions": [],
@@ -115,8 +115,8 @@
       "status": "ok"
     }
   ],
-  "cli_object_flag_collision": "mneme {assert,propose} --object <v> -> argparse 'ambiguous option: --object' (collides with global --object-store/--object-key-* registered in cli.py:~4319). Assertion creation falls back to the public MemoryTools.assert_fact facade (== cmd_assert dispatch target); all other steps stay on the CLI subprocess.",
-  "public_surface": "python -m mnemosyne.cli (subprocess) + MemoryTools facade fallback",
+  "cli_object_option_status": "mneme {assert,propose} --object <v> is parsed exactly; argparse abbreviation matching is disabled for the top-level parser and subparsers.",
+  "public_surface": "python -m mnemosyne.cli (subprocess)",
   "summary": {
     "all_enforced_invariants_hold": true,
     "breach_unenforced": 0,
