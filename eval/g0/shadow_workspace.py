@@ -36,7 +36,7 @@ def run_shadow_workspace_eval(*, repo_root: Path | None = None) -> dict[str, Any
         max_idle_ticks=int(controller_config.get("max_idle_ticks", 2)),
         tick_ms=int(controller_config.get("tick_ms", 250)),
     )
-    service = ShadowWorkspaceService(controller=controller, enabled=True)
+    service = ShadowWorkspaceService(controller=controller)
     service.start()
     item_ticks = [_items_from_cycle(cycle) for cycle in dataset.get("cycles", [])]
     service_report = service.run_shadow_loop(
@@ -56,6 +56,7 @@ def run_shadow_workspace_eval(*, repo_root: Path | None = None) -> dict[str, Any
     useful_checks = _useful_transition_checks(dataset.get("cycles", []), payload)
     contract_checks = _contract_checks(payload, dataset.get("contract_expected", {}))
     service_checks = _service_checks(service_payload)
+    service_no_enable_contract = 1.0 if service_checks.get("native_no_enable_toggle") is True else 0.0
     advisory_checks = _advisory_checks(advisory, dataset)
     advisory_promotion_probe = _workspace_advisory_promotion_probe(tenant)
     advisory_promotion_checks = advisory_promotion_probe["checks"]
@@ -137,6 +138,7 @@ def run_shadow_workspace_eval(*, repo_root: Path | None = None) -> dict[str, Any
         "useful_transition_rate": useful_transition_rate,
         "rumination_rate": rumination_rate,
         "shadow_workspace_contract": 1.0 if all(_flatten_bool_checks(all_contract_checks)) else 0.0,
+        "workspace_service_no_enable_toggle_contract": service_no_enable_contract,
         "always_on_heartbeat_contract": always_on_contract,
         "always_on_rumination_rate": rumination_rate,
         "heartbeat_compute_bounded_contract": 1.0 if heartbeat_checks["compute_bounded"] else 0.0,
@@ -157,7 +159,6 @@ def run_shadow_workspace_eval(*, repo_root: Path | None = None) -> dict[str, Any
         "checks": all_contract_checks,
         "workspace": {
             "service": {
-                "enabled": service_payload["enabled"],
                 "running": service_payload["running"],
                 "tick_ms": service_payload["tick_ms"],
                 "max_cycles": service_payload["max_cycles"],
@@ -198,7 +199,7 @@ def _service_checks(payload: dict[str, Any]) -> dict[str, bool]:
     rows = raw_rows if isinstance(raw_rows, (list, tuple)) else []
     tick_count = int(payload.get("tick_count") or 0)
     return {
-        "explicitly_enabled": payload.get("enabled") is True,
+        "native_no_enable_toggle": "enabled" not in payload,
         "explicitly_running": payload.get("running") is True,
         "shadow_only": payload.get("shadow_only") is True,
         "critical_path_false": payload.get("critical_path") is False,

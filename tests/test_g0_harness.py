@@ -159,6 +159,9 @@ def test_g0_report_emits_every_spec_metric_and_source_hashes() -> None:
     assert metrics["always_on_heartbeat_contract"]["status"] == "measured"
     assert metrics["always_on_heartbeat_contract"]["value"] == 1.0
     assert metrics["always_on_heartbeat_contract"]["source_id"] == "shadow_workspace_eval"
+    assert metrics["workspace_service_no_enable_toggle_contract"]["status"] == "measured"
+    assert metrics["workspace_service_no_enable_toggle_contract"]["value"] == 1.0
+    assert metrics["workspace_service_no_enable_toggle_contract"]["source_id"] == "shadow_workspace_eval"
     assert metrics["always_on_rumination_rate"]["value"] == 0.0
     assert metrics["heartbeat_compute_bounded_contract"]["value"] == 1.0
     assert metrics["heartbeat_compute_reported_contract"]["value"] == 1.0
@@ -195,6 +198,7 @@ def test_g0_report_emits_every_spec_metric_and_source_hashes() -> None:
     assert report["computed_evidence"]["unified_substrate_eval"]["passed"] is True
     assert report["computed_evidence"]["shadow_workspace_eval"]["shadow_workspace_contract"] == 1.0
     assert report["computed_evidence"]["shadow_workspace_eval"]["always_on_heartbeat_contract"] == 1.0
+    assert report["computed_evidence"]["shadow_workspace_eval"]["workspace_service_no_enable_toggle_contract"] == 1.0
     assert report["computed_evidence"]["shadow_workspace_eval"]["circuit_breaker_contract"] == 1.0
     assert report["computed_evidence"]["shadow_workspace_eval"]["workspace_broadcast_as_data_contract"] == 1.0
     assert report["computed_evidence"]["shadow_workspace_eval"]["self_generation_budget_rail_contract"] == 1.0
@@ -387,7 +391,7 @@ def test_g0_consciousness_scorecard_reports_indicator_properties() -> None:
     assert report["metrics"]["consciousness_indicator_total"] == report["total_score"]
     assert report["metrics"]["workspace_loop_liveness"] == 1.0
     assert report["metrics"]["workspace_stream_coherence"] == 1.0
-    assert report["continuity"]["service_enabled"] is True
+    assert report["continuity"]["service_native_no_enable_toggle"] is True
     assert report["continuity"]["service_running"] is True
     assert report["continuity"]["proto_self_history_count"] == report["continuity"]["metacognitive_rows"]
     assert report["metrics"]["self_model_accuracy"] == 1.0
@@ -429,6 +433,7 @@ def test_g0_shadow_workspace_fixture_reports_bounded_stream_contract() -> None:
     assert report["useful_transition_rate"] == 1.0
     assert report["shadow_workspace_contract"] == 1.0
     assert report["always_on_heartbeat_contract"] == 1.0
+    assert report["workspace_service_no_enable_toggle_contract"] == 1.0
     assert report["always_on_rumination_rate"] == 0.0
     assert report["heartbeat_compute_bounded_contract"] == 1.0
     assert report["heartbeat_compute_reported_contract"] == 1.0
@@ -444,7 +449,7 @@ def test_g0_shadow_workspace_fixture_reports_bounded_stream_contract() -> None:
     assert report["workspace"]["critical_path"] is False
     assert report["workspace"]["production_mutation"] is False
     assert report["workspace"]["promotion_gate_required"] is True
-    assert report["workspace"]["service"]["enabled"] is True
+    assert "enabled" not in report["workspace"]["service"]
     assert report["workspace"]["service"]["running"] is True
     assert report["workspace"]["service"]["tick_count"] == report["workspace"]["service"]["proto_self_history_count"]
     assert report["workspace"]["service"]["tick_count"] == report["workspace"]["service"]["metacognitive_rows"]
