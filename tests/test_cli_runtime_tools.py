@@ -218,6 +218,27 @@ def seed_grounded_gate_evidence(
     )
 
 
+def seed_legacy_evidence(
+    store: Path,
+    content: str,
+    *,
+    tenant_id: str = TENANT,
+    user_id: str = USER,
+) -> str:
+    return LocalMemoryEngine(store_path=store).append_evidence(
+        Evidence(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            actor="user",
+            source_type="legacy-import",
+            content=content,
+            trust_tier=0,
+            sensitivity=0,
+            access_policy={"tenant": tenant_id},
+        )
+    )
+
+
 def run_packaged_cli(store: Path, *args: str) -> dict:
     entrypoint = Path(sys.executable).with_name("mneme")
     assert entrypoint.exists(), (
@@ -9552,6 +9573,45 @@ def test_cli_privacy_ops_check_validates_kms_residency_erasure_bundle(tmp_path: 
     assert "raw-secret-key" not in serialized
     assert acknowledged["ok"] is True
     assert acknowledged["expected_fingerprint_present"] is True
+
+
+def test_cli_privacy_backfill_report_flags_legacy_pii_without_raw_content(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    cid = seed_legacy_evidence(
+        store,
+        "Legacy support note has SSN 123-45-6789 and card 4111 1111 1111 1111.",
+    )
+
+    report = run_cli(store, "privacy-backfill-report", "--tenant", TENANT)
+    serialized = json.dumps(report, sort_keys=True)
+
+    assert report["ok"] is False
+    assert report["finding_count"] == 1
+    assert report["redaction"]["raw_content_omitted"] is True
+    assert "123-45-6789" not in serialized
+    assert "4111 1111 1111 1111" not in serialized
+    finding = report["findings"][0]
+    assert finding["cid"] == cid
+    assert set(finding["pii_tags"]) >= {"ssn", "payment-card"}
+    assert finding["current_sensitivity"] == 0
+    assert finding["recommended_sensitivity"] == 3
+    assert finding["recommended_data_class"] == "pii"
+    assert finding["needs_sensitivity_raise"] is True
+    assert finding["needs_policy_data_class"] is True
+    assert finding["needs_policy_max_sensitivity"] is True
+
+
+def test_cli_privacy_backfill_report_can_fail_closed(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    seed_legacy_evidence(store, "Legacy row has DOB: 1990-04-03.")
+
+    result = run_raw_cli(store, "privacy-backfill-report", "--tenant", TENANT, "--fail-on-findings")
+    report = json.loads(result.stdout)
+
+    assert result.returncode == 1
+    assert report["ok"] is False
+    assert report["finding_count"] == 1
+    assert report["findings"][0]["needs_backfill"] is True
 
 
 def test_cli_privacy_ops_check_fails_closed_on_local_kms_and_bad_erasure(tmp_path: Path) -> None:

@@ -67,6 +67,7 @@ from mnemosyne.parametric import (
     ParametricTier,
     protected_suite_report,
 )
+from mnemosyne.privacy import classify_privacy
 from mnemosyne.providers import default_registry
 from mnemosyne.provenance import C2paToolVerifier, ProvenanceTrustPolicy, SignedProvenanceVerifier
 from mnemosyne.queue import InProcessQueue, PostgresQueue, QueueWorker
@@ -1588,6 +1589,112 @@ def _privacy_operator_delete_corroboration(case: Mapping[str, Any]) -> dict[str,
         "distinct_supporting_sources_before": distinct_sources,
         "corroborating_source_count": source_hash_count,
     }
+
+
+def cmd_privacy_backfill_report(args: argparse.Namespace) -> None:
+    engine = load_engine(args)
+    exported = engine.export_tenant(args.tenant)
+    rows = exported.get("evidence")
+    if not isinstance(rows, list):
+        raise SystemExit("tenant export did not return evidence rows")
+    branch = str(args.branch)
+    pii_sensitivity = int(args.pii_sensitivity)
+    findings: list[dict[str, Any]] = []
+    tag_counts: dict[str, int] = {}
+    scanned = 0
+    for row in rows:
+        if not isinstance(row, Mapping):
+            continue
+        if str(row.get("branch") or "main") != branch:
+            continue
+        scanned += 1
+        content = str(row.get("content") or "")
+        privacy = classify_privacy(content, residency=_row_residency(row))
+        if not privacy.pii_tags and not args.include_clean:
+            continue
+        for tag in privacy.pii_tags:
+            tag_counts[tag] = tag_counts.get(tag, 0) + 1
+        finding = _privacy_backfill_row(row, privacy.pii_tags, pii_sensitivity=pii_sensitivity)
+        if finding["needs_backfill"] or args.include_clean:
+            findings.append(finding)
+    report = {
+        "ok": not findings,
+        "tenant_id": args.tenant,
+        "branch": branch,
+        "scanned_evidence": scanned,
+        "finding_count": len([item for item in findings if item["needs_backfill"]]),
+        "detector": {
+            "name": "mnemosyne.privacy.classify_privacy",
+            "pii_sensitivity": pii_sensitivity,
+            "tags": sorted(tag_counts),
+        },
+        "tag_counts": {key: tag_counts[key] for key in sorted(tag_counts)},
+        "findings": findings,
+        "redaction": {
+            "raw_content_omitted": True,
+            "content_hash_sha256_reported": True,
+        },
+    }
+    emit(report)
+    if args.fail_on_findings and not report["ok"]:
+        raise SystemExit(1)
+
+
+def _privacy_backfill_row(row: Mapping[str, Any], pii_tags: list[str], *, pii_sensitivity: int) -> dict[str, Any]:
+    current_sensitivity = _coerce_int(row.get("sensitivity"), default=0)
+    recommended_sensitivity = max(current_sensitivity, pii_sensitivity if pii_tags else current_sensitivity)
+    policy = row.get("access_policy") if isinstance(row.get("access_policy"), Mapping) else {}
+    policy_max = _coerce_int(policy.get("max_sensitivity"), default=current_sensitivity)
+    data_class = str(policy.get("data_class") or "standard")
+    metadata = row.get("metadata") if isinstance(row.get("metadata"), Mapping) else {}
+    metadata_privacy = metadata.get("privacy") if isinstance(metadata.get("privacy"), Mapping) else {}
+    metadata_tags = metadata_privacy.get("pii_tags")
+    metadata_tag_set = {str(item) for item in metadata_tags} if isinstance(metadata_tags, list) else set()
+    detected_tag_set = set(pii_tags)
+    needs_sensitivity_raise = bool(pii_tags and current_sensitivity < pii_sensitivity)
+    needs_policy_data_class = bool(pii_tags and data_class != "pii")
+    needs_policy_max_sensitivity = bool(pii_tags and policy_max < recommended_sensitivity)
+    needs_metadata_refresh = detected_tag_set != metadata_tag_set
+    content = str(row.get("content") or "")
+    return {
+        "cid": row.get("cid"),
+        "branch": row.get("branch") or "main",
+        "source_type": row.get("source_type"),
+        "content_sha256": sha256(content.encode("utf-8")).hexdigest(),
+        "pii_tags": pii_tags,
+        "current_sensitivity": current_sensitivity,
+        "recommended_sensitivity": recommended_sensitivity,
+        "current_data_class": data_class,
+        "recommended_data_class": "pii" if pii_tags else data_class,
+        "current_policy_max_sensitivity": policy_max,
+        "needs_sensitivity_raise": needs_sensitivity_raise,
+        "needs_policy_data_class": needs_policy_data_class,
+        "needs_policy_max_sensitivity": needs_policy_max_sensitivity,
+        "needs_metadata_refresh": needs_metadata_refresh,
+        "needs_backfill": any(
+            (
+                needs_sensitivity_raise,
+                needs_policy_data_class,
+                needs_policy_max_sensitivity,
+                needs_metadata_refresh,
+            )
+        ),
+    }
+
+
+def _row_residency(row: Mapping[str, Any]) -> str:
+    policy = row.get("access_policy") if isinstance(row.get("access_policy"), Mapping) else {}
+    metadata = row.get("metadata") if isinstance(row.get("metadata"), Mapping) else {}
+    privacy = metadata.get("privacy") if isinstance(metadata.get("privacy"), Mapping) else {}
+    value = policy.get("residency") or privacy.get("residency") or "local"
+    return str(value)
+
+
+def _coerce_int(value: Any, *, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
 
 
 def cmd_privacy_ops_check(args: argparse.Namespace) -> None:
@@ -14193,6 +14300,14 @@ def build_parser() -> argparse.ArgumentParser:
     policy_ops_check.add_argument("--max-proxy-gap", type=float, default=0.15)
     policy_ops_check.add_argument("--expected-fingerprint")
     policy_ops_check.set_defaults(func=cmd_policy_ops_check)
+
+    privacy_backfill_report = sub.add_parser("privacy-backfill-report")
+    privacy_backfill_report.add_argument("--tenant", required=True)
+    privacy_backfill_report.add_argument("--branch", default="main")
+    privacy_backfill_report.add_argument("--pii-sensitivity", type=int, default=3)
+    privacy_backfill_report.add_argument("--include-clean", action="store_true")
+    privacy_backfill_report.add_argument("--fail-on-findings", action="store_true")
+    privacy_backfill_report.set_defaults(func=cmd_privacy_backfill_report)
 
     privacy_ops_check = sub.add_parser("privacy-ops-check")
     privacy_ops_check.add_argument("--bundle", help="Path to production privacy/KMS/residency evidence bundle")
