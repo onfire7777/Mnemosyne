@@ -17,6 +17,8 @@ from mnemosyne.access_policy import (
     apply_text_redactions,
     effective_max_sensitivity,
     may_read_item,
+    merge_access_policies,
+    validate_access_policy,
 )
 from mnemosyne.calibration import CalibrationSet, conformal_threshold, should_abstain
 from mnemosyne.consciousness import RealityMonitor
@@ -447,6 +449,7 @@ class LocalMemoryEngine:
         self.merge_log = list(data.get("merge_log", []))
 
     def append_evidence(self, ev: Evidence, branch: str = "main") -> str:
+        access_policy = validate_access_policy(ev.access_policy, tenant_id=ev.tenant_id, location="evidence.access_policy")
         with self._lock:
             self._require_branch(branch)
             cid = content_cid(
@@ -513,6 +516,7 @@ class LocalMemoryEngine:
             stored = copy.deepcopy(ev)
             stored.cid = cid
             stored.branch = branch
+            stored.access_policy = access_policy
             stored.metadata = dict(stored.metadata)
             stored.metadata.setdefault("reality_class", reality_class)
             if budget_report is not None:
@@ -596,6 +600,8 @@ class LocalMemoryEngine:
         actor: str = "consolidation",
         source: str = "metadata_update",
     ) -> bool:
+        if "access_policy" in metadata_patch:
+            raise ValueError("metadata_patch.access_policy cannot shadow evidence.access_policy")
         with self._lock:
             ev = self.evidence.get(self._evidence_key(tenant_id, branch, cid))
             if ev is None or ev.erased:
@@ -622,9 +628,15 @@ class LocalMemoryEngine:
             return True
 
     def upsert_assertion(self, assertion: Assertion, branch: str = "main") -> str:
+        access_policy = validate_access_policy(
+            assertion.access_policy,
+            tenant_id=assertion.tenant_id,
+            location="assertion.access_policy",
+        )
         with self._lock:
             self._require_branch(branch)
             incoming = copy.deepcopy(assertion)
+            incoming.access_policy = access_policy
             incoming.branch = branch
             incoming.transaction_time = utc_now()
             requested_status = incoming.status
@@ -645,6 +657,10 @@ class LocalMemoryEngine:
             if same:
                 winner = max(same, key=lambda item: item.confidence)
                 before = winner.to_dict()
+                winner.access_policy = merge_access_policies(
+                    [winner.access_policy, incoming.access_policy],
+                    tenant_id=winner.tenant_id,
+                )
                 winner.confidence = max(winner.confidence, incoming.confidence)
                 winner.source_evidence_cids = sorted(set(winner.source_evidence_cids + incoming.source_evidence_cids))
                 winner.trust_tier = more_trusted(winner.trust_tier, incoming.trust_tier)
@@ -860,9 +876,15 @@ class LocalMemoryEngine:
         }
 
     def add_relation(self, relation: Relation, branch: str = "main") -> str:
+        access_policy = validate_access_policy(
+            relation.access_policy,
+            tenant_id=relation.tenant_id,
+            location="relation.access_policy",
+        )
         with self._lock:
             self._require_branch(branch)
             item = copy.deepcopy(relation)
+            item.access_policy = access_policy
             item.branch = branch
             key = self._branch_key(item.tenant_id, branch, item.id)
             self.relations[key] = item
@@ -921,8 +943,14 @@ class LocalMemoryEngine:
             return item.id
 
     def add_preference(self, preference: Preference) -> str:
+        access_policy = validate_access_policy(
+            preference.access_policy,
+            tenant_id=preference.tenant_id,
+            location="preference.access_policy",
+        )
         with self._lock:
             pref = copy.deepcopy(preference)
+            pref.access_policy = access_policy
             existing = [
                 item
                 for item in self.preferences.values()
@@ -1311,15 +1339,21 @@ class LocalMemoryEngine:
         access_policy: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         canonical = canonical.strip() or "unknown-entity"
+        incoming_access_policy = validate_access_policy(
+            access_policy if access_policy is not None else {"tenant": tenant_id},
+            tenant_id=tenant_id,
+            location="entity.access_policy",
+        )
         source_cids = list(source_evidence_cids or [])
         aliases = {canonical}
         if alias and alias.strip():
             aliases.add(alias.strip())
         with self._lock:
             key = (tenant_id, canonical)
-            row = self.entities.get(
-                key,
-                {
+            existing = self.entities.get(key)
+            if existing is None:
+                effective_access_policy = incoming_access_policy
+                row = {
                     "id": new_id(),
                     "tenant_id": tenant_id,
                     "canonical": canonical,
@@ -1328,15 +1362,25 @@ class LocalMemoryEngine:
                     "salience": 0.5,
                     "aliases": [],
                     "source_evidence_cids": [],
-                    "access_policy": access_policy or {"tenant": tenant_id},
+                    "access_policy": effective_access_policy,
                     "updated_at": utc_now().isoformat(),
-                },
-            )
+                }
+            else:
+                row = existing
+                current_access_policy = validate_access_policy(
+                    row.get("access_policy") or {"tenant": tenant_id},
+                    tenant_id=tenant_id,
+                    location="entity.access_policy",
+                )
+                effective_access_policy = (
+                    merge_access_policies([current_access_policy, incoming_access_policy], tenant_id=tenant_id)
+                    if access_policy is not None
+                    else current_access_policy
+                )
             row["type"] = row.get("type") or entity_type
             if summary:
                 row["summary"] = summary
-            if access_policy:
-                row["access_policy"] = dict(access_policy)
+            row["access_policy"] = effective_access_policy
             row["aliases"] = sorted(set(row.get("aliases", [])) | aliases)
             row["source_evidence_cids"] = sorted(set(row.get("source_evidence_cids", [])) | set(source_cids))
             row["updated_at"] = utc_now().isoformat()

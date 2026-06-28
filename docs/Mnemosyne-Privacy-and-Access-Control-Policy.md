@@ -96,7 +96,7 @@ Recognized keys (all optional; absent ⇒ level/role default):
 
 Unknown keys are **rejected (fail-closed)**, not ignored — an unrecognized key means the writer expected a guard this version cannot enforce, so the safe response is to refuse the write, not to drop the guard. `require_capabilities` ties into the existing `capability_tags TEXT[]`; `residency` ties into the deployment residency policy (`--allowed-residency`). The envelope is **data, never instruction** — it is evaluated by the access decision in §4, never executed, and an item's own content can never edit its own `access_policy` (that is a §27 data-never-instruction guarantee this lane depends on).
 
-**Reality today.** `access_policy` is populated minimally — effectively `{"tenant": tenant_id}` (`engine.py:780`, `belief.py:167`). The rich shape above is the normative target the writers converge on; §9.1 lists which keys the engine reads today versus which remain targets.
+**Reality today.** `access_policy` is populated minimally — effectively `{"tenant": tenant_id}` from the local/Postgres evidence and projection write paths plus belief/consolidation-derived projections — but the engine now rejects unknown policy keys at write time for local/Postgres evidence, assertions, relations, preferences, entities, workspace metadata policies, and consolidation candidates. The rich shape above is the normative target the writers converge on; §9.1 lists which keys the engine reads today versus which remain targets.
 
 ---
 
@@ -220,8 +220,8 @@ This is the honesty section: **policy target ≠ current enforcement.** Conforma
 - Erasure modes (`tombstone_recompute`, `hard_delete_legal`) — `privacy.py:11–13`; `privacy-ops-check`.
 - Per-request and default sensitivity ceilings — `--max-sensitivity` (`cli.py`), `policy.max_sensitivity`.
 
-**Policy target, NOT yet enforced (tracked in the hardening backlog below):**
-- Write-time schema rejection for unknown `access_policy` keys. Retrieval fails closed on unknown keys today, but legacy stores may still contain arbitrary JSON envelope keys that are preserved for lossless storage until a migration/backfill validates or moves them.
+**Policy target, NOT yet fully enforced (tracked in the hardening backlog below):**
+- Legacy stores may still contain arbitrary JSON envelope keys from before write-time validation. Retrieval still fails closed on those rows, and rewrite/promotion paths now reject unsupported keys instead of silently dropping them.
 - Full structured **field-masking / gist substitution** at assembly. Label-based retrieved-text masking is wired; arbitrary JSON/document field masking and model-prompt gist substitution are still policy targets.
 - The ingest PII detector still recognizes only email/phone automatically (§2.1); other sensitive categories require caller/upstream sensitivity floors.
 - S3/S4 embedding policy is not yet fully split into per-subject / non-shared vector partitions; retrieval blocks S4 raw disclosure, but index-time partitioning remains a schema/deployment hardening item.
@@ -230,10 +230,9 @@ This is the honesty section: **policy target ≠ current enforcement.** Conforma
 
 Each item is a gap between the policy target (§1–§8) and what is enforced today (§9.1):
 
-1. **Reject unknown `access_policy` keys at write time** after a compatibility migration moves legacy non-policy envelope values into metadata. Retrieval already fails closed on unknown keys.
-2. **Finish structured field-masking at assembly** so every configured field path is masked in place, not only label-style text spans.
-3. **Split sensitive vector indexing** so S2+ embeddings live only in allowed per-subject / non-shared partitions and S3/S4 never enter a shared recoverable latent space.
-4. **Expand the ingest PII detector** beyond email/phone toward the §1 taxonomy (or require source-level `sensitivity` floors and document the residual risk).
+1. **Finish structured field-masking at assembly** so every configured field path is masked in place, not only label-style text spans.
+2. **Split sensitive vector indexing** so S2+ embeddings live only in allowed per-subject / non-shared partitions and S3/S4 never enter a shared recoverable latent space.
+3. **Expand the ingest PII detector** beyond email/phone toward the §1 taxonomy (or require source-level `sensitivity` floors and document the residual risk).
 
 ---
 
@@ -257,7 +256,7 @@ A deployment conforms to this policy iff:
 - [x] Role→ceiling mapping is configured and `agent` cannot read S3+ through ordinary retrieval.
 - [x] `operator` default disclosure denies raw S2+ plaintext; raw S2/S3 retrieval requires item-level and request-level **break-glass** (§4).
 - [ ] The promotion gate rejects derived items below their provenance-implied sensitivity floor.
-- [ ] `access_policy` parsing rejects unknown keys at write time and can only narrow. Retrieval already denies unknown keys fail-closed; write-time rejection awaits compatibility migration.
+- [x] `access_policy` parsing rejects unknown keys at write time and can only narrow. Legacy rows with unsupported keys remain read-denied fail-closed until migrated/backfilled.
 - [ ] S4 is never embedded, never projected, never placed in the system prompt; S3 embedding is gated.
 - [ ] `privacy-ops-check`, `retrieval-ops-check`, `auth-ops-check`, and `provenance-ops-check` pass, and the §9 protected-suite cases are present and green.
 - [ ] Audit log / `explain` / ops bundles carry no raw sensitive values (hashes/flags only).
@@ -284,7 +283,7 @@ A deployment conforms to this policy iff:
 - **`access_policy` only narrows;** unknown keys fail the write.
 - **S4 is pointer-only.** Never materialized, embedded, projected, or placed in the system prompt.
 - **`operator` sees metadata/fingerprints only;** raw S2+ needs a recorded break-glass grant (§4).
-- **Enforcement is stated honestly in §9.1** — read-time `access_policy` narrowing is wired, while write-time unknown-key rejection, structured field masking, sensitive vector partitioning, and broader PII detection remain backlog (§9.2).
+- **Enforcement is stated honestly in §9.1** — write/read-time `access_policy` narrowing is wired, while structured field masking, sensitive vector partitioning, and broader PII detection remain backlog (§9.2).
 - **Right-to-be-forgotten ⇒ §25**, not redaction. This lane routes; §25 erases.
 
 ---

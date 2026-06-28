@@ -88,6 +88,54 @@ def effective_max_sensitivity(context: Mapping[str, Any] | None, policy_max_sens
     return max(-1, ceiling)
 
 
+def unknown_access_policy_keys(access_policy: Mapping[str, Any] | None) -> tuple[str, ...]:
+    """Return policy keys this runtime cannot enforce."""
+
+    if not access_policy:
+        return ()
+    return tuple(
+        sorted(
+            str(key)
+            for key in access_policy
+            if not isinstance(key, str) or (key not in ALLOWED_ACCESS_POLICY_KEYS and not key.startswith("hold:"))
+        )
+    )
+
+
+def validate_access_policy(
+    access_policy: Mapping[str, Any] | None,
+    *,
+    tenant_id: str | None = None,
+    location: str = "access_policy",
+) -> dict[str, Any]:
+    """Validate a write-time access-policy envelope before persistence.
+
+    Unknown keys are rejected because they mean the writer expected a guard this
+    runtime cannot enforce. Error messages intentionally include key names only,
+    never policy values.
+    """
+
+    if access_policy is None:
+        return {}
+    if not isinstance(access_policy, Mapping):
+        raise ValueError(f"{location} must be a JSON object")
+    policy = dict(access_policy)
+    unknown = unknown_access_policy_keys(policy)
+    if unknown:
+        raise ValueError(f"unknown {location} keys: {', '.join(unknown)}")
+
+    policy_tenants = {
+        str(policy[key])
+        for key in ("tenant", "tenant_id")
+        if key in policy and policy[key] not in (None, "")
+    }
+    if len(policy_tenants) > 1:
+        raise ValueError(f"{location} tenant keys disagree")
+    if tenant_id is not None and policy_tenants and next(iter(policy_tenants)) != str(tenant_id):
+        raise ValueError(f"{location} tenant does not match row tenant")
+    return policy
+
+
 def may_read_item(
     *,
     item_tenant_id: str,
@@ -110,7 +158,7 @@ def may_read_item(
     ceiling = effective_max_sensitivity(ctx, policy_max_sensitivity)
     if role not in ROLE_RANK:
         return AccessDecision(False, "invalid_role", role, ceiling)
-    unknown = tuple(sorted(key for key in policy if key not in ALLOWED_ACCESS_POLICY_KEYS and not str(key).startswith("hold:")))
+    unknown = unknown_access_policy_keys(policy)
     if unknown:
         return AccessDecision(False, "unknown_access_policy_key", role, ceiling, unknown_keys=unknown)
     if erased:
@@ -218,7 +266,11 @@ def apply_text_redactions(text: str, access_policy: Mapping[str, Any] | None, de
 def merge_access_policies(policies: Sequence[Mapping[str, Any] | None], *, tenant_id: str | None = None) -> dict[str, Any]:
     """Merge source policies in the most restrictive direction."""
 
-    rows = [dict(item or {}) for item in policies if item]
+    rows = [
+        validate_access_policy(item, tenant_id=tenant_id, location="source access_policy")
+        for item in policies
+        if item
+    ]
     if not rows:
         return {"tenant": tenant_id} if tenant_id else {}
     merged: dict[str, Any] = {}
