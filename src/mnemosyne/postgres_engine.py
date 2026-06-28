@@ -1685,10 +1685,16 @@ class PostgresEngine:
         max_sensitivity: int,
         access_context: dict[str, Any] | None = None,
     ) -> list[Hit] | None:
+        cache_context = dict(access_context or {})
+        role = str(cache_context.get("role") or cache_context.get("mnemosyne_role") or "reader").lower()
+        extra_context = set(cache_context) - {"tenant_id", "tenant", "branch", "role", "mnemosyne_role"}
+        default_reader_sensitivity = effective_max_sensitivity({"role": "reader"}, self.policy.max_sensitivity)
         if (
             include_quarantined
             or max_trust != int(self.policy.max_trust_tier)
-            or max_sensitivity != int(self.policy.max_sensitivity)
+            or max_sensitivity != default_reader_sensitivity
+            or role != "reader"
+            or extra_context
         ):
             return None
         relation_fingerprint = self._graph_ppr_relation_fingerprint(db_tenant_id, branch, moment)

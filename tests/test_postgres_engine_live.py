@@ -1005,7 +1005,7 @@ def test_postgres_local_rank_fallback_uses_policy_sensitivity_live() -> None:
             source_type="fallback",
             content="Fallback sensitivity contract hidden token.",
             trust_tier=0,
-            sensitivity=9,
+            sensitivity=2,
             access_policy={"tenant": tenant},
         )
     )
@@ -1019,7 +1019,7 @@ def test_postgres_local_rank_fallback_uses_policy_sensitivity_live() -> None:
     override_hits = engine._local_rank(  # noqa: SLF001 - direct regression for fallback filter semantics.
         "fallback sensitivity contract",
         10,
-        {"tenant_id": tenant, "branch": "main", "max_sensitivity": 10},
+        {"tenant_id": tenant, "branch": "main", "role": "agent", "max_sensitivity": 2},
         channel="fallback-regression",
     )
 
