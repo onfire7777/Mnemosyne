@@ -47,8 +47,9 @@ operator capture against deployed infrastructure.
 
 Post-plan reviewer-handoff hardening now writes `summary.json.offline_verify`
 after a successful full capture. It records the captured `bundle_dir`, expected
-bundle fingerprint, an argv-style `production-evidence-verify` command, and a
-custody-only note so reviewers can replay the offline verifier without
+bundle fingerprint, an argv-style `production-evidence-verify` command whose
+first element is the wrapper-selected interpreter, and a custody-only note so
+reviewers can replay the offline verifier without
 reconstructing the command from prose.
 
 ## Executor Readiness
