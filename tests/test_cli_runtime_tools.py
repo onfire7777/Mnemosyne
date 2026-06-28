@@ -9614,6 +9614,55 @@ def test_cli_privacy_backfill_report_can_fail_closed(tmp_path: Path) -> None:
     assert report["findings"][0]["needs_backfill"] is True
 
 
+def test_cli_privacy_backfill_apply_requires_explicit_confirmation(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    seed_legacy_evidence(store, "Legacy row has SSN 123-45-6789.")
+
+    result = run_raw_cli(store, "privacy-backfill-apply", "--tenant", TENANT)
+
+    assert result.returncode == 1
+    assert "requires --confirm-apply" in result.stderr
+
+
+def test_cli_privacy_backfill_apply_updates_legacy_pii_without_raw_content(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    cid = seed_legacy_evidence(
+        store,
+        "Legacy support note has SSN 123-45-6789 and card 4111 1111 1111 1111.",
+    )
+
+    apply_report = run_cli(
+        store,
+        "privacy-backfill-apply",
+        "--tenant",
+        TENANT,
+        "--confirm-apply",
+    )
+    followup = run_cli(store, "privacy-backfill-report", "--tenant", TENANT)
+    exported = LocalMemoryEngine(store_path=store).export_tenant(TENANT)
+    evidence = next(item for item in exported["evidence"] if item["cid"] == cid)
+    audit = [item for item in exported["audit_log"] if item["op"] == "backfill_evidence_privacy"]
+    serialized = json.dumps(apply_report, sort_keys=True)
+
+    assert apply_report["ok"] is True
+    assert apply_report["applied_count"] == 1
+    assert apply_report["failed_count"] == 0
+    assert apply_report["redaction"]["raw_content_omitted"] is True
+    assert "123-45-6789" not in serialized
+    assert "4111 1111 1111 1111" not in serialized
+    assert apply_report["applied"][0]["cid"] == cid
+    assert set(apply_report["applied"][0]["pii_tags"]) >= {"ssn", "payment-card"}
+    assert followup["ok"] is True
+    assert followup["finding_count"] == 0
+    assert evidence["sensitivity"] == 3
+    assert evidence["access_policy"]["data_class"] == "pii"
+    assert evidence["access_policy"]["max_sensitivity"] == 3
+    assert set(evidence["metadata"]["privacy"]["pii_tags"]) >= {"ssn", "payment-card"}
+    assert evidence["metadata"]["embedding_partition"] == "private"
+    assert audit
+    assert audit[-1]["source"] == "privacy_backfill_apply"
+
+
 def test_cli_privacy_ops_check_fails_closed_on_local_kms_and_bad_erasure(tmp_path: Path) -> None:
     bundle = tmp_path / "bad-privacy-ops.json"
     bundle.write_text(json.dumps(privacy_ops_bundle(local_kms=True, incomplete_erasure=True)), encoding="utf-8")

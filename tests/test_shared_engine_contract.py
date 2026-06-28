@@ -515,6 +515,51 @@ def test_shared_engine_contract_updates_evidence_metadata(engine_bundle: tuple[A
     assert audit[-1]["diff"]["patch"]["lifecycle"]["tier"] == "abstractive_gist"
 
 
+def test_shared_engine_contract_backfills_evidence_privacy(engine_bundle: tuple[Any, str, str]) -> None:
+    engine, tenant, user = engine_bundle
+    cid = engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id=user,
+            actor="user",
+            source_type="legacy-privacy-contract",
+            content="Legacy row contains unclassified sensitive identifiers.",
+            trust_tier=0,
+            sensitivity=0,
+            access_policy={"tenant": tenant},
+        )
+    )
+
+    updated = engine.backfill_evidence_privacy(
+        tenant,
+        cid,
+        ["ssn", "email", "ssn"],
+        pii_sensitivity=3,
+    )
+    recalled = engine.get_evidence(tenant, cid)
+    exported = next(item for item in engine.export_tenant(tenant)["evidence"] if item["cid"] == cid)
+    audit = [
+        item
+        for item in engine.export_tenant(tenant)["audit_log"]
+        if item["op"] == "backfill_evidence_privacy"
+    ]
+
+    assert updated is True
+    assert recalled is not None
+    assert recalled.sensitivity == 3
+    assert recalled.access_policy["data_class"] == "pii"
+    assert recalled.access_policy["max_sensitivity"] == 3
+    assert recalled.metadata["privacy"]["pii_tags"] == ["email", "ssn"]
+    assert recalled.metadata["privacy"]["backfilled"] is True
+    assert recalled.metadata["embedding_partition"] == "private"
+    assert exported["sensitivity"] == 3
+    assert exported["access_policy"]["data_class"] == "pii"
+    assert exported["metadata"]["embedding_partition"] == "private"
+    assert audit
+    assert audit[-1]["source"] == "privacy_backfill"
+    assert audit[-1]["diff"]["pii_tags"] == ["email", "ssn"]
+
+
 def test_shared_engine_contract_preserves_lossless_evidence_envelope(
     engine_bundle: tuple[Any, str, str],
 ) -> None:

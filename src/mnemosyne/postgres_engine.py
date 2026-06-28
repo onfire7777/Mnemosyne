@@ -25,6 +25,12 @@ from mnemosyne.access_policy import (
 )
 from mnemosyne.calibration import CalibrationSet, conformal_threshold, should_abstain
 from mnemosyne.consciousness import RealityMonitor
+from mnemosyne.engine import (
+    _normalise_privacy_tags,
+    _privacy_backfill_access_policy,
+    _privacy_backfill_controls,
+    _privacy_backfill_metadata,
+)
 from mnemosyne.ids import content_cid
 from mnemosyne.models import (
     Assertion,
@@ -554,6 +560,100 @@ class PostgresEngine:
                         "patch": metadata_patch,
                         "before_keys": before_keys,
                         "after_keys": sorted(_public_evidence_metadata(metadata).keys()),
+                        "source_type": row["source_type"],
+                    },
+                    source=source,
+                    trust_tier=row["trust_tier"],
+                    capability_tags=list(row["capability_tags"] or []),
+                )
+        return True
+
+    def backfill_evidence_privacy(
+        self,
+        tenant_id: str,
+        cid: str,
+        pii_tags: list[str],
+        branch: str = "main",
+        *,
+        pii_sensitivity: int = 3,
+        actor: str = "privacy_backfill",
+        source: str = "privacy_backfill",
+    ) -> bool:
+        tags = _normalise_privacy_tags(pii_tags)
+        db_tenant_id = _stable_uuid("tenant", tenant_id)
+        with self.connect() as conn:
+            with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                self._set_tenant(cur, db_tenant_id)
+                self._ensure_evidence_vector_schema(cur)
+                cur.execute(
+                    """
+                    SELECT metadata, source_type, trust_tier, capability_tags,
+                           sensitivity, access_policy, embedding_partition
+                    FROM evidence
+                    WHERE tenant_id = %s AND branch = %s AND cid = %s AND erased = false
+                    """,
+                    (db_tenant_id, branch, _cid_to_bytes(cid)),
+                )
+                row = cur.fetchone()
+                if row is None:
+                    return False
+                before = _privacy_backfill_controls(
+                    int(row["sensitivity"]),
+                    dict(row["access_policy"] or {}),
+                    dict(row["metadata"] or {}),
+                )
+                target_sensitivity = max(
+                    int(row["sensitivity"]),
+                    int(pii_sensitivity) if tags else int(row["sensitivity"]),
+                )
+                access_policy = _privacy_backfill_access_policy(
+                    dict(row["access_policy"] or {}),
+                    tenant_id=tenant_id,
+                    pii_tags=tags,
+                    target_sensitivity=target_sensitivity,
+                )
+                embedding_partition = vector_partition_for_item(
+                    sensitivity=target_sensitivity,
+                    access_policy=access_policy,
+                )
+                metadata = _privacy_backfill_metadata(
+                    dict(row["metadata"] or {}),
+                    access_policy=access_policy,
+                    pii_tags=tags,
+                    embedding_partition=embedding_partition,
+                )
+                cur.execute(
+                    """
+                    UPDATE evidence
+                    SET sensitivity = %s,
+                        access_policy = %s,
+                        metadata = %s,
+                        embedding_partition = %s,
+                        embedding = CASE WHEN %s = 'none' THEN NULL ELSE embedding END
+                    WHERE tenant_id = %s AND branch = %s AND cid = %s AND erased = false
+                    """,
+                    (
+                        target_sensitivity,
+                        self._jsonb(access_policy),
+                        self._jsonb(metadata),
+                        embedding_partition,
+                        embedding_partition,
+                        db_tenant_id,
+                        branch,
+                        _cid_to_bytes(cid),
+                    ),
+                )
+                self._audit(
+                    cur,
+                    db_tenant_id,
+                    actor,
+                    "backfill_evidence_privacy",
+                    cid,
+                    {
+                        "branch": branch,
+                        "pii_tags": tags,
+                        "before": before,
+                        "after": _privacy_backfill_controls(target_sensitivity, access_policy, metadata),
                         "source_type": row["source_type"],
                     },
                     source=source,

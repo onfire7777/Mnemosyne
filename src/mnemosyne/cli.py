@@ -1593,12 +1593,98 @@ def _privacy_operator_delete_corroboration(case: Mapping[str, Any]) -> dict[str,
 
 def cmd_privacy_backfill_report(args: argparse.Namespace) -> None:
     engine = load_engine(args)
-    exported = engine.export_tenant(args.tenant)
+    report = _privacy_backfill_scan(
+        engine,
+        tenant_id=args.tenant,
+        branch=str(args.branch),
+        pii_sensitivity=int(args.pii_sensitivity),
+        include_clean=bool(args.include_clean),
+    )
+    emit(report)
+    if args.fail_on_findings and not report["ok"]:
+        raise SystemExit(1)
+
+
+def cmd_privacy_backfill_apply(args: argparse.Namespace) -> None:
+    if not args.confirm_apply:
+        raise SystemExit("privacy-backfill-apply requires --confirm-apply")
+    engine = load_engine(args)
+    branch = str(args.branch)
+    pii_sensitivity = int(args.pii_sensitivity)
+    before = _privacy_backfill_scan(
+        engine,
+        tenant_id=args.tenant,
+        branch=branch,
+        pii_sensitivity=pii_sensitivity,
+        include_clean=False,
+    )
+    backfill = getattr(engine, "backfill_evidence_privacy", None)
+    if not callable(backfill):
+        raise SystemExit("configured engine does not support audited privacy backfill")
+    applied: list[dict[str, Any]] = []
+    failures: list[dict[str, Any]] = []
+    for finding in before["findings"]:
+        if not finding["needs_backfill"]:
+            continue
+        cid = finding.get("cid")
+        if not isinstance(cid, str) or not cid:
+            failures.append({"cid": cid, "reason": "missing_cid"})
+            continue
+        ok = bool(
+            backfill(
+                args.tenant,
+                cid,
+                list(finding["pii_tags"]),
+                branch=branch,
+                pii_sensitivity=pii_sensitivity,
+                actor=str(args.actor),
+                source="privacy_backfill_apply",
+            )
+        )
+        row = {key: finding[key] for key in ("cid", "content_sha256", "pii_tags", "recommended_sensitivity")}
+        row["applied"] = ok
+        applied.append(row)
+        if not ok:
+            failures.append({"cid": cid, "reason": "engine_update_failed"})
+    after = _privacy_backfill_scan(
+        engine,
+        tenant_id=args.tenant,
+        branch=branch,
+        pii_sensitivity=pii_sensitivity,
+        include_clean=False,
+    )
+    report = {
+        "ok": not failures and after["finding_count"] == 0,
+        "tenant_id": args.tenant,
+        "branch": branch,
+        "applied_count": len([item for item in applied if item["applied"]]),
+        "failed_count": len(failures),
+        "failures": failures,
+        "applied": applied,
+        "before": before,
+        "after": after,
+        "redaction": {
+            "raw_content_omitted": True,
+            "content_hash_sha256_reported": True,
+        },
+    }
+    emit(report)
+    if not report["ok"]:
+        raise SystemExit(1)
+
+
+def _privacy_backfill_scan(
+    engine: MemoryEngine,
+    *,
+    tenant_id: str,
+    branch: str,
+    pii_sensitivity: int,
+    include_clean: bool,
+) -> dict[str, Any]:
+    exported = engine.export_tenant(tenant_id)
     rows = exported.get("evidence")
     if not isinstance(rows, list):
         raise SystemExit("tenant export did not return evidence rows")
-    branch = str(args.branch)
-    pii_sensitivity = int(args.pii_sensitivity)
     findings: list[dict[str, Any]] = []
     tag_counts: dict[str, int] = {}
     scanned = 0
@@ -1610,16 +1696,16 @@ def cmd_privacy_backfill_report(args: argparse.Namespace) -> None:
         scanned += 1
         content = str(row.get("content") or "")
         privacy = classify_privacy(content, residency=_row_residency(row))
-        if not privacy.pii_tags and not args.include_clean:
+        if not privacy.pii_tags and not include_clean:
             continue
         for tag in privacy.pii_tags:
             tag_counts[tag] = tag_counts.get(tag, 0) + 1
         finding = _privacy_backfill_row(row, privacy.pii_tags, pii_sensitivity=pii_sensitivity)
-        if finding["needs_backfill"] or args.include_clean:
+        if finding["needs_backfill"] or include_clean:
             findings.append(finding)
-    report = {
+    return {
         "ok": not findings,
-        "tenant_id": args.tenant,
+        "tenant_id": tenant_id,
         "branch": branch,
         "scanned_evidence": scanned,
         "finding_count": len([item for item in findings if item["needs_backfill"]]),
@@ -1635,9 +1721,6 @@ def cmd_privacy_backfill_report(args: argparse.Namespace) -> None:
             "content_hash_sha256_reported": True,
         },
     }
-    emit(report)
-    if args.fail_on_findings and not report["ok"]:
-        raise SystemExit(1)
 
 
 def _privacy_backfill_row(row: Mapping[str, Any], pii_tags: list[str], *, pii_sensitivity: int) -> dict[str, Any]:
@@ -14308,6 +14391,14 @@ def build_parser() -> argparse.ArgumentParser:
     privacy_backfill_report.add_argument("--include-clean", action="store_true")
     privacy_backfill_report.add_argument("--fail-on-findings", action="store_true")
     privacy_backfill_report.set_defaults(func=cmd_privacy_backfill_report)
+
+    privacy_backfill_apply = sub.add_parser("privacy-backfill-apply")
+    privacy_backfill_apply.add_argument("--tenant", required=True)
+    privacy_backfill_apply.add_argument("--branch", default="main")
+    privacy_backfill_apply.add_argument("--pii-sensitivity", type=int, default=3)
+    privacy_backfill_apply.add_argument("--actor", default="operator")
+    privacy_backfill_apply.add_argument("--confirm-apply", action="store_true")
+    privacy_backfill_apply.set_defaults(func=cmd_privacy_backfill_apply)
 
     privacy_ops_check = sub.add_parser("privacy-ops-check")
     privacy_ops_check.add_argument("--bundle", help="Path to production privacy/KMS/residency evidence bundle")

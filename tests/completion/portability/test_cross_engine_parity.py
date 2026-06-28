@@ -318,6 +318,50 @@ def test_parity_update_evidence_metadata() -> None:
     assert local["metadata"]["lifecycle"]["tier"] == "abstractive_gist"
 
 
+def test_parity_backfill_evidence_privacy() -> None:
+    harness = _harness("privacy-backfill")
+
+    def scenario(engine: Any, tenant: str, user: str) -> dict[str, Any]:
+        cid = engine.append_evidence(
+            _evidence(
+                tenant,
+                user,
+                "Portability privacy backfill target.",
+                source_type="legacy-privacy-contract",
+                sensitivity=0,
+            )
+        )
+        updated = engine.backfill_evidence_privacy(
+            tenant,
+            cid,
+            ["email", "ssn", "email"],
+            pii_sensitivity=3,
+        )
+        recalled = engine.get_evidence(tenant, cid)
+        audit = [
+            row
+            for row in engine.export_tenant(tenant)["audit_log"]
+            if row["op"] == "backfill_evidence_privacy"
+        ]
+        return {
+            "updated": updated,
+            "sensitivity": recalled.sensitivity,
+            "data_class": recalled.access_policy.get("data_class"),
+            "policy_max_sensitivity": recalled.access_policy.get("max_sensitivity"),
+            "pii_tags": recalled.metadata["privacy"]["pii_tags"],
+            "embedding_partition": recalled.metadata["embedding_partition"],
+            "audit_source": audit[-1]["source"] if audit else None,
+        }
+
+    local = harness.run("backfill_evidence_privacy", scenario)
+    assert local["updated"] is True
+    assert local["sensitivity"] == 3
+    assert local["data_class"] == "pii"
+    assert local["policy_max_sensitivity"] == 3
+    assert local["pii_tags"] == ["email", "ssn"]
+    assert local["embedding_partition"] == "private"
+
+
 # --------------------------------------------------------------- assertions / TMS
 
 
