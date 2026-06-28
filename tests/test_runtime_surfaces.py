@@ -1540,7 +1540,7 @@ def test_mcp_server_honors_object_encryption_and_residency_config(tmp_path: Path
 
     assert raw_objects
     assert all(b"mcp private payload bytes" not in raw for raw in raw_objects)
-    assert evidence["access_policy"]["residency"] == "eu"
+    assert evidence["metadata"]["privacy"]["residency"] == "eu"
     assert "residency:eu" in evidence["capability_tags"]
     assert rejected["result"]["isError"] is True
     assert "not allowed by this runtime" in rejected["result"]["content"][0]["text"]
@@ -1596,8 +1596,8 @@ def test_mcp_server_enforces_cross_region_residency_transfers(tmp_path: Path) ->
 
     assert denied["result"]["isError"] is True
     assert "cross-region residency transfer" in denied["result"]["content"][0]["text"]
-    assert evidence["access_policy"]["runtime_residency"] == "us"
-    assert evidence["access_policy"]["cross_region_transfer"] is True
+    assert evidence["metadata"]["privacy"]["runtime_residency"] == "us"
+    assert evidence["metadata"]["privacy"]["cross_region_transfer"] is True
 
 
 def test_mcp_server_requires_runtime_residency_when_configured(tmp_path: Path) -> None:
@@ -1649,8 +1649,8 @@ def test_mcp_server_requires_runtime_residency_when_configured(tmp_path: Path) -
 
     assert denied["result"]["isError"] is True
     assert "runtime residency is required" in denied["result"]["content"][0]["text"]
-    assert evidence["access_policy"]["runtime_residency"] == "eu"
-    assert evidence["access_policy"]["cross_region_transfer"] is False
+    assert evidence["metadata"]["privacy"]["runtime_residency"] == "eu"
+    assert evidence["metadata"]["privacy"]["cross_region_transfer"] is False
 
 
 def test_mcp_server_reports_residency_policy(tmp_path: Path) -> None:

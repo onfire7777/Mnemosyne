@@ -298,6 +298,351 @@ def apply_relation_redactions(
     return apply_text_redactions(f"{source} {predicate} {target}", access_policy, decision)
 
 
+def apply_record_redactions(
+    record: Mapping[str, Any],
+    access_policy: Mapping[str, Any] | None,
+    decision: AccessDecision,
+    *,
+    redactable_keys: Sequence[str] | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Redact structured export fields while preserving the record envelope."""
+
+    copied = dict(record)
+    metadata = _redaction_metadata(decision)
+    if not decision.redacted:
+        return copied, metadata
+    fields = _str_list((access_policy or {}).get("redact_fields"))
+    keys = tuple(redactable_keys or copied.keys())
+    if not fields:
+        placeholder, metadata = _redaction_placeholder((), metadata)
+        for key in keys:
+            if key in copied:
+                copied[key] = placeholder
+        return copied, metadata
+
+    structured = _redact_structured_value({key: copied.get(key) for key in keys if key in copied}, fields)
+    if structured is None:
+        placeholder, metadata = _redaction_placeholder(fields, metadata)
+        for key in keys:
+            if key in copied:
+                copied[key] = placeholder
+        return copied, metadata
+    redacted_record, structured_metadata = structured
+    metadata.update(structured_metadata)
+    for key, value in redacted_record.items():
+        copied[key] = value
+    return copied, metadata
+
+
+def filter_export_for_context(
+    exported: Mapping[str, Any],
+    context: Mapping[str, Any],
+    *,
+    policy_max_sensitivity: int,
+) -> dict[str, Any]:
+    """Return a caller-scoped export with explicit omission/redaction disclosure."""
+
+    tenant_id = str(exported.get("tenant_id") or context.get("tenant_id") or context.get("tenant") or "")
+    ctx = dict(context)
+    if tenant_id:
+        ctx.setdefault("tenant_id", tenant_id)
+        ctx.setdefault("tenant", tenant_id)
+    omitted: dict[str, int] = {}
+    omitted_by_reason: dict[str, dict[str, int]] = {}
+    redacted: dict[str, int] = {}
+
+    def omit(collection: str, reason: str = "filtered") -> None:
+        omitted[collection] = omitted.get(collection, 0) + 1
+        reasons = omitted_by_reason.setdefault(collection, {})
+        reasons[reason] = reasons.get(reason, 0) + 1
+
+    def record_redaction(collection: str, privacy: Mapping[str, Any]) -> None:
+        if bool(privacy.get("redacted")):
+            redacted[collection] = redacted.get(collection, 0) + 1
+
+    evidence_by_cid: dict[str, Mapping[str, Any]] = {
+        str(item.get("cid")): item
+        for item in exported.get("evidence", [])
+        if isinstance(item, Mapping) and item.get("cid")
+    }
+    allowed_evidence_cids: set[str] = set()
+
+    def source_sensitivity(row: Mapping[str, Any]) -> int:
+        sensitivities: list[int] = []
+        if row.get("sensitivity") is not None:
+            sensitivities.append(_int_or_zero(row.get("sensitivity")))
+        for cid in _str_list(row.get("source_evidence_cids")):
+            source = evidence_by_cid.get(cid)
+            if source is not None:
+                sensitivities.append(_int_or_zero(source.get("sensitivity")))
+        return max(sensitivities or [0])
+
+    def source_denial_reason(row: Mapping[str, Any]) -> str | None:
+        for cid in _str_list(row.get("source_evidence_cids")):
+            if cid not in evidence_by_cid:
+                return "source_evidence_missing"
+            if cid not in allowed_evidence_cids:
+                return "source_evidence_denied"
+        return None
+
+    def attach_privacy(record: Mapping[str, Any], privacy: Mapping[str, Any]) -> dict[str, Any]:
+        copied = dict(record)
+        copied["privacy"] = dict(privacy)
+        return copied
+
+    def scrub(record: Mapping[str, Any], drop_keys: Sequence[str]) -> dict[str, Any]:
+        copied = dict(record)
+        for key in drop_keys:
+            copied.pop(key, None)
+        return copied
+
+    def decision_for(
+        row: Mapping[str, Any],
+        *,
+        sensitivity: int,
+        status: str = "active",
+        erased: bool = False,
+    ) -> AccessDecision:
+        return may_read_item(
+            item_tenant_id=str(row.get("tenant_id") or tenant_id),
+            sensitivity=int(sensitivity),
+            access_policy=row.get("access_policy") if isinstance(row.get("access_policy"), Mapping) else {},
+            context=ctx,
+            policy_max_sensitivity=policy_max_sensitivity,
+            status=status,
+            erased=erased,
+        )
+
+    filtered_evidence: list[dict[str, Any]] = []
+    for item in exported.get("evidence", []):
+        if not isinstance(item, Mapping):
+            omit("evidence", "invalid_record")
+            continue
+        decision = decision_for(
+            item,
+            sensitivity=_int_or_zero(item.get("sensitivity")),
+            status="active",
+            erased=bool(item.get("erased")),
+        )
+        if not decision.allowed:
+            omit("evidence", decision.reason)
+            continue
+        policy = item.get("access_policy") if isinstance(item.get("access_policy"), Mapping) else {}
+        record = scrub(item, ("access_policy", "embedding"))
+        content, privacy = apply_text_redactions(str(record.get("content") or ""), policy, decision)
+        record["content"] = content
+        if decision.redacted:
+            for field in _str_list(policy.get("redact_fields")):
+                if field in record and field != "content":
+                    record[field] = f"[REDACTED:{field}]"
+                    privacy["redacted"] = True
+                    privacy["redaction_mode"] = "structured"
+        record = attach_privacy(record, privacy)
+        record_redaction("evidence", privacy)
+        filtered_evidence.append(record)
+        if record.get("cid"):
+            allowed_evidence_cids.add(str(record["cid"]))
+
+    def filter_assertions() -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        allowed_assertion_ids.clear()
+        for item in exported.get("assertions", []):
+            if not isinstance(item, Mapping):
+                omit("assertions", "invalid_record")
+                continue
+            source_denial = source_denial_reason(item)
+            if source_denial:
+                omit("assertions", source_denial)
+                continue
+            decision = decision_for(
+                item,
+                sensitivity=source_sensitivity(item),
+                status=str(item.get("status") or "candidate"),
+            )
+            if not decision.allowed:
+                omit("assertions", decision.reason)
+                continue
+            text, privacy = apply_statement_redactions(
+                subject=str(item.get("subject") or ""),
+                predicate=str(item.get("predicate") or ""),
+                object_value=str(item.get("object") or ""),
+                access_policy=item.get("access_policy") if isinstance(item.get("access_policy"), Mapping) else {},
+                decision=decision,
+            )
+            record = scrub(
+                item,
+                (
+                    "access_policy",
+                    "access_count",
+                    "calibration",
+                    "justification_id",
+                    "last_accessed",
+                    "scope",
+                    "user_id",
+                ),
+            )
+            redacted_record = privacy.get("redacted_record")
+            if isinstance(redacted_record, Mapping):
+                record["subject"] = str(redacted_record.get("subject", record.get("subject", "")))
+                record["predicate"] = str(redacted_record.get("predicate", record.get("predicate", "")))
+                record["object"] = str(redacted_record.get("object", record.get("object", "")))
+            elif decision.redacted:
+                record["subject"] = text
+                record["predicate"] = "[REDACTED]"
+                record["object"] = "[REDACTED]"
+            record = attach_privacy(record, privacy)
+            record_redaction("assertions", privacy)
+            rows.append(record)
+            if record.get("id"):
+                allowed_assertion_ids.add(str(record["id"]))
+        return rows
+
+    allowed_assertion_ids: set[str] = set()
+    filtered_assertions = filter_assertions()
+
+    def filter_relations() -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        for item in exported.get("relations", []):
+            if not isinstance(item, Mapping):
+                omit("relations", "invalid_record")
+                continue
+            source_denial = source_denial_reason(item)
+            if source_denial:
+                omit("relations", source_denial)
+                continue
+            decision = decision_for(item, sensitivity=source_sensitivity(item), status="active")
+            if not decision.allowed:
+                omit("relations", decision.reason)
+                continue
+            text, privacy = apply_relation_redactions(
+                source=str(item.get("source") or ""),
+                predicate=str(item.get("predicate") or ""),
+                target=str(item.get("target") or ""),
+                access_policy=item.get("access_policy") if isinstance(item.get("access_policy"), Mapping) else {},
+                decision=decision,
+            )
+            record = scrub(item, ("access_policy",))
+            redacted_record = privacy.get("redacted_record")
+            if isinstance(redacted_record, Mapping):
+                record["source"] = str(redacted_record.get("source", record.get("source", "")))
+                record["predicate"] = str(redacted_record.get("predicate", record.get("predicate", "")))
+                record["target"] = str(redacted_record.get("target", record.get("target", "")))
+            elif decision.redacted:
+                record["source"] = text
+                record["predicate"] = "[REDACTED]"
+                record["target"] = "[REDACTED]"
+            record = attach_privacy(record, privacy)
+            record_redaction("relations", privacy)
+            rows.append(record)
+        return rows
+
+    def filter_preferences() -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        for item in exported.get("preferences", []):
+            if not isinstance(item, Mapping):
+                omit("preferences", "invalid_record")
+                continue
+            source_denial = source_denial_reason(item)
+            if source_denial:
+                omit("preferences", source_denial)
+                continue
+            decision = decision_for(
+                item,
+                sensitivity=source_sensitivity(item),
+                status=str(item.get("status") or "active"),
+            )
+            if not decision.allowed:
+                omit("preferences", decision.reason)
+                continue
+            statement, privacy = apply_text_redactions(
+                str(item.get("statement") or ""),
+                item.get("access_policy") if isinstance(item.get("access_policy"), Mapping) else {},
+                decision,
+            )
+            record = scrub(item, ("access_policy", "exceptions", "scope", "user_id"))
+            record["statement"] = statement
+            record = attach_privacy(record, privacy)
+            record_redaction("preferences", privacy)
+            rows.append(record)
+        return rows
+
+    def filter_entities() -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        for item in exported.get("entities", []):
+            if not isinstance(item, Mapping):
+                omit("entities", "invalid_record")
+                continue
+            source_denial = source_denial_reason(item)
+            if source_denial:
+                omit("entities", source_denial)
+                continue
+            decision = decision_for(item, sensitivity=source_sensitivity(item), status="active")
+            if not decision.allowed:
+                omit("entities", decision.reason)
+                continue
+            record, privacy = apply_record_redactions(
+                item,
+                item.get("access_policy") if isinstance(item.get("access_policy"), Mapping) else {},
+                decision,
+                redactable_keys=("canonical", "type", "summary", "aliases"),
+            )
+            record = scrub(record, ("access_policy",))
+            record = attach_privacy(record, privacy)
+            record_redaction("entities", privacy)
+            rows.append(record)
+        return rows
+
+    filtered_relations = filter_relations()
+    filtered_preferences = filter_preferences()
+    filtered_entities = filter_entities()
+    for item in exported.get("justifications", []):
+        if not isinstance(item, Mapping):
+            omit("justifications", "invalid_record")
+            continue
+        omit("justifications", "derived_trace_withheld")
+
+    for item in exported.get("contradictions", []):
+        if not isinstance(item, Mapping):
+            omit("contradictions", "invalid_record")
+            continue
+        omit("contradictions", "derived_trace_withheld")
+
+    filtered = {
+        "tenant_id": tenant_id,
+        "evidence": filtered_evidence,
+        "assertions": filtered_assertions,
+        "relations": filtered_relations,
+        "preferences": filtered_preferences,
+        "calibrations": [dict(item) for item in exported.get("calibrations", []) if isinstance(item, Mapping)],
+        "entities": filtered_entities,
+        "justifications": [],
+        "contradictions": [],
+        "audit_log": [],
+        "deletion_log": [],
+        "merge_log": [],
+    }
+    for log_name in ("audit_log", "deletion_log", "merge_log"):
+        for item in exported.get(log_name, []):
+            if isinstance(item, Mapping):
+                omit(log_name, "raw_log_withheld")
+
+    disclosure = {
+        "filtered": True,
+        "tenant_id": tenant_id,
+        "role": role_for_context(ctx),
+        "effective_max_sensitivity": effective_max_sensitivity(ctx, policy_max_sensitivity),
+        "omitted": {key: omitted[key] for key in sorted(omitted)},
+        "redacted": {key: redacted[key] for key in sorted(redacted)},
+        "omitted_by_reason": {
+            collection: {reason: reasons[reason] for reason in sorted(reasons)}
+            for collection, reasons in sorted(omitted_by_reason.items())
+        },
+        "logs": "audit_log, deletion_log, and merge_log are withheld from filtered exports; use internal raw export with an approved operator context for custody review.",
+    }
+    filtered["disclosure"] = disclosure
+    return filtered
+
+
 def merge_access_policies(policies: Sequence[Mapping[str, Any] | None], *, tenant_id: str | None = None) -> dict[str, Any]:
     """Merge source policies in the most restrictive direction."""
 
@@ -518,6 +863,13 @@ def _residency_allows(policy: Mapping[str, Any], context: Mapping[str, Any]) -> 
         return False
     transfer_set = _str_set(policy.get("allowed_residency_transfers"))
     return bool(transfer_set and context_set <= transfer_set)
+
+
+def _int_or_zero(value: Any) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _intersects_if_policy_set(policy_value: Any, context_value: Any, *, allow_absent_context: bool = False) -> bool:

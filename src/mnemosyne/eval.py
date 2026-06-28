@@ -114,7 +114,7 @@ def run_seed_suite() -> list[EvalOutcome]:
         )
     )
     tools.forget(tenant, erase_cid)
-    exported = tools.export(tenant)
+    exported = engine.export_tenant(tenant)
     status = next(item["status"] for item in exported["assertions"] if item["id"] == assertion_id)
     outcomes.append(
         EvalOutcome(

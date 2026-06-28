@@ -214,6 +214,7 @@ This is the honesty section: **policy target ≠ current enforcement.** Conforma
 - Prefetch uses the same access context as retrieval, so warmed results cannot contain rows above the caller's effective role/policy boundary.
 - Derived summaries and candidates use a most-restrictive `access_policy` merge instead of first-source inheritance: role/purpose/principal constraints intersect; required capabilities and redaction fields union; raw-role and expiry take the stricter value.
 - Candidate redaction is wired before return/disclosure for label-style text, structured JSON evidence keys/dotted paths, and assertion/relation structured fields (`subject`/`predicate`/`object`, `source`/`predicate`/`target`). Relation access policies are checked before graph traversal, and relation hit metadata is masked alongside visible text. Where a requested structured field cannot be located safely, the returned text degrades to a field-redacted placeholder.
+- Public export-backed reads now use caller-scoped disclosure views instead of raw snapshots. `export_tenant_filtered()` applies the shared read predicate, omits inaccessible source-backed derivatives, withholds raw policy/log internals, preserves only allowed provenance, masks evidence/assertion/relation/preference/entity fields where `redact_fields` requires it, and reports omission/redaction counts under `disclosure`. `MemoryTools.export`, `MemoryTools.get`, CLI `export`, CLI `get`, and `graph-timeline` use this filtered path; raw `export_tenant()`, `export_all()`, and `to_json()` remain internal full-fidelity snapshot APIs for persistence, recompute, and custody review.
 - Ingest effective-sensitivity `max` escalation — `ingestion.py:152`.
 - Consolidation `max` sensitivity inheritance — `consolidation.py:727`, `:1447`, `:1505`.
 - Residency enforce + deny-by-default transfer at ingest — `ingestion.py:107,114`.
@@ -222,7 +223,7 @@ This is the honesty section: **policy target ≠ current enforcement.** Conforma
 
 **Policy target, NOT yet fully enforced (tracked in the hardening backlog below):**
 - Legacy stores may still contain arbitrary JSON envelope keys from before write-time validation. Retrieval still fails closed on those rows, and rewrite/promotion paths now reject unsupported keys instead of silently dropping them.
-- Model-prompt gist substitution and filtered export semantics are still policy targets. Returned retrieval text/metadata masking is wired for structured JSON and core assertion/relation fields, but export paths still emit raw stored rows because they currently have no caller-scoped disclosure filter.
+- Model-prompt gist substitution is still a policy target for prompt assembly; returned retrieval text/metadata masking and public export-backed disclosure filtering are wired, but prompt context assembly still needs a reduced-form substitution path.
 - The ingest PII detector still recognizes only email/phone automatically (§2.1); other sensitive categories require caller/upstream sensitivity floors.
 - S3/S4 embedding policy is not yet fully split into per-subject / non-shared vector partitions; retrieval blocks S4 raw disclosure, but index-time partitioning remains a schema/deployment hardening item.
 
@@ -230,7 +231,7 @@ This is the honesty section: **policy target ≠ current enforcement.** Conforma
 
 Each item is a gap between the policy target (§1–§8) and what is enforced today (§9.1):
 
-1. **Finish model-prompt gist substitution and filtered export disclosure** so context assembly and export APIs use caller-scoped reduced forms instead of raw stored rows where policy requires omission or abstraction.
+1. **Finish model-prompt gist substitution** so context assembly uses caller-scoped reduced forms instead of raw stored rows where policy requires omission or abstraction.
 2. **Split sensitive vector indexing** so S2+ embeddings live only in allowed per-subject / non-shared partitions and S3/S4 never enter a shared recoverable latent space.
 3. **Expand the ingest PII detector** beyond email/phone toward the §1 taxonomy (or require source-level `sensitivity` floors and document the residual risk).
 
@@ -283,7 +284,7 @@ A deployment conforms to this policy iff:
 - **`access_policy` only narrows;** unknown keys fail the write.
 - **S4 is pointer-only.** Never materialized, embedded, projected, or placed in the system prompt.
 - **`operator` sees metadata/fingerprints only;** raw S2+ needs a recorded break-glass grant (§4).
-- **Enforcement is stated honestly in §9.1** — write/read-time `access_policy` narrowing and structured returned-text masking are wired, while model-prompt gist substitution, filtered export disclosure, sensitive vector partitioning, and broader PII detection remain backlog (§9.2).
+- **Enforcement is stated honestly in §9.1** — write/read-time `access_policy` narrowing, structured returned-text masking, and public filtered export disclosure are wired, while model-prompt gist substitution, sensitive vector partitioning, and broader PII detection remain backlog (§9.2).
 - **Right-to-be-forgotten ⇒ §25**, not redaction. This lane routes; §25 erases.
 
 ---
