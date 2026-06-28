@@ -380,10 +380,12 @@ class ShadowWorkspaceController:
             spec = self.registry.specialist(self.dreamer_name)
             if str(spec.role) != "dreamer":
                 raise ValueError(f"{self.dreamer_name} must have dreamer role")
-            if not spec.budget.shadow_only:
-                raise ValueError(f"{self.dreamer_name} must remain shadow-only")
             if spec.budget.critical_path_allowed:
                 raise ValueError(f"{self.dreamer_name} must remain off the critical path")
+            if spec.budget.answer_authority_allowed:
+                raise ValueError(f"{self.dreamer_name} must not have answer authority")
+            if not spec.budget.promotion_gate_required:
+                raise ValueError(f"{self.dreamer_name} must require a promotion gate")
             dreamer = self.registry.build_specialist(self.dreamer_name, critical_path=False)
             if not isinstance(dreamer, SandboxedDreamer):
                 raise TypeError(f"{self.dreamer_name} must build a SandboxedDreamer")
@@ -879,7 +881,7 @@ def _dreamer_invocation(spec: Any, report: DreamReport) -> SpecialistInvocation:
     return SpecialistInvocation(
         name=spec.name,
         role=str(spec.role),
-        shadow_only=spec.budget.shadow_only and report.shadow_only,
+        shadow_only=report.shadow_only and not bool(spec.budget.answer_authority_allowed),
         critical_path=bool(report.critical_path),
         critical_path_allowed=bool(spec.budget.critical_path_allowed),
         output_summary={
@@ -887,6 +889,8 @@ def _dreamer_invocation(spec: Any, report: DreamReport) -> SpecialistInvocation:
             "source_count": report.source_count,
             "production_mutation": report.production_mutation,
             "promotion_gate_required": report.promotion_gate_required,
+            "answer_authority": False,
+            "answer_authority_allowed": bool(spec.budget.answer_authority_allowed),
             "candidate_reality_classes": sorted({candidate.reality_class for candidate in report.candidates}),
             "candidate_trust_tiers": sorted({candidate.trust_tier for candidate in report.candidates}),
             "promotion_evidence": _specialist_promotion_evidence(spec, report),
@@ -916,6 +920,8 @@ def _specialist_promotion_evidence(spec: Any, report: DreamReport) -> dict[str, 
         "specialist_role": str(spec.role),
         "provider_kind": str(getattr(spec, "provider_kind", "")),
         "shadow_only": report.shadow_only,
+        "answer_authority": False,
+        "answer_authority_allowed": bool(spec.budget.answer_authority_allowed),
         "critical_path": report.critical_path,
         "critical_path_allowed": bool(spec.budget.critical_path_allowed),
         "production_mutation": report.production_mutation,

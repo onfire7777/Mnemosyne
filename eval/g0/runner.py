@@ -288,6 +288,15 @@ G0_METRIC_SPECS: tuple[dict[str, Any], ...] = (
         "blueprint_metric": "G5 native workspace service without service.enabled toggle",
     },
     {
+        "id": "operational_toggle_retirement_contract",
+        "label": "operational toggle retirement contract",
+        "class": "target",
+        "direction": "increase",
+        "target": 1.0,
+        "target_op": ">=",
+        "blueprint_metric": "G5 P5 no operational shadow/enabled toggles",
+    },
+    {
         "id": "always_on_rumination_rate",
         "label": "always-on rumination rate",
         "class": "guardrail",
@@ -852,6 +861,7 @@ def _build_metric(spec: dict[str, Any], sources: dict[str, Source]) -> dict[str,
         "shadow_workspace_rumination_rate": _metric_shadow_workspace_rumination_rate,
         "always_on_heartbeat_contract": _metric_shadow_workspace_named_contract,
         "workspace_service_no_enable_toggle_contract": _metric_shadow_workspace_named_contract,
+        "operational_toggle_retirement_contract": _metric_shadow_workspace_named_contract,
         "always_on_rumination_rate": _metric_shadow_workspace_named_contract,
         "heartbeat_compute_bounded_contract": _metric_shadow_workspace_named_contract,
         "heartbeat_compute_reported_contract": _metric_shadow_workspace_named_contract,
@@ -1375,6 +1385,12 @@ def _metric_shadow_workspace_named_contract(spec: dict[str, Any], sources: dict[
             "Measured by the G0 P5 workspace fixture. Passing requires the native "
             "workspace service payload to omit the former service.enabled toggle "
             "while preserving explicit running lifecycle and bounded telemetry."
+        ),
+        "operational_toggle_retirement_contract": (
+            "Measured by the G0 P5 source-inspection fixture. Passing requires "
+            "SpecialistBudget.shadow_only, ShadowWorkspaceService.enabled, and "
+            "controller budget.shadow_only branches to be absent while the "
+            "fail-closed circuit breaker remains present."
         ),
         "always_on_rumination_rate": (
             "Measured by the G0 P3 workspace fixture as failed always-on "

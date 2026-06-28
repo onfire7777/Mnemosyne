@@ -44,6 +44,6 @@ Two interchangeable backends sit behind one contract: an in‑memory **Local** e
 
 ## What is implemented, but still gated/pending
 
-Mnemosyne is no longer only a passive substrate. The typed specialist registry, sandboxed dreamer, shadow workspace controller/service, Standing signal, always-on heartbeat safety floor, earned-autonomy credentials, and the P5 H8/H12 cascade/observability pre-check are implemented and G0-gated. What remains open is final P5 no-toggle retirement behind the owner checkpoint plus Tier B operator-captured production evidence for v1.0 parity.
+Mnemosyne is no longer only a passive substrate. The typed specialist registry, sandboxed dreamer, workspace controller/service, Standing signal, always-on heartbeat safety floor, earned-autonomy credentials, and the P5 H8/H12 cascade/observability plus operational-toggle retirement gates are implemented and G0-gated. What remains open is Tier B operator-captured production evidence for v1.0 parity.
 
 The loop, generative replay, and self-recursive paths remain reliability-gated, low-trust, and shadow/advisory unless a preregistered gate promotes a narrow behavior without guardrail regression. This document describes functional architecture only; it never claims phenomenal or subjective consciousness.

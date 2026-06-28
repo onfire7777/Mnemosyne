@@ -162,6 +162,9 @@ def test_g0_report_emits_every_spec_metric_and_source_hashes() -> None:
     assert metrics["workspace_service_no_enable_toggle_contract"]["status"] == "measured"
     assert metrics["workspace_service_no_enable_toggle_contract"]["value"] == 1.0
     assert metrics["workspace_service_no_enable_toggle_contract"]["source_id"] == "shadow_workspace_eval"
+    assert metrics["operational_toggle_retirement_contract"]["status"] == "measured"
+    assert metrics["operational_toggle_retirement_contract"]["value"] == 1.0
+    assert metrics["operational_toggle_retirement_contract"]["source_id"] == "shadow_workspace_eval"
     assert metrics["always_on_rumination_rate"]["value"] == 0.0
     assert metrics["heartbeat_compute_bounded_contract"]["value"] == 1.0
     assert metrics["heartbeat_compute_reported_contract"]["value"] == 1.0
@@ -199,6 +202,7 @@ def test_g0_report_emits_every_spec_metric_and_source_hashes() -> None:
     assert report["computed_evidence"]["shadow_workspace_eval"]["shadow_workspace_contract"] == 1.0
     assert report["computed_evidence"]["shadow_workspace_eval"]["always_on_heartbeat_contract"] == 1.0
     assert report["computed_evidence"]["shadow_workspace_eval"]["workspace_service_no_enable_toggle_contract"] == 1.0
+    assert report["computed_evidence"]["shadow_workspace_eval"]["operational_toggle_retirement_contract"] == 1.0
     assert report["computed_evidence"]["shadow_workspace_eval"]["circuit_breaker_contract"] == 1.0
     assert report["computed_evidence"]["shadow_workspace_eval"]["workspace_broadcast_as_data_contract"] == 1.0
     assert report["computed_evidence"]["shadow_workspace_eval"]["self_generation_budget_rail_contract"] == 1.0
@@ -434,6 +438,7 @@ def test_g0_shadow_workspace_fixture_reports_bounded_stream_contract() -> None:
     assert report["shadow_workspace_contract"] == 1.0
     assert report["always_on_heartbeat_contract"] == 1.0
     assert report["workspace_service_no_enable_toggle_contract"] == 1.0
+    assert report["operational_toggle_retirement_contract"] == 1.0
     assert report["always_on_rumination_rate"] == 0.0
     assert report["heartbeat_compute_bounded_contract"] == 1.0
     assert report["heartbeat_compute_reported_contract"] == 1.0
@@ -450,6 +455,12 @@ def test_g0_shadow_workspace_fixture_reports_bounded_stream_contract() -> None:
     assert report["workspace"]["production_mutation"] is False
     assert report["workspace"]["promotion_gate_required"] is True
     assert "enabled" not in report["workspace"]["service"]
+    toggle_probe = report["operational_toggle_probe"]
+    assert toggle_probe["schema_version"] == "g0.operational-toggle-retirement.v1"
+    assert "shadow_only" not in toggle_probe["specialist_budget_fields"]
+    assert "enabled" not in toggle_probe["workspace_service_fields"]
+    assert "enabled" not in toggle_probe["workspace_service_report_fields"]
+    assert all(toggle_probe["checks"].values())
     assert report["workspace"]["service"]["running"] is True
     assert report["workspace"]["service"]["tick_count"] == report["workspace"]["service"]["proto_self_history_count"]
     assert report["workspace"]["service"]["tick_count"] == report["workspace"]["service"]["metacognitive_rows"]

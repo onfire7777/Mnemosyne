@@ -797,8 +797,11 @@ def test_specialist_registry_exposes_typed_roles_and_budgets() -> None:
     assert manifest["embedder.local"]["role"] == "embedder"
     assert manifest["embedder.local"]["budget"]["critical_path_allowed"] is True
     assert manifest["dreamer.shadow"]["role"] == "dreamer"
-    assert manifest["dreamer.shadow"]["budget"]["shadow_only"] is True
     assert manifest["dreamer.shadow"]["budget"]["critical_path_allowed"] is False
+    assert manifest["dreamer.shadow"]["budget"]["answer_authority_allowed"] is False
+    assert manifest["dreamer.shadow"]["budget"]["promotion_gate_required"] is True
+    assert "shadow_only" not in manifest["dreamer.shadow"]["budget"]
+    assert "low-groundedness" in manifest["dreamer.shadow"]["tags"]
     assert [spec.name for spec in registry.specialists_by_role("dreamer")] == ["dreamer.shadow"]
 
 
@@ -823,8 +826,8 @@ def test_specialist_registry_builds_modules_and_blocks_shadow_critical_path() ->
 
 
 def test_specialist_registry_rejects_invalid_specs_and_duplicate_names() -> None:
-    with pytest.raises(ValueError, match="shadow-only specialists"):
-        SpecialistBudget(shadow_only=True, critical_path_allowed=True)
+    with pytest.raises(ValueError, match="answer-authority specialists"):
+        SpecialistBudget(answer_authority_allowed=True, critical_path_allowed=False)
 
     registry = ProviderRegistry()
     spec = SpecialistModuleSpec(

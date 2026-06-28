@@ -8,6 +8,7 @@ answer critical path.
 
 from __future__ import annotations
 
+import ast
 import json
 from datetime import UTC, datetime
 from pathlib import Path
@@ -57,6 +58,9 @@ def run_shadow_workspace_eval(*, repo_root: Path | None = None) -> dict[str, Any
     contract_checks = _contract_checks(payload, dataset.get("contract_expected", {}))
     service_checks = _service_checks(service_payload)
     service_no_enable_contract = 1.0 if service_checks.get("native_no_enable_toggle") is True else 0.0
+    operational_toggle_probe = _operational_toggle_probe(repo_root)
+    operational_toggle_checks = operational_toggle_probe["checks"]
+    operational_toggle_contract = 1.0 if all(operational_toggle_checks.values()) else 0.0
     advisory_checks = _advisory_checks(advisory, dataset)
     advisory_promotion_probe = _workspace_advisory_promotion_probe(tenant)
     advisory_promotion_checks = advisory_promotion_probe["checks"]
@@ -78,6 +82,7 @@ def run_shadow_workspace_eval(*, repo_root: Path | None = None) -> dict[str, Any
     all_contract_checks = {
         **contract_checks,
         **{f"service_{key}": value for key, value in service_checks.items()},
+        **{f"operational_toggle_{key}": value for key, value in operational_toggle_checks.items()},
         **{f"advisory_{key}": value for key, value in advisory_checks.items()},
         **{f"advisory_promotion_{key}": value for key, value in advisory_promotion_checks.items()},
         **{f"retrieval_controller_{key}": value for key, value in retrieval_controller_checks.items()},
@@ -139,6 +144,7 @@ def run_shadow_workspace_eval(*, repo_root: Path | None = None) -> dict[str, Any
         "rumination_rate": rumination_rate,
         "shadow_workspace_contract": 1.0 if all(_flatten_bool_checks(all_contract_checks)) else 0.0,
         "workspace_service_no_enable_toggle_contract": service_no_enable_contract,
+        "operational_toggle_retirement_contract": operational_toggle_contract,
         "always_on_heartbeat_contract": always_on_contract,
         "always_on_rumination_rate": rumination_rate,
         "heartbeat_compute_bounded_contract": 1.0 if heartbeat_checks["compute_bounded"] else 0.0,
@@ -179,6 +185,7 @@ def run_shadow_workspace_eval(*, repo_root: Path | None = None) -> dict[str, Any
                 "trace": payload["trace"],
         },
         "workspace_consolidation_advisory": advisory,
+        "operational_toggle_probe": operational_toggle_probe,
         "workspace_advisory_promotion_probe": advisory_promotion_probe,
         "workspace_retrieval_controller_probe": retrieval_controller_probe,
         "rumination_probe": rumination_payload,
@@ -209,6 +216,55 @@ def _service_checks(payload: dict[str, Any]) -> dict[str, bool]:
         "proto_self_history_complete": len(proto_history) == len(trace),
         "metacognition_rows_complete": len(rows) == len(trace),
     }
+
+
+def _operational_toggle_probe(repo_root: Path) -> dict[str, Any]:
+    """Inspect source for the Phase 7 P5 operational-toggle retirement contract."""
+
+    providers_path = repo_root / "src/mnemosyne/providers/__init__.py"
+    workspace_path = repo_root / "src/mnemosyne/workspace.py"
+    providers_text = providers_path.read_text(encoding="utf-8")
+    workspace_text = workspace_path.read_text(encoding="utf-8")
+    budget_fields = _class_field_names(providers_path, "SpecialistBudget")
+    service_fields = _class_field_names(workspace_path, "ShadowWorkspaceService")
+    service_report_fields = _class_field_names(workspace_path, "ShadowWorkspaceServiceReport")
+    checks = {
+        "specialist_budget_shadow_only_field_absent": "shadow_only" not in budget_fields,
+        "specialist_budget_answer_authority_field_present": "answer_authority_allowed" in budget_fields,
+        "specialist_budget_promotion_gate_field_present": "promotion_gate_required" in budget_fields,
+        "workspace_service_enabled_field_absent": "enabled" not in service_fields,
+        "workspace_service_report_enabled_field_absent": "enabled" not in service_report_fields,
+        "controller_budget_shadow_branch_absent": "budget.shadow_only" not in workspace_text,
+        "controller_authority_gate_present": "answer_authority_allowed" in workspace_text
+        and "promotion_gate_required" in workspace_text,
+        "fail_closed_circuit_breaker_preserved": "circuit_breaker_tripped" in workspace_text
+        and "evidence_only_fallback" in workspace_text
+        and "self_generation_frozen" in workspace_text,
+        "provider_manifest_shadow_budget_absent": '"shadow_only"' not in providers_text
+        and "'shadow_only'" not in providers_text,
+    }
+    return {
+        "schema_version": "g0.operational-toggle-retirement.v1",
+        "scope": "source-inspection",
+        "providers_path": "src/mnemosyne/providers/__init__.py",
+        "workspace_path": "src/mnemosyne/workspace.py",
+        "specialist_budget_fields": budget_fields,
+        "workspace_service_fields": service_fields,
+        "workspace_service_report_fields": service_report_fields,
+        "checks": checks,
+    }
+
+
+def _class_field_names(path: Path, class_name: str) -> list[str]:
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef) and node.name == class_name:
+            fields: list[str] = []
+            for item in node.body:
+                if isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name):
+                    fields.append(item.target.id)
+            return sorted(fields)
+    return []
 
 
 def _items_from_cycle(cycle: dict[str, Any]) -> list[WorkspaceItem]:

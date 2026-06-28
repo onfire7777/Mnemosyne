@@ -1,8 +1,8 @@
 # Mnemosyne G0 Benchmark Report
 
-- Generated: `2026-06-28T09:22:35.294945+00:00`
+- Generated: `2026-06-28T16:02:28.181664+00:00`
 - Baseline: `baseline-0` at `67c229ace12313a8b8a6c6ede99d0a2096bae178`
-- Gate ready: **False** (70/71 metrics measured)
+- Gate ready: **False** (71/72 metrics measured)
 
 ## Metrics
 
@@ -26,7 +26,7 @@
 | standing_evidence_dominance_gap | guardrail | measured | 0.95 | >= 0.02 | standing_calibration_eval |
 | poison_block_rate | guardrail | measured | 1.0 | >= 0.95 | slo_v2_definitive |
 | fast_path_p95_ms | guardrail | measured | 92.1 | <= 400.0 | latency_bench |
-| deep_path_p95_ms | reported | measured | 2.692375 | reported | deep_latency_eval |
+| deep_path_p95_ms | reported | measured | 2.191291 | reported | deep_latency_eval |
 | cost_usd_per_1k_queries | reported | measured | 0.0 | reported | resource_usage_eval |
 | controller_watts_per_dollar | reported | missing |  | reported | resource_usage_eval |
 | dreamer_shadow_corroborated_candidate_yield | target | measured | 1.0 | reported | dreamer_eval |
@@ -36,6 +36,7 @@
 | shadow_workspace_contract | guardrail | measured | 1.0 | >= 1.0 | shadow_workspace_eval |
 | always_on_heartbeat_contract | target | measured | 1.0 | >= 1.0 | shadow_workspace_eval |
 | workspace_service_no_enable_toggle_contract | guardrail | measured | 1.0 | >= 1.0 | shadow_workspace_eval |
+| operational_toggle_retirement_contract | target | measured | 1.0 | >= 1.0 | shadow_workspace_eval |
 | always_on_rumination_rate | guardrail | measured | 0.0 | <= 0.0 | shadow_workspace_eval |
 | heartbeat_compute_bounded_contract | guardrail | measured | 1.0 | >= 1.0 | shadow_workspace_eval |
 | heartbeat_compute_reported_contract | guardrail | measured | 1.0 | >= 1.0 | shadow_workspace_eval |
@@ -116,9 +117,10 @@ Intentional missing metrics:
 | g5-earned-autonomy | eval/g0/preregistrations/g5-earned-autonomy.json | 2026-06-27T22:54:23.635288+00:00 | True | earned_autonomy_external_expansion | 0.0 | not_required |
 | g5-standing-byte-stable-parity | eval/g0/preregistrations/g5-standing-byte-stable-parity.json | 2026-06-27T20:04:06.834283+00:00 | True | standing_decision_divergence | 0.0 | not_required |
 | g5-standing-continuous | eval/g0/preregistrations/g5-standing-continuous.json | 2026-06-27T20:32:39.200301+00:00 | True | standing_calibration_error | 0.0 | not_required |
+| g5-toggle-retirement | eval/g0/preregistrations/g5-toggle-retirement.json | 2026-06-28T16:02:17.859982+00:00 | True | operational_toggle_retirement_contract | 1.0 | not_required |
 | g5-unified-substrate-cascade | eval/g0/preregistrations/g5-unified-substrate-cascade.json | 2026-06-27T23:14:43.650241+00:00 | True | standing_erasure_cascade_contract | 0.0 | not_required |
 
 ## Artifact Custody
 
-- Source commit at generation: `c8aa8bc4f0cba8e9d5e3912d864a711d56110ea1`
+- Source commit at generation: `75b9c5be865799759701bb32f4224618b0e986c4`
 - Note: Committed G0 reports are source-tree custody snapshots. The commit that contains a report cannot be embedded in that report before the commit exists; use git log to identify the containing artifact commit.

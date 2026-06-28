@@ -198,7 +198,8 @@ class SpecialistBudget:
     max_cost_usd: float = 0.0
     token_budget: int = 0
     critical_path_allowed: bool = False
-    shadow_only: bool = True
+    answer_authority_allowed: bool = False
+    promotion_gate_required: bool = False
 
     def __post_init__(self) -> None:
         if self.max_calls_per_task < 0:
@@ -209,8 +210,8 @@ class SpecialistBudget:
             raise ValueError("max_cost_usd must be non-negative")
         if self.token_budget < 0:
             raise ValueError("token_budget must be non-negative")
-        if self.shadow_only and self.critical_path_allowed:
-            raise ValueError("shadow-only specialists cannot be critical-path allowed")
+        if self.answer_authority_allowed and not self.critical_path_allowed:
+            raise ValueError("answer-authority specialists must be critical-path allowed")
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -357,7 +358,8 @@ def _critical_budget(
         max_cost_usd=max_cost_usd,
         token_budget=token_budget,
         critical_path_allowed=True,
-        shadow_only=False,
+        answer_authority_allowed=False,
+        promotion_gate_required=False,
     )
 
 
@@ -432,12 +434,19 @@ def _register_builtin_specialists(registry: ProviderRegistry) -> None:
             name="dreamer.shadow",
             role="dreamer",
             factory=_build_sandboxed_dreamer,
-            budget=SpecialistBudget(max_calls_per_task=1, max_latency_ms=1_000.0, token_budget=512),
+            budget=SpecialistBudget(
+                max_calls_per_task=1,
+                max_latency_ms=1_000.0,
+                token_budget=512,
+                critical_path_allowed=False,
+                answer_authority_allowed=False,
+                promotion_gate_required=True,
+            ),
             input_contract="retained evidence rows with CIDs",
             output_contract="low-trust replay candidates requiring promotion gate",
             provider_kind="shadow_local",
             description="Sandboxed generative replay specialist; never on answer critical path.",
-            tags=("generative-replay", "shadow-only", "g3"),
+            tags=("generative-replay", "low-groundedness", "g3"),
         )
     )
 
