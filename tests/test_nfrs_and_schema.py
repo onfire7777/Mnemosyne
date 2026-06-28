@@ -135,7 +135,7 @@ def test_canonical_schema_includes_all_blueprint_core_tables() -> None:
 def test_canonical_schema_partitions_sensitive_vector_indexes() -> None:
     schema = Path("sql/schema.sql").read_text(encoding="utf-8")
 
-    assert "embedding_partition TEXT NOT NULL DEFAULT 'public'" in schema
+    assert "embedding_partition TEXT NOT NULL DEFAULT 'none'" in schema
     assert "CHECK (embedding_partition IN ('public', 'private', 'none'))" in schema
     assert "evidence_embedding_public_hnsw" in schema
     assert "evidence_embedding_private_hnsw" in schema

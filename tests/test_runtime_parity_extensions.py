@@ -151,7 +151,21 @@ def test_command_model_providers_receive_prompt_boundary_for_untrusted_evidence(
 
     extractor = CommandCandidateExtractor([sys.executable, str(provider), str(requests_path)])
     summarizer = CommandEvidenceSummarizer([sys.executable, str(provider), str(requests_path)])
-    extracted = extractor.extract(TENANT, {"content": injection, "metadata": {"provider_context": {"job": "fact"}}}, [evidence])
+    extracted = extractor.extract(
+        TENANT,
+        {
+            "content": injection,
+            "metadata": {
+                "provider_context": {
+                    "job": "fact",
+                    "api_key": "provider-api-key-fixture",
+                    "authorization": "Bearer provider-secret",
+                    "nested": {"access_token": "nested-secret"},
+                }
+            },
+        },
+        [evidence],
+    )
     summarized = summarizer.summarize(TENANT, [evidence])
     requests = json.loads(requests_path.read_text(encoding="utf-8"))
 
@@ -173,11 +187,19 @@ def test_command_model_providers_receive_prompt_boundary_for_untrusted_evidence(
     assert injection not in serialized_requests
     assert "jane@example.com" not in serialized_requests
     assert "123-45-6789" not in serialized_requests
+    assert "provider-api-key-fixture" not in serialized_requests
+    assert "provider-secret" not in serialized_requests
+    assert "access_token" not in serialized_requests
+    assert "api_key" not in serialized_requests
+    assert "authorization" not in serialized_requests
     assert requests[0]["payload"]["content"] == "[untrusted-content-omitted]"
+    assert requests[0]["payload"]["metadata"]["provider_context"] == {"job": "fact"}
     for request in requests:
         evidence_packet = request["evidence"][0]
         assert evidence_packet["content_view"]["mode"] == "bounded_pii_redacted_gist"
         assert evidence_packet["content_view"]["raw_content_omitted"] is True
+        assert evidence_packet["content_view"]["raw_fingerprint_omitted"] is True
+        assert "raw_sha256" not in evidence_packet["content_view"]
         assert evidence_packet["content_view"]["control_directives_omitted"] is True
         assert set(evidence_packet["content_view"]["pii_tags_redacted"]) >= {"email", "ssn"}
         assert "Invoice total for [REDACTED:email] is $42." in evidence_packet["content"]
@@ -1819,6 +1841,44 @@ def test_externalized_binary_evidence_cid_includes_object_pointer(tmp_path) -> N
     )
 
     assert first.cid != second.cid
+    assert len(engine.evidence) == 2
+
+
+def test_ingestion_scopes_sensitive_predicted_cids_by_user(tmp_path) -> None:
+    engine = LocalMemoryEngine()
+    pipeline = IngestionPipeline(engine, LocalObjectStore(tmp_path / "objects"))
+    content = "Sensitive intake has SSN 123-45-6789 for patient@example.com."
+
+    first = pipeline.ingest(
+        IngestRequest(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="chat",
+            content=content,
+        )
+    )
+    duplicate = pipeline.ingest(
+        IngestRequest(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="chat",
+            content=content,
+        )
+    )
+    other_user = pipeline.ingest(
+        IngestRequest(
+            tenant_id=TENANT,
+            user_id=f"{USER}-other",
+            actor="user",
+            source_type="chat",
+            content=content,
+        )
+    )
+
+    assert duplicate.cid == first.cid
+    assert other_user.cid != first.cid
     assert len(engine.evidence) == 2
 
 

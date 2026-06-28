@@ -84,7 +84,7 @@ flowchart TB
         eng["engine.py · MemoryEngine Protocol<br/>+ LocalMemoryEngine · route() · RoutePlan"]
         pg["postgres_engine.py · PostgresEngine<br/>RLS · FTS · pgvector · recursive PPR · as_of()"]
         models["models.py · Evidence / Assertion / Relation / Hit"]
-        ids["ids.py · content_cid() · bytes_cid() · canonical_json()"]
+        ids["ids.py · evidence_cid() · content_cid()<br/>bytes_cid() · canonical_json()"]
         text["text.py · tokenize · lexical_score · hashing_embedding"]
     end
 
@@ -318,8 +318,13 @@ erDiagram
 **Cross-cutting design**
 
 - **Content addressing vs. embedding — distinct hashes.** `evidence.cid` is produced by
-  `ids.content_cid(content, metadata=None)` = `sha256(canonical_json({"content":…,"metadata":…}))`
-  (the raw-bytes variant is `ids.bytes_cid(data)`), giving dedup + tamper-evidence. The **local fallback
+  `ids.evidence_cid(...)`, a wrapper over `ids.content_cid(content, metadata=None)` =
+  `sha256(canonical_json({"content":…,"metadata":…}))`. S2+ evidence, and content with
+  built-in detected PII even when a direct caller forgot to raise sensitivity, adds `user_id`
+  to the CID scope so content-addressed dedup cannot confirm another subject's sensitive content;
+  S0/S1 non-PII remains tenant/source/modality scoped. Existing global/tombstoned rows retain
+  collision priority so immutable dedup and erased-replay blocking still hold. The raw-bytes variant is `ids.bytes_cid(data)`,
+  giving dedup + tamper-evidence. The **local fallback
   embedding** uses **BLAKE2b** per-token (`text.hashing_embedding`, §9) — a *different* algorithm from the
   SHA-256 CID. Projections cite `source_evidence_cids[]`, so every belief is traceable to raw evidence.
 - **Bitemporal:** `valid_from / valid_to` (plus `transaction_time` / `recorded_time` / `expired_at` on
@@ -362,7 +367,7 @@ flowchart LR
     GATE -->|reject| X1["dropped"]
     GATE -->|quarantine| QZ["quarantine pool (data-only)"]
     GATE -->|pass| ING["ingestion.py · build Evidence"]
-    ING --> CID["ids.content_cid()<br/>SHA-256 content address"]
+    ING --> CID["ids.evidence_cid()<br/>SHA-256 content address"]
     ING --> STORE["storage.py · externalize large<br/>payloads → content_pointer"]
     CID --> EV[("evidence row<br/>append-only")]
     EV --> ENQ["queue.py · enqueue CONSOLIDATE job"]

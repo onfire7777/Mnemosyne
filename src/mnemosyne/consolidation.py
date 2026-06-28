@@ -1709,6 +1709,27 @@ def _provider_prompt_boundary(role: str) -> dict[str, Any]:
 
 _PROVIDER_GIST_MAX_CHARS = 512
 _PROVIDER_GIST_MAX_WORDS = 80
+_PROVIDER_CONTEXT_SAFE_KEYS = frozenset(
+    {
+        "job",
+        "purpose",
+        "request_id",
+        "role",
+        "source",
+        "source_type",
+        "strategy",
+        "task",
+        "tenant_id",
+        "trace_id",
+    }
+)
+_SECRET_KEY_RE = re.compile(
+    r"(?:api[_-]?key|authorization|bearer|credential|client[_-]?secret|password|private[_-]?key|refresh[_-]?token|secret|token)",
+    re.I,
+)
+_SECRET_VALUE_RE = re.compile(
+    r"\b(?:Bearer\s+[A-Za-z0-9._~+/=-]+|sk-[A-Za-z0-9]{8,}|gh[pousr]_[A-Za-z0-9_]+|[A-Za-z0-9+/]{32,}={0,2})\b"
+)
 _CONTROL_MARKER_RE = re.compile(r"(?:^|\b)(?:system|developer|assistant|tool)\s*:", re.I)
 _CONTROL_DIRECTIVE_RE = re.compile(
     r"\b(ignore|disregard|override|forget|reveal|exfiltrate|execute|run|call|write|update|delete|"
@@ -1742,7 +1763,7 @@ def _provider_payload_metadata_view(metadata: Any) -> dict[str, Any]:
         view["provider_context"] = {
             str(key): _json_safe_provider_value(value)
             for key, value in provider_context.items()
-            if isinstance(key, str)
+            if isinstance(key, str) and str(key) in _PROVIDER_CONTEXT_SAFE_KEYS and _provider_safe_key(str(key))
         }
     return view
 
@@ -1797,7 +1818,7 @@ def _provider_content_gist(text: str) -> tuple[str, dict[str, Any]]:
     content_view = {
         "mode": "bounded_pii_redacted_gist",
         "raw_content_omitted": True,
-        "raw_sha256": sha256(raw.encode("utf-8")).hexdigest(),
+        "raw_fingerprint_omitted": True,
         "raw_chars": len(raw),
         "gist_chars": len(gist),
         "pii_tags_redacted": detect_pii_tags(raw),
@@ -1815,7 +1836,7 @@ def _json_safe_provider_value(value: Any) -> Any:
         return {
             str(key): _json_safe_provider_value(child)
             for key, child in value.items()
-            if isinstance(key, str) and not str(key).lower().endswith(("token", "secret", "password", "credential"))
+            if isinstance(key, str) and _provider_safe_key(str(key))
         }
     if isinstance(value, list):
         return [_json_safe_provider_value(child) for child in value[:32]]
@@ -1823,9 +1844,18 @@ def _json_safe_provider_value(value: Any) -> Any:
         return [_json_safe_provider_value(child) for child in value[:32]]
     if isinstance(value, (str, int, float, bool)) or value is None:
         if isinstance(value, str):
-            return redact_pii_text(value[:_PROVIDER_GIST_MAX_CHARS])
+            return _redact_provider_string(value)
         return value
     return str(value)[:_PROVIDER_GIST_MAX_CHARS]
+
+
+def _provider_safe_key(key: str) -> bool:
+    return not bool(_SECRET_KEY_RE.search(key))
+
+
+def _redact_provider_string(value: str) -> str:
+    redacted = redact_pii_text(value[:_PROVIDER_GIST_MAX_CHARS])
+    return _SECRET_VALUE_RE.sub("[secret-omitted]", redacted)
 
 
 class CommandCandidateExtractor:

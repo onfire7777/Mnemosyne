@@ -9614,6 +9614,48 @@ def test_cli_privacy_backfill_report_can_fail_closed(tmp_path: Path) -> None:
     assert report["findings"][0]["needs_backfill"] is True
 
 
+def test_cli_privacy_backfill_report_include_clean_stays_ok_on_clean_rows(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    seed_legacy_evidence(store, "Legacy row has no regulated personal data.")
+
+    result = run_raw_cli(
+        store,
+        "privacy-backfill-report",
+        "--tenant",
+        TENANT,
+        "--include-clean",
+        "--fail-on-findings",
+    )
+    report = json.loads(result.stdout)
+
+    assert result.returncode == 0
+    assert report["ok"] is True
+    assert report["finding_count"] == 0
+    assert len(report["findings"]) == 1
+    assert report["findings"][0]["needs_backfill"] is False
+
+
+def test_cli_privacy_backfill_rejects_pii_sensitivity_below_floor(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    seed_legacy_evidence(store, "Legacy row has SSN 123-45-6789.")
+
+    report = run_raw_cli(store, "privacy-backfill-report", "--tenant", TENANT, "--pii-sensitivity", "0")
+    apply = run_raw_cli(
+        store,
+        "privacy-backfill-apply",
+        "--tenant",
+        TENANT,
+        "--pii-sensitivity",
+        "0",
+        "--confirm-apply",
+    )
+
+    assert report.returncode == 1
+    assert "pii sensitivity must be at least 3" in report.stderr
+    assert apply.returncode == 1
+    assert "pii sensitivity must be at least 3" in apply.stderr
+
+
 def test_cli_privacy_backfill_apply_requires_explicit_confirmation(tmp_path: Path) -> None:
     store = tmp_path / "mnemosyne.json"
     seed_legacy_evidence(store, "Legacy row has SSN 123-45-6789.")

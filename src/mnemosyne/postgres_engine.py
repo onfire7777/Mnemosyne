@@ -31,7 +31,7 @@ from mnemosyne.engine import (
     _privacy_backfill_controls,
     _privacy_backfill_metadata,
 )
-from mnemosyne.ids import content_cid
+from mnemosyne.ids import evidence_cid, evidence_unscoped_cid
 from mnemosyne.models import (
     Assertion,
     Contradiction,
@@ -133,8 +133,10 @@ class PostgresEngine:
     @staticmethod
     def _ensure_evidence_vector_schema(cur: Any) -> None:
         cur.execute("ALTER TABLE evidence ADD COLUMN IF NOT EXISTS embedding VECTOR(1024)")
-        cur.execute("ALTER TABLE evidence ADD COLUMN IF NOT EXISTS embedding_partition TEXT NOT NULL DEFAULT 'public'")
-        cur.execute("ALTER TABLE assertions ADD COLUMN IF NOT EXISTS embedding_partition TEXT NOT NULL DEFAULT 'public'")
+        cur.execute("ALTER TABLE evidence ADD COLUMN IF NOT EXISTS embedding_partition TEXT NOT NULL DEFAULT 'none'")
+        cur.execute("ALTER TABLE assertions ADD COLUMN IF NOT EXISTS embedding_partition TEXT NOT NULL DEFAULT 'none'")
+        cur.execute("ALTER TABLE evidence ALTER COLUMN embedding_partition SET DEFAULT 'none'")
+        cur.execute("ALTER TABLE assertions ALTER COLUMN embedding_partition SET DEFAULT 'none'")
         cur.execute(
             """
             DO $$
@@ -156,6 +158,100 @@ class PostgresEngine:
             END $$;
             """
         )
+        cur.execute(
+            """
+            UPDATE evidence
+            SET embedding_partition = CASE
+                  WHEN erased
+                    OR sensitivity >= 4
+                    OR COALESCE(access_policy ? 'unknown', false)
+                    OR access_policy->'restricted' = 'true'::jsonb
+                    OR access_policy->'hold' = 'true'::jsonb
+                    OR access_policy->'embed_ok' = 'false'::jsonb
+                    OR access_policy ? 'allow_principals'
+                    OR access_policy ? 'redact_fields'
+                    OR access_policy ? 'min_role_for_raw'
+                    THEN 'none'
+                  WHEN sensitivity >= 2
+                    OR COALESCE(access_policy->>'data_class', '') <> ''
+                       AND COALESCE(access_policy->>'data_class', '') <> 'standard'
+                    THEN 'private'
+                  ELSE 'public'
+                END
+            WHERE embedding_partition IS NULL
+               OR embedding_partition NOT IN ('public', 'private', 'none')
+               OR (
+                    embedding_partition <> 'none'
+                    AND (
+                      erased
+                      OR sensitivity >= 4
+                      OR COALESCE(access_policy ? 'unknown', false)
+                      OR access_policy->'restricted' = 'true'::jsonb
+                      OR access_policy->'hold' = 'true'::jsonb
+                      OR access_policy->'embed_ok' = 'false'::jsonb
+                      OR access_policy ? 'allow_principals'
+                      OR access_policy ? 'redact_fields'
+                      OR access_policy ? 'min_role_for_raw'
+                    )
+                  )
+               OR (
+                    embedding_partition = 'public'
+                    AND (
+                      sensitivity >= 2
+                      OR COALESCE(access_policy->>'data_class', '') <> ''
+                         AND COALESCE(access_policy->>'data_class', '') <> 'standard'
+                    )
+                  )
+            """
+        )
+        cur.execute("UPDATE evidence SET embedding = NULL WHERE embedding_partition = 'none'")
+        cur.execute(
+            """
+            UPDATE assertions
+            SET embedding_partition = CASE
+                  WHEN status NOT IN ('active', 'candidate', 'contested')
+                    OR sensitivity >= 4
+                    OR COALESCE(access_policy ? 'unknown', false)
+                    OR access_policy->'restricted' = 'true'::jsonb
+                    OR access_policy->'hold' = 'true'::jsonb
+                    OR access_policy->'embed_ok' = 'false'::jsonb
+                    OR access_policy ? 'allow_principals'
+                    OR access_policy ? 'redact_fields'
+                    OR access_policy ? 'min_role_for_raw'
+                    THEN 'none'
+                  WHEN sensitivity >= 2
+                    OR COALESCE(access_policy->>'data_class', '') <> ''
+                       AND COALESCE(access_policy->>'data_class', '') <> 'standard'
+                    THEN 'private'
+                  ELSE 'public'
+                END
+            WHERE embedding_partition IS NULL
+               OR embedding_partition NOT IN ('public', 'private', 'none')
+               OR (
+                    embedding_partition <> 'none'
+                    AND (
+                      status NOT IN ('active', 'candidate', 'contested')
+                      OR sensitivity >= 4
+                      OR COALESCE(access_policy ? 'unknown', false)
+                      OR access_policy->'restricted' = 'true'::jsonb
+                      OR access_policy->'hold' = 'true'::jsonb
+                      OR access_policy->'embed_ok' = 'false'::jsonb
+                      OR access_policy ? 'allow_principals'
+                      OR access_policy ? 'redact_fields'
+                      OR access_policy ? 'min_role_for_raw'
+                    )
+                  )
+               OR (
+                    embedding_partition = 'public'
+                    AND (
+                      sensitivity >= 2
+                      OR COALESCE(access_policy->>'data_class', '') <> ''
+                         AND COALESCE(access_policy->>'data_class', '') <> 'standard'
+                    )
+                  )
+            """
+        )
+        cur.execute("UPDATE assertions SET embedding = NULL WHERE embedding_partition = 'none'")
         cur.execute("DROP INDEX IF EXISTS evidence_embedding_hnsw")
         cur.execute("DROP INDEX IF EXISTS assertions_embedding_hnsw")
         cur.execute(
@@ -250,20 +346,49 @@ class PostgresEngine:
         metadata.setdefault("reality_class", reality_class)
         if ev.session_id:
             metadata["_external_session_id"] = ev.session_id
-        cid = content_cid(
+        cid = evidence_cid(
             ev.content,
-            {
-                "tenant_id": ev.tenant_id,
-                "source_type": ev.source_type,
-                "content_pointer": ev.content_pointer,
-                "modality": ev.modality,
-            },
+            tenant_id=ev.tenant_id,
+            user_id=ev.user_id,
+            source_type=ev.source_type,
+            content_pointer=ev.content_pointer,
+            modality=ev.modality,
+            sensitivity=int(ev.sensitivity),
+        )
+        unscoped_cid = evidence_unscoped_cid(
+            ev.content,
+            tenant_id=ev.tenant_id,
+            source_type=ev.source_type,
+            content_pointer=ev.content_pointer,
+            modality=ev.modality,
         )
         cid_bytes = _cid_to_bytes(cid)
         with self.connect() as conn:
             with conn.cursor() as cur:
                 self._set_tenant(cur, db_tenant_id)
                 self._ensure_evidence_vector_schema(cur)
+                if unscoped_cid != cid and self._evidence_row_exists(
+                    cur,
+                    tenant_id=db_tenant_id,
+                    branch=branch,
+                    cid_bytes=_cid_to_bytes(unscoped_cid),
+                ):
+                    cid = unscoped_cid
+                    cid_bytes = _cid_to_bytes(cid)
+                else:
+                    replay_cid = self._erased_replay_cid(
+                        cur,
+                        external_tenant_id=ev.tenant_id,
+                        tenant_id=db_tenant_id,
+                        branch=branch,
+                        content=ev.content,
+                        source_type=ev.source_type,
+                        content_pointer=ev.content_pointer,
+                        modality=ev.modality,
+                    )
+                    if replay_cid is not None:
+                        cid = replay_cid
+                        cid_bytes = _cid_to_bytes(cid)
                 duplicate_noop = self._evidence_row_exists(
                     cur,
                     tenant_id=db_tenant_id,
@@ -385,6 +510,59 @@ class PostgresEngine:
             (tenant_id, branch, cid_bytes),
         )
         return cur.fetchone() is not None
+
+    def _erased_replay_cid(
+        self,
+        cur: Any,
+        *,
+        external_tenant_id: str,
+        tenant_id: UUID,
+        branch: str,
+        content: str,
+        source_type: str,
+        content_pointer: str | None,
+        modality: str,
+    ) -> str | None:
+        unscoped_cid = evidence_unscoped_cid(
+            content,
+            tenant_id=external_tenant_id,
+            source_type=source_type,
+            content_pointer=content_pointer,
+            modality=modality,
+        )
+        cur.execute(
+            """
+            SELECT cid, sensitivity, metadata
+            FROM evidence
+            WHERE tenant_id = %s
+              AND branch = %s
+              AND erased = true
+              AND source_type = %s
+              AND content_pointer IS NOT DISTINCT FROM %s
+              AND modality = %s
+            """,
+            (tenant_id, branch, source_type, content_pointer, modality),
+        )
+        for row in cur.fetchall():
+            row_cid = _bytes_to_cid(row[0])
+            metadata = dict(row[2] or {})
+            row_user_id = metadata.get("_external_user_id")
+            if unscoped_cid == row_cid:
+                return row_cid
+            if not isinstance(row_user_id, str) or not row_user_id:
+                continue
+            scoped_cid = evidence_cid(
+                content,
+                tenant_id=external_tenant_id,
+                user_id=row_user_id,
+                source_type=source_type,
+                content_pointer=content_pointer,
+                modality=modality,
+                sensitivity=int(row[1]),
+            )
+            if scoped_cid == row_cid:
+                return row_cid
+        return None
 
     def _self_generation_budget_usage(self, cur: Any, *, tenant_id: UUID, branch: str) -> tuple[int, int]:
         cur.execute(
@@ -580,6 +758,8 @@ class PostgresEngine:
         source: str = "privacy_backfill",
     ) -> bool:
         tags = _normalise_privacy_tags(pii_tags)
+        if tags and int(pii_sensitivity) < 3:
+            raise ValueError("pii_sensitivity must be at least 3 for detected PII")
         db_tenant_id = _stable_uuid("tenant", tenant_id)
         with self.connect() as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
@@ -3637,12 +3817,12 @@ class PostgresEngine:
                           cid, branch, tenant_id, user_id, session_id, actor, source_type,
                           source_identity, content, content_pointer, modality, metadata,
                           trust_tier, capability_tags, sensitivity, signed_provenance,
-                          access_policy, erased, created_at
+                          access_policy, embedding, embedding_partition, erased, created_at
                         )
                         SELECT cid, %s, tenant_id, user_id, session_id, actor, source_type,
                           source_identity, content, content_pointer, modality, metadata,
                           trust_tier, capability_tags, sensitivity, signed_provenance,
-                          access_policy, erased, created_at
+                          access_policy, embedding, embedding_partition, erased, created_at
                         FROM evidence
                         WHERE tenant_id = %s AND branch = %s
                         ON CONFLICT (tenant_id, branch, cid) DO NOTHING
@@ -3705,12 +3885,12 @@ class PostgresEngine:
                           cid, branch, tenant_id, user_id, session_id, actor, source_type,
                           source_identity, content, content_pointer, modality, metadata,
                           trust_tier, capability_tags, sensitivity, signed_provenance,
-                          access_policy, erased, created_at
+                          access_policy, embedding, embedding_partition, erased, created_at
                         )
                         SELECT cid, %s, tenant_id, user_id, session_id, actor, source_type,
                           source_identity, content, content_pointer, modality, metadata,
                           trust_tier, capability_tags, sensitivity, signed_provenance,
-                          access_policy, erased, created_at
+                          access_policy, embedding, embedding_partition, erased, created_at
                         FROM evidence
                         WHERE tenant_id = %s AND branch = %s
                         ON CONFLICT (tenant_id, branch, cid) DO NOTHING

@@ -1593,11 +1593,12 @@ def _privacy_operator_delete_corroboration(case: Mapping[str, Any]) -> dict[str,
 
 def cmd_privacy_backfill_report(args: argparse.Namespace) -> None:
     engine = load_engine(args)
+    pii_sensitivity = _validate_pii_sensitivity(args.pii_sensitivity)
     report = _privacy_backfill_scan(
         engine,
         tenant_id=args.tenant,
         branch=str(args.branch),
-        pii_sensitivity=int(args.pii_sensitivity),
+        pii_sensitivity=pii_sensitivity,
         include_clean=bool(args.include_clean),
     )
     emit(report)
@@ -1610,7 +1611,7 @@ def cmd_privacy_backfill_apply(args: argparse.Namespace) -> None:
         raise SystemExit("privacy-backfill-apply requires --confirm-apply")
     engine = load_engine(args)
     branch = str(args.branch)
-    pii_sensitivity = int(args.pii_sensitivity)
+    pii_sensitivity = _validate_pii_sensitivity(args.pii_sensitivity)
     before = _privacy_backfill_scan(
         engine,
         tenant_id=args.tenant,
@@ -1704,7 +1705,7 @@ def _privacy_backfill_scan(
         if finding["needs_backfill"] or include_clean:
             findings.append(finding)
     return {
-        "ok": not findings,
+        "ok": not any(item["needs_backfill"] for item in findings),
         "tenant_id": tenant_id,
         "branch": branch,
         "scanned_evidence": scanned,
@@ -1778,6 +1779,13 @@ def _coerce_int(value: Any, *, default: int) -> int:
         return int(value)
     except (TypeError, ValueError):
         return default
+
+
+def _validate_pii_sensitivity(value: Any) -> int:
+    sensitivity = _coerce_int(value, default=3)
+    if sensitivity < 3:
+        raise SystemExit("pii sensitivity must be at least 3")
+    return sensitivity
 
 
 def cmd_privacy_ops_check(args: argparse.Namespace) -> None:
