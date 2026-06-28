@@ -1,7 +1,7 @@
-"""Shadow workspace controller over typed specialist modules.
+"""Workspace controller over typed specialist modules.
 
 The workspace controller is advisory by construction. It can recruit specialists
-registered in :mod:`mnemosyne.providers`, but it cannot place shadow-only
+registered in :mod:`mnemosyne.providers`, but it cannot place low-groundedness
 specialists on the answer critical path or mutate production memory.
 """
 
@@ -150,18 +150,17 @@ class WorkspaceStreamReport:
 
 @dataclass(frozen=True, slots=True)
 class ShadowWorkspaceServiceReport:
-    """Stateful shadow-loop service report.
+    """Stateful workspace-loop service report.
 
-    This is still advisory-only. The service makes the continuous workspace loop
-    explicit and measurable without creating a daemon, mutating memory, or
-    joining the answer critical path.
+    The service makes the continuous workspace loop explicit and measurable
+    without creating a daemon, mutating memory, or joining the answer critical
+    path.
     """
 
     tenant_id: str
     stream: WorkspaceStreamReport
     proto_self_history: tuple[ProtoSelfSnapshot, ...]
     metacognition: MetacognitiveScore
-    enabled: bool
     running: bool
     tick_ms: int
     max_cycles: int
@@ -178,7 +177,6 @@ class ShadowWorkspaceServiceReport:
             "stream": self.stream.to_dict(),
             "proto_self_history": [asdict(row) for row in self.proto_self_history],
             "metacognition": asdict(self.metacognition),
-            "enabled": self.enabled,
             "running": self.running,
             "tick_ms": self.tick_ms,
             "max_cycles": self.max_cycles,
@@ -409,15 +407,14 @@ class ShadowWorkspaceController:
 
 @dataclass(slots=True)
 class ShadowWorkspaceService:
-    """Default-off continuous workspace service wrapper.
+    """Native continuous workspace service wrapper.
 
     The service persists proto-self snapshots and feeds a metacognitive monitor
-    from each bounded shadow tick. It never starts automatically: callers must
-    opt in with ``enabled=True`` and ``start()`` before any loop can run.
+    from each bounded workspace tick. Construction is no longer gated by a
+    default-off ``enabled`` flag; callers start the lifecycle before ticking.
     """
 
     controller: ShadowWorkspaceController = field(default_factory=ShadowWorkspaceController)
-    enabled: bool = False
     monitor: MetacognitiveMonitor = field(default_factory=MetacognitiveMonitor)
     proto_self_history: list[ProtoSelfSnapshot] = field(default_factory=list)
     running: bool = False
@@ -425,8 +422,6 @@ class ShadowWorkspaceService:
     previous_focus_id: str | None = None
 
     def start(self) -> None:
-        if not self.enabled:
-            raise RuntimeError("shadow workspace service is disabled by default")
         self.running = True
 
     def stop(self) -> None:
@@ -468,7 +463,6 @@ class ShadowWorkspaceService:
             stream=stream,
             proto_self_history=tuple(self.proto_self_history),
             metacognition=self.monitor.score(),
-            enabled=self.enabled,
             running=self.running,
             tick_ms=self.controller.tick_ms,
             max_cycles=self.controller.max_cycles,
@@ -551,7 +545,6 @@ class ShadowWorkspaceService:
             stream=stream,
             proto_self_history=tuple(self.proto_self_history),
             metacognition=self.monitor.score(),
-            enabled=self.enabled,
             running=self.running,
             tick_ms=self.controller.tick_ms,
             max_cycles=self.controller.max_cycles,
@@ -564,8 +557,6 @@ class ShadowWorkspaceService:
         )
 
     def _require_running(self) -> None:
-        if not self.enabled:
-            raise RuntimeError("shadow workspace service is disabled by default")
         if not self.running:
             raise RuntimeError("shadow workspace service must be started before ticking")
 

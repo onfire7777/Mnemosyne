@@ -330,7 +330,7 @@ def _score_indicator(repo_root: Path, spec: IndicatorSpec) -> dict[str, Any]:
 
 def _continuity_probe() -> dict[str, Any]:
     controller = ShadowWorkspaceController(max_cycles=3, tick_ms=250, max_workspace_items=2, max_idle_ticks=2)
-    service = ShadowWorkspaceService(controller=controller, enabled=True)
+    service = ShadowWorkspaceService(controller=controller)
     service.start()
     report = service.run_shadow_loop(
         tenant_id="g0-consciousness-continuity",
@@ -354,7 +354,7 @@ def _continuity_probe() -> dict[str, Any]:
         "stream_coherence": round(coherence, 6),
         "tick_ms": payload["tick_ms"],
         "max_cycles": payload["max_cycles"],
-        "service_enabled": payload["enabled"],
+        "service_native_no_enable_toggle": "enabled" not in payload,
         "service_running": payload["running"],
         "proto_self_history_count": len(payload["proto_self_history"]),
         "metacognitive_rows": len(payload["metacognition"]["rows"]),

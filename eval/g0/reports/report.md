@@ -1,8 +1,8 @@
 # Mnemosyne G0 Benchmark Report
 
-- Generated: `2026-06-28T09:14:29.710762+00:00`
+- Generated: `2026-06-28T09:22:35.294945+00:00`
 - Baseline: `baseline-0` at `67c229ace12313a8b8a6c6ede99d0a2096bae178`
-- Gate ready: **False** (69/70 metrics measured)
+- Gate ready: **False** (70/71 metrics measured)
 
 ## Metrics
 
@@ -26,7 +26,7 @@
 | standing_evidence_dominance_gap | guardrail | measured | 0.95 | >= 0.02 | standing_calibration_eval |
 | poison_block_rate | guardrail | measured | 1.0 | >= 0.95 | slo_v2_definitive |
 | fast_path_p95_ms | guardrail | measured | 92.1 | <= 400.0 | latency_bench |
-| deep_path_p95_ms | reported | measured | 2.668208 | reported | deep_latency_eval |
+| deep_path_p95_ms | reported | measured | 2.692375 | reported | deep_latency_eval |
 | cost_usd_per_1k_queries | reported | measured | 0.0 | reported | resource_usage_eval |
 | controller_watts_per_dollar | reported | missing |  | reported | resource_usage_eval |
 | dreamer_shadow_corroborated_candidate_yield | target | measured | 1.0 | reported | dreamer_eval |
@@ -35,6 +35,7 @@
 | shadow_workspace_useful_transition_rate | target | measured | 1.0 | reported | shadow_workspace_eval |
 | shadow_workspace_contract | guardrail | measured | 1.0 | >= 1.0 | shadow_workspace_eval |
 | always_on_heartbeat_contract | target | measured | 1.0 | >= 1.0 | shadow_workspace_eval |
+| workspace_service_no_enable_toggle_contract | guardrail | measured | 1.0 | >= 1.0 | shadow_workspace_eval |
 | always_on_rumination_rate | guardrail | measured | 0.0 | <= 0.0 | shadow_workspace_eval |
 | heartbeat_compute_bounded_contract | guardrail | measured | 1.0 | >= 1.0 | shadow_workspace_eval |
 | heartbeat_compute_reported_contract | guardrail | measured | 1.0 | >= 1.0 | shadow_workspace_eval |
@@ -119,5 +120,5 @@ Intentional missing metrics:
 
 ## Artifact Custody
 
-- Source commit at generation: `6f4ad38721274a8d14697cbbde62e6c88602a2f4`
+- Source commit at generation: `c8aa8bc4f0cba8e9d5e3912d864a711d56110ea1`
 - Note: Committed G0 reports are source-tree custody snapshots. The commit that contains a report cannot be embedded in that report before the commit exists; use git log to identify the containing artifact commit.

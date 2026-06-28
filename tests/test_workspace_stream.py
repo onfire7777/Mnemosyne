@@ -201,23 +201,16 @@ def test_shadow_workspace_stream_exports_bounded_consolidation_advisory() -> Non
     assert "raw workspace advisory content" not in str(advisory)
 
 
-def test_shadow_workspace_service_is_default_off_and_feeds_runtime_state() -> None:
+def test_shadow_workspace_service_is_native_and_feeds_runtime_state() -> None:
     controller = ShadowWorkspaceController(max_workspace_items=1, max_cycles=3, max_idle_ticks=2)
-    disabled = ShadowWorkspaceService(controller=controller)
 
-    with pytest.raises(RuntimeError, match="disabled by default"):
-        disabled.tick(
-            tenant_id="tenant-stream",
-            items=[WorkspaceItem(id="focus", priority=1.0, content="not allowed before enable")],
-        )
-
-    service = ShadowWorkspaceService(controller=controller, enabled=True)
     with pytest.raises(RuntimeError, match="started"):
-        service.tick(
+        ShadowWorkspaceService(controller=controller).tick(
             tenant_id="tenant-stream",
             items=[WorkspaceItem(id="focus", priority=1.0, content="not allowed before start")],
         )
 
+    service = ShadowWorkspaceService(controller=controller)
     service.start()
     single = service.tick(
         tenant_id="tenant-stream",
@@ -229,7 +222,7 @@ def test_shadow_workspace_service_is_default_off_and_feeds_runtime_state() -> No
     assert len(single["proto_self_history"]) == 1
     assert "single tick content" not in str(single)
 
-    loop_service = ShadowWorkspaceService(controller=controller, enabled=True)
+    loop_service = ShadowWorkspaceService(controller=controller)
     loop_service.start()
     report = loop_service.run_shadow_loop(
         tenant_id="tenant-stream",
@@ -252,7 +245,7 @@ def test_shadow_workspace_service_is_default_off_and_feeds_runtime_state() -> No
     )
     payload = report.to_dict()
 
-    assert payload["enabled"] is True
+    assert "enabled" not in payload
     assert payload["running"] is True
     assert payload["shadow_only"] is True
     assert payload["critical_path"] is False

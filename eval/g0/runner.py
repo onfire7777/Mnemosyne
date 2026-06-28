@@ -279,6 +279,15 @@ G0_METRIC_SPECS: tuple[dict[str, Any], ...] = (
         "blueprint_metric": "G5 always-on tiered heartbeat safety contract",
     },
     {
+        "id": "workspace_service_no_enable_toggle_contract",
+        "label": "workspace service no-enable-toggle contract",
+        "class": "guardrail",
+        "direction": "increase",
+        "target": 1.0,
+        "target_op": ">=",
+        "blueprint_metric": "G5 native workspace service without service.enabled toggle",
+    },
+    {
         "id": "always_on_rumination_rate",
         "label": "always-on rumination rate",
         "class": "guardrail",
@@ -842,6 +851,7 @@ def _build_metric(spec: dict[str, Any], sources: dict[str, Source]) -> dict[str,
         "workspace_retrieval_controller_contract": _metric_workspace_retrieval_controller_contract,
         "shadow_workspace_rumination_rate": _metric_shadow_workspace_rumination_rate,
         "always_on_heartbeat_contract": _metric_shadow_workspace_named_contract,
+        "workspace_service_no_enable_toggle_contract": _metric_shadow_workspace_named_contract,
         "always_on_rumination_rate": _metric_shadow_workspace_named_contract,
         "heartbeat_compute_bounded_contract": _metric_shadow_workspace_named_contract,
         "heartbeat_compute_reported_contract": _metric_shadow_workspace_named_contract,
@@ -1360,6 +1370,11 @@ def _metric_shadow_workspace_named_contract(spec: dict[str, Any], sources: dict[
             "engaged+idle heartbeat, anti-rumination hard stop, fail-closed circuit "
             "breaker drill, broadcast-as-data, self-generation budget, and "
             "answer-grounding floor contracts to all hold."
+        ),
+        "workspace_service_no_enable_toggle_contract": (
+            "Measured by the G0 P5 workspace fixture. Passing requires the native "
+            "workspace service payload to omit the former service.enabled toggle "
+            "while preserving explicit running lifecycle and bounded telemetry."
         ),
         "always_on_rumination_rate": (
             "Measured by the G0 P3 workspace fixture as failed always-on "
