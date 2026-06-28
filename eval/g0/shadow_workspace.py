@@ -58,6 +58,8 @@ def run_shadow_workspace_eval(*, repo_root: Path | None = None) -> dict[str, Any
     contract_checks = _contract_checks(payload, dataset.get("contract_expected", {}))
     service_checks = _service_checks(service_payload)
     service_no_enable_contract = 1.0 if service_checks.get("native_no_enable_toggle") is True else 0.0
+    service_tick_probe = _service_tick_window_probe(controller, tenant)
+    service_tick_checks = service_tick_probe["checks"]
     operational_toggle_probe = _operational_toggle_probe(repo_root)
     operational_toggle_checks = operational_toggle_probe["checks"]
     operational_toggle_contract = 1.0 if all(operational_toggle_checks.values()) else 0.0
@@ -82,6 +84,7 @@ def run_shadow_workspace_eval(*, repo_root: Path | None = None) -> dict[str, Any
     all_contract_checks = {
         **contract_checks,
         **{f"service_{key}": value for key, value in service_checks.items()},
+        **{f"service_tick_{key}": value for key, value in service_tick_checks.items()},
         **{f"operational_toggle_{key}": value for key, value in operational_toggle_checks.items()},
         **{f"advisory_{key}": value for key, value in advisory_checks.items()},
         **{f"advisory_promotion_{key}": value for key, value in advisory_promotion_checks.items()},
@@ -133,7 +136,8 @@ def run_shadow_workspace_eval(*, repo_root: Path | None = None) -> dict[str, Any
         "metric_note": (
             "Measures useful state progression across an explicitly-started bounded shadow workspace service, "
             "plus anti-rumination shutdown, heartbeat safety, circuit-breaker, self-generation budget, "
-            "answer-grounding floor, and broadcast-as-data contracts. It does not count dreamer candidate yield "
+            "answer-grounding floor, stateful service-tick bounds, and broadcast-as-data contracts. "
+            "It does not count dreamer candidate yield "
             "and makes no phenomenal-consciousness claim."
         ),
         "tenant": tenant,
@@ -185,6 +189,7 @@ def run_shadow_workspace_eval(*, repo_root: Path | None = None) -> dict[str, Any
                 "trace": payload["trace"],
         },
         "workspace_consolidation_advisory": advisory,
+        "service_tick_probe": service_tick_probe,
         "operational_toggle_probe": operational_toggle_probe,
         "workspace_advisory_promotion_probe": advisory_promotion_probe,
         "workspace_retrieval_controller_probe": retrieval_controller_probe,
@@ -215,6 +220,123 @@ def _service_checks(payload: dict[str, Any]) -> dict[str, bool]:
         "tick_count_matches_trace": tick_count == len(trace),
         "proto_self_history_complete": len(proto_history) == len(trace),
         "metacognition_rows_complete": len(rows) == len(trace),
+    }
+
+
+def _service_tick_window_probe(
+    controller: ShadowWorkspaceController,
+    tenant: str,
+) -> dict[str, Any]:
+    repeated_service = ShadowWorkspaceService(controller=controller)
+    repeated_service.start()
+    repeated_reports = [
+        repeated_service.tick(
+            tenant_id=tenant,
+            items=[
+                WorkspaceItem(
+                    id="same-service-focus",
+                    priority=1.0,
+                    content="stateful same focus probe",
+                    source="g0-service-tick-probe",
+                )
+            ],
+        ).to_dict()
+        for _ in range(controller.max_idle_ticks + 1)
+    ]
+    repeated_final = repeated_reports[-1]
+
+    max_cycle_service = ShadowWorkspaceService(controller=controller)
+    max_cycle_service.start()
+    max_cycle_reports = [
+        max_cycle_service.tick(
+            tenant_id=tenant,
+            items=[
+                WorkspaceItem(
+                    id=f"service-max-focus-{index}",
+                    priority=1.0,
+                    content=f"stateful max cycle probe {index}",
+                    source="g0-service-tick-probe",
+                )
+            ],
+        ).to_dict()
+        for index in range(1, controller.max_cycles + 1)
+    ]
+    max_cycle_final = max_cycle_reports[-1]
+
+    evidence = [
+        {
+            "cid": "cid-service-dreamer-a",
+            "tenant_id": tenant,
+            "access_policy": {"tenant": tenant},
+            "content": "Service tick dreamer source alpha.",
+        },
+        {
+            "cid": "cid-service-dreamer-b",
+            "tenant_id": tenant,
+            "access_policy": {"tenant": tenant},
+            "content": "Service tick dreamer source beta.",
+        },
+    ]
+    dreamer_service = ShadowWorkspaceService(controller=controller)
+    dreamer_service.start()
+    dreamer_tick_count = min(3, controller.max_cycles)
+    dreamer_reports = [
+        dreamer_service.tick(
+            tenant_id=tenant,
+            items=[
+                WorkspaceItem(
+                    id=f"service-dreamer-focus-{index}",
+                    priority=1.0,
+                    content=f"stateful dreamer probe {index}",
+                    source="g0-service-tick-probe",
+                )
+            ],
+            evidence=evidence,
+        ).to_dict()
+        for index in range(1, dreamer_tick_count + 1)
+    ]
+    dreamer_final = dreamer_reports[-1]
+    dreamer_invocations_by_cycle = [
+        len(cycle.get("specialist_invocations") or [])
+        for cycle in dreamer_final["stream"]["cycles"]
+        if isinstance(cycle, dict)
+    ]
+    checks = {
+        "anti_rumination_across_calls": repeated_final["stream"]["stopped_reason"]
+        == "anti_rumination_repeated_focus_exit"
+        and repeated_final["stream"]["heartbeat_safety"]["hard_stop"] is True,
+        "anti_rumination_counts_non_useful_ticks": repeated_final["stream"]["heartbeat_safety"][
+            "non_useful_ticks"
+        ]
+        >= controller.max_idle_ticks,
+        "max_cycles_across_calls": max_cycle_final["stream"]["stopped_reason"]
+        == "escalate_max_cycles"
+        and max_cycle_final["stream"]["heartbeat_safety"]["hard_stop"] is True,
+        "max_cycle_tick_count_cumulative": max_cycle_final["tick_count"] == controller.max_cycles,
+        "dreamer_once_per_service_window": sum(dreamer_invocations_by_cycle) == 1
+        and dreamer_invocations_by_cycle[0] == 1
+        and all(count == 0 for count in dreamer_invocations_by_cycle[1:]),
+        "cycle_consistency": repeated_final["stream"]["cycle_consistency"]["score"] == 1.0
+        and max_cycle_final["stream"]["cycle_consistency"]["score"] == 1.0
+        and dreamer_final["stream"]["cycle_consistency"]["score"] == 1.0,
+    }
+    return {
+        "schema_version": "g0.shadow-workspace-service-tick-window.v1",
+        "anti_rumination": {
+            "stopped_reason": repeated_final["stream"]["stopped_reason"],
+            "tick_count": repeated_final["tick_count"],
+            "heartbeat_safety": repeated_final["stream"]["heartbeat_safety"],
+        },
+        "max_cycles": {
+            "stopped_reason": max_cycle_final["stream"]["stopped_reason"],
+            "tick_count": max_cycle_final["tick_count"],
+            "heartbeat_safety": max_cycle_final["stream"]["heartbeat_safety"],
+        },
+        "dreamer": {
+            "invocations_by_cycle": dreamer_invocations_by_cycle,
+            "tick_count": dreamer_final["tick_count"],
+        },
+        "checks": checks,
     }
 
 

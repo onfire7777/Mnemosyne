@@ -350,6 +350,7 @@ class ShadowWorkspaceController:
         tenant_id: str,
         items: Sequence[WorkspaceItem | Mapping[str, Any]],
         evidence: Sequence[Evidence | Mapping[str, Any]] = (),
+        allow_dreamer: bool | None = None,
         confidence: float = 0.75,
         resource_health: float = 0.9,
         error_rate: float = 0.0,
@@ -376,7 +377,9 @@ class ShadowWorkspaceController:
             max_cycles=cycle["max_cycles"],
         )
         invocations: list[SpecialistInvocation] = []
-        if evidence and cycle_guard.cycle_index == 1:
+        if allow_dreamer is None:
+            allow_dreamer = bool(evidence and cycle_guard.cycle_index == 1)
+        if evidence and allow_dreamer:
             spec = self.registry.specialist(self.dreamer_name)
             if str(spec.role) != "dreamer":
                 raise ValueError(f"{self.dreamer_name} must have dreamer role")
@@ -422,8 +425,16 @@ class ShadowWorkspaceService:
     running: bool = False
     tick_index: int = 0
     previous_focus_id: str | None = None
+    cycle_guard: BoundedCognitiveCycle | None = None
+    cycles: list[WorkspaceCycleReport] = field(default_factory=list)
+    trace: list[WorkspaceTraceEntry] = field(default_factory=list)
+    idle_ticks: int = 0
+    non_useful_ticks: int = 0
+    stopped_reason: str = "not_started"
+    dreamer_invoked: bool = False
 
     def start(self) -> None:
+        self._reset_window_state()
         self.running = True
 
     def stop(self) -> None:
@@ -457,7 +468,7 @@ class ShadowWorkspaceService:
             rail_budget=rail_budget,
         )
         if stream.trace:
-            self.tick_index += len(stream.trace)
+            self._adopt_stream_window(stream)
             self.previous_focus_id = stream.trace[-1].focus_id
         self._observe_stream(stream)
         return ShadowWorkspaceServiceReport(
@@ -492,21 +503,29 @@ class ShadowWorkspaceService:
         """Run one explicit shadow service tick."""
 
         self._require_running()
-        self.tick_index += 1
+        if self.cycle_guard is None:
+            self.cycle_guard = BoundedCognitiveCycle(
+                max_cycles=self.controller.max_cycles,
+                tick_ms=self.controller.tick_ms,
+            )
+        next_tick_index = self.tick_index + 1
         source_items = _bounded_items(items, limit=self.controller.max_items_per_tick)
         idle_generated = not source_items
         if idle_generated:
             source_items = [
                 _idle_workspace_item(
                     tenant_id=tenant_id,
-                    tick_index=self.tick_index,
+                    tick_index=next_tick_index,
                     previous_focus_id=self.previous_focus_id,
                 )
             ]
-        cycle = self.controller.run_shadow_cycle(
+        allow_dreamer = bool(evidence and not self.dreamer_invoked)
+        cycle = self.controller._run_cycle(
+            cycle_guard=self.cycle_guard,
             tenant_id=tenant_id,
             items=source_items,
             evidence=evidence,
+            allow_dreamer=allow_dreamer,
             confidence=confidence,
             resource_health=resource_health,
             error_rate=error_rate,
@@ -514,34 +533,25 @@ class ShadowWorkspaceService:
             memory_pressure=memory_pressure,
             rail_budget=rail_budget,
         )
+        if any(invocation.role == "dreamer" for invocation in cycle.specialist_invocations):
+            self.dreamer_invoked = True
         trace = _trace_entry(
-            tick_index=self.tick_index,
+            tick_index=next_tick_index,
             report=cycle,
             previous_focus_id=self.previous_focus_id,
             idle_generated=idle_generated,
         )
+        self.tick_index = next_tick_index
         self.previous_focus_id = trace.focus_id
-        stream = WorkspaceStreamReport(
-            tenant_id=tenant_id,
-            cycles=(cycle,),
-            trace=(trace,),
-            cycle_consistency=_cycle_consistency((cycle,), (trace,)),
-            stopped_reason=str(cycle.cycle.get("state") or "continue"),
-            idle_ticks=int(idle_generated),
-            rumination_score=0.0 if trace.useful_state else 1.0,
-            heartbeat_safety=_heartbeat_safety_report(
-                cycles=(cycle,),
-                trace=(trace,),
-                stopped_reason=str(cycle.cycle.get("state") or "continue"),
-                max_cycles=self.controller.max_cycles,
-                max_idle_ticks=self.controller.max_idle_ticks,
-                tick_ms=self.controller.tick_ms,
-            ),
-            shadow_only=cycle.shadow_only,
-            critical_path=cycle.critical_path,
-            production_mutation=cycle.production_mutation,
-        )
-        self._observe_stream(stream)
+        self.cycles.append(cycle)
+        self.trace.append(trace)
+        if idle_generated:
+            self.idle_ticks += 1
+        if not trace.useful_state:
+            self.non_useful_ticks += 1
+        self.stopped_reason = self._current_stopped_reason(cycle)
+        stream = self._current_stream(tenant_id=tenant_id)
+        self._observe_cycle(cycle, trace)
         return ShadowWorkspaceServiceReport(
             tenant_id=tenant_id,
             stream=stream,
@@ -550,7 +560,7 @@ class ShadowWorkspaceService:
             running=self.running,
             tick_ms=self.controller.tick_ms,
             max_cycles=self.controller.max_cycles,
-            tick_count=1,
+            tick_count=len(stream.trace),
             heartbeat_safety=stream.heartbeat_safety,
             shadow_only=stream.shadow_only,
             critical_path=stream.critical_path,
@@ -564,18 +574,90 @@ class ShadowWorkspaceService:
 
     def _observe_stream(self, stream: WorkspaceStreamReport) -> None:
         for cycle, trace in zip(stream.cycles, stream.trace, strict=True):
-            self.proto_self_history.append(cycle.proto_self)
-            answerable = not trace.idle_generated
-            abstained = bool(trace.idle_generated or cycle.escalation_required)
-            outcome_correct = bool(trace.useful_state or (abstained and not answerable))
-            self.monitor.observe(
-                confidence=cycle.proto_self.confidence,
-                outcome_correct=outcome_correct,
-                abstained=abstained,
-                answerable=answerable,
-                reality_class=trace.reality_class,
-                source="shadow-workspace-service",
-            )
+            self._observe_cycle(cycle, trace)
+
+    def _observe_cycle(self, cycle: WorkspaceCycleReport, trace: WorkspaceTraceEntry) -> None:
+        self.proto_self_history.append(cycle.proto_self)
+        answerable = not trace.idle_generated
+        abstained = bool(trace.idle_generated or cycle.escalation_required)
+        outcome_correct = bool(trace.useful_state or (abstained and not answerable))
+        self.monitor.observe(
+            confidence=cycle.proto_self.confidence,
+            outcome_correct=outcome_correct,
+            abstained=abstained,
+            answerable=answerable,
+            reality_class=trace.reality_class,
+            source="shadow-workspace-service",
+        )
+
+    def _current_stopped_reason(self, cycle: WorkspaceCycleReport) -> str:
+        if self.idle_ticks >= self.controller.max_idle_ticks:
+            return "anti_rumination_idle_exit"
+        if self.non_useful_ticks >= self.controller.max_idle_ticks:
+            return "anti_rumination_repeated_focus_exit"
+        if cycle.escalation_required:
+            return str(cycle.cycle.get("state") or "escalation_required")
+        return str(cycle.cycle.get("state") or "continue")
+
+    def _current_stream(self, *, tenant_id: str) -> WorkspaceStreamReport:
+        total_ticks = len(self.trace) or 1
+        stream_shadow_only = all(cycle.shadow_only for cycle in self.cycles)
+        stream_critical_path = any(cycle.critical_path for cycle in self.cycles)
+        stream_production_mutation = any(cycle.production_mutation for cycle in self.cycles)
+        heartbeat_safety = _heartbeat_safety_report(
+            cycles=self.cycles,
+            trace=self.trace,
+            stopped_reason=self.stopped_reason,
+            max_cycles=self.controller.max_cycles,
+            max_idle_ticks=self.controller.max_idle_ticks,
+            tick_ms=self.controller.tick_ms,
+        )
+        return WorkspaceStreamReport(
+            tenant_id=tenant_id,
+            cycles=tuple(self.cycles),
+            trace=tuple(self.trace),
+            cycle_consistency=_cycle_consistency(self.cycles, self.trace),
+            stopped_reason=self.stopped_reason,
+            idle_ticks=self.idle_ticks,
+            rumination_score=round(self.non_useful_ticks / total_ticks, 6),
+            heartbeat_safety=heartbeat_safety,
+            shadow_only=stream_shadow_only,
+            critical_path=stream_critical_path,
+            production_mutation=stream_production_mutation,
+        )
+
+    def _adopt_stream_window(self, stream: WorkspaceStreamReport) -> None:
+        self.cycles = list(stream.cycles)
+        self.trace = list(stream.trace)
+        self.tick_index = len(stream.trace)
+        self.idle_ticks = stream.idle_ticks
+        self.non_useful_ticks = sum(1 for entry in stream.trace if not entry.useful_state)
+        self.stopped_reason = stream.stopped_reason
+        self.dreamer_invoked = any(
+            invocation.role == "dreamer"
+            for cycle in stream.cycles
+            for invocation in cycle.specialist_invocations
+        )
+        guard = BoundedCognitiveCycle(max_cycles=self.controller.max_cycles, tick_ms=self.controller.tick_ms)
+        guard.cycle_index = len(stream.cycles)
+        if stream.cycles:
+            guard.impasses = int(stream.cycles[-1].cycle.get("impasses") or 0)
+            guard.history = [str(cycle.cycle.get("state") or "continue") for cycle in stream.cycles]
+        self.cycle_guard = guard
+
+    def _reset_window_state(self) -> None:
+        self.tick_index = 0
+        self.previous_focus_id = None
+        self.cycle_guard = BoundedCognitiveCycle(
+            max_cycles=self.controller.max_cycles,
+            tick_ms=self.controller.tick_ms,
+        )
+        self.cycles = []
+        self.trace = []
+        self.idle_ticks = 0
+        self.non_useful_ticks = 0
+        self.stopped_reason = "continue"
+        self.dreamer_invoked = False
 
 
 def _item_to_row(
