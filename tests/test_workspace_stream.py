@@ -261,3 +261,105 @@ def test_shadow_workspace_service_is_native_and_feeds_runtime_state() -> None:
 
     loop_service.stop()
     assert loop_service.running is False
+
+
+def test_shadow_workspace_service_tick_enforces_anti_rumination_across_calls() -> None:
+    controller = ShadowWorkspaceController(max_workspace_items=1, max_cycles=6, max_idle_ticks=2)
+    service = ShadowWorkspaceService(controller=controller)
+    service.start()
+
+    first = service.tick(
+        tenant_id="tenant-stream",
+        items=[WorkspaceItem(id="same-focus", priority=1.0, content="same focus")],
+    ).to_dict()
+    second = service.tick(
+        tenant_id="tenant-stream",
+        items=[WorkspaceItem(id="same-focus", priority=1.0, content="same focus")],
+    ).to_dict()
+    third = service.tick(
+        tenant_id="tenant-stream",
+        items=[WorkspaceItem(id="same-focus", priority=1.0, content="same focus")],
+    ).to_dict()
+
+    assert first["stream"]["stopped_reason"] == "continue"
+    assert second["stream"]["stopped_reason"] == "continue"
+    assert third["stream"]["stopped_reason"] == "anti_rumination_repeated_focus_exit"
+    assert third["stream"]["heartbeat_safety"]["hard_stop"] is True
+    assert third["stream"]["heartbeat_safety"]["non_useful_ticks"] == 2
+    assert third["tick_count"] == 3
+    assert len(third["proto_self_history"]) == 3
+    assert [entry["focus_id"] for entry in third["stream"]["trace"]] == [
+        "same-focus",
+        "same-focus",
+        "same-focus",
+    ]
+    assert third["stream"]["cycle_consistency"]["score"] == 1.0
+
+
+def test_shadow_workspace_service_tick_enforces_max_cycles_across_calls() -> None:
+    controller = ShadowWorkspaceController(max_workspace_items=1, max_cycles=3, max_idle_ticks=3)
+    service = ShadowWorkspaceService(controller=controller)
+    service.start()
+
+    reports = [
+        service.tick(
+            tenant_id="tenant-stream",
+            items=[WorkspaceItem(id=f"focus-{index}", priority=1.0, content=f"focus {index}")],
+        ).to_dict()
+        for index in range(1, 4)
+    ]
+
+    final = reports[-1]
+    assert [row["stream"]["stopped_reason"] for row in reports] == [
+        "continue",
+        "continue",
+        "escalate_max_cycles",
+    ]
+    assert final["stream"]["heartbeat_safety"]["hard_stop"] is True
+    assert final["stream"]["heartbeat_safety"]["circuit_breaker_tripped"] is True
+    assert final["stream"]["heartbeat_safety"]["tick_count"] == 3
+    assert final["stream"]["cycle_consistency"]["cycle_indexes"] == [1, 2, 3]
+    assert final["stream"]["cycle_consistency"]["trace_ticks"] == [1, 2, 3]
+
+
+def test_shadow_workspace_service_tick_invokes_dreamer_once_per_service_window() -> None:
+    controller = ShadowWorkspaceController(max_workspace_items=1, max_cycles=5, max_idle_ticks=3)
+    service = ShadowWorkspaceService(controller=controller)
+    service.start()
+    evidence = [
+        {
+            "cid": "cid-dreamer-a",
+            "tenant_id": "tenant-stream",
+            "access_policy": {"tenant": "tenant-stream"},
+            "content": "Alpha retained source supports bounded dreamer recruitment.",
+        },
+        {
+            "cid": "cid-dreamer-b",
+            "tenant_id": "tenant-stream",
+            "access_policy": {"tenant": "tenant-stream"},
+            "content": "Beta retained source supports one burst per service window.",
+        },
+    ]
+
+    reports = [
+        service.tick(
+            tenant_id="tenant-stream",
+            items=[WorkspaceItem(id=f"focus-{index}", priority=1.0, content=f"focus {index}")],
+            evidence=evidence,
+        ).to_dict()
+        for index in range(1, 4)
+    ]
+
+    invocation_counts = [
+        sum(
+            len(cycle["specialist_invocations"])
+            for cycle in report["stream"]["cycles"]
+        )
+        for report in reports
+    ]
+    assert invocation_counts == [1, 1, 1]
+    assert reports[-1]["stream"]["cycles"][0]["specialist_invocations"][0]["role"] == "dreamer"
+    assert all(
+        not cycle["specialist_invocations"]
+        for cycle in reports[-1]["stream"]["cycles"][1:]
+    )

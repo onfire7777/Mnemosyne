@@ -1,6 +1,6 @@
 # Codex Handoff
 
-**Latest verified code/runtime baseline:** 2026-06-28 UTC · `7ab7051` on `origin/main`; GitHub CI run `28332157144` passed. Current local and CI follow-up work hardens privacy-sensitive evidence custody while leaving strict v1.0 parity blocked only on Tier-B operator-captured production evidence.
+**Latest verified code/runtime baseline:** 2026-06-28 UTC · `6c45c56` on `origin/main`; GitHub CI run `28333175447` passed. Current follow-up work hardens the stateful always-on workspace tick path while preserving the production release-custody hardening from `6c45c56`; strict v1.0 parity remains blocked only on Tier-B operator-captured production evidence.
 
 **Canonical checkout:** `/Users/admin/Mnemosyne` on `main`, tracking `origin/main` (`github.com/onfire7777/Mnemosyne`). This is now the single local checkout.
 
@@ -45,9 +45,11 @@
 
 ## Latest Verified Snapshot
 
+- Stateful workspace tick hardening is in progress on top of `6c45c56`: `ShadowWorkspaceService.tick()` now carries its cycle guard, idle/non-useful counters, trace history, and dreamer invocation guard across calls, so anti-rumination, max-cycle escalation, and one-dreamer-burst-per-service-window behavior are measured on the continuous service path rather than only on batch `run_shadow_stream()`.
+- Production evidence custody hardening is closed in source at `6c45c56`: production render/capture now requires absolute external output and capture paths, production output rendering validates C2PA tool paths, hosted dashboard evidence requires retained `ops-dashboard-bundle.json` production operations proof, `production-evidence-verify` rescans retained metadata files for secret-shaped material, and sensitive evidence CID scoping prevents live unscoped sensitive rows from suppressing user-scoped sensitive writes while preserving tombstone replay blocking.
 - Follow-up privacy review findings are closed: provider packets omit raw content fingerprints and secret-shaped provider context, sensitive/detected-PII evidence CIDs are user-scoped without weakening tombstone replay blocking, privacy backfill rejects unsafe PII sensitivity floors, and legacy Postgres sensitive vectors are remediated away from public partitions.
 - Full local verification passed for focused regressions, `py_compile`, `ruff`, `git diff --check`, the no-DSN pytest suite, explicit-controller-telemetry G0 (`72/72 measured; gate_ready=True`), and 15 zero-delta G0 preregistration replays.
-- GitHub CI run `28332157144` passed on `7ab7051`: Lint (ruff), Postgres integration, Unit + drift checks, and G0 preregistration gate replay all completed successfully.
+- GitHub CI run `28333175447` passed on `6c45c56`: Lint (ruff), Postgres integration, Unit + drift checks, and G0 preregistration gate replay all completed successfully.
 - Direct default G0 without controller telemetry still intentionally reports `71/72 measured; gate_ready=False`; no controller power/cost estimate is fabricated.
 
 ## Prior Verified History
