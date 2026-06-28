@@ -87,7 +87,7 @@ Post-v1.0. Does not block, and is not blocked by, the v1.0 strict-parity sign-of
 - Standing is `(groundedness ⟂ salience)`; answer-authority depends on `groundedness` only; only **independent** external evidence raises groundedness; a permanent **evidence-dominance gap** holds (self < external, always).
 - The cognitive loop is always-on via a tiered heartbeat with **hard** anti-rumination + proto-self; self-generation budget, answer-grounding floor, broadcast-as-data, and a fail-closed circuit-breaker hold; rumination ~ 0 and heartbeat compute bounded.
 - Autonomy grows only as external corroboration earns it; an adversarial echo-chamber/sleeper corpus cannot raise a credential (Goodhart meta-rail).
-- **No operational on/off toggle remains** (only the fail-closed floor fuse); every reliability guardrail (ECE, confabulation, poison-block, recall/nDCG, P95, 7 rails, 14 indicators) stays green; honesty charter intact (functional only; welfare flag stays; no phenomenal claim).
+- The retired `service.enabled`, `SpecialistBudget.shadow_only`, and controller `budget.shadow_only` controls remain absent; explicit retrieval/consolidation advisory promotion is CID-validated and separately gated; every reliability guardrail (ECE, confabulation, poison-block, recall/nDCG, P95, 7 rails, 14 indicators) stays green; honesty charter intact (functional only; welfare flag stays; no phenomenal claim).
 
 ### Plans
 - `07-01` … `07-05` in `.planning/phases/07-unified-cognitive-substrate/` (P1 byte-stable Standing → P5 retire toggles). Plans `07-01` through `07-05`, the P5 H8/H12 pre-check, the `service.enabled` retirement, and the operational-toggle source inspection are complete and gate-recorded; no plan ships on a guardrail regression.

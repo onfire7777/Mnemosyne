@@ -97,10 +97,12 @@ input artifacts, fails if preflight paths do not resolve to the retained bundle
 files, checks that the retained source and operator soak manifests have matching
 production command profiles, and checks that the retained operator manifest plus
 nested suite JSON still reference the staged artifacts recorded in
-`preflight.json`. It does not contact production services, does not run
-`deployment-soak`, does not create production evidence, and cannot flip any
-strict-audit row to Done unless the bundle was originally captured by the
-production wrapper against deployed infrastructure.
+`preflight.json`. It also validates `summary.json.offline_verify.argv`, so a
+handoff cannot silently point reviewers at a stale bundle path, stale
+fingerprint, or non-custody replay command. It does not contact production
+services, does not run `deployment-soak`, does not create production evidence,
+and cannot flip any strict-audit row to Done unless the bundle was originally
+captured by the production wrapper against deployed infrastructure.
 
 ## Acceptance
 
