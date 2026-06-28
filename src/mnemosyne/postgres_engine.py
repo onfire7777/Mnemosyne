@@ -11,6 +11,8 @@ from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from mnemosyne.access_policy import (
+    apply_relation_redactions,
+    apply_statement_redactions,
     apply_text_redactions,
     effective_max_sensitivity,
     may_read_item,
@@ -1156,7 +1158,6 @@ class PostgresEngine:
                     (query, db_tenant_id, branch, max_trust, max_sensitivity, k),
                 )
                 for row in cur.fetchall():
-                    raw_text = f"{row['subject']} {row['predicate']} {row['object']}"
                     decision = may_read_item(
                         item_tenant_id=tenant_id,
                         sensitivity=int(row["sensitivity"]),
@@ -1167,7 +1168,13 @@ class PostgresEngine:
                     )
                     if not decision.allowed:
                         continue
-                    text, privacy_metadata = apply_text_redactions(raw_text, dict(row["access_policy"] or {}), decision)
+                    text, privacy_metadata = apply_statement_redactions(
+                        subject=str(row["subject"]),
+                        predicate=str(row["predicate"]),
+                        object_value=str(row["object"]),
+                        access_policy=dict(row["access_policy"] or {}),
+                        decision=decision,
+                    )
                     reality_monitoring = self._projection_reality_monitoring_from_calibration(dict(row["calibration"] or {}))
                     hits.append(
                         Hit(
@@ -1228,7 +1235,6 @@ class PostgresEngine:
                     score = float(row["score"] or 0.0)
                     if score <= 0:
                         continue
-                    raw_text = f"{row['subject']} {row['predicate']} {row['object']}"
                     decision = may_read_item(
                         item_tenant_id=tenant_id,
                         sensitivity=int(row["sensitivity"]),
@@ -1239,7 +1245,13 @@ class PostgresEngine:
                     )
                     if not decision.allowed:
                         continue
-                    text, privacy_metadata = apply_text_redactions(raw_text, dict(row["access_policy"] or {}), decision)
+                    text, privacy_metadata = apply_statement_redactions(
+                        subject=str(row["subject"]),
+                        predicate=str(row["predicate"]),
+                        object_value=str(row["object"]),
+                        access_policy=dict(row["access_policy"] or {}),
+                        decision=decision,
+                    )
                     reality_monitoring = self._projection_reality_monitoring_from_calibration(dict(row["calibration"] or {}))
                     hits.append(
                         Hit(
@@ -1547,11 +1559,24 @@ class PostgresEngine:
                     )
                     if security is None:
                         continue
+                    relation_policy = dict(row.get("access_policy") or {})
+                    relation_decision = may_read_item(
+                        item_tenant_id=tenant_id,
+                        sensitivity=int(security["sensitivity"]),
+                        access_policy=relation_policy,
+                        context=graph_filter,
+                        policy_max_sensitivity=self.policy.max_sensitivity,
+                        status="active",
+                    )
+                    if not relation_decision.allowed:
+                        continue
                     source = row["source"].lower()
                     target = row["target"].lower()
                     adjacency[source].add(target)
                     adjacency[target].add(source)
                     row["hit_security"] = security
+                    row["hit_access_decision"] = relation_decision
+                    row["hit_access_policy"] = relation_policy
                     relation_by_pair[(source, target)] = dict(row)
                     relation_by_pair[(target, source)] = dict(row)
         hits: list[Hit] = []
@@ -1560,24 +1585,40 @@ class PostgresEngine:
             if not (matches_seed(str(rel["source"])) and matches_seed(str(rel["target"]))):
                 continue
             relation_id = str(rel["id"])
-            seen_relation_ids.add(relation_id)
             security = rel["hit_security"]
+            relation_policy = dict(rel.get("hit_access_policy") or {})
+            relation_decision = rel["hit_access_decision"]
+            text, privacy_metadata = apply_relation_redactions(
+                source=str(rel["source"]),
+                predicate=str(rel["predicate"]),
+                target=str(rel["target"]),
+                access_policy=relation_policy,
+                decision=relation_decision,
+            )
+            relation_fields = privacy_metadata.get("redacted_record")
+            if not isinstance(relation_fields, dict):
+                relation_fields = {
+                    "source": str(rel["source"]),
+                    "predicate": str(rel["predicate"]),
+                    "target": str(rel["target"]),
+                }
+            seen_relation_ids.add(relation_id)
             hits.append(
                 Hit(
                     id=relation_id,
                     kind="relation",
                     tenant_id=tenant_id,
                     branch=rel["branch"],
-                    text=f"{rel['source']} {rel['predicate']} {rel['target']}",
+                    text=text,
                     score=float(rel["confidence"]),
                     channel="postgres_graph_ppr",
                     provenance=_bytes_list_to_cids(rel["source_evidence_cids"]),
                     trust_tier=security["trust_tier"],
                     sensitivity=security["sensitivity"],
                     metadata={
-                        "source": rel["source"],
-                        "predicate": rel["predicate"],
-                        "target": rel["target"],
+                        "source": relation_fields["source"],
+                        "predicate": relation_fields["predicate"],
+                        "target": relation_fields["target"],
                         "confidence": float(rel["confidence"]),
                         "source_evidence_cids": _bytes_list_to_cids(rel["source_evidence_cids"]),
                         "backend": self.adapters.graph_backend,
@@ -1585,6 +1626,7 @@ class PostgresEngine:
                         "source_evidence_status": security["source_evidence_status"],
                         "source_evidence_security": security["source_evidence_security"],
                         "direct_seed_relation": True,
+                        "privacy": privacy_metadata,
                     },
                 )
             )
@@ -1611,30 +1653,47 @@ class PostgresEngine:
             relation_id = str(rel["id"])
             if relation_id in seen_relation_ids:
                 continue
-            seen_relation_ids.add(relation_id)
             security = rel["hit_security"]
+            relation_policy = dict(rel.get("hit_access_policy") or {})
+            relation_decision = rel["hit_access_decision"]
+            text, privacy_metadata = apply_relation_redactions(
+                source=str(rel["source"]),
+                predicate=str(rel["predicate"]),
+                target=str(rel["target"]),
+                access_policy=relation_policy,
+                decision=relation_decision,
+            )
+            relation_fields = privacy_metadata.get("redacted_record")
+            if not isinstance(relation_fields, dict):
+                relation_fields = {
+                    "source": str(rel["source"]),
+                    "predicate": str(rel["predicate"]),
+                    "target": str(rel["target"]),
+                }
+            seen_relation_ids.add(relation_id)
             hits.append(
                 Hit(
                     id=relation_id,
                     kind="relation",
                     tenant_id=tenant_id,
                     branch=rel["branch"],
-                    text=f"{rel['source']} {rel['predicate']} {rel['target']}",
+                    text=text,
                     score=float(score) * float(rel["confidence"]),
                     channel="postgres_graph_ppr",
                     provenance=_bytes_list_to_cids(rel["source_evidence_cids"]),
                     trust_tier=security["trust_tier"],
                     sensitivity=security["sensitivity"],
                     metadata={
-                        "source": rel["source"],
-                        "predicate": rel["predicate"],
-                        "target": rel["target"],
+                        "source": relation_fields["source"],
+                        "predicate": relation_fields["predicate"],
+                        "target": relation_fields["target"],
                         "confidence": float(rel["confidence"]),
                         "source_evidence_cids": _bytes_list_to_cids(rel["source_evidence_cids"]),
                         "backend": self.adapters.graph_backend,
                         "reality_class": security["reality_class"],
                         "source_evidence_status": security["source_evidence_status"],
                         "source_evidence_security": security["source_evidence_security"],
+                        "privacy": privacy_metadata,
                     },
                 )
             )
@@ -1763,7 +1822,7 @@ class PostgresEngine:
                 cur.execute(
                     """
                     SELECT id, source, predicate, target, confidence, weight,
-                           valid_from, valid_to, source_evidence_cids
+                           valid_from, valid_to, source_evidence_cids, access_policy
                     FROM relations
                     WHERE tenant_id = %s AND branch = %s
                       AND valid_from <= %s AND (valid_to IS NULL OR valid_to > %s)
@@ -1782,7 +1841,7 @@ class PostgresEngine:
                 if source_cid_bytes:
                     cur.execute(
                         """
-                        SELECT cid, trust_tier, sensitivity, metadata, erased, source_type, actor
+                        SELECT cid, trust_tier, sensitivity, metadata, erased, source_type, actor, access_policy
                         FROM evidence
                         WHERE tenant_id = %s AND branch = %s AND cid = ANY(%s::bytea[])
                         ORDER BY cid
@@ -1801,6 +1860,7 @@ class PostgresEngine:
                 "valid_from": dt_to_json(row["valid_from"]),
                 "valid_to": dt_to_json(row["valid_to"]),
                 "source_evidence_cids": _bytes_list_to_cids(row["source_evidence_cids"]),
+                "access_policy": dict(row.get("access_policy") or {}),
                 "source_evidence_custody": [
                     {
                         "cid": cid,
@@ -1813,6 +1873,9 @@ class PostgresEngine:
                         if cid in evidence_by_cid
                         else None,
                         "actor": str(evidence_by_cid[cid].get("actor") or "") if cid in evidence_by_cid else None,
+                        "access_policy": dict(evidence_by_cid[cid].get("access_policy") or {})
+                        if cid in evidence_by_cid
+                        else None,
                     }
                     for cid in _bytes_list_to_cids(row["source_evidence_cids"])
                 ],
@@ -3613,7 +3676,13 @@ class PostgresEngine:
                         )
                         if not decision.allowed:
                             continue
-                        text, privacy_metadata = apply_text_redactions(raw_text, dict(row["access_policy"] or {}), decision)
+                        text, privacy_metadata = apply_statement_redactions(
+                            subject=str(row["subject"]),
+                            predicate=str(row["predicate"]),
+                            object_value=str(row["object"]),
+                            access_policy=dict(row["access_policy"] or {}),
+                            decision=decision,
+                        )
                         reality_monitoring = self._projection_reality_monitoring_from_calibration(dict(row["calibration"] or {}))
                         candidates.append(
                             Hit(

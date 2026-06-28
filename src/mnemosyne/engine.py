@@ -14,6 +14,8 @@ from pathlib import Path
 from typing import Any, Literal, Protocol, runtime_checkable
 
 from mnemosyne.access_policy import (
+    apply_relation_redactions,
+    apply_statement_redactions,
     apply_text_redactions,
     effective_max_sensitivity,
     may_read_item,
@@ -1079,7 +1081,7 @@ class LocalMemoryEngine:
             return node_lower in seed_set or bool(set(tokenize(node_lower)) & seed_set)
 
         adjacency: dict[str, set[str]] = defaultdict(set)
-        relation_by_pair: dict[tuple[str, str], tuple[Relation, dict[str, Any]]] = {}
+        relation_by_pair: dict[tuple[str, str], tuple[Relation, dict[str, Any], Any]] = {}
         for rel in self.relations.values():
             if tenant_id is not None and rel.tenant_id != tenant_id:
                 continue
@@ -1097,15 +1099,35 @@ class LocalMemoryEngine:
             )
             if security is None:
                 continue
+            relation_decision = may_read_item(
+                item_tenant_id=rel.tenant_id,
+                sensitivity=int(security["sensitivity"]),
+                access_policy=rel.access_policy,
+                context=graph_filter,
+                policy_max_sensitivity=self.policy.max_sensitivity,
+                status="active",
+            )
+            if not relation_decision.allowed:
+                continue
             adjacency[rel.source.lower()].add(rel.target.lower())
             adjacency[rel.target.lower()].add(rel.source.lower())
-            relation_by_pair[(rel.source.lower(), rel.target.lower())] = (rel, security)
-            relation_by_pair[(rel.target.lower(), rel.source.lower())] = (rel, security)
+            relation_by_pair[(rel.source.lower(), rel.target.lower())] = (rel, security, relation_decision)
+            relation_by_pair[(rel.target.lower(), rel.source.lower())] = (rel, security, relation_decision)
         hits: list[Hit] = []
         seen_relation_ids: set[str] = set()
-        for rel, security in {row[0].id: row for row in relation_by_pair.values()}.values():
+        for rel, security, relation_decision in {row[0].id: row for row in relation_by_pair.values()}.values():
             if not (matches_seed(rel.source) and matches_seed(rel.target)):
                 continue
+            text, privacy_metadata = apply_relation_redactions(
+                source=rel.source,
+                predicate=rel.predicate,
+                target=rel.target,
+                access_policy=rel.access_policy,
+                decision=relation_decision,
+            )
+            relation_fields = privacy_metadata.get("redacted_record")
+            if not isinstance(relation_fields, dict):
+                relation_fields = {"source": rel.source, "predicate": rel.predicate, "target": rel.target}
             seen_relation_ids.add(rel.id)
             hits.append(
                 Hit(
@@ -1113,22 +1135,23 @@ class LocalMemoryEngine:
                     kind="relation",
                     tenant_id=rel.tenant_id,
                     branch=rel.branch,
-                    text=f"{rel.source} {rel.predicate} {rel.target}",
+                    text=text,
                     score=float(rel.confidence),
                     channel="graph_ppr",
                     provenance=rel.source_evidence_cids,
                     trust_tier=security["trust_tier"],
                     sensitivity=security["sensitivity"],
                     metadata={
-                        "source": rel.source,
-                        "predicate": rel.predicate,
-                        "target": rel.target,
+                        "source": relation_fields["source"],
+                        "predicate": relation_fields["predicate"],
+                        "target": relation_fields["target"],
                         "confidence": rel.confidence,
                         "source_evidence_cids": list(rel.source_evidence_cids),
                         "reality_class": security["reality_class"],
                         "source_evidence_status": security["source_evidence_status"],
                         "source_evidence_security": security["source_evidence_security"],
                         "direct_seed_relation": True,
+                        "privacy": privacy_metadata,
                     },
                 )
             )
@@ -1151,9 +1174,19 @@ class LocalMemoryEngine:
                 continue
             relation_row = next((relation_by_pair[pair] for pair in relation_by_pair if pair[0] == node or pair[1] == node), None)
             if relation_row:
-                rel, security = relation_row
+                rel, security, relation_decision = relation_row
                 if rel.id in seen_relation_ids:
                     continue
+                text, privacy_metadata = apply_relation_redactions(
+                    source=rel.source,
+                    predicate=rel.predicate,
+                    target=rel.target,
+                    access_policy=rel.access_policy,
+                    decision=relation_decision,
+                )
+                relation_fields = privacy_metadata.get("redacted_record")
+                if not isinstance(relation_fields, dict):
+                    relation_fields = {"source": rel.source, "predicate": rel.predicate, "target": rel.target}
                 seen_relation_ids.add(rel.id)
                 hits.append(
                     Hit(
@@ -1161,21 +1194,22 @@ class LocalMemoryEngine:
                         kind="relation",
                         tenant_id=rel.tenant_id,
                         branch=rel.branch,
-                        text=f"{rel.source} {rel.predicate} {rel.target}",
+                        text=text,
                         score=score,
                         channel="graph_ppr",
                         provenance=rel.source_evidence_cids,
                         trust_tier=security["trust_tier"],
                         sensitivity=security["sensitivity"],
                         metadata={
-                            "source": rel.source,
-                            "predicate": rel.predicate,
-                            "target": rel.target,
+                            "source": relation_fields["source"],
+                            "predicate": relation_fields["predicate"],
+                            "target": relation_fields["target"],
                             "confidence": rel.confidence,
                             "source_evidence_cids": list(rel.source_evidence_cids),
                             "reality_class": security["reality_class"],
                             "source_evidence_status": security["source_evidence_status"],
                             "source_evidence_security": security["source_evidence_security"],
+                            "privacy": privacy_metadata,
                         },
                     )
                 )
@@ -2389,7 +2423,13 @@ class LocalMemoryEngine:
             )
             if not decision.allowed:
                 continue
-            text, privacy_metadata = apply_text_redactions(assertion.statement(), assertion.access_policy, decision)
+            text, privacy_metadata = apply_statement_redactions(
+                subject=assertion.subject,
+                predicate=assertion.predicate,
+                object_value=assertion.object,
+                access_policy=assertion.access_policy,
+                decision=decision,
+            )
             reality_monitoring = self._projection_reality_monitoring_from_calibration(assertion.calibration)
             hits.append(
                 Hit(
