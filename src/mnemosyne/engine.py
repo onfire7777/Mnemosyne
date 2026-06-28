@@ -90,6 +90,68 @@ def _bounded_float(value: object, *, default: float) -> float:
     return max(0.0, min(1.0, number))
 
 
+def _normalise_privacy_tags(pii_tags: list[str]) -> list[str]:
+    return sorted({str(tag).strip().lower() for tag in pii_tags if str(tag).strip()})
+
+
+def _int_or_default(value: Any, *, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _privacy_backfill_access_policy(
+    access_policy: dict[str, Any],
+    *,
+    tenant_id: str,
+    pii_tags: list[str],
+    target_sensitivity: int,
+) -> dict[str, Any]:
+    policy = dict(access_policy or {})
+    if pii_tags:
+        policy["data_class"] = "pii"
+        policy["max_sensitivity"] = max(
+            _int_or_default(policy.get("max_sensitivity"), default=target_sensitivity),
+            target_sensitivity,
+        )
+    return validate_access_policy(policy, tenant_id=tenant_id, location="evidence.access_policy")
+
+
+def _privacy_backfill_metadata(
+    metadata: dict[str, Any],
+    *,
+    access_policy: dict[str, Any],
+    pii_tags: list[str],
+    embedding_partition: str,
+) -> dict[str, Any]:
+    updated = dict(metadata or {})
+    privacy = updated.get("privacy") if isinstance(updated.get("privacy"), dict) else {}
+    updated["privacy"] = {
+        **dict(privacy),
+        "pii_tags": pii_tags,
+        "residency": privacy.get("residency") or access_policy.get("residency") or "local",
+        "detector": "mnemosyne.privacy.classify_privacy",
+        "backfilled": True,
+    }
+    updated["embedding_partition"] = embedding_partition
+    return updated
+
+
+def _privacy_backfill_controls(
+    sensitivity: int,
+    access_policy: dict[str, Any],
+    metadata: dict[str, Any],
+) -> dict[str, Any]:
+    policy = dict(access_policy or {})
+    return {
+        "sensitivity": int(sensitivity),
+        "data_class": str(policy.get("data_class") or "standard"),
+        "policy_max_sensitivity": _int_or_default(policy.get("max_sensitivity"), default=int(sensitivity)),
+        "embedding_partition": str((metadata or {}).get("embedding_partition") or "public"),
+    }
+
+
 @dataclass(slots=True)
 class RoutePlan:
     """Result of the cheap fast-vs-deep retrieval router (§22.1 / §30.4)."""
@@ -187,6 +249,19 @@ class MemoryEngine(Protocol):
     """
 
     def append_evidence(self, ev: Evidence, branch: str = "main") -> str:
+        raise NotImplementedError
+
+    def backfill_evidence_privacy(
+        self,
+        tenant_id: str,
+        cid: str,
+        pii_tags: list[str],
+        branch: str = "main",
+        *,
+        pii_sensitivity: int = 3,
+        actor: str = "privacy_backfill",
+        source: str = "privacy_backfill",
+    ) -> bool:
         raise NotImplementedError
 
     def upsert_assertion(self, assertion: Assertion, branch: str = "main") -> str:
@@ -659,6 +734,63 @@ class LocalMemoryEngine:
                     "patch": metadata_patch,
                     "before_keys": before_keys,
                     "after_keys": sorted(ev.metadata.keys()),
+                    "source_type": ev.source_type,
+                },
+                source=source,
+                trust_tier=ev.trust_tier,
+                capability_tags=ev.capability_tags,
+            )
+            self._persist()
+            return True
+
+    def backfill_evidence_privacy(
+        self,
+        tenant_id: str,
+        cid: str,
+        pii_tags: list[str],
+        branch: str = "main",
+        *,
+        pii_sensitivity: int = 3,
+        actor: str = "privacy_backfill",
+        source: str = "privacy_backfill",
+    ) -> bool:
+        tags = _normalise_privacy_tags(pii_tags)
+        with self._lock:
+            ev = self.evidence.get(self._evidence_key(tenant_id, branch, cid))
+            if ev is None or ev.erased:
+                return False
+            before = _privacy_backfill_controls(ev.sensitivity, ev.access_policy, ev.metadata)
+            target_sensitivity = max(int(ev.sensitivity), int(pii_sensitivity) if tags else int(ev.sensitivity))
+            access_policy = _privacy_backfill_access_policy(
+                ev.access_policy,
+                tenant_id=tenant_id,
+                pii_tags=tags,
+                target_sensitivity=target_sensitivity,
+            )
+            embedding_partition = vector_partition_for_item(
+                sensitivity=target_sensitivity,
+                access_policy=access_policy,
+            )
+            ev.sensitivity = target_sensitivity
+            ev.access_policy = access_policy
+            ev.metadata = _privacy_backfill_metadata(
+                ev.metadata,
+                access_policy=access_policy,
+                pii_tags=tags,
+                embedding_partition=embedding_partition,
+            )
+            if embedding_partition == "none":
+                ev.embedding = None
+            self._audit(
+                tenant_id,
+                actor,
+                "backfill_evidence_privacy",
+                cid,
+                {
+                    "branch": branch,
+                    "pii_tags": tags,
+                    "before": before,
+                    "after": _privacy_backfill_controls(ev.sensitivity, ev.access_policy, ev.metadata),
                     "source_type": ev.source_type,
                 },
                 source=source,
