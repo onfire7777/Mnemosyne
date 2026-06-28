@@ -111,6 +111,19 @@ def test_canonical_schema_includes_all_blueprint_core_tables() -> None:
         assert f"CREATE TABLE IF NOT EXISTS {table}" in schema
 
 
+def test_canonical_schema_partitions_sensitive_vector_indexes() -> None:
+    schema = Path("sql/schema.sql").read_text(encoding="utf-8")
+
+    assert "embedding_partition TEXT NOT NULL DEFAULT 'public'" in schema
+    assert "CHECK (embedding_partition IN ('public', 'private', 'none'))" in schema
+    assert "evidence_embedding_public_hnsw" in schema
+    assert "evidence_embedding_private_hnsw" in schema
+    assert "assertions_embedding_public_hnsw" in schema
+    assert "assertions_embedding_private_hnsw" in schema
+    assert "CREATE INDEX IF NOT EXISTS evidence_embedding_hnsw" not in schema
+    assert "CREATE INDEX IF NOT EXISTS assertions_embedding_hnsw" not in schema
+
+
 def test_schema_has_single_preference_valid_to_column() -> None:
     schema = Path("sql/schema.sql").read_text(encoding="utf-8")
     match = re.search(r"CREATE TABLE IF NOT EXISTS preferences \((.*?)\);", schema, re.S)

@@ -173,6 +173,41 @@ def test_redact_fields_masks_raw_text_below_min_role_for_raw() -> None:
     assert result.hits[0].metadata["privacy"]["redacted"] is True
 
 
+def test_redacted_callers_do_not_rank_against_raw_stored_embedding() -> None:
+    engine = LocalMemoryEngine()
+    cid = _append(
+        engine,
+        "Support ticket vector-redaction includes ssn: 123-45-6789 for follow-up.",
+        sensitivity=2,
+        access_policy={
+            "tenant": TENANT,
+            "redact_fields": ["ssn"],
+            "min_role_for_raw": "operator",
+            "break_glass": True,
+        },
+    )
+    raw_vector_only_query = "raw-vector-only-omega"
+    vector = engine.adapters.embedding.embed(raw_vector_only_query)
+
+    assert engine.set_evidence_embedding(TENANT, cid, vector) is True
+
+    redacted_hits = engine.vector_search(
+        raw_vector_only_query,
+        5,
+        {"tenant_id": TENANT, "branch": "main", "role": "agent"},
+    )
+    raw_hits = engine.vector_search(
+        raw_vector_only_query,
+        5,
+        {"tenant_id": TENANT, "branch": "main", "role": "operator", "break_glass": True},
+    )
+
+    assert redacted_hits == []
+    assert [hit.id for hit in raw_hits] == [cid]
+    assert raw_hits[0].metadata["stored_embedding_used"] is True
+    assert raw_hits[0].metadata["embedding_partition"] == "private"
+
+
 def test_redact_fields_masks_json_and_dotted_paths_below_raw_role() -> None:
     engine = LocalMemoryEngine()
     _append(

@@ -225,15 +225,15 @@ This is the honesty section: **policy target ≠ current enforcement.** Conforma
 - Legacy stores may still contain arbitrary JSON envelope keys from before write-time validation. Retrieval still fails closed on those rows, and rewrite/promotion paths now reject unsupported keys instead of silently dropping them.
 - Model-prompt gist substitution is still a policy target for prompt assembly; returned retrieval text/metadata masking and public export-backed disclosure filtering are wired, but prompt context assembly still needs a reduced-form substitution path.
 - The ingest PII detector still recognizes only email/phone automatically (§2.1); other sensitive categories require caller/upstream sensitivity floors.
-- S3/S4 embedding policy is not yet fully split into per-subject / non-shared vector partitions; retrieval blocks S4 raw disclosure, but index-time partitioning remains a schema/deployment hardening item.
+
+**Vector partitioning enforcement.** Local and Postgres vector paths now enforce `embedding_partition` from `access_policy`: `embed_ok:false`, S4, restricted, held, or unknown-policy rows are non-embeddable; S2+ and raw/redaction-restricted rows default to a private partition; and stored raw embeddings are used for ranking only when the caller can read the raw item rather than a redacted projection. Postgres fresh schema/runtime migration uses partition-scoped HNSW indexes instead of one broad shared vector index. This closes the shared-index/raw-vector side channel; production evidence still has to prove the deployed pgvector path is running this schema.
 
 ### 9.2 Hardening backlog (disclosure-side, ordered by risk)
 
 Each item is a gap between the policy target (§1–§8) and what is enforced today (§9.1):
 
 1. **Finish model-prompt gist substitution** so context assembly uses caller-scoped reduced forms instead of raw stored rows where policy requires omission or abstraction.
-2. **Split sensitive vector indexing** so S2+ embeddings live only in allowed per-subject / non-shared partitions and S3/S4 never enter a shared recoverable latent space.
-3. **Expand the ingest PII detector** beyond email/phone toward the §1 taxonomy (or require source-level `sensitivity` floors and document the residual risk).
+2. **Broaden automatic PII detection** beyond email/phone so SSN, DOB, health IDs, payment IDs, national IDs, addresses/precise location, and comparable regulated classes raise sensitivity/access-policy floors without relying only on caller-supplied metadata.
 
 ---
 
@@ -284,7 +284,7 @@ A deployment conforms to this policy iff:
 - **`access_policy` only narrows;** unknown keys fail the write.
 - **S4 is pointer-only.** Never materialized, embedded, projected, or placed in the system prompt.
 - **`operator` sees metadata/fingerprints only;** raw S2+ needs a recorded break-glass grant (§4).
-- **Enforcement is stated honestly in §9.1** — write/read-time `access_policy` narrowing, structured returned-text masking, and public filtered export disclosure are wired, while model-prompt gist substitution, sensitive vector partitioning, and broader PII detection remain backlog (§9.2).
+- **Enforcement is stated honestly in §9.1** — write/read-time `access_policy` narrowing, structured returned-text masking, public filtered export disclosure, and sensitive vector partitioning are wired, while model-prompt gist substitution and broader PII detection remain backlog (§9.2).
 - **Right-to-be-forgotten ⇒ §25**, not redaction. This lane routes; §25 erases.
 
 ---

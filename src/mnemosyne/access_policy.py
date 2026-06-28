@@ -65,6 +65,29 @@ class AccessDecision:
     unknown_keys: tuple[str, ...] = ()
 
 
+VECTOR_PARTITION_PUBLIC = "public"
+VECTOR_PARTITION_PRIVATE = "private"
+VECTOR_PARTITION_NONE = "none"
+VECTOR_PARTITIONS = {
+    VECTOR_PARTITION_PUBLIC,
+    VECTOR_PARTITION_PRIVATE,
+    VECTOR_PARTITION_NONE,
+}
+_PRIVATE_VECTOR_DATA_CLASSES = {
+    "biometric",
+    "credential",
+    "credentials",
+    "financial",
+    "health",
+    "phi",
+    "pii",
+    "secret",
+    "secrets",
+    "sensitive",
+    "sensitive_personal",
+}
+
+
 def role_for_context(context: Mapping[str, Any] | None) -> str:
     role = str((context or {}).get("role") or (context or {}).get("mnemosyne_role") or "reader").strip().lower()
     return role
@@ -135,6 +158,78 @@ def validate_access_policy(
     if tenant_id is not None and policy_tenants and next(iter(policy_tenants)) != str(tenant_id):
         raise ValueError(f"{location} tenant does not match row tenant")
     return policy
+
+
+def may_embed_item(
+    *,
+    sensitivity: int,
+    access_policy: Mapping[str, Any] | None,
+    status: str = "active",
+    erased: bool = False,
+) -> bool:
+    """Return whether an item may enter any embedding/vector channel."""
+
+    return vector_partition_for_item(
+        sensitivity=sensitivity,
+        access_policy=access_policy,
+        status=status,
+        erased=erased,
+    ) != VECTOR_PARTITION_NONE
+
+
+def vector_partition_for_item(
+    *,
+    sensitivity: int,
+    access_policy: Mapping[str, Any] | None,
+    status: str = "active",
+    erased: bool = False,
+) -> str:
+    """Return the fail-closed vector partition for a retrievable item.
+
+    ``embed_ok: false`` means no embedding should be accepted or generated.
+    Redaction/raw-role policies may still be retrievable textually, but their
+    stored raw vectors are private and cannot be used for callers who only see
+    a redacted projection.
+    """
+
+    policy = dict(access_policy or {})
+    if unknown_access_policy_keys(policy):
+        return VECTOR_PARTITION_NONE
+    if erased or status not in {"active", "candidate", "contested"}:
+        return VECTOR_PARTITION_NONE
+    if policy.get("embed_ok") is False:
+        return VECTOR_PARTITION_NONE
+    if bool(policy.get("restricted")) or bool(policy.get("hold")) or any(
+        str(key).startswith("hold:") and bool(value) for key, value in policy.items()
+    ):
+        return VECTOR_PARTITION_NONE
+    if int(sensitivity) >= 4:
+        return VECTOR_PARTITION_NONE
+
+    if _raw_vector_restricted(policy, int(sensitivity)):
+        return VECTOR_PARTITION_PRIVATE
+    return VECTOR_PARTITION_PUBLIC
+
+
+def may_use_stored_embedding(
+    *,
+    decision: AccessDecision,
+    sensitivity: int,
+    access_policy: Mapping[str, Any] | None,
+    embedding_partition: str | None = None,
+) -> bool:
+    """Return whether a stored raw embedding may influence this caller's rank."""
+
+    if not decision.allowed:
+        return False
+    partition = _normalise_vector_partition(embedding_partition)
+    if partition is None:
+        partition = vector_partition_for_item(sensitivity=sensitivity, access_policy=access_policy)
+    if partition == VECTOR_PARTITION_NONE:
+        return False
+    if partition == VECTOR_PARTITION_PUBLIC:
+        return True
+    return not decision.redacted
 
 
 def may_read_item(
@@ -696,6 +791,26 @@ def merge_access_policies(policies: Sequence[Mapping[str, Any] | None], *, tenan
     elif len(data_classes) > 1:
         merged["data_class"] = "mixed"
     return merged
+
+
+def _normalise_vector_partition(value: object) -> str | None:
+    if value is None:
+        return None
+    partition = str(value).strip().lower()
+    if partition in VECTOR_PARTITIONS:
+        return partition
+    return VECTOR_PARTITION_NONE
+
+
+def _raw_vector_restricted(policy: Mapping[str, Any], sensitivity: int) -> bool:
+    if sensitivity >= 2:
+        return True
+    if _str_list(policy.get("redact_fields")):
+        return True
+    if str(policy.get("min_role_for_raw") or "").strip():
+        return True
+    data_class = str(policy.get("data_class") or "").strip().lower()
+    return data_class in _PRIVATE_VECTOR_DATA_CLASSES
 
 
 def _redaction_metadata(decision: AccessDecision) -> dict[str, Any]:
