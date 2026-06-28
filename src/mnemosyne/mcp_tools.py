@@ -540,22 +540,44 @@ class MemoryTools:
         min_trust_tier: int | None = None,
         max_trust_tier: int | None = None,
         max_sensitivity: int | None = None,
+        role: WriteRole = "agent",
+        user_id: str | None = None,
+        capability_tags: list[str] | None = None,
+        purpose: str | list[str] | None = None,
+        residency: str | None = None,
+        region: str | None = None,
+        break_glass: bool = False,
+        lawful_basis: str | list[str] | None = None,
     ) -> dict[str, Any]:
-        filt: dict[str, Any] = {}
+        filt: dict[str, Any] = {"role": role}
+        if user_id:
+            filt["user_id"] = user_id
         if max_trust_tier is not None:
             filt["max_trust_tier"] = max_trust_tier
         elif min_trust_tier is not None:
             filt["min_trust_tier"] = min_trust_tier
         if max_sensitivity is not None:
             filt["max_sensitivity"] = max_sensitivity
+        if capability_tags:
+            filt["capability_tags"] = list(capability_tags)
+        if purpose is not None:
+            filt["purpose"] = purpose
+        if residency:
+            filt["residency"] = residency
+        if region:
+            filt["region"] = region
+        if break_glass:
+            filt["break_glass"] = True
+        if lawful_basis is not None:
+            filt["lawful_basis"] = lawful_basis
         start = perf_counter()
         result = self.engine.retrieve(query=query, tenant_id=tenant_id, branch=branch, filt=filt)
         self._record_retrieval(result.to_dict(), start)
         return result.to_dict()
 
-    def deep_search(self, tenant_id: str, query: str, branch: str = "main") -> dict[str, Any]:
+    def deep_search(self, tenant_id: str, query: str, branch: str = "main", role: WriteRole = "agent") -> dict[str, Any]:
         start = perf_counter()
-        result = self.engine.deep_search(query=query, tenant_id=tenant_id, branch=branch)
+        result = self.engine.deep_search(query=query, tenant_id=tenant_id, branch=branch, filt={"role": role})
         self._record_retrieval(result.to_dict(), start)
         return result.to_dict()
 
@@ -976,7 +998,23 @@ class MemoryTools:
         result["corrects"] = id
         return result
 
-    def prefetch(self, tenant_id: str, candidates: list[dict[str, Any]], branch: str = "main") -> dict[str, Any]:
+    def prefetch(
+        self,
+        tenant_id: str,
+        candidates: list[dict[str, Any]],
+        branch: str = "main",
+        role: WriteRole = "agent",
+        user_id: str | None = None,
+        capability_tags: list[str] | None = None,
+        purpose: str | list[str] | None = None,
+    ) -> dict[str, Any]:
+        access_context: dict[str, Any] = {"role": role}
+        if user_id:
+            access_context["user_id"] = user_id
+        if capability_tags:
+            access_context["capability_tags"] = list(capability_tags)
+        if purpose is not None:
+            access_context["purpose"] = purpose
         results = self.prefetcher.prefetch(
             tenant_id,
             [
@@ -989,6 +1027,7 @@ class MemoryTools:
                 for candidate in candidates
             ],
             branch=branch,
+            access_context=access_context,
         )
         return {"results": [item.to_dict() for item in results]}
 

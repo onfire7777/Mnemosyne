@@ -1565,7 +1565,7 @@ def test_postgres_engine_delegates_to_command_retrieval_adapters(tmp_path: Path)
     assert [item["role"] for item in requests] == ["lexical_search", "graph_ppr"]
     assert requests[0]["tenant_id"] == TENANT
     assert requests[1]["tenant_id"] == TENANT
-    assert requests[1]["filter"] == {}
+    assert requests[1]["filter"] == {"branch": "main", "tenant_id": TENANT}
 
 
 def test_cli_provider_check_returns_nonzero_for_malformed_http_provider(tmp_path: Path) -> None:
@@ -3608,7 +3608,7 @@ def test_cli_ingests_binary_file_with_c2pa_verifier(tmp_path: Path) -> None:
     }
     exported = run_cli(store, "export", "--tenant", TENANT)
     evidence = next(item for item in exported["evidence"] if item["cid"] == ingested["cid"])
-    search = run_cli(store, "search", "--tenant", TENANT, "--query", "camera capture")
+    search = run_cli(store, "search", "--tenant", TENANT, "--query", "camera capture", "--role", "agent")
     assert evidence["content"] == "Binary camera capture."
     assert "provenance-valid" in evidence["capability_tags"]
     assert "provenance-verified" in evidence["capability_tags"]

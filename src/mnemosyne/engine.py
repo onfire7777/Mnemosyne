@@ -13,6 +13,11 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal, Protocol, runtime_checkable
 
+from mnemosyne.access_policy import (
+    apply_text_redactions,
+    effective_max_sensitivity,
+    may_read_item,
+)
 from mnemosyne.calibration import CalibrationSet, conformal_threshold, should_abstain
 from mnemosyne.consciousness import RealityMonitor
 from mnemosyne.ids import content_cid, new_id
@@ -1007,10 +1012,14 @@ class LocalMemoryEngine:
         moment = as_of or utc_now()
         moment = moment.astimezone(UTC) if moment.tzinfo else moment.replace(tzinfo=UTC)
         graph_filter = dict(filt or {})
+        if tenant_id is not None:
+            graph_filter.setdefault("tenant_id", tenant_id)
+        if branch is not None:
+            graph_filter.setdefault("branch", branch)
         include_quarantined = bool(graph_filter.get("include_quarantined", False))
         default_max_trust = int(TrustTier.UNTRUSTED_EXTERNAL) if include_quarantined else self.policy.max_trust_tier
         max_trust = int(graph_filter.get("max_trust_tier", graph_filter.get("min_trust_tier", default_max_trust)))
-        max_sensitivity = int(graph_filter.get("max_sensitivity", self.policy.max_sensitivity))
+        max_sensitivity = effective_max_sensitivity(graph_filter, self.policy.max_sensitivity)
         if self.adapters.graph_retriever is not None and tenant_id:
             hits = self.adapters.graph_retriever.search(
                 seeds,
@@ -1033,6 +1042,7 @@ class LocalMemoryEngine:
                 include_quarantined=include_quarantined,
                 max_trust=max_trust,
                 max_sensitivity=max_sensitivity,
+                access_context=graph_filter,
             )
             return self._mark_retrieved_text_as_data(hits)
 
@@ -1055,6 +1065,7 @@ class LocalMemoryEngine:
                 include_quarantined=include_quarantined,
                 max_trust=max_trust,
                 max_sensitivity=max_sensitivity,
+                access_context=graph_filter,
             )
             if security is None:
                 continue
@@ -1456,6 +1467,7 @@ class LocalMemoryEngine:
         include_quarantined: bool,
         max_trust: int,
         max_sensitivity: int,
+        access_context: dict[str, Any] | None,
     ) -> list[Hit]:
         filtered: list[Hit] = []
         for hit in hits:
@@ -1476,6 +1488,7 @@ class LocalMemoryEngine:
                 include_quarantined=include_quarantined,
                 max_trust=max_trust,
                 max_sensitivity=max_sensitivity,
+                access_context=access_context,
             )
             if security is None:
                 continue
@@ -1501,6 +1514,7 @@ class LocalMemoryEngine:
         include_quarantined: bool,
         max_trust: int,
         max_sensitivity: int,
+        access_context: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         source_cids = [cid for cid in relation.source_evidence_cids if cid]
         if not source_cids:
@@ -1514,6 +1528,17 @@ class LocalMemoryEngine:
             if not include_quarantined and ev.metadata.get("quarantine_reason"):
                 return None
             if is_retired_summary_metadata(ev.metadata):
+                return None
+            decision = may_read_item(
+                item_tenant_id=ev.tenant_id,
+                sensitivity=int(ev.sensitivity),
+                access_policy=ev.access_policy,
+                context={**dict(access_context or {}), "tenant_id": relation.tenant_id},
+                policy_max_sensitivity=self.policy.max_sensitivity,
+                status="active",
+                erased=ev.erased,
+            )
+            if not decision.allowed:
                 return None
             source_rows.append(ev)
 
@@ -1536,6 +1561,7 @@ class LocalMemoryEngine:
                     "trust_tier": int(ev.trust_tier),
                     "sensitivity": int(ev.sensitivity),
                     "reality_class": self._classify_evidence_reality(ev),
+                    "access_policy_enforced": True,
                 }
                 for ev in source_rows
             ],
@@ -2238,17 +2264,33 @@ class LocalMemoryEngine:
         include_quarantined = bool(filt.get("include_quarantined", False))
         default_max_trust = int(TrustTier.UNTRUSTED_EXTERNAL) if include_quarantined else self.policy.max_trust_tier
         max_trust = int(filt.get("max_trust_tier", filt.get("min_trust_tier", default_max_trust)))
-        max_sensitivity = int(filt.get("max_sensitivity", self.policy.max_sensitivity))
+        max_sensitivity = effective_max_sensitivity(filt, self.policy.max_sensitivity)
         hits: list[Hit] = []
         for ev in self.evidence.values():
             if ev.erased or ev.tenant_id != tenant_id or ev.branch != branch:
                 continue
             if ev.trust_tier > max_trust or ev.sensitivity > max_sensitivity:
                 continue
+            decision = may_read_item(
+                item_tenant_id=ev.tenant_id,
+                sensitivity=int(ev.sensitivity),
+                access_policy=ev.access_policy,
+                context=filt,
+                policy_max_sensitivity=self.policy.max_sensitivity,
+                status="active",
+                erased=ev.erased,
+            )
+            if not decision.allowed:
+                continue
             if not include_quarantined and ev.metadata.get("quarantine_reason"):
                 continue
             if is_retired_summary_metadata(ev.metadata):
                 continue
+            text, privacy_metadata = apply_text_redactions(
+                ev.content or ev.content_pointer or f"{ev.modality} evidence",
+                ev.access_policy,
+                decision,
+            )
             metadata = {
                 "actor": ev.actor,
                 "source_type": ev.source_type,
@@ -2256,6 +2298,7 @@ class LocalMemoryEngine:
                 "content_pointer": ev.content_pointer,
                 "reality_class": self._classify_evidence_reality(ev),
                 "stored_media_embedding": bool(ev.embedding and ev.modality != "text"),
+                "privacy": privacy_metadata,
             }
             if isinstance(ev.metadata.get("media_embedding"), dict):
                 metadata["media_embedding"] = dict(ev.metadata["media_embedding"])
@@ -2275,7 +2318,7 @@ class LocalMemoryEngine:
                     kind="evidence",
                     tenant_id=ev.tenant_id,
                     branch=ev.branch,
-                    text=ev.content or ev.content_pointer or f"{ev.modality} evidence",
+                    text=text,
                     score=0.0,
                     channel="candidate",
                     provenance=[ev.cid] if ev.cid else [],
@@ -2291,6 +2334,18 @@ class LocalMemoryEngine:
                 continue
             if assertion.trust_tier > max_trust or assertion.sensitivity > max_sensitivity:
                 continue
+            decision = may_read_item(
+                item_tenant_id=assertion.tenant_id,
+                sensitivity=int(assertion.sensitivity),
+                access_policy=assertion.access_policy,
+                context=filt,
+                policy_max_sensitivity=self.policy.max_sensitivity,
+                status=assertion.status,
+                erased=False,
+            )
+            if not decision.allowed:
+                continue
+            text, privacy_metadata = apply_text_redactions(assertion.statement(), assertion.access_policy, decision)
             reality_monitoring = self._projection_reality_monitoring_from_calibration(assertion.calibration)
             hits.append(
                 Hit(
@@ -2298,7 +2353,7 @@ class LocalMemoryEngine:
                     kind="assertion",
                     tenant_id=assertion.tenant_id,
                     branch=assertion.branch,
-                    text=assertion.statement(),
+                    text=text,
                     score=0.0,
                     channel="candidate",
                     provenance=list(assertion.source_evidence_cids),
@@ -2311,25 +2366,38 @@ class LocalMemoryEngine:
                         "reality_monitoring": reality_monitoring,
                         "last_accessed": assertion.last_accessed.isoformat() if assertion.last_accessed else None,
                         "access_count": assertion.access_count,
+                        "privacy": privacy_metadata,
                     },
                 )
             )
         for pref in self.preferences.values():
             if pref.tenant_id != tenant_id or pref.status != "active":
                 continue
+            decision = may_read_item(
+                item_tenant_id=pref.tenant_id,
+                sensitivity=0,
+                access_policy=pref.access_policy,
+                context=filt,
+                policy_max_sensitivity=self.policy.max_sensitivity,
+                status=pref.status,
+                erased=False,
+            )
+            if not decision.allowed:
+                continue
+            text, privacy_metadata = apply_text_redactions(pref.statement, pref.access_policy, decision)
             hits.append(
                 Hit(
                     id=pref.id,
                     kind="preference",
                     tenant_id=pref.tenant_id,
                     branch=branch,
-                    text=pref.statement,
+                    text=text,
                     score=0.0,
                     channel="candidate",
                     provenance=list(pref.source_evidence_cids),
                     trust_tier=0 if pref.explicit else 3,
                     sensitivity=0,
-                    metadata={"category": pref.category, "explicit": pref.explicit},
+                    metadata={"category": pref.category, "explicit": pref.explicit, "privacy": privacy_metadata},
                 )
             )
         return hits

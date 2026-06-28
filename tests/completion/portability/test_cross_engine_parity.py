@@ -496,7 +496,7 @@ def test_parity_graph_ppr_filters_relation_source_trust_boundary() -> None:
                 user,
                 "Restricted graph relation backing evidence.",
                 trust_tier=5,
-                sensitivity=4,
+                sensitivity=3,
             )
         )
         relation_id = engine.add_relation(
@@ -515,7 +515,7 @@ def test_parity_graph_ppr_filters_relation_source_trust_boundary() -> None:
             5,
             tenant_id=tenant,
             branch="main",
-            filt={"max_trust_tier": 5, "max_sensitivity": 4},
+            filt={"role": "consolidator", "max_trust_tier": 5, "max_sensitivity": 3},
         )
         permissive_hit = next(hit for hit in permissive_hits if hit.id == relation_id)
         return {
@@ -532,7 +532,7 @@ def test_parity_graph_ppr_filters_relation_source_trust_boundary() -> None:
     assert local["default_relation_ids"] == []
     assert len(local["permissive_relation_ids"]) == 1
     assert local["permissive_trust_tier"] == 5
-    assert local["permissive_sensitivity"] == 4
+    assert local["permissive_sensitivity"] == 3
     assert local["permissive_reality_class"] == "externally_suggested"
     assert local["permissive_source_status"] == "source_evidence_visible"
     assert local["permissive_source_security"][0]["trust_tier"] == 5

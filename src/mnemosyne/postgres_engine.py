@@ -10,6 +10,7 @@ from hashlib import sha256
 from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid5
 
+from mnemosyne.access_policy import apply_text_redactions, effective_max_sensitivity, may_read_item
 from mnemosyne.calibration import CalibrationSet, conformal_threshold, should_abstain
 from mnemosyne.consciousness import RealityMonitor
 from mnemosyne.ids import content_cid
@@ -1032,7 +1033,7 @@ class PostgresEngine:
         include_quarantined = bool(filt.get("include_quarantined", False))
         default_max_trust = int(TrustTier.UNTRUSTED_EXTERNAL) if include_quarantined else self.policy.max_trust_tier
         max_trust = int(filt.get("max_trust_tier", filt.get("min_trust_tier", default_max_trust)))
-        max_sensitivity = int(filt.get("max_sensitivity", self.policy.max_sensitivity))
+        max_sensitivity = effective_max_sensitivity(filt, self.policy.max_sensitivity)
         hits: list[Hit] = []
         with self.connect() as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
@@ -1040,7 +1041,7 @@ class PostgresEngine:
                 cur.execute(
                     """
                     WITH q AS (SELECT plainto_tsquery('english', %s) AS query)
-                    SELECT e.cid, e.branch, e.content, e.metadata, e.trust_tier, e.sensitivity,
+                    SELECT e.cid, e.branch, e.content, e.metadata, e.trust_tier, e.sensitivity, e.access_policy,
                       e.actor, e.source_type,
                       ts_rank_cd(to_tsvector('english', coalesce(e.content, '')), q.query) AS score
                     FROM evidence e, q
@@ -1066,11 +1067,22 @@ class PostgresEngine:
                     metadata = dict(row["metadata"] or {})
                     if is_retired_summary_metadata(metadata):
                         continue
+                    decision = may_read_item(
+                        item_tenant_id=tenant_id,
+                        sensitivity=int(row["sensitivity"]),
+                        access_policy=dict(row["access_policy"] or {}),
+                        context=filt,
+                        policy_max_sensitivity=self.policy.max_sensitivity,
+                    )
+                    if not decision.allowed:
+                        continue
+                    text, privacy_metadata = apply_text_redactions(row["content"] or "", dict(row["access_policy"] or {}), decision)
                     hit_metadata = {
                         "source_type": row["source_type"],
                         "actor": row["actor"],
                         "backend": self.adapters.lexical_backend,
                         "reality_class": self._classify_evidence_row_reality(row, metadata),
+                        "privacy": privacy_metadata,
                     }
                     if isinstance(metadata.get("summary"), dict):
                         hit_metadata["summary"] = metadata["summary"]
@@ -1088,7 +1100,7 @@ class PostgresEngine:
                             kind="evidence",
                             tenant_id=tenant_id,
                             branch=row["branch"],
-                            text=row["content"] or "",
+                            text=text,
                             score=float(row["score"] or 0.0),
                             channel="postgres_fts",
                             provenance=[cid],
@@ -1100,8 +1112,8 @@ class PostgresEngine:
                 cur.execute(
                     """
                     WITH q AS (SELECT plainto_tsquery('english', %s) AS query)
-                    SELECT a.id, a.branch, a.subject, a.predicate, a.object, a.confidence, a.calibration,
-                      a.source_evidence_cids, a.trust_tier, a.sensitivity, a.last_accessed, a.access_count,
+                    SELECT a.id, a.branch, a.subject, a.predicate, a.object, a.confidence, a.calibration, a.status,
+                      a.source_evidence_cids, a.trust_tier, a.sensitivity, a.access_policy, a.last_accessed, a.access_count,
                       ts_rank_cd(coalesce(a.lexeme, to_tsvector('english', concat_ws(' ', a.subject, a.predicate, a.object))), q.query) AS score
                     FROM assertions a, q
                     WHERE a.tenant_id = %s AND a.branch = %s AND a.status IN ('active', 'contested')
@@ -1113,7 +1125,18 @@ class PostgresEngine:
                     (query, db_tenant_id, branch, max_trust, max_sensitivity, k),
                 )
                 for row in cur.fetchall():
-                    text = f"{row['subject']} {row['predicate']} {row['object']}"
+                    raw_text = f"{row['subject']} {row['predicate']} {row['object']}"
+                    decision = may_read_item(
+                        item_tenant_id=tenant_id,
+                        sensitivity=int(row["sensitivity"]),
+                        access_policy=dict(row["access_policy"] or {}),
+                        context=filt,
+                        policy_max_sensitivity=self.policy.max_sensitivity,
+                        status=str(row["status"]),
+                    )
+                    if not decision.allowed:
+                        continue
+                    text, privacy_metadata = apply_text_redactions(raw_text, dict(row["access_policy"] or {}), decision)
                     reality_monitoring = self._projection_reality_monitoring_from_calibration(dict(row["calibration"] or {}))
                     hits.append(
                         Hit(
@@ -1134,6 +1157,7 @@ class PostgresEngine:
                                 "backend": self.adapters.lexical_backend,
                                 "last_accessed": row["last_accessed"].isoformat() if row["last_accessed"] else None,
                                 "access_count": row["access_count"],
+                                "privacy": privacy_metadata,
                             },
                         )
                     )
@@ -1148,7 +1172,7 @@ class PostgresEngine:
         include_quarantined = bool(filt.get("include_quarantined", False))
         default_max_trust = int(TrustTier.UNTRUSTED_EXTERNAL) if include_quarantined else self.policy.max_trust_tier
         max_trust = int(filt.get("max_trust_tier", filt.get("min_trust_tier", default_max_trust)))
-        max_sensitivity = int(filt.get("max_sensitivity", self.policy.max_sensitivity))
+        max_sensitivity = effective_max_sensitivity(filt, self.policy.max_sensitivity)
         query_vec = self.adapters.embedding.embed(query)
         query_literal = _vector_literal(query_vec)
         hits: list[Hit] = []
@@ -1157,8 +1181,8 @@ class PostgresEngine:
                 self._set_tenant(cur, db_tenant_id)
                 cur.execute(
                     """
-                    SELECT id, branch, subject, predicate, object, confidence, calibration,
-                      source_evidence_cids, trust_tier, sensitivity, last_accessed, access_count,
+                    SELECT id, branch, subject, predicate, object, confidence, calibration, status,
+                      source_evidence_cids, trust_tier, sensitivity, access_policy, last_accessed, access_count,
                       1.0 - (embedding <=> %s::vector) AS score
                     FROM assertions
                     WHERE tenant_id = %s AND branch = %s AND status IN ('active', 'contested')
@@ -1173,7 +1197,18 @@ class PostgresEngine:
                     score = float(row["score"] or 0.0)
                     if score <= 0:
                         continue
-                    text = f"{row['subject']} {row['predicate']} {row['object']}"
+                    raw_text = f"{row['subject']} {row['predicate']} {row['object']}"
+                    decision = may_read_item(
+                        item_tenant_id=tenant_id,
+                        sensitivity=int(row["sensitivity"]),
+                        access_policy=dict(row["access_policy"] or {}),
+                        context=filt,
+                        policy_max_sensitivity=self.policy.max_sensitivity,
+                        status=str(row["status"]),
+                    )
+                    if not decision.allowed:
+                        continue
+                    text, privacy_metadata = apply_text_redactions(raw_text, dict(row["access_policy"] or {}), decision)
                     reality_monitoring = self._projection_reality_monitoring_from_calibration(dict(row["calibration"] or {}))
                     hits.append(
                         Hit(
@@ -1195,6 +1230,7 @@ class PostgresEngine:
                                 "embedding_dims": self.adapters.embedding.dims,
                                 "last_accessed": row["last_accessed"].isoformat() if row["last_accessed"] else None,
                                 "access_count": row["access_count"],
+                                "privacy": privacy_metadata,
                             },
                         )
                     )
@@ -1202,7 +1238,7 @@ class PostgresEngine:
                 cur.execute(
                     """
                     SELECT cid, branch, content, content_pointer, modality, metadata,
-                      trust_tier, sensitivity, actor, source_type,
+                      trust_tier, sensitivity, access_policy, actor, source_type,
                       1.0 - (embedding <=> %s::vector) AS score
                     FROM evidence
                     WHERE tenant_id = %s AND branch = %s AND erased = false
@@ -1240,6 +1276,16 @@ class PostgresEngine:
                     metadata = dict(row["metadata"] or {})
                     if is_retired_summary_metadata(metadata):
                         continue
+                    decision = may_read_item(
+                        item_tenant_id=tenant_id,
+                        sensitivity=int(row["sensitivity"]),
+                        access_policy=dict(row["access_policy"] or {}),
+                        context=filt,
+                        policy_max_sensitivity=self.policy.max_sensitivity,
+                    )
+                    if not decision.allowed:
+                        continue
+                    text, privacy_metadata = apply_text_redactions(text, dict(row["access_policy"] or {}), decision)
                     media_embedding = metadata.get("media_embedding")
                     hit_metadata = {
                         "source_type": row["source_type"],
@@ -1252,6 +1298,7 @@ class PostgresEngine:
                         "modality": row["modality"],
                         "content_pointer": row["content_pointer"],
                         "reality_class": self._classify_evidence_row_reality(row, metadata),
+                        "privacy": privacy_metadata,
                     }
                     if isinstance(media_embedding, dict):
                         hit_metadata["media_embedding"] = media_embedding
@@ -1282,7 +1329,7 @@ class PostgresEngine:
                     )
                 cur.execute(
                     """
-                    SELECT cid, branch, content, content_pointer, modality, metadata, trust_tier, sensitivity, actor, source_type
+                    SELECT cid, branch, content, content_pointer, modality, metadata, trust_tier, sensitivity, access_policy, actor, source_type
                     FROM evidence
                     WHERE tenant_id = %s AND branch = %s AND erased = false
                       AND trust_tier <= %s AND sensitivity <= %s
@@ -1308,6 +1355,16 @@ class PostgresEngine:
                     metadata = dict(row["metadata"] or {})
                     if is_retired_summary_metadata(metadata):
                         continue
+                    decision = may_read_item(
+                        item_tenant_id=tenant_id,
+                        sensitivity=int(row["sensitivity"]),
+                        access_policy=dict(row["access_policy"] or {}),
+                        context=filt,
+                        policy_max_sensitivity=self.policy.max_sensitivity,
+                    )
+                    if not decision.allowed:
+                        continue
+                    text, privacy_metadata = apply_text_redactions(text, dict(row["access_policy"] or {}), decision)
                     hit_metadata = {
                         "source_type": row["source_type"],
                         "actor": row["actor"],
@@ -1316,6 +1373,7 @@ class PostgresEngine:
                         "stored_embedding": False,
                         "source_table": "evidence",
                         "reality_class": self._classify_evidence_row_reality(row, metadata),
+                        "privacy": privacy_metadata,
                     }
                     if isinstance(metadata.get("summary"), dict):
                         hit_metadata["summary"] = metadata["summary"]
@@ -1366,10 +1424,12 @@ class PostgresEngine:
         moment = as_of or utc_now()
         moment = moment.astimezone(UTC) if moment.tzinfo else moment.replace(tzinfo=UTC)
         graph_filter = dict(filt or {})
+        graph_filter.setdefault("tenant_id", tenant_id)
+        graph_filter.setdefault("branch", branch)
         include_quarantined = bool(graph_filter.get("include_quarantined", False))
         default_max_trust = int(TrustTier.UNTRUSTED_EXTERNAL) if include_quarantined else self.policy.max_trust_tier
         max_trust = int(graph_filter.get("max_trust_tier", graph_filter.get("min_trust_tier", default_max_trust)))
-        max_sensitivity = int(graph_filter.get("max_sensitivity", self.policy.max_sensitivity))
+        max_sensitivity = effective_max_sensitivity(graph_filter, self.policy.max_sensitivity)
         db_tenant_id = _stable_uuid("tenant", tenant_id)
         if self.adapters.graph_retriever is not None:
             hits = self.adapters.graph_retriever.search(
@@ -1394,6 +1454,7 @@ class PostgresEngine:
                 include_quarantined=include_quarantined,
                 max_trust=max_trust,
                 max_sensitivity=max_sensitivity,
+                access_context=graph_filter,
             )
             return self._mark_retrieved_text_as_data(hits)
         if use_cache:
@@ -1408,6 +1469,7 @@ class PostgresEngine:
                 include_quarantined=include_quarantined,
                 max_trust=max_trust,
                 max_sensitivity=max_sensitivity,
+                access_context=graph_filter,
             )
             if cached_hits is not None:
                 return self._mark_retrieved_text_as_data(cached_hits)
@@ -1436,7 +1498,7 @@ class PostgresEngine:
                 if relation_source_cids:
                     cur.execute(
                         """
-                        SELECT cid, metadata, trust_tier, sensitivity, erased, actor, source_type
+                        SELECT cid, metadata, trust_tier, sensitivity, access_policy, erased, actor, source_type
                         FROM evidence
                         WHERE tenant_id = %s AND branch = %s AND cid = ANY(%s::bytea[])
                         """,
@@ -1450,6 +1512,7 @@ class PostgresEngine:
                         include_quarantined=include_quarantined,
                         max_trust=max_trust,
                         max_sensitivity=max_sensitivity,
+                        access_context=graph_filter,
                     )
                     if security is None:
                         continue
@@ -1620,6 +1683,7 @@ class PostgresEngine:
         include_quarantined: bool,
         max_trust: int,
         max_sensitivity: int,
+        access_context: dict[str, Any] | None = None,
     ) -> list[Hit] | None:
         if (
             include_quarantined
@@ -2175,6 +2239,7 @@ class PostgresEngine:
         include_quarantined: bool,
         max_trust: int,
         max_sensitivity: int,
+        access_context: dict[str, Any] | None,
     ) -> list[Hit]:
         relation_source_cids: set[str] = set()
         source_cids_by_hit: dict[str, list[str]] = {}
@@ -2198,7 +2263,7 @@ class PostgresEngine:
                         self._set_tenant(cur, db_tenant_id)
                         cur.execute(
                             """
-                            SELECT cid, trust_tier, sensitivity, metadata, erased, source_type, actor
+                            SELECT cid, trust_tier, sensitivity, access_policy, metadata, erased, source_type, actor
                             FROM evidence
                             WHERE tenant_id = %s AND branch = %s AND cid = ANY(%s::bytea[])
                             """,
@@ -2224,6 +2289,7 @@ class PostgresEngine:
                 include_quarantined=include_quarantined,
                 max_trust=max_trust,
                 max_sensitivity=max_sensitivity,
+                access_context=access_context,
             )
             if security is None:
                 continue
@@ -2249,6 +2315,7 @@ class PostgresEngine:
         include_quarantined: bool,
         max_trust: int,
         max_sensitivity: int,
+        access_context: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         source_cids = _bytes_list_to_cids(relation.get("source_evidence_cids"))
         if not source_cids:
@@ -2263,6 +2330,16 @@ class PostgresEngine:
             if not include_quarantined and metadata.get("quarantine_reason"):
                 return None
             if is_retired_summary_metadata(metadata):
+                return None
+            decision = may_read_item(
+                item_tenant_id=str(access_context.get("tenant_id") if access_context else ""),
+                sensitivity=int(row.get("sensitivity") or 0),
+                access_policy=dict(row.get("access_policy") or {}),
+                context=access_context or {},
+                policy_max_sensitivity=self.policy.max_sensitivity,
+                erased=bool(row.get("erased")),
+            )
+            if not decision.allowed:
                 return None
             source_rows.append((cid, row, metadata))
 
@@ -2288,6 +2365,7 @@ class PostgresEngine:
                     "trust_tier": int(row.get("trust_tier") or 0),
                     "sensitivity": int(row.get("sensitivity") or 0),
                     "reality_class": self._classify_evidence_row_reality(row, metadata),
+                    "access_policy_enforced": True,
                 }
                 for cid, row, metadata in source_rows
             ],
@@ -3378,14 +3456,14 @@ class PostgresEngine:
         include_quarantined = bool(filt.get("include_quarantined", False))
         default_max_trust = int(TrustTier.UNTRUSTED_EXTERNAL) if include_quarantined else self.policy.max_trust_tier
         max_trust = int(filt.get("max_trust_tier", filt.get("min_trust_tier", default_max_trust)))
-        max_sensitivity = int(filt.get("max_sensitivity", self.policy.max_sensitivity))
+        max_sensitivity = effective_max_sensitivity(filt, self.policy.max_sensitivity)
         candidates: list[Hit] = []
         with self.connect() as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
                 self._set_tenant(cur, db_tenant_id)
                 cur.execute(
                     """
-                    SELECT cid, tenant_id, branch, content, metadata, trust_tier, sensitivity, actor, source_type
+                    SELECT cid, tenant_id, branch, content, metadata, trust_tier, sensitivity, access_policy, actor, source_type
                     FROM evidence
                     WHERE tenant_id = %s AND branch = %s AND erased = false
                       AND trust_tier <= %s AND sensitivity <= %s
@@ -3409,10 +3487,21 @@ class PostgresEngine:
                         metadata = dict(row["metadata"] or {})
                         if is_retired_summary_metadata(metadata):
                             continue
+                        decision = may_read_item(
+                            item_tenant_id=tenant_id,
+                            sensitivity=int(row["sensitivity"]),
+                            access_policy=dict(row["access_policy"] or {}),
+                            context=filt,
+                            policy_max_sensitivity=self.policy.max_sensitivity,
+                        )
+                        if not decision.allowed:
+                            continue
+                        text, privacy_metadata = apply_text_redactions(text, dict(row["access_policy"] or {}), decision)
                         hit_metadata = {
                             "source_type": row["source_type"],
                             "actor": row["actor"],
                             "reality_class": self._classify_evidence_row_reality(row, metadata),
+                            "privacy": privacy_metadata,
                         }
                         if isinstance(metadata.get("summary"), dict):
                             hit_metadata["summary"] = metadata["summary"]
@@ -3441,8 +3530,8 @@ class PostgresEngine:
                         )
                 cur.execute(
                     """
-                    SELECT id, tenant_id, branch, subject, predicate, object, confidence, calibration,
-                      source_evidence_cids, trust_tier, sensitivity, last_accessed, access_count
+                    SELECT id, tenant_id, branch, subject, predicate, object, confidence, calibration, status,
+                      source_evidence_cids, trust_tier, sensitivity, access_policy, last_accessed, access_count
                     FROM assertions
                     WHERE tenant_id = %s AND branch = %s AND status IN ('active', 'contested')
                       AND trust_tier <= %s AND sensitivity <= %s
@@ -3450,9 +3539,20 @@ class PostgresEngine:
                     (db_tenant_id, branch, max_trust, max_sensitivity),
                 )
                 for row in cur.fetchall():
-                    text = f"{row['subject']} {row['predicate']} {row['object']}"
-                    score = lexical_score(query, text) * float(row["confidence"])
+                    raw_text = f"{row['subject']} {row['predicate']} {row['object']}"
+                    score = lexical_score(query, raw_text) * float(row["confidence"])
                     if score > 0:
+                        decision = may_read_item(
+                            item_tenant_id=tenant_id,
+                            sensitivity=int(row["sensitivity"]),
+                            access_policy=dict(row["access_policy"] or {}),
+                            context=filt,
+                            policy_max_sensitivity=self.policy.max_sensitivity,
+                            status=str(row["status"]),
+                        )
+                        if not decision.allowed:
+                            continue
+                        text, privacy_metadata = apply_text_redactions(raw_text, dict(row["access_policy"] or {}), decision)
                         reality_monitoring = self._projection_reality_monitoring_from_calibration(dict(row["calibration"] or {}))
                         candidates.append(
                             Hit(
@@ -3472,6 +3572,7 @@ class PostgresEngine:
                                     "reality_monitoring": reality_monitoring,
                                     "last_accessed": row["last_accessed"].isoformat() if row["last_accessed"] else None,
                                     "access_count": row["access_count"],
+                                    "privacy": privacy_metadata,
                                 },
                             )
                         )

@@ -137,7 +137,7 @@ mneme-mcp --http --http-host 127.0.0.1 --http-port 8765 \
 | **Hybrid retrieval** | Lexical (FTS/BM25) + dense (pgvector HNSW, 1024-dim in production; a BLAKE2b hashing embedder, dims=256, is the offline fallback) + graph (recursive PPR / Apache AGE), fused and reranked. |
 | **Calibrated abstention** | Conformal calibration per tenant/memory-type yields a confidence the system can *abstain* on rather than answer (measured ECE 0.0063). |
 | **Trust tiers** | `TrustTier` (IntEnum), a monotonic **0–5 ladder, lower = more trusted**: `0` = direct-user / user-authored / operator, `1` verified, `2` authenticated, `3` normal (default), `4` low, `5` untrusted-external. A write may never raise its own trust (§31 Rail 4); belief and branch writes require ≥ `3` (`NORMAL`). |
-| **Sensitivity** | Per-row `SMALLINT` (default `0`); the read path enforces a per-role ceiling (`policy.max_sensitivity`, default `3`) on the read-side disclosure boundary. |
+| **Sensitivity** | Per-row `SMALLINT` (default `0`); the read path enforces role ceilings first (`reader` S1, `agent` S2, `consolidator` S3, `operator` raw S2+ only with break-glass), then applies `policy.max_sensitivity` / request ceilings as further narrowing. |
 | **Fidelity tiers** | Lifecycle demotion order: `VERBATIM` → `EXTRACTIVE_SUMMARY` → `ABSTRACTIVE_GIST` → `STATISTICAL_TRACE`. Demotion is gated by a gist-risk abstention hook. |
 | **Consolidation** | Warm-loop worker that runs an ordered 11-role pass pipeline through the promotion gate (see below). |
 | **Promotion gate** | Protected regression cases must pass before any candidate belief is promoted; failures roll back on a branch. |

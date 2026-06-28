@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from hashlib import sha256
 from typing import Any, Callable, Protocol, Sequence
 
+from mnemosyne.access_policy import merge_access_policies
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.gate import Candidate, GateResult, PromotionGate, RegressionCase
 from mnemosyne.learning import Lesson, Procedure
@@ -1196,7 +1197,7 @@ class ConsolidationWorker:
                 trust_tier=trust_tier,
                 capability_tags=["derived-summary", "consolidation-gist", "source:consolidation"],
                 sensitivity=max((int(item.sensitivity) for item in evidence), default=0),
-                access_policy=dict(first.access_policy or {"tenant": tenant_id}),
+                access_policy=_merged_access_policy(evidence, tenant_id=tenant_id),
             ),
             branch=branch,
         )
@@ -1220,7 +1221,7 @@ class ConsolidationWorker:
                         target=summary_cid,
                         confidence=0.92,
                         source_evidence_cids=[source_cid, summary_cid],
-                        access_policy=dict(first.access_policy or {"tenant": tenant_id}),
+                        access_policy=_merged_access_policy(evidence, tenant_id=tenant_id),
                     ),
                     branch=branch,
                 )
@@ -2019,7 +2020,7 @@ def _normalize_candidate(row: Any, evidence: Sequence[Evidence], payload: dict[s
     candidate["confidence"] = float(row.get("confidence", payload.get("confidence", 0.72)))
     candidate["trust_tier"] = int(row.get("trust_tier", payload.get("trust_tier", _max_evidence_trust(evidence))))
     candidate["sensitivity"] = int(row.get("sensitivity", payload.get("sensitivity", _max_evidence_sensitivity(evidence))))
-    candidate["access_policy"] = row.get("access_policy") or payload.get("access_policy") or _first_access_policy(evidence)
+    candidate["access_policy"] = row.get("access_policy") or payload.get("access_policy") or _merged_access_policy(evidence)
     entity_key = str(row.get("entity_key") or row.get("entityKey") or "").strip()
     if entity_key:
         candidate["entity_key"] = entity_key
@@ -2082,11 +2083,8 @@ def _max_evidence_sensitivity(evidence: Sequence[Evidence]) -> int:
     return max(int(item.sensitivity) for item in evidence)
 
 
-def _first_access_policy(evidence: Sequence[Evidence]) -> dict[str, Any] | None:
-    for item in evidence:
-        if item.access_policy:
-            return dict(item.access_policy)
-    return None
+def _merged_access_policy(evidence: Sequence[Evidence], *, tenant_id: str | None = None) -> dict[str, Any]:
+    return merge_access_policies([item.access_policy for item in evidence], tenant_id=tenant_id)
 
 
 def _run_json_command(

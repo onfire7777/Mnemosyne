@@ -65,6 +65,7 @@ class AnticipatoryPrefetcher:
         tenant_id: str,
         candidates: list[PrefetchCandidate],
         branch: str = "main",
+        access_context: dict[str, Any] | None = None,
     ) -> list[PrefetchResult]:
         selected = set(
             id(candidate)
@@ -79,7 +80,7 @@ class AnticipatoryPrefetcher:
             if not allowed:
                 results.append(PrefetchResult(candidate, False, reason))
                 continue
-            retrieval = self.engine.retrieve(candidate.query, tenant_id, branch=branch)
+            retrieval = self.engine.retrieve(candidate.query, tenant_id, branch=branch, filt=dict(access_context or {}))
             self.cache[(tenant_id, branch, candidate.query)] = retrieval
             results.append(PrefetchResult(candidate, True, reason, retrieval))
         return results

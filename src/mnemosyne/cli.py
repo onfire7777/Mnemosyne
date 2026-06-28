@@ -1185,13 +1185,21 @@ def cmd_search(args: argparse.Namespace) -> None:
             min_trust_tier=args.min_trust_tier,
             max_trust_tier=args.max_trust_tier,
             max_sensitivity=args.max_sensitivity,
+            role=args.role,
+            user_id=getattr(args, "user", None),
+            capability_tags=args.capability_tag,
+            purpose=args.purpose,
+            residency=args.residency,
+            region=args.region,
+            break_glass=args.break_glass,
+            lawful_basis=args.lawful_basis,
         )
     )
 
 
 def cmd_deep_search(args: argparse.Namespace) -> None:
     tools = load_tools(args)
-    emit(tools.deep_search(tenant_id=args.tenant, query=args.query, branch=args.branch))
+    emit(tools.deep_search(tenant_id=args.tenant, query=args.query, branch=args.branch, role=args.role))
 
 
 def cmd_explain(args: argparse.Namespace) -> None:
@@ -13983,12 +13991,21 @@ def build_parser() -> argparse.ArgumentParser:
     search.add_argument("--min-trust-tier", type=int)
     search.add_argument("--max-trust-tier", type=int)
     search.add_argument("--max-sensitivity", type=int)
+    search.add_argument("--role", default="reader", choices=["reader", "agent", "consolidator", "operator"])
+    search.add_argument("--user")
+    search.add_argument("--capability-tag", action="append", default=[])
+    search.add_argument("--purpose")
+    search.add_argument("--lawful-basis")
+    search.add_argument("--residency")
+    search.add_argument("--region")
+    search.add_argument("--break-glass", action="store_true")
     search.set_defaults(func=cmd_search)
 
     deep = sub.add_parser("deep-search")
     deep.add_argument("--tenant", required=True)
     deep.add_argument("--query", required=True)
     deep.add_argument("--branch", default="main")
+    deep.add_argument("--role", default="reader", choices=["reader", "agent", "consolidator", "operator"])
     deep.set_defaults(func=cmd_deep_search)
 
     explain = sub.add_parser("explain")
