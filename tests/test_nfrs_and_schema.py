@@ -10,7 +10,7 @@ from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.ingestion import IngestionPipeline, IngestRequest
 from mnemosyne.models import Assertion, Evidence
 from mnemosyne.observability import MetricsRegistry
-from mnemosyne.privacy import ErasureMode, classify_privacy
+from mnemosyne.privacy import ErasureMode, classify_privacy, redact_pii_text
 from mnemosyne.provenance import HowProvenance, how_provenance_for_sources
 from mnemosyne.queue import InProcessQueue
 from mnemosyne.source_truth import SOURCE_TRUTH_FENCE, parse_markdown_git_blocks
@@ -78,6 +78,27 @@ def test_privacy_classifier_tags_pii_and_erasure_mode() -> None:
     assert normal.residency == "us"
     assert normal.erasure_mode == ErasureMode.TOMBSTONE_RECOMPUTE
     assert legal.erasure_mode == ErasureMode.HARD_DELETE_LEGAL
+
+
+def test_privacy_classifier_detects_and_redacts_broader_pii() -> None:
+    text = (
+        "DOB: 1990-04-03, SSN 123-45-6789, card 4111 1111 1111 1111, "
+        "passport A1234567, IP 192.168.1.50, address 742 Evergreen St."
+    )
+    classification = classify_privacy(text)
+    redacted = redact_pii_text(text)
+
+    assert set(classification.pii_tags) >= {
+        "date-of-birth",
+        "ssn",
+        "payment-card",
+        "passport",
+        "ip-address",
+        "street-address",
+    }
+    assert "123-45-6789" not in redacted
+    assert "4111 1111 1111 1111" not in redacted
+    assert "192.168.1.50" not in redacted
 
 
 def test_canonical_schema_includes_all_blueprint_core_tables() -> None:

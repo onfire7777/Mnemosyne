@@ -15,6 +15,7 @@ from mnemosyne.media import MEDIA_EXTRACT_JOB, extract_derived_text
 from mnemosyne.models import Assertion, Evidence, Resource
 from mnemosyne.privacy import (
     classify_privacy,
+    detect_pii_tags,
     enforce_residency,
     enforce_residency_transfer,
     normalize_residency,
@@ -693,11 +694,4 @@ def _looks_imperative(text: str) -> bool:
 
 
 def _pii_tags(text: str) -> list[str]:
-    tags: list[str] = []
-    if re.search(r"\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b", text):
-        tags.append("pii-email")
-    if re.search(r"\b\d{3}-\d{2}-\d{4}\b", text):
-        tags.append("pii-ssn")
-    if re.search(r"\b(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]\d{3}[-.\s]\d{4}\b", text):
-        tags.append("pii-phone")
-    return tags
+    return [f"pii-{tag}" for tag in detect_pii_tags(text)]
