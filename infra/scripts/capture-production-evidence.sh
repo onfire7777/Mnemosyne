@@ -76,6 +76,14 @@ if [ -z "${MANIFEST}" ]; then
   exit 64
 fi
 
+case "${MANIFEST}" in
+  /*) ;;
+  *)
+    echo "ERROR: production soak manifest path must be absolute: ${MANIFEST}" >&2
+    exit 65
+    ;;
+esac
+
 if [ ! -f "${MANIFEST}" ]; then
   echo "ERROR: production soak manifest not found: ${MANIFEST}" >&2
   exit 66
@@ -83,6 +91,13 @@ fi
 
 STAMP="$(date -u +"%Y%m%dT%H%M%SZ")"
 OUT_ROOT_RAW="${2:-/tmp/mnemosyne-tierb-production-evidence-${STAMP}}"
+case "${OUT_ROOT_RAW}" in
+  /*) ;;
+  *)
+    echo "ERROR: production evidence output root must be absolute: ${OUT_ROOT_RAW}" >&2
+    exit 65
+    ;;
+esac
 
 PYTHON="${MNEMOSYNE_PYTHON:-}"
 if [ -z "${PYTHON}" ]; then
@@ -1010,7 +1025,7 @@ from pathlib import Path
 repo_dir = Path(os.environ["REPO_DIR"])
 sys.path.insert(0, str(repo_dir / "src"))
 
-from mnemosyne.evidence_redaction import scan_evidence_tree  # noqa: E402
+from mnemosyne.evidence_redaction import scan_evidence_paths, scan_evidence_tree  # noqa: E402
 
 
 out_root = Path(os.environ["OUT_ROOT"])
@@ -1128,5 +1143,26 @@ summary = {
     },
 }
 (out_root / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+metadata_scan = scan_evidence_paths(
+    [out_root / "bundle-manifest.json", out_root / "summary.json"],
+    scope="final-metadata",
+    reject_symlinks=True,
+)
+if not metadata_scan["ok"]:
+    print(
+        "ERROR: high-confidence secret material found in production evidence metadata:",
+        file=sys.stderr,
+    )
+    for finding in metadata_scan["findings"]:
+        print(
+            f"  - {finding['source']}:{finding['line']} {finding['kind']}",
+            file=sys.stderr,
+        )
+    for skipped in metadata_scan.get("skipped_files", []):
+        print(
+            f"  - {skipped['path']}: {skipped['reason']}",
+            file=sys.stderr,
+        )
+    sys.exit(65)
 print(json.dumps(summary, indent=2))
 PY

@@ -355,40 +355,24 @@ class PostgresEngine:
             modality=ev.modality,
             sensitivity=int(ev.sensitivity),
         )
-        unscoped_cid = evidence_unscoped_cid(
-            ev.content,
-            tenant_id=ev.tenant_id,
-            source_type=ev.source_type,
-            content_pointer=ev.content_pointer,
-            modality=ev.modality,
-        )
         cid_bytes = _cid_to_bytes(cid)
         with self.connect() as conn:
             with conn.cursor() as cur:
                 self._set_tenant(cur, db_tenant_id)
                 self._ensure_evidence_vector_schema(cur)
-                if unscoped_cid != cid and self._evidence_row_exists(
+                replay_cid = self._erased_replay_cid(
                     cur,
+                    external_tenant_id=ev.tenant_id,
                     tenant_id=db_tenant_id,
                     branch=branch,
-                    cid_bytes=_cid_to_bytes(unscoped_cid),
-                ):
-                    cid = unscoped_cid
+                    content=ev.content,
+                    source_type=ev.source_type,
+                    content_pointer=ev.content_pointer,
+                    modality=ev.modality,
+                )
+                if replay_cid is not None:
+                    cid = replay_cid
                     cid_bytes = _cid_to_bytes(cid)
-                else:
-                    replay_cid = self._erased_replay_cid(
-                        cur,
-                        external_tenant_id=ev.tenant_id,
-                        tenant_id=db_tenant_id,
-                        branch=branch,
-                        content=ev.content,
-                        source_type=ev.source_type,
-                        content_pointer=ev.content_pointer,
-                        modality=ev.modality,
-                    )
-                    if replay_cid is not None:
-                        cid = replay_cid
-                        cid_bytes = _cid_to_bytes(cid)
                 duplicate_noop = self._evidence_row_exists(
                     cur,
                     tenant_id=db_tenant_id,

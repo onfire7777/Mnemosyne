@@ -329,7 +329,9 @@
         "--dashboard-url",
         "MNEMOSYNE_PROD_DASHBOARD_URL",
         "--expected-tenant",
-        "MNEMOSYNE_PROD_TENANT"
+        "MNEMOSYNE_PROD_TENANT",
+        "--ops-bundle",
+        "MNEMOSYNE_PROD_EVIDENCE_DIR/ops-dashboard-bundle.json"
       ],
       "timeout": 120
     },
