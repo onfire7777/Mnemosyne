@@ -112,8 +112,8 @@ TOOL_SPEC: list[dict[str, Any]] = [
     },
     {
         "name": "export",
-        "description": "Export tenant-owned evidence, assertions, relations, preferences, and audit records.",
-        "arguments": ["tenant_id"],
+        "description": "Export a caller-scoped tenant disclosure view with omissions and redactions reported.",
+        "arguments": ["tenant_id", "role", "user_id", "max_sensitivity", "capability_tags", "purpose"],
     },
     {
         "name": "residency_policy",
@@ -587,8 +587,66 @@ class MemoryTools:
         self._record_retrieval(result.to_dict(), start)
         return result.to_dict()
 
-    def get(self, tenant_id: str, id: str, branch: str | None = None) -> dict[str, Any]:
-        exported = self.engine.export_tenant(tenant_id)
+    @staticmethod
+    def _read_context(
+        tenant_id: str,
+        *,
+        role: WriteRole = "reader",
+        user_id: str | None = None,
+        max_sensitivity: int | None = None,
+        capability_tags: list[str] | None = None,
+        purpose: str | list[str] | None = None,
+        residency: str | None = None,
+        region: str | None = None,
+        break_glass: bool = False,
+        lawful_basis: str | list[str] | None = None,
+    ) -> dict[str, Any]:
+        context: dict[str, Any] = {"tenant_id": tenant_id, "tenant": tenant_id, "role": role}
+        if user_id:
+            context["user_id"] = user_id
+        if max_sensitivity is not None:
+            context["max_sensitivity"] = max_sensitivity
+        if capability_tags:
+            context["capability_tags"] = list(capability_tags)
+        if purpose is not None:
+            context["purpose"] = purpose
+        if residency:
+            context["residency"] = residency
+        if region:
+            context["region"] = region
+        if break_glass:
+            context["break_glass"] = True
+        if lawful_basis is not None:
+            context["lawful_basis"] = lawful_basis
+        return context
+
+    def get(
+        self,
+        tenant_id: str,
+        id: str,
+        branch: str | None = None,
+        role: WriteRole = "reader",
+        user_id: str | None = None,
+        max_sensitivity: int | None = None,
+        capability_tags: list[str] | None = None,
+        purpose: str | list[str] | None = None,
+        residency: str | None = None,
+        region: str | None = None,
+        break_glass: bool = False,
+        lawful_basis: str | list[str] | None = None,
+    ) -> dict[str, Any]:
+        exported = self.export(
+            tenant_id,
+            role=role,
+            user_id=user_id,
+            max_sensitivity=max_sensitivity,
+            capability_tags=capability_tags,
+            purpose=purpose,
+            residency=residency,
+            region=region,
+            break_glass=break_glass,
+            lawful_basis=lawful_basis,
+        )
         for collection in ("evidence", "assertions", "relations", "preferences", "justifications", "contradictions"):
             for item in exported.get(collection, []):
                 item_id = item.get("cid") or item.get("id")
@@ -784,8 +842,34 @@ class MemoryTools:
         result["security"] = decision
         return result
 
-    def export(self, tenant_id: str) -> dict[str, Any]:
-        return self.engine.export_tenant(tenant_id)
+    def export(
+        self,
+        tenant_id: str,
+        role: WriteRole = "reader",
+        user_id: str | None = None,
+        max_sensitivity: int | None = None,
+        capability_tags: list[str] | None = None,
+        purpose: str | list[str] | None = None,
+        residency: str | None = None,
+        region: str | None = None,
+        break_glass: bool = False,
+        lawful_basis: str | list[str] | None = None,
+    ) -> dict[str, Any]:
+        context = self._read_context(
+            tenant_id,
+            role=role,
+            user_id=user_id,
+            max_sensitivity=max_sensitivity,
+            capability_tags=capability_tags,
+            purpose=purpose,
+            residency=residency,
+            region=region,
+            break_glass=break_glass,
+            lawful_basis=lawful_basis,
+        )
+        if not hasattr(self.engine, "export_tenant_filtered"):
+            raise NotImplementedError("public export requires engine.export_tenant_filtered")
+        return self.engine.export_tenant_filtered(tenant_id, context)
 
     def _engine_branch(self, name: str, from_branch: str = "main", kind: str = "scratch", tenant_id: str | None = None) -> None:
         try:
@@ -1046,8 +1130,33 @@ class MemoryTools:
         result["hops"] = hops
         return result
 
-    def graph_timeline(self, tenant_id: str, entity: str, branch: str = "main") -> dict[str, Any]:
-        exported = self.engine.export_tenant(tenant_id)
+    def graph_timeline(
+        self,
+        tenant_id: str,
+        entity: str,
+        branch: str = "main",
+        role: WriteRole = "reader",
+        user_id: str | None = None,
+        max_sensitivity: int | None = None,
+        capability_tags: list[str] | None = None,
+        purpose: str | list[str] | None = None,
+        residency: str | None = None,
+        region: str | None = None,
+        break_glass: bool = False,
+        lawful_basis: str | list[str] | None = None,
+    ) -> dict[str, Any]:
+        exported = self.export(
+            tenant_id,
+            role=role,
+            user_id=user_id,
+            max_sensitivity=max_sensitivity,
+            capability_tags=capability_tags,
+            purpose=purpose,
+            residency=residency,
+            region=region,
+            break_glass=break_glass,
+            lawful_basis=lawful_basis,
+        )
         events: list[dict[str, Any]] = []
         entity_l = entity.lower()
         for assertion in exported.get("assertions", []):

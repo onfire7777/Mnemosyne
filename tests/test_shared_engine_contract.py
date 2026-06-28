@@ -161,6 +161,163 @@ def test_shared_engine_contract_retrieves_and_exports_evidence(engine_bundle: tu
     assert any(item["cid"] == cid for item in exported["evidence"])
 
 
+def test_shared_engine_contract_filtered_export_discloses_omissions_and_masks_raw_fields(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, user = engine_bundle
+    secret_cid = engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id=user,
+            actor="user",
+            source_type="shared-filtered-export",
+            content=json.dumps({"case": "shared-filtered-export", "profile": {"ssn": "123-45-6789"}}),
+            sensitivity=2,
+            access_policy={
+                "tenant": tenant,
+                "redact_fields": ["profile.ssn"],
+                "min_role_for_raw": "operator",
+            },
+        )
+    )
+    denied_cid = engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id=user,
+            actor="user",
+            source_type="shared-filtered-export",
+            content="denied source evidence should not leak",
+            sensitivity=3,
+            access_policy={"tenant": tenant},
+        )
+    )
+    assertion_id = engine.upsert_assertion(
+        Assertion(
+            tenant_id=tenant,
+            subject="shared filtered assertion",
+            predicate="stores",
+            object="MRN-ASSERTION-SECRET",
+            source_evidence_cids=[secret_cid],
+            status="active",
+            sensitivity=2,
+            access_policy={
+                "tenant": tenant,
+                "redact_fields": ["object"],
+                "min_role_for_raw": "operator",
+            },
+        )
+    )
+    denied_assertion_id = engine.upsert_assertion(
+        Assertion(
+            tenant_id=tenant,
+            subject="denied filtered assertion",
+            predicate="stores",
+            object="DENIED-ASSERTION-SECRET",
+            source_evidence_cids=[denied_cid],
+            status="active",
+            sensitivity=3,
+            access_policy={"tenant": tenant},
+        )
+    )
+    engine.add_relation(
+        Relation(
+            tenant_id=tenant,
+            source="shared filtered relation",
+            predicate="points_to",
+            target="RELATION-TARGET-SECRET",
+            source_evidence_cids=[secret_cid],
+            access_policy={
+                "tenant": tenant,
+                "redact_fields": ["target"],
+                "min_role_for_raw": "operator",
+            },
+        )
+    )
+    engine.add_relation(
+        Relation(
+            tenant_id=tenant,
+            source="denied filtered relation",
+            predicate="points_to",
+            target="DENIED-RELATION-SECRET",
+            source_evidence_cids=[denied_cid],
+            access_policy={"tenant": tenant},
+        )
+    )
+    engine.add_preference(
+        Preference(
+            tenant_id=tenant,
+            user_id=user,
+            category="workflow",
+            statement="shared preference includes ssn: 987-65-4321",
+            source_evidence_cids=[secret_cid],
+            access_policy={
+                "tenant": tenant,
+                "redact_fields": ["ssn"],
+                "min_role_for_raw": "operator",
+            },
+        )
+    )
+    engine.register_entity(
+        tenant,
+        "shared-filtered-entity",
+        alias="ENTITY-ALIAS-SECRET",
+        summary="ENTITY-SUMMARY-SECRET",
+        source_evidence_cids=[secret_cid],
+        access_policy={
+            "tenant": tenant,
+            "redact_fields": ["summary", "aliases"],
+            "min_role_for_raw": "operator",
+        },
+    )
+    engine.register_entity(
+        tenant,
+        "denied-filtered-entity",
+        summary="DENIED-ENTITY-SECRET",
+        source_evidence_cids=[denied_cid],
+        access_policy={"tenant": tenant},
+    )
+
+    raw = engine.export_tenant(tenant)
+    filtered = engine.export_tenant_filtered(tenant, {"tenant_id": tenant, "role": "agent"})
+    raw_blob = json.dumps(raw, sort_keys=True)
+    filtered_blob = json.dumps(filtered, sort_keys=True)
+
+    assert "123-45-6789" in raw_blob
+    assert "MRN-ASSERTION-SECRET" in raw_blob
+    assert denied_assertion_id in raw_blob
+    assert "123-45-6789" not in filtered_blob
+    assert "MRN-ASSERTION-SECRET" not in filtered_blob
+    assert "RELATION-TARGET-SECRET" not in filtered_blob
+    assert "987-65-4321" not in filtered_blob
+    assert "ENTITY-SUMMARY-SECRET" not in filtered_blob
+    assert "ENTITY-ALIAS-SECRET" not in filtered_blob
+    assert "denied source evidence should not leak" not in filtered_blob
+    assert denied_cid not in filtered_blob
+    assert denied_assertion_id not in filtered_blob
+    assert "access_policy" not in filtered_blob
+    assert filtered["disclosure"]["filtered"] is True
+    assert filtered["disclosure"]["redacted"]["evidence"] == 1
+    assert filtered["disclosure"]["redacted"]["assertions"] == 1
+    assert filtered["disclosure"]["redacted"]["relations"] == 1
+    assert filtered["disclosure"]["redacted"]["preferences"] == 1
+    assert filtered["disclosure"]["redacted"]["entities"] == 1
+    assert filtered["disclosure"]["omitted"]["evidence"] == 1
+    assert filtered["disclosure"]["omitted"]["assertions"] == 1
+    assert filtered["disclosure"]["omitted_by_reason"]["assertions"]["source_evidence_denied"] == 1
+    [assertion] = [item for item in filtered["assertions"] if item["id"] == assertion_id]
+    [relation] = [item for item in filtered["relations"] if item["source"] == "shared filtered relation"]
+    [preference] = filtered["preferences"]
+    [entity] = filtered["entities"]
+    assert assertion["object"] == "[REDACTED:object]"
+    assert relation["target"] == "[REDACTED:target]"
+    assert "[REDACTED:ssn]" in preference["statement"]
+    assert entity["summary"] == "[REDACTED:summary]"
+    assert entity["aliases"] == "[REDACTED:aliases]"
+    assert filtered["audit_log"] == []
+    assert filtered["deletion_log"] == []
+    assert filtered["merge_log"] == []
+
+
 def test_shared_engine_contract_updates_evidence_embedding(engine_bundle: tuple[Any, str, str]) -> None:
     engine, tenant, user = engine_bundle
     cid = engine.append_evidence(

@@ -15,6 +15,7 @@ from mnemosyne.access_policy import (
     apply_statement_redactions,
     apply_text_redactions,
     effective_max_sensitivity,
+    filter_export_for_context,
     may_read_item,
     merge_access_policies,
     validate_access_policy,
@@ -3308,6 +3309,13 @@ class PostgresEngine:
             "deletion_log": deletion,
             "merge_log": merge_log,
         }
+
+    def export_tenant_filtered(self, tenant_id: str, access_context: dict[str, Any]) -> dict[str, Any]:
+        return filter_export_for_context(
+            self.export_tenant(tenant_id),
+            {**dict(access_context or {}), "tenant_id": tenant_id},
+            policy_max_sensitivity=self.policy.max_sensitivity,
+        )
 
     def to_json(self) -> str:
         return json.dumps(self.export_all(), indent=2, sort_keys=True)

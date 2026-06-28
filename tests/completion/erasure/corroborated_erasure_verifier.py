@@ -62,6 +62,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from mnemosyne.engine import LocalMemoryEngine
+
 # Repo root: tests/completion/erasure/<file> -> repo
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _SRC = _REPO_ROOT / "src"
@@ -269,7 +271,7 @@ class CorroboratedErasureVerifier:
         return None
 
     def export(self) -> dict[str, Any]:
-        return self.cli("export", "--tenant", TENANT)
+        return LocalMemoryEngine(store_path=Path(self.store)).export_tenant(TENANT)
 
     def assertion_record(self, assertion_id: str) -> dict[str, Any] | None:
         """Read the assertion straight from ``export`` (status-agnostic; ``export``

@@ -1209,7 +1209,7 @@ def cmd_explain(args: argparse.Namespace) -> None:
 
 def cmd_get(args: argparse.Namespace) -> None:
     tools = load_tools(args)
-    emit(tools.get(args.tenant, args.id, branch=args.branch))
+    emit(tools.get(args.tenant, args.id, branch=args.branch, **_read_context_kwargs(args)))
 
 
 def cmd_propose(args: argparse.Namespace) -> None:
@@ -1296,7 +1296,33 @@ def cmd_forget(args: argparse.Namespace) -> None:
 
 def cmd_export(args: argparse.Namespace) -> None:
     tools = load_tools(args)
-    emit(tools.export(args.tenant))
+    emit(tools.export(args.tenant, **_read_context_kwargs(args)))
+
+
+def _read_context_kwargs(args: argparse.Namespace) -> dict[str, Any]:
+    return {
+        "role": getattr(args, "role", "reader"),
+        "user_id": getattr(args, "user", None),
+        "max_sensitivity": getattr(args, "max_sensitivity", None),
+        "capability_tags": getattr(args, "capability_tag", None) or None,
+        "purpose": getattr(args, "purpose", None),
+        "residency": getattr(args, "residency", None),
+        "region": getattr(args, "region", None),
+        "break_glass": bool(getattr(args, "break_glass", False)),
+        "lawful_basis": getattr(args, "lawful_basis", None),
+    }
+
+
+def _add_read_context_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--role", default="reader", choices=["reader", "agent", "consolidator", "operator"])
+    parser.add_argument("--user")
+    parser.add_argument("--max-sensitivity", type=int)
+    parser.add_argument("--capability-tag", action="append", default=[])
+    parser.add_argument("--purpose")
+    parser.add_argument("--lawful-basis")
+    parser.add_argument("--residency")
+    parser.add_argument("--region")
+    parser.add_argument("--break-glass", action="store_true")
 
 
 def parse_json_arg(value: str, default: Any) -> Any:
@@ -7073,7 +7099,7 @@ def cmd_graph_query(args: argparse.Namespace) -> None:
 
 def cmd_graph_timeline(args: argparse.Namespace) -> None:
     tools = load_tools(args)
-    emit(tools.graph_timeline(args.tenant, args.entity, branch=args.branch))
+    emit(tools.graph_timeline(args.tenant, args.entity, branch=args.branch, **_read_context_kwargs(args)))
 
 
 def cmd_graph_as_of(args: argparse.Namespace) -> None:
@@ -14018,6 +14044,7 @@ def build_parser() -> argparse.ArgumentParser:
     get.add_argument("--tenant", required=True)
     get.add_argument("--id", required=True)
     get.add_argument("--branch")
+    _add_read_context_args(get)
     get.set_defaults(func=cmd_get)
 
     propose = sub.add_parser("propose")
@@ -14079,6 +14106,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     export = sub.add_parser("export")
     export.add_argument("--tenant", required=True)
+    _add_read_context_args(export)
     export.set_defaults(func=cmd_export)
 
     calibration_tune = sub.add_parser("calibration-tune")
@@ -14390,6 +14418,7 @@ def build_parser() -> argparse.ArgumentParser:
     graph_timeline.add_argument("--tenant", required=True)
     graph_timeline.add_argument("--entity", required=True)
     graph_timeline.add_argument("--branch", default="main")
+    _add_read_context_args(graph_timeline)
     graph_timeline.set_defaults(func=cmd_graph_timeline)
 
     graph_as_of = sub.add_parser("graph-as-of")

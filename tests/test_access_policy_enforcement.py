@@ -8,6 +8,7 @@ import pytest
 from mnemosyne.access_policy import AccessDecision, apply_text_redactions, merge_access_policies
 from mnemosyne.consolidation import ConsolidationJob, ConsolidationWorker
 from mnemosyne.engine import LocalMemoryEngine
+from mnemosyne.mcp_tools import MemoryTools
 from mnemosyne.models import Assertion, Evidence, Preference, Relation
 from mnemosyne.prefetch import AnticipatoryPrefetcher, PrefetchCandidate
 from mnemosyne.workspace import ShadowWorkspaceController, WorkspaceItem
@@ -338,6 +339,37 @@ def test_operator_raw_s2_requires_item_and_request_break_glass() -> None:
 
     assert ordinary.hits == []
     assert [hit.text for hit in break_glass.hits] == ["Operator epsilon break-glass record."]
+
+
+def test_public_export_get_and_timeline_are_filtered_by_default() -> None:
+    engine = LocalMemoryEngine()
+    tools = MemoryTools(engine)
+    cid = _append(engine, "Filtered export public facade S2 secret.", sensitivity=2)
+    engine.add_relation(
+        Relation(
+            tenant_id=TENANT,
+            source="filtered facade subject",
+            predicate="mentions",
+            target="filtered facade target",
+            source_evidence_cids=[cid],
+            access_policy={"tenant": TENANT},
+        )
+    )
+
+    reader_export = tools.export(TENANT)
+    agent_export = tools.export(TENANT, role="agent")
+    reader_timeline = tools.graph_timeline(TENANT, "filtered facade subject")
+    agent_timeline = tools.graph_timeline(TENANT, "filtered facade subject", role="agent")
+
+    assert reader_export["evidence"] == []
+    assert reader_export["disclosure"]["omitted"]["evidence"] == 1
+    assert "Filtered export public facade" not in json.dumps(reader_export)
+    assert [item["content"] for item in agent_export["evidence"]] == ["Filtered export public facade S2 secret."]
+    with pytest.raises(KeyError):
+        tools.get(TENANT, cid)
+    assert tools.get(TENANT, cid, role="agent")["record"]["content"] == "Filtered export public facade S2 secret."
+    assert reader_timeline["events"] == []
+    assert [event["record"]["target"] for event in agent_timeline["events"]] == ["filtered facade target"]
 
 
 def test_unknown_access_policy_keys_are_rejected_at_write_time() -> None:
