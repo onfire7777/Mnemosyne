@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from hashlib import sha256
 from typing import Any, Callable, Protocol, Sequence
 
-from mnemosyne.access_policy import merge_access_policies
+from mnemosyne.access_policy import merge_access_policies, validate_access_policy
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.gate import Candidate, GateResult, PromotionGate, RegressionCase
 from mnemosyne.learning import Lesson, Procedure
@@ -1508,6 +1508,22 @@ class ConsolidationWorker:
         fully authorized, non-throttled, corroborated, regression-clean candidate
         is promoted.
         """
+        try:
+            validated_access_policy = validate_access_policy(
+                job.access_policy if job.access_policy is not None else {"tenant": job.tenant_id},
+                tenant_id=job.tenant_id,
+                location="consolidation access_policy",
+            )
+        except ValueError as exc:
+            return GateResult(
+                candidate_id=f"candidate-{job.signature}",
+                promoted=False,
+                protected_regressions=[],
+                failed_cases=[str(exc)],
+                passed_cases=[],
+                margin=0.0,
+                rollback_branch=None,
+            )
         decision = self.security.authorize_write(
             operation="promote_candidate",
             role="consolidator",
@@ -1583,7 +1599,7 @@ class ConsolidationWorker:
                     status="active",
                     trust_tier=job.trust_tier,
                     sensitivity=job.sensitivity,
-                    access_policy=job.access_policy or {"tenant": job.tenant_id},
+                    access_policy=validated_access_policy,
                 ),
                 branch=branch,
             )
@@ -1602,7 +1618,7 @@ class ConsolidationWorker:
                 alias=job.candidate_subject,
                 summary=candidate.description,
                 source_evidence_cids=job.source_evidence_cids,
-                access_policy=job.access_policy or {"tenant": job.tenant_id},
+                access_policy=validated_access_policy,
             )
         return result
 

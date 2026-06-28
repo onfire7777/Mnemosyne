@@ -123,6 +123,90 @@ def fake_parametric_command(tmp_path: Path) -> tuple[str, Path]:
     return " ".join(shlex.quote(item) for item in (sys.executable, str(script), str(state))), state
 
 
+def test_postgres_rejects_unknown_access_policy_keys_live() -> None:
+    tenant = f"tenant-policy-live-{uuid4()}"
+    user = f"user-policy-live-{uuid4()}"
+    policy = {"tenant": tenant, "vendor_flag": True}
+    engine = PostgresEngine(live_dsn())
+
+    with pytest.raises(ValueError, match="vendor_flag"):
+        engine.append_evidence(
+            Evidence(
+                tenant_id=tenant,
+                user_id=user,
+                actor="user",
+                source_type="unknown-policy-source",
+                content="Unknown policy evidence should fail before persistence.",
+                access_policy=policy,
+            )
+        )
+    with pytest.raises(ValueError, match="vendor_flag"):
+        engine.upsert_assertion(
+            Assertion(
+                tenant_id=tenant,
+                user_id=user,
+                subject="unknown policy assertion",
+                predicate="has",
+                object="unsupported guard",
+                access_policy=policy,
+            )
+        )
+    with pytest.raises(ValueError, match="vendor_flag"):
+        engine.add_relation(
+            Relation(
+                tenant_id=tenant,
+                source="unknown policy source",
+                predicate="links_to",
+                target="unknown policy target",
+                access_policy=policy,
+            )
+        )
+    with pytest.raises(ValueError, match="vendor_flag"):
+        engine.add_preference(
+            Preference(
+                tenant_id=tenant,
+                user_id=user,
+                category="workflow",
+                statement="unknown policy preference",
+                access_policy=policy,
+            )
+        )
+    with pytest.raises(ValueError, match="vendor_flag"):
+        engine.register_entity(tenant, "Unknown Policy Entity", access_policy=policy)
+
+
+def test_postgres_assertion_reinforcement_narrows_access_policy_live() -> None:
+    tenant = f"tenant-policy-reinforce-live-{uuid4()}"
+    user = f"user-policy-reinforce-live-{uuid4()}"
+    engine = PostgresEngine(live_dsn())
+
+    first_id = engine.upsert_assertion(
+        Assertion(
+            tenant_id=tenant,
+            user_id=user,
+            subject="postgres policy reinforcement",
+            predicate="has",
+            object="same object",
+            access_policy={"tenant": tenant},
+        )
+    )
+    second_id = engine.upsert_assertion(
+        Assertion(
+            tenant_id=tenant,
+            user_id=user,
+            subject="postgres policy reinforcement",
+            predicate="has",
+            object="same object",
+            confidence=0.95,
+            access_policy={"tenant": tenant, "allow_roles": ["consolidator"]},
+        )
+    )
+    exported = next(item for item in engine.export_tenant(tenant)["assertions"] if item["id"] == first_id)
+
+    assert second_id == first_id
+    assert exported["access_policy"] == {"tenant": tenant, "allow_roles": ["consolidator"]}
+
+
 def start_fake_retrieval_provider(*, malformed_embedding: bool = False) -> tuple[ThreadingHTTPServer, str, dict[str, list[dict]]]:
     calls: dict[str, list[dict]] = {"embedding": [], "reranker": []}
 

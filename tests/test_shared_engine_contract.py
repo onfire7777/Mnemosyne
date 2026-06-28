@@ -394,7 +394,7 @@ def test_shared_engine_contract_evidence_cids_are_immutable(
             capability_tags=["first"],
             sensitivity=0,
             signed_provenance={"issuer": "first"},
-            access_policy={"tenant": tenant, "version": "first"},
+            access_policy={"tenant": tenant},
         )
     )
 
@@ -413,7 +413,7 @@ def test_shared_engine_contract_evidence_cids_are_immutable(
             capability_tags=["second"],
             sensitivity=4,
             signed_provenance={"issuer": "second"},
-            access_policy={"tenant": tenant, "version": "second"},
+            access_policy={"tenant": tenant},
         )
     )
 
@@ -432,7 +432,56 @@ def test_shared_engine_contract_evidence_cids_are_immutable(
         assert record["capability_tags"] == ["first"]
         assert record["sensitivity"] == 0
         assert record["signed_provenance"] == {"issuer": "first"}
-        assert record["access_policy"]["version"] == "first"
+        assert record["access_policy"] == {"tenant": tenant}
+
+
+def test_shared_engine_contract_rejects_unknown_access_policy_keys(engine_bundle: tuple[Any, str, str]) -> None:
+    engine, tenant, user = engine_bundle
+    policy = {"tenant": tenant, "vendor_flag": True}
+
+    with pytest.raises(ValueError, match="vendor_flag"):
+        engine.append_evidence(
+            Evidence(
+                tenant_id=tenant,
+                user_id=user,
+                actor="user",
+                source_type="unknown-policy-source",
+                content="Unknown policy evidence should fail before persistence.",
+                access_policy=policy,
+            )
+        )
+    with pytest.raises(ValueError, match="vendor_flag"):
+        engine.upsert_assertion(
+            Assertion(
+                tenant_id=tenant,
+                subject="unknown policy assertion",
+                predicate="has",
+                object="unsupported guard",
+                access_policy=policy,
+            )
+        )
+    with pytest.raises(ValueError, match="vendor_flag"):
+        engine.add_relation(
+            Relation(
+                tenant_id=tenant,
+                source="unknown policy source",
+                predicate="links_to",
+                target="unknown policy target",
+                access_policy=policy,
+            )
+        )
+    with pytest.raises(ValueError, match="vendor_flag"):
+        engine.add_preference(
+            Preference(
+                tenant_id=tenant,
+                user_id=user,
+                category="workflow",
+                statement="unknown policy preference",
+                access_policy=policy,
+            )
+        )
+    with pytest.raises(ValueError, match="vendor_flag"):
+        engine.register_entity(tenant, "Unknown Policy Entity", access_policy=policy)
 
 
 def test_shared_engine_contract_exports_all_and_json(engine_bundle: tuple[Any, str, str]) -> None:

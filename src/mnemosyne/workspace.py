@@ -12,6 +12,7 @@ import hashlib
 from itertools import islice
 from typing import Any, Iterable, Mapping, Sequence
 
+from .access_policy import validate_access_policy
 from .consciousness import (
     BoundedCognitiveCycle,
     InteroceptiveProtoSelf,
@@ -679,10 +680,11 @@ def _validate_item_metadata(tenant_id: str, metadata: Mapping[str, Any]) -> None
 
 
 def _validate_access_policy(tenant_id: str, access_policy: object) -> None:
-    if isinstance(access_policy, Mapping):
-        policy_tenant = access_policy.get("tenant")
-        if policy_tenant is not None and str(policy_tenant) != tenant_id:
-            raise ValueError("workspace item access policy does not match stream tenant")
+    if access_policy is None:
+        return
+    if not isinstance(access_policy, Mapping):
+        raise ValueError("workspace item access policy must be a JSON object")
+    validate_access_policy(access_policy, tenant_id=tenant_id, location="workspace item access policy")
 
 
 def _selected_rows(

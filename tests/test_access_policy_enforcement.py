@@ -2,10 +2,14 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from mnemosyne.access_policy import merge_access_policies
+from mnemosyne.consolidation import ConsolidationJob, ConsolidationWorker
 from mnemosyne.engine import LocalMemoryEngine
-from mnemosyne.models import Evidence
+from mnemosyne.models import Assertion, Evidence, Preference, Relation
 from mnemosyne.prefetch import AnticipatoryPrefetcher, PrefetchCandidate
+from mnemosyne.workspace import ShadowWorkspaceController, WorkspaceItem
 
 
 TENANT = "tenant-access-policy"
@@ -183,10 +187,140 @@ def test_operator_raw_s2_requires_item_and_request_break_glass() -> None:
     assert [hit.text for hit in break_glass.hits] == ["Operator epsilon break-glass record."]
 
 
-def test_s4_and_unknown_access_policy_keys_fail_closed() -> None:
+def test_unknown_access_policy_keys_are_rejected_at_write_time() -> None:
+    engine = LocalMemoryEngine()
+    policy = {"tenant": TENANT, "vendor_flag": True}
+
+    with pytest.raises(ValueError, match="vendor_flag"):
+        _append(engine, "Unknown evidence policy key.", sensitivity=1, access_policy=policy)
+    with pytest.raises(ValueError, match="vendor_flag"):
+        engine.upsert_assertion(
+            Assertion(
+                tenant_id=TENANT,
+                subject="unknown policy assertion",
+                predicate="has",
+                object="unsupported guard",
+                access_policy=policy,
+            )
+        )
+    with pytest.raises(ValueError, match="vendor_flag"):
+        engine.add_relation(
+            Relation(
+                tenant_id=TENANT,
+                source="unknown policy source",
+                predicate="links_to",
+                target="unknown policy target",
+                access_policy=policy,
+            )
+        )
+    with pytest.raises(ValueError, match="vendor_flag"):
+        engine.add_preference(
+            Preference(
+                tenant_id=TENANT,
+                user_id=USER,
+                category="workflow",
+                statement="unknown policy preference",
+                access_policy=policy,
+            )
+        )
+    with pytest.raises(ValueError, match="vendor_flag"):
+        engine.register_entity(TENANT, "Unknown Policy Entity", access_policy=policy)
+
+
+def test_metadata_shadow_access_policy_is_rejected() -> None:
+    engine = LocalMemoryEngine()
+    cid = _append(engine, "Metadata shadow policy should not be accepted.")
+
+    with pytest.raises(ValueError, match="cannot shadow"):
+        engine.update_evidence_metadata(cid=cid, tenant_id=TENANT, metadata_patch={"access_policy": {"tenant": TENANT}})
+
+
+def test_assertion_reinforcement_merges_access_policy_restrictively() -> None:
+    engine = LocalMemoryEngine()
+    first_id = engine.upsert_assertion(
+        Assertion(
+            tenant_id=TENANT,
+            subject="policy reinforcement",
+            predicate="has",
+            object="same object",
+            access_policy={"tenant": TENANT},
+        )
+    )
+    second_id = engine.upsert_assertion(
+        Assertion(
+            tenant_id=TENANT,
+            subject="policy reinforcement",
+            predicate="has",
+            object="same object",
+            confidence=0.95,
+            access_policy={"tenant": TENANT, "allow_roles": ["consolidator"]},
+        )
+    )
+    [stored] = list(engine.assertions.values())
+
+    assert second_id == first_id
+    assert stored.access_policy == {"tenant": TENANT, "allow_roles": ["consolidator"]}
+
+
+def test_entity_rewrite_validates_existing_legacy_access_policy() -> None:
+    engine = LocalMemoryEngine()
+    row = engine.register_entity(TENANT, "Legacy Policy Entity", access_policy={"tenant": TENANT})
+    engine.entities[(TENANT, "Legacy Policy Entity")]["access_policy"] = {"tenant": TENANT, "vendor_flag": True}
+
+    with pytest.raises(ValueError, match="vendor_flag"):
+        engine.register_entity(TENANT, row["canonical"], alias="legacy policy alias")
+
+
+def test_derived_access_policy_merge_rejects_unknown_source_keys() -> None:
+    with pytest.raises(ValueError, match="vendor_flag"):
+        merge_access_policies([{"tenant": TENANT, "vendor_flag": True}], tenant_id=TENANT)
+
+
+def test_workspace_metadata_access_policy_rejects_unknown_keys() -> None:
+    controller = ShadowWorkspaceController(max_workspace_items=1, max_cycles=1)
+
+    with pytest.raises(ValueError, match="vendor_flag"):
+        controller.run_shadow_stream(
+            tenant_id=TENANT,
+            item_ticks=[
+                [
+                    WorkspaceItem(
+                        id="unknown-policy",
+                        priority=1.0,
+                        content="unknown workspace policy",
+                        metadata={"access_policy": {"tenant": TENANT, "vendor_flag": True}},
+                    )
+                ]
+            ],
+        )
+
+
+def test_consolidation_candidate_unknown_access_policy_fails_closed() -> None:
+    engine = LocalMemoryEngine()
+    result = ConsolidationWorker(engine, []).run_job(
+        ConsolidationJob(
+            tenant_id=TENANT,
+            signature="unknown-policy-candidate",
+            query="unknown policy candidate",
+            candidate_subject="unknown policy candidate",
+            candidate_predicate="has",
+            candidate_object="unsupported guard",
+            source_evidence_cids=[],
+            access_policy={"tenant": TENANT, "vendor_flag": True},
+        )
+    )
+
+    assert result.promoted is False
+    assert result.failed_cases == ["unknown consolidation access_policy keys: vendor_flag"]
+    assert engine.assertions == {}
+
+
+def test_s4_and_legacy_unknown_access_policy_keys_fail_closed() -> None:
     engine = LocalMemoryEngine()
     _append(engine, "S4 zeta secret pointer.", sensitivity=4, access_policy={"tenant": TENANT, "break_glass": True})
-    _append(engine, "Unknown eta policy key.", sensitivity=1, access_policy={"tenant": TENANT, "vendor_flag": True})
+    legacy_cid = _append(engine, "Unknown eta policy key.", sensitivity=1, access_policy={"tenant": TENANT})
+    legacy = next(item for item in engine.evidence.values() if item.cid == legacy_cid)
+    legacy.access_policy = {"tenant": TENANT, "vendor_flag": True}
 
     s4 = engine.retrieve("S4 zeta", TENANT, filt={"role": "operator", "break_glass": True})
     unknown = engine.retrieve("Unknown eta", TENANT, filt={"role": "agent"})

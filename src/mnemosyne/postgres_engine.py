@@ -10,7 +10,13 @@ from hashlib import sha256
 from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid5
 
-from mnemosyne.access_policy import apply_text_redactions, effective_max_sensitivity, may_read_item
+from mnemosyne.access_policy import (
+    apply_text_redactions,
+    effective_max_sensitivity,
+    may_read_item,
+    merge_access_policies,
+    validate_access_policy,
+)
 from mnemosyne.calibration import CalibrationSet, conformal_threshold, should_abstain
 from mnemosyne.consciousness import RealityMonitor
 from mnemosyne.ids import content_cid
@@ -186,6 +192,7 @@ class PostgresEngine:
                 )
 
     def append_evidence(self, ev: Evidence, branch: str = "main") -> str:
+        access_policy = validate_access_policy(ev.access_policy, tenant_id=ev.tenant_id, location="evidence.access_policy")
         self.ensure_tenant_and_branch(ev.tenant_id, branch)
         db_tenant_id = _stable_uuid("tenant", ev.tenant_id)
         db_user_id = _stable_uuid("user", ev.user_id)
@@ -296,7 +303,7 @@ class PostgresEngine:
                         ev.capability_tags,
                         ev.sensitivity,
                         self._jsonb(ev.signed_provenance) if ev.signed_provenance else None,
-                        self._jsonb(ev.access_policy),
+                        self._jsonb(access_policy),
                         embedding,
                         ev.created_at,
                     ),
@@ -424,6 +431,8 @@ class PostgresEngine:
         actor: str = "consolidation",
         source: str = "metadata_update",
     ) -> bool:
+        if "access_policy" in metadata_patch:
+            raise ValueError("metadata_patch.access_policy cannot shadow evidence.access_policy")
         db_tenant_id = _stable_uuid("tenant", tenant_id)
         with self.connect() as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
@@ -622,8 +631,14 @@ class PostgresEngine:
         }
 
     def upsert_assertion(self, assertion: Assertion, branch: str = "main") -> str:
+        access_policy = validate_access_policy(
+            assertion.access_policy,
+            tenant_id=assertion.tenant_id,
+            location="assertion.access_policy",
+        )
         self.ensure_tenant_and_branch(assertion.tenant_id, branch)
         incoming = Assertion.from_dict(assertion.to_dict())
+        incoming.access_policy = access_policy
         incoming.branch = branch
         requested_status = incoming.status
         incoming.status = "active" if incoming.status == "candidate" else incoming.status
@@ -655,6 +670,10 @@ class PostgresEngine:
                 same = [row for row in peers if row["object"] == incoming.object]
                 if same:
                     winner = same[0]
+                    merged_access_policy = merge_access_policies(
+                        [dict(winner["access_policy"] or {}), incoming.access_policy],
+                        tenant_id=incoming.tenant_id,
+                    )
                     merged_confidence = max(float(winner["confidence"]), incoming.confidence)
                     merged_sources = sorted(set(_bytes_list_to_cids(winner["source_evidence_cids"]) + incoming.source_evidence_cids))
                     merged_calibration = dict(winner["calibration"] or {})
@@ -671,7 +690,7 @@ class PostgresEngine:
                         """
                         UPDATE assertions
                         SET confidence = %s, calibration = %s, source_evidence_cids = %s, trust_tier = LEAST(trust_tier, %s),
-                            last_accessed = now(), access_count = access_count + 1
+                            access_policy = %s, last_accessed = now(), access_count = access_count + 1
                         WHERE id = %s
                         """,
                         (
@@ -679,6 +698,7 @@ class PostgresEngine:
                             self._jsonb(merged_calibration),
                             _cid_list_to_bytes(merged_sources),
                             incoming.trust_tier,
+                            self._jsonb(merged_access_policy),
                             winner["id"],
                         ),
                     )
@@ -795,6 +815,11 @@ class PostgresEngine:
         return incoming.id
 
     def add_relation(self, relation: Relation, branch: str = "main") -> str:
+        access_policy = validate_access_policy(
+            relation.access_policy,
+            tenant_id=relation.tenant_id,
+            location="relation.access_policy",
+        )
         self.ensure_tenant_and_branch(relation.tenant_id, branch)
         db_tenant_id = _stable_uuid("tenant", relation.tenant_id)
         with self.connect() as conn:
@@ -823,7 +848,7 @@ class PostgresEngine:
                         relation.valid_from,
                         relation.valid_to,
                         _cid_list_to_bytes(relation.source_evidence_cids),
-                        self._jsonb(relation.access_policy),
+                        self._jsonb(access_policy),
                     ),
                 )
                 self._audit(
@@ -932,8 +957,14 @@ class PostgresEngine:
         return contradiction.id
 
     def add_preference(self, preference: Preference) -> str:
+        access_policy = validate_access_policy(
+            preference.access_policy,
+            tenant_id=preference.tenant_id,
+            location="preference.access_policy",
+        )
         self.ensure_tenant_and_branch(preference.tenant_id)
         pref = Preference.from_dict(preference.to_dict())
+        pref.access_policy = access_policy
         db_tenant_id = _stable_uuid("tenant", pref.tenant_id)
         db_user_id = _stable_uuid("user", pref.user_id)
         with self.connect() as conn:
@@ -1984,6 +2015,11 @@ class PostgresEngine:
         access_policy: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         canonical = canonical.strip() or "unknown-entity"
+        incoming_access_policy = validate_access_policy(
+            access_policy if access_policy is not None else {"tenant": tenant_id},
+            tenant_id=tenant_id,
+            location="entity.access_policy",
+        )
         aliases = sorted({canonical, *([" ".join(alias.split())] if alias and alias.strip() else [])})
         db_tenant_id = _stable_uuid("tenant", tenant_id)
         self.ensure_tenant_and_branch(tenant_id, "main")
@@ -1991,6 +2027,28 @@ class PostgresEngine:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
                 self._ensure_entity_registry_schema(cur)
                 self._set_tenant(cur, db_tenant_id)
+                cur.execute(
+                    """
+                    SELECT access_policy
+                    FROM entities
+                    WHERE tenant_id = %s AND canonical = %s
+                    """,
+                    (db_tenant_id, canonical),
+                )
+                existing = cur.fetchone()
+                if existing is None:
+                    effective_access_policy = incoming_access_policy
+                else:
+                    current_access_policy = validate_access_policy(
+                        dict(existing["access_policy"] or {}),
+                        tenant_id=tenant_id,
+                        location="entity.access_policy",
+                    )
+                    effective_access_policy = (
+                        merge_access_policies([current_access_policy, incoming_access_policy], tenant_id=tenant_id)
+                        if access_policy is not None
+                        else current_access_policy
+                    )
                 cur.execute(
                     """
                     INSERT INTO entities(
@@ -2006,10 +2064,7 @@ class PostgresEngine:
                         SELECT array_agg(DISTINCT cid)
                         FROM unnest(entities.source_evidence_cids || EXCLUDED.source_evidence_cids) AS cid
                       ), '{}'::bytea[]),
-                      access_policy = CASE
-                        WHEN EXCLUDED.access_policy = '{}'::jsonb THEN entities.access_policy
-                        ELSE EXCLUDED.access_policy
-                      END,
+                      access_policy = EXCLUDED.access_policy,
                       updated_at = now()
                     RETURNING id, canonical, type, summary, salience, source_evidence_cids, access_policy, updated_at
                     """,
@@ -2019,7 +2074,7 @@ class PostgresEngine:
                         entity_type,
                         summary,
                         _cid_list_to_bytes(source_evidence_cids or []),
-                        self._jsonb(access_policy or {"tenant": tenant_id}),
+                        self._jsonb(effective_access_policy),
                     ),
                 )
                 row = cur.fetchone()
