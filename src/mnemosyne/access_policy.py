@@ -7,6 +7,7 @@ cannot drift into a wider disclosure boundary than the other.
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -238,16 +239,18 @@ def may_read_item(
 
 def apply_text_redactions(text: str, access_policy: Mapping[str, Any] | None, decision: AccessDecision) -> tuple[str, dict[str, Any]]:
     fields = _str_list((access_policy or {}).get("redact_fields"))
-    metadata = {
-        "access_decision": decision.reason,
-        "role": decision.role,
-        "effective_max_sensitivity": decision.ceiling,
-        "redacted": False,
-    }
-    if decision.unknown_keys:
-        metadata["unknown_access_policy_keys"] = list(decision.unknown_keys)
-    if not decision.redacted or not fields:
+    metadata = _redaction_metadata(decision)
+    if not decision.redacted:
         return text, metadata
+    if not fields:
+        return _redaction_placeholder((), metadata)
+
+    structured = _redact_json_text(text, fields)
+    if structured is not None:
+        redacted, structured_metadata = structured
+        metadata.update(structured_metadata)
+        return redacted, metadata
+
     redacted = text
     for field in fields:
         label = re.escape(field)
@@ -257,10 +260,42 @@ def apply_text_redactions(text: str, access_policy: Mapping[str, Any] | None, de
             redacted,
         )
     if redacted == text:
-        redacted = "[REDACTED fields: " + ", ".join(fields) + "]"
+        return _redaction_placeholder(fields, metadata)
+    else:
+        metadata["redaction_mode"] = "label"
     metadata["redacted"] = True
     metadata["redact_fields"] = fields
     return redacted, metadata
+
+
+def apply_statement_redactions(
+    *,
+    subject: str,
+    predicate: str,
+    object_value: str,
+    access_policy: Mapping[str, Any] | None,
+    decision: AccessDecision,
+) -> tuple[str, dict[str, Any]]:
+    record = {"subject": subject, "predicate": predicate, "object": object_value}
+    structured = _apply_structured_record_redactions(record, ("subject", "predicate", "object"), access_policy, decision)
+    if structured is not None:
+        return structured
+    return apply_text_redactions(f"{subject} {predicate} {object_value}", access_policy, decision)
+
+
+def apply_relation_redactions(
+    *,
+    source: str,
+    predicate: str,
+    target: str,
+    access_policy: Mapping[str, Any] | None,
+    decision: AccessDecision,
+) -> tuple[str, dict[str, Any]]:
+    record = {"source": source, "predicate": predicate, "target": target}
+    structured = _apply_structured_record_redactions(record, ("source", "predicate", "target"), access_policy, decision)
+    if structured is not None:
+        return structured
+    return apply_text_redactions(f"{source} {predicate} {target}", access_policy, decision)
 
 
 def merge_access_policies(policies: Sequence[Mapping[str, Any] | None], *, tenant_id: str | None = None) -> dict[str, Any]:
@@ -316,6 +351,118 @@ def merge_access_policies(policies: Sequence[Mapping[str, Any] | None], *, tenan
     elif len(data_classes) > 1:
         merged["data_class"] = "mixed"
     return merged
+
+
+def _redaction_metadata(decision: AccessDecision) -> dict[str, Any]:
+    metadata = {
+        "access_decision": decision.reason,
+        "role": decision.role,
+        "effective_max_sensitivity": decision.ceiling,
+        "redacted": False,
+    }
+    if decision.unknown_keys:
+        metadata["unknown_access_policy_keys"] = list(decision.unknown_keys)
+    return metadata
+
+
+def _redact_json_text(text: str, fields: Sequence[str]) -> tuple[str, dict[str, Any]] | None:
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(parsed, (Mapping, list)):
+        return None
+    structured = _redact_structured_value(parsed, fields)
+    if structured is None:
+        return _redaction_placeholder(fields, {})
+    redacted, metadata = structured
+    return json.dumps(redacted, sort_keys=True, separators=(",", ":")), metadata
+
+
+def _redact_structured_value(value: Any, fields: Sequence[str]) -> tuple[Any, dict[str, Any]] | None:
+    normalized_fields = [field for field in fields if field]
+    found: set[str] = set()
+
+    def walk(node: Any, path: tuple[str, ...]) -> Any:
+        if isinstance(node, Mapping):
+            redacted_node: dict[Any, Any] = {}
+            for key, child in node.items():
+                key_text = str(key).strip().lower()
+                child_path = (*path, key_text)
+                matching_fields = [
+                    field
+                    for field in normalized_fields
+                    if _field_matches_path(field, child_path)
+                ]
+                if matching_fields:
+                    label = max(matching_fields, key=lambda item: (item.count("."), len(item)))
+                    found.update(matching_fields)
+                    redacted_node[key] = f"[REDACTED:{label}]"
+                else:
+                    redacted_node[key] = walk(child, child_path)
+            return redacted_node
+        if isinstance(node, list):
+            return [walk(item, path) for item in node]
+        return node
+
+    redacted = walk(value, ())
+    missing = sorted(set(normalized_fields) - found)
+    if missing:
+        return None
+    return (
+        redacted,
+        {
+            "redacted": True,
+            "redact_fields": list(normalized_fields),
+            "redaction_mode": "structured",
+            "redacted_field_count": len(found),
+        },
+    )
+
+
+def _field_matches_path(field: str, path: tuple[str, ...]) -> bool:
+    segments = tuple(part for part in field.split(".") if part)
+    if not segments:
+        return False
+    if len(segments) == 1:
+        return bool(path and path[-1] == segments[0])
+    return path[-len(segments) :] == segments
+
+
+def _apply_structured_record_redactions(
+    record: Mapping[str, str],
+    render_order: Sequence[str],
+    access_policy: Mapping[str, Any] | None,
+    decision: AccessDecision,
+) -> tuple[str, dict[str, Any]] | None:
+    fields = _str_list((access_policy or {}).get("redact_fields"))
+    metadata = _redaction_metadata(decision)
+    if not decision.redacted:
+        return " ".join(str(record[key]) for key in render_order), metadata
+    if not fields:
+        return _redaction_placeholder((), metadata)
+
+    structured = _redact_structured_value(dict(record), fields)
+    if structured is None:
+        return None
+    redacted_record, structured_metadata = structured
+    metadata.update(structured_metadata)
+    metadata["redacted_record"] = {key: str(redacted_record[key]) for key in render_order}
+    return " ".join(str(redacted_record[key]) for key in render_order), metadata
+
+
+def _redaction_placeholder(fields: Sequence[str], metadata: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    missing = sorted(set(fields))
+    metadata.update(
+        {
+            "redacted": True,
+            "redact_fields": list(fields),
+            "redaction_mode": "placeholder",
+            "missing_redact_fields": missing,
+        }
+    )
+    label = ", ".join(missing) if missing else "unspecified"
+    return "[REDACTED fields: " + label + "]", metadata
 
 
 def _merge_intersection(merged: dict[str, Any], rows: Sequence[dict[str, Any]], key: str, aliases: tuple[str, ...] = ()) -> None:

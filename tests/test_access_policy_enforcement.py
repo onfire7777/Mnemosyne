@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from mnemosyne.access_policy import merge_access_policies
+from mnemosyne.access_policy import AccessDecision, apply_text_redactions, merge_access_policies
 from mnemosyne.consolidation import ConsolidationJob, ConsolidationWorker
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.models import Assertion, Evidence, Preference, Relation
@@ -169,6 +170,158 @@ def test_redact_fields_masks_raw_text_below_min_role_for_raw() -> None:
     assert "123-45-6789" not in result.hits[0].text
     assert "[REDACTED:ssn]" in result.hits[0].text
     assert result.hits[0].metadata["privacy"]["redacted"] is True
+
+
+def test_redact_fields_masks_json_and_dotted_paths_below_raw_role() -> None:
+    engine = LocalMemoryEngine()
+    _append(
+        engine,
+        json.dumps(
+            {
+                "ticket": "structured-json-delta",
+                "profile": {"name": "Ada", "ssn": "123-45-6789"},
+                "dob": "2000-01-01",
+                "notes": [{"ssn": "987-65-4321"}],
+            }
+        ),
+        sensitivity=2,
+        access_policy={
+            "tenant": TENANT,
+            "redact_fields": ["profile.ssn", "dob"],
+            "min_role_for_raw": "operator",
+        },
+    )
+
+    result = engine.retrieve("structured-json-delta", TENANT, filt={"role": "agent"})
+
+    assert len(result.hits) == 1
+    assert "123-45-6789" not in result.hits[0].text
+    assert "2000-01-01" not in result.hits[0].text
+    assert "[REDACTED:profile.ssn]" in result.hits[0].text
+    assert "[REDACTED:dob]" in result.hits[0].text
+    assert result.hits[0].metadata["privacy"]["redaction_mode"] == "structured"
+
+
+def test_redact_fields_missing_json_path_fails_closed() -> None:
+    engine = LocalMemoryEngine()
+    _append(
+        engine,
+        json.dumps({"ticket": "structured-json-missing", "profile": {"ssn": "123-45-6789"}}),
+        sensitivity=2,
+        access_policy={
+            "tenant": TENANT,
+            "redact_fields": ["profile.mrn"],
+            "min_role_for_raw": "operator",
+        },
+    )
+
+    result = engine.retrieve("profile.mrn", TENANT, filt={"role": "agent"})
+
+    assert len(result.hits) == 1
+    assert result.hits[0].text == "[REDACTED fields: profile.mrn]"
+    assert "123-45-6789" not in result.hits[0].text
+    assert result.hits[0].metadata["privacy"]["redaction_mode"] == "placeholder"
+    assert result.hits[0].metadata["privacy"]["missing_redact_fields"] == ["profile.mrn"]
+
+
+def test_assertion_structured_field_masking_hides_object() -> None:
+    engine = LocalMemoryEngine()
+    engine.upsert_assertion(
+        Assertion(
+            tenant_id=TENANT,
+            subject="structured assertion",
+            predicate="stores",
+            object="MRN 12345",
+            status="active",
+            sensitivity=2,
+            access_policy={
+                "tenant": TENANT,
+                "redact_fields": ["object"],
+                "min_role_for_raw": "operator",
+            },
+        )
+    )
+
+    result = engine.retrieve("structured assertion", TENANT, filt={"role": "agent"})
+
+    assert len(result.hits) == 1
+    assert result.hits[0].text == "structured assertion stores [REDACTED:object]"
+    assert "MRN 12345" not in result.hits[0].text
+    assert result.hits[0].metadata["privacy"]["redaction_mode"] == "structured"
+
+
+def test_relation_structured_field_masking_hides_text_and_metadata() -> None:
+    engine = LocalMemoryEngine()
+    cid = _append(engine, "Relation masking source evidence.")
+    engine.add_relation(
+        Relation(
+            tenant_id=TENANT,
+            source="relation masking subject",
+            predicate="links_to",
+            target="MRN 888 target",
+            source_evidence_cids=[cid],
+            access_policy={
+                "tenant": TENANT,
+                "redact_fields": ["target"],
+                "min_role_for_raw": "operator",
+            },
+        )
+    )
+
+    [hit] = engine.graph_ppr(
+        ["relation masking subject", "MRN 888 target"],
+        1,
+        tenant_id=TENANT,
+        filt={"role": "agent"},
+    )
+
+    assert hit.text == "relation masking subject links_to [REDACTED:target]"
+    assert hit.metadata["target"] == "[REDACTED:target]"
+    assert "MRN 888" not in hit.text
+    assert "MRN 888" not in hit.metadata["target"]
+    assert hit.metadata["privacy"]["redaction_mode"] == "structured"
+
+
+def test_required_redaction_without_fields_fails_closed() -> None:
+    text, metadata = apply_text_redactions(
+        "Unfielded raw sensitive value.",
+        {"tenant": TENANT},
+        AccessDecision(True, "allowed", "agent", 2, redacted=True),
+    )
+
+    assert text == "[REDACTED fields: unspecified]"
+    assert metadata["redacted"] is True
+    assert metadata["redaction_mode"] == "placeholder"
+    assert metadata["missing_redact_fields"] == []
+
+
+def test_denied_relation_policy_does_not_bridge_graph_traversal() -> None:
+    engine = LocalMemoryEngine()
+    cid = _append(engine, "Denied relation bridge source evidence.")
+    engine.add_relation(
+        Relation(
+            tenant_id=TENANT,
+            source="denied bridge alpha",
+            predicate="links_to",
+            target="denied bridge beta",
+            source_evidence_cids=[cid],
+            access_policy={"tenant": TENANT, "allow_roles": ["operator"]},
+        )
+    )
+    engine.add_relation(
+        Relation(
+            tenant_id=TENANT,
+            source="denied bridge beta",
+            predicate="links_to",
+            target="denied bridge gamma",
+            source_evidence_cids=[cid],
+            access_policy={"tenant": TENANT},
+        )
+    )
+
+    hits = engine.graph_ppr(["denied bridge alpha"], 5, tenant_id=TENANT, filt={"role": "agent"})
+
+    assert hits == []
 
 
 def test_operator_raw_s2_requires_item_and_request_break_glass() -> None:

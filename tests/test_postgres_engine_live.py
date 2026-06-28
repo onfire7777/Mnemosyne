@@ -207,6 +207,40 @@ def test_postgres_assertion_reinforcement_narrows_access_policy_live() -> None:
     assert exported["access_policy"] == {"tenant": tenant, "allow_roles": ["consolidator"]}
 
 
+def test_postgres_assertion_structured_field_masking_live() -> None:
+    tenant = f"tenant-policy-redact-live-{uuid4()}"
+    user = f"user-policy-redact-live-{uuid4()}"
+    engine = PostgresEngine(live_dsn())
+    engine.upsert_assertion(
+        Assertion(
+            tenant_id=tenant,
+            user_id=user,
+            subject="postgres structured masking",
+            predicate="stores",
+            object="MRN 54321",
+            status="active",
+            sensitivity=2,
+            access_policy={
+                "tenant": tenant,
+                "redact_fields": ["object"],
+                "min_role_for_raw": "operator",
+            },
+        )
+    )
+
+    hits = engine.lexical_search(
+        "postgres structured masking",
+        5,
+        {"tenant_id": tenant, "branch": "main", "role": "agent"},
+    )
+
+    assertion_hits = [hit for hit in hits if hit.kind == "assertion"]
+    assert len(assertion_hits) == 1
+    assert assertion_hits[0].text == "postgres structured masking stores [REDACTED:object]"
+    assert "MRN 54321" not in assertion_hits[0].text
+    assert assertion_hits[0].metadata["privacy"]["redaction_mode"] == "structured"
+
+
 def start_fake_retrieval_provider(*, malformed_embedding: bool = False) -> tuple[ThreadingHTTPServer, str, dict[str, list[dict]]]:
     calls: dict[str, list[dict]] = {"embedding": [], "reranker": []}
 
