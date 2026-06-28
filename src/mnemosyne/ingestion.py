@@ -9,7 +9,7 @@ from typing import Any, Literal
 
 from mnemosyne.consolidation import CONSOLIDATE_EVIDENCE_JOB, DEFAULT_CONSOLIDATION_PASSES
 from mnemosyne.engine import LocalMemoryEngine
-from mnemosyne.ids import content_cid
+from mnemosyne.ids import evidence_cid, evidence_unscoped_cid
 from mnemosyne.media_limits import DEFAULT_MAX_INGEST_BYTES, enforce_byte_limit, validate_byte_limit
 from mnemosyne.media import MEDIA_EXTRACT_JOB, extract_derived_text
 from mnemosyne.models import Assertion, Evidence, Resource
@@ -213,16 +213,25 @@ class IngestionPipeline:
             metadata["derived_text_sources"] = derived_sources
             capability_tags.append("derived-text-indexed")
             capability_tags = sorted(set(capability_tags))
-        predicted_cid = content_cid(
+        predicted_cid = evidence_cid(
             content,
-            {
-                "tenant_id": request.tenant_id,
-                "source_type": request.source_type,
-                "content_pointer": content_pointer,
-                "modality": request.modality,
-            },
+            tenant_id=request.tenant_id,
+            user_id=request.user_id,
+            source_type=request.source_type,
+            content_pointer=content_pointer,
+            modality=request.modality,
+            sensitivity=sensitivity,
+        )
+        unscoped_cid = evidence_unscoped_cid(
+            content,
+            tenant_id=request.tenant_id,
+            source_type=request.source_type,
+            content_pointer=content_pointer,
+            modality=request.modality,
         )
         already_present = self._evidence_exists(request.tenant_id, predicted_cid, branch)
+        if not already_present and unscoped_cid != predicted_cid:
+            already_present = self._evidence_exists(request.tenant_id, unscoped_cid, branch)
         prediction_error = self._prediction_error_signal(
             tenant_id=request.tenant_id,
             branch=branch,

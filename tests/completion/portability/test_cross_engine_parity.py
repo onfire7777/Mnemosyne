@@ -1229,6 +1229,56 @@ def test_parity_merge_branch_into_main() -> None:
     assert local["merged_on_main"] is True
 
 
+def test_parity_branch_and_merge_preserve_evidence_embeddings() -> None:
+    harness = _harness("branch-merge-embedding")
+    embedding = [0.125] * 1024
+
+    def scenario(engine: Any, tenant: str, user: str) -> dict[str, Any]:
+        source_cid = engine.append_evidence(
+            _evidence(
+                tenant,
+                user,
+                "Sensitive branch copy evidence carries an explicit vector.",
+                source_type="vector-branch-copy",
+                sensitivity=3,
+                access_policy={"tenant": tenant, "data_class": "pii", "max_sensitivity": 3},
+                embedding=list(embedding),
+            )
+        )
+        engine.branch("copy-candidate", frm="main", tenant_id=tenant)
+        branched = engine.get_evidence(tenant, source_cid, branch="copy-candidate")
+
+        engine.branch("merge-candidate", frm="main", tenant_id=tenant)
+        merge_cid = engine.append_evidence(
+            _evidence(
+                tenant,
+                user,
+                "Sensitive merge evidence carries an explicit vector.",
+                source_type="vector-branch-merge",
+                sensitivity=3,
+                access_policy={"tenant": tenant, "data_class": "pii", "max_sensitivity": 3},
+                embedding=list(embedding),
+            ),
+            branch="merge-candidate",
+        )
+        engine.merge("merge-candidate", into="main", tenant_id=tenant)
+        merged = engine.get_evidence(tenant, merge_cid, branch="main")
+        assert branched is not None
+        assert merged is not None
+        return {
+            "branched_embedding": branched.embedding,
+            "branched_partition": branched.metadata.get("embedding_partition"),
+            "merged_embedding": merged.embedding,
+            "merged_partition": merged.metadata.get("embedding_partition"),
+        }
+
+    local = harness.run("branch+merge-evidence-embedding", scenario)
+    assert local["branched_embedding"] == embedding
+    assert local["branched_partition"] == "private"
+    assert local["merged_embedding"] == embedding
+    assert local["merged_partition"] == "private"
+
+
 # ---------------------------------------------------------------- erasure
 
 

@@ -560,6 +560,120 @@ def test_shared_engine_contract_backfills_evidence_privacy(engine_bundle: tuple[
     assert audit[-1]["diff"]["pii_tags"] == ["email", "ssn"]
 
 
+def test_shared_engine_contract_rejects_unsafe_pii_backfill_sensitivity(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, user = engine_bundle
+    cid = engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id=user,
+            actor="user",
+            source_type="legacy-privacy-contract",
+            content="Legacy row still has SSN 123-45-6789.",
+            trust_tier=0,
+            sensitivity=0,
+            access_policy={"tenant": tenant},
+        )
+    )
+
+    with pytest.raises(ValueError, match="pii_sensitivity must be at least 3"):
+        engine.backfill_evidence_privacy(tenant, cid, ["ssn"], pii_sensitivity=0)
+
+    recalled = engine.get_evidence(tenant, cid)
+    assert recalled is not None
+    assert recalled.sensitivity == 0
+    assert recalled.access_policy.get("data_class") is None
+
+
+def test_shared_engine_contract_scopes_sensitive_evidence_cids_by_user(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, user = engine_bundle
+    other_user = f"{user}-other"
+    content = "Sensitive medical record confirms patient@example.com has labs pending."
+
+    first = engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id=user,
+            actor="user",
+            source_type="sensitive-import",
+            content=content,
+            trust_tier=0,
+            sensitivity=3,
+            access_policy={"tenant": tenant, "data_class": "pii", "max_sensitivity": 3},
+        )
+    )
+    same_user_duplicate = engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id=user,
+            actor="user",
+            source_type="sensitive-import",
+            content=content,
+            trust_tier=0,
+            sensitivity=3,
+            access_policy={"tenant": tenant, "data_class": "pii", "max_sensitivity": 3},
+        )
+    )
+    other_user_cid = engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id=other_user,
+            actor="user",
+            source_type="sensitive-import",
+            content=content,
+            trust_tier=0,
+            sensitivity=3,
+            access_policy={"tenant": tenant, "data_class": "pii", "max_sensitivity": 3},
+        )
+    )
+
+    assert same_user_duplicate == first
+    assert other_user_cid != first
+    exported = [
+        item
+        for item in engine.export_tenant(tenant)["evidence"]
+        if item["source_type"] == "sensitive-import"
+    ]
+    assert sorted(item["user_id"] for item in exported) == sorted([user, other_user])
+
+
+def test_shared_engine_contract_scopes_detected_pii_cids_even_without_declared_sensitivity(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, user = engine_bundle
+    content = "Direct capture left sensitivity unset but contains SSN 123-45-6789."
+
+    first = engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id=user,
+            actor="user",
+            source_type="direct-capture",
+            content=content,
+            trust_tier=0,
+            sensitivity=0,
+            access_policy={"tenant": tenant},
+        )
+    )
+    other_user = engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id=f"{user}-other",
+            actor="user",
+            source_type="direct-capture",
+            content=content,
+            trust_tier=0,
+            sensitivity=0,
+            access_policy={"tenant": tenant},
+        )
+    )
+
+    assert other_user != first
+
+
 def test_shared_engine_contract_preserves_lossless_evidence_envelope(
     engine_bundle: tuple[Any, str, str],
 ) -> None:

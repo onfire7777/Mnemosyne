@@ -29,7 +29,7 @@ from mnemosyne.access_policy import (
 )
 from mnemosyne.calibration import CalibrationSet, conformal_threshold, should_abstain
 from mnemosyne.consciousness import RealityMonitor
-from mnemosyne.ids import content_cid, new_id
+from mnemosyne.ids import evidence_cid, evidence_unscoped_cid, new_id
 from mnemosyne.models import (
     Assertion,
     Contradiction,
@@ -537,15 +537,47 @@ class LocalMemoryEngine:
         access_policy = validate_access_policy(ev.access_policy, tenant_id=ev.tenant_id, location="evidence.access_policy")
         with self._lock:
             self._require_branch(branch)
-            cid = content_cid(
+            cid = evidence_cid(
                 ev.content,
-                {
-                    "tenant_id": ev.tenant_id,
-                    "source_type": ev.source_type,
-                    "content_pointer": ev.content_pointer,
-                    "modality": ev.modality,
-                },
+                tenant_id=ev.tenant_id,
+                user_id=ev.user_id,
+                source_type=ev.source_type,
+                content_pointer=ev.content_pointer,
+                modality=ev.modality,
+                sensitivity=int(ev.sensitivity),
             )
+            unscoped_cid = evidence_unscoped_cid(
+                ev.content,
+                tenant_id=ev.tenant_id,
+                source_type=ev.source_type,
+                content_pointer=ev.content_pointer,
+                modality=ev.modality,
+            )
+            if unscoped_cid != cid and self.evidence.get(self._evidence_key(ev.tenant_id, branch, unscoped_cid)):
+                cid = unscoped_cid
+            else:
+                for existing in self.evidence.values():
+                    if (
+                        existing.tenant_id == ev.tenant_id
+                        and existing.branch == branch
+                        and existing.erased
+                        and existing.source_type == ev.source_type
+                        and existing.content_pointer == ev.content_pointer
+                        and existing.modality == ev.modality
+                        and existing.cid
+                    ):
+                        replay_cid = evidence_cid(
+                            ev.content,
+                            tenant_id=ev.tenant_id,
+                            user_id=existing.user_id,
+                            source_type=ev.source_type,
+                            content_pointer=ev.content_pointer,
+                            modality=ev.modality,
+                            sensitivity=int(existing.sensitivity),
+                        )
+                        if replay_cid == existing.cid or unscoped_cid == existing.cid:
+                            cid = existing.cid
+                            break
             key = self._evidence_key(ev.tenant_id, branch, cid)
             existing = self.evidence.get(key)
             reality_class = self._classify_evidence_reality(ev)
@@ -755,6 +787,8 @@ class LocalMemoryEngine:
         source: str = "privacy_backfill",
     ) -> bool:
         tags = _normalise_privacy_tags(pii_tags)
+        if tags and int(pii_sensitivity) < 3:
+            raise ValueError("pii_sensitivity must be at least 3 for detected PII")
         with self._lock:
             ev = self.evidence.get(self._evidence_key(tenant_id, branch, cid))
             if ev is None or ev.erased:

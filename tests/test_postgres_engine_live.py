@@ -34,7 +34,7 @@ from mnemosyne.jobs import (
 from mnemosyne.media import MEDIA_EXTRACT_JOB, MediaExtractionResult
 from mnemosyne.mcp_server import MnemosyneMcpServer
 from mnemosyne.models import Assertion, Evidence, Preference, Relation
-from mnemosyne.postgres_engine import PostgresEngine, _cid_to_bytes, _stable_uuid
+from mnemosyne.postgres_engine import PostgresEngine, _cid_to_bytes, _stable_uuid, _vector_literal
 from mnemosyne.queue import InProcessQueue, PostgresQueue, QueueWorker
 from mnemosyne.runtime_state import RuntimeState
 from mnemosyne.storage import LocalObjectStore
@@ -907,6 +907,52 @@ def test_postgres_evidence_vector_search_uses_stored_pgvector_live() -> None:
     assert evidence_hit.channel == "postgres_pgvector"
     assert evidence_hit.metadata["stored_embedding"] is True
     assert evidence_hit.metadata["source_table"] == "evidence"
+
+
+def test_postgres_vector_schema_reconciles_sensitive_legacy_public_embeddings_live() -> None:
+    engine = PostgresEngine(live_dsn())
+    tenant = f"tenant-legacy-sensitive-vector-{uuid4()}"
+    user = "user-legacy-sensitive-vector"
+    cid = engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id=user,
+            actor="user",
+            source_type="legacy-sensitive-vector",
+            content="Legacy sensitive vector row contains patient@example.com.",
+            trust_tier=0,
+            sensitivity=3,
+            access_policy={"tenant": tenant, "data_class": "pii", "max_sensitivity": 3},
+            embedding=[0.25] * 1024,
+        )
+    )
+
+    db_tenant_id = _stable_uuid("tenant", tenant)
+    with engine.connect() as conn:
+        with conn.cursor() as cur:
+            engine._set_tenant(cur, db_tenant_id)  # noqa: SLF001 - live legacy-row migration simulation.
+            cur.execute(
+                """
+                UPDATE evidence
+                SET embedding = %s::vector,
+                    embedding_partition = 'public'
+                WHERE tenant_id = %s AND branch = 'main' AND cid = %s
+                """,
+                (_vector_literal([0.25] * 1024), db_tenant_id, _cid_to_bytes(cid)),
+            )
+            engine._ensure_evidence_vector_schema(cur)  # noqa: SLF001 - validates migration reconciler.
+            cur.execute(
+                """
+                SELECT embedding_partition, embedding IS NOT NULL
+                FROM evidence
+                WHERE tenant_id = %s AND branch = 'main' AND cid = %s
+                """,
+                (db_tenant_id, _cid_to_bytes(cid)),
+            )
+            partition, has_embedding = cur.fetchone()
+
+    assert partition == "private"
+    assert has_embedding is True
 
 
 def test_postgres_evidence_vector_search_keeps_null_embedding_fallback_live() -> None:
