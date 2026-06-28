@@ -2631,7 +2631,7 @@ exec "$REAL_PYTHON" "$@"
         "bundle_dir": str(out_root),
         "expected_bundle_fingerprint": summary["bundle_fingerprint"],
         "argv": [
-            "python",
+            str(fake_python),
             "-m",
             "mnemosyne.cli",
             "production-evidence-verify",

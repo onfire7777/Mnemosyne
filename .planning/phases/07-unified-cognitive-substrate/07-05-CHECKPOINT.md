@@ -45,8 +45,8 @@ has not been performed.
 ## Owner Checkpoint Packet
 
 This checkpoint is a pause point, not approval to retire toggles. Current
-synced head when this packet was refreshed: `b8e43de` on `main` /
-`origin/main`, with GitHub CI `28305065678` passing.
+synced head when this packet was refreshed: `7f8fd99` on `main` /
+`origin/main`, with GitHub CI `28306994194` passing.
 
 Prior Phase 7 G5 gates already recorded:
 

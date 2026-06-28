@@ -151,7 +151,7 @@ else:
 PY
 )"
 STARTED_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-export MANIFEST_PATH OUT_ROOT REPO_DIR STARTED_AT PREFLIGHT_ONLY
+export MANIFEST_PATH OUT_ROOT REPO_DIR STARTED_AT PREFLIGHT_ONLY PYTHON
 
 "${PYTHON}" - <<'PY'
 import json
@@ -1116,7 +1116,7 @@ summary = {
         "bundle_dir": str(out_root),
         "expected_bundle_fingerprint": bundle_fingerprint,
         "argv": [
-            "python",
+            os.environ["PYTHON"],
             "-m",
             "mnemosyne.cli",
             "production-evidence-verify",

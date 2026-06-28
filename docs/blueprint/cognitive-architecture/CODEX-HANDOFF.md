@@ -1,6 +1,6 @@
 # Codex Handoff
 
-**Latest verified code/runtime baseline:** 2026-06-27 · `b8e43de` (`test(g0): add sanitized controller telemetry fixture`) with GitHub CI `28305065678` passing. Later docs-only commits may sit above this baseline.
+**Latest verified code/runtime baseline:** 2026-06-28 UTC · `7f8fd99` (`fix(postgres): preserve default PPR cache reads`) with GitHub CI `28306994194` passing.
 
 **Canonical checkout:** `/Users/admin/Mnemosyne` on `main`, tracking `origin/main` (`github.com/onfire7777/Mnemosyne`). This is now the single local checkout.
 
@@ -45,15 +45,15 @@
 
 ## Latest Verified Snapshot
 
-- `b8e43de` is pushed to `origin/main`; local and remote heads match.
-- GitHub CI `28305065678` passed: ruff, unit/drift checks with G0 preregistration replay, and Postgres integration.
+- `7f8fd99` is pushed to `origin/main`; local and remote heads match.
+- GitHub CI `28306994194` passed: ruff, unit/drift checks with G0 preregistration replay, and Postgres integration.
 - Focused G0 telemetry fixture tests pass:
   - `tests/test_g0_harness.py::test_g0_report_emits_every_spec_metric_and_source_hashes`
   - `tests/test_g0_harness.py::test_g0_report_measures_controller_watts_with_committed_fixture`
   - `tests/test_g0_harness.py::test_g0_runner_cli_accepts_controller_telemetry`
 - Direct G0 fixture run with `--controller-telemetry eval/datasets/controller_telemetry_sanitized.json` reports `70/70 measured; gate_ready=True`.
 - Direct default G0 run still reports `69/70 measured; gate_ready=False`; no controller power/cost estimate is fabricated.
-- Full local pytest and full ruff passed before the commit.
+- For `7f8fd99`, the current verified signal is GitHub CI; no fresh local full-suite rerun is recorded in this handoff.
 
 ## Prior Verified History
 
