@@ -14,14 +14,18 @@ from pathlib import Path
 from typing import Any, Literal, Protocol, runtime_checkable
 
 from mnemosyne.access_policy import (
+    VECTOR_PARTITION_PUBLIC,
     apply_relation_redactions,
     apply_statement_redactions,
     apply_text_redactions,
     effective_max_sensitivity,
     filter_export_for_context,
+    may_embed_item,
     may_read_item,
+    may_use_stored_embedding,
     merge_access_policies,
     validate_access_policy,
+    vector_partition_for_item,
 )
 from mnemosyne.calibration import CalibrationSet, conformal_threshold, should_abstain
 from mnemosyne.consciousness import RealityMonitor
@@ -523,8 +527,17 @@ class LocalMemoryEngine:
             stored.cid = cid
             stored.branch = branch
             stored.access_policy = access_policy
+            if stored.embedding and not may_embed_item(
+                sensitivity=int(stored.sensitivity),
+                access_policy=stored.access_policy,
+            ):
+                stored.embedding = None
             stored.metadata = dict(stored.metadata)
             stored.metadata.setdefault("reality_class", reality_class)
+            stored.metadata["embedding_partition"] = vector_partition_for_item(
+                sensitivity=int(stored.sensitivity),
+                access_policy=stored.access_policy,
+            )
             if budget_report is not None:
                 stored.metadata["self_generation_budget"] = budget_report
                 stored.metadata["self_generation_lifecycle"] = {
@@ -582,7 +595,29 @@ class LocalMemoryEngine:
             ev = self.evidence.get(self._evidence_key(tenant_id, branch, cid))
             if ev is None or ev.erased:
                 return False
+            if not may_embed_item(
+                sensitivity=int(ev.sensitivity),
+                access_policy=ev.access_policy,
+                erased=ev.erased,
+            ):
+                self._audit(
+                    tenant_id,
+                    actor,
+                    "set_evidence_embedding.blocked_policy",
+                    cid,
+                    {"branch": branch, "source_type": ev.source_type, "reason": "embedding_not_allowed"},
+                    source=source,
+                    trust_tier=ev.trust_tier,
+                    capability_tags=ev.capability_tags,
+                )
+                self._persist()
+                return False
             ev.embedding = list(embedding)
+            ev.metadata = dict(ev.metadata)
+            ev.metadata["embedding_partition"] = vector_partition_for_item(
+                sensitivity=int(ev.sensitivity),
+                access_policy=ev.access_policy,
+            )
             self._audit(
                 tenant_id,
                 actor,
@@ -995,10 +1030,14 @@ class LocalMemoryEngine:
         query_vec = self._embed_text(query)
         hits: list[Hit] = []
         for hit in self._candidate_hits(filt):
-            score = cosine(query_vec, self._embedding_for_hit(hit))
+            hit_vec = self._embedding_for_hit(hit, filt)
+            if hit_vec is None:
+                continue
+            score = cosine(query_vec, hit_vec)
             if score > 0:
                 hit.score = score
-                hit.channel = "dense_media" if hit.metadata.get("stored_media_embedding") else "dense_hash"
+                stored_raw = bool(hit.metadata.get("stored_embedding_used"))
+                hit.channel = "dense_media" if stored_raw and hit.metadata.get("stored_media_embedding") else "dense_hash"
                 hits.append(hit)
         return self._mark_retrieved_text_as_data(sorted(hits, key=lambda item: item.score, reverse=True)[:k])
 
@@ -2387,6 +2426,10 @@ class LocalMemoryEngine:
                 "content_pointer": ev.content_pointer,
                 "reality_class": self._classify_evidence_reality(ev),
                 "stored_media_embedding": bool(ev.embedding and ev.modality != "text"),
+                "embedding_partition": vector_partition_for_item(
+                    sensitivity=int(ev.sensitivity),
+                    access_policy=ev.access_policy,
+                ),
                 "privacy": privacy_metadata,
             }
             if isinstance(ev.metadata.get("media_embedding"), dict):
@@ -2506,11 +2549,39 @@ class LocalMemoryEngine:
             }
         return hits
 
-    def _embedding_for_hit(self, hit: Hit) -> list[float]:
+    def _embedding_for_hit(
+        self,
+        hit: Hit,
+        filt: dict[str, Any] | None = None,
+        *,
+        allow_fallback: bool = True,
+    ) -> list[float] | None:
         if hit.kind == "evidence":
             ev = self.evidence.get(self._evidence_key(hit.tenant_id, hit.branch, hit.id))
             if ev and ev.embedding:
-                return ev.embedding
+                decision = may_read_item(
+                    item_tenant_id=ev.tenant_id,
+                    sensitivity=int(ev.sensitivity),
+                    access_policy=ev.access_policy,
+                    context=filt,
+                    policy_max_sensitivity=self.policy.max_sensitivity,
+                    status="active",
+                    erased=ev.erased,
+                )
+                if may_use_stored_embedding(
+                    decision=decision,
+                    sensitivity=int(ev.sensitivity),
+                    access_policy=ev.access_policy,
+                    embedding_partition=ev.metadata.get("embedding_partition"),
+                ):
+                    hit.metadata["stored_embedding_used"] = True
+                    return ev.embedding
+        if not allow_fallback:
+            return None
+        partition = str(hit.metadata.get("embedding_partition") or VECTOR_PARTITION_PUBLIC)
+        if partition == "none":
+            return None
+        hit.metadata["stored_embedding_used"] = False
         return self._embed_text(hit.text)
 
     def _embed_text(self, text: str) -> list[float]:
@@ -2542,11 +2613,17 @@ class LocalMemoryEngine:
             best: Hit | None = None
             best_score = float("-inf")
             for hit in remaining:
-                hit_vec = self._embedding_for_hit(hit)
-                relevance = cosine(query_vec, hit_vec)
+                hit_vec = self._embedding_for_hit(hit, allow_fallback=True)
+                relevance = cosine(query_vec, hit_vec) if hit_vec is not None else 0.0
                 diversity_penalty = 0.0
-                if selected:
-                    diversity_penalty = max(cosine(hit_vec, self._embedding_for_hit(item)) for item in selected)
+                if selected and hit_vec is not None:
+                    selected_vectors = [
+                        selected_vec
+                        for item in selected
+                        if (selected_vec := self._embedding_for_hit(item, allow_fallback=True)) is not None
+                    ]
+                    if selected_vectors:
+                        diversity_penalty = max(cosine(hit_vec, selected_vec) for selected_vec in selected_vectors)
                 score = self.policy.mmr_lambda * relevance - (1.0 - self.policy.mmr_lambda) * diversity_penalty
                 score += hit.score
                 if score > best_score:

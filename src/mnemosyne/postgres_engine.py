@@ -16,9 +16,12 @@ from mnemosyne.access_policy import (
     apply_text_redactions,
     effective_max_sensitivity,
     filter_export_for_context,
+    may_embed_item,
     may_read_item,
+    may_use_stored_embedding,
     merge_access_policies,
     validate_access_policy,
+    vector_partition_for_item,
 )
 from mnemosyne.calibration import CalibrationSet, conformal_threshold, should_abstain
 from mnemosyne.consciousness import RealityMonitor
@@ -124,7 +127,43 @@ class PostgresEngine:
     @staticmethod
     def _ensure_evidence_vector_schema(cur: Any) -> None:
         cur.execute("ALTER TABLE evidence ADD COLUMN IF NOT EXISTS embedding VECTOR(1024)")
-        cur.execute("CREATE INDEX IF NOT EXISTS evidence_embedding_hnsw ON evidence USING hnsw (embedding vector_cosine_ops)")
+        cur.execute("ALTER TABLE evidence ADD COLUMN IF NOT EXISTS embedding_partition TEXT NOT NULL DEFAULT 'public'")
+        cur.execute("ALTER TABLE assertions ADD COLUMN IF NOT EXISTS embedding_partition TEXT NOT NULL DEFAULT 'public'")
+        cur.execute(
+            """
+            DO $$
+            BEGIN
+              IF NOT EXISTS (
+                SELECT 1 FROM pg_constraint WHERE conname = 'evidence_embedding_partition_check'
+              ) THEN
+                ALTER TABLE evidence
+                  ADD CONSTRAINT evidence_embedding_partition_check
+                  CHECK (embedding_partition IN ('public', 'private', 'none'));
+              END IF;
+              IF NOT EXISTS (
+                SELECT 1 FROM pg_constraint WHERE conname = 'assertions_embedding_partition_check'
+              ) THEN
+                ALTER TABLE assertions
+                  ADD CONSTRAINT assertions_embedding_partition_check
+                  CHECK (embedding_partition IN ('public', 'private', 'none'));
+              END IF;
+            END $$;
+            """
+        )
+        cur.execute("DROP INDEX IF EXISTS evidence_embedding_hnsw")
+        cur.execute("DROP INDEX IF EXISTS assertions_embedding_hnsw")
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS evidence_embedding_public_hnsw ON evidence USING hnsw (embedding vector_cosine_ops) WHERE embedding_partition = 'public'"
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS assertions_embedding_public_hnsw ON assertions USING hnsw (embedding vector_cosine_ops) WHERE embedding_partition = 'public'"
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS evidence_embedding_private_hnsw ON evidence USING hnsw (embedding vector_cosine_ops) WHERE embedding_partition = 'private'"
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS assertions_embedding_private_hnsw ON assertions USING hnsw (embedding vector_cosine_ops) WHERE embedding_partition = 'private'"
+        )
 
     @staticmethod
     def _ensure_preference_access_policy_schema(cur: Any) -> None:
@@ -271,21 +310,30 @@ class PostgresEngine:
                             "pointer_preserved": bool(ev.content_pointer or cid),
                             "critical_path_allowed": False,
                         }
-                if ev.embedding is not None:
+                embedding_partition = vector_partition_for_item(
+                    sensitivity=int(ev.sensitivity),
+                    access_policy=access_policy,
+                )
+                metadata["embedding_partition"] = embedding_partition
+                if embedding_partition == "none":
+                    embedding = None
+                elif ev.embedding is not None:
                     metadata["_mnemosyne_embedding_explicit"] = True
                     embedding = _vector_literal(ev.embedding)
-                else:
+                elif embedding_partition == "public":
                     embedding = _vector_literal(self.adapters.embedding.embed(ev.content)) if ev.content else None
+                else:
+                    embedding = None
                 cur.execute(
                     """
                     INSERT INTO evidence (
                       cid, branch, tenant_id, user_id, session_id, actor, source_type,
                       source_identity, content, content_pointer, modality, metadata,
                       trust_tier, capability_tags, sensitivity, signed_provenance,
-                      access_policy, embedding, erased, created_at
+                      access_policy, embedding, embedding_partition, erased, created_at
                     )
                     VALUES (
-                      %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::vector, false, %s
+                      %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::vector, %s, false, %s
                     )
                     ON CONFLICT (tenant_id, branch, cid) DO NOTHING
                     """,
@@ -308,6 +356,7 @@ class PostgresEngine:
                         self._jsonb(ev.signed_provenance) if ev.signed_provenance else None,
                         self._jsonb(access_policy),
                         embedding,
+                        embedding_partition,
                         ev.created_at,
                     ),
                 )
@@ -394,23 +443,54 @@ class PostgresEngine:
                 self._ensure_evidence_vector_schema(cur)
                 cur.execute(
                     """
+                    SELECT source_type, trust_tier, capability_tags, sensitivity, access_policy
+                    FROM evidence
+                    WHERE tenant_id = %s AND branch = %s AND cid = %s AND erased = false
+                    """,
+                    (db_tenant_id, branch, _cid_to_bytes(cid)),
+                )
+                row = cur.fetchone()
+                if row is None:
+                    return False
+                embedding_partition = vector_partition_for_item(
+                    sensitivity=int(row["sensitivity"]),
+                    access_policy=dict(row["access_policy"] or {}),
+                )
+                if embedding_partition == "none":
+                    self._audit(
+                        cur,
+                        db_tenant_id,
+                        actor,
+                        "set_evidence_embedding.blocked_policy",
+                        cid,
+                        {"branch": branch, "source_type": row["source_type"], "reason": "embedding_not_allowed"},
+                        source=source,
+                        trust_tier=row["trust_tier"],
+                        capability_tags=list(row["capability_tags"] or []),
+                    )
+                    return False
+                cur.execute(
+                    """
                     UPDATE evidence
                     SET embedding = %s::vector,
+                        embedding_partition = %s,
                         metadata = COALESCE(metadata, '{}'::jsonb) || %s::jsonb
                     WHERE tenant_id = %s AND branch = %s AND cid = %s AND erased = false
-                    RETURNING source_type, trust_tier, capability_tags
                     """,
                     (
                         _vector_literal(embedding),
-                        self._jsonb({"_mnemosyne_embedding_explicit": True}),
+                        embedding_partition,
+                        self._jsonb(
+                            {
+                                "_mnemosyne_embedding_explicit": True,
+                                "embedding_partition": embedding_partition,
+                            }
+                        ),
                         db_tenant_id,
                         branch,
                         _cid_to_bytes(cid),
                     ),
                 )
-                row = cur.fetchone()
-                if row is None:
-                    return False
                 self._audit(
                     cur,
                     db_tenant_id,
@@ -651,6 +731,7 @@ class PostgresEngine:
         with self.connect() as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
                 self._ensure_entity_registry_schema(cur)
+                self._ensure_evidence_vector_schema(cur)
                 self._set_tenant(cur, db_tenant_id)
                 self._apply_projection_reality_monitoring(cur, incoming, db_tenant_id)
                 self._apply_schema_fast_path_projection_status(
@@ -751,6 +832,16 @@ class PostgresEngine:
                         incoming.status = "superseded"
                         incoming.valid_to = current_valid_from
 
+                embedding_partition = vector_partition_for_item(
+                    sensitivity=int(incoming.sensitivity),
+                    access_policy=incoming.access_policy,
+                    status=incoming.status,
+                )
+                assertion_embedding = (
+                    _vector_literal(self.adapters.embedding.embed(incoming.statement()))
+                    if embedding_partition == "public"
+                    else None
+                )
                 cur.execute(
                     """
                     INSERT INTO assertions (
@@ -758,11 +849,11 @@ class PostgresEngine:
                       confidence, calibration, valid_from, valid_to, transaction_time,
                       expired_at, justification_id, source_evidence_cids, status, version,
                       superseded_by, trust_tier, sensitivity, access_policy, embedding,
-                      lexeme, last_accessed, access_count
+                      embedding_partition, lexeme, last_accessed, access_count
                     )
                     VALUES (
                       %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                      %s, %s, %s, %s, %s, %s, %s::vector,
+                      %s, %s, %s, %s, %s, %s, %s::vector, %s,
                       to_tsvector('english', %s), %s, %s
                     )
                     ON CONFLICT (id) DO UPDATE
@@ -774,6 +865,7 @@ class PostgresEngine:
                         sensitivity = EXCLUDED.sensitivity,
                         access_policy = EXCLUDED.access_policy,
                         embedding = EXCLUDED.embedding,
+                        embedding_partition = EXCLUDED.embedding_partition,
                         lexeme = EXCLUDED.lexeme
                     """,
                     (
@@ -799,7 +891,8 @@ class PostgresEngine:
                         incoming.trust_tier,
                         incoming.sensitivity,
                         self._jsonb(incoming.access_policy),
-                        _vector_literal(self.adapters.embedding.embed(incoming.statement())),
+                        assertion_embedding,
+                        embedding_partition,
                         incoming.statement(),
                         incoming.last_accessed,
                         incoming.access_count,
@@ -1072,6 +1165,7 @@ class PostgresEngine:
         with self.connect() as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
                 self._set_tenant(cur, db_tenant_id)
+                self._ensure_evidence_vector_schema(cur)
                 cur.execute(
                     """
                     WITH q AS (SELECT plainto_tsquery('english', %s) AS query)
@@ -1222,11 +1316,12 @@ class PostgresEngine:
                     """
                     SELECT id, branch, subject, predicate, object, confidence, calibration, status,
                       source_evidence_cids, trust_tier, sensitivity, access_policy, last_accessed, access_count,
-                      1.0 - (embedding <=> %s::vector) AS score
+                      embedding_partition, 1.0 - (embedding <=> %s::vector) AS score
                     FROM assertions
                     WHERE tenant_id = %s AND branch = %s AND status IN ('active', 'contested')
                       AND trust_tier <= %s AND sensitivity <= %s
                       AND embedding IS NOT NULL
+                      AND embedding_partition <> 'none'
                     ORDER BY embedding <=> %s::vector
                     LIMIT %s
                     """,
@@ -1245,6 +1340,13 @@ class PostgresEngine:
                         status=str(row["status"]),
                     )
                     if not decision.allowed:
+                        continue
+                    if not may_use_stored_embedding(
+                        decision=decision,
+                        sensitivity=int(row["sensitivity"]),
+                        access_policy=dict(row["access_policy"] or {}),
+                        embedding_partition=str(row["embedding_partition"] or ""),
+                    ):
                         continue
                     text, privacy_metadata = apply_statement_redactions(
                         subject=str(row["subject"]),
@@ -1278,12 +1380,11 @@ class PostgresEngine:
                             },
                         )
                     )
-                self._ensure_evidence_vector_schema(cur)
                 cur.execute(
                     """
                     SELECT cid, branch, content, content_pointer, modality, metadata,
                       trust_tier, sensitivity, access_policy, actor, source_type,
-                      1.0 - (embedding <=> %s::vector) AS score
+                      embedding_partition, 1.0 - (embedding <=> %s::vector) AS score
                     FROM evidence
                     WHERE tenant_id = %s AND branch = %s AND erased = false
                       AND trust_tier <= %s AND sensitivity <= %s
@@ -1297,6 +1398,7 @@ class PostgresEngine:
                         )
                       )
                       AND embedding IS NOT NULL
+                      AND embedding_partition <> 'none'
                     ORDER BY embedding <=> %s::vector
                     LIMIT %s
                     """,
@@ -1329,6 +1431,13 @@ class PostgresEngine:
                     )
                     if not decision.allowed:
                         continue
+                    if not may_use_stored_embedding(
+                        decision=decision,
+                        sensitivity=int(row["sensitivity"]),
+                        access_policy=dict(row["access_policy"] or {}),
+                        embedding_partition=str(row["embedding_partition"] or ""),
+                    ):
+                        continue
                     text, privacy_metadata = apply_text_redactions(text, dict(row["access_policy"] or {}), decision)
                     media_embedding = metadata.get("media_embedding")
                     hit_metadata = {
@@ -1337,6 +1446,7 @@ class PostgresEngine:
                         "backend": self.adapters.embedding.name,
                         "embedding_dims": self.adapters.embedding.dims,
                         "stored_embedding": True,
+                        "embedding_partition": str(row["embedding_partition"] or ""),
                         "stored_media_embedding": bool(media_embedding and row["modality"] != "text"),
                         "source_table": "evidence",
                         "modality": row["modality"],
@@ -1373,7 +1483,8 @@ class PostgresEngine:
                     )
                 cur.execute(
                     """
-                    SELECT cid, branch, content, content_pointer, modality, metadata, trust_tier, sensitivity, access_policy, actor, source_type
+                    SELECT cid, branch, content, content_pointer, modality, metadata,
+                      trust_tier, sensitivity, access_policy, actor, source_type, embedding_partition
                     FROM evidence
                     WHERE tenant_id = %s AND branch = %s AND erased = false
                       AND trust_tier <= %s AND sensitivity <= %s
@@ -1392,9 +1503,6 @@ class PostgresEngine:
                 )
                 for row in cur.fetchall():
                     text = row["content"] or row["content_pointer"] or f"{row['modality']} evidence"
-                    score = cosine(query_vec, self.adapters.embedding.embed(text))
-                    if score <= 0:
-                        continue
                     cid = _bytes_to_cid(row["cid"])
                     metadata = dict(row["metadata"] or {})
                     if is_retired_summary_metadata(metadata):
@@ -1409,12 +1517,32 @@ class PostgresEngine:
                     if not decision.allowed:
                         continue
                     text, privacy_metadata = apply_text_redactions(text, dict(row["access_policy"] or {}), decision)
+                    if not may_embed_item(
+                        sensitivity=int(row["sensitivity"]),
+                        access_policy=dict(row["access_policy"] or {}),
+                    ):
+                        continue
+                    if str(row["embedding_partition"] or "") == "private" and not may_use_stored_embedding(
+                        decision=decision,
+                        sensitivity=int(row["sensitivity"]),
+                        access_policy=dict(row["access_policy"] or {}),
+                        embedding_partition=str(row["embedding_partition"] or ""),
+                    ):
+                        # Use the redacted projection for dense fallback; never
+                        # the raw text loaded from the database.
+                        fallback_text = text
+                    else:
+                        fallback_text = text
+                    score = cosine(query_vec, self.adapters.embedding.embed(fallback_text))
+                    if score <= 0:
+                        continue
                     hit_metadata = {
                         "source_type": row["source_type"],
                         "actor": row["actor"],
                         "backend": self.adapters.embedding.name,
                         "embedding_dims": self.adapters.embedding.dims,
                         "stored_embedding": False,
+                        "embedding_partition": str(row["embedding_partition"] or ""),
                         "source_table": "evidence",
                         "reality_class": self._classify_evidence_row_reality(row, metadata),
                         "privacy": privacy_metadata,
@@ -3390,6 +3518,7 @@ class PostgresEngine:
         with self.connect() as conn:
             with conn.cursor() as cur:
                 self._set_tenant(cur, db_tenant_id)
+                self._ensure_evidence_vector_schema(cur)
                 for db_tenant_id in [db_tenant_id]:
                     cur.execute(
                         """
@@ -3427,13 +3556,13 @@ class PostgresEngine:
                           confidence, calibration, valid_from, valid_to, transaction_time,
                           expired_at, justification_id, source_evidence_cids, status, version,
                           superseded_by, trust_tier, sensitivity, access_policy, embedding,
-                          lexeme, last_accessed, access_count
+                          embedding_partition, lexeme, last_accessed, access_count
                         )
                         SELECT gen_random_uuid(), tenant_id, user_id, %s, subject, predicate,
                           object, scope, confidence, calibration, valid_from, valid_to,
                           transaction_time, expired_at, justification_id, source_evidence_cids,
                           status, version, superseded_by, trust_tier, sensitivity,
-                          access_policy, embedding, lexeme, last_accessed, access_count
+                          access_policy, embedding, embedding_partition, lexeme, last_accessed, access_count
                         FROM assertions
                         WHERE tenant_id = %s AND branch = %s
                         """,

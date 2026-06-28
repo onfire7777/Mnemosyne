@@ -39,13 +39,15 @@ CREATE TABLE IF NOT EXISTS evidence (
   signed_provenance JSONB,
   access_policy JSONB NOT NULL DEFAULT '{}'::jsonb,
   embedding VECTOR(1024),
+  embedding_partition TEXT NOT NULL DEFAULT 'public' CHECK (embedding_partition IN ('public', 'private', 'none')),
   erased BOOLEAN NOT NULL DEFAULT false,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (tenant_id, branch, cid),
   FOREIGN KEY (tenant_id, branch) REFERENCES branches(tenant_id, name)
 );
 
-CREATE INDEX IF NOT EXISTS evidence_embedding_hnsw ON evidence USING hnsw (embedding vector_cosine_ops);
+CREATE INDEX IF NOT EXISTS evidence_embedding_public_hnsw ON evidence USING hnsw (embedding vector_cosine_ops) WHERE embedding_partition = 'public';
+CREATE INDEX IF NOT EXISTS evidence_embedding_private_hnsw ON evidence USING hnsw (embedding vector_cosine_ops) WHERE embedding_partition = 'private';
 
 CREATE TABLE IF NOT EXISTS assertions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -74,6 +76,7 @@ CREATE TABLE IF NOT EXISTS assertions (
   sensitivity SMALLINT NOT NULL DEFAULT 0,
   access_policy JSONB NOT NULL DEFAULT '{}'::jsonb,
   embedding VECTOR(1024),
+  embedding_partition TEXT NOT NULL DEFAULT 'public' CHECK (embedding_partition IN ('public', 'private', 'none')),
   lexeme TSVECTOR,
   last_accessed TIMESTAMPTZ,
   access_count INT NOT NULL DEFAULT 0,
@@ -81,7 +84,8 @@ CREATE TABLE IF NOT EXISTS assertions (
   CHECK (valid_to IS NULL OR valid_to > valid_from)
 );
 
-CREATE INDEX IF NOT EXISTS assertions_embedding_hnsw ON assertions USING hnsw (embedding vector_cosine_ops);
+CREATE INDEX IF NOT EXISTS assertions_embedding_public_hnsw ON assertions USING hnsw (embedding vector_cosine_ops) WHERE embedding_partition = 'public';
+CREATE INDEX IF NOT EXISTS assertions_embedding_private_hnsw ON assertions USING hnsw (embedding vector_cosine_ops) WHERE embedding_partition = 'private';
 CREATE INDEX IF NOT EXISTS assertions_lexeme_gin ON assertions USING gin (lexeme);
 CREATE INDEX IF NOT EXISTS assertions_current ON assertions (tenant_id, subject, predicate, branch, status, valid_from DESC);
 

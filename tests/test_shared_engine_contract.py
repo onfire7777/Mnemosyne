@@ -362,6 +362,40 @@ def test_shared_engine_contract_updates_evidence_embedding(engine_bundle: tuple[
     assert audit_rows[0]["diff"]["source_type"] == "embedding-contract"
 
 
+def test_shared_engine_contract_embed_ok_false_blocks_vector_storage(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, user = engine_bundle
+    cid = engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id=user,
+            actor="tool",
+            source_type="embedding-policy-contract",
+            content="",
+            content_pointer="objects/shared/embed-ok-disabled.txt",
+            trust_tier=1,
+            access_policy={"tenant": tenant, "embed_ok": False},
+        )
+    )
+    dims = int(getattr(getattr(getattr(engine, "adapters", None), "embedding", None), "dims", 256))
+    vector_query = "embed-ok-disabled-vector-only"
+    vector = hashing_embedding(vector_query, dims=dims)
+
+    updated = engine.set_evidence_embedding(tenant, cid, vector)
+    recalled = engine.get_evidence(tenant, cid)
+    hits = engine.vector_search(
+        vector_query,
+        5,
+        {"tenant_id": tenant, "branch": "main", "role": "agent"},
+    )
+
+    assert updated is False
+    assert recalled is not None
+    assert recalled.embedding is None
+    assert [hit.id for hit in hits] == []
+
+
 def test_shared_engine_contract_ingests_raw_media_embedding_before_extraction(
     engine_bundle: tuple[Any, str, str],
     tmp_path: Path,
