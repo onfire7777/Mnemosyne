@@ -460,6 +460,11 @@ def test_g0_shadow_workspace_fixture_reports_bounded_stream_contract() -> None:
     assert "shadow_only" not in toggle_probe["specialist_budget_fields"]
     assert "enabled" not in toggle_probe["workspace_service_fields"]
     assert "enabled" not in toggle_probe["workspace_service_report_fields"]
+    allowed_controls = toggle_probe["allowed_explicit_promotion_controls"]
+    assert "workspace_retrieval_advisory_enabled" in allowed_controls
+    assert "apply_workspace_retrieval_advisory" in allowed_controls
+    assert "apply_workspace_advisory" in allowed_controls
+    assert "workspace_advisory_mode" in allowed_controls
     assert all(toggle_probe["checks"].values())
     assert report["workspace"]["service"]["running"] is True
     assert report["workspace"]["service"]["tick_count"] == report["workspace"]["service"]["proto_self_history_count"]

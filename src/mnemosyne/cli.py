@@ -10354,6 +10354,44 @@ def _production_evidence_iso_datetime_ok(value: Any) -> bool:
     return True
 
 
+def _production_evidence_summary_offline_verify_argv_ok(
+    summary: Mapping[str, Any] | None,
+    *,
+    bundle_dir: Path,
+    bundle_fingerprint: str | None = None,
+) -> bool:
+    if summary is None:
+        return False
+    offline_verify = summary.get("offline_verify")
+    if not isinstance(offline_verify, Mapping):
+        return False
+    if not _production_evidence_path_matches(offline_verify.get("bundle_dir"), expected_path=bundle_dir):
+        return False
+    expected_fingerprint = bundle_fingerprint or summary.get("bundle_fingerprint")
+    if not isinstance(expected_fingerprint, str) or not expected_fingerprint.startswith("sha256:"):
+        return False
+    if offline_verify.get("expected_bundle_fingerprint") != expected_fingerprint:
+        return False
+    argv = offline_verify.get("argv")
+    if not isinstance(argv, list) or len(argv) != 7 or not all(isinstance(item, str) for item in argv):
+        return False
+    if not argv[0]:
+        return False
+    interpreter_name = Path(argv[0]).name.lower()
+    if "python" not in interpreter_name:
+        return False
+    if argv[1:4] != ["-m", "mnemosyne.cli", "production-evidence-verify"]:
+        return False
+    if not _production_evidence_path_matches(argv[4], expected_path=bundle_dir):
+        return False
+    if argv[5] != "--expected-bundle-fingerprint":
+        return False
+    if argv[6] != expected_fingerprint:
+        return False
+    note = offline_verify.get("note")
+    return isinstance(note, str) and "Custody review only" in note and "does not rerun production checks" in note
+
+
 def _verify_production_evidence_summary(
     *,
     summary: Mapping[str, Any] | None,
@@ -10396,6 +10434,12 @@ def _verify_production_evidence_summary(
             "summary_release_audit_findings_present",
             "summary.json reports release-audit findings",
         )
+    if not _production_evidence_summary_offline_verify_argv_ok(summary, bundle_dir=bundle_dir):
+        _production_evidence_finding(
+            findings,
+            "summary_offline_verify_invalid",
+            "summary.json offline_verify must contain the exact retained production-evidence-verify replay command",
+        )
 
 
 def _production_evidence_summary_ok(summary: Mapping[str, Any] | None, *, bundle_dir: Path) -> bool:
@@ -10407,6 +10451,7 @@ def _production_evidence_summary_ok(summary: Mapping[str, Any] | None, *, bundle
         and summary.get("release_audit_ok") is True
         and summary.get("release_audit_findings") == []
         and _production_evidence_iso_datetime_ok(summary.get("completed_at"))
+        and _production_evidence_summary_offline_verify_argv_ok(summary, bundle_dir=bundle_dir)
         and all(
             _production_evidence_path_matches(summary.get(key), expected_path=expected_path)
             for key, expected_path in _production_evidence_summary_expected_paths(bundle_dir).items()

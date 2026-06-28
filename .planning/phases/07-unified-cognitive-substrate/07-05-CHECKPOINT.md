@@ -41,9 +41,11 @@ recorded as `g5-toggle-retirement`.
 - `standing_from_shadow_flag` is retired in favor of
   `standing_from_authority_state`.
 - `eval/g0/preregistrations/g5-toggle-retirement.json` gate-records the
-  source-inspection proof that no operational `service.enabled`,
-  `SpecialistBudget.shadow_only`, or controller `budget.shadow_only` branch
-  remains while the fail-closed circuit breaker remains present.
+  source-inspection proof that the retired `service.enabled`,
+  `SpecialistBudget.shadow_only`, and controller `budget.shadow_only`
+  controls are absent while the fail-closed circuit breaker remains present.
+  Explicit retrieval/consolidation advisory promotion seams remain narrow,
+  CID-validated, and separately measured by their G0 contracts.
 
 ## Gate Evidence
 
@@ -77,9 +79,10 @@ Prior Phase 7 G5 gates already recorded:
 | `g5-toggle-retirement` | `operational_toggle_retirement_contract` | passed; target delta `+1.0`, 68 target/guardrail metrics non-regressed |
 
 The source inspection remains intentionally narrow: it proves the old
-operational toggles are gone, not that every historical compatibility field or
-report label has been renamed. Future schema cleanup must be preregistered as a
-separate target-up/guardrail-not-down slice.
+service/shadow operational toggles are gone, not that every explicit advisory
+promotion seam, historical compatibility field, or report label has been
+removed or renamed. Future schema cleanup must be preregistered as a separate
+target-up/guardrail-not-down slice.
 
 Refresh the inventory with:
 

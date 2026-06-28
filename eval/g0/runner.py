@@ -1390,7 +1390,10 @@ def _metric_shadow_workspace_named_contract(spec: dict[str, Any], sources: dict[
             "Measured by the G0 P5 source-inspection fixture. Passing requires "
             "SpecialistBudget.shadow_only, ShadowWorkspaceService.enabled, and "
             "controller budget.shadow_only branches to be absent while the "
-            "fail-closed circuit breaker remains present."
+            "fail-closed circuit breaker remains present. This metric is scoped "
+            "to retired legacy shadow/service toggles; explicit policy/request-"
+            "gated advisory promotions remain allowed and are measured by their "
+            "own workspace advisory contracts."
         ),
         "always_on_rumination_rate": (
             "Measured by the G0 P3 workspace fixture as failed always-on "

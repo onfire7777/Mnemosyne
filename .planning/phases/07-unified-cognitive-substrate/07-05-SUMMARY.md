@@ -21,7 +21,8 @@ Phase 7 P5 is locally implemented and G0-gated. The H8/H12 Standing cascade and 
 - The built-in dreamer budget is `critical_path_allowed=false`, `answer_authority_allowed=false`, and `promotion_gate_required=true`.
 - `ShadowWorkspaceController` rejects dreamer recruitment if the role, critical-path, answer-authority, or promotion-gate contract is weakened.
 - `standing_from_shadow_flag` is retired in favor of `standing_from_authority_state`.
-- G0 source inspection verifies no `service.enabled`, `SpecialistBudget.shadow_only`, or controller `budget.shadow_only` operational branch remains while the fail-closed circuit breaker remains present.
+- G0 source inspection verifies the retired `service.enabled`, `SpecialistBudget.shadow_only`, and controller `budget.shadow_only` controls are absent while the fail-closed circuit breaker remains present.
+- Explicit retrieval and consolidation advisory promotion controls remain intentional, CID-validated, and separately measured by `workspace_retrieval_controller_contract` and `workspace_advisory_promotion_gate_contract`.
 
 ## Gate Evidence
 
@@ -43,4 +44,4 @@ Phase 7 P5 is locally implemented and G0-gated. The H8/H12 Standing cascade and 
 
 ## Remaining Work
 
-The remaining strict-parity blocker is Tier-B production/operator evidence against deployed infrastructure. Historical `shadow_only` report labels can be renamed later only through a separate preregistered schema cleanup; they are not live operational toggles.
+The remaining strict-parity blocker is Tier-B production/operator evidence against deployed infrastructure. Historical `shadow_only` report labels can be renamed later only through a separate preregistered schema cleanup; they are not live service/shadow operational toggles.

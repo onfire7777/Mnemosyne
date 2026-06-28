@@ -1,6 +1,6 @@
 # Codex Handoff
 
-**Latest verified code/runtime baseline:** 2026-06-28 UTC · Phase 7 P5 operational-toggle retirement patch verified locally. Push/CI status should be refreshed after the next GitHub update.
+**Latest verified code/runtime baseline:** 2026-06-28 UTC · `7c2ff5d` on `origin/main`; GitHub CI run `28328407556` passed. Current local follow-up work hardens production evidence offline-verifier custody.
 
 **Canonical checkout:** `/Users/admin/Mnemosyne` on `main`, tracking `origin/main` (`github.com/onfire7777/Mnemosyne`). This is now the single local checkout.
 
@@ -77,12 +77,12 @@
 - Multimodal/local media byte caps are enforced across CLI file ingest, MCP/base64 ingest, ingestion/object-store/provider calls, runtime media-extract jobs, and command media embedder/extractor temp-file boundaries.
 - Phase 7 plans 01-04 are gate-recorded. `Standing` is byte-stable and continuous, the always-on heartbeat safety floor is measured, and earned-autonomy credentials are external-only, holdout-validated, provenance-domain assigned, bounded/decay-ready, and adversarially checked with `echo_chamber_uplift=0.0`.
 - Phase 7 P5 H8/H12 pre-check is gate-recorded. Retrieval emits replayable Standing observability traces, forget cascades emit `standing.erasure-cascade.v1`, and belief dependency invalidation emits `standing.belief-cascade.v1`; `g5-unified-substrate-cascade` passes.
-- Phase 7 P5 operational-toggle retirement is gate-recorded. `ShadowWorkspaceService.enabled`, `SpecialistBudget.shadow_only`, and the controller `budget.shadow_only` branch are absent; `g5-toggle-retirement` passes with `operational_toggle_retirement_contract=1.0` while the fail-closed circuit breaker remains present.
+- Phase 7 P5 legacy service/shadow toggle retirement is gate-recorded. `ShadowWorkspaceService.enabled`, `SpecialistBudget.shadow_only`, and the controller `budget.shadow_only` branch are absent; `g5-toggle-retirement` passes with `operational_toggle_retirement_contract=1.0` while the fail-closed circuit breaker remains present. Explicit retrieval/consolidation advisory promotion remains separately CID-validated and separately measured.
 
 ## Next Safe Queue
 
 1. Prioritize real-infrastructure evidence capture for Tier B rows: IdP/Keycloak, Vault/KMS, ParadeDB+AGE+pgvector, hosted embedding/reranker/trainer endpoints, C2PA roots, hosted dashboards, supervised workers, and production rollback drills.
-2. Use the sanctioned production path only: render the external production manifest from exported non-secret environment values, run `infra/scripts/capture-production-evidence.sh`, require strict `release-audit`, then run offline `production-evidence-verify` against the retained bundle fingerprint.
+2. Use the sanctioned production path only: render the external production manifest from exported non-secret environment values, run `infra/scripts/capture-production-evidence.sh`, require strict `release-audit`, then run offline `production-evidence-verify` against the retained bundle fingerprint and the retained `summary.json.offline_verify.argv` replay command.
 3. Reopen G1-G4 or Phase 7 code only if a new strict-audit finding or preregistered target-up/guardrail-not-down slice demands it. Phase 7 P5's operational-toggle deletion is wired; remaining strict-parity completion is Tier-B production/operator evidence plus any future schema cleanup that can be preregistered without reliability regression.
 4. Keep `eval/g0/` authoritative; do not fork a parallel harness.
 5. Keep Mnemosyne distinct from gbrain, mempalace, and external agent memory systems in docs and implementation language.

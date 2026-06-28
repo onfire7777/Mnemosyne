@@ -4,7 +4,7 @@
 
 ## Scope
 
-This audit checks the local, deterministic Phase 7 P5 contract: the workspace/consciousness path must no longer depend on operational `service.enabled` or specialist `shadow_only` switches, while reliability guardrails and the fail-closed circuit breaker remain intact.
+This audit checks the local, deterministic Phase 7 P5 contract: the workspace/consciousness path must no longer depend on the retired legacy `service.enabled` construction switch, `SpecialistBudget.shadow_only` budget bit, or controller `budget.shadow_only` branch, while reliability guardrails and the fail-closed circuit breaker remain intact.
 
 The audit is measured by `eval/g0/shadow_workspace.py` and surfaced as:
 
@@ -23,6 +23,8 @@ The G0 source-inspection probe verifies:
 - `ShadowWorkspaceController` no longer branches on `budget.shadow_only`.
 - The controller enforces dreamer safety through role, critical-path, answer-authority, and promotion-gate constraints.
 - The fail-closed circuit breaker remains present through `circuit_breaker_tripped`, `self_generation_frozen`, and `evidence_only_fallback`.
+
+Explicit advisory promotion controls remain intentional and separately measured. Retrieval promotion requires both `OperatingPolicy.workspace_retrieval_advisory_enabled=true` and request-level `apply_workspace_retrieval_advisory=true`, and is covered by `workspace_retrieval_controller_contract`. Consolidation promotion requires `apply_workspace_advisory=true` or `workspace_advisory_mode=apply`, and is covered by `workspace_advisory_promotion_gate_contract`. Those paths are not default-off shadow/service switches; they are narrow, preregistered, CID-validated promotion seams.
 
 Historical `shadow_only` labels still appear in some report schemas and G0 fixture names for backwards-compatible evidence custody. They are not service enable switches or specialist admission gates. Future schema cleanup can remove those labels only through a separate preregistered target-up/guardrail-not-down slice.
 

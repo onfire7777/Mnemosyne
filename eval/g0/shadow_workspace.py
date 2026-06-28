@@ -223,11 +223,35 @@ def _operational_toggle_probe(repo_root: Path) -> dict[str, Any]:
 
     providers_path = repo_root / "src/mnemosyne/providers/__init__.py"
     workspace_path = repo_root / "src/mnemosyne/workspace.py"
+    policy_path = repo_root / "src/mnemosyne/policy.py"
+    retrieval_path = repo_root / "src/mnemosyne/retrieval.py"
+    consolidation_path = repo_root / "src/mnemosyne/consolidation.py"
     providers_text = providers_path.read_text(encoding="utf-8")
     workspace_text = workspace_path.read_text(encoding="utf-8")
+    policy_text = policy_path.read_text(encoding="utf-8")
+    retrieval_text = retrieval_path.read_text(encoding="utf-8")
+    consolidation_text = consolidation_path.read_text(encoding="utf-8")
     budget_fields = _class_field_names(providers_path, "SpecialistBudget")
     service_fields = _class_field_names(workspace_path, "ShadowWorkspaceService")
     service_report_fields = _class_field_names(workspace_path, "ShadowWorkspaceServiceReport")
+    allowed_explicit_promotion_controls = {
+        "workspace_retrieval_advisory_enabled": (
+            "policy plus request-gated retrieval advisory promotion; measured by "
+            "workspace_retrieval_controller_contract"
+        ),
+        "apply_workspace_retrieval_advisory": (
+            "per-request retrieval advisory apply switch; measured by "
+            "workspace_retrieval_controller_contract"
+        ),
+        "apply_workspace_advisory": (
+            "per-job consolidation advisory apply switch; measured by "
+            "workspace_advisory_promotion_gate_contract"
+        ),
+        "workspace_advisory_mode": (
+            "per-job consolidation advisory mode; measured by "
+            "workspace_advisory_promotion_gate_contract"
+        ),
+    }
     checks = {
         "specialist_budget_shadow_only_field_absent": "shadow_only" not in budget_fields,
         "specialist_budget_answer_authority_field_present": "answer_authority_allowed" in budget_fields,
@@ -242,12 +266,22 @@ def _operational_toggle_probe(repo_root: Path) -> dict[str, Any]:
         and "self_generation_frozen" in workspace_text,
         "provider_manifest_shadow_budget_absent": '"shadow_only"' not in providers_text
         and "'shadow_only'" not in providers_text,
+        "explicit_retrieval_advisory_gate_documented": "workspace_retrieval_advisory_enabled"
+        in policy_text
+        and "apply_workspace_retrieval_advisory" in retrieval_text,
+        "explicit_consolidation_advisory_gate_documented": "apply_workspace_advisory"
+        in consolidation_text
+        and "workspace_advisory_mode" in consolidation_text,
     }
     return {
         "schema_version": "g0.operational-toggle-retirement.v1",
-        "scope": "source-inspection",
+        "scope": "source-inspection for retired legacy shadow/service toggles",
         "providers_path": "src/mnemosyne/providers/__init__.py",
         "workspace_path": "src/mnemosyne/workspace.py",
+        "policy_path": "src/mnemosyne/policy.py",
+        "retrieval_path": "src/mnemosyne/retrieval.py",
+        "consolidation_path": "src/mnemosyne/consolidation.py",
+        "allowed_explicit_promotion_controls": allowed_explicit_promotion_controls,
         "specialist_budget_fields": budget_fields,
         "workspace_service_fields": service_fields,
         "workspace_service_report_fields": service_report_fields,
