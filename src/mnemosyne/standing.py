@@ -177,10 +177,10 @@ def standing(unit_signals: Mapping[str, Any] | None) -> Standing:
     )
 
 
-def standing_from_shadow_flag(*, shadow_only: bool, critical_path: bool) -> dict[str, Any]:
-    """Mirror an existing shadow/critical-path boolean pair as Standing."""
+def standing_from_authority_state(*, answer_authority: bool, critical_path: bool) -> dict[str, Any]:
+    """Mirror an authority/critical-path state as a Standing report."""
 
-    grounded = not shadow_only and critical_path
+    grounded = bool(answer_authority) and bool(critical_path)
     score = standing(
         {
             "reality_class": "grounded" if grounded else "self_generated",
@@ -193,10 +193,10 @@ def standing_from_shadow_flag(*, shadow_only: bool, critical_path: bool) -> dict
         }
     )
     payload = score.to_dict()
-    payload["mirror"] = {
-        "shadow_only": bool(shadow_only),
+    payload["authority_state"] = {
+        "answer_authority": bool(answer_authority),
         "critical_path": bool(critical_path),
-        "standing_authority_matches_boolean": score.authority is grounded,
+        "standing_authority_matches_state": score.authority is grounded,
     }
     return payload
 

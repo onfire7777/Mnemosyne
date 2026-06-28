@@ -3539,8 +3539,10 @@ def test_cli_specialist_manifest_exposes_shadow_dreamer_contract(tmp_path: Path)
     assert dreamer["name"] == "dreamer.shadow"
     assert dreamer["role"] == "dreamer"
     assert dreamer["provider_kind"] == "shadow_local"
-    assert dreamer["budget"]["shadow_only"] is True
     assert dreamer["budget"]["critical_path_allowed"] is False
+    assert dreamer["budget"]["answer_authority_allowed"] is False
+    assert dreamer["budget"]["promotion_gate_required"] is True
+    assert "shadow_only" not in dreamer["budget"]
     assert "promotion gate" in dreamer["output_contract"]
 
 

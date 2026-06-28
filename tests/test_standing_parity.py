@@ -12,7 +12,7 @@ from mnemosyne.standing import (
     SELF_GENERATED_CEILING,
     STANDING_FN_VERSION,
     standing,
-    standing_from_shadow_flag,
+    standing_from_authority_state,
 )
 
 
@@ -100,14 +100,14 @@ def test_standing_module_is_pure_projection_surface() -> None:
     assert "requests" not in source
 
 
-def test_standing_mirrors_shadow_flags() -> None:
-    advisory = standing_from_shadow_flag(shadow_only=True, critical_path=False)
-    promoted = standing_from_shadow_flag(shadow_only=False, critical_path=True)
+def test_standing_mirrors_authority_state() -> None:
+    advisory = standing_from_authority_state(answer_authority=False, critical_path=False)
+    promoted = standing_from_authority_state(answer_authority=True, critical_path=True)
 
     assert advisory["authority"] is False
-    assert advisory["mirror"]["standing_authority_matches_boolean"] is True
+    assert advisory["authority_state"]["standing_authority_matches_state"] is True
     assert promoted["authority"] is True
-    assert promoted["mirror"]["standing_authority_matches_boolean"] is True
+    assert promoted["authority_state"]["standing_authority_matches_state"] is True
 
 
 def test_local_retrieval_exposes_standing_without_decision_divergence() -> None:

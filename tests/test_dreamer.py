@@ -179,6 +179,8 @@ def test_shadow_workspace_controller_recruits_dreamer_off_critical_path() -> Non
     assert invocation["shadow_only"] is True
     assert invocation["critical_path"] is False
     assert invocation["critical_path_allowed"] is False
+    assert output["answer_authority"] is False
+    assert output["answer_authority_allowed"] is False
     assert output["candidate_count"] == 1
     assert output["production_mutation"] is False
     assert output["promotion_gate_required"] is True
@@ -189,6 +191,8 @@ def test_shadow_workspace_controller_recruits_dreamer_off_critical_path() -> Non
     assert promotion["specialist_name"] == "dreamer.shadow"
     assert promotion["specialist_role"] == "dreamer"
     assert promotion["shadow_only"] is True
+    assert promotion["answer_authority"] is False
+    assert promotion["answer_authority_allowed"] is False
     assert promotion["critical_path"] is False
     assert promotion["critical_path_allowed"] is False
     assert promotion["production_mutation"] is False
@@ -212,7 +216,11 @@ def test_shadow_workspace_controller_rejects_replaced_dreamer_factory() -> None:
             name="dreamer.shadow",
             role="dreamer",
             factory=lambda _config: object(),
-            budget=SpecialistBudget(shadow_only=True, critical_path_allowed=False),
+            budget=SpecialistBudget(
+                critical_path_allowed=False,
+                answer_authority_allowed=False,
+                promotion_gate_required=True,
+            ),
             input_contract="retained evidence rows with CIDs",
             output_contract="low-trust replay candidates requiring promotion gate",
         )

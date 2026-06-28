@@ -2,8 +2,8 @@
 
 Phase 7 P1 introduces Standing as a derived projection over existing memory
 signals. This fixture proves the P1 contract: Standing mirrors the existing
-boolean reality-monitoring and shadow/advisory decisions without changing the
-critical-path retrieval or consolidation behavior.
+boolean reality-monitoring and authority/advisory decisions without changing
+the critical-path retrieval or consolidation behavior.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from typing import Any
 
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.models import Evidence
-from mnemosyne.standing import STANDING_FN_VERSION, standing_from_shadow_flag
+from mnemosyne.standing import STANDING_FN_VERSION, standing_from_authority_state
 
 
 RETRIEVAL_CASES: tuple[dict[str, Any], ...] = (
@@ -198,14 +198,14 @@ def _run_retrieval_case(case: dict[str, Any]) -> dict[str, Any]:
 
 
 def _run_consolidation_case(case: dict[str, Any]) -> dict[str, Any]:
-    standing = standing_from_shadow_flag(
-        shadow_only=bool(case["shadow_only"]),
+    standing = standing_from_authority_state(
+        answer_authority=not bool(case["shadow_only"]),
         critical_path=bool(case["critical_path"]),
     )
     expected = bool(case["expected_authority"])
     authority = bool(standing.get("authority"))
-    mirror = standing.get("mirror") if isinstance(standing.get("mirror"), dict) else {}
-    diverged = authority != expected or mirror.get("standing_authority_matches_boolean") is not True
+    authority_state = standing.get("authority_state") if isinstance(standing.get("authority_state"), dict) else {}
+    diverged = authority != expected or authority_state.get("standing_authority_matches_state") is not True
     return {
         "case_id": case["id"],
         "shadow_only": bool(case["shadow_only"]),
