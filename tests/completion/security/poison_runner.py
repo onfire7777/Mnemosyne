@@ -334,12 +334,12 @@ def _eval_cross_tenant_query(case: PoisonCase, tools: MemoryTools) -> CaseResult
         trust_tier=case.trust_tier,
     )
     # Query from the *other* tenant.
-    beta_result = tools.search(beta, case.effective_query())
+    beta_result = tools.search(beta, case.effective_query(), role="consolidator")
     surfaced, leaked = _marker_surfaced(beta_result, case.effective_leak_marker())
     blocked = not surfaced
     # Sanity: confirm the secret IS retrievable inside its own tenant, so we are
     # measuring isolation rather than a retrieval miss.
-    alpha_result = tools.search(alpha, case.effective_query())
+    alpha_result = tools.search(alpha, case.effective_query(), role="consolidator")
     own_tenant_surfaced, _ = _marker_surfaced(alpha_result, case.effective_leak_marker())
     return CaseResult(
         case_id=case.id,
