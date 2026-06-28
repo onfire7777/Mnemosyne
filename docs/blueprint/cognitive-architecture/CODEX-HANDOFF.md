@@ -1,6 +1,6 @@
 # Codex Handoff
 
-**Latest verified code/runtime baseline:** 2026-06-28 UTC · `7c2ff5d` on `origin/main`; GitHub CI run `28328407556` passed. Current local follow-up work hardens production evidence offline-verifier custody.
+**Latest verified code/runtime baseline:** 2026-06-28 UTC · `7ab7051` on `origin/main`; GitHub CI run `28332157144` passed. Current local and CI follow-up work hardens privacy-sensitive evidence custody while leaving strict v1.0 parity blocked only on Tier-B operator-captured production evidence.
 
 **Canonical checkout:** `/Users/admin/Mnemosyne` on `main`, tracking `origin/main` (`github.com/onfire7777/Mnemosyne`). This is now the single local checkout.
 
@@ -45,10 +45,10 @@
 
 ## Latest Verified Snapshot
 
-- Focused P5/G0 tests pass for specialist authority budgets, Standing authority-state mapping, shadow-workspace fixture, committed preregistration decisions, and current preregistration replay.
-- Full local pytest passes with `.venv/bin/python -m pytest -q`.
-- Direct default G0 run reports `71/72 measured; gate_ready=False`; no controller power/cost estimate is fabricated.
-- After push, refresh this section with the GitHub CI run status if CI is available.
+- Follow-up privacy review findings are closed: provider packets omit raw content fingerprints and secret-shaped provider context, sensitive/detected-PII evidence CIDs are user-scoped without weakening tombstone replay blocking, privacy backfill rejects unsafe PII sensitivity floors, and legacy Postgres sensitive vectors are remediated away from public partitions.
+- Full local verification passed for focused regressions, `py_compile`, `ruff`, `git diff --check`, the no-DSN pytest suite, explicit-controller-telemetry G0 (`72/72 measured; gate_ready=True`), and 15 zero-delta G0 preregistration replays.
+- GitHub CI run `28332157144` passed on `7ab7051`: Lint (ruff), Postgres integration, Unit + drift checks, and G0 preregistration gate replay all completed successfully.
+- Direct default G0 without controller telemetry still intentionally reports `71/72 measured; gate_ready=False`; no controller power/cost estimate is fabricated.
 
 ## Prior Verified History
 
