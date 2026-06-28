@@ -5928,10 +5928,53 @@ def production_release_stdout(command: str, provider_stdout: dict) -> dict:
     if command == "ops-dashboard-check":
         return {
             "ok": True,
-            "mode": "package",
-            "source": {"package_fingerprint": "sha256:" + "7" * 64},
-            "checks": [{"name": "taxonomy", "ok": True}],
+            "mode": "hosted",
+            "source": {
+                "dashboard_url_hash": "sha256:" + "7" * 64,
+                "snapshot_fingerprint": "sha256:" + "8" * 64,
+            },
+            "checks": [
+                {
+                    "name": "dashboard_operations_scope",
+                    "ok": True,
+                    "production_validated": True,
+                    "target_environment": "production",
+                },
+                {
+                    "name": "dashboard_refresh",
+                    "ok": True,
+                    "max_age_seconds": 300,
+                    "observed_age_seconds": 42,
+                },
+                {
+                    "name": "dashboard_access_control",
+                    "ok": True,
+                    "authenticated": True,
+                    "tenant_scoped": True,
+                },
+                {
+                    "name": "dashboard_alerts",
+                    "ok": True,
+                    "routes_validated": ["pager", "audit-log"],
+                },
+                {
+                    "name": "dashboard_operations_redaction",
+                    "ok": True,
+                    "raw_html_omitted": True,
+                    "raw_snapshot_omitted": True,
+                    "raw_tokens_omitted": True,
+                    "raw_user_data_omitted": True,
+                    "forbidden_raw_paths": [],
+                },
+            ],
             "findings": [],
+            "redaction": {
+                "raw_html_omitted": True,
+                "raw_snapshot_omitted": True,
+                "raw_tokens_omitted": True,
+                "raw_user_data_omitted": True,
+                "forbidden_raw_paths": [],
+            },
         }
     if command == "ops-report":
         return {"ok": True, "counts": {"memories": 10}, "tripwires": {"passed": True}}
@@ -6019,6 +6062,28 @@ def write_release_report(
         encoding="utf-8",
     )
     return report_path, manifest_path
+
+
+def rewrite_release_check_stdout(
+    report_path: Path,
+    manifest_path: Path,
+    *,
+    command: str,
+    stdout_json: dict,
+) -> None:
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    check = next(item for item in report["checks"] if item["command"] == command)
+    check["stdout_json"] = stdout_json
+    report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    checks_dir = manifest_path.parent / manifest["files"]["checks_dir"]
+    check_path = checks_dir / f"{int(check['index']):03d}-{check['command']}.json"
+    check_path.write_text(json.dumps(check, indent=2, sort_keys=True), encoding="utf-8")
+    manifest_check = next(item for item in manifest["checks"] if item["command"] == command)
+    manifest_check["sha256"] = "sha256:" + sha256(check_path.read_bytes()).hexdigest()
+    manifest["files"]["report_sha256"] = "sha256:" + sha256(report_path.read_bytes()).hexdigest()
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
 
 
 def write_production_evidence_bundle(tmp_path: Path) -> tuple[Path, str]:
@@ -6314,6 +6379,45 @@ def test_cli_release_audit_verifies_production_deployment_evidence(tmp_path: Pat
     assert report["provider"]["retrieval_backends"]["lexical_backend"] == "paradedb-bm25"
     assert report["provider"]["retrieval_backends"]["graph_backend"] == "apache-age"
     assert report["validation_scope"]["production_validated"] is True
+
+
+def test_cli_release_audit_rejects_package_only_ops_dashboard_evidence(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    report_path, manifest_path = write_release_report(tmp_path)
+    rewrite_release_check_stdout(
+        report_path,
+        manifest_path,
+        command="ops-dashboard-check",
+        stdout_json={
+            "ok": True,
+            "mode": "package",
+            "source": {"package_fingerprint": "sha256:" + "7" * 64},
+            "checks": [{"name": "taxonomy", "ok": True}],
+            "findings": [],
+            "redaction": {
+                "raw_html_omitted": True,
+                "raw_snapshot_omitted": True,
+                "raw_tokens_omitted": True,
+                "raw_user_data_omitted": True,
+                "forbidden_raw_paths": [],
+            },
+        },
+    )
+
+    result = run_raw_cli(
+        store,
+        "release-audit",
+        "--evidence-manifest",
+        str(manifest_path),
+        "--require-production-validated",
+        "--require-provider-forbid-local",
+    )
+    payload = json.loads(result.stdout)
+    codes = {finding["code"] for finding in payload["findings"]}
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert "required_ops_dashboard_evidence_incomplete" in codes
 
 
 def test_cli_release_audit_requires_manifest_bound_production_evidence(tmp_path: Path) -> None:
@@ -7107,6 +7211,32 @@ def test_cli_production_evidence_verify_rescans_bundle_for_secret_material(tmp_p
     assert result.returncode == 1
     assert payload["ok"] is False
     assert payload["checks"]["redaction_scan"] is False
+    assert "redaction_scan_recompute_not_ok" in codes
+    assert "redaction_scan_recompute_findings_present" in codes
+
+
+@pytest.mark.parametrize("relative_path", ["summary.json", "bundle-manifest.json", "redaction-scan.json"])
+def test_cli_production_evidence_verify_rescans_retained_metadata_for_secret_material(
+    tmp_path: Path,
+    relative_path: str,
+) -> None:
+    bundle_dir, _bundle_fingerprint = write_production_evidence_bundle(tmp_path)
+    metadata_path = bundle_dir / relative_path
+    payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+    payload["operator_note"] = "jwt=eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJvcGVyYXRvciJ9.signature123"
+    metadata_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+    result = run_raw_cli(
+        tmp_path / "verify-store.json",
+        "production-evidence-verify",
+        str(bundle_dir),
+    )
+    report = json.loads(result.stdout)
+    codes = {finding["code"] for finding in report["findings"]}
+
+    assert result.returncode == 1
+    assert report["ok"] is False
+    assert report["checks"]["redaction_scan"] is False
     assert "redaction_scan_recompute_not_ok" in codes
     assert "redaction_scan_recompute_findings_present" in codes
 
@@ -9654,6 +9784,34 @@ def test_cli_privacy_backfill_rejects_pii_sensitivity_below_floor(tmp_path: Path
     assert "pii sensitivity must be at least 3" in report.stderr
     assert apply.returncode == 1
     assert "pii sensitivity must be at least 3" in apply.stderr
+
+
+def test_cli_privacy_backfill_rejects_malformed_pii_sensitivity(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    seed_legacy_evidence(store, "Legacy row has SSN 123-45-6789.")
+
+    report = run_raw_cli(
+        store,
+        "privacy-backfill-report",
+        "--tenant",
+        TENANT,
+        "--pii-sensitivity",
+        "five",
+    )
+    apply = run_raw_cli(
+        store,
+        "privacy-backfill-apply",
+        "--tenant",
+        TENANT,
+        "--pii-sensitivity",
+        "five",
+        "--confirm-apply",
+    )
+
+    assert report.returncode == 1
+    assert "pii sensitivity must be an integer" in report.stderr
+    assert apply.returncode == 1
+    assert "pii sensitivity must be an integer" in apply.stderr
 
 
 def test_cli_privacy_backfill_apply_requires_explicit_confirmation(tmp_path: Path) -> None:

@@ -207,7 +207,7 @@ RELEASE_AUDIT_REQUIRED_OUTPUT_KEYS: dict[str, tuple[str, ...]] = {
     "gate-suite-check": ("suite", "requirements", "failures"),
     "projection-recompute-once": ("queue", "enqueued_job", "job", "metrics"),
     "worker-run": ("worker", "summary", "queue", "cycles", "jobs", "metrics"),
-    "ops-dashboard-check": ("mode", "source", "checks", "findings"),
+    "ops-dashboard-check": ("mode", "source", "checks", "findings", "redaction"),
     "parametric-trainer-check": ("bundle", "requirements", "checks", "findings"),
     "worker-ops-check": ("bundle", "requirements", "checks", "findings", "redaction"),
     "ops-report": ("counts", "tripwires"),
@@ -1782,7 +1782,13 @@ def _coerce_int(value: Any, *, default: int) -> int:
 
 
 def _validate_pii_sensitivity(value: Any) -> int:
-    sensitivity = _coerce_int(value, default=3)
+    if value is None:
+        sensitivity = 3
+    else:
+        try:
+            sensitivity = int(value)
+        except (TypeError, ValueError) as exc:
+            raise SystemExit("pii sensitivity must be an integer") from exc
     if sensitivity < 3:
         raise SystemExit("pii sensitivity must be at least 3")
     return sensitivity
@@ -9168,6 +9174,13 @@ PRODUCTION_EVIDENCE_REQUIRED_FILES = frozenset(
         "source-soak-manifest.json",
     }
 )
+PRODUCTION_EVIDENCE_REDACTION_SCAN_EXTRA_FILES = frozenset(
+    {
+        "bundle-manifest.json",
+        "redaction-scan.json",
+        "summary.json",
+    }
+)
 
 
 def _write_deployment_soak_evidence(
@@ -9928,6 +9941,62 @@ def _release_worker_ops_evidence_findings(stdout_json: Mapping[str, Any]) -> lis
     return findings
 
 
+def _release_ops_dashboard_evidence_findings(stdout_json: Mapping[str, Any]) -> list[dict[str, Any]]:
+    findings: list[dict[str, Any]] = []
+
+    def add(message: str) -> None:
+        findings.append(_release_finding("required_ops_dashboard_evidence_incomplete", message))
+
+    if stdout_json.get("ok") is not True:
+        add("ops-dashboard-check report must be ok")
+    if stdout_json.get("findings") != []:
+        add("ops-dashboard-check report must not contain findings")
+    checks_raw = stdout_json.get("checks")
+    if not isinstance(checks_raw, list):
+        add("ops-dashboard-check checks must be a list")
+        return findings
+    checks = [item for item in checks_raw if isinstance(item, Mapping)]
+    checks_by_name = {str(item.get("name") or ""): item for item in checks}
+    required_check_names = (
+        "dashboard_operations_scope",
+        "dashboard_refresh",
+        "dashboard_access_control",
+        "dashboard_alerts",
+        "dashboard_operations_redaction",
+    )
+    missing_check_names = [name for name in required_check_names if name not in checks_by_name]
+    if missing_check_names:
+        add("ops-dashboard-check evidence is missing production operations checks: " + ", ".join(missing_check_names))
+    for name in required_check_names:
+        check = checks_by_name.get(name)
+        if isinstance(check, Mapping) and check.get("ok") is not True:
+            add(f"ops-dashboard-check {name} check must be ok")
+
+    scope = checks_by_name.get("dashboard_operations_scope", {})
+    if isinstance(scope, Mapping):
+        if scope.get("production_validated") is not True:
+            add("ops-dashboard-check operations scope must be production validated")
+        if scope.get("target_environment") != "production":
+            add("ops-dashboard-check operations scope must target production")
+
+    redaction = stdout_json.get("redaction")
+    redaction_maps = [redaction] if isinstance(redaction, Mapping) else []
+    redaction_check = checks_by_name.get("dashboard_operations_redaction")
+    if isinstance(redaction_check, Mapping):
+        redaction_maps.append(redaction_check)
+    if not redaction_maps:
+        add("ops-dashboard-check operations redaction evidence is missing")
+    for redaction_map in redaction_maps:
+        for flag in ("raw_html_omitted", "raw_snapshot_omitted", "raw_tokens_omitted", "raw_user_data_omitted"):
+            if redaction_map.get(flag) is not True:
+                add(f"ops-dashboard-check redaction flag {flag} is not proven")
+        forbidden_paths = redaction_map.get("forbidden_raw_paths")
+        if isinstance(forbidden_paths, list) and forbidden_paths:
+            add("ops-dashboard-check redaction contains raw field paths")
+
+    return findings
+
+
 def _release_command_output_findings(check: Mapping[str, Any]) -> list[dict[str, Any]]:
     command = check.get("command")
     if not isinstance(command, str) or command not in RELEASE_AUDIT_REQUIRED_OUTPUT_KEYS:
@@ -9974,6 +10043,8 @@ def _release_command_output_findings(check: Mapping[str, Any]) -> list[dict[str,
         findings.extend(_release_bundle_ops_evidence_findings(command, stdout_json))
     if command == "worker-run":
         findings.extend(_release_worker_run_evidence_findings(stdout_json))
+    if command == "ops-dashboard-check":
+        findings.extend(_release_ops_dashboard_evidence_findings(stdout_json))
     if command == "worker-ops-check":
         findings.extend(_release_worker_ops_evidence_findings(stdout_json))
     return findings
@@ -11078,12 +11149,19 @@ def _verify_production_evidence_redaction_scan(
         )
     scan_paths: list[Path] = []
     expected_scanned: set[str] = set()
+    expected_recomputed_scanned: set[str] = set()
     for item in actual_files:
         rel_path = item.get("path")
         if not isinstance(rel_path, str) or rel_path == "redaction-scan.json":
             continue
         scan_paths.append(bundle_dir / rel_path)
         expected_scanned.add(rel_path)
+        expected_recomputed_scanned.add(rel_path)
+    for rel_path in sorted(PRODUCTION_EVIDENCE_REDACTION_SCAN_EXTRA_FILES):
+        extra_path = bundle_dir / rel_path
+        if extra_path.exists():
+            scan_paths.append(extra_path)
+            expected_recomputed_scanned.add(rel_path)
     recomputed = scan_evidence_paths(
         scan_paths,
         scope="verify",
@@ -11094,7 +11172,7 @@ def _verify_production_evidence_redaction_scan(
         _production_evidence_finding(
             findings,
             "redaction_scan_recompute_not_ok",
-            "fresh redaction scan over current bundle artifacts is not ok",
+            "fresh redaction scan over current bundle artifacts and metadata is not ok",
         )
     if recomputed.get("findings") != []:
         ok = False
@@ -11108,7 +11186,7 @@ def _verify_production_evidence_redaction_scan(
         _production_evidence_finding(
             findings,
             "redaction_scan_recompute_skipped_files_present",
-            "fresh redaction scan skipped current bundle artifacts",
+            "fresh redaction scan skipped current bundle artifacts or metadata",
         )
 
     def relative_scanned_files(scan: Mapping[str, Any]) -> set[str] | None:
@@ -11139,12 +11217,12 @@ def _verify_production_evidence_redaction_scan(
             "redaction_scan_scanned_files_mismatch",
             "redaction-scan.json scanned_files do not match bundle-manifest artifacts except redaction-scan.json",
         )
-    if recomputed_scanned is not None and recomputed_scanned != expected_scanned:
+    if recomputed_scanned is not None and recomputed_scanned != expected_recomputed_scanned:
         ok = False
         _production_evidence_finding(
             findings,
             "redaction_scan_recompute_scanned_files_mismatch",
-            "fresh redaction scan did not cover exactly the current bundle artifacts",
+            "fresh redaction scan did not cover exactly the current bundle artifacts and metadata",
         )
     return ok
 
@@ -14395,7 +14473,7 @@ def build_parser() -> argparse.ArgumentParser:
     privacy_backfill_report = sub.add_parser("privacy-backfill-report")
     privacy_backfill_report.add_argument("--tenant", required=True)
     privacy_backfill_report.add_argument("--branch", default="main")
-    privacy_backfill_report.add_argument("--pii-sensitivity", type=int, default=3)
+    privacy_backfill_report.add_argument("--pii-sensitivity", default=3)
     privacy_backfill_report.add_argument("--include-clean", action="store_true")
     privacy_backfill_report.add_argument("--fail-on-findings", action="store_true")
     privacy_backfill_report.set_defaults(func=cmd_privacy_backfill_report)
@@ -14403,7 +14481,7 @@ def build_parser() -> argparse.ArgumentParser:
     privacy_backfill_apply = sub.add_parser("privacy-backfill-apply")
     privacy_backfill_apply.add_argument("--tenant", required=True)
     privacy_backfill_apply.add_argument("--branch", default="main")
-    privacy_backfill_apply.add_argument("--pii-sensitivity", type=int, default=3)
+    privacy_backfill_apply.add_argument("--pii-sensitivity", default=3)
     privacy_backfill_apply.add_argument("--actor", default="operator")
     privacy_backfill_apply.add_argument("--confirm-apply", action="store_true")
     privacy_backfill_apply.set_defaults(func=cmd_privacy_backfill_apply)

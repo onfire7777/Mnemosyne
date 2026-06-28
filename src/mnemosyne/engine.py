@@ -553,31 +553,28 @@ class LocalMemoryEngine:
                 content_pointer=ev.content_pointer,
                 modality=ev.modality,
             )
-            if unscoped_cid != cid and self.evidence.get(self._evidence_key(ev.tenant_id, branch, unscoped_cid)):
-                cid = unscoped_cid
-            else:
-                for existing in self.evidence.values():
-                    if (
-                        existing.tenant_id == ev.tenant_id
-                        and existing.branch == branch
-                        and existing.erased
-                        and existing.source_type == ev.source_type
-                        and existing.content_pointer == ev.content_pointer
-                        and existing.modality == ev.modality
-                        and existing.cid
-                    ):
-                        replay_cid = evidence_cid(
-                            ev.content,
-                            tenant_id=ev.tenant_id,
-                            user_id=existing.user_id,
-                            source_type=ev.source_type,
-                            content_pointer=ev.content_pointer,
-                            modality=ev.modality,
-                            sensitivity=int(existing.sensitivity),
-                        )
-                        if replay_cid == existing.cid or unscoped_cid == existing.cid:
-                            cid = existing.cid
-                            break
+            for existing in self.evidence.values():
+                if (
+                    existing.tenant_id == ev.tenant_id
+                    and existing.branch == branch
+                    and existing.erased
+                    and existing.source_type == ev.source_type
+                    and existing.content_pointer == ev.content_pointer
+                    and existing.modality == ev.modality
+                    and existing.cid
+                ):
+                    replay_cid = evidence_cid(
+                        ev.content,
+                        tenant_id=ev.tenant_id,
+                        user_id=existing.user_id,
+                        source_type=ev.source_type,
+                        content_pointer=ev.content_pointer,
+                        modality=ev.modality,
+                        sensitivity=int(existing.sensitivity),
+                    )
+                    if replay_cid == existing.cid or unscoped_cid == existing.cid:
+                        cid = existing.cid
+                        break
             key = self._evidence_key(ev.tenant_id, branch, cid)
             existing = self.evidence.get(key)
             reality_class = self._classify_evidence_reality(ev)

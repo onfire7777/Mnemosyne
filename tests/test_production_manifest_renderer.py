@@ -27,6 +27,7 @@ REQUIRED_PRODUCTION_INPUT_ARTIFACTS = [
     "idp-authz-policy.current.json",
     "mcp-ops-bundle.json",
     "multimodal-ops-bundle.json",
+    "ops-dashboard-bundle.json",
     "parametric-trainer-bundle.json",
     "policy-ops-bundle.json",
     "privacy-ops-bundle.json",
@@ -546,6 +547,27 @@ def test_renderer_check_environment_rejects_relative_c2pa_tool(tmp_path: Path) -
     assert env["MNEMOSYNE_PROD_C2PA_TOOL"] not in proc.stderr
 
 
+def test_renderer_output_rejects_relative_c2pa_tool(tmp_path: Path) -> None:
+    output = tmp_path / "secure" / "production-soak-manifest.json"
+    env = _filled_render_env(tmp_path)
+    _populate_required_input_artifacts(env)
+    env["MNEMOSYNE_PROD_C2PA_TOOL"] = "c2patool"
+
+    proc = subprocess.run(
+        [str(RENDERER), "--output", str(output)],
+        cwd=REPO,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert proc.returncode == 78
+    assert not output.exists()
+    assert "MNEMOSYNE_PROD_C2PA_TOOL must be an absolute external executable path" in proc.stderr
+    assert env["MNEMOSYNE_PROD_C2PA_TOOL"] not in proc.stderr
+
+
 def test_renderer_check_environment_rejects_non_executable_c2pa_tool(tmp_path: Path) -> None:
     env = _filled_render_env(tmp_path)
     tool = tmp_path / "bin" / "not-executable-c2patool"
@@ -564,6 +586,30 @@ def test_renderer_check_environment_rejects_non_executable_c2pa_tool(tmp_path: P
 
     assert proc.returncode == 78
     assert proc.stdout == ""
+    assert "MNEMOSYNE_PROD_C2PA_TOOL must be executable" in proc.stderr
+    assert env["MNEMOSYNE_PROD_C2PA_TOOL"] not in proc.stderr
+
+
+def test_renderer_output_rejects_non_executable_c2pa_tool(tmp_path: Path) -> None:
+    output = tmp_path / "secure" / "production-soak-manifest.json"
+    env = _filled_render_env(tmp_path)
+    _populate_required_input_artifacts(env)
+    tool = tmp_path / "bin" / "not-executable-c2patool"
+    tool.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    tool.chmod(0o600)
+    env["MNEMOSYNE_PROD_C2PA_TOOL"] = str(tool)
+
+    proc = subprocess.run(
+        [str(RENDERER), "--output", str(output)],
+        cwd=REPO,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert proc.returncode == 78
+    assert not output.exists()
     assert "MNEMOSYNE_PROD_C2PA_TOOL must be executable" in proc.stderr
     assert env["MNEMOSYNE_PROD_C2PA_TOOL"] not in proc.stderr
 
@@ -587,6 +633,27 @@ def test_renderer_check_environment_rejects_repo_local_c2pa_tool(tmp_path: Path)
     assert env["MNEMOSYNE_PROD_C2PA_TOOL"] not in proc.stderr
 
 
+def test_renderer_output_rejects_repo_local_c2pa_tool(tmp_path: Path) -> None:
+    output = tmp_path / "secure" / "production-soak-manifest.json"
+    env = _filled_render_env(tmp_path)
+    _populate_required_input_artifacts(env)
+    env["MNEMOSYNE_PROD_C2PA_TOOL"] = str(RENDERER)
+
+    proc = subprocess.run(
+        [str(RENDERER), "--output", str(output)],
+        cwd=REPO,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert proc.returncode == 78
+    assert not output.exists()
+    assert "MNEMOSYNE_PROD_C2PA_TOOL must not point inside the repository" in proc.stderr
+    assert env["MNEMOSYNE_PROD_C2PA_TOOL"] not in proc.stderr
+
+
 def test_renderer_refuses_repo_local_output() -> None:
     proc = subprocess.run(
         [str(RENDERER), "--output", str(REPO / "production-soak-manifest.json")],
@@ -599,6 +666,23 @@ def test_renderer_refuses_repo_local_output() -> None:
 
     assert proc.returncode == 73
     assert "refusing to write production manifest inside the repository" in proc.stderr
+
+
+def test_renderer_refuses_relative_output(tmp_path: Path) -> None:
+    env = _filled_render_env(tmp_path)
+    _populate_required_input_artifacts(env)
+
+    proc = subprocess.run(
+        [str(RENDERER), "--output", "production-soak-manifest.json"],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert proc.returncode == 73
+    assert "output must be an absolute external custody path" in proc.stderr
 
 
 def test_renderer_rejects_secret_bearing_manifest_args(tmp_path: Path) -> None:
@@ -772,6 +856,11 @@ def test_renderer_writes_private_valid_manifest_outside_repo(tmp_path: Path) -> 
         check for check in manifest["checks"] if check["command"] == "ops-dashboard-check"
     )
     assert "--dashboard-url" in ops_dashboard["args"]
+    assert "--ops-bundle" in ops_dashboard["args"]
+    assert (
+        f"{env['MNEMOSYNE_PROD_EVIDENCE_DIR']}/ops-dashboard-bundle.json"
+        in ops_dashboard["args"]
+    )
     assert "--dashboard-package-dir" not in ops_dashboard["args"]
     ops_report = next(check for check in manifest["checks"] if check["command"] == "ops-report")
     assert ops_report["args"] == ["--tenant", env["MNEMOSYNE_PROD_TENANT"]]

@@ -154,7 +154,14 @@ if not check_environment:
         print("ERROR: --output is required unless --list-placeholders or --check-environment is used", file=sys.stderr)
         raise SystemExit(64)
 
-    output_path = Path(output_raw).expanduser().resolve()
+    output_candidate = Path(output_raw).expanduser()
+    if not output_candidate.is_absolute():
+        print(
+            "ERROR: --output must be an absolute external custody path",
+            file=sys.stderr,
+        )
+        raise SystemExit(73)
+    output_path = output_candidate.resolve()
     try:
         output_path.relative_to(repo_dir)
         inside_repo = True
@@ -209,52 +216,53 @@ else:
     )
     raise SystemExit(78)
 
+c2pa_tool_raw = os.environ.get("MNEMOSYNE_PROD_C2PA_TOOL", "")
+c2pa_tool = Path(c2pa_tool_raw).expanduser()
+if not c2pa_tool.is_absolute():
+    print(
+        "ERROR: MNEMOSYNE_PROD_C2PA_TOOL must be an absolute external executable path",
+        file=sys.stderr,
+    )
+    raise SystemExit(78)
+try:
+    c2pa_tool.relative_to(repo_dir)
+except ValueError:
+    pass
+else:
+    print(
+        "ERROR: MNEMOSYNE_PROD_C2PA_TOOL must not point inside the repository",
+        file=sys.stderr,
+    )
+    raise SystemExit(78)
+c2pa_tool_resolved = c2pa_tool.resolve(strict=False)
+try:
+    c2pa_tool_resolved.relative_to(repo_dir)
+except ValueError:
+    pass
+else:
+    print(
+        "ERROR: MNEMOSYNE_PROD_C2PA_TOOL must not point inside the repository",
+        file=sys.stderr,
+    )
+    raise SystemExit(78)
+if not c2pa_tool_resolved.exists() or not c2pa_tool_resolved.is_file():
+    print(
+        "ERROR: MNEMOSYNE_PROD_C2PA_TOOL must exist as an external executable file",
+        file=sys.stderr,
+    )
+    raise SystemExit(78)
+if not os.access(c2pa_tool_resolved, os.X_OK):
+    print(
+        "ERROR: MNEMOSYNE_PROD_C2PA_TOOL must be executable",
+        file=sys.stderr,
+    )
+    raise SystemExit(78)
+
 if check_environment:
     if not evidence_dir_resolved.exists() or not evidence_dir_resolved.is_dir():
         print(
             "ERROR: MNEMOSYNE_PROD_EVIDENCE_DIR must exist as an external directory "
             "before --check-environment can pass",
-            file=sys.stderr,
-        )
-        raise SystemExit(78)
-    c2pa_tool_raw = os.environ.get("MNEMOSYNE_PROD_C2PA_TOOL", "")
-    c2pa_tool = Path(c2pa_tool_raw).expanduser()
-    if not c2pa_tool.is_absolute():
-        print(
-            "ERROR: MNEMOSYNE_PROD_C2PA_TOOL must be an absolute external executable path",
-            file=sys.stderr,
-        )
-        raise SystemExit(78)
-    try:
-        c2pa_tool.relative_to(repo_dir)
-    except ValueError:
-        pass
-    else:
-        print(
-            "ERROR: MNEMOSYNE_PROD_C2PA_TOOL must not point inside the repository",
-            file=sys.stderr,
-        )
-        raise SystemExit(78)
-    c2pa_tool_resolved = c2pa_tool.resolve(strict=False)
-    try:
-        c2pa_tool_resolved.relative_to(repo_dir)
-    except ValueError:
-        pass
-    else:
-        print(
-            "ERROR: MNEMOSYNE_PROD_C2PA_TOOL must not point inside the repository",
-            file=sys.stderr,
-        )
-        raise SystemExit(78)
-    if not c2pa_tool_resolved.exists() or not c2pa_tool_resolved.is_file():
-        print(
-            "ERROR: MNEMOSYNE_PROD_C2PA_TOOL must exist as an external executable file",
-            file=sys.stderr,
-        )
-        raise SystemExit(78)
-    if not os.access(c2pa_tool_resolved, os.X_OK):
-        print(
-            "ERROR: MNEMOSYNE_PROD_C2PA_TOOL must be executable",
             file=sys.stderr,
         )
         raise SystemExit(78)

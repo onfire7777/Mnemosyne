@@ -165,6 +165,51 @@ def test_capture_production_evidence_preflight_only_stops_before_soak(tmp_path: 
     assert out_root.stat().st_mode & 0o777 == 0o700
 
 
+def test_capture_production_evidence_rejects_relative_manifest_path(tmp_path: Path) -> None:
+    manifest = tmp_path / "production-soak.json"
+    out_root = tmp_path / "capture"
+    _minimal_production_manifest(manifest)
+
+    proc = subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "--preflight-only",
+            manifest.name,
+            str(out_root),
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert proc.returncode == 65
+    assert "production soak manifest path must be absolute" in proc.stderr
+    assert not out_root.exists()
+
+
+def test_capture_production_evidence_rejects_relative_output_root(tmp_path: Path) -> None:
+    manifest = tmp_path / "production-soak.json"
+    _minimal_production_manifest(manifest)
+
+    proc = subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "--preflight-only",
+            str(manifest),
+            "capture",
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert proc.returncode == 65
+    assert "production evidence output root must be absolute" in proc.stderr
+    assert not (tmp_path / "capture").exists()
+
+
 def test_capture_production_evidence_rejects_malformed_manifest(tmp_path: Path) -> None:
     manifest = tmp_path / "production-soak.json"
     out_root = tmp_path / "capture"

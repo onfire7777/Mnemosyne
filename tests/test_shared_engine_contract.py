@@ -13,6 +13,7 @@ from mnemosyne.calibration import CalibrationSet, calibration_examples_from_rows
 from mnemosyne.consolidation import CONSOLIDATE_EVIDENCE_JOB, ConsolidationWorker
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.gate import RegressionCase
+from mnemosyne.ids import evidence_unscoped_cid
 from mnemosyne.ingestion import IngestRequest, IngestionPipeline
 from mnemosyne.jobs import (
     CALIBRATE_JOB,
@@ -27,7 +28,7 @@ from mnemosyne.models import Assertion, Contradiction, Evidence, Hit, Justificat
 from mnemosyne.mcp_tools import MemoryTools
 from mnemosyne.observability import MetricsRegistry
 from mnemosyne.parametric import ParametricArtifactStore, ParametricTier
-from mnemosyne.postgres_engine import PostgresEngine
+from mnemosyne.postgres_engine import PostgresEngine, _cid_to_bytes, _stable_uuid
 from mnemosyne.privacy import ErasureMode
 from mnemosyne.queue import InProcessQueue
 from mnemosyne.retrieval import RetrievalAdapters, gist_support_report
@@ -48,6 +49,91 @@ def _runtime_state_for_engine(engine: Any, tenant_id: str, tmp_path: Path) -> An
         assert dsn is not None
         return PostgresRuntimeState(dsn, tenant_id=tenant_id)
     return RuntimeState.from_store_path(tmp_path / f"{tenant_id}.runtime.json")
+
+
+def _seed_live_legacy_unscoped_evidence(
+    engine: Any,
+    *,
+    tenant: str,
+    user: str,
+    source_type: str,
+    content: str,
+    branch: str = "main",
+) -> str:
+    cid = evidence_unscoped_cid(
+        content,
+        tenant_id=tenant,
+        source_type=source_type,
+        content_pointer=None,
+        modality="text",
+    )
+    evidence = Evidence(
+        tenant_id=tenant,
+        user_id=user,
+        actor="user",
+        source_type=source_type,
+        content=content,
+        metadata={
+            "_external_tenant_id": tenant,
+            "_external_user_id": user,
+            "reality_class": "evidence_grounded",
+            "embedding_partition": "none",
+        },
+        sensitivity=0,
+        access_policy={"tenant": tenant, "max_sensitivity": 0, "data_class": "standard"},
+        branch=branch,
+        cid=cid,
+        created_at=datetime.now(UTC),
+    )
+    if isinstance(engine, LocalMemoryEngine):
+        engine._require_branch(branch)
+        engine.evidence[engine._evidence_key(tenant, branch, cid)] = evidence
+        return cid
+    if isinstance(engine, PostgresEngine):
+        engine.ensure_tenant_and_branch(tenant, branch)
+        db_tenant_id = _stable_uuid("tenant", tenant)
+        db_user_id = _stable_uuid("user", user)
+        with engine.connect() as conn:
+            with conn.cursor() as cur:
+                engine._set_tenant(cur, db_tenant_id)
+                engine._ensure_evidence_vector_schema(cur)
+                cur.execute(
+                    """
+                    INSERT INTO evidence (
+                      cid, branch, tenant_id, user_id, session_id, actor, source_type,
+                      source_identity, content, content_pointer, modality, metadata,
+                      trust_tier, capability_tags, sensitivity, signed_provenance,
+                      access_policy, embedding, embedding_partition, erased, created_at
+                    )
+                    VALUES (
+                      %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NULL::vector, %s, false, %s
+                    )
+                    ON CONFLICT (tenant_id, branch, cid) DO NOTHING
+                    """,
+                    (
+                        _cid_to_bytes(cid),
+                        branch,
+                        db_tenant_id,
+                        db_user_id,
+                        None,
+                        evidence.actor,
+                        source_type,
+                        None,
+                        content,
+                        None,
+                        "text",
+                        engine._jsonb(evidence.metadata),
+                        evidence.trust_tier,
+                        evidence.capability_tags,
+                        evidence.sensitivity,
+                        None,
+                        engine._jsonb(evidence.access_policy),
+                        "none",
+                        evidence.created_at,
+                    ),
+                )
+        return cid
+    raise TypeError(f"unsupported engine type: {type(engine)!r}")
 
 
 class _RotatingSummarizer:
@@ -159,6 +245,54 @@ def test_shared_engine_contract_retrieves_and_exports_evidence(engine_bundle: tu
     assert recalled.content == "Shared engine contract stores the orchid retrieval fact."
     assert any(hit.id == cid for hit in retrieved.hits)
     assert any(item["cid"] == cid for item in exported["evidence"])
+
+
+def test_shared_engine_contract_sensitive_ingest_ignores_live_unscoped_legacy_cid(
+    engine_bundle: tuple[Any, str, str],
+    tmp_path: Path,
+) -> None:
+    engine, tenant, user = engine_bundle
+    source_type = "shared-unscoped-legacy"
+    content = "Sensitive shared contract row has SSN 123-45-6789."
+    legacy_user = f"{user}-legacy"
+    incoming_user = f"{user}-incoming"
+    legacy_cid = _seed_live_legacy_unscoped_evidence(
+        engine,
+        tenant=tenant,
+        user=legacy_user,
+        source_type=source_type,
+        content=content,
+    )
+    queue = InProcessQueue()
+    pipeline = IngestionPipeline(
+        engine,
+        object_store=LocalObjectStore(tmp_path / "objects"),
+        queue=queue,
+    )
+
+    result = pipeline.ingest(
+        IngestRequest(
+            tenant_id=tenant,
+            user_id=incoming_user,
+            actor="user",
+            source_type=source_type,
+            content=content,
+            sensitivity=3,
+        )
+    )
+    legacy = engine.get_evidence(tenant, legacy_cid)
+    incoming = engine.get_evidence(tenant, result.cid)
+    exported = engine.export_tenant(tenant)
+    exported_users = {item["user_id"] for item in exported["evidence"]}
+
+    assert result.cid != legacy_cid
+    assert legacy is not None
+    assert legacy.user_id == legacy_user
+    assert incoming is not None
+    assert incoming.user_id == incoming_user
+    assert {legacy_user, incoming_user} <= exported_users
+    assert result.queued_jobs
+    assert any(job["kind"] == CONSOLIDATE_EVIDENCE_JOB for job in result.queued_jobs)
 
 
 def test_shared_engine_contract_filtered_export_discloses_omissions_and_masks_raw_fields(
@@ -761,7 +895,7 @@ def test_shared_engine_contract_evidence_cids_are_immutable(
             content_pointer="objects/shared/immutable.txt",
             trust_tier=5,
             capability_tags=["second"],
-            sensitivity=4,
+            sensitivity=0,
             signed_provenance={"issuer": "second"},
             access_policy={"tenant": tenant},
         )
