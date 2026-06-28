@@ -221,19 +221,20 @@ This is the honesty section: **policy target ≠ current enforcement.** Conforma
 - Erasure modes (`tombstone_recompute`, `hard_delete_legal`) — `privacy.py:11–13`; `privacy-ops-check`.
 - Per-request and default sensitivity ceilings — `--max-sensitivity` (`cli.py`), `policy.max_sensitivity`.
 
-**Policy target, NOT yet fully enforced (tracked in the hardening backlog below):**
+**Local enforcement wired; production/backfill still required:**
 - Legacy stores may still contain arbitrary JSON envelope keys from before write-time validation. Retrieval still fails closed on those rows, and rewrite/promotion paths now reject unsupported keys instead of silently dropping them.
-- Model-prompt gist substitution is still a policy target for prompt assembly; returned retrieval text/metadata masking and public export-backed disclosure filtering are wired, but prompt context assembly still needs a reduced-form substitution path.
-- The ingest PII detector still recognizes only email/phone automatically (§2.1); other sensitive categories require caller/upstream sensitivity floors.
+- Command-backed model provider prompt context now receives bounded, PII-redacted gist packets instead of raw `Evidence.to_dict()` rows. The provider-facing packet omits raw content, embeddings, signed provenance, raw metadata, and secret-shaped metadata keys while retaining trust/sensitivity/access-policy context.
+- The ingest privacy detector now recognizes email, phone, SSN, Luhn-valid payment-card numbers, valid IPv4 addresses, DOB/date-of-birth labels, passport IDs, and street-address shapes (§2.1). Regulated deployments still need operator-owned precision/recall review and legacy-row backfill before relying on default-S0 legacy rows.
 
 **Vector partitioning enforcement.** Local and Postgres vector paths now enforce `embedding_partition` from `access_policy`: `embed_ok:false`, S4, restricted, held, or unknown-policy rows are non-embeddable; S2+ and raw/redaction-restricted rows default to a private partition; and stored raw embeddings are used for ranking only when the caller can read the raw item rather than a redacted projection. Postgres fresh schema/runtime migration uses partition-scoped HNSW indexes instead of one broad shared vector index. This closes the shared-index/raw-vector side channel; production evidence still has to prove the deployed pgvector path is running this schema.
 
-### 9.2 Hardening backlog (disclosure-side, ordered by risk)
+### 9.2 Residual production/backfill work (disclosure-side)
 
-Each item is a gap between the policy target (§1–§8) and what is enforced today (§9.1):
+The remaining privacy work is no longer an unwired local source path; it is production proof and legacy data hygiene:
 
-1. **Finish model-prompt gist substitution** so context assembly uses caller-scoped reduced forms instead of raw stored rows where policy requires omission or abstraction.
-2. **Broaden automatic PII detection** beyond email/phone so SSN, DOB, health IDs, payment IDs, national IDs, addresses/precise location, and comparable regulated classes raise sensitivity/access-policy floors without relying only on caller-supplied metadata.
+1. **Production evidence capture** must prove the deployed command-provider/consolidation path is using the bounded gist packet and not logging raw provider prompts, requests, responses, embeddings, credentials, tenant/user values, or CIDs outside approved fingerprint fields.
+2. **Legacy-row backfill** must classify or quarantine historical default-`0` rows with the broader detector plus any jurisdiction-specific regulated classes that exceed the built-in local detector.
+3. **Detector quality review** must set precision/recall targets for regulated deployments and decide whether health IDs, national IDs beyond passport patterns, precise geolocation, and jurisdiction-specific identifiers require additional configured detectors.
 
 ---
 
@@ -284,7 +285,7 @@ A deployment conforms to this policy iff:
 - **`access_policy` only narrows;** unknown keys fail the write.
 - **S4 is pointer-only.** Never materialized, embedded, projected, or placed in the system prompt.
 - **`operator` sees metadata/fingerprints only;** raw S2+ needs a recorded break-glass grant (§4).
-- **Enforcement is stated honestly in §9.1** — write/read-time `access_policy` narrowing, structured returned-text masking, public filtered export disclosure, and sensitive vector partitioning are wired, while model-prompt gist substitution and broader PII detection remain backlog (§9.2).
+- **Enforcement is stated honestly in §9.1** — write/read-time `access_policy` narrowing, structured returned-text masking, public filtered export disclosure, sensitive vector partitioning, command-provider gist substitution, and broader local PII detection are wired; production evidence and legacy backfill remain required (§9.2).
 - **Right-to-be-forgotten ⇒ §25**, not redaction. This lane routes; §25 erases.
 
 ---
