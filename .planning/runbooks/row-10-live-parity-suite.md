@@ -27,6 +27,15 @@ the production soak manifest; the template retains it through
 custody-verifies it without adding a new command-line argument to
 `belief-revision-check`.
 
+## Required Production Input Artifacts
+
+Place these files in the external `MNEMOSYNE_PROD_EVIDENCE_DIR` before
+rendering:
+
+- `belief-revision-cases.json`
+- `provider-manifest.production.json`
+- `row-10-full-suite-evidence.json`
+
 ## Redaction Requirement
 
 Evidence must not include raw tenant data, queries, documents, tokens, keys,

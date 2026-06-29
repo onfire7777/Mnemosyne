@@ -1,0 +1,152 @@
+{
+  "schema": "mnemosyne.provider-manifest.production.v1",
+  "name": "mnemosyne-production-provider-manifest",
+  "forbid_local": true,
+  "required_checks": [
+    "embedding",
+    "reranker",
+    "retrieval_backends",
+    "media_extractor",
+    "media_embedding",
+    "object_key_manager",
+    "parametric",
+    "candidate_extractor",
+    "summarizer",
+    "entity_resolver",
+    "lesson_distiller",
+    "skill_inducer",
+    "oidc",
+    "session_secret",
+    "residency_policy"
+  ],
+  "providers": {
+    "retrieval": {
+      "embedding": {
+        "provider": "http",
+        "url": {
+          "env": "MNEMOSYNE_EMBEDDING_URL"
+        },
+        "model": {
+          "env": "MNEMOSYNE_EMBEDDING_MODEL"
+        },
+        "api_key": {
+          "env": "MNEMOSYNE_EMBEDDING_API_KEY"
+        },
+        "dims": 1536,
+        "timeout_seconds": 30
+      },
+      "reranker": {
+        "provider": "http",
+        "url": {
+          "env": "MNEMOSYNE_RERANKER_URL"
+        },
+        "model": {
+          "env": "MNEMOSYNE_RERANKER_MODEL"
+        },
+        "api_key": {
+          "env": "MNEMOSYNE_RERANKER_API_KEY"
+        },
+        "timeout_seconds": 30
+      },
+      "lexical": {
+        "provider": "postgres",
+        "backend": "paradedb-bm25",
+        "timeout_seconds": 30
+      },
+      "graph": {
+        "provider": "postgres",
+        "backend": "apache-age-ppr",
+        "timeout_seconds": 30
+      }
+    },
+    "media": {
+      "extractor": {
+        "command": {
+          "env": "MNEMOSYNE_MEDIA_EXTRACTOR_COMMAND"
+        },
+        "timeout_seconds": 30
+      },
+      "embedding": {
+        "provider": "command",
+        "command": {
+          "env": "MNEMOSYNE_MEDIA_EMBEDDING_COMMAND"
+        },
+        "dims": 1536,
+        "timeout_seconds": 30
+      }
+    },
+    "object_key": {
+      "required": true,
+      "provider": "command",
+      "command": {
+        "env": "MNEMOSYNE_OBJECT_KEY_COMMAND"
+      },
+      "timeout_seconds": 30
+    },
+    "parametric": {
+      "provider": "command",
+      "command": {
+        "env": "MNEMOSYNE_PARAMETRIC_COMMAND"
+      },
+      "adapter_kind": "production-lora-command-adapter",
+      "timeout_seconds": 300
+    },
+    "candidate_extractor": {
+      "provider": "command",
+      "command": {
+        "env": "MNEMOSYNE_CANDIDATE_EXTRACTOR_COMMAND"
+      },
+      "timeout_seconds": 30
+    },
+    "summarizer": {
+      "provider": "command",
+      "command": {
+        "env": "MNEMOSYNE_SUMMARIZER_COMMAND"
+      },
+      "timeout_seconds": 30
+    },
+    "entity_resolver": {
+      "provider": "command",
+      "command": {
+        "env": "MNEMOSYNE_ENTITY_RESOLVER_COMMAND"
+      },
+      "timeout_seconds": 30
+    },
+    "lesson_distiller": {
+      "provider": "command",
+      "command": {
+        "env": "MNEMOSYNE_LESSON_DISTILLER_COMMAND"
+      },
+      "timeout_seconds": 30
+    },
+    "skill_inducer": {
+      "provider": "command",
+      "command": {
+        "env": "MNEMOSYNE_SKILL_INDUCER_COMMAND"
+      },
+      "timeout_seconds": 30
+    },
+    "oidc": {
+      "jwks_url": {
+        "env": "MNEMOSYNE_PROVIDER_OIDC_JWKS_URL"
+      },
+      "issuer": {
+        "env": "MNEMOSYNE_PROVIDER_OIDC_ISSUER"
+      },
+      "audience": {
+        "env": "MNEMOSYNE_PROVIDER_OIDC_AUDIENCE"
+      },
+      "authz_policy_file": {
+        "env": "MNEMOSYNE_PROVIDER_OIDC_AUTHZ_POLICY_FILE"
+      },
+      "timeout_seconds": 30,
+      "jwks_max_bytes": 1048576
+    },
+    "session_secret": {
+      "command": {
+        "env": "MNEMOSYNE_SESSION_SECRET_COMMAND"
+      },
+      "timeout_seconds": 30
+    }
+  }
+}

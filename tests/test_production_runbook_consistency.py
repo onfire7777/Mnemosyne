@@ -6,6 +6,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 RUNBOOK_DIR = REPO / ".planning" / "runbooks"
+INPUT_ARTIFACT_CHECKLIST = REPO / "infra" / "templates" / "production-input-artifacts.checklist.md"
 
 
 def _markdown_table_cells(line: str) -> list[str]:
@@ -14,6 +15,26 @@ def _markdown_table_cells(line: str) -> list[str]:
 
 def _normalized_row_name(value: str) -> str:
     return " ".join(value.lower().split())
+
+
+def _checklist_row_artifacts() -> dict[str, tuple[Path, list[str]]]:
+    rows: dict[str, tuple[Path, list[str]]] = {}
+    for line in INPUT_ARTIFACT_CHECKLIST.read_text(encoding="utf-8").splitlines():
+        if not line.startswith("| B"):
+            continue
+        cells = _markdown_table_cells(line)
+        if len(cells) < 3:
+            continue
+        lane = cells[0].split(maxsplit=1)[0]
+        runbook_matches = re.findall(r"`([^`]+\.md)`", cells[1])
+        assert len(runbook_matches) == 1, line
+        artifact_names = [
+            item
+            for item in re.findall(r"`([^`]+)`", cells[2])
+            if not item.startswith(".planning/")
+        ]
+        rows[lane] = (REPO / runbook_matches[0], artifact_names)
+    return rows
 
 
 def test_every_row_runbook_points_to_universal_preflight_capture_flow() -> None:
@@ -59,6 +80,18 @@ def test_every_row_runbook_points_to_universal_preflight_capture_flow() -> None:
             'release-audit --evidence-manifest "$OUT_ROOT/evidence/manifest.json" '
             "--require-production-validated --require-provider-forbid-local" in text
         ), path
+
+
+def test_row_runbooks_list_checklist_input_artifacts() -> None:
+    rows = _checklist_row_artifacts()
+
+    assert set(rows) == {f"B{index}" for index in range(1, 11)}
+    for lane, (runbook_path, artifact_names) in rows.items():
+        text = runbook_path.read_text(encoding="utf-8")
+        assert "## Required Production Input Artifacts" in text, runbook_path
+        assert "MNEMOSYNE_PROD_EVIDENCE_DIR" in text, runbook_path
+        for artifact_name in artifact_names:
+            assert f"`{artifact_name}`" in text, (lane, runbook_path, artifact_name)
 
 
 def test_runbook_index_and_ops_handoff_document_preflight_scope() -> None:

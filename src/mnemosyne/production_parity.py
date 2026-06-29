@@ -89,7 +89,7 @@ PARITY_LANES_BY_COMMAND: dict[str, list[str]] = {
     "policy-ops-check": ["B2"],
     "privacy-ops-check": ["B7"],
     "projection-recompute-once": ["B4"],
-    "provider-check": ["B1", "B4", "B6", "B9", "B10"],
+    "provider-check": ["B1", "B2", "B4", "B6", "B7", "B9", "B10"],
     "provenance-ops-check": ["B5"],
     "provenance-trust-check": ["B5"],
     "retrieval-ops-check": ["B1"],

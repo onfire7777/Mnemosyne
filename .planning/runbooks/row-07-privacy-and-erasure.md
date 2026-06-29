@@ -17,6 +17,15 @@ Run in the production soak profile:
 - `policy-ops-check`
 - `forgetting-policy-check`
 
+## Required Production Input Artifacts
+
+Place these files in the external `MNEMOSYNE_PROD_EVIDENCE_DIR` before
+rendering:
+
+- `forgetting-policy-cases.json`
+- `privacy-ops-bundle.json`
+- `provider-manifest.production.json`
+
 ## Redaction Requirement
 
 Evidence must not include user data, raw deletion targets, key material,

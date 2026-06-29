@@ -128,6 +128,7 @@ validation_categories = [
 operator_readiness_files = {
     "env_template": "infra/templates/production-render.env.example",
     "input_artifacts_checklist": "infra/templates/production-input-artifacts.checklist.md",
+    "provider_manifest_template": "infra/templates/provider-manifest.production.template.json",
     "production_evidence_runbook": "infra/PRODUCTION-EVIDENCE.md",
 }
 next_steps = [
@@ -505,6 +506,8 @@ def evidence_relative_path(value: str, *, label: str) -> tuple[Path, str] | None
     except ValueError:
         if lexical_relative is not None:
             add_input_artifact_error(f"{label} must resolve under MNEMOSYNE_PROD_EVIDENCE_DIR")
+        else:
+            add_input_artifact_error(f"{label} must live under MNEMOSYNE_PROD_EVIDENCE_DIR")
         return None
     return resolved, relative.as_posix()
 

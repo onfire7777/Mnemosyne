@@ -69,9 +69,11 @@ CLI commands consumed by `deployment-soak` and `release-audit`.
 - Each row handoff resumes only after the operator reports the row's evidence
   capture signal from the row runbook. The generic defer signal is
   `skip operator gates`.
-- Production evidence must be operator-captured against real production or
-  production-equivalent IdP, Postgres/retrieval, provider, MCP, dashboard,
-  worker, object-store, KMS/residency, C2PA, and trainer surfaces.
+- Production evidence must be operator-captured against the real production
+  wrapper and manifest-bound release-audit path over deployed IdP,
+  Postgres/retrieval, provider, MCP, dashboard, worker, object-store,
+  KMS/residency, C2PA, and trainer surfaces. Local staging, compose, and
+  production-like dry runs are setup evidence only and cannot satisfy Tier B.
 - Secrets must be supplied through environment variables, provider files, Vault,
   Keycloak, KMS, or equivalent runtime custody. Do not place raw secrets in the
   soak manifest or committed docs; production bundles must keep

@@ -8,12 +8,19 @@ import subprocess
 import sys
 from pathlib import Path
 
-from mnemosyne.cli import PRODUCTION_RELEASE_REQUIRED_COMMANDS
+from mnemosyne.cli import (
+    PRODUCTION_RELEASE_REQUIRED_COMMANDS,
+    PRODUCTION_RELEASE_REQUIRED_PROVIDER_CHECKS,
+)
 
 
 REPO = Path(__file__).resolve().parents[1]
 RENDERER = REPO / "infra" / "scripts" / "render-production-soak-manifest.sh"
 RENDERER_CMD = ["/bin/bash", str(RENDERER)]
+PRODUCTION_TEMPLATE = REPO / "infra" / "templates" / "production-soak-manifest.template.json"
+PROVIDER_MANIFEST_TEMPLATE = (
+    REPO / "infra" / "templates" / "provider-manifest.production.template.json"
+)
 ENV_EXAMPLE = REPO / "infra" / "templates" / "production-render.env.example"
 ENV_GUIDE = REPO / ".planning" / "ENV-AND-SECRETS.md"
 REQUIRED_PRODUCTION_INPUT_ARTIFACTS = [
@@ -43,6 +50,50 @@ REQUIRED_PRODUCTION_INPUT_ARTIFACTS = [
     "worker-ops-bundle.json",
 ]
 REQUIRED_PARITY_LANES = [f"B{index}" for index in range(1, 11)]
+PROVIDER_MANIFEST_PARITY_ROUTES = [
+    {
+        "lane": "B1",
+        "row": 1,
+        "title": "Production Postgres retrieval",
+        "runbook": ".planning/runbooks/row-01-production-postgres-retrieval.md",
+    },
+    {
+        "lane": "B2",
+        "row": 2,
+        "title": "Tenant isolation and auth",
+        "runbook": ".planning/runbooks/row-02-tenant-isolation-and-auth.md",
+    },
+    {
+        "lane": "B4",
+        "row": 4,
+        "title": "Consolidation role pipeline",
+        "runbook": ".planning/runbooks/row-04-consolidation-role-pipeline.md",
+    },
+    {
+        "lane": "B6",
+        "row": 6,
+        "title": "Multimodal retrieval",
+        "runbook": ".planning/runbooks/row-06-multimodal-retrieval.md",
+    },
+    {
+        "lane": "B7",
+        "row": 7,
+        "title": "Privacy and erasure",
+        "runbook": ".planning/runbooks/row-07-privacy-and-erasure.md",
+    },
+    {
+        "lane": "B9",
+        "row": 9,
+        "title": "Parametric tier",
+        "runbook": ".planning/runbooks/row-09-parametric-tier.md",
+    },
+    {
+        "lane": "B10",
+        "row": 10,
+        "title": "Live parity suite",
+        "runbook": ".planning/runbooks/row-10-live-parity-suite.md",
+    },
+]
 
 
 def _detail_by_path(payload: dict[str, object]) -> dict[str, dict[str, object]]:
@@ -328,6 +379,29 @@ def test_renderer_list_placeholders_includes_static_artifact_inventory() -> None
     assert rows["B10"]["runbook"] == ".planning/runbooks/row-10-live-parity-suite.md"
 
 
+def test_provider_manifest_template_matches_production_required_checks() -> None:
+    payload = json.loads(PROVIDER_MANIFEST_TEMPLATE.read_text(encoding="utf-8"))
+
+    assert payload["forbid_local"] is True
+    assert payload["required_checks"] == list(PRODUCTION_RELEASE_REQUIRED_PROVIDER_CHECKS)
+    assert isinstance(payload["providers"], dict)
+    assert payload["providers"]["retrieval"]["embedding"]["provider"] == "http"
+    assert payload["providers"]["retrieval"]["reranker"]["provider"] == "http"
+    assert payload["providers"]["retrieval"]["lexical"]["provider"] == "postgres"
+    assert payload["providers"]["retrieval"]["graph"]["provider"] == "postgres"
+    assert payload["providers"]["object_key"]["required"] is True
+    assert payload["providers"]["object_key"]["provider"] == "command"
+    assert payload["providers"]["media"]["embedding"]["provider"] == "command"
+    assert payload["providers"]["parametric"]["provider"] == "command"
+    assert payload["providers"]["candidate_extractor"]["provider"] == "command"
+    assert payload["providers"]["summarizer"]["provider"] == "command"
+    assert payload["providers"]["entity_resolver"]["provider"] == "command"
+    assert payload["providers"]["lesson_distiller"]["provider"] == "command"
+    assert payload["providers"]["skill_inducer"]["provider"] == "command"
+    assert "oidc" in payload["providers"]
+    assert "session_secret" in payload["providers"]
+
+
 def test_renderer_requires_all_production_env_values(tmp_path: Path) -> None:
     proc = subprocess.run(
         [*RENDERER_CMD, "--output", str(tmp_path / "manifest.json")],
@@ -372,6 +446,7 @@ def test_renderer_check_environment_reports_missing_without_output() -> None:
     assert payload["operator_readiness_files"] == {
         "env_template": "infra/templates/production-render.env.example",
         "input_artifacts_checklist": "infra/templates/production-input-artifacts.checklist.md",
+        "provider_manifest_template": "infra/templates/provider-manifest.production.template.json",
         "production_evidence_runbook": "infra/PRODUCTION-EVIDENCE.md",
     }
     assert payload["required_input_artifact_count"] == len(
@@ -457,38 +532,9 @@ def test_renderer_check_environment_passes_without_writing_manifest(
         "option": "input_artifacts[0]",
         "parity_lanes": ["B10"],
     } in details["row-10-full-suite-evidence.json"]["checks"]
-    assert details["provider-manifest.production.json"]["parity_routes"] == [
-        {
-            "lane": "B1",
-            "row": 1,
-            "title": "Production Postgres retrieval",
-            "runbook": ".planning/runbooks/row-01-production-postgres-retrieval.md",
-        },
-        {
-            "lane": "B4",
-            "row": 4,
-            "title": "Consolidation role pipeline",
-            "runbook": ".planning/runbooks/row-04-consolidation-role-pipeline.md",
-        },
-        {
-            "lane": "B6",
-            "row": 6,
-            "title": "Multimodal retrieval",
-            "runbook": ".planning/runbooks/row-06-multimodal-retrieval.md",
-        },
-        {
-            "lane": "B9",
-            "row": 9,
-            "title": "Parametric tier",
-            "runbook": ".planning/runbooks/row-09-parametric-tier.md",
-        },
-        {
-            "lane": "B10",
-            "row": 10,
-            "title": "Live parity suite",
-            "runbook": ".planning/runbooks/row-10-live-parity-suite.md",
-        },
-    ]
+    assert details["provider-manifest.production.json"]["parity_routes"] == (
+        PROVIDER_MANIFEST_PARITY_ROUTES
+    )
     assert sorted(payload["present"]) == _placeholders()
     assert not list(tmp_path.glob("*.json"))
 
@@ -538,6 +584,49 @@ def test_renderer_check_environment_fails_on_missing_input_artifacts(
     assert env["MNEMOSYNE_PROD_EVIDENCE_DIR"] not in proc.stdout
     assert env["MNEMOSYNE_PROD_C2PA_TOOL"] not in proc.stdout
     assert proc.stderr == ""
+
+
+def test_renderer_check_environment_rejects_absolute_artifact_outside_evidence_dir(
+    tmp_path: Path,
+) -> None:
+    env = _filled_render_env(tmp_path)
+    _populate_required_input_artifacts(env)
+    outside_artifact = tmp_path / "external-auth-ops-bundle.json"
+    outside_artifact.write_text("{}\n", encoding="utf-8")
+    custom_template = tmp_path / "production-soak.custom.json"
+    custom_template.write_text(
+        PRODUCTION_TEMPLATE.read_text(encoding="utf-8").replace(
+            "MNEMOSYNE_PROD_EVIDENCE_DIR/auth-ops-bundle.json",
+            str(outside_artifact),
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    proc = subprocess.run(
+        [*RENDERER_CMD, "--check-environment", "--template", str(custom_template)],
+        cwd=REPO,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    payload = json.loads(proc.stdout)
+
+    assert proc.returncode == 78
+    assert payload["ok"] is False
+    assert payload["blocked_reason"] == "missing_or_invalid_input_artifacts"
+    assert payload["input_artifacts_complete"] is False
+    assert payload["input_artifact_errors"] == [
+        "auth-ops --bundle must live under MNEMOSYNE_PROD_EVIDENCE_DIR"
+    ]
+    assert str(outside_artifact) not in proc.stdout
+    rows = _row_readiness_by_lane(payload)
+    assert rows["B2"]["input_artifacts_complete"] is False
+    assert rows["B2"]["input_artifact_errors"] == [
+        "auth-ops --bundle must live under MNEMOSYNE_PROD_EVIDENCE_DIR"
+    ]
 
 
 def test_renderer_check_environment_row_readiness_scopes_single_missing_artifact(
@@ -595,7 +684,7 @@ def test_renderer_check_environment_row_readiness_scopes_shared_provider_artifac
     assert proc.returncode == 78
     assert payload["ok"] is False
     rows = _row_readiness_by_lane(payload)
-    missing_lanes = {"B1", "B4", "B6", "B9", "B10"}
+    missing_lanes = {"B1", "B2", "B4", "B6", "B7", "B9", "B10"}
     assert set(rows) == set(REQUIRED_PARITY_LANES)
     for lane in REQUIRED_PARITY_LANES:
         _assert_row_readiness_shape(rows[lane], has_exists=True)

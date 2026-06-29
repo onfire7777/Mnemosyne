@@ -16,6 +16,12 @@ Run in the production soak profile:
 - `mcp-http-soak`
 - `mcp-streamable-http-soak`
 
+## Required Production Input Artifacts
+
+Place this file in the external `MNEMOSYNE_PROD_EVIDENCE_DIR` before rendering:
+
+- `mcp-ops-bundle.json`
+
 ## Redaction Requirement
 
 Evidence must not include bearer tokens, session tokens, raw tool payloads, or

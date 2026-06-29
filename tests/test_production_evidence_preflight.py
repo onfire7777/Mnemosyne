@@ -743,6 +743,7 @@ def test_capture_production_evidence_preflight_records_input_artifacts(
     assert (
         str(out_root / "operator-soak-manifest.json") in redaction_scan["scanned_files"]
     )
+    assert str(out_root / "preflight.json") in redaction_scan["scanned_files"]
     assert str(manifest) not in redaction_scan["scanned_files"]
     assert input_artifacts[0]["snapshot_path"] in redaction_scan["scanned_files"]
     assert redaction_scan["skipped_files"] == []
@@ -1078,6 +1079,49 @@ def test_capture_production_evidence_preflight_rejects_relative_tool_executable(
 
     assert proc.returncode == 65
     assert "relative executable path for --c2pa-tool" in proc.stderr
+    assert not out_root.exists()
+
+
+def test_capture_production_evidence_preflight_rejects_symlinked_tool_executable(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "production-soak.json"
+    out_root = tmp_path / "capture"
+    tool = tmp_path / "bin" / "c2patool-real"
+    link = tmp_path / "bin" / "c2patool-link"
+    tool.parent.mkdir()
+    tool.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    tool.chmod(0o755)
+    try:
+        link.symlink_to(tool)
+    except OSError as exc:
+        pytest.skip(f"symlink setup unavailable: {exc}")
+
+    def add_symlinked_tool_path(payload: dict[str, Any]) -> None:
+        check = next(
+            item
+            for item in payload["checks"]
+            if item["command"] == "provenance-trust-check"
+        )
+        check["args"] = ["--c2pa-tool", str(link)]
+
+    _minimal_production_manifest(manifest, mutate=add_symlinked_tool_path)
+
+    proc = subprocess.run(
+        [
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
+            "--preflight-only",
+            str(manifest),
+            str(out_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+    )
+
+    assert proc.returncode == 65
+    assert "points through a symlink or non-canonical path" in proc.stderr
     assert not out_root.exists()
 
 
