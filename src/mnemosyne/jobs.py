@@ -107,8 +107,13 @@ class RuntimeJobHandlers:
         affected_cids = _affected_evidence_cids(snapshot, tenant_id, branch, changed_cids)
         projections = _affected_projections(snapshot, tenant_id, branch, affected_cids)
         surviving_cids = _surviving_evidence_cids(snapshot, tenant_id, branch, affected_cids)
+        dirty_cids = _dirty_recompute_cids(snapshot, tenant_id, branch, changed_cids, surviving_cids)
         enqueue_consolidation = bool(payload.get("enqueue_consolidation", True))
-        passes = [str(name) for name in payload.get("passes") or DEFAULT_CONSOLIDATION_PASSES]
+        passes = (
+            [str(name) for name in payload["passes"]]
+            if payload.get("passes")
+            else _projection_recompute_passes(projections)
+        )
         fingerprint = _projection_recompute_fingerprint(
             tenant_id=tenant_id,
             branch=branch,
@@ -116,13 +121,14 @@ class RuntimeJobHandlers:
             affected_cids=affected_cids,
             projections=projections,
             surviving_cids=surviving_cids,
+            dirty_cids=dirty_cids,
             passes=passes,
             enqueue_consolidation=enqueue_consolidation,
         )
         memo_hit = fingerprint in self._projection_recompute_memo and not bool(payload.get("force_recompute", False))
         queued_jobs = []
         if enqueue_consolidation and not memo_hit:
-            for cid in surviving_cids:
+            for cid in dirty_cids:
                 job = self.queue.enqueue(
                     CONSOLIDATE_EVIDENCE_JOB,
                     {
@@ -150,6 +156,8 @@ class RuntimeJobHandlers:
                 "affected_projection_counts": {key: len(value) for key, value in projections.items()},
                 "affected_projections": projections,
                 "surviving_evidence_cids": surviving_cids,
+                "dirty_recompute_cids": dirty_cids,
+                "passes": passes,
                 "fingerprint": fingerprint,
                 "memo_hit": memo_hit,
                 "queued_consolidation_jobs": queued_jobs,
@@ -464,6 +472,7 @@ def _projection_recompute_fingerprint(
     affected_cids: list[str],
     projections: dict[str, list[str]],
     surviving_cids: list[str],
+    dirty_cids: list[str],
     passes: list[str],
     enqueue_consolidation: bool,
 ) -> str:
@@ -474,10 +483,22 @@ def _projection_recompute_fingerprint(
         "affected_evidence_cids": sorted(set(affected_cids)),
         "affected_projections": {key: sorted(set(value)) for key, value in sorted(projections.items())},
         "surviving_evidence_cids": sorted(set(surviving_cids)),
+        "dirty_recompute_cids": sorted(set(dirty_cids)),
         "passes": list(passes),
         "enqueue_consolidation": enqueue_consolidation,
     }
     return sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def _projection_recompute_passes(projections: dict[str, list[str]]) -> list[str]:
+    passes: list[str] = []
+    if projections.get("assertions") or projections.get("entities"):
+        passes.extend(["extractor", "resolver", "belief_reviser"])
+    if projections.get("relations"):
+        passes.append("summarizer")
+    if projections.get("preferences"):
+        passes.append("user_model_updater")
+    return list(dict.fromkeys(passes)) or ["replayer"]
 
 
 def _metadata_source_cids(metadata: dict[str, Any]) -> set[str]:
@@ -530,6 +551,33 @@ def _surviving_evidence_cids(
         ):
             surviving.append(cid)
     return surviving
+
+
+def _dirty_recompute_cids(
+    snapshot: dict[str, Any],
+    tenant_id: str,
+    branch: str,
+    changed_cids: list[str],
+    surviving_cids: list[str],
+) -> list[str]:
+    changed = set(changed_cids)
+    surviving = set(surviving_cids)
+    dirty = {cid for cid in changed_cids if cid in surviving}
+    fallback: set[str] = set()
+    for section in ("assertions", "preferences", "relations", "entities"):
+        for row in snapshot.get(section, []):
+            if not _matches_tenant_branch(row, tenant_id, branch):
+                continue
+            sources = {str(cid) for cid in row.get("source_evidence_cids", []) if cid}
+            if not sources.intersection(changed):
+                continue
+            direct_dirty = sources.intersection(changed).intersection(surviving)
+            if direct_dirty:
+                dirty.update(direct_dirty)
+            else:
+                fallback.update(sources.intersection(surviving))
+    selected = dirty or fallback
+    return [cid for cid in surviving_cids if cid in selected]
 
 
 def _projection_ids(

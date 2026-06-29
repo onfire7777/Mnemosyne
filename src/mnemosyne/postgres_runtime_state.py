@@ -50,6 +50,10 @@ def _support_strategy_threshold(value: Any) -> int:
         return 2
 
 
+def _gate_case_db_id(db_tenant_id: str, case_id: str) -> str:
+    return _stable_uuid("eval-case", f"{db_tenant_id}:{case_id}")
+
+
 class PostgresRuntimeState:
     """Tenant-scoped Postgres implementation of the RuntimeState API.
 
@@ -273,12 +277,13 @@ class PostgresRuntimeState:
                           protected = EXCLUDED.protected
                         """,
                         (
-                            case.id,
+                            _gate_case_db_id(self.db_tenant_id, case.id),
                             self.db_tenant_id,
                             case.signature,
                             case.query,
                             self._jsonb(
                                 {
+                                    "case_id": case.id,
                                     "expected_substring": case.expected_substring,
                                     "case_origin": case.origin,
                                     "case_mode": case.mode,
@@ -387,16 +392,17 @@ class PostgresRuntimeState:
                 )
                 return [
                     RegressionCase(
-                        id=str(row["id"]),
+                        id=str(expected.get("case_id") or row["id"]),
                         signature=row["signature"],
                         query=row["query"],
-                        expected_substring=dict(row["expected"] or {}).get("expected_substring", ""),
+                        expected_substring=expected.get("expected_substring", ""),
                         tier=row["tier"],
                         protected=row["protected"],
-                        origin=dict(row["expected"] or {}).get("case_origin", "curated"),
-                        mode=dict(row["expected"] or {}).get("case_mode", "active"),
+                        origin=expected.get("case_origin", "curated"),
+                        mode=expected.get("case_mode", "active"),
                     )
                     for row in cur.fetchall()
+                    for expected in [dict(row["expected"] or {})]
                 ]
 
     def _mirror_user_model(self, entries: list[UserModelEntry], latent_profiles: list[LatentUserProfile]) -> None:
