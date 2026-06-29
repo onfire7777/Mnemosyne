@@ -196,6 +196,33 @@ def test_http_embedding_rejects_zero_and_malformed(monkeypatch: pytest.MonkeyPat
         HttpEmbeddingProvider(url="https://e.test", dims=2).embed("x")
 
 
+@pytest.mark.parametrize(
+    ("url", "match"),
+    [
+        (
+            "http://provider.example.test/embed",
+            "requires https unless insecure localhost is explicitly allowed",
+        ),
+        (
+            "https://user:secret@provider.example.test/embed",
+            "must not contain userinfo credentials",
+        ),
+        (
+            "file:///tmp/embed",
+            "must be http\\(s\\) with a hostname",
+        ),
+    ],
+)
+def test_http_provider_config_rejects_unsafe_fetch_urls(url: str, match: str) -> None:
+    with pytest.raises(ValueError, match=match):
+        _validate_http_provider_config(url, 5.0)
+
+
+def test_http_provider_config_rejects_private_https_address() -> None:
+    with pytest.raises(ValueError, match="must not resolve to private"):
+        _validate_http_provider_config("https://127.0.0.1/embed", 5.0)
+
+
 # --------------------------------------------------------------------------- #
 # HTTP cross-encoder reranker (faked transport)
 # --------------------------------------------------------------------------- #
@@ -524,8 +551,9 @@ def test_coerce_and_finite_float_guards() -> None:
 @pytest.mark.parametrize(
     ("url", "timeout", "ok"),
     [
-        ("https://provider.test/v1", 30.0, True),
-        ("http://provider.test", 1.0, True),
+        ("https://93.184.216.34/v1", 30.0, True),
+        ("http://127.0.0.1", 1.0, True),
+        ("http://provider.test", 1.0, False),
         ("ftp://provider.test", 30.0, False),
         ("not-a-url", 30.0, False),
         ("https://provider.test", 0.0, False),
@@ -551,37 +579,42 @@ def test_post_json_success_and_errors(monkeypatch: pytest.MonkeyPatch) -> None:
         def __exit__(self, *exc: object) -> None:
             self.close()
 
-    def _ok(request: object, timeout: float) -> _FakeResponse:
+    monkeypatch.setattr(
+        "mnemosyne.retrieval.validate_fetch_url",
+        lambda *_args, **_kwargs: object(),
+    )
+
+    def _ok(request: object, *, validated: object, timeout: float) -> _FakeResponse:
         return _FakeResponse(b'{"embedding": [1.0]}')
 
-    monkeypatch.setattr("urllib.request.urlopen", _ok)
+    monkeypatch.setattr("mnemosyne.retrieval.safe_urlopen", _ok)
     assert _post_json("https://p.test", {"input": "x"}, None, 5.0) == {"embedding": [1.0]}
 
-    def _non_dict(request: object, timeout: float) -> _FakeResponse:
+    def _non_dict(request: object, *, validated: object, timeout: float) -> _FakeResponse:
         return _FakeResponse(b"[1, 2, 3]")
 
-    monkeypatch.setattr("urllib.request.urlopen", _non_dict)
+    monkeypatch.setattr("mnemosyne.retrieval.safe_urlopen", _non_dict)
     with pytest.raises(ValueError, match="must be a JSON object"):
         _post_json("https://p.test", {}, None, 5.0)
 
-    def _bad_json(request: object, timeout: float) -> _FakeResponse:
+    def _bad_json(request: object, *, validated: object, timeout: float) -> _FakeResponse:
         return _FakeResponse(b"not json")
 
-    monkeypatch.setattr("urllib.request.urlopen", _bad_json)
+    monkeypatch.setattr("mnemosyne.retrieval.safe_urlopen", _bad_json)
     with pytest.raises(ValueError, match="must be valid JSON"):
         _post_json("https://p.test", {}, None, 5.0)
 
-    def _http_error(request: object, timeout: float) -> _FakeResponse:
+    def _http_error(request: object, *, validated: object, timeout: float) -> _FakeResponse:
         raise urllib.error.HTTPError("https://p.test", 503, "unavailable", {}, io.BytesIO(b"down"))
 
-    monkeypatch.setattr("urllib.request.urlopen", _http_error)
+    monkeypatch.setattr("mnemosyne.retrieval.safe_urlopen", _http_error)
     with pytest.raises(ValueError, match="HTTP 503"):
         _post_json("https://p.test", {}, None, 5.0)
 
-    def _url_error(request: object, timeout: float) -> _FakeResponse:
+    def _url_error(request: object, *, validated: object, timeout: float) -> _FakeResponse:
         raise urllib.error.URLError("connection refused")
 
-    monkeypatch.setattr("urllib.request.urlopen", _url_error)
+    monkeypatch.setattr("mnemosyne.retrieval.safe_urlopen", _url_error)
     with pytest.raises(ValueError, match="request failed"):
         _post_json("https://p.test", {}, None, 5.0)
 
