@@ -131,6 +131,128 @@ next_steps = [
     "Re-run infra/scripts/render-production-soak-manifest.sh --check-environment until ok=true.",
     "Render with --output to an external path, run infra/scripts/capture-production-evidence.sh, then verify the bundle with production-evidence-verify.",
 ]
+parity_routes = {
+    "B1": {
+        "lane": "B1",
+        "row": 1,
+        "title": "Production Postgres retrieval",
+        "runbook": ".planning/runbooks/row-01-production-postgres-retrieval.md",
+    },
+    "B2": {
+        "lane": "B2",
+        "row": 2,
+        "title": "Tenant isolation and auth",
+        "runbook": ".planning/runbooks/row-02-tenant-isolation-and-auth.md",
+    },
+    "B3": {
+        "lane": "B3",
+        "row": 3,
+        "title": "CLI/MCP runtime coverage",
+        "runbook": ".planning/runbooks/row-03-cli-mcp-runtime-coverage.md",
+    },
+    "B4": {
+        "lane": "B4",
+        "row": 4,
+        "title": "Consolidation role pipeline",
+        "runbook": ".planning/runbooks/row-04-consolidation-role-pipeline.md",
+    },
+    "B5": {
+        "lane": "B5",
+        "row": 5,
+        "title": "Signed provenance",
+        "runbook": ".planning/runbooks/row-05-signed-provenance.md",
+    },
+    "B6": {
+        "lane": "B6",
+        "row": 6,
+        "title": "Multimodal retrieval",
+        "runbook": ".planning/runbooks/row-06-multimodal-retrieval.md",
+    },
+    "B7": {
+        "lane": "B7",
+        "row": 7,
+        "title": "Privacy and erasure",
+        "runbook": ".planning/runbooks/row-07-privacy-and-erasure.md",
+    },
+    "B8": {
+        "lane": "B8",
+        "row": 8,
+        "title": "Observability dashboards",
+        "runbook": ".planning/runbooks/row-08-observability-dashboards.md",
+    },
+    "B9": {
+        "lane": "B9",
+        "row": 9,
+        "title": "Parametric tier",
+        "runbook": ".planning/runbooks/row-09-parametric-tier.md",
+    },
+    "B10": {
+        "lane": "B10",
+        "row": 10,
+        "title": "Live parity suite",
+        "runbook": ".planning/runbooks/row-10-live-parity-suite.md",
+    },
+}
+parity_lanes_by_command = {
+    "auth-ops-check": ["B2"],
+    "belief-revision-check": ["B10"],
+    "calibration-tune": ["B4"],
+    "consolidation-ops-check": ["B4"],
+    "forgetting-policy-check": ["B7"],
+    "gate-suite-check": ["B10"],
+    "hosted-llm-check": ["B4"],
+    "idp-authz-policy-rollout-check": ["B2"],
+    "idp-jwks-live-check": ["B2"],
+    "mcp-http-soak": ["B3"],
+    "mcp-ops-check": ["B3"],
+    "mcp-streamable-http-soak": ["B3"],
+    "multimodal-ops-check": ["B6"],
+    "ops-dashboard-check": ["B8"],
+    "ops-report": ["B4"],
+    "parametric-trainer-check": ["B9"],
+    "policy-ops-check": ["B2"],
+    "privacy-ops-check": ["B7"],
+    "projection-recompute-once": ["B4"],
+    "provider-check": ["B1", "B4", "B6", "B9", "B10"],
+    "provenance-ops-check": ["B5"],
+    "provenance-trust-check": ["B5"],
+    "retrieval-ops-check": ["B1"],
+    "tls-cert-check": ["B2"],
+    "tls-lifecycle-ops-check": ["B2"],
+    "tls-rotation-plan-check": ["B2"],
+    "worker-ops-check": ["B4"],
+    "worker-run": ["B4"],
+}
+
+
+def parity_lanes_for_command(command: str) -> list[str]:
+    return parity_lanes_by_command.get(command, [])
+
+
+def parity_lane_sort_key(lane: str) -> tuple[int, str]:
+    if lane.startswith("B") and lane[1:].isdigit():
+        return int(lane[1:]), lane
+    return 10_000, lane
+
+
+def parity_routes_for_lanes(lanes: list[str]) -> list[dict[str, object]]:
+    return [
+        parity_routes[lane]
+        for lane in sorted(set(lanes), key=parity_lane_sort_key)
+        if lane in parity_routes
+    ]
+
+
+def annotate_artifact_routes(artifact: dict[str, object]) -> None:
+    lanes: list[str] = []
+    checks = artifact.get("checks", [])
+    if isinstance(checks, list):
+        for check in checks:
+            if isinstance(check, dict):
+                check_lanes = check.get("parity_lanes", [])
+                if isinstance(check_lanes, list):
+                    lanes.extend(str(lane) for lane in check_lanes)
+    artifact["parity_routes"] = parity_routes_for_lanes(lanes)
 
 template_manifest = json.loads(template_text)
 
@@ -157,6 +279,7 @@ def collect_template_input_artifact_plan(manifest_payload: dict[str, Any]) -> li
                 "name": check_name,
                 "command": command,
                 "option": option,
+                "parity_lanes": parity_lanes_for_command(command),
             }
         )
 
@@ -201,6 +324,8 @@ def collect_template_input_artifact_plan(manifest_payload: dict[str, Any]) -> li
                     command=command,
                     option=f"input_artifacts[{index}]",
                 )
+    for artifact in artifacts.values():
+        annotate_artifact_routes(artifact)
     return sorted(artifacts.values(), key=lambda item: str(item["relative_path"]))
 
 
@@ -217,6 +342,7 @@ if list_placeholders:
                 "placeholders": required,
                 "required_input_artifact_count": len(template_input_artifact_names),
                 "required_input_artifacts": template_input_artifact_names,
+                "required_input_artifacts_plan": template_input_artifact_plan,
             },
             indent=2,
         )
@@ -515,6 +641,7 @@ def collect_manifest_input_artifacts(manifest_payload: dict[str, Any]) -> list[d
                 "name": check_name,
                 "command": command,
                 "option": option,
+                "parity_lanes": parity_lanes_for_command(command),
             }
         )
 
@@ -559,6 +686,8 @@ def collect_manifest_input_artifacts(manifest_payload: dict[str, Any]) -> list[d
                     command=command,
                     option=f"input_artifacts[{index}]",
                 )
+    for artifact in artifacts.values():
+        annotate_artifact_routes(artifact)
     return sorted(artifacts.values(), key=lambda item: str(item["relative_path"]))
 
 input_artifacts = collect_manifest_input_artifacts(rendered_manifest)
@@ -599,10 +728,12 @@ def record_suite_nested_artifact(value: object, *, suite_name: str, field: str) 
                 "name": "provenance-trust",
                 "command": "provenance-trust-check",
                 "option": field,
+                "parity_lanes": parity_lanes_for_command("provenance-trust-check"),
             }
         ],
         "exists": resolved.exists(),
     }
+    annotate_artifact_routes(artifact)
     existing = next(
         (item for item in input_artifacts if item.get("relative_path") == relative_name),
         None,
@@ -611,6 +742,7 @@ def record_suite_nested_artifact(value: object, *, suite_name: str, field: str) 
         input_artifacts.append(artifact)
     else:
         existing.setdefault("checks", []).extend(artifact["checks"])
+        annotate_artifact_routes(existing)
 
 def inspect_provenance_suites(manifest_payload: dict[str, Any]) -> None:
     checks_payload = manifest_payload.get("checks", [])
@@ -662,6 +794,8 @@ def inspect_provenance_suites(manifest_payload: dict[str, Any]) -> None:
                         )
 
 inspect_provenance_suites(rendered_manifest)
+for artifact in input_artifacts:
+    annotate_artifact_routes(artifact)
 input_artifacts = sorted(input_artifacts, key=lambda item: str(item["relative_path"]))
 missing_input_artifacts = [
     str(artifact["relative_path"])
