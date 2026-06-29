@@ -4,6 +4,7 @@ This runbook is the operator handoff for flipping the remaining Tier B parity ro
 
 ## Preconditions
 
+- Review `infra/templates/production-operator-env.inventory.md` before capture. It is a no-secret name inventory for render placeholders, provider-manifest references, and runtime/secret-custody environment names. Do not fill values in that file.
 - Copy `infra/templates/production-render.env.example` outside the repo, fill the blank non-secret `MNEMOSYNE_PROD_*` values there, and source the external copy before rendering.
 - Populate `MNEMOSYNE_PROD_EVIDENCE_DIR` with the manifest-referenced production input artifacts before running `--check-environment`. The check is no-write and reports the static template-derived artifact inventory plus `parity_row_readiness` grouping even before environment values are sourced; after `MNEMOSYNE_PROD_EVIDENCE_DIR` is set, it fails if required relative artifact names are missing from that external directory and shows which strict-audit row is blocked. Use `infra/templates/production-input-artifacts.checklist.md` as the non-secret operator checklist for the required artifact names.
 - Copy `infra/templates/provider-manifest.production.template.json` to `$MNEMOSYNE_PROD_EVIDENCE_DIR/provider-manifest.production.json` and fill the external copy with production provider values or environment-variable references. This file is shared evidence for retrieval, auth/session provider custody, consolidation roles, multimodal/object-key providers, privacy/residency policy, parametric adapters, and the final parity row. It must keep `forbid_local: true` and include every required provider-check subcheck listed in the template. `--check-environment` parses this external manifest when present, reports referenced provider env-var names, and fails before capture if any referenced provider env var is unset.
@@ -27,6 +28,7 @@ This runbook is the operator handoff for flipping the remaining Tier B parity ro
 Run the production wrapper from the repository root:
 
 ```bash
+open infra/templates/production-operator-env.inventory.md
 cp infra/templates/production-render.env.example \
   /secure/path/to/production-render.env
 # Fill /secure/path/to/production-render.env outside this repository.
@@ -61,7 +63,9 @@ strict-audit row to Done.
 
 The `--check-environment` command is a no-write readiness check. It reports only
 placeholder names, the static template-derived input artifact inventory, and
-the operator readiness files needed to prepare the external capture directory.
+the operator readiness files needed to prepare the external capture directory,
+including `production-operator-env.inventory.md` as the names-only inventory for
+render, provider, runtime, and secret-custody env preparation.
 When all required `MNEMOSYNE_PROD_*` keys are present, it also confirms
 `MNEMOSYNE_PROD_EVIDENCE_DIR` is an existing external directory and
 `MNEMOSYNE_PROD_C2PA_TOOL` is an existing external executable. It renders the
@@ -138,10 +142,12 @@ not contact production
 services, does not run `deployment-soak`, does not create production evidence,
 and cannot flip any strict-audit row to Done unless the bundle was originally
 captured by the production wrapper against deployed infrastructure.
-`--expected-bundle-fingerprint` is required for custody review and must come
-from the independently retained out-of-band capture record. The
-`--internal-consistency-only` flag exists only for local diagnostics and does
-not satisfy Tier B custody review.
+`production-evidence-verify` reports the expected out-of-band fingerprint, the
+retained `bundle-manifest.json` fingerprint, and the recomputed current-files
+fingerprint. `--expected-bundle-fingerprint` is required for custody review and
+must come from the independently retained out-of-band capture record. The
+`--internal-consistency-only` flag exists only for local diagnostics and does not
+satisfy Tier B custody review.
 
 ## Acceptance
 

@@ -22,6 +22,9 @@ PROVIDER_MANIFEST_TEMPLATE = (
     REPO / "infra" / "templates" / "provider-manifest.production.template.json"
 )
 ENV_EXAMPLE = REPO / "infra" / "templates" / "production-render.env.example"
+OPERATOR_ENV_INVENTORY = (
+    REPO / "infra" / "templates" / "production-operator-env.inventory.md"
+)
 ENV_GUIDE = REPO / ".planning" / "ENV-AND-SECRETS.md"
 REQUIRED_PRODUCTION_INPUT_ARTIFACTS = [
     "auth-ops-bundle.json",
@@ -384,6 +387,22 @@ def test_renderer_placeholders_match_env_example_and_env_guide() -> None:
     assert placeholders == guide_vars
 
 
+def test_operator_env_inventory_covers_render_provider_and_runtime_names() -> None:
+    inventory_text = OPERATOR_ENV_INVENTORY.read_text(encoding="utf-8")
+    inventory_names = set(re.findall(r"`(MNEMOSYNE_[A-Z0-9_]+)`", inventory_text))
+
+    assert set(_placeholders()) <= inventory_names
+    assert set(_provider_manifest_env_refs()) <= inventory_names
+    assert {
+        "MNEMOSYNE_IDP_TOKEN",
+        "MNEMOSYNE_MCP_SESSION_TOKEN",
+        "MNEMOSYNE_MCP_TOKEN",
+        "MNEMOSYNE_POSTGRES_DSN",
+    } <= inventory_names
+    assert "embedding-provider-key-ref" not in inventory_text
+    assert "reranker-provider-key-ref" not in inventory_text
+
+
 def test_renderer_list_placeholders_includes_static_artifact_inventory() -> None:
     proc = subprocess.run(
         [*RENDERER_CMD, "--list-placeholders"],
@@ -486,6 +505,9 @@ def test_renderer_check_environment_reports_missing_without_output() -> None:
     assert "required_placeholders_present" in payload["validation_categories"]
     assert "external_input_artifact_custody" in payload["validation_categories"]
     assert any(
+        "production-operator-env.inventory.md" in step for step in payload["next_steps"]
+    )
+    assert any(
         "production-render.env.example" in step for step in payload["next_steps"]
     )
     assert any("production-evidence-verify" in step for step in payload["next_steps"])
@@ -494,6 +516,7 @@ def test_renderer_check_environment_reports_missing_without_output() -> None:
     assert payload["operator_readiness_files"] == {
         "env_template": "infra/templates/production-render.env.example",
         "input_artifacts_checklist": "infra/templates/production-input-artifacts.checklist.md",
+        "operator_env_inventory": "infra/templates/production-operator-env.inventory.md",
         "provider_manifest_template": "infra/templates/provider-manifest.production.template.json",
         "production_evidence_runbook": "infra/PRODUCTION-EVIDENCE.md",
     }

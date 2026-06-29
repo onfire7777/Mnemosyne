@@ -8,6 +8,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 RUNBOOK_DIR = REPO / ".planning" / "runbooks"
 INPUT_ARTIFACT_CHECKLIST = REPO / "infra" / "templates" / "production-input-artifacts.checklist.md"
+OPERATOR_ENV_INVENTORY = REPO / "infra" / "templates" / "production-operator-env.inventory.md"
 PROVIDER_MANIFEST_TEMPLATE = REPO / "infra" / "templates" / "provider-manifest.production.template.json"
 
 
@@ -238,7 +239,12 @@ def test_production_evidence_input_dir_is_not_capture_output() -> None:
 
 def test_provider_manifest_env_refs_are_documented_for_operators() -> None:
     env_doc = (REPO / ".planning" / "ENV-AND-SECRETS.md").read_text(encoding="utf-8")
-    missing = sorted(ref for ref in _provider_manifest_env_refs() if ref not in env_doc)
+    operator_inventory = OPERATOR_ENV_INVENTORY.read_text(encoding="utf-8")
+    missing = sorted(
+        ref
+        for ref in _provider_manifest_env_refs()
+        if ref not in env_doc or ref not in operator_inventory
+    )
 
     assert missing == []
 
