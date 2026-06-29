@@ -21,6 +21,7 @@ Options:
   --force              Overwrite OUT if it already exists.
   --list-placeholders  Print required MNEMOSYNE_PROD_* placeholder names as JSON.
   --check-environment  Validate required MNEMOSYNE_PROD_* keys without writing a manifest.
+                       Reports readiness docs, provider env refs, and input artifacts.
   -h, --help           Show this help text.
 USAGE
 }
@@ -132,10 +133,12 @@ validation_categories = [
 operator_readiness_files = {
     "env_template": "infra/templates/production-render.env.example",
     "input_artifacts_checklist": "infra/templates/production-input-artifacts.checklist.md",
+    "operator_env_inventory": "infra/templates/production-operator-env.inventory.md",
     "provider_manifest_template": "infra/templates/provider-manifest.production.template.json",
     "production_evidence_runbook": "infra/PRODUCTION-EVIDENCE.md",
 }
 next_steps = [
+    "Review infra/templates/production-operator-env.inventory.md for the full no-secret operator env name inventory.",
     "Copy infra/templates/production-render.env.example outside the repo and fill every MNEMOSYNE_PROD_* value.",
     "Set MNEMOSYNE_PROD_EVIDENCE_DIR to an absolute external directory containing the listed production input artifacts.",
     "Re-run infra/scripts/render-production-soak-manifest.sh --check-environment until ok=true.",

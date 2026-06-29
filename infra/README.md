@@ -53,6 +53,7 @@ infra/
   templates/
     production-soak-manifest.template.json
     production-render.env.example   # blank non-secret render inputs template
+    production-operator-env.inventory.md # no-secret operator env name inventory
     provider-manifest.production.template.json
     production-input-artifacts.checklist.md
   validate/
@@ -107,6 +108,8 @@ For production Tier-B evidence, render the production soak manifest outside the
 repository, then use the production runner:
 
 ```bash
+# Review the complete no-secret operator environment inventory first.
+open infra/templates/production-operator-env.inventory.md
 cp infra/templates/production-render.env.example \
   /secure/path/to/production-render.env
 # Fill /secure/path/to/production-render.env outside this repository.
@@ -159,7 +162,11 @@ runbook without treating the summary as a separate evidence source.
 `--check-environment` writes no files and prints no values. It always reports
 the required `MNEMOSYNE_PROD_*` key names, operator readiness file paths, and
 static template-derived input artifact inventory so operators can prepare the
-external custody directory before sourcing environment values. Once the
+external custody directory before sourcing environment values. The readiness
+file map includes `production-operator-env.inventory.md`, a names-only catalog
+covering render placeholders, provider-manifest references, and common runtime
+secret-custody variables so operators can prepare the right external env and
+secret-manager surfaces before the first check run. Once the
 environment is present, it verifies the external production input directory, the
 manifest-referenced relative input artifacts in that directory, and the resolved
 canonical C2PA verifier path before rendering. It also parses the external
@@ -207,9 +214,12 @@ that resolve outside the evidence bundle, and confirms retained check JSON
 matches the audited report before trusting the bundle. The offline
 `production-evidence-verify` command rechecks an already captured bundle's
 custody metadata, retained input-artifact bindings, and release-audit replay
-without contacting production or rerunning deployment soak. Custody review
-requires `--expected-bundle-fingerprint` from an independently retained
-out-of-band capture record; `--internal-consistency-only` is diagnostic-only.
+without contacting production or rerunning deployment soak. Its report exposes
+the reviewer-supplied expected fingerprint, the retained
+`bundle-manifest.json` fingerprint, and the recomputed current-files fingerprint
+so custody review can compare all three values directly. Custody review requires
+`--expected-bundle-fingerprint` from an independently retained out-of-band
+capture record; `--internal-consistency-only` is diagnostic-only.
 Use `--preflight-only` to validate and copy the rendered manifest without
 running production checks; preflight output plus `redaction-scan.json` is setup
 proof only, not production parity evidence. Successful full capture writes

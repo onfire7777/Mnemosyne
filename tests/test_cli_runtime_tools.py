@@ -6900,7 +6900,10 @@ def test_cli_production_evidence_verify_accepts_captured_bundle(tmp_path: Path) 
 
     assert report["ok"] is True
     assert report["bundle_fingerprint"] == bundle_fingerprint
+    assert report["expected_bundle_fingerprint"] == bundle_fingerprint
     assert report["expected_bundle_fingerprint_present"] is True
+    assert report["expected_bundle_fingerprint_source"] == "cli-argument"
+    assert report["actual_bundle_fingerprint"] == bundle_fingerprint
     assert report["artifact_count"] > 0
     assert report["checks"] == {
         "summary": True,
@@ -7010,9 +7013,39 @@ def test_cli_production_evidence_verify_requires_expected_bundle_fingerprint(
     assert result.returncode == 1
     assert report["ok"] is False
     assert report["bundle_fingerprint"] == bundle_fingerprint
+    assert report["expected_bundle_fingerprint"] is None
     assert report["expected_bundle_fingerprint_present"] is False
+    assert report["expected_bundle_fingerprint_source"] is None
+    assert report["actual_bundle_fingerprint"] == bundle_fingerprint
     assert report["internal_consistency_only"] is False
     assert "expected_bundle_fingerprint_missing" in codes
+
+
+def test_cli_production_evidence_verify_reports_expected_fingerprint_mismatch(
+    tmp_path: Path,
+) -> None:
+    bundle_dir, bundle_fingerprint = write_production_evidence_bundle(tmp_path)
+    wrong_fingerprint = "sha256:" + ("0" * 64)
+
+    result = run_raw_cli(
+        tmp_path / "verify-store.json",
+        "production-evidence-verify",
+        str(bundle_dir),
+        "--expected-bundle-fingerprint",
+        wrong_fingerprint,
+    )
+    report = json.loads(result.stdout)
+    codes = {finding["code"] for finding in report["findings"]}
+
+    assert wrong_fingerprint != bundle_fingerprint
+    assert result.returncode == 1
+    assert report["ok"] is False
+    assert report["bundle_fingerprint"] == bundle_fingerprint
+    assert report["expected_bundle_fingerprint"] == wrong_fingerprint
+    assert report["expected_bundle_fingerprint_present"] is True
+    assert report["expected_bundle_fingerprint_source"] == "cli-argument"
+    assert report["actual_bundle_fingerprint"] == bundle_fingerprint
+    assert "expected_bundle_fingerprint_mismatch" in codes
 
 
 def test_cli_production_evidence_verify_allows_explicit_internal_consistency_only(
@@ -7029,7 +7062,10 @@ def test_cli_production_evidence_verify_allows_explicit_internal_consistency_onl
 
     assert report["ok"] is True
     assert report["bundle_fingerprint"] == bundle_fingerprint
+    assert report["expected_bundle_fingerprint"] is None
     assert report["expected_bundle_fingerprint_present"] is False
+    assert report["expected_bundle_fingerprint_source"] is None
+    assert report["actual_bundle_fingerprint"] == bundle_fingerprint
     assert report["internal_consistency_only"] is True
     assert report["findings"] == []
 
@@ -7829,7 +7865,7 @@ def test_cli_production_evidence_verify_rejects_input_artifact_parent_mismatch(
 
 
 def test_cli_production_evidence_verify_rejects_tampered_bundle(tmp_path: Path) -> None:
-    bundle_dir, _bundle_fingerprint = write_production_evidence_bundle(tmp_path)
+    bundle_dir, bundle_fingerprint = write_production_evidence_bundle(tmp_path)
     release_audit_path = bundle_dir / "release-audit.json"
     release_audit = json.loads(release_audit_path.read_text(encoding="utf-8"))
     release_audit["ok"] = False
@@ -7845,6 +7881,8 @@ def test_cli_production_evidence_verify_rejects_tampered_bundle(tmp_path: Path) 
 
     assert result.returncode == 1
     assert payload["ok"] is False
+    assert payload["bundle_fingerprint"] == bundle_fingerprint
+    assert payload["actual_bundle_fingerprint"] != bundle_fingerprint
     assert "bundle_file_sha256_mismatch" in codes
     assert "bundle_fingerprint_mismatch" in codes
     assert "release_audit_not_ok" in codes

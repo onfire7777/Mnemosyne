@@ -10501,7 +10501,7 @@ def _verify_production_evidence_bundle_manifest(
     summary: Mapping[str, Any] | None,
     expected_bundle_fingerprint: str | None,
     findings: list[dict[str, Any]],
-) -> tuple[str | None, list[dict[str, Any]]]:
+) -> tuple[str | None, str | None, list[dict[str, Any]]]:
     if bundle_manifest.get("schema") != PRODUCTION_EVIDENCE_BUNDLE_SCHEMA:
         _production_evidence_finding(
             findings,
@@ -10547,7 +10547,7 @@ def _verify_production_evidence_bundle_manifest(
             "bundle_manifest_fingerprint_mismatch",
             "bundle-manifest.json fingerprint does not match its files payload",
         )
-    if expected_bundle_fingerprint and expected_bundle_fingerprint.strip() != manifest_fingerprint:
+    if expected_bundle_fingerprint and expected_bundle_fingerprint != manifest_fingerprint:
         _production_evidence_finding(
             findings,
             "expected_bundle_fingerprint_mismatch",
@@ -10657,7 +10657,7 @@ def _verify_production_evidence_bundle_manifest(
             "bundle_fingerprint_mismatch",
             "bundle-manifest.json fingerprint does not match current bundle files",
         )
-    return manifest_fingerprint, actual_files
+    return manifest_fingerprint, actual_fingerprint, actual_files
 
 
 def _production_evidence_summary_expected_paths(bundle_dir: Path) -> dict[str, Path]:
@@ -12453,6 +12453,9 @@ def _verify_production_evidence_release_audit(
 
 def cmd_production_evidence_verify(args: argparse.Namespace) -> None:
     bundle_dir = Path(args.bundle_dir).expanduser()
+    expected_bundle_fingerprint = (
+        args.expected_bundle_fingerprint.strip() if args.expected_bundle_fingerprint else None
+    )
     findings: list[dict[str, Any]] = []
     if bundle_dir.is_symlink():
         raise SystemExit("production evidence bundle path must not be a symlink")
@@ -12541,15 +12544,18 @@ def cmd_production_evidence_verify(args: argparse.Namespace) -> None:
         findings=findings,
     )
     bundle_fingerprint = None
+    actual_bundle_fingerprint = None
     artifact_count = 0
     actual_files: list[dict[str, Any]] = []
     if bundle_manifest is not None:
-        bundle_fingerprint, actual_files = _verify_production_evidence_bundle_manifest(
-            bundle_dir=resolved_bundle_dir,
-            bundle_manifest=bundle_manifest,
-            summary=summary,
-            expected_bundle_fingerprint=args.expected_bundle_fingerprint,
-            findings=findings,
+        bundle_fingerprint, actual_bundle_fingerprint, actual_files = (
+            _verify_production_evidence_bundle_manifest(
+                bundle_dir=resolved_bundle_dir,
+                bundle_manifest=bundle_manifest,
+                summary=summary,
+                expected_bundle_fingerprint=expected_bundle_fingerprint,
+                findings=findings,
+            )
         )
         artifact_count = len(actual_files)
     redaction_scan_ok = _verify_production_evidence_redaction_scan(
@@ -12566,7 +12572,7 @@ def cmd_production_evidence_verify(args: argparse.Namespace) -> None:
         summary=summary,
         findings=findings,
     )
-    expected_bundle_fingerprint_present = bool(args.expected_bundle_fingerprint)
+    expected_bundle_fingerprint_present = bool(expected_bundle_fingerprint)
     internal_consistency_only = bool(args.internal_consistency_only)
     if expected_bundle_fingerprint_present and internal_consistency_only:
         _production_evidence_finding(
@@ -12586,7 +12592,12 @@ def cmd_production_evidence_verify(args: argparse.Namespace) -> None:
         "ok": not findings,
         "bundle_dir": str(resolved_bundle_dir),
         "bundle_fingerprint": bundle_fingerprint,
+        "expected_bundle_fingerprint": expected_bundle_fingerprint,
         "expected_bundle_fingerprint_present": expected_bundle_fingerprint_present,
+        "expected_bundle_fingerprint_source": "cli-argument"
+        if expected_bundle_fingerprint
+        else None,
+        "actual_bundle_fingerprint": actual_bundle_fingerprint,
         "internal_consistency_only": internal_consistency_only,
         "artifact_count": artifact_count,
         "release_audit_fingerprint": recomputed_release_audit.get("fingerprint")

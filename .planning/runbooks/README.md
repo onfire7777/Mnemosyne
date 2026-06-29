@@ -14,6 +14,9 @@ CLI commands consumed by `deployment-soak` and `release-audit`.
   template operators copy outside the repo before filling render values;
   `MNEMOSYNE_PROD_EVIDENCE_DIR` must be an absolute external input-artifact path
   outside the repository.
+- `infra/templates/production-operator-env.inventory.md` - names-only operator
+  inventory covering render placeholders, provider manifest references, and
+  runtime/secret-custody env names; do not put values in this file.
 - `infra/templates/provider-manifest.production.template.json` - non-secret
   provider-check template copied to
   `$MNEMOSYNE_PROD_EVIDENCE_DIR/provider-manifest.production.json` outside the
