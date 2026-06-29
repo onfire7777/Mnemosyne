@@ -182,6 +182,7 @@ import json
 import hashlib
 import os
 import re
+import shlex
 import shutil
 import sys
 from pathlib import Path
@@ -558,6 +559,73 @@ def _validate_executable_tool_path(
     )
     reference["labels"].append(label)
 
+
+def _manifest_ref_value(value: object, *, label: str) -> str | None:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict) and set(value) == {"env"} and isinstance(value.get("env"), str):
+        env_name = str(value["env"])
+        env_value = os.environ.get(env_name)
+        if env_value is None or not env_value.strip():
+            errors.append(f"{label} references unset environment variable {env_name}")
+            return None
+        return env_value
+    errors.append(f"{label} command must be a string or {{\"env\": \"...\"}} reference")
+    return None
+
+
+def _provider_manifest_command_entries(value: object, *, path: str) -> list[tuple[str, object]]:
+    entries: list[tuple[str, object]] = []
+    if isinstance(value, dict):
+        for key, item in value.items():
+            child_path = f"{path}.{key}" if path else str(key)
+            if key == "command":
+                entries.append((child_path, item))
+            entries.extend(_provider_manifest_command_entries(item, path=child_path))
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            entries.extend(_provider_manifest_command_entries(item, path=f"{path}[{index}]"))
+    return entries
+
+
+def _validate_provider_manifest_command_tools(value: str, *, label: str) -> None:
+    if not value:
+        return
+    manifest_path = Path(value).expanduser()
+    try:
+        resolved_manifest = manifest_path.resolve(strict=True)
+    except (OSError, RuntimeError, ValueError):
+        return
+    try:
+        payload = json.loads(resolved_manifest.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        errors.append(f"{label} provider manifest cannot be inspected for command custody: {exc}")
+        return
+    if not isinstance(payload, dict):
+        errors.append(f"{label} provider manifest must be a JSON object for command custody")
+        return
+    for command_path, raw_command in _provider_manifest_command_entries(
+        payload,
+        path="provider-manifest.production.json",
+    ):
+        command_value = _manifest_ref_value(raw_command, label=command_path)
+        if command_value is None:
+            continue
+        try:
+            command_parts = shlex.split(command_value)
+        except ValueError as exc:
+            errors.append(f"{command_path} command cannot be parsed: {exc}")
+            continue
+        if not command_parts:
+            errors.append(f"{command_path} command must include an executable path")
+            continue
+        _validate_executable_tool_path(
+            command_parts[0],
+            option_name="provider-manifest.command",
+            label=command_path,
+        )
+
+
 def _extract_option_values(values: list[str], option_name: str, *, label: str) -> tuple[list[str], int]:
     extracted: list[str] = []
     occurrences = 0
@@ -691,6 +759,11 @@ for index, check in enumerate(checks, start=1):
                     option=option_name,
                     replacement_prefix=f"{option_name}=",
                 )
+                if option_name == "--provider-manifest":
+                    _validate_provider_manifest_command_tools(
+                        option_value,
+                        label=f"checks[{index}].{field} {option_name}",
+                    )
                 continue
             previous_option = None
             if value_index > 0:
@@ -721,6 +794,11 @@ for index, check in enumerate(checks, start=1):
                 label=f"checks[{index}].{field}",
                 option=previous_option or field,
             )
+            if previous_option == "--provider-manifest":
+                _validate_provider_manifest_command_tools(
+                    value,
+                    label=f"checks[{index}].{field} {previous_option}",
+                )
     provenance_args: list[str] = []
     provenance_global_args: list[str] = []
     if command == "provenance-trust-check":

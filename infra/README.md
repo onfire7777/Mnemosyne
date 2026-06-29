@@ -160,7 +160,10 @@ redacting values; `MNEMOSYNE_PROD_C2PA_TOOL` must be an absolute external
 executable outside the repository, reached without a symlink or non-canonical
 wrapper path. Production preflight records that
 executable path's size and SHA-256 digest in `preflight.json` without copying
-the executable into `input-artifacts/`. Its JSON includes
+the executable into `input-artifacts/`. Provider manifest `command` values are
+resolved the same way at capture time: the first command token must be an
+absolute external executable, and its digest metadata is retained under the
+provider-manifest field label. Its JSON includes
 `required_input_artifacts_detail` and `missing_input_artifacts_detail` entries
 with relative path, existence, check/command/option references, Tier-B lane,
 strict-audit row, and row-runbook routing so operators can repair missing inputs

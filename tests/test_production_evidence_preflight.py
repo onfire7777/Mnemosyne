@@ -1051,6 +1051,119 @@ def test_capture_production_evidence_preflight_does_not_snapshot_tool_executable
     assert redaction_scan["skipped_files"] == []
 
 
+def test_capture_production_evidence_records_provider_command_executable_digest(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "production-soak.json"
+    out_root = tmp_path / "capture"
+    tool = tmp_path / "bin" / "session-secret-provider"
+    tool.parent.mkdir()
+    tool_payload = b"#!/bin/sh\nexit 0\n"
+    tool.write_bytes(tool_payload)
+    tool.chmod(0o755)
+    provider_manifest = tmp_path / "provider-manifest.production.json"
+    provider_manifest.write_text(
+        json.dumps(
+            {
+                "providers": {
+                    "session_secret": {
+                        "command": {"env": "MNEMOSYNE_TEST_PROVIDER_COMMAND"}
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def add_provider_manifest(payload: dict[str, Any]) -> None:
+        check = next(
+            item for item in payload["checks"] if item["command"] == "provider-check"
+        )
+        check["args"] = ["--provider-manifest", str(provider_manifest)]
+
+    _minimal_production_manifest(manifest, mutate=add_provider_manifest)
+    env = os.environ.copy()
+    env["MNEMOSYNE_TEST_PROVIDER_COMMAND"] = f"{tool} --json"
+
+    proc = subprocess.run(
+        [
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
+            "--preflight-only",
+            str(manifest),
+            str(out_root),
+        ],
+        cwd=REPO,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    stdout = json.loads(proc.stdout)
+
+    assert stdout["required_input_artifacts"][0]["path"] == str(provider_manifest)
+    assert stdout["executable_tool_references"] == [
+        {
+            "option": "provider-manifest.command",
+            "path": str(tool),
+            "size_bytes": len(tool_payload),
+            "sha256": "sha256:" + sha256(tool_payload).hexdigest(),
+            "labels": [
+                "provider-manifest.production.json.providers.session_secret.command"
+            ],
+        }
+    ]
+
+
+def test_capture_production_evidence_rejects_relative_provider_command_executable(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "production-soak.json"
+    out_root = tmp_path / "capture"
+    provider_manifest = tmp_path / "provider-manifest.production.json"
+    provider_manifest.write_text(
+        json.dumps(
+            {
+                "providers": {
+                    "session_secret": {
+                        "command": {"env": "MNEMOSYNE_TEST_PROVIDER_COMMAND"}
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def add_provider_manifest(payload: dict[str, Any]) -> None:
+        check = next(
+            item for item in payload["checks"] if item["command"] == "provider-check"
+        )
+        check["args"] = ["--provider-manifest", str(provider_manifest)]
+
+    _minimal_production_manifest(manifest, mutate=add_provider_manifest)
+    env = os.environ.copy()
+    env["MNEMOSYNE_TEST_PROVIDER_COMMAND"] = "session-secret-provider --json"
+
+    proc = subprocess.run(
+        [
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
+            "--preflight-only",
+            str(manifest),
+            str(out_root),
+        ],
+        cwd=REPO,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert proc.returncode == 65
+    assert "relative executable path for provider-manifest.command" in proc.stderr
+
+
 def test_capture_production_evidence_preflight_rejects_relative_tool_executable(
     tmp_path: Path,
 ) -> None:
