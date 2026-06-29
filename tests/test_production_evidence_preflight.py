@@ -1128,7 +1128,7 @@ def test_capture_production_evidence_records_provider_command_executable_digest(
 
     _minimal_production_manifest(manifest, mutate=add_provider_manifest)
     env = os.environ.copy()
-    env["MNEMOSYNE_TEST_PROVIDER_COMMAND"] = f"{tool} --json"
+    env["MNEMOSYNE_TEST_PROVIDER_COMMAND"] = str(tool)
 
     proc = subprocess.run(
         [
@@ -1169,7 +1169,7 @@ def test_capture_production_evidence_records_provider_command_executable_digest(
     )
     assert (
         retained_provider_manifest["providers"]["session_secret"]["command"]
-        == f"{retained_tool} --json"
+        == str(retained_tool)
     )
 
 
@@ -1283,7 +1283,7 @@ def test_capture_production_evidence_rejects_relative_provider_command_executabl
     assert "relative executable path for provider-manifest.command" in proc.stderr
 
 
-def test_capture_production_evidence_rejects_provider_command_path_argument(
+def test_capture_production_evidence_rejects_provider_command_argument(
     tmp_path: Path,
 ) -> None:
     manifest = tmp_path / "production-soak.json"
@@ -1292,7 +1292,6 @@ def test_capture_production_evidence_rejects_provider_command_path_argument(
     tool.parent.mkdir()
     tool.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     tool.chmod(0o755)
-    config_path = tmp_path / "provider-config.json"
     provider_manifest = tmp_path / "provider-manifest.production.json"
     provider_manifest.write_text(
         json.dumps(
@@ -1315,7 +1314,7 @@ def test_capture_production_evidence_rejects_provider_command_path_argument(
 
     _minimal_production_manifest(manifest, mutate=add_provider_manifest)
     env = os.environ.copy()
-    env["MNEMOSYNE_TEST_PROVIDER_COMMAND"] = f"{tool} --config={config_path}"
+    env["MNEMOSYNE_TEST_PROVIDER_COMMAND"] = f"{tool} -m unretained_provider"
 
     proc = subprocess.run(
         [
@@ -1333,8 +1332,8 @@ def test_capture_production_evidence_rejects_provider_command_path_argument(
     )
 
     assert proc.returncode == 65
-    assert "provider-manifest.command argument 2 is path-like" in proc.stderr
-    assert str(config_path) not in proc.stderr
+    assert "provider-manifest.command must be a single external executable" in proc.stderr
+    assert "unretained_provider" not in proc.stderr
 
 
 def test_capture_production_evidence_preflight_rejects_relative_tool_executable(

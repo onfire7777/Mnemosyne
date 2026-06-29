@@ -605,11 +605,19 @@ def test_post_json_success_and_errors(monkeypatch: pytest.MonkeyPatch) -> None:
         _post_json("https://p.test", {}, None, 5.0)
 
     def _http_error(request: object, *, validated: object, timeout: float) -> _FakeResponse:
-        raise urllib.error.HTTPError("https://p.test", 503, "unavailable", {}, io.BytesIO(b"down"))
+        raise urllib.error.HTTPError(
+            "https://p.test",
+            503,
+            "unavailable",
+            {},
+            io.BytesIO(b"Authorization: Bearer opaque-secret"),
+        )
 
     monkeypatch.setattr("mnemosyne.retrieval.safe_urlopen", _http_error)
-    with pytest.raises(ValueError, match="HTTP 503"):
+    with pytest.raises(ValueError, match="HTTP 503.*response body omitted") as excinfo:
         _post_json("https://p.test", {}, None, 5.0)
+    assert "Authorization" not in str(excinfo.value)
+    assert "opaque-secret" not in str(excinfo.value)
 
     def _url_error(request: object, *, validated: object, timeout: float) -> _FakeResponse:
         raise urllib.error.URLError("connection refused")

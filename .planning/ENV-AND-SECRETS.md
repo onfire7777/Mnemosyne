@@ -27,9 +27,9 @@ row-local manifests.
 that external provider manifest when present, reports the referenced provider
 environment-variable names under `provider_manifest_env_refs`, and fails before
 capture if any referenced provider env var is unset. Values remain redacted.
-Provider manifest `command` env vars must resolve to command strings whose
-first token is an absolute, external, non-symlinked executable path; production
-capture records that executable's size and SHA-256 digest in
+Provider manifest `command` env vars must resolve to a single absolute,
+external, non-symlinked executable path with no arguments after `argv[0]`;
+production capture records that executable's size and SHA-256 digest in
 `preflight.json.executable_tool_references`, copies it into
 `OUT_ROOT/tool-artifacts/`, and rewrites the retained provider manifest
 snapshot to execute the retained copy.

@@ -7691,17 +7691,16 @@ def test_cli_production_evidence_verify_accepts_provider_command_executable_refe
     assert report["findings"] == []
 
 
-def test_cli_production_evidence_verify_rejects_provider_command_path_argument(
+def test_cli_production_evidence_verify_rejects_provider_command_argument(
     tmp_path: Path,
 ) -> None:
     bundle_dir, _bundle_fingerprint = write_production_evidence_bundle(tmp_path)
     tool = write_executable_fixture(tmp_path / "tools" / "session-secret-provider")
-    config_path = tmp_path / "tools" / "session-provider-config.json"
     label = "provider-manifest.production.json.providers.session_secret.command"
     preflight = update_provider_manifest_snapshot(
         bundle_dir,
         lambda payload: payload.setdefault("providers", {}).update(
-            {"session_secret": {"command": f"{tool} --config={config_path}"}}
+            {"session_secret": {"command": f"{tool} -m unretained_provider"}}
         ),
     )
     preflight["executable_tool_references"].append(
@@ -7738,8 +7737,8 @@ def test_cli_production_evidence_verify_rejects_provider_command_path_argument(
     assert result.returncode == 1
     assert payload["ok"] is False
     assert payload["checks"]["preflight"] is False
-    assert "preflight_provider_command_unretained_path_argument" in codes
-    assert str(config_path) not in result.stdout
+    assert "preflight_provider_command_unretained_argument" in codes
+    assert "unretained_provider" not in result.stdout
 
 
 def test_cli_production_evidence_verify_rejects_missing_provider_command_reference(

@@ -164,6 +164,7 @@ def build_parity_row_readiness(
                 {
                     "lane": lane,
                     "row": PARITY_ROUTES[lane]["row"],
+                    "strict_audit_row": PARITY_ROUTES[lane]["row"],
                     "title": PARITY_ROUTES[lane]["title"],
                     "runbook": PARITY_ROUTES[lane]["runbook"],
                     "required_input_artifacts": [],
@@ -208,6 +209,7 @@ def build_parity_row_readiness(
             {
                 "lane": lane,
                 "row": PARITY_ROUTES[lane]["row"],
+                "strict_audit_row": PARITY_ROUTES[lane]["row"],
                 "title": PARITY_ROUTES[lane]["title"],
                 "runbook": PARITY_ROUTES[lane]["runbook"],
                 "required_input_artifacts": [],

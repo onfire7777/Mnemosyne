@@ -186,10 +186,11 @@ deployed executable into `tool-artifacts/`, and rewrites the copied operator
 manifest to execute the retained snapshot. When the `MNEMOSYNE_C2PA_TOOL`
 fallback is needed, capture emits `tool-env.sh` with the retained path and
 sources it before `deployment-soak`. Provider manifest `command` values are
-resolved the same way at capture time: the first command token must be an
-absolute external executable, the retained provider manifest snapshot is
-rewritten to execute the retained tool artifact, and digest metadata is retained
-under the provider-manifest field label. Its JSON includes
+resolved the same way at capture time: the complete command string must be a
+single absolute external executable with no arguments after `argv[0]`, the
+retained provider manifest snapshot is rewritten to execute the retained tool
+artifact, and digest metadata is retained under the provider-manifest field
+label. Its JSON includes
 `required_input_artifacts_detail` and `missing_input_artifacts_detail` entries
 with relative path, existence, check/command/option references, Tier-B lane,
 strict-audit row, and row-runbook routing so operators can repair missing inputs

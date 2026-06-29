@@ -10791,39 +10791,6 @@ def _provider_manifest_command_labels(value: Any, *, path: str) -> set[str]:
     return labels
 
 
-def _provider_manifest_command_arg_looks_path(value: str) -> bool:
-    candidate = value
-    if value.startswith("-") and "=" in value:
-        candidate = value.split("=", 1)[1]
-    if not candidate or candidate.startswith("-"):
-        return False
-    if urlsplit(candidate).scheme:
-        return True
-    if candidate.startswith(("/", "./", "../", "~")):
-        return True
-    if "/" in candidate or "\\" in candidate:
-        return True
-    return candidate.lower().endswith(
-        (
-            ".py",
-            ".sh",
-            ".bash",
-            ".zsh",
-            ".json",
-            ".jsonl",
-            ".yaml",
-            ".yml",
-            ".toml",
-            ".ini",
-            ".cfg",
-            ".conf",
-            ".pem",
-            ".crt",
-            ".key",
-        )
-    )
-
-
 def _verify_provider_manifest_command_arguments(
     value: Any,
     *,
@@ -10850,13 +10817,12 @@ def _verify_provider_manifest_command_arguments(
                         f"{child_path} command cannot be parsed in the retained provider manifest: {exc}",
                     )
                     continue
-                for arg_index, part in enumerate(command_parts[1:], start=2):
-                    if _provider_manifest_command_arg_looks_path(part):
-                        _production_evidence_finding(
-                            findings,
-                            "preflight_provider_command_unretained_path_argument",
-                            f"{child_path} command argument {arg_index} is path-like and is not retained in tool-artifacts",
-                        )
+                if len(command_parts) > 1:
+                    _production_evidence_finding(
+                        findings,
+                        "preflight_provider_command_unretained_argument",
+                        f"{child_path} command must be a single retained executable with no arguments after argv[0]",
+                    )
             _verify_provider_manifest_command_arguments(
                 item,
                 path=child_path,
