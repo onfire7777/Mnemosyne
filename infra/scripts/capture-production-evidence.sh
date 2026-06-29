@@ -5,7 +5,7 @@ umask 077
 usage() {
   cat >&2 <<'USAGE'
 Usage:
-  infra/scripts/capture-production-evidence.sh --preflight-only SOAK_MANIFEST [OUT_ROOT]
+  infra/scripts/capture-production-evidence.sh --preflight-only SOAK_MANIFEST OUT_ROOT
   infra/scripts/capture-production-evidence.sh SOAK_MANIFEST OUT_ROOT
 
 Runs the existing production evidence path:
@@ -20,9 +20,8 @@ Runs the existing production evidence path:
   6. Redaction-scan generated evidence and fail on findings or skipped files.
   7. Write bundle-manifest.json and summary.json with bundle_fingerprint.
 
-For full production capture, OUT_ROOT is required and must be an explicit
-absolute external custody path outside the repository. Preflight-only may omit
-OUT_ROOT and then writes to a timestamped /tmp setup-proof directory.
+OUT_ROOT is required and must be an explicit absolute external custody path
+outside the repository for both preflight-only and full production capture.
 
 Reviewers can recheck a completed bundle offline with an independently retained
 bundle fingerprint recorded at capture time:
@@ -95,14 +94,9 @@ if [ ! -f "${MANIFEST}" ]; then
   exit 66
 fi
 
-STAMP="$(date -u +"%Y%m%dT%H%M%SZ")"
 if [ -z "${2:-}" ]; then
-  if [ "${PREFLIGHT_ONLY}" = "1" ]; then
-    OUT_ROOT_RAW="/tmp/mnemosyne-tierb-production-preflight-${STAMP}"
-  else
-    echo "ERROR: full production evidence output root is required; pass an explicit absolute external OUT_ROOT" >&2
-    exit 64
-  fi
+  echo "ERROR: production evidence output root is required; pass an explicit absolute external OUT_ROOT" >&2
+  exit 64
 else
   OUT_ROOT_RAW="${2}"
 fi

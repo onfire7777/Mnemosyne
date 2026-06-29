@@ -16,6 +16,7 @@ from mnemosyne.evidence_redaction import scan_evidence_paths, scan_evidence_tree
 
 
 REPO = Path(__file__).resolve().parents[1]
+CAPTURE_SCRIPT = REPO / "infra" / "scripts" / "capture-production-evidence.sh"
 
 
 def _minimal_production_manifest(
@@ -50,7 +51,9 @@ def _minimal_production_manifest(
 def test_redaction_scan_rejects_symlinked_tree_root(tmp_path: Path) -> None:
     external = tmp_path / "external"
     external.mkdir()
-    (external / "operator-note.txt").write_text("non-secret operator note\n", encoding="utf-8")
+    (external / "operator-note.txt").write_text(
+        "non-secret operator note\n", encoding="utf-8"
+    )
     linked_root = tmp_path / "linked-root"
     try:
         linked_root.symlink_to(external, target_is_directory=True)
@@ -74,7 +77,9 @@ def test_redaction_scan_rejects_symlinked_tree_root(tmp_path: Path) -> None:
 def test_redaction_tree_scan_rejects_symlinked_output_root(tmp_path: Path) -> None:
     external = tmp_path / "external-output-root"
     external.mkdir()
-    (external / "retained-artifact.txt").write_text("retained artifact\n", encoding="utf-8")
+    (external / "retained-artifact.txt").write_text(
+        "retained artifact\n", encoding="utf-8"
+    )
     out_root = tmp_path / "linked-output-root"
     try:
         out_root.symlink_to(external, target_is_directory=True)
@@ -106,7 +111,9 @@ def test_redaction_tree_scan_scans_nested_redaction_scan_files(tmp_path: Path) -
     assert str(root_scan) not in scan["scanned_files"]
 
 
-def test_redaction_scan_detects_dsn_vault_and_bearer_secret_shapes(tmp_path: Path) -> None:
+def test_redaction_scan_detects_dsn_vault_and_bearer_secret_shapes(
+    tmp_path: Path,
+) -> None:
     evidence = tmp_path / "evidence.txt"
     evidence.write_text(
         "\n".join(
@@ -127,14 +134,17 @@ def test_redaction_scan_detects_dsn_vault_and_bearer_secret_shapes(tmp_path: Pat
     assert {"url_userinfo", "vault_token", "authorization_bearer"} <= kinds
 
 
-def test_capture_production_evidence_preflight_only_stops_before_soak(tmp_path: Path) -> None:
+def test_capture_production_evidence_preflight_only_stops_before_soak(
+    tmp_path: Path,
+) -> None:
     manifest = tmp_path / "production-soak.json"
     out_root = tmp_path / "capture"
     _minimal_production_manifest(manifest)
 
     proc = subprocess.run(
         [
-            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
             "--preflight-only",
             str(manifest),
             str(out_root),
@@ -147,8 +157,12 @@ def test_capture_production_evidence_preflight_only_stops_before_soak(tmp_path: 
 
     stdout = json.loads(proc.stdout)
     preflight = json.loads((out_root / "preflight.json").read_text(encoding="utf-8"))
-    redaction_scan = json.loads((out_root / "redaction-scan.json").read_text(encoding="utf-8"))
-    copied_manifest = json.loads((out_root / "operator-soak-manifest.json").read_text(encoding="utf-8"))
+    redaction_scan = json.loads(
+        (out_root / "redaction-scan.json").read_text(encoding="utf-8")
+    )
+    copied_manifest = json.loads(
+        (out_root / "operator-soak-manifest.json").read_text(encoding="utf-8")
+    )
 
     assert stdout["ok"] is True
     assert stdout["preflight_only"] is True
@@ -158,20 +172,25 @@ def test_capture_production_evidence_preflight_only_stops_before_soak(tmp_path: 
     assert redaction_scan["ok"] is True
     assert redaction_scan["scope"] == "preflight"
     assert redaction_scan["findings"] == []
-    assert sorted(preflight["provided_commands"]) == sorted(PRODUCTION_RELEASE_REQUIRED_COMMANDS)
+    assert sorted(preflight["provided_commands"]) == sorted(
+        PRODUCTION_RELEASE_REQUIRED_COMMANDS
+    )
     assert not (out_root / "evidence").exists()
     assert not (out_root / "deployment-soak.stdout.json").exists()
     assert not (out_root / "release-audit.json").exists()
     assert out_root.stat().st_mode & 0o777 == 0o700
 
 
-def test_capture_production_evidence_full_capture_requires_explicit_output_root(tmp_path: Path) -> None:
+def test_capture_production_evidence_full_capture_requires_explicit_output_root(
+    tmp_path: Path,
+) -> None:
     manifest = tmp_path / "production-soak.json"
     _minimal_production_manifest(manifest)
 
     proc = subprocess.run(
         [
-            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
             str(manifest),
         ],
         cwd=REPO,
@@ -181,18 +200,46 @@ def test_capture_production_evidence_full_capture_requires_explicit_output_root(
     )
 
     assert proc.returncode == 64
-    assert "full production evidence output root is required" in proc.stderr
+    assert "production evidence output root is required" in proc.stderr
     assert proc.stdout == ""
 
 
-def test_capture_production_evidence_rejects_relative_manifest_path(tmp_path: Path) -> None:
+def test_capture_production_evidence_preflight_requires_explicit_output_root(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "production-soak.json"
+    _minimal_production_manifest(manifest)
+
+    proc = subprocess.run(
+        [
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
+            "--preflight-only",
+            str(manifest),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert proc.returncode == 64
+    assert "production evidence output root is required" in proc.stderr
+    assert "explicit absolute external OUT_ROOT" in proc.stderr
+    assert proc.stdout == ""
+
+
+def test_capture_production_evidence_rejects_relative_manifest_path(
+    tmp_path: Path,
+) -> None:
     manifest = tmp_path / "production-soak.json"
     out_root = tmp_path / "capture"
     _minimal_production_manifest(manifest)
 
     proc = subprocess.run(
         [
-            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
             "--preflight-only",
             manifest.name,
             str(out_root),
@@ -208,13 +255,16 @@ def test_capture_production_evidence_rejects_relative_manifest_path(tmp_path: Pa
     assert not out_root.exists()
 
 
-def test_capture_production_evidence_rejects_relative_output_root(tmp_path: Path) -> None:
+def test_capture_production_evidence_rejects_relative_output_root(
+    tmp_path: Path,
+) -> None:
     manifest = tmp_path / "production-soak.json"
     _minimal_production_manifest(manifest)
 
     proc = subprocess.run(
         [
-            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
             "--preflight-only",
             str(manifest),
             "capture",
@@ -237,7 +287,8 @@ def test_capture_production_evidence_rejects_malformed_manifest(tmp_path: Path) 
 
     proc = subprocess.run(
         [
-            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
             "--preflight-only",
             str(manifest),
             str(out_root),
@@ -253,7 +304,9 @@ def test_capture_production_evidence_rejects_malformed_manifest(tmp_path: Path) 
     assert not out_root.exists()
 
 
-def test_capture_production_evidence_rejects_repo_local_output_root(tmp_path: Path) -> None:
+def test_capture_production_evidence_rejects_repo_local_output_root(
+    tmp_path: Path,
+) -> None:
     manifest = tmp_path / "production-soak.json"
     out_root = REPO / ".tmp-production-evidence-repo-local"
     _minimal_production_manifest(manifest)
@@ -263,7 +316,8 @@ def test_capture_production_evidence_rejects_repo_local_output_root(tmp_path: Pa
     try:
         proc = subprocess.run(
             [
-                str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+                "/bin/bash",
+                str(CAPTURE_SCRIPT),
                 "--preflight-only",
                 str(manifest),
                 str(out_root),
@@ -274,14 +328,18 @@ def test_capture_production_evidence_rejects_repo_local_output_root(tmp_path: Pa
         )
 
         assert proc.returncode == 65
-        assert "refusing to write production evidence inside the repository" in proc.stderr
+        assert (
+            "refusing to write production evidence inside the repository" in proc.stderr
+        )
         assert not out_root.exists()
     finally:
         if out_root.exists():
             shutil.rmtree(out_root)
 
 
-def test_capture_production_evidence_rejects_symlinked_output_root(tmp_path: Path) -> None:
+def test_capture_production_evidence_rejects_symlinked_output_root(
+    tmp_path: Path,
+) -> None:
     manifest = tmp_path / "production-soak.json"
     target_root = tmp_path / "real-capture"
     out_root = tmp_path / "linked-capture"
@@ -294,7 +352,8 @@ def test_capture_production_evidence_rejects_symlinked_output_root(tmp_path: Pat
 
     proc = subprocess.run(
         [
-            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
             "--preflight-only",
             str(manifest),
             str(out_root),
@@ -309,7 +368,9 @@ def test_capture_production_evidence_rejects_symlinked_output_root(tmp_path: Pat
     assert not (target_root / "preflight.json").exists()
 
 
-def test_capture_production_evidence_rejects_repo_local_soak_manifest(tmp_path: Path) -> None:
+def test_capture_production_evidence_rejects_repo_local_soak_manifest(
+    tmp_path: Path,
+) -> None:
     manifest = REPO / ".tmp-production-soak-manifest.json"
     out_root = tmp_path / "capture"
     _minimal_production_manifest(manifest)
@@ -317,7 +378,8 @@ def test_capture_production_evidence_rejects_repo_local_soak_manifest(tmp_path: 
     try:
         proc = subprocess.run(
             [
-                str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+                "/bin/bash",
+                str(CAPTURE_SCRIPT),
                 "--preflight-only",
                 str(manifest),
                 str(out_root),
@@ -328,23 +390,31 @@ def test_capture_production_evidence_rejects_repo_local_soak_manifest(tmp_path: 
         )
 
         assert proc.returncode == 65
-        assert "refusing to use production soak manifest inside the repository" in proc.stderr
+        assert (
+            "refusing to use production soak manifest inside the repository"
+            in proc.stderr
+        )
         assert not out_root.exists()
     finally:
         if manifest.exists():
             manifest.unlink()
 
 
-def test_capture_production_evidence_preflight_rejects_unrendered_template(tmp_path: Path) -> None:
+def test_capture_production_evidence_preflight_rejects_unrendered_template(
+    tmp_path: Path,
+) -> None:
     manifest = tmp_path / "production-soak-manifest.template.json"
     manifest.write_text(
-        (REPO / "infra" / "templates" / "production-soak-manifest.template.json").read_text(encoding="utf-8"),
+        (
+            REPO / "infra" / "templates" / "production-soak-manifest.template.json"
+        ).read_text(encoding="utf-8"),
         encoding="utf-8",
     )
     out_root = tmp_path / "capture"
     proc = subprocess.run(
         [
-            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
             "--preflight-only",
             str(manifest),
             str(out_root),
@@ -359,7 +429,9 @@ def test_capture_production_evidence_preflight_rejects_unrendered_template(tmp_p
     assert not out_root.exists()
 
 
-def test_capture_production_evidence_rejects_existing_output_root(tmp_path: Path) -> None:
+def test_capture_production_evidence_rejects_existing_output_root(
+    tmp_path: Path,
+) -> None:
     manifest = tmp_path / "production-soak.json"
     out_root = tmp_path / "capture"
     out_root.mkdir()
@@ -368,7 +440,8 @@ def test_capture_production_evidence_rejects_existing_output_root(tmp_path: Path
 
     proc = subprocess.run(
         [
-            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
             "--preflight-only",
             str(manifest),
             str(out_root),
@@ -397,7 +470,8 @@ def test_capture_production_evidence_preflight_rejects_secret_option_name(
 
     proc = subprocess.run(
         [
-            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
             "--preflight-only",
             str(manifest),
             str(out_root),
@@ -425,7 +499,8 @@ def test_capture_production_evidence_preflight_rejects_secret_option_equals_form
 
     proc = subprocess.run(
         [
-            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
             "--preflight-only",
             str(manifest),
             str(out_root),
@@ -453,7 +528,8 @@ def test_capture_production_evidence_preflight_rejects_dsn_secret_option(
 
     proc = subprocess.run(
         [
-            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
             "--preflight-only",
             str(manifest),
             str(out_root),
@@ -483,7 +559,8 @@ def test_capture_production_evidence_preflight_rejects_url_userinfo(
 
     proc = subprocess.run(
         [
-            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
             "--preflight-only",
             str(manifest),
             str(out_root),
@@ -514,7 +591,8 @@ def test_capture_production_evidence_preflight_rejects_repo_local_artifact_path(
 
     proc = subprocess.run(
         [
-            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
             "--preflight-only",
             str(manifest),
             str(out_root),
@@ -542,7 +620,8 @@ def test_capture_production_evidence_preflight_rejects_relative_artifact_path(
 
     proc = subprocess.run(
         [
-            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
             "--preflight-only",
             str(manifest),
             str(out_root),
@@ -573,7 +652,8 @@ def test_capture_production_evidence_preflight_records_input_artifacts(
 
     proc = subprocess.run(
         [
-            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
             "--preflight-only",
             str(manifest),
             str(out_root),
@@ -598,7 +678,10 @@ def test_capture_production_evidence_preflight_records_input_artifacts(
         str(out_root / "input-artifacts")
     )
     assert input_artifacts[0]["files"][0]["source_path"] == str(artifact)
-    assert input_artifacts[0]["files"][0]["snapshot_path"] == input_artifacts[0]["snapshot_path"]
+    assert (
+        input_artifacts[0]["files"][0]["snapshot_path"]
+        == input_artifacts[0]["snapshot_path"]
+    )
     assert input_artifacts[0]["files"][0]["sha256"].startswith("sha256:")
     assert input_artifacts[0]["files"][0]["size_bytes"] == artifact.stat().st_size
     copied_manifest = json.loads(
@@ -634,7 +717,8 @@ def test_capture_production_evidence_preflight_rejects_symlinked_argument_artifa
 
     proc = subprocess.run(
         [
-            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
             "--preflight-only",
             str(manifest),
             str(out_root),
@@ -670,7 +754,8 @@ def test_capture_production_evidence_preflight_rejects_symlinked_manifest_artifa
 
     proc = subprocess.run(
         [
-            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
             "--preflight-only",
             str(manifest),
             str(out_root),
@@ -692,7 +777,9 @@ def test_capture_production_evidence_preflight_rejects_ops_report_package_output
     out_root = tmp_path / "capture"
 
     def add_ops_report_package_output(payload: dict[str, Any]) -> None:
-        check = next(item for item in payload["checks"] if item["command"] == "ops-report")
+        check = next(
+            item for item in payload["checks"] if item["command"] == "ops-report"
+        )
         check["args"] = [
             "--tenant",
             "tenant-prod",
@@ -704,7 +791,8 @@ def test_capture_production_evidence_preflight_rejects_ops_report_package_output
 
     proc = subprocess.run(
         [
-            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
             "--preflight-only",
             str(manifest),
             str(out_root),
@@ -735,7 +823,8 @@ def test_capture_production_evidence_preflight_records_manifest_input_artifacts(
 
     proc = subprocess.run(
         [
-            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
             "--preflight-only",
             str(manifest),
             str(out_root),
@@ -782,7 +871,8 @@ def test_capture_production_evidence_preflight_records_equals_form_input_artifac
 
     proc = subprocess.run(
         [
-            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
             "--preflight-only",
             str(manifest),
             str(out_root),
@@ -801,7 +891,9 @@ def test_capture_production_evidence_preflight_records_equals_form_input_artifac
 
     assert input_artifact["path"] == str(artifact)
     assert input_artifact["snapshot_path"].startswith(str(out_root / "input-artifacts"))
-    assert copied_manifest["checks"][0]["args"] == [f"--cases={input_artifact['snapshot_path']}"]
+    assert copied_manifest["checks"][0]["args"] == [
+        f"--cases={input_artifact['snapshot_path']}"
+    ]
 
 
 def test_capture_production_evidence_preflight_does_not_snapshot_tool_executable(
@@ -826,7 +918,8 @@ def test_capture_production_evidence_preflight_does_not_snapshot_tool_executable
 
     proc = subprocess.run(
         [
-            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
             "--preflight-only",
             str(manifest),
             str(out_root),
@@ -881,7 +974,8 @@ def test_capture_production_evidence_preflight_rejects_relative_tool_executable(
 
     proc = subprocess.run(
         [
-            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
             "--preflight-only",
             str(manifest),
             str(out_root),
@@ -917,7 +1011,8 @@ def test_capture_production_evidence_preflight_rejects_non_executable_tool(
 
     proc = subprocess.run(
         [
-            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
             "--preflight-only",
             str(manifest),
             str(out_root),
@@ -951,7 +1046,8 @@ def test_capture_production_evidence_preflight_rejects_missing_tool_executable(
 
     proc = subprocess.run(
         [
-            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
             "--preflight-only",
             str(manifest),
             str(out_root),
@@ -978,13 +1074,17 @@ def test_capture_production_evidence_preflight_rejects_repo_local_tool_executabl
             for item in payload["checks"]
             if item["command"] == "provenance-trust-check"
         )
-        check["args"] = ["--c2pa-tool", str(REPO / "infra" / "c2pa" / "c2pa-verify-host.sh")]
+        check["args"] = [
+            "--c2pa-tool",
+            str(REPO / "infra" / "c2pa" / "c2pa-verify-host.sh"),
+        ]
 
     _minimal_production_manifest(manifest, mutate=add_repo_local_tool_path)
 
     proc = subprocess.run(
         [
-            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
             "--preflight-only",
             str(manifest),
             str(out_root),
@@ -1017,7 +1117,8 @@ def test_capture_production_evidence_preflight_rejects_url_tool_executable(
 
     proc = subprocess.run(
         [
-            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
             "--preflight-only",
             str(manifest),
             str(out_root),
@@ -1074,7 +1175,8 @@ def test_capture_production_evidence_preflight_snapshots_provenance_suite_assets
 
     proc = subprocess.run(
         [
-            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
             "--preflight-only",
             str(manifest),
             str(out_root),
@@ -1115,9 +1217,10 @@ def test_capture_production_evidence_preflight_snapshots_provenance_suite_assets
     assert rewritten_asset_path != str(asset)
     assert suite_metadata["files"][0]["snapshot_path"] == str(suite_snapshot)
     assert suite_metadata["files"][0]["size_bytes"] == suite_snapshot.stat().st_size
-    assert suite_metadata["files"][0]["sha256"] == "sha256:" + sha256(
-        suite_snapshot.read_bytes()
-    ).hexdigest()
+    assert (
+        suite_metadata["files"][0]["sha256"]
+        == "sha256:" + sha256(suite_snapshot.read_bytes()).hexdigest()
+    )
     assert {Path(item["path"]).name for item in stdout["required_input_artifacts"]} == {
         "asset.json",
         "provenance-trust-suite.json",
@@ -1150,7 +1253,8 @@ def test_capture_production_evidence_preflight_rejects_symlinked_provenance_suit
 
     proc = subprocess.run(
         [
-            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
             "--preflight-only",
             str(manifest),
             str(out_root),
@@ -1206,7 +1310,8 @@ def test_capture_production_evidence_preflight_rejects_symlinked_suite_asset(
 
     proc = subprocess.run(
         [
-            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
             "--preflight-only",
             str(manifest),
             str(out_root),
@@ -1257,7 +1362,8 @@ def test_capture_production_evidence_preflight_rewrites_equals_form_suite_path(
 
     proc = subprocess.run(
         [
-            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
             "--preflight-only",
             str(manifest),
             str(out_root),
@@ -1310,7 +1416,8 @@ def test_capture_production_evidence_preflight_rejects_suite_json(
 
     proc = subprocess.run(
         [
-            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
             "--preflight-only",
             str(manifest),
             str(out_root),
@@ -1343,7 +1450,8 @@ def test_capture_production_evidence_preflight_rejects_bare_suite_json(
 
     proc = subprocess.run(
         [
-            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
             "--preflight-only",
             str(manifest),
             str(out_root),
@@ -1381,7 +1489,8 @@ def test_capture_production_evidence_preflight_rejects_bare_suite_option(
 
     proc = subprocess.run(
         [
-            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
             "--preflight-only",
             str(manifest),
             str(out_root),
@@ -1419,7 +1528,8 @@ def test_capture_production_evidence_preflight_rejects_relative_suite_path(
 
     proc = subprocess.run(
         [
-            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
             "--preflight-only",
             str(manifest),
             str(out_root),
@@ -1452,7 +1562,8 @@ def test_capture_production_evidence_preflight_rejects_invalid_suite_path_bytes(
 
     proc = subprocess.run(
         [
-            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
             "--preflight-only",
             str(manifest),
             str(out_root),
@@ -1486,7 +1597,8 @@ def test_capture_production_evidence_preflight_rejects_invalid_direct_tool_path_
 
     proc = subprocess.run(
         [
-            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
             "--preflight-only",
             str(manifest),
             str(out_root),
@@ -1534,7 +1646,8 @@ def test_capture_production_evidence_preflight_rejects_suite_repo_local_tool(
 
     proc = subprocess.run(
         [
-            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
             "--preflight-only",
             str(manifest),
             str(out_root),
@@ -1588,7 +1701,8 @@ def test_capture_production_evidence_preflight_rejects_suite_repo_local_asset(
 
     proc = subprocess.run(
         [
-            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
             "--preflight-only",
             str(manifest),
             str(out_root),
@@ -1635,7 +1749,8 @@ def test_capture_production_evidence_preflight_rejects_invalid_suite_tool_path_b
 
     proc = subprocess.run(
         [
-            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
             "--preflight-only",
             str(manifest),
             str(out_root),
@@ -1667,7 +1782,9 @@ def test_capture_production_evidence_preflight_rejects_invalid_suite_asset_path_
             {
                 "name": "production-c2pa",
                 "tool": str(tool),
-                "cases": [{"id": "asset-bound", "asset_path": f"{tmp_path}\u0000asset.json"}],
+                "cases": [
+                    {"id": "asset-bound", "asset_path": f"{tmp_path}\u0000asset.json"}
+                ],
             }
         ),
         encoding="utf-8",
@@ -1685,7 +1802,8 @@ def test_capture_production_evidence_preflight_rejects_invalid_suite_asset_path_
 
     proc = subprocess.run(
         [
-            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
             "--preflight-only",
             str(manifest),
             str(out_root),
@@ -1730,7 +1848,8 @@ def test_capture_production_evidence_preflight_rejects_suite_in_global_args(
 
     proc = subprocess.run(
         [
-            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
             "--preflight-only",
             str(manifest),
             str(out_root),
@@ -1774,7 +1893,8 @@ def test_capture_production_evidence_preflight_rejects_c2pa_tool_in_global_args(
 
     proc = subprocess.run(
         [
-            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
             "--preflight-only",
             str(manifest),
             str(out_root),
@@ -1803,7 +1923,8 @@ def test_capture_production_evidence_preflight_rejects_missing_input_artifact(
 
     proc = subprocess.run(
         [
-            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
             "--preflight-only",
             str(manifest),
             str(out_root),
@@ -1843,7 +1964,8 @@ def test_capture_production_evidence_preflight_rejects_secret_input_artifact(
 
     proc = subprocess.run(
         [
-            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
             "--preflight-only",
             str(manifest),
             str(out_root),
@@ -1875,7 +1997,8 @@ def test_capture_production_evidence_preflight_rejects_unscanned_input_artifact(
 
     proc = subprocess.run(
         [
-            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
             "--preflight-only",
             str(manifest),
             str(out_root),
@@ -1906,7 +2029,8 @@ def test_capture_production_evidence_preflight_rejects_empty_input_directory(
 
     proc = subprocess.run(
         [
-            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
             "--preflight-only",
             str(manifest),
             str(out_root),
@@ -1938,7 +2062,8 @@ def test_capture_production_evidence_preflight_rejects_symlinked_input_artifact(
 
     proc = subprocess.run(
         [
-            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
             "--preflight-only",
             str(manifest),
             str(out_root),
@@ -1967,7 +2092,8 @@ def test_capture_production_evidence_preflight_rejects_duplicate_commands(
 
     proc = subprocess.run(
         [
-            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
             "--preflight-only",
             str(manifest),
             str(out_root),
@@ -2066,7 +2192,8 @@ exec "$REAL_PYTHON" "$@"
 
     proc = subprocess.run(
         [
-            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
             str(manifest),
             str(out_root),
         ],
@@ -2112,7 +2239,8 @@ def test_capture_production_evidence_preflight_rejects_unknown_commands(
 
     proc = subprocess.run(
         [
-            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
             "--preflight-only",
             str(manifest),
             str(out_root),
@@ -2148,7 +2276,8 @@ def test_capture_production_evidence_preflight_rejects_jwt_in_manifest_args(
 
     proc = subprocess.run(
         [
-            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
             "--preflight-only",
             str(manifest),
             str(out_root),
@@ -2180,7 +2309,8 @@ def test_capture_production_evidence_preflight_rejects_private_key_in_manifest_a
 
     proc = subprocess.run(
         [
-            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
             "--preflight-only",
             str(manifest),
             str(out_root),
@@ -2275,7 +2405,8 @@ exec "$REAL_PYTHON" "$@"
 
     proc = subprocess.run(
         [
-            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
             str(manifest),
             str(out_root),
         ],
@@ -2285,9 +2416,14 @@ exec "$REAL_PYTHON" "$@"
         env={**os.environ, "MNEMOSYNE_PYTHON": str(fake_python)},
     )
 
-    redaction_scan = json.loads((out_root / "redaction-scan.json").read_text(encoding="utf-8"))
+    redaction_scan = json.loads(
+        (out_root / "redaction-scan.json").read_text(encoding="utf-8")
+    )
     assert proc.returncode == 65
-    assert "high-confidence secret material found in the production evidence bundle" in proc.stderr
+    assert (
+        "high-confidence secret material found in the production evidence bundle"
+        in proc.stderr
+    )
     assert "jwt" in proc.stderr
     assert redaction_scan["ok"] is False
     assert redaction_scan["findings"][0]["kind"] == "jwt"
@@ -2367,7 +2503,8 @@ exec "$REAL_PYTHON" "$@"
 
     proc = subprocess.run(
         [
-            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
             str(manifest),
             str(out_root),
         ],
@@ -2377,11 +2514,18 @@ exec "$REAL_PYTHON" "$@"
         env={**os.environ, "MNEMOSYNE_PYTHON": str(fake_python)},
     )
 
-    redaction_scan = json.loads((out_root / "redaction-scan.json").read_text(encoding="utf-8"))
+    redaction_scan = json.loads(
+        (out_root / "redaction-scan.json").read_text(encoding="utf-8")
+    )
     assert proc.returncode == 65
-    assert "high-confidence secret material found in the production evidence bundle" in proc.stderr
+    assert (
+        "high-confidence secret material found in the production evidence bundle"
+        in proc.stderr
+    )
     assert redaction_scan["ok"] is False
-    assert redaction_scan["findings"][0]["source"].endswith("evidence/redaction-scan.json")
+    assert redaction_scan["findings"][0]["source"].endswith(
+        "evidence/redaction-scan.json"
+    )
     assert redaction_scan["findings"][0]["kind"] == "jwt"
     assert not (out_root / "summary.json").exists()
 
@@ -2471,7 +2615,8 @@ exec "$REAL_PYTHON" "$@"
 
     proc = subprocess.run(
         [
-            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
             str(manifest),
             str(out_root),
         ],
@@ -2481,7 +2626,9 @@ exec "$REAL_PYTHON" "$@"
         env={**os.environ, "MNEMOSYNE_PYTHON": str(fake_python)},
     )
 
-    redaction_scan = json.loads((out_root / "redaction-scan.json").read_text(encoding="utf-8"))
+    redaction_scan = json.loads(
+        (out_root / "redaction-scan.json").read_text(encoding="utf-8")
+    )
     assert proc.returncode == 65
     assert "production evidence bundle contains unscanned files" in proc.stderr
     assert "escaped-generated-artifact.txt" in proc.stderr
@@ -2574,7 +2721,8 @@ exec "$REAL_PYTHON" "$@"
 
     proc = subprocess.run(
         [
-            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
             str(manifest),
             str(out_root),
         ],
@@ -2584,7 +2732,9 @@ exec "$REAL_PYTHON" "$@"
         env={**os.environ, "MNEMOSYNE_PYTHON": str(fake_python)},
     )
 
-    redaction_scan = json.loads((out_root / "redaction-scan.json").read_text(encoding="utf-8"))
+    redaction_scan = json.loads(
+        (out_root / "redaction-scan.json").read_text(encoding="utf-8")
+    )
     assert proc.returncode == 65
     assert "production evidence bundle contains unscanned files" in proc.stderr
     assert "unscanned.bin" in proc.stderr
@@ -2673,7 +2823,8 @@ exec "$REAL_PYTHON" "$@"
 
     proc = subprocess.run(
         [
-            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
             str(manifest),
             str(out_root),
         ],
@@ -2686,7 +2837,9 @@ exec "$REAL_PYTHON" "$@"
 
     stdout = json.loads(proc.stdout)
     summary = json.loads((out_root / "summary.json").read_text(encoding="utf-8"))
-    bundle_manifest = json.loads((out_root / "bundle-manifest.json").read_text(encoding="utf-8"))
+    bundle_manifest = json.loads(
+        (out_root / "bundle-manifest.json").read_text(encoding="utf-8")
+    )
     bundle_paths = {item["path"] for item in bundle_manifest["files"]}
 
     assert stdout == summary
@@ -2719,7 +2872,9 @@ exec "$REAL_PYTHON" "$@"
     assert "evidence/soak-manifest-path.txt" in bundle_paths
     assert "bundle-manifest.json" not in bundle_paths
     assert "summary.json" not in bundle_paths
-    assert all(item["sha256"].startswith("sha256:") for item in bundle_manifest["files"])
+    assert all(
+        item["sha256"].startswith("sha256:") for item in bundle_manifest["files"]
+    )
     assert (out_root / "evidence" / "soak-manifest-path.txt").read_text(
         encoding="utf-8"
     ).strip() == str(out_root / "operator-soak-manifest.json")

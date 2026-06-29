@@ -26,8 +26,7 @@ def test_every_row_runbook_points_to_universal_preflight_capture_flow() -> None:
         assert "infra/PRODUCTION-EVIDENCE.md" in text, path
         assert (
             'infra/scripts/capture-production-evidence.sh --preflight-only "$SOAK_MANIFEST" '
-            '"$PRECHECK_OUTPUT_ROOT"'
-            in text
+            '"$PRECHECK_OUTPUT_ROOT"' in text
         ), path
         assert "setup proof only" in text, path
         assert "does not flip this row to Done" in text, path
@@ -38,8 +37,7 @@ def test_every_row_runbook_points_to_universal_preflight_capture_flow() -> None:
         assert (
             "Use absolute external paths outside the repo for `SOAK_MANIFEST`, "
             "`PRECHECK_OUTPUT_ROOT`, `OUT_ROOT`, and the "
-            "`MNEMOSYNE_PROD_EVIDENCE_DIR` input-artifact directory."
-            in text
+            "`MNEMOSYNE_PROD_EVIDENCE_DIR` input-artifact directory." in text
         ), path
         assert "reviewers must run" in text, path
         assert "retained `preflight.json`" in text, path
@@ -49,15 +47,17 @@ def test_every_row_runbook_points_to_universal_preflight_capture_flow() -> None:
         assert "`operator-soak-manifest.json`" in text, path
         assert "`input-artifacts/` custody" in text, path
         assert "source/operator command-profile agreement" in text, path
-        assert "offline custody verification must pass before this row can flip Done" in text, path
+        assert (
+            "offline custody verification must pass before this row can flip Done"
+            in text
+        ), path
         assert "`release_audit_ok=true`" in text, path
         assert "`redaction_scan_ok=true`" in text, path
         assert "`bundle-manifest.json`/fingerprint" in text, path
         assert "passing `production-evidence-verify`" in text, path
         assert (
             'release-audit --evidence-manifest "$OUT_ROOT/evidence/manifest.json" '
-            "--require-production-validated --require-provider-forbid-local"
-            in text
+            "--require-production-validated --require-provider-forbid-local" in text
         ), path
 
 
@@ -75,10 +75,15 @@ def test_runbook_index_and_ops_handoff_document_preflight_scope() -> None:
         assert "capture-production-evidence.sh" in text, path
         assert "absolute external" in text, path
         assert "outside the repository" in text, path
-        assert (
-            "release-audit --evidence-manifest"
-            in normalized
-        ), path
+        assert "release-audit --evidence-manifest" in normalized, path
+
+    ops_handoff = (REPO / ".planning" / "OPS-HANDOFF-AND-OWNERSHIP.md").read_text(
+        encoding="utf-8",
+    )
+    assert (
+        'capture-production-evidence.sh --preflight-only "$SOAK_MANIFEST" '
+        '"$PRECHECK_OUTPUT_ROOT"' in ops_handoff
+    )
 
 
 def test_production_evidence_docs_require_manifest_bound_release_audit() -> None:
@@ -171,7 +176,12 @@ def test_roadmap_tier_b_table_routes_rows_through_full_production_manifest() -> 
     )
     assert "| # | Parity row | Real infra to stand up | Canonical capture |" in roadmap
     assert "Capture command" not in roadmap
-    assert roadmap.count("Full 28-command production manifest via `infra/PRODUCTION-EVIDENCE.md`") == 10
+    assert (
+        roadmap.count(
+            "Full 28-command production manifest via `infra/PRODUCTION-EVIDENCE.md`"
+        )
+        == 10
+    )
 
     strict_rows = [
         _markdown_table_cells(line)[0]
@@ -188,7 +198,10 @@ def test_roadmap_tier_b_table_routes_rows_through_full_production_manifest() -> 
         and _markdown_table_cells(line)[0][1:].isdigit()
     ]
     runbook_rows = [
-        path.read_text(encoding="utf-8").splitlines()[0].removeprefix("# ").split(" - ", 1)[1]
+        path.read_text(encoding="utf-8")
+        .splitlines()[0]
+        .removeprefix("# ")
+        .split(" - ", 1)[1]
         for path in sorted(RUNBOOK_DIR.glob("row-*.md"))
     ]
 
