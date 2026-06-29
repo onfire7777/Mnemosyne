@@ -29,8 +29,10 @@ bundle fingerprint recorded at capture time:
   PYTHON="${PYTHON:-$(if [ -x .venv/bin/python ]; then printf '%s' .venv/bin/python; else command -v python3; fi)}"
   BUNDLE_DIR=OUT_ROOT
   EXPECTED_BUNDLE_FINGERPRINT=sha256:...  # external ticket/log value, not read from this bundle
+  VERIFY_REPORT=/secure/path/to/mnemosyne-production-evidence-verify.json
   "$PYTHON" -m mnemosyne.cli production-evidence-verify "$BUNDLE_DIR" \
-    --expected-bundle-fingerprint "$EXPECTED_BUNDLE_FINGERPRINT"
+    --expected-bundle-fingerprint "$EXPECTED_BUNDLE_FINGERPRINT" \
+    --report-output "$VERIFY_REPORT"
 This is custody review only; it does not rerun production checks or flip rows.
 
 The manifest must contain validation_scope.production_validated=true,

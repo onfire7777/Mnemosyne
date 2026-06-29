@@ -147,6 +147,20 @@
         "env": "MNEMOSYNE_SESSION_SECRET_COMMAND"
       },
       "timeout_seconds": 30
+    },
+    "residency_policy": {
+      "allowed_residencies": {
+        "env": "MNEMOSYNE_ALLOWED_RESIDENCIES"
+      },
+      "runtime_residency": {
+        "env": "MNEMOSYNE_RUNTIME_RESIDENCY"
+      },
+      "allowed_residency_transfers": {
+        "env": "MNEMOSYNE_ALLOWED_RESIDENCY_TRANSFERS"
+      },
+      "require_runtime_residency": {
+        "env": "MNEMOSYNE_REQUIRE_RUNTIME_RESIDENCY"
+      }
     }
   }
 }

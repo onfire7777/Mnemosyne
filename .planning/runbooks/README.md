@@ -96,12 +96,16 @@ CLI commands consumed by `deployment-soak` and `release-audit`.
   `PYTHON="${PYTHON:-$(if [ -x .venv/bin/python ]; then printf '%s' .venv/bin/python; else command -v python3; fi)}"`;
   set `BUNDLE_DIR=/secure/path/to/mnemosyne-production-evidence`; set
   `EXPECTED_BUNDLE_FINGERPRINT=sha256:...` from the operator's out-of-band
-  capture record, not from `summary.json` inside the bundle under review; then
+  capture record, not from `summary.json` inside the bundle under review; set
+  `VERIFY_REPORT=/secure/path/to/mnemosyne-production-evidence-verify.json`
+  outside the bundle under review; then
   `"$PYTHON" -m mnemosyne.cli production-evidence-verify "$BUNDLE_DIR"
-  --expected-bundle-fingerprint "$EXPECTED_BUNDLE_FINGERPRINT"` can recheck
-  the completed bundle offline, including fresh redaction recompute and
+  --expected-bundle-fingerprint "$EXPECTED_BUNDLE_FINGERPRINT" --report-output "$VERIFY_REPORT"`
+  can recheck the completed bundle offline and retain a
+  no-overwrite reviewer report, including fresh redaction recompute and
   `scanned_files` coverage against `bundle-manifest.json`, retained
-  `source-soak-manifest.json` custody, and source/operator command-profile
-  agreement.
+  `source-soak-manifest.json` custody, source/operator command-profile
+  agreement, diagnostic-only `reviewer_guidance`, and row review sourced from
+  retained `preflight.json.parity_row_readiness`.
   This is custody review only; it does not contact production, rerun
   `deployment-soak`, create evidence, or replace operator capture.

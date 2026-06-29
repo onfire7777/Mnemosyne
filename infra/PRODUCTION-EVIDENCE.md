@@ -105,9 +105,11 @@ BUNDLE_DIR=/secure/path/to/mnemosyne-production-evidence
 # Set this from the operator's out-of-band capture record, not from summary.json
 # inside the bundle under review.
 EXPECTED_BUNDLE_FINGERPRINT=sha256:...
+VERIFY_REPORT=/secure/path/to/mnemosyne-production-evidence-verify.json
 "$PYTHON" -m mnemosyne.cli production-evidence-verify \
   "$BUNDLE_DIR" \
-  --expected-bundle-fingerprint "$EXPECTED_BUNDLE_FINGERPRINT"
+  --expected-bundle-fingerprint "$EXPECTED_BUNDLE_FINGERPRINT" \
+  --report-output "$VERIFY_REPORT"
 ```
 
 This command verifies `summary.json`, `redaction-scan.json`,
@@ -142,10 +144,14 @@ not contact production
 services, does not run `deployment-soak`, does not create production evidence,
 and cannot flip any strict-audit row to Done unless the bundle was originally
 captured by the production wrapper against deployed infrastructure.
-`production-evidence-verify` reports the expected out-of-band fingerprint, the
-retained `bundle-manifest.json` fingerprint, and the recomputed current-files
-fingerprint. `--expected-bundle-fingerprint` is required for custody review and
-must come from the independently retained out-of-band capture record. The
+`production-evidence-verify` reports the expected out-of-band fingerprint,
+retained `bundle-manifest.json` fingerprint, recomputed current-files
+fingerprint, diagnostic-only `reviewer_guidance`, and retained preflight row
+review. When `--report-output` is supplied it writes the same JSON report to an
+absolute, non-existing path outside the bundle under review so the review
+artifact can be retained without changing the bundle fingerprint.
+`--expected-bundle-fingerprint` is required for custody review and must come
+from the independently retained out-of-band capture record. The
 `--internal-consistency-only` flag exists only for local diagnostics and does not
 satisfy Tier B custody review.
 

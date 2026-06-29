@@ -246,7 +246,11 @@
         "--require-provider-check",
         "summarizer",
         "--require-provider-check",
-        "entity_resolver"
+        "entity_resolver",
+        "--require-provider-check",
+        "lesson_distiller",
+        "--require-provider-check",
+        "skill_inducer"
       ],
       "timeout": 120
     },

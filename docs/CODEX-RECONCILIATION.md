@@ -11,6 +11,8 @@ Use these current sources instead:
 - [ROADMAP-TO-100.md](/Users/admin/Mnemosyne/docs/ROADMAP-TO-100.md)
 - [STRICT-BLUEPRINT-PARITY-AUDIT.md](/Users/admin/Mnemosyne/.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md)
 - [STATE.md](/Users/admin/Mnemosyne/.planning/STATE.md)
+- [PRODUCTION-EVIDENCE.md](/Users/admin/Mnemosyne/infra/PRODUCTION-EVIDENCE.md)
+- [Runbook index](/Users/admin/Mnemosyne/.planning/runbooks/README.md)
 
 ## Current Reconciliation State
 
@@ -60,3 +62,8 @@ real deployed infrastructure:
 Do not use this archived file to reopen already-closed Tier A items. New work
 should either capture real production evidence through the existing gates or
 address a concrete new strict-audit finding with current evidence.
+Current Tier-B custody review includes retained `input-artifacts/`,
+`tool-artifacts/`, `summary.json.offline_verify`, retained preflight
+row-readiness routing, verifier `row_review.rows[]`, and an external
+no-overwrite verifier `--report-output` artifact. Use the production evidence
+guide and row runbooks for those details.

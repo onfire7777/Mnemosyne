@@ -11116,6 +11116,146 @@ def _production_evidence_row_review(preflight: Mapping[str, Any] | None) -> dict
     }
 
 
+def _production_evidence_reviewer_guidance(
+    *,
+    findings: list[dict[str, Any]],
+    row_review: Mapping[str, Any],
+    internal_consistency_only: bool,
+) -> dict[str, Any]:
+    codes = {
+        code
+        for finding in findings
+        if isinstance((code := finding.get("code")), str)
+    }
+    incomplete_rows = row_review.get("incomplete_rows")
+    incomplete_row_count = len(incomplete_rows) if isinstance(incomplete_rows, list) else 0
+    next_steps: list[str] = []
+    blocked_reason = None
+
+    if "preflight_completion_missing" in codes:
+        blocked_reason = "preflight_only_bundle"
+        next_steps.append(
+            "This bundle is setup proof only. Run infra/scripts/capture-production-evidence.sh "
+            "without --preflight-only against the production soak manifest to capture completed evidence."
+        )
+
+    if "expected_bundle_fingerprint_missing" in codes:
+        blocked_reason = blocked_reason or "missing_expected_fingerprint"
+        next_steps.append(
+            "Provide --expected-bundle-fingerprint from the independently retained out-of-band "
+            "operator capture record. Do not copy the value from the bundle under review."
+        )
+
+    if internal_consistency_only:
+        next_steps.append(
+            "Internal-consistency mode is diagnostic only. For custody review, rerun with "
+            "--expected-bundle-fingerprint from the external capture record."
+        )
+
+    if incomplete_row_count:
+        blocked_reason = blocked_reason or "evidence_integrity_failure"
+        next_steps.append(
+            "Fix the row-local missing input artifacts or errors listed in row_review.incomplete_rows "
+            "and retained preflight.json.parity_row_readiness, then rerun --check-environment or "
+            "preflight capture before full production capture."
+        )
+
+    if any(code.startswith("redaction_scan") or code.startswith("evidence_manifest_redaction") for code in codes):
+        blocked_reason = blocked_reason or "evidence_integrity_failure"
+        next_steps.append(
+            "Do not publish this bundle. Remove or redact the flagged retained artifacts, rerun "
+            "production capture, and verify the new bundle with a fresh external fingerprint."
+        )
+
+    if findings and blocked_reason is None:
+        blocked_reason = "evidence_integrity_failure"
+    if findings and not next_steps:
+        next_steps.append(
+            "Repair the listed verifier findings at the production capture source, rerun the "
+            "capture wrapper, retain the new external bundle fingerprint, and rerun verification."
+        )
+    if not findings and not next_steps:
+        next_steps.append(
+            "Custody verification passed. Review row_review.rows[] and release-audit evidence "
+            "before updating any strict-audit row status."
+        )
+
+    return {
+        "blocked_reason": blocked_reason,
+        "next_steps": next_steps,
+        "diagnostic_only": True,
+    }
+
+
+def _write_production_evidence_verify_report(
+    *,
+    report: Mapping[str, Any],
+    report_output: str | None,
+    bundle_dir: Path,
+) -> None:
+    if not report_output:
+        return
+    report_path = Path(report_output).expanduser()
+    if not report_path.is_absolute():
+        raise SystemExit("production evidence verify report output must be an absolute path")
+    if report_path.is_symlink():
+        raise SystemExit("production evidence verify report output must not be a symlink")
+    if report_path.exists():
+        raise SystemExit("production evidence verify report output must not already exist")
+    parent = report_path.parent
+    if parent.is_symlink():
+        raise SystemExit("production evidence verify report output parent must not be a symlink")
+    try:
+        resolved_parent = parent.resolve(strict=True)
+    except OSError as exc:
+        raise SystemExit(f"production evidence verify report output parent denied: {exc}") from exc
+    if not resolved_parent.is_dir():
+        raise SystemExit("production evidence verify report output parent must be a directory")
+    try:
+        resolved_bundle = bundle_dir.resolve(strict=True)
+    except OSError as exc:
+        raise SystemExit(f"production evidence bundle denied: {exc}") from exc
+    resolved_report = resolved_parent / report_path.name
+    try:
+        resolved_report.relative_to(resolved_bundle)
+    except ValueError:
+        pass
+    else:
+        raise SystemExit(
+            "production evidence verify report output must be outside the evidence bundle under review"
+        )
+
+    payload = json.dumps(report, indent=2, sort_keys=True, default=json_default) + "\n"
+    temp_path: Path | None = None
+    fd = -1
+    try:
+        fd, temp_name = tempfile.mkstemp(
+            prefix=f".{report_path.name}.",
+            suffix=".tmp",
+            dir=str(resolved_parent),
+        )
+        temp_path = Path(temp_name)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            fd = -1
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(temp_path, 0o600)
+        os.link(temp_path, resolved_report)
+    except FileExistsError as exc:
+        raise SystemExit("production evidence verify report output must not already exist") from exc
+    except OSError as exc:
+        raise SystemExit(f"production evidence verify report output denied: {exc}") from exc
+    finally:
+        if fd >= 0:
+            os.close(fd)
+        if temp_path is not None:
+            try:
+                temp_path.unlink()
+            except FileNotFoundError:
+                pass
+
+
 def _verify_production_evidence_preflight(
     preflight: Mapping[str, Any] | None,
     *,
@@ -12588,6 +12728,7 @@ def cmd_production_evidence_verify(args: argparse.Namespace) -> None:
             "from an out-of-band capture record; use --internal-consistency-only only "
             "for local diagnostics",
         )
+    row_review = _production_evidence_row_review(preflight)
     report = {
         "ok": not findings,
         "bundle_dir": str(resolved_bundle_dir),
@@ -12603,7 +12744,12 @@ def cmd_production_evidence_verify(args: argparse.Namespace) -> None:
         "release_audit_fingerprint": recomputed_release_audit.get("fingerprint")
         if isinstance(recomputed_release_audit, Mapping)
         else None,
-        "row_review": _production_evidence_row_review(preflight),
+        "row_review": row_review,
+        "reviewer_guidance": _production_evidence_reviewer_guidance(
+            findings=findings,
+            row_review=row_review,
+            internal_consistency_only=internal_consistency_only,
+        ),
         "checks": {
             "summary": _production_evidence_summary_ok(
                 summary,
@@ -12624,6 +12770,11 @@ def cmd_production_evidence_verify(args: argparse.Namespace) -> None:
         },
         "findings": findings,
     }
+    _write_production_evidence_verify_report(
+        report=report,
+        report_output=args.report_output,
+        bundle_dir=resolved_bundle_dir,
+    )
     emit(report)
     if findings:
         raise SystemExit(1)
@@ -13283,6 +13434,28 @@ def _manifest_value(value: Any) -> Any:
     return value
 
 
+def _manifest_string_list(value: Any, *, field: str) -> list[str]:
+    resolved = _manifest_value(value)
+    if isinstance(resolved, str):
+        return [item.strip() for item in resolved.split(",") if item.strip()]
+    if isinstance(resolved, list) and all(isinstance(item, str) and item.strip() for item in resolved):
+        return [item.strip() for item in resolved]
+    raise SystemExit(f"provider manifest field {field} must be a string list or comma-separated string")
+
+
+def _manifest_bool(value: Any, *, field: str) -> bool:
+    resolved = _manifest_value(value)
+    if isinstance(resolved, bool):
+        return resolved
+    if isinstance(resolved, str):
+        normalized = resolved.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+    raise SystemExit(f"provider manifest field {field} must be a boolean")
+
+
 def _apply_manifest_fields(args: argparse.Namespace, fields: dict[str, Any], mapping: dict[str, str]) -> None:
     for source, target in mapping.items():
         if source in fields and fields[source] is not None:
@@ -13482,6 +13655,31 @@ def apply_provider_manifest(args: argparse.Namespace) -> dict[str, Any]:
                 "jwks_max_bytes": "provider_oidc_jwks_max_bytes",
             },
         )
+    residency_policy = providers.get("residency_policy", {})
+    if isinstance(residency_policy, dict):
+        if "allowed_residencies" in residency_policy and residency_policy["allowed_residencies"] is not None:
+            args.allowed_residency = _manifest_string_list(
+                residency_policy["allowed_residencies"],
+                field="providers.residency_policy.allowed_residencies",
+            )
+        if "runtime_residency" in residency_policy and residency_policy["runtime_residency"] is not None:
+            args.runtime_residency = _manifest_value(residency_policy["runtime_residency"])
+        if (
+            "allowed_residency_transfers" in residency_policy
+            and residency_policy["allowed_residency_transfers"] is not None
+        ):
+            args.allowed_residency_transfer = _manifest_string_list(
+                residency_policy["allowed_residency_transfers"],
+                field="providers.residency_policy.allowed_residency_transfers",
+            )
+        if (
+            "require_runtime_residency" in residency_policy
+            and residency_policy["require_runtime_residency"] is not None
+        ):
+            args.require_runtime_residency = _manifest_bool(
+                residency_policy["require_runtime_residency"],
+                field="providers.residency_policy.require_runtime_residency",
+            )
     required = manifest.get("required_checks", [])
     if not isinstance(required, list) or not all(isinstance(item, str) for item in required):
         raise SystemExit("provider manifest field 'required_checks' must be an array of strings")
@@ -15711,6 +15909,13 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Allow offline structure/redaction replay without an out-of-band "
             "fingerprint; diagnostic only, not custody evidence"
+        ),
+    )
+    production_evidence_verify.add_argument(
+        "--report-output",
+        help=(
+            "Absolute path outside the bundle under review where the verifier "
+            "JSON report is written; the file must not already exist"
         ),
     )
     production_evidence_verify.set_defaults(func=cmd_production_evidence_verify)
