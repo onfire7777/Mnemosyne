@@ -63,6 +63,19 @@ def _assert_artifact_detail_shape(item: dict[str, object]) -> None:
         assert all(isinstance(check[key], str) for key in ("name", "command", "option"))
 
 
+def _assert_artifact_plan_shape(item: dict[str, object]) -> None:
+    assert set(item) == {"relative_path", "checks"}
+    assert isinstance(item["relative_path"], str)
+    assert item["relative_path"]
+    assert not Path(item["relative_path"]).is_absolute()
+    assert isinstance(item["checks"], list)
+    assert item["checks"]
+    for check in item["checks"]:
+        assert isinstance(check, dict)
+        assert set(check) == {"name", "command", "option"}
+        assert all(isinstance(check[key], str) for key in ("name", "command", "option"))
+
+
 def _renderer_base_env() -> dict[str, str]:
     return {
         "PATH": os.environ.get("PATH", ""),
@@ -143,6 +156,21 @@ def test_renderer_placeholders_match_env_example_and_env_guide() -> None:
     assert placeholders == guide_vars
 
 
+def test_renderer_list_placeholders_includes_static_artifact_inventory() -> None:
+    proc = subprocess.run(
+        [str(RENDERER), "--list-placeholders"],
+        cwd=REPO,
+        env=_renderer_base_env(),
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    payload = json.loads(proc.stdout)
+
+    assert payload["required_input_artifact_count"] == len(REQUIRED_PRODUCTION_INPUT_ARTIFACTS)
+    assert sorted(payload["required_input_artifacts"]) == sorted(REQUIRED_PRODUCTION_INPUT_ARTIFACTS)
+
+
 def test_renderer_requires_all_production_env_values(tmp_path: Path) -> None:
     proc = subprocess.run(
         [str(RENDERER), "--output", str(tmp_path / "manifest.json")],
@@ -180,6 +208,27 @@ def test_renderer_check_environment_reports_missing_without_output() -> None:
     assert any("production-evidence-verify" in step for step in payload["next_steps"])
     assert "MNEMOSYNE_PROD_EVIDENCE_DIR" in payload["missing"]
     assert payload["present"] == []
+    assert payload["operator_readiness_files"] == {
+        "env_template": "infra/templates/production-render.env.example",
+        "input_artifacts_checklist": "infra/templates/production-input-artifacts.checklist.md",
+        "production_evidence_runbook": "infra/PRODUCTION-EVIDENCE.md",
+    }
+    assert payload["required_input_artifact_count"] == len(REQUIRED_PRODUCTION_INPUT_ARTIFACTS)
+    assert sorted(payload["required_input_artifacts"]) == sorted(REQUIRED_PRODUCTION_INPUT_ARTIFACTS)
+    plan_by_path = {
+        str(item["relative_path"]): item
+        for item in payload["required_input_artifacts_plan"]
+        if isinstance(item, dict)
+    }
+    assert sorted(plan_by_path) == sorted(REQUIRED_PRODUCTION_INPUT_ARTIFACTS)
+    for item in plan_by_path.values():
+        _assert_artifact_plan_shape(item)
+        assert "exists" not in item
+    assert {
+        "name": "belief-revision",
+        "command": "belief-revision-check",
+        "option": "input_artifacts[0]",
+    } in plan_by_path["row-10-full-suite-evidence.json"]["checks"]
     assert proc.stderr == ""
 
 

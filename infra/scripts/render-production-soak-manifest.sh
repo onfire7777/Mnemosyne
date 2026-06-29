@@ -120,6 +120,11 @@ validation_categories = [
     "external_c2pa_tool",
     "operator_capture_and_offline_verify",
 ]
+operator_readiness_files = {
+    "env_template": "infra/templates/production-render.env.example",
+    "input_artifacts_checklist": "infra/templates/production-input-artifacts.checklist.md",
+    "production_evidence_runbook": "infra/PRODUCTION-EVIDENCE.md",
+}
 next_steps = [
     "Copy infra/templates/production-render.env.example outside the repo and fill every MNEMOSYNE_PROD_* value.",
     "Set MNEMOSYNE_PROD_EVIDENCE_DIR to an absolute external directory containing the listed production input artifacts.",
@@ -127,8 +132,95 @@ next_steps = [
     "Render with --output to an external path, run infra/scripts/capture-production-evidence.sh, then verify the bundle with production-evidence-verify.",
 ]
 
+template_manifest = json.loads(template_text)
+
+
+def collect_template_input_artifact_plan(manifest_payload: dict[str, Any]) -> list[dict[str, object]]:
+    artifacts: dict[str, dict[str, object]] = {}
+    marker = "MNEMOSYNE_PROD_EVIDENCE_DIR/"
+
+    def record(value: str, *, check_name: str, command: str, option: str) -> None:
+        if marker not in value:
+            return
+        relative_path = value.split(marker, 1)[1]
+        if not relative_path or relative_path.startswith("/") or ".." in Path(relative_path).parts:
+            return
+        artifact = artifacts.setdefault(
+            relative_path,
+            {
+                "relative_path": relative_path,
+                "checks": [],
+            },
+        )
+        artifact["checks"].append(
+            {
+                "name": check_name,
+                "command": command,
+                "option": option,
+            }
+        )
+
+    checks_payload = manifest_payload.get("checks", [])
+    if not isinstance(checks_payload, list):
+        return []
+    for check in checks_payload:
+        if not isinstance(check, dict):
+            continue
+        command = check.get("command")
+        check_name = check.get("name")
+        if not isinstance(command, str):
+            command = ""
+        if not isinstance(check_name, str):
+            check_name = command
+        for field in ("args", "global_args"):
+            values = check.get(field, [])
+            if not isinstance(values, list) or not all(isinstance(v, str) for v in values):
+                continue
+            for index, value in enumerate(values):
+                previous = values[index - 1] if index > 0 else ""
+                if previous == "--c2pa-tool":
+                    continue
+                option = previous if previous.startswith("--") and "=" not in previous else field
+                if value.startswith("--"):
+                    option_name, separator, option_value = value.partition("=")
+                    if separator and option_name != "--c2pa-tool":
+                        record(
+                            option_value,
+                            check_name=check_name,
+                            command=command,
+                            option=option_name,
+                        )
+                    continue
+                record(value, check_name=check_name, command=command, option=option)
+        input_artifacts = check.get("input_artifacts", [])
+        if isinstance(input_artifacts, list) and all(isinstance(v, str) for v in input_artifacts):
+            for index, value in enumerate(input_artifacts):
+                record(
+                    value,
+                    check_name=check_name,
+                    command=command,
+                    option=f"input_artifacts[{index}]",
+                )
+    return sorted(artifacts.values(), key=lambda item: str(item["relative_path"]))
+
+
+template_input_artifact_plan = collect_template_input_artifact_plan(template_manifest)
+template_input_artifact_names = [
+    str(artifact["relative_path"]) for artifact in template_input_artifact_plan
+]
+
 if list_placeholders:
-    print(json.dumps({"template": str(template_path), "placeholders": required}, indent=2))
+    print(
+        json.dumps(
+            {
+                "template": str(template_path),
+                "placeholders": required,
+                "required_input_artifact_count": len(template_input_artifact_names),
+                "required_input_artifacts": template_input_artifact_names,
+            },
+            indent=2,
+        )
+    )
     raise SystemExit(0)
 
 missing = [name for name in required if not os.environ.get(name)]
@@ -142,6 +234,10 @@ if check_environment:
         "missing": missing,
         "values_redacted": True,
         "validation_categories": validation_categories,
+        "operator_readiness_files": operator_readiness_files,
+        "required_input_artifact_count": len(template_input_artifact_names),
+        "required_input_artifacts": template_input_artifact_names,
+        "required_input_artifacts_plan": template_input_artifact_plan,
         "next_steps": next_steps,
     }
     if missing:
@@ -267,7 +363,7 @@ if check_environment:
         )
         raise SystemExit(78)
 
-manifest = json.loads(template_text)
+manifest = template_manifest
 
 def render_value(value: Any) -> Any:
     if isinstance(value, str):
