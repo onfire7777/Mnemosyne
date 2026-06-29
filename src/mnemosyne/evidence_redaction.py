@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import Mapping, Pattern
+from typing import Any, Mapping, Pattern
 from urllib.parse import urlparse
 
 
@@ -83,6 +83,50 @@ SECRET_PATTERNS: tuple[tuple[str, Pattern[str]], ...] = (
         re.compile(r"\b[A-Za-z][A-Za-z0-9+.-]*://[^\s\"'/?#@]+:[^\s\"'/?#@]+@"),
     ),
 )
+SECRET_KEY_MARKERS = frozenset(
+    {
+        "access_token",
+        "api_key",
+        "auth_token",
+        "bearer_token",
+        "client_secret",
+        "credential",
+        "credentials",
+        "idp_token",
+        "mcp_session_token",
+        "password",
+        "private_key",
+        "refresh_token",
+        "secret",
+        "session_secret",
+        "session_token",
+        "token",
+        "vault_token",
+    }
+)
+SECRET_KEY_ALLOWED_SUFFIXES = (
+    "_command",
+    "_env",
+    "_fingerprint",
+    "_hash",
+    "_omitted",
+    "_present",
+    "_provider",
+    "_redacted",
+    "_sha256",
+    "_source",
+)
+SECRET_VALUE_PLACEHOLDERS = frozenset(
+    {
+        "",
+        "***",
+        "<omitted>",
+        "<redacted>",
+        "omitted",
+        "redacted",
+        "redacted-placeholder",
+    }
+)
 
 
 def is_secret_argument_option(option_name: str) -> bool:
@@ -103,6 +147,73 @@ def is_secret_argument_option(option_name: str) -> bool:
 def url_contains_userinfo(value: str) -> bool:
     parsed = urlparse(value)
     return bool(parsed.scheme and parsed.netloc and (parsed.username or parsed.password))
+
+
+def _normalise_secret_key(value: str) -> str:
+    return value.strip().lower().replace("-", "_")
+
+
+def _is_secret_key(key: str) -> bool:
+    normalized = _normalise_secret_key(key)
+    if normalized.endswith(SECRET_KEY_ALLOWED_SUFFIXES):
+        return False
+    parts = set(normalized.split("_"))
+    if normalized in SECRET_KEY_MARKERS:
+        return True
+    if {"api", "key"} <= parts:
+        return True
+    if {"client", "secret"} <= parts:
+        return True
+    if {"private", "key"} <= parts:
+        return True
+    return bool(SECRET_KEY_MARKERS & parts)
+
+
+def _is_raw_secret_scalar(value: Any) -> bool:
+    if isinstance(value, (Mapping, list)):
+        return False
+    if value is None or isinstance(value, bool | int | float):
+        return False
+    text = str(value).strip()
+    return text.lower() not in SECRET_VALUE_PLACEHOLDERS
+
+
+def _line_for_json_key(text: str, key: str) -> int:
+    pattern = re.compile(rf'"{re.escape(key)}"\s*:')
+    match = pattern.search(text)
+    if match is None:
+        return 1
+    return text.count("\n", 0, match.start()) + 1
+
+
+def _structured_secret_findings(source: str, text: str) -> list[dict[str, object]]:
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return []
+    findings: list[dict[str, object]] = []
+
+    def visit(value: Any, path: str = "$") -> None:
+        if isinstance(value, Mapping):
+            for raw_key, raw_child in value.items():
+                key = str(raw_key)
+                child_path = f"{path}.{key}"
+                if _is_secret_key(key) and _is_raw_secret_scalar(raw_child):
+                    findings.append(
+                        {
+                            "source": source,
+                            "line": _line_for_json_key(text, key),
+                            "kind": "structured_secret_key",
+                            "path": child_path,
+                        }
+                    )
+                visit(raw_child, child_path)
+        elif isinstance(value, list):
+            for index, item in enumerate(value):
+                visit(item, f"{path}[{index}]")
+
+    visit(payload)
+    return findings
 
 
 def manifest_argument_secret_errors(manifest: Mapping[str, object]) -> list[str]:
@@ -152,6 +263,7 @@ def redaction_findings(source: str, text: str) -> list[dict[str, object]]:
                         "kind": kind,
                     }
                 )
+    findings.extend(_structured_secret_findings(source, text))
     return findings
 
 
@@ -166,7 +278,7 @@ def redaction_scan(
     scan: dict[str, object] = {
         "ok": not findings and not skipped,
         "scope": scope,
-        "patterns": [kind for kind, _ in SECRET_PATTERNS],
+        "patterns": [kind for kind, _ in SECRET_PATTERNS] + ["structured_secret_key"],
         "scanned_files": scanned_files,
         "findings": findings,
     }

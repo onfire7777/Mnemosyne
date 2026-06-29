@@ -246,7 +246,8 @@ def test_shadow_workspace_service_is_native_and_feeds_runtime_state() -> None:
     payload = report.to_dict()
 
     assert "enabled" not in payload
-    assert payload["running"] is True
+    assert payload["running"] is False
+    assert payload["stream"]["heartbeat_safety"]["hard_stop"] is True
     assert payload["shadow_only"] is True
     assert payload["critical_path"] is False
     assert payload["production_mutation"] is False
@@ -285,6 +286,8 @@ def test_shadow_workspace_service_tick_enforces_anti_rumination_across_calls() -
     assert second["stream"]["stopped_reason"] == "continue"
     assert third["stream"]["stopped_reason"] == "anti_rumination_repeated_focus_exit"
     assert third["stream"]["heartbeat_safety"]["hard_stop"] is True
+    assert third["stream"]["heartbeat_safety"]["self_generation_frozen"] is True
+    assert third["stream"]["heartbeat_safety"]["evidence_only_fallback"] is True
     assert third["stream"]["heartbeat_safety"]["non_useful_ticks"] == 2
     assert third["tick_count"] == 3
     assert len(third["proto_self_history"]) == 3
@@ -294,6 +297,16 @@ def test_shadow_workspace_service_tick_enforces_anti_rumination_across_calls() -
         "same-focus",
     ]
     assert third["stream"]["cycle_consistency"]["score"] == 1.0
+    assert service.running is False
+    cycles_before = len(service.cycles)
+    trace_before = len(service.trace)
+    with pytest.raises(RuntimeError, match="stopped after hard stop: anti_rumination_repeated_focus_exit"):
+        service.tick(
+            tenant_id="tenant-stream",
+            items=[WorkspaceItem(id="same-focus", priority=1.0, content="same focus")],
+        )
+    assert len(service.cycles) == cycles_before
+    assert len(service.trace) == trace_before
 
 
 def test_shadow_workspace_service_tick_enforces_max_cycles_across_calls() -> None:
@@ -317,9 +330,21 @@ def test_shadow_workspace_service_tick_enforces_max_cycles_across_calls() -> Non
     ]
     assert final["stream"]["heartbeat_safety"]["hard_stop"] is True
     assert final["stream"]["heartbeat_safety"]["circuit_breaker_tripped"] is True
+    assert final["stream"]["heartbeat_safety"]["self_generation_frozen"] is True
+    assert final["stream"]["heartbeat_safety"]["evidence_only_fallback"] is True
     assert final["stream"]["heartbeat_safety"]["tick_count"] == 3
     assert final["stream"]["cycle_consistency"]["cycle_indexes"] == [1, 2, 3]
     assert final["stream"]["cycle_consistency"]["trace_ticks"] == [1, 2, 3]
+    assert service.running is False
+    cycles_before = len(service.cycles)
+    trace_before = len(service.trace)
+    with pytest.raises(RuntimeError, match="stopped after hard stop: escalate_max_cycles"):
+        service.tick(
+            tenant_id="tenant-stream",
+            items=[WorkspaceItem(id="focus-extra", priority=1.0, content="extra focus")],
+        )
+    assert len(service.cycles) == cycles_before
+    assert len(service.trace) == trace_before
 
 
 def test_shadow_workspace_service_tick_invokes_dreamer_once_per_service_window() -> None:

@@ -356,6 +356,8 @@ def _continuity_probe() -> dict[str, Any]:
         "max_cycles": payload["max_cycles"],
         "service_native_no_enable_toggle": "enabled" not in payload,
         "service_running": payload["running"],
+        "service_terminal_after_hard_stop": payload["running"] is False
+        and stream["heartbeat_safety"]["hard_stop"] is True,
         "proto_self_history_count": len(payload["proto_self_history"]),
         "metacognitive_rows": len(payload["metacognition"]["rows"]),
         "bottleneck_selected_ids": stream["trace"][0]["selected_item_ids"],

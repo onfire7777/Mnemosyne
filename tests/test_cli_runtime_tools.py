@@ -26,6 +26,7 @@ from mnemosyne.cli import (
     PRODUCTION_RELEASE_REQUIRED_COMMANDS,
     PRODUCTION_RELEASE_REQUIRED_PROVIDER_CHECKS,
     RELEASE_AUDIT_REQUIRED_OUTPUT_KEYS,
+    _validate_hosted_url,
     build_parser,
     load_engine,
 )
@@ -3018,6 +3019,45 @@ def test_cli_hosted_llm_check_rejects_insecure_non_acknowledged_http(tmp_path: P
     assert payload["ok"] is False
     assert "hosted provider checks require https" in payload["checks"][0]["error"]
     assert "hosted-secret-value" not in result.stdout
+
+
+def test_cli_hosted_llm_check_rejects_inline_api_key(tmp_path: Path) -> None:
+    manifest = tmp_path / "hosted-llm-inline-key.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "name": "bad-hosted-provider",
+                "required_roles": ["summarizer"],
+                "providers": [
+                    {
+                        "name": "bad-summarizer",
+                        "role": "summarizer",
+                        "url": "https://provider.example.test/summarize",
+                        "api_key": "short-prod-token",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = run_raw_cli(tmp_path / "mnemosyne.json", "hosted-llm-check", "--hosted-llm-manifest", str(manifest))
+    payload = json.loads(result.stdout)
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert "api_key must not be inline" in payload["checks"][0]["error"]
+    assert "short-prod-token" not in result.stdout
+
+
+def test_hosted_url_validation_rejects_dns_names_resolving_private(monkeypatch) -> None:
+    def fake_getaddrinfo(*_args: object, **_kwargs: object) -> list[tuple[object, ...]]:
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("10.0.0.5", 443))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+
+    with pytest.raises(ValueError, match="must not resolve"):
+        _validate_hosted_url("https://provider.example.test/summarize", allow_insecure_localhost=False)
 
 
 def multimodal_ops_bundle(

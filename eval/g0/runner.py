@@ -746,6 +746,18 @@ def render_markdown(report: dict[str, Any]) -> str:
             f"| {metric['id']} | {metric['class']} | {metric['status']} | "
             f"{value} | {target} | {source} |"
         )
+    resource_usage = report.get("computed_evidence", {}).get("resource_usage_eval")
+    if isinstance(resource_usage, dict) and resource_usage.get("controller_telemetry_present") is True:
+        telemetry_name = resource_usage.get("telemetry_path") or "explicit telemetry artifact"
+        lines.extend(
+            [
+                "",
+                "## Controller Telemetry Scope",
+                "",
+                f"- Controller telemetry source: `{telemetry_name}`",
+                "- This is explicit harness telemetry for the local G0 report; it is not production power/cost evidence.",
+            ]
+        )
     lines.extend(
         [
             "",

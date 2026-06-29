@@ -78,7 +78,7 @@ Hippocampal replay in sharp‑wave ripples (Wilson & McNaughton 1994; Science 20
 | Brain (✓ / ✗) | Mnemosyne today | Upgrade |
 |---|---|---|
 | Prioritised replay. ✓ revisit important/surprising. ✗ over‑samples salient‑but‑misleading; reward‑biased. | `replayer` scores importance×novelty×surprise×reward. | Add **importance‑sampling debias** + make replay **reproducible & auditable** (the brain's isn't). *Maps: consolidation pass 1.* |
-| Offline recombination / dreaming. ✓ new inferences & plans, no new input. ✗ can seed false associations. | RAPTOR summariser only; **no generative replay**. | Add a **generative‑replay "dreamer" pass**: recombine evidence → candidate beliefs/plans → forced through the **promotion gate** on a canary branch. Dreaming's creativity, with a regression gate biology lacks → no false associations survive. *Maps: new pass + gate.py.* |
+| Offline recombination / dreaming. ✓ new inferences & plans, no new input. ✗ can seed false associations. | RAPTOR summariser plus a sandboxed **shadow dreamer** seed; generative replay is low-trust, non-authoritative, and gate-promoted only. | Continue hardening the **generative‑replay "dreamer" pass**: recombine evidence → candidate beliefs/plans → forced through the **promotion gate** on a canary branch. Dreaming's creativity, with a regression gate biology lacks → no false associations survive. *Maps: new pass + gate.py.* |
 
 ### C. Encoding: prediction‑error & multi‑signal salience
 The brain encodes **surprise** (predictive coding; Clark 2013; Friston 2010), weighting errors by **precision** (confidence). Novelty, reward‑prediction‑error (Schultz; hippocampal–VTA loop, Lisman & Grace 2005) and emotional arousal (McGaugh 2013) tag what to keep. Emotional memories gain **confidence but not accuracy** (Talarico & Rubin 2003).
@@ -125,7 +125,7 @@ WM is a small focus (~4 chunks; Cowan 2001) and in most theories *is* the conten
 
 | Brain (✓ / ✗) | Mnemosyne today | Upgrade |
 |---|---|---|
-| WM → global workspace. ✓ bounded focus broadcast to all modules. ✗ hard ~4‑item ceiling. | Retrieval context; **no broadcast loop.** | Build the **workspace controller** (Layer 4). Capacity = a tunable budget, not a fixed 4. *Maps: controller + route() + jobs + self_model.* |
+| WM → global workspace. ✓ bounded focus broadcast to all modules. ✗ hard ~4‑item ceiling. | Retrieval context plus a bounded **shadow workspace controller** with advisory broadcast metadata; the loop has no answer authority and no production mutation authority unless separately gate-promoted. | Continue hardening the **workspace controller** (Layer 4). Capacity = a tunable budget, not a fixed 4. *Maps: controller + route() + jobs + self_model.* |
 | Self‑model & mental time travel. ✓ model own states; simulate past/future. ✗ confabulated narrative; rumination. | `self_model`, `user_latent`; `as_of`. | Self‑model **only as calibration/gating** (never a truth oracle); add an **anti‑rumination regulator**; never assert phenomenal consciousness. *Maps: self_model, calibration, §31 R7.* |
 
 ---

@@ -33,6 +33,8 @@ def test_tiered_heartbeat_reports_bounded_engaged_and_idle_compute() -> None:
     assert safety["hard_stop"] is True
     assert safety["stopped_reason"] == "anti_rumination_idle_exit"
     assert safety["self_generation_budget"]["allowed"] is True
+    assert safety["self_generation_frozen"] is True
+    assert safety["evidence_only_fallback"] is True
     assert safety["data_not_instructions"] is True
     assert safety["used_for_control_flow"] is False
 

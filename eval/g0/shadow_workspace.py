@@ -170,6 +170,7 @@ def run_shadow_workspace_eval(*, repo_root: Path | None = None) -> dict[str, Any
         "workspace": {
             "service": {
                 "running": service_payload["running"],
+                "terminal_after_hard_stop": service_checks["terminal_after_hard_stop"],
                 "tick_ms": service_payload["tick_ms"],
                 "max_cycles": service_payload["max_cycles"],
                 "tick_count": service_payload["tick_count"],
@@ -212,7 +213,8 @@ def _service_checks(payload: dict[str, Any]) -> dict[str, bool]:
     tick_count = int(payload.get("tick_count") or 0)
     return {
         "native_no_enable_toggle": "enabled" not in payload,
-        "explicitly_running": payload.get("running") is True,
+        "terminal_after_hard_stop": payload.get("running") is False
+        and stream.get("heartbeat_safety", {}).get("hard_stop") is True,
         "shadow_only": payload.get("shadow_only") is True,
         "critical_path_false": payload.get("critical_path") is False,
         "production_mutation_false": payload.get("production_mutation") is False,
@@ -244,6 +246,27 @@ def _service_tick_window_probe(
         for _ in range(controller.max_idle_ticks + 1)
     ]
     repeated_final = repeated_reports[-1]
+    repeated_cycles_before = len(repeated_service.cycles)
+    repeated_trace_before = len(repeated_service.trace)
+    try:
+        repeated_service.tick(
+            tenant_id=tenant,
+            items=[
+                WorkspaceItem(
+                    id="same-service-focus",
+                    priority=1.0,
+                    content="stateful same focus probe",
+                    source="g0-service-tick-probe",
+                )
+            ],
+        )
+        repeated_post_stop_rejected = False
+    except RuntimeError:
+        repeated_post_stop_rejected = True
+    repeated_post_stop_no_growth = (
+        len(repeated_service.cycles) == repeated_cycles_before
+        and len(repeated_service.trace) == repeated_trace_before
+    )
 
     max_cycle_service = ShadowWorkspaceService(controller=controller)
     max_cycle_service.start()
@@ -262,6 +285,27 @@ def _service_tick_window_probe(
         for index in range(1, controller.max_cycles + 1)
     ]
     max_cycle_final = max_cycle_reports[-1]
+    max_cycle_cycles_before = len(max_cycle_service.cycles)
+    max_cycle_trace_before = len(max_cycle_service.trace)
+    try:
+        max_cycle_service.tick(
+            tenant_id=tenant,
+            items=[
+                WorkspaceItem(
+                    id="service-max-focus-extra",
+                    priority=1.0,
+                    content="stateful max cycle probe extra",
+                    source="g0-service-tick-probe",
+                )
+            ],
+        )
+        max_cycle_post_stop_rejected = False
+    except RuntimeError:
+        max_cycle_post_stop_rejected = True
+    max_cycle_post_stop_no_growth = (
+        len(max_cycle_service.cycles) == max_cycle_cycles_before
+        and len(max_cycle_service.trace) == max_cycle_trace_before
+    )
 
     evidence = [
         {
@@ -309,10 +353,12 @@ def _service_tick_window_probe(
             "non_useful_ticks"
         ]
         >= controller.max_idle_ticks,
+        "anti_rumination_post_stop_terminal": repeated_post_stop_rejected and repeated_post_stop_no_growth,
         "max_cycles_across_calls": max_cycle_final["stream"]["stopped_reason"]
         == "escalate_max_cycles"
         and max_cycle_final["stream"]["heartbeat_safety"]["hard_stop"] is True,
         "max_cycle_tick_count_cumulative": max_cycle_final["tick_count"] == controller.max_cycles,
+        "max_cycle_post_stop_terminal": max_cycle_post_stop_rejected and max_cycle_post_stop_no_growth,
         "dreamer_once_per_service_window": sum(dreamer_invocations_by_cycle) == 1
         and dreamer_invocations_by_cycle[0] == 1
         and all(count == 0 for count in dreamer_invocations_by_cycle[1:]),
@@ -325,11 +371,15 @@ def _service_tick_window_probe(
         "anti_rumination": {
             "stopped_reason": repeated_final["stream"]["stopped_reason"],
             "tick_count": repeated_final["tick_count"],
+            "post_stop_rejected": repeated_post_stop_rejected,
+            "post_stop_no_growth": repeated_post_stop_no_growth,
             "heartbeat_safety": repeated_final["stream"]["heartbeat_safety"],
         },
         "max_cycles": {
             "stopped_reason": max_cycle_final["stream"]["stopped_reason"],
             "tick_count": max_cycle_final["tick_count"],
+            "post_stop_rejected": max_cycle_post_stop_rejected,
+            "post_stop_no_growth": max_cycle_post_stop_no_growth,
             "heartbeat_safety": max_cycle_final["stream"]["heartbeat_safety"],
         },
         "dreamer": {

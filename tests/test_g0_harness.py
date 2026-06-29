@@ -396,7 +396,8 @@ def test_g0_consciousness_scorecard_reports_indicator_properties() -> None:
     assert report["metrics"]["workspace_loop_liveness"] == 1.0
     assert report["metrics"]["workspace_stream_coherence"] == 1.0
     assert report["continuity"]["service_native_no_enable_toggle"] is True
-    assert report["continuity"]["service_running"] is True
+    assert report["continuity"]["service_running"] is False
+    assert report["continuity"]["service_terminal_after_hard_stop"] is True
     assert report["continuity"]["proto_self_history_count"] == report["continuity"]["metacognitive_rows"]
     assert report["metrics"]["self_model_accuracy"] == 1.0
     assert report["metrics"]["metacognition_meta_d_prime"] == 1.0
@@ -466,7 +467,8 @@ def test_g0_shadow_workspace_fixture_reports_bounded_stream_contract() -> None:
     assert "apply_workspace_advisory" in allowed_controls
     assert "workspace_advisory_mode" in allowed_controls
     assert all(toggle_probe["checks"].values())
-    assert report["workspace"]["service"]["running"] is True
+    assert report["workspace"]["service"]["running"] is False
+    assert report["workspace"]["service"]["terminal_after_hard_stop"] is True
     assert report["workspace"]["service"]["tick_count"] == report["workspace"]["service"]["proto_self_history_count"]
     assert report["workspace"]["service"]["tick_count"] == report["workspace"]["service"]["metacognitive_rows"]
     assert report["workspace"]["cycle_consistency"]["score"] == 1.0
@@ -501,6 +503,10 @@ def test_g0_shadow_workspace_fixture_reports_bounded_stream_contract() -> None:
     assert all(report["answer_grounding_floor_probe"]["checks"].values())
     assert report["answer_grounding_floor_probe"]["active_case"]["abstain"] is True
     assert report["rumination_probe"]["stopped_reason"] == "anti_rumination_repeated_focus_exit"
+    assert report["service_tick_probe"]["anti_rumination"]["post_stop_rejected"] is True
+    assert report["service_tick_probe"]["anti_rumination"]["post_stop_no_growth"] is True
+    assert report["service_tick_probe"]["max_cycles"]["post_stop_rejected"] is True
+    assert report["service_tick_probe"]["max_cycles"]["post_stop_no_growth"] is True
     assert all(report["checks"].values())
     assert all("phenomenal" not in str(row).lower() for row in report["workspace"]["trace"])
 
