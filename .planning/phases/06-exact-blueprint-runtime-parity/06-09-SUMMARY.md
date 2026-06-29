@@ -40,17 +40,18 @@ the generated bundle has no redaction findings and no skipped files.
 Post-plan offline-custody hardening adds `production-evidence-verify` for
 reviewing an already captured production bundle without credentials. It rechecks
 `summary.json`, `redaction-scan.json`, `bundle-manifest.json`, retained artifact
-sizes/SHA-256 hashes, captured `release-audit.json`, optional expected
-`bundle_fingerprint`, and a fresh offline `release-audit` replay over
-`evidence/manifest.json`. This is not a new production gate and does not replace
-operator capture against deployed infrastructure.
+sizes/SHA-256 hashes, captured `release-audit.json`, the reviewer-supplied
+out-of-band expected `bundle_fingerprint`, and a fresh offline `release-audit`
+replay over `evidence/manifest.json`. This is not a new production gate and
+does not replace operator capture against deployed infrastructure.
 
 Post-plan reviewer-handoff hardening now writes `summary.json.offline_verify`
-after a successful full capture. It records the captured `bundle_dir`, expected
-bundle fingerprint, an argv-style `production-evidence-verify` command whose
-first element is the wrapper-selected interpreter, and a custody-only note so
-reviewers can replay the offline verifier without
-reconstructing the command from prose.
+after a successful full capture. It records the captured `bundle_dir`, an
+argv-style `production-evidence-verify` command with a fingerprint placeholder
+whose first element is the wrapper-selected interpreter, and a custody-only note
+so reviewers can replay the offline verifier without reconstructing the command
+from prose. The expected fingerprint remains outside the bundle in the
+operator's capture record and is supplied by the reviewer.
 
 ## Executor Readiness
 
@@ -151,7 +152,8 @@ Checked 2026-06-25 during renderer hardening:
 - Successful full captures now write `bundle-manifest.json` with per-artifact
   SHA-256 hashes and copy its fingerprint into `summary.json`.
 - Successful full captures now write `summary.json.offline_verify` with the
-  exact offline verifier handoff command and expected bundle fingerprint.
+  exact offline verifier handoff command template and the placeholder requiring
+  a reviewer-supplied out-of-band bundle fingerprint.
 - `deployment-soak --evidence-dir` writes SHA-256 digests for its report/check
   JSON artifacts, and `release-audit --evidence-manifest` rejects missing or
   mismatched digests, artifact path escape, and report/check content divergence.

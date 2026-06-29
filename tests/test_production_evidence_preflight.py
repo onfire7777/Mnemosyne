@@ -869,6 +869,45 @@ def test_capture_production_evidence_preflight_rejects_ops_report_package_output
     assert not out_root.exists()
 
 
+@pytest.mark.parametrize("option_style", ["split", "equals"])
+def test_capture_production_evidence_preflight_rejects_ops_report_html_output(
+    tmp_path: Path,
+    option_style: str,
+) -> None:
+    manifest = tmp_path / "production-soak.json"
+    out_root = tmp_path / "capture"
+    dashboard_html = tmp_path / "production-inputs" / "ops-dashboard.html"
+
+    def add_ops_report_html_output(payload: dict[str, Any]) -> None:
+        check = next(
+            item for item in payload["checks"] if item["command"] == "ops-report"
+        )
+        check["args"] = ["--tenant", "tenant-prod"]
+        if option_style == "split":
+            check["args"].extend(["--dashboard-html", str(dashboard_html)])
+        else:
+            check["args"].append(f"--dashboard-html={dashboard_html}")
+
+    _minimal_production_manifest(manifest, mutate=add_ops_report_html_output)
+
+    proc = subprocess.run(
+        [
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
+            "--preflight-only",
+            str(manifest),
+            str(out_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+    )
+
+    assert proc.returncode == 65
+    assert "ops-report output option --dashboard-html" in proc.stderr
+    assert not out_root.exists()
+
+
 def test_capture_production_evidence_preflight_records_manifest_input_artifacts(
     tmp_path: Path,
 ) -> None:

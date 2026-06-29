@@ -85,6 +85,7 @@ export TEMPLATE OUTPUT FORCE LIST_PLACEHOLDERS CHECK_ENVIRONMENT REPO_DIR
 import json
 import os
 import re
+import shlex
 import sys
 from pathlib import Path
 from typing import Any
@@ -371,6 +372,12 @@ else:
         "c2pa_tool_repo_local",
         "MNEMOSYNE_PROD_C2PA_TOOL must not point inside the repository",
     )
+if c2pa_tool.is_symlink():
+    fail_environment_value(
+        "MNEMOSYNE_PROD_C2PA_TOOL",
+        "c2pa_tool_symlink",
+        "MNEMOSYNE_PROD_C2PA_TOOL must not be a symlink",
+    )
 c2pa_tool_resolved = c2pa_tool.resolve(strict=False)
 try:
     c2pa_tool_resolved.relative_to(repo_dir)
@@ -629,6 +636,85 @@ def collect_env_refs(value: object) -> set[str]:
     return set()
 
 
+def collect_provider_command_entries(value: object, *, path: str) -> list[tuple[str, object]]:
+    entries: list[tuple[str, object]] = []
+    if isinstance(value, dict):
+        for key, item in value.items():
+            child_path = f"{path}.{key}" if path else str(key)
+            if key == "command":
+                entries.append((child_path, item))
+            entries.extend(collect_provider_command_entries(item, path=child_path))
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            entries.extend(collect_provider_command_entries(item, path=f"{path}[{index}]"))
+    return entries
+
+
+def provider_command_value(value: object, *, label: str) -> str | None:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict) and set(value) == {"env"} and isinstance(value.get("env"), str):
+        env_name = str(value["env"])
+        env_value = os.environ.get(env_name)
+        if env_value is None or not env_value.strip():
+            provider_manifest_error(f"{label} references unset environment variable {env_name}")
+            return None
+        return env_value
+    provider_manifest_error(f"{label} command must be a string or {{\"env\": \"...\"}} reference")
+    return None
+
+
+def validate_provider_command(value: str, *, label: str) -> None:
+    try:
+        parts = shlex.split(value)
+    except ValueError as exc:
+        provider_manifest_error(f"{label} command cannot be parsed: {exc}")
+        return
+    if not parts:
+        provider_manifest_error(f"{label} command must include an executable path")
+        return
+    executable = Path(parts[0]).expanduser()
+    if not executable.is_absolute():
+        provider_manifest_error(
+            f"{label} contains relative executable path for provider-manifest.command; "
+            "use an absolute external executable path"
+        )
+        return
+    try:
+        executable.relative_to(repo_dir)
+    except ValueError:
+        pass
+    else:
+        provider_manifest_error(
+            f"{label} provider-manifest.command must point outside the repository"
+        )
+        return
+    if executable.is_symlink():
+        provider_manifest_error(
+            f"{label} provider-manifest.command executable must not be a symlink"
+        )
+        return
+    resolved = executable.resolve(strict=False)
+    try:
+        resolved.relative_to(repo_dir)
+    except ValueError:
+        pass
+    else:
+        provider_manifest_error(
+            f"{label} provider-manifest.command executable must not resolve inside the repository"
+        )
+        return
+    if not resolved.exists() or not resolved.is_file():
+        provider_manifest_error(
+            f"{label} provider-manifest.command executable must exist as an external file"
+        )
+        return
+    if not os.access(resolved, os.X_OK):
+        provider_manifest_error(
+            f"{label} provider-manifest.command executable must be executable"
+        )
+
+
 def inspect_provider_manifest() -> None:
     global provider_manifest_env_refs, missing_provider_manifest_env_refs
     provider_manifest = evidence_dir_resolved / "provider-manifest.production.json"
@@ -678,6 +764,13 @@ def inspect_provider_manifest() -> None:
             "provider-manifest.production.json references unset environment variables: "
             + ", ".join(missing_provider_manifest_env_refs)
         )
+    for label, raw_command in collect_provider_command_entries(
+        payload,
+        path="provider-manifest.production.json",
+    ):
+        command_value = provider_command_value(raw_command, label=label)
+        if command_value is not None:
+            validate_provider_command(command_value, label=label)
 
 def artifact_relative_name(value: str) -> str:
     candidate = Path(value).expanduser()

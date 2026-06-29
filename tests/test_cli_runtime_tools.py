@@ -7191,7 +7191,41 @@ def test_cli_production_evidence_verify_reports_expected_fingerprint_mismatch(
     assert report["expected_bundle_fingerprint_present"] is True
     assert report["expected_bundle_fingerprint_source"] == "cli-argument"
     assert report["actual_bundle_fingerprint"] == bundle_fingerprint
+    assert report["reviewer_guidance"]["blocked_reason"] == "expected_fingerprint_mismatch"
+    assert any(
+        "Stop the review" in step and "Do not replace the expected fingerprint" in step
+        for step in report["reviewer_guidance"]["next_steps"]
+    )
     assert "expected_bundle_fingerprint_mismatch" in codes
+
+
+def test_cli_production_evidence_verify_reports_fingerprint_mode_conflict(
+    tmp_path: Path,
+) -> None:
+    bundle_dir, bundle_fingerprint = write_production_evidence_bundle(tmp_path)
+
+    result = run_raw_cli(
+        tmp_path / "verify-store.json",
+        "production-evidence-verify",
+        str(bundle_dir),
+        "--expected-bundle-fingerprint",
+        bundle_fingerprint,
+        "--internal-consistency-only",
+    )
+    report = json.loads(result.stdout)
+    codes = {finding["code"] for finding in report["findings"]}
+
+    assert result.returncode == 1
+    assert report["ok"] is False
+    assert report["expected_bundle_fingerprint"] == bundle_fingerprint
+    assert report["expected_bundle_fingerprint_present"] is True
+    assert report["internal_consistency_only"] is True
+    assert report["reviewer_guidance"]["blocked_reason"] == "fingerprint_mode_conflict"
+    assert any(
+        "Choose exactly one verifier mode" in step
+        for step in report["reviewer_guidance"]["next_steps"]
+    )
+    assert "expected_bundle_fingerprint_mode_conflict" in codes
 
 
 def test_cli_production_evidence_verify_allows_explicit_internal_consistency_only(
@@ -7287,6 +7321,35 @@ def test_cli_production_evidence_verify_rejects_symlinked_bundle_root(tmp_path: 
 
     assert result.returncode == 1
     assert "production evidence bundle path must not be a symlink" in result.stderr
+
+
+def test_cli_production_evidence_verify_rejects_symlinked_required_json_before_reading(
+    tmp_path: Path,
+) -> None:
+    bundle_dir, _bundle_fingerprint = write_production_evidence_bundle(tmp_path)
+    summary_path = bundle_dir / "summary.json"
+    external_summary = tmp_path / "external-summary.json"
+    external_summary.write_text("{not json", encoding="utf-8")
+    summary_path.unlink()
+    try:
+        summary_path.symlink_to(external_summary)
+    except OSError as exc:
+        pytest.skip(f"symlink setup unavailable: {exc}")
+
+    result = run_raw_cli(
+        tmp_path / "verify-store.json",
+        "production-evidence-verify",
+        str(bundle_dir),
+        "--internal-consistency-only",
+    )
+    payload = json.loads(result.stdout)
+    codes = {finding["code"] for finding in payload["findings"]}
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert payload["checks"]["summary"] is False
+    assert "summary_symlink" in codes
+    assert "summary_invalid" not in codes
 
 
 def test_cli_production_evidence_verify_rejects_tampered_operator_manifest(tmp_path: Path) -> None:
