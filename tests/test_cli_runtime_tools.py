@@ -6888,6 +6888,7 @@ def test_cli_release_audit_requires_manifest_bound_production_evidence(tmp_path:
 
 def test_cli_production_evidence_verify_accepts_captured_bundle(tmp_path: Path) -> None:
     bundle_dir, bundle_fingerprint = write_production_evidence_bundle(tmp_path)
+    preflight = json.loads((bundle_dir / "preflight.json").read_text(encoding="utf-8"))
 
     report = run_cli(
         tmp_path / "verify-store.json",
@@ -6913,6 +6914,13 @@ def test_cli_production_evidence_verify_accepts_captured_bundle(tmp_path: Path) 
         "evidence_manifest": True,
         "deployment_soak_stdout": True,
         "release_audit_replay": True,
+    }
+    assert report["row_review"] == {
+        "source": "preflight.json.parity_row_readiness",
+        "rows": preflight["parity_row_readiness"],
+        "row_count": len(preflight["parity_row_readiness"]),
+        "complete_row_count": len(preflight["parity_row_readiness"]),
+        "incomplete_rows": [],
     }
     assert report["findings"] == []
 
@@ -7592,6 +7600,13 @@ def test_cli_production_evidence_verify_rejects_missing_input_artifact_contract(
     assert payload["ok"] is False
     assert payload["checks"]["preflight"] is False
     assert payload["checks"]["input_artifact_custody"] is False
+    assert payload["row_review"] == {
+        "source": "preflight.json.parity_row_readiness",
+        "rows": [],
+        "row_count": 0,
+        "complete_row_count": 0,
+        "incomplete_rows": [],
+    }
     assert "preflight_input_artifacts_missing" in codes
     assert "preflight_parity_row_readiness_invalid" in codes
     assert "preflight_input_artifact_root_missing" in codes

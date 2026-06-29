@@ -122,8 +122,11 @@ directory, and `preflight.json.parity_row_readiness` value matching those
 retained snapshots. `summary.json.parity_row_readiness` mirrors that same
 non-secret row-routing metadata and records
 `row_review_source=preflight.json.parity_row_readiness` so reviewers can route a
-completed bundle without treating the summary as a separate authority. Provider
-manifest command fields and C2PA verifier paths must also have matching retained
+completed bundle without treating the summary as a separate authority.
+`production-evidence-verify` also emits a non-gating `row_review` object sourced
+only from retained `preflight.json.parity_row_readiness`, including row counts
+and any row-local missing-artifact/error routing. Provider manifest command
+fields and C2PA verifier paths must also have matching retained
 executable snapshot metadata in
 `preflight.json.executable_tool_references`; offline verification checks the
 retained `tool-artifacts/` bytes rather than trusting mutable external paths.

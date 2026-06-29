@@ -11091,6 +11091,31 @@ def _production_evidence_summary_ok(
     )
 
 
+def _production_evidence_row_review(preflight: Mapping[str, Any] | None) -> dict[str, Any]:
+    source = "preflight.json.parity_row_readiness"
+    row_readiness = preflight.get("parity_row_readiness") if isinstance(preflight, Mapping) else None
+    rows = [dict(row) for row in row_readiness if isinstance(row, Mapping)] if isinstance(row_readiness, list) else []
+    incomplete_rows = [
+        {
+            "lane": row.get("lane"),
+            "row": row.get("row"),
+            "title": row.get("title"),
+            "runbook": row.get("runbook"),
+            "missing_input_artifacts": row.get("missing_input_artifacts", []),
+            "input_artifact_errors": row.get("input_artifact_errors", []),
+        }
+        for row in rows
+        if row.get("input_artifacts_complete") is not True
+    ]
+    return {
+        "source": source,
+        "rows": rows,
+        "row_count": len(rows),
+        "complete_row_count": sum(1 for row in rows if row.get("input_artifacts_complete") is True),
+        "incomplete_rows": incomplete_rows,
+    }
+
+
 def _verify_production_evidence_preflight(
     preflight: Mapping[str, Any] | None,
     *,
@@ -12567,6 +12592,7 @@ def cmd_production_evidence_verify(args: argparse.Namespace) -> None:
         "release_audit_fingerprint": recomputed_release_audit.get("fingerprint")
         if isinstance(recomputed_release_audit, Mapping)
         else None,
+        "row_review": _production_evidence_row_review(preflight),
         "checks": {
             "summary": _production_evidence_summary_ok(
                 summary,

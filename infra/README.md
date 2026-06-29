@@ -149,6 +149,12 @@ include non-empty `preflight.json.required_input_artifacts`, matching
 `preflight.json.executable_tool_references` entries whose retained
 `snapshot_path` files live under `tool-artifacts/`. They do not replace
 operator capture against deployed infrastructure.
+`summary.json.parity_row_readiness` mirrors the retained preflight rows and
+`summary.json.row_review_source` points back to
+`preflight.json.parity_row_readiness`; preflight remains the authority. The
+offline verifier report also emits `row_review.rows[]` from that retained
+preflight source so reviewers can route completed bundles by Tier-B lane and
+runbook without treating the summary as a separate evidence source.
 
 `--check-environment` writes no files and prints no values. It always reports
 the required `MNEMOSYNE_PROD_*` key names, operator readiness file paths, and
