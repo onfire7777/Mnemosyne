@@ -12124,11 +12124,28 @@ def cmd_production_evidence_verify(args: argparse.Namespace) -> None:
         summary=summary,
         findings=findings,
     )
+    expected_bundle_fingerprint_present = bool(args.expected_bundle_fingerprint)
+    internal_consistency_only = bool(args.internal_consistency_only)
+    if expected_bundle_fingerprint_present and internal_consistency_only:
+        _production_evidence_finding(
+            findings,
+            "expected_bundle_fingerprint_mode_conflict",
+            "use either --expected-bundle-fingerprint or --internal-consistency-only, not both",
+        )
+    if not expected_bundle_fingerprint_present and not internal_consistency_only:
+        _production_evidence_finding(
+            findings,
+            "expected_bundle_fingerprint_missing",
+            "production evidence custody review requires --expected-bundle-fingerprint "
+            "from an out-of-band capture record; use --internal-consistency-only only "
+            "for local diagnostics",
+        )
     report = {
         "ok": not findings,
         "bundle_dir": str(resolved_bundle_dir),
         "bundle_fingerprint": bundle_fingerprint,
-        "expected_bundle_fingerprint_present": bool(args.expected_bundle_fingerprint),
+        "expected_bundle_fingerprint_present": expected_bundle_fingerprint_present,
+        "internal_consistency_only": internal_consistency_only,
         "artifact_count": artifact_count,
         "release_audit_fingerprint": recomputed_release_audit.get("fingerprint")
         if isinstance(recomputed_release_audit, Mapping)
@@ -15225,7 +15242,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     production_evidence_verify.add_argument(
         "--expected-bundle-fingerprint",
-        help="Expected bundle-manifest.json sha256 fingerprint for handoff review",
+        help=(
+            "Expected bundle-manifest.json sha256 fingerprint from an out-of-band "
+            "operator capture record; required for custody review"
+        ),
+    )
+    production_evidence_verify.add_argument(
+        "--internal-consistency-only",
+        action="store_true",
+        help=(
+            "Allow offline structure/redaction replay without an out-of-band "
+            "fingerprint; diagnostic only, not custody evidence"
+        ),
     )
     production_evidence_verify.set_defaults(func=cmd_production_evidence_verify)
 

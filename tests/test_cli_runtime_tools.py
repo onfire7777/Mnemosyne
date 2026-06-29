@@ -6764,6 +6764,46 @@ def test_cli_production_evidence_verify_accepts_captured_bundle(tmp_path: Path) 
     assert report["findings"] == []
 
 
+def test_cli_production_evidence_verify_requires_expected_bundle_fingerprint(
+    tmp_path: Path,
+) -> None:
+    bundle_dir, bundle_fingerprint = write_production_evidence_bundle(tmp_path)
+
+    result = run_raw_cli(
+        tmp_path / "verify-store.json",
+        "production-evidence-verify",
+        str(bundle_dir),
+    )
+    report = json.loads(result.stdout)
+    codes = {finding["code"] for finding in report["findings"]}
+
+    assert result.returncode == 1
+    assert report["ok"] is False
+    assert report["bundle_fingerprint"] == bundle_fingerprint
+    assert report["expected_bundle_fingerprint_present"] is False
+    assert report["internal_consistency_only"] is False
+    assert "expected_bundle_fingerprint_missing" in codes
+
+
+def test_cli_production_evidence_verify_allows_explicit_internal_consistency_only(
+    tmp_path: Path,
+) -> None:
+    bundle_dir, bundle_fingerprint = write_production_evidence_bundle(tmp_path)
+
+    report = run_cli(
+        tmp_path / "verify-store.json",
+        "production-evidence-verify",
+        str(bundle_dir),
+        "--internal-consistency-only",
+    )
+
+    assert report["ok"] is True
+    assert report["bundle_fingerprint"] == bundle_fingerprint
+    assert report["expected_bundle_fingerprint_present"] is False
+    assert report["internal_consistency_only"] is True
+    assert report["findings"] == []
+
+
 def test_cli_production_evidence_verify_rejects_tampered_offline_verify_command(
     tmp_path: Path,
 ) -> None:

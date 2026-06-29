@@ -168,7 +168,9 @@ that resolve outside the evidence bundle, and confirms retained check JSON
 matches the audited report before trusting the bundle. The offline
 `production-evidence-verify` command rechecks an already captured bundle's
 custody metadata, retained input-artifact bindings, and release-audit replay
-without contacting production or rerunning deployment soak.
+without contacting production or rerunning deployment soak. Custody review
+requires `--expected-bundle-fingerprint` from an independently retained
+out-of-band capture record; `--internal-consistency-only` is diagnostic-only.
 Use `--preflight-only` to validate and copy the rendered manifest without
 running production checks; preflight output plus `redaction-scan.json` is setup
 proof only, not production parity evidence. Successful full capture writes
