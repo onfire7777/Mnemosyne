@@ -117,7 +117,8 @@ mkdir -p "$MNEMOSYNE_PROD_EVIDENCE_DIR"
 cp infra/templates/provider-manifest.production.template.json \
   "$MNEMOSYNE_PROD_EVIDENCE_DIR/provider-manifest.production.json"
 # Fill the external provider manifest with production provider values or
-# environment-variable references before rendering.
+# environment-variable references before rendering. --check-environment parses
+# those refs and fails with env names only when any referenced var is unset.
 infra/scripts/render-production-soak-manifest.sh --check-environment
 infra/scripts/render-production-soak-manifest.sh \
   --output /secure/path/to/production-soak-manifest.json
@@ -141,8 +142,10 @@ EXPECTED_BUNDLE_FINGERPRINT=sha256:...
 The completed production bundle must retain `summary.json`, `preflight.json`,
 `redaction-scan.json`, `bundle-manifest.json`, `source-soak-manifest.json`,
 `operator-soak-manifest.json`, and `input-artifacts/` custody. Those artifacts
-are the offline handoff surface for `production-evidence-verify`; they do not
-replace operator capture against deployed infrastructure.
+are the offline handoff surface for `production-evidence-verify`; completed
+bundles must include non-empty `preflight.json.required_input_artifacts` and
+matching `preflight.json.parity_row_readiness`. They do not replace operator
+capture against deployed infrastructure.
 
 `--check-environment` writes no files and prints no values. It always reports
 the required `MNEMOSYNE_PROD_*` key names, operator readiness file paths, and
@@ -150,9 +153,12 @@ static template-derived input artifact inventory so operators can prepare the
 external custody directory before sourcing environment values. Once the
 environment is present, it verifies the external production input directory, the
 manifest-referenced relative input artifacts in that directory, and the resolved
-canonical C2PA verifier path before rendering; `MNEMOSYNE_PROD_C2PA_TOOL` must
-be an absolute external executable outside the repository, reached without a
-symlink or non-canonical wrapper path. Production preflight records that
+canonical C2PA verifier path before rendering. It also parses the external
+`provider-manifest.production.json` when present and fails early if any
+referenced provider environment variable is unset, reporting env names only and
+redacting values; `MNEMOSYNE_PROD_C2PA_TOOL` must be an absolute external
+executable outside the repository, reached without a symlink or non-canonical
+wrapper path. Production preflight records that
 executable path's size and SHA-256 digest in `preflight.json` without copying
 the executable into `input-artifacts/`. Its JSON includes
 `required_input_artifacts_detail` and `missing_input_artifacts_detail` entries

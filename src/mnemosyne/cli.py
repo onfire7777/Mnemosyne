@@ -10995,6 +10995,13 @@ def _verify_production_evidence_preflight(
             "preflight.json required_input_artifacts must be a list",
         )
         input_artifacts = []
+    elif not input_artifacts:
+        ok = False
+        _production_evidence_finding(
+            findings,
+            "preflight_input_artifacts_missing",
+            "preflight.json must retain production input artifact snapshots",
+        )
     snapshot_root = (bundle_dir / "input-artifacts").resolve(strict=False)
     for index, artifact in enumerate(input_artifacts, start=1):
         if not isinstance(artifact, Mapping):
@@ -11148,37 +11155,36 @@ def _verify_production_evidence_preflight(
                     f"preflight.json required_input_artifacts[{index}].files[{file_index}] sha256 does not match snapshot",
                 )
     row_readiness = preflight.get("parity_row_readiness")
-    if row_readiness is not None:
-        if not isinstance(row_readiness, list):
+    if not isinstance(row_readiness, list):
+        ok = False
+        _production_evidence_finding(
+            findings,
+            "preflight_parity_row_readiness_invalid",
+            "preflight.json parity_row_readiness must be a list",
+        )
+    else:
+        expected_readiness = build_parity_row_readiness(
+            [
+                {
+                    "relative_path": _production_evidence_retained_input_path(
+                        artifact,
+                        bundle_dir=bundle_dir,
+                    ),
+                    "checks": artifact.get("checks", []),
+                    "parity_routes": artifact.get("parity_routes", []),
+                    "exists": True,
+                }
+                for artifact in input_artifacts
+                if isinstance(artifact, Mapping)
+            ]
+        )
+        if row_readiness != expected_readiness:
             ok = False
             _production_evidence_finding(
                 findings,
-                "preflight_parity_row_readiness_invalid",
-                "preflight.json parity_row_readiness must be a list",
+                "preflight_parity_row_readiness_mismatch",
+                "preflight.json parity_row_readiness does not match retained input artifacts",
             )
-        else:
-            expected_readiness = build_parity_row_readiness(
-                [
-                    {
-                        "relative_path": _production_evidence_retained_input_path(
-                            artifact,
-                            bundle_dir=bundle_dir,
-                        ),
-                        "checks": artifact.get("checks", []),
-                        "parity_routes": artifact.get("parity_routes", []),
-                        "exists": True,
-                    }
-                    for artifact in input_artifacts
-                    if isinstance(artifact, Mapping)
-                ]
-            )
-            if row_readiness != expected_readiness:
-                ok = False
-                _production_evidence_finding(
-                    findings,
-                    "preflight_parity_row_readiness_mismatch",
-                    "preflight.json parity_row_readiness does not match retained input artifacts",
-                )
     if not _verify_production_evidence_executable_tool_references(preflight, findings):
         ok = False
     return ok
@@ -11261,6 +11267,13 @@ def _verify_production_evidence_input_artifact_custody(
             findings,
             "preflight_input_artifact_symlink",
             "input-artifacts must be a retained directory, not a symlink",
+        )
+    elif not input_root_path.is_dir():
+        ok = False
+        _production_evidence_finding(
+            findings,
+            "preflight_input_artifact_root_missing",
+            "input-artifacts must be retained in the production evidence bundle",
         )
     elif input_root_path.exists():
         for path in sorted(input_root_path.rglob("*")):

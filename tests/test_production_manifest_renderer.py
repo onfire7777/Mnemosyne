@@ -304,6 +304,30 @@ def _filled_render_env(tmp_path: Path) -> dict[str, str]:
         "MNEMOSYNE_PROD_TENANT": "tenant-prod",
         "MNEMOSYNE_PROD_TLS_HOSTNAME": "mnemosyne.example.com",
         "MNEMOSYNE_PROD_TLS_URL": "https://mnemosyne.example.com",
+        "MNEMOSYNE_CANDIDATE_EXTRACTOR_COMMAND": "candidate-extractor-prod",
+        "MNEMOSYNE_EMBEDDING_API_KEY": "embedding-provider-key-ref",
+        "MNEMOSYNE_EMBEDDING_MODEL": "text-embedding-prod",
+        "MNEMOSYNE_EMBEDDING_URL": "https://providers.example.com/embedding",
+        "MNEMOSYNE_ENTITY_RESOLVER_COMMAND": "entity-resolver-prod",
+        "MNEMOSYNE_LESSON_DISTILLER_COMMAND": "lesson-distiller-prod",
+        "MNEMOSYNE_MEDIA_EMBEDDING_COMMAND": "media-embedding-prod",
+        "MNEMOSYNE_MEDIA_EXTRACTOR_COMMAND": "media-extractor-prod",
+        "MNEMOSYNE_OBJECT_KEY_COMMAND": "object-key-provider-prod",
+        "MNEMOSYNE_PARAMETRIC_COMMAND": "parametric-trainer-prod",
+        "MNEMOSYNE_PROVIDER_OIDC_AUDIENCE": "mnemosyne",
+        "MNEMOSYNE_PROVIDER_OIDC_AUTHZ_POLICY_FILE": str(
+            evidence_dir / "idp-authz-policy.current.json"
+        ),
+        "MNEMOSYNE_PROVIDER_OIDC_ISSUER": "https://idp.example.com/realms/mnemosyne",
+        "MNEMOSYNE_PROVIDER_OIDC_JWKS_URL": (
+            "https://idp.example.com/realms/mnemosyne/protocol/openid-connect/certs"
+        ),
+        "MNEMOSYNE_RERANKER_API_KEY": "reranker-provider-key-ref",
+        "MNEMOSYNE_RERANKER_MODEL": "reranker-prod",
+        "MNEMOSYNE_RERANKER_URL": "https://providers.example.com/reranker",
+        "MNEMOSYNE_SESSION_SECRET_COMMAND": "session-secret-provider-prod",
+        "MNEMOSYNE_SKILL_INDUCER_COMMAND": "skill-inducer-prod",
+        "MNEMOSYNE_SUMMARIZER_COMMAND": "summarizer-prod",
     }
     env = _renderer_base_env()
     env.update(values)
@@ -319,8 +343,32 @@ def _populate_required_input_artifacts(
         path.parent.mkdir(parents=True, exist_ok=True)
         if relative_path == "provenance-trust-suite.json":
             path.write_text(suite_payload, encoding="utf-8")
+        elif relative_path == "provider-manifest.production.json":
+            path.write_text(
+                PROVIDER_MANIFEST_TEMPLATE.read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
         else:
             path.write_text("{}\n", encoding="utf-8")
+
+
+def _provider_manifest_env_refs() -> list[str]:
+    payload = json.loads(PROVIDER_MANIFEST_TEMPLATE.read_text(encoding="utf-8"))
+    refs: set[str] = set()
+
+    def collect(value: object) -> None:
+        if isinstance(value, dict):
+            if set(value) == {"env"} and isinstance(value.get("env"), str):
+                refs.add(value["env"])
+                return
+            for item in value.values():
+                collect(item)
+        elif isinstance(value, list):
+            for item in value:
+                collect(item)
+
+    collect(payload)
+    return sorted(refs)
 
 
 def test_renderer_placeholders_match_env_example_and_env_guide() -> None:
@@ -508,6 +556,8 @@ def test_renderer_check_environment_passes_without_writing_manifest(
     assert payload["missing_input_artifacts"] == []
     assert payload["missing_input_artifacts_detail"] == []
     assert payload["input_artifact_errors"] == []
+    assert payload["provider_manifest_env_refs"] == _provider_manifest_env_refs()
+    assert payload["missing_provider_manifest_env_refs"] == []
     assert payload["required_input_artifact_count"] == len(
         REQUIRED_PRODUCTION_INPUT_ARTIFACTS
     )
@@ -537,6 +587,51 @@ def test_renderer_check_environment_passes_without_writing_manifest(
     )
     assert sorted(payload["present"]) == _placeholders()
     assert not list(tmp_path.glob("*.json"))
+
+
+def test_renderer_check_environment_rejects_missing_provider_manifest_env_ref(
+    tmp_path: Path,
+) -> None:
+    env = _filled_render_env(tmp_path)
+    _populate_required_input_artifacts(env)
+    missing_ref = "MNEMOSYNE_RERANKER_URL"
+    env.pop(missing_ref)
+
+    proc = subprocess.run(
+        [*RENDERER_CMD, "--check-environment"],
+        cwd=REPO,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    payload = json.loads(proc.stdout)
+    expected_error = (
+        "provider-manifest.production.json references unset environment variables: "
+        f"{missing_ref}"
+    )
+
+    assert proc.returncode == 78
+    assert payload["ok"] is False
+    assert payload["blocked_reason"] == "missing_or_invalid_input_artifacts"
+    assert payload["missing_input_artifacts"] == []
+    assert payload["missing_provider_manifest_env_refs"] == [missing_ref]
+    assert payload["provider_manifest_env_refs"] == _provider_manifest_env_refs()
+    assert payload["input_artifact_errors"] == [expected_error]
+    rows = _row_readiness_by_lane(payload)
+    affected_lanes = {"B1", "B2", "B4", "B6", "B7", "B9", "B10"}
+    for lane in REQUIRED_PARITY_LANES:
+        _assert_row_readiness_shape(rows[lane], has_exists=True)
+        if lane in affected_lanes:
+            assert rows[lane]["input_artifact_errors"] == [expected_error]
+            assert rows[lane]["input_artifacts_complete"] is False
+        else:
+            assert rows[lane]["input_artifact_errors"] == []
+            assert rows[lane]["input_artifacts_complete"] is True
+    assert "https://providers.example.com/reranker" not in proc.stdout
+    assert env["MNEMOSYNE_PROD_EVIDENCE_DIR"] not in proc.stdout
+    assert proc.stderr == ""
 
 
 def test_renderer_check_environment_fails_on_missing_input_artifacts(
