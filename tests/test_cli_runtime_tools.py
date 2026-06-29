@@ -13,6 +13,7 @@ from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import Callable
 from urllib import request as urlrequest
 
 from cryptography import x509
@@ -6365,6 +6366,34 @@ def production_preflight_row_readiness(
     return build_parity_row_readiness(readiness_inputs)
 
 
+def write_executable_fixture(path: Path, payload: str = "#!/bin/sh\nexit 0\n") -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(payload, encoding="utf-8")
+    path.chmod(0o755)
+    return path
+
+
+def update_provider_manifest_snapshot(
+    bundle_dir: Path,
+    mutate: Callable[[dict[str, object]], None],
+) -> dict[str, object]:
+    preflight_path = bundle_dir / "preflight.json"
+    preflight = json.loads(preflight_path.read_text(encoding="utf-8"))
+    provider_artifact = next(
+        artifact
+        for artifact in preflight["required_input_artifacts"]
+        if "provider-manifest" in Path(str(artifact["snapshot_path"])).name
+    )
+    snapshot = Path(str(provider_artifact["snapshot_path"]))
+    payload = json.loads(snapshot.read_text(encoding="utf-8"))
+    mutate(payload)
+    snapshot.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    provider_artifact["files"][0]["size_bytes"] = snapshot.stat().st_size
+    provider_artifact["files"][0]["sha256"] = "sha256:" + sha256(snapshot.read_bytes()).hexdigest()
+    preflight_path.write_text(json.dumps(preflight, indent=2, sort_keys=True), encoding="utf-8")
+    return preflight
+
+
 def write_production_evidence_bundle(tmp_path: Path) -> tuple[Path, str]:
     store = tmp_path / "mnemosyne.json"
     source_root = tmp_path / "source"
@@ -7333,6 +7362,108 @@ def test_cli_production_evidence_verify_rejects_changed_executable_tool_bytes(
         "preflight_executable_tool_reference_size_mismatch",
         "preflight_executable_tool_reference_sha256_mismatch",
     }.issubset(codes)
+
+
+def test_cli_production_evidence_verify_accepts_provider_command_executable_reference(
+    tmp_path: Path,
+) -> None:
+    bundle_dir, _bundle_fingerprint = write_production_evidence_bundle(tmp_path)
+    tool = write_executable_fixture(tmp_path / "tools" / "session-secret-provider")
+    label = "provider-manifest.production.json.providers.session_secret.command"
+    preflight = update_provider_manifest_snapshot(
+        bundle_dir,
+        lambda payload: payload.setdefault("providers", {}).update(
+            {"session_secret": {"command": str(tool)}}
+        ),
+    )
+    preflight["executable_tool_references"].append(
+        {
+            "option": "provider-manifest.command",
+            "path": str(tool),
+            "size_bytes": tool.stat().st_size,
+            "sha256": "sha256:" + sha256(tool.read_bytes()).hexdigest(),
+            "labels": [label],
+        }
+    )
+    (bundle_dir / "preflight.json").write_text(
+        json.dumps(preflight, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    rewrite_production_redaction_scan(bundle_dir)
+    bundle_fingerprint = rewrite_production_bundle_manifest(bundle_dir)
+
+    report = run_cli(
+        tmp_path / "verify-store.json",
+        "production-evidence-verify",
+        str(bundle_dir),
+        "--expected-bundle-fingerprint",
+        bundle_fingerprint,
+    )
+
+    assert report["ok"] is True
+    assert report["findings"] == []
+
+
+def test_cli_production_evidence_verify_rejects_missing_provider_command_reference(
+    tmp_path: Path,
+) -> None:
+    bundle_dir, _bundle_fingerprint = write_production_evidence_bundle(tmp_path)
+    tool = write_executable_fixture(tmp_path / "tools" / "session-secret-provider")
+    update_provider_manifest_snapshot(
+        bundle_dir,
+        lambda payload: payload.setdefault("providers", {}).update(
+            {"session_secret": {"command": str(tool)}}
+        ),
+    )
+    rewrite_production_redaction_scan(bundle_dir)
+    bundle_fingerprint = rewrite_production_bundle_manifest(bundle_dir)
+
+    result = run_raw_cli(
+        tmp_path / "verify-store.json",
+        "production-evidence-verify",
+        str(bundle_dir),
+        "--expected-bundle-fingerprint",
+        bundle_fingerprint,
+    )
+    payload = json.loads(result.stdout)
+    codes = {finding["code"] for finding in payload["findings"]}
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert payload["checks"]["preflight"] is False
+    assert "preflight_provider_command_executable_reference_missing" in codes
+    assert "bundle_file_sha256_mismatch" not in codes
+    assert "bundle_fingerprint_mismatch" not in codes
+
+
+def test_cli_production_evidence_verify_rejects_missing_referenced_executable_tool(
+    tmp_path: Path,
+) -> None:
+    bundle_dir, _bundle_fingerprint = write_production_evidence_bundle(tmp_path)
+    preflight_path = bundle_dir / "preflight.json"
+    preflight = json.loads(preflight_path.read_text(encoding="utf-8"))
+    tool = Path(preflight["executable_tool_references"][0]["path"])
+    tool.unlink()
+    preflight_path.write_text(json.dumps(preflight, indent=2, sort_keys=True), encoding="utf-8")
+    rewrite_production_redaction_scan(bundle_dir)
+    bundle_fingerprint = rewrite_production_bundle_manifest(bundle_dir)
+
+    result = run_raw_cli(
+        tmp_path / "verify-store.json",
+        "production-evidence-verify",
+        str(bundle_dir),
+        "--expected-bundle-fingerprint",
+        bundle_fingerprint,
+    )
+    payload = json.loads(result.stdout)
+    codes = {finding["code"] for finding in payload["findings"]}
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert payload["checks"]["preflight"] is False
+    assert "preflight_executable_tool_reference_missing" in codes
+    assert "bundle_file_sha256_mismatch" not in codes
+    assert "bundle_fingerprint_mismatch" not in codes
 
 
 def test_cli_production_evidence_verify_rejects_external_preflight_paths(

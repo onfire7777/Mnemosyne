@@ -27,6 +27,10 @@ row-local manifests.
 that external provider manifest when present, reports the referenced provider
 environment-variable names under `provider_manifest_env_refs`, and fails before
 capture if any referenced provider env var is unset. Values remain redacted.
+Provider manifest `command` env vars must resolve to command strings whose
+first token is an absolute, external, non-symlinked executable path; production
+capture records that executable's size and SHA-256 digest in
+`preflight.json.executable_tool_references`.
 The check command prints key names only; it also verifies the production input
 directory exists outside the repo and `MNEMOSYNE_PROD_C2PA_TOOL` resolves to an
 absolute external executable outside the repository without a symlink or

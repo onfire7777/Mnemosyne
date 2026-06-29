@@ -10725,9 +10725,77 @@ def _production_evidence_sha256_digest_ok(value: Any) -> bool:
     return isinstance(value, str) and re.fullmatch(r"sha256:[0-9a-f]{64}", value) is not None
 
 
+def _provider_manifest_command_labels(value: Any, *, path: str) -> set[str]:
+    labels: set[str] = set()
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            child_path = f"{path}.{key}" if path else str(key)
+            if key == "command":
+                labels.add(child_path)
+            labels.update(_provider_manifest_command_labels(item, path=child_path))
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            labels.update(_provider_manifest_command_labels(item, path=f"{path}[{index}]"))
+    return labels
+
+
+def _production_evidence_provider_manifest_command_labels(
+    preflight: Mapping[str, Any],
+    *,
+    bundle_dir: Path,
+    findings: list[dict[str, Any]],
+) -> set[str]:
+    input_artifacts = preflight.get("required_input_artifacts")
+    if not isinstance(input_artifacts, list):
+        return set()
+    labels: set[str] = set()
+    for artifact in input_artifacts:
+        if not isinstance(artifact, Mapping):
+            continue
+        artifact_labels = artifact.get("labels", [])
+        snapshot_path_value = artifact.get("snapshot_path")
+        if not isinstance(snapshot_path_value, str) or not snapshot_path_value:
+            continue
+        if not (
+            "provider-manifest" in Path(snapshot_path_value).name
+            or (
+                isinstance(artifact_labels, list)
+                and any("--provider-manifest" in str(label) for label in artifact_labels)
+            )
+        ):
+            continue
+        try:
+            snapshot_path = Path(snapshot_path_value).expanduser().resolve(strict=True)
+            snapshot_path.relative_to(bundle_dir.resolve(strict=False))
+            payload = json.loads(snapshot_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            _production_evidence_finding(
+                findings,
+                "preflight_provider_manifest_command_labels_unreadable",
+                f"provider manifest command labels cannot be read from retained snapshot: {exc}",
+            )
+            continue
+        if not isinstance(payload, Mapping):
+            _production_evidence_finding(
+                findings,
+                "preflight_provider_manifest_command_labels_invalid",
+                "retained provider manifest must be a JSON object for command custody",
+            )
+            continue
+        labels.update(
+            _provider_manifest_command_labels(
+                payload,
+                path="provider-manifest.production.json",
+            )
+        )
+    return labels
+
+
 def _verify_production_evidence_executable_tool_references(
     preflight: Mapping[str, Any],
     findings: list[dict[str, Any]],
+    *,
+    bundle_dir: Path,
 ) -> bool:
     references = preflight.get("executable_tool_references")
     if not isinstance(references, list) or not references:
@@ -10739,6 +10807,15 @@ def _verify_production_evidence_executable_tool_references(
         return False
     ok = True
     c2pa_reference_seen = False
+    provider_label_finding_count = len(findings)
+    provider_command_labels = _production_evidence_provider_manifest_command_labels(
+        preflight,
+        bundle_dir=bundle_dir,
+        findings=findings,
+    )
+    if len(findings) > provider_label_finding_count:
+        ok = False
+    provider_command_reference_labels: set[str] = set()
     allowed_options = {"--c2pa-tool", "suite.tool", "suite.c2pa_tool", "MNEMOSYNE_C2PA_TOOL"}
     for index, reference in enumerate(references, start=1):
         if not isinstance(reference, Mapping):
@@ -10775,6 +10852,8 @@ def _verify_production_evidence_executable_tool_references(
             continue
         if option in allowed_options:
             c2pa_reference_seen = True
+        if option == "provider-manifest.command":
+            provider_command_reference_labels.update(labels)
         tool_path = Path(path_value).expanduser()
         if not tool_path.is_absolute():
             ok = False
@@ -10785,37 +10864,44 @@ def _verify_production_evidence_executable_tool_references(
             )
             continue
         try:
-            if tool_path.exists():
-                if tool_path.is_symlink():
-                    ok = False
-                    _production_evidence_finding(
-                        findings,
-                        "preflight_executable_tool_reference_symlink",
-                        f"preflight.json executable_tool_references[{index}].path must not be a symlink",
-                    )
-                    continue
-                if not tool_path.is_file():
-                    ok = False
-                    _production_evidence_finding(
-                        findings,
-                        "preflight_executable_tool_reference_not_file",
-                        f"preflight.json executable_tool_references[{index}].path is not a file",
-                    )
-                    continue
-                if tool_path.stat().st_size != size_bytes:
-                    ok = False
-                    _production_evidence_finding(
-                        findings,
-                        "preflight_executable_tool_reference_size_mismatch",
-                        f"preflight.json executable_tool_references[{index}] size does not match the executable",
-                    )
-                if _file_sha256(tool_path) != expected_sha256:
-                    ok = False
-                    _production_evidence_finding(
-                        findings,
-                        "preflight_executable_tool_reference_sha256_mismatch",
-                        f"preflight.json executable_tool_references[{index}] sha256 does not match the executable",
-                    )
+            if not tool_path.exists():
+                ok = False
+                _production_evidence_finding(
+                    findings,
+                    "preflight_executable_tool_reference_missing",
+                    f"preflight.json executable_tool_references[{index}].path is missing",
+                )
+                continue
+            if tool_path.is_symlink():
+                ok = False
+                _production_evidence_finding(
+                    findings,
+                    "preflight_executable_tool_reference_symlink",
+                    f"preflight.json executable_tool_references[{index}].path must not be a symlink",
+                )
+                continue
+            if not tool_path.is_file():
+                ok = False
+                _production_evidence_finding(
+                    findings,
+                    "preflight_executable_tool_reference_not_file",
+                    f"preflight.json executable_tool_references[{index}].path is not a file",
+                )
+                continue
+            if tool_path.stat().st_size != size_bytes:
+                ok = False
+                _production_evidence_finding(
+                    findings,
+                    "preflight_executable_tool_reference_size_mismatch",
+                    f"preflight.json executable_tool_references[{index}] size does not match the executable",
+                )
+            if _file_sha256(tool_path) != expected_sha256:
+                ok = False
+                _production_evidence_finding(
+                    findings,
+                    "preflight_executable_tool_reference_sha256_mismatch",
+                    f"preflight.json executable_tool_references[{index}] sha256 does not match the executable",
+                )
         except OSError as exc:
             ok = False
             _production_evidence_finding(
@@ -10829,6 +10915,15 @@ def _verify_production_evidence_executable_tool_references(
             findings,
             "preflight_c2pa_executable_reference_missing",
             "preflight.json must retain C2PA executable digest metadata",
+        )
+    missing_provider_labels = sorted(provider_command_labels - provider_command_reference_labels)
+    if missing_provider_labels:
+        ok = False
+        _production_evidence_finding(
+            findings,
+            "preflight_provider_command_executable_reference_missing",
+            "preflight.json must retain provider command executable digest metadata for: "
+            + ", ".join(missing_provider_labels),
         )
     return ok
 
@@ -11185,7 +11280,11 @@ def _verify_production_evidence_preflight(
                 "preflight_parity_row_readiness_mismatch",
                 "preflight.json parity_row_readiness does not match retained input artifacts",
             )
-    if not _verify_production_evidence_executable_tool_references(preflight, findings):
+    if not _verify_production_evidence_executable_tool_references(
+        preflight,
+        findings,
+        bundle_dir=bundle_dir,
+    ):
         ok = False
     return ok
 
