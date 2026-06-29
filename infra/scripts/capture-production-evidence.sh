@@ -1469,6 +1469,7 @@ from mnemosyne.evidence_redaction import scan_evidence_paths, scan_evidence_tree
 out_root = Path(os.environ["OUT_ROOT"])
 soak = json.loads((out_root / "deployment-soak.stdout.json").read_text(encoding="utf-8"))
 audit = json.loads((out_root / "release-audit.json").read_text(encoding="utf-8"))
+preflight = json.loads((out_root / "preflight.json").read_text(encoding="utf-8"))
 redaction_scan = scan_evidence_tree(
     out_root,
     binary_custody_roots=[out_root / "tool-artifacts"],
@@ -1562,6 +1563,8 @@ summary = {
     "redaction_scan": str(out_root / "redaction-scan.json"),
     "bundle_manifest": str(out_root / "bundle-manifest.json"),
     "bundle_fingerprint": bundle_fingerprint,
+    "parity_row_readiness": preflight.get("parity_row_readiness", []),
+    "row_review_source": "preflight.json.parity_row_readiness",
     "redaction_scan_ok": redaction_scan["ok"],
     "deployment_soak_ok": soak.get("ok") is True,
     "release_audit_ok": audit.get("ok") is True,

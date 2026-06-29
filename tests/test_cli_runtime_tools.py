@@ -6636,6 +6636,8 @@ def write_production_evidence_bundle(tmp_path: Path) -> tuple[Path, str]:
                 "redaction_scan": str(bundle_dir / "redaction-scan.json"),
                 "bundle_manifest": str(bundle_dir / "bundle-manifest.json"),
                 "bundle_fingerprint": bundle_fingerprint,
+                "parity_row_readiness": parity_row_readiness,
+                "row_review_source": "preflight.json.parity_row_readiness",
                 "redaction_scan_ok": True,
                 "deployment_soak_ok": True,
                 "release_audit_ok": True,
@@ -7854,6 +7856,27 @@ def test_cli_production_evidence_verify_summary_check_requires_full_summary_cont
     assert "summary_deployment_soak_ok_missing" in codes
 
 
+def test_cli_production_evidence_verify_rejects_summary_row_readiness_drift(tmp_path: Path) -> None:
+    bundle_dir, _bundle_fingerprint = write_production_evidence_bundle(tmp_path)
+    summary_path = bundle_dir / "summary.json"
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    summary["parity_row_readiness"] = []
+    summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
+
+    result = run_raw_cli(
+        tmp_path / "verify-store.json",
+        "production-evidence-verify",
+        str(bundle_dir),
+    )
+    payload = json.loads(result.stdout)
+    codes = {finding["code"] for finding in payload["findings"]}
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert payload["checks"]["summary"] is False
+    assert "summary_parity_row_readiness_mismatch" in codes
+
+
 def test_cli_production_evidence_verify_rejects_skeletal_summary_contract(tmp_path: Path) -> None:
     bundle_dir, _bundle_fingerprint = write_production_evidence_bundle(tmp_path)
     summary_path = bundle_dir / "summary.json"
@@ -7888,6 +7911,8 @@ def test_cli_production_evidence_verify_rejects_skeletal_summary_contract(tmp_pa
     assert "summary_out_root_invalid" in codes
     assert "summary_operator_manifest_invalid" in codes
     assert "summary_completed_at_missing" in codes
+    assert "summary_parity_row_readiness_invalid" in codes
+    assert "summary_row_review_source_invalid" in codes
 
 
 def test_cli_production_evidence_verify_rejects_skeletal_release_audit(tmp_path: Path) -> None:
