@@ -137,8 +137,11 @@ The completed production bundle must retain `summary.json`, `preflight.json`,
 are the offline handoff surface for `production-evidence-verify`; they do not
 replace operator capture against deployed infrastructure.
 
-`--check-environment` writes no files and prints no values. It verifies required
-`MNEMOSYNE_PROD_*` key names, the external production input directory, the
+`--check-environment` writes no files and prints no values. It always reports
+the required `MNEMOSYNE_PROD_*` key names, operator readiness file paths, and
+static template-derived input artifact inventory so operators can prepare the
+external custody directory before sourcing environment values. Once the
+environment is present, it verifies the external production input directory, the
 manifest-referenced relative input artifacts in that directory, and the external
 executable C2PA verifier before rendering. Its JSON includes
 `required_input_artifacts_detail` and `missing_input_artifacts_detail` entries

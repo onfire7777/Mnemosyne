@@ -42,5 +42,7 @@ Rules:
   values are also treated as input artifacts and must resolve inside this same
   external directory.
 - Run `infra/scripts/render-production-soak-manifest.sh --check-environment`
-  before capture; it reports missing relative artifact names without printing
+  before capture. Without sourced environment values, it reports this static
+  artifact inventory and the readiness files to use next. With environment
+  values present, it reports missing relative artifact names without printing
   the external custody path.
