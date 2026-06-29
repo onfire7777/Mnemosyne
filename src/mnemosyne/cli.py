@@ -10993,6 +10993,7 @@ def _production_evidence_binary_custody_paths(
 def _verify_production_evidence_summary(
     *,
     summary: Mapping[str, Any] | None,
+    preflight: Mapping[str, Any] | None,
     bundle_dir: Path,
     findings: list[dict[str, Any]],
 ) -> None:
@@ -11038,16 +11039,49 @@ def _verify_production_evidence_summary(
             "summary_offline_verify_invalid",
             "summary.json offline_verify must contain a verifier command template that requires an out-of-band expected fingerprint",
         )
+    summary_row_readiness = summary.get("parity_row_readiness")
+    if not isinstance(summary_row_readiness, list):
+        _production_evidence_finding(
+            findings,
+            "summary_parity_row_readiness_invalid",
+            "summary.json parity_row_readiness must mirror preflight.json parity_row_readiness",
+        )
+    elif isinstance(preflight, Mapping):
+        preflight_row_readiness = preflight.get("parity_row_readiness")
+        if isinstance(preflight_row_readiness, list) and summary_row_readiness != preflight_row_readiness:
+            _production_evidence_finding(
+                findings,
+                "summary_parity_row_readiness_mismatch",
+                "summary.json parity_row_readiness does not match preflight.json parity_row_readiness",
+            )
+    if summary.get("row_review_source") != "preflight.json.parity_row_readiness":
+        _production_evidence_finding(
+            findings,
+            "summary_row_review_source_invalid",
+            "summary.json row_review_source must point reviewers at preflight.json.parity_row_readiness",
+        )
 
 
-def _production_evidence_summary_ok(summary: Mapping[str, Any] | None, *, bundle_dir: Path) -> bool:
+def _production_evidence_summary_ok(
+    summary: Mapping[str, Any] | None,
+    *,
+    preflight: Mapping[str, Any] | None,
+    bundle_dir: Path,
+) -> bool:
     if summary is None:
         return False
+    summary_row_readiness = summary.get("parity_row_readiness")
+    preflight_row_readiness = preflight.get("parity_row_readiness") if isinstance(preflight, Mapping) else None
+    row_readiness_ok = isinstance(summary_row_readiness, list) and (
+        not isinstance(preflight_row_readiness, list) or summary_row_readiness == preflight_row_readiness
+    )
     return (
         summary.get("redaction_scan_ok") is True
         and summary.get("deployment_soak_ok") is True
         and summary.get("release_audit_ok") is True
         and summary.get("release_audit_findings") == []
+        and row_readiness_ok
+        and summary.get("row_review_source") == "preflight.json.parity_row_readiness"
         and _production_evidence_iso_datetime_ok(summary.get("completed_at"))
         and _production_evidence_summary_offline_verify_argv_ok(summary, bundle_dir=bundle_dir)
         and all(
@@ -12447,6 +12481,7 @@ def cmd_production_evidence_verify(args: argparse.Namespace) -> None:
     )
     _verify_production_evidence_summary(
         summary=summary,
+        preflight=preflight,
         bundle_dir=resolved_bundle_dir,
         findings=findings,
     )
@@ -12533,7 +12568,11 @@ def cmd_production_evidence_verify(args: argparse.Namespace) -> None:
         if isinstance(recomputed_release_audit, Mapping)
         else None,
         "checks": {
-            "summary": _production_evidence_summary_ok(summary, bundle_dir=resolved_bundle_dir),
+            "summary": _production_evidence_summary_ok(
+                summary,
+                preflight=preflight,
+                bundle_dir=resolved_bundle_dir,
+            ),
             "preflight": preflight_ok,
             "redaction_scan": redaction_scan_ok,
             "bundle_manifest": bundle_manifest is not None and bundle_fingerprint is not None,

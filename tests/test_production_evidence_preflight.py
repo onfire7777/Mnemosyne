@@ -3239,6 +3239,7 @@ exec "$REAL_PYTHON" "$@"
 
     stdout = json.loads(proc.stdout)
     summary = json.loads((out_root / "summary.json").read_text(encoding="utf-8"))
+    preflight = json.loads((out_root / "preflight.json").read_text(encoding="utf-8"))
     bundle_manifest = json.loads(
         (out_root / "bundle-manifest.json").read_text(encoding="utf-8")
     )
@@ -3247,6 +3248,8 @@ exec "$REAL_PYTHON" "$@"
     assert stdout == summary
     assert summary["bundle_manifest"] == str(out_root / "bundle-manifest.json")
     assert summary["bundle_fingerprint"].startswith("sha256:")
+    assert summary["parity_row_readiness"] == preflight["parity_row_readiness"]
+    assert summary["row_review_source"] == "preflight.json.parity_row_readiness"
     assert summary["offline_verify"] == {
         "bundle_dir": str(out_root),
         "expected_bundle_fingerprint_source": "out-of-band-capture-record",
