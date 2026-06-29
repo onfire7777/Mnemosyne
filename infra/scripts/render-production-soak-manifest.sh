@@ -664,6 +664,49 @@ def provider_command_value(value: object, *, label: str) -> str | None:
     return None
 
 
+def provider_command_arg_looks_path(value: str) -> bool:
+    candidate = value
+    if value.startswith("-") and "=" in value:
+        candidate = value.split("=", 1)[1]
+    if not candidate or candidate.startswith("-"):
+        return False
+    if urlparse(candidate).scheme:
+        return True
+    if candidate.startswith(("/", "./", "../", "~")):
+        return True
+    if "/" in candidate or "\\" in candidate:
+        return True
+    return candidate.lower().endswith(
+        (
+            ".py",
+            ".sh",
+            ".bash",
+            ".zsh",
+            ".json",
+            ".jsonl",
+            ".yaml",
+            ".yml",
+            ".toml",
+            ".ini",
+            ".cfg",
+            ".conf",
+            ".pem",
+            ".crt",
+            ".key",
+        )
+    )
+
+
+def validate_provider_command_arguments(parts: list[str], *, label: str) -> None:
+    for arg_index, part in enumerate(parts[1:], start=2):
+        if provider_command_arg_looks_path(part):
+            provider_manifest_error(
+                f"{label} provider-manifest.command argument {arg_index} is path-like "
+                "and would not be retained in tool-artifacts; use a single external "
+                "executable or an explicit production input artifact"
+            )
+
+
 def validate_provider_command(value: str, *, label: str) -> None:
     try:
         parts = shlex.split(value)
@@ -713,6 +756,8 @@ def validate_provider_command(value: str, *, label: str) -> None:
         provider_manifest_error(
             f"{label} provider-manifest.command executable must be executable"
         )
+        return
+    validate_provider_command_arguments(parts, label=label)
 
 
 def inspect_provider_manifest() -> None:

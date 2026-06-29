@@ -513,12 +513,44 @@ def test_http_retrieval_adapters_fail_closed_on_malformed_provider_responses() -
                 [Hit("a", "evidence", TENANT, "main", "first", 0.1, "candidate")],
                 k=1,
             )
-        with pytest.raises(ValueError, match="absolute HTTP or HTTPS"):
+        with pytest.raises(ValueError, match="must be http\\(s\\) with a hostname"):
             HttpEmbeddingProvider("file:///tmp/embed", dims=3).embed("hello")
     finally:
         server.shutdown()
         thread.join(timeout=5)
         server.server_close()
+
+
+def test_hosted_json_probe_rejects_unsafe_fetch_url_without_network() -> None:
+    from mnemosyne import cli as mneme_cli
+
+    probe = mneme_cli._http_json_probe(
+        url="http://provider.example.test/healthz",
+        method="GET",
+        headers={},
+        timeout_seconds=1.0,
+    )
+
+    assert probe["ok"] is False
+    assert probe["status"] is None
+    assert "requires https unless insecure localhost is explicitly allowed" in probe["error"]
+
+
+def test_hosted_sse_probe_rejects_userinfo_without_network() -> None:
+    from mnemosyne import cli as mneme_cli
+
+    probe = mneme_cli._sse_probe(
+        url="https://user:secret@provider.example.test/sse",
+        headers={},
+        timeout_seconds=1.0,
+        max_bytes=1024,
+        max_events=1,
+        expected_event=None,
+    )
+
+    assert probe["ok"] is False
+    assert probe["status"] is None
+    assert "must not contain userinfo credentials" in probe["error"]
 
 
 def test_command_media_embedding_provider_validates_json_contract(tmp_path: Path) -> None:

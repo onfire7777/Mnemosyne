@@ -7691,6 +7691,57 @@ def test_cli_production_evidence_verify_accepts_provider_command_executable_refe
     assert report["findings"] == []
 
 
+def test_cli_production_evidence_verify_rejects_provider_command_path_argument(
+    tmp_path: Path,
+) -> None:
+    bundle_dir, _bundle_fingerprint = write_production_evidence_bundle(tmp_path)
+    tool = write_executable_fixture(tmp_path / "tools" / "session-secret-provider")
+    config_path = tmp_path / "tools" / "session-provider-config.json"
+    label = "provider-manifest.production.json.providers.session_secret.command"
+    preflight = update_provider_manifest_snapshot(
+        bundle_dir,
+        lambda payload: payload.setdefault("providers", {}).update(
+            {"session_secret": {"command": f"{tool} --config={config_path}"}}
+        ),
+    )
+    preflight["executable_tool_references"].append(
+        {
+            "option": "provider-manifest.command",
+            "path": str(tool),
+            "size_bytes": tool.stat().st_size,
+            "sha256": "sha256:" + sha256(tool.read_bytes()).hexdigest(),
+            "labels": [label],
+            **retained_executable_snapshot(
+                bundle_dir,
+                tool,
+                option="provider-manifest.command",
+            ),
+        }
+    )
+    (bundle_dir / "preflight.json").write_text(
+        json.dumps(preflight, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    rewrite_production_redaction_scan(bundle_dir)
+    bundle_fingerprint = rewrite_production_bundle_manifest(bundle_dir)
+
+    result = run_raw_cli(
+        tmp_path / "verify-store.json",
+        "production-evidence-verify",
+        str(bundle_dir),
+        "--expected-bundle-fingerprint",
+        bundle_fingerprint,
+    )
+    payload = json.loads(result.stdout)
+    codes = {finding["code"] for finding in payload["findings"]}
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert payload["checks"]["preflight"] is False
+    assert "preflight_provider_command_unretained_path_argument" in codes
+    assert str(config_path) not in result.stdout
+
+
 def test_cli_production_evidence_verify_rejects_missing_provider_command_reference(
     tmp_path: Path,
 ) -> None:

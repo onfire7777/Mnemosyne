@@ -9,6 +9,7 @@ import json
 import math
 import os
 import re
+import shlex
 import socket
 import ssl
 import subprocess
@@ -8065,9 +8066,12 @@ def _fetch_dashboard_url(
     timeout: float,
     max_bytes: int,
 ) -> tuple[bytes, dict[str, Any]]:
-    _validate_hosted_url(url, allow_insecure_localhost=allow_insecure_localhost)
+    validated_url = _validate_hosted_fetch_url(
+        url,
+        allow_insecure_localhost=allow_insecure_localhost,
+    )
     req = urlrequest.Request(url, headers={"User-Agent": "mnemosyne-ops-dashboard-check/1"})
-    with urlrequest.urlopen(req, timeout=timeout) as response:
+    with safe_urlopen(req, validated=validated_url, timeout=timeout) as response:
         body = response.read(max_bytes + 1)
         if len(body) > max_bytes:
             raise ValueError(f"dashboard response exceeded {max_bytes} bytes")
@@ -8474,9 +8478,14 @@ def _http_json_probe(
         encoded_payload = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
         request_headers["Content-Type"] = "application/json"
     started = time.monotonic()
-    request = urlrequest.Request(url, data=encoded_payload, headers=request_headers, method=method)
     try:
-        with urlrequest.urlopen(request, timeout=timeout_seconds) as response:
+        validated_url = validate_fetch_url(
+            url,
+            allow_insecure_localhost=True,
+            purpose="hosted probe URL",
+        )
+        request = urlrequest.Request(url, data=encoded_payload, headers=request_headers, method=method)
+        with safe_urlopen(request, validated=validated_url, timeout=timeout_seconds) as response:
             body = _bounded_json_body(response)
             return {
                 "ok": 200 <= int(response.status) < 300,
@@ -8611,10 +8620,15 @@ def _sse_probe(
     expected_event: str | None,
 ) -> dict[str, Any]:
     request_headers = {"Accept": "text/event-stream", "Cache-Control": "no-cache", **dict(headers)}
-    request = urlrequest.Request(url, headers=request_headers, method="GET")
     started = time.monotonic()
     try:
-        with urlrequest.urlopen(request, timeout=timeout_seconds) as response:
+        validated_url = validate_fetch_url(
+            url,
+            allow_insecure_localhost=True,
+            purpose="hosted SSE URL",
+        )
+        request = urlrequest.Request(url, headers=request_headers, method="GET")
+        with safe_urlopen(request, validated=validated_url, timeout=timeout_seconds) as response:
             status = int(response.status)
             content_type = str(response.headers.get("Content-Type") or "")
             events: list[dict[str, Any]] = []
@@ -10777,6 +10791,86 @@ def _provider_manifest_command_labels(value: Any, *, path: str) -> set[str]:
     return labels
 
 
+def _provider_manifest_command_arg_looks_path(value: str) -> bool:
+    candidate = value
+    if value.startswith("-") and "=" in value:
+        candidate = value.split("=", 1)[1]
+    if not candidate or candidate.startswith("-"):
+        return False
+    if urlsplit(candidate).scheme:
+        return True
+    if candidate.startswith(("/", "./", "../", "~")):
+        return True
+    if "/" in candidate or "\\" in candidate:
+        return True
+    return candidate.lower().endswith(
+        (
+            ".py",
+            ".sh",
+            ".bash",
+            ".zsh",
+            ".json",
+            ".jsonl",
+            ".yaml",
+            ".yml",
+            ".toml",
+            ".ini",
+            ".cfg",
+            ".conf",
+            ".pem",
+            ".crt",
+            ".key",
+        )
+    )
+
+
+def _verify_provider_manifest_command_arguments(
+    value: Any,
+    *,
+    path: str,
+    findings: list[dict[str, Any]],
+) -> None:
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            child_path = f"{path}.{key}" if path else str(key)
+            if key == "command":
+                if not isinstance(item, str):
+                    _production_evidence_finding(
+                        findings,
+                        "preflight_provider_command_retained_value_invalid",
+                        f"{child_path} must be a retained command string in the provider manifest snapshot",
+                    )
+                    continue
+                try:
+                    command_parts = shlex.split(item)
+                except ValueError as exc:
+                    _production_evidence_finding(
+                        findings,
+                        "preflight_provider_command_retained_value_invalid",
+                        f"{child_path} command cannot be parsed in the retained provider manifest: {exc}",
+                    )
+                    continue
+                for arg_index, part in enumerate(command_parts[1:], start=2):
+                    if _provider_manifest_command_arg_looks_path(part):
+                        _production_evidence_finding(
+                            findings,
+                            "preflight_provider_command_unretained_path_argument",
+                            f"{child_path} command argument {arg_index} is path-like and is not retained in tool-artifacts",
+                        )
+            _verify_provider_manifest_command_arguments(
+                item,
+                path=child_path,
+                findings=findings,
+            )
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            _verify_provider_manifest_command_arguments(
+                item,
+                path=f"{path}[{index}]",
+                findings=findings,
+            )
+
+
 def _production_evidence_provider_manifest_command_labels(
     preflight: Mapping[str, Any],
     *,
@@ -10820,6 +10914,11 @@ def _production_evidence_provider_manifest_command_labels(
                 "retained provider manifest must be a JSON object for command custody",
             )
             continue
+        _verify_provider_manifest_command_arguments(
+            payload,
+            path="provider-manifest.production.json",
+            findings=findings,
+        )
         labels.update(
             _provider_manifest_command_labels(
                 payload,

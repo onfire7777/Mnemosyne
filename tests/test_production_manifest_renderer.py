@@ -761,6 +761,43 @@ def test_renderer_check_environment_rejects_symlinked_provider_command(
     assert proc.stderr == ""
 
 
+def test_renderer_check_environment_rejects_provider_command_path_argument(
+    tmp_path: Path,
+) -> None:
+    env = _filled_render_env(tmp_path)
+    _populate_required_input_artifacts(env)
+    real_tool = Path(env["MNEMOSYNE_CANDIDATE_EXTRACTOR_COMMAND"])
+    config_path = tmp_path / "external-provider-config.json"
+    env["MNEMOSYNE_CANDIDATE_EXTRACTOR_COMMAND"] = (
+        f"{real_tool} --config={config_path}"
+    )
+
+    proc = subprocess.run(
+        [*RENDERER_CMD, "--check-environment"],
+        cwd=REPO,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    payload = json.loads(proc.stdout)
+    expected_error = (
+        "provider-manifest.production.json.providers.candidate_extractor.command "
+        "provider-manifest.command argument 2 is path-like and would not be "
+        "retained in tool-artifacts; use a single external executable or an "
+        "explicit production input artifact"
+    )
+
+    assert proc.returncode == 78
+    assert payload["ok"] is False
+    assert payload["blocked_reason"] == "missing_or_invalid_input_artifacts"
+    assert payload["missing_input_artifacts"] == []
+    assert payload["input_artifact_errors"] == [expected_error]
+    assert str(config_path) not in proc.stdout
+    assert proc.stderr == ""
+
+
 def test_renderer_check_environment_fails_on_missing_input_artifacts(
     tmp_path: Path,
 ) -> None:

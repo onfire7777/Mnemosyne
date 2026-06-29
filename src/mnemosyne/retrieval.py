@@ -11,7 +11,6 @@ import shlex
 import subprocess
 import tempfile
 import urllib.error
-import urllib.parse
 import urllib.request
 from collections import Counter
 from dataclasses import dataclass, replace
@@ -20,6 +19,7 @@ from typing import Any, Callable, Mapping, Protocol, Sequence
 
 from mnemosyne.media_limits import DEFAULT_MAX_INGEST_BYTES, enforce_byte_limit, validate_byte_limit
 from mnemosyne.models import Hit, parse_dt, utc_now
+from mnemosyne.network_safety import safe_urlopen, validate_fetch_url
 from mnemosyne.policy import OperatingPolicy
 from mnemosyne.security import trust_weight
 from mnemosyne.text import cosine, hashing_embedding, lexical_score, tokenize
@@ -1821,14 +1821,14 @@ def _required_env(name: str) -> str:
 
 
 def _post_json(url: str, payload: dict[str, object], api_key: str | None, timeout: float) -> dict[str, object]:
-    _validate_http_provider_config(url, timeout)
+    validated_url = _validate_http_provider_config(url, timeout)
     body = json.dumps(payload).encode("utf-8")
     headers = {"Content-Type": "application/json", "Accept": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
     request = urllib.request.Request(url, data=body, headers=headers, method="POST")
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310 - URL is operator-configured.
+        with safe_urlopen(request, validated=validated_url, timeout=timeout) as response:
             decoded = response.read().decode("utf-8")
     except urllib.error.HTTPError as exc:
         detail = exc.read(512).decode("utf-8", errors="replace").strip()
@@ -1884,12 +1884,17 @@ def _normalize_vector(vector: Sequence[float], dims: int) -> list[float]:
     return [value / norm for value in adjusted]
 
 
-def _validate_http_provider_config(url: str, timeout: float) -> None:
+def _validate_http_provider_config(url: str, timeout: float):
     if not math.isfinite(timeout) or timeout <= 0:
         raise ValueError("retrieval provider timeout must be positive")
-    parsed = urllib.parse.urlparse(url)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        raise ValueError("retrieval provider URL must be absolute HTTP or HTTPS")
+    try:
+        return validate_fetch_url(
+            url,
+            allow_insecure_localhost=True,
+            purpose="retrieval provider URL",
+        )
+    except ValueError as exc:
+        raise ValueError(str(exc)) from exc
 
 
 def _coerce_vector(values: Sequence[object], *, field: str) -> list[float]:
