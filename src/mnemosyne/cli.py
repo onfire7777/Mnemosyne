@@ -10400,9 +10400,38 @@ def _read_json_object_for_evidence(
     path: Path,
     label: str,
     findings: list[dict[str, Any]],
+    *,
+    bundle_dir: Path,
 ) -> dict[str, Any] | None:
+    if path.is_symlink():
+        _production_evidence_finding(
+            findings,
+            f"{label}_symlink",
+            f"{label} must be a retained JSON file, not a symlink",
+        )
+        return None
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        resolved_path = path.resolve(strict=True)
+    except FileNotFoundError:
+        _production_evidence_finding(findings, f"{label}_missing", f"{label} is missing")
+        return None
+    except OSError as exc:
+        _production_evidence_finding(findings, f"{label}_invalid", f"{label} denied: {exc}")
+        return None
+    try:
+        resolved_path.relative_to(bundle_dir)
+    except ValueError:
+        _production_evidence_finding(
+            findings,
+            f"{label}_escape",
+            f"{label} resolves outside the production evidence bundle",
+        )
+        return None
+    if not resolved_path.is_file():
+        _production_evidence_finding(findings, f"{label}_invalid", f"{label} must be a JSON file")
+        return None
+    try:
+        payload = json.loads(resolved_path.read_text(encoding="utf-8"))
     except FileNotFoundError:
         _production_evidence_finding(findings, f"{label}_missing", f"{label} is missing")
         return None
@@ -11144,6 +11173,34 @@ def _production_evidence_reviewer_guidance(
         next_steps.append(
             "Provide --expected-bundle-fingerprint from the independently retained out-of-band "
             "operator capture record. Do not copy the value from the bundle under review."
+        )
+
+    if "expected_bundle_fingerprint_mode_conflict" in codes:
+        blocked_reason = blocked_reason or "fingerprint_mode_conflict"
+        next_steps.append(
+            "Choose exactly one verifier mode. For Tier B custody review, remove "
+            "--internal-consistency-only and rerun with only the out-of-band "
+            "--expected-bundle-fingerprint."
+        )
+
+    if "expected_bundle_fingerprint_mismatch" in codes:
+        blocked_reason = blocked_reason or "expected_fingerprint_mismatch"
+        next_steps.append(
+            "Stop the review. Do not replace the expected fingerprint with a value copied from "
+            "the bundle; compare the external capture record against bundle-manifest.json and "
+            "the reviewed bundle path, then rerun production capture if they cannot be reconciled."
+        )
+
+    if {
+        "bundle_manifest_fingerprint_mismatch",
+        "bundle_fingerprint_mismatch",
+        "summary_bundle_fingerprint_mismatch",
+    } & codes:
+        blocked_reason = blocked_reason or "bundle_integrity_failure"
+        next_steps.append(
+            "Treat the retained bundle as mutated or internally inconsistent. Do not update the "
+            "out-of-band capture record from the bundle; rerun the production capture wrapper "
+            "from the original production sources."
         )
 
     if internal_consistency_only:
@@ -12606,46 +12663,59 @@ def cmd_production_evidence_verify(args: argparse.Namespace) -> None:
     if not resolved_bundle_dir.is_dir():
         raise SystemExit("production evidence bundle path must be a directory")
 
-    summary = _read_json_object_for_evidence(resolved_bundle_dir / "summary.json", "summary", findings)
+    summary = _read_json_object_for_evidence(
+        resolved_bundle_dir / "summary.json",
+        "summary",
+        findings,
+        bundle_dir=resolved_bundle_dir,
+    )
     redaction_scan = _read_json_object_for_evidence(
         resolved_bundle_dir / "redaction-scan.json",
         "redaction_scan",
         findings,
+        bundle_dir=resolved_bundle_dir,
     )
     bundle_manifest = _read_json_object_for_evidence(
         resolved_bundle_dir / "bundle-manifest.json",
         "bundle_manifest",
         findings,
+        bundle_dir=resolved_bundle_dir,
     )
     release_audit = _read_json_object_for_evidence(
         resolved_bundle_dir / "release-audit.json",
         "release_audit",
         findings,
+        bundle_dir=resolved_bundle_dir,
     )
     deployment_soak = _read_json_object_for_evidence(
         resolved_bundle_dir / "deployment-soak.stdout.json",
         "deployment_soak_stdout",
         findings,
+        bundle_dir=resolved_bundle_dir,
     )
     evidence_manifest = _read_json_object_for_evidence(
         resolved_bundle_dir / "evidence" / "manifest.json",
         "evidence_manifest",
         findings,
+        bundle_dir=resolved_bundle_dir,
     )
     preflight = _read_json_object_for_evidence(
         resolved_bundle_dir / "preflight.json",
         "preflight",
         findings,
+        bundle_dir=resolved_bundle_dir,
     )
     operator_manifest = _read_json_object_for_evidence(
         resolved_bundle_dir / "operator-soak-manifest.json",
         "operator_soak_manifest",
         findings,
+        bundle_dir=resolved_bundle_dir,
     )
     source_soak_manifest = _read_json_object_for_evidence(
         resolved_bundle_dir / "source-soak-manifest.json",
         "source_soak_manifest",
         findings,
+        bundle_dir=resolved_bundle_dir,
     )
     _verify_production_evidence_summary(
         summary=summary,

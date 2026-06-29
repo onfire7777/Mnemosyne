@@ -247,12 +247,18 @@ The policy's done-when gate is numeric:
 - **Benchmark integrity:** public sets (LoCoMo, LongMemEval, PersonaMem, MemoryAgentBench) are **internal sanity gates only, never headline claims** (LoCoMo keys are ~6% wrong and fit in context).
 
 ### 7.3 Production retrieval evidence contract (`retrieval-ops-check`)
-Production parity (parity row #1) is closed by gates over **real infra**, not by code (per the DO-NOT-REDERIVE rule). `retrieval-ops-check --bundle … --min-cases 3 --min-calibration-examples 50` requires a bundle proving:
+Production parity row #1 closes only after the real-infra gate bundle passes;
+it is not closed by code or local staging proof alone (per the DO-NOT-REDERIVE
+rule). `retrieval-ops-check --bundle … --min-cases 3 --min-calibration-examples 50` requires a bundle proving:
 - **`provider_check`** — `forbid_local=true`; non-local embedding/reranker providers and non-local lexical/graph backends; `lexical_probe`/`graph_probe` hit evidence.
 - **`adapter_probes`** — lexical, vector, graph, reranker adapters with production validation, non-local names, **SHA-256 fingerprints** (command/source/query/tenant/result/top-id), hit counts, bounded latency.
 - **`retrieval`** — hashed tenant/query cases proving **all five paths: lexical, vector, graph, reranked, calibrated**.
 - **`calibration`** — production dataset fingerprint, sample-shape counts, empirical coverage, **false-accept rate**, threshold.
 - **`redaction`** — omits raw queries, embeddings, documents, results, stdout/stderr, commands, env, credentials.
+
+Final row acceptance still runs through `capture-production-evidence.sh`,
+strict `release-audit --evidence-manifest`, and offline
+`production-evidence-verify` with an out-of-band expected bundle fingerprint.
 
 Production backends per the parity rows: **#1** = ParadeDB BM25 + Apache AGE + pgvector + non-local embedding/reranker; **#6** = non-local extractor + media-embedding + encrypted object store (`multimodal-ops-check`, modalities image/audio/video, async `media_extract` jobs with fail-closed dead-job handling).
 

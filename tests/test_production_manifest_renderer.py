@@ -8,6 +8,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from mnemosyne.cli import (
     PRODUCTION_RELEASE_REQUIRED_COMMANDS,
     PRODUCTION_RELEASE_REQUIRED_PROVIDER_CHECKS,
@@ -263,6 +265,13 @@ def _renderer_base_env() -> dict[str, str]:
     }
 
 
+def _write_executable(path: Path) -> str:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    path.chmod(0o755)
+    return str(path)
+
+
 def _placeholders() -> list[str]:
     proc = subprocess.run(
         [*RENDERER_CMD, "--list-placeholders"],
@@ -280,11 +289,9 @@ def _filled_render_env(tmp_path: Path) -> dict[str, str]:
     evidence_dir = tmp_path / "production-input-artifacts"
     evidence_dir.mkdir(exist_ok=True)
     c2pa_tool = tmp_path / "bin" / "c2patool"
-    c2pa_tool.parent.mkdir(exist_ok=True)
-    c2pa_tool.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-    c2pa_tool.chmod(0o755)
+    command_dir = tmp_path / "provider-bin"
     values = {
-        "MNEMOSYNE_PROD_C2PA_TOOL": str(c2pa_tool),
+        "MNEMOSYNE_PROD_C2PA_TOOL": _write_executable(c2pa_tool),
         "MNEMOSYNE_PROD_CHANGE_TICKET": "CHG-12345",
         "MNEMOSYNE_PROD_DASHBOARD_URL": "https://mnemosyne.example.com/dashboards/ops",
         "MNEMOSYNE_PROD_EVIDENCE_DIR": str(evidence_dir),
@@ -309,16 +316,30 @@ def _filled_render_env(tmp_path: Path) -> dict[str, str]:
         "MNEMOSYNE_PROD_TLS_URL": "https://mnemosyne.example.com",
         "MNEMOSYNE_ALLOWED_RESIDENCIES": "eu,us",
         "MNEMOSYNE_ALLOWED_RESIDENCY_TRANSFERS": "eu->us",
-        "MNEMOSYNE_CANDIDATE_EXTRACTOR_COMMAND": "candidate-extractor-prod",
+        "MNEMOSYNE_CANDIDATE_EXTRACTOR_COMMAND": _write_executable(
+            command_dir / "candidate-extractor-prod"
+        ),
         "MNEMOSYNE_EMBEDDING_API_KEY": "embedding-provider-key-ref",
         "MNEMOSYNE_EMBEDDING_MODEL": "text-embedding-prod",
         "MNEMOSYNE_EMBEDDING_URL": "https://providers.example.com/embedding",
-        "MNEMOSYNE_ENTITY_RESOLVER_COMMAND": "entity-resolver-prod",
-        "MNEMOSYNE_LESSON_DISTILLER_COMMAND": "lesson-distiller-prod",
-        "MNEMOSYNE_MEDIA_EMBEDDING_COMMAND": "media-embedding-prod",
-        "MNEMOSYNE_MEDIA_EXTRACTOR_COMMAND": "media-extractor-prod",
-        "MNEMOSYNE_OBJECT_KEY_COMMAND": "object-key-provider-prod",
-        "MNEMOSYNE_PARAMETRIC_COMMAND": "parametric-trainer-prod",
+        "MNEMOSYNE_ENTITY_RESOLVER_COMMAND": _write_executable(
+            command_dir / "entity-resolver-prod"
+        ),
+        "MNEMOSYNE_LESSON_DISTILLER_COMMAND": _write_executable(
+            command_dir / "lesson-distiller-prod"
+        ),
+        "MNEMOSYNE_MEDIA_EMBEDDING_COMMAND": _write_executable(
+            command_dir / "media-embedding-prod"
+        ),
+        "MNEMOSYNE_MEDIA_EXTRACTOR_COMMAND": _write_executable(
+            command_dir / "media-extractor-prod"
+        ),
+        "MNEMOSYNE_OBJECT_KEY_COMMAND": _write_executable(
+            command_dir / "object-key-provider-prod"
+        ),
+        "MNEMOSYNE_PARAMETRIC_COMMAND": _write_executable(
+            command_dir / "parametric-trainer-prod"
+        ),
         "MNEMOSYNE_PROVIDER_OIDC_AUDIENCE": "mnemosyne",
         "MNEMOSYNE_PROVIDER_OIDC_AUTHZ_POLICY_FILE": str(
             evidence_dir / "idp-authz-policy.current.json"
@@ -332,9 +353,15 @@ def _filled_render_env(tmp_path: Path) -> dict[str, str]:
         "MNEMOSYNE_RERANKER_URL": "https://providers.example.com/reranker",
         "MNEMOSYNE_REQUIRE_RUNTIME_RESIDENCY": "true",
         "MNEMOSYNE_RUNTIME_RESIDENCY": "us",
-        "MNEMOSYNE_SESSION_SECRET_COMMAND": "session-secret-provider-prod",
-        "MNEMOSYNE_SKILL_INDUCER_COMMAND": "skill-inducer-prod",
-        "MNEMOSYNE_SUMMARIZER_COMMAND": "summarizer-prod",
+        "MNEMOSYNE_SESSION_SECRET_COMMAND": _write_executable(
+            command_dir / "session-secret-provider-prod"
+        ),
+        "MNEMOSYNE_SKILL_INDUCER_COMMAND": _write_executable(
+            command_dir / "skill-inducer-prod"
+        ),
+        "MNEMOSYNE_SUMMARIZER_COMMAND": _write_executable(
+            command_dir / "summarizer-prod"
+        ),
     }
     env = _renderer_base_env()
     env.update(values)
@@ -658,6 +685,79 @@ def test_renderer_check_environment_rejects_missing_provider_manifest_env_ref(
             assert rows[lane]["input_artifacts_complete"] is True
     assert "https://providers.example.com/reranker" not in proc.stdout
     assert env["MNEMOSYNE_PROD_EVIDENCE_DIR"] not in proc.stdout
+    assert proc.stderr == ""
+
+
+def test_renderer_check_environment_rejects_relative_provider_command(
+    tmp_path: Path,
+) -> None:
+    env = _filled_render_env(tmp_path)
+    _populate_required_input_artifacts(env)
+    env["MNEMOSYNE_CANDIDATE_EXTRACTOR_COMMAND"] = "candidate-extractor-prod --json"
+
+    proc = subprocess.run(
+        [*RENDERER_CMD, "--check-environment"],
+        cwd=REPO,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    payload = json.loads(proc.stdout)
+    expected_error = (
+        "provider-manifest.production.json.providers.candidate_extractor.command "
+        "contains relative executable path for provider-manifest.command; use an "
+        "absolute external executable path"
+    )
+
+    assert proc.returncode == 78
+    assert payload["ok"] is False
+    assert payload["blocked_reason"] == "missing_or_invalid_input_artifacts"
+    assert payload["missing_input_artifacts"] == []
+    assert payload["input_artifact_errors"] == [expected_error]
+    rows = _row_readiness_by_lane(payload)
+    for lane in {"B1", "B2", "B4", "B6", "B7", "B9", "B10"}:
+        assert rows[lane]["input_artifact_errors"] == [expected_error]
+        assert rows[lane]["input_artifacts_complete"] is False
+    assert "candidate-extractor-prod" not in proc.stdout
+    assert proc.stderr == ""
+
+
+def test_renderer_check_environment_rejects_symlinked_provider_command(
+    tmp_path: Path,
+) -> None:
+    env = _filled_render_env(tmp_path)
+    _populate_required_input_artifacts(env)
+    real_tool = Path(env["MNEMOSYNE_CANDIDATE_EXTRACTOR_COMMAND"])
+    symlink_tool = tmp_path / "provider-bin" / "candidate-extractor-link"
+    try:
+        symlink_tool.symlink_to(real_tool)
+    except OSError as exc:
+        pytest.skip(f"symlink setup unavailable: {exc}")
+    env["MNEMOSYNE_CANDIDATE_EXTRACTOR_COMMAND"] = str(symlink_tool)
+
+    proc = subprocess.run(
+        [*RENDERER_CMD, "--check-environment"],
+        cwd=REPO,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    payload = json.loads(proc.stdout)
+    expected_error = (
+        "provider-manifest.production.json.providers.candidate_extractor.command "
+        "provider-manifest.command executable must not be a symlink"
+    )
+
+    assert proc.returncode == 78
+    assert payload["ok"] is False
+    assert payload["blocked_reason"] == "missing_or_invalid_input_artifacts"
+    assert payload["missing_input_artifacts"] == []
+    assert payload["input_artifact_errors"] == [expected_error]
+    assert str(symlink_tool) not in proc.stdout
     assert proc.stderr == ""
 
 
@@ -1182,6 +1282,34 @@ def test_renderer_output_rejects_relative_c2pa_tool(tmp_path: Path) -> None:
         in proc.stderr
     )
     assert env["MNEMOSYNE_PROD_C2PA_TOOL"] not in proc.stderr
+
+
+def test_renderer_check_environment_rejects_symlinked_c2pa_tool(tmp_path: Path) -> None:
+    env = _filled_render_env(tmp_path)
+    real_tool = Path(env["MNEMOSYNE_PROD_C2PA_TOOL"])
+    linked_tool = tmp_path / "bin" / "linked-c2patool"
+    try:
+        linked_tool.symlink_to(real_tool)
+    except OSError as exc:
+        pytest.skip(f"symlink setup unavailable: {exc}")
+    env["MNEMOSYNE_PROD_C2PA_TOOL"] = str(linked_tool)
+
+    proc = subprocess.run(
+        [*RENDERER_CMD, "--check-environment"],
+        cwd=REPO,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    _assert_check_environment_value_error(
+        proc,
+        name="MNEMOSYNE_PROD_C2PA_TOOL",
+        code="c2pa_tool_symlink",
+        message_fragment="MNEMOSYNE_PROD_C2PA_TOOL must not be a symlink",
+        redacted_value=env["MNEMOSYNE_PROD_C2PA_TOOL"],
+    )
 
 
 def test_renderer_check_environment_rejects_non_executable_c2pa_tool(

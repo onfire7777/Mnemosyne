@@ -134,8 +134,10 @@ Rollback drills are accepted only when captured by
 `infra/scripts/capture-production-evidence.sh` and accepted by
 `release-audit --evidence-manifest "$OUT_ROOT/evidence/manifest.json" --require-production-validated --require-provider-forbid-local`,
 then rechecked by `production-evidence-verify "$BUNDLE_DIR"
---expected-bundle-fingerprint "$EXPECTED_BUNDLE_FINGERPRINT"` with the expected
-fingerprint from an independently retained out-of-band rollback capture record.
+--expected-bundle-fingerprint "$EXPECTED_BUNDLE_FINGERPRINT"
+--report-output "$VERIFY_REPORT"` with the expected fingerprint from an
+independently retained out-of-band rollback capture record and a new external
+verifier report path outside the bundle under review.
 
 Local tests and compose smoke runs can prove mechanics, but they do not replace
 operator-captured production rollback evidence.

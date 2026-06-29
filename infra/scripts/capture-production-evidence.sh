@@ -724,11 +724,11 @@ for index, check in enumerate(checks, start=1):
             continue
         for value_index, value in enumerate(values):
             option_name, separator, option_value = value.partition("=")
-            if command == "ops-report" and option_name == "--dashboard-package-dir":
+            if command == "ops-report" and option_name in {"--dashboard-html", "--dashboard-package-dir"}:
                 errors.append(
                     f"checks[{index}].{field} contains ops-report output option "
-                    "--dashboard-package-dir; production capture must not write "
-                    "generated dashboard packages into input-artifact custody"
+                    f"{option_name}; production capture must not write "
+                    "generated dashboard artifacts into input-artifact custody"
                 )
             if option_name in executable_path_options and separator:
                 _validate_executable_tool_path(
