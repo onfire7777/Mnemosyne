@@ -44,7 +44,8 @@ def _cf_referenced_in_gate() -> bool:
 
 def _shadow_only_by_construction() -> bool:
     src = _source_of(ShadowPolicyOptimizer.evaluate_variant)
-    return "finally" in src and "OperatingPolicy()" in src
+    restores_policy = "OperatingPolicy()" in src or "OperatingPolicy.from_dict" in src
+    return "finally" in src and restores_policy and "self.engine.policy = original_policy" in src
 
 
 def _default_replay_fails_closed() -> dict:

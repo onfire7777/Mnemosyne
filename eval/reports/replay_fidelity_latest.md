@@ -1,6 +1,6 @@
 # FR-17 Cold-Loop Replay-Fidelity Check (OQ2)
 
-- **Generated:** 2026-06-22T00:19:24.809140+00:00
+- **Generated:** 2026-06-29T01:01:53.827806+00:00
 - **Mode:** `default`
 - **Blueprint refs:** OQ2, FR-17 cold-loop gate, §23.3, §30.6
 - **OQ2 bar:** rho>=0.6 & CI-lower>0.3, sign>=0.8, gap<=0.15, window>=50, coverage>=0.8
@@ -8,7 +8,7 @@
 ## Verdict: PASS (exit 0)
 
 - golden guarantee holds: **True**
-- cf term wired into gate: **False**
+- cf term wired into gate: **True**
 - proxy authorized to gate: **False**
 - loop correctly SHADOW (veto-only): **True**
 
@@ -25,13 +25,10 @@
 
 ## Current-src honest status
 
-**Honest current status — loop correctly held in SHADOW (veto-only).** The counterfactual replay arithmetic exists and runs (`counterfactual_replay_score(2,5,10)` = 0.3), and it is surfaced by `mcp_tools.outcome_evaluate`, but it is **informational only**: `cf term consumed by gate decision = False`. `gate.PromotionGate.evaluate` decides `promoted` purely from the regression-case margin, and `ShadowPolicyOptimizer.evaluate_variant` is veto-only by construction (restores base `OperatingPolicy()` in a `finally`: shadow_only=True). There is **no paired (replay-predicted lift, observed real lift) corpus in src**, so the OQ2 gate has 0 real pairs to score (window 0 < 50). The replay proxy is therefore **NOT authorized to gate self-modifications**, which is exactly why the cold loop must stay in shadow. This harness is the forcing function: it will authorize the proxy only once the cf->gate path is wired AND it clears the OQ2 bar on real paired data.
+**Current status — replay hook wired, promotion still shadow-only until proven.** `ShadowPolicyOptimizer` attaches the default replay hook to promotion (`cf_wired=True`), and restores base policy after evaluation (`shadow_only=True`). The default hook now fails closed when the replay-pair window is below the OQ2 bar: default promotion result = False, reason = `cf proxy unproven: 0 replay pairs < window 50`. The src-side real replay-pair corpus available to the live cold loop is 0; window 0 < 50, so the proxy is not authorized to promote. The golden corpus still proves the scorer can authorize a faithful corpus once real pairs exist.
 
 ### Required src wiring to authorize the proxy as a gate
 
-- src/mnemosyne/self_optimization.py — add an `observed_real_lift` field (or a reserved metrics key) to `PolicyOutcome` and have the cold loop record the real post-promotion lift there, paired to the candidate's `replay_predicted_lift` (= counterfactual_replay_score(before,after,total)).
-- src/mnemosyne/self_optimization.py — add a `SelfModelStore.replay_pairs(tenant_id)` accessor that returns the (predicted, observed) pairs the OQ2 scorer consumes, so the gate has a first-class source of paired data.
-- src/mnemosyne/gate.py — extend `PromotionGate.evaluate` (or add a sibling `replay_fidelity_gate`) so that, before `promoted` can be True for a self-modification candidate, the OQ2 fidelity bar over recent replay_pairs must hold (rho>=0.6 & CI-lower>0.3, sign>=0.80, gap<=0.15, window>=50, coverage>=0.80). Until the bar holds, force veto-only (shadow).
-- src/mnemosyne/self_optimization.py — bind the existing `tripwire_check` `max_proxy_gap` (0.15) to the OQ2 `proxy_true_gap` axis so the two gap guards share one threshold and cannot drift apart.
-- src/mnemosyne/mcp_tools.py — stop treating `outcome_evaluate`'s `counterfactual_replay_score` as purely informational: route the cf value into the candidate's `replay_predicted_lift` so it is the same number the OQ2 gate scores (single source of truth for the proxy).
-- eval — once wired, run `replay_fidelity_check.py --require-wired` in CI; a non-zero exit (code 2) blocks the cold loop from leaving shadow until the proxy proves fidelity on real paired data.
+- Populate real replay pairs in `SelfModelStore.record_replay_pair` from post-promotion outcomes.
+- Run `replay_fidelity_check.py --require-wired` only after real pairs meet the OQ2 bar.
+- Keep default promotion fail-closed while the real replay-pair window remains below the OQ2 minimum.

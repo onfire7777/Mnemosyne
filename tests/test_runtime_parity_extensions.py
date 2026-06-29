@@ -2352,6 +2352,39 @@ def test_postgres_runtime_state_isolates_tenant_side_state() -> None:
     assert mirror_counts(state_b) == expected_counts
 
 
+def test_postgres_runtime_state_eval_case_mirror_preserves_origin_mode_fallback() -> None:
+    dsn = os.environ.get("MNEMOSYNE_POSTGRES_DSN")
+    if not dsn:
+        pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+    from mnemosyne.postgres_runtime_state import PostgresRuntimeState
+
+    tenant = f"tenant-gate-case-mirror-{uuid4()}"
+    state = PostgresRuntimeState(dsn, tenant_id=tenant)
+    case = RegressionCase(
+        str(uuid4()),
+        "postgres eval mirror origin mode",
+        "postgres eval mirror origin mode",
+        "tenant-scoped mirror fallback",
+        tier="archive",
+        protected=True,
+        origin="genuine",
+        mode="shadow",
+    )
+
+    state.save_gate_cases([case])
+    with state.connect() as conn:
+        with conn.cursor() as cur:
+            state._set_tenant(cur)
+            cur.execute(
+                "DELETE FROM runtime_state WHERE tenant_id = %s AND key = 'gate_cases'",
+                (state.db_tenant_id,),
+            )
+
+    loaded = state.load_gate_cases()
+
+    assert [item.to_dict() for item in loaded] == [case.to_dict()]
+
+
 def test_postgres_runtime_state_filters_contaminated_support_strategy_payload() -> None:
     dsn = os.environ.get("MNEMOSYNE_POSTGRES_DSN")
     if not dsn:

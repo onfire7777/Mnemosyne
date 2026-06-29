@@ -7,10 +7,9 @@ Answers the single keystone question the OQ5 decision turns into a switch:
     (verdicts bind, a regression blocks promotion)?*
 
 This module computes that readiness from the seed set produced by ``loader.py``.
-It is the **completion-additive mirror** of the ``PromotionGate.ignition_status``
-method Codex will add to ``src/mnemosyne/gate.py`` (see reconciliation_items): the
-counting rules here ARE the rules that method must implement, so this report is
-the spec-by-example and the test oracle for that wiring.
+It mirrors the production ``PromotionGate.ignition_status`` counting rules in
+``src/mnemosyne/gate.py`` so the seed report remains a readable oracle for that
+runtime wiring.
 
 Counting rules (OQ5 decision, verbatim intent):
   * ``N_active`` counts ONLY ``curated`` + ``genuine`` cases.

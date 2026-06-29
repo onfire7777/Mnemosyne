@@ -105,18 +105,18 @@ def test_numeric_invariant_rails_mirror_policy(baseline: dict[str, Any]) -> None
     """§31/§23.5 immutable mutation-rate rail VALUES pin live == declared.
 
     The cold loop tunes WITHIN these and can never widen them, so their numeric
-    values are drift-critical (not just their names). CC-LS lands them as constants
-    on ``OperatingPolicy`` (blueprint-parity item #22); until then the names are
-    absent and this skips, so it never blocks the no-DSN gate but auto-enforces the
-    moment the constants appear. A failure means a rail value drifted from the
-    blueprint baseline — mirror the intentional change into the baseline in the same
-    commit, or restore the value in code.
+    values are drift-critical (not just their names). A missing declared rail means
+    the live policy has drifted from the blueprint baseline; an intentional rename or
+    deletion must update ``config/drift-baseline.toml`` in the same commit.
     """
     declared = baseline["rails"]["numeric"]
     policy = OperatingPolicy()
-    present = {name: getattr(policy, name) for name in declared if hasattr(policy, name)}
-    if not present:
-        pytest.skip("§31 numeric rails not yet exposed on OperatingPolicy (parity item #22, CC-LS)")
+    missing = sorted(name for name in declared if not hasattr(policy, name))
+    assert not missing, (
+        f"§31 numeric invariant rails declared in the baseline are missing on OperatingPolicy: {missing}; "
+        "restore the rails or mirror the intentional contract change into config/drift-baseline.toml"
+    )
+    present = {name: getattr(policy, name) for name in declared}
     drifted = {
         name: (value, declared[name]) for name, value in present.items() if value != declared[name]
     }

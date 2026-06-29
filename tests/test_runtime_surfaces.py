@@ -1162,6 +1162,8 @@ def test_mcp_server_initializes_lists_tools_and_calls_capture_search(tmp_path: P
         "prefetch",
         "profile_add",
         "profile_context",
+        "profile_record_mistake",
+        "profile_retire_support_strategy",
         "graph_neighbors",
         "trajectory_log",
         "lesson_induce",
@@ -1185,6 +1187,13 @@ def test_mcp_server_initializes_lists_tools_and_calls_capture_search(tmp_path: P
     assert graph_schema["properties"]["seeds"] == {"type": "array", "items": {"type": "string"}}
     assert graph_schema["properties"]["hops"]["type"] == "integer"
     assert "hops" not in graph_schema["required"]
+    mistake_schema = tools_by_name["profile_record_mistake"]["inputSchema"]
+    assert {"type": "object", "additionalProperties": True} in mistake_schema["properties"]["scope"]["anyOf"]
+    assert {"type": "null"} in mistake_schema["properties"]["scope"]["anyOf"]
+    assert "scope" not in mistake_schema["required"]
+    retire_schema = tools_by_name["profile_retire_support_strategy"]["inputSchema"]
+    assert retire_schema["properties"]["strategy_id"]["type"] == "string"
+    assert "role" not in retire_schema["required"]
     supersede_schema = tools_by_name["supersede"]["inputSchema"]
     assert supersede_schema["properties"]["new"]["type"] == "object"
     assert "branch" not in supersede_schema["required"]
@@ -3067,13 +3076,84 @@ def test_mcp_server_stateless_mode_reloads_durable_engine_and_runtime_state(tmp_
             "statement": "Prefer stateless MCP calls backed by durable state.",
         },
     )
+    first_slip = mcp_call(
+        writer,
+        "profile_record_mistake",
+        {
+            "tenant_id": TENANT,
+            "user_id": USER,
+            "pattern": "date_math",
+            "description": "User accepted an off-by-one deployment date.",
+            "scope": {"surface": "mcp"},
+            "suggestion": "Offer to double-check deployment date math.",
+            "source_trust_tier": 0,
+        },
+    )
+    second_slip = mcp_call(
+        writer,
+        "profile_record_mistake",
+        {
+            "tenant_id": TENANT,
+            "user_id": USER,
+            "pattern": "date_math",
+            "description": "User repeated the same deployment date slip.",
+            "scope": {"surface": "mcp"},
+            "suggestion": "Offer to double-check deployment date math.",
+            "source_trust_tier": 0,
+        },
+    )
     reader = MnemosyneMcpServer(store_path=store, stateless=True)
 
     search = mcp_call(reader, "search", {"tenant_id": TENANT, "query": "stateless durable evidence"})
-    profile = mcp_call(reader, "profile_context", {"tenant_id": TENANT, "user_id": USER})
+    profile = mcp_call(reader, "profile_context", {"tenant_id": TENANT, "user_id": USER, "scope": {"surface": "mcp"}})
 
+    assert first_slip["promoted"] is False
+    assert first_slip["strategy_id"] is None
+    assert second_slip["promoted"] is True
+    assert second_slip["strategy_id"]
     assert search["hits"][0]["provenance"] == [captured["cid"]]
     assert profile["authoritative"][0]["statement"] == "Prefer stateless MCP calls backed by durable state."
+    assert profile["support_strategies"][0]["id"] == second_slip["strategy_id"]
+    assert profile["support_strategies"][0]["suggestion"] == "Offer to double-check deployment date math."
+
+    denied_retire = reader.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 100,
+            "method": "tools/call",
+            "params": {
+                "name": "profile_retire_support_strategy",
+                "arguments": {
+                    "tenant_id": TENANT,
+                    "user_id": "other-user",
+                    "strategy_id": second_slip["strategy_id"],
+                    "role": "operator",
+                    "source_trust_tier": 0,
+                },
+            },
+        }
+    )
+    retired = mcp_call(
+        reader,
+        "profile_retire_support_strategy",
+        {
+            "tenant_id": TENANT,
+            "user_id": USER,
+            "strategy_id": second_slip["strategy_id"],
+            "role": "operator",
+            "source_trust_tier": 0,
+        },
+    )
+    after_retire = mcp_call(
+        MnemosyneMcpServer(store_path=store, stateless=True),
+        "profile_context",
+        {"tenant_id": TENANT, "user_id": USER, "scope": {"surface": "mcp"}},
+    )
+
+    assert denied_retire["result"]["isError"] is True
+    assert "outside the requested tenant/user scope" in denied_retire["result"]["content"][0]["text"]
+    assert retired["retired"] is True
+    assert after_retire["support_strategies"] == []
 
 
 def test_mcp_server_persists_parametric_artifacts_and_rolls_back(tmp_path: Path) -> None:
