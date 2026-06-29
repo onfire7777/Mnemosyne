@@ -67,11 +67,13 @@ manifest in memory, derives the required input artifacts under
 `MNEMOSYNE_PROD_EVIDENCE_DIR`, and fails if any are missing. It reports only
 relative artifact names, per-artifact `exists` status, and the manifest
 check/command/option references that require each artifact via
-`required_input_artifacts_detail` and `missing_input_artifacts_detail`; it does
+`required_input_artifacts_detail` and `missing_input_artifacts_detail`. Those
+entries include Tier-B lane, strict-audit row, and row-runbook routing metadata
+so operators can assign missing evidence without exposing custody paths. It does
 not print configured absolute paths or secret values. Invalid configured
-production paths and executable references are reported in the same redacted JSON
-shape through `environment_errors`, with stable error codes and variable names
-but without the configured values.
+production paths and executable references are reported in the same redacted
+JSON shape through `environment_errors`, with stable error codes and variable
+names but without the configured values.
 
 The wrapper performs these steps:
 

@@ -13,6 +13,7 @@ from mnemosyne.cli import PRODUCTION_RELEASE_REQUIRED_COMMANDS
 
 REPO = Path(__file__).resolve().parents[1]
 RENDERER = REPO / "infra" / "scripts" / "render-production-soak-manifest.sh"
+RENDERER_CMD = ["/bin/bash", str(RENDERER)]
 ENV_EXAMPLE = REPO / "infra" / "templates" / "production-render.env.example"
 ENV_GUIDE = REPO / ".planning" / "ENV-AND-SECRETS.md"
 REQUIRED_PRODUCTION_INPUT_ARTIFACTS = [
@@ -46,34 +47,66 @@ REQUIRED_PRODUCTION_INPUT_ARTIFACTS = [
 def _detail_by_path(payload: dict[str, object]) -> dict[str, dict[str, object]]:
     details = payload["required_input_artifacts_detail"]
     assert isinstance(details, list)
-    return {str(item["relative_path"]): item for item in details if isinstance(item, dict)}
+    return {
+        str(item["relative_path"]): item for item in details if isinstance(item, dict)
+    }
+
+
+def _assert_parity_routes_shape(routes: object) -> None:
+    assert isinstance(routes, list)
+    assert routes
+    for route in routes:
+        assert isinstance(route, dict)
+        assert set(route) == {"lane", "row", "title", "runbook"}
+        assert isinstance(route["lane"], str)
+        assert route["lane"].startswith("B")
+        assert isinstance(route["row"], int)
+        assert 1 <= route["row"] <= 10
+        assert isinstance(route["title"], str)
+        assert route["title"]
+        assert isinstance(route["runbook"], str)
+        assert route["runbook"].startswith(".planning/runbooks/row-")
 
 
 def _assert_artifact_detail_shape(item: dict[str, object]) -> None:
-    assert set(item) == {"relative_path", "checks", "exists"}
+    assert set(item) == {"relative_path", "checks", "exists", "parity_routes"}
     assert isinstance(item["relative_path"], str)
     assert item["relative_path"]
     assert not Path(item["relative_path"]).is_absolute()
     assert isinstance(item["exists"], bool)
+    _assert_parity_routes_shape(item["parity_routes"])
     assert isinstance(item["checks"], list)
     assert item["checks"]
     for check in item["checks"]:
         assert isinstance(check, dict)
-        assert set(check) == {"name", "command", "option"}
+        assert set(check) == {"name", "command", "option", "parity_lanes"}
         assert all(isinstance(check[key], str) for key in ("name", "command", "option"))
+        assert isinstance(check["parity_lanes"], list)
+        assert check["parity_lanes"]
+        assert all(
+            isinstance(lane, str) and lane.startswith("B")
+            for lane in check["parity_lanes"]
+        )
 
 
 def _assert_artifact_plan_shape(item: dict[str, object]) -> None:
-    assert set(item) == {"relative_path", "checks"}
+    assert set(item) == {"relative_path", "checks", "parity_routes"}
     assert isinstance(item["relative_path"], str)
     assert item["relative_path"]
     assert not Path(item["relative_path"]).is_absolute()
+    _assert_parity_routes_shape(item["parity_routes"])
     assert isinstance(item["checks"], list)
     assert item["checks"]
     for check in item["checks"]:
         assert isinstance(check, dict)
-        assert set(check) == {"name", "command", "option"}
+        assert set(check) == {"name", "command", "option", "parity_lanes"}
         assert all(isinstance(check[key], str) for key in ("name", "command", "option"))
+        assert isinstance(check["parity_lanes"], list)
+        assert check["parity_lanes"]
+        assert all(
+            isinstance(lane, str) and lane.startswith("B")
+            for lane in check["parity_lanes"]
+        )
 
 
 def _assert_check_environment_value_error(
@@ -93,8 +126,12 @@ def _assert_check_environment_value_error(
     assert payload["blocked_reason"] == "invalid_required_environment"
     assert payload["values_redacted"] is True
     assert payload["missing"] == []
-    assert payload["required_input_artifact_count"] == len(REQUIRED_PRODUCTION_INPUT_ARTIFACTS)
-    assert sorted(payload["required_input_artifacts"]) == sorted(REQUIRED_PRODUCTION_INPUT_ARTIFACTS)
+    assert payload["required_input_artifact_count"] == len(
+        REQUIRED_PRODUCTION_INPUT_ARTIFACTS
+    )
+    assert sorted(payload["required_input_artifacts"]) == sorted(
+        REQUIRED_PRODUCTION_INPUT_ARTIFACTS
+    )
     assert payload["environment_errors"] == [
         {
             "name": name,
@@ -116,7 +153,7 @@ def _renderer_base_env() -> dict[str, str]:
 
 def _placeholders() -> list[str]:
     proc = subprocess.run(
-        [str(RENDERER), "--list-placeholders"],
+        [*RENDERER_CMD, "--list-placeholders"],
         cwd=REPO,
         env=_renderer_base_env(),
         capture_output=True,
@@ -164,7 +201,9 @@ def _filled_render_env(tmp_path: Path) -> dict[str, str]:
     return env
 
 
-def _populate_required_input_artifacts(env: dict[str, str], *, suite_payload: str = '{"cases": []}\n') -> None:
+def _populate_required_input_artifacts(
+    env: dict[str, str], *, suite_payload: str = '{"cases": []}\n'
+) -> None:
     evidence_dir = Path(env["MNEMOSYNE_PROD_EVIDENCE_DIR"])
     for relative_path in REQUIRED_PRODUCTION_INPUT_ARTIFACTS:
         path = evidence_dir / relative_path
@@ -180,7 +219,9 @@ def test_renderer_placeholders_match_env_example_and_env_guide() -> None:
     example_vars = sorted(
         set(re.findall(r"export (MNEMOSYNE_PROD_[A-Z0-9_]+)=", ENV_EXAMPLE.read_text()))
     )
-    guide_vars = sorted(set(re.findall(r"`(MNEMOSYNE_PROD_[A-Z0-9_]+)`", ENV_GUIDE.read_text())))
+    guide_vars = sorted(
+        set(re.findall(r"`(MNEMOSYNE_PROD_[A-Z0-9_]+)`", ENV_GUIDE.read_text()))
+    )
 
     assert placeholders == example_vars
     assert placeholders == guide_vars
@@ -188,7 +229,7 @@ def test_renderer_placeholders_match_env_example_and_env_guide() -> None:
 
 def test_renderer_list_placeholders_includes_static_artifact_inventory() -> None:
     proc = subprocess.run(
-        [str(RENDERER), "--list-placeholders"],
+        [*RENDERER_CMD, "--list-placeholders"],
         cwd=REPO,
         env=_renderer_base_env(),
         capture_output=True,
@@ -197,13 +238,33 @@ def test_renderer_list_placeholders_includes_static_artifact_inventory() -> None
     )
     payload = json.loads(proc.stdout)
 
-    assert payload["required_input_artifact_count"] == len(REQUIRED_PRODUCTION_INPUT_ARTIFACTS)
-    assert sorted(payload["required_input_artifacts"]) == sorted(REQUIRED_PRODUCTION_INPUT_ARTIFACTS)
+    assert payload["required_input_artifact_count"] == len(
+        REQUIRED_PRODUCTION_INPUT_ARTIFACTS
+    )
+    assert sorted(payload["required_input_artifacts"]) == sorted(
+        REQUIRED_PRODUCTION_INPUT_ARTIFACTS
+    )
+    plan_by_path = {
+        str(item["relative_path"]): item
+        for item in payload["required_input_artifacts_plan"]
+        if isinstance(item, dict)
+    }
+    assert sorted(plan_by_path) == sorted(REQUIRED_PRODUCTION_INPUT_ARTIFACTS)
+    for item in plan_by_path.values():
+        _assert_artifact_plan_shape(item)
+    assert plan_by_path["row-10-full-suite-evidence.json"]["parity_routes"] == [
+        {
+            "lane": "B10",
+            "row": 10,
+            "title": "Live parity suite",
+            "runbook": ".planning/runbooks/row-10-live-parity-suite.md",
+        }
+    ]
 
 
 def test_renderer_requires_all_production_env_values(tmp_path: Path) -> None:
     proc = subprocess.run(
-        [str(RENDERER), "--output", str(tmp_path / "manifest.json")],
+        [*RENDERER_CMD, "--output", str(tmp_path / "manifest.json")],
         cwd=REPO,
         env=_renderer_base_env(),
         capture_output=True,
@@ -212,13 +273,15 @@ def test_renderer_requires_all_production_env_values(tmp_path: Path) -> None:
     )
 
     assert proc.returncode == 78
-    assert "missing required production placeholder environment variables" in proc.stderr
+    assert (
+        "missing required production placeholder environment variables" in proc.stderr
+    )
     assert "MNEMOSYNE_PROD_EVIDENCE_DIR" in proc.stderr
 
 
 def test_renderer_check_environment_reports_missing_without_output() -> None:
     proc = subprocess.run(
-        [str(RENDERER), "--check-environment"],
+        [*RENDERER_CMD, "--check-environment"],
         cwd=REPO,
         env=_renderer_base_env(),
         capture_output=True,
@@ -234,7 +297,9 @@ def test_renderer_check_environment_reports_missing_without_output() -> None:
     assert payload["blocked_reason"] == "missing_required_environment"
     assert "required_placeholders_present" in payload["validation_categories"]
     assert "external_input_artifact_custody" in payload["validation_categories"]
-    assert any("production-render.env.example" in step for step in payload["next_steps"])
+    assert any(
+        "production-render.env.example" in step for step in payload["next_steps"]
+    )
     assert any("production-evidence-verify" in step for step in payload["next_steps"])
     assert "MNEMOSYNE_PROD_EVIDENCE_DIR" in payload["missing"]
     assert payload["present"] == []
@@ -243,8 +308,12 @@ def test_renderer_check_environment_reports_missing_without_output() -> None:
         "input_artifacts_checklist": "infra/templates/production-input-artifacts.checklist.md",
         "production_evidence_runbook": "infra/PRODUCTION-EVIDENCE.md",
     }
-    assert payload["required_input_artifact_count"] == len(REQUIRED_PRODUCTION_INPUT_ARTIFACTS)
-    assert sorted(payload["required_input_artifacts"]) == sorted(REQUIRED_PRODUCTION_INPUT_ARTIFACTS)
+    assert payload["required_input_artifact_count"] == len(
+        REQUIRED_PRODUCTION_INPUT_ARTIFACTS
+    )
+    assert sorted(payload["required_input_artifacts"]) == sorted(
+        REQUIRED_PRODUCTION_INPUT_ARTIFACTS
+    )
     plan_by_path = {
         str(item["relative_path"]): item
         for item in payload["required_input_artifacts_plan"]
@@ -258,16 +327,19 @@ def test_renderer_check_environment_reports_missing_without_output() -> None:
         "name": "belief-revision",
         "command": "belief-revision-check",
         "option": "input_artifacts[0]",
+        "parity_lanes": ["B10"],
     } in plan_by_path["row-10-full-suite-evidence.json"]["checks"]
     assert proc.stderr == ""
 
 
-def test_renderer_check_environment_passes_without_writing_manifest(tmp_path: Path) -> None:
+def test_renderer_check_environment_passes_without_writing_manifest(
+    tmp_path: Path,
+) -> None:
     env = _filled_render_env(tmp_path)
     _populate_required_input_artifacts(env)
 
     proc = subprocess.run(
-        [str(RENDERER), "--check-environment"],
+        [*RENDERER_CMD, "--check-environment"],
         cwd=REPO,
         env=env,
         capture_output=True,
@@ -284,12 +356,18 @@ def test_renderer_check_environment_passes_without_writing_manifest(tmp_path: Pa
     assert payload["missing"] == []
     assert payload["input_artifacts_complete"] is True
     assert "operator_capture_and_offline_verify" in payload["validation_categories"]
-    assert any("capture-production-evidence.sh" in step for step in payload["next_steps"])
+    assert any(
+        "capture-production-evidence.sh" in step for step in payload["next_steps"]
+    )
     assert payload["missing_input_artifacts"] == []
     assert payload["missing_input_artifacts_detail"] == []
     assert payload["input_artifact_errors"] == []
-    assert payload["required_input_artifact_count"] == len(REQUIRED_PRODUCTION_INPUT_ARTIFACTS)
-    assert sorted(payload["required_input_artifacts"]) == sorted(REQUIRED_PRODUCTION_INPUT_ARTIFACTS)
+    assert payload["required_input_artifact_count"] == len(
+        REQUIRED_PRODUCTION_INPUT_ARTIFACTS
+    )
+    assert sorted(payload["required_input_artifacts"]) == sorted(
+        REQUIRED_PRODUCTION_INPUT_ARTIFACTS
+    )
     details = _detail_by_path(payload)
     assert sorted(details) == sorted(REQUIRED_PRODUCTION_INPUT_ARTIFACTS)
     for detail in details.values():
@@ -299,16 +377,51 @@ def test_renderer_check_environment_passes_without_writing_manifest(tmp_path: Pa
         "name": "belief-revision",
         "command": "belief-revision-check",
         "option": "input_artifacts[0]",
+        "parity_lanes": ["B10"],
     } in details["row-10-full-suite-evidence.json"]["checks"]
+    assert details["provider-manifest.production.json"]["parity_routes"] == [
+        {
+            "lane": "B1",
+            "row": 1,
+            "title": "Production Postgres retrieval",
+            "runbook": ".planning/runbooks/row-01-production-postgres-retrieval.md",
+        },
+        {
+            "lane": "B4",
+            "row": 4,
+            "title": "Consolidation role pipeline",
+            "runbook": ".planning/runbooks/row-04-consolidation-role-pipeline.md",
+        },
+        {
+            "lane": "B6",
+            "row": 6,
+            "title": "Multimodal retrieval",
+            "runbook": ".planning/runbooks/row-06-multimodal-retrieval.md",
+        },
+        {
+            "lane": "B9",
+            "row": 9,
+            "title": "Parametric tier",
+            "runbook": ".planning/runbooks/row-09-parametric-tier.md",
+        },
+        {
+            "lane": "B10",
+            "row": 10,
+            "title": "Live parity suite",
+            "runbook": ".planning/runbooks/row-10-live-parity-suite.md",
+        },
+    ]
     assert sorted(payload["present"]) == _placeholders()
     assert not list(tmp_path.glob("*.json"))
 
 
-def test_renderer_check_environment_fails_on_missing_input_artifacts(tmp_path: Path) -> None:
+def test_renderer_check_environment_fails_on_missing_input_artifacts(
+    tmp_path: Path,
+) -> None:
     env = _filled_render_env(tmp_path)
 
     proc = subprocess.run(
-        [str(RENDERER), "--check-environment"],
+        [*RENDERER_CMD, "--check-environment"],
         cwd=REPO,
         env=env,
         capture_output=True,
@@ -322,12 +435,15 @@ def test_renderer_check_environment_fails_on_missing_input_artifacts(tmp_path: P
     assert payload["ok"] is False
     assert payload["blocked_reason"] == "missing_or_invalid_input_artifacts"
     assert payload["input_artifacts_complete"] is False
-    assert sorted(payload["missing_input_artifacts"]) == sorted(REQUIRED_PRODUCTION_INPUT_ARTIFACTS)
+    assert sorted(payload["missing_input_artifacts"]) == sorted(
+        REQUIRED_PRODUCTION_INPUT_ARTIFACTS
+    )
     assert payload["input_artifact_errors"] == []
-    assert payload["required_input_artifact_count"] == len(REQUIRED_PRODUCTION_INPUT_ARTIFACTS)
+    assert payload["required_input_artifact_count"] == len(
+        REQUIRED_PRODUCTION_INPUT_ARTIFACTS
+    )
     assert sorted(
-        item["relative_path"]
-        for item in payload["missing_input_artifacts_detail"]
+        item["relative_path"] for item in payload["missing_input_artifacts_detail"]
     ) == sorted(REQUIRED_PRODUCTION_INPUT_ARTIFACTS)
     details = _detail_by_path(payload)
     assert sorted(details) == sorted(REQUIRED_PRODUCTION_INPUT_ARTIFACTS)
@@ -350,7 +466,7 @@ def test_renderer_check_environment_fails_on_missing_provenance_suite_asset(
     )
 
     proc = subprocess.run(
-        [str(RENDERER), "--check-environment"],
+        [*RENDERER_CMD, "--check-environment"],
         cwd=REPO,
         env=env,
         capture_output=True,
@@ -372,6 +488,7 @@ def test_renderer_check_environment_fails_on_missing_provenance_suite_asset(
         "name": "provenance-trust",
         "command": "provenance-trust-check",
         "option": "cases[0].asset_path",
+        "parity_lanes": ["B5"],
     } in detail["checks"]
     assert payload["missing_input_artifacts_detail"] == [detail]
     assert payload["input_artifact_errors"] == []
@@ -388,11 +505,12 @@ def test_renderer_check_environment_fails_on_invalid_provenance_suite_asset_path
     outside_asset.write_text("asset\n", encoding="utf-8")
     _populate_required_input_artifacts(
         env,
-        suite_payload=json.dumps({"cases": [{"asset_path": str(outside_asset)}]}) + "\n",
+        suite_payload=json.dumps({"cases": [{"asset_path": str(outside_asset)}]})
+        + "\n",
     )
 
     proc = subprocess.run(
-        [str(RENDERER), "--check-environment"],
+        [*RENDERER_CMD, "--check-environment"],
         cwd=REPO,
         env=env,
         capture_output=True,
@@ -422,7 +540,9 @@ def test_renderer_check_environment_rejects_escaped_manifest_artifact_path(
 ) -> None:
     env = _filled_render_env(tmp_path)
     _populate_required_input_artifacts(env)
-    outside_artifact = Path(env["MNEMOSYNE_PROD_EVIDENCE_DIR"]).parent / "outside-auth-ops-bundle.json"
+    outside_artifact = (
+        Path(env["MNEMOSYNE_PROD_EVIDENCE_DIR"]).parent / "outside-auth-ops-bundle.json"
+    )
     outside_artifact.write_text("{}\n", encoding="utf-8")
     template = tmp_path / "production-soak-manifest.template.json"
     template.write_text(
@@ -437,7 +557,7 @@ def test_renderer_check_environment_rejects_escaped_manifest_artifact_path(
     )
 
     proc = subprocess.run(
-        [str(RENDERER), "--check-environment", "--template", str(template)],
+        [*RENDERER_CMD, "--check-environment", "--template", str(template)],
         cwd=REPO,
         env=env,
         capture_output=True,
@@ -472,7 +592,7 @@ def test_renderer_check_environment_rejects_escaped_provenance_suite_asset_path(
     )
 
     proc = subprocess.run(
-        [str(RENDERER), "--check-environment"],
+        [*RENDERER_CMD, "--check-environment"],
         cwd=REPO,
         env=env,
         capture_output=True,
@@ -515,7 +635,7 @@ def test_renderer_check_environment_accepts_provenance_suite_assets(
     )
 
     proc = subprocess.run(
-        [str(RENDERER), "--check-environment"],
+        [*RENDERER_CMD, "--check-environment"],
         cwd=REPO,
         env=env,
         capture_output=True,
@@ -543,18 +663,24 @@ def test_renderer_check_environment_accepts_provenance_suite_assets(
             "name": "provenance-trust",
             "command": "provenance-trust-check",
             "option": option,
+            "parity_lanes": ["B5"],
         } in detail["checks"]
-    assert payload["required_input_artifact_count"] == len(REQUIRED_PRODUCTION_INPUT_ARTIFACTS) + 2
+    assert (
+        payload["required_input_artifact_count"]
+        == len(REQUIRED_PRODUCTION_INPUT_ARTIFACTS) + 2
+    )
     assert env["MNEMOSYNE_PROD_EVIDENCE_DIR"] not in proc.stdout
     assert env["MNEMOSYNE_PROD_C2PA_TOOL"] not in proc.stdout
 
 
-def test_renderer_check_environment_rejects_repo_local_input_dir(tmp_path: Path) -> None:
+def test_renderer_check_environment_rejects_repo_local_input_dir(
+    tmp_path: Path,
+) -> None:
     env = _filled_render_env(tmp_path)
     env["MNEMOSYNE_PROD_EVIDENCE_DIR"] = str(REPO / "production-input-artifacts")
 
     proc = subprocess.run(
-        [str(RENDERER), "--check-environment"],
+        [*RENDERER_CMD, "--check-environment"],
         cwd=REPO,
         env=env,
         capture_output=True,
@@ -576,7 +702,7 @@ def test_renderer_check_environment_rejects_relative_input_dir(tmp_path: Path) -
     env["MNEMOSYNE_PROD_EVIDENCE_DIR"] = "production-input-artifacts"
 
     proc = subprocess.run(
-        [str(RENDERER), "--check-environment"],
+        [*RENDERER_CMD, "--check-environment"],
         cwd=REPO,
         env=env,
         capture_output=True,
@@ -599,7 +725,7 @@ def test_renderer_check_environment_rejects_missing_input_dir(tmp_path: Path) ->
     env["MNEMOSYNE_PROD_EVIDENCE_DIR"] = str(missing_dir)
 
     proc = subprocess.run(
-        [str(RENDERER), "--check-environment"],
+        [*RENDERER_CMD, "--check-environment"],
         cwd=REPO,
         env=env,
         capture_output=True,
@@ -624,7 +750,7 @@ def test_renderer_check_environment_rejects_relative_c2pa_tool(tmp_path: Path) -
     env["MNEMOSYNE_PROD_C2PA_TOOL"] = "c2patool"
 
     proc = subprocess.run(
-        [str(RENDERER), "--check-environment"],
+        [*RENDERER_CMD, "--check-environment"],
         cwd=REPO,
         env=env,
         capture_output=True,
@@ -648,7 +774,7 @@ def test_renderer_output_rejects_relative_c2pa_tool(tmp_path: Path) -> None:
     env["MNEMOSYNE_PROD_C2PA_TOOL"] = "c2patool"
 
     proc = subprocess.run(
-        [str(RENDERER), "--output", str(output)],
+        [*RENDERER_CMD, "--output", str(output)],
         cwd=REPO,
         env=env,
         capture_output=True,
@@ -658,11 +784,16 @@ def test_renderer_output_rejects_relative_c2pa_tool(tmp_path: Path) -> None:
 
     assert proc.returncode == 78
     assert not output.exists()
-    assert "MNEMOSYNE_PROD_C2PA_TOOL must be an absolute external executable path" in proc.stderr
+    assert (
+        "MNEMOSYNE_PROD_C2PA_TOOL must be an absolute external executable path"
+        in proc.stderr
+    )
     assert env["MNEMOSYNE_PROD_C2PA_TOOL"] not in proc.stderr
 
 
-def test_renderer_check_environment_rejects_non_executable_c2pa_tool(tmp_path: Path) -> None:
+def test_renderer_check_environment_rejects_non_executable_c2pa_tool(
+    tmp_path: Path,
+) -> None:
     env = _filled_render_env(tmp_path)
     tool = tmp_path / "bin" / "not-executable-c2patool"
     tool.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
@@ -670,7 +801,7 @@ def test_renderer_check_environment_rejects_non_executable_c2pa_tool(tmp_path: P
     env["MNEMOSYNE_PROD_C2PA_TOOL"] = str(tool)
 
     proc = subprocess.run(
-        [str(RENDERER), "--check-environment"],
+        [*RENDERER_CMD, "--check-environment"],
         cwd=REPO,
         env=env,
         capture_output=True,
@@ -697,7 +828,7 @@ def test_renderer_output_rejects_non_executable_c2pa_tool(tmp_path: Path) -> Non
     env["MNEMOSYNE_PROD_C2PA_TOOL"] = str(tool)
 
     proc = subprocess.run(
-        [str(RENDERER), "--output", str(output)],
+        [*RENDERER_CMD, "--output", str(output)],
         cwd=REPO,
         env=env,
         capture_output=True,
@@ -711,12 +842,14 @@ def test_renderer_output_rejects_non_executable_c2pa_tool(tmp_path: Path) -> Non
     assert env["MNEMOSYNE_PROD_C2PA_TOOL"] not in proc.stderr
 
 
-def test_renderer_check_environment_rejects_repo_local_c2pa_tool(tmp_path: Path) -> None:
+def test_renderer_check_environment_rejects_repo_local_c2pa_tool(
+    tmp_path: Path,
+) -> None:
     env = _filled_render_env(tmp_path)
     env["MNEMOSYNE_PROD_C2PA_TOOL"] = str(RENDERER)
 
     proc = subprocess.run(
-        [str(RENDERER), "--check-environment"],
+        [*RENDERER_CMD, "--check-environment"],
         cwd=REPO,
         env=env,
         capture_output=True,
@@ -740,7 +873,7 @@ def test_renderer_output_rejects_repo_local_c2pa_tool(tmp_path: Path) -> None:
     env["MNEMOSYNE_PROD_C2PA_TOOL"] = str(RENDERER)
 
     proc = subprocess.run(
-        [str(RENDERER), "--output", str(output)],
+        [*RENDERER_CMD, "--output", str(output)],
         cwd=REPO,
         env=env,
         capture_output=True,
@@ -750,13 +883,15 @@ def test_renderer_output_rejects_repo_local_c2pa_tool(tmp_path: Path) -> None:
 
     assert proc.returncode == 78
     assert not output.exists()
-    assert "MNEMOSYNE_PROD_C2PA_TOOL must not point inside the repository" in proc.stderr
+    assert (
+        "MNEMOSYNE_PROD_C2PA_TOOL must not point inside the repository" in proc.stderr
+    )
     assert env["MNEMOSYNE_PROD_C2PA_TOOL"] not in proc.stderr
 
 
 def test_renderer_refuses_repo_local_output() -> None:
     proc = subprocess.run(
-        [str(RENDERER), "--output", str(REPO / "production-soak-manifest.json")],
+        [*RENDERER_CMD, "--output", str(REPO / "production-soak-manifest.json")],
         cwd=REPO,
         env=_renderer_base_env(),
         capture_output=True,
@@ -773,7 +908,7 @@ def test_renderer_refuses_relative_output(tmp_path: Path) -> None:
     _populate_required_input_artifacts(env)
 
     proc = subprocess.run(
-        [str(RENDERER), "--output", "production-soak-manifest.json"],
+        [*RENDERER_CMD, "--output", "production-soak-manifest.json"],
         cwd=tmp_path,
         env=env,
         capture_output=True,
@@ -791,15 +926,15 @@ def test_renderer_rejects_secret_bearing_manifest_args(tmp_path: Path) -> None:
     _populate_required_input_artifacts(env)
     template = tmp_path / "production-soak-manifest.template.json"
     payload = json.loads(
-        (REPO / "infra" / "templates" / "production-soak-manifest.template.json").read_text(
-            encoding="utf-8"
-        )
+        (
+            REPO / "infra" / "templates" / "production-soak-manifest.template.json"
+        ).read_text(encoding="utf-8")
     )
     payload["checks"][0]["global_args"] = ["--postgres-dsn", "postgresql://db/prod"]
     template.write_text(json.dumps(payload), encoding="utf-8")
 
     proc = subprocess.run(
-        [str(RENDERER), "--output", str(output), "--template", str(template)],
+        [*RENDERER_CMD, "--output", str(output), "--template", str(template)],
         cwd=REPO,
         env=env,
         capture_output=True,
@@ -818,15 +953,15 @@ def test_renderer_rejects_token_suffix_manifest_args(tmp_path: Path) -> None:
     _populate_required_input_artifacts(env)
     template = tmp_path / "production-soak-manifest.template.json"
     payload = json.loads(
-        (REPO / "infra" / "templates" / "production-soak-manifest.template.json").read_text(
-            encoding="utf-8"
-        )
+        (
+            REPO / "infra" / "templates" / "production-soak-manifest.template.json"
+        ).read_text(encoding="utf-8")
     )
     payload["checks"][0]["args"] = ["--github-token", "from-env-instead"]
     template.write_text(json.dumps(payload), encoding="utf-8")
 
     proc = subprocess.run(
-        [str(RENDERER), "--output", str(output), "--template", str(template)],
+        [*RENDERER_CMD, "--output", str(output), "--template", str(template)],
         cwd=REPO,
         env=env,
         capture_output=True,
@@ -844,7 +979,7 @@ def test_renderer_refuses_repo_local_production_input_dir(tmp_path: Path) -> Non
     env["MNEMOSYNE_PROD_EVIDENCE_DIR"] = str(REPO / "production-input-artifacts")
 
     proc = subprocess.run(
-        [str(RENDERER), "--output", str(tmp_path / "production-soak-manifest.json")],
+        [*RENDERER_CMD, "--output", str(tmp_path / "production-soak-manifest.json")],
         cwd=REPO,
         env=env,
         capture_output=True,
@@ -853,7 +988,10 @@ def test_renderer_refuses_repo_local_production_input_dir(tmp_path: Path) -> Non
     )
 
     assert proc.returncode == 78
-    assert "MNEMOSYNE_PROD_EVIDENCE_DIR must not point inside the repository" in proc.stderr
+    assert (
+        "MNEMOSYNE_PROD_EVIDENCE_DIR must not point inside the repository"
+        in proc.stderr
+    )
 
 
 def test_renderer_refuses_relative_production_input_dir(tmp_path: Path) -> None:
@@ -861,7 +999,7 @@ def test_renderer_refuses_relative_production_input_dir(tmp_path: Path) -> None:
     env["MNEMOSYNE_PROD_EVIDENCE_DIR"] = "production-input-artifacts"
 
     proc = subprocess.run(
-        [str(RENDERER), "--output", str(tmp_path / "production-soak-manifest.json")],
+        [*RENDERER_CMD, "--output", str(tmp_path / "production-soak-manifest.json")],
         cwd=REPO,
         env=env,
         capture_output=True,
@@ -878,7 +1016,7 @@ def test_renderer_output_fails_on_missing_input_artifacts(tmp_path: Path) -> Non
     env = _filled_render_env(tmp_path)
 
     proc = subprocess.run(
-        [str(RENDERER), "--output", str(output)],
+        [*RENDERER_CMD, "--output", str(output)],
         cwd=REPO,
         env=env,
         capture_output=True,
@@ -900,7 +1038,7 @@ def test_renderer_writes_private_valid_manifest_outside_repo(tmp_path: Path) -> 
     _populate_required_input_artifacts(env)
 
     proc = subprocess.run(
-        [str(RENDERER), "--output", str(output)],
+        [*RENDERER_CMD, "--output", str(output)],
         cwd=REPO,
         env=env,
         capture_output=True,
@@ -942,8 +1080,16 @@ def test_renderer_writes_private_valid_manifest_outside_repo(tmp_path: Path) -> 
         "--queue-tenant",
         env["MNEMOSYNE_PROD_TENANT"],
     ]
-    assert gate_suite["args"] == ["--include-cases", "--min-cases", "30", "--min-protected", "20"]
-    worker_run = next(check for check in manifest["checks"] if check["command"] == "worker-run")
+    assert gate_suite["args"] == [
+        "--include-cases",
+        "--min-cases",
+        "30",
+        "--min-protected",
+        "20",
+    ]
+    worker_run = next(
+        check for check in manifest["checks"] if check["command"] == "worker-run"
+    )
     assert worker_run["global_args"] == [
         "--backend",
         "postgres",
@@ -953,7 +1099,9 @@ def test_renderer_writes_private_valid_manifest_outside_repo(tmp_path: Path) -> 
         env["MNEMOSYNE_PROD_TENANT"],
     ]
     ops_dashboard = next(
-        check for check in manifest["checks"] if check["command"] == "ops-dashboard-check"
+        check
+        for check in manifest["checks"]
+        if check["command"] == "ops-dashboard-check"
     )
     assert "--dashboard-url" in ops_dashboard["args"]
     assert "--ops-bundle" in ops_dashboard["args"]
@@ -962,5 +1110,7 @@ def test_renderer_writes_private_valid_manifest_outside_repo(tmp_path: Path) -> 
         in ops_dashboard["args"]
     )
     assert "--dashboard-package-dir" not in ops_dashboard["args"]
-    ops_report = next(check for check in manifest["checks"] if check["command"] == "ops-report")
+    ops_report = next(
+        check for check in manifest["checks"] if check["command"] == "ops-report"
+    )
     assert ops_report["args"] == ["--tenant", env["MNEMOSYNE_PROD_TENANT"]]
