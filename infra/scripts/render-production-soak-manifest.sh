@@ -92,7 +92,10 @@ from urllib.parse import urlparse
 repo_dir = Path(os.environ["REPO_DIR"]).resolve()
 sys.path.insert(0, str(repo_dir / "src"))
 
-from mnemosyne.cli import PRODUCTION_RELEASE_REQUIRED_COMMANDS  # noqa: E402
+from mnemosyne.cli import (  # noqa: E402
+    PRODUCTION_RELEASE_REQUIRED_COMMANDS,
+    PRODUCTION_RELEASE_REQUIRED_PROVIDER_CHECKS,
+)
 from mnemosyne.evidence_redaction import (  # noqa: E402
     manifest_argument_secret_errors,
     redaction_findings,
@@ -122,6 +125,7 @@ validation_categories = [
     "production_validation_scope",
     "frozen_command_profile",
     "external_input_artifact_custody",
+    "provider_manifest_env_refs",
     "external_c2pa_tool",
     "operator_capture_and_offline_verify",
 ]
@@ -596,6 +600,82 @@ def collect_manifest_input_artifacts(manifest_payload: dict[str, Any]) -> list[d
 
 input_artifacts = collect_manifest_input_artifacts(rendered_manifest)
 
+provider_manifest_env_refs: list[str] = []
+missing_provider_manifest_env_refs: list[str] = []
+
+
+def provider_manifest_error(message: str) -> None:
+    add_input_artifact_error(message)
+    for lane in parity_lanes_for_command("provider-check"):
+        input_artifact_row_errors.setdefault(lane, []).append(message)
+
+
+def collect_env_refs(value: object) -> set[str]:
+    if isinstance(value, dict):
+        if set(value) == {"env"} and isinstance(value.get("env"), str):
+            return {str(value["env"])}
+        refs: set[str] = set()
+        for item in value.values():
+            refs.update(collect_env_refs(item))
+        return refs
+    if isinstance(value, list):
+        refs = set()
+        for item in value:
+            refs.update(collect_env_refs(item))
+        return refs
+    return set()
+
+
+def inspect_provider_manifest() -> None:
+    global provider_manifest_env_refs, missing_provider_manifest_env_refs
+    provider_manifest = evidence_dir_resolved / "provider-manifest.production.json"
+    if not provider_manifest.exists():
+        return
+    if not provider_manifest.is_file():
+        provider_manifest_error("provider-manifest.production.json must be a file")
+        return
+    try:
+        payload = json.loads(provider_manifest.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        provider_manifest_error("provider-manifest.production.json must be readable UTF-8 JSON")
+        return
+    if not isinstance(payload, dict):
+        provider_manifest_error("provider-manifest.production.json must be a JSON object")
+        return
+    if payload.get("forbid_local") is not True:
+        provider_manifest_error("provider-manifest.production.json must set forbid_local=true")
+    required_checks = payload.get("required_checks")
+    expected_checks = set(PRODUCTION_RELEASE_REQUIRED_PROVIDER_CHECKS)
+    if not isinstance(required_checks, list) or not all(isinstance(item, str) for item in required_checks):
+        provider_manifest_error(
+            "provider-manifest.production.json required_checks must be a string array"
+        )
+    else:
+        actual_checks = set(required_checks)
+        missing_checks = sorted(expected_checks - actual_checks)
+        extra_checks = sorted(actual_checks - expected_checks)
+        if missing_checks:
+            provider_manifest_error(
+                "provider-manifest.production.json missing production provider checks: "
+                + ", ".join(missing_checks)
+            )
+        if extra_checks:
+            provider_manifest_error(
+                "provider-manifest.production.json contains unsupported provider checks: "
+                + ", ".join(extra_checks)
+            )
+    if not isinstance(payload.get("providers"), dict):
+        provider_manifest_error("provider-manifest.production.json providers must be an object")
+    provider_manifest_env_refs = sorted(collect_env_refs(payload))
+    missing_provider_manifest_env_refs = [
+        name for name in provider_manifest_env_refs if not os.environ.get(name)
+    ]
+    if missing_provider_manifest_env_refs:
+        provider_manifest_error(
+            "provider-manifest.production.json references unset environment variables: "
+            + ", ".join(missing_provider_manifest_env_refs)
+        )
+
 def artifact_relative_name(value: str) -> str:
     candidate = Path(value).expanduser()
     resolved = candidate.resolve(strict=False)
@@ -726,6 +806,7 @@ def inspect_provenance_suites(manifest_payload: dict[str, Any]) -> None:
                         )
 
 inspect_provenance_suites(rendered_manifest)
+inspect_provider_manifest()
 for artifact in input_artifacts:
     annotate_artifact_routes(artifact)
 input_artifacts = sorted(input_artifacts, key=lambda item: str(item["relative_path"]))
@@ -761,6 +842,8 @@ if check_environment:
         "required_input_artifacts_detail": input_artifacts,
         "missing_input_artifacts": missing_input_artifacts,
         "missing_input_artifacts_detail": missing_input_artifact_details,
+        "provider_manifest_env_refs": provider_manifest_env_refs,
+        "missing_provider_manifest_env_refs": missing_provider_manifest_env_refs,
         "parity_row_readiness": parity_row_readiness,
         "input_artifact_errors": input_artifact_errors,
         "input_artifacts_complete": not missing_input_artifacts and not input_artifact_errors,

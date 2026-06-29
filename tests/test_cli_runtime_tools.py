@@ -36,6 +36,7 @@ from mnemosyne.mcp_server import MnemosyneMcpServer, build_http_server, build_sd
 from mnemosyne.models import Evidence, Relation
 from mnemosyne.oidc_jwks import load_oidc_jwks
 from mnemosyne.postgres_engine import PostgresEngine
+from mnemosyne.production_parity import build_parity_row_readiness, parity_routes_for_lanes
 from mnemosyne.retrieval import (
     CommandGraphRetriever,
     CommandLexicalRetriever,
@@ -6340,18 +6341,94 @@ def rewrite_release_check_stdout(
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
 
 
+def production_preflight_row_readiness(
+    bundle_dir: Path,
+    artifacts: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    readiness_inputs: list[dict[str, object]] = []
+    for artifact in artifacts:
+        snapshot_path = artifact.get("snapshot_path")
+        if not isinstance(snapshot_path, str) or not snapshot_path:
+            continue
+        try:
+            relative_path = Path(snapshot_path).resolve(strict=False).relative_to(bundle_dir).as_posix()
+        except ValueError:
+            relative_path = Path(snapshot_path).name
+        readiness_inputs.append(
+            {
+                "relative_path": relative_path,
+                "checks": artifact.get("checks", []),
+                "parity_routes": artifact.get("parity_routes", []),
+                "exists": True,
+            }
+        )
+    return build_parity_row_readiness(readiness_inputs)
+
+
 def write_production_evidence_bundle(tmp_path: Path) -> tuple[Path, str]:
     store = tmp_path / "mnemosyne.json"
     source_root = tmp_path / "source"
     _report_path, manifest_path = write_release_report(source_root)
     bundle_dir = tmp_path / "production-evidence"
     evidence_dir = bundle_dir / "evidence"
+    input_root = bundle_dir / "input-artifacts"
     c2pa_tool = tmp_path / "tools" / "c2patool"
     c2pa_tool.parent.mkdir(parents=True, exist_ok=True)
     c2pa_tool_payload = b"#!/bin/sh\nexit 0\n"
     c2pa_tool.write_bytes(c2pa_tool_payload)
     c2pa_tool.chmod(0o755)
     shutil.copytree(manifest_path.parent, evidence_dir)
+    input_root.mkdir(parents=True)
+    provider_manifest_source = tmp_path / "operator-inputs" / "provider-manifest.production.json"
+    provider_manifest_source.parent.mkdir(parents=True)
+    provider_manifest_source.write_text(
+        json.dumps(
+            {
+                "forbid_local": True,
+                "providers": {
+                    "embedding": {
+                        "kind": "hosted",
+                        "url": "https://providers.example.test/embedding",
+                    }
+                },
+                "required_checks": sorted(PRODUCTION_RELEASE_REQUIRED_PROVIDER_CHECKS),
+            },
+            indent=2,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    provider_manifest_snapshot = input_root / "0001-provider-manifest.production.json"
+    shutil.copy2(provider_manifest_source, provider_manifest_snapshot)
+    provider_manifest_lanes = ["B1", "B2", "B4", "B6", "B7", "B9", "B10"]
+    provider_manifest_checks = [
+        {
+            "name": "provider-manifest.production.json",
+            "command": "provider-check",
+            "option": "--provider-manifest",
+            "parity_lanes": provider_manifest_lanes,
+        }
+    ]
+    provider_manifest_routes = parity_routes_for_lanes(provider_manifest_lanes)
+    provider_manifest_artifact = {
+        "path": str(provider_manifest_source),
+        "snapshot_path": str(provider_manifest_snapshot),
+        "kind": "file",
+        "labels": ["checks[provider-check].args"],
+        "checks": provider_manifest_checks,
+        "parity_routes": provider_manifest_routes,
+        "files": [
+            {
+                "source_path": str(provider_manifest_source),
+                "snapshot_path": str(provider_manifest_snapshot),
+                "relative_path": provider_manifest_snapshot.name,
+                "size_bytes": provider_manifest_snapshot.stat().st_size,
+                "sha256": "sha256:" + sha256(provider_manifest_snapshot.read_bytes()).hexdigest(),
+            }
+        ],
+    }
+    required_input_artifacts = [provider_manifest_artifact]
+    parity_row_readiness = production_preflight_row_readiness(bundle_dir, required_input_artifacts)
 
     operator_manifest_path = bundle_dir / "operator-soak-manifest.json"
     operator_manifest_path.write_text(
@@ -6363,7 +6440,14 @@ def write_production_evidence_bundle(tmp_path: Path) -> tuple[Path, str]:
                     "operator_asserted": True,
                 },
                 "checks": [
-                    {"command": command, "args": []}
+                    {
+                        "command": command,
+                        "args": (
+                            ["--provider-manifest", str(provider_manifest_snapshot)]
+                            if command == "provider-check"
+                            else []
+                        ),
+                    }
                     for command in PRODUCTION_RELEASE_REQUIRED_COMMANDS
                 ],
             },
@@ -6415,7 +6499,8 @@ def write_production_evidence_bundle(tmp_path: Path) -> tuple[Path, str]:
                 "redaction_scan": str(bundle_dir / "redaction-scan.json"),
                 "required_commands": list(PRODUCTION_RELEASE_REQUIRED_COMMANDS),
                 "provided_commands": sorted(PRODUCTION_RELEASE_REQUIRED_COMMANDS),
-                "required_input_artifacts": [],
+                "required_input_artifacts": required_input_artifacts,
+                "parity_row_readiness": parity_row_readiness,
                 "executable_tool_references": [
                     {
                         "option": "--c2pa-tool",
@@ -6795,7 +6880,7 @@ def test_cli_production_evidence_verify_accepts_symlink_parent_source_value(tmp_
     source_value = linked_root / source_artifact.name
 
     snapshot = bundle_dir / "input-artifacts" / "0001-cases.json"
-    snapshot.parent.mkdir()
+    snapshot.parent.mkdir(exist_ok=True)
     shutil.copy2(source_artifact, snapshot)
     operator_manifest_path = bundle_dir / "operator-soak-manifest.json"
     source_manifest_path = bundle_dir / "source-soak-manifest.json"
@@ -6808,7 +6893,8 @@ def test_cli_production_evidence_verify_accepts_symlink_parent_source_value(tmp_
 
     preflight_path = bundle_dir / "preflight.json"
     preflight = json.loads(preflight_path.read_text(encoding="utf-8"))
-    preflight["required_input_artifacts"] = [
+    input_artifacts = list(preflight["required_input_artifacts"])
+    input_artifacts.append(
         {
             "path": str(source_artifact.resolve(strict=True)),
             "source_values": [str(source_value)],
@@ -6825,7 +6911,12 @@ def test_cli_production_evidence_verify_accepts_symlink_parent_source_value(tmp_
                 }
             ],
         }
-    ]
+    )
+    preflight["required_input_artifacts"] = input_artifacts
+    preflight["parity_row_readiness"] = production_preflight_row_readiness(
+        bundle_dir,
+        input_artifacts,
+    )
     preflight_path.write_text(json.dumps(preflight, indent=2, sort_keys=True), encoding="utf-8")
     rewrite_production_redaction_scan(bundle_dir)
     bundle_fingerprint = rewrite_production_bundle_manifest(bundle_dir)
@@ -7315,16 +7406,50 @@ def test_cli_production_evidence_verify_rejects_secret_args_in_retained_manifest
     assert "bundle_fingerprint_mismatch" not in codes
 
 
+def test_cli_production_evidence_verify_rejects_missing_input_artifact_contract(
+    tmp_path: Path,
+) -> None:
+    bundle_dir, _bundle_fingerprint = write_production_evidence_bundle(tmp_path)
+    shutil.rmtree(bundle_dir / "input-artifacts")
+    preflight_path = bundle_dir / "preflight.json"
+    preflight = json.loads(preflight_path.read_text(encoding="utf-8"))
+    preflight["required_input_artifacts"] = []
+    preflight.pop("parity_row_readiness", None)
+    preflight_path.write_text(json.dumps(preflight, indent=2, sort_keys=True), encoding="utf-8")
+    rewrite_production_redaction_scan(bundle_dir)
+    bundle_fingerprint = rewrite_production_bundle_manifest(bundle_dir)
+
+    result = run_raw_cli(
+        tmp_path / "verify-store.json",
+        "production-evidence-verify",
+        str(bundle_dir),
+        "--expected-bundle-fingerprint",
+        bundle_fingerprint,
+    )
+    payload = json.loads(result.stdout)
+    codes = {finding["code"] for finding in payload["findings"]}
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert payload["checks"]["preflight"] is False
+    assert payload["checks"]["input_artifact_custody"] is False
+    assert "preflight_input_artifacts_missing" in codes
+    assert "preflight_parity_row_readiness_invalid" in codes
+    assert "preflight_input_artifact_root_missing" in codes
+    assert "bundle_file_sha256_mismatch" not in codes
+    assert "bundle_fingerprint_mismatch" not in codes
+
+
 def test_cli_production_evidence_verify_rejects_tampered_input_artifact_metadata(
     tmp_path: Path,
 ) -> None:
     bundle_dir, _bundle_fingerprint = write_production_evidence_bundle(tmp_path)
     snapshot = bundle_dir / "input-artifacts" / "0001-cases.json"
-    snapshot.parent.mkdir()
+    snapshot.parent.mkdir(exist_ok=True)
     snapshot.write_text('{"ok": true}\n', encoding="utf-8")
     preflight_path = bundle_dir / "preflight.json"
     preflight = json.loads(preflight_path.read_text(encoding="utf-8"))
-    preflight["required_input_artifacts"] = [
+    input_artifacts = [
         {
             "path": str(tmp_path / "external" / "cases.json"),
             "snapshot_path": str(snapshot),
@@ -7341,6 +7466,11 @@ def test_cli_production_evidence_verify_rejects_tampered_input_artifact_metadata
             ],
         }
     ]
+    preflight["required_input_artifacts"] = input_artifacts
+    preflight["parity_row_readiness"] = production_preflight_row_readiness(
+        bundle_dir,
+        input_artifacts,
+    )
     preflight["required_input_artifacts"][0]["files"][0]["sha256"] = "sha256:" + ("0" * 64)
     preflight_path.write_text(json.dumps(preflight, indent=2, sort_keys=True), encoding="utf-8")
     rewrite_production_bundle_manifest(bundle_dir)
@@ -7365,11 +7495,11 @@ def test_cli_production_evidence_verify_rejects_unreferenced_input_artifact_snap
 ) -> None:
     bundle_dir, _bundle_fingerprint = write_production_evidence_bundle(tmp_path)
     snapshot = bundle_dir / "input-artifacts" / "0001-cases.json"
-    snapshot.parent.mkdir()
+    snapshot.parent.mkdir(exist_ok=True)
     snapshot.write_text('{"ok": true}\n', encoding="utf-8")
     preflight_path = bundle_dir / "preflight.json"
     preflight = json.loads(preflight_path.read_text(encoding="utf-8"))
-    preflight["required_input_artifacts"] = [
+    input_artifacts = [
         {
             "path": str(tmp_path / "external" / "cases.json"),
             "snapshot_path": str(snapshot),
@@ -7386,6 +7516,11 @@ def test_cli_production_evidence_verify_rejects_unreferenced_input_artifact_snap
             ],
         }
     ]
+    preflight["required_input_artifacts"] = input_artifacts
+    preflight["parity_row_readiness"] = production_preflight_row_readiness(
+        bundle_dir,
+        input_artifacts,
+    )
     preflight_path.write_text(json.dumps(preflight, indent=2, sort_keys=True), encoding="utf-8")
     rewrite_production_redaction_scan(bundle_dir)
     rewrite_production_bundle_manifest(bundle_dir)
@@ -7410,7 +7545,7 @@ def test_cli_production_evidence_verify_rejects_unrecorded_operator_input_artifa
 ) -> None:
     bundle_dir, _bundle_fingerprint = write_production_evidence_bundle(tmp_path)
     snapshot = bundle_dir / "input-artifacts" / "0001-cases.json"
-    snapshot.parent.mkdir()
+    snapshot.parent.mkdir(exist_ok=True)
     snapshot.write_text('{"ok": true}\n', encoding="utf-8")
     operator_manifest_path = bundle_dir / "operator-soak-manifest.json"
     operator_manifest = json.loads(operator_manifest_path.read_text(encoding="utf-8"))
@@ -7443,7 +7578,7 @@ def test_cli_production_evidence_verify_rejects_symlinked_input_artifact(
 ) -> None:
     bundle_dir, _bundle_fingerprint = write_production_evidence_bundle(tmp_path)
     snapshot = bundle_dir / "input-artifacts" / "linked-cases.json"
-    snapshot.parent.mkdir()
+    snapshot.parent.mkdir(exist_ok=True)
     try:
         snapshot.symlink_to(Path("/etc/hosts"))
     except OSError as exc:
@@ -7473,12 +7608,12 @@ def test_cli_production_evidence_verify_rejects_input_artifact_parent_mismatch(
     artifact_root = bundle_dir / "input-artifacts" / "0001-suite"
     other_root = bundle_dir / "input-artifacts" / "0002-cases"
     snapshot = other_root / "cases.json"
-    artifact_root.mkdir(parents=True)
-    snapshot.parent.mkdir(parents=True)
+    artifact_root.mkdir(parents=True, exist_ok=True)
+    snapshot.parent.mkdir(parents=True, exist_ok=True)
     snapshot.write_text('{"ok": true}\n', encoding="utf-8")
     preflight_path = bundle_dir / "preflight.json"
     preflight = json.loads(preflight_path.read_text(encoding="utf-8"))
-    preflight["required_input_artifacts"] = [
+    input_artifacts = [
         {
             "path": str(tmp_path / "external" / "suite"),
             "snapshot_path": str(artifact_root),
@@ -7495,6 +7630,11 @@ def test_cli_production_evidence_verify_rejects_input_artifact_parent_mismatch(
             ],
         }
     ]
+    preflight["required_input_artifacts"] = input_artifacts
+    preflight["parity_row_readiness"] = production_preflight_row_readiness(
+        bundle_dir,
+        input_artifacts,
+    )
     preflight_path.write_text(json.dumps(preflight, indent=2, sort_keys=True), encoding="utf-8")
     rewrite_production_redaction_scan(bundle_dir)
     rewrite_production_bundle_manifest(bundle_dir)

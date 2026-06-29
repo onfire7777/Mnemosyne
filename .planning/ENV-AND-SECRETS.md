@@ -23,6 +23,10 @@ environment-variable references before rendering. The provider manifest is a
 retained production input artifact shared across B1, B2, B4, B6, B7, B9, and
 B10; keep `forbid_local: true` and do not split provider-check subchecks into
 row-local manifests.
+`infra/scripts/render-production-soak-manifest.sh --check-environment` parses
+that external provider manifest when present, reports the referenced provider
+environment-variable names under `provider_manifest_env_refs`, and fails before
+capture if any referenced provider env var is unset. Values remain redacted.
 The check command prints key names only; it also verifies the production input
 directory exists outside the repo and `MNEMOSYNE_PROD_C2PA_TOOL` resolves to an
 absolute external executable outside the repository without a symlink or
@@ -221,7 +225,10 @@ The only production acceptance path is:
 4. `production-evidence-verify` passes offline against the retained output
    bundle with `--expected-bundle-fingerprint` set from an independently
    retained out-of-band capture record, not from `summary.json` inside the
-   bundle under review.
+   bundle under review. The retained bundle must include a non-empty
+   `preflight.json.required_input_artifacts` list, matching
+   `preflight.json.parity_row_readiness`, and the retained `input-artifacts/`
+   directory.
 
 ## Hard Rules
 
