@@ -16,6 +16,16 @@ Run in the production soak profile:
 - `provenance-ops-check`
 - `provenance-trust-check`
 
+## Required Production Input Artifacts
+
+Place these files in the external `MNEMOSYNE_PROD_EVIDENCE_DIR` before
+rendering:
+
+- `provenance-ops-bundle.json`
+- `provenance-trust-suite.json`
+- Nested `asset_path` and `c2pa_asset_path` files referenced by
+  `provenance-trust-suite.json`
+
 ## Redaction Requirement
 
 Evidence must not include private media, raw certificate private keys, or

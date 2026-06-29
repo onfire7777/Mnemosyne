@@ -19,6 +19,12 @@ Run in the production soak profile:
 - `ops-dashboard-check`
 - `ops-report`
 
+## Required Production Input Artifacts
+
+Place this file in the external `MNEMOSYNE_PROD_EVIDENCE_DIR` before rendering:
+
+- `ops-dashboard-bundle.json`
+
 ## Redaction Requirement
 
 Evidence must not include private tenant data, raw queries, raw memory content,

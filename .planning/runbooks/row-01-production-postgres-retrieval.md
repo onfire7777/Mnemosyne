@@ -16,6 +16,14 @@ Run in the production soak profile:
 - `retrieval-ops-check`
 - `provider-check` for `retrieval_backends`
 
+## Required Production Input Artifacts
+
+Place these files in the external `MNEMOSYNE_PROD_EVIDENCE_DIR` before
+rendering:
+
+- `retrieval-ops-bundle.json`
+- `provider-manifest.production.json`
+
 ## Redaction Requirement
 
 Evidence must not include raw tokens, keys, queries, documents, credentials, or

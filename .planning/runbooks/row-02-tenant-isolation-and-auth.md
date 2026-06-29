@@ -20,6 +20,21 @@ Run in the production soak profile:
 - `tls-rotation-plan-check`
 - `tls-lifecycle-ops-check`
 
+## Required Production Input Artifacts
+
+Place these files in the external `MNEMOSYNE_PROD_EVIDENCE_DIR` before
+rendering:
+
+- `auth-ops-bundle.json`
+- `idp-authz-policy-simulation.json`
+- `idp-authz-policy.candidate.json`
+- `idp-authz-policy.current.json`
+- `policy-ops-bundle.json`
+- `provider-manifest.production.json`
+- `tls-candidate.pem`
+- `tls-current.pem`
+- `tls-lifecycle-bundle.json`
+
 ## Redaction Requirement
 
 Evidence must not include raw tokens, private keys, session secrets, passwords,

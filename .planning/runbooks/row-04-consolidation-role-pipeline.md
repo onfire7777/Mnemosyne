@@ -20,6 +20,17 @@ Run in the production soak profile:
 - `projection-recompute-once`
 - `gate-suite-check`
 
+## Required Production Input Artifacts
+
+Place these files in the external `MNEMOSYNE_PROD_EVIDENCE_DIR` before
+rendering:
+
+- `calibration-dataset.json`
+- `consolidation-ops-bundle.json`
+- `hosted-llm-manifest.json`
+- `provider-manifest.production.json`
+- `worker-ops-bundle.json`
+
 ## Redaction Requirement
 
 Evidence must not include raw documents, raw prompts, private extracted text, or

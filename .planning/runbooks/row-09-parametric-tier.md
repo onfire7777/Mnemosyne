@@ -17,6 +17,14 @@ Run in the production soak profile:
 - `hosted-llm-check`
 - `calibration-tune`
 
+## Required Production Input Artifacts
+
+Place these files in the external `MNEMOSYNE_PROD_EVIDENCE_DIR` before
+rendering:
+
+- `parametric-trainer-bundle.json`
+- `provider-manifest.production.json`
+
 ## Redaction Requirement
 
 Evidence must not include training data, model secrets, raw prompts, bearer

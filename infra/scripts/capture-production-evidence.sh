@@ -515,6 +515,13 @@ def _validate_executable_tool_path(
     resolved = _resolve_checked(path, label=label)
     if resolved is None:
         return
+    lexical_path = Path(os.path.abspath(os.fspath(path)))
+    if lexical_path != resolved:
+        errors.append(
+            f"{label} executable path for {option_name} points through a symlink or non-canonical path: "
+            f"{path}; use the resolved deployed external tool path"
+        )
+        return
     try:
         resolved.relative_to(repo_dir.resolve())
     except ValueError:
@@ -1080,10 +1087,31 @@ for occurrence in artifact_occurrences:
     json.dumps(manifest, indent=2, sort_keys=True),
     encoding="utf-8",
 )
+redaction_scan_path = out_root / "redaction-scan.json"
+preflight_path = out_root / "preflight.json"
+preflight = {
+    "ok": True,
+    "preflight_only": os.environ.get("PREFLIGHT_ONLY") == "1",
+    "source_manifest": str(manifest_path),
+    "source_manifest_copy": str(out_root / "source-soak-manifest.json"),
+    "copied_manifest": str(out_root / "operator-soak-manifest.json"),
+    "redaction_scan": str(redaction_scan_path),
+    "started_at": os.environ["STARTED_AT"],
+    "required_commands": list(PRODUCTION_RELEASE_REQUIRED_COMMANDS),
+    "provided_commands": sorted(commands),
+    "required_input_artifacts": artifact_metadata,
+    "parity_row_readiness": preflight_row_readiness,
+    "executable_tool_references": sorted(
+        executable_tool_references.values(),
+        key=lambda item: (str(item["option"]), str(item["path"])),
+    ),
+}
+preflight_path.write_text(json.dumps(preflight, indent=2), encoding="utf-8")
 retained_preflight_scan = scan_evidence_paths(
     [
         out_root / "source-soak-manifest.json",
         out_root / "operator-soak-manifest.json",
+        preflight_path,
         *[Path(str(artifact["snapshot_path"])) for artifact in artifact_metadata],
     ],
     scope="preflight",
@@ -1111,7 +1139,6 @@ if retained_preflight_skipped:
     for skipped in retained_preflight_skipped:
         print(f"  - {skipped['path']}: {skipped['reason']}", file=sys.stderr)
     sys.exit(65)
-redaction_scan_path = out_root / "redaction-scan.json"
 write_redaction_scan(
     redaction_scan_path,
     scope="preflight",
@@ -1119,24 +1146,6 @@ write_redaction_scan(
     findings=[],
     skipped_files=[],
 )
-preflight = {
-    "ok": True,
-    "preflight_only": os.environ.get("PREFLIGHT_ONLY") == "1",
-    "source_manifest": str(manifest_path),
-    "source_manifest_copy": str(out_root / "source-soak-manifest.json"),
-    "copied_manifest": str(out_root / "operator-soak-manifest.json"),
-    "redaction_scan": str(redaction_scan_path),
-    "started_at": os.environ["STARTED_AT"],
-    "required_commands": list(PRODUCTION_RELEASE_REQUIRED_COMMANDS),
-    "provided_commands": sorted(commands),
-    "required_input_artifacts": artifact_metadata,
-    "parity_row_readiness": preflight_row_readiness,
-    "executable_tool_references": sorted(
-        executable_tool_references.values(),
-        key=lambda item: (str(item["option"]), str(item["path"])),
-    ),
-}
-(out_root / "preflight.json").write_text(json.dumps(preflight, indent=2), encoding="utf-8")
 PY
 
 if [ "${PREFLIGHT_ONLY}" = "1" ]; then

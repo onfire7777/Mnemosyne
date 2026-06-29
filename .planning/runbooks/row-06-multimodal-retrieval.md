@@ -15,6 +15,14 @@ Run in the production soak profile:
 
 - `multimodal-ops-check`
 
+## Required Production Input Artifacts
+
+Place these files in the external `MNEMOSYNE_PROD_EVIDENCE_DIR` before
+rendering:
+
+- `multimodal-ops-bundle.json`
+- `provider-manifest.production.json`
+
 ## Redaction Requirement
 
 Evidence must not include raw media, transcripts, captions, extracted private
