@@ -13,10 +13,38 @@ import pytest
 
 from mnemosyne.cli import PRODUCTION_RELEASE_REQUIRED_COMMANDS
 from mnemosyne.evidence_redaction import scan_evidence_paths, scan_evidence_tree
+from mnemosyne.production_parity import build_parity_row_readiness
 
 
 REPO = Path(__file__).resolve().parents[1]
 CAPTURE_SCRIPT = REPO / "infra" / "scripts" / "capture-production-evidence.sh"
+
+
+def _preflight_rows_by_lane(payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    rows = payload["parity_row_readiness"]
+    assert isinstance(rows, list)
+    return {str(row["lane"]): row for row in rows if isinstance(row, dict)}
+
+
+def _retained_input_path(out_root: Path, artifact: dict[str, Any]) -> str:
+    return Path(str(artifact["snapshot_path"])).relative_to(out_root).as_posix()
+
+
+def _expected_preflight_row_readiness(
+    out_root: Path,
+    input_artifacts: list[dict[str, Any]],
+) -> list[dict[str, object]]:
+    return build_parity_row_readiness(
+        [
+            {
+                "relative_path": _retained_input_path(out_root, artifact),
+                "checks": artifact["checks"],
+                "parity_routes": artifact["parity_routes"],
+                "exists": True,
+            }
+            for artifact in input_artifacts
+        ]
+    )
 
 
 def _minimal_production_manifest(
@@ -672,8 +700,25 @@ def test_capture_production_evidence_preflight_records_input_artifacts(
     input_artifacts = stdout["required_input_artifacts"]
     assert len(input_artifacts) == 1
     assert input_artifacts[0]["path"] == str(artifact)
+    assert input_artifacts[0]["source_values"] == [str(artifact)]
     assert input_artifacts[0]["kind"] == "file"
     assert input_artifacts[0]["labels"] == ["checks[1].args"]
+    assert input_artifacts[0]["checks"] == [
+        {
+            "name": "belief-revision-check",
+            "command": "belief-revision-check",
+            "option": "--cases",
+            "parity_lanes": ["B10"],
+        }
+    ]
+    assert input_artifacts[0]["parity_routes"] == [
+        {
+            "lane": "B10",
+            "row": 10,
+            "title": "Live parity suite",
+            "runbook": ".planning/runbooks/row-10-live-parity-suite.md",
+        }
+    ]
     assert input_artifacts[0]["snapshot_path"].startswith(
         str(out_root / "input-artifacts")
     )
@@ -692,8 +737,24 @@ def test_capture_production_evidence_preflight_records_input_artifacts(
         input_artifacts[0]["snapshot_path"],
     ]
     assert (out_root / "source-soak-manifest.json").exists()
+    assert (
+        str(out_root / "source-soak-manifest.json") in redaction_scan["scanned_files"]
+    )
+    assert (
+        str(out_root / "operator-soak-manifest.json") in redaction_scan["scanned_files"]
+    )
+    assert str(manifest) not in redaction_scan["scanned_files"]
     assert input_artifacts[0]["snapshot_path"] in redaction_scan["scanned_files"]
     assert redaction_scan["skipped_files"] == []
+    assert stdout["parity_row_readiness"] == _expected_preflight_row_readiness(
+        out_root,
+        input_artifacts,
+    )
+    rows = _preflight_rows_by_lane(stdout)
+    assert rows["B10"]["required_input_artifacts"] == [
+        _retained_input_path(out_root, input_artifacts[0])
+    ]
+    assert rows["B10"]["input_artifacts_complete"] is True
 
 
 def test_capture_production_evidence_preflight_rejects_symlinked_argument_artifact(
@@ -846,13 +907,26 @@ def test_capture_production_evidence_preflight_records_manifest_input_artifacts(
 
     assert len(input_artifacts) == 1
     assert input_artifacts[0]["path"] == str(artifact)
+    assert input_artifacts[0]["source_values"] == [str(artifact)]
     assert input_artifacts[0]["kind"] == "file"
     assert input_artifacts[0]["labels"] == ["checks[1].input_artifacts"]
+    assert input_artifacts[0]["checks"] == [
+        {
+            "name": "belief-revision-check",
+            "command": "belief-revision-check",
+            "option": "input_artifacts[0]",
+            "parity_lanes": ["B10"],
+        }
+    ]
     assert copied_manifest["checks"][0]["input_artifacts"] == [
         input_artifacts[0]["snapshot_path"]
     ]
     assert copied_manifest["checks"][0]["args"] == []
     assert input_artifacts[0]["snapshot_path"] in redaction_scan["scanned_files"]
+    assert stdout["parity_row_readiness"] == _expected_preflight_row_readiness(
+        out_root,
+        input_artifacts,
+    )
 
 
 def test_capture_production_evidence_preflight_records_equals_form_input_artifacts(
@@ -890,7 +964,16 @@ def test_capture_production_evidence_preflight_records_equals_form_input_artifac
     input_artifact = stdout["required_input_artifacts"][0]
 
     assert input_artifact["path"] == str(artifact)
+    assert input_artifact["source_values"] == [str(artifact)]
     assert input_artifact["snapshot_path"].startswith(str(out_root / "input-artifacts"))
+    assert input_artifact["checks"] == [
+        {
+            "name": "belief-revision-check",
+            "command": "belief-revision-check",
+            "option": "--cases",
+            "parity_lanes": ["B10"],
+        }
+    ]
     assert copied_manifest["checks"][0]["args"] == [
         f"--cases={input_artifact['snapshot_path']}"
     ]
@@ -939,6 +1022,7 @@ def test_capture_production_evidence_preflight_does_not_snapshot_tool_executable
     )
 
     assert stdout["required_input_artifacts"] == []
+    assert stdout["parity_row_readiness"] == []
     assert stdout["executable_tool_references"] == [
         {
             "option": "--c2pa-tool",
@@ -946,6 +1030,13 @@ def test_capture_production_evidence_preflight_does_not_snapshot_tool_executable
             "labels": ["checks[9].args"],
         }
     ]
+    assert (
+        str(out_root / "source-soak-manifest.json") in redaction_scan["scanned_files"]
+    )
+    assert (
+        str(out_root / "operator-soak-manifest.json") in redaction_scan["scanned_files"]
+    )
+    assert str(manifest) not in redaction_scan["scanned_files"]
     provenance_check = next(
         item
         for item in copied_manifest["checks"]
@@ -1199,11 +1290,11 @@ def test_capture_production_evidence_preflight_snapshots_provenance_suite_assets
     suite_snapshot = Path(provenance_check["args"][1])
     rewritten_suite = json.loads(suite_snapshot.read_text(encoding="utf-8"))
     rewritten_asset_path = rewritten_suite["cases"][0]["asset_path"]
-    suite_metadata = next(
-        item
-        for item in stdout["required_input_artifacts"]
-        if Path(item["path"]).name == "provenance-trust-suite.json"
-    )
+    artifact_by_name = {
+        Path(item["path"]).name: item for item in stdout["required_input_artifacts"]
+    }
+    asset_metadata = artifact_by_name["asset.json"]
+    suite_metadata = artifact_by_name["provenance-trust-suite.json"]
 
     assert stdout["executable_tool_references"] == [
         {
@@ -1215,6 +1306,24 @@ def test_capture_production_evidence_preflight_snapshots_provenance_suite_assets
     assert suite_snapshot.is_relative_to(out_root / "input-artifacts")
     assert Path(rewritten_asset_path).is_relative_to(out_root / "input-artifacts")
     assert rewritten_asset_path != str(asset)
+    assert asset_metadata["source_values"] == [str(asset)]
+    assert suite_metadata["source_values"] == [str(suite)]
+    assert asset_metadata["checks"] == [
+        {
+            "name": "provenance-trust-check",
+            "command": "provenance-trust-check",
+            "option": "cases[0].asset_path",
+            "parity_lanes": ["B5"],
+        }
+    ]
+    assert suite_metadata["checks"] == [
+        {
+            "name": "provenance-trust-check",
+            "command": "provenance-trust-check",
+            "option": "--suite",
+            "parity_lanes": ["B5"],
+        }
+    ]
     assert suite_metadata["files"][0]["snapshot_path"] == str(suite_snapshot)
     assert suite_metadata["files"][0]["size_bytes"] == suite_snapshot.stat().st_size
     assert (
@@ -1225,6 +1334,18 @@ def test_capture_production_evidence_preflight_snapshots_provenance_suite_assets
         "asset.json",
         "provenance-trust-suite.json",
     }
+    assert stdout["parity_row_readiness"] == _expected_preflight_row_readiness(
+        out_root,
+        stdout["required_input_artifacts"],
+    )
+    rows = _preflight_rows_by_lane(stdout)
+    assert rows["B5"]["required_input_artifacts"] == sorted(
+        [
+            _retained_input_path(out_root, asset_metadata),
+            _retained_input_path(out_root, suite_metadata),
+        ]
+    )
+    assert rows["B5"]["input_artifacts_complete"] is True
 
 
 def test_capture_production_evidence_preflight_rejects_symlinked_provenance_suite(
@@ -1386,16 +1507,35 @@ def test_capture_production_evidence_preflight_rewrites_equals_form_suite_path(
     rewritten_arg = provenance_check["args"][0]
     suite_snapshot = Path(rewritten_arg.split("=", 1)[1])
     rewritten_suite = json.loads(suite_snapshot.read_text(encoding="utf-8"))
+    artifact_by_name = {
+        Path(item["path"]).name: item for item in stdout["required_input_artifacts"]
+    }
 
     assert rewritten_arg.startswith("--suite=")
     assert suite_snapshot.is_relative_to(out_root / "input-artifacts")
     assert Path(rewritten_suite["cases"][0]["asset_path"]).is_relative_to(
         out_root / "input-artifacts"
     )
+    assert artifact_by_name["asset.json"]["source_values"] == [str(asset)]
+    assert artifact_by_name["provenance-trust-suite.json"]["source_values"] == [
+        str(suite)
+    ]
+    assert artifact_by_name["provenance-trust-suite.json"]["checks"] == [
+        {
+            "name": "provenance-trust-check",
+            "command": "provenance-trust-check",
+            "option": "--suite",
+            "parity_lanes": ["B5"],
+        }
+    ]
     assert {Path(item["path"]).name for item in stdout["required_input_artifacts"]} == {
         "asset.json",
         "provenance-trust-suite.json",
     }
+    assert stdout["parity_row_readiness"] == _expected_preflight_row_readiness(
+        out_root,
+        stdout["required_input_artifacts"],
+    )
 
 
 def test_capture_production_evidence_preflight_rejects_suite_json(
@@ -2115,12 +2255,18 @@ def test_capture_production_evidence_uses_staged_input_snapshot_after_source_mut
     manifest = tmp_path / "production-soak.json"
     out_root = tmp_path / "capture"
     source_artifact = tmp_path / "production-inputs" / "cases.json"
+    linked_input_root = tmp_path / "linked-production-inputs"
     fake_python = tmp_path / "fake-python"
     source_artifact.parent.mkdir()
     source_artifact.write_text('{"value": "original"}\n', encoding="utf-8")
+    try:
+        linked_input_root.symlink_to(source_artifact.parent, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"symlink setup unavailable: {exc}")
+    manifest_artifact = linked_input_root / source_artifact.name
 
     def add_external_artifact_path(payload: dict[str, Any]) -> None:
-        payload["checks"][0]["args"] = ["--cases", str(source_artifact)]
+        payload["checks"][0]["args"] = ["--cases", str(manifest_artifact)]
 
     _minimal_production_manifest(manifest, mutate=add_external_artifact_path)
     fake_python.write_text(
@@ -2211,10 +2357,14 @@ exec "$REAL_PYTHON" "$@"
     copied_manifest = json.loads(
         (out_root / "operator-soak-manifest.json").read_text(encoding="utf-8")
     )
+    preflight = json.loads((out_root / "preflight.json").read_text(encoding="utf-8"))
     used_input = (out_root / "evidence" / "used-input.json").read_text(encoding="utf-8")
     snapshot_path = copied_manifest["checks"][0]["args"][1]
+    input_artifact = preflight["required_input_artifacts"][0]
 
     assert json.loads(proc.stdout)["release_audit_ok"] is True
+    assert input_artifact["path"] == str(source_artifact.resolve(strict=True))
+    assert input_artifact["source_values"] == [str(manifest_artifact)]
     assert snapshot_path.startswith(str(out_root / "input-artifacts"))
     assert used_input == '{"value": "original"}\n'
     assert source_artifact.read_text(encoding="utf-8") == '{"value": "mutated"}\n'

@@ -32,6 +32,28 @@ repository before rendering or checking the production soak manifest:
 - [ ] `tls-lifecycle-bundle.json`
 - [ ] `worker-ops-bundle.json`
 
+Row routing:
+
+| Row | Runbook | Input artifacts |
+| --- | --- | --- |
+| B1 production Postgres retrieval | `.planning/runbooks/row-01-production-postgres-retrieval.md` | `retrieval-ops-bundle.json`, `provider-manifest.production.json` |
+| B2 tenant isolation and auth | `.planning/runbooks/row-02-tenant-isolation-and-auth.md` | `auth-ops-bundle.json`, `idp-authz-policy-simulation.json`, `idp-authz-policy.candidate.json`, `idp-authz-policy.current.json`, `policy-ops-bundle.json`, `tls-candidate.pem`, `tls-current.pem`, `tls-lifecycle-bundle.json` |
+| B3 CLI/MCP runtime coverage | `.planning/runbooks/row-03-cli-mcp-runtime-coverage.md` | `mcp-ops-bundle.json` |
+| B4 consolidation role pipeline | `.planning/runbooks/row-04-consolidation-role-pipeline.md` | `calibration-dataset.json`, `consolidation-ops-bundle.json`, `hosted-llm-manifest.json`, `provider-manifest.production.json`, `worker-ops-bundle.json` |
+| B5 signed provenance | `.planning/runbooks/row-05-signed-provenance.md` | `provenance-ops-bundle.json`, `provenance-trust-suite.json`, plus nested suite assets |
+| B6 multimodal retrieval | `.planning/runbooks/row-06-multimodal-retrieval.md` | `multimodal-ops-bundle.json`, `provider-manifest.production.json` |
+| B7 privacy and erasure | `.planning/runbooks/row-07-privacy-and-erasure.md` | `forgetting-policy-cases.json`, `privacy-ops-bundle.json` |
+| B8 observability dashboards | `.planning/runbooks/row-08-observability-dashboards.md` | `ops-dashboard-bundle.json` |
+| B9 parametric tier | `.planning/runbooks/row-09-parametric-tier.md` | `parametric-trainer-bundle.json`, `provider-manifest.production.json` |
+| B10 live parity suite | `.planning/runbooks/row-10-live-parity-suite.md` | `belief-revision-cases.json`, `provider-manifest.production.json`, `row-10-full-suite-evidence.json` |
+
+`provider-manifest.production.json` is intentionally shared by B1, B4, B6, B9,
+and B10. It must describe the real production provider categories used by those
+rows: embedding, reranker, retrieval backends, extractor, summarizer, entity
+resolver, media extractor, media embedding, trainer, and final parity adapters.
+Do not split those into row-local copies; one retained provider manifest keeps
+the shared infrastructure evidence consistent across the parity rows.
+
 Rules:
 
 - Keep this directory outside the repo. The renderer and capture wrapper reject
