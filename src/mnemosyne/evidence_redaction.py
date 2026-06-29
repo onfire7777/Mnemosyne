@@ -428,10 +428,28 @@ def scan_evidence_tree(
     scope: str = "capture",
     max_scan_bytes: int = MAX_SCAN_BYTES,
     reject_symlinks: bool = True,
+    binary_custody_roots: list[Path] | None = None,
 ) -> dict[str, object]:
     findings: list[dict[str, object]] = []
     scanned_files: list[str] = []
     skipped_files: list[dict[str, str]] = []
+    binary_custody_files: list[str] = []
+    resolved_binary_custody_roots = [
+        root.resolve(strict=False) for root in (binary_custody_roots or [])
+    ]
+
+    def _is_binary_custody_path(path: Path) -> bool:
+        if not resolved_binary_custody_roots:
+            return False
+        try:
+            resolved = path.resolve(strict=True)
+        except OSError:
+            return False
+        return any(
+            _path_is_relative_to(resolved, custody_root)
+            for custody_root in resolved_binary_custody_roots
+        )
+
     if reject_symlinks and out_root.is_symlink():
         skipped_files.append({"path": str(out_root), "reason": "symlink not allowed"})
         return redaction_scan(
@@ -447,6 +465,9 @@ def scan_evidence_tree(
             continue
         if not path.is_file() or path == root_scan_report:
             continue
+        if _is_binary_custody_path(path):
+            binary_custody_files.append(str(path))
+            continue
         _scan_file(
             path,
             findings=findings,
@@ -454,9 +475,20 @@ def scan_evidence_tree(
             skipped_files=skipped_files,
             max_scan_bytes=max_scan_bytes,
         )
-    return redaction_scan(
+    scan = redaction_scan(
         scope=scope,
         scanned_files=scanned_files,
         skipped_files=skipped_files,
         findings=findings,
     )
+    if binary_custody_files:
+        scan["binary_custody_files"] = sorted(binary_custody_files)
+    return scan
+
+
+def _path_is_relative_to(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+    return True

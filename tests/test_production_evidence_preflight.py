@@ -980,7 +980,7 @@ def test_capture_production_evidence_preflight_records_equals_form_input_artifac
     ]
 
 
-def test_capture_production_evidence_preflight_does_not_snapshot_tool_executable(
+def test_capture_production_evidence_preflight_snapshots_and_rewrites_tool_executable(
     tmp_path: Path,
 ) -> None:
     manifest = tmp_path / "production-soak.json"
@@ -1025,15 +1025,20 @@ def test_capture_production_evidence_preflight_does_not_snapshot_tool_executable
 
     assert stdout["required_input_artifacts"] == []
     assert stdout["parity_row_readiness"] == []
-    assert stdout["executable_tool_references"] == [
-        {
-            "option": "--c2pa-tool",
-            "path": str(tool),
-            "size_bytes": len(tool_payload),
-            "sha256": "sha256:" + sha256(tool_payload).hexdigest(),
-            "labels": ["checks[9].args"],
-        }
-    ]
+    assert len(stdout["executable_tool_references"]) == 1
+    reference = stdout["executable_tool_references"][0]
+    assert reference["option"] == "--c2pa-tool"
+    assert reference["path"] == str(tool)
+    assert reference["size_bytes"] == len(tool_payload)
+    assert reference["sha256"] == "sha256:" + sha256(tool_payload).hexdigest()
+    assert reference["labels"] == ["checks[9].args"]
+    retained_tool = Path(reference["snapshot_path"])
+    assert retained_tool.is_relative_to(out_root / "tool-artifacts")
+    assert retained_tool.read_bytes() == tool_payload
+    assert retained_tool.stat().st_mode & 0o777 == 0o500
+    assert reference["snapshot_relative_path"] == retained_tool.relative_to(out_root).as_posix()
+    assert reference["snapshot_size_bytes"] == len(tool_payload)
+    assert reference["snapshot_sha256"] == reference["sha256"]
     assert (
         str(out_root / "source-soak-manifest.json") in redaction_scan["scanned_files"]
     )
@@ -1046,8 +1051,9 @@ def test_capture_production_evidence_preflight_does_not_snapshot_tool_executable
         for item in copied_manifest["checks"]
         if item["command"] == "provenance-trust-check"
     )
-    assert provenance_check["args"] == ["--c2pa-tool", str(tool)]
+    assert provenance_check["args"] == ["--c2pa-tool", str(retained_tool)]
     assert str(tool) not in redaction_scan["scanned_files"]
+    assert str(retained_tool) not in redaction_scan["scanned_files"]
     assert redaction_scan["skipped_files"] == []
 
 
@@ -1102,18 +1108,92 @@ def test_capture_production_evidence_records_provider_command_executable_digest(
 
     stdout = json.loads(proc.stdout)
 
-    assert stdout["required_input_artifacts"][0]["path"] == str(provider_manifest)
-    assert stdout["executable_tool_references"] == [
-        {
-            "option": "provider-manifest.command",
-            "path": str(tool),
-            "size_bytes": len(tool_payload),
-            "sha256": "sha256:" + sha256(tool_payload).hexdigest(),
-            "labels": [
-                "provider-manifest.production.json.providers.session_secret.command"
-            ],
-        }
+    input_artifact = stdout["required_input_artifacts"][0]
+    assert input_artifact["path"] == str(provider_manifest)
+    assert len(stdout["executable_tool_references"]) == 1
+    reference = stdout["executable_tool_references"][0]
+    assert reference["option"] == "provider-manifest.command"
+    assert reference["path"] == str(tool)
+    assert reference["size_bytes"] == len(tool_payload)
+    assert reference["sha256"] == "sha256:" + sha256(tool_payload).hexdigest()
+    assert reference["labels"] == [
+        "provider-manifest.production.json.providers.session_secret.command"
     ]
+    retained_tool = Path(reference["snapshot_path"])
+    assert retained_tool.is_relative_to(out_root / "tool-artifacts")
+    assert retained_tool.read_bytes() == tool_payload
+    assert reference["snapshot_relative_path"] == retained_tool.relative_to(out_root).as_posix()
+    assert reference["snapshot_size_bytes"] == len(tool_payload)
+    assert reference["snapshot_sha256"] == reference["sha256"]
+    retained_provider_manifest = json.loads(
+        Path(str(input_artifact["snapshot_path"])).read_text(encoding="utf-8")
+    )
+    assert (
+        retained_provider_manifest["providers"]["session_secret"]["command"]
+        == f"{retained_tool} --json"
+    )
+
+
+def test_capture_production_evidence_rewrites_env_c2pa_tool_to_retained_snapshot(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "production-soak.json"
+    out_root = tmp_path / "capture"
+    tool = tmp_path / "bin" / "c2patool"
+    suite = tmp_path / "production-inputs" / "provenance-trust-suite.json"
+    tool.parent.mkdir()
+    suite.parent.mkdir()
+    tool_payload = b"#!/bin/sh\nexit 0\n"
+    tool.write_bytes(tool_payload)
+    tool.chmod(0o755)
+    suite.write_text(
+        json.dumps({"name": "production-c2pa", "cases": []}),
+        encoding="utf-8",
+    )
+
+    def add_suite_without_tool(payload: dict[str, Any]) -> None:
+        check = next(
+            item
+            for item in payload["checks"]
+            if item["command"] == "provenance-trust-check"
+        )
+        check["args"] = ["--suite", str(suite)]
+
+    _minimal_production_manifest(manifest, mutate=add_suite_without_tool)
+    env = os.environ.copy()
+    env["MNEMOSYNE_C2PA_TOOL"] = str(tool)
+
+    proc = subprocess.run(
+        [
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
+            "--preflight-only",
+            str(manifest),
+            str(out_root),
+        ],
+        cwd=REPO,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    stdout = json.loads(proc.stdout)
+    reference = stdout["executable_tool_references"][0]
+    retained_tool = Path(reference["snapshot_path"])
+    tool_env = out_root / "tool-env.sh"
+    redaction_scan = json.loads((out_root / "redaction-scan.json").read_text(encoding="utf-8"))
+
+    assert reference["option"] == "MNEMOSYNE_C2PA_TOOL"
+    assert reference["path"] == str(tool)
+    assert reference["sha256"] == "sha256:" + sha256(tool_payload).hexdigest()
+    assert retained_tool.is_relative_to(out_root / "tool-artifacts")
+    assert stdout["tool_env_overrides"] == ["MNEMOSYNE_C2PA_TOOL"]
+    assert tool_env.read_text(encoding="utf-8") == (
+        "# Generated by capture-production-evidence.sh; contains retained tool paths only.\n"
+        f"export MNEMOSYNE_C2PA_TOOL={retained_tool}\n"
+    )
+    assert str(tool_env) in redaction_scan["scanned_files"]
 
 
 def test_capture_production_evidence_rejects_relative_provider_command_executable(
@@ -1457,16 +1537,23 @@ def test_capture_production_evidence_preflight_snapshots_provenance_suite_assets
     asset_metadata = artifact_by_name["asset.json"]
     suite_metadata = artifact_by_name["provenance-trust-suite.json"]
 
-    assert stdout["executable_tool_references"] == [
-        {
-            "option": "suite.tool",
-            "path": str(tool),
-            "size_bytes": len(tool_payload.encode("utf-8")),
-            "sha256": "sha256:" + sha256(tool_payload.encode("utf-8")).hexdigest(),
-            "labels": ["checks[9].args tool"],
-        }
-    ]
+    assert len(stdout["executable_tool_references"]) == 1
+    reference = stdout["executable_tool_references"][0]
+    assert reference["option"] == "suite.tool"
+    assert reference["path"] == str(tool)
+    assert reference["size_bytes"] == len(tool_payload.encode("utf-8"))
+    assert (
+        reference["sha256"]
+        == "sha256:" + sha256(tool_payload.encode("utf-8")).hexdigest()
+    )
+    assert reference["labels"] == ["checks[9].args tool"]
+    retained_tool = Path(reference["snapshot_path"])
+    assert retained_tool.is_relative_to(out_root / "tool-artifacts")
+    assert reference["snapshot_relative_path"] == retained_tool.relative_to(out_root).as_posix()
+    assert reference["snapshot_size_bytes"] == len(tool_payload.encode("utf-8"))
+    assert reference["snapshot_sha256"] == reference["sha256"]
     assert suite_snapshot.is_relative_to(out_root / "input-artifacts")
+    assert rewritten_suite["tool"] == str(retained_tool)
     assert Path(rewritten_asset_path).is_relative_to(out_root / "input-artifacts")
     assert rewritten_asset_path != str(asset)
     assert asset_metadata["source_values"] == [str(asset)]
@@ -1676,6 +1763,8 @@ def test_capture_production_evidence_preflight_rewrites_equals_form_suite_path(
 
     assert rewritten_arg.startswith("--suite=")
     assert suite_snapshot.is_relative_to(out_root / "input-artifacts")
+    retained_tool = Path(stdout["executable_tool_references"][0]["snapshot_path"])
+    assert rewritten_suite["tool"] == str(retained_tool)
     assert Path(rewritten_suite["cases"][0]["asset_path"]).is_relative_to(
         out_root / "input-artifacts"
     )
