@@ -93,7 +93,7 @@ Verified prerequisite summaries present:
 | 5 | Signed provenance | Runbook exists; local C2PA validation proven. | Pending production verifier, issuer/root, rotation, and quarantine evidence. |
 | 6 | Multimodal retrieval | Runbook exists; FR-20 local/live breadth proven. | Pending production extractor, media-embedding, object-store, retrieval, and job evidence. |
 | 7 | Privacy and erasure | Runbook exists; env/secrets catalog exists; local-staging dry run proven. | Pending production KMS, residency, tombstone, legal delete, and corroboration evidence. |
-| 8 | Observability dashboards | Runbook exists; local-staging dry run proven. | Pending hosted dashboard URL evidence, or pre-existing external package input evidence only, plus access-control, freshness, and alert evidence. |
+| 8 | Observability dashboards | Runbook exists; local-staging dry run proven. | Pending hosted dashboard URL evidence with access-control, freshness, and alert evidence; package mode is local/preflight only and is rejected for production release evidence. |
 | 9 | Parametric tier | Runbook exists; FR-21 trainer/rollback local validation and rollback plan exist. | Pending deployed LoRA/test-time-training trainer, protected suite, and rollback drill evidence. |
 | 10 | Live parity suite | Runbook exists; 06-07 DSN suite green. | Pending production all-row release audit with `--require-production-validated`. |
 

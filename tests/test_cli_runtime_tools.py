@@ -5928,12 +5928,22 @@ def production_release_stdout(command: str, provider_stdout: dict) -> dict:
     if command == "ops-dashboard-check":
         return {
             "ok": True,
-            "mode": "hosted",
+            "mode": "hosted_url",
             "source": {
+                "mode": "hosted_url",
+                "dashboard_url": "https://ops.example.test/mnemosyne/dashboard",
                 "dashboard_url_hash": "sha256:" + "7" * 64,
                 "snapshot_fingerprint": "sha256:" + "8" * 64,
             },
             "checks": [
+                {
+                    "name": "hosted_dashboard",
+                    "ok": True,
+                    "url": "https://ops.example.test/mnemosyne/dashboard",
+                    "status": 200,
+                    "marker_present": True,
+                    "doctype_present": True,
+                },
                 {
                     "name": "dashboard_operations_scope",
                     "ok": True,
@@ -6418,6 +6428,45 @@ def test_cli_release_audit_rejects_package_only_ops_dashboard_evidence(tmp_path:
     assert result.returncode == 1
     assert payload["ok"] is False
     assert "required_ops_dashboard_evidence_incomplete" in codes
+
+
+def test_cli_release_audit_rejects_package_mode_ops_dashboard_with_operations_proof(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    report_path, manifest_path = write_release_report(tmp_path)
+    stdout_json = production_release_stdout("ops-dashboard-check", production_provider_stdout())
+    stdout_json["mode"] = "package"
+    stdout_json["source"] = {
+        "mode": "package",
+        "package_fingerprint": "sha256:" + "7" * 64,
+        "snapshot_fingerprint": "sha256:" + "8" * 64,
+    }
+    stdout_json["checks"] = [
+        check for check in stdout_json["checks"] if check.get("name") != "hosted_dashboard"
+    ]
+    rewrite_release_check_stdout(
+        report_path,
+        manifest_path,
+        command="ops-dashboard-check",
+        stdout_json=stdout_json,
+    )
+
+    result = run_raw_cli(
+        store,
+        "release-audit",
+        "--evidence-manifest",
+        str(manifest_path),
+        "--require-production-validated",
+        "--require-provider-forbid-local",
+    )
+    payload = json.loads(result.stdout)
+    messages = [finding["message"] for finding in payload["findings"]]
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert "required_ops_dashboard_evidence_incomplete" in {
+        finding["code"] for finding in payload["findings"]
+    }
+    assert any("hosted_url mode" in message for message in messages)
 
 
 def test_cli_release_audit_requires_manifest_bound_production_evidence(tmp_path: Path) -> None:
