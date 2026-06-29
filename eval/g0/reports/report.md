@@ -1,6 +1,6 @@
 # Mnemosyne G0 Benchmark Report
 
-- Generated: `2026-06-29T02:07:37.146791+00:00`
+- Generated: `2026-06-29T03:28:37.526608+00:00`
 - Baseline: `baseline-0` at `67c229ace12313a8b8a6c6ede99d0a2096bae178`
 - Gate ready: **True** (72/72 metrics measured)
 
@@ -26,7 +26,7 @@
 | standing_evidence_dominance_gap | guardrail | measured | 0.95 | >= 0.02 | standing_calibration_eval |
 | poison_block_rate | guardrail | measured | 1.0 | >= 0.95 | slo_v2_definitive |
 | fast_path_p95_ms | guardrail | measured | 92.1 | <= 400.0 | latency_bench |
-| deep_path_p95_ms | reported | measured | 2.388125 | reported | deep_latency_eval |
+| deep_path_p95_ms | reported | measured | 2.474291 | reported | deep_latency_eval |
 | cost_usd_per_1k_queries | reported | measured | 0.0 | reported | resource_usage_eval |
 | controller_watts_per_dollar | reported | measured | 50.0 | reported | resource_usage_eval |
 | dreamer_shadow_corroborated_candidate_yield | target | measured | 1.0 | reported | dreamer_eval |
@@ -124,5 +124,5 @@
 
 ## Artifact Custody
 
-- Source commit at generation: `8b03d27b4b872e88ba842b6b78bfd3893530316a`
+- Source commit at generation: `998ac09cdd43e467d2a451509e011bbcc28c0bd9`
 - Note: Committed G0 reports are source-tree custody snapshots. The commit that contains a report cannot be embedded in that report before the commit exists; use git log to identify the containing artifact commit.

@@ -34,6 +34,7 @@ from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.learning import LearningSystem, Lesson, Procedure
 from mnemosyne.mcp_server import MnemosyneMcpServer, build_http_server, build_sdk_streamable_http_app
 from mnemosyne.models import Evidence, Relation
+from mnemosyne.oidc_jwks import load_oidc_jwks
 from mnemosyne.postgres_engine import PostgresEngine
 from mnemosyne.retrieval import (
     CommandGraphRetriever,
@@ -43,7 +44,7 @@ from mnemosyne.retrieval import (
     RetrievalAdapters,
 )
 from mnemosyne.runtime_state import RuntimeState
-from mnemosyne.security import SessionIdentity, SessionTokenVerifier
+from mnemosyne.security import SessionAuthError, SessionIdentity, SessionTokenVerifier
 
 
 TENANT = "tenant-cli"
@@ -3050,6 +3051,57 @@ def test_cli_hosted_llm_check_rejects_inline_api_key(tmp_path: Path) -> None:
     assert "short-prod-token" not in result.stdout
 
 
+def test_cli_hosted_llm_check_rejects_redirects(tmp_path: Path) -> None:
+    class RedirectHandler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:  # noqa: N802 - stdlib callback name.
+            self.send_response(302)
+            self.send_header("Location", "http://127.0.0.1:9/private-metadata")
+            self.end_headers()
+
+        def log_message(self, format: str, *args: object) -> None:  # noqa: A002 - stdlib signature.
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), RedirectHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    manifest = tmp_path / "hosted-llm-redirect.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "name": "redirecting-hosted-provider",
+                "required_roles": ["summarizer"],
+                "providers": [
+                    {
+                        "name": "redirecting-summarizer",
+                        "role": "summarizer",
+                        "url": f"http://127.0.0.1:{server.server_port}/summarize",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    try:
+        result = run_raw_cli(
+            tmp_path / "mnemosyne.json",
+            "hosted-llm-check",
+            "--hosted-llm-manifest",
+            str(manifest),
+            "--allow-insecure-localhost",
+        )
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        server.server_close()
+    payload = json.loads(result.stdout)
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert payload["checks"][0]["ok"] is False
+    assert "HTTP Error 302" in payload["checks"][0]["error"]
+
+
 def test_hosted_url_validation_rejects_dns_names_resolving_private(monkeypatch) -> None:
     def fake_getaddrinfo(*_args: object, **_kwargs: object) -> list[tuple[object, ...]]:
         return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("10.0.0.5", 443))]
@@ -3407,6 +3459,85 @@ def test_cli_provider_check_validates_oidc_manifest_without_sensitive_values(tmp
     assert "prod-client-secret" not in encoded
     assert "tenant-secret" not in encoded
     assert "mnemosyne-operators" not in encoded
+
+
+def test_load_oidc_jwks_rejects_private_and_userinfo_urls() -> None:
+    with pytest.raises(SessionAuthError, match="must not resolve"):
+        load_oidc_jwks(
+            jwks=None,
+            jwks_file=None,
+            jwks_url="https://127.0.0.1/jwks.json",
+            allow_insecure_url=False,
+            timeout=0.1,
+            max_bytes=1024,
+        )
+
+    with pytest.raises(SessionAuthError, match="must not contain userinfo"):
+        load_oidc_jwks(
+            jwks=None,
+            jwks_file=None,
+            jwks_url="https://token@example.test/jwks.json",
+            allow_insecure_url=False,
+            timeout=0.1,
+            max_bytes=1024,
+        )
+
+
+def test_load_oidc_jwks_rejects_redirects_to_private_targets(tmp_path: Path) -> None:
+    class RedirectHandler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802 - stdlib callback name.
+            self.send_response(302)
+            self.send_header("Location", "http://127.0.0.1:9/jwks.json")
+            self.end_headers()
+
+        def log_message(self, format: str, *args: object) -> None:  # noqa: A002 - stdlib signature.
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), RedirectHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        with pytest.raises(SessionAuthError, match="could not be loaded"):
+            load_oidc_jwks(
+                jwks=None,
+                jwks_file=None,
+                jwks_url=f"http://127.0.0.1:{server.server_port}/jwks.json",
+                allow_insecure_url=True,
+                timeout=1.0,
+                max_bytes=1024,
+            )
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        server.server_close()
+
+
+def test_cli_provider_check_rejects_unsafe_oidc_jwks_url(tmp_path: Path) -> None:
+    manifest = tmp_path / "providers.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "name": "bad-oidc-provider-check",
+                "required_checks": ["oidc"],
+                "providers": {
+                    "oidc": {
+                        "jwks_url": "https://token@example.test/jwks.json",
+                        "issuer": IDP_ISSUER,
+                        "audience": IDP_AUDIENCE,
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = run_raw_cli(tmp_path / "mnemosyne.json", "provider-check", "--provider-manifest", str(manifest))
+    payload = json.loads(result.stdout)
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert payload["checks"]["oidc"]["ok"] is False
+    assert "must not contain userinfo" in payload["checks"]["oidc"]["error"]
 
 
 def test_cli_provider_check_validates_session_secret_command_without_sensitive_values(tmp_path: Path) -> None:

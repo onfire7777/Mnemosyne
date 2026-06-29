@@ -101,6 +101,25 @@ def test_production_evidence_docs_require_manifest_bound_release_audit() -> None
     assert "release-audit --evidence-manifest" in ops_handoff
 
 
+def test_production_evidence_docs_require_independent_bundle_fingerprint() -> None:
+    docs = [
+        REPO / "infra" / "PRODUCTION-EVIDENCE.md",
+        REPO / "infra" / "README.md",
+        RUNBOOK_DIR / "README.md",
+    ]
+    self_referential_snippet = (
+        'json.loads((pathlib.Path(sys.argv[1]) / "summary.json").read_text())'
+        '["bundle_fingerprint"]'
+    )
+
+    for path in docs:
+        text = path.read_text(encoding="utf-8")
+        assert "EXPECTED_BUNDLE_FINGERPRINT=sha256:..." in text, path
+        assert "out-of-band" in text, path
+        assert "bundle under review" in text, path
+        assert self_referential_snippet not in text, path
+
+
 def test_operator_docs_do_not_use_unbound_production_release_audit() -> None:
     phase_dir = REPO / ".planning" / "phases" / "06-exact-blueprint-runtime-parity"
     docs = [
