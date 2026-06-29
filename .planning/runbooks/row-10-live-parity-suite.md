@@ -7,8 +7,8 @@ available.
 
 ## Real-Infra Dependency
 
-Optional production adapters enabled for the full compose-Postgres suite and
-belief revision check.
+Required production adapters enabled for every configured production path in the
+full compose-Postgres suite and belief revision check.
 
 ## Gate Commands
 

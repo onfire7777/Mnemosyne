@@ -563,47 +563,13 @@ def _validate_executable_tool_path(
     reference["labels"].append(label)
 
 
-def _provider_command_arg_looks_path(value: str) -> bool:
-    candidate = value
-    if value.startswith("-") and "=" in value:
-        candidate = value.split("=", 1)[1]
-    if not candidate or candidate.startswith("-"):
-        return False
-    if _is_url(candidate):
-        return True
-    if candidate.startswith(("/", "./", "../", "~")):
-        return True
-    if "/" in candidate or "\\" in candidate:
-        return True
-    return candidate.lower().endswith(
-        (
-            ".py",
-            ".sh",
-            ".bash",
-            ".zsh",
-            ".json",
-            ".jsonl",
-            ".yaml",
-            ".yml",
-            ".toml",
-            ".ini",
-            ".cfg",
-            ".conf",
-            ".pem",
-            ".crt",
-            ".key",
-        )
-    )
-
-
 def _validate_provider_command_arguments(command_parts: list[str], *, label: str) -> None:
-    for arg_index, part in enumerate(command_parts[1:], start=2):
-        if _provider_command_arg_looks_path(part):
-            errors.append(
-                f"{label} provider-manifest.command argument {arg_index} is path-like "
-                "and would not be retained in tool-artifacts; use a single external "
-                "executable or an explicit production input artifact"
-            )
+    if len(command_parts) > 1:
+        errors.append(
+            f"{label} provider-manifest.command must be a single external executable "
+            "with no arguments after argv[0]; put provider implementation/config in "
+            "the deployed wrapper or an explicit production input artifact"
+        )
 
 
 def _manifest_ref_value(value: object, *, label: str) -> str | None:
@@ -1274,14 +1240,13 @@ def _rewrite_command_to_retained_tool(raw_command: object, *, label: str) -> str
     if not command_parts:
         print(f"ERROR: {label} command is empty during custody rewrite", file=sys.stderr)
         sys.exit(65)
-    for arg_index, part in enumerate(command_parts[1:], start=2):
-        if _provider_command_arg_looks_path(part):
-            print(
-                f"ERROR: {label} provider-manifest.command argument {arg_index} "
-                "is path-like and was not retained in tool-artifacts",
-                file=sys.stderr,
-            )
-            sys.exit(65)
+    if len(command_parts) > 1:
+        print(
+            f"ERROR: {label} provider-manifest.command must be a single retained "
+            "executable with no arguments after argv[0]",
+            file=sys.stderr,
+        )
+        sys.exit(65)
     retained = _retained_tool_path(command_parts[0])
     if retained is None:
         print(

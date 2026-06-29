@@ -1831,9 +1831,11 @@ def _post_json(url: str, payload: dict[str, object], api_key: str | None, timeou
         with safe_urlopen(request, validated=validated_url, timeout=timeout) as response:
             decoded = response.read().decode("utf-8")
     except urllib.error.HTTPError as exc:
-        detail = exc.read(512).decode("utf-8", errors="replace").strip()
-        suffix = f": {detail}" if detail else ""
-        raise ValueError(f"provider returned HTTP {exc.code}{suffix}") from exc
+        reason = str(getattr(exc, "reason", "") or "").strip()
+        suffix = f" {reason}" if reason else ""
+        raise ValueError(
+            f"provider returned HTTP {exc.code}{suffix}; response body omitted"
+        ) from exc
     except urllib.error.URLError as exc:
         raise ValueError(f"provider request failed: {exc.reason}") from exc
     try:

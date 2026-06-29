@@ -9,7 +9,7 @@ This runbook is the operator handoff for flipping the remaining Tier B parity ro
 - Populate `MNEMOSYNE_PROD_EVIDENCE_DIR` with the manifest-referenced production input artifacts before running `--check-environment`. The check is no-write and reports the static template-derived artifact inventory plus `parity_row_readiness` grouping even before environment values are sourced; after all required `MNEMOSYNE_PROD_*` values are set, including `MNEMOSYNE_PROD_EVIDENCE_DIR`, it fails if required relative artifact names are missing from that external directory and shows which strict-audit row is blocked. Use `infra/templates/production-input-artifacts.checklist.md` as the non-secret operator checklist for the required artifact names.
 - Copy `infra/templates/provider-manifest.production.template.json` to `$MNEMOSYNE_PROD_EVIDENCE_DIR/provider-manifest.production.json` and fill the external copy with production provider values or environment-variable references. This file is shared evidence for retrieval, auth/session provider custody, consolidation roles, multimodal/object-key providers, privacy/residency policy, parametric adapters, and the final parity row. It must keep `forbid_local: true` and include every required provider-check subcheck listed in the template. `--check-environment` parses this external manifest when present, reports referenced provider env-var names, and fails before capture if any referenced provider env var is unset.
 - Provider manifest `command` values must resolve to absolute, non-symlinked, external executable paths. During capture, those command executables are copied into `OUT_ROOT/tool-artifacts/`, retained as mode `0500` custody artifacts, rewritten into the retained provider manifest snapshot, and recorded in `preflight.json.executable_tool_references` with original path, retained snapshot path, size, SHA-256 digest, and provider-manifest field label.
-- Provider manifest `command` values must not include path-like arguments after the executable. Commands such as `/external/python /external/provider.py` or `/external/provider --config=/external/config.json` are rejected because only `argv[0]` is retained under `tool-artifacts/`; put provider implementation/config into the deployed executable or an explicit production input artifact covered by a row runbook.
+- Provider manifest `command` values must be a single external executable with no arguments after `argv[0]`. Commands such as `/external/python -m provider`, `/bin/sh -c provider`, or `/external/provider --config=/external/config.json` are rejected because only `argv[0]` is retained under `tool-artifacts/`; put provider implementation/config into the deployed executable wrapper or an explicit production input artifact covered by a row runbook.
 - `render-production-soak-manifest.sh --check-environment` now validates those provider-manifest command executable paths before capture, including relative-path, symlink, repo-local, missing-file, and non-executable failures, so renderer readiness cannot pass values the capture wrapper will later reject.
 - Render `infra/templates/production-soak-manifest.template.json` outside the repo with `infra/scripts/render-production-soak-manifest.sh --output /secure/path/to/production-soak-manifest.json`. Manual edits are only a fallback and must still leave no unresolved `MNEMOSYNE_PROD_*` placeholders; the capture wrapper rejects unresolved placeholders before running production checks.
 - `MNEMOSYNE_PROD_EVIDENCE_DIR` and the second positional output-root argument passed to `capture-production-evidence.sh` must be absolute external custody paths outside the repository; output roots must be new and must not already exist. The wrapper does not consume a separate `PREFLIGHT_OUT_ROOT` environment variable.
@@ -69,6 +69,11 @@ placeholder names, the static template-derived input artifact inventory, and
 the operator readiness files needed to prepare the external capture directory,
 including `production-operator-env.inventory.md` as the names-only inventory for
 render, provider, runtime, and secret-custody env preparation.
+For automation, it keeps the legacy `present`/`missing` placeholder fields and
+also emits explicit `present_environment`, `present_environment_count`,
+`missing_environment`, and `missing_environment_count` aliases. Row readiness
+entries carry both `row` and `strict_audit_row` so downstream handoff scripts do
+not have to infer strict-audit row numbers from lane names.
 When all required `MNEMOSYNE_PROD_*` keys are present, it also confirms
 `MNEMOSYNE_PROD_EVIDENCE_DIR` is an existing external directory and
 `MNEMOSYNE_PROD_C2PA_TOOL` is an existing external executable. It renders the
@@ -139,9 +144,10 @@ fields and C2PA verifier paths must also have matching retained
 executable snapshot metadata in
 `preflight.json.executable_tool_references`; offline verification checks the
 retained `tool-artifacts/` bytes rather than trusting mutable external paths.
-It also rejects retained provider-manifest commands that contain path-like
-arguments after `argv[0]`, because those argument targets are not retained
-under `tool-artifacts/` and cannot be trusted during offline review.
+It also rejects retained provider-manifest commands that contain any arguments
+after `argv[0]`, because only the executable is retained under
+`tool-artifacts/` and extra arguments can dispatch unretained scripts, modules,
+shell commands, or config files during offline review.
 It also validates `summary.json.offline_verify.argv` as a
 template that requires the reviewer-supplied out-of-band fingerprint, so a
 handoff cannot silently point reviewers at a stale bundle path,

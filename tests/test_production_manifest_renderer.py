@@ -135,6 +135,7 @@ def _assert_row_readiness_shape(item: dict[str, object], *, has_exists: bool) ->
     expected_keys = {
         "lane",
         "row",
+        "strict_audit_row",
         "title",
         "runbook",
         "required_input_artifacts",
@@ -152,6 +153,7 @@ def _assert_row_readiness_shape(item: dict[str, object], *, has_exists: bool) ->
     assert item["lane"].startswith("B")
     assert isinstance(item["row"], int)
     assert 1 <= item["row"] <= 10
+    assert item["strict_audit_row"] == item["row"]
     assert isinstance(item["title"], str)
     assert item["title"]
     assert isinstance(item["runbook"], str)
@@ -543,7 +545,11 @@ def test_renderer_check_environment_reports_missing_without_output() -> None:
     )
     assert any("production-evidence-verify" in step for step in payload["next_steps"])
     assert "MNEMOSYNE_PROD_EVIDENCE_DIR" in payload["missing"]
+    assert payload["missing_environment"] == payload["missing"]
+    assert payload["missing_environment_count"] == len(payload["missing"])
     assert payload["present"] == []
+    assert payload["present_environment"] == []
+    assert payload["present_environment_count"] == 0
     assert payload["operator_readiness_files"] == {
         "env_template": "infra/templates/production-render.env.example",
         "input_artifacts_checklist": "infra/templates/production-input-artifacts.checklist.md",
@@ -602,6 +608,10 @@ def test_renderer_check_environment_passes_without_writing_manifest(
     assert payload["evidence_dir_external"] is True
     assert payload["c2pa_tool_external"] is True
     assert payload["missing"] == []
+    assert payload["missing_environment"] == []
+    assert payload["missing_environment_count"] == 0
+    assert sorted(payload["present_environment"]) == _placeholders()
+    assert payload["present_environment_count"] == len(_placeholders())
     assert payload["input_artifacts_complete"] is True
     assert "operator_capture_and_offline_verify" in payload["validation_categories"]
     assert any(
@@ -761,16 +771,13 @@ def test_renderer_check_environment_rejects_symlinked_provider_command(
     assert proc.stderr == ""
 
 
-def test_renderer_check_environment_rejects_provider_command_path_argument(
+def test_renderer_check_environment_rejects_provider_command_argument(
     tmp_path: Path,
 ) -> None:
     env = _filled_render_env(tmp_path)
     _populate_required_input_artifacts(env)
     real_tool = Path(env["MNEMOSYNE_CANDIDATE_EXTRACTOR_COMMAND"])
-    config_path = tmp_path / "external-provider-config.json"
-    env["MNEMOSYNE_CANDIDATE_EXTRACTOR_COMMAND"] = (
-        f"{real_tool} --config={config_path}"
-    )
+    env["MNEMOSYNE_CANDIDATE_EXTRACTOR_COMMAND"] = f"{real_tool} -m unretained_provider"
 
     proc = subprocess.run(
         [*RENDERER_CMD, "--check-environment"],
@@ -784,9 +791,9 @@ def test_renderer_check_environment_rejects_provider_command_path_argument(
     payload = json.loads(proc.stdout)
     expected_error = (
         "provider-manifest.production.json.providers.candidate_extractor.command "
-        "provider-manifest.command argument 2 is path-like and would not be "
-        "retained in tool-artifacts; use a single external executable or an "
-        "explicit production input artifact"
+        "provider-manifest.command must be a single external executable with no "
+        "arguments after argv[0]; put provider implementation/config in the "
+        "deployed wrapper or an explicit production input artifact"
     )
 
     assert proc.returncode == 78
@@ -794,7 +801,7 @@ def test_renderer_check_environment_rejects_provider_command_path_argument(
     assert payload["blocked_reason"] == "missing_or_invalid_input_artifacts"
     assert payload["missing_input_artifacts"] == []
     assert payload["input_artifact_errors"] == [expected_error]
-    assert str(config_path) not in proc.stdout
+    assert "unretained_provider" not in proc.stdout
     assert proc.stderr == ""
 
 

@@ -254,6 +254,10 @@ if check_environment:
         "placeholder_count": len(required),
         "present": present,
         "missing": missing,
+        "present_environment": present,
+        "present_environment_count": len(present),
+        "missing_environment": missing,
+        "missing_environment_count": len(missing),
         "values_redacted": True,
         "validation_categories": validation_categories,
         "operator_readiness_files": operator_readiness_files,
@@ -664,47 +668,13 @@ def provider_command_value(value: object, *, label: str) -> str | None:
     return None
 
 
-def provider_command_arg_looks_path(value: str) -> bool:
-    candidate = value
-    if value.startswith("-") and "=" in value:
-        candidate = value.split("=", 1)[1]
-    if not candidate or candidate.startswith("-"):
-        return False
-    if urlparse(candidate).scheme:
-        return True
-    if candidate.startswith(("/", "./", "../", "~")):
-        return True
-    if "/" in candidate or "\\" in candidate:
-        return True
-    return candidate.lower().endswith(
-        (
-            ".py",
-            ".sh",
-            ".bash",
-            ".zsh",
-            ".json",
-            ".jsonl",
-            ".yaml",
-            ".yml",
-            ".toml",
-            ".ini",
-            ".cfg",
-            ".conf",
-            ".pem",
-            ".crt",
-            ".key",
-        )
-    )
-
-
 def validate_provider_command_arguments(parts: list[str], *, label: str) -> None:
-    for arg_index, part in enumerate(parts[1:], start=2):
-        if provider_command_arg_looks_path(part):
-            provider_manifest_error(
-                f"{label} provider-manifest.command argument {arg_index} is path-like "
-                "and would not be retained in tool-artifacts; use a single external "
-                "executable or an explicit production input artifact"
-            )
+    if len(parts) > 1:
+        provider_manifest_error(
+            f"{label} provider-manifest.command must be a single external executable "
+            "with no arguments after argv[0]; put provider implementation/config in "
+            "the deployed wrapper or an explicit production input artifact"
+        )
 
 
 def validate_provider_command(value: str, *, label: str) -> None:
@@ -973,6 +943,10 @@ if check_environment:
         "placeholder_count": len(required),
         "present": present,
         "missing": [],
+        "present_environment": present,
+        "present_environment_count": len(present),
+        "missing_environment": [],
+        "missing_environment_count": 0,
         "values_redacted": True,
         "evidence_dir_external": True,
         "c2pa_tool_external": True,
