@@ -328,6 +328,8 @@ Latest checkpoint (2026-06-24): FR-20 local multimodal breadth is validated for 
 
 Latest checkpoint (2026-06-24): FR-21 local parametric trainer/rollback validation is complete. The learning/attack suite now exercises a shell-free command-backed LoRA/test-time-training trainer that produces a persisted local artifact, verifies protected-suite and margin-over-noise rejection, proves invariant rails fail closed for reward/trust/sink/eval-overlap/mutation violations, and verifies `MemoryTools.parametric_rollback()` returns rollback-drill evidence with authorization, protected-suite metrics, no rollback branch promotion, and a deterministic rollback fingerprint. Focused trainer/protected and rollback filters plus the full `tests/test_learning_and_attack_suite.py` file pass. Concrete deployed GPU trainer and production rollback evidence remains operator-run under row 9.
 
+Latest checkpoint (2026-06-28): T-SEC protected registry breadth is reconciled with the authoritative security playbook. `src/mnemosyne/attack_suite.py` now returns all 22 canonical curated/active/protected `T-SEC` cases (`T-SEC-001` through `T-SEC-021` plus `T-SEC-016b`) instead of the original two seed cases, and stale tests/planning notes were updated so future parity checks assert the full registry including audit-completeness and benign-utility negative controls. Verification passes for the affected 46-test learning/security slice. This is local/source registry parity only; Tier-B production security evidence remains operator-run.
+
 ### Blockers/Concerns
 
 - Exact 1:1 blueprint parity is not yet achieved; `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md` is the controlling status artifact.

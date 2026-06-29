@@ -113,7 +113,7 @@ Plans:
 - [x] 04-02: Implement trajectory store and failure-attribution checklist.
 - [x] 04-03: Implement lesson and procedure induction.
 - [x] 04-04: Implement counterfactual replay harness.
-- [x] 04-05: Add MINJA and AgentPoison protected test tier.
+- [x] 04-05: Add full protected T-SEC security playbook tier.
 
 ### Phase 5: Profile-Guided Self-Optimization
 **Goal**: Learn safe policy variants for routing, activation, thresholds, cadence, and fidelity demotion in shadow mode, promote only through gates, and maintain a self-model with diversity and proxy-divergence tripwires.

@@ -20,7 +20,7 @@ Phase 4 captures trajectories, attributes failures, induces lessons and procedur
 
 ### Safety
 - **D-04-04:** Promotion uses the existing branch-based `PromotionGate`.
-- **D-04-05:** MINJA and AgentPoison cases are permanent protected cases.
+- **D-04-05:** The canonical T-SEC security playbook cases are permanent protected cases.
 
 </decisions>
 
@@ -32,4 +32,3 @@ Phase 4 captures trajectories, attributes failures, induces lessons and procedur
 - `docs/blueprint/Mnemosyne-v2-Build-Blueprint.md` §34 Phase 4.
 
 </canonical_refs>
-
