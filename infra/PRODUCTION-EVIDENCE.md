@@ -7,7 +7,7 @@ This runbook is the operator handoff for flipping the remaining Tier B parity ro
 - Copy `infra/templates/production-render.env.example` outside the repo, fill the blank non-secret `MNEMOSYNE_PROD_*` values there, and source the external copy before rendering.
 - Populate `MNEMOSYNE_PROD_EVIDENCE_DIR` with the manifest-referenced production input artifacts before running `--check-environment`. The check is no-write and reports the static template-derived artifact inventory plus `parity_row_readiness` grouping even before environment values are sourced; after `MNEMOSYNE_PROD_EVIDENCE_DIR` is set, it fails if required relative artifact names are missing from that external directory and shows which strict-audit row is blocked. Use `infra/templates/production-input-artifacts.checklist.md` as the non-secret operator checklist for the required artifact names.
 - Copy `infra/templates/provider-manifest.production.template.json` to `$MNEMOSYNE_PROD_EVIDENCE_DIR/provider-manifest.production.json` and fill the external copy with production provider values or environment-variable references. This file is shared evidence for retrieval, auth/session provider custody, consolidation roles, multimodal/object-key providers, privacy/residency policy, parametric adapters, and the final parity row. It must keep `forbid_local: true` and include every required provider-check subcheck listed in the template. `--check-environment` parses this external manifest when present, reports referenced provider env-var names, and fails before capture if any referenced provider env var is unset.
-- Provider manifest `command` values must resolve to absolute, non-symlinked, external executable paths. During capture, those command executables are not copied into `input-artifacts/`; their path, size, SHA-256 digest, and provider-manifest field label are retained in `preflight.json.executable_tool_references`.
+- Provider manifest `command` values must resolve to absolute, non-symlinked, external executable paths. During capture, those command executables are copied into `OUT_ROOT/tool-artifacts/`, retained as mode `0500` custody artifacts, rewritten into the retained provider manifest snapshot, and recorded in `preflight.json.executable_tool_references` with original path, retained snapshot path, size, SHA-256 digest, and provider-manifest field label.
 - Render `infra/templates/production-soak-manifest.template.json` outside the repo with `infra/scripts/render-production-soak-manifest.sh --output /secure/path/to/production-soak-manifest.json`. Manual edits are only a fallback and must still leave no unresolved `MNEMOSYNE_PROD_*` placeholders; the capture wrapper rejects unresolved placeholders before running production checks.
 - `MNEMOSYNE_PROD_EVIDENCE_DIR` and the second positional output-root argument passed to `capture-production-evidence.sh` must be absolute external custody paths outside the repository; output roots must be new and must not already exist. The wrapper does not consume a separate `PREFLIGHT_OUT_ROOT` environment variable.
 - Keep raw secrets out of `args` and `global_args`. The production wrapper rejects secret-bearing options such as `--access-token`, `--api-token`, `--github-token`, `--session-secret`, and `--password`, and it fails closed on high-confidence secret material such as JWTs, private-key blocks, GitHub tokens, AWS access keys, and `sk-*` API keys.
@@ -19,7 +19,7 @@ This runbook is the operator handoff for flipping the remaining Tier B parity ro
 - The manifest must include the exact production release profile: every command in the current 28-command set from `src/mnemosyne/cli.py`, with no duplicate or unknown commands.
 - The output root must be new and outside this repository. The wrapper rejects repo-local or pre-existing output roots so stale artifacts cannot enter a production bundle and final-directory creation stays race-resistant.
 - Every manifest-referenced production input artifact must already exist at an absolute external path before preflight. The wrapper inventories those paths in `preflight.json`, recursively scans referenced directories, and fails closed on missing, symlinked, secret-shaped, non-UTF-8, or over-limit input artifacts. Accepted inputs are snapshotted under `OUT_ROOT/input-artifacts/` with per-file size and SHA-256 metadata, and the copied operator manifest is rewritten to use those immutable snapshots so later mutation of the external source paths cannot change the capture inputs. Provenance trust-suite metadata is hashed after nested asset-path rewrites, so `preflight.json` describes the retained staged suite exactly.
-- `MNEMOSYNE_PROD_C2PA_TOOL` is the absolute canonical path to the deployed c2patool-compatible executable. Preflight verifies it exists outside the repository, is not reached through a symlink or non-canonical path, and is executable. It records the canonical path, size, and SHA-256 digest under `executable_tool_references` and does not snapshot it as input evidence; keep the C2PA trust-suite JSON and trust-root evidence under `MNEMOSYNE_PROD_EVIDENCE_DIR` instead.
+- `MNEMOSYNE_PROD_C2PA_TOOL` is the absolute canonical path to the deployed c2patool-compatible executable. Preflight verifies it exists outside the repository, is not reached through a symlink or non-canonical path, and is executable. It records the canonical path, size, and SHA-256 digest under `executable_tool_references`, copies the executable into `OUT_ROOT/tool-artifacts/`, rewrites direct `--c2pa-tool` and retained suite `tool`/`c2pa_tool` references to that snapshot, emits `tool-env.sh` when the `MNEMOSYNE_C2PA_TOOL` fallback must be pointed at the retained snapshot for the soak, and marks the retained binary under `redaction-scan.json.binary_custody_files`.
 - For `provenance-trust-check --suite`, nested suite `asset_path` and `c2pa_asset_path` values are also treated as production input artifacts. Preflight snapshots those assets and rewrites the staged suite JSON to point at the immutable snapshots. Inline `--suite-json` is rejected for production capture because nested paths cannot be custody-rewritten safely.
 
 ## Capture
@@ -109,7 +109,8 @@ EXPECTED_BUNDLE_FINGERPRINT=sha256:...
 This command verifies `summary.json`, `redaction-scan.json`,
 `bundle-manifest.json`, every manifest-listed artifact hash/size, the captured
 `release-audit.json`, the retained `source-soak-manifest.json`, the retained
-`input-artifacts/` inventory, and a fresh offline replay of `release-audit`
+`input-artifacts/` inventory, retained `tool-artifacts/` executable snapshots,
+and a fresh offline replay of `release-audit`
 against `evidence/manifest.json`. It rejects symlinked or unrecorded retained
 input artifacts, fails if preflight paths do not resolve to the retained bundle
 files, checks that the retained source and operator soak manifests have matching
@@ -118,8 +119,10 @@ nested suite JSON still reference the staged artifacts recorded in
 `preflight.json`. A completed bundle must have a non-empty
 `preflight.json.required_input_artifacts` list, retained `input-artifacts/`
 directory, and `preflight.json.parity_row_readiness` value matching those
-retained snapshots. Provider manifest command fields must also have matching
-executable digest metadata in `preflight.json.executable_tool_references`.
+retained snapshots. Provider manifest command fields and C2PA verifier paths
+must also have matching retained executable snapshot metadata in
+`preflight.json.executable_tool_references`; offline verification checks the
+retained `tool-artifacts/` bytes rather than trusting mutable external paths.
 It also validates `summary.json.offline_verify.argv` as a
 template that requires the reviewer-supplied out-of-band fingerprint, so a
 handoff cannot silently point reviewers at a stale bundle path,

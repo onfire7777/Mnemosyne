@@ -6373,6 +6373,27 @@ def write_executable_fixture(path: Path, payload: str = "#!/bin/sh\nexit 0\n") -
     return path
 
 
+def retained_executable_snapshot(
+    bundle_dir: Path,
+    tool: Path,
+    *,
+    option: str,
+) -> dict[str, object]:
+    payload = tool.read_bytes()
+    digest = "sha256:" + sha256(payload).hexdigest()
+    tool_root = bundle_dir / "tool-artifacts"
+    tool_root.mkdir(parents=True, exist_ok=True)
+    snapshot = tool_root / f"0001-{option.strip('-').replace('.', '-')}-{tool.name}-{digest.split(':', 1)[1][:12]}"
+    shutil.copy2(tool, snapshot)
+    snapshot.chmod(0o500)
+    return {
+        "snapshot_path": str(snapshot),
+        "snapshot_relative_path": snapshot.relative_to(bundle_dir).as_posix(),
+        "snapshot_size_bytes": snapshot.stat().st_size,
+        "snapshot_sha256": "sha256:" + sha256(snapshot.read_bytes()).hexdigest(),
+    }
+
+
 def update_provider_manifest_snapshot(
     bundle_dir: Path,
     mutate: Callable[[dict[str, object]], None],
@@ -6537,6 +6558,11 @@ def write_production_evidence_bundle(tmp_path: Path) -> tuple[Path, str]:
                         "size_bytes": len(c2pa_tool_payload),
                         "sha256": "sha256:" + sha256(c2pa_tool_payload).hexdigest(),
                         "labels": ["checks[9].args"],
+                        **retained_executable_snapshot(
+                            bundle_dir,
+                            c2pa_tool,
+                            option="--c2pa-tool",
+                        ),
                     }
                 ],
             },
@@ -6567,27 +6593,7 @@ def write_production_evidence_bundle(tmp_path: Path) -> tuple[Path, str]:
         encoding="utf-8",
     )
     (bundle_dir / "store.json").write_text("{}", encoding="utf-8")
-    scanned_files = [
-        str(path)
-        for path in sorted(file_path for file_path in bundle_dir.rglob("*") if file_path.is_file())
-        if path.relative_to(bundle_dir).as_posix()
-        not in {"bundle-manifest.json", "summary.json", "redaction-scan.json"}
-    ]
-    (bundle_dir / "redaction-scan.json").write_text(
-        json.dumps(
-            {
-                "ok": True,
-                "scope": "generated-evidence",
-                "patterns": [],
-                "scanned_files": scanned_files,
-                "findings": [],
-                "skipped_files": [],
-            },
-            indent=2,
-            sort_keys=True,
-        ),
-        encoding="utf-8",
-    )
+    rewrite_production_redaction_scan(bundle_dir)
 
     files = []
     for file_path in sorted(path for path in bundle_dir.rglob("*") if path.is_file()):
@@ -6663,11 +6669,24 @@ def write_production_evidence_bundle(tmp_path: Path) -> tuple[Path, str]:
 
 
 def rewrite_production_redaction_scan(bundle_dir: Path) -> None:
+    preflight_path = bundle_dir / "preflight.json"
+    binary_custody_files: list[str] = []
+    if preflight_path.exists():
+        preflight = json.loads(preflight_path.read_text(encoding="utf-8"))
+        references = preflight.get("executable_tool_references", [])
+        if isinstance(references, list):
+            for reference in references:
+                if not isinstance(reference, dict):
+                    continue
+                snapshot_path = reference.get("snapshot_path")
+                if isinstance(snapshot_path, str) and snapshot_path:
+                    binary_custody_files.append(snapshot_path)
     scanned_files = [
         str(path)
         for path in sorted(file_path for file_path in bundle_dir.rglob("*") if file_path.is_file())
         if path.relative_to(bundle_dir).as_posix()
         not in {"bundle-manifest.json", "summary.json", "redaction-scan.json"}
+        and not path.relative_to(bundle_dir).as_posix().startswith("tool-artifacts/")
     ]
     (bundle_dir / "redaction-scan.json").write_text(
         json.dumps(
@@ -6676,6 +6695,7 @@ def rewrite_production_redaction_scan(bundle_dir: Path) -> None:
                 "scope": "generated-evidence",
                 "patterns": [],
                 "scanned_files": scanned_files,
+                "binary_custody_files": sorted(binary_custody_files),
                 "findings": [],
                 "skipped_files": [],
             },
@@ -7339,7 +7359,8 @@ def test_cli_production_evidence_verify_rejects_changed_executable_tool_bytes(
     bundle_dir, _bundle_fingerprint = write_production_evidence_bundle(tmp_path)
     preflight_path = bundle_dir / "preflight.json"
     preflight = json.loads(preflight_path.read_text(encoding="utf-8"))
-    tool_path = Path(preflight["executable_tool_references"][0]["path"])
+    tool_path = Path(preflight["executable_tool_references"][0]["snapshot_path"])
+    tool_path.chmod(0o700)
     tool_path.write_text("#!/bin/sh\necho changed\n", encoding="utf-8")
     preflight_path.write_text(json.dumps(preflight, indent=2, sort_keys=True), encoding="utf-8")
     rewrite_production_redaction_scan(bundle_dir)
@@ -7359,8 +7380,8 @@ def test_cli_production_evidence_verify_rejects_changed_executable_tool_bytes(
     assert payload["ok"] is False
     assert payload["checks"]["preflight"] is False
     assert {
-        "preflight_executable_tool_reference_size_mismatch",
-        "preflight_executable_tool_reference_sha256_mismatch",
+        "preflight_executable_tool_snapshot_size_mismatch",
+        "preflight_executable_tool_snapshot_sha256_mismatch",
     }.issubset(codes)
 
 
@@ -7383,6 +7404,11 @@ def test_cli_production_evidence_verify_accepts_provider_command_executable_refe
             "size_bytes": tool.stat().st_size,
             "sha256": "sha256:" + sha256(tool.read_bytes()).hexdigest(),
             "labels": [label],
+            **retained_executable_snapshot(
+                bundle_dir,
+                tool,
+                option="provider-manifest.command",
+            ),
         }
     )
     (bundle_dir / "preflight.json").write_text(
@@ -7442,7 +7468,7 @@ def test_cli_production_evidence_verify_rejects_missing_referenced_executable_to
     bundle_dir, _bundle_fingerprint = write_production_evidence_bundle(tmp_path)
     preflight_path = bundle_dir / "preflight.json"
     preflight = json.loads(preflight_path.read_text(encoding="utf-8"))
-    tool = Path(preflight["executable_tool_references"][0]["path"])
+    tool = Path(preflight["executable_tool_references"][0]["snapshot_path"])
     tool.unlink()
     preflight_path.write_text(json.dumps(preflight, indent=2, sort_keys=True), encoding="utf-8")
     rewrite_production_redaction_scan(bundle_dir)
@@ -7461,7 +7487,7 @@ def test_cli_production_evidence_verify_rejects_missing_referenced_executable_to
     assert result.returncode == 1
     assert payload["ok"] is False
     assert payload["checks"]["preflight"] is False
-    assert "preflight_executable_tool_reference_missing" in codes
+    assert "preflight_executable_tool_snapshot_missing" in codes
     assert "bundle_file_sha256_mismatch" not in codes
     assert "bundle_fingerprint_mismatch" not in codes
 

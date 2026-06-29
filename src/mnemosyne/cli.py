@@ -10725,6 +10725,15 @@ def _production_evidence_sha256_digest_ok(value: Any) -> bool:
     return isinstance(value, str) and re.fullmatch(r"sha256:[0-9a-f]{64}", value) is not None
 
 
+def _production_evidence_bundle_relative_path(value: Any) -> str | None:
+    if not isinstance(value, str) or not value:
+        return None
+    path = Path(value)
+    if path.is_absolute() or any(part == ".." for part in path.parts):
+        return None
+    return path.as_posix()
+
+
 def _provider_manifest_command_labels(value: Any, *, path: str) -> set[str]:
     labels: set[str] = set()
     if isinstance(value, Mapping):
@@ -10831,6 +10840,10 @@ def _verify_production_evidence_executable_tool_references(
         labels = reference.get("labels")
         size_bytes = reference.get("size_bytes")
         expected_sha256 = reference.get("sha256")
+        snapshot_path_value = reference.get("snapshot_path")
+        snapshot_relative_path = reference.get("snapshot_relative_path")
+        snapshot_size_bytes = reference.get("snapshot_size_bytes")
+        snapshot_sha256 = reference.get("snapshot_sha256")
         if (
             not isinstance(option, str)
             or not option
@@ -10842,6 +10855,12 @@ def _verify_production_evidence_executable_tool_references(
             or not isinstance(size_bytes, int)
             or size_bytes < 0
             or not _production_evidence_sha256_digest_ok(expected_sha256)
+            or not isinstance(snapshot_path_value, str)
+            or not snapshot_path_value
+            or _production_evidence_bundle_relative_path(snapshot_relative_path) is None
+            or not isinstance(snapshot_size_bytes, int)
+            or snapshot_size_bytes < 0
+            or not _production_evidence_sha256_digest_ok(snapshot_sha256)
         ):
             ok = False
             _production_evidence_finding(
@@ -10864,50 +10883,66 @@ def _verify_production_evidence_executable_tool_references(
             )
             continue
         try:
-            if not tool_path.exists():
+            if tool_path.resolve(strict=False).is_relative_to(bundle_dir.resolve(strict=False)):
                 ok = False
                 _production_evidence_finding(
                     findings,
-                    "preflight_executable_tool_reference_missing",
-                    f"preflight.json executable_tool_references[{index}].path is missing",
+                    "preflight_executable_tool_reference_path_not_external",
+                    f"preflight.json executable_tool_references[{index}].path must be the deployed external tool path",
+                )
+        except (OSError, RuntimeError, ValueError):
+            pass
+
+        snapshot_path = Path(snapshot_path_value).expanduser()
+        try:
+            resolved_snapshot = snapshot_path.resolve(strict=True)
+            resolved_snapshot.relative_to((bundle_dir / "tool-artifacts").resolve(strict=False))
+            if resolved_snapshot.is_symlink():
+                ok = False
+                _production_evidence_finding(
+                    findings,
+                    "preflight_executable_tool_snapshot_symlink",
+                    f"preflight.json executable_tool_references[{index}].snapshot_path must not be a symlink",
                 )
                 continue
-            if tool_path.is_symlink():
+            if not resolved_snapshot.is_file():
                 ok = False
                 _production_evidence_finding(
                     findings,
-                    "preflight_executable_tool_reference_symlink",
-                    f"preflight.json executable_tool_references[{index}].path must not be a symlink",
+                    "preflight_executable_tool_snapshot_not_file",
+                    f"preflight.json executable_tool_references[{index}].snapshot_path is not a file",
                 )
                 continue
-            if not tool_path.is_file():
+            resolved_relative_path = resolved_snapshot.relative_to(bundle_dir.resolve(strict=False)).as_posix()
+            if resolved_relative_path != snapshot_relative_path:
                 ok = False
                 _production_evidence_finding(
                     findings,
-                    "preflight_executable_tool_reference_not_file",
-                    f"preflight.json executable_tool_references[{index}].path is not a file",
+                    "preflight_executable_tool_snapshot_relative_mismatch",
+                    f"preflight.json executable_tool_references[{index}] snapshot relative path does not match retained file",
                 )
                 continue
-            if tool_path.stat().st_size != size_bytes:
+            if resolved_snapshot.stat().st_size != size_bytes or snapshot_size_bytes != size_bytes:
                 ok = False
                 _production_evidence_finding(
                     findings,
-                    "preflight_executable_tool_reference_size_mismatch",
-                    f"preflight.json executable_tool_references[{index}] size does not match the executable",
+                    "preflight_executable_tool_snapshot_size_mismatch",
+                    f"preflight.json executable_tool_references[{index}] size does not match retained executable snapshot",
                 )
-            if _file_sha256(tool_path) != expected_sha256:
+            retained_sha256 = _file_sha256(resolved_snapshot)
+            if retained_sha256 != expected_sha256 or snapshot_sha256 != expected_sha256:
                 ok = False
                 _production_evidence_finding(
                     findings,
-                    "preflight_executable_tool_reference_sha256_mismatch",
-                    f"preflight.json executable_tool_references[{index}] sha256 does not match the executable",
+                    "preflight_executable_tool_snapshot_sha256_mismatch",
+                    f"preflight.json executable_tool_references[{index}] sha256 does not match retained executable snapshot",
                 )
-        except OSError as exc:
+        except (OSError, ValueError) as exc:
             ok = False
             _production_evidence_finding(
                 findings,
-                "preflight_executable_tool_reference_denied",
-                f"preflight.json executable_tool_references[{index}] cannot be checked: {exc}",
+                "preflight_executable_tool_snapshot_missing",
+                f"preflight.json executable_tool_references[{index}].snapshot_path is missing or outside tool-artifacts: {exc}",
             )
     if not c2pa_reference_seen:
         ok = False
@@ -10926,6 +10961,33 @@ def _verify_production_evidence_executable_tool_references(
             + ", ".join(missing_provider_labels),
         )
     return ok
+
+
+def _production_evidence_binary_custody_paths(
+    preflight: Mapping[str, Any] | None,
+    *,
+    bundle_dir: Path,
+) -> set[str]:
+    if preflight is None:
+        return set()
+    references = preflight.get("executable_tool_references")
+    if not isinstance(references, list):
+        return set()
+    paths: set[str] = set()
+    tool_root = (bundle_dir / "tool-artifacts").resolve(strict=False)
+    for reference in references:
+        if not isinstance(reference, Mapping):
+            continue
+        snapshot_path_value = reference.get("snapshot_path")
+        if not isinstance(snapshot_path_value, str) or not snapshot_path_value:
+            continue
+        try:
+            snapshot_path = Path(snapshot_path_value).expanduser().resolve(strict=False)
+            snapshot_path.relative_to(tool_root)
+            paths.add(snapshot_path.relative_to(bundle_dir.resolve(strict=False)).as_posix())
+        except (OSError, ValueError):
+            continue
+    return paths
 
 
 def _verify_production_evidence_summary(
@@ -11453,6 +11515,7 @@ def _verify_production_evidence_redaction_scan(
     *,
     bundle_dir: Path,
     actual_files: list[dict[str, Any]],
+    preflight: Mapping[str, Any] | None,
     findings: list[dict[str, Any]],
 ) -> bool:
     if redaction_scan is None:
@@ -11482,9 +11545,15 @@ def _verify_production_evidence_redaction_scan(
     scan_paths: list[Path] = []
     expected_scanned: set[str] = set()
     expected_recomputed_scanned: set[str] = set()
+    expected_binary_custody = _production_evidence_binary_custody_paths(
+        preflight,
+        bundle_dir=bundle_dir,
+    )
     for item in actual_files:
         rel_path = item.get("path")
         if not isinstance(rel_path, str) or rel_path == "redaction-scan.json":
+            continue
+        if rel_path in expected_binary_custody:
             continue
         scan_paths.append(bundle_dir / rel_path)
         expected_scanned.add(rel_path)
@@ -11555,6 +11624,30 @@ def _verify_production_evidence_redaction_scan(
             findings,
             "redaction_scan_recompute_scanned_files_mismatch",
             "fresh redaction scan did not cover exactly the current bundle artifacts and metadata",
+        )
+    binary_custody_files = redaction_scan.get("binary_custody_files", [])
+    if not isinstance(binary_custody_files, list) or not all(isinstance(item, str) for item in binary_custody_files):
+        recorded_binary_custody = None
+    else:
+        recorded_binary_custody = set()
+        for item in binary_custody_files:
+            try:
+                recorded_binary_custody.add(Path(item).resolve(strict=False).relative_to(bundle_dir).as_posix())
+            except ValueError:
+                recorded_binary_custody.add(item)
+    if recorded_binary_custody is None:
+        ok = False
+        _production_evidence_finding(
+            findings,
+            "redaction_scan_binary_custody_files_missing",
+            "redaction-scan.json must list retained binary custody files",
+        )
+    elif recorded_binary_custody != expected_binary_custody:
+        ok = False
+        _production_evidence_finding(
+            findings,
+            "redaction_scan_binary_custody_files_mismatch",
+            "redaction-scan.json binary_custody_files do not match retained tool snapshots",
         )
     return ok
 
@@ -12403,6 +12496,7 @@ def cmd_production_evidence_verify(args: argparse.Namespace) -> None:
         redaction_scan,
         bundle_dir=resolved_bundle_dir,
         actual_files=actual_files,
+        preflight=preflight,
         findings=findings,
     )
     recomputed_release_audit = _verify_production_evidence_release_audit(

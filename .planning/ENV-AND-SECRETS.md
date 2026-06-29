@@ -30,13 +30,18 @@ capture if any referenced provider env var is unset. Values remain redacted.
 Provider manifest `command` env vars must resolve to command strings whose
 first token is an absolute, external, non-symlinked executable path; production
 capture records that executable's size and SHA-256 digest in
-`preflight.json.executable_tool_references`.
+`preflight.json.executable_tool_references`, copies it into
+`OUT_ROOT/tool-artifacts/`, and rewrites the retained provider manifest
+snapshot to execute the retained copy.
 The check command prints key names only; it also verifies the production input
 directory exists outside the repo and `MNEMOSYNE_PROD_C2PA_TOOL` resolves to an
 absolute external executable outside the repository without a symlink or
 non-canonical wrapper path. Production preflight records the executable's size
-and SHA-256 digest in `preflight.json` under `executable_tool_references`
-without copying the executable into `input-artifacts/`. A green check also means
+and SHA-256 digest in `preflight.json` under `executable_tool_references`,
+copies the executable into `OUT_ROOT/tool-artifacts/`, and rewrites direct
+`--c2pa-tool` plus retained suite tool references to the retained copy. When
+the `MNEMOSYNE_C2PA_TOOL` fallback is needed, capture emits `tool-env.sh` with
+the retained path and sources it before `deployment-soak`. A green check also means
 every manifest-referenced file or directory under `MNEMOSYNE_PROD_EVIDENCE_DIR`
 exists. Missing production inputs are reported by relative artifact name only,
 with redacted detail entries that show the check/command/option requiring each

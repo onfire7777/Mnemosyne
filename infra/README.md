@@ -141,11 +141,14 @@ EXPECTED_BUNDLE_FINGERPRINT=sha256:...
 
 The completed production bundle must retain `summary.json`, `preflight.json`,
 `redaction-scan.json`, `bundle-manifest.json`, `source-soak-manifest.json`,
-`operator-soak-manifest.json`, and `input-artifacts/` custody. Those artifacts
-are the offline handoff surface for `production-evidence-verify`; completed
-bundles must include non-empty `preflight.json.required_input_artifacts` and
-matching `preflight.json.parity_row_readiness`. They do not replace operator
-capture against deployed infrastructure.
+`operator-soak-manifest.json`, `input-artifacts/` custody, and
+`tool-artifacts/` retained executable custody. Those artifacts are the offline
+handoff surface for `production-evidence-verify`; completed bundles must
+include non-empty `preflight.json.required_input_artifacts`, matching
+`preflight.json.parity_row_readiness`, and
+`preflight.json.executable_tool_references` entries whose retained
+`snapshot_path` files live under `tool-artifacts/`. They do not replace
+operator capture against deployed infrastructure.
 
 `--check-environment` writes no files and prints no values. It always reports
 the required `MNEMOSYNE_PROD_*` key names, operator readiness file paths, and
@@ -159,11 +162,15 @@ referenced provider environment variable is unset, reporting env names only and
 redacting values; `MNEMOSYNE_PROD_C2PA_TOOL` must be an absolute external
 executable outside the repository, reached without a symlink or non-canonical
 wrapper path. Production preflight records that
-executable path's size and SHA-256 digest in `preflight.json` without copying
-the executable into `input-artifacts/`. Provider manifest `command` values are
+executable path's size and SHA-256 digest in `preflight.json`, copies the
+deployed executable into `tool-artifacts/`, and rewrites the copied operator
+manifest to execute the retained snapshot. When the `MNEMOSYNE_C2PA_TOOL`
+fallback is needed, capture emits `tool-env.sh` with the retained path and
+sources it before `deployment-soak`. Provider manifest `command` values are
 resolved the same way at capture time: the first command token must be an
-absolute external executable, and its digest metadata is retained under the
-provider-manifest field label. Its JSON includes
+absolute external executable, the retained provider manifest snapshot is
+rewritten to execute the retained tool artifact, and digest metadata is retained
+under the provider-manifest field label. Its JSON includes
 `required_input_artifacts_detail` and `missing_input_artifacts_detail` entries
 with relative path, existence, check/command/option references, Tier-B lane,
 strict-audit row, and row-runbook routing so operators can repair missing inputs
