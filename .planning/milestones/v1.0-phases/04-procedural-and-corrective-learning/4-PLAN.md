@@ -7,10 +7,9 @@
 - [x] Implement lesson induction and procedure induction.
 - [x] Implement lesson promotion through protected regression gate.
 - [x] Implement counterfactual replay score.
-- [x] Add permanent MINJA and AgentPoison protected cases.
+- [x] Add permanent protected T-SEC security playbook cases.
 
 ## Verification
 
 - [x] Run `python -m pytest`.
 - [x] Confirm `30 passed`.
-

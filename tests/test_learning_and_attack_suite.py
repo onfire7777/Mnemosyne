@@ -210,9 +210,17 @@ def test_counterfactual_replay_score_measures_lift() -> None:
 
 def test_memory_poisoning_cases_are_protected() -> None:
     cases = memory_poisoning_cases()
+    case_ids = {case.id for case in cases}
 
-    assert {case.id for case in cases} == {"minja-cross-user-isolation", "agentpoison-data-never-instruction"}
+    assert len(cases) == 22
+    assert "T-SEC-001" in case_ids
+    assert "T-SEC-003" in case_ids
+    assert "T-SEC-016b" in case_ids
+    assert "T-SEC-020" in case_ids
+    assert "T-SEC-021" in case_ids
     assert all(case.protected for case in cases)
+    assert all(case.origin == "curated" for case in cases)
+    assert all(case.mode == "active" for case in cases)
     assert all("security" in case.signature for case in cases)
 
 

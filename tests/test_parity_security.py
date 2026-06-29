@@ -305,15 +305,42 @@ def test_security_policy_declares_blueprint_immutable_rails() -> None:
     }
 
 
-def test_memory_poisoning_cases_are_permanent_protected_smoke_cases() -> None:
-    """FR-7: a MINJA/AgentPoison attack suite is a permanent protected tier."""
+def test_memory_poisoning_cases_are_permanent_protected_tsec_cases() -> None:
+    """FR-7/G7: the full T-SEC playbook is a permanent protected tier."""
 
     cases = {case.id: case for case in memory_poisoning_cases()}
-    assert "minja-cross-user-isolation" in cases
-    assert "agentpoison-data-never-instruction" in cases
+    assert len(cases) == 22
+    assert set(cases) == {
+        "T-SEC-001",
+        "T-SEC-002",
+        "T-SEC-003",
+        "T-SEC-004",
+        "T-SEC-005",
+        "T-SEC-006",
+        "T-SEC-007",
+        "T-SEC-008",
+        "T-SEC-009",
+        "T-SEC-010",
+        "T-SEC-011",
+        "T-SEC-012",
+        "T-SEC-013",
+        "T-SEC-014",
+        "T-SEC-015",
+        "T-SEC-016",
+        "T-SEC-016b",
+        "T-SEC-017",
+        "T-SEC-018",
+        "T-SEC-019",
+        "T-SEC-020",
+        "T-SEC-021",
+    }
     for case in cases.values():
         assert case.protected is True
-        assert case.tier == "smoke"
+        assert case.origin == "curated"
+        assert case.mode == "active"
+        assert case.signature.startswith("security t-sec ")
+    assert cases["T-SEC-001"].tier == "smoke"
+    assert cases["T-SEC-016b"].tier == "core"
 
 
 # ---------------------------------------------------------------------------

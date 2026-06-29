@@ -57,10 +57,10 @@ def test_minja_and_agentpoison_lineage_present() -> None:
     ids = {c.id for c in all_cases()}
     assert any(i.startswith("minja-") for i in ids)
     assert any(i.startswith("agentpoison-") for i in ids)
-    # The original two seed cases' intents remain represented.
+    # The original seed-case intents remain represented in the larger corpus.
     cats = {c.category for c in all_cases()}
-    assert PoisonCategory.CROSS_TENANT_LEAKAGE in cats  # minja-cross-user-isolation
-    assert PoisonCategory.DATA_AS_INSTRUCTION in cats   # agentpoison-data-never-instruction
+    assert PoisonCategory.CROSS_TENANT_LEAKAGE in cats
+    assert PoisonCategory.DATA_AS_INSTRUCTION in cats
 
 
 # --------------------------------------------------------------------------- #
