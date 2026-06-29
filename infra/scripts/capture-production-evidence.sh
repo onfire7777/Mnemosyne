@@ -5,7 +5,8 @@ umask 077
 usage() {
   cat >&2 <<'USAGE'
 Usage:
-  infra/scripts/capture-production-evidence.sh [--preflight-only] SOAK_MANIFEST [OUT_ROOT]
+  infra/scripts/capture-production-evidence.sh --preflight-only SOAK_MANIFEST [OUT_ROOT]
+  infra/scripts/capture-production-evidence.sh SOAK_MANIFEST OUT_ROOT
 
 Runs the existing production evidence path:
   1. Validate that SOAK_MANIFEST is explicitly production-scoped.
@@ -19,10 +20,15 @@ Runs the existing production evidence path:
   6. Redaction-scan generated evidence and fail on findings or skipped files.
   7. Write bundle-manifest.json and summary.json with bundle_fingerprint.
 
-Reviewers can recheck a completed bundle offline with:
+For full production capture, OUT_ROOT is required and must be an explicit
+absolute external custody path outside the repository. Preflight-only may omit
+OUT_ROOT and then writes to a timestamped /tmp setup-proof directory.
+
+Reviewers can recheck a completed bundle offline with an independently retained
+bundle fingerprint recorded at capture time:
   PYTHON="${PYTHON:-$(if [ -x .venv/bin/python ]; then printf '%s' .venv/bin/python; else command -v python3; fi)}"
   BUNDLE_DIR=OUT_ROOT
-  EXPECTED_BUNDLE_FINGERPRINT="$("$PYTHON" -c 'import json, pathlib, sys; print(json.loads((pathlib.Path(sys.argv[1]) / "summary.json").read_text())["bundle_fingerprint"])' "$BUNDLE_DIR")"
+  EXPECTED_BUNDLE_FINGERPRINT=sha256:...  # external ticket/log value, not read from this bundle
   "$PYTHON" -m mnemosyne.cli production-evidence-verify "$BUNDLE_DIR" \
     --expected-bundle-fingerprint "$EXPECTED_BUNDLE_FINGERPRINT"
 This is custody review only; it does not rerun production checks or flip rows.
@@ -90,7 +96,16 @@ if [ ! -f "${MANIFEST}" ]; then
 fi
 
 STAMP="$(date -u +"%Y%m%dT%H%M%SZ")"
-OUT_ROOT_RAW="${2:-/tmp/mnemosyne-tierb-production-evidence-${STAMP}}"
+if [ -z "${2:-}" ]; then
+  if [ "${PREFLIGHT_ONLY}" = "1" ]; then
+    OUT_ROOT_RAW="/tmp/mnemosyne-tierb-production-preflight-${STAMP}"
+  else
+    echo "ERROR: full production evidence output root is required; pass an explicit absolute external OUT_ROOT" >&2
+    exit 64
+  fi
+else
+  OUT_ROOT_RAW="${2}"
+fi
 case "${OUT_ROOT_RAW}" in
   /*) ;;
   *)

@@ -82,7 +82,9 @@ offline without production credentials:
 ```bash
 PYTHON="${PYTHON:-$(if [ -x .venv/bin/python ]; then printf '%s' .venv/bin/python; else command -v python3; fi)}"
 BUNDLE_DIR=/secure/path/to/mnemosyne-production-evidence
-EXPECTED_BUNDLE_FINGERPRINT="$("$PYTHON" -c 'import json, pathlib, sys; print(json.loads((pathlib.Path(sys.argv[1]) / "summary.json").read_text())["bundle_fingerprint"])' "$BUNDLE_DIR")"
+# Set this from the operator's out-of-band capture record, not from summary.json
+# inside the bundle under review.
+EXPECTED_BUNDLE_FINGERPRINT=sha256:...
 "$PYTHON" -m mnemosyne.cli production-evidence-verify \
   "$BUNDLE_DIR" \
   --expected-bundle-fingerprint "$EXPECTED_BUNDLE_FINGERPRINT"
@@ -109,10 +111,10 @@ captured by the production wrapper against deployed infrastructure.
 The resulting `release-audit.json` must report `ok: true` with no findings, and
 `redaction-scan.json` must report `ok: true` with no findings and no skipped
 files. `production-evidence-verify` must also report `ok: true` when pointed at
-the completed bundle and, when supplied, the retained `summary.json`
-`bundle_fingerprint`. Retain `bundle-manifest.json` and the `summary.json`
-`bundle_fingerprint` as the handoff chain-of-custody record for the captured
-files. The offline verifier independently rechecks the retained
+the completed bundle and the independently retained `bundle_fingerprint`
+recorded at capture time. Retain `bundle-manifest.json`, `summary.json`, and the
+out-of-band `bundle_fingerprint` record as the handoff chain-of-custody record
+for the captured files. The offline verifier independently rechecks the retained
 `preflight.json`, `source-soak-manifest.json`, and
 `operator-soak-manifest.json` for production scope, input-artifact reference
 binding, operator attestation, unresolved production placeholders,

@@ -76,8 +76,9 @@ CLI commands consumed by `deployment-soak` and `release-audit`.
   `bundle_fingerprint` for handoff custody.
 - After capture, select the repo interpreter with
   `PYTHON="${PYTHON:-$(if [ -x .venv/bin/python ]; then printf '%s' .venv/bin/python; else command -v python3; fi)}"`;
-  set `BUNDLE_DIR=/secure/path/to/mnemosyne-production-evidence`; derive
-  `EXPECTED_BUNDLE_FINGERPRINT` from `"$BUNDLE_DIR/summary.json"`; then
+  set `BUNDLE_DIR=/secure/path/to/mnemosyne-production-evidence`; set
+  `EXPECTED_BUNDLE_FINGERPRINT=sha256:...` from the operator's out-of-band
+  capture record, not from `summary.json` inside the bundle under review; then
   `"$PYTHON" -m mnemosyne.cli production-evidence-verify "$BUNDLE_DIR"
   --expected-bundle-fingerprint "$EXPECTED_BUNDLE_FINGERPRINT"` can recheck
   the completed bundle offline, including fresh redaction recompute and

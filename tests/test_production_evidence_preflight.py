@@ -165,6 +165,26 @@ def test_capture_production_evidence_preflight_only_stops_before_soak(tmp_path: 
     assert out_root.stat().st_mode & 0o777 == 0o700
 
 
+def test_capture_production_evidence_full_capture_requires_explicit_output_root(tmp_path: Path) -> None:
+    manifest = tmp_path / "production-soak.json"
+    _minimal_production_manifest(manifest)
+
+    proc = subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "capture-production-evidence.sh"),
+            str(manifest),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert proc.returncode == 64
+    assert "full production evidence output root is required" in proc.stderr
+    assert proc.stdout == ""
+
+
 def test_capture_production_evidence_rejects_relative_manifest_path(tmp_path: Path) -> None:
     manifest = tmp_path / "production-soak.json"
     out_root = tmp_path / "capture"

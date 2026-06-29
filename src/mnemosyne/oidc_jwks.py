@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import json
 import urllib.error
-import urllib.request
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from mnemosyne.network_safety import safe_urlopen, validate_fetch_url
 from mnemosyne.security import OidcAuthorizationPolicy, SessionAuthError
 
 
@@ -33,9 +33,14 @@ def load_oidc_jwks(
         raw = _decode_jwks_bytes(_read_file_bytes(Path(jwks_file).expanduser(), max_bytes))
     else:
         assert jwks_url is not None
-        if not jwks_url.startswith("https://") and not allow_insecure_url:
-            raise SessionAuthError("OIDC JWKS URL must use https unless insecure URLs are explicitly allowed")
-        raw = _decode_jwks_bytes(_read_url_bytes(jwks_url, timeout=timeout, max_bytes=max_bytes))
+        raw = _decode_jwks_bytes(
+            _read_url_bytes(
+                jwks_url,
+                allow_insecure_url=allow_insecure_url,
+                timeout=timeout,
+                max_bytes=max_bytes,
+            )
+        )
     try:
         loaded = json.loads(raw)
     except json.JSONDecodeError as exc:
@@ -93,9 +98,20 @@ def _read_file_bytes(path: Path, max_bytes: int) -> bytes:
     return data
 
 
-def _read_url_bytes(url: str, *, timeout: float, max_bytes: int) -> bytes:
+def _read_url_bytes(url: str, *, allow_insecure_url: bool, timeout: float, max_bytes: int) -> bytes:
     try:
-        with urllib.request.urlopen(url, timeout=timeout) as response:  # noqa: S310 - URL is operator configured.
+        validated_url = validate_fetch_url(
+            url,
+            allow_insecure_localhost=allow_insecure_url,
+            purpose="OIDC JWKS URL",
+        )
+    except ValueError as exc:
+        message = str(exc)
+        if "requires https unless insecure localhost is explicitly allowed" in message:
+            message = "OIDC JWKS URL must use https unless insecure URLs are explicitly allowed"
+        raise SessionAuthError(message) from exc
+    try:
+        with safe_urlopen(url, validated=validated_url, timeout=timeout) as response:
             data = response.read(max_bytes + 1)
     except (OSError, urllib.error.URLError) as exc:
         raise SessionAuthError("OIDC JWKS URL could not be loaded") from exc

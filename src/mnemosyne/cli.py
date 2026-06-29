@@ -59,6 +59,12 @@ from mnemosyne.media import (
 from mnemosyne.media_limits import DEFAULT_MAX_INGEST_BYTES, ensure_file_within_limit, validate_byte_limit
 from mnemosyne.mcp_tools import MemoryTools, TOOL_SPEC
 from mnemosyne.models import Evidence, Hit
+from mnemosyne.network_safety import (
+    ValidatedFetchUrl,
+    is_loopback_host,
+    safe_urlopen,
+    validate_fetch_url,
+)
 from mnemosyne.observability import MetricsRegistry, build_ops_report, render_ops_dashboard
 from mnemosyne.oidc_jwks import load_oidc_authorization_policy, load_oidc_jwks, oidc_jwks_loader
 from mnemosyne.parametric import (
@@ -13067,59 +13073,26 @@ def _read_hosted_llm_manifest(path: str) -> dict[str, Any]:
 
 
 def _is_loopback_host(host: str | None) -> bool:
-    if not host:
-        return False
-    normalized = host.strip().lower()
-    if normalized == "localhost":
-        return True
-    try:
-        return ipaddress.ip_address(normalized).is_loopback
-    except ValueError:
-        return False
+    return is_loopback_host(host)
 
 
-def _host_resolves_only_to_allowed_addresses(host: str, *, allow_loopback: bool) -> bool:
+def _validate_hosted_fetch_url(url: str, *, allow_insecure_localhost: bool) -> ValidatedFetchUrl:
     try:
-        infos = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
-    except socket.gaierror as exc:
-        raise ValueError(f"provider url hostname could not be resolved: {host}") from exc
-    resolved: set[str] = set()
-    for info in infos:
-        sockaddr = info[4]
-        if not sockaddr:
-            continue
-        resolved.add(str(sockaddr[0]))
-    if not resolved:
-        raise ValueError(f"provider url hostname resolved to no addresses: {host}")
-    for address in resolved:
-        try:
-            ip = ipaddress.ip_address(address)
-        except ValueError as exc:
-            raise ValueError(f"provider url hostname resolved to invalid address: {address}") from exc
-        if allow_loopback and ip.is_loopback:
-            continue
-        if not ip.is_global:
-            return False
-    return True
+        return validate_fetch_url(
+            url,
+            allow_insecure_localhost=allow_insecure_localhost,
+            purpose="provider url",
+        )
+    except ValueError as exc:
+        message = str(exc)
+        if "requires https unless insecure localhost is explicitly allowed" in message:
+            message = "hosted provider checks require https unless --allow-insecure-localhost is set"
+        raise ValueError(message) from exc
 
 
 def _validate_hosted_url(url: str, *, allow_insecure_localhost: bool) -> tuple[str, str]:
-    parsed = urlsplit(url)
-    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
-        raise ValueError("provider url must be http(s) with a hostname")
-    if parsed.username or parsed.password:
-        raise ValueError("provider url must not contain userinfo credentials")
-    try:
-        port = f":{parsed.port}" if parsed.port else ""
-    except ValueError as exc:
-        raise ValueError("provider url port is invalid") from exc
-    if parsed.scheme != "https" and not (allow_insecure_localhost and _is_loopback_host(parsed.hostname)):
-        raise ValueError("hosted provider checks require https unless --allow-insecure-localhost is set")
-    allow_loopback = parsed.scheme != "https" and allow_insecure_localhost and _is_loopback_host(parsed.hostname)
-    if not _host_resolves_only_to_allowed_addresses(parsed.hostname, allow_loopback=allow_loopback):
-        raise ValueError("provider url hostname must not resolve to private, loopback, link-local, reserved, or metadata addresses")
-    origin = f"{parsed.scheme}://{parsed.hostname}{port}"
-    return origin, parsed.hostname
+    validated = _validate_hosted_fetch_url(url, allow_insecure_localhost=allow_insecure_localhost)
+    return validated.origin, validated.host
 
 
 def _hosted_provider_request(provider: Mapping[str, Any], *, default_timeout: float) -> tuple[dict[str, Any], float]:
@@ -13292,7 +13265,10 @@ def _run_hosted_provider_check(
     url = str(provider["url"])
     request_payload, timeout = _hosted_provider_request(provider, default_timeout=default_timeout)
     api_key, api_key_source = _hosted_provider_api_key(provider)
-    origin, host = _validate_hosted_url(url, allow_insecure_localhost=allow_insecure_localhost)
+    validated_url = _validate_hosted_fetch_url(
+        url,
+        allow_insecure_localhost=allow_insecure_localhost,
+    )
     headers = {
         "Accept": "application/json",
         "Content-Type": "application/json",
@@ -13303,7 +13279,7 @@ def _run_hosted_provider_check(
     body = json.dumps(request_payload).encode("utf-8")
     request = urlrequest.Request(url, data=body, headers=headers, method=str(provider.get("method") or "POST").upper())
     started = time.monotonic()
-    with urlrequest.urlopen(request, timeout=timeout) as response:  # noqa: S310 - URL is policy-validated above.
+    with safe_urlopen(request, validated=validated_url, timeout=timeout) as response:
         status_code = int(getattr(response, "status", response.getcode()))
         raw_bytes = response.read(int(provider.get("max_response_bytes", 65536)))
     duration_ms = round((time.monotonic() - started) * 1000, 3)
@@ -13318,8 +13294,8 @@ def _run_hosted_provider_check(
         "ok": True,
         "provider_kind": "hosted_http",
         "protocol": protocol,
-        "origin": origin,
-        "host_sha256": sha256(host.encode("utf-8")).hexdigest()[:16],
+        "origin": validated_url.origin,
+        "host_sha256": sha256(validated_url.host.encode("utf-8")).hexdigest()[:16],
         "status_code": status_code,
         "duration_ms": duration_ms,
         "auth": {
