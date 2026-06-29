@@ -76,6 +76,36 @@ def _assert_artifact_plan_shape(item: dict[str, object]) -> None:
         assert all(isinstance(check[key], str) for key in ("name", "command", "option"))
 
 
+def _assert_check_environment_value_error(
+    proc: subprocess.CompletedProcess[str],
+    *,
+    name: str,
+    code: str,
+    message_fragment: str,
+    redacted_value: str,
+) -> dict[str, object]:
+    assert proc.returncode == 78
+    assert proc.stderr == ""
+    payload = json.loads(proc.stdout)
+    if Path(redacted_value).is_absolute():
+        assert redacted_value not in proc.stdout
+    assert payload["ok"] is False
+    assert payload["blocked_reason"] == "invalid_required_environment"
+    assert payload["values_redacted"] is True
+    assert payload["missing"] == []
+    assert payload["required_input_artifact_count"] == len(REQUIRED_PRODUCTION_INPUT_ARTIFACTS)
+    assert sorted(payload["required_input_artifacts"]) == sorted(REQUIRED_PRODUCTION_INPUT_ARTIFACTS)
+    assert payload["environment_errors"] == [
+        {
+            "name": name,
+            "code": code,
+            "message": message_fragment,
+        }
+    ]
+    assert redacted_value not in json.dumps(payload["environment_errors"])
+    return payload
+
+
 def _renderer_base_env() -> dict[str, str]:
     return {
         "PATH": os.environ.get("PATH", ""),
@@ -532,10 +562,13 @@ def test_renderer_check_environment_rejects_repo_local_input_dir(tmp_path: Path)
         check=False,
     )
 
-    assert proc.returncode == 78
-    assert proc.stdout == ""
-    assert "MNEMOSYNE_PROD_EVIDENCE_DIR must not point inside the repository" in proc.stderr
-    assert env["MNEMOSYNE_PROD_EVIDENCE_DIR"] not in proc.stderr
+    _assert_check_environment_value_error(
+        proc,
+        name="MNEMOSYNE_PROD_EVIDENCE_DIR",
+        code="evidence_dir_repo_local",
+        message_fragment="MNEMOSYNE_PROD_EVIDENCE_DIR must not point inside the repository",
+        redacted_value=env["MNEMOSYNE_PROD_EVIDENCE_DIR"],
+    )
 
 
 def test_renderer_check_environment_rejects_relative_input_dir(tmp_path: Path) -> None:
@@ -551,10 +584,13 @@ def test_renderer_check_environment_rejects_relative_input_dir(tmp_path: Path) -
         check=False,
     )
 
-    assert proc.returncode == 78
-    assert proc.stdout == ""
-    assert "MNEMOSYNE_PROD_EVIDENCE_DIR must be an absolute external" in proc.stderr
-    assert env["MNEMOSYNE_PROD_EVIDENCE_DIR"] not in proc.stderr
+    _assert_check_environment_value_error(
+        proc,
+        name="MNEMOSYNE_PROD_EVIDENCE_DIR",
+        code="evidence_dir_not_absolute",
+        message_fragment="MNEMOSYNE_PROD_EVIDENCE_DIR must be an absolute external production input-artifact path",
+        redacted_value=env["MNEMOSYNE_PROD_EVIDENCE_DIR"],
+    )
 
 
 def test_renderer_check_environment_rejects_missing_input_dir(tmp_path: Path) -> None:
@@ -571,10 +607,16 @@ def test_renderer_check_environment_rejects_missing_input_dir(tmp_path: Path) ->
         check=False,
     )
 
-    assert proc.returncode == 78
-    assert proc.stdout == ""
-    assert "MNEMOSYNE_PROD_EVIDENCE_DIR must exist as an external directory" in proc.stderr
-    assert env["MNEMOSYNE_PROD_EVIDENCE_DIR"] not in proc.stderr
+    _assert_check_environment_value_error(
+        proc,
+        name="MNEMOSYNE_PROD_EVIDENCE_DIR",
+        code="evidence_dir_missing",
+        message_fragment=(
+            "MNEMOSYNE_PROD_EVIDENCE_DIR must exist as an external directory "
+            "before --check-environment can pass"
+        ),
+        redacted_value=env["MNEMOSYNE_PROD_EVIDENCE_DIR"],
+    )
 
 
 def test_renderer_check_environment_rejects_relative_c2pa_tool(tmp_path: Path) -> None:
@@ -590,10 +632,13 @@ def test_renderer_check_environment_rejects_relative_c2pa_tool(tmp_path: Path) -
         check=False,
     )
 
-    assert proc.returncode == 78
-    assert proc.stdout == ""
-    assert "MNEMOSYNE_PROD_C2PA_TOOL must be an absolute external executable path" in proc.stderr
-    assert env["MNEMOSYNE_PROD_C2PA_TOOL"] not in proc.stderr
+    _assert_check_environment_value_error(
+        proc,
+        name="MNEMOSYNE_PROD_C2PA_TOOL",
+        code="c2pa_tool_not_absolute",
+        message_fragment="MNEMOSYNE_PROD_C2PA_TOOL must be an absolute external executable path",
+        redacted_value=env["MNEMOSYNE_PROD_C2PA_TOOL"],
+    )
 
 
 def test_renderer_output_rejects_relative_c2pa_tool(tmp_path: Path) -> None:
@@ -633,10 +678,13 @@ def test_renderer_check_environment_rejects_non_executable_c2pa_tool(tmp_path: P
         check=False,
     )
 
-    assert proc.returncode == 78
-    assert proc.stdout == ""
-    assert "MNEMOSYNE_PROD_C2PA_TOOL must be executable" in proc.stderr
-    assert env["MNEMOSYNE_PROD_C2PA_TOOL"] not in proc.stderr
+    _assert_check_environment_value_error(
+        proc,
+        name="MNEMOSYNE_PROD_C2PA_TOOL",
+        code="c2pa_tool_not_executable",
+        message_fragment="MNEMOSYNE_PROD_C2PA_TOOL must be executable",
+        redacted_value=env["MNEMOSYNE_PROD_C2PA_TOOL"],
+    )
 
 
 def test_renderer_output_rejects_non_executable_c2pa_tool(tmp_path: Path) -> None:
@@ -676,10 +724,13 @@ def test_renderer_check_environment_rejects_repo_local_c2pa_tool(tmp_path: Path)
         check=False,
     )
 
-    assert proc.returncode == 78
-    assert proc.stdout == ""
-    assert "MNEMOSYNE_PROD_C2PA_TOOL must not point inside the repository" in proc.stderr
-    assert env["MNEMOSYNE_PROD_C2PA_TOOL"] not in proc.stderr
+    _assert_check_environment_value_error(
+        proc,
+        name="MNEMOSYNE_PROD_C2PA_TOOL",
+        code="c2pa_tool_repo_local",
+        message_fragment="MNEMOSYNE_PROD_C2PA_TOOL must not point inside the repository",
+        redacted_value=env["MNEMOSYNE_PROD_C2PA_TOOL"],
+    )
 
 
 def test_renderer_output_rejects_repo_local_c2pa_tool(tmp_path: Path) -> None:

@@ -225,8 +225,9 @@ if list_placeholders:
 
 missing = [name for name in required if not os.environ.get(name)]
 present = [name for name in required if os.environ.get(name)]
+readiness_payload: dict[str, object] | None = None
 if check_environment:
-    payload = {
+    readiness_payload = {
         "ok": not missing,
         "template": str(template_path),
         "placeholder_count": len(required),
@@ -241,9 +242,28 @@ if check_environment:
         "next_steps": next_steps,
     }
     if missing:
-        payload["blocked_reason"] = "missing_required_environment"
-        print(json.dumps(payload, indent=2))
+        readiness_payload["blocked_reason"] = "missing_required_environment"
+        print(json.dumps(readiness_payload, indent=2))
         raise SystemExit(78)
+
+
+def fail_environment_value(name: str, code: str, message: str) -> None:
+    if check_environment:
+        assert readiness_payload is not None
+        payload = dict(readiness_payload)
+        payload["ok"] = False
+        payload["blocked_reason"] = "invalid_required_environment"
+        payload["environment_errors"] = [
+            {
+                "name": name,
+                "code": code,
+                "message": message,
+            }
+        ]
+        print(json.dumps(payload, indent=2))
+    else:
+        print(f"ERROR: {message}", file=sys.stderr)
+    raise SystemExit(78)
 
 if not check_environment:
     if not output_raw:
@@ -285,83 +305,83 @@ if missing:
 evidence_dir_raw = os.environ.get("MNEMOSYNE_PROD_EVIDENCE_DIR", "")
 evidence_dir = Path(evidence_dir_raw).expanduser()
 if not evidence_dir.is_absolute():
-    print(
-        "ERROR: MNEMOSYNE_PROD_EVIDENCE_DIR must be an absolute external production input-artifact path",
-        file=sys.stderr,
+    fail_environment_value(
+        "MNEMOSYNE_PROD_EVIDENCE_DIR",
+        "evidence_dir_not_absolute",
+        "MNEMOSYNE_PROD_EVIDENCE_DIR must be an absolute external production input-artifact path",
     )
-    raise SystemExit(78)
 try:
     evidence_dir.relative_to(repo_dir)
 except ValueError:
     pass
 else:
-    print(
-        "ERROR: MNEMOSYNE_PROD_EVIDENCE_DIR must not point inside the repository",
-        file=sys.stderr,
+    fail_environment_value(
+        "MNEMOSYNE_PROD_EVIDENCE_DIR",
+        "evidence_dir_repo_local",
+        "MNEMOSYNE_PROD_EVIDENCE_DIR must not point inside the repository",
     )
-    raise SystemExit(78)
 evidence_dir_resolved = evidence_dir.resolve(strict=False)
 try:
     evidence_dir_resolved.relative_to(repo_dir)
 except ValueError:
     pass
 else:
-    print(
-        "ERROR: MNEMOSYNE_PROD_EVIDENCE_DIR must not resolve inside the repository",
-        file=sys.stderr,
+    fail_environment_value(
+        "MNEMOSYNE_PROD_EVIDENCE_DIR",
+        "evidence_dir_resolves_repo_local",
+        "MNEMOSYNE_PROD_EVIDENCE_DIR must not resolve inside the repository",
     )
-    raise SystemExit(78)
 
 c2pa_tool_raw = os.environ.get("MNEMOSYNE_PROD_C2PA_TOOL", "")
 c2pa_tool = Path(c2pa_tool_raw).expanduser()
 if not c2pa_tool.is_absolute():
-    print(
-        "ERROR: MNEMOSYNE_PROD_C2PA_TOOL must be an absolute external executable path",
-        file=sys.stderr,
+    fail_environment_value(
+        "MNEMOSYNE_PROD_C2PA_TOOL",
+        "c2pa_tool_not_absolute",
+        "MNEMOSYNE_PROD_C2PA_TOOL must be an absolute external executable path",
     )
-    raise SystemExit(78)
 try:
     c2pa_tool.relative_to(repo_dir)
 except ValueError:
     pass
 else:
-    print(
-        "ERROR: MNEMOSYNE_PROD_C2PA_TOOL must not point inside the repository",
-        file=sys.stderr,
+    fail_environment_value(
+        "MNEMOSYNE_PROD_C2PA_TOOL",
+        "c2pa_tool_repo_local",
+        "MNEMOSYNE_PROD_C2PA_TOOL must not point inside the repository",
     )
-    raise SystemExit(78)
 c2pa_tool_resolved = c2pa_tool.resolve(strict=False)
 try:
     c2pa_tool_resolved.relative_to(repo_dir)
 except ValueError:
     pass
 else:
-    print(
-        "ERROR: MNEMOSYNE_PROD_C2PA_TOOL must not point inside the repository",
-        file=sys.stderr,
+    fail_environment_value(
+        "MNEMOSYNE_PROD_C2PA_TOOL",
+        "c2pa_tool_resolves_repo_local",
+        "MNEMOSYNE_PROD_C2PA_TOOL must not point inside the repository",
     )
-    raise SystemExit(78)
 if not c2pa_tool_resolved.exists() or not c2pa_tool_resolved.is_file():
-    print(
-        "ERROR: MNEMOSYNE_PROD_C2PA_TOOL must exist as an external executable file",
-        file=sys.stderr,
+    fail_environment_value(
+        "MNEMOSYNE_PROD_C2PA_TOOL",
+        "c2pa_tool_missing",
+        "MNEMOSYNE_PROD_C2PA_TOOL must exist as an external executable file",
     )
-    raise SystemExit(78)
 if not os.access(c2pa_tool_resolved, os.X_OK):
-    print(
-        "ERROR: MNEMOSYNE_PROD_C2PA_TOOL must be executable",
-        file=sys.stderr,
+    fail_environment_value(
+        "MNEMOSYNE_PROD_C2PA_TOOL",
+        "c2pa_tool_not_executable",
+        "MNEMOSYNE_PROD_C2PA_TOOL must be executable",
     )
-    raise SystemExit(78)
 
 if check_environment:
     if not evidence_dir_resolved.exists() or not evidence_dir_resolved.is_dir():
-        print(
-            "ERROR: MNEMOSYNE_PROD_EVIDENCE_DIR must exist as an external directory "
+        fail_environment_value(
+            "MNEMOSYNE_PROD_EVIDENCE_DIR",
+            "evidence_dir_missing",
+            "MNEMOSYNE_PROD_EVIDENCE_DIR must exist as an external directory "
             "before --check-environment can pass",
-            file=sys.stderr,
         )
-        raise SystemExit(78)
 
 manifest = template_manifest
 

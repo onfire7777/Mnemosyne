@@ -68,7 +68,10 @@ manifest in memory, derives the required input artifacts under
 relative artifact names, per-artifact `exists` status, and the manifest
 check/command/option references that require each artifact via
 `required_input_artifacts_detail` and `missing_input_artifacts_detail`; it does
-not print configured absolute paths or secret values.
+not print configured absolute paths or secret values. Invalid configured
+production paths and executable references are reported in the same redacted JSON
+shape through `environment_errors`, with stable error codes and variable names
+but without the configured values.
 
 The wrapper performs these steps:
 
@@ -107,6 +110,10 @@ fingerprint, or non-custody replay command. It does not contact production
 services, does not run `deployment-soak`, does not create production evidence,
 and cannot flip any strict-audit row to Done unless the bundle was originally
 captured by the production wrapper against deployed infrastructure.
+`--expected-bundle-fingerprint` is required for custody review and must come
+from the independently retained out-of-band capture record. The
+`--internal-consistency-only` flag exists only for local diagnostics and does
+not satisfy Tier B custody review.
 
 ## Acceptance
 
