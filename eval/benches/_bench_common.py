@@ -3,13 +3,13 @@
 These benches measure the **CURRENT** ``src/mnemosyne`` tree *honestly*. They
 import the real engine / job handlers / lifecycle / security modules in-process
 (no mocks, no CLI subprocess) and report a JSON metric block plus the blueprint
-target. Where a feature the bench measures is **not yet wired** in src (e.g. a
-cached-PPR column, a projection dirty-check, a separated read-path mediation
-seam), the bench still runs end-to-end and reports the honest current status as
-a forcing function, naming the precise src wiring that would change the verdict.
+target. Where a feature the bench measures is **not yet wired** in src, the
+bench still runs end-to-end and reports the honest current status as a forcing
+function. As wirings land, keep the reported status current rather than
+preserving historical gap text.
 
 Design rules honored here:
-  * Net-new files only, under ``eval/benches/`` — never edit ``src/mnemosyne``.
+  * Measurement code stays under ``eval/benches/`` and calls real src seams.
   * Reuse ``.venv-eval`` (torch + sentence-transformers ready). These benches
     do not require torch; they exercise the deterministic local engine, which is
     what "CURRENT src" exposes today.

@@ -1176,6 +1176,8 @@ def test_projection_recompute_schedules_summary_refresh_for_affected_gist(tmp_pa
     assert recompute.kind == PROJECTION_RECOMPUTE_JOB
     assert recompute.details["affected_evidence_cids"] == [cid, summary_cid]
     assert recompute.details["affected_projections"]["relations"] == [relation_id]
+    assert recompute.details["surviving_evidence_cids"] == [cid]
+    assert recompute.details["dirty_recompute_cids"] == [cid]
     assert recompute.details["queued_consolidation_jobs"] == [jobs[0].id]
     assert recompute.details["memo_hit"] is False
     assert len(recompute.details["fingerprint"]) == 64
@@ -2361,7 +2363,7 @@ def test_postgres_runtime_state_eval_case_mirror_preserves_origin_mode_fallback(
     tenant = f"tenant-gate-case-mirror-{uuid4()}"
     state = PostgresRuntimeState(dsn, tenant_id=tenant)
     case = RegressionCase(
-        str(uuid4()),
+        "gate-runtime-public-non-uuid",
         "postgres eval mirror origin mode",
         "postgres eval mirror origin mode",
         "tenant-scoped mirror fallback",
@@ -2376,6 +2378,17 @@ def test_postgres_runtime_state_eval_case_mirror_preserves_origin_mode_fallback(
         with conn.cursor() as cur:
             state._set_tenant(cur)
             cur.execute(
+                """
+                SELECT id::text, expected->>'case_id'
+                FROM eval_cases
+                WHERE tenant_id = %s AND origin = 'runtime_state'
+                """,
+                (state.db_tenant_id,),
+            )
+            db_case_id, public_case_id = cur.fetchone()
+            assert db_case_id != case.id
+            assert public_case_id == case.id
+            cur.execute(
                 "DELETE FROM runtime_state WHERE tenant_id = %s AND key = 'gate_cases'",
                 (state.db_tenant_id,),
             )
@@ -2383,6 +2396,28 @@ def test_postgres_runtime_state_eval_case_mirror_preserves_origin_mode_fallback(
     loaded = state.load_gate_cases()
 
     assert [item.to_dict() for item in loaded] == [case.to_dict()]
+
+    other_tenant = f"{tenant}-other"
+    other_state = PostgresRuntimeState(dsn, tenant_id=other_tenant)
+    other_case = RegressionCase(
+        case.id,
+        "postgres eval mirror tenant isolation",
+        "postgres eval mirror tenant isolation",
+        "other tenant mirror fallback",
+        tier="core",
+        protected=False,
+        origin="genuine",
+        mode="active",
+    )
+    other_state.save_gate_cases([other_case])
+    with other_state.connect() as conn:
+        with conn.cursor() as cur:
+            other_state._set_tenant(cur)
+            cur.execute(
+                "DELETE FROM runtime_state WHERE tenant_id = %s AND key = 'gate_cases'",
+                (other_state.db_tenant_id,),
+            )
+    assert [item.to_dict() for item in other_state.load_gate_cases()] == [other_case.to_dict()]
 
 
 def test_postgres_runtime_state_filters_contaminated_support_strategy_payload() -> None:

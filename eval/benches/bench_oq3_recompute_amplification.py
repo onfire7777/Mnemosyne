@@ -6,11 +6,10 @@ projections whose inputs actually changed). This bench measures the CURRENT src
 honestly on three cascade triggers — add, retraction, erasure — by driving the
 real handler:
 
-  * ``jobs.RuntimeJobHandlers.run_projection_recompute`` (src/mnemosyne/jobs.py:88)
-    walks the dependency closure (``_affected_evidence_cids`` BFS, jobs.py:391)
-    and then enqueues ONE ``consolidate_evidence`` job per *surviving* affected
-    cid (``_surviving_evidence_cids``, jobs.py:457). Each consolidate job runs the
-    full ``DEFAULT_CONSOLIDATION_PASSES`` pipeline (11 passes, consolidation.py:25).
+  * ``jobs.RuntimeJobHandlers.run_projection_recompute`` walks the dependency
+    closure, then enqueues one ``consolidate_evidence`` job per surviving dirty
+    source selected by ``_dirty_recompute_cids``. Each consolidate job runs the
+    requested consolidation passes.
 
   * "projections truly invalidated" = the count of distinct projection rows whose
     ``source_evidence_cids`` intersect the changed set (``_affected_projections``,
@@ -21,12 +20,10 @@ real handler:
 
 AMPLIFICATION = passes_executed / projections_truly_invalidated.
 
-HONEST STATUS as a forcing function: there is **no dirty-check / memoization**
-today. ``run_projection_recompute`` re-enqueues a full 11-pass consolidation for
-every surviving cid in the closure even when the projection it feeds is unchanged,
-so amplification is >> 1. The bench also computes a **memo-hit-rate** by replaying
-the SAME recompute twice and checking whether the second pass is skipped: it is
-not (no memo table), so memo-hit-rate == 0.0. Both are measured, not asserted.
+HONEST STATUS as a forcing function: ``run_projection_recompute`` now has an
+in-process identical-replay memo guard, a first-run dirty-set filter, and
+projection-specific default pass selection. The bench keeps measuring work
+amplification so future changes cannot silently reintroduce full-pipeline churn.
 
 Run: ``python eval/benches/bench_oq3_recompute_amplification.py``
 """
@@ -50,7 +47,6 @@ from mnemosyne.models import Evidence, Relation  # noqa: E402
 from mnemosyne.queue import InProcessQueue  # noqa: E402
 
 TENANT = "oq3-tenant"
-PASSES_PER_JOB = len(DEFAULT_CONSOLIDATION_PASSES)
 CHAIN_LEN = 6  # derived-evidence chain depth so the BFS closure is non-trivial
 
 
@@ -111,11 +107,14 @@ def _measure(engine: LocalMemoryEngine, handlers: RuntimeJobHandlers, changed_ci
     )
     details = res.details
     affected_ev = len(details["affected_evidence_cids"])  # type: ignore[index]
+    dirty_ev = len(details.get("dirty_recompute_cids", []))
     queued = len(details["queued_consolidation_jobs"])  # type: ignore[index]
+    passes = [str(name) for name in details.get("passes", DEFAULT_CONSOLIDATION_PASSES)]
+    passes_per_job = len(passes)
     proj_counts = details["affected_projection_counts"]  # type: ignore[index]
     projections_invalidated = sum(int(v) for v in proj_counts.values())
 
-    passes_executed = queued * PASSES_PER_JOB
+    passes_executed = queued * passes_per_job
 
     # Replay the IDENTICAL recompute to probe for memoization / dirty-skip.
     res2 = handlers.run_projection_recompute(
@@ -137,8 +136,10 @@ def _measure(engine: LocalMemoryEngine, handlers: RuntimeJobHandlers, changed_ci
         "trigger": label,
         "changed_evidence_cids": 1,
         "affected_evidence_cids": affected_ev,
+        "dirty_recompute_cids": dirty_ev,
         "surviving_consolidation_jobs_enqueued": queued,
-        "passes_per_job": PASSES_PER_JOB,
+        "passes": passes,
+        "passes_per_job": passes_per_job,
         "passes_executed": passes_executed,
         "projections_truly_invalidated": projections_invalidated,
         "affected_projection_counts": proj_counts,
@@ -198,11 +199,11 @@ def main() -> dict[str, object]:
         "bench": "oq3_recompute_amplification",
         "blueprint_ref": "OQ3 recompute amplification",
         "src_wiring": {
-            "recompute_handler": "mnemosyne.jobs.RuntimeJobHandlers.run_projection_recompute (src/mnemosyne/jobs.py:88)",
-            "closure_bfs": "mnemosyne.jobs._affected_evidence_cids (src/mnemosyne/jobs.py:391)",
-            "projection_invalidation": "mnemosyne.jobs._affected_projections (src/mnemosyne/jobs.py:442)",
-            "surviving_enqueue": "mnemosyne.jobs._surviving_evidence_cids (src/mnemosyne/jobs.py:457)",
-            "passes_per_job": f"DEFAULT_CONSOLIDATION_PASSES = {PASSES_PER_JOB} (src/mnemosyne/consolidation.py:25)",
+            "recompute_handler": "mnemosyne.jobs.RuntimeJobHandlers.run_projection_recompute",
+            "closure_bfs": "mnemosyne.jobs._affected_evidence_cids",
+            "projection_invalidation": "mnemosyne.jobs._affected_projections",
+            "dirty_enqueue": "mnemosyne.jobs._surviving_evidence_cids + _dirty_recompute_cids",
+            "passes_per_job": "projection recompute reports the pass list scheduled for each dirty source",
             "job_kind": PROJECTION_RECOMPUTE_JOB,
         },
         "metric": {
@@ -215,15 +216,13 @@ def main() -> dict[str, object]:
             "memo_hit_rate": ">0 on identical replay (dirty-skip / memoized recompute)",
         },
         "honest_status": {
-            "dirty_check_today": False,
-            "memo_table_today": False,
+            "dirty_check_today": True,
+            "memo_guard_today": True,
+            "persisted_memo_table_today": False,
             "note": (
-                "No dirty-check or memo table exists: run_projection_recompute "
-                "enqueues a full 11-pass consolidation per surviving cid in the "
-                "BFS closure and re-enqueues identically on replay (memo_hit_rate "
-                "== 0.0). Amplification is therefore >> 1.0 — every projection in "
-                "the closure pays the full pipeline whether or not its inputs "
-                "actually changed."
+                "run_projection_recompute has an in-process identical-replay memo "
+                "guard, a first-run dirty-set filter, and projection-specific "
+                "default pass selection."
             ),
         },
         "verdict": {
@@ -231,15 +230,8 @@ def main() -> dict[str, object]:
             "memoization_present": mean_memo > 0.0,
         },
         "wiring_to_reduce_amplification": [
-            "Add a projection-input fingerprint (hash of contributing "
-            "source_evidence_cids + their content versions) and skip enqueue when "
-            "the fingerprint is unchanged — turn _surviving_evidence_cids into a "
-            "dirty-set filter (jobs.py:457).",
-            "Introduce a memo table keyed on (tenant,branch,projection_id,input_hash) "
-            "so an identical replay hits the cache (memo_hit_rate -> 1.0).",
-            "Run only the passes whose outputs a given projection depends on instead "
-            "of the full DEFAULT_CONSOLIDATION_PASSES pipeline per cid "
-            "(consolidation.py pass selection).",
+            "Persist the in-process memo key if cross-process replay skipping is "
+            "required by the release audit.",
         ],
     }
     emit(payload)

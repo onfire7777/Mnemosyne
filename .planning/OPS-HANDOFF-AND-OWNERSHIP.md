@@ -1,6 +1,6 @@
 # Mnemosyne — Deployment & Operations Handoff + Ownership Registry
 
-**Date:** 2026-06-23
+**Date:** 2026-06-29
 **Type:** Ops/deployment coordination + artifact-ownership registry. **NOT a coding plan.**
 **Scope source (do not recompute):** `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md` (10 "Partial" rows) and memory `mnemosyne-topology-and-status`.
 
