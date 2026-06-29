@@ -6,6 +6,7 @@ from mnemosyne.guard import no_degradation_guard
 from mnemosyne.lifecycle import FidelityTier, LifecycleState, apply_rehearsal_schedule, next_rehearsal_days
 from mnemosyne.user_model import (
     LatentUserProfile,
+    SupportStrategy,
     UserMemoryKind,
     UserMistakeEvent,
     UserModel,
@@ -267,6 +268,55 @@ def test_single_user_slip_creates_no_support_strategy() -> None:
     assert result["strategy_id"] is None
     assert result["similar_count"] == 1
     assert model.context_packet(TENANT, USER, {"task": "deploy"})["support_strategies"] == []
+
+
+def test_user_mistake_event_and_support_strategy_serialize_stable_envelopes() -> None:
+    event = UserMistakeEvent(
+        tenant_id=TENANT,
+        user_id=USER,
+        pattern="date-math-before-deploy",
+        description="Off-by-one on the deploy window.",
+        scope={"task": "deploy"},
+        occurred_at=datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC),
+        id="mistake-event-1",
+    )
+    strategy = SupportStrategy(
+        tenant_id=TENANT,
+        user_id=USER,
+        pattern="date-math-before-deploy",
+        suggestion="Offer to double-check date math before deploys.",
+        scope={"task": "deploy"},
+        supporting_event_ids=[event.id],
+        status="active",
+        created_at=datetime(2026, 1, 2, 3, 5, 0, tzinfo=UTC),
+        id="support-strategy-1",
+    )
+
+    event_payload = event.to_dict()
+    strategy_payload = strategy.to_dict()
+
+    assert set(event_payload) == {
+        "tenant_id",
+        "user_id",
+        "pattern",
+        "description",
+        "scope",
+        "occurred_at",
+        "id",
+    }
+    assert set(strategy_payload) == {
+        "tenant_id",
+        "user_id",
+        "pattern",
+        "suggestion",
+        "scope",
+        "supporting_event_ids",
+        "status",
+        "created_at",
+        "id",
+    }
+    assert UserMistakeEvent.from_dict(event_payload) == event
+    assert SupportStrategy.from_dict(strategy_payload) == strategy
 
 
 def test_repeated_user_mistakes_promote_scoped_reversible_support_strategy() -> None:

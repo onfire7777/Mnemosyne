@@ -48,7 +48,14 @@ from mnemosyne.retrieval import CommandMediaEmbeddingProvider
 from mnemosyne.runtime_state import RuntimeState
 from mnemosyne.storage import EncryptedLocalObjectStore, JsonKeyManager, LocalObjectStore
 from mnemosyne.text import hashing_embedding
-from mnemosyne.user_model import LatentUserProfile, UserMemoryKind, UserModel, UserModelEntry
+from mnemosyne.user_model import (
+    LatentUserProfile,
+    SupportStrategy,
+    UserMemoryKind,
+    UserMistakeEvent,
+    UserModel,
+    UserModelEntry,
+)
 
 
 TENANT = "tenant-runtime-extensions"
@@ -1912,7 +1919,7 @@ def test_runtime_state_round_trips_local_side_state_without_postgres(tmp_path) -
     assert state is not None
     assert state.path == store_path.with_suffix(store_path.suffix + ".runtime.json")
 
-    model = UserModel()
+    model = UserModel(support_strategy_threshold=3)
     model.add_entry(
         UserModelEntry(
             tenant_id=tenant,
@@ -1932,6 +1939,19 @@ def test_runtime_state_round_trips_local_side_state_without_postgres(tmp_path) -
             summary="Local runtime state profile",
         )
     )
+    support_results = [
+        model.record_user_mistake(
+            UserMistakeEvent(
+                tenant_id=tenant,
+                user_id=USER,
+                pattern="deploy_date_math",
+                description=f"Local runtime state deploy date math slip {index}",
+                scope={"surface": "local-runtime"},
+            ),
+            suggestion="Offer to double-check deploy date math before release.",
+        )
+        for index in range(3)
+    ]
 
     learning = LearningSystem(LocalMemoryEngine())
     trajectory = Trajectory(
@@ -1986,6 +2006,34 @@ def test_runtime_state_round_trips_local_side_state_without_postgres(tmp_path) -
     assert context["authoritative"][0]["statement"] == "Prefer local runtime-state verification even without Postgres."
     assert context["authoritative"][0]["source_evidence_cids"] == [source_cid]
     assert context["latent_advisory"]["summary"] == "Local runtime state profile"
+    assert loaded_model.support_strategy_threshold == 3
+    assert [item["suggestion"] for item in context["support_strategies"]] == [
+        "Offer to double-check deploy date math before release."
+    ]
+    assert len(loaded_model.mistake_events) == 3
+    strategy_id = context["support_strategies"][0]["id"]
+    assert loaded_model.support_strategies[strategy_id].supporting_event_ids == [
+        support_results[0]["event_id"],
+        support_results[1]["event_id"],
+        support_results[2]["event_id"],
+    ]
+    for index in range(2):
+        loaded_model.record_user_mistake(
+            UserMistakeEvent(
+                tenant_id=tenant,
+                user_id=USER,
+                pattern="local_threshold_probe",
+                description=f"Local threshold probe slip {index}",
+                scope={"surface": "local-runtime"},
+            )
+        )
+    assert len(
+        [
+            strategy
+            for strategy in loaded_model.support_strategies.values()
+            if strategy.pattern == "local_threshold_probe"
+        ]
+    ) == 0
     assert sorted(loaded_learning.trajectories) == [trajectory.id]
     assert sorted(loaded_learning.attributions) == [trajectory.id]
     assert sorted(loaded_learning.lessons) == [lesson.id]
@@ -1999,6 +2047,12 @@ def test_runtime_state_round_trips_local_side_state_without_postgres(tmp_path) -
     assert metric_snapshot["samples"]["runtime.local_state.latency_ms"] == [9.0]
     assert [case.to_dict() for case in loaded_cases] == [case.to_dict() for case in gate_cases]
 
+    assert loaded_model.retire_support_strategy(strategy_id) is True
+    reloaded.save_user_model(loaded_model)
+    retired_model = RuntimeState.from_store_path(store_path).load_user_model()
+    assert retired_model.context_packet(tenant, USER, {"surface": "local-runtime"})["support_strategies"] == []
+    assert retired_model.support_strategies[strategy_id].status == "retired"
+
 
 def test_runtime_state_round_trips_local_and_postgres_parity(tmp_path) -> None:
     dsn = os.environ.get("MNEMOSYNE_POSTGRES_DSN")
@@ -2008,7 +2062,7 @@ def test_runtime_state_round_trips_local_and_postgres_parity(tmp_path) -> None:
 
     tenant = f"{TENANT}-runtime-state-{uuid4()}"
     source_cid = f"cidv1:{sha256(b'runtime-state-evidence').hexdigest()}"
-    model = UserModel()
+    model = UserModel(support_strategy_threshold=3)
     model.add_entry(
         UserModelEntry(
             tenant_id=tenant,
@@ -2028,6 +2082,17 @@ def test_runtime_state_round_trips_local_and_postgres_parity(tmp_path) -> None:
             summary="Runtime state parity profile",
         )
     )
+    for index in range(3):
+        model.record_user_mistake(
+            UserMistakeEvent(
+                tenant_id=tenant,
+                user_id=USER,
+                pattern="cli_runtime_ordering",
+                description=f"Runtime parity CLI ordering slip {index}",
+                scope={"surface": "cli"},
+            ),
+            suggestion="Offer to double-check CLI runtime ordering before execution.",
+        )
 
     learning = LearningSystem(LocalMemoryEngine())
     trajectory = Trajectory(
@@ -2078,6 +2143,7 @@ def test_runtime_state_round_trips_local_and_postgres_parity(tmp_path) -> None:
         loaded_cases = state.load_gate_cases()
         return {
             "user_model": loaded_model.context_packet(tenant, USER, {"surface": "cli"}),
+            "support_strategy_threshold": loaded_model.support_strategy_threshold,
             "learning": {
                 "trajectories": sorted((item.to_dict() for item in loaded_learning.trajectories.values()), key=lambda item: item["id"]),
                 "attributions": sorted(
@@ -2103,6 +2169,9 @@ def test_runtime_state_round_trips_local_and_postgres_parity(tmp_path) -> None:
     postgres_snapshot = snapshot(PostgresRuntimeState(dsn, tenant_id=tenant))
 
     assert local_snapshot == postgres_snapshot
+    assert [item["suggestion"] for item in postgres_snapshot["user_model"]["support_strategies"]] == [
+        "Offer to double-check CLI runtime ordering before execution."
+    ]
 
 
 def test_postgres_runtime_state_isolates_tenant_side_state() -> None:
@@ -2141,6 +2210,17 @@ def test_postgres_runtime_state_isolates_tenant_side_state() -> None:
                 summary=f"{tenant} latent profile",
             )
         )
+        for index in range(2):
+            model.record_user_mistake(
+                UserMistakeEvent(
+                    tenant_id=tenant,
+                    user_id=user,
+                    pattern="runtime_isolation_scope",
+                    description=f"{statement} support event {index}",
+                    scope={"surface": "runtime-isolation"},
+                ),
+                suggestion=f"Offer {user} scoped runtime-state assistance.",
+            )
 
     learning = LearningSystem(LocalMemoryEngine())
     for tenant, user, label in [(tenant_a, user_a, "tenant-a"), (tenant_b, user_b, "tenant-b")]:
@@ -2214,6 +2294,16 @@ def test_postgres_runtime_state_isolates_tenant_side_state() -> None:
     assert [item["statement"] for item in packet_b["authoritative"]] == [
         "Tenant B prefers isolated runtime state."
     ]
+    assert [item["suggestion"] for item in packet_a["support_strategies"]] == [
+        f"Offer {user_a} scoped runtime-state assistance."
+    ]
+    assert [item["suggestion"] for item in packet_b["support_strategies"]] == [
+        f"Offer {user_b} scoped runtime-state assistance."
+    ]
+    assert {event.tenant_id for event in loaded_a_model.mistake_events} == {tenant_a}
+    assert {event.tenant_id for event in loaded_b_model.mistake_events} == {tenant_b}
+    assert {strategy.tenant_id for strategy in loaded_a_model.support_strategies.values()} == {tenant_a}
+    assert {strategy.tenant_id for strategy in loaded_b_model.support_strategies.values()} == {tenant_b}
     assert {item.tenant_id for item in loaded_a_learning.trajectories.values()} == {tenant_a}
     assert {item.tenant_id for item in loaded_b_learning.trajectories.values()} == {tenant_b}
     assert {item.tenant_id for item in loaded_a_learning.lessons.values()} == {tenant_a}
@@ -2260,6 +2350,84 @@ def test_postgres_runtime_state_isolates_tenant_side_state() -> None:
     }
     assert mirror_counts(state_a) == expected_counts
     assert mirror_counts(state_b) == expected_counts
+
+
+def test_postgres_runtime_state_filters_contaminated_support_strategy_payload() -> None:
+    dsn = os.environ.get("MNEMOSYNE_POSTGRES_DSN")
+    if not dsn:
+        pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+    from mnemosyne.postgres_runtime_state import PostgresRuntimeState
+
+    tenant = f"{TENANT}-support-contamination-{uuid4()}"
+    other_tenant = f"{TENANT}-support-contamination-other-{uuid4()}"
+    user = f"{USER}-support"
+    other_user = f"{USER}-support-other"
+    state = PostgresRuntimeState(dsn, tenant_id=tenant)
+    good_event = UserMistakeEvent(
+        tenant_id=tenant,
+        user_id=user,
+        pattern="support_scope",
+        description="Tenant-local support event.",
+        scope={"surface": "support-contamination"},
+    )
+    same_tenant_wrong_user_event = UserMistakeEvent(
+        tenant_id=tenant,
+        user_id=other_user,
+        pattern="support_scope",
+        description="Same-tenant event for a different user.",
+        scope={"surface": "support-contamination"},
+    )
+    other_tenant_event = UserMistakeEvent(
+        tenant_id=other_tenant,
+        user_id=user,
+        pattern="support_scope",
+        description="Wrong-tenant support event.",
+        scope={"surface": "support-contamination"},
+    )
+    good_strategy = SupportStrategy(
+        tenant_id=tenant,
+        user_id=user,
+        pattern="support_scope",
+        suggestion="Offer tenant-local support only.",
+        scope={"surface": "support-contamination"},
+        supporting_event_ids=[
+            good_event.id,
+            same_tenant_wrong_user_event.id,
+            other_tenant_event.id,
+        ],
+    )
+    wrong_tenant_strategy = SupportStrategy(
+        tenant_id=other_tenant,
+        user_id=user,
+        pattern="support_scope",
+        suggestion="This strategy must not load.",
+        scope={"surface": "support-contamination"},
+        supporting_event_ids=[other_tenant_event.id],
+    )
+    state._save_payload(
+        "user_model",
+        {
+            "entries": [],
+            "latent_profiles": [],
+            "mistake_events": [
+                good_event.to_dict(),
+                same_tenant_wrong_user_event.to_dict(),
+                other_tenant_event.to_dict(),
+            ],
+            "support_strategies": [
+                good_strategy.to_dict(),
+                wrong_tenant_strategy.to_dict(),
+            ],
+            "support_strategy_threshold": 3,
+        },
+    )
+
+    loaded = state.load_user_model()
+
+    assert loaded.support_strategy_threshold == 3
+    assert {event.tenant_id for event in loaded.mistake_events} == {tenant}
+    assert set(loaded.support_strategies) == {good_strategy.id}
+    assert loaded.support_strategies[good_strategy.id].supporting_event_ids == [good_event.id]
 
 
 def test_runtime_job_handler_public_methods_return_structured_results() -> None:

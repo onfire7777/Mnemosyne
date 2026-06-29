@@ -7,10 +7,10 @@ routing, and production ops reporting.
 
 ## Real-Infra Dependency
 
-Hosted production dashboard URL plus live ops report inputs. A dashboard
-package can appear only as retained pre-existing external input evidence for
-`ops-dashboard-check`; production capture must not generate one with
-`ops-report --dashboard-package-dir`.
+Hosted production dashboard URL plus live ops report inputs. Local dashboard
+packages are preflight/development artifacts only; production release evidence
+must come from `ops-dashboard-check --dashboard-url` and must not use
+`--dashboard-package-dir` or generate one with `ops-report --dashboard-package-dir`.
 
 ## Gate Commands
 

@@ -9951,12 +9951,20 @@ def _release_ops_dashboard_evidence_findings(stdout_json: Mapping[str, Any]) -> 
         add("ops-dashboard-check report must be ok")
     if stdout_json.get("findings") != []:
         add("ops-dashboard-check report must not contain findings")
+    if stdout_json.get("mode") != "hosted_url":
+        add("ops-dashboard-check production evidence must use hosted_url mode")
+    source = stdout_json.get("source")
+    if not isinstance(source, Mapping) or not isinstance(source.get("dashboard_url"), str) or not source["dashboard_url"]:
+        add("ops-dashboard-check hosted dashboard_url source is required")
     checks_raw = stdout_json.get("checks")
     if not isinstance(checks_raw, list):
         add("ops-dashboard-check checks must be a list")
         return findings
     checks = [item for item in checks_raw if isinstance(item, Mapping)]
     checks_by_name = {str(item.get("name") or ""): item for item in checks}
+    hosted_dashboard = checks_by_name.get("hosted_dashboard")
+    if not isinstance(hosted_dashboard, Mapping) or hosted_dashboard.get("ok") is not True:
+        add("ops-dashboard-check hosted_dashboard check must be ok")
     required_check_names = (
         "dashboard_operations_scope",
         "dashboard_refresh",

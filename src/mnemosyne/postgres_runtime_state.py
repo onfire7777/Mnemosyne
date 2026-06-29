@@ -16,11 +16,24 @@ from mnemosyne.postgres_engine import (
 )
 from mnemosyne.queue import InProcessQueue
 from mnemosyne.retrieval import HashingEmbeddingProvider
-from mnemosyne.user_model import LatentUserProfile, UserMemoryKind, UserModel, UserModelEntry
+from mnemosyne.user_model import (
+    LatentUserProfile,
+    SupportStrategy,
+    UserMemoryKind,
+    UserMistakeEvent,
+    UserModel,
+    UserModelEntry,
+)
 
 
 _DEFAULT_RUNTIME_PAYLOAD: dict[str, Any] = {
-    "user_model": {"entries": [], "latent_profiles": []},
+    "user_model": {
+        "entries": [],
+        "latent_profiles": [],
+        "mistake_events": [],
+        "support_strategies": [],
+        "support_strategy_threshold": 2,
+    },
     "learning": {"trajectories": [], "attributions": [], "lessons": [], "procedures": []},
     "queue": {"order": [], "jobs": []},
     "metrics": {"counters": {}, "gauges": {}, "samples": {}},
@@ -28,6 +41,13 @@ _DEFAULT_RUNTIME_PAYLOAD: dict[str, Any] = {
 }
 
 _PREFERENCE_CATEGORIES = {"format", "tone", "workflow", "tooling", "domain", "constraint"}
+
+
+def _support_strategy_threshold(value: Any) -> int:
+    try:
+        return max(2, int(value))
+    except (TypeError, ValueError):
+        return 2
 
 
 class PostgresRuntimeState:
@@ -111,11 +131,41 @@ class PostgresRuntimeState:
         payload = self._load_payload("user_model", None)
         if payload is None:
             return self._load_user_model_from_tables()
-        model = UserModel()
+        model = UserModel(
+            support_strategy_threshold=_support_strategy_threshold(
+                payload.get("support_strategy_threshold", 2)
+            )
+        )
         for row in payload.get("entries", []):
-            model.add_entry(UserModelEntry.from_dict(row))
+            entry = UserModelEntry.from_dict(row)
+            if entry.tenant_id == self.tenant_id:
+                model.add_entry(entry)
         for row in payload.get("latent_profiles", []):
-            model.set_latent_profile(LatentUserProfile.from_dict(row))
+            profile = LatentUserProfile.from_dict(row)
+            if profile.tenant_id == self.tenant_id:
+                model.set_latent_profile(profile)
+        model.mistake_events = [
+            event
+            for event in (UserMistakeEvent.from_dict(row) for row in payload.get("mistake_events", []))
+            if event.tenant_id == self.tenant_id
+        ]
+        event_scopes = {
+            event.id: (event.user_id, event.pattern, event.scope)
+            for event in model.mistake_events
+        }
+        model.support_strategies = {
+            strategy.id: strategy
+            for strategy in (
+                SupportStrategy.from_dict(row) for row in payload.get("support_strategies", [])
+            )
+            if strategy.tenant_id == self.tenant_id
+        }
+        for strategy in model.support_strategies.values():
+            strategy.supporting_event_ids = [
+                event_id
+                for event_id in strategy.supporting_event_ids
+                if event_scopes.get(event_id) == (strategy.user_id, strategy.pattern, strategy.scope)
+            ]
         return model
 
     def save_user_model(self, model: UserModel) -> None:
@@ -123,11 +173,31 @@ class PostgresRuntimeState:
         latent_profiles = [
             profile for profile in model.latent_profiles.values() if profile.tenant_id == self.tenant_id
         ]
+        mistake_events = [event for event in model.mistake_events if event.tenant_id == self.tenant_id]
+        event_scopes = {
+            event.id: (event.user_id, event.pattern, event.scope)
+            for event in mistake_events
+        }
+        support_strategies = [
+            strategy for strategy in model.support_strategies.values() if strategy.tenant_id == self.tenant_id
+        ]
+        serialized_support_strategies = []
+        for strategy in support_strategies:
+            row = strategy.to_dict()
+            row["supporting_event_ids"] = [
+                event_id
+                for event_id in row["supporting_event_ids"]
+                if event_scopes.get(event_id) == (strategy.user_id, strategy.pattern, strategy.scope)
+            ]
+            serialized_support_strategies.append(row)
         self._save_payload(
             "user_model",
             {
                 "entries": [entry.to_dict() for entry in entries],
                 "latent_profiles": [profile.to_dict() for profile in latent_profiles],
+                "mistake_events": [event.to_dict() for event in mistake_events],
+                "support_strategies": serialized_support_strategies,
+                "support_strategy_threshold": model.support_strategy_threshold,
             },
         )
         self._mirror_user_model(entries, latent_profiles)
