@@ -16,7 +16,10 @@ CLI commands consumed by `deployment-soak` and `release-audit`.
   outside the repository.
 - `infra/scripts/render-production-soak-manifest.sh` - canonical renderer for
   non-secret `MNEMOSYNE_PROD_*` placeholders; refuses repo-local output by
-  default and validates the production command profile before writing.
+  default and validates the production command profile before writing. Its
+  `--check-environment` JSON exposes `parity_row_readiness` so the flat
+  manifest-referenced input-artifact inventory can be assigned to the matching
+  Tier-B row runbook without exposing custody paths.
 - `infra/scripts/capture-production-evidence.sh` - operator capture wrapper
   that validates the rendered manifest, rejects unresolved production
   placeholders, rejects duplicate or unknown production commands, rejects
@@ -61,6 +64,8 @@ CLI commands consumed by `deployment-soak` and `release-audit`.
 - Local and compose evidence can prove gate mechanics, but cannot satisfy Tier B.
 - `--preflight-only` output is setup proof only; it does not flip any row to
   Done.
+- `parity_row_readiness` output from the renderer is readiness routing metadata
+  only; it does not add a gate and does not flip any row to Done.
 - Each row handoff resumes only after the operator reports the row's evidence
   capture signal from the row runbook. The generic defer signal is
   `skip operator gates`.

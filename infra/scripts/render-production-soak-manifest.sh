@@ -254,6 +254,109 @@ def annotate_artifact_routes(artifact: dict[str, object]) -> None:
                     lanes.extend(str(lane) for lane in check_lanes)
     artifact["parity_routes"] = parity_routes_for_lanes(lanes)
 
+
+def build_parity_row_readiness(
+    artifacts: list[dict[str, object]],
+    *,
+    row_errors: dict[str, list[str]] | None = None,
+) -> list[dict[str, object]]:
+    rows: dict[str, dict[str, object]] = {}
+    seen_artifacts: dict[str, set[str]] = {}
+    seen_checks: dict[str, set[tuple[str, str, str]]] = {}
+    includes_exists = any("exists" in artifact for artifact in artifacts)
+    row_errors = row_errors or {}
+
+    for artifact in artifacts:
+        relative_path = artifact.get("relative_path")
+        if not isinstance(relative_path, str) or not relative_path:
+            continue
+        routes = artifact.get("parity_routes", [])
+        if not isinstance(routes, list):
+            continue
+        checks = artifact.get("checks", [])
+        if not isinstance(checks, list):
+            checks = []
+        exists = artifact.get("exists")
+        for route in routes:
+            if not isinstance(route, dict):
+                continue
+            lane = route.get("lane")
+            if not isinstance(lane, str) or lane not in parity_routes:
+                continue
+            row = rows.setdefault(
+                lane,
+                {
+                    "lane": lane,
+                    "row": parity_routes[lane]["row"],
+                    "title": parity_routes[lane]["title"],
+                    "runbook": parity_routes[lane]["runbook"],
+                    "required_input_artifacts": [],
+                    "checks": [],
+                },
+            )
+            seen_artifacts.setdefault(lane, set())
+            if relative_path not in seen_artifacts[lane]:
+                row["required_input_artifacts"].append(relative_path)
+                seen_artifacts[lane].add(relative_path)
+            if includes_exists and exists is False:
+                row.setdefault("missing_input_artifacts", []).append(relative_path)
+            seen_checks.setdefault(lane, set())
+            for check in checks:
+                if not isinstance(check, dict):
+                    continue
+                check_lanes = check.get("parity_lanes", [])
+                if not isinstance(check_lanes, list) or lane not in check_lanes:
+                    continue
+                name = check.get("name")
+                command = check.get("command")
+                option = check.get("option")
+                if not all(isinstance(value, str) for value in (name, command, option)):
+                    continue
+                check_key = (name, command, option)
+                if check_key in seen_checks[lane]:
+                    continue
+                row["checks"].append(
+                    {
+                        "name": name,
+                        "command": command,
+                        "option": option,
+                    }
+                )
+                seen_checks[lane].add(check_key)
+
+    for lane, errors in row_errors.items():
+        if lane not in parity_routes:
+            continue
+        row = rows.setdefault(
+            lane,
+            {
+                "lane": lane,
+                "row": parity_routes[lane]["row"],
+                "title": parity_routes[lane]["title"],
+                "runbook": parity_routes[lane]["runbook"],
+                "required_input_artifacts": [],
+                "checks": [],
+            },
+        )
+        row.setdefault("input_artifact_errors", []).extend(errors)
+
+    for row in rows.values():
+        row["required_input_artifact_count"] = len(row["required_input_artifacts"])
+        row["required_input_artifacts"] = sorted(row["required_input_artifacts"])
+        row["checks"] = sorted(
+            row["checks"],
+            key=lambda item: (item["command"], item["name"], item["option"]),
+        )
+        if includes_exists:
+            missing = sorted(set(row.get("missing_input_artifacts", [])))
+            errors = sorted(set(row.get("input_artifact_errors", [])))
+            row["missing_input_artifacts"] = missing
+            row["input_artifact_errors"] = errors
+            row["input_artifacts_complete"] = not missing and not errors
+
+    return sorted(rows.values(), key=lambda row: int(row["row"]))
+
+
 template_manifest = json.loads(template_text)
 
 
@@ -333,6 +436,7 @@ template_input_artifact_plan = collect_template_input_artifact_plan(template_man
 template_input_artifact_names = [
     str(artifact["relative_path"]) for artifact in template_input_artifact_plan
 ]
+template_parity_row_readiness = build_parity_row_readiness(template_input_artifact_plan)
 
 if list_placeholders:
     print(
@@ -343,6 +447,7 @@ if list_placeholders:
                 "required_input_artifact_count": len(template_input_artifact_names),
                 "required_input_artifacts": template_input_artifact_names,
                 "required_input_artifacts_plan": template_input_artifact_plan,
+                "parity_row_readiness": template_parity_row_readiness,
             },
             indent=2,
         )
@@ -365,6 +470,7 @@ if check_environment:
         "required_input_artifact_count": len(template_input_artifact_names),
         "required_input_artifacts": template_input_artifact_names,
         "required_input_artifacts_plan": template_input_artifact_plan,
+        "parity_row_readiness": template_parity_row_readiness,
         "next_steps": next_steps,
     }
     if missing:
@@ -592,6 +698,14 @@ def is_url(value: str) -> bool:
     return bool(parsed.scheme and parsed.netloc)
 
 input_artifact_errors: list[str] = []
+input_artifact_row_errors: dict[str, list[str]] = {}
+
+
+def add_input_artifact_error(message: str, *, lane: str | None = None) -> None:
+    input_artifact_errors.append(message)
+    if lane:
+        input_artifact_row_errors.setdefault(lane, []).append(message)
+
 
 def evidence_relative_path(value: str, *, label: str) -> tuple[Path, str] | None:
     candidate = Path(value).expanduser()
@@ -603,13 +717,13 @@ def evidence_relative_path(value: str, *, label: str) -> tuple[Path, str] | None
     except ValueError:
         lexical_relative = None
     if lexical_relative is not None and ".." in lexical_relative.parts:
-        input_artifact_errors.append(f"{label} must not contain '..' path segments")
+        add_input_artifact_error(f"{label} must not contain '..' path segments")
         return None
     try:
         relative = resolved.relative_to(evidence_dir_resolved)
     except ValueError:
         if lexical_relative is not None:
-            input_artifact_errors.append(f"{label} must resolve under MNEMOSYNE_PROD_EVIDENCE_DIR")
+            add_input_artifact_error(f"{label} must resolve under MNEMOSYNE_PROD_EVIDENCE_DIR")
         return None
     return resolved, relative.as_posix()
 
@@ -705,11 +819,17 @@ def artifact_relative_name(value: str) -> str:
 
 def record_suite_nested_artifact(value: object, *, suite_name: str, field: str) -> None:
     if not isinstance(value, str) or not value.strip() or is_url(value):
-        input_artifact_errors.append(f"{suite_name} {field} must be an absolute external path")
+        add_input_artifact_error(
+            f"{suite_name} {field} must be an absolute external path",
+            lane="B5",
+        )
         return
     candidate = Path(value).expanduser()
     if not candidate.is_absolute():
-        input_artifact_errors.append(f"{suite_name} {field} must be an absolute external path")
+        add_input_artifact_error(
+            f"{suite_name} {field} must be an absolute external path",
+            lane="B5",
+        )
         return
     error_count = len(input_artifact_errors)
     relative_result = evidence_relative_path(
@@ -718,7 +838,14 @@ def record_suite_nested_artifact(value: object, *, suite_name: str, field: str) 
     )
     if relative_result is None:
         if len(input_artifact_errors) == error_count:
-            input_artifact_errors.append(f"{suite_name} {field} must live under MNEMOSYNE_PROD_EVIDENCE_DIR")
+            add_input_artifact_error(
+                f"{suite_name} {field} must live under MNEMOSYNE_PROD_EVIDENCE_DIR",
+                lane="B5",
+            )
+        else:
+            input_artifact_row_errors.setdefault("B5", []).extend(
+                input_artifact_errors[error_count:]
+            )
         return
     resolved, relative_name = relative_result
     artifact = {
@@ -764,7 +891,10 @@ def inspect_provenance_suites(manifest_payload: dict[str, Any]) -> None:
             suite_name = artifact_relative_name(suite_value)
             suite_path = Path(suite_value).expanduser()
             if not suite_path.is_absolute():
-                input_artifact_errors.append(f"{suite_name} must be an absolute external path")
+                add_input_artifact_error(
+                    f"{suite_name} must be an absolute external path",
+                    lane="B5",
+                )
                 continue
             suite_resolved = suite_path.resolve(strict=False)
             if not suite_resolved.exists() or not suite_resolved.is_file():
@@ -772,18 +902,30 @@ def inspect_provenance_suites(manifest_payload: dict[str, Any]) -> None:
             try:
                 suite_payload = json.loads(suite_resolved.read_text(encoding="utf-8"))
             except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-                input_artifact_errors.append(f"{suite_name} must be readable UTF-8 JSON")
+                add_input_artifact_error(
+                    f"{suite_name} must be readable UTF-8 JSON",
+                    lane="B5",
+                )
                 continue
             if not isinstance(suite_payload, dict):
-                input_artifact_errors.append(f"{suite_name} must be a JSON object")
+                add_input_artifact_error(
+                    f"{suite_name} must be a JSON object",
+                    lane="B5",
+                )
                 continue
             cases = suite_payload.get("cases")
             if not isinstance(cases, list):
-                input_artifact_errors.append(f"{suite_name} cases must be an array")
+                add_input_artifact_error(
+                    f"{suite_name} cases must be an array",
+                    lane="B5",
+                )
                 continue
             for case_index, case in enumerate(cases):
                 if not isinstance(case, dict):
-                    input_artifact_errors.append(f"{suite_name} cases[{case_index}] must be an object")
+                    add_input_artifact_error(
+                        f"{suite_name} cases[{case_index}] must be an object",
+                        lane="B5",
+                    )
                     continue
                 for field in ("asset_path", "c2pa_asset_path"):
                     if field in case:
@@ -797,6 +939,10 @@ inspect_provenance_suites(rendered_manifest)
 for artifact in input_artifacts:
     annotate_artifact_routes(artifact)
 input_artifacts = sorted(input_artifacts, key=lambda item: str(item["relative_path"]))
+parity_row_readiness = build_parity_row_readiness(
+    input_artifacts,
+    row_errors=input_artifact_row_errors,
+)
 missing_input_artifacts = [
     str(artifact["relative_path"])
     for artifact in input_artifacts
@@ -825,6 +971,7 @@ if check_environment:
         "required_input_artifacts_detail": input_artifacts,
         "missing_input_artifacts": missing_input_artifacts,
         "missing_input_artifacts_detail": missing_input_artifact_details,
+        "parity_row_readiness": parity_row_readiness,
         "input_artifact_errors": input_artifact_errors,
         "input_artifacts_complete": not missing_input_artifacts and not input_artifact_errors,
         "validation_categories": validation_categories,

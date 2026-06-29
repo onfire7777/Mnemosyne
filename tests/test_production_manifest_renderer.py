@@ -42,6 +42,7 @@ REQUIRED_PRODUCTION_INPUT_ARTIFACTS = [
     "tls-lifecycle-bundle.json",
     "worker-ops-bundle.json",
 ]
+REQUIRED_PARITY_LANES = [f"B{index}" for index in range(1, 11)]
 
 
 def _detail_by_path(payload: dict[str, object]) -> dict[str, dict[str, object]]:
@@ -50,6 +51,12 @@ def _detail_by_path(payload: dict[str, object]) -> dict[str, dict[str, object]]:
     return {
         str(item["relative_path"]): item for item in details if isinstance(item, dict)
     }
+
+
+def _row_readiness_by_lane(payload: dict[str, object]) -> dict[str, dict[str, object]]:
+    rows = payload["parity_row_readiness"]
+    assert isinstance(rows, list)
+    return {str(item["lane"]): item for item in rows if isinstance(item, dict)}
 
 
 def _assert_parity_routes_shape(routes: object) -> None:
@@ -66,6 +73,57 @@ def _assert_parity_routes_shape(routes: object) -> None:
         assert route["title"]
         assert isinstance(route["runbook"], str)
         assert route["runbook"].startswith(".planning/runbooks/row-")
+
+
+def _assert_row_readiness_shape(item: dict[str, object], *, has_exists: bool) -> None:
+    expected_keys = {
+        "lane",
+        "row",
+        "title",
+        "runbook",
+        "required_input_artifacts",
+        "required_input_artifact_count",
+        "checks",
+    }
+    if has_exists:
+        expected_keys |= {
+            "missing_input_artifacts",
+            "input_artifact_errors",
+            "input_artifacts_complete",
+        }
+    assert set(item) == expected_keys
+    assert isinstance(item["lane"], str)
+    assert item["lane"].startswith("B")
+    assert isinstance(item["row"], int)
+    assert 1 <= item["row"] <= 10
+    assert isinstance(item["title"], str)
+    assert item["title"]
+    assert isinstance(item["runbook"], str)
+    assert item["runbook"].startswith(".planning/runbooks/row-")
+    assert isinstance(item["required_input_artifacts"], list)
+    assert item["required_input_artifacts"]
+    assert item["required_input_artifact_count"] == len(
+        item["required_input_artifacts"]
+    )
+    assert all(isinstance(path, str) for path in item["required_input_artifacts"])
+    assert all(
+        not Path(path).is_absolute() for path in item["required_input_artifacts"]
+    )
+    assert isinstance(item["checks"], list)
+    assert item["checks"]
+    for check in item["checks"]:
+        assert isinstance(check, dict)
+        assert set(check) == {"name", "command", "option"}
+        assert all(isinstance(check[key], str) for key in ("name", "command", "option"))
+    if has_exists:
+        assert isinstance(item["missing_input_artifacts"], list)
+        assert all(isinstance(path, str) for path in item["missing_input_artifacts"])
+        assert all(
+            not Path(path).is_absolute() for path in item["missing_input_artifacts"]
+        )
+        assert isinstance(item["input_artifact_errors"], list)
+        assert all(isinstance(error, str) for error in item["input_artifact_errors"])
+        assert isinstance(item["input_artifacts_complete"], bool)
 
 
 def _assert_artifact_detail_shape(item: dict[str, object]) -> None:
@@ -252,6 +310,12 @@ def test_renderer_list_placeholders_includes_static_artifact_inventory() -> None
     assert sorted(plan_by_path) == sorted(REQUIRED_PRODUCTION_INPUT_ARTIFACTS)
     for item in plan_by_path.values():
         _assert_artifact_plan_shape(item)
+    rows = _row_readiness_by_lane(payload)
+    assert set(rows) == set(REQUIRED_PARITY_LANES)
+    for lane in REQUIRED_PARITY_LANES:
+        _assert_row_readiness_shape(rows[lane], has_exists=False)
+        assert rows[lane]["row"] == int(lane.removeprefix("B"))
+        assert "missing_input_artifacts" not in rows[lane]
     assert plan_by_path["row-10-full-suite-evidence.json"]["parity_routes"] == [
         {
             "lane": "B10",
@@ -260,6 +324,8 @@ def test_renderer_list_placeholders_includes_static_artifact_inventory() -> None
             "runbook": ".planning/runbooks/row-10-live-parity-suite.md",
         }
     ]
+    assert "row-10-full-suite-evidence.json" in rows["B10"]["required_input_artifacts"]
+    assert rows["B10"]["runbook"] == ".planning/runbooks/row-10-live-parity-suite.md"
 
 
 def test_renderer_requires_all_production_env_values(tmp_path: Path) -> None:
@@ -323,6 +389,11 @@ def test_renderer_check_environment_reports_missing_without_output() -> None:
     for item in plan_by_path.values():
         _assert_artifact_plan_shape(item)
         assert "exists" not in item
+    rows = _row_readiness_by_lane(payload)
+    assert set(rows) == set(REQUIRED_PARITY_LANES)
+    for lane in REQUIRED_PARITY_LANES:
+        _assert_row_readiness_shape(rows[lane], has_exists=False)
+        assert "input_artifacts_complete" not in rows[lane]
     assert {
         "name": "belief-revision",
         "command": "belief-revision-check",
@@ -373,6 +444,13 @@ def test_renderer_check_environment_passes_without_writing_manifest(
     for detail in details.values():
         _assert_artifact_detail_shape(detail)
         assert detail["exists"] is True
+    rows = _row_readiness_by_lane(payload)
+    assert set(rows) == set(REQUIRED_PARITY_LANES)
+    for lane in REQUIRED_PARITY_LANES:
+        _assert_row_readiness_shape(rows[lane], has_exists=True)
+        assert rows[lane]["input_artifacts_complete"] is True
+        assert rows[lane]["missing_input_artifacts"] == []
+        assert rows[lane]["input_artifact_errors"] == []
     assert {
         "name": "belief-revision",
         "command": "belief-revision-check",
@@ -450,9 +528,85 @@ def test_renderer_check_environment_fails_on_missing_input_artifacts(
     for detail in details.values():
         _assert_artifact_detail_shape(detail)
         assert detail["exists"] is False
+    rows = _row_readiness_by_lane(payload)
+    assert set(rows) == set(REQUIRED_PARITY_LANES)
+    for lane in REQUIRED_PARITY_LANES:
+        _assert_row_readiness_shape(rows[lane], has_exists=True)
+        assert rows[lane]["input_artifacts_complete"] is False
+        assert rows[lane]["missing_input_artifacts"]
+        assert rows[lane]["input_artifact_errors"] == []
     assert env["MNEMOSYNE_PROD_EVIDENCE_DIR"] not in proc.stdout
     assert env["MNEMOSYNE_PROD_C2PA_TOOL"] not in proc.stdout
     assert proc.stderr == ""
+
+
+def test_renderer_check_environment_row_readiness_scopes_single_missing_artifact(
+    tmp_path: Path,
+) -> None:
+    env = _filled_render_env(tmp_path)
+    _populate_required_input_artifacts(env)
+    (Path(env["MNEMOSYNE_PROD_EVIDENCE_DIR"]) / "auth-ops-bundle.json").unlink()
+
+    proc = subprocess.run(
+        [*RENDERER_CMD, "--check-environment"],
+        cwd=REPO,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    payload = json.loads(proc.stdout)
+
+    assert proc.returncode == 78
+    assert payload["ok"] is False
+    rows = _row_readiness_by_lane(payload)
+    assert set(rows) == set(REQUIRED_PARITY_LANES)
+    for lane in REQUIRED_PARITY_LANES:
+        _assert_row_readiness_shape(rows[lane], has_exists=True)
+    assert rows["B2"]["missing_input_artifacts"] == ["auth-ops-bundle.json"]
+    assert rows["B2"]["input_artifacts_complete"] is False
+    for lane in set(REQUIRED_PARITY_LANES) - {"B2"}:
+        assert rows[lane]["missing_input_artifacts"] == []
+        assert rows[lane]["input_artifact_errors"] == []
+        assert rows[lane]["input_artifacts_complete"] is True
+    assert env["MNEMOSYNE_PROD_EVIDENCE_DIR"] not in proc.stdout
+
+
+def test_renderer_check_environment_row_readiness_scopes_shared_provider_artifact(
+    tmp_path: Path,
+) -> None:
+    env = _filled_render_env(tmp_path)
+    _populate_required_input_artifacts(env)
+    shared_artifact = "provider-manifest.production.json"
+    (Path(env["MNEMOSYNE_PROD_EVIDENCE_DIR"]) / shared_artifact).unlink()
+
+    proc = subprocess.run(
+        [*RENDERER_CMD, "--check-environment"],
+        cwd=REPO,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    payload = json.loads(proc.stdout)
+
+    assert proc.returncode == 78
+    assert payload["ok"] is False
+    rows = _row_readiness_by_lane(payload)
+    missing_lanes = {"B1", "B4", "B6", "B9", "B10"}
+    assert set(rows) == set(REQUIRED_PARITY_LANES)
+    for lane in REQUIRED_PARITY_LANES:
+        _assert_row_readiness_shape(rows[lane], has_exists=True)
+        if lane in missing_lanes:
+            assert rows[lane]["missing_input_artifacts"] == [shared_artifact]
+            assert rows[lane]["input_artifacts_complete"] is False
+        else:
+            assert rows[lane]["missing_input_artifacts"] == []
+            assert rows[lane]["input_artifacts_complete"] is True
+        assert rows[lane]["input_artifact_errors"] == []
+    assert env["MNEMOSYNE_PROD_EVIDENCE_DIR"] not in proc.stdout
 
 
 def test_renderer_check_environment_fails_on_missing_provenance_suite_asset(
@@ -492,6 +646,11 @@ def test_renderer_check_environment_fails_on_missing_provenance_suite_asset(
     } in detail["checks"]
     assert payload["missing_input_artifacts_detail"] == [detail]
     assert payload["input_artifact_errors"] == []
+    rows = _row_readiness_by_lane(payload)
+    _assert_row_readiness_shape(rows["B5"], has_exists=True)
+    assert rows["B5"]["missing_input_artifacts"] == ["missing-suite-asset.txt"]
+    assert rows["B5"]["input_artifact_errors"] == []
+    assert rows["B5"]["input_artifacts_complete"] is False
     assert env["MNEMOSYNE_PROD_EVIDENCE_DIR"] not in proc.stdout
     assert env["MNEMOSYNE_PROD_C2PA_TOOL"] not in proc.stdout
     assert proc.stderr == ""
@@ -530,6 +689,11 @@ def test_renderer_check_environment_fails_on_invalid_provenance_suite_asset_path
         "provenance-trust-suite.json cases[0].asset_path must live under "
         "MNEMOSYNE_PROD_EVIDENCE_DIR"
     ]
+    rows = _row_readiness_by_lane(payload)
+    _assert_row_readiness_shape(rows["B5"], has_exists=True)
+    assert rows["B5"]["missing_input_artifacts"] == []
+    assert rows["B5"]["input_artifact_errors"] == payload["input_artifact_errors"]
+    assert rows["B5"]["input_artifacts_complete"] is False
     assert env["MNEMOSYNE_PROD_EVIDENCE_DIR"] not in proc.stdout
     assert env["MNEMOSYNE_PROD_C2PA_TOOL"] not in proc.stdout
     assert proc.stderr == ""
@@ -608,6 +772,11 @@ def test_renderer_check_environment_rejects_escaped_provenance_suite_asset_path(
     assert payload["input_artifact_errors"] == [
         "provenance-trust-suite.json cases[0].asset_path must not contain '..' path segments"
     ]
+    rows = _row_readiness_by_lane(payload)
+    _assert_row_readiness_shape(rows["B5"], has_exists=True)
+    assert rows["B5"]["missing_input_artifacts"] == []
+    assert rows["B5"]["input_artifact_errors"] == payload["input_artifact_errors"]
+    assert rows["B5"]["input_artifacts_complete"] is False
 
 
 def test_renderer_check_environment_accepts_provenance_suite_assets(
@@ -665,6 +834,13 @@ def test_renderer_check_environment_accepts_provenance_suite_assets(
             "option": option,
             "parity_lanes": ["B5"],
         } in detail["checks"]
+    rows = _row_readiness_by_lane(payload)
+    _assert_row_readiness_shape(rows["B5"], has_exists=True)
+    assert rows["B5"]["input_artifacts_complete"] is True
+    assert rows["B5"]["missing_input_artifacts"] == []
+    assert rows["B5"]["input_artifact_errors"] == []
+    assert "suite-asset.txt" in rows["B5"]["required_input_artifacts"]
+    assert "suite-c2pa-asset.txt" in rows["B5"]["required_input_artifacts"]
     assert (
         payload["required_input_artifact_count"]
         == len(REQUIRED_PRODUCTION_INPUT_ARTIFACTS) + 2

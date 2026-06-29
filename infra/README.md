@@ -147,9 +147,14 @@ executable C2PA verifier before rendering. Its JSON includes
 `required_input_artifacts_detail` and `missing_input_artifacts_detail` entries
 with relative path, existence, check/command/option references, Tier-B lane,
 strict-audit row, and row-runbook routing so operators can repair missing inputs
-without exposing absolute custody paths. Check-level `input_artifacts` metadata
-is included in the same custody inventory for evidence that must be retained but
-is not passed as a command argument.
+without exposing absolute custody paths. It also includes
+`parity_row_readiness`, which groups the same required artifact and check
+references by Tier-B lane/runbook and, when environment values are present,
+reports row-local missing artifacts, row-local validation errors, and
+`input_artifacts_complete`. This readiness grouping is assignment metadata only;
+the production capture plus release-audit path still gates every Partial row.
+Check-level `input_artifacts` metadata is included in the same custody inventory
+for evidence that must be retained but is not passed as a command argument.
 
 The renderer replaces non-secret `MNEMOSYNE_PROD_*` placeholders from the
 operator environment and validates production scope plus the full command

@@ -5,7 +5,7 @@ This runbook is the operator handoff for flipping the remaining Tier B parity ro
 ## Preconditions
 
 - Copy `infra/templates/production-render.env.example` outside the repo, fill the blank non-secret `MNEMOSYNE_PROD_*` values there, and source the external copy before rendering.
-- Populate `MNEMOSYNE_PROD_EVIDENCE_DIR` with the manifest-referenced production input artifacts before running `--check-environment`. The check is no-write and reports the static template-derived artifact inventory even before environment values are sourced; after `MNEMOSYNE_PROD_EVIDENCE_DIR` is set, it fails if required relative artifact names are missing from that external directory. Use `infra/templates/production-input-artifacts.checklist.md` as the non-secret operator checklist for the required artifact names.
+- Populate `MNEMOSYNE_PROD_EVIDENCE_DIR` with the manifest-referenced production input artifacts before running `--check-environment`. The check is no-write and reports the static template-derived artifact inventory plus `parity_row_readiness` grouping even before environment values are sourced; after `MNEMOSYNE_PROD_EVIDENCE_DIR` is set, it fails if required relative artifact names are missing from that external directory and shows which strict-audit row is blocked. Use `infra/templates/production-input-artifacts.checklist.md` as the non-secret operator checklist for the required artifact names.
 - Render `infra/templates/production-soak-manifest.template.json` outside the repo with `infra/scripts/render-production-soak-manifest.sh --output /secure/path/to/production-soak-manifest.json`. Manual edits are only a fallback and must still leave no unresolved `MNEMOSYNE_PROD_*` placeholders; the capture wrapper rejects unresolved placeholders before running production checks.
 - `MNEMOSYNE_PROD_EVIDENCE_DIR` and the second positional output-root argument passed to `capture-production-evidence.sh` must be absolute external custody paths outside the repository; output roots must be new and must not already exist. The wrapper does not consume a separate `PREFLIGHT_OUT_ROOT` environment variable.
 - Keep raw secrets out of `args` and `global_args`. The production wrapper rejects secret-bearing options such as `--access-token`, `--api-token`, `--github-token`, `--session-secret`, and `--password`, and it fails closed on high-confidence secret material such as JWTs, private-key blocks, GitHub tokens, AWS access keys, and `sk-*` API keys.
@@ -69,11 +69,18 @@ relative artifact names, per-artifact `exists` status, and the manifest
 check/command/option references that require each artifact via
 `required_input_artifacts_detail` and `missing_input_artifacts_detail`. Those
 entries include Tier-B lane, strict-audit row, and row-runbook routing metadata
-so operators can assign missing evidence without exposing custody paths. It does
-not print configured absolute paths or secret values. Invalid configured
-production paths and executable references are reported in the same redacted
-JSON shape through `environment_errors`, with stable error codes and variable
-names but without the configured values.
+so operators can assign missing evidence without exposing custody paths. The
+same JSON also includes `parity_row_readiness`, grouped by Tier-B lane and
+runbook. In static no-env mode, each row lists the required relative artifacts
+and check references. In env-backed mode, each row also lists missing relative
+artifacts, row-scoped input-artifact validation errors, and
+`input_artifacts_complete`. This is readiness routing metadata only; it is not a
+new release gate and cannot flip a strict-audit row without the production
+capture and release-audit path below. It does not print configured absolute
+paths or secret values. Invalid configured production paths and executable
+references are reported in the same redacted JSON shape through
+`environment_errors`, with stable error codes and variable names but without the
+configured values.
 
 The wrapper performs these steps:
 
