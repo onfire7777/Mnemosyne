@@ -199,6 +199,11 @@ from mnemosyne.evidence_redaction import (  # noqa: E402
     scan_evidence_paths,
     write_redaction_scan,
 )
+from mnemosyne.production_parity import (  # noqa: E402
+    annotate_artifact_routes,
+    build_parity_row_readiness,
+    parity_lanes_for_command,
+)
 
 
 manifest_path = Path(os.environ["MANIFEST_PATH"])
@@ -323,26 +328,71 @@ def _record_required_artifact(
     resolved: Path,
     *,
     label: str,
+    check_metadata: dict[str, object] | None = None,
     occurrence: dict[str, object] | None = None,
+    source_value: str | None = None,
 ) -> None:
     artifact = required_artifacts.setdefault(
         str(resolved),
         {
             "path": str(resolved),
             "labels": [],
+            "checks": [],
+            "source_values": [],
         },
     )
     artifact["labels"].append(label)
+    if source_value is not None and source_value:
+        artifact["source_values"].append(source_value)
+    if check_metadata is not None:
+        artifact["checks"].append(check_metadata)
     if occurrence is not None:
         artifact_occurrences.append(occurrence)
+
+def _check_metadata(command: str, check_name: str, option: str) -> dict[str, object]:
+    return {
+        "name": check_name,
+        "command": command,
+        "option": option,
+        "parity_lanes": parity_lanes_for_command(command),
+    }
+
+def _dedupe_checks(checks: object) -> list[dict[str, object]]:
+    if not isinstance(checks, list):
+        return []
+    deduped: dict[tuple[str, str, str], dict[str, object]] = {}
+    for check in checks:
+        if not isinstance(check, dict):
+            continue
+        name = check.get("name")
+        command = check.get("command")
+        option = check.get("option")
+        lanes = check.get("parity_lanes")
+        if not all(isinstance(value, str) for value in (name, command, option)):
+            continue
+        if not isinstance(lanes, list) or not all(isinstance(lane, str) for lane in lanes):
+            lanes = []
+        deduped[(name, command, option)] = {
+            "name": name,
+            "command": command,
+            "option": option,
+            "parity_lanes": sorted(set(lanes)),
+        }
+    return sorted(
+        deduped.values(),
+        key=lambda item: (str(item["command"]), str(item["name"]), str(item["option"])),
+    )
 
 def _validate_external_file_path(
     value: str,
     *,
     check_index: int,
+    command: str,
+    check_name: str,
     field: str,
     value_index: int,
     label: str,
+    option: str,
     replacement_prefix: str | None = None,
 ) -> None:
     if not _looks_like_file_path(value):
@@ -362,6 +412,8 @@ def _validate_external_file_path(
         _record_required_artifact(
             resolved,
             label=label,
+            check_metadata=_check_metadata(command, check_name, option),
+            source_value=value,
             occurrence={
                 "path": str(resolved),
                 "check_index": check_index,
@@ -393,7 +445,6 @@ def _validate_nested_input_artifact_path(value: object, *, label: str) -> Path |
     try:
         resolved.relative_to(repo_dir.resolve())
     except ValueError:
-        _record_required_artifact(resolved, label=label)
         return resolved
     errors.append(f"{label} points inside the repository: {resolved}; use an external custody path")
     return None
@@ -402,6 +453,8 @@ def _validate_manifest_input_artifact_path(
     value: object,
     *,
     check_index: int,
+    command: str,
+    check_name: str,
     value_index: int,
     label: str,
 ) -> None:
@@ -426,6 +479,12 @@ def _validate_manifest_input_artifact_path(
         _record_required_artifact(
             resolved,
             label=label,
+            check_metadata=_check_metadata(
+                command,
+                check_name,
+                f"input_artifacts[{value_index}]",
+            ),
+            source_value=value,
             occurrence={
                 "path": str(resolved),
                 "check_index": check_index,
@@ -551,6 +610,10 @@ for index, check in enumerate(checks, start=1):
         command_list.append(command)
     else:
         errors.append(f"checks[{index}].command must be a string")
+        command = ""
+    check_name = check.get("name")
+    if not isinstance(check_name, str) or not check_name:
+        check_name = command
     check_args = check.get("args", [])
     check_global_args = check.get("global_args", [])
     input_artifacts = check.get("input_artifacts", [])
@@ -562,6 +625,8 @@ for index, check in enumerate(checks, start=1):
                 _validate_manifest_input_artifact_path(
                     value,
                     check_index=index - 1,
+                    command=command,
+                    check_name=check_name,
                     value_index=value_index,
                     label=f"checks[{index}].input_artifacts",
                 )
@@ -589,9 +654,12 @@ for index, check in enumerate(checks, start=1):
                 _validate_external_file_path(
                     option_value,
                     check_index=index - 1,
+                    command=command,
+                    check_name=check_name,
                     field=field,
                     value_index=value_index,
                     label=f"checks[{index}].{field}",
+                    option=option_name,
                     replacement_prefix=f"{option_name}=",
                 )
                 continue
@@ -599,9 +667,12 @@ for index, check in enumerate(checks, start=1):
                 _validate_external_file_path(
                     option_value,
                     check_index=index - 1,
+                    command=command,
+                    check_name=check_name,
                     field=field,
                     value_index=value_index,
                     label=f"checks[{index}].{field}",
+                    option=option_name,
                     replacement_prefix=f"{option_name}=",
                 )
                 continue
@@ -627,9 +698,12 @@ for index, check in enumerate(checks, start=1):
             _validate_external_file_path(
                 value,
                 check_index=index - 1,
+                command=command,
+                check_name=check_name,
                 field=field,
                 value_index=value_index,
                 label=f"checks[{index}].{field}",
+                option=previous_option or field,
             )
     provenance_args: list[str] = []
     provenance_global_args: list[str] = []
@@ -719,6 +793,16 @@ for index, check in enumerate(checks, start=1):
                         label=f"checks[{index}].args suite cases[{case_index}].{asset_field}",
                     )
                     if asset_path is not None:
+                        _record_required_artifact(
+                            asset_path,
+                            label=f"checks[{index}].args suite cases[{case_index}].{asset_field}",
+                            check_metadata=_check_metadata(
+                                command,
+                                check_name,
+                                f"cases[{case_index}].{asset_field}",
+                            ),
+                            source_value=case.get(asset_field),
+                        )
                         suite_rewrites.append(
                             {
                                 "case_index": case_index,
@@ -892,15 +976,23 @@ for artifact_index, artifact in enumerate(
     if not snapshot_path.is_symlink():
         snapshot_path.chmod(0o600 if snapshot_path.is_file() else 0o700)
     path_rewrites[str(source_path.resolve(strict=False))] = str(snapshot_path.resolve(strict=True))
-    artifact_metadata.append(
-        {
-            "path": str(source_path.resolve(strict=True)),
-            "snapshot_path": str(snapshot_path.resolve(strict=True)),
-            "kind": kind,
-            "labels": sorted(set(str(label) for label in artifact["labels"])),
-            "files": _snapshot_file_entries(source_path, snapshot_path),
-        }
-    )
+    metadata = {
+        "path": str(source_path.resolve(strict=True)),
+        "snapshot_path": str(snapshot_path.resolve(strict=True)),
+        "kind": kind,
+        "labels": sorted(set(str(label) for label in artifact["labels"])),
+        "source_values": sorted(
+            set(
+                str(source_value)
+                for source_value in artifact.get("source_values", [])
+                if isinstance(source_value, str) and source_value
+            )
+        ),
+        "checks": _dedupe_checks(artifact.get("checks")),
+        "files": _snapshot_file_entries(source_path, snapshot_path),
+    }
+    annotate_artifact_routes(metadata)
+    artifact_metadata.append(metadata)
 
 for suite_source, rewrites in suite_case_artifact_rewrites.items():
     suite_snapshot_path = Path(path_rewrites[str(Path(suite_source).resolve(strict=False))])
@@ -920,6 +1012,26 @@ for artifact in artifact_metadata:
         Path(str(artifact["path"])),
         Path(str(artifact["snapshot_path"])),
     )
+
+def _retained_relative_path(value: object) -> str:
+    if not isinstance(value, str) or not value:
+        return ""
+    try:
+        return Path(value).resolve(strict=False).relative_to(out_root).as_posix()
+    except (OSError, ValueError):
+        return Path(value).name
+
+preflight_row_readiness = build_parity_row_readiness(
+    [
+        {
+            "relative_path": _retained_relative_path(artifact.get("snapshot_path")),
+            "checks": artifact.get("checks", []),
+            "parity_routes": artifact.get("parity_routes", []),
+            "exists": True,
+        }
+        for artifact in artifact_metadata
+    ]
+)
 
 snapshot_scan = scan_evidence_paths(
     [Path(str(artifact["snapshot_path"])) for artifact in artifact_metadata],
@@ -968,12 +1080,42 @@ for occurrence in artifact_occurrences:
     json.dumps(manifest, indent=2, sort_keys=True),
     encoding="utf-8",
 )
+retained_preflight_scan = scan_evidence_paths(
+    [
+        out_root / "source-soak-manifest.json",
+        out_root / "operator-soak-manifest.json",
+        *[Path(str(artifact["snapshot_path"])) for artifact in artifact_metadata],
+    ],
+    scope="preflight",
+    forbidden_roots=[repo_dir],
+    reject_symlinks=True,
+)
+retained_preflight_findings = retained_preflight_scan.get("findings", [])
+retained_preflight_skipped = retained_preflight_scan.get("skipped_files", [])
+if retained_preflight_findings:
+    print(
+        "ERROR: high-confidence secret material found in retained preflight evidence:",
+        file=sys.stderr,
+    )
+    for finding in retained_preflight_findings:
+        print(
+            f"  - {finding['source']}:{finding['line']} {finding['kind']}",
+            file=sys.stderr,
+        )
+    sys.exit(65)
+if retained_preflight_skipped:
+    print(
+        "ERROR: retained preflight evidence includes unscanned files:",
+        file=sys.stderr,
+    )
+    for skipped in retained_preflight_skipped:
+        print(f"  - {skipped['path']}: {skipped['reason']}", file=sys.stderr)
+    sys.exit(65)
 redaction_scan_path = out_root / "redaction-scan.json"
-preflight_scanned_files = [str(manifest_path)] + list(snapshot_scan.get("scanned_files", []))
 write_redaction_scan(
     redaction_scan_path,
     scope="preflight",
-    scanned_files=preflight_scanned_files,
+    scanned_files=list(retained_preflight_scan.get("scanned_files", [])),
     findings=[],
     skipped_files=[],
 )
@@ -988,6 +1130,7 @@ preflight = {
     "required_commands": list(PRODUCTION_RELEASE_REQUIRED_COMMANDS),
     "provided_commands": sorted(commands),
     "required_input_artifacts": artifact_metadata,
+    "parity_row_readiness": preflight_row_readiness,
     "executable_tool_references": sorted(
         executable_tool_references.values(),
         key=lambda item: (str(item["option"]), str(item["path"])),

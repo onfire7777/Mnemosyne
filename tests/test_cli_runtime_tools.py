@@ -6764,6 +6764,74 @@ def test_cli_production_evidence_verify_accepts_captured_bundle(tmp_path: Path) 
     assert report["findings"] == []
 
 
+def test_cli_production_evidence_verify_accepts_symlink_parent_source_value(tmp_path: Path) -> None:
+    bundle_dir, _bundle_fingerprint = write_production_evidence_bundle(tmp_path)
+    source_root = tmp_path / "external-inputs"
+    source_root.mkdir()
+    source_artifact = source_root / "cases.json"
+    source_artifact.write_text('{"ok": true}\n', encoding="utf-8")
+    linked_root = tmp_path / "linked-external-inputs"
+    try:
+        linked_root.symlink_to(source_root, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"symlink setup unavailable: {exc}")
+    source_value = linked_root / source_artifact.name
+
+    snapshot = bundle_dir / "input-artifacts" / "0001-cases.json"
+    snapshot.parent.mkdir()
+    shutil.copy2(source_artifact, snapshot)
+    operator_manifest_path = bundle_dir / "operator-soak-manifest.json"
+    source_manifest_path = bundle_dir / "source-soak-manifest.json"
+    operator_manifest = json.loads(operator_manifest_path.read_text(encoding="utf-8"))
+    source_manifest = json.loads(source_manifest_path.read_text(encoding="utf-8"))
+    operator_manifest["checks"][0]["args"] = ["--cases", str(snapshot)]
+    source_manifest["checks"][0]["args"] = ["--cases", str(source_value)]
+    operator_manifest_path.write_text(json.dumps(operator_manifest, indent=2, sort_keys=True), encoding="utf-8")
+    source_manifest_path.write_text(json.dumps(source_manifest, indent=2, sort_keys=True), encoding="utf-8")
+
+    preflight_path = bundle_dir / "preflight.json"
+    preflight = json.loads(preflight_path.read_text(encoding="utf-8"))
+    preflight["required_input_artifacts"] = [
+        {
+            "path": str(source_artifact.resolve(strict=True)),
+            "source_values": [str(source_value)],
+            "snapshot_path": str(snapshot.resolve(strict=True)),
+            "kind": "file",
+            "labels": ["checks[1].args"],
+            "files": [
+                {
+                    "source_path": str(source_artifact.resolve(strict=True)),
+                    "snapshot_path": str(snapshot.resolve(strict=True)),
+                    "relative_path": snapshot.name,
+                    "size_bytes": snapshot.stat().st_size,
+                    "sha256": "sha256:" + sha256(snapshot.read_bytes()).hexdigest(),
+                }
+            ],
+        }
+    ]
+    preflight_path.write_text(json.dumps(preflight, indent=2, sort_keys=True), encoding="utf-8")
+    rewrite_production_redaction_scan(bundle_dir)
+    bundle_fingerprint = rewrite_production_bundle_manifest(bundle_dir)
+    summary_path = bundle_dir / "summary.json"
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    summary["offline_verify"]["expected_bundle_fingerprint"] = bundle_fingerprint
+    summary["offline_verify"]["argv"][-1] = bundle_fingerprint
+    summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
+
+    report = run_cli(
+        tmp_path / "verify-store.json",
+        "production-evidence-verify",
+        str(bundle_dir),
+        "--expected-bundle-fingerprint",
+        bundle_fingerprint,
+    )
+
+    assert report["ok"] is True
+    assert report["checks"]["source_soak_manifest"] is True
+    assert report["checks"]["input_artifact_custody"] is True
+    assert report["findings"] == []
+
+
 def test_cli_production_evidence_verify_requires_expected_bundle_fingerprint(
     tmp_path: Path,
 ) -> None:

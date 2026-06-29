@@ -74,6 +74,7 @@ from mnemosyne.parametric import (
     protected_suite_report,
 )
 from mnemosyne.privacy import classify_privacy
+from mnemosyne.production_parity import build_parity_row_readiness
 from mnemosyne.providers import default_registry
 from mnemosyne.provenance import C2paToolVerifier, ProvenanceTrustPolicy, SignedProvenanceVerifier
 from mnemosyne.queue import InProcessQueue, PostgresQueue, QueueWorker
@@ -11031,7 +11032,53 @@ def _verify_production_evidence_preflight(
                     "preflight_input_artifact_file_sha256_mismatch",
                     f"preflight.json required_input_artifacts[{index}].files[{file_index}] sha256 does not match snapshot",
                 )
+    row_readiness = preflight.get("parity_row_readiness")
+    if row_readiness is not None:
+        if not isinstance(row_readiness, list):
+            ok = False
+            _production_evidence_finding(
+                findings,
+                "preflight_parity_row_readiness_invalid",
+                "preflight.json parity_row_readiness must be a list",
+            )
+        else:
+            expected_readiness = build_parity_row_readiness(
+                [
+                    {
+                        "relative_path": _production_evidence_retained_input_path(
+                            artifact,
+                            bundle_dir=bundle_dir,
+                        ),
+                        "checks": artifact.get("checks", []),
+                        "parity_routes": artifact.get("parity_routes", []),
+                        "exists": True,
+                    }
+                    for artifact in input_artifacts
+                    if isinstance(artifact, Mapping)
+                ]
+            )
+            if row_readiness != expected_readiness:
+                ok = False
+                _production_evidence_finding(
+                    findings,
+                    "preflight_parity_row_readiness_mismatch",
+                    "preflight.json parity_row_readiness does not match retained input artifacts",
+                )
     return ok
+
+
+def _production_evidence_retained_input_path(
+    artifact: Mapping[str, Any],
+    *,
+    bundle_dir: Path,
+) -> str:
+    snapshot_path = artifact.get("snapshot_path")
+    if not isinstance(snapshot_path, str) or not snapshot_path:
+        return ""
+    try:
+        return Path(snapshot_path).resolve(strict=False).relative_to(bundle_dir).as_posix()
+    except (OSError, ValueError):
+        return Path(snapshot_path).name
 
 
 def _iter_evidence_string_values(value: Any) -> Iterable[str]:
@@ -11433,15 +11480,29 @@ def _production_evidence_manifest_path_rewrites(preflight: Mapping[str, Any] | N
     if not isinstance(input_artifacts, list):
         return {}
     rewrites: dict[str, str] = {}
+
+    def record_rewrite(source: str, snapshot: str) -> None:
+        if not source or not snapshot:
+            return
+        snapshot_resolved = str(Path(snapshot).expanduser().resolve(strict=False))
+        rewrites[source] = snapshot_resolved
+        try:
+            rewrites[str(Path(source).expanduser().resolve(strict=False))] = snapshot_resolved
+        except (OSError, RuntimeError, ValueError):
+            pass
+
     for artifact in input_artifacts:
         if not isinstance(artifact, Mapping):
             continue
         source_path = artifact.get("path")
         snapshot_path = artifact.get("snapshot_path")
         if isinstance(source_path, str) and source_path and isinstance(snapshot_path, str) and snapshot_path:
-            rewrites[str(Path(source_path).expanduser().resolve(strict=False))] = str(
-                Path(snapshot_path).expanduser().resolve(strict=False)
-            )
+            record_rewrite(source_path, snapshot_path)
+            source_values = artifact.get("source_values", [])
+            if isinstance(source_values, list):
+                for source_value in source_values:
+                    if isinstance(source_value, str):
+                        record_rewrite(source_value, snapshot_path)
         files = artifact.get("files")
         if not isinstance(files, list):
             continue
@@ -11451,9 +11512,7 @@ def _production_evidence_manifest_path_rewrites(preflight: Mapping[str, Any] | N
             source_file = file_entry.get("source_path")
             snapshot_file = file_entry.get("snapshot_path")
             if isinstance(source_file, str) and source_file and isinstance(snapshot_file, str) and snapshot_file:
-                rewrites[str(Path(source_file).expanduser().resolve(strict=False))] = str(
-                    Path(snapshot_file).expanduser().resolve(strict=False)
-                )
+                record_rewrite(source_file, snapshot_file)
     return rewrites
 
 

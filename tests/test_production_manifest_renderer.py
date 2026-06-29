@@ -738,6 +738,12 @@ def test_renderer_check_environment_rejects_escaped_manifest_artifact_path(
         "must not contain '..' path segments" in error
         for error in payload["input_artifact_errors"]
     )
+    rows = _row_readiness_by_lane(payload)
+    assert any(
+        "must not contain '..' path segments" in error
+        for error in rows["B2"]["input_artifact_errors"]
+    )
+    assert rows["B2"]["input_artifacts_complete"] is False
 
 
 def test_renderer_check_environment_rejects_escaped_provenance_suite_asset_path(
