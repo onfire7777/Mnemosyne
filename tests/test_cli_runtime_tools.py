@@ -6346,6 +6346,11 @@ def write_production_evidence_bundle(tmp_path: Path) -> tuple[Path, str]:
     _report_path, manifest_path = write_release_report(source_root)
     bundle_dir = tmp_path / "production-evidence"
     evidence_dir = bundle_dir / "evidence"
+    c2pa_tool = tmp_path / "tools" / "c2patool"
+    c2pa_tool.parent.mkdir(parents=True, exist_ok=True)
+    c2pa_tool_payload = b"#!/bin/sh\nexit 0\n"
+    c2pa_tool.write_bytes(c2pa_tool_payload)
+    c2pa_tool.chmod(0o755)
     shutil.copytree(manifest_path.parent, evidence_dir)
 
     operator_manifest_path = bundle_dir / "operator-soak-manifest.json"
@@ -6411,6 +6416,15 @@ def write_production_evidence_bundle(tmp_path: Path) -> tuple[Path, str]:
                 "required_commands": list(PRODUCTION_RELEASE_REQUIRED_COMMANDS),
                 "provided_commands": sorted(PRODUCTION_RELEASE_REQUIRED_COMMANDS),
                 "required_input_artifacts": [],
+                "executable_tool_references": [
+                    {
+                        "option": "--c2pa-tool",
+                        "path": str(c2pa_tool),
+                        "size_bytes": len(c2pa_tool_payload),
+                        "sha256": "sha256:" + sha256(c2pa_tool_payload).hexdigest(),
+                        "labels": ["checks[9].args"],
+                    }
+                ],
             },
             indent=2,
             sort_keys=True,
@@ -6510,7 +6524,7 @@ def write_production_evidence_bundle(tmp_path: Path) -> tuple[Path, str]:
                 "completed_at": datetime.now(UTC).isoformat(),
                 "offline_verify": {
                     "bundle_dir": str(bundle_dir),
-                    "expected_bundle_fingerprint": bundle_fingerprint,
+                    "expected_bundle_fingerprint_source": "out-of-band-capture-record",
                     "argv": [
                         "python",
                         "-m",
@@ -6518,9 +6532,12 @@ def write_production_evidence_bundle(tmp_path: Path) -> tuple[Path, str]:
                         "production-evidence-verify",
                         str(bundle_dir),
                         "--expected-bundle-fingerprint",
-                        bundle_fingerprint,
+                        "<out-of-band-bundle-fingerprint>",
                     ],
-                    "note": "Custody review only; does not rerun production checks or flip audit rows.",
+                    "note": (
+                        "Custody review only; does not rerun production checks or flip audit rows. "
+                        "Expected fingerprint must come from an independently retained out-of-band capture record."
+                    ),
                 },
             },
             indent=2,
@@ -6812,11 +6829,6 @@ def test_cli_production_evidence_verify_accepts_symlink_parent_source_value(tmp_
     preflight_path.write_text(json.dumps(preflight, indent=2, sort_keys=True), encoding="utf-8")
     rewrite_production_redaction_scan(bundle_dir)
     bundle_fingerprint = rewrite_production_bundle_manifest(bundle_dir)
-    summary_path = bundle_dir / "summary.json"
-    summary = json.loads(summary_path.read_text(encoding="utf-8"))
-    summary["offline_verify"]["expected_bundle_fingerprint"] = bundle_fingerprint
-    summary["offline_verify"]["argv"][-1] = bundle_fingerprint
-    summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
 
     report = run_cli(
         tmp_path / "verify-store.json",
@@ -6875,10 +6887,11 @@ def test_cli_production_evidence_verify_allows_explicit_internal_consistency_onl
 def test_cli_production_evidence_verify_rejects_tampered_offline_verify_command(
     tmp_path: Path,
 ) -> None:
-    bundle_dir, _bundle_fingerprint = write_production_evidence_bundle(tmp_path)
+    bundle_dir, bundle_fingerprint = write_production_evidence_bundle(tmp_path)
     summary_path = bundle_dir / "summary.json"
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
-    summary["offline_verify"]["argv"][-1] = "sha256:" + ("0" * 64)
+    summary["offline_verify"]["expected_bundle_fingerprint"] = bundle_fingerprint
+    summary["offline_verify"]["argv"][-1] = bundle_fingerprint
     summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
     rewrite_production_bundle_manifest(bundle_dir)
 
@@ -7143,6 +7156,92 @@ def test_cli_production_evidence_verify_rejects_tampered_preflight(tmp_path: Pat
     assert "preflight_provided_commands_mismatch" in codes
     assert "bundle_file_sha256_mismatch" not in codes
     assert "bundle_fingerprint_mismatch" not in codes
+
+
+def test_cli_production_evidence_verify_rejects_missing_executable_tool_metadata(
+    tmp_path: Path,
+) -> None:
+    bundle_dir, _bundle_fingerprint = write_production_evidence_bundle(tmp_path)
+    preflight_path = bundle_dir / "preflight.json"
+    preflight = json.loads(preflight_path.read_text(encoding="utf-8"))
+    preflight.pop("executable_tool_references")
+    preflight_path.write_text(json.dumps(preflight, indent=2, sort_keys=True), encoding="utf-8")
+    rewrite_production_redaction_scan(bundle_dir)
+    bundle_fingerprint = rewrite_production_bundle_manifest(bundle_dir)
+
+    result = run_raw_cli(
+        tmp_path / "verify-store.json",
+        "production-evidence-verify",
+        str(bundle_dir),
+        "--expected-bundle-fingerprint",
+        bundle_fingerprint,
+    )
+    payload = json.loads(result.stdout)
+    codes = {finding["code"] for finding in payload["findings"]}
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert payload["checks"]["preflight"] is False
+    assert "preflight_executable_tool_references_missing" in codes
+
+
+def test_cli_production_evidence_verify_rejects_malformed_executable_tool_digest(
+    tmp_path: Path,
+) -> None:
+    bundle_dir, _bundle_fingerprint = write_production_evidence_bundle(tmp_path)
+    preflight_path = bundle_dir / "preflight.json"
+    preflight = json.loads(preflight_path.read_text(encoding="utf-8"))
+    preflight["executable_tool_references"][0]["sha256"] = "sha256:not-a-digest"
+    preflight_path.write_text(json.dumps(preflight, indent=2, sort_keys=True), encoding="utf-8")
+    rewrite_production_redaction_scan(bundle_dir)
+    bundle_fingerprint = rewrite_production_bundle_manifest(bundle_dir)
+
+    result = run_raw_cli(
+        tmp_path / "verify-store.json",
+        "production-evidence-verify",
+        str(bundle_dir),
+        "--expected-bundle-fingerprint",
+        bundle_fingerprint,
+    )
+    payload = json.loads(result.stdout)
+    codes = {finding["code"] for finding in payload["findings"]}
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert payload["checks"]["preflight"] is False
+    assert "preflight_executable_tool_reference_invalid" in codes
+    assert "preflight_c2pa_executable_reference_missing" in codes
+
+
+def test_cli_production_evidence_verify_rejects_changed_executable_tool_bytes(
+    tmp_path: Path,
+) -> None:
+    bundle_dir, _bundle_fingerprint = write_production_evidence_bundle(tmp_path)
+    preflight_path = bundle_dir / "preflight.json"
+    preflight = json.loads(preflight_path.read_text(encoding="utf-8"))
+    tool_path = Path(preflight["executable_tool_references"][0]["path"])
+    tool_path.write_text("#!/bin/sh\necho changed\n", encoding="utf-8")
+    preflight_path.write_text(json.dumps(preflight, indent=2, sort_keys=True), encoding="utf-8")
+    rewrite_production_redaction_scan(bundle_dir)
+    bundle_fingerprint = rewrite_production_bundle_manifest(bundle_dir)
+
+    result = run_raw_cli(
+        tmp_path / "verify-store.json",
+        "production-evidence-verify",
+        str(bundle_dir),
+        "--expected-bundle-fingerprint",
+        bundle_fingerprint,
+    )
+    payload = json.loads(result.stdout)
+    codes = {finding["code"] for finding in payload["findings"]}
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert payload["checks"]["preflight"] is False
+    assert {
+        "preflight_executable_tool_reference_size_mismatch",
+        "preflight_executable_tool_reference_sha256_mismatch",
+    }.issubset(codes)
 
 
 def test_cli_production_evidence_verify_rejects_external_preflight_paths(

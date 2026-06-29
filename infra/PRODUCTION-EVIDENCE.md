@@ -18,7 +18,7 @@ This runbook is the operator handoff for flipping the remaining Tier B parity ro
 - The manifest must include the exact production release profile: every command in the current 28-command set from `src/mnemosyne/cli.py`, with no duplicate or unknown commands.
 - The output root must be new and outside this repository. The wrapper rejects repo-local or pre-existing output roots so stale artifacts cannot enter a production bundle and final-directory creation stays race-resistant.
 - Every manifest-referenced production input artifact must already exist at an absolute external path before preflight. The wrapper inventories those paths in `preflight.json`, recursively scans referenced directories, and fails closed on missing, symlinked, secret-shaped, non-UTF-8, or over-limit input artifacts. Accepted inputs are snapshotted under `OUT_ROOT/input-artifacts/` with per-file size and SHA-256 metadata, and the copied operator manifest is rewritten to use those immutable snapshots so later mutation of the external source paths cannot change the capture inputs. Provenance trust-suite metadata is hashed after nested asset-path rewrites, so `preflight.json` describes the retained staged suite exactly.
-- `MNEMOSYNE_PROD_C2PA_TOOL` is the absolute canonical path to the deployed c2patool-compatible executable. Preflight verifies it exists outside the repository, is not reached through a symlink or non-canonical path, and is executable. It records the canonical path under `executable_tool_references` and does not snapshot it as input evidence; keep the C2PA trust-suite JSON and trust-root evidence under `MNEMOSYNE_PROD_EVIDENCE_DIR` instead.
+- `MNEMOSYNE_PROD_C2PA_TOOL` is the absolute canonical path to the deployed c2patool-compatible executable. Preflight verifies it exists outside the repository, is not reached through a symlink or non-canonical path, and is executable. It records the canonical path, size, and SHA-256 digest under `executable_tool_references` and does not snapshot it as input evidence; keep the C2PA trust-suite JSON and trust-root evidence under `MNEMOSYNE_PROD_EVIDENCE_DIR` instead.
 - For `provenance-trust-check --suite`, nested suite `asset_path` and `c2pa_asset_path` values are also treated as production input artifacts. Preflight snapshots those assets and rewrites the staged suite JSON to point at the immutable snapshots. Inline `--suite-json` is rejected for production capture because nested paths cannot be custody-rewritten safely.
 
 ## Capture
@@ -114,9 +114,11 @@ input artifacts, fails if preflight paths do not resolve to the retained bundle
 files, checks that the retained source and operator soak manifests have matching
 production command profiles, and checks that the retained operator manifest plus
 nested suite JSON still reference the staged artifacts recorded in
-`preflight.json`. It also validates `summary.json.offline_verify.argv`, so a
-handoff cannot silently point reviewers at a stale bundle path, stale
-fingerprint, or non-custody replay command. It does not contact production
+`preflight.json`. It also validates `summary.json.offline_verify.argv` as a
+template that requires the reviewer-supplied out-of-band fingerprint, so a
+handoff cannot silently point reviewers at a stale bundle path,
+self-authorizing expected fingerprint, or non-custody replay command. It does
+not contact production
 services, does not run `deployment-soak`, does not create production evidence,
 and cannot flip any strict-audit row to Done unless the bundle was originally
 captured by the production wrapper against deployed infrastructure.

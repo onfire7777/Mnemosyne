@@ -19,16 +19,21 @@ good release artifact.
 6. Stage redacted rollback input artifacts in the absolute external directory
    referenced by `MNEMOSYNE_PROD_EVIDENCE_DIR`; it must not point inside the
    repository.
-7. Run `infra/scripts/capture-production-evidence.sh "$SOAK_MANIFEST" "$OUT_ROOT"`;
+7. Run
+   `infra/scripts/capture-production-evidence.sh --preflight-only "$SOAK_MANIFEST" "$PRECHECK_OUTPUT_ROOT"`
+   as setup proof only; `PRECHECK_OUTPUT_ROOT` must be a new absolute external
+   custody path outside the repository.
+8. Run `infra/scripts/capture-production-evidence.sh "$SOAK_MANIFEST" "$OUT_ROOT"`;
    `OUT_ROOT` must be a new absolute external custody path outside the
    repository and must not already exist; the capture wrapper writes the
    production bundle there.
-8. Require `release-audit --evidence-manifest "$OUT_ROOT/evidence/manifest.json" --require-production-validated --require-provider-forbid-local` to pass before
-   declaring the rollback accepted.
-9. Retain `summary.json`, `preflight.json`, `redaction-scan.json`,
+9. Require `release-audit --evidence-manifest "$OUT_ROOT/evidence/manifest.json" --require-production-validated --require-provider-forbid-local` to pass.
+10. Retain `summary.json`, `preflight.json`, `redaction-scan.json`,
    `bundle-manifest.json`, `source-soak-manifest.json`,
    `operator-soak-manifest.json`, and `input-artifacts/` so
-   `production-evidence-verify` can recheck rollback custody offline.
+   `production-evidence-verify` can recheck rollback custody offline with
+   `--expected-bundle-fingerprint` set from an independently retained
+   out-of-band rollback capture record.
 
 ## Canary-Abort Procedure
 
@@ -127,7 +132,10 @@ fingerprints stay bound.
 
 Rollback drills are accepted only when captured by
 `infra/scripts/capture-production-evidence.sh` and accepted by
-`release-audit --evidence-manifest "$OUT_ROOT/evidence/manifest.json" --require-production-validated --require-provider-forbid-local`.
+`release-audit --evidence-manifest "$OUT_ROOT/evidence/manifest.json" --require-production-validated --require-provider-forbid-local`,
+then rechecked by `production-evidence-verify "$BUNDLE_DIR"
+--expected-bundle-fingerprint "$EXPECTED_BUNDLE_FINGERPRINT"` with the expected
+fingerprint from an independently retained out-of-band rollback capture record.
 
 Local tests and compose smoke runs can prove mechanics, but they do not replace
 operator-captured production rollback evidence.
@@ -141,3 +149,5 @@ operator-captured production rollback evidence.
 - Redaction applied to tokens, keys, raw prompts, documents, queries, and
   credentials.
 - `release-audit --evidence-manifest "$OUT_ROOT/evidence/manifest.json" --require-production-validated --require-provider-forbid-local` passes over the bundle.
+- `production-evidence-verify` passes with `--expected-bundle-fingerprint`
+  sourced from the out-of-band rollback capture record.
