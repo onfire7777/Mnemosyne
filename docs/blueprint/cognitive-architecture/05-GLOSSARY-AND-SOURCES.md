@@ -18,10 +18,10 @@
 - **§31 rails** — seven machine‑checked invariants bounding supersession, deletion, pruning, trust monotonicity, reward source (external‑only), "retrieved text = data not instructions," and consolidation cadence.
 - **Calibration / abstention** — conformal‑prediction gate that returns "not sure" when support is thin or contested. **ECE** = expected calibration error.
 - **Bitemporal / `as_of`** — beliefs carry validity windows; `as_of` answers "what was true at time *t*."
-- **Specialist‑module registry** *(proposed)* — Layer 3: the typed evolution of today's `providers` adapters (reasoner, embedder, dreamer, graph, reranker) recruited on demand.
-- **Workspace controller** *(proposed)* — Layer 4: the small, always‑on process running the cognitive cycle (perceive → compete → broadcast → act → consolidate).
-- **Generative replay / "dreamer"** *(proposed)* — a sandboxed consolidation pass that recombines evidence into low‑trust candidate beliefs, promoted only through the gate.
-- **Reality‑monitoring discriminator** *(proposed)* — tags content as evidence‑grounded / self‑generated / externally‑suggested; biases abstention against self‑generated content.
+- **Specialist‑module registry** — Layer 3: the typed evolution of today's `providers` adapters (reasoner, embedder, dreamer, graph, reranker) recruited on demand; implemented as a shadow/advisory seed with role, budget, authority, and promotion-gate contracts.
+- **Workspace controller** — Layer 4: the small, bounded process running the cognitive cycle (perceive → compete → broadcast → act → consolidate); implemented as a shadow/advisory seed that stays off the answer critical path unless separately gate-promoted.
+- **Generative replay / "dreamer"** — a sandboxed pass that recombines evidence into low‑trust candidate beliefs, promoted only through the gate; implemented in shadow mode and never treated as answer-authoritative.
+- **Reality‑monitoring discriminator** — tags content as evidence‑grounded / self‑generated / externally‑suggested; implemented as a shadow/retrieval provenance signal that biases abstention against self‑generated or externally suggested support.
 
 **Neuroscience / cognitive‑science terms**
 - **Complementary Learning Systems (CLS)** — fast hippocampus (sparse, one‑shot) + slow neocortex (interleaved, generalising); the fast/slow split.

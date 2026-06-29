@@ -57,7 +57,7 @@ Phases 0–5 are checked complete in the roadmap; **Phase 6 is the open mileston
 | I3 | Content-addressed branchable memory | `storage`, `engine`, `ids` | `test_engine_contract` | ✅ | (merge = replica-upsert, not 3-way — by design) | CC-PG |
 | I4 | Unified associative substrate | `retrieval`, `engine`, `graph`, schema | `test_engine_contract` | ✅ | #1 `assertions.salience` column | CC-R/CC-PG |
 | I5 | Bitemporal facts + queryable provenance | `provenance`, `models`, `engine` | `test_engine_contract` | 🟡 | #25 semiring how-provenance (named "genuine opening") | CC-UPS |
-| I6 | Incremental view maintenance | `consolidation`, `belief`, `jobs` | `test_cli_runtime_tools` | 🟡 | #11 real dirty-set/memoization (currently full replay) | CC-BC |
+| I6 | Incremental view maintenance | `consolidation`, `belief`, `jobs` | `test_cli_runtime_tools`, `test_runtime_parity_extensions` | ✅ local | #11 dirty-set/memoization is wired locally; production evidence remains Tier B | CC-BC |
 | I7 | Graduated forgetting fidelity tiers | `lifecycle` | `test_blueprint_later_phases` | 🟡 | #14 enforce `must_keep` + pointer-to-original | CC-BC |
 | I8 | Confidence + conformal abstention | `calibration`, `engine` | `test_belief_and_calibration` | 🟡 | #12 per-example nonconformity | CC-BC |
 | I9 | Latent-advisory + explicit-authoritative model | `user_model` | `test_user_model_and_guards` | ✅ | (`latent_never_overrides_explicit` enforced) | CC-UPS |
@@ -178,7 +178,7 @@ Lane-routed. Status tracked here; owning lane commits only its own files. Cross-
 10. `[C/T]` recall@k / nDCG benchmark in `benchmarks.py`; latency SLO at larger seed.
 
 ### CC-BC (B12) — belief/calibration/consolidation/lifecycle
-11. `[C]` real IVM dirty-set/memoization + auto-trigger (I6).
+11. `[C]` real IVM dirty-set/memoization + auto-trigger (I6). ✅ local: projection recompute walks affected evidence/projection edges, queues only dirty surviving source inputs, and memo-skips unchanged fingerprints; production proof remains Tier B.
 12. `[C]` per-example conformal nonconformity (I8).
 13. `[C]` explicit AGM expansion/revision/contraction + ATMS labels (I2).
 14. `[C]` enforce `must_keep` in lifecycle demotion + pointer-to-original (I7/§25).

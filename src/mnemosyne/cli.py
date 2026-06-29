@@ -13078,21 +13078,46 @@ def _is_loopback_host(host: str | None) -> bool:
         return False
 
 
+def _host_resolves_only_to_allowed_addresses(host: str, *, allow_loopback: bool) -> bool:
+    try:
+        infos = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+    except socket.gaierror as exc:
+        raise ValueError(f"provider url hostname could not be resolved: {host}") from exc
+    resolved: set[str] = set()
+    for info in infos:
+        sockaddr = info[4]
+        if not sockaddr:
+            continue
+        resolved.add(str(sockaddr[0]))
+    if not resolved:
+        raise ValueError(f"provider url hostname resolved to no addresses: {host}")
+    for address in resolved:
+        try:
+            ip = ipaddress.ip_address(address)
+        except ValueError as exc:
+            raise ValueError(f"provider url hostname resolved to invalid address: {address}") from exc
+        if allow_loopback and ip.is_loopback:
+            continue
+        if not ip.is_global:
+            return False
+    return True
+
+
 def _validate_hosted_url(url: str, *, allow_insecure_localhost: bool) -> tuple[str, str]:
     parsed = urlsplit(url)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         raise ValueError("provider url must be http(s) with a hostname")
+    if parsed.username or parsed.password:
+        raise ValueError("provider url must not contain userinfo credentials")
+    try:
+        port = f":{parsed.port}" if parsed.port else ""
+    except ValueError as exc:
+        raise ValueError("provider url port is invalid") from exc
     if parsed.scheme != "https" and not (allow_insecure_localhost and _is_loopback_host(parsed.hostname)):
         raise ValueError("hosted provider checks require https unless --allow-insecure-localhost is set")
-    if parsed.scheme == "https":
-        try:
-            host_ip = ipaddress.ip_address(parsed.hostname)
-        except ValueError:
-            pass
-        else:
-            if host_ip.is_private or host_ip.is_link_local or host_ip.is_loopback:
-                raise ValueError("https provider url must not target private, link-local, or loopback IPs")
-    port = f":{parsed.port}" if parsed.port else ""
+    allow_loopback = parsed.scheme != "https" and allow_insecure_localhost and _is_loopback_host(parsed.hostname)
+    if not _host_resolves_only_to_allowed_addresses(parsed.hostname, allow_loopback=allow_loopback):
+        raise ValueError("provider url hostname must not resolve to private, loopback, link-local, reserved, or metadata addresses")
     origin = f"{parsed.scheme}://{parsed.hostname}{port}"
     return origin, parsed.hostname
 
@@ -13134,7 +13159,7 @@ def _hosted_provider_api_key(provider: Mapping[str, Any]) -> tuple[str | None, s
             raise ValueError(f"api key env {env_name} is not set")
         return value, env_name
     if provider.get("api_key"):
-        return str(provider["api_key"]), "inline"
+        raise ValueError("hosted provider api_key must not be inline; use api_key_env or command-backed custody")
     return None, None
 
 

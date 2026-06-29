@@ -471,6 +471,8 @@ class ShadowWorkspaceService:
             self._adopt_stream_window(stream)
             self.previous_focus_id = stream.trace[-1].focus_id
         self._observe_stream(stream)
+        if stream.heartbeat_safety.get("hard_stop") is True:
+            self.running = False
         return ShadowWorkspaceServiceReport(
             tenant_id=tenant_id,
             stream=stream,
@@ -502,6 +504,11 @@ class ShadowWorkspaceService:
     ) -> ShadowWorkspaceServiceReport:
         """Run one explicit shadow service tick."""
 
+        if self._terminal_hard_stop_active():
+            raise RuntimeError(
+                f"shadow workspace service stopped after hard stop: {self.stopped_reason}; "
+                "call start() to open a new bounded window"
+            )
         self._require_running()
         if self.cycle_guard is None:
             self.cycle_guard = BoundedCognitiveCycle(
@@ -551,6 +558,8 @@ class ShadowWorkspaceService:
             self.non_useful_ticks += 1
         self.stopped_reason = self._current_stopped_reason(cycle)
         stream = self._current_stream(tenant_id=tenant_id)
+        if stream.heartbeat_safety.get("hard_stop") is True:
+            self.running = False
         self._observe_cycle(cycle, trace)
         return ShadowWorkspaceServiceReport(
             tenant_id=tenant_id,
@@ -571,6 +580,19 @@ class ShadowWorkspaceService:
     def _require_running(self) -> None:
         if not self.running:
             raise RuntimeError("shadow workspace service must be started before ticking")
+
+    def _terminal_hard_stop_active(self) -> bool:
+        if not self.cycles or not self.trace:
+            return False
+        safety = _heartbeat_safety_report(
+            cycles=self.cycles,
+            trace=self.trace,
+            stopped_reason=self.stopped_reason,
+            max_cycles=self.controller.max_cycles,
+            max_idle_ticks=self.controller.max_idle_ticks,
+            tick_ms=self.controller.tick_ms,
+        )
+        return safety.get("hard_stop") is True
 
     def _observe_stream(self, stream: WorkspaceStreamReport) -> None:
         for cycle, trace in zip(stream.cycles, stream.trace, strict=True):
@@ -933,6 +955,7 @@ def _heartbeat_safety_report(
         and estimated_compute_ms <= compute_budget_ms
         and budget["allowed"]
     )
+    hard_stop = circuit_breaker or stopped_reason.startswith("anti_rumination")
     return {
         "schema_version": HEARTBEAT_SAFETY_VERSION,
         "tier": "tiered_engaged_idle",
@@ -947,10 +970,10 @@ def _heartbeat_safety_report(
         "compute_bounded": bounded,
         "compute_reported": True,
         "stopped_reason": stopped_reason,
-        "hard_stop": circuit_breaker or stopped_reason.startswith("anti_rumination"),
+        "hard_stop": hard_stop,
         "circuit_breaker_tripped": circuit_breaker,
-        "self_generation_frozen": circuit_breaker or not budget["allowed"],
-        "evidence_only_fallback": circuit_breaker or not budget["allowed"],
+        "self_generation_frozen": hard_stop or not budget["allowed"],
+        "evidence_only_fallback": hard_stop or not budget["allowed"],
         "proto_self_reasons": proto_reasons,
         "non_useful_ticks": non_useful_ticks,
         "self_generation_budget": budget,
