@@ -4,6 +4,7 @@ import json
 import shutil
 import shlex
 import socket
+import stat
 import subprocess
 import sys
 import threading
@@ -4635,6 +4636,56 @@ def test_cli_reports_residency_policy_and_provider_check(tmp_path: Path) -> None
     assert check["checks"]["residency_policy"]["allowed_residency_transfers"] == ["eu->us"]
 
 
+def test_cli_provider_manifest_configures_residency_policy(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = tmp_path / "mnemosyne.json"
+    monkeypatch.setenv("MNEMOSYNE_RUNTIME_RESIDENCY", "us")
+    monkeypatch.setenv("MNEMOSYNE_ALLOWED_RESIDENCY_TRANSFERS", "eu->us")
+    monkeypatch.setenv("MNEMOSYNE_REQUIRE_RUNTIME_RESIDENCY", "true")
+    manifest = tmp_path / "provider-manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "schema": "mnemosyne.provider-manifest.production.v1",
+                "name": "test-provider-manifest",
+                "required_checks": ["residency_policy"],
+                "providers": {
+                    "residency_policy": {
+                        "allowed_residencies": ["eu", "us"],
+                        "runtime_residency": {"env": "MNEMOSYNE_RUNTIME_RESIDENCY"},
+                        "allowed_residency_transfers": {
+                            "env": "MNEMOSYNE_ALLOWED_RESIDENCY_TRANSFERS"
+                        },
+                        "require_runtime_residency": {
+                            "env": "MNEMOSYNE_REQUIRE_RUNTIME_RESIDENCY"
+                        },
+                    }
+                },
+            },
+            indent=2,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    check = run_cli(
+        store,
+        "provider-check",
+        "--provider-manifest",
+        str(manifest),
+    )
+    residency = check["checks"]["residency_policy"]
+
+    assert check["ok"] is True
+    assert residency["ok"] is True
+    assert residency["allowed_residencies"] == ["eu", "us"]
+    assert residency["runtime_residency"] == "us"
+    assert residency["allowed_residency_transfers"] == ["eu->us"]
+    assert residency["require_runtime_residency"] is True
+
+
 def test_cli_drains_media_extraction_job_with_command_provider(tmp_path: Path) -> None:
     store = tmp_path / "mnemosyne.json"
     objects = tmp_path / "objects"
@@ -6925,7 +6976,96 @@ def test_cli_production_evidence_verify_accepts_captured_bundle(tmp_path: Path) 
         "complete_row_count": len(preflight["parity_row_readiness"]),
         "incomplete_rows": [],
     }
+    assert report["reviewer_guidance"] == {
+        "blocked_reason": None,
+        "next_steps": [
+            "Custody verification passed. Review row_review.rows[] and release-audit evidence "
+            "before updating any strict-audit row status."
+        ],
+        "diagnostic_only": True,
+    }
     assert report["findings"] == []
+
+
+def test_cli_production_evidence_verify_writes_external_report_output(tmp_path: Path) -> None:
+    bundle_dir, bundle_fingerprint = write_production_evidence_bundle(tmp_path)
+    report_path = tmp_path / "mnemosyne-production-evidence-verify.json"
+
+    report = run_cli(
+        tmp_path / "verify-store.json",
+        "production-evidence-verify",
+        str(bundle_dir),
+        "--expected-bundle-fingerprint",
+        bundle_fingerprint,
+        "--report-output",
+        str(report_path),
+    )
+    written = json.loads(report_path.read_text(encoding="utf-8"))
+
+    assert written == report
+    assert stat.S_IMODE(report_path.stat().st_mode) == 0o600
+
+
+def test_cli_production_evidence_verify_rejects_report_output_inside_bundle(
+    tmp_path: Path,
+) -> None:
+    bundle_dir, bundle_fingerprint = write_production_evidence_bundle(tmp_path)
+    report_path = bundle_dir / "mnemosyne-production-evidence-verify.json"
+
+    result = run_raw_cli(
+        tmp_path / "verify-store.json",
+        "production-evidence-verify",
+        str(bundle_dir),
+        "--expected-bundle-fingerprint",
+        bundle_fingerprint,
+        "--report-output",
+        str(report_path),
+    )
+
+    assert result.returncode == 1
+    assert "outside the evidence bundle under review" in result.stderr
+    assert not report_path.exists()
+
+
+def test_cli_production_evidence_verify_rejects_existing_report_output(
+    tmp_path: Path,
+) -> None:
+    bundle_dir, bundle_fingerprint = write_production_evidence_bundle(tmp_path)
+    report_path = tmp_path / "mnemosyne-production-evidence-verify.json"
+    report_path.write_text("existing report\n", encoding="utf-8")
+
+    result = run_raw_cli(
+        tmp_path / "verify-store.json",
+        "production-evidence-verify",
+        str(bundle_dir),
+        "--expected-bundle-fingerprint",
+        bundle_fingerprint,
+        "--report-output",
+        str(report_path),
+    )
+
+    assert result.returncode == 1
+    assert "must not already exist" in result.stderr
+    assert report_path.read_text(encoding="utf-8") == "existing report\n"
+
+
+def test_cli_production_evidence_verify_rejects_relative_report_output(
+    tmp_path: Path,
+) -> None:
+    bundle_dir, bundle_fingerprint = write_production_evidence_bundle(tmp_path)
+
+    result = run_raw_cli(
+        tmp_path / "verify-store.json",
+        "production-evidence-verify",
+        str(bundle_dir),
+        "--expected-bundle-fingerprint",
+        bundle_fingerprint,
+        "--report-output",
+        "mnemosyne-production-evidence-verify.json",
+    )
+
+    assert result.returncode == 1
+    assert "must be an absolute path" in result.stderr
 
 
 def test_cli_production_evidence_verify_accepts_symlink_parent_source_value(tmp_path: Path) -> None:
@@ -7018,6 +7158,12 @@ def test_cli_production_evidence_verify_requires_expected_bundle_fingerprint(
     assert report["expected_bundle_fingerprint_source"] is None
     assert report["actual_bundle_fingerprint"] == bundle_fingerprint
     assert report["internal_consistency_only"] is False
+    assert report["reviewer_guidance"]["blocked_reason"] == "missing_expected_fingerprint"
+    assert any(
+        "Provide --expected-bundle-fingerprint" in step
+        for step in report["reviewer_guidance"]["next_steps"]
+    )
+    assert report["reviewer_guidance"]["diagnostic_only"] is True
     assert "expected_bundle_fingerprint_missing" in codes
 
 
@@ -7067,6 +7213,12 @@ def test_cli_production_evidence_verify_allows_explicit_internal_consistency_onl
     assert report["expected_bundle_fingerprint_source"] is None
     assert report["actual_bundle_fingerprint"] == bundle_fingerprint
     assert report["internal_consistency_only"] is True
+    assert report["reviewer_guidance"]["blocked_reason"] is None
+    assert any(
+        "Internal-consistency mode is diagnostic only" in step
+        for step in report["reviewer_guidance"]["next_steps"]
+    )
+    assert report["reviewer_guidance"]["diagnostic_only"] is True
     assert report["findings"] == []
 
 

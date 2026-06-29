@@ -67,8 +67,12 @@ After capture, reviewers must run `"$PYTHON" -m mnemosyne.cli production-evidenc
 `--expected-bundle-fingerprint` set from the independently retained out-of-band
 capture record, plus retained `preflight.json`, `redaction-scan.json`,
 `bundle-manifest.json`, `source-soak-manifest.json`, `operator-soak-manifest.json`,
-and `input-artifacts/` custody, plus source/operator command-profile agreement;
-offline custody verification must pass before this row can flip Done.
+`input-artifacts/`, `tool-artifacts/`, `summary.json.offline_verify`,
+`summary.json.parity_row_readiness`,
+`summary.json.row_review_source=preflight.json.parity_row_readiness`,
+verifier `row_review.rows[]`, and source/operator command-profile agreement;
+offline custody verification with an external `--report-output` artifact must pass
+before this row can flip Done.
 
 ## Acceptance
 

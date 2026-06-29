@@ -7,8 +7,8 @@ production Postgres/runtime state.
 
 ## Real-Infra Dependency
 
-Supervised Postgres worker plus model-backed extractor, summarizer, and entity
-resolver providers.
+Supervised Postgres worker plus model-backed extractor, summarizer, entity
+resolver, lesson distiller, and skill inducer providers.
 
 ## Gate Commands
 
@@ -19,7 +19,8 @@ Run in the production soak profile:
 - `worker-ops-check`
 - `projection-recompute-once`
 - `gate-suite-check`
-- `provider-check` for `candidate_extractor`, `summarizer`, and `entity_resolver`
+- `provider-check` for `candidate_extractor`, `summarizer`,
+  `entity_resolver`, `lesson_distiller`, and `skill_inducer`
 
 ## Required Production Input Artifacts
 
@@ -34,7 +35,8 @@ rendering:
 
 `provider-check` runs once from `provider-manifest.production.json` in the full
 production profile. This row consumes the shared consolidation role-provider
-subchecks; do not create a row-local provider manifest.
+subchecks for candidate extraction, summarization, entity resolution, lesson
+distillation, and skill induction; do not create a row-local provider manifest.
 
 ## Redaction Requirement
 
@@ -55,8 +57,12 @@ After capture, reviewers must run `"$PYTHON" -m mnemosyne.cli production-evidenc
 `--expected-bundle-fingerprint` set from the independently retained out-of-band
 capture record, plus retained `preflight.json`, `redaction-scan.json`,
 `bundle-manifest.json`, `source-soak-manifest.json`, `operator-soak-manifest.json`,
-and `input-artifacts/` custody, plus source/operator command-profile agreement;
-offline custody verification must pass before this row can flip Done.
+`input-artifacts/`, `tool-artifacts/`, `summary.json.offline_verify`,
+`summary.json.parity_row_readiness`,
+`summary.json.row_review_source=preflight.json.parity_row_readiness`,
+verifier `row_review.rows[]`, and source/operator command-profile agreement;
+offline custody verification with an external `--report-output` artifact must pass
+before this row can flip Done.
 
 ## Acceptance
 

@@ -87,10 +87,13 @@ def test_every_row_runbook_points_to_universal_preflight_capture_flow() -> None:
         assert "`bundle-manifest.json`" in text, path
         assert "`source-soak-manifest.json`" in text, path
         assert "`operator-soak-manifest.json`" in text, path
-        assert "`input-artifacts/` custody" in text, path
+        assert "`input-artifacts/`" in text, path
+        assert "`tool-artifacts/`" in text, path
+        assert "`summary.json.offline_verify`" in text, path
+        assert "verifier `row_review.rows[]`" in text, path
         assert "source/operator command-profile agreement" in text, path
         assert (
-            "offline custody verification must pass before this row can flip Done"
+            "offline custody verification with an external `--report-output` artifact must pass"
             in text
         ), path
         assert "`release_audit_ok=true`" in text, path
@@ -181,6 +184,8 @@ def test_production_evidence_docs_require_independent_bundle_fingerprint() -> No
     for path in docs_with_command_snippets:
         text = path.read_text(encoding="utf-8")
         assert "EXPECTED_BUNDLE_FINGERPRINT=sha256:..." in text, path
+        assert "VERIFY_REPORT=/secure/path/to/mnemosyne-production-evidence-verify.json" in text, path
+        assert '--report-output "$VERIFY_REPORT"' in text, path
 
     for path in docs_with_custody_language:
         text = path.read_text(encoding="utf-8")
@@ -266,7 +271,8 @@ def test_provider_check_routes_are_documented_for_shared_manifest_rows() -> None
             "do not create a row-local provider manifest",
         ],
         RUNBOOK_DIR / "row-04-consolidation-role-pipeline.md": [
-            "`provider-check` for `candidate_extractor`, `summarizer`, and `entity_resolver`",
+            "`provider-check` for `candidate_extractor`, `summarizer`,",
+            "`entity_resolver`, `lesson_distiller`, and `skill_inducer`",
             "do not create a row-local provider manifest",
         ],
         RUNBOOK_DIR / "row-06-multimodal-retrieval.md": [

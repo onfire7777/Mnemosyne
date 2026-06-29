@@ -35,6 +35,8 @@ These names are referenced by `provider-manifest.production.template.json`.
 The renderer's `--check-environment` parses the external provider manifest and
 reports these names only when a referenced variable is unset.
 
+- `MNEMOSYNE_ALLOWED_RESIDENCIES`
+- `MNEMOSYNE_ALLOWED_RESIDENCY_TRANSFERS`
 - `MNEMOSYNE_CANDIDATE_EXTRACTOR_COMMAND`
 - `MNEMOSYNE_EMBEDDING_API_KEY`
 - `MNEMOSYNE_EMBEDDING_MODEL`
@@ -52,6 +54,8 @@ reports these names only when a referenced variable is unset.
 - `MNEMOSYNE_RERANKER_API_KEY`
 - `MNEMOSYNE_RERANKER_MODEL`
 - `MNEMOSYNE_RERANKER_URL`
+- `MNEMOSYNE_REQUIRE_RUNTIME_RESIDENCY`
+- `MNEMOSYNE_RUNTIME_RESIDENCY`
 - `MNEMOSYNE_SESSION_SECRET_COMMAND`
 - `MNEMOSYNE_SKILL_INDUCER_COMMAND`
 - `MNEMOSYNE_SUMMARIZER_COMMAND`

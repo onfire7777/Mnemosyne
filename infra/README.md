@@ -137,9 +137,11 @@ BUNDLE_DIR=/secure/path/to/mnemosyne-production-evidence
 # Set this from the operator's out-of-band capture record, not from summary.json
 # inside the bundle under review.
 EXPECTED_BUNDLE_FINGERPRINT=sha256:...
+VERIFY_REPORT=/secure/path/to/mnemosyne-production-evidence-verify.json
 "$PYTHON" -m mnemosyne.cli production-evidence-verify \
   "$BUNDLE_DIR" \
-  --expected-bundle-fingerprint "$EXPECTED_BUNDLE_FINGERPRINT"
+  --expected-bundle-fingerprint "$EXPECTED_BUNDLE_FINGERPRINT" \
+  --report-output "$VERIFY_REPORT"
 ```
 
 The completed production bundle must retain `summary.json`, `preflight.json`,
@@ -158,6 +160,10 @@ operator capture against deployed infrastructure.
 offline verifier report also emits `row_review.rows[]` from that retained
 preflight source so reviewers can route completed bundles by Tier-B lane and
 runbook without treating the summary as a separate evidence source.
+The optional `--report-output` path must be absolute, outside the bundle under
+review, and not pre-existing; retain it with the external capture record so
+reviewers can compare the emitted `reviewer_guidance`, fingerprints, checks,
+and row review without mutating the evidence bundle.
 
 `--check-environment` writes no files and prints no values. It always reports
 the required `MNEMOSYNE_PROD_*` key names, operator readiness file paths, and
