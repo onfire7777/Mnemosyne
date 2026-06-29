@@ -10,18 +10,11 @@ evidence artifact:
      golden expectation is violated, the gate itself is broken -> non-zero exit.
 
   2. **Current-src measurement (the honest forcing function)** — measures the
-     CURRENT system. Today ``counterfactual_replay_score`` is computed (in
-     ``mcp_tools.outcome_evaluate``) but is **not consumed by any promotion
-     decision**: ``gate.PromotionGate.evaluate`` decides ``promoted`` purely on
-     regression-case margin, and ``ShadowPolicyOptimizer.evaluate_variant``
-     restores ``OperatingPolicy()`` in a ``finally`` so it never mutates
-     production. So there is no wired cf->gate path to validate against real
-     observed lift, and **no paired (predicted, observed) corpus exists in src**.
-     The honest verdict is therefore: the replay proxy is **NOT yet authorized to
-     gate** -> the loop is correctly kept in SHADOW (veto-only). The check proves
-     this is the right state by showing the proxy would have to clear the OQ2 bar
-     on real paired data first, and that bar is unmet because the data does not
-     exist yet (window = 0).
+     CURRENT system. ``ShadowPolicyOptimizer`` wires the replay hook into
+     promotion and the default hook fails closed while the live replay-pair window
+     remains below the OQ2 bar. The replay proxy is therefore **NOT yet authorized
+     to gate active self-modification**, and the loop is correctly kept in SHADOW
+     (veto-only) until real paired data proves fidelity.
 
   3. **Bar verdict** — exits 0 only when the golden guarantee holds AND the
       current-src state is safe: replay is wired into promotion, but unproven
@@ -44,6 +37,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -205,6 +199,18 @@ def render_markdown(report: dict) -> str:
     return "\n".join(lines)
 
 
+def _strict_json_value(value: object) -> object:
+    if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
+        return None
+    if isinstance(value, dict):
+        return {str(key): _strict_json_value(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_strict_json_value(item) for item in value]
+    if isinstance(value, tuple):
+        return [_strict_json_value(item) for item in value]
+    return value
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="FR-17 OQ2 replay-fidelity check")
     parser.add_argument(
@@ -233,7 +239,7 @@ def main(argv: list[str] | None = None) -> int:
     report = build_report(golden, src_state, bar, require_wired=args.require_wired)
 
     args.json_out.parent.mkdir(parents=True, exist_ok=True)
-    args.json_out.write_text(json.dumps(report, indent=2, default=str))
+    args.json_out.write_text(json.dumps(_strict_json_value(report), indent=2, default=str, allow_nan=False))
     args.md_out.parent.mkdir(parents=True, exist_ok=True)
     md = render_markdown(report)
     args.md_out.write_text(md)

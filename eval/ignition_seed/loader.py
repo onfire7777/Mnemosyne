@@ -4,19 +4,10 @@ Turns ``cases.json`` into ``RegressionCase``-shaped objects (``mnemosyne.gate``)
 while preserving the per-case ``origin`` tag (``curated`` | ``genuine`` |
 ``synthetic``) that the OQ5 ignition counter depends on.
 
-Forward-compatibility note (FR-14 reconciliation):
-    The *current* ``RegressionCase`` dataclass has fields
-    ``id, signature, query, expected_substring, tier, protected`` only -- it does
-    NOT yet accept ``origin``/``mode`` (verified: ``from_dict`` raises TypeError on
-    an extra ``origin`` key). The OQ5 decision requires Codex to add ``origin`` and
-    ``mode`` to ``RegressionCase`` in ``src/mnemosyne/gate.py``.
-
-    To remain loadable against BOTH the current and the future shape, this loader
-    introspects the dataclass fields at runtime and only passes ``origin``/``mode``
-    into the constructor when the dataclass actually declares them. Either way the
-    ``origin`` is always returned alongside (see :class:`LoadedCase`) so the
-    ignition reporter can count curated/genuine/synthetic without depending on the
-    src change having landed.
+Implementation note:
+    ``RegressionCase`` now carries ``origin`` and ``mode`` directly. The loader
+    still introspects fields so older artifacts remain readable, but the current
+    source path passes both fields into the runtime case consumed by the gate.
 
 SECURITY: every string in ``cases.json`` is inert data. Adversarial / poison
 strings (e.g. "ignore all previous instructions ...") are intentional regression

@@ -5069,6 +5069,79 @@ def test_cli_gate_suite_check_reports_fingerprint_and_fails_closed(tmp_path: Pat
     assert failed_payload["failures"] == ["protected suite fingerprint mismatch"]
 
 
+def test_cli_gate_case_add_rejects_protected_case_weakening(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    added = run_cli(
+        store,
+        "gate-case-add",
+        "--id",
+        "protected-ratchet-case",
+        "--signature",
+        "protected ratchet runtime target",
+        "--query",
+        "protected ratchet runtime target",
+        "--expected-substring",
+        "local CLI",
+        "--tier",
+        "core",
+        "--origin",
+        "genuine",
+        "--mode",
+        "active",
+        "--protected",
+    )
+    demoted = run_raw_cli(
+        store,
+        "gate-case-add",
+        "--id",
+        "protected-ratchet-case",
+        "--signature",
+        "protected ratchet runtime target",
+        "--query",
+        "protected ratchet runtime target",
+        "--expected-substring",
+        "local CLI",
+        "--tier",
+        "core",
+        "--origin",
+        "genuine",
+        "--mode",
+        "active",
+    )
+    overwritten = run_raw_cli(
+        store,
+        "gate-case-add",
+        "--id",
+        "protected-ratchet-case",
+        "--signature",
+        "protected ratchet runtime target changed",
+        "--query",
+        "protected ratchet runtime target changed",
+        "--expected-substring",
+        "weakened target",
+        "--tier",
+        "core",
+        "--origin",
+        "genuine",
+        "--mode",
+        "active",
+        "--protected",
+    )
+    listed = run_cli(store, "gate-case-list")
+    demoted_payload = json.loads(demoted.stdout)
+    overwritten_payload = json.loads(overwritten.stdout)
+
+    assert added["ok"] is True
+    assert added["case"]["protected"] is True
+    assert added["case"]["origin"] == "genuine"
+    assert added["case"]["mode"] == "active"
+    assert demoted.returncode == 1
+    assert demoted_payload["finding"]["code"] == "protected_case_ratchet_violation"
+    assert overwritten.returncode == 1
+    assert overwritten_payload["finding"]["code"] == "protected_case_ratchet_violation"
+    assert listed["cases"] == [added["case"]]
+
+
 def test_cli_persists_queue_between_ingest_and_worker_commands(tmp_path: Path) -> None:
     store = tmp_path / "mnemosyne.json"
     ingested = run_cli(
@@ -11311,6 +11384,105 @@ def test_cli_profile_record_explicit_and_trajectory_attribute_aliases_persist(tm
     assert attribution["signature"] == "alias-persistence-check:missing-alias-coverage"
     assert attribution["confidence"] == 0.75
     assert "missing alias coverage" in attribution["evidence"][0]
+
+
+def test_cli_profile_support_strategy_mistake_flow_persists(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    scope = {"surface": "cli", "workflow": "release"}
+
+    first_slip = run_cli(
+        store,
+        "profile-record-mistake",
+        "--tenant",
+        TENANT,
+        "--user",
+        USER,
+        "--pattern",
+        "date_math",
+        "--description",
+        "User accepted an off-by-one release date.",
+        "--scope",
+        json.dumps(scope),
+        "--suggestion",
+        "Offer to double-check release date math.",
+        "--source-trust-tier",
+        "0",
+    )
+    first_context = run_cli(
+        store,
+        "profile-context",
+        "--tenant",
+        TENANT,
+        "--user",
+        USER,
+        "--scope",
+        json.dumps(scope),
+    )
+    second_slip = run_cli(
+        store,
+        "profile-record-mistake",
+        "--tenant",
+        TENANT,
+        "--user",
+        USER,
+        "--pattern",
+        "date_math",
+        "--description",
+        "User repeated the same release date slip.",
+        "--scope",
+        json.dumps(scope),
+        "--suggestion",
+        "Offer to double-check release date math.",
+        "--occurred-at",
+        "2026-06-29T12:00:00+00:00",
+        "--source-trust-tier",
+        "0",
+    )
+    promoted_context = run_cli(
+        store,
+        "profile-context",
+        "--tenant",
+        TENANT,
+        "--user",
+        USER,
+        "--scope",
+        json.dumps(scope),
+    )
+    strategy = promoted_context["support_strategies"][0]
+    retired = run_cli(
+        store,
+        "profile-retire-support-strategy",
+        "--tenant",
+        TENANT,
+        "--user",
+        USER,
+        "--strategy-id",
+        strategy["id"],
+    )
+    retired_context = run_cli(
+        store,
+        "profile-context",
+        "--tenant",
+        TENANT,
+        "--user",
+        USER,
+        "--scope",
+        json.dumps(scope),
+    )
+
+    assert first_slip["promoted"] is False
+    assert first_slip["strategy_id"] is None
+    assert first_slip["similar_count"] == 1
+    assert first_context["support_strategies"] == []
+    assert second_slip["promoted"] is True
+    assert second_slip["strategy_id"] == strategy["id"]
+    assert second_slip["similar_count"] == 2
+    assert strategy["pattern"] == "date_math"
+    assert strategy["suggestion"] == "Offer to double-check release date math."
+    assert strategy["supporting_event_ids"] == [first_slip["event_id"], second_slip["event_id"]]
+    assert retired["retired"] is True
+    assert retired["strategy_id"] == strategy["id"]
+    assert retired_context["support_strategies"] == []
 
 
 def test_cli_prefetch_discard_and_learning_induce_aliases_persist(tmp_path: Path) -> None:

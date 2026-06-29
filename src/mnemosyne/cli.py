@@ -7291,6 +7291,36 @@ def cmd_profile_correct(args: argparse.Namespace) -> None:
     )
 
 
+def cmd_profile_record_mistake(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(
+        tools.profile_record_mistake(
+            tenant_id=args.tenant,
+            user_id=args.user,
+            pattern=args.pattern,
+            description=args.description,
+            scope=parse_json_arg(args.scope, {}),
+            suggestion=args.suggestion,
+            occurred_at=args.occurred_at,
+            role=args.role,
+            source_trust_tier=args.source_trust_tier,
+        )
+    )
+
+
+def cmd_profile_retire_support_strategy(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(
+        tools.profile_retire_support_strategy(
+            tenant_id=args.tenant,
+            user_id=args.user,
+            strategy_id=args.strategy_id,
+            role=args.role,
+            source_trust_tier=args.source_trust_tier,
+        )
+    )
+
+
 def cmd_graph_neighbors(args: argparse.Namespace) -> None:
     tools = load_tools(args)
     emit(tools.graph_neighbors(args.tenant, args.seed, branch=args.branch, k=args.k))
@@ -7539,11 +7569,23 @@ def cmd_gate_case_add(args: argparse.Namespace) -> None:
         expected_substring=args.expected_substring,
         tier=args.tier,
         protected=args.protected,
+        origin=args.origin,
+        mode=args.mode,
     )
+    existing = cases.get(case.id)
+    if existing is not None and existing.protected and existing.to_dict() != case.to_dict():
+        finding = {
+            "code": "protected_case_ratchet_violation",
+            "message": "protected regression cases cannot be weakened or overwritten by gate-case-add",
+            "existing": existing.to_dict(),
+            "attempted": case.to_dict(),
+        }
+        emit({"ok": False, "case": existing.to_dict(), "finding": finding})
+        raise SystemExit(1)
     cases[case.id] = case
     ordered = sorted(cases.values(), key=lambda item: item.id)
     runtime_state.save_gate_cases(ordered)
-    emit({"case": case.to_dict(), "cases": [item.to_dict() for item in ordered]})
+    emit({"ok": True, "case": case.to_dict(), "cases": [item.to_dict() for item in ordered]})
 
 
 def cmd_gate_case_list(args: argparse.Namespace) -> None:
@@ -14744,6 +14786,26 @@ def build_parser() -> argparse.ArgumentParser:
     profile_correct.add_argument("--confidence", type=float, default=0.95)
     profile_correct.set_defaults(func=cmd_profile_correct)
 
+    profile_record_mistake = sub.add_parser("profile-record-mistake")
+    profile_record_mistake.add_argument("--tenant", required=True)
+    profile_record_mistake.add_argument("--user", required=True)
+    profile_record_mistake.add_argument("--pattern", required=True)
+    profile_record_mistake.add_argument("--description", required=True)
+    profile_record_mistake.add_argument("--scope", default="{}")
+    profile_record_mistake.add_argument("--suggestion")
+    profile_record_mistake.add_argument("--occurred-at")
+    profile_record_mistake.add_argument("--role", default="agent", choices=["reader", "agent", "consolidator", "operator"])
+    profile_record_mistake.add_argument("--source-trust-tier", type=int)
+    profile_record_mistake.set_defaults(func=cmd_profile_record_mistake)
+
+    profile_retire_support = sub.add_parser("profile-retire-support-strategy")
+    profile_retire_support.add_argument("--tenant", required=True)
+    profile_retire_support.add_argument("--user", required=True)
+    profile_retire_support.add_argument("--strategy-id", required=True)
+    profile_retire_support.add_argument("--role", default="operator", choices=["reader", "agent", "consolidator", "operator"])
+    profile_retire_support.add_argument("--source-trust-tier", type=int, default=0)
+    profile_retire_support.set_defaults(func=cmd_profile_retire_support_strategy)
+
     graph_neighbors = sub.add_parser("graph-neighbors")
     graph_neighbors.add_argument("--tenant", required=True)
     graph_neighbors.add_argument("--seed", action="append", required=True)
@@ -14928,6 +14990,8 @@ def build_parser() -> argparse.ArgumentParser:
     gate_case_add.add_argument("--query", required=True)
     gate_case_add.add_argument("--expected-substring", required=True)
     gate_case_add.add_argument("--tier", choices=["smoke", "core", "archive"], default="smoke")
+    gate_case_add.add_argument("--origin", choices=["curated", "genuine", "synthetic"], default="curated")
+    gate_case_add.add_argument("--mode", choices=["shadow", "active"], default="active")
     gate_case_add.add_argument("--protected", action="store_true")
     gate_case_add.set_defaults(func=cmd_gate_case_add)
 

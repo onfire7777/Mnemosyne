@@ -277,7 +277,13 @@ class PostgresRuntimeState:
                             self.db_tenant_id,
                             case.signature,
                             case.query,
-                            self._jsonb({"expected_substring": case.expected_substring}),
+                            self._jsonb(
+                                {
+                                    "expected_substring": case.expected_substring,
+                                    "case_origin": case.origin,
+                                    "case_mode": case.mode,
+                                }
+                            ),
                             case.tier,
                             case.protected,
                         ),
@@ -387,6 +393,8 @@ class PostgresRuntimeState:
                         expected_substring=dict(row["expected"] or {}).get("expected_substring", ""),
                         tier=row["tier"],
                         protected=row["protected"],
+                        origin=dict(row["expected"] or {}).get("case_origin", "curated"),
+                        mode=dict(row["expected"] or {}).get("case_mode", "active"),
                     )
                     for row in cur.fetchall()
                 ]

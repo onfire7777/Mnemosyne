@@ -5,6 +5,7 @@ Run:  python -m pytest eval/replay_fidelity/test_replay_fidelity.py -v
 
 from __future__ import annotations
 
+import json
 import math
 import sys
 from pathlib import Path
@@ -157,6 +158,17 @@ def test_default_check_passes_because_wired_loop_fails_closed_without_real_pairs
     # Golden guarantee holds AND wired replay blocks unproven active promotion -> exit 0.
     code = check.main(["--quiet", "--json-out", _tmp("a.json"), "--md-out", _tmp("a.md")])
     assert code == 0
+
+
+def test_default_report_json_is_strict_json_without_nan_constants():
+    out = Path(_tmp("strict.json"))
+    code = check.main(["--quiet", "--json-out", str(out), "--md-out", _tmp("strict.md")])
+    text = out.read_text(encoding="utf-8")
+
+    assert code == 0
+    assert "NaN" not in text
+    assert "Infinity" not in text
+    assert json.loads(text)["verdict"]["cf_wired_into_gate"] is True
 
 
 def test_require_wired_fails_until_real_pairs_authorize_promotion():

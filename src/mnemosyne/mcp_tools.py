@@ -20,7 +20,7 @@ from mnemosyne.privacy import ErasureMode
 from mnemosyne.runtime_state import RuntimeState
 from mnemosyne.security import SecurityPolicy, TrustTier, WriteRole
 from mnemosyne.source_truth import apply_markdown_git_source
-from mnemosyne.user_model import UserMemoryKind, UserModel, UserModelEntry
+from mnemosyne.user_model import UserMemoryKind, UserMistakeEvent, UserModel, UserModelEntry
 
 
 TOOL_SPEC: list[dict[str, Any]] = [
@@ -164,6 +164,16 @@ TOOL_SPEC: list[dict[str, Any]] = [
         "name": "profile_correct",
         "description": "Record an explicit profile correction that supersedes weaker entries.",
         "arguments": ["tenant_id", "user_id", "id", "statement"],
+    },
+    {
+        "name": "profile_record_mistake",
+        "description": "Record a neutral user-slip episode and promote scoped support only after repeated similar events.",
+        "arguments": ["tenant_id", "user_id", "pattern", "description"],
+    },
+    {
+        "name": "profile_retire_support_strategy",
+        "description": "Retire a scoped support strategy so it no longer appears in profile context.",
+        "arguments": ["tenant_id", "user_id", "strategy_id", "role", "source_trust_tier"],
     },
     {
         "name": "prefetch",
@@ -1081,6 +1091,80 @@ class MemoryTools:
         )
         result["corrects"] = id
         return result
+
+    def profile_record_mistake(
+        self,
+        tenant_id: str,
+        user_id: str,
+        pattern: str,
+        description: str,
+        scope: dict[str, Any] | None = None,
+        suggestion: str | None = None,
+        occurred_at: str | None = None,
+        role: WriteRole = "agent",
+        source_trust_tier: int | None = None,
+    ) -> dict[str, Any]:
+        trust = source_trust_tier if source_trust_tier is not None else int(TrustTier.USER_AUTHORED)
+        decision = self._authorize(
+            "profile_record_mistake",
+            role=role,
+            source_trust_tier=trust,
+            target_sink="preference",
+        )
+        event_kwargs: dict[str, Any] = {
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+            "pattern": pattern,
+            "description": description,
+            "scope": scope or {},
+        }
+        if occurred_at is not None:
+            parsed = parse_dt(occurred_at)
+            if parsed is None:
+                raise ValueError("occurred_at must be an ISO-8601 datetime")
+            event_kwargs["occurred_at"] = parsed
+        result = self.user_model.record_user_mistake(
+            UserMistakeEvent(**event_kwargs),
+            suggestion=suggestion,
+        )
+        self._save_user_model()
+        return {
+            **result,
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+            "pattern": pattern,
+            "scope": scope or {},
+            "security": decision,
+        }
+
+    def profile_retire_support_strategy(
+        self,
+        tenant_id: str,
+        user_id: str,
+        strategy_id: str,
+        role: WriteRole = "operator",
+        source_trust_tier: int = int(TrustTier.USER_AUTHORED),
+    ) -> dict[str, Any]:
+        decision = self._authorize(
+            "profile_retire_support_strategy",
+            role=role,
+            source_trust_tier=source_trust_tier,
+            destructive=True,
+            target_sink="preference",
+        )
+        strategy = self.user_model.support_strategies.get(strategy_id)
+        if strategy is not None and (strategy.tenant_id != tenant_id or strategy.user_id != user_id):
+            raise PermissionError("support strategy is outside the requested tenant/user scope")
+        retired = self.user_model.retire_support_strategy(strategy_id)
+        if retired:
+            self._save_user_model()
+        return {
+            "strategy_id": strategy_id,
+            "retired": retired,
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+            "security": decision,
+        }
 
     def prefetch(
         self,
