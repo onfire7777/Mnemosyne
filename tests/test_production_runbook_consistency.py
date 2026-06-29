@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -7,6 +8,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 RUNBOOK_DIR = REPO / ".planning" / "runbooks"
 INPUT_ARTIFACT_CHECKLIST = REPO / "infra" / "templates" / "production-input-artifacts.checklist.md"
+PROVIDER_MANIFEST_TEMPLATE = REPO / "infra" / "templates" / "provider-manifest.production.template.json"
 
 
 def _markdown_table_cells(line: str) -> list[str]:
@@ -35,6 +37,24 @@ def _checklist_row_artifacts() -> dict[str, tuple[Path, list[str]]]:
         ]
         rows[lane] = (REPO / runbook_matches[0], artifact_names)
     return rows
+
+
+def _provider_manifest_env_refs() -> set[str]:
+    payload = json.loads(PROVIDER_MANIFEST_TEMPLATE.read_text(encoding="utf-8"))
+    refs: set[str] = set()
+
+    def visit(value: object) -> None:
+        if isinstance(value, dict):
+            if set(value) == {"env"} and isinstance(value["env"], str):
+                refs.add(value["env"])
+            for item in value.values():
+                visit(item)
+        elif isinstance(value, list):
+            for item in value:
+                visit(item)
+
+    visit(payload)
+    return refs
 
 
 def test_every_row_runbook_points_to_universal_preflight_capture_flow() -> None:
@@ -140,22 +160,36 @@ def test_production_evidence_docs_require_manifest_bound_release_audit() -> None
 
 
 def test_production_evidence_docs_require_independent_bundle_fingerprint() -> None:
-    docs = [
+    docs_with_command_snippets = [
         REPO / "infra" / "PRODUCTION-EVIDENCE.md",
         REPO / "infra" / "README.md",
         RUNBOOK_DIR / "README.md",
+    ]
+    docs_with_custody_language = [
+        *docs_with_command_snippets,
+        REPO / ".planning" / "ENV-AND-SECRETS.md",
+        REPO / ".planning" / "STRICT-BLUEPRINT-PARITY-AUDIT.md",
+        REPO / ".planning" / "STATE.md",
+        *sorted(RUNBOOK_DIR.glob("row-*.md")),
     ]
     self_referential_snippet = (
         'json.loads((pathlib.Path(sys.argv[1]) / "summary.json").read_text())'
         '["bundle_fingerprint"]'
     )
 
-    for path in docs:
+    for path in docs_with_command_snippets:
         text = path.read_text(encoding="utf-8")
         assert "EXPECTED_BUNDLE_FINGERPRINT=sha256:..." in text, path
+
+    for path in docs_with_custody_language:
+        text = path.read_text(encoding="utf-8")
         assert "out-of-band" in text, path
-        assert "bundle under review" in text, path
+        if path in docs_with_command_snippets:
+            assert "bundle under review" in text, path
         assert self_referential_snippet not in text, path
+        assert "expected `summary.json` `bundle_fingerprint`" not in text, path
+        if path.parent == RUNBOOK_DIR and path.name.startswith("row-"):
+            assert "`--expected-bundle-fingerprint` set from" in text, path
 
 
 def test_operator_docs_do_not_use_unbound_production_release_audit() -> None:
@@ -200,6 +234,79 @@ def test_production_evidence_input_dir_is_not_capture_output() -> None:
     assert "must not already exist" in rollback_doc
     assert "validates local real-service mechanics" in infra_readme
     assert "not production validation" in infra_readme
+
+
+def test_provider_manifest_env_refs_are_documented_for_operators() -> None:
+    env_doc = (REPO / ".planning" / "ENV-AND-SECRETS.md").read_text(encoding="utf-8")
+    missing = sorted(ref for ref in _provider_manifest_env_refs() if ref not in env_doc)
+
+    assert missing == []
+
+
+def test_provider_check_routes_are_documented_for_shared_manifest_rows() -> None:
+    docs = {
+        REPO / ".planning" / "OPS-HANDOFF-AND-OWNERSHIP.md": [
+            "`provider-check` oidc/session_secret",
+            "`provider-check` object_key_manager/residency_policy",
+            "`policy-ops-check`",
+        ],
+        RUNBOOK_DIR / "row-01-production-postgres-retrieval.md": [
+            "`provider-check` for `retrieval_backends`",
+            "do not create a row-local provider manifest",
+        ],
+        RUNBOOK_DIR / "row-02-tenant-isolation-and-auth.md": [
+            "`provider-check` for `oidc` and `session_secret`",
+            "`policy-ops-check`",
+            "do not create a row-local provider manifest",
+        ],
+        RUNBOOK_DIR / "row-04-consolidation-role-pipeline.md": [
+            "`provider-check` for `candidate_extractor`, `summarizer`, and `entity_resolver`",
+            "do not create a row-local provider manifest",
+        ],
+        RUNBOOK_DIR / "row-06-multimodal-retrieval.md": [
+            "`provider-check` for `media_extractor` and `media_embedding`",
+            "do not create a row-local provider manifest",
+        ],
+        RUNBOOK_DIR / "row-07-privacy-and-erasure.md": [
+            "`provider-check` for `object_key_manager` and `residency_policy`",
+            "do not create a row-local provider manifest",
+        ],
+        RUNBOOK_DIR / "row-09-parametric-tier.md": [
+            "`provider-check` for `parametric`",
+            "do not create a row-local provider manifest",
+        ],
+        RUNBOOK_DIR / "row-10-live-parity-suite.md": [
+            "`provider-check` for production adapter/provider coverage",
+            "do not create a row-local provider manifest",
+        ],
+    }
+
+    for path, snippets in docs.items():
+        text = path.read_text(encoding="utf-8")
+        for snippet in snippets:
+            assert snippet in text, (path, snippet)
+
+    row7 = (RUNBOOK_DIR / "row-07-privacy-and-erasure.md").read_text(encoding="utf-8")
+    assert "`policy-ops-check`" not in row7
+
+
+def test_operator_docs_bind_c2pa_executable_metadata_and_rollback_verify() -> None:
+    docs = [
+        REPO / "infra" / "PRODUCTION-EVIDENCE.md",
+        REPO / "infra" / "README.md",
+        REPO / ".planning" / "ENV-AND-SECRETS.md",
+        RUNBOOK_DIR / "README.md",
+    ]
+    for path in docs:
+        text = path.read_text(encoding="utf-8")
+        assert "canonical" in text, path
+        assert "symlink" in text, path
+        assert "SHA-256" in text or "sha256" in text, path
+
+    rollback = (REPO / ".planning" / "ROLLBACK.md").read_text(encoding="utf-8")
+    assert "--preflight-only" in rollback
+    assert "--expected-bundle-fingerprint" in rollback
+    assert "out-of-band rollback capture record" in rollback
 
 
 def test_roadmap_tier_b_table_routes_rows_through_full_production_manifest() -> None:

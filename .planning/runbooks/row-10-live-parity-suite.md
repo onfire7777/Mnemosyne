@@ -16,6 +16,7 @@ Run for the row-10 operator evidence pass:
 
 - `MNEMOSYNE_POSTGRES_DSN="$PRODUCTION_POSTGRES_DSN" .venv/bin/python -m pytest -q`
 - `belief-revision-check`
+- `provider-check` for production adapter/provider coverage
 
 The full suite is not itself one of the frozen 28 production soak manifest
 commands, so retain its redacted output and coverage summary as row-10 input
@@ -35,6 +36,10 @@ rendering:
 - `belief-revision-cases.json`
 - `provider-manifest.production.json`
 - `row-10-full-suite-evidence.json`
+
+`provider-check` runs once from `provider-manifest.production.json` in the full
+production profile. This row consumes the shared final adapter/provider coverage
+subchecks; do not create a row-local provider manifest.
 
 ## Redaction Requirement
 
@@ -58,8 +63,9 @@ as setup proof only, then run
 `infra/scripts/capture-production-evidence.sh "$SOAK_MANIFEST" "$OUT_ROOT"` for the real
 `deployment-soak` + `release-audit` capture. The preflight output does not flip this row to Done.
 Use absolute external paths outside the repo for `SOAK_MANIFEST`, `PRECHECK_OUTPUT_ROOT`, `OUT_ROOT`, and the `MNEMOSYNE_PROD_EVIDENCE_DIR` input-artifact directory.
-After capture, reviewers must run `"$PYTHON" -m mnemosyne.cli production-evidence-verify` with the retained
-`summary.json` `bundle_fingerprint`, retained `preflight.json`, `redaction-scan.json`,
+After capture, reviewers must run `"$PYTHON" -m mnemosyne.cli production-evidence-verify` with
+`--expected-bundle-fingerprint` set from the independently retained out-of-band
+capture record, plus retained `preflight.json`, `redaction-scan.json`,
 `bundle-manifest.json`, `source-soak-manifest.json`, `operator-soak-manifest.json`,
 and `input-artifacts/` custody, plus source/operator command-profile agreement;
 offline custody verification must pass before this row can flip Done.

@@ -53,6 +53,8 @@ infra/
   templates/
     production-soak-manifest.template.json
     production-render.env.example   # blank non-secret render inputs template
+    provider-manifest.production.template.json
+    production-input-artifacts.checklist.md
   validate/
     validate-all.sh                 # run all three validations
     validate-keycloak.sh validate-vault.sh validate-c2pa.sh
@@ -111,6 +113,11 @@ cp infra/templates/production-render.env.example \
 set -a
 . /secure/path/to/production-render.env
 set +a
+mkdir -p "$MNEMOSYNE_PROD_EVIDENCE_DIR"
+cp infra/templates/provider-manifest.production.template.json \
+  "$MNEMOSYNE_PROD_EVIDENCE_DIR/provider-manifest.production.json"
+# Fill the external provider manifest with production provider values or
+# environment-variable references before rendering.
 infra/scripts/render-production-soak-manifest.sh --check-environment
 infra/scripts/render-production-soak-manifest.sh \
   --output /secure/path/to/production-soak-manifest.json
@@ -142,8 +149,12 @@ the required `MNEMOSYNE_PROD_*` key names, operator readiness file paths, and
 static template-derived input artifact inventory so operators can prepare the
 external custody directory before sourcing environment values. Once the
 environment is present, it verifies the external production input directory, the
-manifest-referenced relative input artifacts in that directory, and the external
-executable C2PA verifier before rendering. Its JSON includes
+manifest-referenced relative input artifacts in that directory, and the resolved
+canonical C2PA verifier path before rendering; `MNEMOSYNE_PROD_C2PA_TOOL` must
+be an absolute external executable outside the repository, reached without a
+symlink or non-canonical wrapper path. Production preflight records that
+executable path's size and SHA-256 digest in `preflight.json` without copying
+the executable into `input-artifacts/`. Its JSON includes
 `required_input_artifacts_detail` and `missing_input_artifacts_detail` entries
 with relative path, existence, check/command/option references, Tier-B lane,
 strict-audit row, and row-runbook routing so operators can repair missing inputs
@@ -182,7 +193,10 @@ running production checks; preflight output plus `redaction-scan.json` is setup
 proof only, not production parity evidence. Successful full capture writes
 `bundle-manifest.json` with SHA-256 hashes for retained artifacts, keeps
 `source-soak-manifest.json` for source/operator command-profile agreement, and
-surfaces its `bundle_fingerprint` in `summary.json` for operator handoff custody.
+records the copied `summary.json` fingerprint for review metadata. Custody
+review still requires `--expected-bundle-fingerprint` from an independently
+retained out-of-band capture record, not from `summary.json` inside the bundle
+under review.
 Put secrets in environment variables, files, or command-backed providers, not
 in manifest `args`.
 
@@ -401,8 +415,11 @@ and runs a negative tamper test.
 A real signing certificate chained to a CA your organization trusts (not the
 self-signed test root), a real timestamp authority, and `trusted_roots` /
 `trusted_issuers` in the policy populated with your production roots. If
-c2patool is installed natively on the host, set `C2PATOOL_BIN=/path/to/c2patool`
-and the wrapper skips the Docker round-trip.
+c2patool is installed natively on the host for local setup, set
+`C2PATOOL_BIN=/path/to/c2patool` and the wrapper skips the Docker round-trip.
+For Tier-B production capture, render `MNEMOSYNE_PROD_C2PA_TOOL` to the resolved
+canonical deployed executable path; local `C2PATOOL_BIN` shortcuts are setup
+mechanics only unless that exact canonical executable is what production uses.
 
 ---
 

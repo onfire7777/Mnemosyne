@@ -14,6 +14,7 @@ Non-local media extractor, media embedding provider, and encrypted object store.
 Run in the production soak profile:
 
 - `multimodal-ops-check`
+- `provider-check` for `media_extractor` and `media_embedding`
 
 ## Required Production Input Artifacts
 
@@ -22,6 +23,10 @@ rendering:
 
 - `multimodal-ops-bundle.json`
 - `provider-manifest.production.json`
+
+`provider-check` runs once from `provider-manifest.production.json` in the full
+production profile. This row consumes the shared media extractor and media
+embedding subchecks; do not create a row-local provider manifest.
 
 ## Redaction Requirement
 
@@ -45,8 +50,9 @@ as setup proof only, then run
 `infra/scripts/capture-production-evidence.sh "$SOAK_MANIFEST" "$OUT_ROOT"` for the real
 `deployment-soak` + `release-audit` capture. The preflight output does not flip this row to Done.
 Use absolute external paths outside the repo for `SOAK_MANIFEST`, `PRECHECK_OUTPUT_ROOT`, `OUT_ROOT`, and the `MNEMOSYNE_PROD_EVIDENCE_DIR` input-artifact directory.
-After capture, reviewers must run `"$PYTHON" -m mnemosyne.cli production-evidence-verify` with the retained
-`summary.json` `bundle_fingerprint`, retained `preflight.json`, `redaction-scan.json`,
+After capture, reviewers must run `"$PYTHON" -m mnemosyne.cli production-evidence-verify` with
+`--expected-bundle-fingerprint` set from the independently retained out-of-band
+capture record, plus retained `preflight.json`, `redaction-scan.json`,
 `bundle-manifest.json`, `source-soak-manifest.json`, `operator-soak-manifest.json`,
 and `input-artifacts/` custody, plus source/operator command-profile agreement;
 offline custody verification must pass before this row can flip Done.

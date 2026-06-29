@@ -10684,7 +10684,6 @@ def _production_evidence_summary_offline_verify_argv_ok(
     summary: Mapping[str, Any] | None,
     *,
     bundle_dir: Path,
-    bundle_fingerprint: str | None = None,
 ) -> bool:
     if summary is None:
         return False
@@ -10693,10 +10692,9 @@ def _production_evidence_summary_offline_verify_argv_ok(
         return False
     if not _production_evidence_path_matches(offline_verify.get("bundle_dir"), expected_path=bundle_dir):
         return False
-    expected_fingerprint = bundle_fingerprint or summary.get("bundle_fingerprint")
-    if not isinstance(expected_fingerprint, str) or not expected_fingerprint.startswith("sha256:"):
+    if "expected_bundle_fingerprint" in offline_verify:
         return False
-    if offline_verify.get("expected_bundle_fingerprint") != expected_fingerprint:
+    if offline_verify.get("expected_bundle_fingerprint_source") != "out-of-band-capture-record":
         return False
     argv = offline_verify.get("argv")
     if not isinstance(argv, list) or len(argv) != 7 or not all(isinstance(item, str) for item in argv):
@@ -10712,10 +10710,127 @@ def _production_evidence_summary_offline_verify_argv_ok(
         return False
     if argv[5] != "--expected-bundle-fingerprint":
         return False
-    if argv[6] != expected_fingerprint:
+    if argv[6] != "<out-of-band-bundle-fingerprint>":
         return False
     note = offline_verify.get("note")
-    return isinstance(note, str) and "Custody review only" in note and "does not rerun production checks" in note
+    return (
+        isinstance(note, str)
+        and "Custody review only" in note
+        and "does not rerun production checks" in note
+        and "out-of-band capture record" in note
+    )
+
+
+def _production_evidence_sha256_digest_ok(value: Any) -> bool:
+    return isinstance(value, str) and re.fullmatch(r"sha256:[0-9a-f]{64}", value) is not None
+
+
+def _verify_production_evidence_executable_tool_references(
+    preflight: Mapping[str, Any],
+    findings: list[dict[str, Any]],
+) -> bool:
+    references = preflight.get("executable_tool_references")
+    if not isinstance(references, list) or not references:
+        _production_evidence_finding(
+            findings,
+            "preflight_executable_tool_references_missing",
+            "preflight.json must retain executable tool reference metadata",
+        )
+        return False
+    ok = True
+    c2pa_reference_seen = False
+    allowed_options = {"--c2pa-tool", "suite.tool", "suite.c2pa_tool", "MNEMOSYNE_C2PA_TOOL"}
+    for index, reference in enumerate(references, start=1):
+        if not isinstance(reference, Mapping):
+            ok = False
+            _production_evidence_finding(
+                findings,
+                "preflight_executable_tool_reference_invalid",
+                f"preflight.json executable_tool_references[{index}] must be an object",
+            )
+            continue
+        option = reference.get("option")
+        path_value = reference.get("path")
+        labels = reference.get("labels")
+        size_bytes = reference.get("size_bytes")
+        expected_sha256 = reference.get("sha256")
+        if (
+            not isinstance(option, str)
+            or not option
+            or not isinstance(path_value, str)
+            or not path_value
+            or not isinstance(labels, list)
+            or not labels
+            or not all(isinstance(label, str) and label for label in labels)
+            or not isinstance(size_bytes, int)
+            or size_bytes < 0
+            or not _production_evidence_sha256_digest_ok(expected_sha256)
+        ):
+            ok = False
+            _production_evidence_finding(
+                findings,
+                "preflight_executable_tool_reference_invalid",
+                f"preflight.json executable_tool_references[{index}] has invalid metadata",
+            )
+            continue
+        if option in allowed_options:
+            c2pa_reference_seen = True
+        tool_path = Path(path_value).expanduser()
+        if not tool_path.is_absolute():
+            ok = False
+            _production_evidence_finding(
+                findings,
+                "preflight_executable_tool_reference_relative",
+                f"preflight.json executable_tool_references[{index}].path must be absolute",
+            )
+            continue
+        try:
+            if tool_path.exists():
+                if tool_path.is_symlink():
+                    ok = False
+                    _production_evidence_finding(
+                        findings,
+                        "preflight_executable_tool_reference_symlink",
+                        f"preflight.json executable_tool_references[{index}].path must not be a symlink",
+                    )
+                    continue
+                if not tool_path.is_file():
+                    ok = False
+                    _production_evidence_finding(
+                        findings,
+                        "preflight_executable_tool_reference_not_file",
+                        f"preflight.json executable_tool_references[{index}].path is not a file",
+                    )
+                    continue
+                if tool_path.stat().st_size != size_bytes:
+                    ok = False
+                    _production_evidence_finding(
+                        findings,
+                        "preflight_executable_tool_reference_size_mismatch",
+                        f"preflight.json executable_tool_references[{index}] size does not match the executable",
+                    )
+                if _file_sha256(tool_path) != expected_sha256:
+                    ok = False
+                    _production_evidence_finding(
+                        findings,
+                        "preflight_executable_tool_reference_sha256_mismatch",
+                        f"preflight.json executable_tool_references[{index}] sha256 does not match the executable",
+                    )
+        except OSError as exc:
+            ok = False
+            _production_evidence_finding(
+                findings,
+                "preflight_executable_tool_reference_denied",
+                f"preflight.json executable_tool_references[{index}] cannot be checked: {exc}",
+            )
+    if not c2pa_reference_seen:
+        ok = False
+        _production_evidence_finding(
+            findings,
+            "preflight_c2pa_executable_reference_missing",
+            "preflight.json must retain C2PA executable digest metadata",
+        )
+    return ok
 
 
 def _verify_production_evidence_summary(
@@ -10764,7 +10879,7 @@ def _verify_production_evidence_summary(
         _production_evidence_finding(
             findings,
             "summary_offline_verify_invalid",
-            "summary.json offline_verify must contain the exact retained production-evidence-verify replay command",
+            "summary.json offline_verify must contain a verifier command template that requires an out-of-band expected fingerprint",
         )
 
 
@@ -11064,6 +11179,8 @@ def _verify_production_evidence_preflight(
                     "preflight_parity_row_readiness_mismatch",
                     "preflight.json parity_row_readiness does not match retained input artifacts",
                 )
+    if not _verify_production_evidence_executable_tool_references(preflight, findings):
+        ok = False
     return ok
 
 

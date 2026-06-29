@@ -14,6 +14,12 @@ CLI commands consumed by `deployment-soak` and `release-audit`.
   template operators copy outside the repo before filling render values;
   `MNEMOSYNE_PROD_EVIDENCE_DIR` must be an absolute external input-artifact path
   outside the repository.
+- `infra/templates/provider-manifest.production.template.json` - non-secret
+  provider-check template copied to
+  `$MNEMOSYNE_PROD_EVIDENCE_DIR/provider-manifest.production.json` outside the
+  repo and filled with production provider values or environment references.
+- `infra/templates/production-input-artifacts.checklist.md` - row-routed
+  checklist for the external input artifacts that must exist before preflight.
 - `infra/scripts/render-production-soak-manifest.sh` - canonical renderer for
   non-secret `MNEMOSYNE_PROD_*` placeholders; refuses repo-local output by
   default and validates the production command profile before writing. Its
@@ -39,8 +45,10 @@ CLI commands consumed by `deployment-soak` and `release-audit`.
   `input_artifacts` metadata is retained through the same custody path for row
   evidence that is not a command-line argument.
 - Executable tool paths such as `MNEMOSYNE_PROD_C2PA_TOOL` are validated as
-  absolute, external, executable tool references and recorded in
-  `preflight.json`; they are not snapshotted as evidence input artifacts.
+  absolute, external, executable tool references outside the repository,
+  reached without symlinks or non-canonical wrapper paths, and recorded in
+  `preflight.json` with size and SHA-256 metadata; they are not snapshotted as
+  evidence input artifacts.
 - `provenance-trust-check --suite` is parsed during preflight: nested
   `asset_path` and `c2pa_asset_path` values are snapshotted and rewritten in
   the staged suite JSON, while inline `--suite-json` is rejected for production
@@ -73,14 +81,14 @@ CLI commands consumed by `deployment-soak` and `release-audit`.
   wrapper and manifest-bound release-audit path over deployed IdP,
   Postgres/retrieval, provider, MCP, dashboard, worker, object-store,
   KMS/residency, C2PA, and trainer surfaces. Local staging, compose, and
-  production-like dry runs are setup evidence only and cannot satisfy Tier B.
+  non-production dry runs are setup evidence only and cannot satisfy Tier B.
 - Secrets must be supplied through environment variables, provider files, Vault,
   Keycloak, KMS, or equivalent runtime custody. Do not place raw secrets in the
   soak manifest or committed docs; production bundles must keep
   `redaction-scan.json` at `ok: true` with no skipped files and a
   `scanned_files` list matching the retained `bundle-manifest.json` artifact
-  set except `redaction-scan.json` itself, plus the `summary.json`
-  `bundle_fingerprint` for handoff custody.
+  set except `redaction-scan.json` itself, plus an independently retained
+  out-of-band expected bundle fingerprint for handoff custody.
 - After capture, select the repo interpreter with
   `PYTHON="${PYTHON:-$(if [ -x .venv/bin/python ]; then printf '%s' .venv/bin/python; else command -v python3; fi)}"`;
   set `BUNDLE_DIR=/secure/path/to/mnemosyne-production-evidence`; set

@@ -313,6 +313,13 @@ def _resolve_checked(path: Path, *, label: str, strict: bool = False) -> Path | 
         errors.append(f"{label} contains invalid path {path}: {exc}")
         return None
 
+def _path_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return "sha256:" + digest.hexdigest()
+
 def _reject_symlinked_input_path(path: Path, *, label: str) -> bool:
     try:
         is_symlink = path.is_symlink()
@@ -544,6 +551,8 @@ def _validate_executable_tool_path(
         {
             "option": option_name,
             "path": str(resolved),
+            "size_bytes": resolved.stat().st_size,
+            "sha256": _path_sha256(resolved),
             "labels": [],
         },
     )
@@ -1290,7 +1299,7 @@ summary = {
     "completed_at": __import__("datetime").datetime.now(__import__("datetime").UTC).isoformat(),
     "offline_verify": {
         "bundle_dir": str(out_root),
-        "expected_bundle_fingerprint": bundle_fingerprint,
+        "expected_bundle_fingerprint_source": "out-of-band-capture-record",
         "argv": [
             os.environ["PYTHON"],
             "-m",
@@ -1298,9 +1307,12 @@ summary = {
             "production-evidence-verify",
             str(out_root),
             "--expected-bundle-fingerprint",
-            bundle_fingerprint,
+            "<out-of-band-bundle-fingerprint>",
         ],
-        "note": "Custody review only; does not rerun production checks or flip audit rows.",
+        "note": (
+            "Custody review only; does not rerun production checks or flip audit rows. "
+            "Expected fingerprint must come from an independently retained out-of-band capture record."
+        ),
     },
 }
 (out_root / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")

@@ -987,7 +987,8 @@ def test_capture_production_evidence_preflight_does_not_snapshot_tool_executable
     out_root = tmp_path / "capture"
     tool = tmp_path / "bin" / "c2patool"
     tool.parent.mkdir()
-    tool.write_bytes(b"\x00\x01not utf-8 executable bytes")
+    tool_payload = b"\x00\x01not utf-8 executable bytes"
+    tool.write_bytes(tool_payload)
     tool.chmod(0o755)
 
     def add_tool_path(payload: dict[str, Any]) -> None:
@@ -1028,6 +1029,8 @@ def test_capture_production_evidence_preflight_does_not_snapshot_tool_executable
         {
             "option": "--c2pa-tool",
             "path": str(tool),
+            "size_bytes": len(tool_payload),
+            "sha256": "sha256:" + sha256(tool_payload).hexdigest(),
             "labels": ["checks[9].args"],
         }
     ]
@@ -1278,7 +1281,8 @@ def test_capture_production_evidence_preflight_snapshots_provenance_suite_assets
     suite = tmp_path / "production-inputs" / "provenance-trust-suite.json"
     tool.parent.mkdir()
     asset.parent.mkdir()
-    tool.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    tool_payload = "#!/bin/sh\nexit 0\n"
+    tool.write_text(tool_payload, encoding="utf-8")
     tool.chmod(0o755)
     asset.write_text('{"asset":"redacted-c2pa-fixture"}\n', encoding="utf-8")
     suite.write_text(
@@ -1344,6 +1348,8 @@ def test_capture_production_evidence_preflight_snapshots_provenance_suite_assets
         {
             "option": "suite.tool",
             "path": str(tool),
+            "size_bytes": len(tool_payload.encode("utf-8")),
+            "sha256": "sha256:" + sha256(tool_payload.encode("utf-8")).hexdigest(),
             "labels": ["checks[9].args tool"],
         }
     ]
@@ -3041,7 +3047,7 @@ exec "$REAL_PYTHON" "$@"
     assert summary["bundle_fingerprint"].startswith("sha256:")
     assert summary["offline_verify"] == {
         "bundle_dir": str(out_root),
-        "expected_bundle_fingerprint": summary["bundle_fingerprint"],
+        "expected_bundle_fingerprint_source": "out-of-band-capture-record",
         "argv": [
             str(fake_python),
             "-m",
@@ -3049,9 +3055,12 @@ exec "$REAL_PYTHON" "$@"
             "production-evidence-verify",
             str(out_root),
             "--expected-bundle-fingerprint",
-            summary["bundle_fingerprint"],
+            "<out-of-band-bundle-fingerprint>",
         ],
-        "note": "Custody review only; does not rerun production checks or flip audit rows.",
+        "note": (
+            "Custody review only; does not rerun production checks or flip audit rows. "
+            "Expected fingerprint must come from an independently retained out-of-band capture record."
+        ),
     }
     assert bundle_manifest["schema"] == "mnemosyne.production-evidence-bundle.v1"
     assert bundle_manifest["artifact_count"] == len(bundle_manifest["files"])

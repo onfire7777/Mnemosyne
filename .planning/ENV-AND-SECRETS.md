@@ -16,13 +16,23 @@ external copy into the current shell, then render with
 before running `infra/scripts/capture-production-evidence.sh`.
 The renderer reads the current process environment; it does not accept an
 `--env-file` argument.
+Copy `infra/templates/provider-manifest.production.template.json` to
+`$MNEMOSYNE_PROD_EVIDENCE_DIR/provider-manifest.production.json` outside the
+repository and fill that external copy with production provider values or
+environment-variable references before rendering. The provider manifest is a
+retained production input artifact shared across B1, B2, B4, B6, B7, B9, and
+B10; keep `forbid_local: true` and do not split provider-check subchecks into
+row-local manifests.
 The check command prints key names only; it also verifies the production input
-directory exists outside the repo and the C2PA verifier path is an external
-executable. A green check also means every manifest-referenced file or
-directory under `MNEMOSYNE_PROD_EVIDENCE_DIR` exists. Missing production inputs
-are reported by relative artifact name only, with redacted detail entries that
-show the check/command/option requiring each artifact; configured absolute path
-values remain redacted.
+directory exists outside the repo and `MNEMOSYNE_PROD_C2PA_TOOL` resolves to an
+absolute external executable outside the repository without a symlink or
+non-canonical wrapper path. Production preflight records the executable's size
+and SHA-256 digest in `preflight.json` under `executable_tool_references`
+without copying the executable into `input-artifacts/`. A green check also means
+every manifest-referenced file or directory under `MNEMOSYNE_PROD_EVIDENCE_DIR`
+exists. Missing production inputs are reported by relative artifact name only,
+with redacted detail entries that show the check/command/option requiring each
+artifact; configured absolute path values remain redacted.
 
 Secrets and credentials must be supplied outside manifest `args` and
 `global_args`, using runtime environment variables or provider custody files.
@@ -57,6 +67,24 @@ them outside the repository with
 | `MNEMOSYNE_PROD_TENANT` | Production tenant id used for evidence capture | Deployment metadata | tenant-scoped production checks |
 | `MNEMOSYNE_PROD_TLS_HOSTNAME` | Production TLS hostname | Certificate/deployment metadata | TLS gates |
 | `MNEMOSYNE_PROD_TLS_URL` | Production TLS endpoint URL | Certificate/deployment metadata | TLS gates |
+
+## Production Provider Manifest Environment References
+
+`infra/templates/provider-manifest.production.template.json` may reference these
+runtime variables through `{ "env": "..." }` objects. Their values stay outside
+the committed template and outside soak-manifest `args`.
+
+| Variable | Purpose | Source | Consumed by |
+|---|---|---|---|
+| `MNEMOSYNE_CANDIDATE_EXTRACTOR_COMMAND` | Command-backed candidate extractor | Provider custody file or deployment env | `provider-check` candidate_extractor |
+| `MNEMOSYNE_ENTITY_RESOLVER_COMMAND` | Command-backed entity resolver | Provider custody file or deployment env | `provider-check` entity_resolver |
+| `MNEMOSYNE_LESSON_DISTILLER_COMMAND` | Command-backed lesson distiller | Provider custody file or deployment env | `provider-check` lesson_distiller |
+| `MNEMOSYNE_PROVIDER_OIDC_AUDIENCE` | Provider-check OIDC audience | IdP provider config | `provider-check` oidc |
+| `MNEMOSYNE_PROVIDER_OIDC_AUTHZ_POLICY_FILE` | Provider-check OIDC authz policy artifact | Versioned deployment artifact | `provider-check` oidc |
+| `MNEMOSYNE_PROVIDER_OIDC_ISSUER` | Provider-check OIDC issuer | IdP provider config | `provider-check` oidc |
+| `MNEMOSYNE_PROVIDER_OIDC_JWKS_URL` | Provider-check OIDC JWKS endpoint | IdP provider config | `provider-check` oidc |
+| `MNEMOSYNE_SKILL_INDUCER_COMMAND` | Command-backed skill/procedure inducer | Provider custody file or deployment env | `provider-check` skill_inducer |
+| `MNEMOSYNE_SUMMARIZER_COMMAND` | Command-backed evidence summarizer | Provider custody file or deployment env | `provider-check` summarizer |
 
 ## Environment Catalog
 
@@ -191,7 +219,9 @@ The only production acceptance path is:
 3. `release-audit` reports `ok: true` with
    `--require-production-validated --require-provider-forbid-local`.
 4. `production-evidence-verify` passes offline against the retained output
-   bundle and expected `summary.json` `bundle_fingerprint`.
+   bundle with `--expected-bundle-fingerprint` set from an independently
+   retained out-of-band capture record, not from `summary.json` inside the
+   bundle under review.
 
 ## Hard Rules
 
