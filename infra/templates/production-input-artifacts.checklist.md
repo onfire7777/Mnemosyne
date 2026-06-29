@@ -43,6 +43,9 @@ Rules:
   external directory.
 - Run `infra/scripts/render-production-soak-manifest.sh --check-environment`
   before capture. Without sourced environment values, it reports this static
-  artifact inventory and the readiness files to use next. With environment
-  values present, it reports missing relative artifact names without printing
-  the external custody path.
+  artifact inventory, the readiness files to use next, and
+  `parity_row_readiness` grouped by Tier-B row/runbook. With environment values
+  present, it reports missing relative artifact names and row-local validation
+  errors without printing the external custody path. The row grouping is for
+  operator assignment only; production evidence still requires the full capture
+  and release-audit runbook.
