@@ -103,6 +103,11 @@ byte-binding). The work is closing **intent-vs-enforcement** gaps and shipping *
      matching `acr`/`amr` and a fresh, non-future `auth_time`. This closes the tenant-only
      elevation source gap; the Tier-B row still requires retained live Keycloak/MFA rollout
      evidence.
+   - 2026-06-30 implementation note: C2PA trust evaluation now defaults to trusted-issuer
+     enforcement; unconfigured or mismatched signers quarantine instead of raising trust.
+     Root-only trust remains possible only through an explicit policy that disables issuer
+     matching and requires the configured root. This closes the source fail-open; the Tier-B
+     row still requires retained live C2PA issuer/root rotation evidence.
 2. **Postgres role separation under RLS:** ship `mnemosyne_app` (NOSUPERUSER, NOBYPASSRLS, no
    DELETE/TRUNCATE), a separate `mnemosyne_consolidator` (sole write/destructive authority), and
    SELECT-only eval roles; an ops-check that live-probes `rolsuper`/`rolbypassrls` and fails if true.

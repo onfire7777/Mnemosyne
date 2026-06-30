@@ -160,7 +160,7 @@ class ProvenanceTrustPolicy:
 
     trusted_issuers: tuple[str, ...] = ()
     trusted_roots: tuple[str, ...] = ()
-    require_trusted_issuer: bool = False
+    require_trusted_issuer: bool = True
     require_trusted_root: bool = False
     rules: tuple[ProvenanceTrustRule, ...] = ()
 
@@ -179,7 +179,7 @@ class ProvenanceTrustPolicy:
                 data,
                 snake_name="require_trusted_issuer",
                 camel_name="requireTrustedIssuer",
-                default=False,
+                default=True,
             ),
             require_trusted_root=_bool_field(
                 data,
