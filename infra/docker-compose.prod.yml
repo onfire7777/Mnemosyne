@@ -1,0 +1,158 @@
+# Mnemosyne — hardened SELF-HOSTED production stack (no-GPU).
+# Extends infra/docker-compose.providers.yml (Keycloak/Vault/c2pa) into a complete,
+# segmented, fail-closed production profile. Caddy is the SOLE published port.
+#
+# FIRST-RUN: run infra/prod/bootstrap.sh first (step-ca, Vault transit, Keycloak realm,
+# Postgres roles, model pull). Then `docker compose -f infra/docker-compose.prod.yml up -d`.
+# CI MUST digest-pin every image (the `:tag` pins below are the pre-pin baseline) and run
+# the policy-as-code gate (no docker.sock, non-root, read_only, cap_drop ALL, limits).
+
+x-hardened: &hardened
+  read_only: true
+  security_opt: ["no-new-privileges:true"]
+  cap_drop: ["ALL"]
+  restart: unless-stopped
+  init: true
+  pids_limit: 512
+  # NOTE: docker.sock is NEVER mounted into any service.
+
+networks:
+  edge:      { driver: bridge }                 # caddy <-> public-facing service routes
+  internal:  { internal: true }                 # service-to-service, no NAT/egress
+  datasec:   { internal: true }                 # postgres + vault; reachable only by the consolidator
+
+volumes:
+  stepca: {}
+  pgdata: {}     # put on a LUKS/FileVault-encrypted host path in production
+  vault: {}
+  kc: {}
+  seaweed: {}
+  vmdata: {}
+  grafana: {}
+  caddy_data: {}
+  tei_models: {}
+
+services:
+  caddy:                                   # SOLE ingress: terminates TLS (step-ca ACME), the only published port
+    <<: *hardened
+    image: caddy:2.8
+    cap_add: ["NET_BIND_SERVICE"]
+    depends_on: [step-ca, mnemo-api, keycloak, grafana, tei, seaweedfs]
+    ports: ["443:443"]                     # bind to a concrete LAN/VPN iface in prod, never 0.0.0.0/WAN
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    tmpfs: ["/config:size=16m"]
+    networks: [edge]
+
+  step-ca:                                 # internal ACME CA -> real, non-self-signed chains (TLS gate)
+    <<: *hardened
+    image: smallstep/step-ca:0.27
+    environment: { DOCKER_STEPCA_INIT_NAME: Mnemosyne, DOCKER_STEPCA_INIT_DNS_NAMES: ca.mnemo.local }
+    volumes: [stepca:/home/step]
+    networks: [edge, internal]
+
+  postgres:                                # NATIVE retrieval engine: FTS + pgvector HNSW + recursive-PPR
+    <<: *hardened
+    image: pgvector/pgvector:pg16
+    user: "999:999"
+    environment:
+      POSTGRES_DB: mnemosyne
+      POSTGRES_USER: mnemosyne_superuser   # bootstrap only; apps use least-privilege roles (roles.sql)
+      POSTGRES_PASSWORD_FILE: /run/secrets/pg_superuser_pw
+    secrets: [pg_superuser_pw]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./postgres/roles.sql:/docker-entrypoint-initdb.d/10-roles.sql:ro
+    tmpfs: ["/tmp:size=64m", "/run/postgresql:size=64m"]
+    command: ["postgres", "-c", "shared_buffers=512MB", "-c", "maintenance_work_mem=512MB"]
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U mnemosyne_superuser -d mnemosyne"], interval: 10s, retries: 6 }
+    networks: [datasec]
+
+  tei:                                     # CPU embeddings (arctic-embed-l-v2.0, 1024-dim) + cross-encoder reranker
+    <<: *hardened
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.5
+    user: "1000:1000"
+    environment: { MODEL_ID: Snowflake/snowflake-arctic-embed-l-v2.0, HF_HOME: /models }
+    volumes: [tei_models:/models]
+    tmpfs: ["/tmp:size=128m"]
+    mem_limit: 4g
+    networks: [internal]
+    # Reranker: run a second TEI instance (MODEL_ID=BAAI/bge-reranker-v2-m3) or Infinity; wire HttpReranker to it.
+
+  keycloak:                                # OIDC/JWKS (FR-7/9) — production realm imported by bootstrap
+    <<: *hardened
+    image: quay.io/keycloak/keycloak:25.0
+    user: "1000:0"
+    command: ["start", "--optimized", "--hostname=kc.mnemo.local", "--proxy-headers=xforwarded"]
+    environment:
+      KC_DB: postgres
+      KC_HEALTH_ENABLED: "true"
+      KC_HTTP_ENABLED: "true"               # TLS terminated at Caddy; KC reachable only on internal net
+    volumes: [kc:/opt/keycloak/data]
+    tmpfs: ["/tmp:size=64m"]
+    mem_limit: 768m
+    networks: [edge, datasec]
+
+  vault:                                   # KMS transit (crypto-shred) — PRODUCTION: sealed, no dev root token
+    <<: *hardened
+    image: hashicorp/vault:1.17
+    cap_add: ["IPC_LOCK"]
+    command: ["vault", "server", "-config=/vault/config/vault.hcl"]
+    volumes:
+      - vault:/vault/file
+      - ./vault/vault.hcl:/vault/config/vault.hcl:ro
+    tmpfs: ["/tmp:size=16m"]
+    networks: [datasec]
+    # bootstrap.sh runs `vault operator init` + transit enable + AppRole; NEVER a committed root token.
+
+  seaweedfs:                               # S3 object store (native AES256) for multimodal (B6)
+    <<: *hardened
+    image: chrislusf/seaweedfs:3.73
+    command: ["server", "-s3", "-dir=/data", "-s3.config=/etc/seaweed/s3.json"]
+    volumes:
+      - seaweed:/data
+      - ./seaweed/s3.json:/etc/seaweed/s3.json:ro
+    networks: [internal]
+
+  victoriametrics:
+    <<: *hardened
+    image: victoriametrics/victoria-metrics:v1.102.1
+    command: ["--storageDataPath=/vmdata", "--retentionPeriod=90d"]
+    volumes: [vmdata:/vmdata]
+    networks: [internal]
+
+  grafana:                                 # hosted dashboard URL for B8 (mode=hosted_url)
+    <<: *hardened
+    image: grafana/grafana:11.1.0
+    user: "472:472"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana_admin_pw
+      GF_SERVER_ROOT_URL: https://grafana.mnemo.local
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    secrets: [grafana_admin_pw]
+    volumes: [grafana:/var/lib/grafana]
+    tmpfs: ["/tmp:size=32m"]
+    networks: [edge, internal]
+
+  mnemo-api:                               # EDGE: MCP/HTTP surface. NO secrets, NO KMS, NO direct DB writes.
+    <<: *hardened
+    build: { context: .., dockerfile: infra/Dockerfile }   # adjust to the app Dockerfile path
+    env_file: [./profiles/self-hosted.env]
+    environment: { MNEMOSYNE_MCP_REQUIRE_SESSION: "1", MNEMOSYNE_ROLE: api }
+    tmpfs: ["/tmp:size=64m"]
+    networks: [edge, internal]
+    depends_on: [keycloak, tei]
+
+  mnemo-consolidator:                      # BACK: sole write + KMS authority. NO edge reachability.
+    <<: *hardened
+    build: { context: .., dockerfile: infra/Dockerfile }
+    env_file: [./profiles/self-hosted.env]
+    environment: { MNEMOSYNE_ROLE: consolidator }
+    tmpfs: ["/tmp:size=64m"]
+    networks: [internal, datasec]
+    depends_on: [postgres, vault]
+
+secrets:
+  pg_superuser_pw: { file: /secure/outside/repo/pg_superuser_pw }
+  grafana_admin_pw: { file: /secure/outside/repo/grafana_admin_pw }

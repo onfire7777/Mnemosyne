@@ -1,0 +1,52 @@
+# Caddy — sole ingress. Real certs from step-ca ACME (NOT Caddy's self-signed `internal`).
+# Every backend is HTTPS on a non-loopback hostname -> satisfies the locality + real-CA gates.
+
+{
+	# Issue leaf certs from the self-hosted step-ca ACME directory (real chain, not self-signed).
+	acme_ca https://ca.mnemo.local/acme/acme/directory
+	acme_ca_root /data/step-ca-root.crt
+	servers {
+		protocols h1 h2
+	}
+}
+
+(secure_headers) {
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+	request_body {
+		max_size 32MB
+	}
+}
+
+mcp.mnemo.local {
+	import secure_headers
+	reverse_proxy mnemo-api:8080
+}
+
+kc.mnemo.local {
+	import secure_headers
+	# Block the admin console from the public ingress; admin is internal-only.
+	@admin path /admin* /metrics*
+	respond @admin 404
+	reverse_proxy keycloak:8080
+}
+
+tei.mnemo.local {
+	import secure_headers
+	reverse_proxy tei:80
+}
+
+s3.mnemo.local {
+	import secure_headers
+	reverse_proxy seaweedfs:8333
+}
+
+grafana.mnemo.local {
+	import secure_headers
+	reverse_proxy grafana:3000
+}
