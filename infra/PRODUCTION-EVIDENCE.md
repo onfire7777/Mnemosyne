@@ -26,6 +26,10 @@ This runbook is the operator handoff for flipping the remaining Tier B parity ro
   section summarizes the current blocked lanes and missing blocker classes so
   dispatcher handoff can start from one machine-readable report field instead
   of re-parsing every row. The packet also writes
+  `reports/row-action-plan.{json,md}` as a row-owner handoff that joins each
+  B1-B10 row's packet runbook, missing render values, missing provider refs,
+  missing artifacts, next actions, and row-scoped validator command. It also
+  writes
   `reports/input-artifact-worklist.{json,md}` as an artifact-first preparation
   aid that maps each required input artifact to its packet path, rows, row
   runbooks, and consuming checks. It is not evidence; do not create placeholder

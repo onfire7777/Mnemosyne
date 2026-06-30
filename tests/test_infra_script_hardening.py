@@ -241,6 +241,8 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     artifact_worklist_json = (
         packet_root / "reports" / "input-artifact-worklist.json"
     )
+    row_action_plan_markdown = packet_root / "reports" / "row-action-plan.md"
+    row_action_plan_json = packet_root / "reports" / "row-action-plan.json"
     artifact_validation_script = (
         packet_root / "reports" / "input-artifact-validation-commands.sh"
     )
@@ -252,6 +254,7 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     assert summary["post_capture_verify_report"] == report["post_capture_verify_report"]
     assert summary["next_commands_script"] == str(next_commands_script)
     assert summary["input_artifact_worklist"] == str(artifact_worklist_markdown)
+    assert summary["row_action_plan"] == str(row_action_plan_markdown)
     assert summary["input_artifact_validation_script"] == str(
         artifact_validation_script
     )
@@ -268,6 +271,8 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     assert "provider-manifest.production.json" not in report["missing_input_artifacts"]
     assert report["input_artifact_worklist_markdown"] == str(artifact_worklist_markdown)
     assert report["input_artifact_worklist_json"] == str(artifact_worklist_json)
+    assert report["row_action_plan_markdown"] == str(row_action_plan_markdown)
+    assert report["row_action_plan_json"] == str(row_action_plan_json)
     assert report["input_artifact_validation_script"] == str(
         artifact_validation_script
     )
@@ -320,6 +325,25 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     assert "row-10-full-suite-evidence.json" in validation_plan["belief-revision"][
         "required_input_artifacts"
     ]
+    row_action_plan = {item["lane"]: item for item in report["row_action_plan"]}
+    assert set(row_action_plan) == {f"B{index}" for index in range(1, 11)}
+    assert row_action_plan["B1"]["packet_runbook"] == (
+        "docs/runbooks/row-01-production-postgres-retrieval.md"
+    )
+    assert row_action_plan["B1"]["input_artifact_validation_command"] == (
+        f"{artifact_validation_script} B1"
+    )
+    assert row_action_plan["B1"]["blocker_counts"]["input_artifacts"] == 1
+    assert row_action_plan["B1"]["missing_input_artifacts"] == [
+        "retrieval-ops-bundle.json"
+    ]
+    assert {
+        validator["name"] for validator in row_action_plan["B1"]["validators"]
+    } >= {"provider-check", "retrieval-ops"}
+    assert row_action_plan["B1"]["report_is_evidence"] is False
+    assert "Capture real production input artifacts under input-artifacts/." in (
+        row_action_plan["B1"]["next_actions"]
+    )
     blockers = report["capture_blockers"]
     assert blockers["report_is_evidence"] is False
     assert blockers["blocked_lane_count"] == len(blockers["blocked_lanes"])
@@ -377,6 +401,11 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     assert json.loads(artifact_worklist_json.read_text(encoding="utf-8")) == report[
         "input_artifact_worklist"
     ]
+    assert row_action_plan_markdown.is_file()
+    assert row_action_plan_json.is_file()
+    assert json.loads(row_action_plan_json.read_text(encoding="utf-8")) == report[
+        "row_action_plan"
+    ]
     assert artifact_validation_script.is_file()
     assert os.access(artifact_validation_script, os.X_OK)
     assert next_commands_script.is_file()
@@ -402,6 +431,7 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     assert "docs/runbooks/" in readme
     assert "read-only packet guidance docs" in readme
     assert "reports/mnemosyne-production-runtime.env.example" in readme
+    assert "reports/row-action-plan.md" in readme
     assert "reports/input-artifact-worklist.md" in readme
     assert "reports/input-artifact-validation-commands.sh" in readme
     assert "reports/input-artifact-validation-commands.sh B1" in readme
@@ -482,6 +512,7 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     assert "### Runtime Env File" in markdown
     assert "### Input Artifacts" in markdown
     assert "Input Artifact Worklist" in markdown
+    assert "row-action-plan.md" in markdown
     assert "input-artifact-validation-commands.sh" in markdown
     assert "input-artifact-validation-commands.sh B1" in markdown
     assert "do not create placeholder JSON" in markdown
@@ -493,6 +524,11 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     assert "`retrieval-ops-bundle.json`" in artifact_worklist_text
     assert "`retrieval-ops-check`" in artifact_worklist_text
     assert "`B1` Production Postgres retrieval" in artifact_worklist_text
+    row_action_plan_text = row_action_plan_markdown.read_text(encoding="utf-8")
+    assert "operator preparation aid, not production evidence" in row_action_plan_text
+    assert "## B1 - Production Postgres retrieval" in row_action_plan_text
+    assert f"`{artifact_validation_script} B1`" in row_action_plan_text
+    assert "`retrieval-ops-bundle.json`" in row_action_plan_text
     assert str(next_commands_script) in markdown
     assert "Copy this generated no-secret example" in runtime_example
     assert 'export MNEMOSYNE_EMBEDDING_URL=""' in runtime_example
