@@ -80,7 +80,11 @@ limited to defects that directly block that path:
 2. Use the generated `reports/input-artifact-worklist.{json,md}` as the
    artifact-first operator checklist. It routes every required input artifact to
    packet paths, rows, row runbooks, and consuming checks without creating
-   placeholders. Use `reports/row-action-plan.{json,md}` as the row-owner
+   placeholders. Use `reports/input-artifact-contracts.{json,md}` to inspect
+   each artifact's kind, consuming validators, release-audit output-key
+   contract, and minimum operator contract before supplying files. It is a
+   contract/readiness aid only, not substitute evidence and not a schema sample.
+   Use `reports/row-action-plan.{json,md}` as the row-owner
    handoff because it joins each B1-B10 row's runbook, missing render values,
    missing provider refs, missing artifacts, next actions, and row validator.
    Use `reports/provider-env-action-plan.{json,md}` as the shared-provider

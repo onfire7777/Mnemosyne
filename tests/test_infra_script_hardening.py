@@ -241,6 +241,12 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     artifact_worklist_json = (
         packet_root / "reports" / "input-artifact-worklist.json"
     )
+    artifact_contracts_markdown = (
+        packet_root / "reports" / "input-artifact-contracts.md"
+    )
+    artifact_contracts_json = (
+        packet_root / "reports" / "input-artifact-contracts.json"
+    )
     provider_env_action_plan_markdown = (
         packet_root / "reports" / "provider-env-action-plan.md"
     )
@@ -260,6 +266,7 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     assert summary["post_capture_verify_report"] == report["post_capture_verify_report"]
     assert summary["next_commands_script"] == str(next_commands_script)
     assert summary["input_artifact_worklist"] == str(artifact_worklist_markdown)
+    assert summary["input_artifact_contracts"] == str(artifact_contracts_markdown)
     assert summary["provider_env_action_plan"] == str(
         provider_env_action_plan_markdown
     )
@@ -280,6 +287,10 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     assert "provider-manifest.production.json" not in report["missing_input_artifacts"]
     assert report["input_artifact_worklist_markdown"] == str(artifact_worklist_markdown)
     assert report["input_artifact_worklist_json"] == str(artifact_worklist_json)
+    assert report["input_artifact_contracts_markdown"] == str(
+        artifact_contracts_markdown
+    )
+    assert report["input_artifact_contracts_json"] == str(artifact_contracts_json)
     assert report["provider_env_action_plan_markdown"] == str(
         provider_env_action_plan_markdown
     )
@@ -307,6 +318,39 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
         "retrieval-ops-check"
     )
     assert artifact_worklist["auth-ops-bundle.json"]["rows"][0]["lane"] == "B2"
+    artifact_contracts = {
+        item["relative_path"]: item for item in report["input_artifact_contracts"]
+    }
+    assert len(artifact_contracts) == 24
+    retrieval_contract = artifact_contracts["retrieval-ops-bundle.json"]
+    assert retrieval_contract["artifact_kind"] == "ops_bundle_json"
+    assert retrieval_contract["status"] == "missing"
+    assert retrieval_contract["report_is_evidence"] is False
+    assert retrieval_contract["consuming_validators"][0]["command"] == (
+        "retrieval-ops-check"
+    )
+    assert retrieval_contract["release_audit_output_keys_by_command"] == [
+        {
+            "command": "retrieval-ops-check",
+            "keys": ["bundle", "requirements", "checks", "findings"],
+        }
+    ]
+    assert any(
+        "real production artifact" in note
+        for note in retrieval_contract["minimum_operator_contract"]
+    )
+    provider_manifest_contract = artifact_contracts[
+        "provider-manifest.production.json"
+    ]
+    assert provider_manifest_contract["artifact_kind"] == "provider_manifest_json"
+    assert {
+        item["command"]
+        for item in provider_manifest_contract["release_audit_output_keys_by_command"]
+    } >= {"provider-check"}
+    assert any(
+        "forbid_local true" in note
+        for note in provider_manifest_contract["minimum_operator_contract"]
+    )
     validation_plan = {
         item["name"]: item for item in report["input_artifact_validation_plan"]
     }
@@ -444,6 +488,11 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     assert json.loads(artifact_worklist_json.read_text(encoding="utf-8")) == report[
         "input_artifact_worklist"
     ]
+    assert artifact_contracts_markdown.is_file()
+    assert artifact_contracts_json.is_file()
+    assert json.loads(artifact_contracts_json.read_text(encoding="utf-8")) == report[
+        "input_artifact_contracts"
+    ]
     assert row_action_plan_markdown.is_file()
     assert row_action_plan_json.is_file()
     assert json.loads(row_action_plan_json.read_text(encoding="utf-8")) == report[
@@ -482,6 +531,7 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     assert "reports/provider-env-action-plan.md" in readme
     assert "reports/row-action-plan.md" in readme
     assert "reports/input-artifact-worklist.md" in readme
+    assert "reports/input-artifact-contracts.md" in readme
     assert "reports/input-artifact-validation-commands.sh" in readme
     assert "reports/input-artifact-validation-commands.sh B1" in readme
     assert "symlinked input artifacts scoped to that selection" in readme
@@ -561,6 +611,7 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     assert "### Runtime Env File" in markdown
     assert "### Input Artifacts" in markdown
     assert "Input Artifact Worklist" in markdown
+    assert "input-artifact-contracts.md" in markdown
     assert "provider-env-action-plan.md" in markdown
     assert "row-action-plan.md" in markdown
     assert "input-artifact-validation-commands.sh" in markdown
@@ -574,6 +625,14 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     assert "`retrieval-ops-bundle.json`" in artifact_worklist_text
     assert "`retrieval-ops-check`" in artifact_worklist_text
     assert "`B1` Production Postgres retrieval" in artifact_worklist_text
+    artifact_contracts_text = artifact_contracts_markdown.read_text(encoding="utf-8")
+    assert "operator preparation aid, not production evidence" in artifact_contracts_text
+    assert "`retrieval-ops-bundle.json`" in artifact_contracts_text
+    assert "`ops_bundle_json`" in artifact_contracts_text
+    assert "`retrieval-ops-check`: `bundle`, `requirements`, `checks`, `findings`" in (
+        artifact_contracts_text
+    )
+    assert "Keep forbid_local true" in artifact_contracts_text
     row_action_plan_text = row_action_plan_markdown.read_text(encoding="utf-8")
     assert "operator preparation aid, not production evidence" in row_action_plan_text
     assert "## B1 - Production Postgres retrieval" in row_action_plan_text
