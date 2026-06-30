@@ -2,6 +2,8 @@
 
 **Status:** Active continuation contract for the long-running 1:1 blueprint-parity goal.
 **Last updated:** 2026-06-30.
+**Goal-tool state:** Active as of the latest live resume check; there is no
+repo-side pause to clear. This contract is the editable continuation objective.
 
 This file is the repo-owned execution contract for continuing the active Codex/GSD
 goal after pauses, usage limits, or handoffs. It is deliberately stricter than a
@@ -28,6 +30,14 @@ and hard to mis-follow; capture and verify real B1-B10 production bundles; then
 update the strict audit and release status. Any change that cannot be mapped to
 a Tier-B evidence blocker, an active source defect, a custody weakness, or a
 current-status/stale-instruction cleanup is deliberately deprioritized.
+
+**Resume improvement based on prior downfalls:** On every continuation, first
+prove the live root and `HEAD`, then work only on items that remove friction from
+real production capture or fix source behavior that blocks it. Treat planning
+attachments, old agent transcripts, and percentage claims as hypotheses until
+the live repo, generated custody packet, and strict audit agree. The next useful
+unit of progress is a self-contained Tier-B operator packet and then a real
+operator capture pass, not another local-only scoring layer.
 
 Drive Mnemosyne from the current source-complete state to exact blueprint parity
 and production release readiness:
