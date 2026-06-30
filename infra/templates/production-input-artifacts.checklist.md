@@ -31,7 +31,7 @@ of shell-sourcing it:
 ```bash
 infra/scripts/render-production-soak-manifest.sh \
   --env-file /secure/path/to/mnemosyne-tier-b-custody/production-render.env \
-  --runtime-env-file /secure/path/to/mnemosyne-production-runtime.env \
+  --runtime-env-file "$RUNTIME_ENV_FILE" \
   --check-environment
 ```
 
@@ -97,7 +97,7 @@ Rules:
 - For `provenance-trust-suite.json`, nested `asset_path` and `c2pa_asset_path`
   values are also treated as input artifacts and must resolve inside this same
   external directory.
-- Run `infra/scripts/render-production-soak-manifest.sh --env-file /secure/path/to/mnemosyne-tier-b-custody/production-render.env --runtime-env-file /secure/path/to/mnemosyne-production-runtime.env --check-environment`
+- Run `infra/scripts/render-production-soak-manifest.sh --env-file /secure/path/to/mnemosyne-tier-b-custody/production-render.env --runtime-env-file "$RUNTIME_ENV_FILE" --check-environment`
   before capture. Without render values, it reports this static
   artifact inventory, the readiness files to use next, and
   `parity_row_readiness` grouped by Tier-B row/runbook. With render values
@@ -107,8 +107,8 @@ Rules:
   and release-audit runbook.
 - For secret-bearing provider/runtime variables, prefer passing a separate
   external mode-`0600` env file to
-  `infra/scripts/render-production-soak-manifest.sh --runtime-env-file /secure/path/to/mnemosyne-production-runtime.env`
+  `infra/scripts/render-production-soak-manifest.sh --runtime-env-file "$RUNTIME_ENV_FILE"`
   for readiness and
-  `infra/scripts/capture-production-evidence.sh --env-file /secure/path/to/mnemosyne-production-runtime.env`
+  `infra/scripts/capture-production-evidence.sh --env-file "$RUNTIME_ENV_FILE"`
   for capture; do not put those values in this no-secret input-artifact checklist or the
   custody packet docs.

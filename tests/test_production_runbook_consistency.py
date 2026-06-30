@@ -194,6 +194,30 @@ def test_production_evidence_docs_point_to_generated_next_commands_script() -> N
         ), path
 
 
+def test_operator_docs_use_runtime_env_variable_for_runtime_commands() -> None:
+    docs = [
+        REPO / "infra" / "PRODUCTION-EVIDENCE.md",
+        REPO / "infra" / "README.md",
+        REPO / "infra" / "templates" / "production-input-artifacts.checklist.md",
+        REPO / "infra" / "templates" / "production-render.env.example",
+        REPO / ".planning" / "ENV-AND-SECRETS.md",
+        REPO / ".planning" / "TIER-B-TO-100-AGENT-PROMPT.md",
+        PHASE_06_SUMMARY,
+        REPO / "docs" / "ROADMAP-TO-100.md",
+    ]
+    stale_command_patterns = [
+        "--env-file /secure/path/to/mnemosyne-production-runtime.env",
+        "--runtime-env-file /secure/path/to/mnemosyne-production-runtime.env",
+        "capture-production-evidence.sh --env-file /secure/path/to/mnemosyne-production-runtime.env",
+    ]
+
+    for path in docs:
+        text = path.read_text(encoding="utf-8")
+        assert "RUNTIME_ENV_FILE" in text, path
+        for pattern in stale_command_patterns:
+            assert pattern not in text, (path, pattern)
+
+
 def test_production_evidence_docs_require_independent_bundle_fingerprint() -> None:
     docs_with_command_snippets = [
         REPO / "infra" / "PRODUCTION-EVIDENCE.md",
@@ -360,9 +384,11 @@ def test_operator_docs_use_strict_capture_env_file() -> None:
 
     for path in docs:
         text = path.read_text(encoding="utf-8")
+        normalized = " ".join(text.split())
         assert "capture-production-evidence.sh" in text, path
         assert "--env-file" in text, path
-        assert "mnemosyne-production-runtime.env" in text, path
+        assert '--env-file "$RUNTIME_ENV_FILE"' in normalized, path
+        assert "RUNTIME_ENV_FILE" in text, path
         assert "Omit `--env-file`" not in text, path
         assert "trusted secret manager or supervisor" not in text, path
         assert "already-exported shell environment variables" not in text, path

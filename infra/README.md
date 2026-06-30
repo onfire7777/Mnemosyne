@@ -127,8 +127,9 @@ open infra/templates/production-operator-env.inventory.md
 # and missing blocker classes for dispatcher handoff without exposing values.
 # Copy reports/mnemosyne-production-runtime.env.example to the real external
 # runtime env path, chmod 600, and fill secret-bearing values there.
+RUNTIME_ENV_FILE=/secure/path/to/mnemosyne-production-runtime.env
 infra/scripts/prepare-production-evidence-custody.py \
-  --runtime-env-file /secure/path/to/mnemosyne-production-runtime.env \
+  --runtime-env-file "$RUNTIME_ENV_FILE" \
   --refresh \
   /secure/path/to/mnemosyne-tier-b-custody
 
@@ -139,19 +140,19 @@ infra/scripts/prepare-production-evidence-custody.py \
 #   /secure/path/to/mnemosyne-tier-b-custody/reports/next-commands.sh
 infra/scripts/render-production-soak-manifest.sh \
   --env-file /secure/path/to/mnemosyne-tier-b-custody/production-render.env \
-  --runtime-env-file /secure/path/to/mnemosyne-production-runtime.env \
+  --runtime-env-file "$RUNTIME_ENV_FILE" \
   --check-environment
 infra/scripts/render-production-soak-manifest.sh \
   --env-file /secure/path/to/mnemosyne-tier-b-custody/production-render.env \
-  --runtime-env-file /secure/path/to/mnemosyne-production-runtime.env \
+  --runtime-env-file "$RUNTIME_ENV_FILE" \
   --output /secure/path/to/production-soak-manifest.json
 infra/scripts/capture-production-evidence.sh \
-  --env-file /secure/path/to/mnemosyne-production-runtime.env \
+  --env-file "$RUNTIME_ENV_FILE" \
   --preflight-only \
   /secure/path/to/production-soak-manifest.json \
   /secure/path/to/mnemosyne-production-preflight
 infra/scripts/capture-production-evidence.sh \
-  --env-file /secure/path/to/mnemosyne-production-runtime.env \
+  --env-file "$RUNTIME_ENV_FILE" \
   --fingerprint-record-output /secure/path/to/mnemosyne-production-bundle-fingerprint.json \
   /secure/path/to/production-soak-manifest.json \
   /secure/path/to/mnemosyne-production-evidence
@@ -210,7 +211,7 @@ canonical C2PA verifier path before rendering. It also parses the external
 `provider-manifest.production.json` when present and fails early if any
 referenced provider environment variable is unset, reporting env names only and
 redacting values. Pass the strict secret-bearing runtime env file with
-`--runtime-env-file /secure/path/to/mnemosyne-production-runtime.env` so
+`--runtime-env-file "$RUNTIME_ENV_FILE"` so
 provider refs can be validated without exporting or shell-sourcing secrets;
 that file is allowlist-loaded only for the readiness process and its path and
 values are not retained in renderer JSON. `MNEMOSYNE_PROD_C2PA_TOOL` must be an absolute external

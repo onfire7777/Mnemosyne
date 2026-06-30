@@ -12,9 +12,10 @@ shape. Prefer starting from the external custody packet created by
 `infra/scripts/prepare-production-evidence-custody.py`; it includes a
 `production-render.env` copied from the template. Fill the blank non-secret
 values there, then render with
-`infra/scripts/render-production-soak-manifest.sh --env-file /secure/path/to/mnemosyne-tier-b-custody/production-render.env --runtime-env-file /secure/path/to/mnemosyne-production-runtime.env --check-environment`
+`RUNTIME_ENV_FILE=/secure/path/to/mnemosyne-production-runtime.env` and
+`infra/scripts/render-production-soak-manifest.sh --env-file /secure/path/to/mnemosyne-tier-b-custody/production-render.env --runtime-env-file "$RUNTIME_ENV_FILE" --check-environment`
 and
-`infra/scripts/render-production-soak-manifest.sh --env-file /secure/path/to/mnemosyne-tier-b-custody/production-render.env --runtime-env-file /secure/path/to/mnemosyne-production-runtime.env --output /secure/path/to/production-soak-manifest.json`
+`infra/scripts/render-production-soak-manifest.sh --env-file /secure/path/to/mnemosyne-tier-b-custody/production-render.env --runtime-env-file "$RUNTIME_ENV_FILE" --output /secure/path/to/production-soak-manifest.json`
 before running `infra/scripts/capture-production-evidence.sh`. The renderer
 parses `--env-file` through `infra/scripts/load-env.py`, rejects unsafe dotenv
 syntax, unexpected keys, symlinks, group/world-readable files, and repo-local
@@ -32,9 +33,9 @@ that external provider manifest when present, reports the referenced provider
 environment-variable names under `provider_manifest_env_refs`, and fails before
 capture if any referenced provider env var is unset in either the process
 environment or the strict external `--runtime-env-file`. Use
-`--runtime-env-file /secure/path/to/mnemosyne-production-runtime.env` for the
-same secret-bearing runtime/provider values later passed to
-`capture-production-evidence.sh --env-file`; the renderer allowlist-loads those
+`--runtime-env-file "$RUNTIME_ENV_FILE"` for the same secret-bearing
+runtime/provider values later passed to
+`capture-production-evidence.sh --env-file "$RUNTIME_ENV_FILE"`; the renderer allowlist-loads those
 names for validation only and does not write values or the env-file path into
 the manifest or report. Values remain redacted.
 Provider manifest `command` env vars must resolve to a single absolute,
