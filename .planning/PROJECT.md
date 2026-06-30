@@ -35,6 +35,7 @@ Mnemosyne is its own memory system. It is distinct from gbrain and mempalace, an
 |------|----------|----------|
 | 2026-06-19 | Use v2 blueprint as controlling spec; v1 is lineage only. | README states v2 is final deliverable and v1 is superseded. |
 | 2026-06-19 | Build in `/Users/admin/Projects/Mnemosyne` because `/Users/admin/Desktop/Mnemosyne` is write-blocked by macOS. _(Superseded 2026-06-26: canonical checkout is now `/Users/admin/Mnemosyne`; see STATE.md.)_ | Shell write probes returned `Operation not permitted` on Desktop and succeeded in Projects. |
+| 2026-06-30 | Treat `/Users/admin/Mnemosyne` as the canonical live implementation checkout; Desktop/Projects paths are historical unless `git rev-parse` proves a newer valid checkout. | Resume checks on 2026-06-30 found clean `main` at `589ec83`, matching `origin/main`, with GitHub Actions run `28458226239` green. |
 | 2026-06-19 | Keep Phase 0-1 executable first, but keep Phases 2-5 mandatory in the roadmap. | Updated goal requires following the full build blueprint precisely and completely. |
 
 ## Quality Bar

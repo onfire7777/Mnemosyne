@@ -1,4 +1,4 @@
-# Mnemosyne → 100% Blueprint Parity — Master Completion Agent Prompt (v2, blueprint-grounded)
+# Mnemosyne → 100% Blueprint Parity — Master Completion Agent Prompt (v3, blueprint-grounded)
 
 > **Supersedes the v1 Tier-B-only playbook.** This prompt is grounded in the *entire* project record:
 > the v2 build blueprint (`docs/blueprint/`), every prior plan and runbook (`.planning/`), the parity
@@ -81,11 +81,27 @@ Read `docs/blueprint/Mnemosyne-v2-Build-Blueprint.md` and `.planning/BLUEPRINT-P
 - **External custody only:** `MNEMOSYNE_PROD_EVIDENCE_DIR` and every capture `OUT_ROOT` are absolute paths outside the repo; output roots must not pre-exist.
 - No secrets in manifests/args/docs (wrapper rejects `--access-token`/`--api-token`/`--github-token`/`--session-secret`/`--password` and fails closed on secret material). Absolute, non-symlinked, external executables for every provider `command` + `MNEMOSYNE_PROD_C2PA_TOOL`; provider commands must not include any arguments after `argv[0]` because only the executable is retained under `tool-artifacts/`. Hosted dashboard/probe URLs and HTTP embedding/reranker provider URLs must flow through the shared fail-closed `network_safety` validator/opener, not raw `urlopen`, and HTTP provider error bodies must stay omitted from retained evidence. Keep expected fingerprints out-of-band. Report only real measured latency/recall.
 
-**Repo coordination (this repo is live-edited by an autonomous Codex/GSD session)**
-- **NEVER `git add -A` / `git add .`.** Stage explicit paths only. Commit atomically per row.
-- **Respect the lock table:** `src/mnemosyne/models.py` is **frozen** (change-request only); `engine.py` is owned by lane CC-RT (read-only to others); `runtime_state.py`/`jobs.py`/`queue.py`/`observability.py` frozen; `pyproject.toml`/`uv.lock` are **Sync-lane-only**. **Only the CC-SYNC lane touches `origin`/`main`.**
-- Branch-per-lane off latest `origin/main`; serialized integration order **CC-PG → CC-RT → CC-R → CC-BC → CC-LS → CC-UPS**, one rebased PR at a time.
-- **Test gate every merge:** the current full suite and CI must stay green; use the latest `git log -1` plus GitHub Actions for the moving baseline instead of preserving old pass-counts. Tier-B is evidence capture, **not** a license to edit `src` — touch source only when production evidence exposes a concrete defect, behind a forcing-function test.
+**Repo coordination (current single-checkout continuation)**
+- Work from the canonical live checkout `/Users/admin/Mnemosyne`; verify
+  `git status --short --branch`, `git log -1 --oneline`, and GitHub Actions for
+  the current `HEAD` before writing current-state claims.
+- The operator has authorized clean commits and pushes to `main`, but only after
+  focused verification and only with atomic, explainable changes. **NEVER
+  `git add -A` / `git add .`.** Stage explicit paths only, and never stage
+  secrets, generated evidence bundles, local output roots, or unrelated dirty
+  work.
+- Treat high-risk source surfaces (`src/mnemosyne/models.py`, `engine.py`,
+  `runtime_state.py`, `jobs.py`, `queue.py`, `observability.py`, `pyproject.toml`,
+  and `uv.lock`) as source-stability boundaries. Touch them only when production
+  readiness/capture exposes a concrete defect, and pair the edit with a
+  forcing-function test. Tier-B is evidence capture, **not** a license for broad
+  `src` churn.
+- Do not resurrect the old multi-lane ownership table or branch serialization
+  model over the current single-checkout workflow. Use an isolated branch or
+  worktree only when needed to avoid a real conflict, then integrate cleanly.
+- **Test gate every merge:** the current focused checks, relevant custody tests,
+  and CI must stay green; use the latest `git log -1` plus GitHub Actions for the
+  moving baseline instead of preserving old pass-counts.
 
 **Invariant preservation**
 - A row that would weaken any §31 rail or drop any §16 SLO to "pass" is a **failure**. All 7 rails and 6 SLOs must remain enforced/proven on the real production paths after every row.
