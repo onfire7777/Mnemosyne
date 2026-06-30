@@ -478,6 +478,21 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
         embedding_url_plan["next_action"]
         == "Set this name in the external runtime env file and refresh."
     )
+    assert provider_env_plan["MNEMOSYNE_PROVIDER_OIDC_ISSUER"]["primary_rows"] == [
+        "B2"
+    ]
+    assert provider_env_plan["MNEMOSYNE_SESSION_SECRET_COMMAND"]["primary_rows"] == [
+        "B2"
+    ]
+    assert provider_env_plan["MNEMOSYNE_OBJECT_KEY_COMMAND"]["primary_rows"] == [
+        "B7"
+    ]
+    assert provider_env_plan["MNEMOSYNE_RUNTIME_RESIDENCY"]["primary_rows"] == [
+        "B7"
+    ]
+    assert provider_env_plan["MNEMOSYNE_PARAMETRIC_COMMAND"]["primary_rows"] == [
+        "B9"
+    ]
     blockers = report["capture_blockers"]
     assert blockers["report_is_evidence"] is False
     assert blockers["blocked_lane_count"] == len(blockers["blocked_lanes"])

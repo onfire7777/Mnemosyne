@@ -19,6 +19,23 @@ from typing import Any
 
 
 SHARED_PROVIDER_LANES = {"B1", "B2", "B4", "B6", "B7", "B9", "B10"}
+PROVIDER_CHECK_PRIMARY_LANES: dict[str, tuple[str, ...]] = {
+    "embedding": ("B1",),
+    "reranker": ("B1",),
+    "retrieval_backends": ("B1",),
+    "oidc": ("B2",),
+    "session_secret": ("B2",),
+    "candidate_extractor": ("B4",),
+    "summarizer": ("B4",),
+    "entity_resolver": ("B4",),
+    "lesson_distiller": ("B4",),
+    "skill_inducer": ("B4",),
+    "media_extractor": ("B6",),
+    "media_embedding": ("B6",),
+    "object_key_manager": ("B7",),
+    "residency_policy": ("B7",),
+    "parametric": ("B9",),
+}
 PLACEHOLDER_RE = re.compile(r"MNEMOSYNE_PROD_[A-Z0-9_]+")
 BLOCKED_EXIT = 78
 VALIDATOR_SECTION_HINTS_BY_COMMAND: dict[str, tuple[str, ...]] = {
@@ -487,7 +504,10 @@ def _provider_env_action_plan(
             {
                 lane
                 for provider_check in provider_checks
-                for lane in requirement_routes.get(provider_check, {}).get("lanes", [])
+                for lane in (
+                    *PROVIDER_CHECK_PRIMARY_LANES.get(provider_check, ()),
+                    *requirement_routes.get(provider_check, {}).get("lanes", []),
+                )
                 if isinstance(lane, str)
             },
             key=_lane_sort_key,

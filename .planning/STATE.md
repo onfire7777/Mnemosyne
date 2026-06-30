@@ -15,6 +15,16 @@ Status: In progress; exact 1:1 blueprint parity is not complete.
 Current status (2026-06-30): Mandatory Tier A source wirings are closed on `main`; FR-20 local and live-Postgres image/audio/video breadth, FR-21 local and live-Postgres parametric trainer/rollback validation, full compose-Postgres runtime readiness, belief-revision CLI validation, local hosted-MCP JSON-RPC/StreamableHTTP/SSE readiness, direct A12 cached-PPR live materialization coverage, G1 projection-level reality monitoring, G1 functional consciousness scorecard/proto-self seed, native workspace service with the `service.enabled` default-off gate retired, operational specialist-budget toggle retirement, cold-loop ignition enforcement, protected gate-case ratchet enforcement, Rail 6 serve-time sink enforcement, §24 support-strategy runtime durability plus public CLI/MCP mutation surfaces, Phase 7 plans 01-04, and the P5 H8/H12 cascade/observability pre-check are now done and gate-proven. The remaining strict-parity blocker is Tier B production operator evidence against deployed infrastructure before final v1.0 sign-off.
 Supersession note: the historical "Last activity: 2026-06-20" paragraph below is retained as changelog context only. Its local 287-test count and open-code wording are superseded by the 2026-06-25 checkpoints below, including the 864-test compose run and the current Tier B operator-evidence blocker.
 
+Latest checkpoint (2026-06-30): Tier-B provider-stack handoff now carries
+complete primary row ownership for shared provider-manifest env refs. The
+generated `reports/provider-env-action-plan.{json,md}` no longer leaves
+OIDC/session-secret, object-key/residency-policy, or parametric env names with
+blank primary rows; they route to B2, B7, and B9 respectively while preserving
+the shared affected-row blast radius for B1/B2/B4/B6/B7/B9/B10 and retaining no
+values. This improves shared provider-stack operator assignment only; the
+provider values and B1-B10 production bundles still must be captured from real
+infrastructure before any strict-audit row flips.
+
 Latest checkpoint (2026-06-30): The active goal remains unpaused and has been
 sharpened around the real parity blocker: source-complete local work is not
 enough, and progress now means reducing friction to real Tier-B production
