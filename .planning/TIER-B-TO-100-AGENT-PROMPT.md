@@ -144,13 +144,12 @@ infra/scripts/capture-production-evidence.sh --env-file /secure/path/to/mnemosyn
 PYTHON="${PYTHON:-$(if [ -x .venv/bin/python ]; then printf '%s' .venv/bin/python; else command -v python3; fi)}"
 BUNDLE_DIR=/secure/path/evidence-out
 FINGERPRINT_RECORD=/secure/path/to/mnemosyne-production-bundle-fingerprint.json
-EXPECTED_BUNDLE_FINGERPRINT="$("$PYTHON" -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["bundle_fingerprint"])' "$FINGERPRINT_RECORD")"
 VERIFY_REPORT=/secure/path/to/mnemosyne-production-evidence-verify.json
 "$PYTHON" -m mnemosyne.cli production-evidence-verify "$BUNDLE_DIR" \
-  --expected-bundle-fingerprint "$EXPECTED_BUNDLE_FINGERPRINT" \
+  --fingerprint-record "$FINGERPRINT_RECORD" \
   --report-output "$VERIFY_REPORT"
 ```
-The expected fingerprint must come from the operator's external fingerprint record, not from `summary.json` inside the bundle under review. The verifier confirms custody and emits reviewer guidance/row review; it does **not** contact production or flip rows by itself.
+The expected fingerprint must come from the operator's external fingerprint record, not from `summary.json` inside the bundle under review. Prefer passing the record with `--fingerprint-record`; `--expected-bundle-fingerprint` remains a manual fallback only when populated from that record. The verifier confirms custody and emits reviewer guidance/row review; it does **not** contact production or flip rows by itself.
 7. Flip a row `Partial → Done` in `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md` only after the production wrapper summary has `release_audit_ok=true`, the offline verifier report has `ok=true`, and the row's retained evidence is present in the captured bundle. Commit atomically with explicit paths.
 
 Sub-state lifecycle (tracking only; the audit's Partial/Done split is authoritative): `partial → evidence-pending → validated → done`.
@@ -163,7 +162,7 @@ Postgres DSN (pgvector+ParadeDB+AGE) · embedding+reranker URLs/models/keys · I
 
 **Tier B (~97%):**
 - [ ] **10/10** rows `Done` in `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md`, each with a recorded evidence fingerprint.
-- [ ] `--check-environment` reports 0 `missing_environment`, 0 missing artifacts, 0 provider-manifest/env-ref errors, and 10 complete `parity_row_readiness` rows; the production wrapper summary reports `release_audit_ok=true`; offline `production-evidence-verify` passes with `--expected-bundle-fingerprint` from the out-of-band fingerprint record and `--report-output` outside the bundle under review.
+- [ ] `--check-environment` reports 0 `missing_environment`, 0 missing artifacts, 0 provider-manifest/env-ref errors, and 10 complete `parity_row_readiness` rows; the production wrapper summary reports `release_audit_ok=true`; offline `production-evidence-verify` passes with `--fingerprint-record` pointing to the out-of-band fingerprint record and `--report-output` outside the bundle under review.
 
 **Tier C (100%):**
 - [ ] All 6 §16 SLOs re-proven **on real production paths**; real **LongMemEval R@5** recorded.

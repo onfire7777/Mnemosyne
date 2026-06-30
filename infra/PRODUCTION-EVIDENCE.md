@@ -192,11 +192,10 @@ no-secret convenience for replaying the review command; the
 PYTHON="${PYTHON:-$(if [ -x .venv/bin/python ]; then printf '%s' .venv/bin/python; else command -v python3; fi)}"
 BUNDLE_DIR=/secure/path/to/mnemosyne-production-evidence
 FINGERPRINT_RECORD=/secure/path/to/mnemosyne-production-bundle-fingerprint.json
-EXPECTED_BUNDLE_FINGERPRINT="$("$PYTHON" -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["bundle_fingerprint"])' "$FINGERPRINT_RECORD")"
 VERIFY_REPORT=/secure/path/to/mnemosyne-production-evidence-verify.json
 "$PYTHON" -m mnemosyne.cli production-evidence-verify \
   "$BUNDLE_DIR" \
-  --expected-bundle-fingerprint "$EXPECTED_BUNDLE_FINGERPRINT" \
+  --fingerprint-record "$FINGERPRINT_RECORD" \
   --report-output "$VERIFY_REPORT"
 ```
 
@@ -239,21 +238,23 @@ captured by the production wrapper against deployed infrastructure.
 `production-evidence-verify` reports the expected out-of-band fingerprint,
 retained `bundle-manifest.json` fingerprint, recomputed current-files
 fingerprint, diagnostic-only `reviewer_guidance`, and retained preflight row
-review. For custody review with `--expected-bundle-fingerprint`, `--report-output`
-is required unless the operator is running diagnostic `--internal-consistency-only`;
+review. For custody review with `--fingerprint-record` or
+`--expected-bundle-fingerprint`, `--report-output` is required unless the
+operator is running diagnostic `--internal-consistency-only`;
 it writes the same JSON report to an absolute, non-existing path outside the
 bundle under review so the review artifact can be retained without changing the
 bundle fingerprint.
-`--expected-bundle-fingerprint` is required for custody review and must come
-from the independently retained out-of-band fingerprint record. The
-`--internal-consistency-only` flag exists only for local diagnostics and does not
-satisfy Tier B custody review. If the expected fingerprint mismatches the
+`--fingerprint-record` is the preferred custody-review input and must point to
+the independently retained out-of-band fingerprint record. The legacy
+`--expected-bundle-fingerprint` fallback is still accepted when populated from
+that record, but reviewers should avoid manual transcription. The
+`--internal-consistency-only` flag exists only for local diagnostics and does
+not satisfy Tier B custody review. If the expected fingerprint mismatches the
 retained bundle, stop the review: do not copy a replacement value from the
 bundle under review. Reconcile the external fingerprint record, the reviewed
 bundle path, and `bundle-manifest.json`; if they cannot be reconciled, rerun the
 production capture wrapper and retain a new external fingerprint record. If
-`--expected-bundle-fingerprint` and `--internal-consistency-only` are both
-present, rerun in exactly one mode.
+multiple fingerprint modes are present, rerun in exactly one mode.
 
 ## Acceptance
 

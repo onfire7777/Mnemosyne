@@ -244,9 +244,9 @@ The only production acceptance path is:
 3. `release-audit` reports `ok: true` with
    `--require-production-validated --require-provider-forbid-local`.
 4. `production-evidence-verify` passes offline against the retained output
-   bundle with `--expected-bundle-fingerprint` set from an independently
-   retained out-of-band fingerprint record, not from `summary.json` inside the
-   bundle under review. The retained bundle must include a non-empty
+   bundle with `--fingerprint-record` pointing to the independently retained
+   out-of-band fingerprint record, not `summary.json` inside the bundle under
+   review. The retained bundle must include a non-empty
    `preflight.json.required_input_artifacts` list, matching
    `preflight.json.parity_row_readiness`, and the retained `input-artifacts/`
    directory.

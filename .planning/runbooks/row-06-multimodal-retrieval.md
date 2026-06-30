@@ -51,7 +51,7 @@ as setup proof only, then run
 `deployment-soak` + `release-audit` capture. The preflight output does not flip this row to Done.
 Use absolute external paths outside the repo for `SOAK_MANIFEST`, `PRECHECK_OUTPUT_ROOT`, `OUT_ROOT`, `FINGERPRINT_RECORD`, `RUNTIME_ENV_FILE`, and the `MNEMOSYNE_PROD_EVIDENCE_DIR` input-artifact directory.
 After capture, reviewers must run `"$PYTHON" -m mnemosyne.cli production-evidence-verify` with
-`--expected-bundle-fingerprint` set from the independently retained out-of-band fingerprint record, plus retained `preflight.json`, `redaction-scan.json`,
+`--fingerprint-record` pointing to the independently retained out-of-band fingerprint record, plus retained `preflight.json`, `redaction-scan.json`,
 `bundle-manifest.json`, `source-soak-manifest.json`, `operator-soak-manifest.json`,
 `input-artifacts/`, `tool-artifacts/`, `summary.json.offline_verify`,
 `summary.json.parity_row_readiness`,

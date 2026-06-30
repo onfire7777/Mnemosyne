@@ -33,8 +33,8 @@ good release artifact.
    `bundle-manifest.json`, `source-soak-manifest.json`,
    `operator-soak-manifest.json`, and `input-artifacts/` so
    `production-evidence-verify` can recheck rollback custody offline with
-   `--expected-bundle-fingerprint` set from an independently retained
-   out-of-band rollback capture record.
+   `--fingerprint-record` pointing to the independently retained out-of-band
+   rollback capture record.
 
 ## Canary-Abort Procedure
 
@@ -135,7 +135,7 @@ Rollback drills are accepted only when captured by
 `infra/scripts/capture-production-evidence.sh` and accepted by
 `release-audit --evidence-manifest "$OUT_ROOT/evidence/manifest.json" --require-production-validated --require-provider-forbid-local`,
 then rechecked by `production-evidence-verify "$BUNDLE_DIR"
---expected-bundle-fingerprint "$EXPECTED_BUNDLE_FINGERPRINT"
+--fingerprint-record "$FINGERPRINT_RECORD"
 --report-output "$VERIFY_REPORT"` with the expected fingerprint from an
 independently retained out-of-band rollback capture record and a new external
 verifier report path outside the bundle under review.
@@ -152,5 +152,5 @@ operator-captured production rollback evidence.
 - Redaction applied to tokens, keys, raw prompts, documents, queries, and
   credentials.
 - `release-audit --evidence-manifest "$OUT_ROOT/evidence/manifest.json" --require-production-validated --require-provider-forbid-local` passes over the bundle.
-- `production-evidence-verify` passes with `--expected-bundle-fingerprint`
-  sourced from the out-of-band rollback capture record.
+- `production-evidence-verify` passes with `--fingerprint-record` sourced from
+  the out-of-band rollback capture record.

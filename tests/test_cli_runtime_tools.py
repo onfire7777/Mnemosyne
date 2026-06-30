@@ -6723,6 +6723,31 @@ def write_production_evidence_bundle(tmp_path: Path) -> tuple[Path, str]:
     return bundle_dir, bundle_fingerprint
 
 
+def write_production_fingerprint_record(
+    path: Path,
+    *,
+    bundle_dir: Path,
+    bundle_fingerprint: str,
+    overrides: dict[str, object] | None = None,
+) -> Path:
+    bundle_manifest = json.loads((bundle_dir / "bundle-manifest.json").read_text(encoding="utf-8"))
+    record: dict[str, object] = {
+        "schema": "mnemosyne.production-evidence-fingerprint-record.v1",
+        "record_kind": "out-of-band-bundle-fingerprint",
+        "bundle_dir": str(bundle_dir),
+        "bundle_manifest": str(bundle_dir / "bundle-manifest.json"),
+        "summary": str(bundle_dir / "summary.json"),
+        "bundle_fingerprint": bundle_fingerprint,
+        "artifact_count": len(bundle_manifest["files"]),
+        "captured_at": datetime.now(UTC).isoformat(),
+        "created_by": "test",
+    }
+    if overrides:
+        record.update(overrides)
+    path.write_text(json.dumps(record, indent=2, sort_keys=True), encoding="utf-8")
+    return path
+
+
 def rewrite_production_redaction_scan(bundle_dir: Path) -> None:
     preflight_path = bundle_dir / "preflight.json"
     binary_custody_files: list[str] = []
@@ -6993,7 +7018,7 @@ def test_cli_production_evidence_verify_accepts_captured_bundle(tmp_path: Path) 
     assert report["findings"] == []
 
 
-def test_cli_production_evidence_verify_accepts_fingerprint_record_source(
+def test_cli_production_evidence_verify_accepts_summary_fingerprint_record_source_label(
     tmp_path: Path,
 ) -> None:
     bundle_dir, _bundle_fingerprint = write_production_evidence_bundle(tmp_path)
@@ -7016,6 +7041,134 @@ def test_cli_production_evidence_verify_accepts_fingerprint_record_source(
     assert report["ok"] is True
     assert report["checks"]["summary"] is True
     assert report["findings"] == []
+
+
+def test_cli_production_evidence_verify_accepts_external_fingerprint_record(
+    tmp_path: Path,
+) -> None:
+    bundle_dir, bundle_fingerprint = write_production_evidence_bundle(tmp_path)
+    fingerprint_record = write_production_fingerprint_record(
+        tmp_path / "mnemosyne-production-bundle-fingerprint.json",
+        bundle_dir=bundle_dir,
+        bundle_fingerprint=bundle_fingerprint,
+    )
+    report_path = tmp_path / "fingerprint-record-verify.json"
+
+    report = run_cli(
+        tmp_path / "verify-store.json",
+        "production-evidence-verify",
+        str(bundle_dir),
+        "--fingerprint-record",
+        str(fingerprint_record),
+        "--report-output",
+        str(report_path),
+    )
+
+    assert report["ok"] is True
+    assert json.loads(report_path.read_text(encoding="utf-8")) == report
+    assert report["bundle_fingerprint"] == bundle_fingerprint
+    assert report["expected_bundle_fingerprint"] == bundle_fingerprint
+    assert report["expected_bundle_fingerprint_present"] is True
+    assert report["expected_bundle_fingerprint_source"] == "out-of-band-fingerprint-record"
+    assert report["actual_bundle_fingerprint"] == bundle_fingerprint
+    assert report["findings"] == []
+
+
+def test_cli_production_evidence_verify_rejects_conflicting_fingerprint_sources(
+    tmp_path: Path,
+) -> None:
+    bundle_dir, bundle_fingerprint = write_production_evidence_bundle(tmp_path)
+    fingerprint_record = write_production_fingerprint_record(
+        tmp_path / "mnemosyne-production-bundle-fingerprint.json",
+        bundle_dir=bundle_dir,
+        bundle_fingerprint=bundle_fingerprint,
+    )
+
+    result = run_raw_cli(
+        tmp_path / "verify-store.json",
+        "production-evidence-verify",
+        str(bundle_dir),
+        "--fingerprint-record",
+        str(fingerprint_record),
+        "--expected-bundle-fingerprint",
+        bundle_fingerprint,
+        "--report-output",
+        str(tmp_path / "conflicting-fingerprint-source-verify.json"),
+    )
+    report = json.loads(result.stdout)
+    codes = {finding["code"] for finding in report["findings"]}
+
+    assert result.returncode == 1
+    assert report["ok"] is False
+    assert report["expected_bundle_fingerprint"] == bundle_fingerprint
+    assert report["expected_bundle_fingerprint_present"] is True
+    assert report["expected_bundle_fingerprint_source"] == "conflicting-sources"
+    assert report["reviewer_guidance"]["blocked_reason"] == "fingerprint_source_conflict"
+    assert "expected_bundle_fingerprint_source_conflict" in codes
+    assert "expected_bundle_fingerprint_missing" not in codes
+
+
+def test_cli_production_evidence_verify_rejects_bundle_local_fingerprint_record(
+    tmp_path: Path,
+) -> None:
+    bundle_dir, bundle_fingerprint = write_production_evidence_bundle(tmp_path)
+    fingerprint_record = write_production_fingerprint_record(
+        bundle_dir / "mnemosyne-production-bundle-fingerprint.json",
+        bundle_dir=bundle_dir,
+        bundle_fingerprint=bundle_fingerprint,
+    )
+
+    result = run_raw_cli(
+        tmp_path / "verify-store.json",
+        "production-evidence-verify",
+        str(bundle_dir),
+        "--fingerprint-record",
+        str(fingerprint_record),
+        "--report-output",
+        str(tmp_path / "bundle-local-fingerprint-record-verify.json"),
+    )
+    report = json.loads(result.stdout)
+    codes = {finding["code"] for finding in report["findings"]}
+
+    assert result.returncode == 1
+    assert report["ok"] is False
+    assert report["expected_bundle_fingerprint"] is None
+    assert report["expected_bundle_fingerprint_present"] is False
+    assert report["reviewer_guidance"]["blocked_reason"] == "missing_expected_fingerprint"
+    assert "fingerprint_record_bundle_local" in codes
+    assert "expected_bundle_fingerprint_missing" in codes
+
+
+def test_cli_production_evidence_verify_rejects_fingerprint_record_bundle_mismatch(
+    tmp_path: Path,
+) -> None:
+    bundle_dir, bundle_fingerprint = write_production_evidence_bundle(tmp_path)
+    fingerprint_record = write_production_fingerprint_record(
+        tmp_path / "mnemosyne-production-bundle-fingerprint.json",
+        bundle_dir=bundle_dir,
+        bundle_fingerprint=bundle_fingerprint,
+        overrides={"bundle_dir": str(tmp_path / "other-production-evidence")},
+    )
+
+    result = run_raw_cli(
+        tmp_path / "verify-store.json",
+        "production-evidence-verify",
+        str(bundle_dir),
+        "--fingerprint-record",
+        str(fingerprint_record),
+        "--report-output",
+        str(tmp_path / "fingerprint-record-mismatch-verify.json"),
+    )
+    report = json.loads(result.stdout)
+    codes = {finding["code"] for finding in report["findings"]}
+
+    assert result.returncode == 1
+    assert report["ok"] is False
+    assert report["expected_bundle_fingerprint"] == bundle_fingerprint
+    assert report["expected_bundle_fingerprint_present"] is True
+    assert report["expected_bundle_fingerprint_source"] == "out-of-band-fingerprint-record"
+    assert "fingerprint_record_bundle_dir_mismatch" in codes
+    assert "expected_bundle_fingerprint_missing" not in codes
 
 
 def test_cli_production_evidence_verify_requires_report_output_for_custody(
@@ -7213,7 +7366,7 @@ def test_cli_production_evidence_verify_requires_expected_bundle_fingerprint(
     assert report["internal_consistency_only"] is False
     assert report["reviewer_guidance"]["blocked_reason"] == "missing_expected_fingerprint"
     assert any(
-        "Provide --expected-bundle-fingerprint" in step
+        "Provide --fingerprint-record" in step
         for step in report["reviewer_guidance"]["next_steps"]
     )
     assert report["reviewer_guidance"]["diagnostic_only"] is True
