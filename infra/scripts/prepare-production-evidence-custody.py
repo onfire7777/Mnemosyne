@@ -3053,10 +3053,19 @@ def main(argv: list[str] | None = None) -> int:
         "provider_env_action_plan": report["provider_env_action_plan_markdown"],
         "row_action_plan": report["row_action_plan_markdown"],
         "input_artifact_validation_script": report["input_artifact_validation_script"],
+        "runtime_env_file_placeholder": report["operator_input_inventory"][
+            "runtime_env_file"
+        ]["path_placeholder"],
+        "runtime_env_example": report["operator_input_inventory"]["runtime_env_file"][
+            "example_path"
+        ],
         "next_commands": report["next_commands"],
         "next": (
-            "Fill production-render.env and input-artifacts/, then run "
-            "next_commands_script or next_commands in order."
+            "Fill production-render.env, the external runtime env file provider "
+            "refs, and input-artifacts/; use render_env_action_plan, "
+            "provider_env_action_plan, input_artifact_worklist, and "
+            "runtime_env_example, then run next_commands_script or "
+            "next_commands in order."
         ),
     }
     print(json.dumps(summary, indent=2, sort_keys=True))
