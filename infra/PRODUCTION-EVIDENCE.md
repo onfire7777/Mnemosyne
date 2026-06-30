@@ -26,10 +26,11 @@ This runbook is the operator handoff for flipping the remaining Tier B parity ro
   section summarizes the current blocked lanes and missing blocker classes so
   dispatcher handoff can start from one machine-readable report field instead
   of re-parsing every row. The packet also writes
-  `reports/mnemosyne-production-runtime.env.example`; copy that generated
-  no-secret example to the real external runtime env path, set mode `0600`, and
-  fill values there. After filling or changing packet inputs, refresh the
-  row-scoped report without overwriting operator artifacts. Refresh also
+  `reports/mnemosyne-production-runtime.env.example` and
+  `reports/next-commands.sh`; copy the generated no-secret runtime example to
+  the real external runtime env path, set mode `0600`, and fill values there.
+  After filling or changing packet inputs, refresh the row-scoped report and
+  generated command script without overwriting operator artifacts. Refresh also
   backfills missing read-only packet guidance docs for older packets, but it
   does not overwrite existing copied docs:
 
@@ -85,8 +86,12 @@ infra/scripts/prepare-production-evidence-custody.py \
 open infra/templates/production-operator-env.inventory.md
 # Fill /secure/path/to/mnemosyne-tier-b-custody/production-render.env outside this repository.
 infra/scripts/prepare-production-evidence-custody.py \
+  --runtime-env-file /secure/path/to/mnemosyne-production-runtime.env \
   --refresh \
   /secure/path/to/mnemosyne-tier-b-custody
+# Once refresh reports ready_for_capture=true, either run the generated
+# script below or run the expanded sequence that follows:
+# /secure/path/to/mnemosyne-tier-b-custody/reports/next-commands.sh
 infra/scripts/render-production-soak-manifest.sh \
   --env-file /secure/path/to/mnemosyne-tier-b-custody/production-render.env \
   --runtime-env-file /secure/path/to/mnemosyne-production-runtime.env \
