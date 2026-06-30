@@ -821,6 +821,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     summary = {
         "ok": report["ready_for_capture"],
+        "ready_for_capture": report["ready_for_capture"],
         "custody_root": report["custody_root"],
         "report": str(Path(report["custody_root"]) / "reports" / "tier-b-gap-report.json"),
         "markdown": str(Path(report["custody_root"]) / "reports" / "tier-b-gap-report.md"),
@@ -829,7 +830,9 @@ def main(argv: list[str] | None = None) -> int:
         "missing_input_artifacts": report["missing_input_artifact_count"],
         "packet_docs_complete": report["packet_docs_complete"],
         "packet_docs_added": len(report["packet_docs_added"]),
-        "next": "Fill production-render.env and input-artifacts/, then render and capture from external paths.",
+        "post_capture_verify_report": report["post_capture_verify_report"],
+        "next_commands": report["next_commands"],
+        "next": "Fill production-render.env and input-artifacts/, then run next_commands in order.",
     }
     print(json.dumps(summary, indent=2, sort_keys=True))
     return 0 if report["ready_for_capture"] else BLOCKED_EXIT
