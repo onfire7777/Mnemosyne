@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import re
@@ -179,8 +180,18 @@ def _collect_render_placeholders_by_lane(
     template_manifest: dict[str, Any],
 ) -> tuple[dict[str, set[str]], set[str]]:
     repo_dir = _repo_dir()
-    sys.path.insert(0, str(repo_dir / "src"))
-    from mnemosyne.production_parity import parity_lanes_for_command  # noqa: PLC0415
+    parity_path = repo_dir / "src" / "mnemosyne" / "production_parity.py"
+    spec = importlib.util.spec_from_file_location(
+        "_mnemosyne_production_parity_for_custody",
+        parity_path,
+    )
+    if spec is None or spec.loader is None:
+        _fail(f"cannot load production parity metadata: {parity_path}")
+    parity_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(parity_module)
+    parity_lanes_for_command = getattr(parity_module, "parity_lanes_for_command", None)
+    if not callable(parity_lanes_for_command):
+        _fail("production parity metadata is missing parity_lanes_for_command")
 
     by_lane: dict[str, set[str]] = {}
     routed: set[str] = set()

@@ -36,7 +36,9 @@ CLI commands consumed by `deployment-soak` and `release-audit`.
   completeness, and `ready_for_capture` where those checks have enough
   information to evaluate them.
 - `infra/scripts/capture-production-evidence.sh` - operator capture wrapper
-  that validates the rendered manifest, rejects unresolved production
+  invoked with `--env-file <external-runtime-env>` so secret-bearing
+  runtime/provider values stay outside shell history and committed artifacts. It
+  validates the rendered manifest, rejects unresolved production
   placeholders, rejects duplicate or unknown production commands, rejects
   high-confidence secret material, rejects secret-bearing manifest options in
   split and `--option=value` forms, rejects unscannable retained artifacts,

@@ -38,11 +38,11 @@ operator evidence.
 
 Use the universal Tier B production capture flow in `infra/PRODUCTION-EVIDENCE.md`:
 render the production soak manifest to `SOAK_MANIFEST`, run
-`infra/scripts/capture-production-evidence.sh --preflight-only "$SOAK_MANIFEST" "$PRECHECK_OUTPUT_ROOT"`
+`infra/scripts/capture-production-evidence.sh --env-file "$RUNTIME_ENV_FILE" --preflight-only "$SOAK_MANIFEST" "$PRECHECK_OUTPUT_ROOT"`
 as setup proof only, then run
-`infra/scripts/capture-production-evidence.sh --fingerprint-record-output "$FINGERPRINT_RECORD" "$SOAK_MANIFEST" "$OUT_ROOT"` for the real
+`infra/scripts/capture-production-evidence.sh --env-file "$RUNTIME_ENV_FILE" --fingerprint-record-output "$FINGERPRINT_RECORD" "$SOAK_MANIFEST" "$OUT_ROOT"` for the real
 `deployment-soak` + `release-audit` capture. The preflight output does not flip this row to Done.
-Use absolute external paths outside the repo for `SOAK_MANIFEST`, `PRECHECK_OUTPUT_ROOT`, `OUT_ROOT`, `FINGERPRINT_RECORD`, and the `MNEMOSYNE_PROD_EVIDENCE_DIR` input-artifact directory.
+Use absolute external paths outside the repo for `SOAK_MANIFEST`, `PRECHECK_OUTPUT_ROOT`, `OUT_ROOT`, `FINGERPRINT_RECORD`, `RUNTIME_ENV_FILE`, and the `MNEMOSYNE_PROD_EVIDENCE_DIR` input-artifact directory.
 After capture, reviewers must run `"$PYTHON" -m mnemosyne.cli production-evidence-verify` with
 `--expected-bundle-fingerprint` set from the independently retained out-of-band fingerprint record, plus retained `preflight.json`, `redaction-scan.json`,
 `bundle-manifest.json`, `source-soak-manifest.json`, `operator-soak-manifest.json`,

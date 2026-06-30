@@ -238,7 +238,7 @@ The only production acceptance path is:
 1. Operator-owned production manifest with `validation_scope.production_validated`
    set to `true`, `target_environment` set to `production`, and
    `operator_asserted` set to `true`.
-2. `infra/scripts/capture-production-evidence.sh --fingerprint-record-output`
+2. `infra/scripts/capture-production-evidence.sh --env-file "$RUNTIME_ENV_FILE" --fingerprint-record-output`
    run against that manifest, writing the external fingerprint record outside
    the evidence bundle under review.
 3. `release-audit` reports `ok: true` with
