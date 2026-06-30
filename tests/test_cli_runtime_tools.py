@@ -6940,6 +6940,7 @@ def test_cli_release_audit_requires_manifest_bound_production_evidence(tmp_path:
 def test_cli_production_evidence_verify_accepts_captured_bundle(tmp_path: Path) -> None:
     bundle_dir, bundle_fingerprint = write_production_evidence_bundle(tmp_path)
     preflight = json.loads((bundle_dir / "preflight.json").read_text(encoding="utf-8"))
+    report_path = tmp_path / "mnemosyne-production-evidence-verify.json"
 
     report = run_cli(
         tmp_path / "verify-store.json",
@@ -6947,9 +6948,12 @@ def test_cli_production_evidence_verify_accepts_captured_bundle(tmp_path: Path) 
         str(bundle_dir),
         "--expected-bundle-fingerprint",
         bundle_fingerprint,
+        "--report-output",
+        str(report_path),
     )
 
     assert report["ok"] is True
+    assert json.loads(report_path.read_text(encoding="utf-8")) == report
     assert report["bundle_fingerprint"] == bundle_fingerprint
     assert report["expected_bundle_fingerprint"] == bundle_fingerprint
     assert report["expected_bundle_fingerprint_present"] is True
@@ -6985,6 +6989,26 @@ def test_cli_production_evidence_verify_accepts_captured_bundle(tmp_path: Path) 
         "diagnostic_only": True,
     }
     assert report["findings"] == []
+
+
+def test_cli_production_evidence_verify_requires_report_output_for_custody(
+    tmp_path: Path,
+) -> None:
+    bundle_dir, bundle_fingerprint = write_production_evidence_bundle(tmp_path)
+
+    result = run_raw_cli(
+        tmp_path / "verify-store.json",
+        "production-evidence-verify",
+        str(bundle_dir),
+        "--expected-bundle-fingerprint",
+        bundle_fingerprint,
+    )
+    payload = json.loads(result.stdout)
+    codes = {finding["code"] for finding in payload["findings"]}
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert "report_output_missing" in codes
 
 
 def test_cli_production_evidence_verify_writes_external_report_output(tmp_path: Path) -> None:
@@ -7129,6 +7153,8 @@ def test_cli_production_evidence_verify_accepts_symlink_parent_source_value(tmp_
         str(bundle_dir),
         "--expected-bundle-fingerprint",
         bundle_fingerprint,
+        "--report-output",
+        str(tmp_path / "symlink-parent-verify.json"),
     )
 
     assert report["ok"] is True
@@ -7678,6 +7704,7 @@ def test_cli_production_evidence_verify_accepts_provider_command_executable_refe
     )
     rewrite_production_redaction_scan(bundle_dir)
     bundle_fingerprint = rewrite_production_bundle_manifest(bundle_dir)
+    report_path = tmp_path / "provider-command-verify.json"
 
     report = run_cli(
         tmp_path / "verify-store.json",
@@ -7685,9 +7712,12 @@ def test_cli_production_evidence_verify_accepts_provider_command_executable_refe
         str(bundle_dir),
         "--expected-bundle-fingerprint",
         bundle_fingerprint,
+        "--report-output",
+        str(report_path),
     )
 
     assert report["ok"] is True
+    assert json.loads(report_path.read_text(encoding="utf-8")) == report
     assert report["findings"] == []
 
 
@@ -7739,6 +7769,71 @@ def test_cli_production_evidence_verify_rejects_provider_command_argument(
     assert payload["checks"]["preflight"] is False
     assert "preflight_provider_command_unretained_argument" in codes
     assert "unretained_provider" not in result.stdout
+
+
+def test_cli_production_evidence_verify_rejects_provider_manifest_without_forbid_local(
+    tmp_path: Path,
+) -> None:
+    bundle_dir, _bundle_fingerprint = write_production_evidence_bundle(tmp_path)
+    update_provider_manifest_snapshot(
+        bundle_dir,
+        lambda payload: payload.pop("forbid_local"),
+    )
+    rewrite_production_redaction_scan(bundle_dir)
+    bundle_fingerprint = rewrite_production_bundle_manifest(bundle_dir)
+
+    result = run_raw_cli(
+        tmp_path / "verify-store.json",
+        "production-evidence-verify",
+        str(bundle_dir),
+        "--expected-bundle-fingerprint",
+        bundle_fingerprint,
+    )
+    payload = json.loads(result.stdout)
+    codes = {finding["code"] for finding in payload["findings"]}
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert payload["checks"]["preflight"] is False
+    assert "preflight_provider_manifest_forbid_local_missing" in codes
+    assert "bundle_file_sha256_mismatch" not in codes
+    assert "bundle_fingerprint_mismatch" not in codes
+
+
+def test_cli_production_evidence_verify_rejects_provider_manifest_check_drift(
+    tmp_path: Path,
+) -> None:
+    bundle_dir, _bundle_fingerprint = write_production_evidence_bundle(tmp_path)
+    missing_check = sorted(PRODUCTION_RELEASE_REQUIRED_PROVIDER_CHECKS)[-1]
+
+    def mutate_provider_manifest(payload: dict[str, object]) -> None:
+        payload["required_checks"] = [
+            check
+            for check in PRODUCTION_RELEASE_REQUIRED_PROVIDER_CHECKS
+            if check != missing_check
+        ] + ["unsupported_provider"]
+
+    update_provider_manifest_snapshot(bundle_dir, mutate_provider_manifest)
+    rewrite_production_redaction_scan(bundle_dir)
+    bundle_fingerprint = rewrite_production_bundle_manifest(bundle_dir)
+
+    result = run_raw_cli(
+        tmp_path / "verify-store.json",
+        "production-evidence-verify",
+        str(bundle_dir),
+        "--expected-bundle-fingerprint",
+        bundle_fingerprint,
+    )
+    payload = json.loads(result.stdout)
+    codes = {finding["code"] for finding in payload["findings"]}
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert payload["checks"]["preflight"] is False
+    assert "preflight_provider_manifest_required_checks_missing" in codes
+    assert "preflight_provider_manifest_required_checks_unknown" in codes
+    assert "bundle_file_sha256_mismatch" not in codes
+    assert "bundle_fingerprint_mismatch" not in codes
 
 
 def test_cli_production_evidence_verify_rejects_missing_provider_command_reference(

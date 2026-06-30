@@ -10880,6 +10880,46 @@ def _production_evidence_provider_manifest_command_labels(
                 "retained provider manifest must be a JSON object for command custody",
             )
             continue
+        if payload.get("forbid_local") is not True:
+            _production_evidence_finding(
+                findings,
+                "preflight_provider_manifest_forbid_local_missing",
+                "retained provider manifest must set forbid_local=true",
+            )
+        required_checks = payload.get("required_checks")
+        expected_checks = set(PRODUCTION_RELEASE_REQUIRED_PROVIDER_CHECKS)
+        if not isinstance(required_checks, list) or not all(
+            isinstance(item, str) for item in required_checks
+        ):
+            _production_evidence_finding(
+                findings,
+                "preflight_provider_manifest_required_checks_invalid",
+                "retained provider manifest required_checks must be a string array",
+            )
+        else:
+            actual_checks = set(required_checks)
+            missing_checks = sorted(expected_checks - actual_checks)
+            extra_checks = sorted(actual_checks - expected_checks)
+            if missing_checks:
+                _production_evidence_finding(
+                    findings,
+                    "preflight_provider_manifest_required_checks_missing",
+                    "retained provider manifest missing production provider checks: "
+                    + ", ".join(missing_checks),
+                )
+            if extra_checks:
+                _production_evidence_finding(
+                    findings,
+                    "preflight_provider_manifest_required_checks_unknown",
+                    "retained provider manifest contains unsupported provider checks: "
+                    + ", ".join(extra_checks),
+                )
+        if not isinstance(payload.get("providers"), Mapping):
+            _production_evidence_finding(
+                findings,
+                "preflight_provider_manifest_providers_invalid",
+                "retained provider manifest providers must be a JSON object",
+            )
         _verify_provider_manifest_command_arguments(
             payload,
             path="provider-manifest.production.json",
@@ -12862,6 +12902,13 @@ def cmd_production_evidence_verify(args: argparse.Namespace) -> None:
             "production evidence custody review requires --expected-bundle-fingerprint "
             "from an out-of-band capture record; use --internal-consistency-only only "
             "for local diagnostics",
+        )
+    if expected_bundle_fingerprint_present and not internal_consistency_only and not args.report_output:
+        _production_evidence_finding(
+            findings,
+            "report_output_missing",
+            "production evidence custody review requires --report-output outside the "
+            "bundle so reviewer guidance and row review are retained",
         )
     row_review = _production_evidence_row_review(preflight)
     report = {

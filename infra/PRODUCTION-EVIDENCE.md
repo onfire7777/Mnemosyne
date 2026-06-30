@@ -11,6 +11,7 @@ This runbook is the operator handoff for flipping the remaining Tier B parity ro
 - Provider manifest `command` values must resolve to absolute, non-symlinked, external executable paths. During capture, those command executables are copied into `OUT_ROOT/tool-artifacts/`, retained as mode `0500` custody artifacts, rewritten into the retained provider manifest snapshot, and recorded in `preflight.json.executable_tool_references` with original path, retained snapshot path, size, SHA-256 digest, and provider-manifest field label.
 - Provider manifest `command` values must be a single external executable with no arguments after `argv[0]`. Commands such as `/external/python -m provider`, `/bin/sh -c provider`, or `/external/provider --config=/external/config.json` are rejected because only `argv[0]` is retained under `tool-artifacts/`; put provider implementation/config into the deployed executable wrapper or an explicit production input artifact covered by a row runbook.
 - `render-production-soak-manifest.sh --check-environment` and `capture-production-evidence.sh --preflight-only` both validate provider-manifest shape plus command executable paths before capture, including relative-path, symlink, repo-local, missing-file, and non-executable failures, so renderer readiness and preflight cannot pass values the capture wrapper or offline verifier will later reject.
+- The renderer and capture wrapper both reject symlinked input artifacts. Production capture preflight also rejects skeletal manifests with no retained input artifacts, and `provenance-trust-check` must retain C2PA executable metadata through `--suite` with `tool`/`c2pa_tool`, direct `--c2pa-tool`, or `MNEMOSYNE_C2PA_TOOL`.
 - Render `infra/templates/production-soak-manifest.template.json` outside the repo with `infra/scripts/render-production-soak-manifest.sh --output /secure/path/to/production-soak-manifest.json`. Manual edits are only a fallback and must still leave no unresolved `MNEMOSYNE_PROD_*` placeholders; the capture wrapper rejects unresolved placeholders before running production checks.
 - `MNEMOSYNE_PROD_EVIDENCE_DIR` and the second positional output-root argument passed to `capture-production-evidence.sh` must be absolute external custody paths outside the repository; output roots must be new and must not already exist. The wrapper does not consume a separate `PREFLIGHT_OUT_ROOT` environment variable.
 - Keep raw secrets out of `args` and `global_args`. The production wrapper rejects secret-bearing options such as `--access-token`, `--api-token`, `--github-token`, `--session-secret`, and `--password`, and it fails closed on high-confidence secret material such as JWTs, private-key blocks, GitHub tokens, AWS access keys, and `sk-*` API keys.
@@ -159,9 +160,11 @@ captured by the production wrapper against deployed infrastructure.
 `production-evidence-verify` reports the expected out-of-band fingerprint,
 retained `bundle-manifest.json` fingerprint, recomputed current-files
 fingerprint, diagnostic-only `reviewer_guidance`, and retained preflight row
-review. When `--report-output` is supplied it writes the same JSON report to an
-absolute, non-existing path outside the bundle under review so the review
-artifact can be retained without changing the bundle fingerprint.
+review. For custody review with `--expected-bundle-fingerprint`, `--report-output`
+is required unless the operator is running diagnostic `--internal-consistency-only`;
+it writes the same JSON report to an absolute, non-existing path outside the
+bundle under review so the review artifact can be retained without changing the
+bundle fingerprint.
 `--expected-bundle-fingerprint` is required for custody review and must come
 from the independently retained out-of-band capture record. The
 `--internal-consistency-only` flag exists only for local diagnostics and does not

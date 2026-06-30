@@ -980,6 +980,29 @@ for artifact in required_artifacts.values():
             f"required production input artifact is not a file or directory: {artifact_path} ({labels})"
         )
 
+if not required_artifacts:
+    errors.append(
+        "production capture requires at least one retained production input artifact; "
+        "provide manifest-referenced evidence such as a provenance trust suite, "
+        "provider manifest, or row-specific production artifact"
+    )
+
+c2pa_reference_options = {
+    "--c2pa-tool",
+    "suite.tool",
+    "suite.c2pa_tool",
+    "MNEMOSYNE_C2PA_TOOL",
+}
+if "provenance-trust-check" in commands and not any(
+    str(reference.get("option")) in c2pa_reference_options
+    for reference in executable_tool_references.values()
+):
+    errors.append(
+        "production capture requires retained C2PA executable metadata for "
+        "provenance-trust-check; provide --suite with a suite tool/c2pa_tool, "
+        "--c2pa-tool, or MNEMOSYNE_C2PA_TOOL"
+    )
+
 if errors:
     for error in errors:
         print(f"ERROR: {error}", file=sys.stderr)

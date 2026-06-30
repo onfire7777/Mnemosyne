@@ -511,6 +511,9 @@ def evidence_relative_path(value: str, *, label: str) -> tuple[Path, str] | None
     candidate = Path(value).expanduser()
     if not candidate.is_absolute():
         return None
+    if candidate.is_symlink():
+        add_input_artifact_error(f"{label} must not be a symlinked input artifact")
+        return None
     resolved = candidate.resolve(strict=False)
     try:
         lexical_relative = candidate.relative_to(evidence_dir)
