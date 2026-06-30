@@ -97,13 +97,14 @@ CLI commands consumed by `deployment-soak` and `release-audit`.
   `redaction-scan.json` at `ok: true` with no skipped files and a
   `scanned_files` list matching the retained `bundle-manifest.json` artifact
   set except `redaction-scan.json` itself, plus an independently retained
-  out-of-band expected bundle fingerprint for handoff custody.
+  out-of-band fingerprint record for handoff custody.
 - After capture, select the repo interpreter with
   `PYTHON="${PYTHON:-$(if [ -x .venv/bin/python ]; then printf '%s' .venv/bin/python; else command -v python3; fi)}"`;
   set `BUNDLE_DIR=/secure/path/to/mnemosyne-production-evidence`; set
-  `EXPECTED_BUNDLE_FINGERPRINT=sha256:...` from the operator's out-of-band
-  capture record, not from `summary.json` inside the bundle under review; set
-  `VERIFY_REPORT=/secure/path/to/mnemosyne-production-evidence-verify.json`
+  `FINGERPRINT_RECORD=/secure/path/to/mnemosyne-production-bundle-fingerprint.json`
+  from the capture wrapper's `--fingerprint-record-output`; set
+  `EXPECTED_BUNDLE_FINGERPRINT="$("$PYTHON" -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["bundle_fingerprint"])' "$FINGERPRINT_RECORD")"`;
+  set `VERIFY_REPORT=/secure/path/to/mnemosyne-production-evidence-verify.json`
   outside the bundle under review; then
   `"$PYTHON" -m mnemosyne.cli production-evidence-verify "$BUNDLE_DIR"
   --expected-bundle-fingerprint "$EXPECTED_BUNDLE_FINGERPRINT" --report-output "$VERIFY_REPORT"`

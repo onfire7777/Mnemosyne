@@ -588,6 +588,9 @@ def refresh_report(
         }
     )
     runtime_env_placeholder = "/secure/path/to/mnemosyne-production-runtime.env"
+    fingerprint_record_output = root.parent / (
+        root.name + "-bundle-fingerprint.json"
+    )
     report = {
         "schema": "mnemosyne.tier-b-custody-gap-report.v1",
         "report_is_evidence": False,
@@ -619,7 +622,7 @@ def refresh_report(
             f"infra/scripts/render-production-soak-manifest.sh --env-file {root / 'production-render.env'} --runtime-env-file {runtime_env_placeholder} --check-environment",
             f"infra/scripts/render-production-soak-manifest.sh --env-file {root / 'production-render.env'} --runtime-env-file {runtime_env_placeholder} --output {manifests_dir / 'production-soak-manifest.json'}",
             f"infra/scripts/capture-production-evidence.sh --env-file {runtime_env_placeholder} --preflight-only {manifests_dir / 'production-soak-manifest.json'} {root.parent / (root.name + '-preflight')}",
-            f"infra/scripts/capture-production-evidence.sh --env-file {runtime_env_placeholder} {manifests_dir / 'production-soak-manifest.json'} {root.parent / (root.name + '-capture')}",
+            f"infra/scripts/capture-production-evidence.sh --env-file {runtime_env_placeholder} --fingerprint-record-output {fingerprint_record_output} {manifests_dir / 'production-soak-manifest.json'} {root.parent / (root.name + '-capture')}",
         ],
     }
     report_json = reports_dir / "tier-b-gap-report.json"

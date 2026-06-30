@@ -238,12 +238,14 @@ The only production acceptance path is:
 1. Operator-owned production manifest with `validation_scope.production_validated`
    set to `true`, `target_environment` set to `production`, and
    `operator_asserted` set to `true`.
-2. `infra/scripts/capture-production-evidence.sh` run against that manifest.
+2. `infra/scripts/capture-production-evidence.sh --fingerprint-record-output`
+   run against that manifest, writing the external fingerprint record outside
+   the evidence bundle under review.
 3. `release-audit` reports `ok: true` with
    `--require-production-validated --require-provider-forbid-local`.
 4. `production-evidence-verify` passes offline against the retained output
    bundle with `--expected-bundle-fingerprint` set from an independently
-   retained out-of-band capture record, not from `summary.json` inside the
+   retained out-of-band fingerprint record, not from `summary.json` inside the
    bundle under review. The retained bundle must include a non-empty
    `preflight.json.required_input_artifacts` list, matching
    `preflight.json.parity_row_readiness`, and the retained `input-artifacts/`

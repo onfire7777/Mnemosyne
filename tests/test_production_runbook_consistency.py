@@ -82,12 +82,14 @@ def test_every_row_runbook_points_to_universal_preflight_capture_flow() -> None:
         assert "setup proof only" in text, path
         assert "does not flip this row to Done" in text, path
         assert (
-            'infra/scripts/capture-production-evidence.sh "$SOAK_MANIFEST" "$OUT_ROOT"'
+            'infra/scripts/capture-production-evidence.sh --fingerprint-record-output '
+            '"$FINGERPRINT_RECORD" "$SOAK_MANIFEST" "$OUT_ROOT"'
             in text
         ), path
+        assert "`FINGERPRINT_RECORD`" in text, path
         assert (
             "Use absolute external paths outside the repo for `SOAK_MANIFEST`, "
-            "`PRECHECK_OUTPUT_ROOT`, `OUT_ROOT`, and the "
+            "`PRECHECK_OUTPUT_ROOT`, `OUT_ROOT`, `FINGERPRINT_RECORD`, and the "
             "`MNEMOSYNE_PROD_EVIDENCE_DIR` input-artifact directory." in text
         ), path
         assert "reviewers must run" in text, path
@@ -197,7 +199,10 @@ def test_production_evidence_docs_require_independent_bundle_fingerprint() -> No
 
     for path in docs_with_command_snippets:
         text = path.read_text(encoding="utf-8")
-        assert "EXPECTED_BUNDLE_FINGERPRINT=sha256:..." in text, path
+        assert "FINGERPRINT_RECORD=" in text, path
+        assert "mnemosyne-production-bundle-fingerprint.json" in text, path
+        assert "EXPECTED_BUNDLE_FINGERPRINT=" in text, path
+        assert '["bundle_fingerprint"]' in text, path
         assert "VERIFY_REPORT=/secure/path/to/mnemosyne-production-evidence-verify.json" in text, path
         assert '--report-output "$VERIFY_REPORT"' in text, path
 

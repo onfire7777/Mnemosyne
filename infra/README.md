@@ -140,13 +140,13 @@ infra/scripts/capture-production-evidence.sh \
   /secure/path/to/mnemosyne-production-preflight
 infra/scripts/capture-production-evidence.sh \
   --env-file /secure/path/to/mnemosyne-production-runtime.env \
+  --fingerprint-record-output /secure/path/to/mnemosyne-production-bundle-fingerprint.json \
   /secure/path/to/production-soak-manifest.json \
   /secure/path/to/mnemosyne-production-evidence
 PYTHON="${PYTHON:-$(if [ -x .venv/bin/python ]; then printf '%s' .venv/bin/python; else command -v python3; fi)}"
 BUNDLE_DIR=/secure/path/to/mnemosyne-production-evidence
-# Set this from the operator's out-of-band capture record, not from summary.json
-# inside the bundle under review.
-EXPECTED_BUNDLE_FINGERPRINT=sha256:...
+FINGERPRINT_RECORD=/secure/path/to/mnemosyne-production-bundle-fingerprint.json
+EXPECTED_BUNDLE_FINGERPRINT="$("$PYTHON" -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["bundle_fingerprint"])' "$FINGERPRINT_RECORD")"
 VERIFY_REPORT=/secure/path/to/mnemosyne-production-evidence-verify.json
 "$PYTHON" -m mnemosyne.cli production-evidence-verify \
   "$BUNDLE_DIR" \
@@ -173,7 +173,7 @@ runbook without treating the summary as a separate evidence source.
 For custody review with `--expected-bundle-fingerprint`, `--report-output` is
 required and must be absolute, outside the bundle under review, and not
 pre-existing; it is optional only for diagnostic `--internal-consistency-only`
-runs. Retain it with the external capture record so reviewers can compare the
+runs. Retain it with the external fingerprint record so reviewers can compare the
 emitted `reviewer_guidance`, fingerprints, checks, and row review without
 mutating the evidence bundle.
 
@@ -246,7 +246,7 @@ the reviewer-supplied expected fingerprint, the retained
 `bundle-manifest.json` fingerprint, and the recomputed current-files fingerprint
 so custody review can compare all three values directly. Custody review requires
 `--expected-bundle-fingerprint` from an independently retained out-of-band
-capture record; `--internal-consistency-only` is diagnostic-only.
+fingerprint record; `--internal-consistency-only` is diagnostic-only.
 Use `--preflight-only` to validate and copy the rendered manifest without
 running production checks; preflight output plus `redaction-scan.json` is setup
 proof only, not production parity evidence. Successful full capture writes
@@ -254,7 +254,7 @@ proof only, not production parity evidence. Successful full capture writes
 `source-soak-manifest.json` for source/operator command-profile agreement, and
 records the copied `summary.json` fingerprint for review metadata. Custody
 review still requires `--expected-bundle-fingerprint` from an independently
-retained out-of-band capture record, not from `summary.json` inside the bundle
+retained out-of-band fingerprint record, not from `summary.json` inside the bundle
 under review.
 Put secrets in environment variables, files, or command-backed providers, not
 in manifest `args`.

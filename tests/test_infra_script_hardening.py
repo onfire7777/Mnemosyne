@@ -244,6 +244,7 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
         "--env-file /secure/path/to/mnemosyne-production-runtime.env" in command
         for command in report["next_commands"]
     )
+    assert any("--fingerprint-record-output" in command for command in report["next_commands"])
 
     rows = {row["lane"]: row for row in report["rows"]}
     assert rows["B1"]["missing_input_artifacts"] == ["retrieval-ops-bundle.json"]
