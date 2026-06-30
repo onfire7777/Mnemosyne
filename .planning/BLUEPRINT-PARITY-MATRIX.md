@@ -1,18 +1,19 @@
 # Mnemosyne — Blueprint Parity Matrix
 
 **Maintained by:** AUX-DOCS lane (traceability synthesis). **This is a read-and-track artifact, not a spec.**
-**Date:** 2026-06-26 sync note over 2026-06-23 traceability matrix; current repo root: `/Users/admin/Mnemosyne` → `github.com/onfire7777/Mnemosyne`.
+**Date:** 2026-06-30 sync note over 2026-06-23 traceability matrix; current repo root: `/Users/admin/Mnemosyne` → `github.com/onfire7777/Mnemosyne`.
 **Goal it serves:** exact 1:1 parity with `Mnemosyne-v2-Build-Blueprint.md` (§1–§38 + Appendices A–E).
 
-> **Supersession note (2026-06-25):** this matrix is retained as a traceability
+> **Supersession note (2026-06-30):** this matrix is retained as a traceability
 > synthesis. The current status source is
 > `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md` plus `.planning/STATE.md` and
 > `docs/ROADMAP-TO-100.md`. Older rows below that describe ECE/G2 as failing,
 > Tier-A rails as open, or
-> operator-deferred are superseded by the 2026-06-24/25 updates: mandatory Tier A
-> wirings are closed, all 6 headline SLOs are proven locally/compose, and the
-> remaining local work is to keep proof artifacts current while Tier B operator
-> production-evidence rows remain the blocking parity class.
+> the §20.7 tier-0 correction shortcut / §24 user-mistake strategy as missing
+> are superseded by the 2026-06-24 through 2026-06-30 updates: mandatory Tier A
+> wirings are closed, all 6 headline SLOs are proven locally/compose, historical
+> top missing local features are implemented, and Tier B operator production
+> evidence remains the blocking strict-parity class.
 
 ## Purpose & method
 
@@ -130,16 +131,16 @@ several carry production-evidence gates (release-audit / provider-check / OIDC-J
 | Blueprint area | Module(s) | Status | Notes / gap → §7 |
 |---|---|---|---|
 | §18–19 substrate / data model (DDL) | `models`, `storage`, `sql/schema.sql` | ✅ (🟡 columns) | All 20 tables exist; RLS verified. DDL column gaps #1–#4. |
-| §20 ingestion (hot path) | `ingestion`, `engine` | 🟡 | ❌ §20.7 tier-0 correction shortcut (#23) — highest-value missing feature. |
-| §21 consolidation (society of roles) | `consolidation` | ✅ | 11-pass; cadence-bound anti-thrash missing (#16). |
+| §20 ingestion (hot path) | `ingestion`, `engine` | ✅ | §20.7 tier-0 correction shortcut is implemented in `ingestion.py` and tied to belief-core same-turn supersession. |
+| §21 consolidation (society of roles) | `consolidation` | ✅ | 11-pass pipeline plus cadence-bound anti-thrash are implemented; keep Tier-B production evidence separate. |
 | §22 retrieval | `retrieval`, `engine`, `graph` | 🟡 | #6 fast-graph, #7 spreading term, #8 channels, #9 marginal-gain cutoff. |
 | §23 self-improvement (hot/cold loops) | `learning`, `self_optimization`, `gate` | 🟡 | #17 corroboration gate, #19 counterfactual replay, #20 CRITIC loop. |
-| §24 learn-from-user-mistakes | `user_model` | ❌ | #24 scoped support strategy entirely missing. |
+| §24 learn-from-user-mistakes | `user_model` | ✅ | Mistake events promote scoped, reversible support strategies; runtime/MCP/CLI persistence and isolation tests cover the path. |
 | §25 forgetting / metacognition | `lifecycle`, `guard` | 🟡 | #14 must_keep + pointer, #30 long-horizon anti-degradation. |
 | §26 confidence / abstention | `calibration`, `engine` | 🟡 | #18 persist+fuse `calibrated_confidence`. |
 | §27 security & governance | `security`, `privacy`, `oidc_jwks` | ✅ (🟡) | #27 taint labels, #28 quarantine component; C2PA cert-chain 🔒. |
 | §30.1 engine contract | `engine` | ✅ | Full `MemoryEngine(Protocol)`, Local+Postgres impls, substitutability suite. |
-| §30.2 ingestion shortcut | `ingestion`, `belief` | ❌ | tier-0 correction (#23 + #15) — pairs CC-UPS/CC-BC. |
+| §30.2 ingestion shortcut | `ingestion`, `belief` | ✅ | Tier-0 correction (#23 + #15) is closed locally; remaining parity blocker is operator evidence, not this shortcut. |
 | §30.3 belief revision | `belief` | ✅ | ADD/UPDATE/SUPERSEDE/NOOP/CONTEST + TMS cascade. |
 | §30.4 retrieval fast path | `retrieval`, `engine` | 🟡 | #29 cheap classifier `route()` vs hardcoded `deep` bool. |
 | §30.5 consolidation worker | `consolidation` | ✅ | candidate-until-gate; `projection_recompute`. |
@@ -182,8 +183,8 @@ Lane-routed. Status tracked here; owning lane commits only its own files. Cross-
 12. `[C]` per-example conformal nonconformity (I8).
 13. `[C]` explicit AGM expansion/revision/contraction + ATMS labels (I2).
 14. `[C]` enforce `must_keep` in lifecycle demotion + pointer-to-original (I7/§25).
-15. `[C]` tier-0 correction → same-turn supersession in belief core (pairs #23). + `[T]`.
-16. `[C]` cadence-bound consolidation anti-thrash (§21).
+15. `[C]` tier-0 correction → same-turn supersession in belief core (pairs #23). ✅ closed locally.
+16. `[C]` cadence-bound consolidation anti-thrash (§21). ✅ closed locally.
 17. `[C]` gate fact-candidates by external corroboration (§23.3).
 18. `[C]` persist + compute per-memory `calibrated_confidence`, fuse signals (§26). *(needs CC-PG column)*
 
@@ -194,8 +195,8 @@ Lane-routed. Status tracked here; owning lane commits only its own files. Cross-
 22. `[C/T]` pin numeric invariant-rail VALUES (`max_supersession_rate`≈0.05, `min_corroboration`≈2, `max_prune_fraction`) as live constants tested by config-drift (§31). *(CC-LS adds constants on `OperatingPolicy`; AUX-DOCS pins them in `config/drift-baseline.toml` + `test_config_drift.py`.)*
 
 ### CC-UPS (B3) — user-model/ingestion/provenance
-23. `[C]` **tier-0 user-correction hot-path shortcut** (`is_tier0_user_correction`→ungated apply) (§20.7/§30.2) — **highest-value missing feature** (pairs #15).
-24. `[C]` §24 learn-from-user-mistakes → scoped support strategy. ❌→
+23. `[C]` **tier-0 user-correction hot-path shortcut** (`is_tier0_user_correction`→ungated apply) (§20.7/§30.2). ✅ closed locally; was a historical top missing feature.
+24. `[C]` §24 learn-from-user-mistakes → scoped support strategy. ✅ closed locally.
 25. `[C]` semiring how-provenance tags + combine operators (I5) *(or document deferred-by-design)*.
 26. `[C]` latent user embedding beyond `hashing_embedding` stand-in where codeable (FR-16).
 
