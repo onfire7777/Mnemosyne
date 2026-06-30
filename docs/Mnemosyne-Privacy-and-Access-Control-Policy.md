@@ -112,7 +112,7 @@ A caller is disclosed an item **only if every condition holds** (all-of; first f
 6. **Purpose** — if `access_policy.purpose` is set, the request's declared purpose intersects it.
 7. **Policy freshness** — if `access_policy.expires_at` is set and past, the clause it governs tightens to deny (never loosens).
 
-**Roles map from verified identity.** The four roles are the existing `WriteRole = reader | agent | consolidator | operator`, established by `session-exchange` mapping OIDC claims → `role` + `source_trust_tier` via `OidcAuthorizationPolicy` (validated by `idp-authz-policy-check`). The sensitivity ceiling is a property *of the role*, not a claim the caller can assert directly.
+**Roles map from verified identity.** The four roles are the existing `WriteRole = reader | agent | consolidator | operator`, established by `session-exchange` mapping OIDC claims → `role` + `source_trust_tier` via `OidcAuthorizationPolicy` (validated by `idp-authz-policy-check`). Elevated mappings (`operator`, `consolidator`, or trust-tier≤1) must also prove a non-tenant claim matcher plus fresh MFA claims (`acr`, `amr`, `auth_time`). The sensitivity ceiling is a property *of the role*, not a claim the caller can assert directly.
 
 | Role | Default `max_sensitivity` | Notes |
 |------|---------------------------|-------|

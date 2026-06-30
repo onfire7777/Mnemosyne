@@ -28,14 +28,16 @@ endpoint; **sign every evidence bundle with a collector-only key** the gate veri
   operator-captured `rolsuper`/`rolbypassrls` probe.
 - Object-store encryption defaults to `none` → breaks right-to-be-forgotten in backups.
 - Dev-mode Vault with a committed fixed root token is the only KMS wiring.
-- OIDC policy can grant operator/tier-0 on a tenant_id match alone, **no MFA**.
+- OIDC policy now rejects operator/consolidator or trust-tier≤1 rules unless they have a
+  non-tenant claim matcher plus `required_acr`, `required_amr`, and bounded `auth_time`.
+  Remaining work: capture live Keycloak/MFA evidence against production credentials.
 - `ProvenanceTrustPolicy` is **fail-OPEN**.
 
 ## The 16 must-do controls (ship before any production capture)
 1. **Gate integrity → measure-not-attest** + collector-signed bundles (finding A).
 2. **Auth fail-closed by default:** MCP `require_session=True` (refuse boot if unset); tenant/role/trust ONLY from the verified session claim, never a tool arg; startup + ops-check enforce it. **Code status:** production-profile startup enforcement is wired; live ops-check evidence and MFA-gated elevation evidence remain.
 3. **Postgres role separation under RLS:** `mnemosyne_app` (NOSUPERUSER/NOBYPASSRLS/no DELETE/TRUNCATE), separate `mnemosyne_consolidator` (sole write/destructive), SELECT-only eval roles; ops-check live-probes `rolsuper`/`rolbypassrls`. (DDL: `infra/postgres/roles.sql`.) **Code status:** shared safe-role guard is wired into `PostgresEngine`, `PostgresRuntimeState`, and `PostgresQueue`; `MNEMOSYNE_POSTGRES_REQUIRE_SAFE_ROLE=1` enables it for CLI/self-hosted profile and the MCP production profile enables it automatically. Live role/grant evidence remains required.
-4. **MFA-gate privilege elevation:** any rule granting operator/consolidator or trust_tier≤1 requires a non-empty claim matcher AND `required_acr/amr`; implement acr/amr/auth_time verification; reject tenant-only operator rules; bind superseding trust to the verified session (R4).
+4. **MFA-gate privilege elevation:** any rule granting operator/consolidator or trust_tier≤1 requires a non-empty claim matcher AND `required_acr/amr`; implement acr/amr/auth_time verification; reject tenant-only operator rules; bind superseding trust to the verified session (R4). **Code status:** source enforcement is wired in `OidcAuthorizationPolicy`; live Keycloak/MFA rollout evidence remains required.
 5. **Production KMS (no dev mode):** sealed Vault/OpenBao (raft + transit auto-unseal via a separate hardened seal; AppRole/workload-identity, not root; audit device on; step-ca TLS); remove committed dev root token; single-use response-wrapped short-TTL CIDR-bound secret_ids; `kms-ops-check` asserts not-dev/no-root/key-version-advanced.
 6. **Mandatory at-rest object encryption:** `MNEMOSYNE_OBJECT_STORE_ENCRYPTION=aesgcm` + Vault-transit key provider; boot-time refuse-to-start if it resolves to `none` while S2+ writable; gate crypto-shred on it. **Code status:** MCP production-profile startup enforcement is wired for `aesgcm` + command-backed object-key custody; live Vault/KMS crypto-shred evidence remains.
 7. **Tenant-scope crypto-shred + split erase authority:** per-tenant-namespaced transit key paths + per-tenant policies (no wildcard `transit/keys/mnemosyne-object-*` delete); separate higher-auth credential for delete vs encrypt/decrypt; one-way `deletion_allowed`; alert on every transit DELETE; bound per-tenant KEKs wrapping per-object DEKs (rotation O(tenants)).

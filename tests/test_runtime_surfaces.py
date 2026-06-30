@@ -11,6 +11,7 @@ import ssl
 import subprocess
 import sys
 import threading
+import time
 import tomllib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import StringIO
@@ -54,6 +55,12 @@ PARAMETRIC_AUTH = {"role": "operator", "source_trust_tier": 0}
 MCP_SESSION_SECRET = "mnemosyne-mcp-session-secret"
 IDP_ISSUER = "https://idp.example.test/"
 IDP_AUDIENCE = "mnemosyne-production"
+MFA_ACR = "urn:mnemosyne:mfa"
+MFA_RULE = {
+    "required_acr": MFA_ACR,
+    "required_amr": "mfa",
+    "max_auth_age_seconds": 300,
+}
 
 
 def seed_grounded_gate_evidence(
@@ -145,6 +152,9 @@ def oidc_payload(**overrides: object) -> dict[str, object]:
         "mnemosyne_role": "operator",
         "mnemosyne_source_trust_tier": 0,
         "exp": 2_000_000_000,
+        "auth_time": int(time.time()) - 30,
+        "acr": MFA_ACR,
+        "amr": ["pwd", "mfa"],
         "jti": "mcp-idp-session",
     }
     payload.update(overrides)
@@ -2969,6 +2979,7 @@ def test_mcp_http_session_exchange_maps_claims_through_authz_policy(tmp_path: Pa
                         },
                         "role": "operator",
                         "source_trust_tier": 0,
+                        **MFA_RULE,
                     }
                 ],
             }

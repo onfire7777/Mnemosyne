@@ -27,6 +27,12 @@ from mnemosyne.security import (
 SECRET = "session-unit-secret"
 ISSUER = "https://idp.example.test/"
 AUDIENCE = "mnemosyne-production"
+MFA_ACR = "urn:mnemosyne:mfa"
+MFA_RULE = {
+    "required_acr": MFA_ACR,
+    "required_amr": "mfa",
+    "max_auth_age_seconds": 300,
+}
 
 
 def sign_payload(payload: dict[str, object]) -> str:
@@ -108,6 +114,9 @@ def oidc_payload(**overrides: object) -> dict[str, object]:
         "exp": 2_000_000_000,
         "nbf": 1_800_000_000,
         "iat": 1_800_000_000,
+        "auth_time": 1_899_999_900,
+        "acr": MFA_ACR,
+        "amr": ["pwd", "mfa"],
         "jti": "idp-session-a",
     }
     payload.update(overrides)
@@ -490,6 +499,7 @@ def test_oidc_authorization_policy_maps_claims_without_raw_role_or_trust() -> No
                     },
                     "role": "operator",
                     "source_trust_tier": 0,
+                    **MFA_RULE,
                 }
             ],
         }
@@ -505,6 +515,108 @@ def test_oidc_authorization_policy_maps_claims_without_raw_role_or_trust() -> No
     assert identity.role == "operator"
     assert identity.source_trust_tier == 0
     assert identity.session_id == "idp-session-a"
+
+
+def test_oidc_authorization_policy_rejects_elevated_rules_without_mfa() -> None:
+    with pytest.raises(SessionAuthError, match="non-tenant claim matcher"):
+        OidcAuthorizationPolicy.from_mapping(
+            {
+                "allowed_client_ids": ["cli-client"],
+                "rules": [
+                    {
+                        "tenant_ids": ["tenant-a"],
+                        "role": "operator",
+                        "source_trust_tier": 0,
+                    }
+                ],
+            }
+        )
+    with pytest.raises(SessionAuthError, match="requires required_acr"):
+        OidcAuthorizationPolicy.from_mapping(
+            {
+                "allowed_client_ids": ["cli-client"],
+                "rules": [
+                    {
+                        "tenant_ids": ["tenant-a"],
+                        "claim_contains": {"groups": "mnemosyne-operators"},
+                        "role": "operator",
+                        "source_trust_tier": 0,
+                    }
+                ],
+            }
+        )
+    with pytest.raises(SessionAuthError, match="requires required_amr"):
+        OidcAuthorizationPolicy.from_mapping(
+            {
+                "allowed_client_ids": ["cli-client"],
+                "rules": [
+                    {
+                        "tenant_ids": ["tenant-a"],
+                        "claim_contains": {"groups": "mnemosyne-operators"},
+                        "required_acr": MFA_ACR,
+                        "role": "operator",
+                        "source_trust_tier": 0,
+                    }
+                ],
+            }
+        )
+    with pytest.raises(SessionAuthError, match="requires max_auth_age_seconds"):
+        OidcAuthorizationPolicy.from_mapping(
+            {
+                "allowed_client_ids": ["cli-client"],
+                "rules": [
+                    {
+                        "tenant_ids": ["tenant-a"],
+                        "claim_contains": {"groups": "mnemosyne-operators"},
+                        "required_acr": MFA_ACR,
+                        "required_amr": "mfa",
+                        "role": "operator",
+                        "source_trust_tier": 0,
+                    }
+                ],
+            }
+        )
+
+
+def test_oidc_authorization_policy_rejects_stale_or_missing_mfa_claims() -> None:
+    policy = OidcAuthorizationPolicy.from_mapping(
+        {
+            "allowed_client_ids": ["cli-client"],
+            "rules": [
+                {
+                    "tenant_ids": ["tenant-a"],
+                    "claim_contains": {"groups": "mnemosyne-operators"},
+                    "role": "operator",
+                    "source_trust_tier": 0,
+                    **MFA_RULE,
+                }
+            ],
+        }
+    )
+    base_payload = oidc_payload(groups=["mnemosyne-operators"], azp="cli-client")
+
+    stale_payload = dict(base_payload, auth_time=1_899_999_000)
+    with pytest.raises(SessionAuthError, match="not authorized"):
+        policy.authorize(
+            stale_payload,
+            tenant_id="tenant-a",
+            user_id="user-a",
+            expires_at=2_000_000_000,
+            session_id="idp-session-a",
+            now=1_900_000_000,
+        )
+
+    missing_amr = dict(base_payload)
+    missing_amr.pop("amr")
+    with pytest.raises(SessionAuthError, match="not authorized"):
+        policy.authorize(
+            missing_amr,
+            tenant_id="tenant-a",
+            user_id="user-a",
+            expires_at=2_000_000_000,
+            session_id="idp-session-a",
+            now=1_900_000_000,
+        )
 
 
 def test_oidc_authorization_policy_supports_agent_role_and_claim_equals() -> None:
@@ -591,6 +703,7 @@ def test_oidc_authorization_policy_denies_unmatched_client_and_rules() -> None:
                     "claim_contains": {"groups": "mnemosyne-operators"},
                     "role": "operator",
                     "source_trust_tier": 0,
+                    **MFA_RULE,
                 }
             ],
         }
@@ -621,6 +734,7 @@ def test_oidc_authorization_policy_rejects_malformed_or_ambiguous_rules() -> Non
                         "claim_contains": {"groups": "mnemosyne-operators"},
                         "role": "operator",
                         "source_trust_tier": 0,
+                        **MFA_RULE,
                     }
                 ]
             }
@@ -635,6 +749,7 @@ def test_oidc_authorization_policy_rejects_malformed_or_ambiguous_rules() -> Non
                         "claim_contains": {"groups": "mnemosyne-operators"},
                         "role": "writer",
                         "source_trust_tier": 0,
+                        **MFA_RULE,
                     }
                 ],
             }
@@ -650,6 +765,7 @@ def test_oidc_authorization_policy_rejects_malformed_or_ambiguous_rules() -> Non
                         "claim_contains": {"groups": "mnemosyne-operators"},
                         "role": "operator",
                         "source_trust_tier": 0,
+                        **MFA_RULE,
                     }
                 ],
             }
@@ -666,12 +782,14 @@ def test_oidc_authorization_policy_rejects_malformed_or_ambiguous_rules() -> Non
                     "claim_contains": {"groups": "mnemosyne-operators"},
                     "role": "operator",
                     "source_trust_tier": 0,
+                    **MFA_RULE,
                 },
                 {
                     "tenant_ids": ["tenant-a"],
                     "claim_contains": {"groups": "mnemosyne-operators"},
                     "role": "consolidator",
                     "source_trust_tier": 1,
+                    **MFA_RULE,
                 },
             ],
         }

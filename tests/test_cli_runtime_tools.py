@@ -56,6 +56,12 @@ SESSION_SECRET = "mnemosyne-test-session-secret"
 PARAMETRIC_AUTH = ("--role", "operator", "--source-trust-tier", "0")
 IDP_ISSUER = "https://idp.example.test/"
 IDP_AUDIENCE = "mnemosyne-production"
+MFA_ACR = "urn:mnemosyne:mfa"
+MFA_RULE = {
+    "required_acr": MFA_ACR,
+    "required_amr": "mfa",
+    "max_auth_age_seconds": 300,
+}
 
 
 def make_session_token(
@@ -186,6 +192,9 @@ def oidc_payload(**overrides: object) -> dict[str, object]:
         "mnemosyne_role": "operator",
         "mnemosyne_source_trust_tier": 0,
         "exp": 2_000_000_000,
+        "auth_time": int(time.time()) - 30,
+        "acr": MFA_ACR,
+        "amr": ["pwd", "mfa"],
         "jti": "cli-idp-session",
     }
     payload.update(overrides)
@@ -522,6 +531,7 @@ def test_cli_session_exchange_maps_idp_claims_through_authz_policy(tmp_path: Pat
                         },
                         "role": "operator",
                         "source_trust_tier": 0,
+                        **MFA_RULE,
                     }
                 ],
             }
@@ -571,6 +581,7 @@ def test_cli_session_exchange_authz_policy_miss_fails_closed(tmp_path: Path) -> 
                         "claim_contains": {"groups": "mnemosyne-operators"},
                         "role": "operator",
                         "source_trust_tier": 0,
+                        **MFA_RULE,
                     }
                 ],
             }
@@ -613,6 +624,7 @@ def test_cli_idp_authz_policy_check_reports_fingerprint_without_claim_values(tmp
                         "claim_contains": {"groups": "mnemosyne-operators"},
                         "role": "operator",
                         "source_trust_tier": 0,
+                        **MFA_RULE,
                     }
                 ],
             }
@@ -648,6 +660,7 @@ def test_cli_idp_authz_policy_rollout_requires_fingerprints_and_gates_simulation
                         "claim_contains": {"groups": "mnemosyne-operators"},
                         "role": "operator",
                         "source_trust_tier": 0,
+                        **MFA_RULE,
                     }
                 ],
             }
@@ -665,6 +678,7 @@ def test_cli_idp_authz_policy_rollout_requires_fingerprints_and_gates_simulation
                         "claim_contains": {"groups": "mnemosyne-operators"},
                         "role": "operator",
                         "source_trust_tier": 0,
+                        **MFA_RULE,
                     },
                     {
                         "name": "auditor-access",
@@ -672,6 +686,7 @@ def test_cli_idp_authz_policy_rollout_requires_fingerprints_and_gates_simulation
                         "claim_contains": {"groups": "mnemosyne-auditors"},
                         "role": "agent",
                         "source_trust_tier": 1,
+                        **MFA_RULE,
                     },
                 ],
             }
@@ -688,7 +703,11 @@ def test_cli_idp_authz_policy_rollout_requires_fingerprints_and_gates_simulation
                         "azp": "cli-client",
                         "groups": ["mnemosyne-auditors"],
                         "scope": "mnemosyne.admin",
+                        "auth_time": 1_899_999_900,
+                        "acr": MFA_ACR,
+                        "amr": ["pwd", "mfa"],
                     },
+                    "now": 1_900_000_000,
                 }
             ]
         ),
@@ -1344,6 +1363,7 @@ def test_cli_idp_authz_policy_check_summarizes_without_sensitive_values(tmp_path
                         },
                         "role": "operator",
                         "source_trust_tier": 0,
+                        **MFA_RULE,
                     }
                 ],
             }
@@ -1368,6 +1388,10 @@ def test_cli_idp_authz_policy_check_summarizes_without_sensitive_values(tmp_path
             "tenant_matcher_count": 1,
             "claim_equals_fields": ["department"],
             "claim_contains_fields": ["groups", "scope"],
+            "elevated": True,
+            "required_acr_configured": True,
+            "required_amr_configured": True,
+            "auth_time_required": True,
         }
     ]
     encoded = json.dumps(report, sort_keys=True)
@@ -2178,6 +2202,7 @@ def test_cli_deployment_soak_allows_idp_authz_rollout_check(tmp_path: Path) -> N
                 "claim_contains": {"groups": "mnemosyne-operators"},
                 "role": "operator",
                 "source_trust_tier": 0,
+                **MFA_RULE,
             }
         ],
     }
@@ -3422,6 +3447,7 @@ def test_cli_provider_check_validates_oidc_manifest_without_sensitive_values(tmp
                         "claim_contains": {"groups": "mnemosyne-operators"},
                         "role": "operator",
                         "source_trust_tier": 0,
+                        **MFA_RULE,
                     }
                 ],
             }
