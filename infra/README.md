@@ -126,6 +126,9 @@ open infra/templates/production-operator-env.inventory.md
 # The refreshed reports/input-artifact-worklist.{json,md} routes each artifact
 # to packet path, Tier-B row, row runbook, and consuming check; use it to gather
 # real production artifacts, not placeholder files.
+# The refreshed reports/input-artifact-validation-commands.sh refuses missing
+# or symlinked artifacts and runs manifest-derived validators against supplied
+# files before the full capture path.
 # The refreshed report's capture_blockers section summarizes the blocked lanes
 # and missing blocker classes for dispatcher handoff without exposing values.
 # Copy reports/mnemosyne-production-runtime.env.example to the real external
@@ -246,6 +249,11 @@ The external custody packet also renders this route map as
 artifacts by packet path, Tier-B row, row runbook, and consuming check before
 running capture. That worklist is an operator preparation aid only; it must not
 be satisfied with placeholder artifacts.
+The packet's `reports/input-artifact-validation-commands.sh` script is the
+next local check after files are supplied: it rejects missing, symlinked, or
+non-file artifacts before running the exact manifest-derived validators against
+the packet's `input-artifacts/` files. Passing it is not a row flip; the full
+production capture and offline verifier remain authoritative.
 
 The renderer replaces non-secret `MNEMOSYNE_PROD_*` placeholders from the
 operator environment and validates production scope plus the full command
