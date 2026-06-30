@@ -254,6 +254,11 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     )
     assert (packet_root / "reports" / "tier-b-gap-report.md").is_file()
     assert (packet_root / "docs" / "PRODUCTION-EVIDENCE.md").is_file()
+    assert (packet_root / "docs" / "OPS-HANDOFF-AND-OWNERSHIP.md").is_file()
+    assert (packet_root / "docs" / "runbooks" / "README.md").is_file()
+    assert (
+        packet_root / "docs" / "runbooks" / "row-01-production-postgres-retrieval.md"
+    ).is_file()
     readme = (packet_root / "README.md").read_text(encoding="utf-8")
     markdown = (packet_root / "reports" / "tier-b-gap-report.md").read_text(
         encoding="utf-8"
@@ -262,7 +267,12 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     assert "--env-file /secure/path/to/mnemosyne-production-runtime.env" in readme
     assert "Ready for capture: `false`" not in readme
     assert "does not carry current readiness status" in readme
+    assert "docs/runbooks/" in readme
     assert "Post-Capture Custody Verification" in markdown
+    assert (
+        "Packet runbook: `docs/runbooks/row-01-production-postgres-retrieval.md`"
+        in markdown
+    )
     assert "production-evidence-verify" in report["post_capture_verify_script"]
     assert "--expected-bundle-fingerprint" in report["post_capture_verify_script"]
     assert "--report-output" in report["post_capture_verify_script"]
@@ -277,6 +287,9 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     assert any("--fingerprint-record-output" in command for command in report["next_commands"])
 
     rows = {row["lane"]: row for row in report["rows"]}
+    assert rows["B1"]["packet_runbook"] == (
+        "docs/runbooks/row-01-production-postgres-retrieval.md"
+    )
     assert rows["B1"]["missing_input_artifacts"] == ["retrieval-ops-bundle.json"]
     assert "MNEMOSYNE_EMBEDDING_URL" in rows["B1"]["missing_provider_manifest_env_refs"]
     assert rows["B3"]["missing_provider_manifest_env_refs"] == []

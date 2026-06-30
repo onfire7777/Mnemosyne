@@ -61,6 +61,15 @@ def _copy_readonly(src: Path, dst: Path) -> None:
     dst.chmod(0o600)
 
 
+def _packet_runbook_path(runbook: Any) -> str | None:
+    if not isinstance(runbook, str) or not runbook:
+        return None
+    prefix = ".planning/runbooks/"
+    if not runbook.startswith(prefix):
+        return None
+    return f"docs/runbooks/{Path(runbook).name}"
+
+
 def _seed_packet_render_env(env_file: Path, input_dir: Path) -> None:
     text = env_file.read_text(encoding="utf-8")
     seeded = text.replace(
@@ -235,6 +244,7 @@ def _row_report(
                 "row": raw.get("row"),
                 "title": raw.get("title"),
                 "runbook": raw.get("runbook"),
+                "packet_runbook": _packet_runbook_path(raw.get("runbook")),
                 "required_input_artifacts": required,
                 "missing_input_artifacts": missing_artifacts,
                 "missing_render_environment": row_missing_render_env,
@@ -407,6 +417,7 @@ def _write_markdown(report: dict[str, Any], path: Path) -> None:
                 f"### {row['lane']} - {row['title']}",
                 "",
                 f"- Runbook: `{row['runbook']}`",
+                f"- Packet runbook: `{row['packet_runbook'] or 'not bundled'}`",
                 f"- Ready for capture: `{str(row['ready_for_capture']).lower()}`",
                 f"- Missing artifacts: `{len(row['missing_input_artifacts'])}`",
                 f"- Missing render env: `{len(row['missing_render_environment'])}`",
@@ -445,6 +456,8 @@ def _write_readme(root: Path, report: dict[str, Any]) -> None:
     content = f"""# Mnemosyne Tier-B Production Evidence Custody Packet
 
 This packet is a no-secret operator workspace. It is not production evidence.
+It includes packet-local row runbooks under `docs/runbooks/` so an external
+operator can work from the packet without relying on a live repo checkout.
 
 ## Fill These First
 
@@ -523,10 +536,18 @@ def _validate_existing_packet(root: Path) -> None:
 
 def _write_packet_skeleton(root: Path, *, repo_dir: Path) -> None:
     docs_dir = root / "docs"
+    runbooks_dir = docs_dir / "runbooks"
     input_dir = root / "input-artifacts"
     reports_dir = root / "reports"
     manifests_dir = root / "manifests"
-    for directory in (root, docs_dir, input_dir, reports_dir, manifests_dir):
+    for directory in (
+        root,
+        docs_dir,
+        runbooks_dir,
+        input_dir,
+        reports_dir,
+        manifests_dir,
+    ):
         directory.mkdir(parents=True, exist_ok=False if directory == root else True)
         directory.chmod(0o700)
 
@@ -546,6 +567,14 @@ def _write_packet_skeleton(root: Path, *, repo_dir: Path) -> None:
         "infra/templates/production-soak-manifest.template.json",
     ):
         _copy_readonly(repo_dir / relative, docs_dir / Path(relative).name)
+    for relative in (
+        ".planning/OPS-HANDOFF-AND-OWNERSHIP.md",
+        ".planning/ENV-AND-SECRETS.md",
+        ".planning/ROLLBACK.md",
+    ):
+        _copy_readonly(repo_dir / relative, docs_dir / Path(relative).name)
+    for runbook in sorted((repo_dir / ".planning" / "runbooks").glob("*.md")):
+        _copy_readonly(runbook, runbooks_dir / runbook.name)
 
 
 def refresh_report(
