@@ -110,7 +110,7 @@ when the operator runs:
 
 ```bash
 infra/scripts/capture-production-evidence.sh \
-  --env-file /secure/path/to/mnemosyne-production-runtime.env \
+  --env-file "$RUNTIME_ENV_FILE" \
   --fingerprint-record-output /secure/path/to/mnemosyne-production-bundle-fingerprint.json \
   /secure/path/to/production-soak-manifest.json \
   /secure/path/to/mnemosyne-production-evidence

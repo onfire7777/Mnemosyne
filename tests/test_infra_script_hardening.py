@@ -321,7 +321,8 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
         packet_root / "reports" / "mnemosyne-production-runtime.env.example"
     ).read_text(encoding="utf-8")
     assert "--refresh" in readme
-    assert "--env-file /secure/path/to/mnemosyne-production-runtime.env" in readme
+    assert "RUNTIME_ENV_FILE=/secure/path/to/mnemosyne-production-runtime.env" in readme
+    assert '--env-file "$RUNTIME_ENV_FILE"' in readme
     assert "Ready for capture: `false`" not in readme
     assert "does not carry current readiness status" in readme
     assert "docs/runbooks/" in readme

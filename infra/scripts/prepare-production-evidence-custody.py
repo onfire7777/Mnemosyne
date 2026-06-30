@@ -511,8 +511,9 @@ def _write_runtime_env_example(path: Path, *, provider_env_refs: list[str]) -> N
         "# Copy this generated no-secret example to an external mode-0600 path,",
         "# fill real values there, then pass that file with:",
         "#",
-        "#   render-production-soak-manifest.sh --runtime-env-file /secure/path/to/mnemosyne-production-runtime.env",
-        "#   capture-production-evidence.sh --env-file /secure/path/to/mnemosyne-production-runtime.env",
+        "#   export RUNTIME_ENV_FILE=/secure/path/to/mnemosyne-production-runtime.env",
+        '#   render-production-soak-manifest.sh --runtime-env-file "$RUNTIME_ENV_FILE"',
+        '#   capture-production-evidence.sh --env-file "$RUNTIME_ENV_FILE"',
         "#",
         "# Do not pass this example directly until every required value is filled.",
         "# Refresh the Tier-B packet after editing provider-manifest.production.json",
@@ -785,8 +786,9 @@ operator can work from the packet without relying on a live repo checkout.
 5. Refresh `reports/tier-b-gap-report.json` generation with:
 
 ```bash
+RUNTIME_ENV_FILE=/secure/path/to/mnemosyne-production-runtime.env
 infra/scripts/prepare-production-evidence-custody.py \\
-  --runtime-env-file /secure/path/to/mnemosyne-production-runtime.env \\
+  --runtime-env-file "$RUNTIME_ENV_FILE" \\
   --refresh \\
   {root}
 ```
@@ -815,10 +817,10 @@ path before filling secret-bearing values.
 
 When the report is ready, render the soak manifest to a separate external path
 with `render-production-soak-manifest.sh --env-file {root / 'production-render.env'}`
-and `--runtime-env-file /secure/path/to/mnemosyne-production-runtime.env`, then
+and `--runtime-env-file "$RUNTIME_ENV_FILE"`, then
 capture into a new external output root. Do not use this packet root as the
 capture output root. Pass secret-bearing runtime/provider values through
-`capture-production-evidence.sh --env-file /secure/path/to/mnemosyne-production-runtime.env`
+`capture-production-evidence.sh --env-file "$RUNTIME_ENV_FILE"`
 instead of shell-sourcing them.
 
 After refresh reports `ready_for_capture: true`, set
