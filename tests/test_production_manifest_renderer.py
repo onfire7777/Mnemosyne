@@ -895,6 +895,64 @@ def test_renderer_check_environment_rejects_absolute_artifact_outside_evidence_d
     ]
 
 
+def test_renderer_check_environment_rejects_symlinked_input_artifact(
+    tmp_path: Path,
+) -> None:
+    env = _filled_render_env(tmp_path)
+    _populate_required_input_artifacts(env)
+    evidence_dir = Path(env["MNEMOSYNE_PROD_EVIDENCE_DIR"])
+    target_artifact = evidence_dir / "auth-ops-bundle.json"
+    symlink_target = evidence_dir / "auth-ops-bundle.real.json"
+    symlink_target.write_text("{}\n", encoding="utf-8")
+    target_artifact.unlink()
+    try:
+        target_artifact.symlink_to(symlink_target)
+    except OSError as exc:
+        pytest.skip(f"symlink setup unavailable: {exc}")
+
+    proc = subprocess.run(
+        [*RENDERER_CMD, "--check-environment"],
+        cwd=REPO,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    payload = json.loads(proc.stdout)
+    expected_error = "auth-ops --bundle must not be a symlinked input artifact"
+
+    assert proc.returncode == 78
+    assert payload["ok"] is False
+    assert payload["blocked_reason"] == "missing_or_invalid_input_artifacts"
+    assert payload["input_artifacts_complete"] is False
+    assert payload["missing_input_artifacts"] == []
+    assert payload["input_artifact_errors"] == [expected_error]
+    assert env["MNEMOSYNE_PROD_EVIDENCE_DIR"] not in proc.stdout
+    rows = _row_readiness_by_lane(payload)
+    assert rows["B2"]["input_artifacts_complete"] is False
+    assert rows["B2"]["input_artifact_errors"] == [expected_error]
+    for lane in set(REQUIRED_PARITY_LANES) - {"B2"}:
+        assert rows[lane]["input_artifact_errors"] == []
+        assert rows[lane]["input_artifacts_complete"] is True
+
+    output = tmp_path / "secure" / "production-soak-manifest.json"
+    output_proc = subprocess.run(
+        [*RENDERER_CMD, "--output", str(output)],
+        cwd=REPO,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert output_proc.returncode == 78
+    assert not output.exists()
+    assert "refusing to write production soak manifest" in output_proc.stderr
+    assert expected_error in output_proc.stderr
+    assert env["MNEMOSYNE_PROD_EVIDENCE_DIR"] not in output_proc.stderr
+
+
 def test_renderer_check_environment_row_readiness_scopes_single_missing_artifact(
     tmp_path: Path,
 ) -> None:

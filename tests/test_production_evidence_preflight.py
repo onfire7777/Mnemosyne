@@ -53,7 +53,42 @@ def _expected_preflight_row_readiness(
 def _minimal_production_manifest(
     path: Path,
     mutate: Callable[[dict[str, Any]], None] | None = None,
+    include_default_custody: bool = True,
 ) -> None:
+    if include_default_custody:
+        input_root = path.parent / "production-inputs"
+        tool = path.parent / "bin" / "c2patool"
+        suite = input_root / "provenance-trust-suite.json"
+        asset = input_root / "asset.json"
+        c2pa_asset = input_root / "asset.c2pa"
+        input_root.mkdir(parents=True, exist_ok=True)
+        tool.parent.mkdir(parents=True, exist_ok=True)
+        if not tool.exists():
+            tool.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            tool.chmod(0o755)
+        if not asset.exists():
+            asset.write_text('{"asset": "fixture"}\n', encoding="utf-8")
+        if not c2pa_asset.exists():
+            c2pa_asset.write_text("fixture c2pa asset\n", encoding="utf-8")
+        if not suite.exists():
+            suite.write_text(
+                json.dumps(
+                    {
+                        "name": "production-c2pa",
+                        "tool": str(tool),
+                        "cases": [
+                            {
+                                "id": "asset-bound",
+                                "asset_path": str(asset),
+                                "c2pa_asset_path": str(c2pa_asset),
+                                "manifest": {"sha256": "fixture"},
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
     manifest: dict[str, Any] = {
         "kind": "mnemosyne-production-soak-manifest",
         "validation_scope": {
@@ -74,6 +109,13 @@ def _minimal_production_manifest(
             for command in PRODUCTION_RELEASE_REQUIRED_COMMANDS
         ],
     }
+    if include_default_custody:
+        provenance_check = next(
+            item
+            for item in manifest["checks"]
+            if item["command"] == "provenance-trust-check"
+        )
+        provenance_check["args"] = ["--suite", str(suite)]
     if mutate is not None:
         mutate(manifest)
     path.write_text(json.dumps(manifest), encoding="utf-8")
@@ -225,6 +267,33 @@ def test_capture_production_evidence_preflight_only_stops_before_soak(
     assert not (out_root / "deployment-soak.stdout.json").exists()
     assert not (out_root / "release-audit.json").exists()
     assert out_root.stat().st_mode & 0o777 == 0o700
+
+
+def test_capture_production_evidence_preflight_rejects_skeletal_manifest(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "production-soak.json"
+    out_root = tmp_path / "capture"
+    _minimal_production_manifest(manifest, include_default_custody=False)
+
+    proc = subprocess.run(
+        [
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
+            "--preflight-only",
+            str(manifest),
+            str(out_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert proc.returncode == 65
+    assert "requires at least one retained production input artifact" in proc.stderr
+    assert "requires retained C2PA executable metadata" in proc.stderr
+    assert not out_root.exists()
 
 
 def test_capture_production_evidence_full_capture_requires_explicit_output_root(
@@ -716,12 +785,13 @@ def test_capture_production_evidence_preflight_records_input_artifacts(
     )
 
     input_artifacts = stdout["required_input_artifacts"]
-    assert len(input_artifacts) == 1
-    assert input_artifacts[0]["path"] == str(artifact)
-    assert input_artifacts[0]["source_values"] == [str(artifact)]
-    assert input_artifacts[0]["kind"] == "file"
-    assert input_artifacts[0]["labels"] == ["checks[1].args"]
-    assert input_artifacts[0]["checks"] == [
+    artifact_record = next(
+        item for item in input_artifacts if item["path"] == str(artifact)
+    )
+    assert artifact_record["source_values"] == [str(artifact)]
+    assert artifact_record["kind"] == "file"
+    assert artifact_record["labels"] == ["checks[1].args"]
+    assert artifact_record["checks"] == [
         {
             "name": "belief-revision-check",
             "command": "belief-revision-check",
@@ -729,7 +799,7 @@ def test_capture_production_evidence_preflight_records_input_artifacts(
             "parity_lanes": ["B10"],
         }
     ]
-    assert input_artifacts[0]["parity_routes"] == [
+    assert artifact_record["parity_routes"] == [
         {
             "lane": "B10",
             "row": 10,
@@ -737,22 +807,17 @@ def test_capture_production_evidence_preflight_records_input_artifacts(
             "runbook": ".planning/runbooks/row-10-live-parity-suite.md",
         }
     ]
-    assert input_artifacts[0]["snapshot_path"].startswith(
-        str(out_root / "input-artifacts")
-    )
-    assert input_artifacts[0]["files"][0]["source_path"] == str(artifact)
-    assert (
-        input_artifacts[0]["files"][0]["snapshot_path"]
-        == input_artifacts[0]["snapshot_path"]
-    )
-    assert input_artifacts[0]["files"][0]["sha256"].startswith("sha256:")
-    assert input_artifacts[0]["files"][0]["size_bytes"] == artifact.stat().st_size
+    assert artifact_record["snapshot_path"].startswith(str(out_root / "input-artifacts"))
+    assert artifact_record["files"][0]["source_path"] == str(artifact)
+    assert artifact_record["files"][0]["snapshot_path"] == artifact_record["snapshot_path"]
+    assert artifact_record["files"][0]["sha256"].startswith("sha256:")
+    assert artifact_record["files"][0]["size_bytes"] == artifact.stat().st_size
     copied_manifest = json.loads(
         (out_root / "operator-soak-manifest.json").read_text(encoding="utf-8")
     )
     assert copied_manifest["checks"][0]["args"] == [
         "--cases",
-        input_artifacts[0]["snapshot_path"],
+        artifact_record["snapshot_path"],
     ]
     assert (out_root / "source-soak-manifest.json").exists()
     assert (
@@ -763,7 +828,7 @@ def test_capture_production_evidence_preflight_records_input_artifacts(
     )
     assert str(out_root / "preflight.json") in redaction_scan["scanned_files"]
     assert str(manifest) not in redaction_scan["scanned_files"]
-    assert input_artifacts[0]["snapshot_path"] in redaction_scan["scanned_files"]
+    assert artifact_record["snapshot_path"] in redaction_scan["scanned_files"]
     assert redaction_scan["skipped_files"] == []
     assert stdout["parity_row_readiness"] == _expected_preflight_row_readiness(
         out_root,
@@ -771,7 +836,7 @@ def test_capture_production_evidence_preflight_records_input_artifacts(
     )
     rows = _preflight_rows_by_lane(stdout)
     assert rows["B10"]["required_input_artifacts"] == [
-        _retained_input_path(out_root, input_artifacts[0])
+        _retained_input_path(out_root, artifact_record)
     ]
     assert rows["B10"]["input_artifacts_complete"] is True
 
@@ -962,13 +1027,14 @@ def test_capture_production_evidence_preflight_records_manifest_input_artifacts(
         (out_root / "redaction-scan.json").read_text(encoding="utf-8")
     )
     input_artifacts = stdout["required_input_artifacts"]
+    input_artifact = next(
+        item for item in input_artifacts if item["path"] == str(artifact)
+    )
 
-    assert len(input_artifacts) == 1
-    assert input_artifacts[0]["path"] == str(artifact)
-    assert input_artifacts[0]["source_values"] == [str(artifact)]
-    assert input_artifacts[0]["kind"] == "file"
-    assert input_artifacts[0]["labels"] == ["checks[1].input_artifacts"]
-    assert input_artifacts[0]["checks"] == [
+    assert input_artifact["source_values"] == [str(artifact)]
+    assert input_artifact["kind"] == "file"
+    assert input_artifact["labels"] == ["checks[1].input_artifacts"]
+    assert input_artifact["checks"] == [
         {
             "name": "belief-revision-check",
             "command": "belief-revision-check",
@@ -977,10 +1043,10 @@ def test_capture_production_evidence_preflight_records_manifest_input_artifacts(
         }
     ]
     assert copied_manifest["checks"][0]["input_artifacts"] == [
-        input_artifacts[0]["snapshot_path"]
+        input_artifact["snapshot_path"]
     ]
     assert copied_manifest["checks"][0]["args"] == []
-    assert input_artifacts[0]["snapshot_path"] in redaction_scan["scanned_files"]
+    assert input_artifact["snapshot_path"] in redaction_scan["scanned_files"]
     assert stdout["parity_row_readiness"] == _expected_preflight_row_readiness(
         out_root,
         input_artifacts,
@@ -1019,7 +1085,11 @@ def test_capture_production_evidence_preflight_records_equals_form_input_artifac
     copied_manifest = json.loads(
         (out_root / "operator-soak-manifest.json").read_text(encoding="utf-8")
     )
-    input_artifact = stdout["required_input_artifacts"][0]
+    input_artifact = next(
+        item
+        for item in stdout["required_input_artifacts"]
+        if item["path"] == str(artifact)
+    )
 
     assert input_artifact["path"] == str(artifact)
     assert input_artifact["source_values"] == [str(artifact)]
@@ -1043,12 +1113,16 @@ def test_capture_production_evidence_preflight_snapshots_and_rewrites_tool_execu
     manifest = tmp_path / "production-soak.json"
     out_root = tmp_path / "capture"
     tool = tmp_path / "bin" / "c2patool"
+    artifact = tmp_path / "production-inputs" / "c2pa-tool-evidence.json"
     tool.parent.mkdir()
+    artifact.parent.mkdir(exist_ok=True)
     tool_payload = b"\x00\x01not utf-8 executable bytes"
     tool.write_bytes(tool_payload)
     tool.chmod(0o755)
+    artifact.write_text('{"retained": true}\n', encoding="utf-8")
 
     def add_tool_path(payload: dict[str, Any]) -> None:
+        payload["checks"][0]["input_artifacts"] = [str(artifact)]
         check = next(
             item
             for item in payload["checks"]
@@ -1080,8 +1154,6 @@ def test_capture_production_evidence_preflight_snapshots_and_rewrites_tool_execu
         (out_root / "redaction-scan.json").read_text(encoding="utf-8")
     )
 
-    assert stdout["required_input_artifacts"] == []
-    assert stdout["parity_row_readiness"] == []
     assert len(stdout["executable_tool_references"]) == 1
     reference = stdout["executable_tool_references"][0]
     assert reference["option"] == "--c2pa-tool"
@@ -1157,10 +1229,17 @@ def test_capture_production_evidence_records_provider_command_executable_digest(
 
     stdout = json.loads(proc.stdout)
 
-    input_artifact = stdout["required_input_artifacts"][0]
+    input_artifact = next(
+        item
+        for item in stdout["required_input_artifacts"]
+        if item["path"] == str(provider_manifest)
+    )
     assert input_artifact["path"] == str(provider_manifest)
-    assert len(stdout["executable_tool_references"]) == 1
-    reference = stdout["executable_tool_references"][0]
+    reference = next(
+        item
+        for item in stdout["executable_tool_references"]
+        if item["option"] == "provider-manifest.command"
+    )
     assert reference["option"] == "provider-manifest.command"
     assert reference["path"] == str(tool)
     assert reference["size_bytes"] == len(tool_payload)
@@ -2773,7 +2852,11 @@ exec "$REAL_PYTHON" "$@"
     preflight = json.loads((out_root / "preflight.json").read_text(encoding="utf-8"))
     used_input = (out_root / "evidence" / "used-input.json").read_text(encoding="utf-8")
     snapshot_path = copied_manifest["checks"][0]["args"][1]
-    input_artifact = preflight["required_input_artifacts"][0]
+    input_artifact = next(
+        item
+        for item in preflight["required_input_artifacts"]
+        if item["path"] == str(source_artifact.resolve(strict=True))
+    )
 
     assert json.loads(proc.stdout)["release_audit_ok"] is True
     assert input_artifact["path"] == str(source_artifact.resolve(strict=True))
