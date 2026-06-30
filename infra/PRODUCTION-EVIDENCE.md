@@ -183,6 +183,11 @@ infra/scripts/capture-production-evidence.sh \
 After a successful full capture, reviewers can recheck the completed bundle
 offline without production credentials:
 
+The fingerprint record also includes a `reviewer_handoff` object with a
+suggested external verifier report path and argv template. Treat it as a
+no-secret convenience for replaying the review command; the
+`production-evidence-verify` report remains the custody authority.
+
 ```bash
 PYTHON="${PYTHON:-$(if [ -x .venv/bin/python ]; then printf '%s' .venv/bin/python; else command -v python3; fi)}"
 BUNDLE_DIR=/secure/path/to/mnemosyne-production-evidence
