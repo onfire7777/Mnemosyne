@@ -9,6 +9,13 @@ from mnemosyne.production_parity import PARITY_LANES_BY_COMMAND
 
 REPO = Path(__file__).resolve().parents[1]
 RUNBOOK_DIR = REPO / ".planning" / "runbooks"
+PHASE_06_SUMMARY = (
+    REPO
+    / ".planning"
+    / "phases"
+    / "06-exact-blueprint-runtime-parity"
+    / "06-09-SUMMARY.md"
+)
 INPUT_ARTIFACT_CHECKLIST = REPO / "infra" / "templates" / "production-input-artifacts.checklist.md"
 OPERATOR_ENV_INVENTORY = REPO / "infra" / "templates" / "production-operator-env.inventory.md"
 PROVIDER_MANIFEST_TEMPLATE = REPO / "infra" / "templates" / "provider-manifest.production.template.json"
@@ -178,6 +185,7 @@ def test_production_evidence_docs_require_independent_bundle_fingerprint() -> No
         REPO / ".planning" / "runbooks" / "LOCAL-STAGING-DRY-RUN.md",
         REPO / ".planning" / "STRICT-BLUEPRINT-PARITY-AUDIT.md",
         REPO / ".planning" / "STATE.md",
+        PHASE_06_SUMMARY,
         REPO / "docs" / "blueprint" / "cognitive-architecture" / "CODEX-HANDOFF.md",
         REPO / "docs" / "ROADMAP-TO-100.md",
         *sorted(RUNBOOK_DIR.glob("row-*.md")),
@@ -203,6 +211,37 @@ def test_production_evidence_docs_require_independent_bundle_fingerprint() -> No
         assert "optional `--report-output`" not in text, path
         if path.parent == RUNBOOK_DIR and path.name.startswith("row-"):
             assert "`--expected-bundle-fingerprint` set from" in text, path
+
+
+def test_phase_06_summary_uses_current_capture_and_offline_review_boundary() -> None:
+    text = PHASE_06_SUMMARY.read_text(encoding="utf-8")
+
+    assert (
+        "infra/scripts/capture-production-evidence.sh /secure/path/to/production-soak-manifest.json"
+        not in text
+    )
+    assert "infra/scripts/capture-production-evidence.sh \\" in text
+    assert "/secure/path/to/mnemosyne-production-evidence" in text
+    assert "--expected-bundle-fingerprint" in text
+    assert "--report-output" in text
+    assert "bundle under review" in text
+    assert "hosted LLM/calibration evidence" in text
+
+
+def test_current_state_docs_do_not_reopen_closed_local_feature_gaps() -> None:
+    matrix = (REPO / ".planning" / "BLUEPRINT-PARITY-MATRIX.md").read_text(
+        encoding="utf-8"
+    )
+    handoff = (
+        REPO / "docs" / "blueprint" / "cognitive-architecture" / "CODEX-HANDOFF.md"
+    ).read_text(encoding="utf-8")
+
+    assert "current parity blocker is the Tier-B operator-captured production evidence path" in matrix
+    assert "The only two genuinely-missing **features** are" not in matrix
+    assert "9621971" in handoff
+    assert "CI run `28414377562` passed" in handoff
+    assert "Latest source-bearing baseline before this handoff update, `03f2611`" not in handoff
+    assert "Last recorded green source-bearing GitHub baseline before this handoff update" not in handoff
 
 
 def test_operator_docs_stage_all_production_input_artifacts_before_readiness() -> None:

@@ -53,6 +53,11 @@ so reviewers can replay the offline verifier without reconstructing the command
 from prose. The expected fingerprint remains outside the bundle in the
 operator's capture record and is supplied by the reviewer.
 
+Post-plan reviewer-report hardening now requires normal custody review to write
+an external no-overwrite `--report-output` JSON artifact outside the bundle under
+review. `summary.json.offline_verify` is retained only as replay metadata; it is
+not the fingerprint authority and must not embed the expected fingerprint.
+
 ## Executor Readiness
 
 Verified present:
@@ -95,7 +100,7 @@ Verified prerequisite summaries present:
 | 6 | Multimodal retrieval | Runbook exists; FR-20 local/live breadth proven. | Pending production extractor, media-embedding, object-store, retrieval, and job evidence. |
 | 7 | Privacy and erasure | Runbook exists; env/secrets catalog exists; local-staging dry run proven. | Pending production KMS, residency, tombstone, legal delete, and corroboration evidence. |
 | 8 | Observability dashboards | Runbook exists; local-staging dry run proven. | Pending hosted dashboard URL evidence with access-control, freshness, and alert evidence; package mode is local/preflight only and is rejected for production release evidence. |
-| 9 | Parametric tier | Runbook exists; FR-21 trainer/rollback local validation and rollback plan exist. | Pending deployed LoRA/test-time-training trainer, protected suite, and rollback drill evidence. |
+| 9 | Parametric tier | Runbook exists; FR-21 trainer/rollback local validation and rollback plan exist. | Pending hosted LLM/calibration evidence, deployed LoRA/test-time-training trainer, protected suite, and rollback drill evidence. |
 | 10 | Live parity suite | Runbook exists; 06-07 DSN suite green. | Pending production all-row release audit with `--require-production-validated`. |
 
 ## Production Boundary
@@ -104,7 +109,9 @@ The executor must not mark any row Done from local evidence. Each row flips only
 when the operator runs:
 
 ```bash
-infra/scripts/capture-production-evidence.sh /secure/path/to/production-soak-manifest.json
+infra/scripts/capture-production-evidence.sh \
+  /secure/path/to/production-soak-manifest.json \
+  /secure/path/to/mnemosyne-production-evidence
 ```
 
 with a manifest whose validation scope contains:
@@ -120,7 +127,11 @@ with a manifest whose validation scope contains:
 and the resulting `release-audit --evidence-manifest "$OUT_ROOT/evidence/manifest.json" --require-production-validated --require-provider-forbid-local`
 output reports `ok=true` and `findings=[]`. The wrapper must also produce
 `redaction-scan.json` with `ok=true`, `bundle-manifest.json`, and a
-`summary.json` `bundle_fingerprint`.
+`summary.json` `bundle_fingerprint`. Reviewers must then run
+`production-evidence-verify` with `--expected-bundle-fingerprint` set from an
+independently retained out-of-band capture record and `--report-output` set to a
+new external path outside the bundle under review; the verifier report must have
+`ok=true` before any row can flip.
 
 ## Production Input Preflight
 
@@ -154,6 +165,9 @@ Checked 2026-06-25 during renderer hardening:
 - Successful full captures now write `summary.json.offline_verify` with the
   exact offline verifier handoff command template and the placeholder requiring
   a reviewer-supplied out-of-band bundle fingerprint.
+- Normal offline custody review now also requires an external no-overwrite
+  `--report-output` artifact outside the bundle under review; diagnostic
+  `--internal-consistency-only` remains review-only and cannot flip rows.
 - `deployment-soak --evidence-dir` writes SHA-256 digests for its report/check
   JSON artifacts, and `release-audit --evidence-manifest` rejects missing or
   mismatched digests, artifact path escape, and report/check content divergence.

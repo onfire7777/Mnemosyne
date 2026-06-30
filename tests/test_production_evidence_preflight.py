@@ -3442,23 +3442,61 @@ if [ "${{1:-}}" = "-m" ] && [ "${{2:-}}" = "mnemosyne.cli" ]; then
           ;;
         *)
           shift
-          ;;
-      esac
-    done
-    mkdir -p "$evidence_dir"
-    printf '%s\n' "$soak_manifest" > "$evidence_dir/soak-manifest-path.txt"
-    cat > "$evidence_dir/manifest.json" <<'JSON'
-{{"ok": true, "validation_scope": {{"production_validated": true, "target_environment": "production", "operator_asserted": true}}, "checks": []}}
-JSON
-    cat > "$evidence_dir/provider-output.json" <<'JSON'
-{{"ok": true, "provider": "hosted"}}
-JSON
-    printf '%s\\n' '{{"ok": true}}'
-    exit 0
+        ;;
+    esac
+  done
+  EVIDENCE_DIR="$evidence_dir" SOAK_MANIFEST="$soak_manifest" REPO_DIR={json.dumps(str(REPO))} "$REAL_PYTHON" - <<'PY'
+import importlib.util
+import json
+import os
+import shutil
+from hashlib import sha256
+from pathlib import Path
+
+repo_dir = Path(os.environ["REPO_DIR"])
+spec = importlib.util.spec_from_file_location(
+    "mnemosyne_test_cli_runtime_tools",
+    repo_dir / "tests" / "test_cli_runtime_tools.py",
+)
+helpers = importlib.util.module_from_spec(spec)
+assert spec.loader is not None
+spec.loader.exec_module(helpers)
+
+evidence_dir = Path(os.environ["EVIDENCE_DIR"])
+soak_manifest = Path(os.environ["SOAK_MANIFEST"])
+fixture_root = evidence_dir.parent / "release-fixture"
+if fixture_root.exists():
+    shutil.rmtree(fixture_root)
+_report_path, manifest_path = helpers.write_release_report(fixture_root)
+if evidence_dir.exists():
+    shutil.rmtree(evidence_dir)
+shutil.copytree(manifest_path.parent, evidence_dir)
+
+report_path = evidence_dir / "deployment-soak-report.json"
+report = json.loads(report_path.read_text(encoding="utf-8"))
+report["manifest"] = {{
+    **report.get("manifest", {{}}),
+    "path": str(soak_manifest),
+    "check_count": len(helpers.PRODUCTION_RELEASE_REQUIRED_COMMANDS),
+}}
+report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+
+evidence_manifest_path = evidence_dir / "manifest.json"
+evidence_manifest = json.loads(evidence_manifest_path.read_text(encoding="utf-8"))
+evidence_manifest["source_manifest"] = str(soak_manifest)
+evidence_manifest["files"]["report_sha256"] = (
+    "sha256:" + sha256(report_path.read_bytes()).hexdigest()
+)
+evidence_manifest_path.write_text(
+    json.dumps(evidence_manifest, indent=2, sort_keys=True),
+    encoding="utf-8",
+)
+print(json.dumps(report))
+PY
+  exit 0
   fi
   if [ "$mode" = "audit" ]; then
-    printf '%s\\n' '{{"ok": true, "fingerprint": "fake-fingerprint", "findings": []}}'
-    exit 0
+    exec "$REAL_PYTHON" -m mnemosyne.cli release-audit "$@"
   fi
 fi
 exec "$REAL_PYTHON" "$@"
@@ -3522,13 +3560,46 @@ exec "$REAL_PYTHON" "$@"
     assert "release-audit.json" in bundle_paths
     assert "redaction-scan.json" in bundle_paths
     assert "evidence/manifest.json" in bundle_paths
-    assert "evidence/provider-output.json" in bundle_paths
-    assert "evidence/soak-manifest-path.txt" in bundle_paths
+    assert "evidence/deployment-soak-report.json" in bundle_paths
+    assert any(path.startswith("evidence/checks/") for path in bundle_paths)
     assert "bundle-manifest.json" not in bundle_paths
     assert "summary.json" not in bundle_paths
     assert all(
         item["sha256"].startswith("sha256:") for item in bundle_manifest["files"]
     )
-    assert (out_root / "evidence" / "soak-manifest-path.txt").read_text(
-        encoding="utf-8"
-    ).strip() == str(out_root / "operator-soak-manifest.json")
+    deployment_soak = json.loads(
+        (out_root / "deployment-soak.stdout.json").read_text(encoding="utf-8")
+    )
+    evidence_manifest = json.loads(
+        (out_root / "evidence" / "manifest.json").read_text(encoding="utf-8")
+    )
+    assert deployment_soak["manifest"]["path"] == str(
+        out_root / "operator-soak-manifest.json"
+    )
+    assert evidence_manifest["source_manifest"] == str(
+        out_root / "operator-soak-manifest.json"
+    )
+
+    report_path = tmp_path / "mnemosyne-production-evidence-verify.json"
+    verify = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "mnemosyne.cli",
+            "production-evidence-verify",
+            str(out_root),
+            "--expected-bundle-fingerprint",
+            summary["bundle_fingerprint"],
+            "--report-output",
+            str(report_path),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    verify_report = json.loads(verify.stdout)
+
+    assert verify.returncode == 0
+    assert verify_report["ok"] is True
+    assert json.loads(report_path.read_text(encoding="utf-8")) == verify_report
