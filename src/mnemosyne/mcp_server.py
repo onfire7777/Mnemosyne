@@ -22,6 +22,7 @@ from mnemosyne.ingestion import IngestionPipeline
 from mnemosyne.mcp_tools import MemoryTools, TOOL_SPEC
 from mnemosyne.oidc_jwks import load_oidc_authorization_policy, load_oidc_jwks, oidc_jwks_loader
 from mnemosyne.parametric import CommandParametricTrainer, ParametricArtifactStore, ParametricTier
+from mnemosyne.postgres_security import postgres_safe_role_required
 from mnemosyne.postgres_runtime_state import PostgresRuntimeState
 from mnemosyne.queue import InProcessQueue, PostgresQueue
 from mnemosyne.runtime_state import RuntimeState
@@ -185,8 +186,9 @@ class MnemosyneMcpServer:
             except ImportError as exc:  # pragma: no cover - defensive for broken installs.
                 raise ValueError("Postgres MCP backend requires mnemosyne-memory[postgres].") from exc
             runtime_tenant = queue_tenant or self.queue_tenant
-            engine = PostgresEngine(dsn)
-            runtime_state = PostgresRuntimeState(dsn, tenant_id=runtime_tenant)
+            require_safe_role = self.production_profile or postgres_safe_role_required()
+            engine = PostgresEngine(dsn, require_safe_role=require_safe_role)
+            runtime_state = PostgresRuntimeState(dsn, tenant_id=runtime_tenant, require_safe_role=require_safe_role)
         else:
             engine = LocalMemoryEngine(store_path=self.store_path)
             runtime_state = RuntimeState.from_store_path(self.store_path)
@@ -194,7 +196,12 @@ class MnemosyneMcpServer:
             dsn = self.postgres_dsn or os.environ.get("MNEMOSYNE_POSTGRES_DSN")
             if not dsn:
                 raise ValueError("Postgres MCP queue backend requires postgres_dsn or MNEMOSYNE_POSTGRES_DSN.")
-            queue = PostgresQueue(dsn, tenant_id=queue_tenant or self.queue_tenant)
+            require_safe_role = self.production_profile or postgres_safe_role_required()
+            queue = PostgresQueue(
+                dsn,
+                tenant_id=queue_tenant or self.queue_tenant,
+                require_safe_role=require_safe_role,
+            )
         else:
             queue = runtime_state.load_queue() if runtime_state else InProcessQueue()
         ingestion = IngestionPipeline(

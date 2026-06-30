@@ -482,7 +482,11 @@ def load_engine(args: argparse.Namespace) -> MemoryEngine:
         except ImportError as exc:  # pragma: no cover - defensive for broken installs.
             raise SystemExit("Postgres backend requires mnemosyne-memory[postgres].") from exc
         try:
-            return PostgresEngine(dsn, adapters=load_retrieval_adapters(args))
+            return PostgresEngine(
+                dsn,
+                adapters=load_retrieval_adapters(args),
+                require_safe_role=bool(getattr(args, "postgres_require_safe_role", False)),
+            )
         except PostgresUnavailableError as exc:
             raise SystemExit(str(exc)) from exc
     return LocalMemoryEngine(store_path=Path(args.store), adapters=load_retrieval_adapters(args))
@@ -633,7 +637,11 @@ def load_runtime_state(args: argparse.Namespace) -> RuntimeState | PostgresRunti
         dsn = args.postgres_dsn
         if not dsn:
             raise SystemExit("--backend postgres requires --postgres-dsn or MNEMOSYNE_POSTGRES_DSN.")
-        return PostgresRuntimeState(dsn, tenant_id=runtime_state_tenant(args))
+        return PostgresRuntimeState(
+            dsn,
+            tenant_id=runtime_state_tenant(args),
+            require_safe_role=bool(getattr(args, "postgres_require_safe_role", False)),
+        )
     return RuntimeState.from_store_path(Path(args.store))
 
 
@@ -646,7 +654,11 @@ def load_queue(
         if not dsn:
             raise SystemExit("--queue-backend postgres requires --postgres-dsn or MNEMOSYNE_POSTGRES_DSN.")
         tenant_id = runtime_state_tenant(args)
-        return PostgresQueue(dsn, tenant_id=tenant_id)
+        return PostgresQueue(
+            dsn,
+            tenant_id=tenant_id,
+            require_safe_role=bool(getattr(args, "postgres_require_safe_role", False)),
+        )
     return runtime_state.load_queue() if runtime_state else InProcessQueue()
 
 
@@ -14918,6 +14930,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--backend", choices=["local", "postgres"], default=default_backend(), help="Storage backend")
     parser.add_argument("--store", default=str(default_store()), help="Path to local JSON store")
     parser.add_argument("--postgres-dsn", default=default_postgres_dsn(), help="PostgreSQL DSN for --backend postgres")
+    parser.add_argument(
+        "--postgres-require-safe-role",
+        action="store_true",
+        default=env_flag("MNEMOSYNE_POSTGRES_REQUIRE_SAFE_ROLE", default=False),
+        help="Refuse Postgres connections whose current role is superuser or can bypass RLS",
+    )
     parser.add_argument(
         "--queue-backend",
         choices=["local", "postgres"],

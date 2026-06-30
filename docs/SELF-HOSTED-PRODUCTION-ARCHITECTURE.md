@@ -100,6 +100,12 @@ byte-binding). The work is closing **intent-vs-enforcement** gaps and shipping *
 2. **Postgres role separation under RLS:** ship `mnemosyne_app` (NOSUPERUSER, NOBYPASSRLS, no
    DELETE/TRUNCATE), a separate `mnemosyne_consolidator` (sole write/destructive authority), and
    SELECT-only eval roles; an ops-check that live-probes `rolsuper`/`rolbypassrls` and fails if true.
+   - 2026-06-30 implementation note: `MNEMOSYNE_POSTGRES_REQUIRE_SAFE_ROLE=1` now makes
+     `PostgresEngine`, `PostgresRuntimeState`, and `PostgresQueue` refuse connections whose
+     active role is `rolsuper` or `rolbypassrls`. MCP production profile enables the guard
+     automatically for Postgres engine/state/queue surfaces. This closes the unsafe-runtime-role
+     source gap; the Tier-B row still requires retained live role/grant evidence and the
+     `rolsuper`/`rolbypassrls` ops probe.
 3. **Gate integrity → measure, don't attest:** for Phase 8 only, extend
    high-value `*-ops-check` gates where a real capture attempt exposes an
    attestation-only weakness. The target behavior is live re-execution against

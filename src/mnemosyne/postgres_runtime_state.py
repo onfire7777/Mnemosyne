@@ -14,6 +14,7 @@ from mnemosyne.postgres_engine import (
     _stable_uuid,
     _vector_literal,
 )
+from mnemosyne.postgres_security import assert_postgres_safe_role, postgres_safe_role_required
 from mnemosyne.queue import InProcessQueue
 from mnemosyne.retrieval import HashingEmbeddingProvider
 from mnemosyne.user_model import (
@@ -62,17 +63,23 @@ class PostgresRuntimeState:
     tenant RLS.
     """
 
-    def __init__(self, dsn: str, tenant_id: str = "system"):
+    def __init__(self, dsn: str, tenant_id: str = "system", require_safe_role: bool | None = None):
         self.dsn = dsn
         self.tenant_id = tenant_id or "system"
         self.db_tenant_id = _stable_uuid("tenant", self.tenant_id)
+        self.require_safe_role = (
+            postgres_safe_role_required() if require_safe_role is None else bool(require_safe_role)
+        )
         self._psycopg, self._jsonb = _require_psycopg()
         self.embedding = HashingEmbeddingProvider(dims=1024)
         self.data = dict(_DEFAULT_RUNTIME_PAYLOAD)
         self._ensure_schema()
 
     def connect(self) -> Any:
-        return self._psycopg.connect(self.dsn)
+        conn = self._psycopg.connect(self.dsn)
+        if self.require_safe_role:
+            assert_postgres_safe_role(conn, surface="PostgresRuntimeState")
+        return conn
 
     def _set_tenant(self, cur: Any) -> None:
         cur.execute("SELECT set_config('mnemosyne.tenant_id', %s, true)", (str(self.db_tenant_id),))
