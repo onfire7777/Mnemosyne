@@ -3,16 +3,16 @@
 **Current handoff snapshot:** 2026-06-30 UTC. This file intentionally does not
 freeze a prose "latest commit" as current truth. Future agents must refresh
 `git status`, `git log -1`, and GitHub Actions before making current-state
-claims. The pre-edit resume check for this continuation verified
-`/Users/admin/Mnemosyne` on `main` at
-`2b47989e27af9ec911eb08b43589979e1eb6c934`
-(`fix(infra): group Tier-B runtime env ownership`), with GitHub Actions CI run
-`28475668973` passing; later commits supersede that checkpoint.
+claims. This handoff revision verified `/Users/admin/Mnemosyne` on `main` at
+`b79cb87a97ebb220ae09de0db2ec69900a84411b`
+(`fix(infra): include runtime env in Tier-B summary`), with GitHub Actions CI
+run `28477936121` passing; later commits supersede that checkpoint.
 
 This snapshot includes the current Tier-B production-evidence handoff stack:
 external custody packet generation, strict external render/runtime env
-boundaries, provider-manifest template readiness, input artifact worklists and
-contracts, row action plans, render-env action plans, provider-env action plans,
+boundaries, generated runtime env examples, provider-manifest template
+readiness, input artifact worklists and contracts, row action plans, render-env
+action plans, provider-env action plans,
 top-level inventory groups for missing render placeholders, input artifacts, and
 runtime provider env refs by row, row action plans that separate global render
 blockers from row-scoped render blockers and sort `B1` through `B10`,
@@ -79,27 +79,27 @@ operator-captured Tier-B production evidence and Tier-C real-path sign-off.
 
 ## Latest Verified Snapshot
 
-- Pre-edit baseline verified for this handoff refresh:
-  `2b47989e27af9ec911eb08b43589979e1eb6c934` on `main`, clean against
-  `origin/main`, with GitHub CI run `28475668973` completed successfully.
-  This commit groups `operator_input_inventory.runtime_env_file`
-  `provider_manifest_env_refs` and `missing_provider_manifest_env_refs` by
-  primary Tier-B row, so the external runtime env handoff no longer requires
-  manually joining a flat provider-ref list to row plans.
-- Local verification for the grouped-inventory handoff passed Python compilation for
-  the changed script/test files, focused infra hardening tests, `git diff
-  --check`, focused `ruff`, the relevant production runbook consistency and
-  infra hardening test slice, a no-secret changed-file scan, and fresh external
-  custody packet smokes confirming row-grouped render placeholders, input
-  artifacts, and B1/B2/B4/B6/B7/B9 provider ownership appear in JSON and
-  Markdown without retaining production values or runtime env file paths. This
-  is readiness/handoff verification only, not Tier-B production evidence.
+- Current handoff baseline verified for this refresh:
+  `b79cb87a97ebb220ae09de0db2ec69900a84411b` on `main`, clean against
+  `origin/main`, with GitHub CI run `28477936121` completed successfully.
+  This latest slice makes the custody-packet CLI summary name all three
+  operator input surfaces: non-secret `production-render.env`,
+  secret-bearing external runtime/provider env file, and `input-artifacts/`.
+  It also exposes `runtime_env_example` and the external
+  `runtime_env_file_placeholder` in machine-readable stdout.
+- Local verification for the latest handoff stack passed a fresh external packet
+  smoke, Python compilation for the changed script/test files, the focused
+  infra hardening regression, focused `ruff`, `git diff --check`, the combined
+  infra-hardening plus production-runbook consistency slice (`40 passed`), a
+  no-secret changed-file scan, and GitHub CI. This is readiness/handoff
+  verification only, not Tier-B production evidence.
 - Recent Tier-B handoff commits after the older `9621971` baseline add render
   env plans, artifact contracts, provider-env action plans, row-owned versus
   shared provider-ref splits, complete primary row ownership for provider refs,
-  and runtime env inventory grouping. They reduce operator handoff ambiguity
-  but do not flip any strict audit row without wrapper-captured production
-  bundles plus offline custody verification.
+  runtime env inventory grouping, numeric row ordering, global render blocker
+  visibility, and runtime-env summary routing. They reduce operator handoff
+  ambiguity but do not flip any strict audit row without wrapper-captured
+  production bundles plus offline custody verification.
 - Historical source baseline `9621971` remains useful for the earlier
   row-readiness routing fix: `gate-suite-check` belongs to B4, `ops-report`
   belongs to B8, and hosted LLM/calibration evidence plus
