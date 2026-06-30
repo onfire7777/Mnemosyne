@@ -92,6 +92,14 @@ future continuations must refresh `git status --short --branch`,
 `git log -1 --oneline`, and GitHub Actions for the live `HEAD` before writing
 current status or claiming sync.
 
+**Current live verification for this continuation (refresh before reusing):**
+`/Users/admin/Mnemosyne` is the canonical checkout; `/Users/admin/Desktop/Mnemosyne`
+does not currently exist as a Git worktree. At this checkpoint, `main` and
+`origin/main` are cleanly synchronized at
+`2b47989e27af9ec911eb08b43589979e1eb6c934`, and GitHub CI run `28475668973`
+passed for that head. This proves only source/CI synchronization for the current
+handoff; it does not prove Tier-B production evidence.
+
 Drive Mnemosyne from the current source-complete state to exact blueprint parity
 and production release readiness:
 
@@ -139,8 +147,11 @@ limited to defects that directly block that path:
    without retaining values or runtime env-file paths. The top-level
    `operator_input_inventory.runtime_env_file` also groups all and missing
    provider-manifest env refs by primary row, so the runtime env file can be
-   filled from the same row-owner split without manual joins. Use the generated
-   row action plan's `primary_missing_provider_manifest_env_refs` and
+   filled from the same row-owner split without manual joins. The same top-level
+   inventory groups missing non-secret render placeholders and missing input
+   artifacts by affected row, while preserving global render placeholders
+   explicitly. Use the generated row action plan's
+   `primary_missing_provider_manifest_env_refs` and
    `shared_missing_provider_manifest_env_refs` fields to assign row-owned
    provider env work without hiding shared blockers. B1 owns embedding/reranker
    refs, B2 owns OIDC/session-secret refs, B4 owns consolidation role-provider

@@ -560,6 +560,23 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
         "MNEMOSYNE_PROD_EVIDENCE_DIR"
         not in inventory["production_render_env"]["missing"]
     )
+    assert inventory["production_render_env"]["global_missing"] == [
+        "MNEMOSYNE_PROD_CHANGE_TICKET",
+        "MNEMOSYNE_PROD_OPERATOR_NAME",
+    ]
+    assert inventory["production_render_env"]["missing_render_env_by_row"][
+        "B1"
+    ] == [
+        "MNEMOSYNE_PROD_CHANGE_TICKET",
+        "MNEMOSYNE_PROD_OPERATOR_NAME",
+    ]
+    assert inventory["production_render_env"]["missing_render_env_by_row"][
+        "B5"
+    ] == [
+        "MNEMOSYNE_PROD_C2PA_TOOL",
+        "MNEMOSYNE_PROD_CHANGE_TICKET",
+        "MNEMOSYNE_PROD_OPERATOR_NAME",
+    ]
     assert inventory["runtime_env_file"]["path_placeholder"] == (
         "/secure/path/to/mnemosyne-production-runtime.env"
     )
@@ -591,6 +608,15 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
         packet_root / "input-artifacts"
     )
     assert inventory["input_artifacts"]["missing_count"] == 23
+    assert inventory["input_artifacts"]["missing_input_artifacts_by_row"][
+        "B1"
+    ] == ["retrieval-ops-bundle.json"]
+    assert inventory["input_artifacts"]["missing_input_artifacts_by_row"][
+        "B10"
+    ] == [
+        "belief-revision-cases.json",
+        "row-10-full-suite-evidence.json",
+    ]
     assert inventory["input_artifacts"]["checklist"] == (
         "docs/production-input-artifacts.checklist.md"
     )
@@ -733,10 +759,17 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     assert "`provider_manifest_environment`: `24` missing" in markdown
     assert "Operator Input Inventory" in markdown
     assert "### production-render.env" in markdown
+    assert "Global render placeholders" in markdown
+    assert "Missing render placeholders by row" in markdown
+    assert "`B5`: `MNEMOSYNE_PROD_C2PA_TOOL`" in markdown
     assert "### Runtime Env File" in markdown
     assert "Missing provider refs by primary row" in markdown
     assert "`B1`: `MNEMOSYNE_EMBEDDING_API_KEY`" in markdown
     assert "### Input Artifacts" in markdown
+    assert "Missing input artifacts by row" in markdown
+    assert "`B10`: `belief-revision-cases.json`, `row-10-full-suite-evidence.json`" in (
+        markdown
+    )
     assert "Input Artifact Worklist" in markdown
     assert "input-artifact-contracts.md" in markdown
     assert "render-env-action-plan.md" in markdown
