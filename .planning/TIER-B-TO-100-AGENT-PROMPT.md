@@ -1,6 +1,6 @@
-# Mnemosyne -> 100% Blueprint Parity — Master Completion Agent Prompt (v4, blueprint-grounded)
+# Mnemosyne -> 100% Blueprint Parity — Master Completion Agent Prompt (v5, blueprint-grounded)
 
-> **Supersedes the v1 Tier-B-only playbook and v3 continuation prompt.** This prompt is grounded in the *entire* project record:
+> **Supersedes the v1 Tier-B-only playbook plus the v3/v4 continuation prompts.** This prompt is grounded in the *entire* project record:
 > the v2 build blueprint (`docs/blueprint/`), every prior plan and runbook (`.planning/`), the parity
 > ledger + matrix, the proven SLO evidence (`eval/`), and the full progress history through 2026-06-30.
 > Hand it to a capable coding/SRE agent (Claude Code or Codex) working **inside `/Users/admin/Mnemosyne`**.
@@ -37,7 +37,11 @@ inputs, ambiguous packet handoff, custody/redaction weakness, stale current
 status that would route work to the wrong root/artifact/boundary, or a concrete
 source defect found by a production readiness/capture run. If the change merely
 adds another local test, rewords a percentage, or expands an already-complete
-gate without a capture failure behind it, it is off-mission.
+gate without a capture failure behind it, it is off-mission. If the current
+custody packet already routes render inputs, runtime/provider env refs, input
+artifacts, row ownership, validation commands, next commands, and offline
+review, do not add another handoff layer unless a fresh packet shows a concrete
+operator decision that still requires manual joining.
 
 **Current autonomy rule:** work from `/Users/admin/Mnemosyne`, refresh live
 `HEAD`, dirty tree, and GitHub Actions before current-state claims, then proceed
@@ -45,6 +49,13 @@ without asking for another "continue" unless real production credentials,
 endpoints, or operator-owned artifacts are required. Commit and push clean
 atomic improvements to `main` after focused verification; never stage secrets,
 generated evidence bundles, local packet output roots, or unrelated dirty work.
+
+**Latest prompt-control baseline at this revision:** `main` and `origin/main`
+were cleanly synchronized at
+`b79cb87a97ebb220ae09de0db2ec69900a84411b`
+(`fix(infra): include runtime env in Tier-B summary`), and GitHub Actions run
+`28477936121` completed successfully. Treat that as a historical checkpoint
+after the next commit; always refresh live state before relying on it.
 
 ## 1. WHERE THE PROJECT STANDS — verified, do not re-derive
 

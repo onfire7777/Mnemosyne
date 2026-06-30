@@ -2,8 +2,10 @@
 
 **Status:** Active continuation contract for the long-running 1:1 blueprint-parity goal.
 **Last updated:** 2026-06-30.
-**Goal-tool state:** Active as of the latest live resume check; there is no
-repo-side pause to clear. This contract is the editable continuation objective.
+**Goal-tool state:** Active as of the 2026-06-30 live resume check; there is no
+repo-side pause to clear. The goal tracker does not safely rewrite active
+objective text in-place, so this contract is the editable continuation
+objective.
 **Unpause directive:** Continue from the verified live checkout without asking
 whether to resume. Re-prove root, `HEAD`, dirty tree, and CI before making
 current-state claims.
@@ -92,14 +94,14 @@ future continuations must refresh `git status --short --branch`,
 `git log -1 --oneline`, and GitHub Actions for the live `HEAD` before writing
 current status or claiming sync.
 
-**Pre-edit live verification for this continuation (refresh before reusing):**
-`/Users/admin/Mnemosyne` is the canonical checkout; `/Users/admin/Desktop/Mnemosyne`
-did not exist as a Git worktree during the resume check. Before later handoff
-edits in this continuation, `main` and `origin/main` were cleanly synchronized at
-`2b47989e27af9ec911eb08b43589979e1eb6c934`, and GitHub CI run `28475668973`
-passed for that head. This proves only source/CI synchronization for that
-checkpoint; later commits supersede it, and it does not prove Tier-B production
-evidence.
+**Current live verification for this contract revision (refresh before
+reusing):** `/Users/admin/Mnemosyne` is the canonical checkout; `/Users/admin/Desktop/Mnemosyne`
+is not the Git checkout for this run. At this revision, `main` and `origin/main`
+were synchronized at `b79cb87a97ebb220ae09de0db2ec69900a84411b`
+(`fix(infra): include runtime env in Tier-B summary`), and GitHub Actions run
+`28477936121` completed successfully. This proves only source/CI synchronization
+for this checkpoint; future commits supersede it, and it does not prove Tier-B
+production evidence.
 
 Drive Mnemosyne from the current source-complete state to exact blueprint parity
 and production release readiness:
@@ -119,9 +121,12 @@ documented, and clean.
 
 ## Current Highest-Leverage Path
 
-The next work is not more generic gates or percentage re-scoring. The
-substantive path is operator-execution work against Tier B, with source edits
-limited to defects that directly block that path:
+The next work is not more generic gates, percentage re-scoring, or another
+parallel handoff report for a blocker the packet already names. The substantive
+path is operator-execution work against Tier B, with source edits limited to
+defects that directly block that path. Add new handoff metadata only when a
+fresh custody packet proves an operator still has to manually join or infer a
+capture decision that should be machine-routed.
 
 1. Prepare an external Tier-B custody packet with
    `infra/scripts/prepare-production-evidence-custody.py`.
@@ -290,6 +295,11 @@ path and record the result.
     capture `--env-file` because values are already exported by a supervisor.
     Future operators need one explicit external runtime env-file boundary for
     capture, refresh, review, and incident replay.
+11. **Handoff-plumbing loop:** Stop adding new reports once render inputs,
+    runtime/provider env refs, input artifacts, row ownership, validation
+    commands, next commands, and custody review are already routed. The next
+    progress unit is filling real external inputs and running production
+    capture, unless a fresh packet exposes a concrete missing route.
 
 ## Completion Standard
 
