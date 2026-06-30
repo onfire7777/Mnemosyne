@@ -122,6 +122,9 @@ cp infra/templates/provider-manifest.production.template.json \
 # Fill the external provider manifest with production provider values or
 # environment-variable references before rendering. --check-environment parses
 # those refs and fails with env names only when any referenced var is unset.
+# Populate every other manifest-referenced production input artifact listed in
+# infra/templates/production-input-artifacts.checklist.md before rendering or
+# checking; provider-manifest.production.json is only one shared input artifact.
 infra/scripts/render-production-soak-manifest.sh --check-environment
 infra/scripts/render-production-soak-manifest.sh \
   --output /secure/path/to/production-soak-manifest.json
@@ -160,10 +163,12 @@ operator capture against deployed infrastructure.
 offline verifier report also emits `row_review.rows[]` from that retained
 preflight source so reviewers can route completed bundles by Tier-B lane and
 runbook without treating the summary as a separate evidence source.
-The optional `--report-output` path must be absolute, outside the bundle under
-review, and not pre-existing; retain it with the external capture record so
-reviewers can compare the emitted `reviewer_guidance`, fingerprints, checks,
-and row review without mutating the evidence bundle.
+For custody review with `--expected-bundle-fingerprint`, `--report-output` is
+required and must be absolute, outside the bundle under review, and not
+pre-existing; it is optional only for diagnostic `--internal-consistency-only`
+runs. Retain it with the external capture record so reviewers can compare the
+emitted `reviewer_guidance`, fingerprints, checks, and row review without
+mutating the evidence bundle.
 
 `--check-environment` writes no files and prints no values. It always reports
 the required `MNEMOSYNE_PROD_*` key names, operator readiness file paths, and

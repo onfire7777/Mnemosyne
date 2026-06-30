@@ -2,8 +2,8 @@
 
 > **Supersedes the v1 Tier-B-only playbook.** This prompt is grounded in the *entire* project record:
 > the v2 build blueprint (`docs/blueprint/`), every prior plan and runbook (`.planning/`), the parity
-> ledger + matrix, the proven SLO evidence (`eval/`), and the full progress history through 2026-06-29.
-> Hand it to a capable coding/SRE agent (Claude Code or Codex) working **inside `~/Mnemosyne`**.
+> ledger + matrix, the proven SLO evidence (`eval/`), and the full progress history through 2026-06-30.
+> Hand it to a capable coding/SRE agent (Claude Code or Codex) working **inside `/Users/admin/Mnemosyne`**.
 > **The repo's own docs are authoritative; where this prompt and a repo doc disagree, the doc wins.**
 
 ---
@@ -22,13 +22,16 @@ blueprint invariant:
 
 > **PRIME DIRECTIVE — NEVER FABRICATE EVIDENCE.** Mocked endpoints, hashing pseudo-embeddings,
 > synthetic latency, self-signed "production" trust roots, or any local stand-in invalidate the row.
-> A row flips **only** when its real evidence bundle passes the operator-run `release-audit`.
+> A row flips **only** when its real production bundle passes the wrapper-run
+> manifest-bound `release-audit` and the offline `production-evidence-verify`
+> custody review with an independently retained expected fingerprint plus an
+> external no-overwrite `--report-output` artifact.
 > Green-by-mocking is a failure, not progress. This is the whole point of the project's §38
 > "measure before claiming" exit.
 
 ## 1. WHERE THE PROJECT STANDS — verified, do not re-derive
 
-- **Position:** ~82% blended; branch `main`; latest clean baseline before the provider-fetch/custody hardening pass was `29fde60` with CI green (run `28402707276`); ~500 commits. All 10 audit rows are `Partial`. Canonical checkout `/Users/admin/Mnemosyne` → `onfire7777/Mnemosyne`.
+- **Position:** ~82% blended; branch `main`; latest verified baseline is `5d802dd` with GitHub CI green (run `28413349236`: Unit + drift, Postgres integration, and ruff). All 10 audit rows are `Partial`. Canonical checkout `/Users/admin/Mnemosyne` → `onfire7777/Mnemosyne`.
 - **6/6 §16 SLOs proven** (Wave-5 definitive run, 2026-06-25; evidence in `eval/calibration/report.json` + `docs/ROADMAP-TO-100.md`):
 
   | SLO | Target | Measured |
@@ -43,7 +46,7 @@ blueprint invariant:
 
 - **Tier-A landed (all Done on `main`, each with a forcing-function `xfail→green` test):** A1 local embedding seam *(keystone)*, A2 calibrated confidence/ECE *(keystone — flipped the 6th SLO)*, A3 `max_supersession_rate 0.05`, A4 `max_prune_fraction_per_pass 0.02`, A5 `sanitize_retrieved_text`, A6 cadence bounds [5 steps/24h], A7 cf-gate `cold_loop_counterfactual_trusted`, A8 ignition switch, A9 ACT-R demotion, A10 corroborated-erasure cascade, A12 cached-PPR column `graph_ppr_cache`, A13 dirty-set recompute, A14 `--object`/`Preference.access_policy`. **A11** (hosted-MCP transport, FR-9) is **evidence-only** — local soaks green; only write code if B3 production evidence exposes a concrete transport defect.
 - **Known, explicitly-tracked gaps (do not paper over):** Hard-QA multi-hop answer-synthesis recall/nDCG **0.625 / 0.594** (non-headline, tracked separately); **FR-3 hybrid retrieval runs locally on `HashingEmbeddingProvider`** (BLAKE2b, dims=256) — real `HttpEmbeddingProvider` is the B1 evidence path; cold-loop (FR-17) gains are **unproven by design** and must stay shadow-only.
-- **The honest blocker:** `render-production-soak-manifest.sh --check-environment` stops at `missing_required_environment` — **19 `MNEMOSYNE_PROD_*` vars unset** and **24 production input artifacts** routed across the 10 rows.
+- **The honest blocker:** `render-production-soak-manifest.sh --check-environment` currently exits with `blocked_reason=missing_required_environment`; inspect `missing_environment` for the **19 unset `MNEMOSYNE_PROD_*` render variables**. The renderer also reports **24 production input artifacts** and `parity_row_readiness` routing across the 10 rows. Once render vars are present, it continues to validate the external provider manifest, provider env refs, C2PA tool, and input-artifact custody without printing secret values or absolute custody paths.
 
 ## 2. THE BLUEPRINT YOU ARE COMPLETING — the spec, not optional
 
@@ -66,7 +69,7 @@ Read `docs/blueprint/Mnemosyne-v2-Build-Blueprint.md` and `.planning/BLUEPRINT-P
 - **NEVER `git add -A` / `git add .`.** Stage explicit paths only. Commit atomically per row.
 - **Respect the lock table:** `src/mnemosyne/models.py` is **frozen** (change-request only); `engine.py` is owned by lane CC-RT (read-only to others); `runtime_state.py`/`jobs.py`/`queue.py`/`observability.py` frozen; `pyproject.toml`/`uv.lock` are **Sync-lane-only**. **Only the CC-SYNC lane touches `origin`/`main`.**
 - Branch-per-lane off latest `origin/main`; serialized integration order **CC-PG → CC-RT → CC-R → CC-BC → CC-LS → CC-UPS**, one rebased PR at a time.
-- **Test gate every merge:** the full suite must stay green (**354 pass + 63 skipped live-DB** baseline) and CI green. Tier-B is evidence capture, **not** a license to edit `src` — touch source only when production evidence exposes a concrete defect, behind a forcing-function test.
+- **Test gate every merge:** the current full suite and CI must stay green; use the latest `git log -1` plus GitHub Actions for the moving baseline instead of preserving old pass-counts. Tier-B is evidence capture, **not** a license to edit `src` — touch source only when production evidence exposes a concrete defect, behind a forcing-function test.
 
 **Invariant preservation**
 - A row that would weaken any §31 rail or drop any §16 SLO to "pass" is a **failure**. All 7 rails and 6 SLOs must remain enforced/proven on the real production paths after every row.
@@ -98,12 +101,12 @@ Read `docs/blueprint/Mnemosyne-v2-Build-Blueprint.md` and `.planning/BLUEPRINT-P
 | **B1** | Production Postgres Retrieval | ParadeDB BM25 + Apache AGE + pgvector + reranker | `retrieval-ops-bundle.json`, `provider-manifest.production.json` → `retrieval-ops-check` |
 | **B2** | Tenant Isolation & Auth | Keycloak/IdP + JWKS, Vault session-secret, KMS, TLS lifecycle | `auth-ops-bundle.json`, `idp-authz-policy{,.candidate,.current}.json`, `idp-authz-policy-simulation.json`, `policy-ops-bundle.json`, `tls-{candidate,current}.pem`, `tls-lifecycle-bundle.json` → `auth-ops-check`, `tls-lifecycle-ops-check`, `policy-ops-check` |
 | **B3** | CLI/MCP Runtime Coverage | Hosted JSON-RPC HTTP + StreamableHTTP endpoints | `mcp-ops-bundle.json` → `mcp-ops-check`, `mcp-http-soak`, `mcp-streamable-http-soak` |
-| **B4** | Consolidation Role Pipeline | Hosted LLM for the 11-role pipeline + workers | `consolidation-ops-bundle.json`, `worker-ops-bundle.json`, `calibration-dataset.json`, `hosted-llm-manifest.json` → `consolidation-ops-check`, `worker-ops-check` |
+| **B4** | Consolidation Role Pipeline | Supervised role pipeline + workers | `consolidation-ops-bundle.json`, `provider-manifest.production.json`, `worker-ops-bundle.json` → `consolidation-ops-check`, `worker-ops-check`, `gate-suite-check` |
 | **B5** | Signed Provenance | Real C2PA verifier + trust-root rotation/quarantine | `provenance-ops-bundle.json`, `provenance-trust-suite.json` (+ nested assets) → `provenance-ops-check`, `provenance-trust-check` |
 | **B6** | Multimodal Retrieval | Image/audio/video extractor + media-embedding + encrypted object-store | `multimodal-ops-bundle.json` → `multimodal-ops-check` |
 | **B7** | Privacy & Erasure | KMS/HSM/Vault lifecycle, residency policy, legal hard-delete | `privacy-ops-bundle.json`, `forgetting-policy-cases.json` → `privacy-ops-check`, `forgetting-policy-check` |
 | **B8** | Observability Dashboards | Real hosted dashboard (`mode=hosted_url`; package mode rejected) | `ops-dashboard-bundle.json` → `ops-dashboard-check` (hosted_dashboard) |
-| **B9** | Parametric Tier | GPU LoRA/test-time-training endpoint + protected-suite gate + rollback drill | `parametric-trainer-bundle.json` → `parametric-trainer-check` |
+| **B9** | Parametric Tier | GPU LoRA/test-time-training endpoint + hosted LLM/calibration evidence + protected-suite gate + rollback drill | `calibration-dataset.json`, `hosted-llm-manifest.json`, `parametric-trainer-bundle.json`, `provider-manifest.production.json` → `parametric-trainer-check`, `hosted-llm-check`, `calibration-tune` |
 | **B10** | Live Parity Suite | Final Local/Postgres parity vs concrete production adapters | `belief-revision-cases.json`, `row-10-full-suite-evidence.json` → `belief-revision-check` |
 
 > `provider-manifest.production.json` is intentionally shared by B1, B2, B4, B6, B7, B9, B10 — build it once in Phase 1 from `infra/templates/provider-manifest.production.template.json`.
@@ -119,7 +122,19 @@ infra/scripts/render-production-soak-manifest.sh --check-environment
 infra/scripts/render-production-soak-manifest.sh --output /secure/path/production-soak-manifest.json
 infra/scripts/capture-production-evidence.sh --preflight-only /secure/path/production-soak-manifest.json /secure/path/preflight-out
 ```
-5. Capture: `infra/scripts/capture-production-evidence.sh /secure/path/production-soak-manifest.json /secure/path/evidence-out`. 6. Verify offline with `production-evidence-verify` (fingerprint + custody, no symlinks — note: the verifier confirms integrity but **never** flips a row). 7. Audit: `release-audit --evidence-manifest … --require-production-validated --require-provider-forbid-local` (confirm exact flags in `infra/PRODUCTION-EVIDENCE.md`). 8. Flip the row `Partial → Done` in `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md` with the fingerprint; commit atomically (explicit paths only).
+5. Capture: `infra/scripts/capture-production-evidence.sh /secure/path/production-soak-manifest.json /secure/path/evidence-out`; the wrapper runs `deployment-soak` and then `release-audit --evidence-manifest "$OUT_ROOT/evidence/manifest.json" --require-production-validated --require-provider-forbid-local`.
+6. Verify offline with a separately retained report:
+```bash
+PYTHON="${PYTHON:-$(if [ -x .venv/bin/python ]; then printf '%s' .venv/bin/python; else command -v python3; fi)}"
+BUNDLE_DIR=/secure/path/evidence-out
+EXPECTED_BUNDLE_FINGERPRINT=sha256:...
+VERIFY_REPORT=/secure/path/to/mnemosyne-production-evidence-verify.json
+"$PYTHON" -m mnemosyne.cli production-evidence-verify "$BUNDLE_DIR" \
+  --expected-bundle-fingerprint "$EXPECTED_BUNDLE_FINGERPRINT" \
+  --report-output "$VERIFY_REPORT"
+```
+The expected fingerprint must come from the operator's out-of-band capture record, not from `summary.json` inside the bundle under review. The verifier confirms custody and emits reviewer guidance/row review; it does **not** contact production or flip rows by itself.
+7. Flip a row `Partial → Done` in `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md` only after the production wrapper summary has `release_audit_ok=true`, the offline verifier report has `ok=true`, and the row's retained evidence is present in the captured bundle. Commit atomically with explicit paths.
 
 Sub-state lifecycle (tracking only; the audit's Partial/Done split is authoritative): `partial → evidence-pending → validated → done`.
 
@@ -131,13 +146,13 @@ Postgres DSN (pgvector+ParadeDB+AGE) · embedding+reranker URLs/models/keys · I
 
 **Tier B (~97%):**
 - [ ] **10/10** rows `Done` in `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md`, each with a recorded evidence fingerprint.
-- [ ] `--check-environment` reports 0 missing env vars / 0 missing artifacts; release audit passes per row with `--require-production-validated --require-provider-forbid-local`.
+- [ ] `--check-environment` reports 0 `missing_environment`, 0 missing artifacts, 0 provider-manifest/env-ref errors, and 10 complete `parity_row_readiness` rows; the production wrapper summary reports `release_audit_ok=true`; offline `production-evidence-verify` passes with `--expected-bundle-fingerprint` from the out-of-band capture record and `--report-output` outside the bundle under review.
 
 **Tier C (100%):**
 - [ ] All 6 §16 SLOs re-proven **on real production paths**; real **LongMemEval R@5** recorded.
 - [ ] All 7 §31 rails enforced + regression-tested; protected-fact regressions = 0.
 - [ ] `BLUEPRINT-PARITY-MATRIX.md` fully reconciled (every FR/REQ CLOSED or justified DEFERRED-BY-DESIGN; no DEFERRED-OPERATOR left); FR-17 cold loop remains shadow-only per §38.
-- [ ] README badge → **blueprint parity 100%**; full suite (354 pass + 63 live-DB) + CI green; no fabricated evidence anywhere.
+- [ ] README badge → **blueprint parity 100%**; current full suite + CI green; no fabricated evidence anywhere.
 
 ## 10. REPORTING
 

@@ -23,6 +23,8 @@ Run in the production soak profile:
 Place these files in the external `MNEMOSYNE_PROD_EVIDENCE_DIR` before
 rendering:
 
+- `calibration-dataset.json`
+- `hosted-llm-manifest.json`
 - `parametric-trainer-bundle.json`
 - `provider-manifest.production.json`
 

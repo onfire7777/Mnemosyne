@@ -4,6 +4,8 @@ import json
 import re
 from pathlib import Path
 
+from mnemosyne.production_parity import PARITY_LANES_BY_COMMAND
+
 
 REPO = Path(__file__).resolve().parents[1]
 RUNBOOK_DIR = REPO / ".planning" / "runbooks"
@@ -167,13 +169,17 @@ def test_production_evidence_docs_require_independent_bundle_fingerprint() -> No
     docs_with_command_snippets = [
         REPO / "infra" / "PRODUCTION-EVIDENCE.md",
         REPO / "infra" / "README.md",
+        REPO / ".planning" / "TIER-B-TO-100-AGENT-PROMPT.md",
         RUNBOOK_DIR / "README.md",
     ]
     docs_with_custody_language = [
         *docs_with_command_snippets,
         REPO / ".planning" / "ENV-AND-SECRETS.md",
+        REPO / ".planning" / "runbooks" / "LOCAL-STAGING-DRY-RUN.md",
         REPO / ".planning" / "STRICT-BLUEPRINT-PARITY-AUDIT.md",
         REPO / ".planning" / "STATE.md",
+        REPO / "docs" / "blueprint" / "cognitive-architecture" / "CODEX-HANDOFF.md",
+        REPO / "docs" / "ROADMAP-TO-100.md",
         *sorted(RUNBOOK_DIR.glob("row-*.md")),
     ]
     self_referential_snippet = (
@@ -194,8 +200,23 @@ def test_production_evidence_docs_require_independent_bundle_fingerprint() -> No
             assert "bundle under review" in text, path
         assert self_referential_snippet not in text, path
         assert "expected `summary.json` `bundle_fingerprint`" not in text, path
+        assert "optional `--report-output`" not in text, path
         if path.parent == RUNBOOK_DIR and path.name.startswith("row-"):
             assert "`--expected-bundle-fingerprint` set from" in text, path
+
+
+def test_operator_docs_stage_all_production_input_artifacts_before_readiness() -> None:
+    docs = [
+        REPO / "infra" / "README.md",
+        REPO / "docs" / "ROADMAP-TO-100.md",
+        REPO / "docs" / "blueprint" / "cognitive-architecture" / "CODEX-HANDOFF.md",
+    ]
+
+    for path in docs:
+        text = path.read_text(encoding="utf-8")
+        assert "production-input-artifacts.checklist.md" in text, path
+        assert "provider-manifest.production.json" in text, path
+        assert "manifest-referenced production input artifact" in text, path
 
 
 def test_operator_docs_do_not_use_unbound_production_release_audit() -> None:
@@ -210,6 +231,7 @@ def test_operator_docs_do_not_use_unbound_production_release_audit() -> None:
         REPO / ".planning" / "ROADMAP.md",
         REPO / ".planning" / "ROLLBACK.md",
         REPO / ".planning" / "STATE.md",
+        REPO / ".planning" / "TIER-B-TO-100-AGENT-PROMPT.md",
         RUNBOOK_DIR / "README.md",
         RUNBOOK_DIR / "LOCAL-STAGING-DRY-RUN.md",
         *sorted(RUNBOOK_DIR.glob("row-*.md")),
@@ -300,6 +322,24 @@ def test_provider_check_routes_are_documented_for_shared_manifest_rows() -> None
 
     row7 = (RUNBOOK_DIR / "row-07-privacy-and-erasure.md").read_text(encoding="utf-8")
     assert "`policy-ops-check`" not in row7
+
+
+def test_production_parity_command_routes_match_row_runbooks() -> None:
+    expected_routes = {
+        "calibration-tune": ["B9"],
+        "consolidation-ops-check": ["B4"],
+        "gate-suite-check": ["B4"],
+        "hosted-llm-check": ["B9"],
+        "ops-dashboard-check": ["B8"],
+        "ops-report": ["B8"],
+        "parametric-trainer-check": ["B9"],
+        "projection-recompute-once": ["B4"],
+        "worker-ops-check": ["B4"],
+        "worker-run": ["B4"],
+    }
+
+    for command, lanes in expected_routes.items():
+        assert PARITY_LANES_BY_COMMAND[command] == lanes, command
 
 
 def test_operator_docs_bind_c2pa_executable_metadata_and_rollback_verify() -> None:
