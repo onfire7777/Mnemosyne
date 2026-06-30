@@ -15,6 +15,18 @@ Status: In progress; exact 1:1 blueprint parity is not complete.
 Current status (2026-06-30): Mandatory Tier A source wirings are closed on `main`; FR-20 local and live-Postgres image/audio/video breadth, FR-21 local and live-Postgres parametric trainer/rollback validation, full compose-Postgres runtime readiness, belief-revision CLI validation, local hosted-MCP JSON-RPC/StreamableHTTP/SSE readiness, direct A12 cached-PPR live materialization coverage, G1 projection-level reality monitoring, G1 functional consciousness scorecard/proto-self seed, native workspace service with the `service.enabled` default-off gate retired, operational specialist-budget toggle retirement, cold-loop ignition enforcement, protected gate-case ratchet enforcement, Rail 6 serve-time sink enforcement, §24 support-strategy runtime durability plus public CLI/MCP mutation surfaces, Phase 7 plans 01-04, and the P5 H8/H12 cascade/observability pre-check are now done and gate-proven. The remaining strict-parity blocker is Tier B production operator evidence against deployed infrastructure before final v1.0 sign-off.
 Supersession note: the historical "Last activity: 2026-06-20" paragraph below is retained as changelog context only. Its local 287-test count and open-code wording are superseded by the 2026-06-25 checkpoints below, including the 864-test compose run and the current Tier B operator-evidence blocker.
 
+Latest checkpoint (2026-06-30): The active goal remains unpaused and has been
+sharpened around the real parity blocker: source-complete local work is not
+enough, and progress now means reducing friction to real Tier-B production
+capture without retaining secrets, fabricating artifacts, or flipping rows from
+routing metadata alone. Tier-B custody packets now generate
+`reports/render-env-action-plan.{json,md}` beside the row, provider, artifact,
+and next-command reports. The render-env plan maps each non-secret
+`production-render.env` placeholder to affected B-rows and the packet-local env
+file while explicitly recording no values. This is an operator handoff for the
+first blocker class only; B1-B10 remain Partial until real wrapper-captured
+production bundles pass release audit and offline custody verification.
+
 Latest checkpoint (2026-06-30): The active goal remains unpaused and the
 repo-owned operating contract now states the move-the-needle rule explicitly:
 new work must remove a live Tier-B operator-capture blocker, fix a source defect

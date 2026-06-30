@@ -253,6 +253,12 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     provider_env_action_plan_json = (
         packet_root / "reports" / "provider-env-action-plan.json"
     )
+    render_env_action_plan_markdown = (
+        packet_root / "reports" / "render-env-action-plan.md"
+    )
+    render_env_action_plan_json = (
+        packet_root / "reports" / "render-env-action-plan.json"
+    )
     row_action_plan_markdown = packet_root / "reports" / "row-action-plan.md"
     row_action_plan_json = packet_root / "reports" / "row-action-plan.json"
     artifact_validation_script = (
@@ -270,6 +276,7 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     assert summary["provider_env_action_plan"] == str(
         provider_env_action_plan_markdown
     )
+    assert summary["render_env_action_plan"] == str(render_env_action_plan_markdown)
     assert summary["row_action_plan"] == str(row_action_plan_markdown)
     assert summary["input_artifact_validation_script"] == str(
         artifact_validation_script
@@ -297,6 +304,10 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     assert report["provider_env_action_plan_json"] == str(
         provider_env_action_plan_json
     )
+    assert report["render_env_action_plan_markdown"] == str(
+        render_env_action_plan_markdown
+    )
+    assert report["render_env_action_plan_json"] == str(render_env_action_plan_json)
     assert report["row_action_plan_markdown"] == str(row_action_plan_markdown)
     assert report["row_action_plan_json"] == str(row_action_plan_json)
     assert report["input_artifact_validation_script"] == str(
@@ -373,6 +384,20 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
         "forbid_local true" in note
         for note in provider_manifest_contract["minimum_operator_contract"]
     )
+    render_env_plan = {
+        item["env"]: item for item in report["render_env_action_plan"]
+    }
+    assert len(render_env_plan) == 19
+    assert render_env_plan["MNEMOSYNE_PROD_EVIDENCE_DIR"]["status"] == (
+        "present_for_readiness"
+    )
+    assert render_env_plan["MNEMOSYNE_PROD_EVIDENCE_DIR"]["missing"] is False
+    assert render_env_plan["MNEMOSYNE_PROD_EVIDENCE_DIR"]["values_recorded"] is False
+    assert render_env_plan["MNEMOSYNE_PROD_C2PA_TOOL"]["status"] == "missing"
+    assert render_env_plan["MNEMOSYNE_PROD_C2PA_TOOL"]["affected_rows"][0][
+        "lane"
+    ] == "B5"
+    assert render_env_plan["MNEMOSYNE_PROD_C2PA_TOOL"]["report_is_evidence"] is False
     validation_plan = {
         item["name"]: item for item in report["input_artifact_validation_plan"]
     }
@@ -525,6 +550,11 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     assert json.loads(
         provider_env_action_plan_json.read_text(encoding="utf-8")
     ) == report["provider_env_action_plan"]
+    assert render_env_action_plan_markdown.is_file()
+    assert render_env_action_plan_json.is_file()
+    assert json.loads(
+        render_env_action_plan_json.read_text(encoding="utf-8")
+    ) == report["render_env_action_plan"]
     assert artifact_validation_script.is_file()
     assert os.access(artifact_validation_script, os.X_OK)
     assert next_commands_script.is_file()
@@ -551,6 +581,7 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     assert "read-only packet guidance docs" in readme
     assert "reports/mnemosyne-production-runtime.env.example" in readme
     assert "reports/provider-env-action-plan.md" in readme
+    assert "reports/render-env-action-plan.md" in readme
     assert "reports/row-action-plan.md" in readme
     assert "reports/input-artifact-worklist.md" in readme
     assert "reports/input-artifact-contracts.md" in readme
@@ -635,6 +666,7 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     assert "### Input Artifacts" in markdown
     assert "Input Artifact Worklist" in markdown
     assert "input-artifact-contracts.md" in markdown
+    assert "render-env-action-plan.md" in markdown
     assert "provider-env-action-plan.md" in markdown
     assert "row-action-plan.md" in markdown
     assert "input-artifact-validation-commands.sh" in markdown
@@ -673,6 +705,13 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     assert "`MNEMOSYNE_EMBEDDING_URL`" in provider_env_plan_text
     assert "/providers/retrieval/embedding/url/env" in provider_env_plan_text
     assert "Values and runtime env-file paths are" in provider_env_plan_text
+    render_env_plan_text = render_env_action_plan_markdown.read_text(
+        encoding="utf-8"
+    )
+    assert "operator preparation aid, not production evidence" in render_env_plan_text
+    assert "`MNEMOSYNE_PROD_C2PA_TOOL`" in render_env_plan_text
+    assert "`B5`" in render_env_plan_text
+    assert "Render values are not retained" in render_env_plan_text
     assert str(next_commands_script) in markdown
     assert "Copy this generated no-secret example" in runtime_example
     assert 'export MNEMOSYNE_EMBEDDING_URL=""' in runtime_example

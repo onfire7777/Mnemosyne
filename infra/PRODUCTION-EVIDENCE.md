@@ -26,6 +26,9 @@ This runbook is the operator handoff for flipping the remaining Tier B parity ro
   section summarizes the current blocked lanes and missing blocker classes so
   dispatcher handoff can start from one machine-readable report field instead
   of re-parsing every row. The packet also writes
+  `reports/render-env-action-plan.{json,md}` as the first blocker-class handoff
+  that maps every non-secret `production-render.env` placeholder to affected
+  rows without retaining values. It also writes
   `reports/row-action-plan.{json,md}` as a row-owner handoff that joins each
   B1-B10 row's packet runbook, missing render values, missing provider refs,
   missing artifacts, next actions, and row-scoped validator command. It also
@@ -66,7 +69,9 @@ This runbook is the operator handoff for flipping the remaining Tier B parity ro
   `render-production-soak-manifest.sh --env-file`. Do not shell-source render
   env files; the renderer parses them with `infra/scripts/load-env.py` and
   rejects symlinks, group/world-readable files, unexpected keys, unsafe syntax,
-  repo-local paths, and missing placeholder keys.
+  repo-local paths, and missing placeholder keys. In custody packets, use
+  `reports/render-env-action-plan.{json,md}` to route each missing render value
+  to affected Tier-B rows before filling the packet-local env file.
 - Populate `MNEMOSYNE_PROD_EVIDENCE_DIR` with the manifest-referenced production input artifacts before running `--check-environment --env-file /secure/path/to/mnemosyne-tier-b-custody/production-render.env --runtime-env-file "$RUNTIME_ENV_FILE"`. The check is no-write and reports the static template-derived artifact inventory plus `parity_row_readiness` grouping even before environment values are complete; after all required `MNEMOSYNE_PROD_*` values are set, including `MNEMOSYNE_PROD_EVIDENCE_DIR`, it fails if required relative artifact names are missing from that external directory and shows which strict-audit row is blocked. Use `infra/templates/production-input-artifacts.checklist.md` as the non-secret operator checklist for the required artifact names, then use `reports/input-artifact-contracts.{json,md}` in custody packets to confirm each artifact's validator, advisory section/check hints, and release-audit output-key contract before supplying it.
 - Copy `infra/templates/provider-manifest.production.template.json` to `$MNEMOSYNE_PROD_EVIDENCE_DIR/provider-manifest.production.json` and fill the external copy with production provider values or environment-variable references. This file is shared evidence for retrieval, auth/session provider custody, consolidation roles, multimodal/object-key providers, privacy/residency policy, parametric adapters, and the final parity row. It must keep `forbid_local: true` and include every required provider-check subcheck listed in the template. `--check-environment` parses this external manifest when present, reports referenced provider env-var names, and fails before capture if any referenced provider env var is unset in either the process environment or the strict external `--runtime-env-file`; `capture-production-evidence.sh --preflight-only` also rejects manifests missing `forbid_local: true`, missing or unsupported required provider checks, or a non-object `providers` block. In custody packets, use `reports/provider-env-action-plan.{json,md}` to route each missing env name to its provider-manifest path and B-row ownership before filling the external runtime env file.
 - Provider manifest `command` values must resolve to absolute, non-symlinked, external executable paths. During capture, those command executables are copied into `OUT_ROOT/tool-artifacts/`, retained as mode `0500` custody artifacts, rewritten into the retained provider manifest snapshot, and recorded in `preflight.json.executable_tool_references` with original path, retained snapshot path, size, SHA-256 digest, and provider-manifest field label.
