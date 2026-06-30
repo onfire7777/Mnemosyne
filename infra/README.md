@@ -121,14 +121,17 @@ open infra/templates/production-operator-env.inventory.md
 # Fill input-artifacts/provider-manifest.production.json and every other
 # manifest-referenced production input artifact listed in the packet report.
 infra/scripts/prepare-production-evidence-custody.py \
+  --runtime-env-file /secure/path/to/mnemosyne-production-runtime.env \
   --refresh \
   /secure/path/to/mnemosyne-tier-b-custody
 
 infra/scripts/render-production-soak-manifest.sh \
   --env-file /secure/path/to/mnemosyne-tier-b-custody/production-render.env \
+  --runtime-env-file /secure/path/to/mnemosyne-production-runtime.env \
   --check-environment
 infra/scripts/render-production-soak-manifest.sh \
   --env-file /secure/path/to/mnemosyne-tier-b-custody/production-render.env \
+  --runtime-env-file /secure/path/to/mnemosyne-production-runtime.env \
   --output /secure/path/to/production-soak-manifest.json
 infra/scripts/capture-production-evidence.sh \
   --env-file /secure/path/to/mnemosyne-production-runtime.env \
@@ -191,7 +194,11 @@ manifest-referenced relative input artifacts in that directory, and the resolved
 canonical C2PA verifier path before rendering. It also parses the external
 `provider-manifest.production.json` when present and fails early if any
 referenced provider environment variable is unset, reporting env names only and
-redacting values; `MNEMOSYNE_PROD_C2PA_TOOL` must be an absolute external
+redacting values. Pass the strict secret-bearing runtime env file with
+`--runtime-env-file /secure/path/to/mnemosyne-production-runtime.env` so
+provider refs can be validated without exporting or shell-sourcing secrets;
+that file is allowlist-loaded only for the readiness process and its path and
+values are not retained in renderer JSON. `MNEMOSYNE_PROD_C2PA_TOOL` must be an absolute external
 executable outside the repository, reached without a symlink or non-canonical
 wrapper path. Production preflight records that
 executable path's size and SHA-256 digest in `preflight.json`, copies the

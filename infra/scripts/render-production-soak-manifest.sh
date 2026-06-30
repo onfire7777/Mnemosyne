@@ -5,9 +5,9 @@ umask 077
 usage() {
   cat >&2 <<'USAGE'
 Usage:
-  infra/scripts/render-production-soak-manifest.sh --output OUT [--template TEMPLATE] [--env-file ENV] [--force]
+  infra/scripts/render-production-soak-manifest.sh --output OUT [--template TEMPLATE] [--env-file ENV] [--runtime-env-file ENV] [--force]
   infra/scripts/render-production-soak-manifest.sh --list-placeholders [--template TEMPLATE]
-  infra/scripts/render-production-soak-manifest.sh --check-environment [--template TEMPLATE] [--env-file ENV]
+  infra/scripts/render-production-soak-manifest.sh --check-environment [--template TEMPLATE] [--env-file ENV] [--runtime-env-file ENV]
 
 Renders infra/templates/production-soak-manifest.template.json by replacing every
 MNEMOSYNE_PROD_* placeholder from a strict external env file or the current
@@ -21,6 +21,11 @@ Options:
   --env-file PATH       Strict dotenv file containing every MNEMOSYNE_PROD_* placeholder.
                         Must be absolute, external, non-symlinked, mode 0600,
                         and parsed by infra/scripts/load-env.py.
+  --runtime-env-file PATH
+                        Strict optional dotenv file for runtime/provider env refs
+                        needed only for provider-manifest readiness validation.
+                        Must be absolute, external, non-symlinked, mode 0600,
+                        and contain only allowlisted operator env names.
   --output PATH         Destination manifest path. Required unless --list-placeholders or --check-environment is used.
   --force              Overwrite OUT if it already exists.
   --list-placeholders  Print required MNEMOSYNE_PROD_* placeholder names as JSON.
@@ -36,6 +41,7 @@ REPO_DIR="$(cd "${INFRA_DIR}/.." && pwd)"
 
 TEMPLATE="${REPO_DIR}/infra/templates/production-soak-manifest.template.json"
 ENV_FILE=""
+RUNTIME_ENV_FILE=""
 OUTPUT=""
 FORCE=0
 LIST_PLACEHOLDERS=0
@@ -49,6 +55,10 @@ while [ "$#" -gt 0 ]; do
       ;;
     --env-file)
       ENV_FILE="${2:-}"
+      shift 2
+      ;;
+    --runtime-env-file)
+      RUNTIME_ENV_FILE="${2:-}"
       shift 2
       ;;
     --output)
@@ -88,7 +98,7 @@ if [ -z "${PYTHON}" ]; then
   fi
 fi
 
-export TEMPLATE ENV_FILE OUTPUT FORCE LIST_PLACEHOLDERS CHECK_ENVIRONMENT REPO_DIR
+export TEMPLATE ENV_FILE RUNTIME_ENV_FILE OUTPUT FORCE LIST_PLACEHOLDERS CHECK_ENVIRONMENT REPO_DIR
 
 "${PYTHON}" - <<'PY'
 import json
@@ -159,6 +169,7 @@ next_steps = [
 
 template_manifest = json.loads(template_text)
 env_file_raw = os.environ.get("ENV_FILE", "")
+runtime_env_file_raw = os.environ.get("RUNTIME_ENV_FILE", "")
 
 
 def fail_env_file(message: str, *, code: int = 65) -> None:
@@ -166,31 +177,41 @@ def fail_env_file(message: str, *, code: int = 65) -> None:
     raise SystemExit(code)
 
 
-def load_env_file(path_raw: str, required_keys: list[str]) -> None:
+def load_env_file(
+    path_raw: str,
+    required_keys: list[str],
+    *,
+    allow_missing: bool = False,
+    option_name: str = "--env-file",
+) -> None:
     if not path_raw:
         return
     env_path = Path(path_raw).expanduser()
     if not env_path.is_absolute():
-        fail_env_file("--env-file must be an absolute external path")
+        fail_env_file(f"{option_name} must be an absolute external path")
     if env_path.is_symlink():
-        fail_env_file("--env-file must not be a symlink")
+        fail_env_file(f"{option_name} must not be a symlink")
     repo_resolved = repo_dir.resolve()
     try:
         env_path.relative_to(repo_resolved)
     except ValueError:
         pass
     else:
-        fail_env_file("--env-file must not point inside the repository")
+        fail_env_file(f"{option_name} must not point inside the repository")
     resolved = env_path.resolve(strict=False)
     try:
         resolved.relative_to(repo_resolved)
     except ValueError:
         pass
     else:
-        fail_env_file("--env-file must not resolve inside the repository")
+        fail_env_file(f"{option_name} must not resolve inside the repository")
     loader = repo_dir / "infra" / "scripts" / "load-env.py"
+    command = [str(loader)]
+    if allow_missing:
+        command.append("--allow-missing")
+    command.extend([str(env_path), *required_keys])
     proc = subprocess.run(
-        [str(loader), str(env_path), *required_keys],
+        command,
         cwd=repo_dir,
         capture_output=True,
         text=True,
@@ -198,7 +219,10 @@ def load_env_file(path_raw: str, required_keys: list[str]) -> None:
     )
     if proc.returncode != 0:
         stderr = proc.stderr.strip() or proc.stdout.strip()
-        fail_env_file(f"--env-file failed strict loading: {stderr}", code=proc.returncode)
+        fail_env_file(
+            f"{option_name} failed strict loading: {stderr}",
+            code=proc.returncode,
+        )
     for line in proc.stdout.splitlines():
         key, separator, value = line.partition("=")
         if separator:
@@ -378,6 +402,8 @@ if check_environment:
         "missing_environment": missing,
         "missing_environment_count": len(missing),
         "values_redacted": True,
+        "runtime_env_file_loaded": bool(runtime_env_file_raw),
+        "runtime_env_file_values_redacted": bool(runtime_env_file_raw),
         "validation_categories": validation_categories,
         "operator_readiness_files": operator_readiness_files,
         "required_input_artifact_count": len(template_input_artifact_names),
@@ -766,6 +792,41 @@ def collect_env_refs(value: object) -> set[str]:
     return set()
 
 
+def collect_operator_inventory_env_names() -> set[str]:
+    inventory = repo_dir / "infra" / "templates" / "production-operator-env.inventory.md"
+    names: set[str] = set()
+    if not inventory.is_file():
+        return names
+    pattern = re.compile(r"- `([A-Z][A-Z0-9_]*)`")
+    for line in inventory.read_text(encoding="utf-8").splitlines():
+        match = pattern.fullmatch(line.strip())
+        if match:
+            names.add(match.group(1))
+    return names
+
+
+def load_runtime_env_file_for_provider_manifest() -> None:
+    if not runtime_env_file_raw:
+        return
+    allowed = collect_operator_inventory_env_names()
+    provider_manifest = evidence_dir_resolved / "provider-manifest.production.json"
+    if provider_manifest.is_file():
+        try:
+            payload = json.loads(provider_manifest.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            payload = {}
+        allowed.update(collect_env_refs(payload))
+    if not allowed:
+        provider_manifest_error("runtime env allowlist is empty")
+        return
+    load_env_file(
+        runtime_env_file_raw,
+        sorted(allowed),
+        allow_missing=True,
+        option_name="--runtime-env-file",
+    )
+
+
 def collect_provider_command_entries(value: object, *, path: str) -> list[tuple[str, object]]:
     entries: list[tuple[str, object]] = []
     if isinstance(value, dict):
@@ -1043,6 +1104,7 @@ def inspect_provenance_suites(manifest_payload: dict[str, Any]) -> None:
                         )
 
 inspect_provenance_suites(rendered_manifest)
+load_runtime_env_file_for_provider_manifest()
 inspect_provider_manifest()
 for artifact in input_artifacts:
     annotate_artifact_routes(artifact)
@@ -1079,6 +1141,8 @@ if check_environment:
         "missing_environment": [],
         "missing_environment_count": 0,
         "values_redacted": True,
+        "runtime_env_file_loaded": bool(runtime_env_file_raw),
+        "runtime_env_file_values_redacted": bool(runtime_env_file_raw),
         "evidence_dir_external": True,
         "c2pa_tool_external": True,
         "required_input_artifact_count": len(input_artifacts),

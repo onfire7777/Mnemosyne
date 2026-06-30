@@ -170,13 +170,17 @@ def _run_renderer(
     input_dir: Path,
     *,
     env_overrides: dict[str, str],
+    runtime_env_file: Path | None,
 ) -> tuple[int, dict[str, Any], str]:
     renderer = repo_dir / "infra" / "scripts" / "render-production-soak-manifest.sh"
     env = os.environ.copy()
     env.update(env_overrides)
     env["MNEMOSYNE_PROD_EVIDENCE_DIR"] = str(input_dir)
+    command = ["/bin/bash", str(renderer), "--check-environment"]
+    if runtime_env_file is not None:
+        command.extend(["--runtime-env-file", str(runtime_env_file)])
     proc = subprocess.run(
-        ["/bin/bash", str(renderer), "--check-environment"],
+        command,
         cwd=repo_dir,
         env=env,
         capture_output=True,
@@ -297,6 +301,67 @@ def _phase_plan(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ]
 
 
+def _inventory_env_names(repo_dir: Path) -> set[str]:
+    inventory = repo_dir / "infra" / "templates" / "production-operator-env.inventory.md"
+    names: set[str] = set()
+    pattern = re.compile(r"- `([A-Z][A-Z0-9_]*)`")
+    for line in inventory.read_text(encoding="utf-8").splitlines():
+        match = pattern.fullmatch(line.strip())
+        if match:
+            names.add(match.group(1))
+    return names
+
+
+def _runtime_env_values(
+    path: Path | None,
+    *,
+    repo_dir: Path,
+    provider_env_refs: list[str],
+) -> dict[str, str]:
+    if path is None:
+        return {}
+    allowed = sorted(_inventory_env_names(repo_dir) | set(provider_env_refs))
+    loader = repo_dir / "infra" / "scripts" / "load-env.py"
+    proc = subprocess.run(
+        [str(loader), "--allow-missing", str(path), *allowed],
+        cwd=repo_dir,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        stderr = proc.stderr.strip() or proc.stdout.strip()
+        _fail(f"runtime env file failed strict loading: {stderr}", code=proc.returncode)
+    values: dict[str, str] = {}
+    for line in proc.stdout.splitlines():
+        key, separator, value = line.partition("=")
+        if separator:
+            values[key] = value
+    return values
+
+
+def _resolve_runtime_env_file(raw: str | None, *, repo_dir: Path) -> Path | None:
+    if not raw:
+        return None
+    env_file = Path(raw).expanduser()
+    if not env_file.is_absolute():
+        _fail("runtime env file must be an absolute external path")
+    if env_file.is_symlink():
+        _fail("runtime env file must not be a symlink")
+    try:
+        env_file.relative_to(repo_dir.resolve())
+    except ValueError:
+        pass
+    else:
+        _fail("runtime env file must not point inside the repository")
+    resolved = env_file.resolve(strict=False)
+    try:
+        resolved.relative_to(repo_dir.resolve())
+    except ValueError:
+        return resolved
+    _fail("runtime env file must not resolve inside the repository")
+
+
 def _write_markdown(report: dict[str, Any], path: Path) -> None:
     lines = [
         "# Mnemosyne Tier-B Production Evidence Gap Report",
@@ -377,7 +442,10 @@ This packet is a no-secret operator workspace. It is not production evidence.
 5. Refresh `reports/tier-b-gap-report.json` generation with:
 
 ```bash
-infra/scripts/prepare-production-evidence-custody.py --refresh {root}
+infra/scripts/prepare-production-evidence-custody.py \\
+  --runtime-env-file /secure/path/to/mnemosyne-production-runtime.env \\
+  --refresh \\
+  {root}
 ```
 
 Refresh mode updates only `reports/tier-b-gap-report.json`,
@@ -395,7 +463,8 @@ or `manifests/`.
 
 When the report is ready, render the soak manifest to a separate external path
 with `render-production-soak-manifest.sh --env-file {root / 'production-render.env'}`
-and capture into a new external output root. Do not use this packet root as the
+and `--runtime-env-file /secure/path/to/mnemosyne-production-runtime.env`, then
+capture into a new external output root. Do not use this packet root as the
 capture output root. Pass secret-bearing runtime/provider values through
 `capture-production-evidence.sh --env-file /secure/path/to/mnemosyne-production-runtime.env`
 instead of shell-sourcing them.
@@ -457,7 +526,12 @@ def _write_packet_skeleton(root: Path, *, repo_dir: Path) -> None:
         _copy_readonly(repo_dir / relative, docs_dir / Path(relative).name)
 
 
-def refresh_report(root: Path, *, repo_dir: Path) -> dict[str, Any]:
+def refresh_report(
+    root: Path,
+    *,
+    repo_dir: Path,
+    runtime_env_file: Path | None = None,
+) -> dict[str, Any]:
     os.umask(0o077)
     _validate_existing_packet(root)
     input_dir = root / "input-artifacts"
@@ -475,11 +549,19 @@ def refresh_report(root: Path, *, repo_dir: Path) -> dict[str, Any]:
         repo_dir,
         input_dir,
         env_overrides=env_overrides,
+        runtime_env_file=runtime_env_file,
     )
     provider_manifest = _load_json(input_dir / "provider-manifest.production.json")
     provider_env_refs = sorted(_collect_env_refs(provider_manifest))
+    runtime_env_values = _runtime_env_values(
+        runtime_env_file,
+        repo_dir=repo_dir,
+        provider_env_refs=provider_env_refs,
+    )
     missing_provider_env_refs = sorted(
-        ref for ref in provider_env_refs if not os.environ.get(ref)
+        ref
+        for ref in provider_env_refs
+        if not os.environ.get(ref) and not runtime_env_values.get(ref)
     )
     placeholders_by_lane, routed_placeholders = _collect_render_placeholders_by_lane(
         template_manifest
@@ -505,6 +587,7 @@ def refresh_report(root: Path, *, repo_dir: Path) -> dict[str, Any]:
             if isinstance(item, str)
         }
     )
+    runtime_env_placeholder = "/secure/path/to/mnemosyne-production-runtime.env"
     report = {
         "schema": "mnemosyne.tier-b-custody-gap-report.v1",
         "report_is_evidence": False,
@@ -512,6 +595,8 @@ def refresh_report(root: Path, *, repo_dir: Path) -> dict[str, Any]:
         "input_artifacts_dir": str(input_dir),
         "production_render_env": str(root / "production-render.env"),
         "production_render_env_loaded": True,
+        "runtime_env_file_loaded": runtime_env_file is not None,
+        "runtime_env_file_values_redacted": runtime_env_file is not None,
         "renderer_returncode": renderer_code,
         "renderer_blocked_reason": renderer_payload.get("blocked_reason"),
         "renderer_stderr_present": bool(renderer_stderr.strip()),
@@ -531,10 +616,10 @@ def refresh_report(root: Path, *, repo_dir: Path) -> dict[str, Any]:
         "phase_plan": _phase_plan(rows),
         "operator_readiness_files": renderer_payload.get("operator_readiness_files", {}),
         "next_commands": [
-            f"infra/scripts/render-production-soak-manifest.sh --env-file {root / 'production-render.env'} --check-environment",
-            f"infra/scripts/render-production-soak-manifest.sh --env-file {root / 'production-render.env'} --output {manifests_dir / 'production-soak-manifest.json'}",
-            f"infra/scripts/capture-production-evidence.sh --env-file /secure/path/to/mnemosyne-production-runtime.env --preflight-only {manifests_dir / 'production-soak-manifest.json'} {root.parent / (root.name + '-preflight')}",
-            f"infra/scripts/capture-production-evidence.sh --env-file /secure/path/to/mnemosyne-production-runtime.env {manifests_dir / 'production-soak-manifest.json'} {root.parent / (root.name + '-capture')}",
+            f"infra/scripts/render-production-soak-manifest.sh --env-file {root / 'production-render.env'} --runtime-env-file {runtime_env_placeholder} --check-environment",
+            f"infra/scripts/render-production-soak-manifest.sh --env-file {root / 'production-render.env'} --runtime-env-file {runtime_env_placeholder} --output {manifests_dir / 'production-soak-manifest.json'}",
+            f"infra/scripts/capture-production-evidence.sh --env-file {runtime_env_placeholder} --preflight-only {manifests_dir / 'production-soak-manifest.json'} {root.parent / (root.name + '-preflight')}",
+            f"infra/scripts/capture-production-evidence.sh --env-file {runtime_env_placeholder} {manifests_dir / 'production-soak-manifest.json'} {root.parent / (root.name + '-capture')}",
         ],
     }
     report_json = reports_dir / "tier-b-gap-report.json"
@@ -543,10 +628,19 @@ def refresh_report(root: Path, *, repo_dir: Path) -> dict[str, Any]:
     return report
 
 
-def prepare(root: Path, *, repo_dir: Path) -> dict[str, Any]:
+def prepare(
+    root: Path,
+    *,
+    repo_dir: Path,
+    runtime_env_file: Path | None = None,
+) -> dict[str, Any]:
     os.umask(0o077)
     _write_packet_skeleton(root, repo_dir=repo_dir)
-    report = refresh_report(root, repo_dir=repo_dir)
+    report = refresh_report(
+        root,
+        repo_dir=repo_dir,
+        runtime_env_file=runtime_env_file,
+    )
     _write_readme(root, report)
     return report
 
@@ -562,19 +656,27 @@ def main(argv: list[str] | None = None) -> int:
         dest="refresh_report",
         help="Refresh reports in an existing packet without overwriting operator inputs",
     )
+    parser.add_argument(
+        "--runtime-env-file",
+        help=(
+            "Strict optional external env file for runtime/provider readiness values; "
+            "values are loaded only for validation and are not written to reports"
+        ),
+    )
     parser.add_argument("custody_root", help="Absolute external packet directory")
     args = parser.parse_args(argv)
 
     repo_dir = _repo_dir()
+    runtime_env_file = _resolve_runtime_env_file(args.runtime_env_file, repo_dir=repo_dir)
     root = _resolve_external_root(
         args.custody_root,
         repo_dir=repo_dir,
         must_exist=args.refresh_report,
     )
     report = (
-        refresh_report(root, repo_dir=repo_dir)
+        refresh_report(root, repo_dir=repo_dir, runtime_env_file=runtime_env_file)
         if args.refresh_report
-        else prepare(root, repo_dir=repo_dir)
+        else prepare(root, repo_dir=repo_dir, runtime_env_file=runtime_env_file)
     )
     summary = {
         "ok": report["ready_for_capture"],

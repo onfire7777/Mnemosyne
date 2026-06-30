@@ -29,7 +29,9 @@ documented, and clean.
 
 ## Current Highest-Leverage Path
 
-The next work is not more generic gates. The substantive path is:
+The next work is not more generic gates or percentage re-scoring. The
+substantive path is operator-execution work against Tier B, with source edits
+limited to defects that directly block that path:
 
 1. Prepare an external Tier-B custody packet with
    `infra/scripts/prepare-production-evidence-custody.py`.
@@ -39,12 +41,35 @@ The next work is not more generic gates. The substantive path is:
    `production-render.env`, and pass secret-bearing runtime/provider values
    through a separate external mode-`0600`
    `mnemosyne-production-runtime.env` via
-   `capture-production-evidence.sh --env-file`.
+   `render-production-soak-manifest.sh --runtime-env-file` for readiness and
+   `capture-production-evidence.sh --env-file` for capture.
 3. Fill the shared provider stack first because
    `provider-manifest.production.json` unblocks B1, B2, B4, B6, B7, B9, and B10.
 4. Capture keystone rows B1 retrieval and B2 tenant/auth evidence.
 5. Capture the remaining row bundles B3-B9.
 6. Capture B10 live parity evidence, then run Tier C sign-off.
+
+## Resume Baseline Rules
+
+Every continuation starts from live repository evidence, not from a remembered
+commit, old run id, or copied chat recap:
+
+1. Resolve the canonical checkout first. Current expected root is
+   `/Users/admin/Mnemosyne`; treat `/Users/admin/Desktop/Mnemosyne` and
+   `/Users/admin/Projects/Mnemosyne` as historical unless `git rev-parse`
+   proves otherwise.
+2. Run `git status --short --branch`, `git log -1 --oneline`, and the latest
+   GitHub Actions status for the current `HEAD` before writing "current"
+   status text.
+3. If a prompt, roadmap, or state file names an older commit or run id as the
+   latest verified baseline, either replace it with live-baseline wording or
+   update it to the current commit only after CI is green.
+4. Treat renderer/custody readiness output as routing metadata. It can make the
+   operator pass runnable, but it does not move any strict-audit row from
+   `Partial` to `Done`.
+5. Keep the blended completion percentage stable until the controlling audit
+   changes. Do not re-score progress to make local code changes look larger
+   than they are.
 
 ## Execution Loop
 

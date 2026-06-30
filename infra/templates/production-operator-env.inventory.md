@@ -35,6 +35,10 @@ in the external custody packet's `production-render.env`. Pass that file with
 These names are referenced by `provider-manifest.production.template.json`.
 The renderer's `--check-environment` parses the external provider manifest and
 reports these names only when a referenced variable is unset.
+Pass a separate strict external mode-`0600` runtime env file with
+`render-production-soak-manifest.sh --runtime-env-file` when these values should
+not be exported into the shell during readiness checks. The same file can be
+passed to `capture-production-evidence.sh --env-file` for capture.
 Any `*_COMMAND` value in the production provider manifest must name a single
 absolute external executable only; do not include interpreter, shell, module, or
 config arguments after `argv[0]`.

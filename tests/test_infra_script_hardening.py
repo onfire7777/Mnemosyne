@@ -422,6 +422,48 @@ def test_prepare_production_evidence_custody_refresh_reports_no_values(
     assert provider_sentinel not in combined
 
 
+def test_prepare_production_evidence_custody_runtime_env_file_satisfies_refs_without_retention(
+    tmp_path: Path,
+) -> None:
+    packet_root = tmp_path / "mnemosyne-tier-b-packet"
+    runtime_env_file = tmp_path / "mnemosyne-production-runtime.env"
+    provider_sentinel = "https://embedding-secret-sentinel.example.test"
+    runtime_env_file.write_text(
+        f'export MNEMOSYNE_EMBEDDING_URL="{provider_sentinel}"\n',
+        encoding="utf-8",
+    )
+    runtime_env_file.chmod(0o600)
+
+    proc = subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "prepare-production-evidence-custody.py"),
+            "--runtime-env-file",
+            str(runtime_env_file),
+            str(packet_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    report_text = (packet_root / "reports" / "tier-b-gap-report.json").read_text(
+        encoding="utf-8"
+    )
+    report = json.loads(report_text)
+    markdown = (packet_root / "reports" / "tier-b-gap-report.md").read_text(
+        encoding="utf-8"
+    )
+    combined = "\n".join([proc.stdout, proc.stderr, report_text, markdown])
+
+    assert proc.returncode == 78
+    assert report["runtime_env_file_loaded"] is True
+    assert report["runtime_env_file_values_redacted"] is True
+    assert "MNEMOSYNE_EMBEDDING_URL" not in report["missing_provider_manifest_env_refs"]
+    assert provider_sentinel not in combined
+    assert str(runtime_env_file) not in combined
+    assert "--runtime-env-file /secure/path/to/mnemosyne-production-runtime.env" in report_text
+
+
 def test_prepare_production_evidence_custody_rejects_repo_local_root(
     tmp_path: Path,
 ) -> None:
