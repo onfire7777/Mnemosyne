@@ -22,7 +22,10 @@ This runbook is the operator handoff for flipping the remaining Tier B parity ro
   surfaces: `production-render.env`,
   `input-artifacts/provider-manifest.production.json` plus the remaining B1-B10
   input artifacts, and the separate external runtime env file for
-  secret-bearing provider/runtime values. The packet also writes
+  secret-bearing provider/runtime values. The adjacent `capture_blockers`
+  section summarizes the current blocked lanes and missing blocker classes so
+  dispatcher handoff can start from one machine-readable report field instead
+  of re-parsing every row. The packet also writes
   `reports/mnemosyne-production-runtime.env.example`; copy that generated
   no-secret example to the real external runtime env path, set mode `0600`, and
   fill values there. After filling or changing packet inputs, refresh the

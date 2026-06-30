@@ -251,6 +251,22 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     assert "MNEMOSYNE_EMBEDDING_URL" in report["missing_provider_manifest_env_refs"]
     assert report["missing_input_artifact_count"] == 23
     assert "provider-manifest.production.json" not in report["missing_input_artifacts"]
+    blockers = report["capture_blockers"]
+    assert blockers["report_is_evidence"] is False
+    assert blockers["blocked_lane_count"] == len(blockers["blocked_lanes"])
+    assert set(blockers["blocked_lanes"]) == {
+        str(row["lane"]) for row in report["rows"] if not row["ready_for_capture"]
+    }
+    assert blockers["ready_lanes"] == []
+    assert blockers["types"]["render_environment"]["missing_count"] == 18
+    assert blockers["types"]["provider_manifest_environment"]["missing_count"] == 24
+    assert blockers["types"]["input_artifacts"]["missing_count"] == 23
+    assert blockers["types"]["packet_docs"]["missing_count"] == 0
+    assert [item["kind"] for item in blockers["recommended_order"]] == [
+        "render_environment",
+        "provider_manifest_environment",
+        "input_artifacts",
+    ]
     inventory = report["operator_input_inventory"]
     assert set(inventory) == {
         "input_artifacts",
@@ -308,6 +324,8 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     assert "missing read-only packet guidance docs" in readme
     assert "reports/mnemosyne-production-runtime.env.example" in readme
     assert "Post-Capture Custody Verification" in markdown
+    assert "Capture Blockers" in markdown
+    assert "`provider_manifest_environment`: `24` missing" in markdown
     assert "Operator Input Inventory" in markdown
     assert "### production-render.env" in markdown
     assert "### Runtime Env File" in markdown
@@ -673,6 +691,15 @@ def test_prepare_production_evidence_custody_runtime_env_file_satisfies_refs_wit
     assert report["runtime_env_file_loaded"] is True
     assert report["runtime_env_file_values_redacted"] is True
     assert "MNEMOSYNE_EMBEDDING_URL" not in report["missing_provider_manifest_env_refs"]
+    assert (
+        report["capture_blockers"]["types"]["provider_manifest_environment"][
+            "missing_count"
+        ]
+        == len(report["missing_provider_manifest_env_refs"])
+    )
+    assert report["capture_blockers"]["types"]["provider_manifest_environment"][
+        "missing_count"
+    ] == 23
     inventory = report["operator_input_inventory"]
     assert inventory["runtime_env_file"]["loaded_for_readiness"] is True
     assert (

@@ -382,6 +382,83 @@ def _phase_plan(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ]
 
 
+def _capture_blockers(
+    *,
+    rows: list[dict[str, Any]],
+    missing_render_env: set[str],
+    global_missing_render_env: list[str],
+    missing_provider_env_refs: list[str],
+    missing_input_artifacts: list[str],
+    packet_docs_missing: list[str],
+) -> dict[str, Any]:
+    blocked_lanes = sorted(
+        str(row["lane"])
+        for row in rows
+        if row.get("lane") and not row.get("ready_for_capture")
+    )
+    ready_lanes = sorted(
+        str(row["lane"])
+        for row in rows
+        if row.get("lane") and row.get("ready_for_capture")
+    )
+
+    render_blocked_lanes = sorted(
+        str(row["lane"])
+        for row in rows
+        if row.get("lane") and row.get("missing_render_environment")
+    )
+    if global_missing_render_env:
+        render_blocked_lanes = blocked_lanes
+
+    provider_blocked_lanes = sorted(
+        str(row["lane"])
+        for row in rows
+        if row.get("lane") and row.get("missing_provider_manifest_env_refs")
+    )
+    artifact_blocked_lanes = sorted(
+        str(row["lane"])
+        for row in rows
+        if row.get("lane") and row.get("missing_input_artifacts")
+    )
+
+    blocker_types: dict[str, dict[str, Any]] = {
+        "render_environment": {
+            "missing_count": len(missing_render_env),
+            "blocked_lanes": render_blocked_lanes,
+            "global_missing": global_missing_render_env,
+            "values_redacted": True,
+        },
+        "provider_manifest_environment": {
+            "missing_count": len(missing_provider_env_refs),
+            "blocked_lanes": provider_blocked_lanes,
+            "values_redacted": True,
+        },
+        "input_artifacts": {
+            "missing_count": len(missing_input_artifacts),
+            "blocked_lanes": artifact_blocked_lanes,
+            "values_redacted": False,
+        },
+        "packet_docs": {
+            "missing_count": len(packet_docs_missing),
+            "blocked_lanes": blocked_lanes if packet_docs_missing else [],
+            "values_redacted": False,
+        },
+    }
+    recommended_order = [
+        {"kind": kind, **details}
+        for kind, details in blocker_types.items()
+        if details["missing_count"]
+    ]
+    return {
+        "report_is_evidence": False,
+        "ready_lanes": ready_lanes,
+        "blocked_lanes": blocked_lanes,
+        "blocked_lane_count": len(blocked_lanes),
+        "types": blocker_types,
+        "recommended_order": recommended_order,
+    }
+
+
 def _operator_input_inventory(
     *,
     input_dir: Path,
@@ -532,6 +609,30 @@ def _write_markdown(report: dict[str, Any], path: Path) -> None:
         lines.append(
             f"- Phase {phase['phase']} - {phase['title']}: `{phase['status']}`"
         )
+    blockers = report["capture_blockers"]
+    lines.extend(
+        [
+            "",
+            "## Capture Blockers",
+            "",
+            f"- Blocked lanes: `{blockers['blocked_lane_count']}`",
+        ]
+    )
+    if blockers["blocked_lanes"]:
+        lines.extend(f"- `{lane}`" for lane in blockers["blocked_lanes"])
+    else:
+        lines.append("- None")
+    lines.extend(["", "### Recommended Order", ""])
+    if blockers["recommended_order"]:
+        for item in blockers["recommended_order"]:
+            lines.append(
+                f"- `{item['kind']}`: `{item['missing_count']}` missing"
+            )
+            if item["blocked_lanes"]:
+                lanes = ", ".join(f"`{lane}`" for lane in item["blocked_lanes"])
+                lines.append(f"  - Blocked lanes: {lanes}")
+    else:
+        lines.append("- None")
     lines.extend(
         [
             "",
@@ -692,8 +793,9 @@ README remains static guidance. It does not overwrite `production-render.env`,
 This README is static guidance and does not carry current readiness status.
 After each refresh, read `reports/tier-b-gap-report.md` or
 `reports/tier-b-gap-report.json` for the current `ready_for_capture` value,
-and copy `reports/mnemosyne-production-runtime.env.example` to the external
-runtime env path before filling secret-bearing values.
+`capture_blockers`, and `operator_input_inventory`, then copy
+`reports/mnemosyne-production-runtime.env.example` to the external runtime env
+path before filling secret-bearing values.
 
 ## Capture Boundary
 
@@ -887,6 +989,14 @@ def refresh_report(
             missing_provider_env_refs=missing_provider_env_refs,
             missing_input_artifacts=missing_input_artifacts,
             runtime_env_file_loaded=runtime_env_file is not None,
+        ),
+        "capture_blockers": _capture_blockers(
+            rows=rows,
+            missing_render_env=missing_render_env,
+            global_missing_render_env=global_missing_render_env,
+            missing_provider_env_refs=missing_provider_env_refs,
+            missing_input_artifacts=missing_input_artifacts,
+            packet_docs_missing=packet_docs["missing"],
         ),
         "rows": rows,
         "phase_plan": _phase_plan(rows),
