@@ -6,7 +6,7 @@ usage() {
   cat >&2 <<'USAGE'
 Usage:
   infra/scripts/capture-production-evidence.sh [--env-file ENV] --preflight-only SOAK_MANIFEST OUT_ROOT
-  infra/scripts/capture-production-evidence.sh [--env-file ENV] [--fingerprint-record-output PATH] SOAK_MANIFEST OUT_ROOT
+  infra/scripts/capture-production-evidence.sh [--env-file ENV] --fingerprint-record-output PATH SOAK_MANIFEST OUT_ROOT
 
 Runs the existing production evidence path:
   1. Validate that SOAK_MANIFEST is explicitly production-scoped.
@@ -51,9 +51,10 @@ Options:
                     writes source/operator manifest copies, retained input
                     artifact snapshots, and redaction-scan.json for setup proof.
   --fingerprint-record-output PATH
-                    Optional full-capture-only external JSON record for the
-                    bundle fingerprint. Must be absolute, external, outside the
-                    evidence bundle, non-symlinked, and must not already exist.
+                    Required for full capture. Writes an external JSON record
+                    for the bundle fingerprint. Must be absolute, external,
+                    outside the evidence bundle, non-symlinked, and must not
+                    already exist.
 USAGE
 }
 
@@ -181,6 +182,11 @@ PY
 if [ -e "${OUT_ROOT}" ] || [ -L "${OUT_ROOT}" ]; then
   echo "ERROR: production evidence output root must not already exist: ${OUT_ROOT}" >&2
   exit 65
+fi
+
+if [ "${PREFLIGHT_ONLY}" != "1" ] && [ -z "${FINGERPRINT_RECORD_OUTPUT}" ]; then
+  echo "ERROR: full production capture requires --fingerprint-record-output for external custody review" >&2
+  exit 64
 fi
 
 if [ -n "${FINGERPRINT_RECORD_OUTPUT}" ]; then
