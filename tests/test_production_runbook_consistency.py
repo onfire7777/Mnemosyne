@@ -76,20 +76,22 @@ def test_every_row_runbook_points_to_universal_preflight_capture_flow() -> None:
         assert "## Production Capture" in text, path
         assert "infra/PRODUCTION-EVIDENCE.md" in text, path
         assert (
-            'infra/scripts/capture-production-evidence.sh --preflight-only "$SOAK_MANIFEST" '
-            '"$PRECHECK_OUTPUT_ROOT"' in text
+            'infra/scripts/capture-production-evidence.sh --env-file "$RUNTIME_ENV_FILE" '
+            '--preflight-only "$SOAK_MANIFEST" "$PRECHECK_OUTPUT_ROOT"' in text
         ), path
         assert "setup proof only" in text, path
         assert "does not flip this row to Done" in text, path
         assert (
-            'infra/scripts/capture-production-evidence.sh --fingerprint-record-output '
-            '"$FINGERPRINT_RECORD" "$SOAK_MANIFEST" "$OUT_ROOT"'
+            'infra/scripts/capture-production-evidence.sh --env-file "$RUNTIME_ENV_FILE" '
+            '--fingerprint-record-output "$FINGERPRINT_RECORD" "$SOAK_MANIFEST" "$OUT_ROOT"'
             in text
         ), path
         assert "`FINGERPRINT_RECORD`" in text, path
+        assert "`RUNTIME_ENV_FILE`" in text, path
         assert (
             "Use absolute external paths outside the repo for `SOAK_MANIFEST`, "
-            "`PRECHECK_OUTPUT_ROOT`, `OUT_ROOT`, `FINGERPRINT_RECORD`, and the "
+            "`PRECHECK_OUTPUT_ROOT`, `OUT_ROOT`, `FINGERPRINT_RECORD`, "
+            "`RUNTIME_ENV_FILE`, and the "
             "`MNEMOSYNE_PROD_EVIDENCE_DIR` input-artifact directory." in text
         ), path
         assert "reviewers must run" in text, path
@@ -149,8 +151,12 @@ def test_runbook_index_and_ops_handoff_document_preflight_scope() -> None:
         encoding="utf-8",
     )
     assert (
-        'capture-production-evidence.sh --preflight-only "$SOAK_MANIFEST" '
-        '"$PRECHECK_OUTPUT_ROOT"' in ops_handoff
+        'capture-production-evidence.sh --env-file "$RUNTIME_ENV_FILE" '
+        '--preflight-only "$SOAK_MANIFEST" "$PRECHECK_OUTPUT_ROOT"' in ops_handoff
+    )
+    assert (
+        'capture-production-evidence.sh --env-file "$RUNTIME_ENV_FILE" '
+        '--fingerprint-record-output "$FINGERPRINT_RECORD"' in ops_handoff
     )
 
 

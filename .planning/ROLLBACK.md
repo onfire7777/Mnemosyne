@@ -20,10 +20,11 @@ good release artifact.
    referenced by `MNEMOSYNE_PROD_EVIDENCE_DIR`; it must not point inside the
    repository.
 7. Run
-   `infra/scripts/capture-production-evidence.sh --preflight-only "$SOAK_MANIFEST" "$PRECHECK_OUTPUT_ROOT"`
+   `infra/scripts/capture-production-evidence.sh --env-file "$RUNTIME_ENV_FILE" --preflight-only "$SOAK_MANIFEST" "$PRECHECK_OUTPUT_ROOT"`
    as setup proof only; `PRECHECK_OUTPUT_ROOT` must be a new absolute external
-   custody path outside the repository.
-8. Run `infra/scripts/capture-production-evidence.sh --fingerprint-record-output "$FINGERPRINT_RECORD" "$SOAK_MANIFEST" "$OUT_ROOT"`;
+   custody path outside the repository and `RUNTIME_ENV_FILE` must be the
+   strict external mode-`0600` runtime/provider env file.
+8. Run `infra/scripts/capture-production-evidence.sh --env-file "$RUNTIME_ENV_FILE" --fingerprint-record-output "$FINGERPRINT_RECORD" "$SOAK_MANIFEST" "$OUT_ROOT"`;
    `OUT_ROOT` must be a new absolute external custody path outside the
    repository and must not already exist; the capture wrapper writes the
    production bundle there.

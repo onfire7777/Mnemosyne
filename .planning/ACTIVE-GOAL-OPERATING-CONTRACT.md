@@ -72,9 +72,10 @@ limited to defects that directly block that path:
    `render-production-soak-manifest.sh --runtime-env-file` for readiness and
    `capture-production-evidence.sh --env-file` for capture.
 3. Capture full production bundles with
-   `capture-production-evidence.sh --fingerprint-record-output <external-json>`
-   so the expected offline custody fingerprint is retained outside the bundle
-   under review.
+   `capture-production-evidence.sh --env-file <runtime-env> --fingerprint-record-output <external-json>`
+   so secret-bearing runtime/provider values stay in the strict external
+   runtime env file and the expected offline custody fingerprint is retained
+   outside the bundle under review.
 4. Fill the shared provider stack first because
    `provider-manifest.production.json` unblocks B1, B2, B4, B6, B7, B9, and B10.
 5. Capture keystone rows B1 retrieval and B2 tenant/auth evidence.
