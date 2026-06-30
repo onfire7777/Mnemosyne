@@ -408,6 +408,24 @@ def _write_render_env_file(tmp_path: Path, env: dict[str, str]) -> Path:
     return env_file
 
 
+def _write_runtime_env_file(
+    tmp_path: Path,
+    env: dict[str, str],
+    *,
+    names: list[str] | None = None,
+) -> Path:
+    runtime_env_file = tmp_path / "mnemosyne-production-runtime.env"
+    selected_names = names if names is not None else _provider_manifest_env_refs()
+    lines = [
+        f"export {name}={shlex.quote(env[name])}"
+        for name in selected_names
+        if name in env
+    ]
+    runtime_env_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    runtime_env_file.chmod(0o600)
+    return runtime_env_file
+
+
 def _populate_required_input_artifacts(
     env: dict[str, str], *, suite_payload: str = '{"cases": []}\n'
 ) -> None:
@@ -782,6 +800,78 @@ def test_renderer_env_file_populates_required_production_values(tmp_path: Path) 
     assert env["MNEMOSYNE_PROD_TENANT"] not in proc.stdout
     assert str(env_file) not in proc.stdout
     assert proc.stderr == ""
+
+
+def test_renderer_runtime_env_file_populates_provider_refs_without_exporting(
+    tmp_path: Path,
+) -> None:
+    env = _filled_render_env(tmp_path)
+    _populate_required_input_artifacts(env)
+    render_env_file = _write_render_env_file(tmp_path, env)
+    runtime_env_file = _write_runtime_env_file(tmp_path, env)
+    process_env = _renderer_base_env()
+
+    proc = subprocess.run(
+        [
+            *RENDERER_CMD,
+            "--env-file",
+            str(render_env_file),
+            "--runtime-env-file",
+            str(runtime_env_file),
+            "--check-environment",
+        ],
+        cwd=REPO,
+        env=process_env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    payload = json.loads(proc.stdout)
+
+    assert payload["ok"] is True
+    assert payload["runtime_env_file_loaded"] is True
+    assert payload["runtime_env_file_values_redacted"] is True
+    assert payload["provider_manifest_env_refs"] == _provider_manifest_env_refs()
+    assert payload["missing_provider_manifest_env_refs"] == []
+    assert payload["provider_manifest_environment_complete"] is True
+    assert env["MNEMOSYNE_EMBEDDING_URL"] not in proc.stdout
+    assert env["MNEMOSYNE_RERANKER_URL"] not in proc.stdout
+    assert str(runtime_env_file) not in proc.stdout
+    assert proc.stderr == ""
+
+
+def test_renderer_runtime_env_file_rejects_unexpected_keys(tmp_path: Path) -> None:
+    env = _filled_render_env(tmp_path)
+    _populate_required_input_artifacts(env)
+    render_env_file = _write_render_env_file(tmp_path, env)
+    runtime_env_file = tmp_path / "mnemosyne-production-runtime.env"
+    runtime_env_file.write_text(
+        'export MNEMOSYNE_EMBEDDING_URL="https://providers.example.com/embedding"\n'
+        'export NOT_ALLOWED_RUNTIME_SECRET="nope"\n',
+        encoding="utf-8",
+    )
+    runtime_env_file.chmod(0o600)
+
+    proc = subprocess.run(
+        [
+            *RENDERER_CMD,
+            "--env-file",
+            str(render_env_file),
+            "--runtime-env-file",
+            str(runtime_env_file),
+            "--check-environment",
+        ],
+        cwd=REPO,
+        env=_renderer_base_env(),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert proc.returncode == 65
+    assert "--runtime-env-file failed strict loading" in proc.stderr
+    assert "unexpected dotenv key 'NOT_ALLOWED_RUNTIME_SECRET'" in proc.stderr
+    assert proc.stdout == ""
 
 
 def test_renderer_env_file_rejects_unsafe_dotenv_values(tmp_path: Path) -> None:

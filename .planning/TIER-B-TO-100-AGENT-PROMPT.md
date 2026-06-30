@@ -33,7 +33,13 @@ blueprint invariant:
 
 ## 1. WHERE THE PROJECT STANDS — verified, do not re-derive
 
-- **Position:** ~82% blended; branch `main`; latest verified baseline for the Tier-B custody/env-file handoff is `5491147` with GitHub CI green (run `28434897892`: Unit + drift, Postgres integration, and ruff). All 10 audit rows are `Partial`. Canonical checkout `/Users/admin/Mnemosyne` → `onfire7777/Mnemosyne`.
+- **Position:** ~82% blended; branch `main`; all 10 audit rows are
+  `Partial`. Canonical checkout `/Users/admin/Mnemosyne` →
+  `onfire7777/Mnemosyne`. The verified baseline is intentionally moving:
+  before acting, refresh it from live evidence with `git log -1 --oneline`,
+  `git status --short --branch`, and the GitHub Actions run for current `HEAD`.
+  Do not preserve older commit/run-id text as the latest baseline after new
+  Tier-B handoff commits land.
 - **6/6 §16 SLOs proven** (Wave-5 definitive run, 2026-06-25; evidence in `eval/calibration/report.json` + `docs/ROADMAP-TO-100.md`):
 
   | SLO | Target | Measured |
@@ -48,7 +54,15 @@ blueprint invariant:
 
 - **Tier-A landed (all Done on `main`, each with a forcing-function `xfail→green` test):** A1 local embedding seam *(keystone)*, A2 calibrated confidence/ECE *(keystone — flipped the 6th SLO)*, A3 `max_supersession_rate 0.05`, A4 `max_prune_fraction_per_pass 0.02`, A5 `sanitize_retrieved_text`, A6 cadence bounds [5 steps/24h], A7 cf-gate `cold_loop_counterfactual_trusted`, A8 ignition switch, A9 ACT-R demotion, A10 corroborated-erasure cascade, A12 cached-PPR column `graph_ppr_cache`, A13 dirty-set recompute, A14 `--object`/`Preference.access_policy`. **A11** (hosted-MCP transport, FR-9) is **evidence-only** — local soaks green; only write code if B3 production evidence exposes a concrete transport defect.
 - **Known, explicitly-tracked gaps (do not paper over):** Hard-QA multi-hop answer-synthesis recall/nDCG **0.625 / 0.594** (non-headline, tracked separately); **FR-3 hybrid retrieval runs locally on `HashingEmbeddingProvider`** (BLAKE2b, dims=256) — real `HttpEmbeddingProvider` is the B1 evidence path; cold-loop (FR-17) gains are **unproven by design** and must stay shadow-only.
-- **The honest blocker:** `render-production-soak-manifest.sh --check-environment` currently exits with `blocked_reason=missing_required_environment`; inspect `missing_environment` for the **19 unset `MNEMOSYNE_PROD_*` render variables**. The renderer also reports **24 production input artifacts** and `parity_row_readiness` routing across the 10 rows. Once render vars are present, it continues to validate the external provider manifest, provider env refs, C2PA tool, and input-artifact custody without printing secret values or absolute custody paths.
+- **The honest blocker:** `render-production-soak-manifest.sh --check-environment`
+  currently exits until the external Tier-B packet supplies every required
+  render value, provider-manifest env ref, C2PA executable, and production
+  input artifact. Inspect the live JSON fields (`missing_environment`,
+  `missing_render_environment`, `missing_provider_manifest_env_refs`,
+  `missing_input_artifacts`, and `ready_for_capture`) instead of relying on a
+  hard-coded count from an older baseline. Readiness output routes work to the
+  right row owner; only production capture plus offline custody verification can
+  flip a row.
 
 ## 2. THE BLUEPRINT YOU ARE COMPLETING — the spec, not optional
 
@@ -84,7 +98,7 @@ Read `docs/blueprint/Mnemosyne-v2-Build-Blueprint.md` and `.planning/BLUEPRINT-P
 
 ## 5. EXECUTION PLAN
 
-**Phase 0 — Readiness baseline (no provisioning).** Create a fresh external custody packet with `infra/scripts/prepare-production-evidence-custody.py /secure/path/to/mnemosyne-tier-b-custody`. It copies `production-render.env`, the shared provider-manifest template, operator docs, and a row-scoped `reports/tier-b-gap-report.{json,md}` worklist. The helper exits nonzero while evidence is missing; that is expected setup feedback. After filling `production-render.env` and `input-artifacts/`, run `infra/scripts/prepare-production-evidence-custody.py --refresh /secure/path/to/mnemosyne-tier-b-custody`; refresh updates only the reports and preserves operator inputs. Then run `render-production-soak-manifest.sh --env-file /secure/path/to/mnemosyne-tier-b-custody/production-render.env --check-environment` until the gap report shows every `MNEMOSYNE_PROD_*` var, provider-manifest env ref, input artifact, and `parity_row_readiness` row is ready.
+**Phase 0 — Readiness baseline (no provisioning).** Create a fresh external custody packet with `infra/scripts/prepare-production-evidence-custody.py /secure/path/to/mnemosyne-tier-b-custody`. It copies `production-render.env`, the shared provider-manifest template, operator docs, and a row-scoped `reports/tier-b-gap-report.{json,md}` worklist. The helper exits nonzero while evidence is missing; that is expected setup feedback. After filling `production-render.env` and `input-artifacts/`, run `infra/scripts/prepare-production-evidence-custody.py --runtime-env-file /secure/path/to/mnemosyne-production-runtime.env --refresh /secure/path/to/mnemosyne-tier-b-custody`; refresh updates only the reports and preserves operator inputs. Then run `render-production-soak-manifest.sh --env-file /secure/path/to/mnemosyne-tier-b-custody/production-render.env --runtime-env-file /secure/path/to/mnemosyne-production-runtime.env --check-environment` until the gap report shows every `MNEMOSYNE_PROD_*` var, provider-manifest env ref, input artifact, and `parity_row_readiness` row is ready.
 
 **Phase 1 — Shared provider stack (unblocks 7/10) ← first.** Provision + wire, then fill `provider-manifest.production.json` (`forbid_local: true`): production Postgres (pgvector 1024-dim HNSW + **ParadeDB/BM25** lexical + **Apache AGE** graph), **embedding** (`MNEMOSYNE_EMBEDDING_URL/MODEL/API_KEY`) + **reranker** (`MNEMOSYNE_RERANKER_URL/MODEL/API_KEY`), **OIDC/IdP/Keycloak** (`MNEMOSYNE_PROVIDER_OIDC_ISSUER/AUDIENCE/JWKS_URL` + authz policy). Re-run `--check-environment` until all referenced provider vars resolve.
 
@@ -120,8 +134,8 @@ Per `infra/PRODUCTION-EVIDENCE.md` (the canonical 28-command capture/acceptance 
 
 1. Read the row runbook. 2. Provision/wire the real service (or consume operator endpoint). 3. Produce the row's `*-ops-bundle.json` (+ artifacts) into `MNEMOSYNE_PROD_EVIDENCE_DIR` (relative refs). 4. Render & preflight:
 ```bash
-infra/scripts/render-production-soak-manifest.sh --env-file /secure/path/to/mnemosyne-tier-b-custody/production-render.env --check-environment
-infra/scripts/render-production-soak-manifest.sh --env-file /secure/path/to/mnemosyne-tier-b-custody/production-render.env --output /secure/path/production-soak-manifest.json
+infra/scripts/render-production-soak-manifest.sh --env-file /secure/path/to/mnemosyne-tier-b-custody/production-render.env --runtime-env-file /secure/path/to/mnemosyne-production-runtime.env --check-environment
+infra/scripts/render-production-soak-manifest.sh --env-file /secure/path/to/mnemosyne-tier-b-custody/production-render.env --runtime-env-file /secure/path/to/mnemosyne-production-runtime.env --output /secure/path/production-soak-manifest.json
 infra/scripts/capture-production-evidence.sh --env-file /secure/path/to/mnemosyne-production-runtime.env --preflight-only /secure/path/production-soak-manifest.json /secure/path/preflight-out
 ```
 5. Capture: `infra/scripts/capture-production-evidence.sh --env-file /secure/path/to/mnemosyne-production-runtime.env /secure/path/production-soak-manifest.json /secure/path/evidence-out`; the wrapper runs `deployment-soak` and then `release-audit --evidence-manifest "$OUT_ROOT/evidence/manifest.json" --require-production-validated --require-provider-forbid-local`. Omit `--env-file` only when the equivalent runtime/provider variables are already exported by a trusted secret manager or supervisor.

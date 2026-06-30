@@ -26,6 +26,9 @@ CLI commands consumed by `deployment-soak` and `release-audit`.
 - `infra/scripts/render-production-soak-manifest.sh` - canonical renderer for
   non-secret `MNEMOSYNE_PROD_*` placeholders; refuses repo-local output by
   default and validates the production command profile before writing. Its
+  optional `--runtime-env-file` lets readiness checks validate provider-manifest
+  env refs from the same strict external runtime/provider file later passed to
+  capture, without retaining secret values or shell-sourcing them. Its
   `--check-environment` JSON exposes `parity_row_readiness` so the flat
   manifest-referenced input-artifact inventory can be assigned to the matching
   Tier-B row runbook without exposing custody paths. The row entries also scope
