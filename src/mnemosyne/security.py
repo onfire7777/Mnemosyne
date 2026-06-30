@@ -392,6 +392,24 @@ def _claim_contains(value: Any, expected: tuple[str, ...]) -> bool:
     return bool(_claim_values(value).intersection(expected))
 
 
+def _claim_contains_all(value: Any, expected: tuple[str, ...]) -> bool:
+    return set(expected).issubset(_claim_values(value))
+
+
+def _positive_int(value: Any, *, field: str) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise SessionAuthError(f"OIDC authz rule {field} is invalid") from exc
+    if parsed <= 0:
+        raise SessionAuthError(f"OIDC authz rule {field} must be positive")
+    return parsed
+
+
+def _elevated_oidc_rule(role: str, source_trust_tier: int) -> bool:
+    return role in {"consolidator", "operator"} or source_trust_tier <= int(TrustTier.VERIFIED)
+
+
 class OidcAuthorizationPolicy:
     """Map verified IdP claims to Mnemosyne authorization claims."""
 
@@ -437,9 +455,14 @@ class OidcAuthorizationPolicy:
         user_id: str,
         expires_at: int | None,
         session_id: str | None,
+        now: int | None = None,
     ) -> SessionIdentity:
         self._verify_client(payload)
-        matches = [rule for rule in self.rules if self._rule_matches(rule, payload, tenant_id=tenant_id)]
+        matches = [
+            rule
+            for rule in self.rules
+            if self._rule_matches(rule, payload, tenant_id=tenant_id, now=now)
+        ]
         if not matches:
             raise SessionAuthError("OIDC token is not authorized")
         if len(matches) > 1:
@@ -476,6 +499,10 @@ class OidcAuthorizationPolicy:
                     "tenant_matcher_count": len(rule["tenant_ids"]),
                     "claim_equals_fields": sorted(rule["claim_equals"]),
                     "claim_contains_fields": sorted(rule["claim_contains"]),
+                    "elevated": bool(rule["elevated"]),
+                    "required_acr_configured": bool(rule["required_acr"]),
+                    "required_amr_configured": bool(rule["required_amr"]),
+                    "auth_time_required": rule["max_auth_age_seconds"] is not None,
                 }
                 for index, rule in enumerate(self.rules)
             ],
@@ -500,6 +527,9 @@ class OidcAuthorizationPolicy:
                         claim: list(expected)
                         for claim, expected in sorted(rule["claim_contains"].items())
                     },
+                    "required_acr": list(rule["required_acr"]),
+                    "required_amr": list(rule["required_amr"]),
+                    "max_auth_age_seconds": rule["max_auth_age_seconds"],
                     "role": str(rule["role"]),
                     "source_trust_tier": int(rule["source_trust_tier"]),
                 }
@@ -528,7 +558,18 @@ class OidcAuthorizationPolicy:
     def _normalize_rule(rule: Mapping[str, Any]) -> dict[str, Any]:
         if not isinstance(rule, Mapping):
             raise SessionAuthError("OIDC authz rule must be an object")
-        allowed_fields = {"name", "tenant_ids", "tenants", "claim_equals", "claim_contains", "role", "source_trust_tier"}
+        allowed_fields = {
+            "name",
+            "tenant_ids",
+            "tenants",
+            "claim_equals",
+            "claim_contains",
+            "required_acr",
+            "required_amr",
+            "max_auth_age_seconds",
+            "role",
+            "source_trust_tier",
+        }
         if set(rule).difference(allowed_fields):
             raise SessionAuthError("OIDC authz rule contains unknown fields")
         role = rule.get("role")
@@ -540,11 +581,46 @@ class OidcAuthorizationPolicy:
             raise SessionAuthError("OIDC authz rule source_trust_tier is invalid") from exc
         if source_trust_tier not in {int(item) for item in TrustTier}:
             raise SessionAuthError("OIDC authz rule source_trust_tier is out of range")
-        tenant_ids = _nonempty_tuple(_value_tuple(rule.get("tenant_ids", rule.get("tenants", ()))), field="tenant_ids", allow_empty=True)
+        tenant_ids = _nonempty_tuple(
+            _value_tuple(rule.get("tenant_ids", rule.get("tenants", ()))),
+            field="tenant_ids",
+            allow_empty=True,
+        )
         claim_equals = _normalize_matchers(rule.get("claim_equals", {}), field="claim_equals")
         claim_contains = _normalize_matchers(rule.get("claim_contains", {}), field="claim_contains")
-        if not tenant_ids and not claim_equals and not claim_contains:
+        required_acr = _nonempty_tuple(
+            _value_tuple(rule.get("required_acr", ())),
+            field="required_acr",
+            allow_empty=True,
+        )
+        required_amr = _nonempty_tuple(
+            _value_tuple(rule.get("required_amr", ())),
+            field="required_amr",
+            allow_empty=True,
+        )
+        max_auth_age_seconds = (
+            _positive_int(rule["max_auth_age_seconds"], field="max_auth_age_seconds")
+            if "max_auth_age_seconds" in rule
+            else None
+        )
+        elevated = _elevated_oidc_rule(str(role), source_trust_tier)
+        if (
+            not tenant_ids
+            and not claim_equals
+            and not claim_contains
+            and not required_acr
+            and not required_amr
+        ):
             raise SessionAuthError("OIDC authz rule requires at least one matcher")
+        if elevated:
+            if not claim_equals and not claim_contains:
+                raise SessionAuthError("elevated OIDC authz rule requires a non-tenant claim matcher")
+            if not required_acr:
+                raise SessionAuthError("elevated OIDC authz rule requires required_acr")
+            if not required_amr:
+                raise SessionAuthError("elevated OIDC authz rule requires required_amr")
+            if max_auth_age_seconds is None:
+                raise SessionAuthError("elevated OIDC authz rule requires max_auth_age_seconds")
         return {
             "name": str(rule.get("name", "")).strip() or None,
             "role": str(role),
@@ -552,10 +628,20 @@ class OidcAuthorizationPolicy:
             "tenant_ids": tenant_ids,
             "claim_equals": claim_equals,
             "claim_contains": claim_contains,
+            "required_acr": required_acr,
+            "required_amr": required_amr,
+            "max_auth_age_seconds": max_auth_age_seconds,
+            "elevated": elevated,
         }
 
     @staticmethod
-    def _rule_matches(rule: Mapping[str, Any], payload: Mapping[str, Any], *, tenant_id: str) -> bool:
+    def _rule_matches(
+        rule: Mapping[str, Any],
+        payload: Mapping[str, Any],
+        *,
+        tenant_id: str,
+        now: int | None,
+    ) -> bool:
         tenant_ids = rule["tenant_ids"]
         if tenant_ids and tenant_id not in tenant_ids:
             return False
@@ -564,6 +650,21 @@ class OidcAuthorizationPolicy:
                 return False
         for claim, expected in rule["claim_contains"].items():
             if not _claim_contains(payload.get(claim), expected):
+                return False
+        if rule["required_acr"] and not _claim_equals(payload.get("acr"), rule["required_acr"]):
+            return False
+        if rule["required_amr"] and not _claim_contains_all(payload.get("amr"), rule["required_amr"]):
+            return False
+        max_auth_age_seconds = rule["max_auth_age_seconds"]
+        if max_auth_age_seconds is not None:
+            try:
+                auth_time = int(payload.get("auth_time"))
+            except (TypeError, ValueError):
+                return False
+            now_ts = int(time.time()) if now is None else int(now)
+            if auth_time > now_ts:
+                return False
+            if now_ts - auth_time > int(max_auth_age_seconds):
                 return False
         return True
 
@@ -702,7 +803,7 @@ class OidcJwtVerifier:
             raise SessionAuthError("OIDC JWKS key alg does not match token alg")
         self._verify_signature(algorithm, key, signing_input, signature)
         self._verify_registered_claims(payload, now=now_ts)
-        return self._identity_from_claims(payload)
+        return self._identity_from_claims(payload, now=now_ts)
 
     @staticmethod
     def _decode_compact_jwt(token: str) -> tuple[dict[str, Any], dict[str, Any], bytes, bytes]:
@@ -816,7 +917,7 @@ class OidcJwtVerifier:
             if iat_ts > now_ts + self.leeway_seconds:
                 raise SessionAuthError("OIDC token issued-at is in the future")
 
-    def _identity_from_claims(self, payload: Mapping[str, Any]) -> SessionIdentity:
+    def _identity_from_claims(self, payload: Mapping[str, Any], *, now: int | None) -> SessionIdentity:
         tenant_id = str(self._required_claim(payload, self.tenant_claim))
         user_id = str(self._required_claim(payload, self.user_claim))
         session_id = payload.get(self.session_id_claim)
@@ -828,6 +929,7 @@ class OidcJwtVerifier:
                 user_id=user_id,
                 expires_at=int(payload["exp"]),
                 session_id=normalized_session_id,
+                now=now,
             )
         identity_payload = {
             "tenant_id": tenant_id,

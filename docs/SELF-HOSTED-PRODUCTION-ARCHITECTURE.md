@@ -97,6 +97,12 @@ byte-binding). The work is closing **intent-vs-enforcement** gaps and shipping *
      server refuse startup unless signed sessions, session-verifier custody, AES-GCM object
      encryption, and command-backed object-key custody are active. This is a pre-capture hardening
      gate only; it does not flip any Tier-B row without retained real-infra evidence.
+   - 2026-06-30 implementation note: elevated OIDC authz rules now fail closed unless an
+     operator/consolidator or trust-tier≤1 mapping includes a non-tenant claim matcher,
+     `required_acr`, `required_amr`, and a positive `max_auth_age_seconds`; tokens must present
+     matching `acr`/`amr` and a fresh, non-future `auth_time`. This closes the tenant-only
+     elevation source gap; the Tier-B row still requires retained live Keycloak/MFA rollout
+     evidence.
 2. **Postgres role separation under RLS:** ship `mnemosyne_app` (NOSUPERUSER, NOBYPASSRLS, no
    DELETE/TRUNCATE), a separate `mnemosyne_consolidator` (sole write/destructive authority), and
    SELECT-only eval roles; an ops-check that live-probes `rolsuper`/`rolbypassrls` and fails if true.

@@ -680,3 +680,5 @@ Latest checkpoint (2026-06-28): T-SEC protected registry breadth is reconciled w
 
 Last session: 2026-06-28 America/Los_Angeles
 Stopped at: Phase 7 P5 operational-toggle retirement locally verified; strict-parity continuation is Tier-B production/operator evidence.
+
+Latest active checkpoint (2026-06-30): Continuing the unpaused exact-parity goal from the canonical checkout `/Users/admin/Mnemosyne`, with focus on Tier-B production/control gaps rather than redundant gates. The current source-hardening lane is closing the Phase 8 MFA elevation defect: elevated OIDC authz rules now require non-tenant claim evidence, configured `required_acr`/`required_amr`, positive `max_auth_age_seconds`, and fresh token `auth_time` before minting operator/consolidator or trust-tier≤1 sessions. This is source/control progress only; live Keycloak/MFA rollout evidence remains operator-run and required before Tier-B production parity can be claimed.

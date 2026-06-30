@@ -959,6 +959,7 @@ def _policy_authorization_outcome(policy: OidcAuthorizationPolicy, simulation: M
             user_id=str(simulation["user_id"]),
             expires_at=int(expires_at) if expires_at is not None else None,
             session_id=str(session_id) if session_id is not None else None,
+            now=int(simulation["now"]) if simulation.get("now") is not None else None,
         )
     except SessionAuthError as exc:
         return {"authorized": False, "error": str(exc)}

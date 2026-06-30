@@ -8,6 +8,7 @@
 #   - realm `mnemosyne` with client `mnemosyne-cli` (direct-access grant)
 #   - users analyst-a (operator, trust 0) and agent-a (agent, trust 3)
 #   - claims tenant_id / mnemosyne_role / mnemosyne_source_trust_tier / jti
+#   - auth_time / acr / amr for the MFA-gated production authz-policy contract
 #   - infra/keycloak/out/oidc.env  (source-able OIDC env for Mnemosyne)
 #   - infra/keycloak/out/jwks.json (snapshot of the live JWKS)
 #
@@ -101,7 +102,19 @@ import base64, json, sys
 tok = sys.argv[1].split(".")[1]
 tok += "=" * (-len(tok) % 4)
 claims = json.loads(base64.urlsafe_b64decode(tok))
-keep = ("iss","aud","sub","exp","jti","tenant_id","mnemosyne_role","mnemosyne_source_trust_tier")
+keep = (
+    "iss",
+    "aud",
+    "sub",
+    "exp",
+    "auth_time",
+    "acr",
+    "amr",
+    "jti",
+    "tenant_id",
+    "mnemosyne_role",
+    "mnemosyne_source_trust_tier",
+)
 print(json.dumps({k: claims.get(k) for k in keep}, indent=2, sort_keys=True))
 PY
 
