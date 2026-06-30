@@ -433,6 +433,9 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     ]
     row_action_plan = {item["lane"]: item for item in report["row_action_plan"]}
     assert set(row_action_plan) == {f"B{index}" for index in range(1, 11)}
+    assert [item["lane"] for item in report["row_action_plan"]] == [
+        f"B{index}" for index in range(1, 11)
+    ]
     assert row_action_plan["B1"]["packet_runbook"] == (
         "docs/runbooks/row-01-production-postgres-retrieval.md"
     )
@@ -440,6 +443,12 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
         f"{artifact_validation_script} B1"
     )
     assert row_action_plan["B1"]["blocker_counts"]["input_artifacts"] == 1
+    assert row_action_plan["B1"]["blocker_counts"]["global_render_environment"] == 2
+    assert row_action_plan["B1"]["blocker_counts"]["render_environment"] == 0
+    assert row_action_plan["B1"]["global_missing_render_environment"] == [
+        "MNEMOSYNE_PROD_CHANGE_TICKET",
+        "MNEMOSYNE_PROD_OPERATOR_NAME",
+    ]
     assert row_action_plan["B1"]["blocker_counts"][
         "primary_provider_manifest_environment"
     ] == 6
@@ -805,6 +814,18 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     assert f"`{artifact_validation_script} B1`" in row_action_plan_text
     assert "`retrieval-ops-bundle.json`" in row_action_plan_text
     assert "Primary provider refs" in row_action_plan_text
+    assert "| Row | Ready | Global render | Row render |" in row_action_plan_text
+    assert "`B1` Production Postgres retrieval | `false` | `2` | `0`" in (
+        row_action_plan_text
+    )
+    assert (
+        row_action_plan_text.index("| `B2` Tenant isolation and auth")
+        < row_action_plan_text.index("| `B10` Live parity suite")
+    )
+    assert "Fill global production-render.env placeholders shared by all rows" in (
+        row_action_plan_text
+    )
+    assert "Global missing render env" in row_action_plan_text
     assert "Row-owned missing provider-manifest env refs" in row_action_plan_text
     assert "Shared provider-stack blockers owned by other rows" in row_action_plan_text
     provider_env_plan_text = provider_env_action_plan_markdown.read_text(

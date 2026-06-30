@@ -50,6 +50,15 @@ row beside the existing provider-ref grouping. This removes another manual
 report-join step only; it does not create production values, artifacts, or
 strict-audit evidence.
 
+Latest checkpoint (2026-06-30): Tier-B row action plans now distinguish global
+non-secret render placeholders from row-scoped render placeholders and sort rows
+numerically from `B1` through `B10`. This fixes an operator-facing ambiguity
+where rows such as B1/B10 could show `Render=0` even while global render
+metadata (`MNEMOSYNE_PROD_CHANGE_TICKET`,
+`MNEMOSYNE_PROD_OPERATOR_NAME`) still blocked every row. The row plan remains a
+preparation aid only; readiness and evidence acceptance still require real
+operator inputs, wrapper capture, release audit, and offline custody review.
+
 Latest checkpoint (2026-06-30): Tier-B row action plans now separate
 row-owned provider-manifest env refs from shared provider-stack blockers. The
 generated `reports/row-action-plan.{json,md}` includes

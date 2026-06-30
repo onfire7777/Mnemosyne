@@ -1941,6 +1941,7 @@ def _row_action_plan(
     validation_plan: list[dict[str, Any]],
     input_artifact_validation_script: Path,
     provider_env_action_plan: list[dict[str, Any]],
+    global_missing_render_env: list[str],
 ) -> list[dict[str, Any]]:
     validators_by_lane: dict[str, list[dict[str, Any]]] = {}
     for command in validation_plan:
@@ -1982,6 +1983,9 @@ def _row_action_plan(
             }
 
     plan: list[dict[str, Any]] = []
+    global_missing_render = sorted(
+        item for item in global_missing_render_env if isinstance(item, str)
+    )
     for row in rows:
         lane = row.get("lane")
         if not isinstance(lane, str) or not lane:
@@ -2016,6 +2020,10 @@ def _row_action_plan(
             if isinstance(item, str)
         ]
         next_actions: list[str] = []
+        if global_missing_render:
+            next_actions.append(
+                "Fill global production-render.env placeholders shared by all rows."
+            )
         if missing_render:
             next_actions.append("Fill row-scoped production-render.env placeholders.")
         if primary_missing_provider:
@@ -2051,6 +2059,7 @@ def _row_action_plan(
                 "ready_for_capture": row.get("ready_for_capture") is True,
                 "blocker_counts": {
                     "render_environment": len(missing_render),
+                    "global_render_environment": len(global_missing_render),
                     "provider_manifest_environment": len(missing_provider),
                     "primary_provider_manifest_environment": len(
                         primary_missing_provider
@@ -2060,6 +2069,7 @@ def _row_action_plan(
                     ),
                     "input_artifacts": len(missing_artifacts),
                 },
+                "global_missing_render_environment": global_missing_render,
                 "missing_render_environment": missing_render,
                 "missing_provider_manifest_env_refs": missing_provider,
                 "primary_missing_provider_manifest_env_refs": primary_missing_provider,
@@ -2079,7 +2089,7 @@ def _row_action_plan(
                 "report_is_evidence": False,
             }
         )
-    return sorted(plan, key=lambda item: str(item["lane"]))
+    return sorted(plan, key=lambda item: _lane_sort_key(str(item["lane"])))
 
 
 def _write_row_action_plan_markdown(
@@ -2096,8 +2106,8 @@ def _write_row_action_plan_markdown(
         "shared blockers so row owners do not chase another row's provider",
         "handoff.",
         "",
-        "| Row | Ready | Render | Provider refs | Primary provider refs | Artifacts | Validator |",
-        "|---|---:|---:|---:|---:|---:|---|",
+        "| Row | Ready | Global render | Row render | Provider refs | Primary provider refs | Artifacts | Validator |",
+        "|---|---:|---:|---:|---:|---:|---:|---|",
     ]
     for row in plan:
         counts = row["blocker_counts"]
@@ -2105,6 +2115,7 @@ def _write_row_action_plan_markdown(
             "| "
             f"`{row['lane']}` {row.get('title') or ''} | "
             f"`{str(row['ready_for_capture']).lower()}` | "
+            f"`{counts['global_render_environment']}` | "
             f"`{counts['render_environment']}` | "
             f"`{counts['provider_manifest_environment']}` | "
             f"`{counts['primary_provider_manifest_environment']}` | "
@@ -2125,6 +2136,11 @@ def _write_row_action_plan_markdown(
             ]
         )
         lines.extend(f"  - {item}" for item in row["next_actions"])
+        if row["global_missing_render_environment"]:
+            lines.append("- Global missing render env:")
+            lines.extend(
+                f"  - `{item}`" for item in row["global_missing_render_environment"]
+            )
         if row["missing_render_environment"]:
             lines.append("- Missing render env:")
             lines.extend(f"  - `{item}`" for item in row["missing_render_environment"])
@@ -2821,6 +2837,7 @@ def refresh_report(
         validation_plan=input_artifact_validation_plan,
         input_artifact_validation_script=input_artifact_validation_script,
         provider_env_action_plan=provider_env_action_plan,
+        global_missing_render_env=global_missing_render_env,
     )
     render_env_action_plan = _render_env_action_plan(
         render_env_file=production_render_env,
