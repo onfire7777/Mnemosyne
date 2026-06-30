@@ -26,6 +26,10 @@ This runbook is the operator handoff for flipping the remaining Tier B parity ro
   section summarizes the current blocked lanes and missing blocker classes so
   dispatcher handoff can start from one machine-readable report field instead
   of re-parsing every row. The packet also writes
+  `reports/input-artifact-worklist.{json,md}` as an artifact-first preparation
+  aid that maps each required input artifact to its packet path, rows, row
+  runbooks, and consuming checks. It is not evidence; do not create placeholder
+  JSON, PEM, or bundle files to make readiness pass. The packet also writes
   `reports/mnemosyne-production-runtime.env.example` and
   `reports/next-commands.sh`; copy the generated no-secret runtime example to
   the real external runtime env path, set mode `0600`, and fill values there.

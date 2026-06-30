@@ -504,6 +504,146 @@ def _operator_input_inventory(
     }
 
 
+def _normalize_check(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    normalized: dict[str, Any] = {}
+    for key in ("name", "command", "option"):
+        item = value.get(key)
+        if isinstance(item, str) and item:
+            normalized[key] = item
+    lanes = value.get("parity_lanes")
+    if isinstance(lanes, list):
+        normalized["parity_lanes"] = sorted(
+            str(lane) for lane in lanes if isinstance(lane, str)
+        )
+    return normalized or None
+
+
+def _normalize_artifact_route(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    lane = value.get("lane")
+    if not isinstance(lane, str) or not lane:
+        return None
+    return {
+        "lane": lane,
+        "row": value.get("row"),
+        "title": value.get("title"),
+        "runbook": value.get("runbook"),
+        "packet_runbook": _packet_runbook_path(value.get("runbook")),
+    }
+
+
+def _input_artifact_worklist(
+    *,
+    input_dir: Path,
+    renderer_payload: dict[str, Any],
+    rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Build an artifact-first operator worklist without creating placeholders."""
+    artifacts: dict[str, dict[str, Any]] = {}
+    plan_items = renderer_payload.get("required_input_artifacts_plan", [])
+    if isinstance(plan_items, list):
+        for item in plan_items:
+            if not isinstance(item, dict):
+                continue
+            relative_path = item.get("relative_path")
+            if not isinstance(relative_path, str) or not relative_path:
+                continue
+            artifacts.setdefault(
+                relative_path,
+                {
+                    "relative_path": relative_path,
+                    "checks": [],
+                    "routes": [],
+                },
+            )
+            checks = item.get("checks", [])
+            if isinstance(checks, list):
+                artifacts[relative_path]["checks"].extend(
+                    check
+                    for check in (_normalize_check(check) for check in checks)
+                    if check is not None
+                )
+            routes = item.get("parity_routes", [])
+            if isinstance(routes, list):
+                artifacts[relative_path]["routes"].extend(
+                    route
+                    for route in (_normalize_artifact_route(route) for route in routes)
+                    if route is not None
+                )
+
+    for row in rows:
+        route = _normalize_artifact_route(row)
+        checks = [
+            check
+            for check in (_normalize_check(check) for check in row.get("checks", []))
+            if check is not None
+        ]
+        for relative_path in row.get("required_input_artifacts", []):
+            if not isinstance(relative_path, str) or not relative_path:
+                continue
+            entry = artifacts.setdefault(
+                relative_path,
+                {
+                    "relative_path": relative_path,
+                    "checks": [],
+                    "routes": [],
+                },
+            )
+            if route is not None:
+                entry["routes"].append(route)
+            if not entry["checks"]:
+                entry["checks"].extend(checks)
+
+    worklist: list[dict[str, Any]] = []
+    for relative_path in sorted(artifacts):
+        path = input_dir / relative_path
+        if path.is_symlink():
+            status = "invalid_symlink"
+            present = False
+        elif path.exists() and not path.is_file():
+            status = "invalid_not_file"
+            present = False
+        elif path.is_file():
+            status = "present"
+            present = True
+        else:
+            status = "missing"
+            present = False
+
+        checks = {
+            json.dumps(check, sort_keys=True): check
+            for check in artifacts[relative_path]["checks"]
+        }
+        routes = {
+            json.dumps(route, sort_keys=True): route
+            for route in artifacts[relative_path]["routes"]
+        }
+        worklist.append(
+            {
+                "relative_path": relative_path,
+                "packet_path": str(path),
+                "status": status,
+                "present": present,
+                "rows": sorted(
+                    routes.values(),
+                    key=lambda route: (str(route.get("lane", "")), str(route.get("row", ""))),
+                ),
+                "checks": sorted(
+                    checks.values(),
+                    key=lambda check: (
+                        str(check.get("command", "")),
+                        str(check.get("option", "")),
+                        str(check.get("name", "")),
+                    ),
+                ),
+            }
+        )
+    return worklist
+
+
 def _write_runtime_env_example(path: Path, *, provider_env_refs: list[str]) -> None:
     lines = [
         "# Mnemosyne production runtime env example.",
@@ -720,6 +860,33 @@ def _write_markdown(report: dict[str, Any], path: Path) -> None:
         lines.extend(f"- `{name}`" for name in inventory["input_artifacts"]["missing"])
     else:
         lines.append("- None")
+    lines.extend(
+        [
+            "",
+            "## Input Artifact Worklist",
+            "",
+            "This artifact-first list is generated from the production soak manifest",
+            "routing. It is a preparation aid only; do not create placeholder JSON",
+            "files to make readiness pass.",
+            "",
+            f"- Markdown: `{report['input_artifact_worklist_markdown']}`",
+            f"- JSON: `{report['input_artifact_worklist_json']}`",
+            "",
+        ]
+    )
+    for artifact in report["input_artifact_worklist"]:
+        rows = ", ".join(f"`{row['lane']}`" for row in artifact["rows"]) or "`unrouted`"
+        checks = ", ".join(
+            f"`{check.get('command', check.get('name', 'unknown'))}`"
+            for check in artifact["checks"]
+        ) or "`unknown`"
+        lines.extend(
+            [
+                f"- `{artifact['relative_path']}` - `{artifact['status']}`",
+                f"  - Rows: {rows}",
+                f"  - Checks: {checks}",
+            ]
+        )
     lines.extend(["", "## Rows", ""])
     for row in report["rows"]:
         lines.extend(
@@ -768,6 +935,39 @@ def _write_markdown(report: dict[str, Any], path: Path) -> None:
     _atomic_write_text(path, "\n".join(lines).rstrip() + "\n")
 
 
+def _write_input_artifact_worklist_markdown(
+    worklist: list[dict[str, Any]],
+    path: Path,
+) -> None:
+    lines = [
+        "# Mnemosyne Tier-B Input Artifact Worklist",
+        "",
+        "This report is an operator preparation aid, not production evidence.",
+        "Do not create placeholder JSON, PEM, or bundle files to make readiness pass.",
+        "",
+        "| Artifact | Status | Rows | Checks | Packet path |",
+        "|---|---|---|---|---|",
+    ]
+    for artifact in worklist:
+        rows = "<br>".join(
+            f"`{row['lane']}` {row.get('title') or ''}".strip()
+            for row in artifact["rows"]
+        ) or "`unrouted`"
+        checks = "<br>".join(
+            f"`{check.get('command', check.get('name', 'unknown'))}`"
+            for check in artifact["checks"]
+        ) or "`unknown`"
+        lines.append(
+            "| "
+            f"`{artifact['relative_path']}` | "
+            f"`{artifact['status']}` | "
+            f"{rows} | "
+            f"{checks} | "
+            f"`{artifact['packet_path']}` |"
+        )
+    _atomic_write_text(path, "\n".join(lines).rstrip() + "\n")
+
+
 def _write_readme(root: Path, report: dict[str, Any]) -> None:
     readme = root / "README.md"
     content = f"""# Mnemosyne Tier-B Production Evidence Custody Packet
@@ -794,15 +994,16 @@ infra/scripts/prepare-production-evidence-custody.py \\
 ```
 
 Refresh mode updates only `reports/tier-b-gap-report.json`,
-`reports/tier-b-gap-report.md`, `reports/next-commands.sh`, and missing
-read-only packet guidance docs; this README remains static guidance. It does
-not overwrite `production-render.env`, `input-artifacts/`, existing copied
-operator docs, or `manifests/`.
+`reports/tier-b-gap-report.md`, `reports/input-artifact-worklist.{{json,md}}`,
+`reports/next-commands.sh`, and missing read-only packet guidance docs; this
+README remains static guidance. It does not overwrite `production-render.env`,
+`input-artifacts/`, existing copied operator docs, or `manifests/`.
 
 ## Current Report
 
 - JSON: `reports/tier-b-gap-report.json`
 - Markdown: `reports/tier-b-gap-report.md`
+- Input artifact worklist: `reports/input-artifact-worklist.md`
 - Runnable command sequence: `reports/next-commands.sh`
 - Runtime env example: `reports/mnemosyne-production-runtime.env.example`
 
@@ -991,6 +1192,8 @@ def refresh_report(
     production_soak_manifest = manifests_dir / "production-soak-manifest.json"
     runtime_env_example = reports_dir / "mnemosyne-production-runtime.env.example"
     next_commands_script = reports_dir / "next-commands.sh"
+    input_artifact_worklist_json = reports_dir / "input-artifact-worklist.json"
+    input_artifact_worklist_markdown = reports_dir / "input-artifact-worklist.md"
     python_selector = (
         'PYTHON="${PYTHON:-$(if [ -x .venv/bin/python ]; then printf \'%s\' '
         ".venv/bin/python; else command -v python3; fi)}\""
@@ -1012,6 +1215,11 @@ def refresh_report(
         f"{_shell_quote(capture_output_root)} "
         f"--fingerprint-record {_shell_quote(fingerprint_record_output)} "
         f"--report-output {_shell_quote(verify_report_output)}"
+    )
+    input_artifact_worklist = _input_artifact_worklist(
+        input_dir=input_dir,
+        renderer_payload=renderer_payload,
+        rows=rows,
     )
     report = {
         "schema": "mnemosyne.tier-b-custody-gap-report.v1",
@@ -1040,6 +1248,9 @@ def refresh_report(
         "missing_provider_manifest_env_refs": missing_provider_env_refs,
         "missing_input_artifacts": missing_input_artifacts,
         "missing_input_artifact_count": len(missing_input_artifacts),
+        "input_artifact_worklist_json": str(input_artifact_worklist_json),
+        "input_artifact_worklist_markdown": str(input_artifact_worklist_markdown),
+        "input_artifact_worklist": input_artifact_worklist,
         "operator_input_inventory": _operator_input_inventory(
             input_dir=input_dir,
             render_env_file=production_render_env,
@@ -1075,6 +1286,14 @@ def refresh_report(
     }
     _write_runtime_env_example(runtime_env_example, provider_env_refs=provider_env_refs)
     _write_next_commands_script(report, next_commands_script)
+    _atomic_write_text(
+        input_artifact_worklist_json,
+        json.dumps(input_artifact_worklist, indent=2, sort_keys=True) + "\n",
+    )
+    _write_input_artifact_worklist_markdown(
+        input_artifact_worklist,
+        input_artifact_worklist_markdown,
+    )
     report_json = reports_dir / "tier-b-gap-report.json"
     _atomic_write_text(report_json, json.dumps(report, indent=2, sort_keys=True) + "\n")
     _write_markdown(report, reports_dir / "tier-b-gap-report.md")
@@ -1144,6 +1363,7 @@ def main(argv: list[str] | None = None) -> int:
         "packet_docs_added": len(report["packet_docs_added"]),
         "post_capture_verify_report": report["post_capture_verify_report"],
         "next_commands_script": report["next_commands_script"],
+        "input_artifact_worklist": report["input_artifact_worklist_markdown"],
         "next_commands": report["next_commands"],
         "next": (
             "Fill production-render.env and input-artifacts/, then run "
