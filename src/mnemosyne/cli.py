@@ -10740,7 +10740,11 @@ def _production_evidence_summary_offline_verify_argv_ok(
     if offline_verify.get("expected_bundle_fingerprint_source") != "out-of-band-capture-record":
         return False
     argv = offline_verify.get("argv")
-    if not isinstance(argv, list) or len(argv) != 7 or not all(isinstance(item, str) for item in argv):
+    if (
+        not isinstance(argv, list)
+        or len(argv) not in {7, 9}
+        or not all(isinstance(item, str) for item in argv)
+    ):
         return False
     if not argv[0]:
         return False
@@ -10754,6 +10758,11 @@ def _production_evidence_summary_offline_verify_argv_ok(
     if argv[5] != "--expected-bundle-fingerprint":
         return False
     if argv[6] != "<out-of-band-bundle-fingerprint>":
+        return False
+    if len(argv) == 9 and argv[7:] != [
+        "--report-output",
+        "<external-review-report-json>",
+    ]:
         return False
     note = offline_verify.get("note")
     return (

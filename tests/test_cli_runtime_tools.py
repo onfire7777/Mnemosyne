@@ -6706,6 +6706,8 @@ def write_production_evidence_bundle(tmp_path: Path) -> tuple[Path, str]:
                         str(bundle_dir),
                         "--expected-bundle-fingerprint",
                         "<out-of-band-bundle-fingerprint>",
+                        "--report-output",
+                        "<external-review-report-json>",
                     ],
                     "note": (
                         "Custody review only; does not rerun production checks or flip audit rows. "
@@ -7205,6 +7207,8 @@ def test_cli_production_evidence_verify_reports_expected_fingerprint_mismatch(
         str(bundle_dir),
         "--expected-bundle-fingerprint",
         wrong_fingerprint,
+        "--report-output",
+        str(tmp_path / "fingerprint-mismatch-verify.json"),
     )
     report = json.loads(result.stdout)
     codes = {finding["code"] for finding in report["findings"]}
@@ -7236,6 +7240,8 @@ def test_cli_production_evidence_verify_reports_fingerprint_mode_conflict(
         str(bundle_dir),
         "--expected-bundle-fingerprint",
         bundle_fingerprint,
+        "--report-output",
+        str(tmp_path / "missing-tool-metadata-verify.json"),
         "--internal-consistency-only",
     )
     report = json.loads(result.stdout)
@@ -7602,6 +7608,8 @@ def test_cli_production_evidence_verify_rejects_missing_executable_tool_metadata
         str(bundle_dir),
         "--expected-bundle-fingerprint",
         bundle_fingerprint,
+        "--report-output",
+        str(tmp_path / "malformed-tool-digest-verify.json"),
     )
     payload = json.loads(result.stdout)
     codes = {finding["code"] for finding in payload["findings"]}
@@ -7629,6 +7637,8 @@ def test_cli_production_evidence_verify_rejects_malformed_executable_tool_digest
         str(bundle_dir),
         "--expected-bundle-fingerprint",
         bundle_fingerprint,
+        "--report-output",
+        str(tmp_path / "changed-tool-bytes-verify.json"),
     )
     payload = json.loads(result.stdout)
     codes = {finding["code"] for finding in payload["findings"]}
@@ -7659,6 +7669,8 @@ def test_cli_production_evidence_verify_rejects_changed_executable_tool_bytes(
         str(bundle_dir),
         "--expected-bundle-fingerprint",
         bundle_fingerprint,
+        "--report-output",
+        str(tmp_path / "provider-command-argument-verify.json"),
     )
     payload = json.loads(result.stdout)
     codes = {finding["code"] for finding in payload["findings"]}
@@ -7760,6 +7772,8 @@ def test_cli_production_evidence_verify_rejects_provider_command_argument(
         str(bundle_dir),
         "--expected-bundle-fingerprint",
         bundle_fingerprint,
+        "--report-output",
+        str(tmp_path / "provider-manifest-check-drift-verify.json"),
     )
     payload = json.loads(result.stdout)
     codes = {finding["code"] for finding in payload["findings"]}
@@ -7788,6 +7802,8 @@ def test_cli_production_evidence_verify_rejects_provider_manifest_without_forbid
         str(bundle_dir),
         "--expected-bundle-fingerprint",
         bundle_fingerprint,
+        "--report-output",
+        str(tmp_path / "missing-provider-command-reference-verify.json"),
     )
     payload = json.loads(result.stdout)
     codes = {finding["code"] for finding in payload["findings"]}
@@ -7823,6 +7839,8 @@ def test_cli_production_evidence_verify_rejects_provider_manifest_check_drift(
         str(bundle_dir),
         "--expected-bundle-fingerprint",
         bundle_fingerprint,
+        "--report-output",
+        str(tmp_path / "missing-tool-snapshot-verify.json"),
     )
     payload = json.loads(result.stdout)
     codes = {finding["code"] for finding in payload["findings"]}
@@ -7856,6 +7874,8 @@ def test_cli_production_evidence_verify_rejects_missing_provider_command_referen
         str(bundle_dir),
         "--expected-bundle-fingerprint",
         bundle_fingerprint,
+        "--report-output",
+        str(tmp_path / "missing-input-artifacts-verify.json"),
     )
     payload = json.loads(result.stdout)
     codes = {finding["code"] for finding in payload["findings"]}
@@ -7886,6 +7906,8 @@ def test_cli_production_evidence_verify_rejects_missing_referenced_executable_to
         str(bundle_dir),
         "--expected-bundle-fingerprint",
         bundle_fingerprint,
+        "--report-output",
+        str(tmp_path / "missing-executable-tool-snapshot-verify.json"),
     )
     payload = json.loads(result.stdout)
     codes = {finding["code"] for finding in payload["findings"]}
@@ -7988,6 +8010,8 @@ def test_cli_production_evidence_verify_rejects_missing_input_artifact_contract(
         str(bundle_dir),
         "--expected-bundle-fingerprint",
         bundle_fingerprint,
+        "--report-output",
+        str(tmp_path / "empty-input-artifact-custody-verify.json"),
     )
     payload = json.loads(result.stdout)
     codes = {finding["code"] for finding in payload["findings"]}

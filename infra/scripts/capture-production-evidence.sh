@@ -1649,6 +1649,8 @@ summary = {
             str(out_root),
             "--expected-bundle-fingerprint",
             "<out-of-band-bundle-fingerprint>",
+            "--report-output",
+            "<external-review-report-json>",
         ],
         "note": (
             "Custody review only; does not rerun production checks or flip audit rows. "
