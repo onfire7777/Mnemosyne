@@ -274,6 +274,33 @@ def test_operator_docs_use_refreshable_tier_b_custody_packet() -> None:
         assert "--refresh-report" not in text, path
 
 
+def test_operator_docs_use_strict_render_env_file() -> None:
+    docs = [
+        REPO / ".planning" / "ENV-AND-SECRETS.md",
+        REPO / ".planning" / "TIER-B-TO-100-AGENT-PROMPT.md",
+        REPO / "docs" / "ROADMAP-TO-100.md",
+        REPO / "infra" / "PRODUCTION-EVIDENCE.md",
+        REPO / "infra" / "README.md",
+        REPO / "infra" / "templates" / "production-input-artifacts.checklist.md",
+    ]
+
+    for path in docs:
+        text = path.read_text(encoding="utf-8")
+        assert "--env-file" in text, path
+        assert "production-render.env" in text, path
+        assert "set -a" not in text, path
+        assert ". /secure/path" not in text, path
+
+    strict_loader_docs = [
+        REPO / ".planning" / "ENV-AND-SECRETS.md",
+        REPO / "infra" / "PRODUCTION-EVIDENCE.md",
+        REPO / "infra" / "README.md",
+    ]
+    for path in strict_loader_docs:
+        text = path.read_text(encoding="utf-8")
+        assert "load-env.py" in text, path
+
+
 def test_operator_docs_do_not_use_unbound_production_release_audit() -> None:
     phase_dir = REPO / ".planning" / "phases" / "06-exact-blueprint-runtime-parity"
     docs = [

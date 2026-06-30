@@ -61,6 +61,18 @@ def _copy_readonly(src: Path, dst: Path) -> None:
     dst.chmod(0o600)
 
 
+def _seed_packet_render_env(env_file: Path, input_dir: Path) -> None:
+    text = env_file.read_text(encoding="utf-8")
+    seeded = text.replace(
+        'export MNEMOSYNE_PROD_EVIDENCE_DIR=""',
+        f'export MNEMOSYNE_PROD_EVIDENCE_DIR="{input_dir}"',
+    )
+    if seeded == text:
+        _fail("production-render.env template is missing MNEMOSYNE_PROD_EVIDENCE_DIR")
+    _atomic_write_text(env_file, seeded)
+    env_file.chmod(0o600)
+
+
 def _require_real_directory(path: Path, *, label: str) -> None:
     if path.is_symlink():
         _fail(f"{label} must not be a symlink: {path}")
@@ -367,9 +379,9 @@ infra/scripts/prepare-production-evidence-custody.py --refresh {root}
 ```
 
 Refresh mode updates only `reports/tier-b-gap-report.json`,
-`reports/tier-b-gap-report.md`, and this README is left as static guidance. It
-does not overwrite `production-render.env`, `input-artifacts/`, copied operator
-docs, or `manifests/`.
+`reports/tier-b-gap-report.md`; this README remains static guidance. It does
+not overwrite `production-render.env`, `input-artifacts/`, copied operator docs,
+or `manifests/`.
 
 ## Current Report
 
@@ -380,6 +392,7 @@ docs, or `manifests/`.
 ## Capture Boundary
 
 When the report is ready, render the soak manifest to a separate external path
+with `render-production-soak-manifest.sh --env-file {root / 'production-render.env'}`
 and capture into a new external output root. Do not use this packet root as the
 capture output root.
 """
@@ -426,6 +439,7 @@ def _write_packet_skeleton(root: Path, *, repo_dir: Path) -> None:
         repo_dir / "infra" / "templates" / "production-render.env.example",
         root / "production-render.env",
     )
+    _seed_packet_render_env(root / "production-render.env", input_dir)
     _copy_readonly(
         repo_dir / "infra" / "templates" / "provider-manifest.production.template.json",
         input_dir / "provider-manifest.production.json",
@@ -513,9 +527,8 @@ def refresh_report(root: Path, *, repo_dir: Path) -> dict[str, Any]:
         "phase_plan": _phase_plan(rows),
         "operator_readiness_files": renderer_payload.get("operator_readiness_files", {}),
         "next_commands": [
-            f"set -a && source {root / 'production-render.env'} && set +a",
-            "infra/scripts/render-production-soak-manifest.sh --check-environment",
-            f"infra/scripts/render-production-soak-manifest.sh --output {manifests_dir / 'production-soak-manifest.json'}",
+            f"infra/scripts/render-production-soak-manifest.sh --env-file {root / 'production-render.env'} --check-environment",
+            f"infra/scripts/render-production-soak-manifest.sh --env-file {root / 'production-render.env'} --output {manifests_dir / 'production-soak-manifest.json'}",
             f"infra/scripts/capture-production-evidence.sh --preflight-only {manifests_dir / 'production-soak-manifest.json'} {root.parent / (root.name + '-preflight')}",
             f"infra/scripts/capture-production-evidence.sh {manifests_dir / 'production-soak-manifest.json'} {root.parent / (root.name + '-capture')}",
         ],

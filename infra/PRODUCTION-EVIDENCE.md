@@ -28,8 +28,13 @@ This runbook is the operator handoff for flipping the remaining Tier B parity ro
     /secure/path/to/mnemosyne-tier-b-custody
   ```
 - Review `infra/templates/production-operator-env.inventory.md` before capture. It is a no-secret name inventory for render placeholders, provider-manifest references, and runtime/secret-custody environment names. Do not fill values in that file.
-- Copy `infra/templates/production-render.env.example` outside the repo, fill the blank non-secret `MNEMOSYNE_PROD_*` values there, and source the external copy before rendering.
-- Populate `MNEMOSYNE_PROD_EVIDENCE_DIR` with the manifest-referenced production input artifacts before running `--check-environment`. The check is no-write and reports the static template-derived artifact inventory plus `parity_row_readiness` grouping even before environment values are sourced; after all required `MNEMOSYNE_PROD_*` values are set, including `MNEMOSYNE_PROD_EVIDENCE_DIR`, it fails if required relative artifact names are missing from that external directory and shows which strict-audit row is blocked. Use `infra/templates/production-input-artifacts.checklist.md` as the non-secret operator checklist for the required artifact names.
+- Fill the packet's external `production-render.env` with the blank non-secret
+  `MNEMOSYNE_PROD_*` values, then pass it to
+  `render-production-soak-manifest.sh --env-file`. Do not shell-source render
+  env files; the renderer parses them with `infra/scripts/load-env.py` and
+  rejects symlinks, group/world-readable files, unexpected keys, unsafe syntax,
+  repo-local paths, and missing placeholder keys.
+- Populate `MNEMOSYNE_PROD_EVIDENCE_DIR` with the manifest-referenced production input artifacts before running `--check-environment --env-file /secure/path/to/mnemosyne-tier-b-custody/production-render.env`. The check is no-write and reports the static template-derived artifact inventory plus `parity_row_readiness` grouping even before environment values are complete; after all required `MNEMOSYNE_PROD_*` values are set, including `MNEMOSYNE_PROD_EVIDENCE_DIR`, it fails if required relative artifact names are missing from that external directory and shows which strict-audit row is blocked. Use `infra/templates/production-input-artifacts.checklist.md` as the non-secret operator checklist for the required artifact names.
 - Copy `infra/templates/provider-manifest.production.template.json` to `$MNEMOSYNE_PROD_EVIDENCE_DIR/provider-manifest.production.json` and fill the external copy with production provider values or environment-variable references. This file is shared evidence for retrieval, auth/session provider custody, consolidation roles, multimodal/object-key providers, privacy/residency policy, parametric adapters, and the final parity row. It must keep `forbid_local: true` and include every required provider-check subcheck listed in the template. `--check-environment` parses this external manifest when present, reports referenced provider env-var names, and fails before capture if any referenced provider env var is unset; `capture-production-evidence.sh --preflight-only` also rejects manifests missing `forbid_local: true`, missing or unsupported required provider checks, or a non-object `providers` block.
 - Provider manifest `command` values must resolve to absolute, non-symlinked, external executable paths. During capture, those command executables are copied into `OUT_ROOT/tool-artifacts/`, retained as mode `0500` custody artifacts, rewritten into the retained provider manifest snapshot, and recorded in `preflight.json.executable_tool_references` with original path, retained snapshot path, size, SHA-256 digest, and provider-manifest field label.
 - Provider manifest `command` values must be a single external executable with no arguments after `argv[0]`. Commands such as `/external/python -m provider`, `/bin/sh -c provider`, or `/external/provider --config=/external/config.json` are rejected because only `argv[0]` is retained under `tool-artifacts/`; put provider implementation/config into the deployed executable wrapper or an explicit production input artifact covered by a row runbook.
@@ -58,17 +63,15 @@ Run the production wrapper from the repository root:
 infra/scripts/prepare-production-evidence-custody.py \
   /secure/path/to/mnemosyne-tier-b-custody
 open infra/templates/production-operator-env.inventory.md
-cp infra/templates/production-render.env.example \
-  /secure/path/to/production-render.env
-# Fill /secure/path/to/production-render.env outside this repository.
+# Fill /secure/path/to/mnemosyne-tier-b-custody/production-render.env outside this repository.
 infra/scripts/prepare-production-evidence-custody.py \
   --refresh \
   /secure/path/to/mnemosyne-tier-b-custody
-set -a
-. /secure/path/to/production-render.env
-set +a
-infra/scripts/render-production-soak-manifest.sh --check-environment
 infra/scripts/render-production-soak-manifest.sh \
+  --env-file /secure/path/to/mnemosyne-tier-b-custody/production-render.env \
+  --check-environment
+infra/scripts/render-production-soak-manifest.sh \
+  --env-file /secure/path/to/mnemosyne-tier-b-custody/production-render.env \
   --output /secure/path/to/production-soak-manifest.json
 infra/scripts/capture-production-evidence.sh \
   --preflight-only \
