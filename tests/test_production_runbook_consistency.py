@@ -277,7 +277,16 @@ def test_operator_docs_use_refreshable_tier_b_custody_packet() -> None:
 def test_operator_docs_use_strict_render_env_file() -> None:
     docs = [
         REPO / ".planning" / "ENV-AND-SECRETS.md",
+        REPO / ".planning" / "ROADMAP.md",
+        REPO / ".planning" / "STATE.md",
+        REPO / ".planning" / "STRICT-BLUEPRINT-PARITY-AUDIT.md",
         REPO / ".planning" / "TIER-B-TO-100-AGENT-PROMPT.md",
+        REPO
+        / ".planning"
+        / "phases"
+        / "06-exact-blueprint-runtime-parity"
+        / "06-09-SUMMARY.md",
+        REPO / "docs" / "blueprint" / "cognitive-architecture" / "CODEX-HANDOFF.md",
         REPO / "docs" / "ROADMAP-TO-100.md",
         REPO / "infra" / "PRODUCTION-EVIDENCE.md",
         REPO / "infra" / "README.md",
@@ -290,6 +299,8 @@ def test_operator_docs_use_strict_render_env_file() -> None:
         assert "production-render.env" in text, path
         assert "set -a" not in text, path
         assert ". /secure/path" not in text, path
+        assert "exported non-secret environment values" not in text, path
+        assert "copy and fill outside the repo" not in text, path
 
     strict_loader_docs = [
         REPO / ".planning" / "ENV-AND-SECRETS.md",

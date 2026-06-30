@@ -141,11 +141,13 @@ Checked 2026-06-25 during renderer hardening:
   production-scoped with `production_validated=true`,
   `target_environment=production`, `operator_asserted=true`, and 28 checks.
 - `infra/scripts/render-production-soak-manifest.sh` now renders the 19
-  non-secret production placeholders from the operator environment, refuses
+  non-secret production placeholders from a strict external Tier-B custody
+  packet `production-render.env` passed through `--env-file`, refuses
   repository-local output by default, validates the production scope, and
   validates the full 28-command production release profile before writing.
-- `infra/templates/production-render.env.example` gives operators a blank,
-  no-secret list of all 19 render inputs to copy and fill outside the repo.
+- `infra/templates/production-render.env.example` remains the no-secret
+  template for generated custody packets; operators fill the packet-local
+  `production-render.env`, not a shell-sourced repo copy.
 - `infra/scripts/capture-production-evidence.sh` rejects unresolved
   `MNEMOSYNE_PROD_` placeholders before creating an evidence directory or
   running `deployment-soak`.
