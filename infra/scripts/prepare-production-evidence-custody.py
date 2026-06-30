@@ -382,6 +382,44 @@ def _phase_plan(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ]
 
 
+def _operator_input_inventory(
+    *,
+    input_dir: Path,
+    render_env_file: Path,
+    runtime_env_placeholder: str,
+    missing_render_env: set[str],
+    provider_env_refs: list[str],
+    missing_provider_env_refs: list[str],
+    missing_input_artifacts: list[str],
+    runtime_env_file_loaded: bool,
+) -> dict[str, Any]:
+    return {
+        "production_render_env": {
+            "path": str(render_env_file),
+            "purpose": "Non-secret MNEMOSYNE_PROD_* render placeholders.",
+            "missing": sorted(missing_render_env),
+            "missing_count": len(missing_render_env),
+            "values_may_be_recorded": False,
+        },
+        "runtime_env_file": {
+            "path_placeholder": runtime_env_placeholder,
+            "purpose": "Secret-bearing runtime/provider values for readiness and capture.",
+            "provider_manifest_env_refs": provider_env_refs,
+            "missing_provider_manifest_env_refs": missing_provider_env_refs,
+            "missing_count": len(missing_provider_env_refs),
+            "loaded_for_readiness": runtime_env_file_loaded,
+            "values_redacted": True,
+        },
+        "input_artifacts": {
+            "directory": str(input_dir),
+            "purpose": "No-secret production evidence input artifacts retained by capture.",
+            "missing": missing_input_artifacts,
+            "missing_count": len(missing_input_artifacts),
+            "checklist": "docs/production-input-artifacts.checklist.md",
+        },
+    }
+
+
 def _inventory_env_names(repo_dir: Path) -> set[str]:
     inventory = repo_dir / "infra" / "templates" / "production-operator-env.inventory.md"
     names: set[str] = set()
@@ -491,6 +529,59 @@ def _write_markdown(report: dict[str, Any], path: Path) -> None:
         lines.extend(f"  - `{name}`" for name in report["packet_docs_missing"])
     else:
         lines.append("- Missing packet docs: `0`")
+    inventory = report["operator_input_inventory"]
+    lines.extend(
+        [
+            "",
+            "## Operator Input Inventory",
+            "",
+            "These are edit targets, not evidence.",
+            "",
+            "### production-render.env",
+            "",
+            f"- Path: `{inventory['production_render_env']['path']}`",
+            f"- Missing values: `{inventory['production_render_env']['missing_count']}`",
+        ]
+    )
+    if inventory["production_render_env"]["missing"]:
+        lines.extend(
+            f"- `{name}`" for name in inventory["production_render_env"]["missing"]
+        )
+    else:
+        lines.append("- None")
+    lines.extend(
+        [
+            "",
+            "### Runtime Env File",
+            "",
+            f"- Placeholder path: `{inventory['runtime_env_file']['path_placeholder']}`",
+            f"- Loaded for readiness: `{str(inventory['runtime_env_file']['loaded_for_readiness']).lower()}`",
+            f"- Missing provider refs: `{inventory['runtime_env_file']['missing_count']}`",
+        ]
+    )
+    if inventory["runtime_env_file"]["missing_provider_manifest_env_refs"]:
+        lines.extend(
+            f"- `{name}`"
+            for name in inventory["runtime_env_file"][
+                "missing_provider_manifest_env_refs"
+            ]
+        )
+    else:
+        lines.append("- None")
+    lines.extend(
+        [
+            "",
+            "### Input Artifacts",
+            "",
+            f"- Directory: `{inventory['input_artifacts']['directory']}`",
+            f"- Checklist: `{inventory['input_artifacts']['checklist']}`",
+            f"- Missing artifacts: `{inventory['input_artifacts']['missing_count']}`",
+        ]
+    )
+    if inventory["input_artifacts"]["missing"]:
+        lines.extend(f"- `{name}`" for name in inventory["input_artifacts"]["missing"])
+    else:
+        lines.append("- None")
     lines.extend(["", "## Rows", ""])
     for row in report["rows"]:
         lines.extend(
@@ -751,6 +842,16 @@ def refresh_report(
         "missing_provider_manifest_env_refs": missing_provider_env_refs,
         "missing_input_artifacts": missing_input_artifacts,
         "missing_input_artifact_count": len(missing_input_artifacts),
+        "operator_input_inventory": _operator_input_inventory(
+            input_dir=input_dir,
+            render_env_file=root / "production-render.env",
+            runtime_env_placeholder=runtime_env_placeholder,
+            missing_render_env=missing_render_env,
+            provider_env_refs=provider_env_refs,
+            missing_provider_env_refs=missing_provider_env_refs,
+            missing_input_artifacts=missing_input_artifacts,
+            runtime_env_file_loaded=runtime_env_file is not None,
+        ),
         "rows": rows,
         "phase_plan": _phase_plan(rows),
         "post_capture_verify_report": str(verify_report_output),

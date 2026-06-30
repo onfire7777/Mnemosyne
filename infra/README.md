@@ -121,6 +121,8 @@ open infra/templates/production-operator-env.inventory.md
 # equivalent values.
 # Fill input-artifacts/provider-manifest.production.json and every other
 # manifest-referenced production input artifact listed in the packet report.
+# The refreshed report's operator_input_inventory groups those edit targets
+# under production-render.env, the external runtime env file, and input-artifacts/.
 infra/scripts/prepare-production-evidence-custody.py \
   --runtime-env-file /secure/path/to/mnemosyne-production-runtime.env \
   --refresh \

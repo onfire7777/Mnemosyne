@@ -17,13 +17,15 @@ This runbook is the operator handoff for flipping the remaining Tier B parity ro
   open /secure/path/to/mnemosyne-tier-b-custody/reports/tier-b-gap-report.md
   ```
 
-  The generated packet is not evidence and cannot flip rows. Use it to prepare
-  `production-render.env`, `input-artifacts/provider-manifest.production.json`,
-  and the B1-B10 input artifacts before the render/preflight/capture commands
-  below. After filling or changing packet inputs, refresh the row-scoped report
-  without overwriting operator artifacts. Refresh also backfills missing
-  read-only packet guidance docs for older packets, but it does not overwrite
-  existing copied docs:
+  The generated packet is not evidence and cannot flip rows. Use its
+  `operator_input_inventory` report section to prepare the three operator edit
+  surfaces: `production-render.env`,
+  `input-artifacts/provider-manifest.production.json` plus the remaining B1-B10
+  input artifacts, and the separate external runtime env file for
+  secret-bearing provider/runtime values. After filling or changing packet
+  inputs, refresh the row-scoped report without overwriting operator artifacts.
+  Refresh also backfills missing read-only packet guidance docs for older
+  packets, but it does not overwrite existing copied docs:
 
   ```bash
   infra/scripts/prepare-production-evidence-custody.py \

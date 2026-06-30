@@ -251,6 +251,32 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     assert "MNEMOSYNE_EMBEDDING_URL" in report["missing_provider_manifest_env_refs"]
     assert report["missing_input_artifact_count"] == 23
     assert "provider-manifest.production.json" not in report["missing_input_artifacts"]
+    inventory = report["operator_input_inventory"]
+    assert set(inventory) == {
+        "input_artifacts",
+        "production_render_env",
+        "runtime_env_file",
+    }
+    assert inventory["production_render_env"]["path"] == str(
+        packet_root / "production-render.env"
+    )
+    assert inventory["production_render_env"]["missing_count"] == 18
+    assert (
+        "MNEMOSYNE_PROD_EVIDENCE_DIR"
+        not in inventory["production_render_env"]["missing"]
+    )
+    assert inventory["runtime_env_file"]["path_placeholder"] == (
+        "/secure/path/to/mnemosyne-production-runtime.env"
+    )
+    assert inventory["runtime_env_file"]["missing_count"] == 24
+    assert inventory["runtime_env_file"]["values_redacted"] is True
+    assert inventory["input_artifacts"]["directory"] == str(
+        packet_root / "input-artifacts"
+    )
+    assert inventory["input_artifacts"]["missing_count"] == 23
+    assert inventory["input_artifacts"]["checklist"] == (
+        "docs/production-input-artifacts.checklist.md"
+    )
     assert (packet_root / "input-artifacts" / "provider-manifest.production.json").is_file()
     assert (packet_root / "production-render.env").is_file()
     assert (
@@ -275,6 +301,10 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     assert "docs/runbooks/" in readme
     assert "missing read-only packet guidance docs" in readme
     assert "Post-Capture Custody Verification" in markdown
+    assert "Operator Input Inventory" in markdown
+    assert "### production-render.env" in markdown
+    assert "### Runtime Env File" in markdown
+    assert "### Input Artifacts" in markdown
     assert "Packet docs complete: `true`" in markdown
     assert (
         "Packet runbook: `docs/runbooks/row-01-production-postgres-retrieval.md`"
@@ -631,6 +661,15 @@ def test_prepare_production_evidence_custody_runtime_env_file_satisfies_refs_wit
     assert report["runtime_env_file_loaded"] is True
     assert report["runtime_env_file_values_redacted"] is True
     assert "MNEMOSYNE_EMBEDDING_URL" not in report["missing_provider_manifest_env_refs"]
+    inventory = report["operator_input_inventory"]
+    assert inventory["runtime_env_file"]["loaded_for_readiness"] is True
+    assert (
+        "MNEMOSYNE_EMBEDDING_URL"
+        not in inventory["runtime_env_file"]["missing_provider_manifest_env_refs"]
+    )
+    assert inventory["runtime_env_file"]["path_placeholder"] == (
+        "/secure/path/to/mnemosyne-production-runtime.env"
+    )
     assert provider_sentinel not in combined
     assert str(runtime_env_file) not in combined
     assert "--runtime-env-file /secure/path/to/mnemosyne-production-runtime.env" in report_text
