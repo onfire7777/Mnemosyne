@@ -25,6 +25,9 @@ def test_production_and_local_evidence_capture_reject_repo_local_outputs() -> No
     assert "umask 077" in production
     assert "refusing to write production evidence inside the repository" in production
     assert "out_root.chmod(0o700)" in production
+    assert "--fingerprint-record-output PATH SOAK_MANIFEST OUT_ROOT" in production
+    assert "Required for full capture" in production
+    assert "full production capture requires --fingerprint-record-output" in production
 
     assert "umask 077" in local
     assert "refusing to write local-staging evidence inside the repository" in local

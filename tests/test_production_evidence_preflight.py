@@ -319,6 +319,35 @@ def test_capture_production_evidence_full_capture_requires_explicit_output_root(
     assert proc.stdout == ""
 
 
+def test_capture_production_evidence_full_capture_requires_fingerprint_record_output(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "production-soak.json"
+    out_root = tmp_path / "capture"
+    _minimal_production_manifest(manifest)
+
+    proc = subprocess.run(
+        [
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
+            str(manifest),
+            str(out_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert proc.returncode == 64
+    assert (
+        "full production capture requires --fingerprint-record-output"
+        in proc.stderr
+    )
+    assert proc.stdout == ""
+    assert not out_root.exists()
+
+
 def test_capture_production_evidence_preflight_requires_explicit_output_root(
     tmp_path: Path,
 ) -> None:
@@ -2913,6 +2942,7 @@ def test_capture_production_evidence_uses_staged_input_snapshot_after_source_mut
 ) -> None:
     manifest = tmp_path / "production-soak.json"
     out_root = tmp_path / "capture"
+    fingerprint_record = tmp_path / "mnemosyne-production-bundle-fingerprint.json"
     source_artifact = tmp_path / "production-inputs" / "cases.json"
     linked_input_root = tmp_path / "linked-production-inputs"
     fake_python = tmp_path / "fake-python"
@@ -2999,6 +3029,8 @@ exec "$REAL_PYTHON" "$@"
         [
             "/bin/bash",
             str(CAPTURE_SCRIPT),
+            "--fingerprint-record-output",
+            str(fingerprint_record),
             str(manifest),
             str(out_root),
         ],
@@ -3252,6 +3284,7 @@ def test_capture_production_evidence_scans_nested_redaction_scan_artifact(
 ) -> None:
     manifest = tmp_path / "production-soak.json"
     out_root = tmp_path / "capture"
+    fingerprint_record = tmp_path / "mnemosyne-production-bundle-fingerprint.json"
     fake_python = tmp_path / "fake-python"
     _minimal_production_manifest(manifest)
     fake_python.write_text(
@@ -3322,6 +3355,8 @@ exec "$REAL_PYTHON" "$@"
         [
             "/bin/bash",
             str(CAPTURE_SCRIPT),
+            "--fingerprint-record-output",
+            str(fingerprint_record),
             str(manifest),
             str(out_root),
         ],
@@ -3345,6 +3380,7 @@ exec "$REAL_PYTHON" "$@"
     )
     assert redaction_scan["findings"][0]["kind"] == "jwt"
     assert not (out_root / "summary.json").exists()
+    assert not fingerprint_record.exists()
 
 
 def test_capture_production_evidence_fails_if_generated_bundle_contains_symlink(
@@ -3352,6 +3388,7 @@ def test_capture_production_evidence_fails_if_generated_bundle_contains_symlink(
 ) -> None:
     manifest = tmp_path / "production-soak.json"
     out_root = tmp_path / "capture"
+    fingerprint_record = tmp_path / "mnemosyne-production-bundle-fingerprint.json"
     fake_python = tmp_path / "fake-python"
     outside = tmp_path / "outside-generated-artifact.txt"
     outside.write_text("outside generated artifact\n", encoding="utf-8")
@@ -3434,6 +3471,8 @@ exec "$REAL_PYTHON" "$@"
         [
             "/bin/bash",
             str(CAPTURE_SCRIPT),
+            "--fingerprint-record-output",
+            str(fingerprint_record),
             str(manifest),
             str(out_root),
         ],
@@ -3459,6 +3498,7 @@ exec "$REAL_PYTHON" "$@"
     assert skipped_symlink["reason"] == "symlink not allowed"
     assert not (out_root / "summary.json").exists()
     assert not (out_root / "bundle-manifest.json").exists()
+    assert not fingerprint_record.exists()
 
 
 def test_capture_production_evidence_fails_if_generated_bundle_contains_unscanned_file(
@@ -3466,6 +3506,7 @@ def test_capture_production_evidence_fails_if_generated_bundle_contains_unscanne
 ) -> None:
     manifest = tmp_path / "production-soak.json"
     out_root = tmp_path / "capture"
+    fingerprint_record = tmp_path / "mnemosyne-production-bundle-fingerprint.json"
     fake_python = tmp_path / "fake-python"
     _minimal_production_manifest(manifest)
     fake_python.write_text(
@@ -3540,6 +3581,8 @@ exec "$REAL_PYTHON" "$@"
         [
             "/bin/bash",
             str(CAPTURE_SCRIPT),
+            "--fingerprint-record-output",
+            str(fingerprint_record),
             str(manifest),
             str(out_root),
         ],
@@ -3559,6 +3602,7 @@ exec "$REAL_PYTHON" "$@"
     assert redaction_scan["skipped_files"][0]["reason"] == "not utf-8 text"
     assert not (out_root / "summary.json").exists()
     assert not (out_root / "bundle-manifest.json").exists()
+    assert not fingerprint_record.exists()
 
 
 def test_capture_production_evidence_writes_bundle_manifest(

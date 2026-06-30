@@ -157,7 +157,7 @@ The wrapper performs these steps:
 4. Scans the generated evidence bundle for high-confidence secret material and fails closed if any retained artifact cannot be scanned.
 5. Writes `bundle-manifest.json` with SHA-256 hashes for every retained artifact before writing the final summary.
 
-For full production capture, write the out-of-band fingerprint record outside
+Full production capture must write the out-of-band fingerprint record outside
 the bundle under review:
 
 ```bash
