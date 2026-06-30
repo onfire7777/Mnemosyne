@@ -21,6 +21,14 @@ or percentage bookkeeping unless they directly protect the production evidence
 path. Every claim of progress must be backed by current source, retained
 artifacts, CI, or an explicit operator-evidence record.
 
+**Current objective refinement:** Treat the run as a production-evidence
+completion program, not a test-expansion program. The priority order is:
+preserve the live source baseline; make the Tier-B operator path deterministic
+and hard to mis-follow; capture and verify real B1-B10 production bundles; then
+update the strict audit and release status. Any change that cannot be mapped to
+a Tier-B evidence blocker, an active source defect, a custody weakness, or a
+current-status/stale-instruction cleanup is deliberately deprioritized.
+
 Drive Mnemosyne from the current source-complete state to exact blueprint parity
 and production release readiness:
 
@@ -84,6 +92,19 @@ commit, old run id, or copied chat recap:
 5. Keep the blended completion percentage stable until the controlling audit
    changes. Do not re-score progress to make local code changes look larger
    than they are.
+
+## Source-Of-Truth Order
+
+When instructions, summaries, or planning files disagree, resolve them in this
+order before writing code or status text:
+
+1. Live Git state and current CI for `/Users/admin/Mnemosyne`.
+2. `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md` for strict row status.
+3. `infra/PRODUCTION-EVIDENCE.md`, `.planning/runbooks/`, and the actual
+   `infra/scripts/*production*` behavior for Tier-B operator execution.
+4. `docs/ROADMAP-TO-100.md` and `.planning/STATE.md` for human-readable status.
+5. Historical chat recaps, old commit ids, and prior agent handoffs only as
+   clues to verify, never as current truth.
 
 ## Execution Loop
 

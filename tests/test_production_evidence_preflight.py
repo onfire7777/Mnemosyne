@@ -3773,7 +3773,7 @@ exec "$REAL_PYTHON" "$@"
     assert summary["row_review_source"] == "preflight.json.parity_row_readiness"
     assert summary["offline_verify"] == {
         "bundle_dir": str(out_root),
-        "expected_bundle_fingerprint_source": "out-of-band-capture-record",
+        "expected_bundle_fingerprint_source": "out-of-band-fingerprint-record",
         "argv": [
             str(fake_python),
             "-m",

@@ -6993,6 +6993,31 @@ def test_cli_production_evidence_verify_accepts_captured_bundle(tmp_path: Path) 
     assert report["findings"] == []
 
 
+def test_cli_production_evidence_verify_accepts_fingerprint_record_source(
+    tmp_path: Path,
+) -> None:
+    bundle_dir, _bundle_fingerprint = write_production_evidence_bundle(tmp_path)
+    summary_path = bundle_dir / "summary.json"
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    summary["offline_verify"]["expected_bundle_fingerprint_source"] = "out-of-band-fingerprint-record"
+    summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
+    bundle_fingerprint = rewrite_production_bundle_manifest(bundle_dir)
+
+    report = run_cli(
+        tmp_path / "verify-store.json",
+        "production-evidence-verify",
+        str(bundle_dir),
+        "--expected-bundle-fingerprint",
+        bundle_fingerprint,
+        "--report-output",
+        str(tmp_path / "fingerprint-record-source-verify.json"),
+    )
+
+    assert report["ok"] is True
+    assert report["checks"]["summary"] is True
+    assert report["findings"] == []
+
+
 def test_cli_production_evidence_verify_requires_report_output_for_custody(
     tmp_path: Path,
 ) -> None:
