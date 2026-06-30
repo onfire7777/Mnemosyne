@@ -123,6 +123,9 @@ open infra/templates/production-operator-env.inventory.md
 # manifest-referenced production input artifact listed in the packet report.
 # The refreshed report's operator_input_inventory groups those edit targets
 # under production-render.env, the external runtime env file, and input-artifacts/.
+# The refreshed reports/input-artifact-worklist.{json,md} routes each artifact
+# to packet path, Tier-B row, row runbook, and consuming check; use it to gather
+# real production artifacts, not placeholder files.
 # The refreshed report's capture_blockers section summarizes the blocked lanes
 # and missing blocker classes for dispatcher handoff without exposing values.
 # Copy reports/mnemosyne-production-runtime.env.example to the real external
@@ -238,6 +241,11 @@ reports row-local missing artifacts, row-local validation errors, and
 the production capture plus release-audit path still gates every Partial row.
 Check-level `input_artifacts` metadata is included in the same custody inventory
 for evidence that must be retained but is not passed as a command argument.
+The external custody packet also renders this route map as
+`reports/input-artifact-worklist.{json,md}` so operators can sort missing
+artifacts by packet path, Tier-B row, row runbook, and consuming check before
+running capture. That worklist is an operator preparation aid only; it must not
+be satisfied with placeholder artifacts.
 
 The renderer replaces non-secret `MNEMOSYNE_PROD_*` placeholders from the
 operator environment and validates production scope plus the full command

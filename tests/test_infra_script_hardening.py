@@ -235,6 +235,12 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     report_path = packet_root / "reports" / "tier-b-gap-report.json"
     report = json.loads(report_path.read_text(encoding="utf-8"))
     next_commands_script = packet_root / "reports" / "next-commands.sh"
+    artifact_worklist_markdown = (
+        packet_root / "reports" / "input-artifact-worklist.md"
+    )
+    artifact_worklist_json = (
+        packet_root / "reports" / "input-artifact-worklist.json"
+    )
 
     assert proc.returncode == 78
     assert summary["ok"] is False
@@ -242,6 +248,7 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     assert summary["report"] == str(report_path)
     assert summary["post_capture_verify_report"] == report["post_capture_verify_report"]
     assert summary["next_commands_script"] == str(next_commands_script)
+    assert summary["input_artifact_worklist"] == str(artifact_worklist_markdown)
     assert report["schema"] == "mnemosyne.tier-b-custody-gap-report.v1"
     assert report["report_is_evidence"] is False
     assert report["ready_for_capture"] is False
@@ -253,6 +260,24 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     assert "MNEMOSYNE_EMBEDDING_URL" in report["missing_provider_manifest_env_refs"]
     assert report["missing_input_artifact_count"] == 23
     assert "provider-manifest.production.json" not in report["missing_input_artifacts"]
+    assert report["input_artifact_worklist_markdown"] == str(artifact_worklist_markdown)
+    assert report["input_artifact_worklist_json"] == str(artifact_worklist_json)
+    artifact_worklist = {
+        item["relative_path"]: item for item in report["input_artifact_worklist"]
+    }
+    assert len(artifact_worklist) == 24
+    assert artifact_worklist["provider-manifest.production.json"]["status"] == "present"
+    assert artifact_worklist["provider-manifest.production.json"]["present"] is True
+    assert artifact_worklist["retrieval-ops-bundle.json"]["status"] == "missing"
+    assert artifact_worklist["retrieval-ops-bundle.json"]["present"] is False
+    assert artifact_worklist["retrieval-ops-bundle.json"]["rows"][0]["lane"] == "B1"
+    assert artifact_worklist["retrieval-ops-bundle.json"]["rows"][0]["packet_runbook"] == (
+        "docs/runbooks/row-01-production-postgres-retrieval.md"
+    )
+    assert artifact_worklist["retrieval-ops-bundle.json"]["checks"][0]["command"] == (
+        "retrieval-ops-check"
+    )
+    assert artifact_worklist["auth-ops-bundle.json"]["rows"][0]["lane"] == "B2"
     blockers = report["capture_blockers"]
     assert blockers["report_is_evidence"] is False
     assert blockers["blocked_lane_count"] == len(blockers["blocked_lanes"])
@@ -305,6 +330,11 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
         in (packet_root / "production-render.env").read_text(encoding="utf-8")
     )
     assert (packet_root / "reports" / "tier-b-gap-report.md").is_file()
+    assert artifact_worklist_markdown.is_file()
+    assert artifact_worklist_json.is_file()
+    assert json.loads(artifact_worklist_json.read_text(encoding="utf-8")) == report[
+        "input_artifact_worklist"
+    ]
     assert next_commands_script.is_file()
     assert os.access(next_commands_script, os.X_OK)
     assert (packet_root / "docs" / "PRODUCTION-EVIDENCE.md").is_file()
@@ -328,6 +358,7 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     assert "docs/runbooks/" in readme
     assert "read-only packet guidance docs" in readme
     assert "reports/mnemosyne-production-runtime.env.example" in readme
+    assert "reports/input-artifact-worklist.md" in readme
     assert "reports/next-commands.sh" in readme
     script_text = next_commands_script.read_text(encoding="utf-8")
     assert script_text.startswith("#!/usr/bin/env bash\nset -euo pipefail\n")
@@ -346,7 +377,16 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     assert "### production-render.env" in markdown
     assert "### Runtime Env File" in markdown
     assert "### Input Artifacts" in markdown
+    assert "Input Artifact Worklist" in markdown
+    assert "do not create placeholder JSON" in markdown
+    assert "retrieval-ops-bundle.json" in markdown
     assert "mnemosyne-production-runtime.env.example" in markdown
+    artifact_worklist_text = artifact_worklist_markdown.read_text(encoding="utf-8")
+    assert "operator preparation aid, not production evidence" in artifact_worklist_text
+    assert "Do not create placeholder JSON, PEM, or bundle files" in artifact_worklist_text
+    assert "`retrieval-ops-bundle.json`" in artifact_worklist_text
+    assert "`retrieval-ops-check`" in artifact_worklist_text
+    assert "`B1` Production Postgres retrieval" in artifact_worklist_text
     assert str(next_commands_script) in markdown
     assert "Copy this generated no-secret example" in runtime_example
     assert 'export MNEMOSYNE_EMBEDDING_URL=""' in runtime_example

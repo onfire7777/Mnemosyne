@@ -44,11 +44,12 @@ the live repo, generated custody packet, and strict audit agree. The next useful
 unit of progress is a self-contained Tier-B operator packet and then a real
 operator capture pass, not another local-only scoring layer.
 
-**Live resume checkpoint (2026-06-30):** the goal tracker reports this objective
-as active; canonical checkout `/Users/admin/Mnemosyne` is clean on `main`, local
-`HEAD` and `origin/main` both point at `589ec83`, and GitHub Actions run
-`28458226239` passed for that commit. This is a resume checkpoint only; future
-continuations must refresh the same live evidence before writing current status.
+**Live resume checkpoint discipline (2026-06-30):** the goal tracker reports
+this objective as active and there is no repo-side pause to clear. Exact commit
+SHAs and GitHub run IDs in historical checkpoints are not durable instructions:
+future continuations must refresh `git status --short --branch`,
+`git log -1 --oneline`, and GitHub Actions for the live `HEAD` before writing
+current status or claiming sync.
 
 Drive Mnemosyne from the current source-complete state to exact blueprint parity
 and production release readiness:
@@ -76,7 +77,12 @@ limited to defects that directly block that path:
    `infra/scripts/prepare-production-evidence-custody.py`.
    Recompute row readiness after filling operator inputs with
    `infra/scripts/prepare-production-evidence-custody.py --refresh <packet>`.
-2. Render production manifests through the packet's strict external
+2. Use the generated `reports/input-artifact-worklist.{json,md}` as the
+   artifact-first operator checklist. It routes every required input artifact to
+   packet paths, rows, row runbooks, and consuming checks without creating
+   placeholders. Missing worklist entries are work to capture from real
+   production systems, not files to fake.
+3. Render production manifests through the packet's strict external
    `production-render.env`, and pass secret-bearing runtime/provider values
    through a separate external mode-`0600`
    `mnemosyne-production-runtime.env` via
@@ -84,16 +90,16 @@ limited to defects that directly block that path:
    `capture-production-evidence.sh --env-file` for capture. Do not rely on
    ambient shell exports as the operator handoff; the external runtime env file
    is the reviewable boundary.
-3. Capture full production bundles with
+4. Capture full production bundles with
    `capture-production-evidence.sh --env-file <runtime-env> --fingerprint-record-output <external-json>`
    so secret-bearing runtime/provider values stay in the strict external
    runtime env file and the expected offline custody fingerprint is retained
    outside the bundle under review.
-4. Fill the shared provider stack first because
+5. Fill the shared provider stack first because
    `provider-manifest.production.json` unblocks B1, B2, B4, B6, B7, B9, and B10.
-5. Capture keystone rows B1 retrieval and B2 tenant/auth evidence.
-6. Capture the remaining row bundles B3-B9.
-7. Capture B10 live parity evidence, then run Tier C sign-off.
+6. Capture keystone rows B1 retrieval and B2 tenant/auth evidence.
+7. Capture the remaining row bundles B3-B9.
+8. Capture B10 live parity evidence, then run Tier C sign-off.
 
 ## Resume Baseline Rules
 
