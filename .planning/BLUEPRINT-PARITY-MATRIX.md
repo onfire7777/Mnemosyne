@@ -234,14 +234,19 @@ Local infra now available for *some* of these (Postgres :54329, Vault :8211, Key
 
 ## 9. Headline
 
-> **Historical snapshot.** Sections 9–11 describe the 2026-06-23
+> **Historical snapshot.** Sections 2–7 and 9–11 describe the 2026-06-23
 > completion-merge overlay. They are retained for lineage only. Current source
 > of truth is `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md`,
 > `.planning/OPS-HANDOFF-AND-OWNERSHIP.md`, and `docs/ROADMAP-TO-100.md`: Tier
 > A/local code readiness is closed, and strict v1.0 parity remains blocked by
 > Tier-B operator-captured production evidence for the 10 Partial rows.
 
-No innovation is a total ❌. The only two genuinely-missing **features** are **§20.7 tier-0 correction shortcut** (#23/#15) and **§24 learn-from-user-mistakes strategy** (#24). The dominant 🟡 cluster is **(a) measurement** (success metrics coded as harnesses but not computed) and **(b) the three self-flagged "genuine openings"** — semiring provenance (I5), true IVM (I6), counterfactual replay (I12) + taint tracking (I11) — exactly where §11.13's honesty map predicted the code would be thinnest. Closing §7 + landing the 🔒 evidence where locally satisfiable = Phase 6 done.
+In the historical 2026-06-23 snapshot, no innovation was a total ❌ and the two
+genuinely missing **features** were **§20.7 tier-0 correction shortcut**
+(#23/#15) and **§24 learn-from-user-mistakes strategy** (#24). Those local/code
+gaps were later closed; do not reopen them from this historical section. The
+current parity blocker is the Tier-B operator-captured production evidence path,
+not these old local feature rows.
 
 ---
 
