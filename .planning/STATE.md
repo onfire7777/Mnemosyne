@@ -59,6 +59,12 @@ metadata (`MNEMOSYNE_PROD_CHANGE_TICKET`,
 preparation aid only; readiness and evidence acceptance still require real
 operator inputs, wrapper capture, release audit, and offline custody review.
 
+Latest checkpoint (2026-06-30): Tier-B capture-blocker lane lists and shared
+provider-stack phase lanes now use the same numeric `B1` through `B10` ordering
+as the row action plan. This removes the remaining lexicographic `B1`, `B10`,
+`B2` ordering from generated packet handoffs and keeps row assignment readable
+without changing readiness semantics or evidence acceptance.
+
 Latest checkpoint (2026-06-30): Tier-B row action plans now separate
 row-owned provider-manifest env refs from shared provider-stack blockers. The
 generated `reports/row-action-plan.{json,md}` includes
