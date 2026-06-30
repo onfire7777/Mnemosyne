@@ -31,6 +31,7 @@ of shell-sourcing it:
 ```bash
 infra/scripts/render-production-soak-manifest.sh \
   --env-file /secure/path/to/mnemosyne-tier-b-custody/production-render.env \
+  --runtime-env-file /secure/path/to/mnemosyne-production-runtime.env \
   --check-environment
 ```
 

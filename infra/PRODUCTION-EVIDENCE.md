@@ -6,9 +6,10 @@ This runbook is the operator handoff for flipping the remaining Tier B parity ro
 
 - Start with an external no-secret custody packet instead of hand-assembling the
   workspace. The helper copies the render env template, the shared provider
-  manifest template, operator docs, and a row-scoped gap report into a new
-  absolute directory outside the repo. It exits nonzero while operator evidence
-  is still missing; that is expected setup feedback, not a failed release gate:
+  manifest template, operator docs, packet-local row runbooks under
+  `docs/runbooks/`, and a row-scoped gap report into a new absolute directory
+  outside the repo. It exits nonzero while operator evidence is still missing;
+  that is expected setup feedback, not a failed release gate:
 
   ```bash
   infra/scripts/prepare-production-evidence-custody.py \
@@ -20,7 +21,9 @@ This runbook is the operator handoff for flipping the remaining Tier B parity ro
   `production-render.env`, `input-artifacts/provider-manifest.production.json`,
   and the B1-B10 input artifacts before the render/preflight/capture commands
   below. After filling or changing packet inputs, refresh the row-scoped report
-  without overwriting operator artifacts:
+  without overwriting operator artifacts. Refresh also backfills missing
+  read-only packet guidance docs for older packets, but it does not overwrite
+  existing copied docs:
 
   ```bash
   infra/scripts/prepare-production-evidence-custody.py \

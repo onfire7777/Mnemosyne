@@ -241,6 +241,9 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     assert report["schema"] == "mnemosyne.tier-b-custody-gap-report.v1"
     assert report["report_is_evidence"] is False
     assert report["ready_for_capture"] is False
+    assert report["packet_docs_complete"] is True
+    assert report["packet_docs_added"] == []
+    assert report["packet_docs_missing"] == []
     assert len(report["missing_render_environment"]) == 18
     assert "MNEMOSYNE_PROD_EVIDENCE_DIR" not in report["missing_render_environment"]
     assert "MNEMOSYNE_EMBEDDING_URL" in report["missing_provider_manifest_env_refs"]
@@ -268,7 +271,9 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     assert "Ready for capture: `false`" not in readme
     assert "does not carry current readiness status" in readme
     assert "docs/runbooks/" in readme
+    assert "missing read-only packet guidance docs" in readme
     assert "Post-Capture Custody Verification" in markdown
+    assert "Packet docs complete: `true`" in markdown
     assert (
         "Packet runbook: `docs/runbooks/row-01-production-postgres-retrieval.md`"
         in markdown
@@ -304,6 +309,62 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
         "B9",
         "B10",
     }
+
+
+def test_prepare_production_evidence_custody_refresh_repairs_missing_packet_docs(
+    tmp_path: Path,
+) -> None:
+    packet_root = tmp_path / "mnemosyne-tier-b-packet"
+    subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "prepare-production-evidence-custody.py"),
+            str(packet_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    preserved_doc = packet_root / "docs" / "PRODUCTION-EVIDENCE.md"
+    preserved_doc.write_text("operator-local note\n", encoding="utf-8")
+    missing_runbook = (
+        packet_root / "docs" / "runbooks" / "row-01-production-postgres-retrieval.md"
+    )
+    missing_runbook.unlink()
+
+    proc = subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "prepare-production-evidence-custody.py"),
+            "--refresh",
+            str(packet_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    summary = json.loads(proc.stdout)
+    report = json.loads(
+        (packet_root / "reports" / "tier-b-gap-report.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    markdown = (packet_root / "reports" / "tier-b-gap-report.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert proc.returncode == 78
+    assert summary["packet_docs_complete"] is True
+    assert summary["packet_docs_added"] == 1
+    assert report["packet_docs_complete"] is True
+    assert report["packet_docs_added"] == [
+        "docs/runbooks/row-01-production-postgres-retrieval.md"
+    ]
+    assert report["packet_docs_missing"] == []
+    assert missing_runbook.is_file()
+    assert preserved_doc.read_text(encoding="utf-8") == "operator-local note\n"
+    assert "Added missing packet docs during this refresh" in markdown
 
 
 def test_prepare_production_evidence_custody_phase_plan_scopes_provider_stack() -> None:
