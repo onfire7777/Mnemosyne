@@ -30,6 +30,17 @@ progress unit is real external input assembly and production capture, while
 B1-B10 remain Partial until wrapper-captured production bundles pass
 manifest-bound release audit and offline custody verification.
 
+Latest checkpoint (2026-06-30): New self-hosted-first architecture planning
+artifacts were ingested and corrected before tracking. They now sit subordinate
+to the active Tier-B production-evidence contract: self-hosted/no-GPU is a
+preferred baseline for rows it can honestly evidence, but it cannot mark B9 or
+strict 100% complete by declaration. B9 still requires real cloud/GPU trainer
+evidence through the same custody path, or a future explicit ADR changing the
+strict audit. The same correction preserves native recursive-PPR as the quality
+path while requiring AGE-sidecar evidence or an ADR if the active B1 audit still
+demands AGE, and forbids generic new gate work unless a fresh capture exposes a
+real attestation-only gap.
+
 Historical checkpoint (2026-06-30; superseded by the v5 checkpoint above): The
 active goal was confirmed active, not paused.
 `.planning/ACTIVE-GOAL-OPERATING-CONTRACT.md` and
