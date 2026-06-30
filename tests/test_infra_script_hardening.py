@@ -352,7 +352,25 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
         "--env-file /secure/path/to/mnemosyne-production-runtime.env" in command
         for command in report["next_commands"]
     )
-    assert any("--fingerprint-record-output" in command for command in report["next_commands"])
+    assert any(
+        "--fingerprint-record-output" in command
+        for command in report["next_commands"]
+    )
+    capture_command = report["next_commands"][-2]
+    verify_command = report["next_commands"][-1]
+    assert "--fingerprint-record-output" in capture_command
+    assert "production-evidence-verify" in verify_command
+    assert "--fingerprint-record" in verify_command
+    assert "--report-output" in verify_command
+    assert str(packet_root.parent / f"{packet_root.name}-capture") in verify_command
+    assert (
+        str(packet_root.parent / f"{packet_root.name}-bundle-fingerprint.json")
+        in verify_command
+    )
+    assert (
+        str(packet_root.parent / f"{packet_root.name}-production-evidence-verify.json")
+        in verify_command
+    )
     assert summary["next_commands"] == report["next_commands"]
     assert summary["next"].endswith("run next_commands in order.")
 

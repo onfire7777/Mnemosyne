@@ -8,6 +8,7 @@ import importlib.util
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -28,6 +29,10 @@ def _repo_dir() -> Path:
 def _fail(message: str, code: int = 65) -> None:
     print(f"ERROR: {message}", file=sys.stderr)
     raise SystemExit(code)
+
+
+def _shell_quote(value: Path | str) -> str:
+    return shlex.quote(str(value))
 
 
 def _is_inside(child: Path, parent: Path) -> bool:
@@ -745,9 +750,9 @@ def _write_markdown(report: dict[str, Any], path: Path) -> None:
             "",
             "## Post-Capture Custody Verification",
             "",
-            "Run this after full capture completes. The expected fingerprint is read",
-            "from the external fingerprint record, not from the evidence bundle under",
-            "review.",
+            "Run this after full capture completes. Pass the external fingerprint",
+            "record directly to the verifier; do not read the expected fingerprint",
+            "from the evidence bundle under review.",
             "",
             f"```bash\n{report['post_capture_verify_script']}\n```",
         ]
@@ -934,25 +939,39 @@ def refresh_report(
         root.name + "-bundle-fingerprint.json"
     )
     capture_output_root = root.parent / (root.name + "-capture")
+    preflight_output_root = root.parent / (root.name + "-preflight")
     verify_report_output = root.parent / (root.name + "-production-evidence-verify.json")
+    production_render_env = root / "production-render.env"
+    production_soak_manifest = manifests_dir / "production-soak-manifest.json"
     runtime_env_example = reports_dir / "mnemosyne-production-runtime.env.example"
+    python_selector = (
+        'PYTHON="${PYTHON:-$(if [ -x .venv/bin/python ]; then printf \'%s\' '
+        ".venv/bin/python; else command -v python3; fi)}\""
+    )
     post_capture_verify_script = "\n".join(
         [
-            'PYTHON="${PYTHON:-$(if [ -x .venv/bin/python ]; then printf \'%s\' .venv/bin/python; else command -v python3; fi)}"',
-            f"BUNDLE_DIR={capture_output_root}",
-            f"FINGERPRINT_RECORD={fingerprint_record_output}",
-            f"VERIFY_REPORT={verify_report_output}",
+            python_selector,
+            f"BUNDLE_DIR={_shell_quote(capture_output_root)}",
+            f"FINGERPRINT_RECORD={_shell_quote(fingerprint_record_output)}",
+            f"VERIFY_REPORT={_shell_quote(verify_report_output)}",
             '"$PYTHON" -m mnemosyne.cli production-evidence-verify "$BUNDLE_DIR" \\',
             '  --fingerprint-record "$FINGERPRINT_RECORD" \\',
             '  --report-output "$VERIFY_REPORT"',
         ]
+    )
+    post_capture_verify_command = (
+        f"{python_selector}; "
+        f'"$PYTHON" -m mnemosyne.cli production-evidence-verify '
+        f"{_shell_quote(capture_output_root)} "
+        f"--fingerprint-record {_shell_quote(fingerprint_record_output)} "
+        f"--report-output {_shell_quote(verify_report_output)}"
     )
     report = {
         "schema": "mnemosyne.tier-b-custody-gap-report.v1",
         "report_is_evidence": False,
         "custody_root": str(root),
         "input_artifacts_dir": str(input_dir),
-        "production_render_env": str(root / "production-render.env"),
+        "production_render_env": str(production_render_env),
         "production_render_env_loaded": True,
         "packet_docs_complete": packet_docs["complete"],
         "packet_docs_added": packet_docs["added"],
@@ -976,7 +995,7 @@ def refresh_report(
         "missing_input_artifact_count": len(missing_input_artifacts),
         "operator_input_inventory": _operator_input_inventory(
             input_dir=input_dir,
-            render_env_file=root / "production-render.env",
+            render_env_file=production_render_env,
             runtime_env_placeholder=runtime_env_placeholder,
             runtime_env_example=runtime_env_example,
             missing_render_env=missing_render_env,
@@ -999,10 +1018,11 @@ def refresh_report(
         "post_capture_verify_script": post_capture_verify_script,
         "operator_readiness_files": renderer_payload.get("operator_readiness_files", {}),
         "next_commands": [
-            f"infra/scripts/render-production-soak-manifest.sh --env-file {root / 'production-render.env'} --runtime-env-file {runtime_env_placeholder} --check-environment",
-            f"infra/scripts/render-production-soak-manifest.sh --env-file {root / 'production-render.env'} --runtime-env-file {runtime_env_placeholder} --output {manifests_dir / 'production-soak-manifest.json'}",
-            f"infra/scripts/capture-production-evidence.sh --env-file {runtime_env_placeholder} --preflight-only {manifests_dir / 'production-soak-manifest.json'} {root.parent / (root.name + '-preflight')}",
-            f"infra/scripts/capture-production-evidence.sh --env-file {runtime_env_placeholder} --fingerprint-record-output {fingerprint_record_output} {manifests_dir / 'production-soak-manifest.json'} {capture_output_root}",
+            f"infra/scripts/render-production-soak-manifest.sh --env-file {_shell_quote(production_render_env)} --runtime-env-file {_shell_quote(runtime_env_placeholder)} --check-environment",
+            f"infra/scripts/render-production-soak-manifest.sh --env-file {_shell_quote(production_render_env)} --runtime-env-file {_shell_quote(runtime_env_placeholder)} --output {_shell_quote(production_soak_manifest)}",
+            f"infra/scripts/capture-production-evidence.sh --env-file {_shell_quote(runtime_env_placeholder)} --preflight-only {_shell_quote(production_soak_manifest)} {_shell_quote(preflight_output_root)}",
+            f"infra/scripts/capture-production-evidence.sh --env-file {_shell_quote(runtime_env_placeholder)} --fingerprint-record-output {_shell_quote(fingerprint_record_output)} {_shell_quote(production_soak_manifest)} {_shell_quote(capture_output_root)}",
+            post_capture_verify_command,
         ],
     }
     _write_runtime_env_example(runtime_env_example, provider_env_refs=provider_env_refs)
