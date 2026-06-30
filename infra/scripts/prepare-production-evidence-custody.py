@@ -10,6 +10,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -36,16 +37,21 @@ def _is_inside(child: Path, parent: Path) -> bool:
         return False
 
 
-def _resolve_new_external_root(raw: str, *, repo_dir: Path) -> Path:
+def _resolve_external_root(raw: str, *, repo_dir: Path, must_exist: bool) -> Path:
     root = Path(raw).expanduser()
     if not root.is_absolute():
         _fail("custody root must be an absolute external path")
-    if root.exists():
-        _fail("custody root must not already exist")
+    if root.is_symlink():
+        _fail("custody root must not be a symlink")
     parent = root.parent.resolve()
     repo_resolved = repo_dir.resolve()
     if _is_inside(parent, repo_resolved):
         _fail("refusing to prepare production custody packet inside the repository")
+    if must_exist:
+        if not root.is_dir():
+            _fail("custody root must be an existing external packet directory")
+    elif root.exists():
+        _fail("custody root must not already exist")
     return root
 
 
@@ -53,6 +59,20 @@ def _copy_readonly(src: Path, dst: Path) -> None:
     dst.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(src, dst)
     dst.chmod(0o600)
+
+
+def _require_real_directory(path: Path, *, label: str) -> None:
+    if path.is_symlink():
+        _fail(f"{label} must not be a symlink: {path}")
+    if not path.is_dir():
+        _fail(f"{label} must be an existing directory: {path}")
+
+
+def _require_real_file(path: Path, *, label: str) -> None:
+    if path.is_symlink():
+        _fail(f"{label} must not be a symlink: {path}")
+    if not path.is_file():
+        _fail(f"{label} must be an existing file: {path}")
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -105,9 +125,43 @@ def _collect_render_placeholders_by_lane(
     return by_lane, routed
 
 
-def _run_renderer(repo_dir: Path, input_dir: Path) -> tuple[int, dict[str, Any], str]:
+def _load_packet_render_env(
+    root: Path,
+    *,
+    repo_dir: Path,
+    template_manifest: dict[str, Any],
+) -> dict[str, str]:
+    env_file = root / "production-render.env"
+    _require_real_file(env_file, label="production-render.env")
+    placeholders = sorted(set(PLACEHOLDER_RE.findall(json.dumps(template_manifest))))
+    loader = repo_dir / "infra" / "scripts" / "load-env.py"
+    proc = subprocess.run(
+        [str(loader), str(env_file), *placeholders],
+        cwd=repo_dir,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        stderr = proc.stderr.strip() or proc.stdout.strip()
+        _fail(f"production-render.env failed strict loading: {stderr}")
+    values: dict[str, str] = {}
+    for line in proc.stdout.splitlines():
+        key, separator, value = line.partition("=")
+        if separator:
+            values[key] = value
+    return values
+
+
+def _run_renderer(
+    repo_dir: Path,
+    input_dir: Path,
+    *,
+    env_overrides: dict[str, str],
+) -> tuple[int, dict[str, Any], str]:
     renderer = repo_dir / "infra" / "scripts" / "render-production-soak-manifest.sh"
     env = os.environ.copy()
+    env.update(env_overrides)
     env["MNEMOSYNE_PROD_EVIDENCE_DIR"] = str(input_dir)
     proc = subprocess.run(
         ["/bin/bash", str(renderer), "--check-environment"],
@@ -292,8 +346,7 @@ def _write_markdown(report: dict[str, Any], path: Path) -> None:
         lines.append("")
     lines.extend(["## Next Commands", ""])
     lines.extend(f"```bash\n{command}\n```" for command in report["next_commands"])
-    path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
-    path.chmod(0o600)
+    _atomic_write_text(path, "\n".join(lines).rstrip() + "\n")
 
 
 def _write_readme(root: Path, report: dict[str, Any]) -> None:
@@ -307,14 +360,16 @@ This packet is a no-secret operator workspace. It is not production evidence.
 1. Edit `production-render.env` outside the repo with non-secret `MNEMOSYNE_PROD_*` values.
 2. Fill `input-artifacts/provider-manifest.production.json` with production provider references.
 3. Add the remaining row artifacts under `input-artifacts/`.
-4. Re-run `reports/tier-b-gap-report.json` generation with:
+4. Refresh `reports/tier-b-gap-report.json` generation with:
 
 ```bash
-infra/scripts/prepare-production-evidence-custody.py {root}
+infra/scripts/prepare-production-evidence-custody.py --refresh {root}
 ```
 
-The command above intentionally refuses existing roots. For refreshes, create a
-new sibling packet so earlier custody reports remain immutable.
+Refresh mode updates only `reports/tier-b-gap-report.json`,
+`reports/tier-b-gap-report.md`, and this README is left as static guidance. It
+does not overwrite `production-render.env`, `input-artifacts/`, copied operator
+docs, or `manifests/`.
 
 ## Current Report
 
@@ -328,12 +383,37 @@ When the report is ready, render the soak manifest to a separate external path
 and capture into a new external output root. Do not use this packet root as the
 capture output root.
 """
-    readme.write_text(content, encoding="utf-8")
-    readme.chmod(0o600)
+    _atomic_write_text(readme, content)
 
 
-def prepare(root: Path, *, repo_dir: Path) -> dict[str, Any]:
-    os.umask(0o077)
+def _atomic_write_text(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.parent.chmod(0o700)
+    with tempfile.NamedTemporaryFile(
+        "w",
+        encoding="utf-8",
+        dir=path.parent,
+        prefix=f".{path.name}.",
+        delete=False,
+    ) as handle:
+        handle.write(text)
+        tmp_path = Path(handle.name)
+    tmp_path.chmod(0o600)
+    os.replace(tmp_path, path)
+
+
+def _validate_existing_packet(root: Path) -> None:
+    _require_real_directory(root, label="custody root")
+    _require_real_file(root / "production-render.env", label="production-render.env")
+    _require_real_directory(root / "input-artifacts", label="input-artifacts")
+    _require_real_directory(root / "reports", label="reports")
+    _require_real_file(
+        root / "input-artifacts" / "provider-manifest.production.json",
+        label="provider-manifest.production.json",
+    )
+
+
+def _write_packet_skeleton(root: Path, *, repo_dir: Path) -> None:
     docs_dir = root / "docs"
     input_dir = root / "input-artifacts"
     reports_dir = root / "reports"
@@ -358,9 +438,25 @@ def prepare(root: Path, *, repo_dir: Path) -> dict[str, Any]:
     ):
         _copy_readonly(repo_dir / relative, docs_dir / Path(relative).name)
 
-    renderer_code, renderer_payload, renderer_stderr = _run_renderer(repo_dir, input_dir)
+
+def refresh_report(root: Path, *, repo_dir: Path) -> dict[str, Any]:
+    os.umask(0o077)
+    _validate_existing_packet(root)
+    input_dir = root / "input-artifacts"
+    reports_dir = root / "reports"
+    manifests_dir = root / "manifests"
     template_manifest = _load_json(
         repo_dir / "infra" / "templates" / "production-soak-manifest.template.json"
+    )
+    env_overrides = _load_packet_render_env(
+        root,
+        repo_dir=repo_dir,
+        template_manifest=template_manifest,
+    )
+    renderer_code, renderer_payload, renderer_stderr = _run_renderer(
+        repo_dir,
+        input_dir,
+        env_overrides=env_overrides,
     )
     provider_manifest = _load_json(input_dir / "provider-manifest.production.json")
     provider_env_refs = sorted(_collect_env_refs(provider_manifest))
@@ -396,9 +492,11 @@ def prepare(root: Path, *, repo_dir: Path) -> dict[str, Any]:
         "report_is_evidence": False,
         "custody_root": str(root),
         "input_artifacts_dir": str(input_dir),
+        "production_render_env": str(root / "production-render.env"),
+        "production_render_env_loaded": True,
         "renderer_returncode": renderer_code,
         "renderer_blocked_reason": renderer_payload.get("blocked_reason"),
-        "renderer_stderr": renderer_stderr.strip(),
+        "renderer_stderr_present": bool(renderer_stderr.strip()),
         "ready_for_capture": (
             not missing_render_env
             and not missing_provider_env_refs
@@ -423,9 +521,15 @@ def prepare(root: Path, *, repo_dir: Path) -> dict[str, Any]:
         ],
     }
     report_json = reports_dir / "tier-b-gap-report.json"
-    report_json.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    report_json.chmod(0o600)
+    _atomic_write_text(report_json, json.dumps(report, indent=2, sort_keys=True) + "\n")
     _write_markdown(report, reports_dir / "tier-b-gap-report.md")
+    return report
+
+
+def prepare(root: Path, *, repo_dir: Path) -> dict[str, Any]:
+    os.umask(0o077)
+    _write_packet_skeleton(root, repo_dir=repo_dir)
+    report = refresh_report(root, repo_dir=repo_dir)
     _write_readme(root, report)
     return report
 
@@ -434,12 +538,27 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Prepare a no-secret external custody packet for Tier-B production evidence.",
     )
-    parser.add_argument("custody_root", help="New absolute external packet directory")
+    parser.add_argument(
+        "--refresh",
+        "--refresh-report",
+        action="store_true",
+        dest="refresh_report",
+        help="Refresh reports in an existing packet without overwriting operator inputs",
+    )
+    parser.add_argument("custody_root", help="Absolute external packet directory")
     args = parser.parse_args(argv)
 
     repo_dir = _repo_dir()
-    root = _resolve_new_external_root(args.custody_root, repo_dir=repo_dir)
-    report = prepare(root, repo_dir=repo_dir)
+    root = _resolve_external_root(
+        args.custody_root,
+        repo_dir=repo_dir,
+        must_exist=args.refresh_report,
+    )
+    report = (
+        refresh_report(root, repo_dir=repo_dir)
+        if args.refresh_report
+        else prepare(root, repo_dir=repo_dir)
+    )
     summary = {
         "ok": report["ready_for_capture"],
         "custody_root": report["custody_root"],

@@ -4,19 +4,28 @@
 **Last updated:** 2026-06-30.
 
 This file is the repo-owned execution contract for continuing the active Codex/GSD
-goal when the platform goal record is paused, usage-limited, or too broad to be
-edited safely. The objective remains unchanged: implement Mnemosyne precisely to
-the full blueprint, keep the repo and GitHub synchronized, and do not claim
-completion until current evidence proves every blueprint requirement.
+goal after pauses, usage limits, or handoffs. It is deliberately stricter than a
+chat recap: future agents should treat it as the prompt-engineered operating
+objective for the live run, while still deferring to the blueprint and current
+repo evidence when they conflict.
 
 ## Prime Objective
 
-Drive Mnemosyne from the current source-complete state to exact blueprint parity:
+Drive Mnemosyne from the current source-complete state to exact blueprint parity
+and production release readiness:
 
 1. Preserve Tier A source reconciliation as closed.
-2. Complete Tier B by capturing real operator production evidence for B1-B10.
+2. Complete Tier B by capturing real operator production evidence for B1-B10
+   without local stand-ins, fake providers, or validator weakening.
 3. Complete Tier C by re-proving SLOs on real production paths, reconciling the
-   parity matrix, and publishing the final 100% sign-off.
+   parity matrix, and publishing the final 100% sign-off only after evidence and
+   CI agree.
+
+The goal is intentionally ongoing. Do not mark it complete because a checkpoint,
+script, planning file, test suite, or CI run passed. Completion requires every
+blueprint-required capability, audit row, evidence bundle, SLO, rail, release
+artifact, and current-status document to be genuinely implemented, verified,
+documented, and clean.
 
 ## Current Highest-Leverage Path
 
@@ -24,11 +33,30 @@ The next work is not more generic gates. The substantive path is:
 
 1. Prepare an external Tier-B custody packet with
    `infra/scripts/prepare-production-evidence-custody.py`.
+   Recompute row readiness after filling operator inputs with
+   `infra/scripts/prepare-production-evidence-custody.py --refresh <packet>`.
 2. Fill the shared provider stack first because
    `provider-manifest.production.json` unblocks B1, B2, B4, B6, B7, B9, and B10.
 3. Capture keystone rows B1 retrieval and B2 tenant/auth evidence.
 4. Capture the remaining row bundles B3-B9.
 5. Capture B10 live parity evidence, then run Tier C sign-off.
+
+## Execution Loop
+
+For each substantive move:
+
+1. Confirm the live checkout, branch, dirty tree, latest commit, and CI state.
+2. Read the row runbook or blueprint section being changed before editing.
+3. Prefer the smallest architecture-aligned change that closes a real parity or
+   evidence gap.
+4. Verify with focused tests, custody checks, and CI when pushing source changes.
+5. Stage explicit paths, commit atomically, push, and confirm local and GitHub
+   state are synchronized.
+6. Update only current-status docs that became stale because of the change.
+
+Use subagents only for bounded independent review or clearly separable work. If
+subagent orchestration becomes the bottleneck, continue locally on the critical
+path and record the result.
 
 ## Non-Negotiables
 

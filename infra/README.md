@@ -108,23 +108,23 @@ For production Tier-B evidence, render the production soak manifest outside the
 repository, then use the production runner:
 
 ```bash
-# Review the complete no-secret operator environment inventory first.
+# Prepare the no-secret external packet and row-scoped gap report first.
+infra/scripts/prepare-production-evidence-custody.py \
+  /secure/path/to/mnemosyne-tier-b-custody
+open /secure/path/to/mnemosyne-tier-b-custody/reports/tier-b-gap-report.md
+
+# Review the complete no-secret operator environment inventory.
 open infra/templates/production-operator-env.inventory.md
-cp infra/templates/production-render.env.example \
-  /secure/path/to/production-render.env
-# Fill /secure/path/to/production-render.env outside this repository.
+# Fill the packet's production-render.env outside this repository.
+# Fill input-artifacts/provider-manifest.production.json and every other
+# manifest-referenced production input artifact listed in the packet report.
+infra/scripts/prepare-production-evidence-custody.py \
+  --refresh \
+  /secure/path/to/mnemosyne-tier-b-custody
+
 set -a
-. /secure/path/to/production-render.env
+. /secure/path/to/mnemosyne-tier-b-custody/production-render.env
 set +a
-mkdir -p "$MNEMOSYNE_PROD_EVIDENCE_DIR"
-cp infra/templates/provider-manifest.production.template.json \
-  "$MNEMOSYNE_PROD_EVIDENCE_DIR/provider-manifest.production.json"
-# Fill the external provider manifest with production provider values or
-# environment-variable references before rendering. --check-environment parses
-# those refs and fails with env names only when any referenced var is unset.
-# Populate every other manifest-referenced production input artifact listed in
-# infra/templates/production-input-artifacts.checklist.md before rendering or
-# checking; provider-manifest.production.json is only one shared input artifact.
 infra/scripts/render-production-soak-manifest.sh --check-environment
 infra/scripts/render-production-soak-manifest.sh \
   --output /secure/path/to/production-soak-manifest.json
