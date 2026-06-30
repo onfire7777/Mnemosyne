@@ -128,7 +128,8 @@ open infra/templates/production-operator-env.inventory.md
 # real production artifacts, not placeholder files.
 # The refreshed reports/input-artifact-validation-commands.sh refuses missing
 # or symlinked artifacts and runs manifest-derived validators against supplied
-# files before the full capture path.
+# files before the full capture path. Run it with no argument for all rows, or
+# pass a row such as B1 for a row-scoped pre-capture check.
 # The refreshed report's capture_blockers section summarizes the blocked lanes
 # and missing blocker classes for dispatcher handoff without exposing values.
 # Copy reports/mnemosyne-production-runtime.env.example to the real external
@@ -252,8 +253,9 @@ be satisfied with placeholder artifacts.
 The packet's `reports/input-artifact-validation-commands.sh` script is the
 next local check after files are supplied: it rejects missing, symlinked, or
 non-file artifacts before running the exact manifest-derived validators against
-the packet's `input-artifacts/` files. Passing it is not a row flip; the full
-production capture and offline verifier remain authoritative.
+the packet's `input-artifacts/` files. Run it with no argument for every row, or
+pass `B1` through `B10` for a row-scoped pre-capture check. Passing it is not a
+row flip; the full production capture and offline verifier remain authoritative.
 
 The renderer replaces non-secret `MNEMOSYNE_PROD_*` placeholders from the
 operator environment and validates production scope plus the full command

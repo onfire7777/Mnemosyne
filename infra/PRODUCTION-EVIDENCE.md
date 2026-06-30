@@ -32,7 +32,9 @@ This runbook is the operator handoff for flipping the remaining Tier B parity ro
   JSON, PEM, or bundle files to make readiness pass. The adjacent
   `reports/input-artifact-validation-commands.sh` script refuses missing or
   symlinked artifacts and then runs the manifest-derived validators against the
-  real files already supplied under `input-artifacts/`. The packet also writes
+  real files already supplied under `input-artifacts/`. Run it with no argument
+  for every row, or pass a specific row such as `B1` to validate only that
+  row's artifact set and validators. The packet also writes
   `reports/mnemosyne-production-runtime.env.example` and
   `reports/next-commands.sh`; copy the generated no-secret runtime example to
   the real external runtime env path, set mode `0600`, and fill values there.
