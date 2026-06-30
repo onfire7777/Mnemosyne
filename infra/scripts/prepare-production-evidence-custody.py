@@ -256,7 +256,9 @@ def _row_report(
 def _phase_plan(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     by_lane = {str(row["lane"]): row for row in rows if row.get("lane")}
     shared_missing = sorted(
-        lane for lane in SHARED_PROVIDER_LANES if not by_lane.get(lane, {}).get("ready_for_capture")
+        lane
+        for lane in SHARED_PROVIDER_LANES
+        if not by_lane.get(lane, {}).get("provider_manifest_environment_complete")
     )
     return [
         {

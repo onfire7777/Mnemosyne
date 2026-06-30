@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import subprocess
@@ -13,6 +14,19 @@ REPO = Path(__file__).resolve().parents[1]
 
 def _read(relative_path: str) -> str:
     return (REPO / relative_path).read_text(encoding="utf-8")
+
+
+def _load_prepare_custody_module():
+    module_path = REPO / "infra" / "scripts" / "prepare-production-evidence-custody.py"
+    spec = importlib.util.spec_from_file_location(
+        "prepare_production_evidence_custody",
+        module_path,
+    )
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def test_production_and_local_evidence_capture_reject_repo_local_outputs() -> None:
@@ -264,6 +278,69 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
         "B9",
         "B10",
     }
+
+
+def test_prepare_production_evidence_custody_phase_plan_scopes_provider_stack() -> None:
+    module = _load_prepare_custody_module()
+    rows = [
+        {
+            "lane": "B1",
+            "ready_for_capture": False,
+            "provider_manifest_environment_complete": True,
+        },
+        {
+            "lane": "B2",
+            "ready_for_capture": False,
+            "provider_manifest_environment_complete": False,
+        },
+        {
+            "lane": "B3",
+            "ready_for_capture": False,
+            "provider_manifest_environment_complete": True,
+        },
+        {
+            "lane": "B4",
+            "ready_for_capture": False,
+            "provider_manifest_environment_complete": True,
+        },
+        {
+            "lane": "B6",
+            "ready_for_capture": False,
+            "provider_manifest_environment_complete": True,
+        },
+        {
+            "lane": "B7",
+            "ready_for_capture": False,
+            "provider_manifest_environment_complete": True,
+        },
+        {
+            "lane": "B9",
+            "ready_for_capture": False,
+            "provider_manifest_environment_complete": True,
+        },
+        {
+            "lane": "B10",
+            "ready_for_capture": False,
+            "provider_manifest_environment_complete": True,
+        },
+    ]
+
+    phase_plan = module._phase_plan(rows)
+
+    assert phase_plan[1]["title"] == "Shared provider stack"
+    assert phase_plan[1]["status"] == "blocked"
+    assert phase_plan[1]["currently_blocked_lanes"] == ["B2"]
+    assert phase_plan[2]["title"] == "Keystone rows"
+    assert phase_plan[2]["status"] == "blocked"
+
+    for row in rows:
+        if row["lane"] == "B2":
+            row["provider_manifest_environment_complete"] = True
+    phase_plan = module._phase_plan(rows)
+
+    assert phase_plan[1]["status"] == "ready"
+    assert phase_plan[1]["currently_blocked_lanes"] == []
+    assert phase_plan[2]["status"] == "blocked"
 
 
 def test_prepare_production_evidence_custody_refresh_preserves_operator_inputs(
