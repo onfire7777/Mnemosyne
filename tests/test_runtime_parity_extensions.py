@@ -303,6 +303,7 @@ def test_c2pa_tool_verifier_trusts_configured_issuer_and_quarantines_failures(tm
     untrusted = C2paToolVerifier(tool_path=str(verifier_stub), trusted_issuers=("issuer-b",)).verify(
         payload, {"asset_path": str(asset)}
     )
+    unconfigured = C2paToolVerifier(tool_path=str(verifier_stub)).verify(payload, {"asset_path": str(asset)})
     failed = C2paToolVerifier(tool_path=str(failing_stub)).verify(payload, {"asset_path": str(asset)})
     invalid = C2paToolVerifier(tool_path=str(invalid_stub)).verify(payload, {"asset_path": str(asset)})
 
@@ -318,7 +319,13 @@ def test_c2pa_tool_verifier_trusts_configured_issuer_and_quarantines_failures(tm
     }
     assert untrusted.valid is True
     assert untrusted.trusted is False
-    assert untrusted.trust_delta == -1
+    assert untrusted.quarantine is True
+    assert untrusted.trust_delta == 5
+    assert untrusted.reason == "c2pa manifest valid but signer rejected by trust policy"
+    assert unconfigured.valid is True
+    assert unconfigured.trusted is False
+    assert unconfigured.quarantine is True
+    assert unconfigured.reason == "c2pa manifest valid but signer rejected by trust policy"
     assert failed.quarantine is True
     assert failed.trust_delta > 0
     assert invalid.quarantine is True
@@ -415,6 +422,49 @@ def test_c2pa_tool_verifier_enforces_certificate_root_policy(tmp_path) -> None:
     assert rejected.diagnostics["trusted_roots"] == [rejected_root]
 
 
+def test_c2pa_tool_verifier_requires_explicit_root_only_policy(tmp_path) -> None:
+    payload = b"camera bytes"
+    asset_hash = sha256(payload).hexdigest()
+    trusted_root = "aa" * 32
+    asset = tmp_path / "photo.jpg"
+    asset.write_bytes(payload)
+    verifier_stub = tmp_path / "c2pa-root-only.py"
+    verifier_stub.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env python3",
+                "import json",
+                f"print(json.dumps({{'active_manifest': 'manifest-1', 'claim_generator': 'issuer-a', 'asset_sha256': '{asset_hash}', 'certificate_chain': [{{'root_fingerprint': '{trusted_root}'}}]}}))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    verifier_stub.chmod(0o755)
+    implicit_policy = ProvenanceTrustPolicy(trusted_roots=(trusted_root,))
+    explicit_root_only_policy = ProvenanceTrustPolicy(
+        trusted_roots=(trusted_root,),
+        require_trusted_issuer=False,
+        require_trusted_root=True,
+    )
+
+    implicit = C2paToolVerifier(tool_path=str(verifier_stub), trust_policy=implicit_policy).verify(
+        payload, {"asset_path": str(asset)}
+    )
+    explicit = C2paToolVerifier(tool_path=str(verifier_stub), trust_policy=explicit_root_only_policy).verify(
+        payload, {"asset_path": str(asset)}
+    )
+
+    assert implicit.valid is True
+    assert implicit.trusted is False
+    assert implicit.quarantine is True
+    assert implicit.reason == "c2pa manifest valid but signer rejected by trust policy"
+    assert explicit.valid is True
+    assert explicit.trusted is True
+    assert explicit.quarantine is False
+    assert explicit.diagnostics["trust_policy"]["require_trusted_issuer"] is False
+    assert explicit.diagnostics["trust_policy"]["require_trusted_root"] is True
+
+
 def test_c2pa_tool_verifier_enforces_scoped_trust_policy(tmp_path) -> None:
     payload = b"camera bytes"
     asset_hash = sha256(payload).hexdigest()
@@ -485,6 +535,8 @@ def test_c2pa_tool_verifier_enforces_scoped_trust_policy(tmp_path) -> None:
 
 
 def test_provenance_trust_policy_rejects_ambiguous_boolean_values() -> None:
+    assert ProvenanceTrustPolicy().require_trusted_issuer is True
+    assert ProvenanceTrustPolicy.from_dict({}).require_trusted_issuer is True
     try:
         ProvenanceTrustPolicy.from_dict({"require_trusted_issuer": "false"})
     except ValueError as exc:

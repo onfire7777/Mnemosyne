@@ -4001,6 +4001,62 @@ def test_cli_ingest_c2pa_trust_policy_quarantines_untrusted_signer(tmp_path: Pat
     assert search["hits"] == []
 
 
+def test_cli_ingest_c2pa_without_trust_anchor_quarantines(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    asset = tmp_path / "capture.bin"
+    payload = b"binary camera capture"
+    asset.write_bytes(payload)
+    asset_hash = sha256(payload).hexdigest()
+    verifier_stub = tmp_path / "c2pa-ok.py"
+    verifier_stub.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env python3",
+                "import json",
+                f"print(json.dumps({{'active_manifest': 'manifest-1', 'claim_generator': 'issuer-a', 'asset_sha256': '{asset_hash}'}}))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    verifier_stub.chmod(0o755)
+
+    ingested = run_cli(
+        store,
+        "--c2pa-tool",
+        str(verifier_stub),
+        "ingest",
+        "--tenant",
+        TENANT,
+        "--user",
+        USER,
+        "--actor",
+        "external",
+        "--source-type",
+        "camera",
+        "--source-identity",
+        "device-1",
+        "--file",
+        str(asset),
+        "--modality",
+        "binary",
+        "--media-type",
+        "application/octet-stream",
+        "--trust-tier",
+        "5",
+        "--sensitivity",
+        "2",
+    )
+
+    assert ingested["quarantined"] is True
+    assert ingested["provenance"]["valid"] is True
+    assert ingested["provenance"]["trusted"] is False
+    assert ingested["provenance"]["reason"] == "c2pa manifest valid but signer rejected by trust policy"
+    assert ingested["provenance"]["diagnostics"]["trust_policy"] == {
+        "require_trusted_issuer": True,
+        "trusted_issuers": [],
+    }
+
+
 def test_cli_c2pa_verifier_uses_actual_file_over_manifest_asset_path(tmp_path: Path) -> None:
     store = tmp_path / "mnemosyne.json"
     asset = tmp_path / "capture.bin"

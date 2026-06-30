@@ -506,7 +506,7 @@ def load_provenance_verifier(args: argparse.Namespace) -> SignedProvenanceVerifi
 def load_provenance_trust_policy(args: argparse.Namespace) -> ProvenanceTrustPolicy:
     trusted_issuers = [str(item).strip() for item in (args.trusted_provenance_issuer or []) if str(item).strip()]
     trusted_roots = [str(item).strip() for item in (args.trusted_provenance_root or []) if str(item).strip()]
-    require_trusted_issuer = False
+    require_trusted_issuer = True
     require_trusted_root = False
     rules = ()
     policy_path = getattr(args, "provenance_trust_policy", None)

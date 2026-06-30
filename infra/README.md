@@ -499,8 +499,9 @@ and getting them wrong **quarantines a correctly signed asset**:
   `setup-c2pa.sh` extracts that exact surfaced string from the report it just
   produced and writes it into `trusted_issuers` — listing only the leaf CN
   `mnemosyne-test-signer` would never match.
-- **`require_trusted_issuer` defaults to `true` per rule and is OR-merged.**
-  `ProvenanceTrustRule.from_dict` defaults a missing `require_trusted_issuer` to
+- **`require_trusted_issuer` defaults to `true` at the policy and rule level, and
+  rule matches OR-merge.** `ProvenanceTrustPolicy.from_dict` and
+  `ProvenanceTrustRule.from_dict` default a missing `require_trusted_issuer` to
   `true`, and `for_context` OR-merges rule flags into the scoped policy. The
   `camera-binary-tenant-a` rule therefore sets `require_trusted_issuer: false`
   **explicitly** — it trusts by certificate **root**
