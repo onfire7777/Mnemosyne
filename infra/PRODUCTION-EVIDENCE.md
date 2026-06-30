@@ -4,6 +4,22 @@ This runbook is the operator handoff for flipping the remaining Tier B parity ro
 
 ## Preconditions
 
+- Start with an external no-secret custody packet instead of hand-assembling the
+  workspace. The helper copies the render env template, the shared provider
+  manifest template, operator docs, and a row-scoped gap report into a new
+  absolute directory outside the repo. It exits nonzero while operator evidence
+  is still missing; that is expected setup feedback, not a failed release gate:
+
+  ```bash
+  infra/scripts/prepare-production-evidence-custody.py \
+    /secure/path/to/mnemosyne-tier-b-custody
+  open /secure/path/to/mnemosyne-tier-b-custody/reports/tier-b-gap-report.md
+  ```
+
+  The generated packet is not evidence and cannot flip rows. Use it to prepare
+  `production-render.env`, `input-artifacts/provider-manifest.production.json`,
+  and the B1-B10 input artifacts before the render/preflight/capture commands
+  below.
 - Review `infra/templates/production-operator-env.inventory.md` before capture. It is a no-secret name inventory for render placeholders, provider-manifest references, and runtime/secret-custody environment names. Do not fill values in that file.
 - Copy `infra/templates/production-render.env.example` outside the repo, fill the blank non-secret `MNEMOSYNE_PROD_*` values there, and source the external copy before rendering.
 - Populate `MNEMOSYNE_PROD_EVIDENCE_DIR` with the manifest-referenced production input artifacts before running `--check-environment`. The check is no-write and reports the static template-derived artifact inventory plus `parity_row_readiness` grouping even before environment values are sourced; after all required `MNEMOSYNE_PROD_*` values are set, including `MNEMOSYNE_PROD_EVIDENCE_DIR`, it fails if required relative artifact names are missing from that external directory and shows which strict-audit row is blocked. Use `infra/templates/production-input-artifacts.checklist.md` as the non-secret operator checklist for the required artifact names.
@@ -32,6 +48,8 @@ This runbook is the operator handoff for flipping the remaining Tier B parity ro
 Run the production wrapper from the repository root:
 
 ```bash
+infra/scripts/prepare-production-evidence-custody.py \
+  /secure/path/to/mnemosyne-tier-b-custody
 open infra/templates/production-operator-env.inventory.md
 cp infra/templates/production-render.env.example \
   /secure/path/to/production-render.env

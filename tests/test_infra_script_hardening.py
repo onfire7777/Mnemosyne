@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 
@@ -170,6 +171,80 @@ def test_capture_local_evidence_rejects_symlinked_output_root(tmp_path: Path) ->
     assert proc.returncode == 65
     assert "local-staging evidence output root cannot be a symlink" in proc.stderr
     assert not (target_root / "manifest.json").exists()
+
+
+def test_prepare_production_evidence_custody_writes_external_gap_packet(
+    tmp_path: Path,
+) -> None:
+    packet_root = tmp_path / "mnemosyne-tier-b-packet"
+
+    proc = subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "prepare-production-evidence-custody.py"),
+            str(packet_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    summary = json.loads(proc.stdout)
+    report_path = packet_root / "reports" / "tier-b-gap-report.json"
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+
+    assert proc.returncode == 78
+    assert summary["ok"] is False
+    assert summary["report"] == str(report_path)
+    assert report["schema"] == "mnemosyne.tier-b-custody-gap-report.v1"
+    assert report["report_is_evidence"] is False
+    assert report["ready_for_capture"] is False
+    assert len(report["missing_render_environment"]) == 18
+    assert "MNEMOSYNE_PROD_EVIDENCE_DIR" not in report["missing_render_environment"]
+    assert "MNEMOSYNE_EMBEDDING_URL" in report["missing_provider_manifest_env_refs"]
+    assert report["missing_input_artifact_count"] == 23
+    assert "provider-manifest.production.json" not in report["missing_input_artifacts"]
+    assert (packet_root / "input-artifacts" / "provider-manifest.production.json").is_file()
+    assert (packet_root / "production-render.env").is_file()
+    assert (packet_root / "reports" / "tier-b-gap-report.md").is_file()
+    assert (packet_root / "docs" / "PRODUCTION-EVIDENCE.md").is_file()
+
+    rows = {row["lane"]: row for row in report["rows"]}
+    assert rows["B1"]["missing_input_artifacts"] == ["retrieval-ops-bundle.json"]
+    assert "MNEMOSYNE_EMBEDDING_URL" in rows["B1"]["missing_provider_manifest_env_refs"]
+    assert rows["B3"]["missing_provider_manifest_env_refs"] == []
+    assert rows["B8"]["missing_provider_manifest_env_refs"] == []
+    assert report["phase_plan"][1]["title"] == "Shared provider stack"
+    assert set(report["phase_plan"][1]["lanes_unblocked_when_done"]) == {
+        "B1",
+        "B2",
+        "B4",
+        "B6",
+        "B7",
+        "B9",
+        "B10",
+    }
+
+
+def test_prepare_production_evidence_custody_rejects_repo_local_root(
+    tmp_path: Path,
+) -> None:
+    repo_local_root = REPO / f".tmp-tier-b-packet-{tmp_path.name}"
+
+    proc = subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "prepare-production-evidence-custody.py"),
+            str(repo_local_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert proc.returncode == 65
+    assert "inside the repository" in proc.stderr
+    assert not repo_local_root.exists()
 
 
 def test_generated_secret_material_uses_private_modes() -> None:
