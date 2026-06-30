@@ -16,6 +16,14 @@ infra/scripts/prepare-production-evidence-custody.py \
 
 The generated `reports/tier-b-gap-report.{json,md}` files are an operator
 worklist only. They are not production evidence and cannot flip any row.
+After filling `production-render.env`, `input-artifacts/provider-manifest.production.json`,
+or any row artifact, recompute the worklist without overwriting operator inputs:
+
+```bash
+infra/scripts/prepare-production-evidence-custody.py \
+  --refresh \
+  /secure/path/to/mnemosyne-tier-b-custody
+```
 
 - [ ] `auth-ops-bundle.json`
 - [ ] `belief-revision-cases.json`

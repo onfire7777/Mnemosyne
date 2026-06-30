@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -208,6 +209,9 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     assert (packet_root / "production-render.env").is_file()
     assert (packet_root / "reports" / "tier-b-gap-report.md").is_file()
     assert (packet_root / "docs" / "PRODUCTION-EVIDENCE.md").is_file()
+    assert "--refresh" in (packet_root / "README.md").read_text(
+        encoding="utf-8"
+    )
 
     rows = {row["lane"]: row for row in report["rows"]}
     assert rows["B1"]["missing_input_artifacts"] == ["retrieval-ops-bundle.json"]
@@ -224,6 +228,166 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
         "B9",
         "B10",
     }
+
+
+def test_prepare_production_evidence_custody_refresh_preserves_operator_inputs(
+    tmp_path: Path,
+) -> None:
+    packet_root = tmp_path / "mnemosyne-tier-b-packet"
+    create = subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "prepare-production-evidence-custody.py"),
+            str(packet_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert create.returncode == 78
+
+    env_file = packet_root / "production-render.env"
+    env_text = env_file.read_text(encoding="utf-8")
+    env_file.write_text(
+        env_text.replace(
+            'export MNEMOSYNE_PROD_TENANT=""',
+            'export MNEMOSYNE_PROD_TENANT="tenant-prod"',
+        ),
+        encoding="utf-8",
+    )
+    provider_manifest = packet_root / "input-artifacts" / "provider-manifest.production.json"
+    provider_before = provider_manifest.read_bytes()
+
+    refresh = subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "prepare-production-evidence-custody.py"),
+            "--refresh",
+            str(packet_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    summary = json.loads(refresh.stdout)
+    report = json.loads(
+        (packet_root / "reports" / "tier-b-gap-report.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert refresh.returncode == 78
+    assert summary["missing_render_environment"] == 17
+    assert "MNEMOSYNE_PROD_TENANT" not in report["missing_render_environment"]
+    assert report["production_render_env"] == str(env_file)
+    assert report["production_render_env_loaded"] is True
+    assert provider_manifest.read_bytes() == provider_before
+
+
+def test_prepare_production_evidence_custody_refresh_rejects_unsafe_packet_paths(
+    tmp_path: Path,
+) -> None:
+    packet_root = tmp_path / "mnemosyne-tier-b-packet"
+    create = subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "prepare-production-evidence-custody.py"),
+            str(packet_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert create.returncode == 78
+
+    linked_root = tmp_path / "linked-packet"
+    try:
+        linked_root.symlink_to(packet_root, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"symlink setup unavailable: {exc}")
+    proc = subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "prepare-production-evidence-custody.py"),
+            "--refresh",
+            str(linked_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 65
+    assert "custody root must not be a symlink" in proc.stderr
+
+    input_dir = packet_root / "input-artifacts"
+    real_input_dir = packet_root / "real-input-artifacts"
+    input_dir.rename(real_input_dir)
+    input_dir.symlink_to(real_input_dir, target_is_directory=True)
+    proc = subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "prepare-production-evidence-custody.py"),
+            "--refresh",
+            str(packet_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 65
+    assert "input-artifacts must not be a symlink" in proc.stderr
+
+
+def test_prepare_production_evidence_custody_refresh_reports_no_values(
+    tmp_path: Path,
+) -> None:
+    packet_root = tmp_path / "mnemosyne-tier-b-packet"
+    create = subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "prepare-production-evidence-custody.py"),
+            str(packet_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert create.returncode == 78
+
+    env_sentinel = "tenant-prod-secret-sentinel"
+    provider_sentinel = "https://embedding-secret-sentinel.example.test"
+    env_file = packet_root / "production-render.env"
+    env_file.write_text(
+        env_file.read_text(encoding="utf-8").replace(
+            'export MNEMOSYNE_PROD_TENANT=""',
+            f'export MNEMOSYNE_PROD_TENANT="{env_sentinel}"',
+        ),
+        encoding="utf-8",
+    )
+    proc_env = {**os.environ, "MNEMOSYNE_EMBEDDING_URL": provider_sentinel}
+    proc = subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "prepare-production-evidence-custody.py"),
+            "--refresh",
+            str(packet_root),
+        ],
+        cwd=REPO,
+        env=proc_env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    report_text = (packet_root / "reports" / "tier-b-gap-report.json").read_text(
+        encoding="utf-8"
+    )
+    markdown = (packet_root / "reports" / "tier-b-gap-report.md").read_text(
+        encoding="utf-8"
+    )
+    combined = "\n".join([proc.stdout, proc.stderr, report_text, markdown])
+
+    assert proc.returncode == 78
+    assert env_sentinel not in combined
+    assert provider_sentinel not in combined
 
 
 def test_prepare_production_evidence_custody_rejects_repo_local_root(
