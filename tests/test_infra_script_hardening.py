@@ -281,6 +281,14 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     assert summary["input_artifact_validation_script"] == str(
         artifact_validation_script
     )
+    assert summary["runtime_env_file_placeholder"] == (
+        "/secure/path/to/mnemosyne-production-runtime.env"
+    )
+    assert summary["runtime_env_example"] == str(
+        packet_root / "reports" / "mnemosyne-production-runtime.env.example"
+    )
+    assert "external runtime env file provider refs" in summary["next"]
+    assert "runtime_env_example" in summary["next"]
     assert report["schema"] == "mnemosyne.tier-b-custody-gap-report.v1"
     assert report["report_is_evidence"] is False
     assert report["ready_for_capture"] is False

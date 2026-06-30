@@ -65,6 +65,14 @@ as the row action plan. This removes the remaining lexicographic `B1`, `B10`,
 `B2` ordering from generated packet handoffs and keeps row assignment readable
 without changing readiness semantics or evidence acceptance.
 
+Latest checkpoint (2026-06-30): Tier-B custody packet stdout now names all
+three operator input surfaces instead of only `production-render.env` and
+`input-artifacts/`. The machine-readable summary includes the generated
+`runtime_env_example` path and the external `runtime_env_file_placeholder`, and
+its `next` guidance routes operators through render-env, provider-env/runtime,
+and input-artifact action plans before running capture commands. This is
+handoff metadata only; provider values remain external and redacted.
+
 Latest checkpoint (2026-06-30): Tier-B row action plans now separate
 row-owned provider-manifest env refs from shared provider-stack blockers. The
 generated `reports/row-action-plan.{json,md}` includes
