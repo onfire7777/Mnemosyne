@@ -345,6 +345,30 @@ def test_current_state_docs_do_not_reopen_closed_local_feature_gaps() -> None:
     assert "Last recorded green source-bearing GitHub baseline before this handoff update" not in handoff
 
 
+def test_self_hosted_profile_docs_do_not_weaken_strict_tier_b_contract() -> None:
+    architecture = (REPO / "docs" / "SELF-HOSTED-PRODUCTION-ARCHITECTURE.md").read_text(
+        encoding="utf-8"
+    )
+    phase_plan = (
+        REPO
+        / ".planning"
+        / "phases"
+        / "08-self-hosted-first-production"
+        / "08-01-PLAN.md"
+    ).read_text(encoding="utf-8")
+    combined = "\n".join([architecture, phase_plan])
+    combined_flat = " ".join(combined.split())
+    phase_plan_flat = " ".join(phase_plan.split())
+
+    assert "does **not** by itself reach strict 100%" in architecture
+    assert "Current strict parity still requires B9 evidence" in architecture
+    assert "B9 either receives real cloud/GPU trainer evidence" in phase_plan
+    assert "Do not record it as DEFERRED-BY-DESIGN" in phase_plan_flat
+    assert "satisfy that as an evidence-compatible sidecar" in architecture
+    assert "B9 recorded as DEFERRED-BY-DESIGN" not in combined_flat
+    assert "official self-hosted profile reaches **100%" not in combined_flat
+
+
 def test_operator_docs_stage_all_production_input_artifacts_before_readiness() -> None:
     docs = [
         REPO / "infra" / "README.md",
