@@ -568,6 +568,25 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     )
     assert inventory["runtime_env_file"]["missing_count"] == 24
     assert inventory["runtime_env_file"]["values_redacted"] is True
+    assert inventory["runtime_env_file"][
+        "provider_manifest_env_refs_by_primary_row"
+    ]["B1"] == [
+        "MNEMOSYNE_EMBEDDING_API_KEY",
+        "MNEMOSYNE_EMBEDDING_MODEL",
+        "MNEMOSYNE_EMBEDDING_URL",
+        "MNEMOSYNE_RERANKER_API_KEY",
+        "MNEMOSYNE_RERANKER_MODEL",
+        "MNEMOSYNE_RERANKER_URL",
+    ]
+    assert inventory["runtime_env_file"][
+        "missing_provider_manifest_env_refs_by_primary_row"
+    ]["B2"] == [
+        "MNEMOSYNE_PROVIDER_OIDC_AUDIENCE",
+        "MNEMOSYNE_PROVIDER_OIDC_AUTHZ_POLICY_FILE",
+        "MNEMOSYNE_PROVIDER_OIDC_ISSUER",
+        "MNEMOSYNE_PROVIDER_OIDC_JWKS_URL",
+        "MNEMOSYNE_SESSION_SECRET_COMMAND",
+    ]
     assert inventory["input_artifacts"]["directory"] == str(
         packet_root / "input-artifacts"
     )
@@ -715,6 +734,8 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     assert "Operator Input Inventory" in markdown
     assert "### production-render.env" in markdown
     assert "### Runtime Env File" in markdown
+    assert "Missing provider refs by primary row" in markdown
+    assert "`B1`: `MNEMOSYNE_EMBEDDING_API_KEY`" in markdown
     assert "### Input Artifacts" in markdown
     assert "Input Artifact Worklist" in markdown
     assert "input-artifact-contracts.md" in markdown
@@ -1180,6 +1201,12 @@ def test_prepare_production_evidence_custody_runtime_env_file_satisfies_refs_wit
         "MNEMOSYNE_EMBEDDING_URL"
         not in inventory["runtime_env_file"]["missing_provider_manifest_env_refs"]
     )
+    assert "MNEMOSYNE_EMBEDDING_URL" not in inventory["runtime_env_file"][
+        "missing_provider_manifest_env_refs_by_primary_row"
+    ].get("B1", [])
+    assert "MNEMOSYNE_RERANKER_URL" in inventory["runtime_env_file"][
+        "missing_provider_manifest_env_refs_by_primary_row"
+    ]["B1"]
     assert inventory["runtime_env_file"]["path_placeholder"] == (
         "/secure/path/to/mnemosyne-production-runtime.env"
     )
