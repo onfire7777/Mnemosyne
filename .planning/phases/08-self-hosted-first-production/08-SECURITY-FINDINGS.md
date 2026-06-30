@@ -18,7 +18,10 @@ real `forget` then re-reads to confirm 404 + Vault transit key gone; provider-ch
 endpoint; **sign every evidence bundle with a collector-only key** the gate verifies + freshness.
 
 ## Headline finding B — unsafe shipped defaults (code-checkable; production profile must fail-closed)
-- MCP `require_session=OFF` → tenant_id/role/source_trust_tier taken from client tool args ⇒ any caller reads/writes any tenant, self-asserts operator/tier-0.
+- MCP dev mode can still run with `require_session=OFF`; the production profile now has a code-level
+  `MNEMOSYNE_MCP_PRODUCTION_PROFILE=1` boot gate that refuses missing signed sessions, missing
+  verifier custody, disabled AES-GCM object encryption, or non-command object-key custody. Remaining
+  work: live ops evidence and MFA-gated privilege checks.
 - No non-superuser Postgres role ships → a superuser DSN silently bypasses `FORCE RLS`.
 - Object-store encryption defaults to `none` → breaks right-to-be-forgotten in backups.
 - Dev-mode Vault with a committed fixed root token is the only KMS wiring.
@@ -27,11 +30,11 @@ endpoint; **sign every evidence bundle with a collector-only key** the gate veri
 
 ## The 16 must-do controls (ship before any production capture)
 1. **Gate integrity → measure-not-attest** + collector-signed bundles (finding A).
-2. **Auth fail-closed by default:** MCP `require_session=True` (refuse boot if unset); tenant/role/trust ONLY from the verified session claim, never a tool arg; startup + ops-check enforce it.
+2. **Auth fail-closed by default:** MCP `require_session=True` (refuse boot if unset); tenant/role/trust ONLY from the verified session claim, never a tool arg; startup + ops-check enforce it. **Code status:** production-profile startup enforcement is wired; live ops-check evidence and MFA-gated elevation evidence remain.
 3. **Postgres role separation under RLS:** `mnemosyne_app` (NOSUPERUSER/NOBYPASSRLS/no DELETE/TRUNCATE), separate `mnemosyne_consolidator` (sole write/destructive), SELECT-only eval roles; ops-check live-probes `rolsuper`/`rolbypassrls`. (DDL: `infra/postgres/roles.sql`.)
 4. **MFA-gate privilege elevation:** any rule granting operator/consolidator or trust_tier≤1 requires a non-empty claim matcher AND `required_acr/amr`; implement acr/amr/auth_time verification; reject tenant-only operator rules; bind superseding trust to the verified session (R4).
 5. **Production KMS (no dev mode):** sealed Vault/OpenBao (raft + transit auto-unseal via a separate hardened seal; AppRole/workload-identity, not root; audit device on; step-ca TLS); remove committed dev root token; single-use response-wrapped short-TTL CIDR-bound secret_ids; `kms-ops-check` asserts not-dev/no-root/key-version-advanced.
-6. **Mandatory at-rest object encryption:** `MNEMOSYNE_OBJECT_STORE_ENCRYPTION=aesgcm` + Vault-transit key provider; boot-time refuse-to-start if it resolves to `none` while S2+ writable; gate crypto-shred on it.
+6. **Mandatory at-rest object encryption:** `MNEMOSYNE_OBJECT_STORE_ENCRYPTION=aesgcm` + Vault-transit key provider; boot-time refuse-to-start if it resolves to `none` while S2+ writable; gate crypto-shred on it. **Code status:** MCP production-profile startup enforcement is wired for `aesgcm` + command-backed object-key custody; live Vault/KMS crypto-shred evidence remains.
 7. **Tenant-scope crypto-shred + split erase authority:** per-tenant-namespaced transit key paths + per-tenant policies (no wildcard `transit/keys/mnemosyne-object-*` delete); separate higher-auth credential for delete vs encrypt/decrypt; one-way `deletion_allowed`; alert on every transit DELETE; bound per-tenant KEKs wrapping per-object DEKs (rotation O(tenants)).
 8. **Provenance fail-closed:** `require_trusted_issuer=True` (+ `require_trusted_root` when roots set); self-signed/untrusted/digest-mismatch → data-only, never raises trust; `provenance-trust-check` fails on empty/dev roots.
 9. **Policy-as-code + socket-deny as required CI rails (do FIRST among infra):** trivy-config/conftest gate fails the build on any docker.sock mount or Docker-API-over-TCP, `privileged`, `seccomp/apparmor=unconfined`, missing `read_only`/`cap_drop:[ALL]`/`no-new-privileges`/non-root user/limits/healthcheck, unpinned image, or literal secret in `environment:`; fail-closed if the policy file is missing; scope-exempt only the dev compose by path.

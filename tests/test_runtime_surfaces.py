@@ -1758,6 +1758,44 @@ def test_cli_and_mcp_runtime_env_defaults_are_parsed(tmp_path: Path, monkeypatch
     assert policy["warnings"] == []
 
 
+def test_mcp_production_profile_fails_closed_on_unsafe_defaults(tmp_path: Path) -> None:
+    base = {
+        "store_path": tmp_path / "store.json",
+        "production_profile": True,
+        "object_store_encryption": "aesgcm",
+        "object_key_provider": "command",
+        "object_key_command": "vault-object-key",
+        "stateless": True,
+    }
+
+    with pytest.raises(ValueError, match="requires MNEMOSYNE_MCP_REQUIRE_SESSION=1"):
+        MnemosyneMcpServer(**base)
+    with pytest.raises(ValueError, match="signed-session verifier custody"):
+        MnemosyneMcpServer(**base, require_session=True)
+    with pytest.raises(ValueError, match="MNEMOSYNE_OBJECT_STORE_ENCRYPTION=aesgcm"):
+        MnemosyneMcpServer(
+            **{**base, "object_store_encryption": "none"},
+            require_session=True,
+            session_secret=MCP_SESSION_SECRET,
+        )
+    with pytest.raises(ValueError, match="command-backed object key custody"):
+        MnemosyneMcpServer(
+            **{**base, "object_key_provider": "json", "object_key_command": None},
+            require_session=True,
+            session_secret=MCP_SESSION_SECRET,
+        )
+
+    server = MnemosyneMcpServer(
+        **base,
+        require_session=True,
+        session_secret=MCP_SESSION_SECRET,
+    )
+    assert server.production_profile is True
+    assert server.require_session is True
+    assert server.object_store_encryption == "aesgcm"
+    assert server.object_key_provider == "command"
+
+
 def test_mcp_server_main_dispatches_serving_modes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[str, dict[str, object]]] = []
     monkeypatch.delenv("MNEMOSYNE_MCP_SDK_STREAMABLE_HTTP", raising=False)

@@ -48,7 +48,7 @@ filled in the Tier-B custody packet.
 | **Identity / OIDC (B2)** | **Keycloak 25.0** (already wired: `OidcJwtVerifier`, `idp-jwks-live-check`, FR-7/9) | Already integrated and live-validated; switching to Dex would *lose* wired capability for a marginal RAM saving. | **KEEP** (deployed) |
 | **Secrets / KMS (B2/B7)** | **HashiCorp Vault 1.17 transit** (or **OpenBao** drop-in) via `CommandKeyManager` | Real transit wrap/unwrap/rotate/shred already wired; non-local KMS kind. OpenBao is an Apache-licensed drop-in if licensing matters. | **KEEP** (deployed) |
 | **TLS (B2)** | **smallstep `step-ca`** ACME behind the proxy | Issues a real chain (order-id + serial + chain hashes), **not self-signed** → passes the TLS gate. Caddy's built-in `internal` CA is self-signed and **must not** be used for the gate. | **Add** |
-| **Object store (B6)** | **SeaweedFS** (native AES256-GCM) or MinIO; **mandatory** `MNEMOSYNE_OBJECT_STORE_ENCRYPTION=aesgcm` with Vault-transit key provider | Non-local object store; SeaweedFS encrypts server-side without a separate KMS sidecar. At-rest encryption is a **security must-do**, not optional. | **Add** (+ default fix) |
+| **Object store (B6)** | **SeaweedFS** (native AES256-GCM) or MinIO; **mandatory** `MNEMOSYNE_OBJECT_STORE_ENCRYPTION=aesgcm` with Vault-transit key provider | Non-local object store; SeaweedFS encrypts server-side without a separate KMS sidecar. At-rest encryption is a **security must-do**, not optional. | **Add**; MCP production boot gate wired |
 | **Observability (B8)** | **VictoriaMetrics + vmalert + Grafana** | Real hosted dashboard URL (`mode=hosted_url`) with tripwires + freshness + auth; ~⅓ the RAM of Prometheus. | **Add** |
 | **Reverse proxy / ingress** | **Caddy** — the **sole** published port; ACME certs from step-ca | Lightest auto-HTTPS; one ingress on a non-loopback hostname → satisfies the HTTPS-non-loopback gate for all services. | **Add** |
 
@@ -93,6 +93,10 @@ byte-binding). The work is closing **intent-vs-enforcement** gaps and shipping *
    writable); **sealed** Vault/OpenBao (no dev-mode, no committed root token); **MFA-gated** privilege
    elevation (operator/tier-0 rules require `acr/amr` + claim matcher); `ProvenanceTrustPolicy`
    **fail-closed**.
+   - 2026-06-30 implementation note: `MNEMOSYNE_MCP_PRODUCTION_PROFILE=1` now makes the MCP
+     server refuse startup unless signed sessions, session-verifier custody, AES-GCM object
+     encryption, and command-backed object-key custody are active. This is a pre-capture hardening
+     gate only; it does not flip any Tier-B row without retained real-infra evidence.
 2. **Postgres role separation under RLS:** ship `mnemosyne_app` (NOSUPERUSER, NOBYPASSRLS, no
    DELETE/TRUNCATE), a separate `mnemosyne_consolidator` (sole write/destructive authority), and
    SELECT-only eval roles; an ops-check that live-probes `rolsuper`/`rolbypassrls` and fails if true.

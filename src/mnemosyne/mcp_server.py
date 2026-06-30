@@ -82,6 +82,7 @@ class MnemosyneMcpServer:
         require_runtime_residency: bool | None = None,
         queue_backend: str | None = None,
         queue_tenant: str | None = None,
+        production_profile: bool | None = None,
     ):
         if backend not in {"local", "postgres"}:
             raise ValueError(f"Unsupported MCP backend: {backend}")
@@ -118,6 +119,11 @@ class MnemosyneMcpServer:
         self.object_key_provider = object_key_provider or _default_object_key_provider()
         self.object_key_command = object_key_command or os.environ.get("MNEMOSYNE_OBJECT_KEY_COMMAND")
         self.object_key_timeout = object_key_timeout or float(os.environ.get("MNEMOSYNE_OBJECT_KEY_TIMEOUT", "30"))
+        self.production_profile = (
+            bool(production_profile)
+            if production_profile is not None
+            else _env_flag("MNEMOSYNE_MCP_PRODUCTION_PROFILE", default=False)
+        )
         self.allowed_residencies = allowed_residencies or _default_allowed_residencies()
         self.runtime_residency = runtime_residency or os.environ.get("MNEMOSYNE_RUNTIME_RESIDENCY")
         self.allowed_residency_transfers = (
@@ -162,6 +168,7 @@ class MnemosyneMcpServer:
             if require_session is not None
             else _env_flag("MNEMOSYNE_MCP_REQUIRE_SESSION", default=False)
         )
+        self._enforce_production_profile()
         self.tool_names = {item["name"] for item in TOOL_SPEC}
         self.tool_specs = [_to_mcp_tool_spec(item) for item in TOOL_SPEC]
         self.tool_schemas_by_name = {item["name"]: item["inputSchema"] for item in self.tool_specs}
@@ -217,6 +224,21 @@ class MnemosyneMcpServer:
         )
         tools = MemoryTools(engine, ingestion=ingestion, runtime_state=runtime_state, parametric=parametric)
         return engine, queue, runtime_state, tools
+
+    def _enforce_production_profile(self) -> None:
+        if not self.production_profile:
+            return
+        if not self.require_session:
+            raise ValueError("Production MCP profile requires MNEMOSYNE_MCP_REQUIRE_SESSION=1.")
+        if self._session_verifier() is None:
+            raise ValueError(
+                "Production MCP profile requires signed-session verifier custody "
+                "(session secret, keyring, or session-secret command)."
+            )
+        if self.object_store_encryption != "aesgcm":
+            raise ValueError("Production MCP profile requires MNEMOSYNE_OBJECT_STORE_ENCRYPTION=aesgcm.")
+        if self.object_key_provider != "command" or not self.object_key_command:
+            raise ValueError("Production MCP profile requires command-backed object key custody.")
 
     @staticmethod
     def _save_queue(runtime_state: RuntimeState | None, queue: Any) -> None:
@@ -831,6 +853,7 @@ def build_http_server(
                     "session_exchange_path": session_exchange_path,
                     "backend": facade.backend,
                     "stateless": facade.stateless,
+                    "production_profile": bool(facade.production_profile),
                     "auth_token_required": bool(facade.auth_token),
                     "session_required": bool(facade.require_session),
                     "session_exchange_configured": idp_verifier is not None,
@@ -1095,6 +1118,8 @@ def run_self_test(*, sdk: bool = False, **kwargs: Any) -> dict[str, Any]:
         "ok": ok,
         "backend": server.backend,
         "stateless": server.stateless,
+        "production_profile": bool(server.production_profile),
+        "object_store_encryption": server.object_store_encryption,
         "auth_token_required": bool(server.auth_token),
         "session_required": bool(server.require_session),
         "checks": checks,
@@ -1497,6 +1522,12 @@ def main(argv: list[str] | None = None) -> None:
         default=_env_flag("MNEMOSYNE_MCP_REQUIRE_SESSION", default=False),
         help="Require a valid signed session_token on tools/call",
     )
+    parser.add_argument(
+        "--production-profile",
+        action="store_true",
+        default=_env_flag("MNEMOSYNE_MCP_PRODUCTION_PROFILE", default=False),
+        help="Fail closed unless MCP production session and object-key custody controls are active",
+    )
     args = parser.parse_args(argv)
     config = {
         "store_path": args.store,
@@ -1529,6 +1560,7 @@ def main(argv: list[str] | None = None) -> None:
         "queue_backend": args.queue_backend,
         "queue_tenant": args.queue_tenant,
         "stateless": args.stateless,
+        "production_profile": args.production_profile,
     }
     if args.self_test:
         report = run_self_test(sdk=args.sdk, **config)
