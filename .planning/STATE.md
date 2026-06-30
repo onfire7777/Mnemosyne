@@ -41,6 +41,17 @@ path while requiring AGE-sidecar evidence or an ADR if the active B1 audit still
 demands AGE, and forbids generic new gate work unless a fresh capture exposes a
 real attestation-only gap.
 
+Latest checkpoint (2026-06-30): The self-hosted Phase 8 infra scaffold was
+ingested as additive production-profile enablement, not production evidence.
+`infra/docker-compose.prod.yml`, `infra/profiles/`, `infra/prod/`, Caddy
+ingress config, and Postgres role-separation DDL define a hardened no-GPU
+self-hosted baseline for B1-B8+B10 plus a cloud/GPU values-only extension for
+B9. Local validation covered `bash -n infra/prod/bootstrap.sh`,
+`docker compose -f infra/docker-compose.prod.yml config`, and a no-secret scan.
+This scaffold still needs real bring-up, missing runtime-specific service
+details filled from the operator environment, wrapper capture, release audit,
+and offline custody verification before any strict-audit row flips.
+
 Historical checkpoint (2026-06-30; superseded by the v5 checkpoint above): The
 active goal was confirmed active, not paused.
 `.planning/ACTIVE-GOAL-OPERATING-CONTRACT.md` and
