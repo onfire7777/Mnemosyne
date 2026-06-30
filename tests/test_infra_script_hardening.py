@@ -268,6 +268,9 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     assert inventory["runtime_env_file"]["path_placeholder"] == (
         "/secure/path/to/mnemosyne-production-runtime.env"
     )
+    assert inventory["runtime_env_file"]["example_path"] == str(
+        packet_root / "reports" / "mnemosyne-production-runtime.env.example"
+    )
     assert inventory["runtime_env_file"]["missing_count"] == 24
     assert inventory["runtime_env_file"]["values_redacted"] is True
     assert inventory["input_artifacts"]["directory"] == str(
@@ -294,17 +297,26 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     markdown = (packet_root / "reports" / "tier-b-gap-report.md").read_text(
         encoding="utf-8"
     )
+    runtime_example = (
+        packet_root / "reports" / "mnemosyne-production-runtime.env.example"
+    ).read_text(encoding="utf-8")
     assert "--refresh" in readme
     assert "--env-file /secure/path/to/mnemosyne-production-runtime.env" in readme
     assert "Ready for capture: `false`" not in readme
     assert "does not carry current readiness status" in readme
     assert "docs/runbooks/" in readme
     assert "missing read-only packet guidance docs" in readme
+    assert "reports/mnemosyne-production-runtime.env.example" in readme
     assert "Post-Capture Custody Verification" in markdown
     assert "Operator Input Inventory" in markdown
     assert "### production-render.env" in markdown
     assert "### Runtime Env File" in markdown
     assert "### Input Artifacts" in markdown
+    assert "mnemosyne-production-runtime.env.example" in markdown
+    assert "Copy this generated no-secret example" in runtime_example
+    assert 'export MNEMOSYNE_EMBEDDING_URL=""' in runtime_example
+    assert 'export MNEMOSYNE_RERANKER_API_KEY=""' in runtime_example
+    assert 'export MNEMOSYNE_SESSION_SECRET_COMMAND=""' in runtime_example
     assert "Packet docs complete: `true`" in markdown
     assert (
         "Packet runbook: `docs/runbooks/row-01-production-postgres-retrieval.md`"
@@ -670,6 +682,11 @@ def test_prepare_production_evidence_custody_runtime_env_file_satisfies_refs_wit
     assert inventory["runtime_env_file"]["path_placeholder"] == (
         "/secure/path/to/mnemosyne-production-runtime.env"
     )
+    runtime_example = (
+        packet_root / "reports" / "mnemosyne-production-runtime.env.example"
+    ).read_text(encoding="utf-8")
+    assert str(runtime_env_file) not in runtime_example
+    assert provider_sentinel not in runtime_example
     assert provider_sentinel not in combined
     assert str(runtime_env_file) not in combined
     assert "--runtime-env-file /secure/path/to/mnemosyne-production-runtime.env" in report_text

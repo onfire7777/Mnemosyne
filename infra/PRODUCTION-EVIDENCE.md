@@ -22,10 +22,13 @@ This runbook is the operator handoff for flipping the remaining Tier B parity ro
   surfaces: `production-render.env`,
   `input-artifacts/provider-manifest.production.json` plus the remaining B1-B10
   input artifacts, and the separate external runtime env file for
-  secret-bearing provider/runtime values. After filling or changing packet
-  inputs, refresh the row-scoped report without overwriting operator artifacts.
-  Refresh also backfills missing read-only packet guidance docs for older
-  packets, but it does not overwrite existing copied docs:
+  secret-bearing provider/runtime values. The packet also writes
+  `reports/mnemosyne-production-runtime.env.example`; copy that generated
+  no-secret example to the real external runtime env path, set mode `0600`, and
+  fill values there. After filling or changing packet inputs, refresh the
+  row-scoped report without overwriting operator artifacts. Refresh also
+  backfills missing read-only packet guidance docs for older packets, but it
+  does not overwrite existing copied docs:
 
   ```bash
   infra/scripts/prepare-production-evidence-custody.py \

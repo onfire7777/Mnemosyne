@@ -387,6 +387,7 @@ def _operator_input_inventory(
     input_dir: Path,
     render_env_file: Path,
     runtime_env_placeholder: str,
+    runtime_env_example: Path,
     missing_render_env: set[str],
     provider_env_refs: list[str],
     missing_provider_env_refs: list[str],
@@ -403,6 +404,7 @@ def _operator_input_inventory(
         },
         "runtime_env_file": {
             "path_placeholder": runtime_env_placeholder,
+            "example_path": str(runtime_env_example),
             "purpose": "Secret-bearing runtime/provider values for readiness and capture.",
             "provider_manifest_env_refs": provider_env_refs,
             "missing_provider_manifest_env_refs": missing_provider_env_refs,
@@ -418,6 +420,34 @@ def _operator_input_inventory(
             "checklist": "docs/production-input-artifacts.checklist.md",
         },
     }
+
+
+def _write_runtime_env_example(path: Path, *, provider_env_refs: list[str]) -> None:
+    lines = [
+        "# Mnemosyne production runtime env example.",
+        "#",
+        "# Copy this generated no-secret example to an external mode-0600 path,",
+        "# fill real values there, then pass that file with:",
+        "#",
+        "#   render-production-soak-manifest.sh --runtime-env-file /secure/path/to/mnemosyne-production-runtime.env",
+        "#   capture-production-evidence.sh --env-file /secure/path/to/mnemosyne-production-runtime.env",
+        "#",
+        "# Do not pass this example directly until every required value is filled.",
+        "# Refresh the Tier-B packet after editing provider-manifest.production.json",
+        "# so this example follows the current provider env refs.",
+        "",
+    ]
+    if provider_env_refs:
+        lines.extend(
+            [
+                "# Provider-manifest env refs required by input-artifacts/provider-manifest.production.json.",
+                "",
+            ]
+        )
+        lines.extend(f'export {name}=""' for name in provider_env_refs)
+    else:
+        lines.append("# No provider-manifest env refs were found.")
+    _atomic_write_text(path, "\n".join(lines).rstrip() + "\n")
 
 
 def _inventory_env_names(repo_dir: Path) -> set[str]:
@@ -555,6 +585,7 @@ def _write_markdown(report: dict[str, Any], path: Path) -> None:
             "### Runtime Env File",
             "",
             f"- Placeholder path: `{inventory['runtime_env_file']['path_placeholder']}`",
+            f"- Generated example: `{inventory['runtime_env_file']['example_path']}`",
             f"- Loaded for readiness: `{str(inventory['runtime_env_file']['loaded_for_readiness']).lower()}`",
             f"- Missing provider refs: `{inventory['runtime_env_file']['missing_count']}`",
         ]
@@ -656,10 +687,13 @@ README remains static guidance. It does not overwrite `production-render.env`,
 
 - JSON: `reports/tier-b-gap-report.json`
 - Markdown: `reports/tier-b-gap-report.md`
+- Runtime env example: `reports/mnemosyne-production-runtime.env.example`
 
 This README is static guidance and does not carry current readiness status.
 After each refresh, read `reports/tier-b-gap-report.md` or
-`reports/tier-b-gap-report.json` for the current `ready_for_capture` value.
+`reports/tier-b-gap-report.json` for the current `ready_for_capture` value,
+and copy `reports/mnemosyne-production-runtime.env.example` to the external
+runtime env path before filling secret-bearing values.
 
 ## Capture Boundary
 
@@ -799,6 +833,7 @@ def refresh_report(
     )
     capture_output_root = root.parent / (root.name + "-capture")
     verify_report_output = root.parent / (root.name + "-production-evidence-verify.json")
+    runtime_env_example = reports_dir / "mnemosyne-production-runtime.env.example"
     post_capture_verify_script = "\n".join(
         [
             'PYTHON="${PYTHON:-$(if [ -x .venv/bin/python ]; then printf \'%s\' .venv/bin/python; else command -v python3; fi)}"',
@@ -846,6 +881,7 @@ def refresh_report(
             input_dir=input_dir,
             render_env_file=root / "production-render.env",
             runtime_env_placeholder=runtime_env_placeholder,
+            runtime_env_example=runtime_env_example,
             missing_render_env=missing_render_env,
             provider_env_refs=provider_env_refs,
             missing_provider_env_refs=missing_provider_env_refs,
@@ -864,6 +900,7 @@ def refresh_report(
             f"infra/scripts/capture-production-evidence.sh --env-file {runtime_env_placeholder} --fingerprint-record-output {fingerprint_record_output} {manifests_dir / 'production-soak-manifest.json'} {capture_output_root}",
         ],
     }
+    _write_runtime_env_example(runtime_env_example, provider_env_refs=provider_env_refs)
     report_json = reports_dir / "tier-b-gap-report.json"
     _atomic_write_text(report_json, json.dumps(report, indent=2, sort_keys=True) + "\n")
     _write_markdown(report, reports_dir / "tier-b-gap-report.md")
