@@ -92,13 +92,14 @@ future continuations must refresh `git status --short --branch`,
 `git log -1 --oneline`, and GitHub Actions for the live `HEAD` before writing
 current status or claiming sync.
 
-**Current live verification for this continuation (refresh before reusing):**
+**Pre-edit live verification for this continuation (refresh before reusing):**
 `/Users/admin/Mnemosyne` is the canonical checkout; `/Users/admin/Desktop/Mnemosyne`
-does not currently exist as a Git worktree. At this checkpoint, `main` and
-`origin/main` are cleanly synchronized at
+did not exist as a Git worktree during the resume check. Before later handoff
+edits in this continuation, `main` and `origin/main` were cleanly synchronized at
 `2b47989e27af9ec911eb08b43589979e1eb6c934`, and GitHub CI run `28475668973`
-passed for that head. This proves only source/CI synchronization for the current
-handoff; it does not prove Tier-B production evidence.
+passed for that head. This proves only source/CI synchronization for that
+checkpoint; later commits supersede it, and it does not prove Tier-B production
+evidence.
 
 Drive Mnemosyne from the current source-complete state to exact blueprint parity
 and production release readiness:

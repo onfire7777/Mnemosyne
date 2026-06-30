@@ -327,6 +327,11 @@ def test_current_state_docs_do_not_reopen_closed_local_feature_gaps() -> None:
     assert "current parity blocker is the Tier-B operator-captured production evidence path" in matrix
     assert "The only two genuinely-missing **features** are" not in matrix
     assert "2b47989e27af9ec911eb08b43589979e1eb6c934" in handoff
+    assert "This file intentionally does not freeze a prose \"latest commit\"" in (
+        handoff_flat
+    )
+    assert "pre-edit resume check" in handoff
+    assert "later commits supersede that checkpoint" in handoff_flat
     assert "GitHub Actions CI run `28475668973` passing" in handoff_flat
     assert "9621971" in handoff
     assert "CI run `28414377562` passed" not in handoff
