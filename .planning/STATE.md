@@ -15,6 +15,20 @@ Status: In progress; exact 1:1 blueprint parity is not complete.
 Current status (2026-06-30): Mandatory Tier A source wirings are closed on `main`; FR-20 local and live-Postgres image/audio/video breadth, FR-21 local and live-Postgres parametric trainer/rollback validation, full compose-Postgres runtime readiness, belief-revision CLI validation, local hosted-MCP JSON-RPC/StreamableHTTP/SSE readiness, direct A12 cached-PPR live materialization coverage, G1 projection-level reality monitoring, G1 functional consciousness scorecard/proto-self seed, native workspace service with the `service.enabled` default-off gate retired, operational specialist-budget toggle retirement, cold-loop ignition enforcement, protected gate-case ratchet enforcement, Rail 6 serve-time sink enforcement, §24 support-strategy runtime durability plus public CLI/MCP mutation surfaces, Phase 7 plans 01-04, and the P5 H8/H12 cascade/observability pre-check are now done and gate-proven. The remaining strict-parity blocker is Tier B production operator evidence against deployed infrastructure before final v1.0 sign-off.
 Supersession note: the historical "Last activity: 2026-06-20" paragraph below is retained as changelog context only. Its local 287-test count and open-code wording are superseded by the 2026-06-25 checkpoints below, including the 864-test compose run and the current Tier B operator-evidence blocker.
 
+Latest checkpoint (2026-06-30): The active goal remains unpaused and has been
+revised into a concrete Tier-B provider-stack execution contract instead of a
+generic "continue" prompt. Tier-B custody packets now generate
+`reports/provider-env-action-plan.{json,md}` from
+`input-artifacts/provider-manifest.production.json`, mapping every provider env
+ref to its manifest JSON path, provider check, primary row ownership, affected
+shared provider-check rows, redacted readiness status, and next action. The CLI
+summary, packet README, gap report, infra docs, and active operating contract
+now point operators to that report before filling the external runtime env file.
+This removes manual provider-env/report-join friction for the shared stack that
+unblocks B1, B2, B4, B6, B7, B9, and B10; it does not create production
+evidence, retain secret values, bypass `capture-production-evidence.sh`, or flip
+B1-B10 without wrapper-captured production bundles plus offline verification.
+
 Latest checkpoint (2026-06-30): Tier-B custody packets now generate
 `reports/row-action-plan.{json,md}` as the row-owner handoff beside the
 artifact worklist and row-scoped validator script. Each B1-B10 entry joins the

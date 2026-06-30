@@ -22,6 +22,12 @@ PLACEHOLDER_RE = re.compile(r"MNEMOSYNE_PROD_[A-Z0-9_]+")
 BLOCKED_EXIT = 78
 
 
+def _lane_sort_key(lane: str) -> tuple[int, str]:
+    if lane.startswith("B") and lane[1:].isdigit():
+        return int(lane[1:]), lane
+    return 10_000, lane
+
+
 def _repo_dir() -> Path:
     return Path(__file__).resolve().parents[2]
 
@@ -179,6 +185,212 @@ def _collect_env_refs(value: Any) -> set[str]:
         for item in value:
             refs.update(_collect_env_refs(item))
     return refs
+
+
+def _json_pointer(path: tuple[str, ...]) -> str:
+    if not path:
+        return "/"
+    escaped = [
+        segment.replace("~", "~0").replace("/", "~1")
+        for segment in path
+    ]
+    return "/" + "/".join(escaped)
+
+
+def _collect_provider_env_ref_details(
+    value: Any,
+    path: tuple[str, ...] = (),
+) -> list[dict[str, Any]]:
+    details: list[dict[str, Any]] = []
+    if isinstance(value, dict):
+        env = value.get("env")
+        if isinstance(env, str) and env:
+            setting_name = path[-1] if path else "env"
+            provider_segments = path[1:-1] if path[:1] == ("providers",) else path[:-1]
+            provider_path = ".".join(provider_segments) or ".".join(path) or "manifest"
+            details.append(
+                {
+                    "env": env,
+                    "manifest_path": _json_pointer((*path, "env")),
+                    "setting_path": _json_pointer(path),
+                    "provider_path": provider_path,
+                    "setting_name": setting_name,
+                    "provider_check": _provider_check_name_for_manifest_path(path),
+                }
+            )
+        for key, nested in value.items():
+            details.extend(
+                _collect_provider_env_ref_details(nested, (*path, str(key)))
+            )
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            details.extend(
+                _collect_provider_env_ref_details(item, (*path, str(index)))
+            )
+    return details
+
+
+def _provider_check_name_for_manifest_path(path: tuple[str, ...]) -> str | None:
+    if path[:1] != ("providers",) or len(path) < 2:
+        return None
+    provider_segments = path[1:]
+    provider = provider_segments[0]
+    if provider == "retrieval" and len(provider_segments) >= 2:
+        retrieval_provider = provider_segments[1]
+        if retrieval_provider in {"embedding", "reranker"}:
+            return retrieval_provider
+        if retrieval_provider in {"lexical", "graph"}:
+            return "retrieval_backends"
+    if provider == "media" and len(provider_segments) >= 2:
+        media_provider = provider_segments[1]
+        if media_provider == "extractor":
+            return "media_extractor"
+        if media_provider == "embedding":
+            return "media_embedding"
+    if provider == "object_key":
+        return "object_key_manager"
+    return provider
+
+
+def _provider_check_requirement_routes(
+    template_manifest: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    repo_dir = _repo_dir()
+    parity_path = repo_dir / "src" / "mnemosyne" / "production_parity.py"
+    spec = importlib.util.spec_from_file_location(
+        "_mnemosyne_production_parity_for_provider_plan",
+        parity_path,
+    )
+    if spec is None or spec.loader is None:
+        _fail(f"cannot load production parity metadata: {parity_path}")
+    parity_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(parity_module)
+    parity_lanes_for_command = getattr(parity_module, "parity_lanes_for_command", None)
+    if not callable(parity_lanes_for_command):
+        _fail("production parity metadata is missing parity_lanes_for_command")
+
+    routes: dict[str, dict[str, Any]] = {}
+    checks = template_manifest.get("checks", [])
+    if not isinstance(checks, list):
+        return routes
+    for check in checks:
+        if not isinstance(check, dict):
+            continue
+        command = check.get("command")
+        if not isinstance(command, str):
+            continue
+        lanes = parity_lanes_for_command(command)
+        global_args = check.get("global_args", [])
+        if not isinstance(global_args, list):
+            global_args = []
+        check_args = check.get("args", [])
+        if not isinstance(check_args, list):
+            check_args = []
+        args = [
+            str(arg)
+            for arg in [
+                *global_args,
+                *check_args,
+            ]
+            if isinstance(arg, str)
+        ]
+        for index, arg in enumerate(args[:-1]):
+            if arg != "--require-provider-check":
+                continue
+            provider_check = args[index + 1]
+            route = routes.setdefault(
+                provider_check,
+                {
+                    "provider_check": provider_check,
+                    "lanes": set(),
+                    "commands": set(),
+                },
+            )
+            route["lanes"].update(lanes)
+            route["commands"].add(command)
+    return {
+        name: {
+            "provider_check": name,
+            "lanes": sorted(route["lanes"], key=_lane_sort_key),
+            "commands": sorted(route["commands"]),
+        }
+        for name, route in routes.items()
+    }
+
+
+def _provider_env_action_plan(
+    *,
+    provider_manifest: dict[str, Any],
+    template_manifest: dict[str, Any],
+    missing_provider_env_refs: list[str],
+) -> list[dict[str, Any]]:
+    details_by_env: dict[str, list[dict[str, Any]]] = {}
+    for detail in _collect_provider_env_ref_details(provider_manifest):
+        env = detail.get("env")
+        if isinstance(env, str) and env:
+            details_by_env.setdefault(env, []).append(detail)
+
+    requirement_routes = _provider_check_requirement_routes(template_manifest)
+    missing = set(missing_provider_env_refs)
+    shared_lanes = sorted(SHARED_PROVIDER_LANES, key=_lane_sort_key)
+    plan: list[dict[str, Any]] = []
+    for env in sorted(details_by_env):
+        env_details = sorted(
+            details_by_env[env],
+            key=lambda detail: str(detail.get("manifest_path", "")),
+        )
+        provider_checks = sorted(
+            {
+                str(detail["provider_check"])
+                for detail in env_details
+                if isinstance(detail.get("provider_check"), str)
+            }
+        )
+        primary_rows = sorted(
+            {
+                lane
+                for provider_check in provider_checks
+                for lane in requirement_routes.get(provider_check, {}).get("lanes", [])
+                if isinstance(lane, str)
+            },
+            key=_lane_sort_key,
+        )
+        affected_rows = list(shared_lanes)
+        plan.append(
+            {
+                "env": env,
+                "status": "missing" if env in missing else "present_for_readiness",
+                "missing": env in missing,
+                "values_redacted": True,
+                "value_source_recorded": False,
+                "affected_rows": affected_rows,
+                "primary_rows": primary_rows,
+                "provider_checks": provider_checks,
+                "provider_check_routes": [
+                    requirement_routes[provider_check]
+                    for provider_check in provider_checks
+                    if provider_check in requirement_routes
+                ],
+                "provider_manifest_paths": [
+                    str(detail["manifest_path"]) for detail in env_details
+                ],
+                "provider_settings": [
+                    {
+                        "provider_path": detail.get("provider_path"),
+                        "setting_name": detail.get("setting_name"),
+                        "setting_path": detail.get("setting_path"),
+                    }
+                    for detail in env_details
+                ],
+                "next_action": (
+                    "Set this name in the external runtime env file and refresh."
+                    if env in missing
+                    else "No action for this name on the current readiness refresh."
+                ),
+                "report_is_evidence": False,
+            }
+        )
+    return plan
 
 
 def _collect_render_placeholders_by_lane(
@@ -955,6 +1167,7 @@ def _write_markdown(report: dict[str, Any], path: Path) -> None:
             f"- Generated example: `{inventory['runtime_env_file']['example_path']}`",
             f"- Loaded for readiness: `{str(inventory['runtime_env_file']['loaded_for_readiness']).lower()}`",
             f"- Missing provider refs: `{inventory['runtime_env_file']['missing_count']}`",
+            f"- Provider env action plan: `{report['provider_env_action_plan_markdown']}`",
         ]
     )
     if inventory["runtime_env_file"]["missing_provider_manifest_env_refs"]:
@@ -991,6 +1204,7 @@ def _write_markdown(report: dict[str, Any], path: Path) -> None:
             "",
             f"- Markdown: `{report['input_artifact_worklist_markdown']}`",
             f"- JSON: `{report['input_artifact_worklist_json']}`",
+            f"- Provider env action plan: `{report['provider_env_action_plan_markdown']}`",
             f"- Validation script: `{report['input_artifact_validation_script']}`",
             f"- Run every artifact validator: `{report['input_artifact_validation_script']}`",
             f"- Run one Tier-B row: `{report['input_artifact_validation_script']} B1`",
@@ -1239,6 +1453,62 @@ def _write_row_action_plan_markdown(
                     f"`{validator.get('name')}` "
                     f"({validator.get('command')})"
                 )
+    _atomic_write_text(path, "\n".join(lines).rstrip() + "\n")
+
+
+def _write_provider_env_action_plan_markdown(
+    plan: list[dict[str, Any]],
+    path: Path,
+) -> None:
+    lines = [
+        "# Mnemosyne Tier-B Provider Env Action Plan",
+        "",
+        "This report is an operator preparation aid, not production evidence.",
+        "It is generated from `input-artifacts/provider-manifest.production.json`",
+        "and the current readiness refresh. Values and runtime env-file paths are",
+        "never retained.",
+        "",
+        "| Env var | Status | Primary rows | Affected rows | Provider checks | Paths |",
+        "|---|---|---|---|---|---|",
+    ]
+    for item in plan:
+        primary_rows = ", ".join(f"`{lane}`" for lane in item["primary_rows"]) or "-"
+        affected_rows = ", ".join(f"`{lane}`" for lane in item["affected_rows"]) or "-"
+        provider_checks = (
+            ", ".join(f"`{check}`" for check in item["provider_checks"]) or "-"
+        )
+        paths = "<br>".join(
+            f"`{manifest_path}`" for manifest_path in item["provider_manifest_paths"]
+        )
+        lines.append(
+            "| "
+            f"`{item['env']}` | "
+            f"`{item['status']}` | "
+            f"{primary_rows} | "
+            f"{affected_rows} | "
+            f"{provider_checks} | "
+            f"{paths} |"
+        )
+    for item in plan:
+        lines.extend(
+            [
+                "",
+                f"## `{item['env']}`",
+                "",
+                f"- Status: `{item['status']}`",
+                f"- Missing: `{str(item['missing']).lower()}`",
+                f"- Values redacted: `{str(item['values_redacted']).lower()}`",
+                f"- Value source recorded: `{str(item['value_source_recorded']).lower()}`",
+                f"- Next action: {item['next_action']}",
+                "- Provider settings:",
+            ]
+        )
+        for setting in item["provider_settings"]:
+            lines.append(
+                "  - "
+                f"`{setting.get('provider_path')}.{setting.get('setting_name')}` "
+                f"at `{setting.get('setting_path')}`"
+            )
     _atomic_write_text(path, "\n".join(lines).rstrip() + "\n")
 
 
@@ -1491,6 +1761,7 @@ infra/scripts/prepare-production-evidence-custody.py \\
 
 Refresh mode updates only `reports/tier-b-gap-report.json`,
 `reports/tier-b-gap-report.md`, `reports/input-artifact-worklist.{{json,md}}`,
+`reports/provider-env-action-plan.{{json,md}}`,
 `reports/row-action-plan.{{json,md}}`,
 `reports/input-artifact-validation-commands.sh`, `reports/next-commands.sh`,
 and missing read-only packet guidance docs; this README remains static guidance.
@@ -1502,6 +1773,7 @@ copied operator docs, or `manifests/`.
 - JSON: `reports/tier-b-gap-report.json`
 - Markdown: `reports/tier-b-gap-report.md`
 - Row action plan: `reports/row-action-plan.md`
+- Provider env action plan: `reports/provider-env-action-plan.md`
 - Input artifact worklist: `reports/input-artifact-worklist.md`
 - Input artifact validation: `reports/input-artifact-validation-commands.sh`
 - Runnable command sequence: `reports/next-commands.sh`
@@ -1512,7 +1784,9 @@ After each refresh, read `reports/tier-b-gap-report.md` or
 `reports/tier-b-gap-report.json` for the current `ready_for_capture` value,
 `capture_blockers`, and `operator_input_inventory`. Use
 `reports/row-action-plan.md` to assign row-specific artifact, render-env, and
-provider-env work, then copy
+provider-env work, and use `reports/provider-env-action-plan.md` to route each
+provider-manifest env name to its manifest path, primary rows, and shared
+provider-check blast radius. Then copy
 `reports/mnemosyne-production-runtime.env.example` to the external runtime env
 path before filling secret-bearing values.
 
@@ -1704,6 +1978,8 @@ def refresh_report(
     next_commands_script = reports_dir / "next-commands.sh"
     input_artifact_worklist_json = reports_dir / "input-artifact-worklist.json"
     input_artifact_worklist_markdown = reports_dir / "input-artifact-worklist.md"
+    provider_env_action_plan_json = reports_dir / "provider-env-action-plan.json"
+    provider_env_action_plan_markdown = reports_dir / "provider-env-action-plan.md"
     row_action_plan_json = reports_dir / "row-action-plan.json"
     row_action_plan_markdown = reports_dir / "row-action-plan.md"
     input_artifact_validation_script = (
@@ -1746,6 +2022,11 @@ def refresh_report(
         validation_plan=input_artifact_validation_plan,
         input_artifact_validation_script=input_artifact_validation_script,
     )
+    provider_env_action_plan = _provider_env_action_plan(
+        provider_manifest=provider_manifest,
+        template_manifest=template_manifest,
+        missing_provider_env_refs=missing_provider_env_refs,
+    )
     report = {
         "schema": "mnemosyne.tier-b-custody-gap-report.v1",
         "report_is_evidence": False,
@@ -1776,6 +2057,9 @@ def refresh_report(
         "input_artifact_worklist_json": str(input_artifact_worklist_json),
         "input_artifact_worklist_markdown": str(input_artifact_worklist_markdown),
         "input_artifact_worklist": input_artifact_worklist,
+        "provider_env_action_plan_json": str(provider_env_action_plan_json),
+        "provider_env_action_plan_markdown": str(provider_env_action_plan_markdown),
+        "provider_env_action_plan": provider_env_action_plan,
         "row_action_plan_json": str(row_action_plan_json),
         "row_action_plan_markdown": str(row_action_plan_markdown),
         "row_action_plan": row_action_plan,
@@ -1821,12 +2105,20 @@ def refresh_report(
         json.dumps(input_artifact_worklist, indent=2, sort_keys=True) + "\n",
     )
     _atomic_write_text(
+        provider_env_action_plan_json,
+        json.dumps(provider_env_action_plan, indent=2, sort_keys=True) + "\n",
+    )
+    _atomic_write_text(
         row_action_plan_json,
         json.dumps(row_action_plan, indent=2, sort_keys=True) + "\n",
     )
     _write_input_artifact_worklist_markdown(
         input_artifact_worklist,
         input_artifact_worklist_markdown,
+    )
+    _write_provider_env_action_plan_markdown(
+        provider_env_action_plan,
+        provider_env_action_plan_markdown,
     )
     _write_row_action_plan_markdown(
         row_action_plan,
@@ -1908,6 +2200,7 @@ def main(argv: list[str] | None = None) -> int:
         "post_capture_verify_report": report["post_capture_verify_report"],
         "next_commands_script": report["next_commands_script"],
         "input_artifact_worklist": report["input_artifact_worklist_markdown"],
+        "provider_env_action_plan": report["provider_env_action_plan_markdown"],
         "row_action_plan": report["row_action_plan_markdown"],
         "input_artifact_validation_script": report["input_artifact_validation_script"],
         "next_commands": report["next_commands"],

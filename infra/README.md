@@ -126,6 +126,9 @@ open infra/templates/production-operator-env.inventory.md
 # The refreshed reports/row-action-plan.{json,md} joins each Tier-B row's
 # runbook, blockers, next actions, and row-scoped validator command for row
 # owner handoff.
+# The refreshed reports/provider-env-action-plan.{json,md} maps each
+# provider-manifest env ref to its manifest path, provider check, primary rows,
+# and shared provider-check blast radius without retaining values.
 # The refreshed reports/input-artifact-worklist.{json,md} routes each artifact
 # to packet path, Tier-B row, row runbook, and consuming check; use it to gather
 # real production artifacts, not placeholder files.
@@ -250,10 +253,14 @@ Check-level `input_artifacts` metadata is included in the same custody inventory
 for evidence that must be retained but is not passed as a command argument.
 The external custody packet also renders this route map as
 `reports/row-action-plan.{json,md}` for row-owner handoff and
+`reports/provider-env-action-plan.{json,md}` for provider-stack env ownership,
 `reports/input-artifact-worklist.{json,md}` for artifact assembly, so operators
 can sort missing work by B-row, packet runbook, packet path, and consuming check
-before running capture. These reports are operator preparation aids only; they
-must not be satisfied with placeholder artifacts.
+before running capture. The provider env action plan reports env names,
+provider-manifest JSON paths, primary rows, affected rows, and provider checks
+only; it never records values or runtime env-file paths. These reports are
+operator preparation aids only; they must not be satisfied with placeholder
+artifacts.
 The packet's `reports/input-artifact-validation-commands.sh` script is the
 next local check after files are supplied: it rejects missing, symlinked, or
 non-file artifacts before running the exact manifest-derived validators against
