@@ -255,8 +255,21 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     assert (packet_root / "reports" / "tier-b-gap-report.md").is_file()
     assert (packet_root / "docs" / "PRODUCTION-EVIDENCE.md").is_file()
     readme = (packet_root / "README.md").read_text(encoding="utf-8")
+    markdown = (packet_root / "reports" / "tier-b-gap-report.md").read_text(
+        encoding="utf-8"
+    )
     assert "--refresh" in readme
     assert "--env-file /secure/path/to/mnemosyne-production-runtime.env" in readme
+    assert "Ready for capture: `false`" not in readme
+    assert "does not carry current readiness status" in readme
+    assert "Post-Capture Custody Verification" in markdown
+    assert "production-evidence-verify" in report["post_capture_verify_script"]
+    assert "--expected-bundle-fingerprint" in report["post_capture_verify_script"]
+    assert "--report-output" in report["post_capture_verify_script"]
+    assert report["post_capture_verify_report"] == str(
+        packet_root.parent
+        / f"{packet_root.name}-production-evidence-verify.json"
+    )
     assert any(
         "--env-file /secure/path/to/mnemosyne-production-runtime.env" in command
         for command in report["next_commands"]

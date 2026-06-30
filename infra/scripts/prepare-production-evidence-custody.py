@@ -425,6 +425,18 @@ def _write_markdown(report: dict[str, Any], path: Path) -> None:
         lines.append("")
     lines.extend(["## Next Commands", ""])
     lines.extend(f"```bash\n{command}\n```" for command in report["next_commands"])
+    lines.extend(
+        [
+            "",
+            "## Post-Capture Custody Verification",
+            "",
+            "Run this after full capture completes. The expected fingerprint is read",
+            "from the external fingerprint record, not from the evidence bundle under",
+            "review.",
+            "",
+            f"```bash\n{report['post_capture_verify_script']}\n```",
+        ]
+    )
     _atomic_write_text(path, "\n".join(lines).rstrip() + "\n")
 
 
@@ -459,7 +471,10 @@ or `manifests/`.
 
 - JSON: `reports/tier-b-gap-report.json`
 - Markdown: `reports/tier-b-gap-report.md`
-- Ready for capture: `{str(report["ready_for_capture"]).lower()}`
+
+This README is static guidance and does not carry current readiness status.
+After each refresh, read `reports/tier-b-gap-report.md` or
+`reports/tier-b-gap-report.json` for the current `ready_for_capture` value.
 
 ## Capture Boundary
 
@@ -470,6 +485,11 @@ capture into a new external output root. Do not use this packet root as the
 capture output root. Pass secret-bearing runtime/provider values through
 `capture-production-evidence.sh --env-file /secure/path/to/mnemosyne-production-runtime.env`
 instead of shell-sourcing them.
+
+After full capture, run the post-capture custody verification script from
+`reports/tier-b-gap-report.md`. It reads the expected fingerprint from the
+external fingerprint record and writes the verifier report outside the evidence
+bundle.
 """
     _atomic_write_text(readme, content)
 
@@ -593,6 +613,24 @@ def refresh_report(
     fingerprint_record_output = root.parent / (
         root.name + "-bundle-fingerprint.json"
     )
+    capture_output_root = root.parent / (root.name + "-capture")
+    verify_report_output = root.parent / (root.name + "-production-evidence-verify.json")
+    post_capture_verify_script = "\n".join(
+        [
+            'PYTHON="${PYTHON:-$(if [ -x .venv/bin/python ]; then printf \'%s\' .venv/bin/python; else command -v python3; fi)}"',
+            f"BUNDLE_DIR={capture_output_root}",
+            f"FINGERPRINT_RECORD={fingerprint_record_output}",
+            (
+                'EXPECTED_BUNDLE_FINGERPRINT="$("$PYTHON" -c '
+                '\'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["bundle_fingerprint"])\' '
+                '"$FINGERPRINT_RECORD")"'
+            ),
+            f"VERIFY_REPORT={verify_report_output}",
+            '"$PYTHON" -m mnemosyne.cli production-evidence-verify "$BUNDLE_DIR" \\',
+            '  --expected-bundle-fingerprint "$EXPECTED_BUNDLE_FINGERPRINT" \\',
+            '  --report-output "$VERIFY_REPORT"',
+        ]
+    )
     report = {
         "schema": "mnemosyne.tier-b-custody-gap-report.v1",
         "report_is_evidence": False,
@@ -619,12 +657,14 @@ def refresh_report(
         "missing_input_artifact_count": len(missing_input_artifacts),
         "rows": rows,
         "phase_plan": _phase_plan(rows),
+        "post_capture_verify_report": str(verify_report_output),
+        "post_capture_verify_script": post_capture_verify_script,
         "operator_readiness_files": renderer_payload.get("operator_readiness_files", {}),
         "next_commands": [
             f"infra/scripts/render-production-soak-manifest.sh --env-file {root / 'production-render.env'} --runtime-env-file {runtime_env_placeholder} --check-environment",
             f"infra/scripts/render-production-soak-manifest.sh --env-file {root / 'production-render.env'} --runtime-env-file {runtime_env_placeholder} --output {manifests_dir / 'production-soak-manifest.json'}",
             f"infra/scripts/capture-production-evidence.sh --env-file {runtime_env_placeholder} --preflight-only {manifests_dir / 'production-soak-manifest.json'} {root.parent / (root.name + '-preflight')}",
-            f"infra/scripts/capture-production-evidence.sh --env-file {runtime_env_placeholder} --fingerprint-record-output {fingerprint_record_output} {manifests_dir / 'production-soak-manifest.json'} {root.parent / (root.name + '-capture')}",
+            f"infra/scripts/capture-production-evidence.sh --env-file {runtime_env_placeholder} --fingerprint-record-output {fingerprint_record_output} {manifests_dir / 'production-soak-manifest.json'} {capture_output_root}",
         ],
     }
     report_json = reports_dir / "tier-b-gap-report.json"
