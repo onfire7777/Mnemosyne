@@ -70,7 +70,9 @@ limited to defects that directly block that path:
    through a separate external mode-`0600`
    `mnemosyne-production-runtime.env` via
    `render-production-soak-manifest.sh --runtime-env-file` for readiness and
-   `capture-production-evidence.sh --env-file` for capture.
+   `capture-production-evidence.sh --env-file` for capture. Do not rely on
+   ambient shell exports as the operator handoff; the external runtime env file
+   is the reviewable boundary.
 3. Capture full production bundles with
    `capture-production-evidence.sh --env-file <runtime-env> --fingerprint-record-output <external-json>`
    so secret-bearing runtime/provider values stay in the strict external
@@ -180,6 +182,10 @@ path and record the result.
 9. **Manual custody drift:** Do not ask operators to hand-copy a bundle
    fingerprint when the wrapper can write an external no-overwrite fingerprint
    record for review.
+10. **Ambient-env drift:** Do not let prompts or runbooks suggest omitting the
+    capture `--env-file` because values are already exported by a supervisor.
+    Future operators need one explicit external runtime env-file boundary for
+    capture, refresh, review, and incident replay.
 
 ## Completion Standard
 

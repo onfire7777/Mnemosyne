@@ -336,6 +336,9 @@ def test_operator_docs_use_strict_capture_env_file() -> None:
         assert "capture-production-evidence.sh" in text, path
         assert "--env-file" in text, path
         assert "mnemosyne-production-runtime.env" in text, path
+        assert "Omit `--env-file`" not in text, path
+        assert "trusted secret manager or supervisor" not in text, path
+        assert "already-exported shell environment variables" not in text, path
         assert "shell-sourcing" in text or "shell-source" in text or path.name != "PRODUCTION-EVIDENCE.md"
 
 

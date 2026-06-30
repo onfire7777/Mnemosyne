@@ -116,8 +116,9 @@ open /secure/path/to/mnemosyne-tier-b-custody/reports/tier-b-gap-report.md
 # Review the complete no-secret operator environment inventory.
 open infra/templates/production-operator-env.inventory.md
 # Fill the packet's production-render.env outside this repository.
-# Put secret-bearing runtime/provider values in a separate external 0600 env file
-# if you do not want to rely on already-exported shell environment variables.
+# Put secret-bearing runtime/provider values in a separate external 0600 env file;
+# this file is the capture handoff boundary, even when a supervisor can export
+# equivalent values.
 # Fill input-artifacts/provider-manifest.production.json and every other
 # manifest-referenced production input artifact listed in the packet report.
 infra/scripts/prepare-production-evidence-custody.py \
