@@ -139,7 +139,7 @@ services:
     <<: *hardened
     build: { context: .., dockerfile: infra/Dockerfile }   # adjust to the app Dockerfile path
     env_file: [./profiles/self-hosted.env]
-    environment: { MNEMOSYNE_MCP_REQUIRE_SESSION: "1", MNEMOSYNE_ROLE: api }
+    environment: { MNEMOSYNE_MCP_PRODUCTION_PROFILE: "1", MNEMOSYNE_MCP_REQUIRE_SESSION: "1", MNEMOSYNE_ROLE: api }
     tmpfs: ["/tmp:size=64m"]
     networks: [edge, internal]
     depends_on: [keycloak, tei]

@@ -23,6 +23,15 @@ self-hosted/no-GPU can only evidence B1-B8+B10, while B9/FR-21 still requires
 real cloud/GPU trainer evidence or an explicit ADR before strict v1.0 parity
 reaches 100%. No Tier-B row is marked Done by these planning or scaffold edits.
 
+Latest checkpoint (2026-06-30): Phase 8 security must-do enforcement has begun
+in source. `MnemosyneMcpServer` now supports `MNEMOSYNE_MCP_PRODUCTION_PROFILE=1`
+and refuses production-profile startup unless signed sessions are required, a
+session verifier is configured, object-store encryption is `aesgcm`, and
+object-key custody is command-backed. `infra/profiles/self-hosted.env` and the
+production compose API service enable that profile. This is pre-capture
+hardening only: Tier-B rows remain Partial until wrapper-captured real-infra
+bundles pass release audit and offline custody verification.
+
 Historical checkpoint (2026-06-30; superseded by newer checkpoints above): The active goal is unpaused and the repo-owned
 goal text has been revised to the v5 production-evidence execution contract.
 Because the goal tracker does not safely rewrite active objective text in-place,
