@@ -649,6 +649,30 @@ def test_renderer_check_environment_passes_without_writing_manifest(
     assert details["provider-manifest.production.json"]["parity_routes"] == (
         PROVIDER_MANIFEST_PARITY_ROUTES
     )
+    assert details["calibration-dataset.json"]["parity_routes"] == [
+        {
+            "lane": "B9",
+            "row": 9,
+            "title": "Parametric tier",
+            "runbook": ".planning/runbooks/row-09-parametric-tier.md",
+        }
+    ]
+    assert details["hosted-llm-manifest.json"]["parity_routes"] == [
+        {
+            "lane": "B9",
+            "row": 9,
+            "title": "Parametric tier",
+            "runbook": ".planning/runbooks/row-09-parametric-tier.md",
+        }
+    ]
+    assert details["consolidation-ops-bundle.json"]["parity_routes"] == [
+        {
+            "lane": "B4",
+            "row": 4,
+            "title": "Consolidation role pipeline",
+            "runbook": ".planning/runbooks/row-04-consolidation-role-pipeline.md",
+        }
+    ]
     assert sorted(payload["present"]) == _placeholders()
     assert not list(tmp_path.glob("*.json"))
 
