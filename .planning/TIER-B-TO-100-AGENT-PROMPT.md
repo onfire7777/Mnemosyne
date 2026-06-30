@@ -50,12 +50,11 @@ endpoints, or operator-owned artifacts are required. Commit and push clean
 atomic improvements to `main` after focused verification; never stage secrets,
 generated evidence bundles, local packet output roots, or unrelated dirty work.
 
-**Latest prompt-control baseline at this revision:** `main` and `origin/main`
-were cleanly synchronized at
-`b79cb87a97ebb220ae09de0db2ec69900a84411b`
-(`fix(infra): include runtime env in Tier-B summary`), and GitHub Actions run
-`28477936121` completed successfully. Treat that as a historical checkpoint
-after the next commit; always refresh live state before relying on it.
+**Prompt-control baseline discipline:** exact `HEAD` SHAs and GitHub Actions run
+IDs are moving checkpoints, not durable instructions. Before writing a current
+status claim, refresh `git status --short --branch`, `git log -1 --oneline`,
+and the GitHub Actions run for the live `HEAD`; older SHA/run references in
+planning history are historical evidence only.
 
 ## 1. WHERE THE PROJECT STANDS — verified, do not re-derive
 

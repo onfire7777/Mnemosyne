@@ -14,6 +14,17 @@ Plan: Exact blueprint parity audit and runtime gap closure
 Status: In progress; exact 1:1 blueprint parity is not complete.
 Current status (2026-06-30): Mandatory Tier A source wirings are closed on `main`; FR-20 local and live-Postgres image/audio/video breadth, FR-21 local and live-Postgres parametric trainer/rollback validation, full compose-Postgres runtime readiness, belief-revision CLI validation, local hosted-MCP JSON-RPC/StreamableHTTP/SSE readiness, direct A12 cached-PPR live materialization coverage, G1 projection-level reality monitoring, G1 functional consciousness scorecard/proto-self seed, native workspace service with the `service.enabled` default-off gate retired, operational specialist-budget toggle retirement, cold-loop ignition enforcement, protected gate-case ratchet enforcement, Rail 6 serve-time sink enforcement, §24 support-strategy runtime durability plus public CLI/MCP mutation surfaces, Phase 7 plans 01-04, and the P5 H8/H12 cascade/observability pre-check are now done and gate-proven. The remaining strict-parity blocker is Tier B production operator evidence against deployed infrastructure before final v1.0 sign-off.
 
+Latest checkpoint (2026-06-30): The active goal remains unpaused and the
+professional continuation objective is now governed by the repo-owned operating
+contract plus live root/HEAD/CI refresh. Source work is allowed only when it
+removes a concrete production-capture blocker or security defect. Security
+control 12 source hardening is narrowed: hosted JSON-RPC/SSE probes already use
+`network_safety`, and hosted StreamableHTTP now validates the target URL before
+the official MCP SDK/httpx client can open a socket. This closes a real
+SSRF-class source gap in the hosted MCP evidence path only; full production
+egress-deny, raw-socket lint coverage, default-deny proxy/firewall evidence,
+and all Tier-B operator bundles remain required.
+
 Latest checkpoint (2026-06-30): The active goal operating contract has been refreshed to make the
 professional continuation objective explicit: prioritize real Tier-B production capture, custody,
 operator evidence, and source defects that block that path; avoid redundant generic gates and false

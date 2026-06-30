@@ -133,6 +133,11 @@ byte-binding). The work is closing **intent-vs-enforcement** gaps and shipping *
   **egress chokepoint** routing *all* outbound calls through `network_safety.validate_fetch_url` +
   default-deny allowlist (drop metadata/link-local/RFC1918); a lint that fails if any raw HTTP client
   bypasses the guard.
+  - 2026-06-30 implementation note: hosted JSON-RPC/SSE probes already use the shared
+    `network_safety` opener, and hosted StreamableHTTP now validates its endpoint before the
+    official MCP SDK/httpx client can open a socket. This closes the source-side hosted-MCP
+    SSRF gap; production egress-deny still requires retained proxy/firewall and live endpoint
+    evidence.
 - **Host/container:** policy-as-code CI gate (fail on `docker.sock` mount, `privileged`, unpinned
   image, secret-in-env, missing `read_only`/`cap_drop:[ALL]`/non-root/`no-new-privileges`/limits);
   **digest-pin every image**; Trivy/Grype/Syft + gitleaks required gates; cosign verify-at-deploy.
