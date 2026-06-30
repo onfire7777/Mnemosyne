@@ -196,6 +196,7 @@ sys.path.insert(0, str(repo_dir / "src"))
 
 from mnemosyne.cli import (  # noqa: E402
     PRODUCTION_RELEASE_REQUIRED_COMMANDS,
+    PRODUCTION_RELEASE_REQUIRED_PROVIDER_CHECKS,
 )
 from mnemosyne.evidence_redaction import (  # noqa: E402
     manifest_argument_secret_errors,
@@ -600,7 +601,7 @@ def _provider_manifest_command_entries(value: object, *, path: str) -> list[tupl
     return entries
 
 
-def _validate_provider_manifest_command_tools(value: str, *, label: str) -> None:
+def _validate_provider_manifest(value: str, *, label: str) -> None:
     if not value:
         return
     manifest_path = Path(value).expanduser()
@@ -611,11 +612,35 @@ def _validate_provider_manifest_command_tools(value: str, *, label: str) -> None
     try:
         payload = json.loads(resolved_manifest.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-        errors.append(f"{label} provider manifest cannot be inspected for command custody: {exc}")
+        errors.append(f"{label} provider manifest cannot be inspected for preflight validation: {exc}")
         return
     if not isinstance(payload, dict):
-        errors.append(f"{label} provider manifest must be a JSON object for command custody")
+        errors.append(f"{label} provider manifest must be a JSON object for preflight validation")
         return
+    if payload.get("forbid_local") is not True:
+        errors.append(f"{label} provider manifest must set forbid_local=true")
+    required_checks = payload.get("required_checks")
+    expected_checks = set(PRODUCTION_RELEASE_REQUIRED_PROVIDER_CHECKS)
+    if not isinstance(required_checks, list) or not all(
+        isinstance(item, str) for item in required_checks
+    ):
+        errors.append(f"{label} provider manifest required_checks must be a string array")
+    else:
+        actual_checks = set(required_checks)
+        missing_checks = sorted(expected_checks - actual_checks)
+        extra_checks = sorted(actual_checks - expected_checks)
+        if missing_checks:
+            errors.append(
+                f"{label} provider manifest missing production provider checks: "
+                + ", ".join(missing_checks)
+            )
+        if extra_checks:
+            errors.append(
+                f"{label} provider manifest contains unsupported provider checks: "
+                + ", ".join(extra_checks)
+            )
+    if not isinstance(payload.get("providers"), dict):
+        errors.append(f"{label} provider manifest providers must be an object")
     for command_path, raw_command in _provider_manifest_command_entries(
         payload,
         path="provider-manifest.production.json",
@@ -773,7 +798,7 @@ for index, check in enumerate(checks, start=1):
                     replacement_prefix=f"{option_name}=",
                 )
                 if option_name == "--provider-manifest":
-                    _validate_provider_manifest_command_tools(
+                    _validate_provider_manifest(
                         option_value,
                         label=f"checks[{index}].{field} {option_name}",
                     )
@@ -808,7 +833,7 @@ for index, check in enumerate(checks, start=1):
                 option=previous_option or field,
             )
             if previous_option == "--provider-manifest":
-                _validate_provider_manifest_command_tools(
+                _validate_provider_manifest(
                     value,
                     label=f"checks[{index}].{field} {previous_option}",
                 )
