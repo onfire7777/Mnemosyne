@@ -10737,7 +10737,10 @@ def _production_evidence_summary_offline_verify_argv_ok(
         return False
     if "expected_bundle_fingerprint" in offline_verify:
         return False
-    if offline_verify.get("expected_bundle_fingerprint_source") != "out-of-band-capture-record":
+    if offline_verify.get("expected_bundle_fingerprint_source") not in {
+        "out-of-band-fingerprint-record",
+        "out-of-band-capture-record",
+    }:
         return False
     argv = offline_verify.get("argv")
     if (

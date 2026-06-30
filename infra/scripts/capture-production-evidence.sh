@@ -1822,7 +1822,7 @@ summary = {
     "completed_at": completed_at,
     "offline_verify": {
         "bundle_dir": str(out_root),
-        "expected_bundle_fingerprint_source": "out-of-band-capture-record",
+        "expected_bundle_fingerprint_source": "out-of-band-fingerprint-record",
         "argv": [
             os.environ["PYTHON"],
             "-m",
