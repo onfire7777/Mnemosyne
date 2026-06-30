@@ -8,14 +8,18 @@ material.
 ## Production Evidence Inputs
 
 Use `infra/templates/production-soak-manifest.template.json` as the command
-shape. Copy `infra/templates/production-render.env.example` outside the
-repository, fill the blank non-secret values there, export or source that
-external copy into the current shell, then render with
-`infra/scripts/render-production-soak-manifest.sh --check-environment` and
-`infra/scripts/render-production-soak-manifest.sh --output /secure/path/to/production-soak-manifest.json`
-before running `infra/scripts/capture-production-evidence.sh`.
-The renderer reads the current process environment; it does not accept an
-`--env-file` argument.
+shape. Prefer starting from the external custody packet created by
+`infra/scripts/prepare-production-evidence-custody.py`; it includes a
+`production-render.env` copied from the template. Fill the blank non-secret
+values there, then render with
+`infra/scripts/render-production-soak-manifest.sh --env-file /secure/path/to/mnemosyne-tier-b-custody/production-render.env --check-environment`
+and
+`infra/scripts/render-production-soak-manifest.sh --env-file /secure/path/to/mnemosyne-tier-b-custody/production-render.env --output /secure/path/to/production-soak-manifest.json`
+before running `infra/scripts/capture-production-evidence.sh`. The renderer
+parses `--env-file` through `infra/scripts/load-env.py`, rejects unsafe dotenv
+syntax, unexpected keys, symlinks, group/world-readable files, and repo-local
+env-file paths, and still accepts already-exported environment variables when
+`--env-file` is omitted for legacy operator shells.
 Copy `infra/templates/provider-manifest.production.template.json` to
 `$MNEMOSYNE_PROD_EVIDENCE_DIR/provider-manifest.production.json` outside the
 repository and fill that external copy with production provider values or

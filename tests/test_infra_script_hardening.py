@@ -207,6 +207,10 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     assert "provider-manifest.production.json" not in report["missing_input_artifacts"]
     assert (packet_root / "input-artifacts" / "provider-manifest.production.json").is_file()
     assert (packet_root / "production-render.env").is_file()
+    assert (
+        f'export MNEMOSYNE_PROD_EVIDENCE_DIR="{packet_root / "input-artifacts"}"'
+        in (packet_root / "production-render.env").read_text(encoding="utf-8")
+    )
     assert (packet_root / "reports" / "tier-b-gap-report.md").is_file()
     assert (packet_root / "docs" / "PRODUCTION-EVIDENCE.md").is_file()
     assert "--refresh" in (packet_root / "README.md").read_text(

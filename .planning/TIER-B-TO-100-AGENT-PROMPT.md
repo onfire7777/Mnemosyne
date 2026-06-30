@@ -84,7 +84,7 @@ Read `docs/blueprint/Mnemosyne-v2-Build-Blueprint.md` and `.planning/BLUEPRINT-P
 
 ## 5. EXECUTION PLAN
 
-**Phase 0 — Readiness baseline (no provisioning).** Create a fresh external custody packet with `infra/scripts/prepare-production-evidence-custody.py /secure/path/to/mnemosyne-tier-b-custody`. It copies `production-render.env`, the shared provider-manifest template, operator docs, and a row-scoped `reports/tier-b-gap-report.{json,md}` worklist. The helper exits nonzero while evidence is missing; that is expected setup feedback. After filling `production-render.env` and `input-artifacts/`, run `infra/scripts/prepare-production-evidence-custody.py --refresh /secure/path/to/mnemosyne-tier-b-custody`; refresh updates only the reports and preserves operator inputs. Then run `render-production-soak-manifest.sh --check-environment` until the gap report shows every `MNEMOSYNE_PROD_*` var, provider-manifest env ref, input artifact, and `parity_row_readiness` row is ready.
+**Phase 0 — Readiness baseline (no provisioning).** Create a fresh external custody packet with `infra/scripts/prepare-production-evidence-custody.py /secure/path/to/mnemosyne-tier-b-custody`. It copies `production-render.env`, the shared provider-manifest template, operator docs, and a row-scoped `reports/tier-b-gap-report.{json,md}` worklist. The helper exits nonzero while evidence is missing; that is expected setup feedback. After filling `production-render.env` and `input-artifacts/`, run `infra/scripts/prepare-production-evidence-custody.py --refresh /secure/path/to/mnemosyne-tier-b-custody`; refresh updates only the reports and preserves operator inputs. Then run `render-production-soak-manifest.sh --env-file /secure/path/to/mnemosyne-tier-b-custody/production-render.env --check-environment` until the gap report shows every `MNEMOSYNE_PROD_*` var, provider-manifest env ref, input artifact, and `parity_row_readiness` row is ready.
 
 **Phase 1 — Shared provider stack (unblocks 7/10) ← first.** Provision + wire, then fill `provider-manifest.production.json` (`forbid_local: true`): production Postgres (pgvector 1024-dim HNSW + **ParadeDB/BM25** lexical + **Apache AGE** graph), **embedding** (`MNEMOSYNE_EMBEDDING_URL/MODEL/API_KEY`) + **reranker** (`MNEMOSYNE_RERANKER_URL/MODEL/API_KEY`), **OIDC/IdP/Keycloak** (`MNEMOSYNE_PROVIDER_OIDC_ISSUER/AUDIENCE/JWKS_URL` + authz policy). Re-run `--check-environment` until all referenced provider vars resolve.
 
@@ -120,8 +120,8 @@ Per `infra/PRODUCTION-EVIDENCE.md` (the canonical 28-command capture/acceptance 
 
 1. Read the row runbook. 2. Provision/wire the real service (or consume operator endpoint). 3. Produce the row's `*-ops-bundle.json` (+ artifacts) into `MNEMOSYNE_PROD_EVIDENCE_DIR` (relative refs). 4. Render & preflight:
 ```bash
-infra/scripts/render-production-soak-manifest.sh --check-environment
-infra/scripts/render-production-soak-manifest.sh --output /secure/path/production-soak-manifest.json
+infra/scripts/render-production-soak-manifest.sh --env-file /secure/path/to/mnemosyne-tier-b-custody/production-render.env --check-environment
+infra/scripts/render-production-soak-manifest.sh --env-file /secure/path/to/mnemosyne-tier-b-custody/production-render.env --output /secure/path/production-soak-manifest.json
 infra/scripts/capture-production-evidence.sh --preflight-only /secure/path/production-soak-manifest.json /secure/path/preflight-out
 ```
 5. Capture: `infra/scripts/capture-production-evidence.sh /secure/path/production-soak-manifest.json /secure/path/evidence-out`; the wrapper runs `deployment-soak` and then `release-audit --evidence-manifest "$OUT_ROOT/evidence/manifest.json" --require-production-validated --require-provider-forbid-local`.

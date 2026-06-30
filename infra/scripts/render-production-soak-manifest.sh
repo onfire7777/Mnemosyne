@@ -5,18 +5,22 @@ umask 077
 usage() {
   cat >&2 <<'USAGE'
 Usage:
-  infra/scripts/render-production-soak-manifest.sh --output OUT [--template TEMPLATE] [--force]
+  infra/scripts/render-production-soak-manifest.sh --output OUT [--template TEMPLATE] [--env-file ENV] [--force]
   infra/scripts/render-production-soak-manifest.sh --list-placeholders [--template TEMPLATE]
-  infra/scripts/render-production-soak-manifest.sh --check-environment [--template TEMPLATE]
+  infra/scripts/render-production-soak-manifest.sh --check-environment [--template TEMPLATE] [--env-file ENV]
 
 Renders infra/templates/production-soak-manifest.template.json by replacing every
-MNEMOSYNE_PROD_* placeholder from the current environment. The rendered manifest
-is validated for production scope and full release-command coverage. Secret
-values still belong in environment variables, mounted files, Vault/KMS, or
-command providers; do not put raw secrets in MNEMOSYNE_PROD_* placeholders.
+MNEMOSYNE_PROD_* placeholder from a strict external env file or the current
+environment. The rendered manifest is validated for production scope and full
+release-command coverage. Secret values still belong in environment variables,
+mounted files, Vault/KMS, or command providers; do not put raw secrets in
+MNEMOSYNE_PROD_* placeholders.
 
 Options:
   --template PATH       Template path. Defaults to infra/templates/production-soak-manifest.template.json.
+  --env-file PATH       Strict dotenv file containing every MNEMOSYNE_PROD_* placeholder.
+                        Must be absolute, external, non-symlinked, mode 0600,
+                        and parsed by infra/scripts/load-env.py.
   --output PATH         Destination manifest path. Required unless --list-placeholders or --check-environment is used.
   --force              Overwrite OUT if it already exists.
   --list-placeholders  Print required MNEMOSYNE_PROD_* placeholder names as JSON.
@@ -31,6 +35,7 @@ INFRA_DIR="$(cd "${HERE}/.." && pwd)"
 REPO_DIR="$(cd "${INFRA_DIR}/.." && pwd)"
 
 TEMPLATE="${REPO_DIR}/infra/templates/production-soak-manifest.template.json"
+ENV_FILE=""
 OUTPUT=""
 FORCE=0
 LIST_PLACEHOLDERS=0
@@ -40,6 +45,10 @@ while [ "$#" -gt 0 ]; do
   case "$1" in
     --template)
       TEMPLATE="${2:-}"
+      shift 2
+      ;;
+    --env-file)
+      ENV_FILE="${2:-}"
       shift 2
       ;;
     --output)
@@ -79,13 +88,14 @@ if [ -z "${PYTHON}" ]; then
   fi
 fi
 
-export TEMPLATE OUTPUT FORCE LIST_PLACEHOLDERS CHECK_ENVIRONMENT REPO_DIR
+export TEMPLATE ENV_FILE OUTPUT FORCE LIST_PLACEHOLDERS CHECK_ENVIRONMENT REPO_DIR
 
 "${PYTHON}" - <<'PY'
 import json
 import os
 import re
 import shlex
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -140,14 +150,59 @@ operator_readiness_files = {
 }
 next_steps = [
     "Review infra/templates/production-operator-env.inventory.md for the full no-secret operator env name inventory.",
-    "Copy infra/templates/production-render.env.example outside the repo and fill every MNEMOSYNE_PROD_* value.",
+    "Create a Tier-B custody packet and fill its production-render.env with every MNEMOSYNE_PROD_* value.",
     "Set MNEMOSYNE_PROD_EVIDENCE_DIR to an absolute external directory containing the listed production input artifacts.",
-    "Re-run infra/scripts/render-production-soak-manifest.sh --check-environment until ok=true.",
+    "Re-run infra/scripts/render-production-soak-manifest.sh --env-file <packet>/production-render.env --check-environment until ok=true.",
     "Render with --output to an external path, run infra/scripts/capture-production-evidence.sh, then verify the bundle with production-evidence-verify.",
 ]
 
 
 template_manifest = json.loads(template_text)
+env_file_raw = os.environ.get("ENV_FILE", "")
+
+
+def fail_env_file(message: str, *, code: int = 65) -> None:
+    print(f"ERROR: {message}", file=sys.stderr)
+    raise SystemExit(code)
+
+
+def load_env_file(path_raw: str, required_keys: list[str]) -> None:
+    if not path_raw:
+        return
+    env_path = Path(path_raw).expanduser()
+    if not env_path.is_absolute():
+        fail_env_file("--env-file must be an absolute external path")
+    if env_path.is_symlink():
+        fail_env_file("--env-file must not be a symlink")
+    repo_resolved = repo_dir.resolve()
+    try:
+        env_path.relative_to(repo_resolved)
+    except ValueError:
+        pass
+    else:
+        fail_env_file("--env-file must not point inside the repository")
+    resolved = env_path.resolve(strict=False)
+    try:
+        resolved.relative_to(repo_resolved)
+    except ValueError:
+        pass
+    else:
+        fail_env_file("--env-file must not resolve inside the repository")
+    loader = repo_dir / "infra" / "scripts" / "load-env.py"
+    proc = subprocess.run(
+        [str(loader), str(env_path), *required_keys],
+        cwd=repo_dir,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        stderr = proc.stderr.strip() or proc.stdout.strip()
+        fail_env_file(f"--env-file failed strict loading: {stderr}", code=proc.returncode)
+    for line in proc.stdout.splitlines():
+        key, separator, value = line.partition("=")
+        if separator:
+            os.environ[key] = value
 
 
 def collect_template_input_artifact_plan(manifest_payload: dict[str, Any]) -> list[dict[str, object]]:
@@ -243,6 +298,8 @@ if list_placeholders:
         )
     )
     raise SystemExit(0)
+
+load_env_file(env_file_raw, required)
 
 missing = [name for name in required if not os.environ.get(name)]
 present = [name for name in required if os.environ.get(name)]

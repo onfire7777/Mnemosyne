@@ -25,6 +25,15 @@ infra/scripts/prepare-production-evidence-custody.py \
   /secure/path/to/mnemosyne-tier-b-custody
 ```
 
+Render and check the production soak manifest with the packet env file instead
+of shell-sourcing it:
+
+```bash
+infra/scripts/render-production-soak-manifest.sh \
+  --env-file /secure/path/to/mnemosyne-tier-b-custody/production-render.env \
+  --check-environment
+```
+
 - [ ] `auth-ops-bundle.json`
 - [ ] `belief-revision-cases.json`
 - [ ] `calibration-dataset.json`
@@ -87,10 +96,10 @@ Rules:
 - For `provenance-trust-suite.json`, nested `asset_path` and `c2pa_asset_path`
   values are also treated as input artifacts and must resolve inside this same
   external directory.
-- Run `infra/scripts/render-production-soak-manifest.sh --check-environment`
-  before capture. Without sourced environment values, it reports this static
+- Run `infra/scripts/render-production-soak-manifest.sh --env-file /secure/path/to/mnemosyne-tier-b-custody/production-render.env --check-environment`
+  before capture. Without render values, it reports this static
   artifact inventory, the readiness files to use next, and
-  `parity_row_readiness` grouped by Tier-B row/runbook. With environment values
+  `parity_row_readiness` grouped by Tier-B row/runbook. With render values
   present, it reports missing relative artifact names and row-local validation
   errors without printing the external custody path. The row grouping is for
   operator assignment only; production evidence still requires the full capture

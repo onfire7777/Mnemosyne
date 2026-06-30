@@ -7,7 +7,8 @@ provider files, Vault/KMS, IdP custody, or command-backed providers.
 ## Render Placeholders
 
 These names come from `production-soak-manifest.template.json` and are filled
-by an external copy of `production-render.env.example`.
+in the external custody packet's `production-render.env`. Pass that file with
+`render-production-soak-manifest.sh --env-file`; do not shell-source it.
 
 - `MNEMOSYNE_PROD_C2PA_TOOL`
 - `MNEMOSYNE_PROD_CHANGE_TICKET`

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import stat
 import subprocess
 import sys
@@ -370,6 +371,17 @@ def _filled_render_env(tmp_path: Path) -> dict[str, str]:
     return env
 
 
+def _write_render_env_file(tmp_path: Path, env: dict[str, str]) -> Path:
+    env_file = tmp_path / "production-render.env"
+    lines = [
+        f"export {name}={shlex.quote(env[name])}"
+        for name in _placeholders()
+    ]
+    env_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    env_file.chmod(0o600)
+    return env_file
+
+
 def _populate_required_input_artifacts(
     env: dict[str, str], *, suite_payload: str = '{"cases": []}\n'
 ) -> None:
@@ -540,9 +552,7 @@ def test_renderer_check_environment_reports_missing_without_output() -> None:
     assert any(
         "production-operator-env.inventory.md" in step for step in payload["next_steps"]
     )
-    assert any(
-        "production-render.env.example" in step for step in payload["next_steps"]
-    )
+    assert any("--env-file" in step for step in payload["next_steps"])
     assert any("production-evidence-verify" in step for step in payload["next_steps"])
     assert "MNEMOSYNE_PROD_EVIDENCE_DIR" in payload["missing"]
     assert payload["missing_environment"] == payload["missing"]
@@ -675,6 +685,59 @@ def test_renderer_check_environment_passes_without_writing_manifest(
     ]
     assert sorted(payload["present"]) == _placeholders()
     assert not list(tmp_path.glob("*.json"))
+
+
+def test_renderer_env_file_populates_required_production_values(tmp_path: Path) -> None:
+    env = _filled_render_env(tmp_path)
+    _populate_required_input_artifacts(env)
+    env_file = _write_render_env_file(tmp_path, env)
+    process_env = {
+        key: value
+        for key, value in env.items()
+        if not key.startswith("MNEMOSYNE_PROD_")
+    }
+
+    proc = subprocess.run(
+        [*RENDERER_CMD, "--env-file", str(env_file), "--check-environment"],
+        cwd=REPO,
+        env=process_env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    payload = json.loads(proc.stdout)
+
+    assert payload["ok"] is True
+    assert sorted(payload["present_environment"]) == _placeholders()
+    assert payload["missing_environment"] == []
+    assert payload["input_artifacts_complete"] is True
+    assert env["MNEMOSYNE_PROD_TENANT"] not in proc.stdout
+    assert str(env_file) not in proc.stdout
+    assert proc.stderr == ""
+
+
+def test_renderer_env_file_rejects_unsafe_dotenv_values(tmp_path: Path) -> None:
+    env = _filled_render_env(tmp_path)
+    env["MNEMOSYNE_PROD_TENANT"] = "$(touch /tmp/mnemosyne-render-env-pwned)"
+    env_file = _write_render_env_file(tmp_path, env)
+    marker = Path("/tmp/mnemosyne-render-env-pwned")
+    marker.unlink(missing_ok=True)
+
+    proc = subprocess.run(
+        [*RENDERER_CMD, "--env-file", str(env_file), "--check-environment"],
+        cwd=REPO,
+        env=_renderer_base_env(),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert proc.returncode == 65
+    assert "--env-file failed strict loading" in proc.stderr
+    assert "unsafe dotenv value for MNEMOSYNE_PROD_TENANT" in proc.stderr
+    assert "$(touch" not in proc.stderr
+    assert proc.stdout == ""
+    assert not marker.exists()
 
 
 def test_renderer_check_environment_rejects_missing_provider_manifest_env_ref(

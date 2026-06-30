@@ -122,11 +122,11 @@ infra/scripts/prepare-production-evidence-custody.py \
   --refresh \
   /secure/path/to/mnemosyne-tier-b-custody
 
-set -a
-. /secure/path/to/mnemosyne-tier-b-custody/production-render.env
-set +a
-infra/scripts/render-production-soak-manifest.sh --check-environment
 infra/scripts/render-production-soak-manifest.sh \
+  --env-file /secure/path/to/mnemosyne-tier-b-custody/production-render.env \
+  --check-environment
+infra/scripts/render-production-soak-manifest.sh \
+  --env-file /secure/path/to/mnemosyne-tier-b-custody/production-render.env \
   --output /secure/path/to/production-soak-manifest.json
 infra/scripts/capture-production-evidence.sh \
   --preflight-only \
@@ -170,10 +170,14 @@ runs. Retain it with the external capture record so reviewers can compare the
 emitted `reviewer_guidance`, fingerprints, checks, and row review without
 mutating the evidence bundle.
 
-`--check-environment` writes no files and prints no values. It always reports
+`--check-environment` writes no files and prints no values. Prefer passing the
+packet render env with `--env-file /secure/path/to/mnemosyne-tier-b-custody/production-render.env`
+instead of shell-sourcing it; the renderer uses the same strict loader as the
+packet refresh flow and rejects unsafe dotenv syntax, unexpected keys, symlinks,
+group/world-readable files, and repo-local env-file paths. It always reports
 the required `MNEMOSYNE_PROD_*` key names, operator readiness file paths, and
 static template-derived input artifact inventory so operators can prepare the
-external custody directory before sourcing environment values. The readiness
+external custody directory before loading render values. The readiness
 file map includes `production-operator-env.inventory.md`, a names-only catalog
 covering render placeholders, provider-manifest references, and common runtime
 secret-custody variables so operators can prepare the right external env and
