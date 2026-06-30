@@ -312,6 +312,22 @@ def test_operator_docs_use_strict_render_env_file() -> None:
         assert "load-env.py" in text, path
 
 
+def test_operator_docs_use_strict_capture_env_file() -> None:
+    docs = [
+        REPO / ".planning" / "TIER-B-TO-100-AGENT-PROMPT.md",
+        REPO / "infra" / "PRODUCTION-EVIDENCE.md",
+        REPO / "infra" / "README.md",
+        REPO / "infra" / "templates" / "production-input-artifacts.checklist.md",
+    ]
+
+    for path in docs:
+        text = path.read_text(encoding="utf-8")
+        assert "capture-production-evidence.sh" in text, path
+        assert "--env-file" in text, path
+        assert "mnemosyne-production-runtime.env" in text, path
+        assert "shell-sourcing" in text or "shell-source" in text or path.name != "PRODUCTION-EVIDENCE.md"
+
+
 def test_operator_docs_do_not_use_unbound_production_release_audit() -> None:
     phase_dir = REPO / ".planning" / "phases" / "06-exact-blueprint-runtime-parity"
     docs = [

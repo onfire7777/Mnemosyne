@@ -1262,6 +1262,117 @@ def test_capture_production_evidence_records_provider_command_executable_digest(
     )
 
 
+def test_capture_production_evidence_env_file_supplies_provider_command(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "production-soak.json"
+    out_root = tmp_path / "capture"
+    tool = tmp_path / "bin" / "session-secret-provider"
+    tool.parent.mkdir()
+    tool_payload = b"#!/bin/sh\nexit 0\n"
+    tool.write_bytes(tool_payload)
+    tool.chmod(0o755)
+    provider_manifest = tmp_path / "provider-manifest.production.json"
+    provider_manifest.write_text(
+        json.dumps(
+            _production_provider_manifest_payload(
+                command_env="MNEMOSYNE_SESSION_SECRET_COMMAND"
+            )
+        ),
+        encoding="utf-8",
+    )
+    env_file = tmp_path / "runtime-provider.env"
+    env_file.write_text(
+        f'export MNEMOSYNE_SESSION_SECRET_COMMAND="{tool}"\n',
+        encoding="utf-8",
+    )
+    env_file.chmod(0o600)
+
+    def add_provider_manifest(payload: dict[str, Any]) -> None:
+        check = next(
+            item for item in payload["checks"] if item["command"] == "provider-check"
+        )
+        check["args"] = ["--provider-manifest", str(provider_manifest)]
+
+    _minimal_production_manifest(manifest, mutate=add_provider_manifest)
+    env = os.environ.copy()
+    env.pop("MNEMOSYNE_SESSION_SECRET_COMMAND", None)
+
+    proc = subprocess.run(
+        [
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
+            "--env-file",
+            str(env_file),
+            "--preflight-only",
+            str(manifest),
+            str(out_root),
+        ],
+        cwd=REPO,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    stdout = json.loads(proc.stdout)
+    reference = next(
+        item
+        for item in stdout["executable_tool_references"]
+        if item["option"] == "provider-manifest.command"
+    )
+    assert reference["path"] == str(tool)
+    assert reference["sha256"] == "sha256:" + sha256(tool_payload).hexdigest()
+    assert str(env_file) not in proc.stdout
+    assert str(env_file) not in proc.stderr
+
+
+def test_capture_production_evidence_env_file_rejects_unallowlisted_keys(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "production-soak.json"
+    out_root = tmp_path / "capture"
+    env_file = tmp_path / "runtime-provider.env"
+    env_file.write_text('export PYTHONPATH="/tmp/unsafe"\n', encoding="utf-8")
+    env_file.chmod(0o600)
+    _minimal_production_manifest(manifest)
+
+    proc = subprocess.run(
+        [
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
+            "--env-file",
+            str(env_file),
+            "--preflight-only",
+            str(manifest),
+            str(out_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert proc.returncode == 65
+    assert "unexpected dotenv key 'PYTHONPATH'" in proc.stderr
+    assert proc.stdout == ""
+    assert not out_root.exists()
+
+
+def test_capture_production_evidence_env_file_requires_path() -> None:
+    proc = subprocess.run(
+        ["/bin/bash", str(CAPTURE_SCRIPT), "--env-file"],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert proc.returncode == 64
+    assert "--env-file requires an absolute external path" in proc.stderr
+    assert proc.stdout == ""
+
+
 def test_capture_production_evidence_rewrites_env_c2pa_tool_to_retained_snapshot(
     tmp_path: Path,
 ) -> None:

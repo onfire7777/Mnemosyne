@@ -25,6 +25,10 @@ credentials.json
 service-account.json
 secrets.json
 
+# production preflight scratch artifacts; real custody paths must live outside repo
+/bin/
+/production-inputs/
+
 # volatile eval test scratch output (regenerated with a fresh timestamp each run)
 eval/reports/replay_fidelity_test_tmp/
 eval/reports/*.log

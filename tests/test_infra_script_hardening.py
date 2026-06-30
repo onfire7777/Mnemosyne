@@ -129,6 +129,30 @@ def test_strict_env_loader_emits_allowlisted_assignments(tmp_path: Path) -> None
     assert proc.stdout.splitlines() == ["SAFE_KEY=ok value", "SECOND=two"]
 
 
+def test_strict_env_loader_allow_missing_emits_present_allowed_keys(
+    tmp_path: Path,
+) -> None:
+    env_file = tmp_path / "safe-optional.env"
+    env_file.write_text('export SAFE_KEY="ok value"\n', encoding="utf-8")
+    env_file.chmod(0o600)
+
+    proc = subprocess.run(
+        [
+            str(REPO / "infra" / "scripts" / "load-env.py"),
+            "--allow-missing",
+            str(env_file),
+            "SAFE_KEY",
+            "MISSING_KEY",
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    assert proc.stdout.splitlines() == ["SAFE_KEY=ok value"]
+
+
 def test_capture_local_evidence_rejects_existing_output_root(tmp_path: Path) -> None:
     out_root = tmp_path / "existing-local-capture"
     out_root.mkdir()
@@ -213,8 +237,12 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     )
     assert (packet_root / "reports" / "tier-b-gap-report.md").is_file()
     assert (packet_root / "docs" / "PRODUCTION-EVIDENCE.md").is_file()
-    assert "--refresh" in (packet_root / "README.md").read_text(
-        encoding="utf-8"
+    readme = (packet_root / "README.md").read_text(encoding="utf-8")
+    assert "--refresh" in readme
+    assert "--env-file /secure/path/to/mnemosyne-production-runtime.env" in readme
+    assert any(
+        "--env-file /secure/path/to/mnemosyne-production-runtime.env" in command
+        for command in report["next_commands"]
     )
 
     rows = {row["lane"]: row for row in report["rows"]}
