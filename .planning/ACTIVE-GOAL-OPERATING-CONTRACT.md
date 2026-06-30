@@ -80,11 +80,14 @@ limited to defects that directly block that path:
 2. Use the generated `reports/input-artifact-worklist.{json,md}` as the
    artifact-first operator checklist. It routes every required input artifact to
    packet paths, rows, row runbooks, and consuming checks without creating
-   placeholders. Then use the generated
-   `reports/input-artifact-validation-commands.sh` as a pre-capture check for
-   all rows, or pass `B1` through `B10` to validate one row's required artifact
-   set and manifest-derived validators. Missing worklist entries are work to
-   capture from real production systems, not files to fake.
+   placeholders. Use `reports/row-action-plan.{json,md}` as the row-owner
+   handoff because it joins each B1-B10 row's runbook, missing render values,
+   missing provider refs, missing artifacts, next actions, and row validator.
+   Then use the generated `reports/input-artifact-validation-commands.sh` as a
+   pre-capture check for all rows, or pass `B1` through `B10` to validate one
+   row's required artifact set and manifest-derived validators. Missing
+   worklist entries are work to capture from real production systems, not files
+   to fake.
 3. Render production manifests through the packet's strict external
    `production-render.env`, and pass secret-bearing runtime/provider values
    through a separate external mode-`0600`

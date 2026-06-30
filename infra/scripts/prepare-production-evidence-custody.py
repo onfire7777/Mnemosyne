@@ -994,6 +994,7 @@ def _write_markdown(report: dict[str, Any], path: Path) -> None:
             f"- Validation script: `{report['input_artifact_validation_script']}`",
             f"- Run every artifact validator: `{report['input_artifact_validation_script']}`",
             f"- Run one Tier-B row: `{report['input_artifact_validation_script']} B1`",
+            f"- Row action plan: `{report['row_action_plan_markdown']}`",
             "",
         ]
     )
@@ -1088,6 +1089,156 @@ def _write_input_artifact_worklist_markdown(
             f"{checks} | "
             f"`{artifact['packet_path']}` |"
         )
+    _atomic_write_text(path, "\n".join(lines).rstrip() + "\n")
+
+
+def _row_action_plan(
+    *,
+    rows: list[dict[str, Any]],
+    validation_plan: list[dict[str, Any]],
+    input_artifact_validation_script: Path,
+) -> list[dict[str, Any]]:
+    validators_by_lane: dict[str, list[dict[str, Any]]] = {}
+    for command in validation_plan:
+        lanes = command.get("lanes", [])
+        if not isinstance(lanes, list):
+            continue
+        compact = {
+            "name": command.get("name"),
+            "command": command.get("command"),
+            "required_input_artifacts": command.get("required_input_artifacts", []),
+            "env_placeholders": command.get("env_placeholders", []),
+        }
+        for lane in lanes:
+            if isinstance(lane, str) and lane:
+                validators_by_lane.setdefault(lane, []).append(compact)
+
+    plan: list[dict[str, Any]] = []
+    for row in rows:
+        lane = row.get("lane")
+        if not isinstance(lane, str) or not lane:
+            continue
+        missing_render = [
+            item for item in row.get("missing_render_environment", [])
+            if isinstance(item, str)
+        ]
+        missing_provider = [
+            item for item in row.get("missing_provider_manifest_env_refs", [])
+            if isinstance(item, str)
+        ]
+        missing_artifacts = [
+            item for item in row.get("missing_input_artifacts", [])
+            if isinstance(item, str)
+        ]
+        next_actions: list[str] = []
+        if missing_render:
+            next_actions.append("Fill row-scoped production-render.env placeholders.")
+        if missing_provider:
+            next_actions.append(
+                "Fill provider-manifest refs through the external runtime env file."
+            )
+        if missing_artifacts:
+            next_actions.append(
+                "Capture real production input artifacts under input-artifacts/."
+            )
+        if not next_actions:
+            next_actions.append(
+                "Refresh the packet, run the row validator, then use full capture."
+            )
+        validators = sorted(
+            validators_by_lane.get(lane, []),
+            key=lambda item: (
+                str(item.get("command", "")),
+                str(item.get("name", "")),
+            ),
+        )
+        plan.append(
+            {
+                "lane": lane,
+                "row": row.get("row"),
+                "title": row.get("title"),
+                "runbook": row.get("runbook"),
+                "packet_runbook": row.get("packet_runbook"),
+                "ready_for_capture": row.get("ready_for_capture") is True,
+                "blocker_counts": {
+                    "render_environment": len(missing_render),
+                    "provider_manifest_environment": len(missing_provider),
+                    "input_artifacts": len(missing_artifacts),
+                },
+                "missing_render_environment": missing_render,
+                "missing_provider_manifest_env_refs": missing_provider,
+                "required_input_artifacts": row.get("required_input_artifacts", []),
+                "missing_input_artifacts": missing_artifacts,
+                "input_artifact_validation_command": (
+                    f"{input_artifact_validation_script} {lane}"
+                ),
+                "validators": validators,
+                "next_actions": next_actions,
+                "report_is_evidence": False,
+            }
+        )
+    return sorted(plan, key=lambda item: str(item["lane"]))
+
+
+def _write_row_action_plan_markdown(
+    plan: list[dict[str, Any]],
+    path: Path,
+) -> None:
+    lines = [
+        "# Mnemosyne Tier-B Row Action Plan",
+        "",
+        "This report is an operator preparation aid, not production evidence.",
+        "It joins row readiness, packet runbooks, missing inputs, and row-scoped",
+        "artifact validation commands so B1-B10 work can be assigned without",
+        "manual report joins.",
+        "",
+        "| Row | Ready | Render | Provider refs | Artifacts | Validator |",
+        "|---|---:|---:|---:|---:|---|",
+    ]
+    for row in plan:
+        counts = row["blocker_counts"]
+        lines.append(
+            "| "
+            f"`{row['lane']}` {row.get('title') or ''} | "
+            f"`{str(row['ready_for_capture']).lower()}` | "
+            f"`{counts['render_environment']}` | "
+            f"`{counts['provider_manifest_environment']}` | "
+            f"`{counts['input_artifacts']}` | "
+            f"`{row['input_artifact_validation_command']}` |"
+        )
+    for row in plan:
+        lines.extend(
+            [
+                "",
+                f"## {row['lane']} - {row.get('title') or 'Untitled'}",
+                "",
+                f"- Runbook: `{row.get('runbook')}`",
+                f"- Packet runbook: `{row.get('packet_runbook') or 'not bundled'}`",
+                f"- Ready for capture: `{str(row['ready_for_capture']).lower()}`",
+                f"- Row validator: `{row['input_artifact_validation_command']}`",
+                "- Next actions:",
+            ]
+        )
+        lines.extend(f"  - {item}" for item in row["next_actions"])
+        if row["missing_render_environment"]:
+            lines.append("- Missing render env:")
+            lines.extend(f"  - `{item}`" for item in row["missing_render_environment"])
+        if row["missing_provider_manifest_env_refs"]:
+            lines.append("- Missing provider-manifest env refs:")
+            lines.extend(
+                f"  - `{item}`" for item in row["missing_provider_manifest_env_refs"]
+            )
+        if row["missing_input_artifacts"]:
+            lines.append("- Missing input artifacts:")
+            lines.extend(f"  - `{item}`" for item in row["missing_input_artifacts"])
+        if row["validators"]:
+            lines.append("- Validators:")
+            for validator in row["validators"]:
+                lines.append(
+                    "  - "
+                    f"`{validator.get('name')}` "
+                    f"({validator.get('command')})"
+                )
     _atomic_write_text(path, "\n".join(lines).rstrip() + "\n")
 
 
@@ -1340,6 +1491,7 @@ infra/scripts/prepare-production-evidence-custody.py \\
 
 Refresh mode updates only `reports/tier-b-gap-report.json`,
 `reports/tier-b-gap-report.md`, `reports/input-artifact-worklist.{{json,md}}`,
+`reports/row-action-plan.{{json,md}}`,
 `reports/input-artifact-validation-commands.sh`, `reports/next-commands.sh`,
 and missing read-only packet guidance docs; this README remains static guidance.
 It does not overwrite `production-render.env`, `input-artifacts/`, existing
@@ -1349,6 +1501,7 @@ copied operator docs, or `manifests/`.
 
 - JSON: `reports/tier-b-gap-report.json`
 - Markdown: `reports/tier-b-gap-report.md`
+- Row action plan: `reports/row-action-plan.md`
 - Input artifact worklist: `reports/input-artifact-worklist.md`
 - Input artifact validation: `reports/input-artifact-validation-commands.sh`
 - Runnable command sequence: `reports/next-commands.sh`
@@ -1357,7 +1510,9 @@ copied operator docs, or `manifests/`.
 This README is static guidance and does not carry current readiness status.
 After each refresh, read `reports/tier-b-gap-report.md` or
 `reports/tier-b-gap-report.json` for the current `ready_for_capture` value,
-`capture_blockers`, and `operator_input_inventory`, then copy
+`capture_blockers`, and `operator_input_inventory`. Use
+`reports/row-action-plan.md` to assign row-specific artifact, render-env, and
+provider-env work, then copy
 `reports/mnemosyne-production-runtime.env.example` to the external runtime env
 path before filling secret-bearing values.
 
@@ -1549,6 +1704,8 @@ def refresh_report(
     next_commands_script = reports_dir / "next-commands.sh"
     input_artifact_worklist_json = reports_dir / "input-artifact-worklist.json"
     input_artifact_worklist_markdown = reports_dir / "input-artifact-worklist.md"
+    row_action_plan_json = reports_dir / "row-action-plan.json"
+    row_action_plan_markdown = reports_dir / "row-action-plan.md"
     input_artifact_validation_script = (
         reports_dir / "input-artifact-validation-commands.sh"
     )
@@ -1584,6 +1741,11 @@ def refresh_report(
         template_manifest=template_manifest,
         worklist=input_artifact_worklist,
     )
+    row_action_plan = _row_action_plan(
+        rows=rows,
+        validation_plan=input_artifact_validation_plan,
+        input_artifact_validation_script=input_artifact_validation_script,
+    )
     report = {
         "schema": "mnemosyne.tier-b-custody-gap-report.v1",
         "report_is_evidence": False,
@@ -1614,6 +1776,9 @@ def refresh_report(
         "input_artifact_worklist_json": str(input_artifact_worklist_json),
         "input_artifact_worklist_markdown": str(input_artifact_worklist_markdown),
         "input_artifact_worklist": input_artifact_worklist,
+        "row_action_plan_json": str(row_action_plan_json),
+        "row_action_plan_markdown": str(row_action_plan_markdown),
+        "row_action_plan": row_action_plan,
         "input_artifact_validation_script": str(input_artifact_validation_script),
         "input_artifact_validation_plan": input_artifact_validation_plan,
         "operator_input_inventory": _operator_input_inventory(
@@ -1655,9 +1820,17 @@ def refresh_report(
         input_artifact_worklist_json,
         json.dumps(input_artifact_worklist, indent=2, sort_keys=True) + "\n",
     )
+    _atomic_write_text(
+        row_action_plan_json,
+        json.dumps(row_action_plan, indent=2, sort_keys=True) + "\n",
+    )
     _write_input_artifact_worklist_markdown(
         input_artifact_worklist,
         input_artifact_worklist_markdown,
+    )
+    _write_row_action_plan_markdown(
+        row_action_plan,
+        row_action_plan_markdown,
     )
     _write_input_artifact_validation_script(
         worklist=input_artifact_worklist,
@@ -1735,6 +1908,7 @@ def main(argv: list[str] | None = None) -> int:
         "post_capture_verify_report": report["post_capture_verify_report"],
         "next_commands_script": report["next_commands_script"],
         "input_artifact_worklist": report["input_artifact_worklist_markdown"],
+        "row_action_plan": report["row_action_plan_markdown"],
         "input_artifact_validation_script": report["input_artifact_validation_script"],
         "next_commands": report["next_commands"],
         "next": (
