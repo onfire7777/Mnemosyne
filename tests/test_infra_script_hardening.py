@@ -237,7 +237,9 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
 
     assert proc.returncode == 78
     assert summary["ok"] is False
+    assert summary["ready_for_capture"] is False
     assert summary["report"] == str(report_path)
+    assert summary["post_capture_verify_report"] == report["post_capture_verify_report"]
     assert report["schema"] == "mnemosyne.tier-b-custody-gap-report.v1"
     assert report["report_is_evidence"] is False
     assert report["ready_for_capture"] is False
@@ -290,6 +292,8 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
         for command in report["next_commands"]
     )
     assert any("--fingerprint-record-output" in command for command in report["next_commands"])
+    assert summary["next_commands"] == report["next_commands"]
+    assert summary["next"].endswith("run next_commands in order.")
 
     rows = {row["lane"]: row for row in report["rows"]}
     assert rows["B1"]["packet_runbook"] == (
