@@ -1,6 +1,28 @@
 # Codex Handoff
 
-**Current handoff snapshot:** 2026-06-30 UTC. This snapshot includes §24 support-strategy runtime durability plus public CLI/MCP mutation surfaces, Row 08 hosted-dashboard release-audit hardening, runtime protected `T-SEC` registry reconciliation, protected gate-case ratchet enforcement, replay-fidelity report hygiene, tenant-scoped Postgres gate-case mirror IDs for public non-UUID cases, OQ3 dirty-source projection recompute cleanup, terminal shadow-workspace hard stops, fail-closed hosted-provider, hosted dashboard/probe, and OIDC JWKS fetch hardening through the shared network-safety opener, structured evidence redaction, refreshed G0 report custody, production operator env inventory, external provider-manifest template readiness, canonical C2PA executable-path validation, provider-manifest command argument custody, retained `preflight.json` custody, provider-check row routing, corrected Tier-B command/input-artifact row routing for B4/B8/B9, `summary.json` row-readiness mirroring, verifier `row_review` output, verifier expected/retained/recomputed bundle-fingerprint traceability, retained input/tool artifact custody, hollow-capture rejection, retained provider-manifest shape revalidation, required offline verifier `--report-output` custody, and the CodeRabbit-triggered offline verifier template fix at `03f2611` while preserving the production release-custody and stateful workspace-service hardening already on `main`; strict v1.0 parity remains blocked only on Tier-B operator-captured production evidence. Use `git log -1` plus the latest GitHub CI run for the exact current baseline after later commits.
+**Current handoff snapshot:** 2026-06-30 UTC. Live baseline for this
+checkpoint: `/Users/admin/Mnemosyne` on `main` at
+`2b47989e27af9ec911eb08b43589979e1eb6c934`
+(`fix(infra): group Tier-B runtime env ownership`), with GitHub Actions CI run
+`28475668973` passing. Future agents must still refresh `git status`,
+`git log -1`, and GitHub Actions before making current-state claims; this
+baseline is a checkpoint, not a permanent truth.
+
+This snapshot includes the current Tier-B production-evidence handoff stack:
+external custody packet generation, strict external render/runtime env
+boundaries, provider-manifest template readiness, input artifact worklists and
+contracts, row action plans, render-env action plans, provider-env action plans,
+top-level inventory groups for missing render placeholders, input artifacts, and
+runtime provider env refs by row, row-selectable validation commands, no-secret
+next-command scripts, retained input/tool artifact custody, manifest-bound
+release audit, and offline `production-evidence-verify` using an out-of-band
+fingerprint record plus external verifier report. It also preserves the
+previously closed local source/harness work for G0-G5, §24 support
+strategies, protected `T-SEC` cases, replay-fidelity hygiene, hosted-dashboard
+release evidence, network-safety hardening, redaction, retained
+`preflight.json` custody, `summary.json` row-readiness mirroring, and verifier
+`row_review` routing. Strict v1.0 parity remains blocked only on real
+operator-captured Tier-B production evidence and Tier-C real-path sign-off.
 
 **Canonical checkout:** `/Users/admin/Mnemosyne` on `main`, tracking `origin/main` (`github.com/onfire7777/Mnemosyne`). This is now the single local checkout.
 
@@ -24,7 +46,10 @@
 
 - `06-CONSCIOUSNESS-AND-CONTINUOUS-WORKSPACE.md` is already in the repo and tracked.
 - `04-G0-BENCHMARK-SPEC.md` is already updated to `Implemented (eval/g0/)`.
-- `README.md` and the current roadmap treat G0, the G1-G4 cognitive seeds, Phase 7 plans 01-04, the P5 H8/H12 cascade/observability pre-check, and the P5 operational-toggle retirement as wired and gate-measured. Strict v1.0 parity is still blocked on Tier-B operator-captured production evidence.
+- `README.md` and the current roadmap treat G0, the G1-G4 cognitive seeds,
+  Phase 7 plans 01-05, the P5 H8/H12 cascade/observability pre-check, and the
+  P5 operational-toggle retirement as wired and gate-measured. Strict v1.0
+  parity is still blocked on Tier-B operator-captured production evidence.
 - The G0 harness is implemented under `eval/g0/` and can be run through both:
   - `python -m eval.g0.runner`
   - `mneme eval g0`
@@ -51,10 +76,39 @@
 
 ## Latest Verified Snapshot
 
-- Latest pushed source-bearing baseline entering this cleanup, `9621971`, closes the Tier-B row-readiness routing fix: `gate-suite-check` belongs to B4, `ops-report` belongs to B8, and hosted LLM/calibration evidence plus `hosted-llm-manifest.json` and `calibration-dataset.json` belong to B9. The renderer's `parity_row_readiness` output routes those artifacts to the correct row owners before production capture.
-- Local verification on `9621971` passed full `.venv/bin/python -m pytest -q`, focused production evidence/runbook tests, `uv run --locked ruff check .`, `bash -n infra/scripts/capture-production-evidence.sh infra/scripts/render-production-soak-manifest.sh`, `git diff --check`, and explicit-controller-telemetry G0 (`72/72 measured; gate_ready=True`). This is source and harness verification only, not Tier-B production evidence.
-- GitHub CI run `28414377562` passed on `9621971`: Lint (ruff), Postgres integration, Unit + drift checks, and G0 preregistration gate replay completed successfully. Use `git log -1` plus the latest GitHub CI run for the moving current baseline after later commits.
-- Earlier custody follow-up `03f2611` remains a historical checkpoint for reviewer-report hardening: capture summaries retain the offline replay template with `--report-output <external-review-report-json>`, offline verification accepts both legacy and current retained templates, and provider-manifest negative tests pass valid report outputs unless intentionally testing missing-report-output diagnostics.
+- Live baseline verified for this handoff refresh:
+  `2b47989e27af9ec911eb08b43589979e1eb6c934` on `main`, clean against
+  `origin/main`, with GitHub CI run `28475668973` completed successfully.
+  This commit groups `operator_input_inventory.runtime_env_file`
+  `provider_manifest_env_refs` and `missing_provider_manifest_env_refs` by
+  primary Tier-B row, so the external runtime env handoff no longer requires
+  manually joining a flat provider-ref list to row plans.
+- Local verification for `2b47989` before push passed Python compilation for
+  the changed script/test files, focused infra hardening tests, `git diff
+  --check`, focused `ruff`, the relevant production runbook consistency and
+  infra hardening test slice, a no-secret changed-file scan, and a fresh
+  external custody packet smoke confirming B1/B2/B4/B6/B7/B9 grouped ownership
+  appears in JSON and Markdown without retaining provider values or runtime env
+  file paths. This is readiness/handoff verification only, not Tier-B production
+  evidence.
+- Recent Tier-B handoff commits after the older `9621971` baseline add render
+  env plans, artifact contracts, provider-env action plans, row-owned versus
+  shared provider-ref splits, complete primary row ownership for provider refs,
+  and runtime env inventory grouping. They reduce operator handoff ambiguity
+  but do not flip any strict audit row without wrapper-captured production
+  bundles plus offline custody verification.
+- Historical source baseline `9621971` remains useful for the earlier
+  row-readiness routing fix: `gate-suite-check` belongs to B4, `ops-report`
+  belongs to B8, and hosted LLM/calibration evidence plus
+  `hosted-llm-manifest.json` and `calibration-dataset.json` belong to B9. Do
+  not treat `9621971` or CI run `28414377562` as the latest baseline after the
+  later Tier-B handoff commits.
+- Earlier custody follow-up `03f2611` remains a historical checkpoint for
+  reviewer-report hardening: capture summaries retain the offline replay
+  template with `--report-output <external-review-report-json>`, offline
+  verification accepts both legacy and current retained templates, and
+  provider-manifest negative tests pass valid report outputs unless
+  intentionally testing missing-report-output diagnostics.
 - Terminal hard-stop and evidence-security cleanup is closed on `5417096`: `ShadowWorkspaceService` rejects post-hard-stop ticks without trace/cycle growth until a fresh service window starts, hosted provider and OIDC JWKS checks reject URL userinfo, invalid ports, private/reserved DNS targets, redirects, rebinding-prone fetch paths through address pinning, and inline `api_key` material, and evidence redaction scans structured JSON secret-key scalar fields while allowing non-secret proof metadata objects.
 - Stateful workspace tick hardening is closed on `eb46643`: `ShadowWorkspaceService.tick()` now carries its cycle guard, idle/non-useful counters, trace history, and dreamer invocation guard across calls, so anti-rumination, max-cycle escalation, and one-dreamer-burst-per-service-window behavior are measured on the continuous service path rather than only on batch `run_shadow_stream()`.
 - T-SEC registry reconciliation is closed locally: `memory_poisoning_cases()` returns all 22 playbook cases as active curated protected `RegressionCase` rows, and tests assert the registry cannot shrink or drop `T-SEC-016b`, `T-SEC-020`, or `T-SEC-021`.

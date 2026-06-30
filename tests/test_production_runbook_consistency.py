@@ -322,11 +322,18 @@ def test_current_state_docs_do_not_reopen_closed_local_feature_gaps() -> None:
     handoff = (
         REPO / "docs" / "blueprint" / "cognitive-architecture" / "CODEX-HANDOFF.md"
     ).read_text(encoding="utf-8")
+    handoff_flat = " ".join(handoff.split())
 
     assert "current parity blocker is the Tier-B operator-captured production evidence path" in matrix
     assert "The only two genuinely-missing **features** are" not in matrix
+    assert "2b47989e27af9ec911eb08b43589979e1eb6c934" in handoff
+    assert "GitHub Actions CI run `28475668973` passing" in handoff_flat
     assert "9621971" in handoff
-    assert "CI run `28414377562` passed" in handoff
+    assert "CI run `28414377562` passed" not in handoff
+    assert (
+        "Do not treat `9621971` or CI run `28414377562` as the latest baseline"
+        in handoff_flat
+    )
     assert "Latest source-bearing baseline before this handoff update, `03f2611`" not in handoff
     assert "Last recorded green source-bearing GitHub baseline before this handoff update" not in handoff
 

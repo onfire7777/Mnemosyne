@@ -26,6 +26,28 @@ unchanged: B1-B10 remain Partial until wrapper-captured production bundles pass
 manifest-bound release audit and offline custody verification, followed by
 Tier-C real-path SLO/rail sign-off.
 
+Latest checkpoint (2026-06-30): The continuation baseline was refreshed after
+the folder move/path ambiguity. `/Users/admin/Mnemosyne` is the canonical
+checkout; `/Users/admin/Desktop/Mnemosyne` does not currently exist as a Git
+worktree. `main` and `origin/main` are synchronized at
+`2b47989e27af9ec911eb08b43589979e1eb6c934`, and GitHub CI run `28475668973`
+passed for that head. `docs/blueprint/cognitive-architecture/CODEX-HANDOFF.md`
+now records this as a current checkpoint and demotes older `9621971`/`03f2611`
+references to historical context. This is source/CI synchronization only, not
+Tier-B production evidence.
+
+Latest checkpoint (2026-06-30): Tier-B gap reports now expose row-grouped
+operator input inventory for all three top-level edit surfaces. In addition to
+the existing runtime env primary-row provider-ref groups,
+`operator_input_inventory.production_render_env` now records
+`global_missing`, `render_env_names_by_row`, and
+`missing_render_env_by_row`, while `operator_input_inventory.input_artifacts`
+records `input_artifacts_by_row` and `missing_input_artifacts_by_row`. The
+Markdown gap report surfaces missing render placeholders and input artifacts by
+row beside the existing provider-ref grouping. This removes another manual
+report-join step only; it does not create production values, artifacts, or
+strict-audit evidence.
+
 Latest checkpoint (2026-06-30): Tier-B row action plans now separate
 row-owned provider-manifest env refs from shared provider-stack blockers. The
 generated `reports/row-action-plan.{json,md}` includes

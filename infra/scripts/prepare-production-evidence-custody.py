@@ -946,7 +946,28 @@ def _operator_input_inventory(
     missing_input_artifacts: list[str],
     runtime_env_file_loaded: bool,
     provider_env_action_plan: list[dict[str, Any]],
+    render_env_action_plan: list[dict[str, Any]],
+    input_artifact_worklist: list[dict[str, Any]],
 ) -> dict[str, Any]:
+    render_by_row: dict[str, list[str]] = {}
+    missing_render_by_row: dict[str, list[str]] = {}
+    global_missing_render: list[str] = []
+    for item in render_env_action_plan:
+        env = item.get("env")
+        if not isinstance(env, str) or not env:
+            continue
+        if item.get("global_missing") is True and item.get("missing") is True:
+            global_missing_render.append(env)
+        for row in item.get("affected_rows", []):
+            if not isinstance(row, dict):
+                continue
+            lane = row.get("lane")
+            if not isinstance(lane, str) or not lane:
+                continue
+            render_by_row.setdefault(lane, []).append(env)
+            if item.get("missing") is True:
+                missing_render_by_row.setdefault(lane, []).append(env)
+
     provider_by_primary_row: dict[str, list[str]] = {}
     missing_provider_by_primary_row: dict[str, list[str]] = {}
     for item in provider_env_action_plan:
@@ -961,6 +982,38 @@ def _operator_input_inventory(
             if item.get("missing") is True:
                 missing_provider_by_primary_row.setdefault(lane, []).append(env)
 
+    input_artifacts_by_row: dict[str, list[str]] = {}
+    missing_input_artifacts_by_row: dict[str, list[str]] = {}
+    for item in input_artifact_worklist:
+        relative_path = item.get("relative_path")
+        if not isinstance(relative_path, str) or not relative_path:
+            continue
+        for row in item.get("rows", []):
+            if not isinstance(row, dict):
+                continue
+            lane = row.get("lane")
+            if not isinstance(lane, str) or not lane:
+                continue
+            input_artifacts_by_row.setdefault(lane, []).append(relative_path)
+            if item.get("present") is False:
+                missing_input_artifacts_by_row.setdefault(lane, []).append(
+                    relative_path
+                )
+
+    render_by_row = {
+        lane: sorted(set(envs))
+        for lane, envs in sorted(
+            render_by_row.items(),
+            key=lambda pair: _lane_sort_key(pair[0]),
+        )
+    }
+    missing_render_by_row = {
+        lane: sorted(set(envs))
+        for lane, envs in sorted(
+            missing_render_by_row.items(),
+            key=lambda pair: _lane_sort_key(pair[0]),
+        )
+    }
     provider_by_primary_row = {
         lane: sorted(set(envs))
         for lane, envs in sorted(
@@ -975,12 +1028,29 @@ def _operator_input_inventory(
             key=lambda pair: _lane_sort_key(pair[0]),
         )
     }
+    input_artifacts_by_row = {
+        lane: sorted(set(paths))
+        for lane, paths in sorted(
+            input_artifacts_by_row.items(),
+            key=lambda pair: _lane_sort_key(pair[0]),
+        )
+    }
+    missing_input_artifacts_by_row = {
+        lane: sorted(set(paths))
+        for lane, paths in sorted(
+            missing_input_artifacts_by_row.items(),
+            key=lambda pair: _lane_sort_key(pair[0]),
+        )
+    }
 
     return {
         "production_render_env": {
             "path": str(render_env_file),
             "purpose": "Non-secret MNEMOSYNE_PROD_* render placeholders.",
             "missing": sorted(missing_render_env),
+            "global_missing": sorted(set(global_missing_render)),
+            "render_env_names_by_row": render_by_row,
+            "missing_render_env_by_row": missing_render_by_row,
             "missing_count": len(missing_render_env),
             "values_may_be_recorded": False,
         },
@@ -1002,6 +1072,8 @@ def _operator_input_inventory(
             "directory": str(input_dir),
             "purpose": "No-secret production evidence input artifacts retained by capture.",
             "missing": missing_input_artifacts,
+            "input_artifacts_by_row": input_artifacts_by_row,
+            "missing_input_artifacts_by_row": missing_input_artifacts_by_row,
             "missing_count": len(missing_input_artifacts),
             "checklist": "docs/production-input-artifacts.checklist.md",
         },
@@ -1449,6 +1521,18 @@ def _write_markdown(report: dict[str, Any], path: Path) -> None:
         lines.extend(
             f"- `{name}`" for name in inventory["production_render_env"]["missing"]
         )
+        global_missing = inventory["production_render_env"]["global_missing"]
+        if global_missing:
+            joined = ", ".join(f"`{name}`" for name in global_missing)
+            lines.extend(["", f"Global render placeholders: {joined}"])
+        grouped_missing = inventory["production_render_env"][
+            "missing_render_env_by_row"
+        ]
+        if grouped_missing:
+            lines.extend(["", "Missing render placeholders by row:"])
+            for lane, envs in grouped_missing.items():
+                joined = ", ".join(f"`{env}`" for env in envs)
+                lines.append(f"- `{lane}`: {joined}")
     else:
         lines.append("- None")
     lines.extend(
@@ -1492,6 +1576,14 @@ def _write_markdown(report: dict[str, Any], path: Path) -> None:
     )
     if inventory["input_artifacts"]["missing"]:
         lines.extend(f"- `{name}`" for name in inventory["input_artifacts"]["missing"])
+        grouped_missing = inventory["input_artifacts"][
+            "missing_input_artifacts_by_row"
+        ]
+        if grouped_missing:
+            lines.extend(["", "Missing input artifacts by row:"])
+            for lane, artifacts in grouped_missing.items():
+                joined = ", ".join(f"`{artifact}`" for artifact in artifacts)
+                lines.append(f"- `{lane}`: {joined}")
     else:
         lines.append("- None")
     lines.extend(
@@ -2792,6 +2884,8 @@ def refresh_report(
             missing_input_artifacts=missing_input_artifacts,
             runtime_env_file_loaded=runtime_env_file is not None,
             provider_env_action_plan=provider_env_action_plan,
+            render_env_action_plan=render_env_action_plan,
+            input_artifact_worklist=input_artifact_worklist,
         ),
         "capture_blockers": _capture_blockers(
             rows=rows,
