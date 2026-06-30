@@ -61,6 +61,64 @@ def _copy_readonly(src: Path, dst: Path) -> None:
     dst.chmod(0o600)
 
 
+def _ensure_packet_dir(path: Path, *, label: str) -> None:
+    if path.is_symlink():
+        _fail(f"{label} must not be a symlink: {path}")
+    path.mkdir(parents=True, exist_ok=True)
+    path.chmod(0o700)
+
+
+def _copy_readonly_if_missing(src: Path, dst: Path) -> bool:
+    if dst.is_symlink():
+        _fail(f"packet doc must not be a symlink: {dst}")
+    if dst.exists():
+        if not dst.is_file():
+            _fail(f"packet doc must be a regular file: {dst}")
+        return False
+    _copy_readonly(src, dst)
+    return True
+
+
+def _packet_doc_sources(repo_dir: Path) -> list[tuple[Path, Path]]:
+    docs = [
+        "infra/PRODUCTION-EVIDENCE.md",
+        "infra/templates/production-operator-env.inventory.md",
+        "infra/templates/production-input-artifacts.checklist.md",
+        "infra/templates/production-soak-manifest.template.json",
+        ".planning/OPS-HANDOFF-AND-OWNERSHIP.md",
+        ".planning/ENV-AND-SECRETS.md",
+        ".planning/ROLLBACK.md",
+    ]
+    sources = [
+        (repo_dir / relative, Path("docs") / Path(relative).name)
+        for relative in docs
+    ]
+    sources.extend(
+        (runbook, Path("docs") / "runbooks" / runbook.name)
+        for runbook in sorted((repo_dir / ".planning" / "runbooks").glob("*.md"))
+    )
+    return sources
+
+
+def _sync_packet_docs(root: Path, *, repo_dir: Path) -> dict[str, Any]:
+    _ensure_packet_dir(root / "docs", label="packet docs directory")
+    _ensure_packet_dir(root / "docs" / "runbooks", label="packet runbooks directory")
+    added: list[str] = []
+    missing: list[str] = []
+    for src, dst_relative in _packet_doc_sources(repo_dir):
+        dst = root / dst_relative
+        if not src.is_file():
+            missing.append(str(dst_relative))
+            continue
+        if _copy_readonly_if_missing(src, dst):
+            added.append(str(dst_relative))
+    return {
+        "complete": not missing,
+        "added": added,
+        "missing": missing,
+    }
+
+
 def _packet_runbook_path(runbook: Any) -> str | None:
     if not isinstance(runbook, str) or not runbook:
         return None
@@ -386,6 +444,7 @@ def _write_markdown(report: dict[str, Any], path: Path) -> None:
         f"- Missing render env vars: `{len(report['missing_render_environment'])}`",
         f"- Missing provider-manifest env refs: `{len(report['missing_provider_manifest_env_refs'])}`",
         f"- Missing input artifacts: `{report['missing_input_artifact_count']}`",
+        f"- Packet docs complete: `{str(report['packet_docs_complete']).lower()}`",
         "",
         "## Highest-Leverage Order",
         "",
@@ -410,6 +469,17 @@ def _write_markdown(report: dict[str, Any], path: Path) -> None:
         lines.extend(f"- `{name}`" for name in report["missing_provider_manifest_env_refs"])
     else:
         lines.append("- None")
+    lines.extend(["", "## Packet Guidance Docs", ""])
+    if report["packet_docs_added"]:
+        lines.append("Added missing packet docs during this refresh:")
+        lines.extend(f"- `{name}`" for name in report["packet_docs_added"])
+    else:
+        lines.append("- No missing packet docs were added during this refresh.")
+    if report["packet_docs_missing"]:
+        lines.append("- Missing packet docs:")
+        lines.extend(f"  - `{name}`" for name in report["packet_docs_missing"])
+    else:
+        lines.append("- Missing packet docs: `0`")
     lines.extend(["", "## Rows", ""])
     for row in report["rows"]:
         lines.extend(
@@ -476,9 +546,9 @@ infra/scripts/prepare-production-evidence-custody.py \\
 ```
 
 Refresh mode updates only `reports/tier-b-gap-report.json`,
-`reports/tier-b-gap-report.md`; this README remains static guidance. It does
-not overwrite `production-render.env`, `input-artifacts/`, copied operator docs,
-or `manifests/`.
+`reports/tier-b-gap-report.md`, and missing read-only packet guidance docs; this
+README remains static guidance. It does not overwrite `production-render.env`,
+`input-artifacts/`, existing copied operator docs, or `manifests/`.
 
 ## Current Report
 
@@ -535,15 +605,11 @@ def _validate_existing_packet(root: Path) -> None:
 
 
 def _write_packet_skeleton(root: Path, *, repo_dir: Path) -> None:
-    docs_dir = root / "docs"
-    runbooks_dir = docs_dir / "runbooks"
     input_dir = root / "input-artifacts"
     reports_dir = root / "reports"
     manifests_dir = root / "manifests"
     for directory in (
         root,
-        docs_dir,
-        runbooks_dir,
         input_dir,
         reports_dir,
         manifests_dir,
@@ -560,21 +626,7 @@ def _write_packet_skeleton(root: Path, *, repo_dir: Path) -> None:
         repo_dir / "infra" / "templates" / "provider-manifest.production.template.json",
         input_dir / "provider-manifest.production.json",
     )
-    for relative in (
-        "infra/PRODUCTION-EVIDENCE.md",
-        "infra/templates/production-operator-env.inventory.md",
-        "infra/templates/production-input-artifacts.checklist.md",
-        "infra/templates/production-soak-manifest.template.json",
-    ):
-        _copy_readonly(repo_dir / relative, docs_dir / Path(relative).name)
-    for relative in (
-        ".planning/OPS-HANDOFF-AND-OWNERSHIP.md",
-        ".planning/ENV-AND-SECRETS.md",
-        ".planning/ROLLBACK.md",
-    ):
-        _copy_readonly(repo_dir / relative, docs_dir / Path(relative).name)
-    for runbook in sorted((repo_dir / ".planning" / "runbooks").glob("*.md")):
-        _copy_readonly(runbook, runbooks_dir / runbook.name)
+    _sync_packet_docs(root, repo_dir=repo_dir)
 
 
 def refresh_report(
@@ -588,6 +640,7 @@ def refresh_report(
     input_dir = root / "input-artifacts"
     reports_dir = root / "reports"
     manifests_dir = root / "manifests"
+    packet_docs = _sync_packet_docs(root, repo_dir=repo_dir)
     template_manifest = _load_json(
         repo_dir / "infra" / "templates" / "production-soak-manifest.template.json"
     )
@@ -667,6 +720,9 @@ def refresh_report(
         "input_artifacts_dir": str(input_dir),
         "production_render_env": str(root / "production-render.env"),
         "production_render_env_loaded": True,
+        "packet_docs_complete": packet_docs["complete"],
+        "packet_docs_added": packet_docs["added"],
+        "packet_docs_missing": packet_docs["missing"],
         "runtime_env_file_loaded": runtime_env_file is not None,
         "runtime_env_file_values_redacted": runtime_env_file is not None,
         "renderer_returncode": renderer_code,
@@ -760,6 +816,8 @@ def main(argv: list[str] | None = None) -> int:
         "missing_render_environment": len(report["missing_render_environment"]),
         "missing_provider_manifest_env_refs": len(report["missing_provider_manifest_env_refs"]),
         "missing_input_artifacts": report["missing_input_artifact_count"],
+        "packet_docs_complete": report["packet_docs_complete"],
+        "packet_docs_added": len(report["packet_docs_added"]),
         "next": "Fill production-render.env and input-artifacts/, then render and capture from external paths.",
     }
     print(json.dumps(summary, indent=2, sort_keys=True))
