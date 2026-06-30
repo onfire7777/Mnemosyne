@@ -3765,6 +3765,7 @@ exec "$REAL_PYTHON" "$@"
         "verification_hint": {
             "command": "python -m mnemosyne.cli production-evidence-verify",
             "expected_bundle_fingerprint_argument": summary["bundle_fingerprint"],
+            "fingerprint_record_argument": str(fingerprint_record),
             "report_output_required": True,
         },
         "reviewer_handoff": {
@@ -3777,16 +3778,16 @@ exec "$REAL_PYTHON" "$@"
                 "mnemosyne.cli",
                 "production-evidence-verify",
                 str(out_root),
-                "--expected-bundle-fingerprint",
-                summary["bundle_fingerprint"],
+                "--fingerprint-record",
+                str(fingerprint_record),
                 "--report-output",
                 str(suggested_verify_report),
             ],
             "diagnostic_only": False,
         },
         "note": (
-            "Retain this file outside the evidence bundle and use bundle_fingerprint "
-            "as --expected-bundle-fingerprint during offline custody review."
+            "Retain this file outside the evidence bundle and pass it as "
+            "--fingerprint-record during offline custody review."
         ),
     }
     assert suggested_verify_report.parent == out_root.parent
@@ -3802,14 +3803,14 @@ exec "$REAL_PYTHON" "$@"
             "mnemosyne.cli",
             "production-evidence-verify",
             str(out_root),
-            "--expected-bundle-fingerprint",
-            "<out-of-band-bundle-fingerprint>",
+            "--fingerprint-record",
+            "<out-of-band-fingerprint-record-json>",
             "--report-output",
             "<external-review-report-json>",
         ],
         "note": (
             "Custody review only; does not rerun production checks or flip audit rows. "
-            "Expected fingerprint must come from an independently retained out-of-band fingerprint record."
+            "Expected fingerprint is read from an independently retained out-of-band fingerprint record."
         ),
     }
     assert bundle_manifest["schema"] == "mnemosyne.production-evidence-bundle.v1"
@@ -3849,8 +3850,8 @@ exec "$REAL_PYTHON" "$@"
             "mnemosyne.cli",
             "production-evidence-verify",
             str(out_root),
-            "--expected-bundle-fingerprint",
-            fingerprint_payload["bundle_fingerprint"],
+            "--fingerprint-record",
+            str(fingerprint_record),
             "--report-output",
             str(report_path),
         ],

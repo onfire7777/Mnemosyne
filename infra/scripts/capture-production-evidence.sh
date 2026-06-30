@@ -29,10 +29,9 @@ bundle fingerprint record written at capture time:
   PYTHON="${PYTHON:-$(if [ -x .venv/bin/python ]; then printf '%s' .venv/bin/python; else command -v python3; fi)}"
   BUNDLE_DIR=OUT_ROOT
   FINGERPRINT_RECORD=/secure/path/to/mnemosyne-production-bundle-fingerprint.json
-  EXPECTED_BUNDLE_FINGERPRINT="$("$PYTHON" -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["bundle_fingerprint"])' "$FINGERPRINT_RECORD")"
   VERIFY_REPORT=/secure/path/to/mnemosyne-production-evidence-verify.json
   "$PYTHON" -m mnemosyne.cli production-evidence-verify "$BUNDLE_DIR" \
-    --expected-bundle-fingerprint "$EXPECTED_BUNDLE_FINGERPRINT" \
+    --fingerprint-record "$FINGERPRINT_RECORD" \
     --report-output "$VERIFY_REPORT"
 This is custody review only; it does not rerun production checks or flip rows.
 
@@ -1829,14 +1828,14 @@ summary = {
             "mnemosyne.cli",
             "production-evidence-verify",
             str(out_root),
-            "--expected-bundle-fingerprint",
-            "<out-of-band-bundle-fingerprint>",
+            "--fingerprint-record",
+            "<out-of-band-fingerprint-record-json>",
             "--report-output",
             "<external-review-report-json>",
         ],
         "note": (
             "Custody review only; does not rerun production checks or flip audit rows. "
-            "Expected fingerprint must come from an independently retained out-of-band fingerprint record."
+            "Expected fingerprint is read from an independently retained out-of-band fingerprint record."
         ),
     },
 }
@@ -1881,6 +1880,7 @@ if fingerprint_record_output:
         "verification_hint": {
             "command": "python -m mnemosyne.cli production-evidence-verify",
             "expected_bundle_fingerprint_argument": bundle_fingerprint,
+            "fingerprint_record_argument": str(fingerprint_record_path),
             "report_output_required": True,
         },
         "reviewer_handoff": {
@@ -1893,16 +1893,16 @@ if fingerprint_record_output:
                 "mnemosyne.cli",
                 "production-evidence-verify",
                 str(out_root),
-                "--expected-bundle-fingerprint",
-                bundle_fingerprint,
+                "--fingerprint-record",
+                str(fingerprint_record_path),
                 "--report-output",
                 str(suggested_verify_report),
             ],
             "diagnostic_only": False,
         },
         "note": (
-            "Retain this file outside the evidence bundle and use bundle_fingerprint "
-            "as --expected-bundle-fingerprint during offline custody review."
+            "Retain this file outside the evidence bundle and pass it as "
+            "--fingerprint-record during offline custody review."
         ),
     }
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL

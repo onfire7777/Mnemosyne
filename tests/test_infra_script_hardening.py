@@ -341,7 +341,8 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
         in markdown
     )
     assert "production-evidence-verify" in report["post_capture_verify_script"]
-    assert "--expected-bundle-fingerprint" in report["post_capture_verify_script"]
+    assert "--fingerprint-record" in report["post_capture_verify_script"]
+    assert "EXPECTED_BUNDLE_FINGERPRINT" not in report["post_capture_verify_script"]
     assert "--report-output" in report["post_capture_verify_script"]
     assert report["post_capture_verify_report"] == str(
         packet_root.parent

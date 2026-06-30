@@ -130,7 +130,7 @@ and the resulting `release-audit --evidence-manifest "$OUT_ROOT/evidence/manifes
 output reports `ok=true` and `findings=[]`. The wrapper must also produce
 `redaction-scan.json` with `ok=true`, `bundle-manifest.json`, and a
 `summary.json` `bundle_fingerprint`. Reviewers must then run
-`production-evidence-verify` with `--expected-bundle-fingerprint` set from an
+`production-evidence-verify` with `--fingerprint-record` pointing to an
 independently retained out-of-band fingerprint record and `--report-output` set to a
 new external path outside the bundle under review; the verifier report must have
 `ok=true` before any row can flip.

@@ -10758,9 +10758,11 @@ def _production_evidence_summary_offline_verify_argv_ok(
         return False
     if not _production_evidence_path_matches(argv[4], expected_path=bundle_dir):
         return False
-    if argv[5] != "--expected-bundle-fingerprint":
-        return False
-    if argv[6] != "<out-of-band-bundle-fingerprint>":
+    supported_expected_sources = {
+        ("--expected-bundle-fingerprint", "<out-of-band-bundle-fingerprint>"),
+        ("--fingerprint-record", "<out-of-band-fingerprint-record-json>"),
+    }
+    if tuple(argv[5:7]) not in supported_expected_sources:
         return False
     if len(argv) == 9 and argv[7:] != [
         "--report-output",
@@ -11291,8 +11293,9 @@ def _production_evidence_reviewer_guidance(
     if "expected_bundle_fingerprint_missing" in codes:
         blocked_reason = blocked_reason or "missing_expected_fingerprint"
         next_steps.append(
-            "Provide --expected-bundle-fingerprint from the independently retained out-of-band "
-            "operator fingerprint record. Do not copy the value from the bundle under review."
+            "Provide --fingerprint-record from the independently retained out-of-band "
+            "operator fingerprint record, or provide --expected-bundle-fingerprint from that record. "
+            "Do not copy the value from the bundle under review."
         )
 
     if "expected_bundle_fingerprint_mode_conflict" in codes:
@@ -11300,7 +11303,13 @@ def _production_evidence_reviewer_guidance(
         next_steps.append(
             "Choose exactly one verifier mode. For Tier B custody review, remove "
             "--internal-consistency-only and rerun with only the out-of-band "
-            "--expected-bundle-fingerprint."
+            "--fingerprint-record or --expected-bundle-fingerprint."
+        )
+    if "expected_bundle_fingerprint_source_conflict" in codes:
+        blocked_reason = blocked_reason or "fingerprint_source_conflict"
+        next_steps.append(
+            "Choose either --fingerprint-record or --expected-bundle-fingerprint. "
+            "Prefer --fingerprint-record to avoid manual fingerprint transcription."
         )
 
     if "expected_bundle_fingerprint_mismatch" in codes:
@@ -11326,7 +11335,8 @@ def _production_evidence_reviewer_guidance(
     if internal_consistency_only:
         next_steps.append(
             "Internal-consistency mode is diagnostic only. For custody review, rerun with "
-            "--expected-bundle-fingerprint from the external fingerprint record."
+            "--fingerprint-record or --expected-bundle-fingerprint from the external "
+            "fingerprint record."
         )
 
     if incomplete_row_count:
@@ -11362,6 +11372,115 @@ def _production_evidence_reviewer_guidance(
         "next_steps": next_steps,
         "diagnostic_only": True,
     }
+
+
+def _production_evidence_expected_fingerprint_from_record(
+    record_path_raw: str | None,
+    *,
+    bundle_dir: Path,
+    findings: list[dict[str, Any]],
+) -> str | None:
+    if not record_path_raw:
+        return None
+    record_path = Path(record_path_raw).expanduser()
+    if not record_path.is_absolute():
+        _production_evidence_finding(
+            findings,
+            "fingerprint_record_path_not_absolute",
+            "production fingerprint record path must be absolute",
+        )
+        return None
+    if record_path.is_symlink():
+        _production_evidence_finding(
+            findings,
+            "fingerprint_record_symlink",
+            "production fingerprint record must not be a symlink",
+        )
+        return None
+    try:
+        resolved_record = record_path.resolve(strict=True)
+    except OSError as exc:
+        _production_evidence_finding(
+            findings,
+            "fingerprint_record_invalid",
+            f"production fingerprint record denied: {exc}",
+        )
+        return None
+    try:
+        resolved_record.relative_to(bundle_dir)
+    except ValueError:
+        pass
+    else:
+        _production_evidence_finding(
+            findings,
+            "fingerprint_record_bundle_local",
+            "production fingerprint record must be outside the evidence bundle under review",
+        )
+        return None
+    if not resolved_record.is_file():
+        _production_evidence_finding(
+            findings,
+            "fingerprint_record_invalid",
+            "production fingerprint record must be a JSON file",
+        )
+        return None
+    try:
+        record = json.loads(resolved_record.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        _production_evidence_finding(
+            findings,
+            "fingerprint_record_invalid",
+            f"production fingerprint record denied: {exc}",
+        )
+        return None
+    if not isinstance(record, Mapping):
+        _production_evidence_finding(
+            findings,
+            "fingerprint_record_invalid",
+            "production fingerprint record must contain a JSON object",
+        )
+        return None
+    if record.get("schema") != "mnemosyne.production-evidence-fingerprint-record.v1":
+        _production_evidence_finding(
+            findings,
+            "fingerprint_record_schema_invalid",
+            "production fingerprint record schema is invalid",
+        )
+    if record.get("record_kind") != "out-of-band-bundle-fingerprint":
+        _production_evidence_finding(
+            findings,
+            "fingerprint_record_kind_invalid",
+            "production fingerprint record kind is invalid",
+        )
+    if not _production_evidence_path_matches(record.get("bundle_dir"), expected_path=bundle_dir):
+        _production_evidence_finding(
+            findings,
+            "fingerprint_record_bundle_dir_mismatch",
+            "production fingerprint record bundle_dir does not match the reviewed bundle",
+        )
+    expected_paths = {
+        "bundle_manifest": bundle_dir / "bundle-manifest.json",
+        "summary": bundle_dir / "summary.json",
+    }
+    for key, expected_path in expected_paths.items():
+        if key in record and not _production_evidence_path_matches(
+            record.get(key),
+            expected_path=expected_path,
+        ):
+            _production_evidence_finding(
+                findings,
+                f"fingerprint_record_{key}_mismatch",
+                f"production fingerprint record {key} does not match the reviewed bundle",
+            )
+    fingerprint = record.get("bundle_fingerprint")
+    if not _production_evidence_sha256_digest_ok(fingerprint):
+        _production_evidence_finding(
+            findings,
+            "fingerprint_record_fingerprint_invalid",
+            "production fingerprint record bundle_fingerprint is invalid",
+        )
+        return None
+    return str(fingerprint)
 
 
 def _write_production_evidence_verify_report(
@@ -12770,9 +12889,8 @@ def _verify_production_evidence_release_audit(
 
 def cmd_production_evidence_verify(args: argparse.Namespace) -> None:
     bundle_dir = Path(args.bundle_dir).expanduser()
-    expected_bundle_fingerprint = (
-        args.expected_bundle_fingerprint.strip() if args.expected_bundle_fingerprint else None
-    )
+    expected_bundle_fingerprint = None
+    expected_bundle_fingerprint_source = None
     findings: list[dict[str, Any]] = []
     if bundle_dir.is_symlink():
         raise SystemExit("production evidence bundle path must not be a symlink")
@@ -12782,6 +12900,25 @@ def cmd_production_evidence_verify(args: argparse.Namespace) -> None:
         raise SystemExit(f"production evidence bundle denied: {exc}") from exc
     if not resolved_bundle_dir.is_dir():
         raise SystemExit("production evidence bundle path must be a directory")
+    if args.expected_bundle_fingerprint and args.fingerprint_record:
+        expected_bundle_fingerprint = args.expected_bundle_fingerprint.strip()
+        expected_bundle_fingerprint_source = "conflicting-sources"
+        _production_evidence_finding(
+            findings,
+            "expected_bundle_fingerprint_source_conflict",
+            "use either --fingerprint-record or --expected-bundle-fingerprint, not both",
+        )
+    elif args.fingerprint_record:
+        expected_bundle_fingerprint = _production_evidence_expected_fingerprint_from_record(
+            args.fingerprint_record,
+            bundle_dir=resolved_bundle_dir,
+            findings=findings,
+        )
+        if expected_bundle_fingerprint:
+            expected_bundle_fingerprint_source = "out-of-band-fingerprint-record"
+    elif args.expected_bundle_fingerprint:
+        expected_bundle_fingerprint = args.expected_bundle_fingerprint.strip()
+        expected_bundle_fingerprint_source = "cli-argument"
 
     summary = _read_json_object_for_evidence(
         resolved_bundle_dir / "summary.json",
@@ -12908,15 +13045,15 @@ def cmd_production_evidence_verify(args: argparse.Namespace) -> None:
         _production_evidence_finding(
             findings,
             "expected_bundle_fingerprint_mode_conflict",
-            "use either --expected-bundle-fingerprint or --internal-consistency-only, not both",
+            "use either custody fingerprint input or --internal-consistency-only, not both",
         )
     if not expected_bundle_fingerprint_present and not internal_consistency_only:
         _production_evidence_finding(
             findings,
             "expected_bundle_fingerprint_missing",
-            "production evidence custody review requires --expected-bundle-fingerprint "
-            "from an out-of-band fingerprint record; use --internal-consistency-only only "
-            "for local diagnostics",
+            "production evidence custody review requires --fingerprint-record or "
+            "--expected-bundle-fingerprint from an out-of-band fingerprint record; use "
+            "--internal-consistency-only only for local diagnostics",
         )
     if expected_bundle_fingerprint_present and not internal_consistency_only and not args.report_output:
         _production_evidence_finding(
@@ -12932,9 +13069,7 @@ def cmd_production_evidence_verify(args: argparse.Namespace) -> None:
         "bundle_fingerprint": bundle_fingerprint,
         "expected_bundle_fingerprint": expected_bundle_fingerprint,
         "expected_bundle_fingerprint_present": expected_bundle_fingerprint_present,
-        "expected_bundle_fingerprint_source": "cli-argument"
-        if expected_bundle_fingerprint
-        else None,
+        "expected_bundle_fingerprint_source": expected_bundle_fingerprint_source,
         "actual_bundle_fingerprint": actual_bundle_fingerprint,
         "internal_consistency_only": internal_consistency_only,
         "artifact_count": artifact_count,
@@ -16098,6 +16233,13 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Expected bundle-manifest.json sha256 fingerprint from an out-of-band "
             "operator fingerprint record; required for custody review"
+        ),
+    )
+    production_evidence_verify.add_argument(
+        "--fingerprint-record",
+        help=(
+            "Absolute path to the out-of-band production fingerprint record written "
+            "by capture-production-evidence.sh; preferred over copying the fingerprint manually"
         ),
     )
     production_evidence_verify.add_argument(

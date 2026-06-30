@@ -104,12 +104,11 @@ CLI commands consumed by `deployment-soak` and `release-audit`.
   `PYTHON="${PYTHON:-$(if [ -x .venv/bin/python ]; then printf '%s' .venv/bin/python; else command -v python3; fi)}"`;
   set `BUNDLE_DIR=/secure/path/to/mnemosyne-production-evidence`; set
   `FINGERPRINT_RECORD=/secure/path/to/mnemosyne-production-bundle-fingerprint.json`
-  from the capture wrapper's `--fingerprint-record-output`; set
-  `EXPECTED_BUNDLE_FINGERPRINT="$("$PYTHON" -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["bundle_fingerprint"])' "$FINGERPRINT_RECORD")"`;
+  from the capture wrapper's `--fingerprint-record-output`;
   set `VERIFY_REPORT=/secure/path/to/mnemosyne-production-evidence-verify.json`
   outside the bundle under review; then
   `"$PYTHON" -m mnemosyne.cli production-evidence-verify "$BUNDLE_DIR"
-  --expected-bundle-fingerprint "$EXPECTED_BUNDLE_FINGERPRINT" --report-output "$VERIFY_REPORT"`
+  --fingerprint-record "$FINGERPRINT_RECORD" --report-output "$VERIFY_REPORT"`
   can recheck the completed bundle offline and retain a
   no-overwrite reviewer report, including fresh redaction recompute and
   `scanned_files` coverage against `bundle-manifest.json`, retained

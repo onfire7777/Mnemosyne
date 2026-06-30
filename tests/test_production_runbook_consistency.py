@@ -207,9 +207,10 @@ def test_production_evidence_docs_require_independent_bundle_fingerprint() -> No
         text = path.read_text(encoding="utf-8")
         assert "FINGERPRINT_RECORD=" in text, path
         assert "mnemosyne-production-bundle-fingerprint.json" in text, path
-        assert "EXPECTED_BUNDLE_FINGERPRINT=" in text, path
-        assert '["bundle_fingerprint"]' in text, path
         assert "VERIFY_REPORT=/secure/path/to/mnemosyne-production-evidence-verify.json" in text, path
+        assert "EXPECTED_BUNDLE_FINGERPRINT=" not in text, path
+        assert '["bundle_fingerprint"]' not in text, path
+        assert '--fingerprint-record "$FINGERPRINT_RECORD"' in text, path
         assert '--report-output "$VERIFY_REPORT"' in text, path
 
     for path in docs_with_custody_language:
@@ -221,7 +222,7 @@ def test_production_evidence_docs_require_independent_bundle_fingerprint() -> No
         assert "expected `summary.json` `bundle_fingerprint`" not in text, path
         assert "optional `--report-output`" not in text, path
         if path.parent == RUNBOOK_DIR and path.name.startswith("row-"):
-            assert "`--expected-bundle-fingerprint` set from" in text, path
+            assert "`--fingerprint-record` pointing to" in text, path
 
 
 def test_production_evidence_docs_explain_reviewer_handoff_record() -> None:
@@ -245,7 +246,7 @@ def test_phase_06_summary_uses_current_capture_and_offline_review_boundary() -> 
     )
     assert "infra/scripts/capture-production-evidence.sh \\" in text
     assert "/secure/path/to/mnemosyne-production-evidence" in text
-    assert "--expected-bundle-fingerprint" in text
+    assert "--fingerprint-record" in text
     assert "--report-output" in text
     assert "bundle under review" in text
     assert "hosted LLM/calibration evidence" in text
@@ -492,7 +493,7 @@ def test_operator_docs_bind_c2pa_executable_metadata_and_rollback_verify() -> No
 
     rollback = (REPO / ".planning" / "ROLLBACK.md").read_text(encoding="utf-8")
     assert "--preflight-only" in rollback
-    assert "--expected-bundle-fingerprint" in rollback
+    assert "--fingerprint-record" in rollback
     assert "out-of-band rollback capture record" in rollback
 
 

@@ -808,8 +808,8 @@ capture output root. Pass secret-bearing runtime/provider values through
 instead of shell-sourcing them.
 
 After full capture, run the post-capture custody verification script from
-`reports/tier-b-gap-report.md`. It reads the expected fingerprint from the
-external fingerprint record and writes the verifier report outside the evidence
+`reports/tier-b-gap-report.md`. It passes the external fingerprint record
+directly to the verifier and writes the verifier report outside the evidence
 bundle.
 """
     _atomic_write_text(readme, content)
@@ -941,14 +941,9 @@ def refresh_report(
             'PYTHON="${PYTHON:-$(if [ -x .venv/bin/python ]; then printf \'%s\' .venv/bin/python; else command -v python3; fi)}"',
             f"BUNDLE_DIR={capture_output_root}",
             f"FINGERPRINT_RECORD={fingerprint_record_output}",
-            (
-                'EXPECTED_BUNDLE_FINGERPRINT="$("$PYTHON" -c '
-                '\'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["bundle_fingerprint"])\' '
-                '"$FINGERPRINT_RECORD")"'
-            ),
             f"VERIFY_REPORT={verify_report_output}",
             '"$PYTHON" -m mnemosyne.cli production-evidence-verify "$BUNDLE_DIR" \\',
-            '  --expected-bundle-fingerprint "$EXPECTED_BUNDLE_FINGERPRINT" \\',
+            '  --fingerprint-record "$FINGERPRINT_RECORD" \\',
             '  --report-output "$VERIFY_REPORT"',
         ]
     )

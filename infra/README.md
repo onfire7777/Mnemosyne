@@ -153,11 +153,10 @@ infra/scripts/capture-production-evidence.sh \
 PYTHON="${PYTHON:-$(if [ -x .venv/bin/python ]; then printf '%s' .venv/bin/python; else command -v python3; fi)}"
 BUNDLE_DIR=/secure/path/to/mnemosyne-production-evidence
 FINGERPRINT_RECORD=/secure/path/to/mnemosyne-production-bundle-fingerprint.json
-EXPECTED_BUNDLE_FINGERPRINT="$("$PYTHON" -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["bundle_fingerprint"])' "$FINGERPRINT_RECORD")"
 VERIFY_REPORT=/secure/path/to/mnemosyne-production-evidence-verify.json
 "$PYTHON" -m mnemosyne.cli production-evidence-verify \
   "$BUNDLE_DIR" \
-  --expected-bundle-fingerprint "$EXPECTED_BUNDLE_FINGERPRINT" \
+  --fingerprint-record "$FINGERPRINT_RECORD" \
   --report-output "$VERIFY_REPORT"
 ```
 
@@ -177,12 +176,13 @@ operator capture against deployed infrastructure.
 offline verifier report also emits `row_review.rows[]` from that retained
 preflight source so reviewers can route completed bundles by Tier-B lane and
 runbook without treating the summary as a separate evidence source.
-For custody review with `--expected-bundle-fingerprint`, `--report-output` is
-required and must be absolute, outside the bundle under review, and not
-pre-existing; it is optional only for diagnostic `--internal-consistency-only`
-runs. Retain it with the external fingerprint record so reviewers can compare the
-emitted `reviewer_guidance`, fingerprints, checks, and row review without
-mutating the evidence bundle. The fingerprint record also carries a no-secret
+For custody review with `--fingerprint-record` or the legacy
+`--expected-bundle-fingerprint` fallback, `--report-output` is required and must
+be absolute, outside the bundle under review, and not pre-existing; it is
+optional only for diagnostic `--internal-consistency-only` runs. Retain it with
+the external fingerprint record so reviewers can compare the emitted
+`reviewer_guidance`, fingerprints, checks, and row review without mutating the
+evidence bundle. The fingerprint record also carries a no-secret
 `reviewer_handoff` object with a suggested external verifier report path and
 argv template; use it as replay guidance, not as a substitute for the verifier
 report.
@@ -254,18 +254,19 @@ custody metadata, retained input-artifact bindings, and release-audit replay
 without contacting production or rerunning deployment soak. Its report exposes
 the reviewer-supplied expected fingerprint, the retained
 `bundle-manifest.json` fingerprint, and the recomputed current-files fingerprint
-so custody review can compare all three values directly. Custody review requires
-`--expected-bundle-fingerprint` from an independently retained out-of-band
-fingerprint record; `--internal-consistency-only` is diagnostic-only.
+so custody review can compare all three values directly. Custody review should
+use `--fingerprint-record` from an independently retained out-of-band
+fingerprint record; `--expected-bundle-fingerprint` remains a manual fallback
+when populated from that record. `--internal-consistency-only` is
+diagnostic-only.
 Use `--preflight-only` to validate and copy the rendered manifest without
 running production checks; preflight output plus `redaction-scan.json` is setup
 proof only, not production parity evidence. Successful full capture writes
 `bundle-manifest.json` with SHA-256 hashes for retained artifacts, keeps
 `source-soak-manifest.json` for source/operator command-profile agreement, and
 records the copied `summary.json` fingerprint for review metadata. Custody
-review still requires `--expected-bundle-fingerprint` from an independently
-retained out-of-band fingerprint record, not from `summary.json` inside the bundle
-under review.
+review still requires an independently retained out-of-band fingerprint record,
+not `summary.json` inside the bundle under review.
 Put secrets in environment variables, files, or command-backed providers, not
 in manifest `args`.
 
