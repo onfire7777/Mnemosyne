@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import importlib.util
 import json
 import os
@@ -171,6 +172,45 @@ def _load_json(path: Path) -> dict[str, Any]:
     if not isinstance(payload, dict):
         _fail(f"{path} must contain a JSON object")
     return payload
+
+
+def _release_audit_required_output_keys(repo_dir: Path) -> dict[str, list[str]]:
+    """Read the release-audit output-shape contract without importing the CLI."""
+    cli_path = repo_dir / "src" / "mnemosyne" / "cli.py"
+    tree = ast.parse(cli_path.read_text(encoding="utf-8"), filename=str(cli_path))
+    target_node: ast.AST | None = None
+    for node in tree.body:
+        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            if node.target.id == "RELEASE_AUDIT_REQUIRED_OUTPUT_KEYS":
+                target_node = node.value
+                break
+        if isinstance(node, ast.Assign):
+            if any(
+                isinstance(target, ast.Name)
+                and target.id == "RELEASE_AUDIT_REQUIRED_OUTPUT_KEYS"
+                for target in node.targets
+            ):
+                target_node = node.value
+                break
+    if target_node is None:
+        _fail("cli.py is missing RELEASE_AUDIT_REQUIRED_OUTPUT_KEYS")
+    try:
+        raw = ast.literal_eval(target_node)
+    except (ValueError, SyntaxError) as exc:
+        _fail(f"could not parse RELEASE_AUDIT_REQUIRED_OUTPUT_KEYS: {exc}")
+    if not isinstance(raw, dict):
+        _fail("RELEASE_AUDIT_REQUIRED_OUTPUT_KEYS must be a dict")
+    contract: dict[str, list[str]] = {}
+    for command, keys in raw.items():
+        if not isinstance(command, str) or not isinstance(keys, tuple):
+            _fail("RELEASE_AUDIT_REQUIRED_OUTPUT_KEYS must map str to tuple[str, ...]")
+        normalized: list[str] = []
+        for key in keys:
+            if not isinstance(key, str):
+                _fail("RELEASE_AUDIT_REQUIRED_OUTPUT_KEYS contains a non-string key")
+            normalized.append(key)
+        contract[command] = normalized
+    return contract
 
 
 def _collect_env_refs(value: Any) -> set[str]:
@@ -1204,6 +1244,7 @@ def _write_markdown(report: dict[str, Any], path: Path) -> None:
             "",
             f"- Markdown: `{report['input_artifact_worklist_markdown']}`",
             f"- JSON: `{report['input_artifact_worklist_json']}`",
+            f"- Artifact contracts: `{report['input_artifact_contracts_markdown']}`",
             f"- Provider env action plan: `{report['provider_env_action_plan_markdown']}`",
             f"- Validation script: `{report['input_artifact_validation_script']}`",
             f"- Run every artifact validator: `{report['input_artifact_validation_script']}`",
@@ -1303,6 +1344,209 @@ def _write_input_artifact_worklist_markdown(
             f"{checks} | "
             f"`{artifact['packet_path']}` |"
         )
+    _atomic_write_text(path, "\n".join(lines).rstrip() + "\n")
+
+
+def _artifact_kind(relative_path: str) -> str:
+    name = Path(relative_path).name
+    if name.endswith(".pem"):
+        return "pem_certificate_or_trust_anchor"
+    if name == "provider-manifest.production.json":
+        return "provider_manifest_json"
+    if name == "provenance-trust-suite.json":
+        return "provenance_trust_suite_json"
+    if name.endswith("-bundle.json"):
+        return "ops_bundle_json"
+    if name.endswith("-evidence.json"):
+        return "production_evidence_json"
+    if name.endswith("-suite.json"):
+        return "gate_suite_json"
+    if name.endswith("-dataset.json") or name.endswith("-cases.json"):
+        return "validator_dataset_json"
+    if name.endswith("-config.json"):
+        return "service_config_json"
+    if name.endswith("-target.json"):
+        return "service_target_json"
+    if name.endswith(".json"):
+        return "json_object"
+    return "file"
+
+
+def _artifact_contract_notes(
+    *,
+    relative_path: str,
+    kind: str,
+    release_output_keys: list[dict[str, Any]],
+) -> list[str]:
+    notes = [
+        "Retain a real production artifact captured by the row runbook; do not synthesize a placeholder.",
+        "Keep secrets, credentials, raw private data, and placeholder markers out of the retained artifact.",
+        "Pass every consuming validator listed in this contract before full capture.",
+    ]
+    if release_output_keys:
+        notes.append(
+            "The retained command output must satisfy the release-audit output-key contract listed here."
+        )
+    if kind == "provider_manifest_json":
+        notes.extend(
+            [
+                "Keep forbid_local true and configure production provider endpoints or env references only.",
+                "Resolve provider env references through the external runtime env file; do not retain values in reports.",
+            ]
+        )
+    elif kind == "pem_certificate_or_trust_anchor":
+        notes.append("Retain public certificate or trust-anchor PEM only; private keys do not belong in the packet.")
+    elif kind == "provenance_trust_suite_json":
+        notes.append("Include the C2PA trust-suite assets and required case identifiers consumed by provenance-trust-check.")
+    elif kind == "ops_bundle_json":
+        notes.append("Use the row-specific ops-check bundle produced from deployed infrastructure, with empty findings.")
+    elif kind == "validator_dataset_json":
+        notes.append("Use the production calibration/case dataset referenced by the runbook and consuming validator.")
+    elif kind == "service_target_json":
+        notes.append("Point only at the production hosted endpoint or service target for the named check.")
+    elif kind == "service_config_json":
+        notes.append("Retain non-secret production configuration needed by the named check.")
+    elif kind == "production_evidence_json":
+        notes.append("Retain production evidence output from the upstream row gate, not local fixture output.")
+    if relative_path == "row-10-full-suite-evidence.json":
+        notes.append("Use this only after B1-B9 evidence is captured; B10 is the final live parity sweep.")
+    return notes
+
+
+def _input_artifact_contracts(
+    *,
+    worklist: list[dict[str, Any]],
+    validation_plan: list[dict[str, Any]],
+    release_audit_output_keys: dict[str, list[str]],
+) -> list[dict[str, Any]]:
+    validators_by_artifact: dict[str, list[dict[str, Any]]] = {}
+    for validator in validation_plan:
+        command = validator.get("command")
+        release_keys = release_audit_output_keys.get(command, []) if isinstance(command, str) else []
+        compact = {
+            "name": validator.get("name"),
+            "command": command,
+            "lanes": validator.get("lanes", []),
+            "rows": validator.get("rows", []),
+            "env_placeholders": validator.get("env_placeholders", []),
+            "release_audit_output_keys": release_keys,
+        }
+        for artifact in validator.get("required_input_artifacts", []):
+            if isinstance(artifact, str) and artifact:
+                validators_by_artifact.setdefault(artifact, []).append(compact)
+
+    contracts: list[dict[str, Any]] = []
+    for artifact in worklist:
+        relative_path = artifact.get("relative_path")
+        if not isinstance(relative_path, str) or not relative_path:
+            continue
+        validators = sorted(
+            validators_by_artifact.get(relative_path, []),
+            key=lambda item: (str(item.get("command", "")), str(item.get("name", ""))),
+        )
+        release_keys_by_command = [
+            {
+                "command": validator.get("command"),
+                "keys": validator.get("release_audit_output_keys", []),
+            }
+            for validator in validators
+            if validator.get("release_audit_output_keys")
+        ]
+        kind = _artifact_kind(relative_path)
+        contracts.append(
+            {
+                "relative_path": relative_path,
+                "packet_path": artifact.get("packet_path"),
+                "status": artifact.get("status"),
+                "present": artifact.get("present") is True,
+                "artifact_kind": kind,
+                "rows": artifact.get("rows", []),
+                "checks": artifact.get("checks", []),
+                "consuming_validators": validators,
+                "release_audit_output_keys_by_command": release_keys_by_command,
+                "minimum_operator_contract": _artifact_contract_notes(
+                    relative_path=relative_path,
+                    kind=kind,
+                    release_output_keys=release_keys_by_command,
+                ),
+                "report_is_evidence": False,
+            }
+        )
+    return contracts
+
+
+def _write_input_artifact_contracts_markdown(
+    contracts: list[dict[str, Any]],
+    path: Path,
+) -> None:
+    lines = [
+        "# Mnemosyne Tier-B Input Artifact Contracts",
+        "",
+        "This report is an operator preparation aid, not production evidence.",
+        "It records what each manifest-referenced artifact must satisfy before",
+        "the full production capture path runs. It does not provide samples,",
+        "fixtures, placeholder JSON, PEM material, or secret values.",
+        "",
+        "| Artifact | Kind | Status | Rows | Validators | Release output keys |",
+        "|---|---|---|---|---|---|",
+    ]
+    for contract in contracts:
+        rows = "<br>".join(
+            f"`{row['lane']}` {row.get('title') or ''}".strip()
+            for row in contract["rows"]
+        ) or "`unrouted`"
+        validators = "<br>".join(
+            f"`{validator.get('name')}`"
+            for validator in contract["consuming_validators"]
+        ) or "`none`"
+        release_keys = "<br>".join(
+            f"`{item.get('command')}`: "
+            + ", ".join(f"`{key}`" for key in item.get("keys", []))
+            for item in contract["release_audit_output_keys_by_command"]
+        ) or "`unmapped`"
+        lines.append(
+            "| "
+            f"`{contract['relative_path']}` | "
+            f"`{contract['artifact_kind']}` | "
+            f"`{contract['status']}` | "
+            f"{rows} | "
+            f"{validators} | "
+            f"{release_keys} |"
+        )
+
+    for contract in contracts:
+        lines.extend(
+            [
+                "",
+                f"## `{contract['relative_path']}`",
+                "",
+                f"- Kind: `{contract['artifact_kind']}`",
+                f"- Status: `{contract['status']}`",
+                f"- Packet path: `{contract.get('packet_path')}`",
+                "- Minimum contract:",
+            ]
+        )
+        lines.extend(
+            f"  - {note}" for note in contract["minimum_operator_contract"]
+        )
+        if contract["consuming_validators"]:
+            lines.append("- Consuming validators:")
+            for validator in contract["consuming_validators"]:
+                keys = validator.get("release_audit_output_keys", [])
+                key_text = ", ".join(f"`{key}`" for key in keys) if keys else "`unmapped`"
+                lines.append(
+                    "  - "
+                    f"`{validator.get('name')}` "
+                    f"({validator.get('command')}), release keys: {key_text}"
+                )
+        if contract["rows"]:
+            lines.append("- Rows:")
+            for row in contract["rows"]:
+                lines.append(
+                    "  - "
+                    f"`{row.get('lane')}` {row.get('title') or ''} "
+                    f"runbook `{row.get('packet_runbook') or row.get('runbook')}`"
+                )
     _atomic_write_text(path, "\n".join(lines).rstrip() + "\n")
 
 
@@ -1761,6 +2005,7 @@ infra/scripts/prepare-production-evidence-custody.py \\
 
 Refresh mode updates only `reports/tier-b-gap-report.json`,
 `reports/tier-b-gap-report.md`, `reports/input-artifact-worklist.{{json,md}}`,
+`reports/input-artifact-contracts.{{json,md}}`,
 `reports/provider-env-action-plan.{{json,md}}`,
 `reports/row-action-plan.{{json,md}}`,
 `reports/input-artifact-validation-commands.sh`, `reports/next-commands.sh`,
@@ -1775,6 +2020,7 @@ copied operator docs, or `manifests/`.
 - Row action plan: `reports/row-action-plan.md`
 - Provider env action plan: `reports/provider-env-action-plan.md`
 - Input artifact worklist: `reports/input-artifact-worklist.md`
+- Input artifact contracts: `reports/input-artifact-contracts.md`
 - Input artifact validation: `reports/input-artifact-validation-commands.sh`
 - Runnable command sequence: `reports/next-commands.sh`
 - Runtime env example: `reports/mnemosyne-production-runtime.env.example`
@@ -1786,7 +2032,9 @@ After each refresh, read `reports/tier-b-gap-report.md` or
 `reports/row-action-plan.md` to assign row-specific artifact, render-env, and
 provider-env work, and use `reports/provider-env-action-plan.md` to route each
 provider-manifest env name to its manifest path, primary rows, and shared
-provider-check blast radius. Then copy
+provider-check blast radius. Use `reports/input-artifact-contracts.md` to see
+each artifact's kind, consuming validators, release-audit output-key contract,
+and minimum operator contract before supplying files. Then copy
 `reports/mnemosyne-production-runtime.env.example` to the external runtime env
 path before filling secret-bearing values.
 
@@ -1978,6 +2226,8 @@ def refresh_report(
     next_commands_script = reports_dir / "next-commands.sh"
     input_artifact_worklist_json = reports_dir / "input-artifact-worklist.json"
     input_artifact_worklist_markdown = reports_dir / "input-artifact-worklist.md"
+    input_artifact_contracts_json = reports_dir / "input-artifact-contracts.json"
+    input_artifact_contracts_markdown = reports_dir / "input-artifact-contracts.md"
     provider_env_action_plan_json = reports_dir / "provider-env-action-plan.json"
     provider_env_action_plan_markdown = reports_dir / "provider-env-action-plan.md"
     row_action_plan_json = reports_dir / "row-action-plan.json"
@@ -2016,6 +2266,12 @@ def refresh_report(
         input_dir=input_dir,
         template_manifest=template_manifest,
         worklist=input_artifact_worklist,
+    )
+    release_audit_output_keys = _release_audit_required_output_keys(repo_dir)
+    input_artifact_contracts = _input_artifact_contracts(
+        worklist=input_artifact_worklist,
+        validation_plan=input_artifact_validation_plan,
+        release_audit_output_keys=release_audit_output_keys,
     )
     row_action_plan = _row_action_plan(
         rows=rows,
@@ -2057,6 +2313,9 @@ def refresh_report(
         "input_artifact_worklist_json": str(input_artifact_worklist_json),
         "input_artifact_worklist_markdown": str(input_artifact_worklist_markdown),
         "input_artifact_worklist": input_artifact_worklist,
+        "input_artifact_contracts_json": str(input_artifact_contracts_json),
+        "input_artifact_contracts_markdown": str(input_artifact_contracts_markdown),
+        "input_artifact_contracts": input_artifact_contracts,
         "provider_env_action_plan_json": str(provider_env_action_plan_json),
         "provider_env_action_plan_markdown": str(provider_env_action_plan_markdown),
         "provider_env_action_plan": provider_env_action_plan,
@@ -2109,6 +2368,10 @@ def refresh_report(
         json.dumps(provider_env_action_plan, indent=2, sort_keys=True) + "\n",
     )
     _atomic_write_text(
+        input_artifact_contracts_json,
+        json.dumps(input_artifact_contracts, indent=2, sort_keys=True) + "\n",
+    )
+    _atomic_write_text(
         row_action_plan_json,
         json.dumps(row_action_plan, indent=2, sort_keys=True) + "\n",
     )
@@ -2119,6 +2382,10 @@ def refresh_report(
     _write_provider_env_action_plan_markdown(
         provider_env_action_plan,
         provider_env_action_plan_markdown,
+    )
+    _write_input_artifact_contracts_markdown(
+        input_artifact_contracts,
+        input_artifact_contracts_markdown,
     )
     _write_row_action_plan_markdown(
         row_action_plan,
@@ -2200,6 +2467,7 @@ def main(argv: list[str] | None = None) -> int:
         "post_capture_verify_report": report["post_capture_verify_report"],
         "next_commands_script": report["next_commands_script"],
         "input_artifact_worklist": report["input_artifact_worklist_markdown"],
+        "input_artifact_contracts": report["input_artifact_contracts_markdown"],
         "provider_env_action_plan": report["provider_env_action_plan_markdown"],
         "row_action_plan": report["row_action_plan_markdown"],
         "input_artifact_validation_script": report["input_artifact_validation_script"],
