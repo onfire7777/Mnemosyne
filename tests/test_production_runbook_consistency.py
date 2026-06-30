@@ -180,6 +180,16 @@ def test_production_evidence_docs_require_manifest_bound_release_audit() -> None
     assert "release-audit --evidence-manifest" in ops_handoff
 
 
+def test_production_evidence_docs_point_to_generated_next_commands_script() -> None:
+    for path in [
+        REPO / "infra" / "PRODUCTION-EVIDENCE.md",
+        REPO / "infra" / "README.md",
+    ]:
+        text = path.read_text(encoding="utf-8")
+        assert "reports/next-commands.sh" in text, path
+        assert "expanded sequence" in text, path
+
+
 def test_production_evidence_docs_require_independent_bundle_fingerprint() -> None:
     docs_with_command_snippets = [
         REPO / "infra" / "PRODUCTION-EVIDENCE.md",

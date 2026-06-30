@@ -234,12 +234,14 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     summary = json.loads(proc.stdout)
     report_path = packet_root / "reports" / "tier-b-gap-report.json"
     report = json.loads(report_path.read_text(encoding="utf-8"))
+    next_commands_script = packet_root / "reports" / "next-commands.sh"
 
     assert proc.returncode == 78
     assert summary["ok"] is False
     assert summary["ready_for_capture"] is False
     assert summary["report"] == str(report_path)
     assert summary["post_capture_verify_report"] == report["post_capture_verify_report"]
+    assert summary["next_commands_script"] == str(next_commands_script)
     assert report["schema"] == "mnemosyne.tier-b-custody-gap-report.v1"
     assert report["report_is_evidence"] is False
     assert report["ready_for_capture"] is False
@@ -303,6 +305,8 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
         in (packet_root / "production-render.env").read_text(encoding="utf-8")
     )
     assert (packet_root / "reports" / "tier-b-gap-report.md").is_file()
+    assert next_commands_script.is_file()
+    assert os.access(next_commands_script, os.X_OK)
     assert (packet_root / "docs" / "PRODUCTION-EVIDENCE.md").is_file()
     assert (packet_root / "docs" / "OPS-HANDOFF-AND-OWNERSHIP.md").is_file()
     assert (packet_root / "docs" / "runbooks" / "README.md").is_file()
@@ -321,8 +325,14 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     assert "Ready for capture: `false`" not in readme
     assert "does not carry current readiness status" in readme
     assert "docs/runbooks/" in readme
-    assert "missing read-only packet guidance docs" in readme
+    assert "read-only packet guidance docs" in readme
     assert "reports/mnemosyne-production-runtime.env.example" in readme
+    assert "reports/next-commands.sh" in readme
+    script_text = next_commands_script.read_text(encoding="utf-8")
+    assert script_text.startswith("#!/usr/bin/env bash\nset -euo pipefail\n")
+    assert "operator convenience script, not production evidence" in script_text
+    assert str(packet_root / "reports" / "tier-b-gap-report.md") in script_text
+    assert "run this script from the Mnemosyne repository root" in script_text
     assert "Post-Capture Custody Verification" in markdown
     assert "Capture Blockers" in markdown
     assert "`provider_manifest_environment`: `24` missing" in markdown
@@ -331,6 +341,7 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     assert "### Runtime Env File" in markdown
     assert "### Input Artifacts" in markdown
     assert "mnemosyne-production-runtime.env.example" in markdown
+    assert str(next_commands_script) in markdown
     assert "Copy this generated no-secret example" in runtime_example
     assert 'export MNEMOSYNE_EMBEDDING_URL=""' in runtime_example
     assert 'export MNEMOSYNE_RERANKER_API_KEY=""' in runtime_example
@@ -341,6 +352,7 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
         in markdown
     )
     assert "production-evidence-verify" in report["post_capture_verify_script"]
+    assert report["next_commands_script"] == str(next_commands_script)
     assert "--fingerprint-record" in report["post_capture_verify_script"]
     assert "EXPECTED_BUNDLE_FINGERPRINT" not in report["post_capture_verify_script"]
     assert "--report-output" in report["post_capture_verify_script"]
@@ -372,7 +384,9 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
         in verify_command
     )
     assert summary["next_commands"] == report["next_commands"]
-    assert summary["next"].endswith("run next_commands in order.")
+    assert summary["next"].endswith("run next_commands_script or next_commands in order.")
+    for command in report["next_commands"]:
+        assert command in script_text
 
     rows = {row["lane"]: row for row in report["rows"]}
     assert rows["B1"]["packet_runbook"] == (
