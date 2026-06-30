@@ -115,6 +115,8 @@ open /secure/path/to/mnemosyne-tier-b-custody/reports/tier-b-gap-report.md
 
 # Review the complete no-secret operator environment inventory.
 open infra/templates/production-operator-env.inventory.md
+# Route non-secret render values by affected Tier-B row before filling them.
+open /secure/path/to/mnemosyne-tier-b-custody/reports/render-env-action-plan.md
 # Fill the packet's production-render.env outside this repository.
 # Put secret-bearing runtime/provider values in a separate external 0600 env file;
 # this file is the capture handoff boundary, even when a supervisor can export
@@ -126,6 +128,9 @@ open infra/templates/production-operator-env.inventory.md
 # The refreshed reports/row-action-plan.{json,md} joins each Tier-B row's
 # runbook, blockers, next actions, and row-scoped validator command for row
 # owner handoff.
+# The refreshed reports/render-env-action-plan.{json,md} maps each non-secret
+# production-render.env placeholder to affected rows and the packet-local render
+# env file without retaining values; use it before provider/runtime work.
 # The refreshed reports/provider-env-action-plan.{json,md} maps each
 # provider-manifest env ref to its manifest path, provider check, primary rows,
 # and shared provider-check blast radius without retaining values.
@@ -257,14 +262,18 @@ Check-level `input_artifacts` metadata is included in the same custody inventory
 for evidence that must be retained but is not passed as a command argument.
 The external custody packet also renders this route map as
 `reports/row-action-plan.{json,md}` for row-owner handoff and
+`reports/render-env-action-plan.{json,md}` for no-secret render-value routing,
 `reports/provider-env-action-plan.{json,md}` for provider-stack env ownership,
 `reports/input-artifact-worklist.{json,md}` for artifact assembly, and
 `reports/input-artifact-contracts.{json,md}` for each artifact's validator,
 advisory section/check hints, and release-audit output-key contract, so
 operators can sort missing work by B-row, packet runbook, packet path, and
-consuming check before running capture. The provider env action plan reports env names,
-provider-manifest JSON paths, primary rows, affected rows, and provider checks
-only; it never records values or runtime env-file paths. These reports are
+consuming check before running capture. The render env action plan reports
+non-secret placeholder names, affected rows, and the packet-local
+`production-render.env` path only; it never records values. The provider env
+action plan reports env names, provider-manifest JSON paths, primary rows,
+affected rows, and provider checks only; it never records values or runtime
+env-file paths. These reports are
 operator preparation aids only; they must not be satisfied with placeholder
 artifacts.
 The packet's `reports/input-artifact-validation-commands.sh` script is the

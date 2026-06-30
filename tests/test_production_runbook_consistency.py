@@ -188,6 +188,7 @@ def test_production_evidence_docs_point_to_generated_next_commands_script() -> N
         text = path.read_text(encoding="utf-8")
         assert "reports/next-commands.sh" in text, path
         assert "reports/row-action-plan" in text, path
+        assert "reports/render-env-action-plan" in text, path
         assert "reports/provider-env-action-plan" in text, path
         assert "reports/input-artifact-worklist" in text, path
         assert "reports/input-artifact-contracts" in text, path

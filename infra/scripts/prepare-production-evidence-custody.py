@@ -530,6 +530,72 @@ def _provider_env_action_plan(
     return plan
 
 
+def _render_env_action_plan(
+    *,
+    render_env_file: Path,
+    render_placeholders: list[str],
+    missing_render_env: set[str],
+    global_missing_render_env: list[str],
+    rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    row_routes_by_env: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        lane = row.get("lane")
+        if not isinstance(lane, str) or not lane:
+            continue
+        route = {
+            "lane": lane,
+            "row": row.get("row"),
+            "title": row.get("title"),
+            "runbook": row.get("runbook"),
+            "packet_runbook": row.get("packet_runbook"),
+        }
+        for name in row.get("required_render_environment", []):
+            if isinstance(name, str) and name:
+                row_routes_by_env.setdefault(name, []).append(route)
+
+    all_rows = [
+        {
+            "lane": row.get("lane"),
+            "row": row.get("row"),
+            "title": row.get("title"),
+            "runbook": row.get("runbook"),
+            "packet_runbook": row.get("packet_runbook"),
+        }
+        for row in rows
+        if isinstance(row.get("lane"), str) and row.get("lane")
+    ]
+    global_missing = set(global_missing_render_env)
+    plan: list[dict[str, Any]] = []
+    for name in render_placeholders:
+        routes = sorted(
+            row_routes_by_env.get(name, []),
+            key=lambda row: _lane_sort_key(str(row.get("lane", ""))),
+        )
+        scope = "row_scoped" if routes else "global"
+        affected_rows = routes if routes else all_rows
+        missing = name in missing_render_env
+        plan.append(
+            {
+                "env": name,
+                "status": "missing" if missing else "present_for_readiness",
+                "missing": missing,
+                "scope": scope,
+                "global_missing": name in global_missing,
+                "render_env_file": str(render_env_file),
+                "affected_rows": affected_rows,
+                "values_recorded": False,
+                "report_is_evidence": False,
+                "next_action": (
+                    "Set this non-secret name in production-render.env and refresh."
+                    if missing
+                    else "No action for this name on the current readiness refresh."
+                ),
+            }
+        )
+    return plan
+
+
 def _collect_render_placeholders_by_lane(
     template_manifest: dict[str, Any],
 ) -> tuple[dict[str, set[str]], set[str]]:
@@ -569,6 +635,10 @@ def _collect_render_placeholders_by_lane(
     return by_lane, routed
 
 
+def _template_render_placeholders(template_manifest: dict[str, Any]) -> list[str]:
+    return sorted(set(PLACEHOLDER_RE.findall(json.dumps(template_manifest))))
+
+
 def _load_packet_render_env(
     root: Path,
     *,
@@ -577,7 +647,7 @@ def _load_packet_render_env(
 ) -> dict[str, str]:
     env_file = root / "production-render.env"
     _require_real_file(env_file, label="production-render.env")
-    placeholders = sorted(set(PLACEHOLDER_RE.findall(json.dumps(template_manifest))))
+    placeholders = _template_render_placeholders(template_manifest)
     loader = repo_dir / "infra" / "scripts" / "load-env.py"
     proc = subprocess.run(
         [str(loader), str(env_file), *placeholders],
@@ -652,8 +722,9 @@ def _row_report(
         missing_artifacts = [
             relative for relative in required if not (input_dir / relative).exists()
         ]
+        row_required_render_env = sorted(placeholders_by_lane.get(lane, set()))
         row_missing_render_env = sorted(
-            placeholders_by_lane.get(lane, set()) & missing_render_env
+            set(row_required_render_env) & missing_render_env
         )
         row_missing_provider_env = (
             sorted(missing_provider_env_refs) if lane in SHARED_PROVIDER_LANES else []
@@ -673,6 +744,7 @@ def _row_report(
                 "missing_render_environment": row_missing_render_env,
                 "missing_provider_manifest_env_refs": row_missing_provider_env,
                 "checks": checks,
+                "required_render_environment": row_required_render_env,
                 "input_artifacts_complete": not missing_artifacts,
                 "render_environment_complete": not row_missing_render_env,
                 "provider_manifest_environment_complete": not row_missing_provider_env,
@@ -1287,6 +1359,7 @@ def _write_markdown(report: dict[str, Any], path: Path) -> None:
             "",
             f"- Path: `{inventory['production_render_env']['path']}`",
             f"- Missing values: `{inventory['production_render_env']['missing_count']}`",
+            f"- Render env action plan: `{report['render_env_action_plan_markdown']}`",
         ]
     )
     if inventory["production_render_env"]["missing"]:
@@ -1342,6 +1415,7 @@ def _write_markdown(report: dict[str, Any], path: Path) -> None:
             f"- Markdown: `{report['input_artifact_worklist_markdown']}`",
             f"- JSON: `{report['input_artifact_worklist_json']}`",
             f"- Artifact contracts: `{report['input_artifact_contracts_markdown']}`",
+            f"- Render env action plan: `{report['render_env_action_plan_markdown']}`",
             f"- Provider env action plan: `{report['provider_env_action_plan_markdown']}`",
             f"- Validation script: `{report['input_artifact_validation_script']}`",
             f"- Run every artifact validator: `{report['input_artifact_validation_script']}`",
@@ -1884,6 +1958,57 @@ def _write_provider_env_action_plan_markdown(
     _atomic_write_text(path, "\n".join(lines).rstrip() + "\n")
 
 
+def _write_render_env_action_plan_markdown(
+    plan: list[dict[str, Any]],
+    path: Path,
+) -> None:
+    lines = [
+        "# Mnemosyne Tier-B Render Env Action Plan",
+        "",
+        "This report is an operator preparation aid, not production evidence.",
+        "It is generated from the production soak manifest template and the",
+        "current readiness refresh. Render values are not retained.",
+        "",
+        "| Env var | Status | Scope | Affected rows | production-render.env |",
+        "|---|---|---|---|---|",
+    ]
+    for item in plan:
+        affected_rows = ", ".join(
+            f"`{row.get('lane')}`"
+            for row in item["affected_rows"]
+            if row.get("lane")
+        ) or "-"
+        lines.append(
+            "| "
+            f"`{item['env']}` | "
+            f"`{item['status']}` | "
+            f"`{item['scope']}` | "
+            f"{affected_rows} | "
+            f"`{item['render_env_file']}` |"
+        )
+    for item in plan:
+        lines.extend(
+            [
+                "",
+                f"## `{item['env']}`",
+                "",
+                f"- Status: `{item['status']}`",
+                f"- Missing: `{str(item['missing']).lower()}`",
+                f"- Scope: `{item['scope']}`",
+                f"- Values recorded: `{str(item['values_recorded']).lower()}`",
+                f"- Next action: {item['next_action']}",
+                "- Affected rows:",
+            ]
+        )
+        for row in item["affected_rows"]:
+            lines.append(
+                "  - "
+                f"`{row.get('lane')}` {row.get('title') or ''} "
+                f"runbook `{row.get('packet_runbook') or row.get('runbook')}`"
+            )
+    _atomic_write_text(path, "\n".join(lines).rstrip() + "\n")
+
+
 def _bash_double_quote(value: str) -> str:
     escaped = (
         value.replace("\\", "\\\\")
@@ -2134,6 +2259,7 @@ infra/scripts/prepare-production-evidence-custody.py \\
 Refresh mode updates only `reports/tier-b-gap-report.json`,
 `reports/tier-b-gap-report.md`, `reports/input-artifact-worklist.{{json,md}}`,
 `reports/input-artifact-contracts.{{json,md}}`,
+`reports/render-env-action-plan.{{json,md}}`,
 `reports/provider-env-action-plan.{{json,md}}`,
 `reports/row-action-plan.{{json,md}}`,
 `reports/input-artifact-validation-commands.sh`, `reports/next-commands.sh`,
@@ -2147,6 +2273,7 @@ copied operator docs, or `manifests/`.
 - Markdown: `reports/tier-b-gap-report.md`
 - Row action plan: `reports/row-action-plan.md`
 - Provider env action plan: `reports/provider-env-action-plan.md`
+- Render env action plan: `reports/render-env-action-plan.md`
 - Input artifact worklist: `reports/input-artifact-worklist.md`
 - Input artifact contracts: `reports/input-artifact-contracts.md`
 - Input artifact validation: `reports/input-artifact-validation-commands.sh`
@@ -2157,8 +2284,10 @@ This README is static guidance and does not carry current readiness status.
 After each refresh, read `reports/tier-b-gap-report.md` or
 `reports/tier-b-gap-report.json` for the current `ready_for_capture` value,
 `capture_blockers`, and `operator_input_inventory`. Use
-`reports/row-action-plan.md` to assign row-specific artifact, render-env, and
-provider-env work, and use `reports/provider-env-action-plan.md` to route each
+`reports/render-env-action-plan.md` to route each non-secret
+`production-render.env` value to affected rows, use `reports/row-action-plan.md`
+to assign row-specific artifact, render-env, and provider-env work, and use
+`reports/provider-env-action-plan.md` to route each
 provider-manifest env name to its manifest path, primary rows, and shared
 provider-check blast radius. Use `reports/input-artifact-contracts.md` to see
 each artifact's kind, consuming validators, release-audit output-key contract,
@@ -2294,6 +2423,7 @@ def refresh_report(
     template_manifest = _load_json(
         repo_dir / "infra" / "templates" / "production-soak-manifest.template.json"
     )
+    render_placeholders = _template_render_placeholders(template_manifest)
     env_overrides = _load_packet_render_env(
         root,
         repo_dir=repo_dir,
@@ -2357,6 +2487,8 @@ def refresh_report(
     input_artifact_worklist_markdown = reports_dir / "input-artifact-worklist.md"
     input_artifact_contracts_json = reports_dir / "input-artifact-contracts.json"
     input_artifact_contracts_markdown = reports_dir / "input-artifact-contracts.md"
+    render_env_action_plan_json = reports_dir / "render-env-action-plan.json"
+    render_env_action_plan_markdown = reports_dir / "render-env-action-plan.md"
     provider_env_action_plan_json = reports_dir / "provider-env-action-plan.json"
     provider_env_action_plan_markdown = reports_dir / "provider-env-action-plan.md"
     row_action_plan_json = reports_dir / "row-action-plan.json"
@@ -2407,6 +2539,13 @@ def refresh_report(
         validation_plan=input_artifact_validation_plan,
         input_artifact_validation_script=input_artifact_validation_script,
     )
+    render_env_action_plan = _render_env_action_plan(
+        render_env_file=production_render_env,
+        render_placeholders=render_placeholders,
+        missing_render_env=missing_render_env,
+        global_missing_render_env=global_missing_render_env,
+        rows=rows,
+    )
     provider_env_action_plan = _provider_env_action_plan(
         provider_manifest=provider_manifest,
         template_manifest=template_manifest,
@@ -2445,6 +2584,9 @@ def refresh_report(
         "input_artifact_contracts_json": str(input_artifact_contracts_json),
         "input_artifact_contracts_markdown": str(input_artifact_contracts_markdown),
         "input_artifact_contracts": input_artifact_contracts,
+        "render_env_action_plan_json": str(render_env_action_plan_json),
+        "render_env_action_plan_markdown": str(render_env_action_plan_markdown),
+        "render_env_action_plan": render_env_action_plan,
         "provider_env_action_plan_json": str(provider_env_action_plan_json),
         "provider_env_action_plan_markdown": str(provider_env_action_plan_markdown),
         "provider_env_action_plan": provider_env_action_plan,
@@ -2497,6 +2639,10 @@ def refresh_report(
         json.dumps(provider_env_action_plan, indent=2, sort_keys=True) + "\n",
     )
     _atomic_write_text(
+        render_env_action_plan_json,
+        json.dumps(render_env_action_plan, indent=2, sort_keys=True) + "\n",
+    )
+    _atomic_write_text(
         input_artifact_contracts_json,
         json.dumps(input_artifact_contracts, indent=2, sort_keys=True) + "\n",
     )
@@ -2511,6 +2657,10 @@ def refresh_report(
     _write_provider_env_action_plan_markdown(
         provider_env_action_plan,
         provider_env_action_plan_markdown,
+    )
+    _write_render_env_action_plan_markdown(
+        render_env_action_plan,
+        render_env_action_plan_markdown,
     )
     _write_input_artifact_contracts_markdown(
         input_artifact_contracts,
@@ -2597,6 +2747,7 @@ def main(argv: list[str] | None = None) -> int:
         "next_commands_script": report["next_commands_script"],
         "input_artifact_worklist": report["input_artifact_worklist_markdown"],
         "input_artifact_contracts": report["input_artifact_contracts_markdown"],
+        "render_env_action_plan": report["render_env_action_plan_markdown"],
         "provider_env_action_plan": report["provider_env_action_plan_markdown"],
         "row_action_plan": report["row_action_plan_markdown"],
         "input_artifact_validation_script": report["input_artifact_validation_script"],

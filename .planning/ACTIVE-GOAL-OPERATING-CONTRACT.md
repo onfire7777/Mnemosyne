@@ -4,6 +4,9 @@
 **Last updated:** 2026-06-30.
 **Goal-tool state:** Active as of the latest live resume check; there is no
 repo-side pause to clear. This contract is the editable continuation objective.
+**Unpause directive:** Continue from the verified live checkout without asking
+whether to resume. Re-prove root, `HEAD`, dirty tree, and CI before making
+current-state claims.
 
 This file is the repo-owned execution contract for continuing the active Codex/GSD
 goal after pauses, usage limits, or handoffs. It is deliberately stricter than a
@@ -32,6 +35,9 @@ completion program. The only prioritized change classes are:
 3. A custody, redaction, secret-handling, or reviewer-handoff weakness.
 4. A current-status or stale-instruction cleanup that prevents wrong-root,
    false-completion, or manual-custody drift.
+5. A generated operator handoff that measurably shortens the path from a blocked
+   Tier-B readiness packet to a real capture without retaining secrets, values,
+   or substitute evidence.
 
 Everything else is deliberately lower priority, even if it is useful
 engineering work.
@@ -94,6 +100,10 @@ limited to defects that directly block that path:
    Use `reports/row-action-plan.{json,md}` as the row-owner
    handoff because it joins each B1-B10 row's runbook, missing render values,
    missing provider refs, missing artifacts, next actions, and row validator.
+   Use `reports/render-env-action-plan.{json,md}` as the first blocker-class
+   handoff because it maps every non-secret `production-render.env` placeholder
+   to affected rows and the packet-local render env file without retaining
+   values.
    Use `reports/provider-env-action-plan.{json,md}` as the shared-provider
    handoff because it maps every provider-manifest env ref to its manifest path,
    provider check, primary row ownership, and shared provider-check blast radius
