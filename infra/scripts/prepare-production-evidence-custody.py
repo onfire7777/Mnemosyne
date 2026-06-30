@@ -21,6 +21,103 @@ from typing import Any
 SHARED_PROVIDER_LANES = {"B1", "B2", "B4", "B6", "B7", "B9", "B10"}
 PLACEHOLDER_RE = re.compile(r"MNEMOSYNE_PROD_[A-Z0-9_]+")
 BLOCKED_EXIT = 78
+VALIDATOR_SECTION_HINTS_BY_COMMAND: dict[str, tuple[str, ...]] = {
+    "auth-ops-check": (
+        "idp_jwks",
+        "authz_rollout",
+        "session_secret",
+        "tls",
+        "tenant_isolation",
+        "redaction",
+    ),
+    "consolidation-ops-check": (
+        "validation_scope",
+        "worker",
+        "provider_check",
+        "hosted_providers",
+        "projection_recompute",
+        "protected_suite",
+        "embedding",
+        "consolidation_run",
+        "calibration",
+        "lifecycle",
+        "ops_report",
+        "deployment",
+        "redaction",
+    ),
+    "mcp-ops-check": (
+        "http_json_rpc",
+        "streamable_http",
+        "tls",
+        "redaction",
+    ),
+    "multimodal-ops-check": (
+        "validation_scope",
+        "provider_check",
+        "object_store",
+        "extraction",
+        "media_embedding",
+        "retrieval",
+        "media_jobs",
+        "deployment",
+        "redaction",
+    ),
+    "ops-dashboard-check": (
+        "hosted_dashboard",
+        "dashboard_operations_scope",
+        "dashboard_refresh",
+        "dashboard_access_control",
+        "dashboard_alerts",
+        "dashboard_operations_redaction",
+    ),
+    "parametric-trainer-check": (
+        "trainer",
+        "protected_suite",
+        "gate",
+        "rollback",
+        "deployment",
+        "rail_report",
+        "metrics",
+        "redaction",
+    ),
+    "privacy-ops-check": ("kms", "residency", "erasure", "redaction"),
+    "provenance-ops-check": (
+        "validation_scope",
+        "c2pa_verifier",
+        "trust_roots",
+        "provenance_trust",
+        "asset_bound_cases",
+        "quarantine",
+        "ingestion",
+        "deployment",
+        "redaction",
+    ),
+    "retrieval-ops-check": (
+        "provider_check",
+        "retrieval",
+        "adapter_probes",
+        "calibration",
+        "redaction",
+    ),
+    "tls-lifecycle-ops-check": (
+        "validation_scope",
+        "issuance",
+        "renewal",
+        "deployment",
+        "secret_distribution",
+        "monitoring",
+        "redaction",
+    ),
+    "worker-ops-check": (
+        "deployment_scope",
+        "supervisor",
+        "heartbeat",
+        "queue",
+        "jobs",
+        "observability",
+        "redaction",
+    ),
+}
 
 
 def _lane_sort_key(lane: str) -> tuple[int, str]:
@@ -1400,6 +1497,9 @@ def _artifact_contract_notes(
         notes.append("Include the C2PA trust-suite assets and required case identifiers consumed by provenance-trust-check.")
     elif kind == "ops_bundle_json":
         notes.append("Use the row-specific ops-check bundle produced from deployed infrastructure, with empty findings.")
+        notes.append(
+            "Use the validator section hints below as a production-evidence population checklist; they are advisory, not generated schema or sample data."
+        )
     elif kind == "validator_dataset_json":
         notes.append("Use the production calibration/case dataset referenced by the runbook and consuming validator.")
     elif kind == "service_target_json":
@@ -1423,12 +1523,18 @@ def _input_artifact_contracts(
     for validator in validation_plan:
         command = validator.get("command")
         release_keys = release_audit_output_keys.get(command, []) if isinstance(command, str) else []
+        section_hints = (
+            list(VALIDATOR_SECTION_HINTS_BY_COMMAND.get(command, ()))
+            if isinstance(command, str)
+            else []
+        )
         compact = {
             "name": validator.get("name"),
             "command": command,
             "lanes": validator.get("lanes", []),
             "rows": validator.get("rows", []),
             "env_placeholders": validator.get("env_placeholders", []),
+            "validator_section_hints": section_hints,
             "release_audit_output_keys": release_keys,
         }
         for artifact in validator.get("required_input_artifacts", []):
@@ -1452,6 +1558,14 @@ def _input_artifact_contracts(
             for validator in validators
             if validator.get("release_audit_output_keys")
         ]
+        section_hints_by_command = [
+            {
+                "command": validator.get("command"),
+                "sections": validator.get("validator_section_hints", []),
+            }
+            for validator in validators
+            if validator.get("validator_section_hints")
+        ]
         kind = _artifact_kind(relative_path)
         contracts.append(
             {
@@ -1463,6 +1577,7 @@ def _input_artifact_contracts(
                 "rows": artifact.get("rows", []),
                 "checks": artifact.get("checks", []),
                 "consuming_validators": validators,
+                "validator_section_hints_by_command": section_hints_by_command,
                 "release_audit_output_keys_by_command": release_keys_by_command,
                 "minimum_operator_contract": _artifact_contract_notes(
                     relative_path=relative_path,
@@ -1487,8 +1602,8 @@ def _write_input_artifact_contracts_markdown(
         "the full production capture path runs. It does not provide samples,",
         "fixtures, placeholder JSON, PEM material, or secret values.",
         "",
-        "| Artifact | Kind | Status | Rows | Validators | Release output keys |",
-        "|---|---|---|---|---|---|",
+        "| Artifact | Kind | Status | Rows | Validators | Section hints | Release output keys |",
+        "|---|---|---|---|---|---|---|",
     ]
     for contract in contracts:
         rows = "<br>".join(
@@ -1504,6 +1619,11 @@ def _write_input_artifact_contracts_markdown(
             + ", ".join(f"`{key}`" for key in item.get("keys", []))
             for item in contract["release_audit_output_keys_by_command"]
         ) or "`unmapped`"
+        section_hints = "<br>".join(
+            f"`{item.get('command')}`: "
+            + ", ".join(f"`{section}`" for section in item.get("sections", []))
+            for item in contract["validator_section_hints_by_command"]
+        ) or "`none`"
         lines.append(
             "| "
             f"`{contract['relative_path']}` | "
@@ -1511,6 +1631,7 @@ def _write_input_artifact_contracts_markdown(
             f"`{contract['status']}` | "
             f"{rows} | "
             f"{validators} | "
+            f"{section_hints} | "
             f"{release_keys} |"
         )
 
@@ -1539,6 +1660,13 @@ def _write_input_artifact_contracts_markdown(
                     f"`{validator.get('name')}` "
                     f"({validator.get('command')}), release keys: {key_text}"
                 )
+        if contract["validator_section_hints_by_command"]:
+            lines.append("- Validator section hints (advisory, not schema):")
+            for item in contract["validator_section_hints_by_command"]:
+                sections = ", ".join(
+                    f"`{section}`" for section in item.get("sections", [])
+                )
+                lines.append(f"  - `{item.get('command')}`: {sections}")
         if contract["rows"]:
             lines.append("- Rows:")
             for row in contract["rows"]:
@@ -2034,7 +2162,8 @@ provider-env work, and use `reports/provider-env-action-plan.md` to route each
 provider-manifest env name to its manifest path, primary rows, and shared
 provider-check blast radius. Use `reports/input-artifact-contracts.md` to see
 each artifact's kind, consuming validators, release-audit output-key contract,
-and minimum operator contract before supplying files. Then copy
+advisory validator section/check hints, and minimum operator contract before
+supplying files. Then copy
 `reports/mnemosyne-production-runtime.env.example` to the external runtime env
 path before filling secret-bearing values.
 
