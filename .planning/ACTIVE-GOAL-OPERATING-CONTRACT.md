@@ -136,7 +136,10 @@ limited to defects that directly block that path:
    Use `reports/provider-env-action-plan.{json,md}` as the shared-provider
    handoff because it maps every provider-manifest env ref to its manifest path,
    provider check, primary row ownership, and shared provider-check blast radius
-   without retaining values or runtime env-file paths. Then use the generated
+   without retaining values or runtime env-file paths. The top-level
+   `operator_input_inventory.runtime_env_file` also groups all and missing
+   provider-manifest env refs by primary row, so the runtime env file can be
+   filled from the same row-owner split without manual joins. Use the generated
    row action plan's `primary_missing_provider_manifest_env_refs` and
    `shared_missing_provider_manifest_env_refs` fields to assign row-owned
    provider env work without hiding shared blockers. B1 owns embedding/reranker

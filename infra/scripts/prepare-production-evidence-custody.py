@@ -945,7 +945,37 @@ def _operator_input_inventory(
     missing_provider_env_refs: list[str],
     missing_input_artifacts: list[str],
     runtime_env_file_loaded: bool,
+    provider_env_action_plan: list[dict[str, Any]],
 ) -> dict[str, Any]:
+    provider_by_primary_row: dict[str, list[str]] = {}
+    missing_provider_by_primary_row: dict[str, list[str]] = {}
+    for item in provider_env_action_plan:
+        env = item.get("env")
+        if not isinstance(env, str) or not env:
+            continue
+        primary_rows = [
+            lane for lane in item.get("primary_rows", []) if isinstance(lane, str)
+        ]
+        for lane in primary_rows:
+            provider_by_primary_row.setdefault(lane, []).append(env)
+            if item.get("missing") is True:
+                missing_provider_by_primary_row.setdefault(lane, []).append(env)
+
+    provider_by_primary_row = {
+        lane: sorted(set(envs))
+        for lane, envs in sorted(
+            provider_by_primary_row.items(),
+            key=lambda pair: _lane_sort_key(pair[0]),
+        )
+    }
+    missing_provider_by_primary_row = {
+        lane: sorted(set(envs))
+        for lane, envs in sorted(
+            missing_provider_by_primary_row.items(),
+            key=lambda pair: _lane_sort_key(pair[0]),
+        )
+    }
+
     return {
         "production_render_env": {
             "path": str(render_env_file),
@@ -960,6 +990,10 @@ def _operator_input_inventory(
             "purpose": "Secret-bearing runtime/provider values for readiness and capture.",
             "provider_manifest_env_refs": provider_env_refs,
             "missing_provider_manifest_env_refs": missing_provider_env_refs,
+            "provider_manifest_env_refs_by_primary_row": provider_by_primary_row,
+            "missing_provider_manifest_env_refs_by_primary_row": (
+                missing_provider_by_primary_row
+            ),
             "missing_count": len(missing_provider_env_refs),
             "loaded_for_readiness": runtime_env_file_loaded,
             "values_redacted": True,
@@ -1436,6 +1470,14 @@ def _write_markdown(report: dict[str, Any], path: Path) -> None:
                 "missing_provider_manifest_env_refs"
             ]
         )
+        grouped_missing = inventory["runtime_env_file"][
+            "missing_provider_manifest_env_refs_by_primary_row"
+        ]
+        if grouped_missing:
+            lines.extend(["", "Missing provider refs by primary row:"])
+            for lane, envs in grouped_missing.items():
+                joined = ", ".join(f"`{env}`" for env in envs)
+                lines.append(f"- `{lane}`: {joined}")
     else:
         lines.append("- None")
     lines.extend(
@@ -2749,6 +2791,7 @@ def refresh_report(
             missing_provider_env_refs=missing_provider_env_refs,
             missing_input_artifacts=missing_input_artifacts,
             runtime_env_file_loaded=runtime_env_file is not None,
+            provider_env_action_plan=provider_env_action_plan,
         ),
         "capture_blockers": _capture_blockers(
             rows=rows,

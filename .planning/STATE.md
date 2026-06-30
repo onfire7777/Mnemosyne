@@ -39,6 +39,19 @@ owns object-key/residency refs, and B9 owns parametric refs while shared
 blocking remains visible. This improves operator assignment only; no production
 values or evidence are retained and B1-B10 stay Partial.
 
+Latest checkpoint (2026-06-30): Tier-B gap reports now group runtime
+provider-manifest env refs by primary row in
+`operator_input_inventory.runtime_env_file`. Both
+`provider_manifest_env_refs_by_primary_row` and
+`missing_provider_manifest_env_refs_by_primary_row` are generated from the
+provider env action plan, so the top-level runtime env file handoff no longer
+forces operators to join a flat 24-name list against row plans manually. Fresh
+packet smoke at `/tmp/mnemosyne-tierb-runtime-inventory-6DyyyV/packet`
+confirmed the grouped B1/B2/B4/B6/B7/B9 ownership appears in JSON and Markdown
+without retaining provider values or runtime env-file paths. This is still
+readiness metadata only; B1-B10 remain Partial until real production capture and
+offline custody verification pass.
+
 Latest checkpoint (2026-06-30): Tier-B provider-stack handoff now carries
 complete primary row ownership for shared provider-manifest env refs. The
 generated `reports/provider-env-action-plan.{json,md}` no longer leaves
