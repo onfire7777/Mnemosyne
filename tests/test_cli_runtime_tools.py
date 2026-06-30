@@ -1858,6 +1858,44 @@ def test_cli_mcp_streamable_http_soak_validates_official_sdk_transport(tmp_path:
     assert all(item["read_only_tool_call"]["ok"] for item in report["iterations"])
 
 
+def test_cli_mcp_streamable_http_soak_denies_private_target_before_sdk(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import mnemosyne.cli as cli_module
+
+    called = False
+
+    async def unexpected_streamable_iteration(**_: object) -> dict[str, object]:
+        nonlocal called
+        called = True
+        return {"ok": True}
+
+    monkeypatch.setattr(cli_module, "_streamable_http_iteration", unexpected_streamable_iteration)
+    args = build_parser().parse_args(
+        [
+            "--store",
+            str(tmp_path / "mnemosyne.json"),
+            "mcp-streamable-http-soak",
+            "--base-url",
+            "https://169.254.169.254",
+            "--iterations",
+            "1",
+        ]
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        args.func(args)
+
+    report = json.loads(capsys.readouterr().out)
+    assert exc.value.code == 1
+    assert called is False
+    assert report["ok"] is False
+    assert report["iterations"][0]["ok"] is False
+    assert "must not resolve to private" in report["iterations"][0]["error"]
+
+
 def test_cli_mcp_sse_soak_validates_legacy_sse_handshake(tmp_path: Path) -> None:
     requests: list[dict[str, str | None]] = []
 

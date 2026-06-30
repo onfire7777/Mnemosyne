@@ -9061,6 +9061,15 @@ def cmd_mcp_streamable_http_soak(args: argparse.Namespace) -> None:
         headers["X-Mnemosyne-Session-Token"] = args.mcp_session_token
 
     ok = True
+    streamable_validation_error: str | None = None
+    try:
+        validate_fetch_url(
+            streamable_url,
+            allow_insecure_localhost=True,
+            purpose="hosted StreamableHTTP URL",
+        )
+    except ValueError as exc:
+        streamable_validation_error = str(exc)
     health_probe = _http_json_probe(url=health_url, method="GET", headers=headers, timeout_seconds=args.timeout)
     health_payload = health_probe.get("json") if isinstance(health_probe.get("json"), dict) else {}
     health = {
@@ -9087,15 +9096,22 @@ def cmd_mcp_streamable_http_soak(args: argparse.Namespace) -> None:
     latencies: list[float] = [float(health_probe.get("latency_ms") or 0)]
     failure_count = 0 if ok else 1
     for index in range(1, args.iterations + 1):
-        result = asyncio.run(
-            _streamable_http_iteration(
-                streamable_url=streamable_url,
-                headers=headers,
-                timeout_seconds=args.timeout,
-                read_only_tool=args.read_only_tool,
-                tool_arguments=tool_arguments,
+        if streamable_validation_error:
+            result = {
+                "ok": False,
+                "duration_ms": 0,
+                "error": streamable_validation_error,
+            }
+        else:
+            result = asyncio.run(
+                _streamable_http_iteration(
+                    streamable_url=streamable_url,
+                    headers=headers,
+                    timeout_seconds=args.timeout,
+                    read_only_tool=args.read_only_tool,
+                    tool_arguments=tool_arguments,
+                )
             )
-        )
         result["iteration"] = index
         if not result.get("ok"):
             ok = False
