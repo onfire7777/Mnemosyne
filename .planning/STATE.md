@@ -15,6 +15,21 @@ Status: In progress; exact 1:1 blueprint parity is not complete.
 Current status (2026-06-30): Mandatory Tier A source wirings are closed on `main`; FR-20 local and live-Postgres image/audio/video breadth, FR-21 local and live-Postgres parametric trainer/rollback validation, full compose-Postgres runtime readiness, belief-revision CLI validation, local hosted-MCP JSON-RPC/StreamableHTTP/SSE readiness, direct A12 cached-PPR live materialization coverage, G1 projection-level reality monitoring, G1 functional consciousness scorecard/proto-self seed, native workspace service with the `service.enabled` default-off gate retired, operational specialist-budget toggle retirement, cold-loop ignition enforcement, protected gate-case ratchet enforcement, Rail 6 serve-time sink enforcement, §24 support-strategy runtime durability plus public CLI/MCP mutation surfaces, Phase 7 plans 01-04, and the P5 H8/H12 cascade/observability pre-check are now done and gate-proven. The remaining strict-parity blocker is Tier B production operator evidence against deployed infrastructure before final v1.0 sign-off.
 Supersession note: the historical "Last activity: 2026-06-20" paragraph below is retained as changelog context only. Its local 287-test count and open-code wording are superseded by the 2026-06-25 checkpoints below, including the 864-test compose run and the current Tier B operator-evidence blocker.
 
+Latest checkpoint (2026-06-30): The active goal remains unpaused and the
+repo-owned operating contract now states the move-the-needle rule explicitly:
+new work must remove a live Tier-B operator-capture blocker, fix a source defect
+exposed by that path, or clean stale instructions that would cause wrong-root,
+wrong-artifact, wrong-custody, or false-status drift. Tier-B custody packets now
+extend `reports/input-artifact-contracts.{json,md}` with advisory validator
+section/check hints such as `retrieval-ops-check`'s `provider_check`,
+`retrieval`, `adapter_probes`, `calibration`, and `redaction` sections. These
+hints are generated beside the existing artifact kind, consuming validator,
+release-audit output-key, and minimum-operator contracts, reducing the need for
+operators to inspect CLI source before authoring real ops bundles. They are not
+schemas, samples, placeholder files, production evidence, or a row-flip
+mechanism; B1-B10 remain Partial until wrapper-captured production bundles pass
+manifest-bound release audit and offline custody verification.
+
 Latest checkpoint (2026-06-30): The active goal remains unpaused; because the
 goal tool does not safely rewrite active objective text, the repo-owned
 operating contract is the edited prompt-engineered continuation objective.

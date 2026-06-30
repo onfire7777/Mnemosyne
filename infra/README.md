@@ -133,8 +133,9 @@ open infra/templates/production-operator-env.inventory.md
 # to packet path, Tier-B row, row runbook, and consuming check; use it to gather
 # real production artifacts, not placeholder files.
 # The refreshed reports/input-artifact-contracts.{json,md} records each
-# artifact kind, consuming validator, release-audit output-key contract, and
-# minimum operator contract before files are supplied.
+# artifact kind, consuming validator, advisory validator section/check hints,
+# release-audit output-key contract, and minimum operator contract before files
+# are supplied.
 # The refreshed reports/input-artifact-validation-commands.sh refuses missing
 # or symlinked artifacts and runs manifest-derived validators against supplied
 # files before the full capture path. Run it with no argument for all rows, or
@@ -258,10 +259,10 @@ The external custody packet also renders this route map as
 `reports/row-action-plan.{json,md}` for row-owner handoff and
 `reports/provider-env-action-plan.{json,md}` for provider-stack env ownership,
 `reports/input-artifact-worklist.{json,md}` for artifact assembly, and
-`reports/input-artifact-contracts.{json,md}` for each artifact's validator and
-release-audit output-key contract, so operators can sort missing work by B-row,
-packet runbook, packet path, and consuming check before running capture. The
-provider env action plan reports env names,
+`reports/input-artifact-contracts.{json,md}` for each artifact's validator,
+advisory section/check hints, and release-audit output-key contract, so
+operators can sort missing work by B-row, packet runbook, packet path, and
+consuming check before running capture. The provider env action plan reports env names,
 provider-manifest JSON paths, primary rows, affected rows, and provider checks
 only; it never records values or runtime env-file paths. These reports are
 operator preparation aids only; they must not be satisfied with placeholder

@@ -36,6 +36,12 @@ completion program. The only prioritized change classes are:
 Everything else is deliberately lower priority, even if it is useful
 engineering work.
 
+**Move-the-needle rule:** before editing, state which live blocker the change
+removes. A change is on-goal only if it makes a real Tier-B operator capture
+more runnable/reviewable, fixes a source defect exposed by that capture path, or
+cleans stale instructions that would otherwise send operators or future agents
+to the wrong root, wrong artifact, wrong custody boundary, or false status.
+
 **Resume improvement based on prior downfalls:** On every continuation, first
 prove the live root and `HEAD`, then work only on items that remove friction from
 real production capture or fix source behavior that blocks it. Treat planning
@@ -82,8 +88,9 @@ limited to defects that directly block that path:
    packet paths, rows, row runbooks, and consuming checks without creating
    placeholders. Use `reports/input-artifact-contracts.{json,md}` to inspect
    each artifact's kind, consuming validators, release-audit output-key
-   contract, and minimum operator contract before supplying files. It is a
-   contract/readiness aid only, not substitute evidence and not a schema sample.
+   contract, advisory validator section/check hints, and minimum operator
+   contract before supplying files. It is a contract/readiness aid only, not
+   substitute evidence and not a schema sample.
    Use `reports/row-action-plan.{json,md}` as the row-owner
    handoff because it joins each B1-B10 row's runbook, missing render values,
    missing provider refs, missing artifacts, next actions, and row validator.

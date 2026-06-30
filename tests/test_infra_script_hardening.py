@@ -335,6 +335,27 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
             "keys": ["bundle", "requirements", "checks", "findings"],
         }
     ]
+    assert retrieval_contract["validator_section_hints_by_command"] == [
+        {
+            "command": "retrieval-ops-check",
+            "sections": [
+                "provider_check",
+                "retrieval",
+                "adapter_probes",
+                "calibration",
+                "redaction",
+            ],
+        }
+    ]
+    assert retrieval_contract["consuming_validators"][0][
+        "validator_section_hints"
+    ] == [
+        "provider_check",
+        "retrieval",
+        "adapter_probes",
+        "calibration",
+        "redaction",
+    ]
     assert any(
         "real production artifact" in note
         for note in retrieval_contract["minimum_operator_contract"]
@@ -347,6 +368,7 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
         item["command"]
         for item in provider_manifest_contract["release_audit_output_keys_by_command"]
     } >= {"provider-check"}
+    assert provider_manifest_contract["validator_section_hints_by_command"] == []
     assert any(
         "forbid_local true" in note
         for note in provider_manifest_contract["minimum_operator_contract"]
@@ -532,6 +554,7 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     assert "reports/row-action-plan.md" in readme
     assert "reports/input-artifact-worklist.md" in readme
     assert "reports/input-artifact-contracts.md" in readme
+    assert "advisory validator section/check hints" in readme
     assert "reports/input-artifact-validation-commands.sh" in readme
     assert "reports/input-artifact-validation-commands.sh B1" in readme
     assert "symlinked input artifacts scoped to that selection" in readme
@@ -629,6 +652,11 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     assert "operator preparation aid, not production evidence" in artifact_contracts_text
     assert "`retrieval-ops-bundle.json`" in artifact_contracts_text
     assert "`ops_bundle_json`" in artifact_contracts_text
+    assert "Validator section hints (advisory, not schema)" in artifact_contracts_text
+    assert (
+        "`retrieval-ops-check`: `provider_check`, `retrieval`, `adapter_probes`, "
+        "`calibration`, `redaction`"
+    ) in artifact_contracts_text
     assert "`retrieval-ops-check`: `bundle`, `requirements`, `checks`, `findings`" in (
         artifact_contracts_text
     )
