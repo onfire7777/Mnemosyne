@@ -282,6 +282,65 @@ template_input_artifact_names = [
     str(artifact["relative_path"]) for artifact in template_input_artifact_plan
 ]
 template_parity_row_readiness = build_parity_row_readiness(template_input_artifact_plan)
+shared_provider_lanes = {"B1", "B2", "B4", "B6", "B7", "B9", "B10"}
+
+
+def collect_template_render_placeholders_by_lane(
+    manifest_payload: dict[str, Any],
+) -> dict[str, set[str]]:
+    by_lane: dict[str, set[str]] = {}
+    checks_payload = manifest_payload.get("checks", [])
+    if not isinstance(checks_payload, list):
+        return by_lane
+    for check in checks_payload:
+        if not isinstance(check, dict):
+            continue
+        command = check.get("command")
+        if not isinstance(command, str):
+            continue
+        lanes = parity_lanes_for_command(command)
+        if not lanes:
+            continue
+        placeholders = set(placeholder_re.findall(json.dumps(check, sort_keys=True)))
+        for lane in lanes:
+            by_lane.setdefault(lane, set()).update(placeholders)
+    return by_lane
+
+
+template_render_placeholders_by_lane = collect_template_render_placeholders_by_lane(
+    template_manifest
+)
+
+
+def enrich_renderer_row_readiness(
+    rows: list[dict[str, object]],
+    *,
+    missing_render_environment: list[str],
+    missing_provider_environment: list[str] | None = None,
+) -> list[dict[str, object]]:
+    missing_render_set = set(missing_render_environment)
+    missing_provider = sorted(missing_provider_environment or [])
+    enriched: list[dict[str, object]] = []
+    for row in rows:
+        item = dict(row)
+        lane = str(item.get("lane", ""))
+        row_missing_render = sorted(
+            template_render_placeholders_by_lane.get(lane, set()) & missing_render_set
+        )
+        item["missing_render_environment"] = row_missing_render
+        item["render_environment_complete"] = not row_missing_render
+        if missing_provider_environment is not None:
+            row_missing_provider = missing_provider if lane in shared_provider_lanes else []
+            item["missing_provider_manifest_env_refs"] = row_missing_provider
+            item["provider_manifest_environment_complete"] = not row_missing_provider
+        if "input_artifacts_complete" in item:
+            item["ready_for_capture"] = (
+                bool(item.get("input_artifacts_complete"))
+                and bool(item["render_environment_complete"])
+                and bool(item.get("provider_manifest_environment_complete", True))
+            )
+        enriched.append(item)
+    return enriched
 
 if list_placeholders:
     print(
@@ -292,7 +351,10 @@ if list_placeholders:
                 "required_input_artifact_count": len(template_input_artifact_names),
                 "required_input_artifacts": template_input_artifact_names,
                 "required_input_artifacts_plan": template_input_artifact_plan,
-                "parity_row_readiness": template_parity_row_readiness,
+                "parity_row_readiness": enrich_renderer_row_readiness(
+                    template_parity_row_readiness,
+                    missing_render_environment=[],
+                ),
             },
             indent=2,
         )
@@ -321,7 +383,11 @@ if check_environment:
         "required_input_artifact_count": len(template_input_artifact_names),
         "required_input_artifacts": template_input_artifact_names,
         "required_input_artifacts_plan": template_input_artifact_plan,
-        "parity_row_readiness": template_parity_row_readiness,
+        "parity_row_readiness": enrich_renderer_row_readiness(
+            template_parity_row_readiness,
+            missing_render_environment=missing,
+        ),
+        "render_environment_complete": not missing,
         "next_steps": next_steps,
     }
     if missing:
@@ -997,6 +1063,11 @@ missing_input_artifact_details = [
 ]
 
 if check_environment:
+    enriched_parity_row_readiness = enrich_renderer_row_readiness(
+        parity_row_readiness,
+        missing_render_environment=[],
+        missing_provider_environment=missing_provider_manifest_env_refs,
+    )
     payload = {
         "ok": not missing_input_artifacts and not input_artifact_errors,
         "template": str(template_path),
@@ -1019,9 +1090,16 @@ if check_environment:
         "missing_input_artifacts_detail": missing_input_artifact_details,
         "provider_manifest_env_refs": provider_manifest_env_refs,
         "missing_provider_manifest_env_refs": missing_provider_manifest_env_refs,
-        "parity_row_readiness": parity_row_readiness,
+        "parity_row_readiness": enriched_parity_row_readiness,
         "input_artifact_errors": input_artifact_errors,
+        "render_environment_complete": True,
+        "provider_manifest_environment_complete": not missing_provider_manifest_env_refs,
         "input_artifacts_complete": not missing_input_artifacts and not input_artifact_errors,
+        "ready_for_capture": (
+            not missing_input_artifacts
+            and not input_artifact_errors
+            and not missing_provider_manifest_env_refs
+        ),
         "validation_categories": validation_categories,
         "next_steps": next_steps,
     }

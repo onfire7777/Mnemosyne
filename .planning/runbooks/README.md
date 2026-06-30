@@ -28,7 +28,10 @@ CLI commands consumed by `deployment-soak` and `release-audit`.
   default and validates the production command profile before writing. Its
   `--check-environment` JSON exposes `parity_row_readiness` so the flat
   manifest-referenced input-artifact inventory can be assigned to the matching
-  Tier-B row runbook without exposing custody paths.
+  Tier-B row runbook without exposing custody paths. The row entries also scope
+  missing render env, missing provider-manifest env refs, input-artifact
+  completeness, and `ready_for_capture` where those checks have enough
+  information to evaluate them.
 - `infra/scripts/capture-production-evidence.sh` - operator capture wrapper
   that validates the rendered manifest, rejects unresolved production
   placeholders, rejects duplicate or unknown production commands, rejects
