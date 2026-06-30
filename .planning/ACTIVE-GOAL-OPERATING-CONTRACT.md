@@ -13,23 +13,28 @@ repo evidence when they conflict.
 
 ## Prime Objective
 
-**Prompt-engineered goal statement:** Continue Mnemosyne from the live checked-out
-state to exact blueprint parity and production release readiness. Prioritize the
-remaining blockers that materially change the strict audit state: real Tier-B
-operator production evidence, real production-path SLO/rail proof, and precise
-stale-surface cleanup that prevents operators or future agents from following
-obsolete instructions. Do not spend effort on redundant gates, duplicate tests,
-or percentage bookkeeping unless they directly protect the production evidence
-path. Every claim of progress must be backed by current source, retained
-artifacts, CI, or an explicit operator-evidence record.
+**Professionally revised goal statement:** Continue Mnemosyne from the live
+checked-out state to exact blueprint parity and production release readiness by
+turning the source-complete local scaffold into production-attested evidence.
+The decisive work is not another local scoring layer, broad test expansion, or
+percentage bookkeeping; it is real Tier-B operator production evidence, real
+production-path SLO/rail proof, and only the stale-surface cleanup needed to keep
+operators and future agents from following obsolete instructions. Every claim of
+progress must be backed by current source, retained artifacts, CI, or an
+explicit operator-evidence record.
 
-**Current objective refinement:** Treat the run as a production-evidence
-completion program, not a test-expansion program. The priority order is:
-preserve the live source baseline; make the Tier-B operator path deterministic
-and hard to mis-follow; capture and verify real B1-B10 production bundles; then
-update the strict audit and release status. Any change that cannot be mapped to
-a Tier-B evidence blocker, an active source defect, a custody weakness, or a
-current-status/stale-instruction cleanup is deliberately deprioritized.
+**Current objective refinement:** Treat this run as a production-evidence
+completion program. The only prioritized change classes are:
+
+1. A Tier-B capture/readiness blocker that prevents a real operator evidence
+   pass.
+2. A concrete source defect exposed by production readiness or capture evidence.
+3. A custody, redaction, secret-handling, or reviewer-handoff weakness.
+4. A current-status or stale-instruction cleanup that prevents wrong-root,
+   false-completion, or manual-custody drift.
+
+Everything else is deliberately lower priority, even if it is useful
+engineering work.
 
 **Resume improvement based on prior downfalls:** On every continuation, first
 prove the live root and `HEAD`, then work only on items that remove friction from
@@ -38,6 +43,12 @@ attachments, old agent transcripts, and percentage claims as hypotheses until
 the live repo, generated custody packet, and strict audit agree. The next useful
 unit of progress is a self-contained Tier-B operator packet and then a real
 operator capture pass, not another local-only scoring layer.
+
+**Live resume checkpoint (2026-06-30):** the goal tracker reports this objective
+as active; canonical checkout `/Users/admin/Mnemosyne` is clean on `main`, local
+`HEAD` and `origin/main` both point at `589ec83`, and GitHub Actions run
+`28458226239` passed for that commit. This is a resume checkpoint only; future
+continuations must refresh the same live evidence before writing current status.
 
 Drive Mnemosyne from the current source-complete state to exact blueprint parity
 and production release readiness:

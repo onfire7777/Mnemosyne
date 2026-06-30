@@ -218,6 +218,22 @@ def test_operator_docs_use_runtime_env_variable_for_runtime_commands() -> None:
             assert pattern not in text, (path, pattern)
 
 
+def test_tier_b_master_prompt_uses_current_single_checkout_coordination() -> None:
+    text = (REPO / ".planning" / "TIER-B-TO-100-AGENT-PROMPT.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "current single-checkout continuation" in text
+    assert "authorized clean commits and pushes to `main`" in text
+    assert "Stage explicit paths only" in text
+    assert "source-stability boundaries" in text
+    assert "old multi-lane ownership table" in text
+    assert "Only the CC-SYNC lane touches" not in text
+    assert "Branch-per-lane" not in text
+    assert "serialized integration order" not in text
+    assert "CC-PG \u2192 CC-RT" not in text
+
+
 def test_production_evidence_docs_require_independent_bundle_fingerprint() -> None:
     docs_with_command_snippets = [
         REPO / "infra" / "PRODUCTION-EVIDENCE.md",
