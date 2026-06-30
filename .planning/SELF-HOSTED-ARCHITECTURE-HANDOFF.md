@@ -5,6 +5,8 @@
 ## What landed (new files, safe to ingest)
 - `docs/SELF-HOSTED-PRODUCTION-ARCHITECTURE.md` — the full architecture + security spec.
 - `.planning/phases/08-self-hosted-first-production/08-CONTEXT.md` + `08-01-PLAN.md` — the GSD phase.
+- `.planning/phases/08-self-hosted-first-production/08-HANDOFF-INDEX.md` — the current read-first handoff.
+- `.planning/phases/08-self-hosted-first-production/08-SECURITY-FINDINGS.md` — adversarial security findings and pre-capture must-dos.
 
 ## Decision in one line
 Make a **self-hosted stack the preferred production baseline** (cloud/GPU =
@@ -13,15 +15,10 @@ can close B1–B8 + B10 with real evidence, but it does not reduce the current
 strict 100% bar: B9 still needs real operator evidence unless an explicit future
 ADR changes the audit. No gate weakened; §31 rails + §16 SLOs preserved.
 
-## Recommended ledger edits (apply in your own commits to avoid races)
-- **`.planning/ROADMAP.md`** — add `- [ ] **Phase 8: Self-Hosted-First Production Architecture**` plus a
-  `### Phase 8` block (Goal/Depends-on Phase 6/Requirements = the §8.x task groups/Success Criteria = §plan).
-- **`.planning/MILESTONES.md`** — new milestone "Self-Hosted-First Production"
-  (Status proposed; Spec = the architecture doc; Roadmap = Phase 8; Plans =
-  08-01; Success Criteria = B1–B8+B10 real evidence, B9 routed to cloud/GPU
-  evidence or left Partial, security must-dos; Verification = release-audit +
-  re-proven SLOs).
-- **`.planning/STATE.md`** — one checkpoint line referencing this handoff.
+## Ledger status
+- **`.planning/ROADMAP.md`** now includes Phase 8 as a subordinate production-evidence phase.
+- **`.planning/MILESTONES.md`** now includes the self-hosted-first production milestone.
+- **`.planning/STATE.md`** records Phase 8 checkpoints without marking any Tier-B evidence row Done.
 
 ## Stale-doc prune candidates (recommend; do NOT delete in-flight — most self-label superseded)
 Move to `docs/_archive/` or add a one-line "Superseded by ROADMAP-TO-100 / STRICT-AUDIT" banner:

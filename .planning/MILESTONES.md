@@ -94,3 +94,25 @@ Post-v1.0. Does not block, and is not blocked by, the v1.0 strict-parity sign-of
 
 ### Verification (planned gates)
 - `eval/g0/preregistrations/g5-*.json` (bytestable-parity, continuous, always-on-heartbeat, earned-autonomy, unified-substrate-cascade, toggle-retirement) — each must pass target-up / guardrails-not-down against `eval/g0/baselines/baseline-0.json`.
+
+---
+
+## vNext — Self-Hosted-First Production Architecture
+
+**Status:** proposed and scaffolded — live bring-up, hardening, and operator-captured evidence pending
+**Spec:** `docs/SELF-HOSTED-PRODUCTION-ARCHITECTURE.md`
+**Roadmap:** `.planning/ROADMAP.md` → Phase 8 · **Plans:** `.planning/phases/08-self-hosted-first-production/`
+
+Make the self-hosted profile the preferred production baseline for rows it can honestly prove, without weakening the strict Tier-B audit. The self-hosted/no-GPU profile targets B1-B8+B10 through real evidence bundles; B9/FR-21 still requires real cloud/GPU trainer evidence or an explicit future ADR before strict v1.0 parity can reach 100%.
+
+### Success Criteria (what must be TRUE)
+- The `self-hosted` and `cloud` profiles differ by values only and both keep local fallback forbidden for production evidence.
+- The production scaffold is hardened before capture: fail-closed auth/session binding, non-superuser RLS roles, sealed KMS, mandatory object encryption, provenance fail-closed behavior, policy-as-code, secret scanning, digest pins, egress chokepoint, single ingress, and tamper-evident audit logging.
+- B1-B8+B10 flip only after retained, signed, real-infra bundles pass render, preflight, capture, verify, and release-audit.
+- B9 remains Partial until real cloud/GPU trainer evidence passes the same custody path or an explicit ADR changes the strict audit.
+- §31 rails, §16 SLOs, G0/G1 guardrails, and the honesty charter remain non-regressed.
+
+### Verification
+- `infra/PRODUCTION-EVIDENCE.md` render/preflight/capture/verify/release-audit for each production row.
+- Phase 8 security must-dos from `.planning/phases/08-self-hosted-first-production/08-SECURITY-FINDINGS.md`.
+- Real-path §16 SLO re-proof and strict parity audit update after evidence capture.

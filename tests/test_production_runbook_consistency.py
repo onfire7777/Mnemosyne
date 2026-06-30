@@ -349,14 +349,22 @@ def test_self_hosted_profile_docs_do_not_weaken_strict_tier_b_contract() -> None
     architecture = (REPO / "docs" / "SELF-HOSTED-PRODUCTION-ARCHITECTURE.md").read_text(
         encoding="utf-8"
     )
-    phase_plan = (
+    phase_dir = (
         REPO
         / ".planning"
         / "phases"
         / "08-self-hosted-first-production"
-        / "08-01-PLAN.md"
-    ).read_text(encoding="utf-8")
-    combined = "\n".join([architecture, phase_plan])
+    )
+    phase_plan = (phase_dir / "08-01-PLAN.md").read_text(encoding="utf-8")
+    handoff_index = (phase_dir / "08-HANDOFF-INDEX.md").read_text(encoding="utf-8")
+    security_findings = (phase_dir / "08-SECURITY-FINDINGS.md").read_text(
+        encoding="utf-8"
+    )
+    roadmap = (REPO / ".planning" / "ROADMAP.md").read_text(encoding="utf-8")
+    milestones = (REPO / ".planning" / "MILESTONES.md").read_text(encoding="utf-8")
+    combined = "\n".join(
+        [architecture, phase_plan, handoff_index, security_findings, roadmap, milestones]
+    )
     combined_flat = " ".join(combined.split())
     phase_plan_flat = " ".join(phase_plan.split())
 
@@ -364,6 +372,10 @@ def test_self_hosted_profile_docs_do_not_weaken_strict_tier_b_contract() -> None
     assert "Current strict parity still requires B9 evidence" in architecture
     assert "B9 either receives real cloud/GPU trainer evidence" in phase_plan
     assert "Do not record it as DEFERRED-BY-DESIGN" in phase_plan_flat
+    assert "B9/strict-100%:** cloud/GPU evidence or explicit ADR" in handoff_index
+    assert "No control here weakens a gate" in security_findings
+    assert "Phase 8: Self-Hosted-First Production Architecture" in roadmap
+    assert "Self-Hosted-First Production Architecture" in milestones
     assert "satisfy that as an evidence-compatible sidecar" in architecture
     assert "B9 recorded as DEFERRED-BY-DESIGN" not in combined_flat
     assert "official self-hosted profile reaches **100%" not in combined_flat
