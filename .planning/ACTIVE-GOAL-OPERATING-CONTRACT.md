@@ -11,6 +11,16 @@ repo evidence when they conflict.
 
 ## Prime Objective
 
+**Prompt-engineered goal statement:** Continue Mnemosyne from the live checked-out
+state to exact blueprint parity and production release readiness. Prioritize the
+remaining blockers that materially change the strict audit state: real Tier-B
+operator production evidence, real production-path SLO/rail proof, and precise
+stale-surface cleanup that prevents operators or future agents from following
+obsolete instructions. Do not spend effort on redundant gates, duplicate tests,
+or percentage bookkeeping unless they directly protect the production evidence
+path. Every claim of progress must be backed by current source, retained
+artifacts, CI, or an explicit operator-evidence record.
+
 Drive Mnemosyne from the current source-complete state to exact blueprint parity
 and production release readiness:
 
@@ -43,11 +53,15 @@ limited to defects that directly block that path:
    `mnemosyne-production-runtime.env` via
    `render-production-soak-manifest.sh --runtime-env-file` for readiness and
    `capture-production-evidence.sh --env-file` for capture.
-3. Fill the shared provider stack first because
+3. Capture full production bundles with
+   `capture-production-evidence.sh --fingerprint-record-output <external-json>`
+   so the expected offline custody fingerprint is retained outside the bundle
+   under review.
+4. Fill the shared provider stack first because
    `provider-manifest.production.json` unblocks B1, B2, B4, B6, B7, B9, and B10.
-4. Capture keystone rows B1 retrieval and B2 tenant/auth evidence.
-5. Capture the remaining row bundles B3-B9.
-6. Capture B10 live parity evidence, then run Tier C sign-off.
+5. Capture keystone rows B1 retrieval and B2 tenant/auth evidence.
+6. Capture the remaining row bundles B3-B9.
+7. Capture B10 live parity evidence, then run Tier C sign-off.
 
 ## Resume Baseline Rules
 
@@ -77,9 +91,10 @@ For each substantive move:
 
 1. Confirm the live checkout, branch, dirty tree, latest commit, and CI state.
 2. Read the row runbook or blueprint section being changed before editing.
-3. Prefer the smallest architecture-aligned change that closes a real parity or
-   evidence gap.
-4. Verify with focused tests, custody checks, and CI when pushing source changes.
+3. Prefer the smallest architecture-aligned change that closes a real parity,
+   custody, operator-readiness, or evidence gap.
+4. Verify with focused tests, custody checks, and CI when pushing source changes;
+   avoid turning verification into the main workstream.
 5. Stage explicit paths, commit atomically, push, and confirm local and GitHub
    state are synchronized.
 6. Update only current-status docs that became stale because of the change.
@@ -96,7 +111,8 @@ path and record the result.
 - Never flip a strict audit row from `Partial` to `Done` without wrapper-captured
   production evidence, passing manifest-bound `release-audit`, and passing
   offline `production-evidence-verify` with an independently retained expected
-  fingerprint plus external `--report-output`.
+  fingerprint from the external fingerprint record plus external
+  `--report-output`.
 - Keep Mnemosyne distinct from gbrain, mempalace, gstack, and BridgeMemory tool
   state. Do not import their repo-local metadata into Mnemosyne.
 - Use `/Users/admin/Mnemosyne` as the canonical implementation checkout unless
@@ -129,6 +145,9 @@ path and record the result.
    work; close them promptly and continue locally on the critical path.
 8. **Historical text confusion:** Preserve historical lineage, but scrub current
    status surfaces that reopen already-closed local feature gaps.
+9. **Manual custody drift:** Do not ask operators to hand-copy a bundle
+   fingerprint when the wrapper can write an external no-overwrite fingerprint
+   record for review.
 
 ## Completion Standard
 

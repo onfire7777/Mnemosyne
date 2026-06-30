@@ -10769,7 +10769,10 @@ def _production_evidence_summary_offline_verify_argv_ok(
         isinstance(note, str)
         and "Custody review only" in note
         and "does not rerun production checks" in note
-        and "out-of-band capture record" in note
+        and (
+            "out-of-band fingerprint record" in note
+            or "out-of-band capture record" in note
+        )
     )
 
 
@@ -11286,7 +11289,7 @@ def _production_evidence_reviewer_guidance(
         blocked_reason = blocked_reason or "missing_expected_fingerprint"
         next_steps.append(
             "Provide --expected-bundle-fingerprint from the independently retained out-of-band "
-            "operator capture record. Do not copy the value from the bundle under review."
+            "operator fingerprint record. Do not copy the value from the bundle under review."
         )
 
     if "expected_bundle_fingerprint_mode_conflict" in codes:
@@ -11301,7 +11304,7 @@ def _production_evidence_reviewer_guidance(
         blocked_reason = blocked_reason or "expected_fingerprint_mismatch"
         next_steps.append(
             "Stop the review. Do not replace the expected fingerprint with a value copied from "
-            "the bundle; compare the external capture record against bundle-manifest.json and "
+            "the bundle; compare the external fingerprint record against bundle-manifest.json and "
             "the reviewed bundle path, then rerun production capture if they cannot be reconciled."
         )
 
@@ -11313,14 +11316,14 @@ def _production_evidence_reviewer_guidance(
         blocked_reason = blocked_reason or "bundle_integrity_failure"
         next_steps.append(
             "Treat the retained bundle as mutated or internally inconsistent. Do not update the "
-            "out-of-band capture record from the bundle; rerun the production capture wrapper "
+            "out-of-band fingerprint record from the bundle; rerun the production capture wrapper "
             "from the original production sources."
         )
 
     if internal_consistency_only:
         next_steps.append(
             "Internal-consistency mode is diagnostic only. For custody review, rerun with "
-            "--expected-bundle-fingerprint from the external capture record."
+            "--expected-bundle-fingerprint from the external fingerprint record."
         )
 
     if incomplete_row_count:
@@ -12909,7 +12912,7 @@ def cmd_production_evidence_verify(args: argparse.Namespace) -> None:
             findings,
             "expected_bundle_fingerprint_missing",
             "production evidence custody review requires --expected-bundle-fingerprint "
-            "from an out-of-band capture record; use --internal-consistency-only only "
+            "from an out-of-band fingerprint record; use --internal-consistency-only only "
             "for local diagnostics",
         )
     if expected_bundle_fingerprint_present and not internal_consistency_only and not args.report_output:
@@ -16091,7 +16094,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--expected-bundle-fingerprint",
         help=(
             "Expected bundle-manifest.json sha256 fingerprint from an out-of-band "
-            "operator capture record; required for custody review"
+            "operator fingerprint record; required for custody review"
         ),
     )
     production_evidence_verify.add_argument(

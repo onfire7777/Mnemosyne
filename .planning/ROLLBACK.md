@@ -23,7 +23,7 @@ good release artifact.
    `infra/scripts/capture-production-evidence.sh --preflight-only "$SOAK_MANIFEST" "$PRECHECK_OUTPUT_ROOT"`
    as setup proof only; `PRECHECK_OUTPUT_ROOT` must be a new absolute external
    custody path outside the repository.
-8. Run `infra/scripts/capture-production-evidence.sh "$SOAK_MANIFEST" "$OUT_ROOT"`;
+8. Run `infra/scripts/capture-production-evidence.sh --fingerprint-record-output "$FINGERPRINT_RECORD" "$SOAK_MANIFEST" "$OUT_ROOT"`;
    `OUT_ROOT` must be a new absolute external custody path outside the
    repository and must not already exist; the capture wrapper writes the
    production bundle there.

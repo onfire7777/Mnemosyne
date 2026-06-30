@@ -91,6 +91,7 @@ infra/scripts/capture-production-evidence.sh \
   /secure/path/to/mnemosyne-production-preflight
 infra/scripts/capture-production-evidence.sh \
   --env-file /secure/path/to/mnemosyne-production-runtime.env \
+  --fingerprint-record-output /secure/path/to/mnemosyne-production-bundle-fingerprint.json \
   /secure/path/to/production-soak-manifest.json \
   /secure/path/to/mnemosyne-production-evidence
 ```
@@ -156,15 +157,26 @@ The wrapper performs these steps:
 4. Scans the generated evidence bundle for high-confidence secret material and fails closed if any retained artifact cannot be scanned.
 5. Writes `bundle-manifest.json` with SHA-256 hashes for every retained artifact before writing the final summary.
 
+For full production capture, write the out-of-band fingerprint record outside
+the bundle under review:
+
+```bash
+FINGERPRINT_RECORD=/secure/path/to/mnemosyne-production-bundle-fingerprint.json
+infra/scripts/capture-production-evidence.sh \
+  --env-file /secure/path/to/mnemosyne-production-runtime.env \
+  --fingerprint-record-output "$FINGERPRINT_RECORD" \
+  /secure/path/to/production-soak-manifest.json \
+  /secure/path/to/mnemosyne-production-evidence
+```
+
 After a successful full capture, reviewers can recheck the completed bundle
 offline without production credentials:
 
 ```bash
 PYTHON="${PYTHON:-$(if [ -x .venv/bin/python ]; then printf '%s' .venv/bin/python; else command -v python3; fi)}"
 BUNDLE_DIR=/secure/path/to/mnemosyne-production-evidence
-# Set this from the operator's out-of-band capture record, not from summary.json
-# inside the bundle under review.
-EXPECTED_BUNDLE_FINGERPRINT=sha256:...
+FINGERPRINT_RECORD=/secure/path/to/mnemosyne-production-bundle-fingerprint.json
+EXPECTED_BUNDLE_FINGERPRINT="$("$PYTHON" -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["bundle_fingerprint"])' "$FINGERPRINT_RECORD")"
 VERIFY_REPORT=/secure/path/to/mnemosyne-production-evidence-verify.json
 "$PYTHON" -m mnemosyne.cli production-evidence-verify \
   "$BUNDLE_DIR" \
@@ -217,12 +229,12 @@ it writes the same JSON report to an absolute, non-existing path outside the
 bundle under review so the review artifact can be retained without changing the
 bundle fingerprint.
 `--expected-bundle-fingerprint` is required for custody review and must come
-from the independently retained out-of-band capture record. The
+from the independently retained out-of-band fingerprint record. The
 `--internal-consistency-only` flag exists only for local diagnostics and does not
 satisfy Tier B custody review. If the expected fingerprint mismatches the
 retained bundle, stop the review: do not copy a replacement value from the
-bundle under review. Reconcile the external capture record, the reviewed bundle
-path, and `bundle-manifest.json`; if they cannot be reconciled, rerun the
+bundle under review. Reconcile the external fingerprint record, the reviewed
+bundle path, and `bundle-manifest.json`; if they cannot be reconciled, rerun the
 production capture wrapper and retain a new external fingerprint record. If
 `--expected-bundle-fingerprint` and `--internal-consistency-only` are both
 present, rerun in exactly one mode.

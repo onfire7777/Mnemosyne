@@ -97,5 +97,5 @@ operator still must run the production manifest through
 with `production_validated=true`, `target_environment="production"`, non-local
 providers, `release-audit --evidence-manifest "$OUT_ROOT/evidence/manifest.json" --require-production-validated --require-provider-forbid-local`,
 and offline `production-evidence-verify` with `--expected-bundle-fingerprint`
-from the independently retained out-of-band capture record and `--report-output`
+from the independently retained out-of-band fingerprint record and `--report-output`
 set to a new external path outside the bundle under review.

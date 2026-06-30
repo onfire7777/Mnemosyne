@@ -344,6 +344,62 @@ def test_capture_production_evidence_preflight_requires_explicit_output_root(
     assert proc.stdout == ""
 
 
+def test_capture_production_evidence_rejects_preflight_fingerprint_record_output(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "production-soak.json"
+    out_root = tmp_path / "preflight"
+    fingerprint_record = tmp_path / "mnemosyne-production-bundle-fingerprint.json"
+    _minimal_production_manifest(manifest)
+
+    proc = subprocess.run(
+        [
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
+            "--preflight-only",
+            "--fingerprint-record-output",
+            str(fingerprint_record),
+            str(manifest),
+            str(out_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert proc.returncode == 64
+    assert "--fingerprint-record-output is only valid for full production capture" in proc.stderr
+    assert not fingerprint_record.exists()
+
+
+def test_capture_production_evidence_rejects_bundle_local_fingerprint_record(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "production-soak.json"
+    out_root = tmp_path / "capture"
+    _minimal_production_manifest(manifest)
+
+    proc = subprocess.run(
+        [
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
+            "--fingerprint-record-output",
+            str(out_root / "bundle-fingerprint.json"),
+            str(manifest),
+            str(out_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert proc.returncode == 65
+    assert "fingerprint record output must be outside the evidence bundle" in proc.stderr
+    assert not out_root.exists()
+
+
 def test_capture_production_evidence_rejects_relative_manifest_path(
     tmp_path: Path,
 ) -> None:
@@ -3088,6 +3144,7 @@ def test_capture_production_evidence_fails_if_generated_bundle_contains_secret(
 ) -> None:
     manifest = tmp_path / "production-soak.json"
     out_root = tmp_path / "capture"
+    fingerprint_record = tmp_path / "mnemosyne-production-bundle-fingerprint.json"
     fake_python = tmp_path / "fake-python"
     _minimal_production_manifest(manifest)
     fake_python.write_text(
@@ -3164,6 +3221,8 @@ exec "$REAL_PYTHON" "$@"
         [
             "/bin/bash",
             str(CAPTURE_SCRIPT),
+            "--fingerprint-record-output",
+            str(fingerprint_record),
             str(manifest),
             str(out_root),
         ],
@@ -3185,6 +3244,7 @@ exec "$REAL_PYTHON" "$@"
     assert redaction_scan["ok"] is False
     assert redaction_scan["findings"][0]["kind"] == "jwt"
     assert not (out_root / "summary.json").exists()
+    assert not fingerprint_record.exists()
 
 
 def test_capture_production_evidence_scans_nested_redaction_scan_artifact(
@@ -3506,6 +3566,7 @@ def test_capture_production_evidence_writes_bundle_manifest(
 ) -> None:
     manifest = tmp_path / "production-soak.json"
     out_root = tmp_path / "capture"
+    fingerprint_record = tmp_path / "mnemosyne-production-bundle-fingerprint.json"
     fake_python = tmp_path / "fake-python"
     _minimal_production_manifest(manifest)
     fake_python.write_text(
@@ -3620,6 +3681,8 @@ exec "$REAL_PYTHON" "$@"
         [
             "/bin/bash",
             str(CAPTURE_SCRIPT),
+            "--fingerprint-record-output",
+            str(fingerprint_record),
             str(manifest),
             str(out_root),
         ],
@@ -3641,6 +3704,27 @@ exec "$REAL_PYTHON" "$@"
     assert stdout == summary
     assert summary["bundle_manifest"] == str(out_root / "bundle-manifest.json")
     assert summary["bundle_fingerprint"].startswith("sha256:")
+    fingerprint_payload = json.loads(fingerprint_record.read_text(encoding="utf-8"))
+    assert fingerprint_payload == {
+        "schema": "mnemosyne.production-evidence-fingerprint-record.v1",
+        "record_kind": "out-of-band-bundle-fingerprint",
+        "bundle_dir": str(out_root),
+        "bundle_manifest": str(out_root / "bundle-manifest.json"),
+        "summary": str(out_root / "summary.json"),
+        "bundle_fingerprint": summary["bundle_fingerprint"],
+        "artifact_count": len(bundle_manifest["files"]),
+        "captured_at": summary["completed_at"],
+        "created_by": "infra/scripts/capture-production-evidence.sh",
+        "verification_hint": {
+            "command": "python -m mnemosyne.cli production-evidence-verify",
+            "expected_bundle_fingerprint_argument": summary["bundle_fingerprint"],
+            "report_output_required": True,
+        },
+        "note": (
+            "Retain this file outside the evidence bundle and use bundle_fingerprint "
+            "as --expected-bundle-fingerprint during offline custody review."
+        ),
+    }
     assert summary["parity_row_readiness"] == preflight["parity_row_readiness"]
     assert summary["row_review_source"] == "preflight.json.parity_row_readiness"
     assert summary["offline_verify"] == {
@@ -3659,7 +3743,7 @@ exec "$REAL_PYTHON" "$@"
         ],
         "note": (
             "Custody review only; does not rerun production checks or flip audit rows. "
-            "Expected fingerprint must come from an independently retained out-of-band capture record."
+            "Expected fingerprint must come from an independently retained out-of-band fingerprint record."
         ),
     }
     assert bundle_manifest["schema"] == "mnemosyne.production-evidence-bundle.v1"
@@ -3700,7 +3784,7 @@ exec "$REAL_PYTHON" "$@"
             "production-evidence-verify",
             str(out_root),
             "--expected-bundle-fingerprint",
-            summary["bundle_fingerprint"],
+            fingerprint_payload["bundle_fingerprint"],
             "--report-output",
             str(report_path),
         ],

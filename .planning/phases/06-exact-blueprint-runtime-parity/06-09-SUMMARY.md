@@ -51,7 +51,7 @@ argv-style `production-evidence-verify` command with a fingerprint placeholder
 whose first element is the wrapper-selected interpreter, and a custody-only note
 so reviewers can replay the offline verifier without reconstructing the command
 from prose. The expected fingerprint remains outside the bundle in the
-operator's capture record and is supplied by the reviewer.
+operator's fingerprint record and is supplied by the reviewer.
 
 Post-plan reviewer-report hardening now requires normal custody review to write
 an external no-overwrite `--report-output` JSON artifact outside the bundle under
@@ -110,6 +110,7 @@ when the operator runs:
 
 ```bash
 infra/scripts/capture-production-evidence.sh \
+  --fingerprint-record-output /secure/path/to/mnemosyne-production-bundle-fingerprint.json \
   /secure/path/to/production-soak-manifest.json \
   /secure/path/to/mnemosyne-production-evidence
 ```
@@ -129,7 +130,7 @@ output reports `ok=true` and `findings=[]`. The wrapper must also produce
 `redaction-scan.json` with `ok=true`, `bundle-manifest.json`, and a
 `summary.json` `bundle_fingerprint`. Reviewers must then run
 `production-evidence-verify` with `--expected-bundle-fingerprint` set from an
-independently retained out-of-band capture record and `--report-output` set to a
+independently retained out-of-band fingerprint record and `--report-output` set to a
 new external path outside the bundle under review; the verifier report must have
 `ok=true` before any row can flip.
 

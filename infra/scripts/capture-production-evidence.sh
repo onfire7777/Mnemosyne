@@ -6,7 +6,7 @@ usage() {
   cat >&2 <<'USAGE'
 Usage:
   infra/scripts/capture-production-evidence.sh [--env-file ENV] --preflight-only SOAK_MANIFEST OUT_ROOT
-  infra/scripts/capture-production-evidence.sh [--env-file ENV] SOAK_MANIFEST OUT_ROOT
+  infra/scripts/capture-production-evidence.sh [--env-file ENV] [--fingerprint-record-output PATH] SOAK_MANIFEST OUT_ROOT
 
 Runs the existing production evidence path:
   1. Validate that SOAK_MANIFEST is explicitly production-scoped.
@@ -24,11 +24,12 @@ Runs the existing production evidence path:
 OUT_ROOT is required and must be an explicit absolute external custody path
 outside the repository for both preflight-only and full production capture.
 
-Reviewers can recheck a completed bundle offline with an independently retained
-bundle fingerprint recorded at capture time:
+Reviewers can recheck a completed bundle offline with the independently retained
+bundle fingerprint record written at capture time:
   PYTHON="${PYTHON:-$(if [ -x .venv/bin/python ]; then printf '%s' .venv/bin/python; else command -v python3; fi)}"
   BUNDLE_DIR=OUT_ROOT
-  EXPECTED_BUNDLE_FINGERPRINT=sha256:...  # external ticket/log value, not read from this bundle
+  FINGERPRINT_RECORD=/secure/path/to/mnemosyne-production-bundle-fingerprint.json
+  EXPECTED_BUNDLE_FINGERPRINT="$("$PYTHON" -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["bundle_fingerprint"])' "$FINGERPRINT_RECORD")"
   VERIFY_REPORT=/secure/path/to/mnemosyne-production-evidence-verify.json
   "$PYTHON" -m mnemosyne.cli production-evidence-verify "$BUNDLE_DIR" \
     --expected-bundle-fingerprint "$EXPECTED_BUNDLE_FINGERPRINT" \
@@ -49,6 +50,10 @@ Options:
                     exit before deployment-soak or release-audit runs. Preflight
                     writes source/operator manifest copies, retained input
                     artifact snapshots, and redaction-scan.json for setup proof.
+  --fingerprint-record-output PATH
+                    Optional full-capture-only external JSON record for the
+                    bundle fingerprint. Must be absolute, external, outside the
+                    evidence bundle, non-symlinked, and must not already exist.
 USAGE
 }
 
@@ -58,6 +63,7 @@ REPO_DIR="$(cd "${INFRA_DIR}/.." && pwd)"
 
 PREFLIGHT_ONLY=0
 ENV_FILE=""
+FINGERPRINT_RECORD_OUTPUT=""
 while [ "$#" -gt 0 ]; do
   case "${1}" in
     --help|-h)
@@ -75,6 +81,15 @@ while [ "$#" -gt 0 ]; do
         exit 64
       fi
       ENV_FILE="${2:-}"
+      shift 2
+      ;;
+    --fingerprint-record-output)
+      if [ -z "${2:-}" ]; then
+        echo "ERROR: --fingerprint-record-output requires an absolute external path" >&2
+        usage
+        exit 64
+      fi
+      FINGERPRINT_RECORD_OUTPUT="${2:-}"
       shift 2
       ;;
     --)
@@ -166,6 +181,68 @@ PY
 if [ -e "${OUT_ROOT}" ] || [ -L "${OUT_ROOT}" ]; then
   echo "ERROR: production evidence output root must not already exist: ${OUT_ROOT}" >&2
   exit 65
+fi
+
+if [ -n "${FINGERPRINT_RECORD_OUTPUT}" ]; then
+  if [ "${PREFLIGHT_ONLY}" = "1" ]; then
+    echo "ERROR: --fingerprint-record-output is only valid for full production capture" >&2
+    exit 64
+  fi
+  FINGERPRINT_RECORD_OUTPUT_RESOLVED="$("${PYTHON}" - "${FINGERPRINT_RECORD_OUTPUT}" "${REPO_DIR}" "${OUT_ROOT}" <<'PY'
+from pathlib import Path
+import sys
+
+raw = Path(sys.argv[1]).expanduser()
+repo_dir = Path(sys.argv[2]).resolve()
+out_root = Path(sys.argv[3]).resolve(strict=False)
+if not raw.is_absolute():
+    print("ERROR: production fingerprint record output must be an absolute external path", file=sys.stderr)
+    sys.exit(65)
+if raw.exists() or raw.is_symlink():
+    print("ERROR: production fingerprint record output must not already exist or be a symlink", file=sys.stderr)
+    sys.exit(65)
+resolved = raw.resolve(strict=False)
+try:
+    resolved.relative_to(out_root)
+except ValueError:
+    pass
+else:
+    print("ERROR: production fingerprint record output must be outside the evidence bundle", file=sys.stderr)
+    sys.exit(65)
+parent = raw.parent
+if parent.is_symlink():
+    print("ERROR: production fingerprint record output parent must not be a symlink", file=sys.stderr)
+    sys.exit(65)
+if not parent.exists() or not parent.is_dir():
+    print("ERROR: production fingerprint record output parent must be an existing directory", file=sys.stderr)
+    sys.exit(65)
+parent_resolved = parent.resolve(strict=True)
+try:
+    resolved.relative_to(repo_dir)
+except ValueError:
+    pass
+else:
+    print("ERROR: production fingerprint record output must not point inside the repository", file=sys.stderr)
+    sys.exit(65)
+try:
+    parent_resolved.relative_to(repo_dir)
+except ValueError:
+    pass
+else:
+    print("ERROR: production fingerprint record output parent must not be inside the repository", file=sys.stderr)
+    sys.exit(65)
+try:
+    parent_resolved.relative_to(out_root)
+except ValueError:
+    pass
+else:
+    print("ERROR: production fingerprint record output parent must be outside the evidence bundle", file=sys.stderr)
+    sys.exit(65)
+print(resolved)
+PY
+)"
+else
+  FINGERPRINT_RECORD_OUTPUT_RESOLVED=""
 fi
 
 MANIFEST_PATH="$(cd "$(dirname "${MANIFEST}")" && pwd)/$(basename "${MANIFEST}")"
@@ -276,7 +353,7 @@ PY
   unset ENV_LOADED_ASSIGNMENTS
 fi
 STARTED_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-export MANIFEST_PATH OUT_ROOT REPO_DIR STARTED_AT PREFLIGHT_ONLY PYTHON
+export MANIFEST_PATH OUT_ROOT REPO_DIR STARTED_AT PREFLIGHT_ONLY PYTHON FINGERPRINT_RECORD_OUTPUT_RESOLVED
 
 "${PYTHON}" - <<'PY'
 import json
@@ -1721,6 +1798,7 @@ bundle_manifest = {
     encoding="utf-8",
 )
 
+completed_at = __import__("datetime").datetime.now(__import__("datetime").UTC).isoformat()
 summary = {
     "out_root": str(out_root),
     "operator_manifest": str(out_root / "operator-soak-manifest.json"),
@@ -1735,7 +1813,7 @@ summary = {
     "release_audit_ok": audit.get("ok") is True,
     "release_audit_fingerprint": audit.get("fingerprint"),
     "release_audit_findings": audit.get("findings", []),
-    "completed_at": __import__("datetime").datetime.now(__import__("datetime").UTC).isoformat(),
+    "completed_at": completed_at,
     "offline_verify": {
         "bundle_dir": str(out_root),
         "expected_bundle_fingerprint_source": "out-of-band-capture-record",
@@ -1752,7 +1830,7 @@ summary = {
         ],
         "note": (
             "Custody review only; does not rerun production checks or flip audit rows. "
-            "Expected fingerprint must come from an independently retained out-of-band capture record."
+            "Expected fingerprint must come from an independently retained out-of-band fingerprint record."
         ),
     },
 }
@@ -1778,5 +1856,46 @@ if not metadata_scan["ok"]:
             file=sys.stderr,
         )
     sys.exit(65)
+fingerprint_record_output = os.environ.get("FINGERPRINT_RECORD_OUTPUT_RESOLVED", "")
+if fingerprint_record_output:
+    fingerprint_record_path = Path(fingerprint_record_output)
+    fingerprint_record = {
+        "schema": "mnemosyne.production-evidence-fingerprint-record.v1",
+        "record_kind": "out-of-band-bundle-fingerprint",
+        "bundle_dir": str(out_root),
+        "bundle_manifest": str(out_root / "bundle-manifest.json"),
+        "summary": str(out_root / "summary.json"),
+        "bundle_fingerprint": bundle_fingerprint,
+        "artifact_count": len(bundle_files),
+        "captured_at": completed_at,
+        "created_by": "infra/scripts/capture-production-evidence.sh",
+        "verification_hint": {
+            "command": "python -m mnemosyne.cli production-evidence-verify",
+            "expected_bundle_fingerprint_argument": bundle_fingerprint,
+            "report_output_required": True,
+        },
+        "note": (
+            "Retain this file outside the evidence bundle and use bundle_fingerprint "
+            "as --expected-bundle-fingerprint during offline custody review."
+        ),
+    }
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    try:
+        fd = os.open(fingerprint_record_path, flags, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(fingerprint_record, handle, indent=2)
+            handle.write("\n")
+    except FileExistsError:
+        print(
+            f"ERROR: production fingerprint record output already exists: {fingerprint_record_path}",
+            file=sys.stderr,
+        )
+        sys.exit(65)
+    except OSError as exc:
+        print(
+            f"ERROR: production fingerprint record output could not be written: {exc}",
+            file=sys.stderr,
+        )
+        sys.exit(65)
 print(json.dumps(summary, indent=2))
 PY
