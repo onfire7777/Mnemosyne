@@ -83,7 +83,11 @@ limited to defects that directly block that path:
    placeholders. Use `reports/row-action-plan.{json,md}` as the row-owner
    handoff because it joins each B1-B10 row's runbook, missing render values,
    missing provider refs, missing artifacts, next actions, and row validator.
-   Then use the generated `reports/input-artifact-validation-commands.sh` as a
+   Use `reports/provider-env-action-plan.{json,md}` as the shared-provider
+   handoff because it maps every provider-manifest env ref to its manifest path,
+   provider check, primary row ownership, and shared provider-check blast radius
+   without retaining values or runtime env-file paths. Then use the generated
+   `reports/input-artifact-validation-commands.sh` as a
    pre-capture check for all rows, or pass `B1` through `B10` to validate one
    row's required artifact set and manifest-derived validators. Missing
    worklist entries are work to capture from real production systems, not files
