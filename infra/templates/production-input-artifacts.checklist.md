@@ -104,3 +104,8 @@ Rules:
   errors without printing the external custody path. The row grouping is for
   operator assignment only; production evidence still requires the full capture
   and release-audit runbook.
+- For secret-bearing provider/runtime variables, prefer passing a separate
+  external mode-`0600` env file to
+  `infra/scripts/capture-production-evidence.sh --env-file /secure/path/to/mnemosyne-production-runtime.env`;
+  do not put those values in this no-secret input-artifact checklist or the
+  custody packet docs.

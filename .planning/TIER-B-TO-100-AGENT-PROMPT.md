@@ -122,9 +122,9 @@ Per `infra/PRODUCTION-EVIDENCE.md` (the canonical 28-command capture/acceptance 
 ```bash
 infra/scripts/render-production-soak-manifest.sh --env-file /secure/path/to/mnemosyne-tier-b-custody/production-render.env --check-environment
 infra/scripts/render-production-soak-manifest.sh --env-file /secure/path/to/mnemosyne-tier-b-custody/production-render.env --output /secure/path/production-soak-manifest.json
-infra/scripts/capture-production-evidence.sh --preflight-only /secure/path/production-soak-manifest.json /secure/path/preflight-out
+infra/scripts/capture-production-evidence.sh --env-file /secure/path/to/mnemosyne-production-runtime.env --preflight-only /secure/path/production-soak-manifest.json /secure/path/preflight-out
 ```
-5. Capture: `infra/scripts/capture-production-evidence.sh /secure/path/production-soak-manifest.json /secure/path/evidence-out`; the wrapper runs `deployment-soak` and then `release-audit --evidence-manifest "$OUT_ROOT/evidence/manifest.json" --require-production-validated --require-provider-forbid-local`.
+5. Capture: `infra/scripts/capture-production-evidence.sh --env-file /secure/path/to/mnemosyne-production-runtime.env /secure/path/production-soak-manifest.json /secure/path/evidence-out`; the wrapper runs `deployment-soak` and then `release-audit --evidence-manifest "$OUT_ROOT/evidence/manifest.json" --require-production-validated --require-provider-forbid-local`. Omit `--env-file` only when the equivalent runtime/provider variables are already exported by a trusted secret manager or supervisor.
 6. Verify offline with a separately retained report:
 ```bash
 PYTHON="${PYTHON:-$(if [ -x .venv/bin/python ]; then printf '%s' .venv/bin/python; else command -v python3; fi)}"

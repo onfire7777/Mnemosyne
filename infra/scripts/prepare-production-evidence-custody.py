@@ -372,7 +372,9 @@ This packet is a no-secret operator workspace. It is not production evidence.
 1. Edit `production-render.env` outside the repo with non-secret `MNEMOSYNE_PROD_*` values.
 2. Fill `input-artifacts/provider-manifest.production.json` with production provider references.
 3. Add the remaining row artifacts under `input-artifacts/`.
-4. Refresh `reports/tier-b-gap-report.json` generation with:
+4. Put secret-bearing runtime/provider values in a separate external mode-0600
+   env file, for example `/secure/path/to/mnemosyne-production-runtime.env`.
+5. Refresh `reports/tier-b-gap-report.json` generation with:
 
 ```bash
 infra/scripts/prepare-production-evidence-custody.py --refresh {root}
@@ -394,7 +396,9 @@ or `manifests/`.
 When the report is ready, render the soak manifest to a separate external path
 with `render-production-soak-manifest.sh --env-file {root / 'production-render.env'}`
 and capture into a new external output root. Do not use this packet root as the
-capture output root.
+capture output root. Pass secret-bearing runtime/provider values through
+`capture-production-evidence.sh --env-file /secure/path/to/mnemosyne-production-runtime.env`
+instead of shell-sourcing them.
 """
     _atomic_write_text(readme, content)
 
@@ -529,8 +533,8 @@ def refresh_report(root: Path, *, repo_dir: Path) -> dict[str, Any]:
         "next_commands": [
             f"infra/scripts/render-production-soak-manifest.sh --env-file {root / 'production-render.env'} --check-environment",
             f"infra/scripts/render-production-soak-manifest.sh --env-file {root / 'production-render.env'} --output {manifests_dir / 'production-soak-manifest.json'}",
-            f"infra/scripts/capture-production-evidence.sh --preflight-only {manifests_dir / 'production-soak-manifest.json'} {root.parent / (root.name + '-preflight')}",
-            f"infra/scripts/capture-production-evidence.sh {manifests_dir / 'production-soak-manifest.json'} {root.parent / (root.name + '-capture')}",
+            f"infra/scripts/capture-production-evidence.sh --env-file /secure/path/to/mnemosyne-production-runtime.env --preflight-only {manifests_dir / 'production-soak-manifest.json'} {root.parent / (root.name + '-preflight')}",
+            f"infra/scripts/capture-production-evidence.sh --env-file /secure/path/to/mnemosyne-production-runtime.env {manifests_dir / 'production-soak-manifest.json'} {root.parent / (root.name + '-capture')}",
         ],
     }
     report_json = reports_dir / "tier-b-gap-report.json"

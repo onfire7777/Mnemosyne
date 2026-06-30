@@ -5,8 +5,8 @@ umask 077
 usage() {
   cat >&2 <<'USAGE'
 Usage:
-  infra/scripts/capture-production-evidence.sh --preflight-only SOAK_MANIFEST OUT_ROOT
-  infra/scripts/capture-production-evidence.sh SOAK_MANIFEST OUT_ROOT
+  infra/scripts/capture-production-evidence.sh [--env-file ENV] --preflight-only SOAK_MANIFEST OUT_ROOT
+  infra/scripts/capture-production-evidence.sh [--env-file ENV] SOAK_MANIFEST OUT_ROOT
 
 Runs the existing production evidence path:
   1. Validate that SOAK_MANIFEST is explicitly production-scoped.
@@ -41,6 +41,10 @@ validation_scope.operator_asserted=true. Secrets must come from environment,
 files, or command providers; do not put tokens directly in manifest args.
 
 Options:
+  --env-file ENV   Strict optional runtime/provider dotenv file for production
+                   capture. Must be absolute, external, non-symlinked, mode
+                   0600, and contain only allowlisted Mnemosyne operator env
+                   names. This avoids shell-sourcing secret-bearing env files.
   --preflight-only  Validate and copy the manifest, write preflight.json, then
                     exit before deployment-soak or release-audit runs. Preflight
                     writes source/operator manifest copies, retained input
@@ -53,6 +57,7 @@ INFRA_DIR="$(cd "${HERE}/.." && pwd)"
 REPO_DIR="$(cd "${INFRA_DIR}/.." && pwd)"
 
 PREFLIGHT_ONLY=0
+ENV_FILE=""
 while [ "$#" -gt 0 ]; do
   case "${1}" in
     --help|-h)
@@ -62,6 +67,15 @@ while [ "$#" -gt 0 ]; do
     --preflight-only)
       PREFLIGHT_ONLY=1
       shift
+      ;;
+    --env-file)
+      if [ -z "${2:-}" ]; then
+        echo "ERROR: --env-file requires an absolute external path" >&2
+        usage
+        exit 64
+      fi
+      ENV_FILE="${2:-}"
+      shift 2
       ;;
     --)
       shift
@@ -177,6 +191,90 @@ else:
     sys.exit(65)
 PY
 )"
+
+if [ -n "${ENV_FILE}" ]; then
+  ENV_FILE_RESOLVED="$("${PYTHON}" - "${ENV_FILE}" "${REPO_DIR}" <<'PY'
+from pathlib import Path
+import sys
+
+env_file = Path(sys.argv[1]).expanduser()
+repo_dir = Path(sys.argv[2]).resolve()
+if not env_file.is_absolute():
+    print("ERROR: production capture --env-file must be an absolute external path", file=sys.stderr)
+    sys.exit(65)
+if env_file.is_symlink():
+    print("ERROR: production capture --env-file must not be a symlink", file=sys.stderr)
+    sys.exit(65)
+try:
+    env_file.relative_to(repo_dir)
+except ValueError:
+    pass
+else:
+    print("ERROR: production capture --env-file must not point inside the repository", file=sys.stderr)
+    sys.exit(65)
+resolved = env_file.resolve(strict=False)
+try:
+    resolved.relative_to(repo_dir)
+except ValueError:
+    print(resolved)
+else:
+    print("ERROR: production capture --env-file must not resolve inside the repository", file=sys.stderr)
+    sys.exit(65)
+PY
+)"
+  ENV_ALLOWED_KEYS=()
+  while IFS= read -r key; do
+    if [ -n "${key}" ]; then
+      ENV_ALLOWED_KEYS+=("${key}")
+    fi
+  done < <("${PYTHON}" - "${REPO_DIR}" "${MANIFEST_PATH}" <<'PY'
+import json
+import re
+import sys
+from pathlib import Path
+
+repo_dir = Path(sys.argv[1])
+manifest_path = Path(sys.argv[2])
+allowed: set[str] = set()
+inventory = repo_dir / "infra" / "templates" / "production-operator-env.inventory.md"
+for line in inventory.read_text(encoding="utf-8").splitlines():
+    match = re.fullmatch(r"- `([A-Z][A-Z0-9_]*)`", line.strip())
+    if match:
+        allowed.add(match.group(1))
+try:
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+except Exception:
+    payload = {}
+
+
+def collect_env_refs(value: object) -> None:
+    if isinstance(value, dict):
+        if set(value) == {"env"} and isinstance(value.get("env"), str):
+            allowed.add(str(value["env"]))
+        for item in value.values():
+            collect_env_refs(item)
+    elif isinstance(value, list):
+        for item in value:
+            collect_env_refs(item)
+
+
+collect_env_refs(payload)
+for key in sorted(allowed):
+    print(key)
+PY
+)
+  if [ "${#ENV_ALLOWED_KEYS[@]}" -eq 0 ]; then
+    echo "ERROR: production capture --env-file allowlist is empty" >&2
+    exit 65
+  fi
+  ENV_LOADED_ASSIGNMENTS="$("${PYTHON}" "${REPO_DIR}/infra/scripts/load-env.py" --allow-missing "${ENV_FILE_RESOLVED}" "${ENV_ALLOWED_KEYS[@]}")"
+  while IFS='=' read -r key value; do
+    if [ -n "${key}" ]; then
+      export "${key}=${value}"
+    fi
+  done <<< "${ENV_LOADED_ASSIGNMENTS}"
+  unset ENV_LOADED_ASSIGNMENTS
+fi
 STARTED_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 export MANIFEST_PATH OUT_ROOT REPO_DIR STARTED_AT PREFLIGHT_ONLY PYTHON
 

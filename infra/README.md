@@ -116,6 +116,8 @@ open /secure/path/to/mnemosyne-tier-b-custody/reports/tier-b-gap-report.md
 # Review the complete no-secret operator environment inventory.
 open infra/templates/production-operator-env.inventory.md
 # Fill the packet's production-render.env outside this repository.
+# Put secret-bearing runtime/provider values in a separate external 0600 env file
+# if you do not want to rely on already-exported shell environment variables.
 # Fill input-artifacts/provider-manifest.production.json and every other
 # manifest-referenced production input artifact listed in the packet report.
 infra/scripts/prepare-production-evidence-custody.py \
@@ -129,10 +131,12 @@ infra/scripts/render-production-soak-manifest.sh \
   --env-file /secure/path/to/mnemosyne-tier-b-custody/production-render.env \
   --output /secure/path/to/production-soak-manifest.json
 infra/scripts/capture-production-evidence.sh \
+  --env-file /secure/path/to/mnemosyne-production-runtime.env \
   --preflight-only \
   /secure/path/to/production-soak-manifest.json \
   /secure/path/to/mnemosyne-production-preflight
 infra/scripts/capture-production-evidence.sh \
+  --env-file /secure/path/to/mnemosyne-production-runtime.env \
   /secure/path/to/production-soak-manifest.json \
   /secure/path/to/mnemosyne-production-evidence
 PYTHON="${PYTHON:-$(if [ -x .venv/bin/python ]; then printf '%s' .venv/bin/python; else command -v python3; fi)}"

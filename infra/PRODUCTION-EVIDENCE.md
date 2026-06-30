@@ -43,7 +43,14 @@ This runbook is the operator handoff for flipping the remaining Tier B parity ro
 - Render `infra/templates/production-soak-manifest.template.json` outside the repo with `infra/scripts/render-production-soak-manifest.sh --output /secure/path/to/production-soak-manifest.json`. Manual edits are only a fallback and must still leave no unresolved `MNEMOSYNE_PROD_*` placeholders; the capture wrapper rejects unresolved placeholders before running production checks.
 - `MNEMOSYNE_PROD_EVIDENCE_DIR` and the second positional output-root argument passed to `capture-production-evidence.sh` must be absolute external custody paths outside the repository; output roots must be new and must not already exist. The wrapper does not consume a separate `PREFLIGHT_OUT_ROOT` environment variable.
 - Keep raw secrets out of `args` and `global_args`. The production wrapper rejects secret-bearing options such as `--access-token`, `--api-token`, `--github-token`, `--session-secret`, and `--password`, and it fails closed on high-confidence secret material such as JWTs, private-key blocks, GitHub tokens, AWS access keys, and `sk-*` API keys.
-- Provide secrets through environment variables or command/provider files. Required examples include `MNEMOSYNE_POSTGRES_DSN`, `MNEMOSYNE_IDP_TOKEN`, `MNEMOSYNE_MCP_TOKEN`, and `MNEMOSYNE_MCP_SESSION_TOKEN` where the selected checks need them.
+- Provide secrets through environment variables, a strict external runtime env
+  file, or command/provider files. Required examples include
+  `MNEMOSYNE_POSTGRES_DSN`, `MNEMOSYNE_IDP_TOKEN`, `MNEMOSYNE_MCP_TOKEN`, and
+  `MNEMOSYNE_MCP_SESSION_TOKEN` where the selected checks need them. Prefer
+  `capture-production-evidence.sh --env-file /secure/path/to/mnemosyne-production-runtime.env`
+  for secret-bearing runtime/provider values that should not be shell-sourced;
+  the file must be mode `0600`, outside the repo, non-symlinked, and limited to
+  names listed in `infra/templates/production-operator-env.inventory.md`.
 - The manifest must include:
   - `validation_scope.production_validated: true`
   - `validation_scope.target_environment: "production"`
@@ -74,10 +81,12 @@ infra/scripts/render-production-soak-manifest.sh \
   --env-file /secure/path/to/mnemosyne-tier-b-custody/production-render.env \
   --output /secure/path/to/production-soak-manifest.json
 infra/scripts/capture-production-evidence.sh \
+  --env-file /secure/path/to/mnemosyne-production-runtime.env \
   --preflight-only \
   /secure/path/to/production-soak-manifest.json \
   /secure/path/to/mnemosyne-production-preflight
 infra/scripts/capture-production-evidence.sh \
+  --env-file /secure/path/to/mnemosyne-production-runtime.env \
   /secure/path/to/production-soak-manifest.json \
   /secure/path/to/mnemosyne-production-evidence
 ```

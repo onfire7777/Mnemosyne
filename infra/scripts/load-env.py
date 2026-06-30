@@ -44,14 +44,19 @@ def _parse_assignment(line: str, *, line_number: int) -> tuple[str, str] | None:
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) < 3:
+    args = argv[1:]
+    allow_missing = False
+    if args and args[0] == "--allow-missing":
+        allow_missing = True
+        args = args[1:]
+    if len(args) < 2:
         print(
-            "Usage: load-env.py ENV_FILE REQUIRED_KEY [REQUIRED_KEY ...]",
+            "Usage: load-env.py [--allow-missing] ENV_FILE REQUIRED_KEY [REQUIRED_KEY ...]",
             file=sys.stderr,
         )
         return 64
-    env_path = Path(argv[1]).expanduser()
-    required = list(dict.fromkeys(argv[2:]))
+    env_path = Path(args[0]).expanduser()
+    required = list(dict.fromkeys(args[1:]))
     allowed = set(required)
     if any(not KEY_RE.fullmatch(key) for key in required):
         _deny("required keys must be uppercase environment variable names")
@@ -82,10 +87,11 @@ def main(argv: list[str]) -> int:
         values[key] = value
 
     missing = [key for key in required if key not in values]
-    if missing:
+    if missing and not allow_missing:
         _deny("env file is missing required keys: " + ", ".join(missing))
     for key in required:
-        print(f"{key}={values[key]}")
+        if key in values:
+            print(f"{key}={values[key]}")
     return 0
 
 
