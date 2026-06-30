@@ -5,6 +5,8 @@
 > ledger + matrix, the proven SLO evidence (`eval/`), and the full progress history through 2026-06-30.
 > Hand it to a capable coding/SRE agent (Claude Code or Codex) working **inside `/Users/admin/Mnemosyne`**.
 > **The repo's own docs are authoritative; where this prompt and a repo doc disagree, the doc wins.**
+> Also read `.planning/ACTIVE-GOAL-OPERATING-CONTRACT.md` first; it records the
+> active continuation rules and the thread-specific failure modes to avoid.
 
 ---
 
@@ -31,7 +33,7 @@ blueprint invariant:
 
 ## 1. WHERE THE PROJECT STANDS — verified, do not re-derive
 
-- **Position:** ~82% blended; branch `main`; latest verified baseline is `5d802dd` with GitHub CI green (run `28413349236`: Unit + drift, Postgres integration, and ruff). All 10 audit rows are `Partial`. Canonical checkout `/Users/admin/Mnemosyne` → `onfire7777/Mnemosyne`.
+- **Position:** ~82% blended; branch `main`; latest verified baseline entering the Tier-B custody-prep slice is `927f252` with GitHub CI green (run `28415636298`: Unit + drift, Postgres integration, and ruff). All 10 audit rows are `Partial`. Canonical checkout `/Users/admin/Mnemosyne` → `onfire7777/Mnemosyne`.
 - **6/6 §16 SLOs proven** (Wave-5 definitive run, 2026-06-25; evidence in `eval/calibration/report.json` + `docs/ROADMAP-TO-100.md`):
 
   | SLO | Target | Measured |
@@ -82,7 +84,7 @@ Read `docs/blueprint/Mnemosyne-v2-Build-Blueprint.md` and `.planning/BLUEPRINT-P
 
 ## 5. EXECUTION PLAN
 
-**Phase 0 — Readiness baseline (no provisioning).** Create the external custody dir; copy `infra/templates/production-render.env.example` outside the repo; run `render-production-soak-manifest.sh --check-environment`. Emit a **gap report**: every unset `MNEMOSYNE_PROD_*` var, every missing artifact, and the `parity_row_readiness` grouping. That is your work-list.
+**Phase 0 — Readiness baseline (no provisioning).** Create a fresh external custody packet with `infra/scripts/prepare-production-evidence-custody.py /secure/path/to/mnemosyne-tier-b-custody`. It copies `production-render.env`, the shared provider-manifest template, operator docs, and a row-scoped `reports/tier-b-gap-report.{json,md}` worklist. The helper exits nonzero while evidence is missing; that is expected setup feedback. Then fill the external packet and run `render-production-soak-manifest.sh --check-environment` until the gap report shows every `MNEMOSYNE_PROD_*` var, provider-manifest env ref, input artifact, and `parity_row_readiness` row is ready.
 
 **Phase 1 — Shared provider stack (unblocks 7/10) ← first.** Provision + wire, then fill `provider-manifest.production.json` (`forbid_local: true`): production Postgres (pgvector 1024-dim HNSW + **ParadeDB/BM25** lexical + **Apache AGE** graph), **embedding** (`MNEMOSYNE_EMBEDDING_URL/MODEL/API_KEY`) + **reranker** (`MNEMOSYNE_RERANKER_URL/MODEL/API_KEY`), **OIDC/IdP/Keycloak** (`MNEMOSYNE_PROVIDER_OIDC_ISSUER/AUDIENCE/JWKS_URL` + authz policy). Re-run `--check-environment` until all referenced provider vars resolve.
 

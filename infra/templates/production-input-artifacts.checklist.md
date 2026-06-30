@@ -7,6 +7,16 @@ credentials, tokens, DSNs, API keys, or raw secrets.
 Place these files in an absolute external custody directory outside the
 repository before rendering or checking the production soak manifest:
 
+To generate the external directory skeleton plus a row-scoped gap report, run:
+
+```bash
+infra/scripts/prepare-production-evidence-custody.py \
+  /secure/path/to/mnemosyne-tier-b-custody
+```
+
+The generated `reports/tier-b-gap-report.{json,md}` files are an operator
+worklist only. They are not production evidence and cannot flip any row.
+
 - [ ] `auth-ops-bundle.json`
 - [ ] `belief-revision-cases.json`
 - [ ] `calibration-dataset.json`
