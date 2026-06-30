@@ -14,10 +14,12 @@ external custody packet generation, strict external render/runtime env
 boundaries, provider-manifest template readiness, input artifact worklists and
 contracts, row action plans, render-env action plans, provider-env action plans,
 top-level inventory groups for missing render placeholders, input artifacts, and
-runtime provider env refs by row, row-selectable validation commands, no-secret
-next-command scripts, retained input/tool artifact custody, manifest-bound
-release audit, and offline `production-evidence-verify` using an out-of-band
-fingerprint record plus external verifier report. It also preserves the
+runtime provider env refs by row, row action plans that separate global render
+blockers from row-scoped render blockers and sort `B1` through `B10`,
+row-selectable validation commands, no-secret next-command scripts, retained
+input/tool artifact custody, manifest-bound release audit, and offline
+`production-evidence-verify` using an out-of-band fingerprint record plus
+external verifier report. It also preserves the
 previously closed local source/harness work for G0-G5, §24 support
 strategies, protected `T-SEC` cases, replay-fidelity hygiene, hosted-dashboard
 release evidence, network-safety hardening, redaction, retained

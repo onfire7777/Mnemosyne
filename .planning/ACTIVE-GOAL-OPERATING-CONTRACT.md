@@ -151,7 +151,10 @@ limited to defects that directly block that path:
    filled from the same row-owner split without manual joins. The same top-level
    inventory groups missing non-secret render placeholders and missing input
    artifacts by affected row, while preserving global render placeholders
-   explicitly. Use the generated row action plan's
+   explicitly. The generated row action plan separates global render blockers
+   from row-scoped render blockers and is ordered `B1` through `B10`, so row
+   owners do not miss shared operator metadata or chase lexicographic row order.
+   Use the generated row action plan's
    `primary_missing_provider_manifest_env_refs` and
    `shared_missing_provider_manifest_env_refs` fields to assign row-owned
    provider env work without hiding shared blockers. B1 owns embedding/reranker
