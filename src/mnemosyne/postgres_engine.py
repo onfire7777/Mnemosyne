@@ -47,6 +47,7 @@ from mnemosyne.models import (
     utc_now,
 )
 from mnemosyne.policy import OperatingPolicy
+from mnemosyne.postgres_security import assert_postgres_safe_role, postgres_safe_role_required
 from mnemosyne.privacy import ErasureMode
 from mnemosyne.retrieval import (
     HashingEmbeddingProvider,
@@ -100,9 +101,18 @@ class PostgresEngine:
     replace.
     """
 
-    def __init__(self, dsn: str, policy: OperatingPolicy | None = None, adapters: RetrievalAdapters | None = None):
+    def __init__(
+        self,
+        dsn: str,
+        policy: OperatingPolicy | None = None,
+        adapters: RetrievalAdapters | None = None,
+        require_safe_role: bool | None = None,
+    ):
         self.dsn = dsn
         self.policy = policy or OperatingPolicy()
+        self.require_safe_role = (
+            postgres_safe_role_required() if require_safe_role is None else bool(require_safe_role)
+        )
         if adapters is None:
             embedding = HashingEmbeddingProvider(dims=1024)
             adapters = RetrievalAdapters(
@@ -118,7 +128,10 @@ class PostgresEngine:
     def connect(self) -> Any:
         if self._psycopg is None or self._jsonb is None:
             self._psycopg, self._jsonb = _require_psycopg()
-        return self._psycopg.connect(self.dsn)
+        conn = self._psycopg.connect(self.dsn)
+        if self.require_safe_role:
+            assert_postgres_safe_role(conn, surface="PostgresEngine")
+        return conn
 
     @staticmethod
     def _set_tenant(cur: Any, db_tenant_id: str) -> None:

@@ -9,6 +9,7 @@ from typing import Any, Callable
 from uuid import NAMESPACE_URL, uuid5
 
 from mnemosyne.ids import new_id
+from mnemosyne.postgres_security import assert_postgres_safe_role, postgres_safe_role_required
 
 
 @dataclass(slots=True)
@@ -120,15 +121,21 @@ class PostgresQueueUnavailableError(RuntimeError):
 class PostgresQueue:
     """Tenant-scoped durable queue backed by PostgreSQL row leasing."""
 
-    def __init__(self, dsn: str, tenant_id: str):
+    def __init__(self, dsn: str, tenant_id: str, require_safe_role: bool | None = None):
         self.dsn = dsn
         self.tenant_id = tenant_id
+        self.require_safe_role = (
+            postgres_safe_role_required() if require_safe_role is None else bool(require_safe_role)
+        )
         self._psycopg, self._jsonb, self._dict_row = _require_psycopg_queue()
         self._leased: dict[str, QueueJob] = {}
         self.ensure_schema()
 
     def connect(self) -> Any:
-        return self._psycopg.connect(self.dsn)
+        conn = self._psycopg.connect(self.dsn)
+        if self.require_safe_role:
+            assert_postgres_safe_role(conn, surface="PostgresQueue")
+        return conn
 
     @property
     def jobs(self) -> dict[str, QueueJob]:

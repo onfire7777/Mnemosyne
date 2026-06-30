@@ -96,12 +96,13 @@ current status or claiming sync.
 
 **Current live verification for this contract revision (refresh before
 reusing):** `/Users/admin/Mnemosyne` is the canonical checkout; `/Users/admin/Desktop/Mnemosyne`
-is not the Git checkout for this run. At this revision, `main` and `origin/main`
-were synchronized at `b79cb87a97ebb220ae09de0db2ec69900a84411b`
-(`fix(infra): include runtime env in Tier-B summary`), and GitHub Actions run
-`28477936121` completed successfully. This proves only source/CI synchronization
-for this checkpoint; future commits supersede it, and it does not prove Tier-B
-production evidence.
+is not the Git checkout for this run. At the start of the 2026-06-30 Postgres
+safe-role pass, `main` and `origin/main` were synchronized at
+`88f8f91a7e1ed29a102e0630691d4858c560803d`
+(`feat(security): fail closed for production MCP profile`), and the goal-tool
+state was active. This proves only the source/CI synchronization baseline for
+this pass; future commits supersede it, and it does not prove Tier-B production
+evidence.
 
 Drive Mnemosyne from the current source-complete state to exact blueprint parity
 and production release readiness:

@@ -13,6 +13,16 @@ Phase: Strict parity continuation after Phase 5 scaffold
 Plan: Exact blueprint parity audit and runtime gap closure
 Status: In progress; exact 1:1 blueprint parity is not complete.
 Current status (2026-06-30): Mandatory Tier A source wirings are closed on `main`; FR-20 local and live-Postgres image/audio/video breadth, FR-21 local and live-Postgres parametric trainer/rollback validation, full compose-Postgres runtime readiness, belief-revision CLI validation, local hosted-MCP JSON-RPC/StreamableHTTP/SSE readiness, direct A12 cached-PPR live materialization coverage, G1 projection-level reality monitoring, G1 functional consciousness scorecard/proto-self seed, native workspace service with the `service.enabled` default-off gate retired, operational specialist-budget toggle retirement, cold-loop ignition enforcement, protected gate-case ratchet enforcement, Rail 6 serve-time sink enforcement, §24 support-strategy runtime durability plus public CLI/MCP mutation surfaces, Phase 7 plans 01-04, and the P5 H8/H12 cascade/observability pre-check are now done and gate-proven. The remaining strict-parity blocker is Tier B production operator evidence against deployed infrastructure before final v1.0 sign-off.
+
+Latest checkpoint (2026-06-30): The active goal operating contract has been refreshed to make the
+professional continuation objective explicit: prioritize real Tier-B production capture, custody,
+operator evidence, and source defects that block that path; avoid redundant generic gates and false
+completion language. The Postgres least-privilege source gap is now narrowed with a shared safe-role
+guard for `PostgresEngine`, `PostgresRuntimeState`, and `PostgresQueue`; `MNEMOSYNE_POSTGRES_REQUIRE_SAFE_ROLE=1`
+enables it for CLI/self-hosted profile, and the MCP production profile enables it automatically for
+Postgres engine/state/queue surfaces. This is production pre-capture hardening only. Tier-B rows stay
+Partial until live role/grant evidence and retained operator-captured `rolsuper`/`rolbypassrls`
+probe output are reviewed with the rest of the production bundle.
 Supersession note: the historical "Last activity: 2026-06-20" paragraph below is retained as changelog context only. Its local 287-test count and open-code wording are superseded by the 2026-06-25 checkpoints below, including the 864-test compose run and the current Tier B operator-evidence blocker.
 
 Latest checkpoint (2026-06-30): The active goal remains unpaused under the v5
