@@ -15,7 +15,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 
 SHARED_PROVIDER_LANES = {"B1", "B2", "B4", "B6", "B7", "B9", "B10"}
@@ -141,6 +141,10 @@ def _lane_sort_key(lane: str) -> tuple[int, str]:
     if lane.startswith("B") and lane[1:].isdigit():
         return int(lane[1:]), lane
     return 10_000, lane
+
+
+def _sorted_lanes(lanes: Iterable[str]) -> list[str]:
+    return sorted(set(lanes), key=_lane_sort_key)
 
 
 def _repo_dir() -> Path:
@@ -809,7 +813,7 @@ def _row_report(
 
 def _phase_plan(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     by_lane = {str(row["lane"]): row for row in rows if row.get("lane")}
-    shared_missing = sorted(
+    shared_missing = _sorted_lanes(
         lane
         for lane in SHARED_PROVIDER_LANES
         if not by_lane.get(lane, {}).get("provider_manifest_environment_complete")
@@ -825,7 +829,7 @@ def _phase_plan(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "phase": "1",
             "title": "Shared provider stack",
             "status": "blocked" if shared_missing else "ready",
-            "lanes_unblocked_when_done": sorted(SHARED_PROVIDER_LANES),
+            "lanes_unblocked_when_done": _sorted_lanes(SHARED_PROVIDER_LANES),
             "currently_blocked_lanes": shared_missing,
             "purpose": "Provider manifest shared by B1, B2, B4, B6, B7, B9, and B10.",
         },
@@ -866,18 +870,18 @@ def _capture_blockers(
     missing_input_artifacts: list[str],
     packet_docs_missing: list[str],
 ) -> dict[str, Any]:
-    blocked_lanes = sorted(
+    blocked_lanes = _sorted_lanes(
         str(row["lane"])
         for row in rows
         if row.get("lane") and not row.get("ready_for_capture")
     )
-    ready_lanes = sorted(
+    ready_lanes = _sorted_lanes(
         str(row["lane"])
         for row in rows
         if row.get("lane") and row.get("ready_for_capture")
     )
 
-    render_blocked_lanes = sorted(
+    render_blocked_lanes = _sorted_lanes(
         str(row["lane"])
         for row in rows
         if row.get("lane") and row.get("missing_render_environment")
@@ -885,12 +889,12 @@ def _capture_blockers(
     if global_missing_render_env:
         render_blocked_lanes = blocked_lanes
 
-    provider_blocked_lanes = sorted(
+    provider_blocked_lanes = _sorted_lanes(
         str(row["lane"])
         for row in rows
         if row.get("lane") and row.get("missing_provider_manifest_env_refs")
     )
-    artifact_blocked_lanes = sorted(
+    artifact_blocked_lanes = _sorted_lanes(
         str(row["lane"])
         for row in rows
         if row.get("lane") and row.get("missing_input_artifacts")

@@ -542,6 +542,7 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     blockers = report["capture_blockers"]
     assert blockers["report_is_evidence"] is False
     assert blockers["blocked_lane_count"] == len(blockers["blocked_lanes"])
+    assert blockers["blocked_lanes"] == [f"B{index}" for index in range(1, 11)]
     assert set(blockers["blocked_lanes"]) == {
         str(row["lane"]) for row in report["rows"] if not row["ready_for_capture"]
     }
@@ -554,6 +555,18 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
         "render_environment",
         "provider_manifest_environment",
         "input_artifacts",
+    ]
+    assert blockers["recommended_order"][0]["blocked_lanes"] == [
+        f"B{index}" for index in range(1, 11)
+    ]
+    assert blockers["recommended_order"][1]["blocked_lanes"] == [
+        "B1",
+        "B2",
+        "B4",
+        "B6",
+        "B7",
+        "B9",
+        "B10",
     ]
     inventory = report["operator_input_inventory"]
     assert set(inventory) == {
@@ -1022,6 +1035,15 @@ def test_prepare_production_evidence_custody_phase_plan_scopes_provider_stack() 
 
     assert phase_plan[1]["title"] == "Shared provider stack"
     assert phase_plan[1]["status"] == "blocked"
+    assert phase_plan[1]["lanes_unblocked_when_done"] == [
+        "B1",
+        "B2",
+        "B4",
+        "B6",
+        "B7",
+        "B9",
+        "B10",
+    ]
     assert phase_plan[1]["currently_blocked_lanes"] == ["B2"]
     assert phase_plan[2]["title"] == "Keystone rows"
     assert phase_plan[2]["status"] == "blocked"

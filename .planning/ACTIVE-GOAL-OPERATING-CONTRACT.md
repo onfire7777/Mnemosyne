@@ -154,6 +154,8 @@ limited to defects that directly block that path:
    explicitly. The generated row action plan separates global render blockers
    from row-scoped render blockers and is ordered `B1` through `B10`, so row
    owners do not miss shared operator metadata or chase lexicographic row order.
+   Capture-blocker and shared-provider lane lists use the same numeric row
+   ordering.
    Use the generated row action plan's
    `primary_missing_provider_manifest_env_refs` and
    `shared_missing_provider_manifest_env_refs` fields to assign row-owned
