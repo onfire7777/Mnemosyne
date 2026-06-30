@@ -295,6 +295,10 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
         "--bundle",
         str(packet_root / "input-artifacts" / "retrieval-ops-bundle.json"),
     ]
+    assert validation_plan["retrieval-ops"]["lanes"] == ["B1"]
+    assert validation_plan["retrieval-ops"]["rows"][0]["packet_runbook"] == (
+        "docs/runbooks/row-01-production-postgres-retrieval.md"
+    )
     assert validation_plan["retrieval-ops"]["argv"][3:] == [
         "--require-provider-check",
         "embedding",
@@ -400,7 +404,8 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     assert "reports/mnemosyne-production-runtime.env.example" in readme
     assert "reports/input-artifact-worklist.md" in readme
     assert "reports/input-artifact-validation-commands.sh" in readme
-    assert "missing or symlinked input artifacts" in readme
+    assert "reports/input-artifact-validation-commands.sh B1" in readme
+    assert "symlinked input artifacts scoped to that selection" in readme
     assert "reports/next-commands.sh" in readme
     validation_script_text = artifact_validation_script.read_text(encoding="utf-8")
     assert validation_script_text.startswith("#!/usr/bin/env bash\nset -euo pipefail\n")
@@ -408,7 +413,14 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
         validation_script_text
     )
     assert "never creates placeholder JSON, PEM, or bundle files" in validation_script_text
-    assert "check_artifact retrieval-ops-bundle.json" in validation_script_text
+    assert 'REQUESTED_LANE="${1:-all}"' in validation_script_text
+    assert "usage: $0 [all|B1|B2|B3|B4|B5|B6|B7|B8|B9|B10]" in (
+        validation_script_text
+    )
+    assert "check_artifact_for_lanes retrieval-ops-bundle.json B1" in (
+        validation_script_text
+    )
+    assert "run_validator_for_lanes retrieval-ops B1 \\" in validation_script_text
     assert "MISSING input artifact" in validation_script_text
     assert "load-env.py" in validation_script_text
     assert "MNEMOSYNE_PROD_TENANT" in validation_script_text
@@ -429,6 +441,29 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     assert "MISSING input artifact: retrieval-ops-bundle.json" in (
         validation_proc.stderr
     )
+    validation_b1_proc = subprocess.run(
+        [str(artifact_validation_script), "B1"],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert validation_b1_proc.returncode == 78
+    assert "MISSING input artifact: retrieval-ops-bundle.json" in (
+        validation_b1_proc.stderr
+    )
+    assert "MISSING input artifact: ops-dashboard-bundle.json" not in (
+        validation_b1_proc.stderr
+    )
+    invalid_row_proc = subprocess.run(
+        [str(artifact_validation_script), "B11"],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert invalid_row_proc.returncode == 64
+    assert "usage: " in invalid_row_proc.stderr
     script_text = next_commands_script.read_text(encoding="utf-8")
     assert script_text.startswith("#!/usr/bin/env bash\nset -euo pipefail\n")
     assert "operator convenience script, not production evidence" in script_text
@@ -448,6 +483,7 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     assert "### Input Artifacts" in markdown
     assert "Input Artifact Worklist" in markdown
     assert "input-artifact-validation-commands.sh" in markdown
+    assert "input-artifact-validation-commands.sh B1" in markdown
     assert "do not create placeholder JSON" in markdown
     assert "retrieval-ops-bundle.json" in markdown
     assert "mnemosyne-production-runtime.env.example" in markdown
