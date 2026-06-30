@@ -535,6 +535,26 @@ def _normalize_artifact_route(value: Any) -> dict[str, Any] | None:
     }
 
 
+def _artifact_relative_path(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    prefix = "MNEMOSYNE_PROD_EVIDENCE_DIR/"
+    if not value.startswith(prefix):
+        return None
+    relative_path = value.removeprefix(prefix)
+    return relative_path or None
+
+
+def _template_env_placeholder(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    if value == "MNEMOSYNE_PROD_EVIDENCE_DIR":
+        return None
+    if re.fullmatch(r"MNEMOSYNE_PROD_[A-Z0-9_]+", value):
+        return value
+    return None
+
+
 def _input_artifact_worklist(
     *,
     input_dir: Path,
@@ -642,6 +662,80 @@ def _input_artifact_worklist(
             }
         )
     return worklist
+
+
+def _input_artifact_validation_plan(
+    *,
+    input_dir: Path,
+    template_manifest: dict[str, Any],
+    worklist: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Build artifact validator commands from the production command profile."""
+    required_artifacts = {
+        artifact["relative_path"]
+        for artifact in worklist
+        if isinstance(artifact.get("relative_path"), str)
+    }
+    commands: list[dict[str, Any]] = []
+    checks = template_manifest.get("checks", [])
+    if not isinstance(checks, list):
+        return commands
+    for check in checks:
+        if not isinstance(check, dict):
+            continue
+        command = check.get("command")
+        if not isinstance(command, str) or not command:
+            continue
+        global_args = check.get("global_args", [])
+        if not isinstance(global_args, list):
+            global_args = []
+        check_args = check.get("args", [])
+        if not isinstance(check_args, list):
+            check_args = []
+        args = [str(arg) for arg in [*global_args, *check_args] if isinstance(arg, (str, int, float))]
+        input_artifacts = [
+            str(item)
+            for item in check.get("input_artifacts", [])
+            if isinstance(item, str)
+        ]
+        artifact_refs = sorted(
+            {
+                relative_path
+                for relative_path in (
+                    _artifact_relative_path(value) for value in [*args, *input_artifacts]
+                )
+                if relative_path in required_artifacts
+            }
+        )
+        if not artifact_refs:
+            continue
+        env_placeholders = sorted(
+            {
+                name
+                for name in (_template_env_placeholder(value) for value in args)
+                if name is not None
+            }
+        )
+        argv = [command]
+        for arg in args:
+            relative_path = _artifact_relative_path(arg)
+            if relative_path is not None:
+                argv.append(str(input_dir / relative_path))
+            else:
+                argv.append(arg)
+        commands.append(
+            {
+                "name": check.get("name") if isinstance(check.get("name"), str) else command,
+                "command": command,
+                "required_input_artifacts": artifact_refs,
+                "env_placeholders": env_placeholders,
+                "argv": argv,
+            }
+        )
+    return sorted(
+        commands,
+        key=lambda item: (str(item.get("command", "")), str(item.get("name", ""))),
+    )
 
 
 def _write_runtime_env_example(path: Path, *, provider_env_refs: list[str]) -> None:
@@ -871,6 +965,7 @@ def _write_markdown(report: dict[str, Any], path: Path) -> None:
             "",
             f"- Markdown: `{report['input_artifact_worklist_markdown']}`",
             f"- JSON: `{report['input_artifact_worklist_json']}`",
+            f"- Validation script: `{report['input_artifact_validation_script']}`",
             "",
         ]
     )
@@ -968,6 +1063,173 @@ def _write_input_artifact_worklist_markdown(
     _atomic_write_text(path, "\n".join(lines).rstrip() + "\n")
 
 
+def _bash_double_quote(value: str) -> str:
+    escaped = (
+        value.replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("`", "\\`")
+    )
+    return f'"{escaped}"'
+
+
+def _validation_script_arg(
+    arg: str,
+    *,
+    input_dir_var: str,
+    artifact_path_map: dict[str, str],
+) -> str:
+    mapped_relative_path = artifact_path_map.get(arg)
+    if mapped_relative_path is not None:
+        return _bash_double_quote(f"${{{input_dir_var}}}/{mapped_relative_path}")
+    relative_path = _artifact_relative_path(arg)
+    if relative_path is not None:
+        return _bash_double_quote(f"${{{input_dir_var}}}/{relative_path}")
+    env_name = _template_env_placeholder(arg)
+    if env_name is not None:
+        message = f"Set {env_name} in production-render.env or environment before validation"
+        return _bash_double_quote(f"${{{env_name}:?{message}}}")
+    return _shell_quote(arg)
+
+
+def _write_input_artifact_validation_script(
+    *,
+    worklist: list[dict[str, Any]],
+    validation_plan: list[dict[str, Any]],
+    path: Path,
+    repo_dir: Path,
+) -> None:
+    env_names = sorted(
+        {
+            str(name)
+            for command in validation_plan
+            for name in command.get("env_placeholders", [])
+            if isinstance(name, str)
+        }
+    )
+    artifact_names = sorted(
+        {
+            str(artifact["relative_path"])
+            for artifact in worklist
+            if isinstance(artifact.get("relative_path"), str)
+        }
+    )
+    artifact_path_map = {
+        str(artifact["packet_path"]): str(artifact["relative_path"])
+        for artifact in worklist
+        if isinstance(artifact.get("packet_path"), str)
+        and isinstance(artifact.get("relative_path"), str)
+    }
+    lines = [
+        "#!/usr/bin/env bash",
+        "set -euo pipefail",
+        "",
+        "# Generated by prepare-production-evidence-custody.py.",
+        "# This validates supplied input artifacts; it is not production evidence.",
+        "# It never creates placeholder JSON, PEM, or bundle files.",
+        "",
+        'SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"',
+        'PACKET_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"',
+        'INPUT_ARTIFACT_DIR="$PACKET_ROOT/input-artifacts"',
+        f'REPO_DIR="${{MNEMOSYNE_REPO_DIR:-{repo_dir}}}"',
+        (
+            'PYTHON="${PYTHON:-$(if [ -x "$REPO_DIR/.venv/bin/python" ]; then '
+            'printf \'%s\' "$REPO_DIR/.venv/bin/python"; else command -v python3; fi)}"'
+        ),
+        "",
+        'if [ ! -f "$REPO_DIR/pyproject.toml" ]; then',
+        '  echo "ERROR: set MNEMOSYNE_REPO_DIR to the Mnemosyne repository root" >&2',
+        "  exit 65",
+        "fi",
+        "",
+        "missing=0",
+        "invalid=0",
+        "check_artifact() {",
+        "  local rel=\"$1\"",
+        "  local artifact=\"$INPUT_ARTIFACT_DIR/$rel\"",
+        '  if [ -L "$artifact" ]; then',
+        '    echo "INVALID symlink input artifact: $rel" >&2',
+        "    invalid=1",
+        '  elif [ ! -f "$artifact" ]; then',
+        '    echo "MISSING input artifact: $rel" >&2',
+        "    missing=1",
+        "  fi",
+        "}",
+        "",
+    ]
+    for relative_path in artifact_names:
+        lines.append(f"check_artifact {_shell_quote(relative_path)}")
+    lines.extend(
+        [
+            "",
+            'if [ "$invalid" -ne 0 ]; then',
+            "  exit 78",
+            "fi",
+            'if [ "$missing" -ne 0 ]; then',
+            "  exit 78",
+            "fi",
+            "",
+        ]
+    )
+    if env_names:
+        env_args = " ".join(_shell_quote(name) for name in env_names)
+        lines.extend(
+            [
+                "# Load non-secret render placeholders without shell-sourcing production-render.env.",
+                'if [ -f "$PACKET_ROOT/production-render.env" ]; then',
+                (
+                    "  while IFS= read -r assignment; do\n"
+                    '    if [ -n "$assignment" ]; then\n'
+                    '      export "$assignment"\n'
+                    "    fi\n"
+                    f'  done < <("$PYTHON" "$REPO_DIR/infra/scripts/load-env.py" '
+                    f'--allow-missing "$PACKET_ROOT/production-render.env" {env_args})'
+                ),
+                "fi",
+                "",
+            ]
+        )
+    lines.extend(
+        [
+            'cd "$REPO_DIR"',
+            "",
+            "run_validator() {",
+            "  local label=\"$1\"",
+            "  shift",
+            '  echo "==> $label"',
+            '  "$@"',
+            "}",
+            "",
+        ]
+    )
+    for command in validation_plan:
+        argv = command.get("argv", [])
+        if not isinstance(argv, list) or not argv:
+            continue
+        label = str(command.get("name") or command.get("command") or "validator")
+        rendered_args = [
+            _validation_script_arg(
+                str(arg),
+                input_dir_var="INPUT_ARTIFACT_DIR",
+                artifact_path_map=artifact_path_map,
+            )
+            for arg in argv
+            if isinstance(arg, str)
+        ]
+        lines.extend(
+            [
+                f"run_validator {_shell_quote(label)} \\",
+                '  "$PYTHON" -m mnemosyne.cli \\',
+                *[
+                    f"  {arg} \\"
+                    for arg in rendered_args[:-1]
+                ],
+                f"  {rendered_args[-1]}",
+                "",
+            ]
+        )
+    _atomic_write_text(path, "\n".join(lines).rstrip() + "\n", mode=0o700)
+
+
 def _write_readme(root: Path, report: dict[str, Any]) -> None:
     readme = root / "README.md"
     content = f"""# Mnemosyne Tier-B Production Evidence Custody Packet
@@ -995,15 +1257,17 @@ infra/scripts/prepare-production-evidence-custody.py \\
 
 Refresh mode updates only `reports/tier-b-gap-report.json`,
 `reports/tier-b-gap-report.md`, `reports/input-artifact-worklist.{{json,md}}`,
-`reports/next-commands.sh`, and missing read-only packet guidance docs; this
-README remains static guidance. It does not overwrite `production-render.env`,
-`input-artifacts/`, existing copied operator docs, or `manifests/`.
+`reports/input-artifact-validation-commands.sh`, `reports/next-commands.sh`,
+and missing read-only packet guidance docs; this README remains static guidance.
+It does not overwrite `production-render.env`, `input-artifacts/`, existing
+copied operator docs, or `manifests/`.
 
 ## Current Report
 
 - JSON: `reports/tier-b-gap-report.json`
 - Markdown: `reports/tier-b-gap-report.md`
 - Input artifact worklist: `reports/input-artifact-worklist.md`
+- Input artifact validation: `reports/input-artifact-validation-commands.sh`
 - Runnable command sequence: `reports/next-commands.sh`
 - Runtime env example: `reports/mnemosyne-production-runtime.env.example`
 
@@ -1013,6 +1277,12 @@ After each refresh, read `reports/tier-b-gap-report.md` or
 `capture_blockers`, and `operator_input_inventory`, then copy
 `reports/mnemosyne-production-runtime.env.example` to the external runtime env
 path before filling secret-bearing values.
+
+After adding real production files under `input-artifacts/`, run
+`reports/input-artifact-validation-commands.sh` from anywhere. It first refuses
+missing or symlinked input artifacts, then runs the manifest-derived validator
+commands against the supplied files. It does not create placeholders or replace
+the full capture/offline verification path.
 
 ## Capture Boundary
 
@@ -1194,6 +1464,9 @@ def refresh_report(
     next_commands_script = reports_dir / "next-commands.sh"
     input_artifact_worklist_json = reports_dir / "input-artifact-worklist.json"
     input_artifact_worklist_markdown = reports_dir / "input-artifact-worklist.md"
+    input_artifact_validation_script = (
+        reports_dir / "input-artifact-validation-commands.sh"
+    )
     python_selector = (
         'PYTHON="${PYTHON:-$(if [ -x .venv/bin/python ]; then printf \'%s\' '
         ".venv/bin/python; else command -v python3; fi)}\""
@@ -1220,6 +1493,11 @@ def refresh_report(
         input_dir=input_dir,
         renderer_payload=renderer_payload,
         rows=rows,
+    )
+    input_artifact_validation_plan = _input_artifact_validation_plan(
+        input_dir=input_dir,
+        template_manifest=template_manifest,
+        worklist=input_artifact_worklist,
     )
     report = {
         "schema": "mnemosyne.tier-b-custody-gap-report.v1",
@@ -1251,6 +1529,8 @@ def refresh_report(
         "input_artifact_worklist_json": str(input_artifact_worklist_json),
         "input_artifact_worklist_markdown": str(input_artifact_worklist_markdown),
         "input_artifact_worklist": input_artifact_worklist,
+        "input_artifact_validation_script": str(input_artifact_validation_script),
+        "input_artifact_validation_plan": input_artifact_validation_plan,
         "operator_input_inventory": _operator_input_inventory(
             input_dir=input_dir,
             render_env_file=production_render_env,
@@ -1293,6 +1573,12 @@ def refresh_report(
     _write_input_artifact_worklist_markdown(
         input_artifact_worklist,
         input_artifact_worklist_markdown,
+    )
+    _write_input_artifact_validation_script(
+        worklist=input_artifact_worklist,
+        validation_plan=input_artifact_validation_plan,
+        path=input_artifact_validation_script,
+        repo_dir=repo_dir,
     )
     report_json = reports_dir / "tier-b-gap-report.json"
     _atomic_write_text(report_json, json.dumps(report, indent=2, sort_keys=True) + "\n")
@@ -1364,6 +1650,7 @@ def main(argv: list[str] | None = None) -> int:
         "post_capture_verify_report": report["post_capture_verify_report"],
         "next_commands_script": report["next_commands_script"],
         "input_artifact_worklist": report["input_artifact_worklist_markdown"],
+        "input_artifact_validation_script": report["input_artifact_validation_script"],
         "next_commands": report["next_commands"],
         "next": (
             "Fill production-render.env and input-artifacts/, then run "

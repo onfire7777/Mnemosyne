@@ -29,7 +29,10 @@ This runbook is the operator handoff for flipping the remaining Tier B parity ro
   `reports/input-artifact-worklist.{json,md}` as an artifact-first preparation
   aid that maps each required input artifact to its packet path, rows, row
   runbooks, and consuming checks. It is not evidence; do not create placeholder
-  JSON, PEM, or bundle files to make readiness pass. The packet also writes
+  JSON, PEM, or bundle files to make readiness pass. The adjacent
+  `reports/input-artifact-validation-commands.sh` script refuses missing or
+  symlinked artifacts and then runs the manifest-derived validators against the
+  real files already supplied under `input-artifacts/`. The packet also writes
   `reports/mnemosyne-production-runtime.env.example` and
   `reports/next-commands.sh`; copy the generated no-secret runtime example to
   the real external runtime env path, set mode `0600`, and fill values there.
