@@ -33,7 +33,7 @@ blueprint invariant:
 
 ## 1. WHERE THE PROJECT STANDS — verified, do not re-derive
 
-- **Position:** ~82% blended; branch `main`; latest verified baseline entering the Tier-B custody-prep slice is `927f252` with GitHub CI green (run `28415636298`: Unit + drift, Postgres integration, and ruff). All 10 audit rows are `Partial`. Canonical checkout `/Users/admin/Mnemosyne` → `onfire7777/Mnemosyne`.
+- **Position:** ~82% blended; branch `main`; latest verified baseline for the Tier-B custody/env-file handoff is `5491147` with GitHub CI green (run `28434897892`: Unit + drift, Postgres integration, and ruff). All 10 audit rows are `Partial`. Canonical checkout `/Users/admin/Mnemosyne` → `onfire7777/Mnemosyne`.
 - **6/6 §16 SLOs proven** (Wave-5 definitive run, 2026-06-25; evidence in `eval/calibration/report.json` + `docs/ROADMAP-TO-100.md`):
 
   | SLO | Target | Measured |

@@ -35,11 +35,16 @@ The next work is not more generic gates. The substantive path is:
    `infra/scripts/prepare-production-evidence-custody.py`.
    Recompute row readiness after filling operator inputs with
    `infra/scripts/prepare-production-evidence-custody.py --refresh <packet>`.
-2. Fill the shared provider stack first because
+2. Render production manifests through the packet's strict external
+   `production-render.env`, and pass secret-bearing runtime/provider values
+   through a separate external mode-`0600`
+   `mnemosyne-production-runtime.env` via
+   `capture-production-evidence.sh --env-file`.
+3. Fill the shared provider stack first because
    `provider-manifest.production.json` unblocks B1, B2, B4, B6, B7, B9, and B10.
-3. Capture keystone rows B1 retrieval and B2 tenant/auth evidence.
-4. Capture the remaining row bundles B3-B9.
-5. Capture B10 live parity evidence, then run Tier C sign-off.
+4. Capture keystone rows B1 retrieval and B2 tenant/auth evidence.
+5. Capture the remaining row bundles B3-B9.
+6. Capture B10 live parity evidence, then run Tier C sign-off.
 
 ## Execution Loop
 
