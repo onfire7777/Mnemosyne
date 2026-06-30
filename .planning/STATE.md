@@ -26,15 +26,17 @@ unchanged: B1-B10 remain Partial until wrapper-captured production bundles pass
 manifest-bound release audit and offline custody verification, followed by
 Tier-C real-path SLO/rail sign-off.
 
-Latest checkpoint (2026-06-30): The continuation baseline was refreshed after
-the folder move/path ambiguity. `/Users/admin/Mnemosyne` is the canonical
-checkout; `/Users/admin/Desktop/Mnemosyne` does not currently exist as a Git
-worktree. `main` and `origin/main` are synchronized at
+Latest checkpoint (2026-06-30): The continuation baseline was refreshed before
+this grouped-inventory edit after the folder move/path ambiguity.
+`/Users/admin/Mnemosyne` is the canonical checkout;
+`/Users/admin/Desktop/Mnemosyne` did not exist as a Git worktree during the
+resume check. At that pre-edit checkpoint, `main` and `origin/main` were
+synchronized at
 `2b47989e27af9ec911eb08b43589979e1eb6c934`, and GitHub CI run `28475668973`
 passed for that head. `docs/blueprint/cognitive-architecture/CODEX-HANDOFF.md`
-now records this as a current checkpoint and demotes older `9621971`/`03f2611`
-references to historical context. This is source/CI synchronization only, not
-Tier-B production evidence.
+records it as a pre-edit resume checkpoint, not as durable current truth, and
+demotes older `9621971`/`03f2611` references to historical context. This is
+source/CI synchronization only, not Tier-B production evidence.
 
 Latest checkpoint (2026-06-30): Tier-B gap reports now expose row-grouped
 operator input inventory for all three top-level edit surfaces. In addition to

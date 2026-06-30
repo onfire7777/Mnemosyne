@@ -1,12 +1,13 @@
 # Codex Handoff
 
-**Current handoff snapshot:** 2026-06-30 UTC. Live baseline for this
-checkpoint: `/Users/admin/Mnemosyne` on `main` at
+**Current handoff snapshot:** 2026-06-30 UTC. This file intentionally does not
+freeze a prose "latest commit" as current truth. Future agents must refresh
+`git status`, `git log -1`, and GitHub Actions before making current-state
+claims. The pre-edit resume check for this continuation verified
+`/Users/admin/Mnemosyne` on `main` at
 `2b47989e27af9ec911eb08b43589979e1eb6c934`
 (`fix(infra): group Tier-B runtime env ownership`), with GitHub Actions CI run
-`28475668973` passing. Future agents must still refresh `git status`,
-`git log -1`, and GitHub Actions before making current-state claims; this
-baseline is a checkpoint, not a permanent truth.
+`28475668973` passing; later commits supersede that checkpoint.
 
 This snapshot includes the current Tier-B production-evidence handoff stack:
 external custody packet generation, strict external render/runtime env
@@ -76,21 +77,21 @@ operator-captured Tier-B production evidence and Tier-C real-path sign-off.
 
 ## Latest Verified Snapshot
 
-- Live baseline verified for this handoff refresh:
+- Pre-edit baseline verified for this handoff refresh:
   `2b47989e27af9ec911eb08b43589979e1eb6c934` on `main`, clean against
   `origin/main`, with GitHub CI run `28475668973` completed successfully.
   This commit groups `operator_input_inventory.runtime_env_file`
   `provider_manifest_env_refs` and `missing_provider_manifest_env_refs` by
   primary Tier-B row, so the external runtime env handoff no longer requires
   manually joining a flat provider-ref list to row plans.
-- Local verification for `2b47989` before push passed Python compilation for
+- Local verification for the grouped-inventory handoff passed Python compilation for
   the changed script/test files, focused infra hardening tests, `git diff
   --check`, focused `ruff`, the relevant production runbook consistency and
-  infra hardening test slice, a no-secret changed-file scan, and a fresh
-  external custody packet smoke confirming B1/B2/B4/B6/B7/B9 grouped ownership
-  appears in JSON and Markdown without retaining provider values or runtime env
-  file paths. This is readiness/handoff verification only, not Tier-B production
-  evidence.
+  infra hardening test slice, a no-secret changed-file scan, and fresh external
+  custody packet smokes confirming row-grouped render placeholders, input
+  artifacts, and B1/B2/B4/B6/B7/B9 provider ownership appear in JSON and
+  Markdown without retaining production values or runtime env file paths. This
+  is readiness/handoff verification only, not Tier-B production evidence.
 - Recent Tier-B handoff commits after the older `9621971` baseline add render
   env plans, artifact contracts, provider-env action plans, row-owned versus
   shared provider-ref splits, complete primary row ownership for provider refs,
