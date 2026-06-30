@@ -821,16 +821,20 @@ capture output root. Pass secret-bearing runtime/provider values through
 `capture-production-evidence.sh --env-file /secure/path/to/mnemosyne-production-runtime.env`
 instead of shell-sourcing them.
 
-After refresh reports `ready_for_capture: true`, run
-`reports/next-commands.sh` from the repository root or run the JSON
-`next_commands` values in order. The final command passes the external
-fingerprint record directly to the verifier and writes the verifier report
-outside the evidence bundle.
+After refresh reports `ready_for_capture: true`, set
+`RUNTIME_ENV_FILE=/secure/path/to/mnemosyne-production-runtime.env` and run
+`reports/next-commands.sh` from the repository root, or export
+`RUNTIME_ENV_FILE` and run the JSON `next_commands` values in order. The final
+command passes the external fingerprint record directly to the verifier and
+writes the verifier report outside the evidence bundle.
 """
     _atomic_write_text(readme, content)
 
 
 def _write_next_commands_script(report: dict[str, Any], path: Path) -> None:
+    runtime_env_placeholder = report["operator_input_inventory"]["runtime_env_file"][
+        "path_placeholder"
+    ]
     lines = [
         "#!/usr/bin/env bash",
         "set -euo pipefail",
@@ -841,6 +845,15 @@ def _write_next_commands_script(report: dict[str, Any], path: Path) -> None:
         "",
         'if [ ! -x "infra/scripts/render-production-soak-manifest.sh" ]; then',
         '  echo "ERROR: run this script from the Mnemosyne repository root" >&2',
+        "  exit 65",
+        "fi",
+        "",
+        f'RUNTIME_ENV_FILE="${{RUNTIME_ENV_FILE:-{runtime_env_placeholder}}}"',
+        'if [ ! -f "$RUNTIME_ENV_FILE" ]; then',
+        (
+            '  echo "ERROR: set RUNTIME_ENV_FILE to the external mode-0600 '
+            'runtime env file before running this script" >&2'
+        ),
         "  exit 65",
         "fi",
         "",
@@ -965,6 +978,7 @@ def refresh_report(
         }
     )
     runtime_env_placeholder = "/secure/path/to/mnemosyne-production-runtime.env"
+    runtime_env_command_arg = f'"${{RUNTIME_ENV_FILE:-{runtime_env_placeholder}}}"'
     fingerprint_record_output = root.parent / (
         root.name + "-bundle-fingerprint.json"
     )
@@ -1050,10 +1064,10 @@ def refresh_report(
         "next_commands_script": str(next_commands_script),
         "operator_readiness_files": renderer_payload.get("operator_readiness_files", {}),
         "next_commands": [
-            f"infra/scripts/render-production-soak-manifest.sh --env-file {_shell_quote(production_render_env)} --runtime-env-file {_shell_quote(runtime_env_placeholder)} --check-environment",
-            f"infra/scripts/render-production-soak-manifest.sh --env-file {_shell_quote(production_render_env)} --runtime-env-file {_shell_quote(runtime_env_placeholder)} --output {_shell_quote(production_soak_manifest)}",
-            f"infra/scripts/capture-production-evidence.sh --env-file {_shell_quote(runtime_env_placeholder)} --preflight-only {_shell_quote(production_soak_manifest)} {_shell_quote(preflight_output_root)}",
-            f"infra/scripts/capture-production-evidence.sh --env-file {_shell_quote(runtime_env_placeholder)} --fingerprint-record-output {_shell_quote(fingerprint_record_output)} {_shell_quote(production_soak_manifest)} {_shell_quote(capture_output_root)}",
+            f"infra/scripts/render-production-soak-manifest.sh --env-file {_shell_quote(production_render_env)} --runtime-env-file {runtime_env_command_arg} --check-environment",
+            f"infra/scripts/render-production-soak-manifest.sh --env-file {_shell_quote(production_render_env)} --runtime-env-file {runtime_env_command_arg} --output {_shell_quote(production_soak_manifest)}",
+            f"infra/scripts/capture-production-evidence.sh --env-file {runtime_env_command_arg} --preflight-only {_shell_quote(production_soak_manifest)} {_shell_quote(preflight_output_root)}",
+            f"infra/scripts/capture-production-evidence.sh --env-file {runtime_env_command_arg} --fingerprint-record-output {_shell_quote(fingerprint_record_output)} {_shell_quote(production_soak_manifest)} {_shell_quote(capture_output_root)}",
             post_capture_verify_command,
         ],
     }

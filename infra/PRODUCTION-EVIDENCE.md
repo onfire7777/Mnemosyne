@@ -90,8 +90,10 @@ infra/scripts/prepare-production-evidence-custody.py \
   --refresh \
   /secure/path/to/mnemosyne-tier-b-custody
 # Once refresh reports ready_for_capture=true, either run the generated
-# script below or run the expanded sequence that follows:
-# /secure/path/to/mnemosyne-tier-b-custody/reports/next-commands.sh
+# script below with RUNTIME_ENV_FILE set, or run the expanded sequence
+# that follows:
+# RUNTIME_ENV_FILE=/secure/path/to/mnemosyne-production-runtime.env \
+#   /secure/path/to/mnemosyne-tier-b-custody/reports/next-commands.sh
 infra/scripts/render-production-soak-manifest.sh \
   --env-file /secure/path/to/mnemosyne-tier-b-custody/production-render.env \
   --runtime-env-file /secure/path/to/mnemosyne-production-runtime.env \

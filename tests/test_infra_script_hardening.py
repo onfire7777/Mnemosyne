@@ -333,6 +333,11 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     assert "operator convenience script, not production evidence" in script_text
     assert str(packet_root / "reports" / "tier-b-gap-report.md") in script_text
     assert "run this script from the Mnemosyne repository root" in script_text
+    assert (
+        'RUNTIME_ENV_FILE="${RUNTIME_ENV_FILE:-'
+        "/secure/path/to/mnemosyne-production-runtime.env}\""
+    ) in script_text
+    assert "external mode-0600 runtime env file" in script_text
     assert "Post-Capture Custody Verification" in markdown
     assert "Capture Blockers" in markdown
     assert "`provider_manifest_environment`: `24` missing" in markdown
@@ -360,8 +365,15 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
         packet_root.parent
         / f"{packet_root.name}-production-evidence-verify.json"
     )
+    runtime_env_arg = (
+        '"${RUNTIME_ENV_FILE:-/secure/path/to/mnemosyne-production-runtime.env}"'
+    )
     assert any(
-        "--env-file /secure/path/to/mnemosyne-production-runtime.env" in command
+        f"--runtime-env-file {runtime_env_arg}" in command
+        for command in report["next_commands"]
+    )
+    assert any(
+        f"--env-file {runtime_env_arg}" in command
         for command in report["next_commands"]
     )
     assert any(
@@ -749,7 +761,13 @@ def test_prepare_production_evidence_custody_runtime_env_file_satisfies_refs_wit
     assert provider_sentinel not in runtime_example
     assert provider_sentinel not in combined
     assert str(runtime_env_file) not in combined
-    assert "--runtime-env-file /secure/path/to/mnemosyne-production-runtime.env" in report_text
+    runtime_env_arg = (
+        '"${RUNTIME_ENV_FILE:-/secure/path/to/mnemosyne-production-runtime.env}"'
+    )
+    assert any(
+        f"--runtime-env-file {runtime_env_arg}" in command
+        for command in report["next_commands"]
+    )
 
 
 def test_prepare_production_evidence_custody_rejects_repo_local_root(
