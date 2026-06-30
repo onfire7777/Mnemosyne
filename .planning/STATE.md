@@ -15,6 +15,30 @@ Status: In progress; exact 1:1 blueprint parity is not complete.
 Current status (2026-06-30): Mandatory Tier A source wirings are closed on `main`; FR-20 local and live-Postgres image/audio/video breadth, FR-21 local and live-Postgres parametric trainer/rollback validation, full compose-Postgres runtime readiness, belief-revision CLI validation, local hosted-MCP JSON-RPC/StreamableHTTP/SSE readiness, direct A12 cached-PPR live materialization coverage, G1 projection-level reality monitoring, G1 functional consciousness scorecard/proto-self seed, native workspace service with the `service.enabled` default-off gate retired, operational specialist-budget toggle retirement, cold-loop ignition enforcement, protected gate-case ratchet enforcement, Rail 6 serve-time sink enforcement, §24 support-strategy runtime durability plus public CLI/MCP mutation surfaces, Phase 7 plans 01-04, and the P5 H8/H12 cascade/observability pre-check are now done and gate-proven. The remaining strict-parity blocker is Tier B production operator evidence against deployed infrastructure before final v1.0 sign-off.
 Supersession note: the historical "Last activity: 2026-06-20" paragraph below is retained as changelog context only. Its local 287-test count and open-code wording are superseded by the 2026-06-25 checkpoints below, including the 864-test compose run and the current Tier B operator-evidence blocker.
 
+Latest checkpoint (2026-06-30): The active goal is confirmed active, not
+paused. `.planning/ACTIVE-GOAL-OPERATING-CONTRACT.md` and
+`.planning/TIER-B-TO-100-AGENT-PROMPT.md` now carry the prompt-engineered v4
+continuation objective: work autonomously from the verified live checkout,
+prioritize only changes that remove real Tier-B capture/custody blockers, avoid
+stale percentage or run-id drift, and refuse to treat generated readiness
+metadata, local tests, or CI as production evidence. The completion standard is
+unchanged: B1-B10 remain Partial until wrapper-captured production bundles pass
+manifest-bound release audit and offline custody verification, followed by
+Tier-C real-path SLO/rail sign-off.
+
+Latest checkpoint (2026-06-30): Tier-B row action plans now separate
+row-owned provider-manifest env refs from shared provider-stack blockers. The
+generated `reports/row-action-plan.{json,md}` includes
+`primary_missing_provider_manifest_env_refs`,
+`shared_missing_provider_manifest_env_refs`, provider-ref roles, and blocker
+counts for both classes, while `reports/provider-env-action-plan.{json,md}`
+adds route sources for both release-manifest and row-runbook-owned provider
+checks. Fresh packet smoke at `/tmp/mnemosyne-tierb-row-provider-B4bDJa/packet`
+confirmed B1 owns embedding/reranker refs, B2 owns OIDC/session-secret refs, B7
+owns object-key/residency refs, and B9 owns parametric refs while shared
+blocking remains visible. This improves operator assignment only; no production
+values or evidence are retained and B1-B10 stay Partial.
+
 Latest checkpoint (2026-06-30): Tier-B provider-stack handoff now carries
 complete primary row ownership for shared provider-manifest env refs. The
 generated `reports/provider-env-action-plan.{json,md}` no longer leaves

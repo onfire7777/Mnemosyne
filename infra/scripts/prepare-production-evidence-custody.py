@@ -472,6 +472,37 @@ def _provider_check_requirement_routes(
     }
 
 
+def _provider_check_plan_routes(
+    requirement_routes: dict[str, dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    provider_checks = set(PROVIDER_CHECK_PRIMARY_LANES) | set(requirement_routes)
+    routes: dict[str, dict[str, Any]] = {}
+    for provider_check in sorted(provider_checks):
+        release_route = requirement_routes.get(provider_check, {})
+        release_lanes = [
+            lane for lane in release_route.get("lanes", []) if isinstance(lane, str)
+        ]
+        primary_lanes = list(PROVIDER_CHECK_PRIMARY_LANES.get(provider_check, ()))
+        commands = [
+            command
+            for command in release_route.get("commands", [])
+            if isinstance(command, str)
+        ]
+        if release_route and primary_lanes:
+            source = "release_manifest_plus_row_runbook_provider_ownership"
+        elif release_route:
+            source = "release_manifest_require_provider_check"
+        else:
+            source = "row_runbook_provider_ownership"
+        routes[provider_check] = {
+            "provider_check": provider_check,
+            "lanes": sorted({*release_lanes, *primary_lanes}, key=_lane_sort_key),
+            "commands": sorted(set(commands)),
+            "source": source,
+        }
+    return routes
+
+
 def _provider_env_action_plan(
     *,
     provider_manifest: dict[str, Any],
@@ -485,6 +516,7 @@ def _provider_env_action_plan(
             details_by_env.setdefault(env, []).append(detail)
 
     requirement_routes = _provider_check_requirement_routes(template_manifest)
+    plan_routes = _provider_check_plan_routes(requirement_routes)
     missing = set(missing_provider_env_refs)
     shared_lanes = sorted(SHARED_PROVIDER_LANES, key=_lane_sort_key)
     plan: list[dict[str, Any]] = []
@@ -504,10 +536,7 @@ def _provider_env_action_plan(
             {
                 lane
                 for provider_check in provider_checks
-                for lane in (
-                    *PROVIDER_CHECK_PRIMARY_LANES.get(provider_check, ()),
-                    *requirement_routes.get(provider_check, {}).get("lanes", []),
-                )
+                for lane in plan_routes.get(provider_check, {}).get("lanes", [])
                 if isinstance(lane, str)
             },
             key=_lane_sort_key,
@@ -524,9 +553,9 @@ def _provider_env_action_plan(
                 "primary_rows": primary_rows,
                 "provider_checks": provider_checks,
                 "provider_check_routes": [
-                    requirement_routes[provider_check]
+                    plan_routes[provider_check]
                     for provider_check in provider_checks
-                    if provider_check in requirement_routes
+                    if provider_check in plan_routes
                 ],
                 "provider_manifest_paths": [
                     str(detail["manifest_path"]) for detail in env_details
@@ -1777,6 +1806,7 @@ def _row_action_plan(
     rows: list[dict[str, Any]],
     validation_plan: list[dict[str, Any]],
     input_artifact_validation_script: Path,
+    provider_env_action_plan: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     validators_by_lane: dict[str, list[dict[str, Any]]] = {}
     for command in validation_plan:
@@ -1793,6 +1823,30 @@ def _row_action_plan(
             if isinstance(lane, str) and lane:
                 validators_by_lane.setdefault(lane, []).append(compact)
 
+    provider_env_roles_by_lane: dict[str, dict[str, dict[str, Any]]] = {}
+    for item in provider_env_action_plan:
+        env = item.get("env")
+        if not isinstance(env, str) or not env or item.get("missing") is not True:
+            continue
+        primary_rows = [
+            lane for lane in item.get("primary_rows", []) if isinstance(lane, str)
+        ]
+        affected_rows = [
+            lane for lane in item.get("affected_rows", []) if isinstance(lane, str)
+        ]
+        role_entry = {
+            "env": env,
+            "primary_rows": primary_rows,
+            "provider_checks": item.get("provider_checks", []),
+            "provider_manifest_paths": item.get("provider_manifest_paths", []),
+        }
+        for lane in affected_rows:
+            role = "primary" if lane in primary_rows else "shared_blocker"
+            provider_env_roles_by_lane.setdefault(lane, {})[env] = {
+                **role_entry,
+                "role": role,
+            }
+
     plan: list[dict[str, Any]] = []
     for row in rows:
         lane = row.get("lane")
@@ -1806,6 +1860,23 @@ def _row_action_plan(
             item for item in row.get("missing_provider_manifest_env_refs", [])
             if isinstance(item, str)
         ]
+        provider_env_roles = provider_env_roles_by_lane.get(lane, {})
+        primary_missing_provider = sorted(
+            [
+                env
+                for env, role in provider_env_roles.items()
+                if role.get("role") == "primary" and env in missing_provider
+            ]
+        )
+        shared_missing_provider = sorted(
+            [
+                env
+                for env, role in provider_env_roles.items()
+                if role.get("role") == "shared_blocker" and env in missing_provider
+            ]
+        )
+        if missing_provider and not provider_env_roles:
+            shared_missing_provider = list(missing_provider)
         missing_artifacts = [
             item for item in row.get("missing_input_artifacts", [])
             if isinstance(item, str)
@@ -1813,9 +1884,13 @@ def _row_action_plan(
         next_actions: list[str] = []
         if missing_render:
             next_actions.append("Fill row-scoped production-render.env placeholders.")
-        if missing_provider:
+        if primary_missing_provider:
             next_actions.append(
-                "Fill provider-manifest refs through the external runtime env file."
+                "Fill row-owned provider-manifest refs in the external runtime env file."
+            )
+        if shared_missing_provider:
+            next_actions.append(
+                "Track shared provider-stack refs owned by their primary rows."
             )
         if missing_artifacts:
             next_actions.append(
@@ -1843,10 +1918,23 @@ def _row_action_plan(
                 "blocker_counts": {
                     "render_environment": len(missing_render),
                     "provider_manifest_environment": len(missing_provider),
+                    "primary_provider_manifest_environment": len(
+                        primary_missing_provider
+                    ),
+                    "shared_provider_manifest_environment": len(
+                        shared_missing_provider
+                    ),
                     "input_artifacts": len(missing_artifacts),
                 },
                 "missing_render_environment": missing_render,
                 "missing_provider_manifest_env_refs": missing_provider,
+                "primary_missing_provider_manifest_env_refs": primary_missing_provider,
+                "shared_missing_provider_manifest_env_refs": shared_missing_provider,
+                "provider_manifest_env_ref_roles": [
+                    provider_env_roles[env]
+                    for env in sorted(provider_env_roles)
+                    if env in missing_provider
+                ],
                 "required_input_artifacts": row.get("required_input_artifacts", []),
                 "missing_input_artifacts": missing_artifacts,
                 "input_artifact_validation_command": (
@@ -1870,10 +1958,12 @@ def _write_row_action_plan_markdown(
         "This report is an operator preparation aid, not production evidence.",
         "It joins row readiness, packet runbooks, missing inputs, and row-scoped",
         "artifact validation commands so B1-B10 work can be assigned without",
-        "manual report joins.",
+        "manual report joins. Provider refs are split into row-owned refs and",
+        "shared blockers so row owners do not chase another row's provider",
+        "handoff.",
         "",
-        "| Row | Ready | Render | Provider refs | Artifacts | Validator |",
-        "|---|---:|---:|---:|---:|---|",
+        "| Row | Ready | Render | Provider refs | Primary provider refs | Artifacts | Validator |",
+        "|---|---:|---:|---:|---:|---:|---|",
     ]
     for row in plan:
         counts = row["blocker_counts"]
@@ -1883,6 +1973,7 @@ def _write_row_action_plan_markdown(
             f"`{str(row['ready_for_capture']).lower()}` | "
             f"`{counts['render_environment']}` | "
             f"`{counts['provider_manifest_environment']}` | "
+            f"`{counts['primary_provider_manifest_environment']}` | "
             f"`{counts['input_artifacts']}` | "
             f"`{row['input_artifact_validation_command']}` |"
         )
@@ -1907,6 +1998,18 @@ def _write_row_action_plan_markdown(
             lines.append("- Missing provider-manifest env refs:")
             lines.extend(
                 f"  - `{item}`" for item in row["missing_provider_manifest_env_refs"]
+            )
+        if row["primary_missing_provider_manifest_env_refs"]:
+            lines.append("- Row-owned missing provider-manifest env refs:")
+            lines.extend(
+                f"  - `{item}`"
+                for item in row["primary_missing_provider_manifest_env_refs"]
+            )
+        if row["shared_missing_provider_manifest_env_refs"]:
+            lines.append("- Shared provider-stack blockers owned by other rows:")
+            lines.extend(
+                f"  - `{item}`"
+                for item in row["shared_missing_provider_manifest_env_refs"]
             )
         if row["missing_input_artifacts"]:
             lines.append("- Missing input artifacts:")
@@ -1934,14 +2037,21 @@ def _write_provider_env_action_plan_markdown(
         "and the current readiness refresh. Values and runtime env-file paths are",
         "never retained.",
         "",
-        "| Env var | Status | Primary rows | Affected rows | Provider checks | Paths |",
-        "|---|---|---|---|---|---|",
+        "| Env var | Status | Primary rows | Affected rows | Provider checks | Route sources | Paths |",
+        "|---|---|---|---|---|---|---|",
     ]
     for item in plan:
         primary_rows = ", ".join(f"`{lane}`" for lane in item["primary_rows"]) or "-"
         affected_rows = ", ".join(f"`{lane}`" for lane in item["affected_rows"]) or "-"
         provider_checks = (
             ", ".join(f"`{check}`" for check in item["provider_checks"]) or "-"
+        )
+        route_sources = (
+            ", ".join(
+                f"`{route.get('provider_check')}: {route.get('source')}`"
+                for route in item.get("provider_check_routes", [])
+            )
+            or "-"
         )
         paths = "<br>".join(
             f"`{manifest_path}`" for manifest_path in item["provider_manifest_paths"]
@@ -1953,6 +2063,7 @@ def _write_provider_env_action_plan_markdown(
             f"{primary_rows} | "
             f"{affected_rows} | "
             f"{provider_checks} | "
+            f"{route_sources} | "
             f"{paths} |"
         )
     for item in plan:
@@ -1966,6 +2077,18 @@ def _write_provider_env_action_plan_markdown(
                 f"- Values redacted: `{str(item['values_redacted']).lower()}`",
                 f"- Value source recorded: `{str(item['value_source_recorded']).lower()}`",
                 f"- Next action: {item['next_action']}",
+                "- Provider check routes:",
+            ]
+        )
+        for route in item.get("provider_check_routes", []):
+            lines.append(
+                "  - "
+                f"`{route.get('provider_check')}` source `{route.get('source')}` "
+                f"lanes {', '.join(f'`{lane}`' for lane in route.get('lanes', [])) or '-'} "
+                f"commands {', '.join(f'`{command}`' for command in route.get('commands', [])) or '-'}"
+            )
+        lines.extend(
+            [
                 "- Provider settings:",
             ]
         )
@@ -2554,10 +2677,16 @@ def refresh_report(
         validation_plan=input_artifact_validation_plan,
         release_audit_output_keys=release_audit_output_keys,
     )
+    provider_env_action_plan = _provider_env_action_plan(
+        provider_manifest=provider_manifest,
+        template_manifest=template_manifest,
+        missing_provider_env_refs=missing_provider_env_refs,
+    )
     row_action_plan = _row_action_plan(
         rows=rows,
         validation_plan=input_artifact_validation_plan,
         input_artifact_validation_script=input_artifact_validation_script,
+        provider_env_action_plan=provider_env_action_plan,
     )
     render_env_action_plan = _render_env_action_plan(
         render_env_file=production_render_env,
@@ -2565,11 +2694,6 @@ def refresh_report(
         missing_render_env=missing_render_env,
         global_missing_render_env=global_missing_render_env,
         rows=rows,
-    )
-    provider_env_action_plan = _provider_env_action_plan(
-        provider_manifest=provider_manifest,
-        template_manifest=template_manifest,
-        missing_provider_env_refs=missing_provider_env_refs,
     )
     report = {
         "schema": "mnemosyne.tier-b-custody-gap-report.v1",

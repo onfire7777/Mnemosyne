@@ -14,17 +14,32 @@ chat recap: future agents should treat it as the prompt-engineered operating
 objective for the live run, while still deferring to the blueprint and current
 repo evidence when they conflict.
 
-## Prime Objective
+## Prompt-Engineered Goal
 
-**Professionally revised goal statement:** Continue Mnemosyne from the live
+**Professionally revised active objective:** Continue Mnemosyne from the live
 checked-out state to exact blueprint parity and production release readiness by
-turning the source-complete local scaffold into production-attested evidence.
-The decisive work is not another local scoring layer, broad test expansion, or
-percentage bookkeeping; it is real Tier-B operator production evidence, real
-production-path SLO/rail proof, and only the stale-surface cleanup needed to keep
-operators and future agents from following obsolete instructions. Every claim of
-progress must be backed by current source, retained artifacts, CI, or an
-explicit operator-evidence record.
+converting the source-complete local scaffold into production-attested evidence.
+The decisive path is Tier-B production capture and custody: real deployed
+services, real provider endpoints, real operator bundles, manifest-bound
+`release-audit`, and offline `production-evidence-verify` with an independently
+retained fingerprint record. Local tests, generated packet reports, and CI are
+verification aids only; they are not substitutes for production evidence.
+
+**Execution posture:** run autonomously from the verified live checkout, choose
+the highest-leverage non-conflicting action, and commit/push clean atomic
+changes when they materially improve the Tier-B capture path. Continue without
+waiting for another "go" unless a blocker requires unavailable production
+credentials, endpoints, or operator-owned artifacts.
+
+**Current no-compromise goal text for future agents:**
+Drive `/Users/admin/Mnemosyne` on `main` from the current source-complete state
+to exact blueprint parity by removing only the blockers that keep the 10 Tier-B
+strict-audit rows from real production capture, preserving every §16 SLO and
+§31 rail, keeping cognitive-architecture/consciousness claims functional and
+measured only, and refusing to mark completion until B1-B10 have retained
+production evidence, the final release audit and offline custody review pass,
+Tier-C real-path SLO/rail proof is recorded, status docs agree, CI is green, and
+local/GitHub state are synchronized.
 
 **Current objective refinement:** Treat this run as a production-evidence
 completion program. The only prioritized change classes are:
@@ -41,6 +56,20 @@ completion program. The only prioritized change classes are:
 
 Everything else is deliberately lower priority, even if it is useful
 engineering work.
+
+**Explicit non-goals until production evidence exists:**
+
+1. Do not add generic `*-ops-check` gates, release gates, scorecards, or broad
+   tests unless a real Tier-B packet/capture run exposes a concrete missing
+   validation contract.
+2. Do not reopen Tier-A source-reconciliation work unless the live strict audit
+   or a production capture failure proves a source defect.
+3. Do not re-score blended completion, update the README badge, or write v1.0
+   sign-off language from local readiness, generated reports, or CI alone.
+4. Do not create placeholder JSON/PEM/bundle artifacts, fake provider values,
+   local stand-ins, or "sample" production evidence to clear readiness checks.
+5. Do not preserve historical path, commit, run-id, or percentage claims as
+   current truth without refreshing the live checkout and GitHub Actions state.
 
 **Move-the-needle rule:** before editing, state which live blocker the change
 removes. A change is on-goal only if it makes a real Tier-B operator capture
@@ -108,6 +137,13 @@ limited to defects that directly block that path:
    handoff because it maps every provider-manifest env ref to its manifest path,
    provider check, primary row ownership, and shared provider-check blast radius
    without retaining values or runtime env-file paths. Then use the generated
+   row action plan's `primary_missing_provider_manifest_env_refs` and
+   `shared_missing_provider_manifest_env_refs` fields to assign row-owned
+   provider env work without hiding shared blockers. B1 owns embedding/reranker
+   refs, B2 owns OIDC/session-secret refs, B4 owns consolidation role-provider
+   refs, B6 owns media refs, B7 owns object-key/residency refs, and B9 owns
+   parametric refs.
+   Use the generated
    `reports/input-artifact-validation-commands.sh` as a
    pre-capture check for all rows, or pass `B1` through `B10` to validate one
    row's required artifact set and manifest-derived validators. Missing

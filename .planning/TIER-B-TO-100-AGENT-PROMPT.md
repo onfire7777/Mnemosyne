@@ -1,6 +1,6 @@
-# Mnemosyne → 100% Blueprint Parity — Master Completion Agent Prompt (v3, blueprint-grounded)
+# Mnemosyne -> 100% Blueprint Parity — Master Completion Agent Prompt (v4, blueprint-grounded)
 
-> **Supersedes the v1 Tier-B-only playbook.** This prompt is grounded in the *entire* project record:
+> **Supersedes the v1 Tier-B-only playbook and v3 continuation prompt.** This prompt is grounded in the *entire* project record:
 > the v2 build blueprint (`docs/blueprint/`), every prior plan and runbook (`.planning/`), the parity
 > ledger + matrix, the proven SLO evidence (`eval/`), and the full progress history through 2026-06-30.
 > Hand it to a capable coding/SRE agent (Claude Code or Codex) working **inside `/Users/admin/Mnemosyne`**.
@@ -10,7 +10,7 @@
 
 ---
 
-## 0. ROLE & MISSION
+## 0. ROLE, MISSION, AND FAILURE-MODE GUARD
 
 You are a **senior release-engineering + SRE agent** completing Mnemosyne — *"memory as a
 self-optimizing compiler for experience,"* a local-first memory compiler for AI agents. The codebase
@@ -30,6 +30,21 @@ blueprint invariant:
 > external no-overwrite `--report-output` artifact.
 > Green-by-mocking is a failure, not progress. This is the whole point of the project's §38
 > "measure before claiming" exit.
+
+**Real-progress test:** before making a source or docs change, identify the
+specific Tier-B capture blocker it removes. Valid blockers are missing operator
+inputs, ambiguous packet handoff, custody/redaction weakness, stale current
+status that would route work to the wrong root/artifact/boundary, or a concrete
+source defect found by a production readiness/capture run. If the change merely
+adds another local test, rewords a percentage, or expands an already-complete
+gate without a capture failure behind it, it is off-mission.
+
+**Current autonomy rule:** work from `/Users/admin/Mnemosyne`, refresh live
+`HEAD`, dirty tree, and GitHub Actions before current-state claims, then proceed
+without asking for another "continue" unless real production credentials,
+endpoints, or operator-owned artifacts are required. Commit and push clean
+atomic improvements to `main` after focused verification; never stage secrets,
+generated evidence bundles, local packet output roots, or unrelated dirty work.
 
 ## 1. WHERE THE PROJECT STANDS — verified, do not re-derive
 
@@ -114,7 +129,7 @@ Read `docs/blueprint/Mnemosyne-v2-Build-Blueprint.md` and `.planning/BLUEPRINT-P
 
 ## 5. EXECUTION PLAN
 
-**Phase 0 — Readiness baseline (no provisioning).** Create a fresh external custody packet with `infra/scripts/prepare-production-evidence-custody.py /secure/path/to/mnemosyne-tier-b-custody`. It copies `production-render.env`, the shared provider-manifest template, operator docs, a row-scoped `reports/tier-b-gap-report.{json,md}` report, a render-env `reports/render-env-action-plan.{json,md}` handoff, an artifact-first `reports/input-artifact-worklist.{json,md}` checklist, an artifact-contract `reports/input-artifact-contracts.{json,md}` report, and a provider-stack `reports/provider-env-action-plan.{json,md}` handoff. The helper exits nonzero while evidence is missing; that is expected setup feedback. Set `RUNTIME_ENV_FILE=/secure/path/to/mnemosyne-production-runtime.env` for the external mode-`0600` runtime env handoff. Use the render-env action plan to fill non-secret `production-render.env` placeholders by affected row before provider work; use the input-artifact worklist to assemble real production artifacts by packet path, row, runbook, and consuming check; use the artifact contracts to confirm each artifact's kind, consuming validators, advisory validator section/check hints, release-audit output-key contract, and minimum operator contract before supplying files; use the provider-env action plan to map each provider-manifest env name to its manifest path, provider check, primary row ownership, and shared provider-check blast radius before filling the external runtime env file. Do **not** create placeholder JSON, PEM, bundle files, or fake provider values just to clear readiness. After filling `production-render.env` and `input-artifacts/`, run `infra/scripts/prepare-production-evidence-custody.py --runtime-env-file "$RUNTIME_ENV_FILE" --refresh /secure/path/to/mnemosyne-tier-b-custody`; refresh updates only the reports and preserves operator inputs. Then run `render-production-soak-manifest.sh --env-file /secure/path/to/mnemosyne-tier-b-custody/production-render.env --runtime-env-file "$RUNTIME_ENV_FILE" --check-environment` until the gap report shows every `MNEMOSYNE_PROD_*` var, provider-manifest env ref, input artifact, and `parity_row_readiness` row is ready.
+**Phase 0 — Readiness baseline (no provisioning).** Create a fresh external custody packet with `infra/scripts/prepare-production-evidence-custody.py /secure/path/to/mnemosyne-tier-b-custody`. It copies `production-render.env`, the shared provider-manifest template, operator docs, a row-scoped `reports/tier-b-gap-report.{json,md}` report, a render-env `reports/render-env-action-plan.{json,md}` handoff, an artifact-first `reports/input-artifact-worklist.{json,md}` checklist, an artifact-contract `reports/input-artifact-contracts.{json,md}` report, a row-owner `reports/row-action-plan.{json,md}` report, and a provider-stack `reports/provider-env-action-plan.{json,md}` handoff. The helper exits nonzero while evidence is missing; that is expected setup feedback. Set `RUNTIME_ENV_FILE=/secure/path/to/mnemosyne-production-runtime.env` for the external mode-`0600` runtime env handoff. Use the render-env action plan to fill non-secret `production-render.env` placeholders by affected row before provider work; use the input-artifact worklist to assemble real production artifacts by packet path, row, runbook, and consuming check; use the artifact contracts to confirm each artifact's kind, consuming validators, advisory validator section/check hints, release-audit output-key contract, and minimum operator contract before supplying files; use the provider-env action plan to map each provider-manifest env name to its manifest path, provider check, primary row ownership, route source, and shared provider-check blast radius before filling the external runtime env file; use the row action plan's primary/shared provider-ref split so B1 owns embedding/reranker refs, B2 owns OIDC/session-secret refs, B4 owns consolidation role-provider refs, B6 owns media refs, B7 owns object-key/residency refs, and B9 owns parametric refs while shared blockers remain visible. Do **not** create placeholder JSON, PEM, bundle files, or fake provider values just to clear readiness. After filling `production-render.env` and `input-artifacts/`, run `infra/scripts/prepare-production-evidence-custody.py --runtime-env-file "$RUNTIME_ENV_FILE" --refresh /secure/path/to/mnemosyne-tier-b-custody`; refresh updates only the reports and preserves operator inputs. Then run `render-production-soak-manifest.sh --env-file /secure/path/to/mnemosyne-tier-b-custody/production-render.env --runtime-env-file "$RUNTIME_ENV_FILE" --check-environment` until the gap report shows every `MNEMOSYNE_PROD_*` var, provider-manifest env ref, input artifact, and `parity_row_readiness` row is ready.
 
 **Phase 1 — Shared provider stack (unblocks 7/10) ← first.** Provision + wire, then fill `provider-manifest.production.json` (`forbid_local: true`): production Postgres (pgvector 1024-dim HNSW + **ParadeDB/BM25** lexical + **Apache AGE** graph), **embedding** (`MNEMOSYNE_EMBEDDING_URL/MODEL/API_KEY`) + **reranker** (`MNEMOSYNE_RERANKER_URL/MODEL/API_KEY`), **OIDC/IdP/Keycloak** (`MNEMOSYNE_PROVIDER_OIDC_ISSUER/AUDIENCE/JWKS_URL` + authz policy). Re-run `--check-environment` until all referenced provider vars resolve.
 

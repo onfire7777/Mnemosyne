@@ -440,8 +440,25 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
         f"{artifact_validation_script} B1"
     )
     assert row_action_plan["B1"]["blocker_counts"]["input_artifacts"] == 1
+    assert row_action_plan["B1"]["blocker_counts"][
+        "primary_provider_manifest_environment"
+    ] == 6
     assert row_action_plan["B1"]["missing_input_artifacts"] == [
         "retrieval-ops-bundle.json"
+    ]
+    assert row_action_plan["B1"]["primary_missing_provider_manifest_env_refs"] == [
+        "MNEMOSYNE_EMBEDDING_API_KEY",
+        "MNEMOSYNE_EMBEDDING_MODEL",
+        "MNEMOSYNE_EMBEDDING_URL",
+        "MNEMOSYNE_RERANKER_API_KEY",
+        "MNEMOSYNE_RERANKER_MODEL",
+        "MNEMOSYNE_RERANKER_URL",
+    ]
+    assert "MNEMOSYNE_PROVIDER_OIDC_ISSUER" in row_action_plan["B1"][
+        "shared_missing_provider_manifest_env_refs"
+    ]
+    assert "MNEMOSYNE_PROVIDER_OIDC_ISSUER" not in row_action_plan["B1"][
+        "primary_missing_provider_manifest_env_refs"
     ]
     assert {
         validator["name"] for validator in row_action_plan["B1"]["validators"]
@@ -481,6 +498,16 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     assert provider_env_plan["MNEMOSYNE_PROVIDER_OIDC_ISSUER"]["primary_rows"] == [
         "B2"
     ]
+    assert provider_env_plan["MNEMOSYNE_PROVIDER_OIDC_ISSUER"][
+        "provider_check_routes"
+    ] == [
+        {
+            "commands": [],
+            "lanes": ["B2"],
+            "provider_check": "oidc",
+            "source": "row_runbook_provider_ownership",
+        }
+    ]
     assert provider_env_plan["MNEMOSYNE_SESSION_SECRET_COMMAND"]["primary_rows"] == [
         "B2"
     ]
@@ -489,6 +516,16 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     ]
     assert provider_env_plan["MNEMOSYNE_RUNTIME_RESIDENCY"]["primary_rows"] == [
         "B7"
+    ]
+    assert provider_env_plan["MNEMOSYNE_RUNTIME_RESIDENCY"][
+        "provider_check_routes"
+    ] == [
+        {
+            "commands": [],
+            "lanes": ["B7"],
+            "provider_check": "residency_policy",
+            "source": "row_runbook_provider_ownership",
+        }
     ]
     assert provider_env_plan["MNEMOSYNE_PARAMETRIC_COMMAND"]["primary_rows"] == [
         "B9"
@@ -713,6 +750,9 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     assert "## B1 - Production Postgres retrieval" in row_action_plan_text
     assert f"`{artifact_validation_script} B1`" in row_action_plan_text
     assert "`retrieval-ops-bundle.json`" in row_action_plan_text
+    assert "Primary provider refs" in row_action_plan_text
+    assert "Row-owned missing provider-manifest env refs" in row_action_plan_text
+    assert "Shared provider-stack blockers owned by other rows" in row_action_plan_text
     provider_env_plan_text = provider_env_action_plan_markdown.read_text(
         encoding="utf-8"
     )
@@ -720,6 +760,7 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     assert "`MNEMOSYNE_EMBEDDING_URL`" in provider_env_plan_text
     assert "/providers/retrieval/embedding/url/env" in provider_env_plan_text
     assert "Values and runtime env-file paths are" in provider_env_plan_text
+    assert "`oidc: row_runbook_provider_ownership`" in provider_env_plan_text
     render_env_plan_text = render_env_action_plan_markdown.read_text(
         encoding="utf-8"
     )
