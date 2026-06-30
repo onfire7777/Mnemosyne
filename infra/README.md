@@ -123,6 +123,8 @@ open infra/templates/production-operator-env.inventory.md
 # manifest-referenced production input artifact listed in the packet report.
 # The refreshed report's operator_input_inventory groups those edit targets
 # under production-render.env, the external runtime env file, and input-artifacts/.
+# Copy reports/mnemosyne-production-runtime.env.example to the real external
+# runtime env path, chmod 600, and fill secret-bearing values there.
 infra/scripts/prepare-production-evidence-custody.py \
   --runtime-env-file /secure/path/to/mnemosyne-production-runtime.env \
   --refresh \
