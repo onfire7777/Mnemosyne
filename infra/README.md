@@ -182,7 +182,10 @@ required and must be absolute, outside the bundle under review, and not
 pre-existing; it is optional only for diagnostic `--internal-consistency-only`
 runs. Retain it with the external fingerprint record so reviewers can compare the
 emitted `reviewer_guidance`, fingerprints, checks, and row review without
-mutating the evidence bundle.
+mutating the evidence bundle. The fingerprint record also carries a no-secret
+`reviewer_handoff` object with a suggested external verifier report path and
+argv template; use it as replay guidance, not as a substitute for the verifier
+report.
 
 `--check-environment` writes no files and prints no values. Prefer passing the
 packet render env with `--env-file /secure/path/to/mnemosyne-tier-b-custody/production-render.env`

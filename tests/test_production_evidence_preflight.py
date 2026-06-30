@@ -3749,6 +3749,9 @@ exec "$REAL_PYTHON" "$@"
     assert summary["bundle_manifest"] == str(out_root / "bundle-manifest.json")
     assert summary["bundle_fingerprint"].startswith("sha256:")
     fingerprint_payload = json.loads(fingerprint_record.read_text(encoding="utf-8"))
+    suggested_verify_report = out_root.parent / (
+        out_root.name + "-production-evidence-verify.json"
+    )
     assert fingerprint_payload == {
         "schema": "mnemosyne.production-evidence-fingerprint-record.v1",
         "record_kind": "out-of-band-bundle-fingerprint",
@@ -3764,11 +3767,30 @@ exec "$REAL_PYTHON" "$@"
             "expected_bundle_fingerprint_argument": summary["bundle_fingerprint"],
             "report_output_required": True,
         },
+        "reviewer_handoff": {
+            "schema": "mnemosyne.production-evidence-reviewer-handoff.v1",
+            "suggested_report_output": str(suggested_verify_report),
+            "suggested_report_output_must_be_external": True,
+            "verification_argv": [
+                "python",
+                "-m",
+                "mnemosyne.cli",
+                "production-evidence-verify",
+                str(out_root),
+                "--expected-bundle-fingerprint",
+                summary["bundle_fingerprint"],
+                "--report-output",
+                str(suggested_verify_report),
+            ],
+            "diagnostic_only": False,
+        },
         "note": (
             "Retain this file outside the evidence bundle and use bundle_fingerprint "
             "as --expected-bundle-fingerprint during offline custody review."
         ),
     }
+    assert suggested_verify_report.parent == out_root.parent
+    assert not str(suggested_verify_report).startswith(str(out_root) + os.sep)
     assert summary["parity_row_readiness"] == preflight["parity_row_readiness"]
     assert summary["row_review_source"] == "preflight.json.parity_row_readiness"
     assert summary["offline_verify"] == {

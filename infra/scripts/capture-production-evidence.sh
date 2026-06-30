@@ -1865,6 +1865,9 @@ if not metadata_scan["ok"]:
 fingerprint_record_output = os.environ.get("FINGERPRINT_RECORD_OUTPUT_RESOLVED", "")
 if fingerprint_record_output:
     fingerprint_record_path = Path(fingerprint_record_output)
+    suggested_verify_report = out_root.parent / (
+        out_root.name + "-production-evidence-verify.json"
+    )
     fingerprint_record = {
         "schema": "mnemosyne.production-evidence-fingerprint-record.v1",
         "record_kind": "out-of-band-bundle-fingerprint",
@@ -1879,6 +1882,23 @@ if fingerprint_record_output:
             "command": "python -m mnemosyne.cli production-evidence-verify",
             "expected_bundle_fingerprint_argument": bundle_fingerprint,
             "report_output_required": True,
+        },
+        "reviewer_handoff": {
+            "schema": "mnemosyne.production-evidence-reviewer-handoff.v1",
+            "suggested_report_output": str(suggested_verify_report),
+            "suggested_report_output_must_be_external": True,
+            "verification_argv": [
+                "python",
+                "-m",
+                "mnemosyne.cli",
+                "production-evidence-verify",
+                str(out_root),
+                "--expected-bundle-fingerprint",
+                bundle_fingerprint,
+                "--report-output",
+                str(suggested_verify_report),
+            ],
+            "diagnostic_only": False,
         },
         "note": (
             "Retain this file outside the evidence bundle and use bundle_fingerprint "

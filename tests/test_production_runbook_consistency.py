@@ -224,6 +224,18 @@ def test_production_evidence_docs_require_independent_bundle_fingerprint() -> No
             assert "`--expected-bundle-fingerprint` set from" in text, path
 
 
+def test_production_evidence_docs_explain_reviewer_handoff_record() -> None:
+    for path in [
+        REPO / "infra" / "PRODUCTION-EVIDENCE.md",
+        REPO / "infra" / "README.md",
+        REPO / ".planning" / "STATE.md",
+    ]:
+        text = path.read_text(encoding="utf-8")
+        assert "reviewer_handoff" in text, path
+        assert "suggested external verifier report path" in text, path
+        assert "verifier report" in text, path
+
+
 def test_phase_06_summary_uses_current_capture_and_offline_review_boundary() -> None:
     text = PHASE_06_SUMMARY.read_text(encoding="utf-8")
 
