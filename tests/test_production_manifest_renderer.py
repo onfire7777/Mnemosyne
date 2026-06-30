@@ -132,7 +132,13 @@ def _assert_parity_routes_shape(routes: object) -> None:
         assert route["runbook"].startswith(".planning/runbooks/row-")
 
 
-def _assert_row_readiness_shape(item: dict[str, object], *, has_exists: bool) -> None:
+def _assert_row_readiness_shape(
+    item: dict[str, object],
+    *,
+    has_exists: bool,
+    has_provider: bool = False,
+    has_ready: bool = False,
+) -> None:
     expected_keys = {
         "lane",
         "row",
@@ -142,6 +148,8 @@ def _assert_row_readiness_shape(item: dict[str, object], *, has_exists: bool) ->
         "required_input_artifacts",
         "required_input_artifact_count",
         "checks",
+        "missing_render_environment",
+        "render_environment_complete",
     }
     if has_exists:
         expected_keys |= {
@@ -149,6 +157,13 @@ def _assert_row_readiness_shape(item: dict[str, object], *, has_exists: bool) ->
             "input_artifact_errors",
             "input_artifacts_complete",
         }
+    if has_provider:
+        expected_keys |= {
+            "missing_provider_manifest_env_refs",
+            "provider_manifest_environment_complete",
+        }
+    if has_ready:
+        expected_keys.add("ready_for_capture")
     assert set(item) == expected_keys
     assert isinstance(item["lane"], str)
     assert item["lane"].startswith("B")
@@ -174,6 +189,9 @@ def _assert_row_readiness_shape(item: dict[str, object], *, has_exists: bool) ->
         assert isinstance(check, dict)
         assert set(check) == {"name", "command", "option"}
         assert all(isinstance(check[key], str) for key in ("name", "command", "option"))
+    assert isinstance(item["missing_render_environment"], list)
+    assert all(isinstance(name, str) for name in item["missing_render_environment"])
+    assert isinstance(item["render_environment_complete"], bool)
     if has_exists:
         assert isinstance(item["missing_input_artifacts"], list)
         assert all(isinstance(path, str) for path in item["missing_input_artifacts"])
@@ -183,6 +201,14 @@ def _assert_row_readiness_shape(item: dict[str, object], *, has_exists: bool) ->
         assert isinstance(item["input_artifact_errors"], list)
         assert all(isinstance(error, str) for error in item["input_artifact_errors"])
         assert isinstance(item["input_artifacts_complete"], bool)
+    if has_provider:
+        assert isinstance(item["missing_provider_manifest_env_refs"], list)
+        assert all(
+            isinstance(name, str) for name in item["missing_provider_manifest_env_refs"]
+        )
+        assert isinstance(item["provider_manifest_environment_complete"], bool)
+    if has_ready:
+        assert isinstance(item["ready_for_capture"], bool)
 
 
 def _assert_artifact_detail_shape(item: dict[str, object]) -> None:
@@ -547,6 +573,7 @@ def test_renderer_check_environment_reports_missing_without_output() -> None:
     assert payload["ok"] is False
     assert payload["values_redacted"] is True
     assert payload["blocked_reason"] == "missing_required_environment"
+    assert payload["render_environment_complete"] is False
     assert "required_placeholders_present" in payload["validation_categories"]
     assert "external_input_artifact_custody" in payload["validation_categories"]
     assert any(
@@ -593,6 +620,42 @@ def test_renderer_check_environment_reports_missing_without_output() -> None:
         "option": "input_artifacts[0]",
         "parity_lanes": ["B10"],
     } in plan_by_path["row-10-full-suite-evidence.json"]["checks"]
+    assert proc.stderr == ""
+
+
+def test_renderer_check_environment_scopes_missing_render_env_by_row(
+    tmp_path: Path,
+) -> None:
+    env = _renderer_base_env()
+    env["MNEMOSYNE_PROD_EVIDENCE_DIR"] = str(tmp_path / "input-artifacts")
+
+    proc = subprocess.run(
+        [*RENDERER_CMD, "--check-environment"],
+        cwd=REPO,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    payload = json.loads(proc.stdout)
+
+    assert proc.returncode == 78
+    assert payload["ok"] is False
+    assert payload["blocked_reason"] == "missing_required_environment"
+    rows = _row_readiness_by_lane(payload)
+    assert rows["B1"]["missing_render_environment"] == []
+    assert rows["B1"]["render_environment_complete"] is True
+    assert "MNEMOSYNE_PROD_IDP_ISSUER" in rows["B2"]["missing_render_environment"]
+    assert (
+        "MNEMOSYNE_PROD_MCP_HTTP_BASE_URL"
+        in rows["B3"]["missing_render_environment"]
+    )
+    assert (
+        "MNEMOSYNE_PROD_DASHBOARD_URL"
+        in rows["B8"]["missing_render_environment"]
+    )
+    assert env["MNEMOSYNE_PROD_EVIDENCE_DIR"] not in proc.stdout
     assert proc.stderr == ""
 
 
@@ -646,7 +709,12 @@ def test_renderer_check_environment_passes_without_writing_manifest(
     rows = _row_readiness_by_lane(payload)
     assert set(rows) == set(REQUIRED_PARITY_LANES)
     for lane in REQUIRED_PARITY_LANES:
-        _assert_row_readiness_shape(rows[lane], has_exists=True)
+        _assert_row_readiness_shape(
+            rows[lane],
+            has_exists=True,
+            has_provider=True,
+            has_ready=True,
+        )
         assert rows[lane]["input_artifacts_complete"] is True
         assert rows[lane]["missing_input_artifacts"] == []
         assert rows[lane]["input_artifact_errors"] == []
@@ -773,7 +841,12 @@ def test_renderer_check_environment_rejects_missing_provider_manifest_env_ref(
     rows = _row_readiness_by_lane(payload)
     affected_lanes = {"B1", "B2", "B4", "B6", "B7", "B9", "B10"}
     for lane in REQUIRED_PARITY_LANES:
-        _assert_row_readiness_shape(rows[lane], has_exists=True)
+        _assert_row_readiness_shape(
+            rows[lane],
+            has_exists=True,
+            has_provider=True,
+            has_ready=True,
+        )
         if lane in affected_lanes:
             assert rows[lane]["input_artifact_errors"] == [expected_error]
             assert rows[lane]["input_artifacts_complete"] is False
@@ -930,7 +1003,12 @@ def test_renderer_check_environment_fails_on_missing_input_artifacts(
     rows = _row_readiness_by_lane(payload)
     assert set(rows) == set(REQUIRED_PARITY_LANES)
     for lane in REQUIRED_PARITY_LANES:
-        _assert_row_readiness_shape(rows[lane], has_exists=True)
+        _assert_row_readiness_shape(
+            rows[lane],
+            has_exists=True,
+            has_provider=True,
+            has_ready=True,
+        )
         assert rows[lane]["input_artifacts_complete"] is False
         assert rows[lane]["missing_input_artifacts"]
         assert rows[lane]["input_artifact_errors"] == []
@@ -1063,7 +1141,12 @@ def test_renderer_check_environment_row_readiness_scopes_single_missing_artifact
     rows = _row_readiness_by_lane(payload)
     assert set(rows) == set(REQUIRED_PARITY_LANES)
     for lane in REQUIRED_PARITY_LANES:
-        _assert_row_readiness_shape(rows[lane], has_exists=True)
+        _assert_row_readiness_shape(
+            rows[lane],
+            has_exists=True,
+            has_provider=True,
+            has_ready=True,
+        )
     assert rows["B2"]["missing_input_artifacts"] == ["auth-ops-bundle.json"]
     assert rows["B2"]["input_artifacts_complete"] is False
     for lane in set(REQUIRED_PARITY_LANES) - {"B2"}:
@@ -1098,7 +1181,12 @@ def test_renderer_check_environment_row_readiness_scopes_shared_provider_artifac
     missing_lanes = {"B1", "B2", "B4", "B6", "B7", "B9", "B10"}
     assert set(rows) == set(REQUIRED_PARITY_LANES)
     for lane in REQUIRED_PARITY_LANES:
-        _assert_row_readiness_shape(rows[lane], has_exists=True)
+        _assert_row_readiness_shape(
+            rows[lane],
+            has_exists=True,
+            has_provider=True,
+            has_ready=True,
+        )
         if lane in missing_lanes:
             assert rows[lane]["missing_input_artifacts"] == [shared_artifact]
             assert rows[lane]["input_artifacts_complete"] is False
@@ -1147,7 +1235,12 @@ def test_renderer_check_environment_fails_on_missing_provenance_suite_asset(
     assert payload["missing_input_artifacts_detail"] == [detail]
     assert payload["input_artifact_errors"] == []
     rows = _row_readiness_by_lane(payload)
-    _assert_row_readiness_shape(rows["B5"], has_exists=True)
+    _assert_row_readiness_shape(
+        rows["B5"],
+        has_exists=True,
+        has_provider=True,
+        has_ready=True,
+    )
     assert rows["B5"]["missing_input_artifacts"] == ["missing-suite-asset.txt"]
     assert rows["B5"]["input_artifact_errors"] == []
     assert rows["B5"]["input_artifacts_complete"] is False
@@ -1190,7 +1283,12 @@ def test_renderer_check_environment_fails_on_invalid_provenance_suite_asset_path
         "MNEMOSYNE_PROD_EVIDENCE_DIR"
     ]
     rows = _row_readiness_by_lane(payload)
-    _assert_row_readiness_shape(rows["B5"], has_exists=True)
+    _assert_row_readiness_shape(
+        rows["B5"],
+        has_exists=True,
+        has_provider=True,
+        has_ready=True,
+    )
     assert rows["B5"]["missing_input_artifacts"] == []
     assert rows["B5"]["input_artifact_errors"] == payload["input_artifact_errors"]
     assert rows["B5"]["input_artifacts_complete"] is False
@@ -1279,7 +1377,12 @@ def test_renderer_check_environment_rejects_escaped_provenance_suite_asset_path(
         "provenance-trust-suite.json cases[0].asset_path must not contain '..' path segments"
     ]
     rows = _row_readiness_by_lane(payload)
-    _assert_row_readiness_shape(rows["B5"], has_exists=True)
+    _assert_row_readiness_shape(
+        rows["B5"],
+        has_exists=True,
+        has_provider=True,
+        has_ready=True,
+    )
     assert rows["B5"]["missing_input_artifacts"] == []
     assert rows["B5"]["input_artifact_errors"] == payload["input_artifact_errors"]
     assert rows["B5"]["input_artifacts_complete"] is False
@@ -1341,7 +1444,12 @@ def test_renderer_check_environment_accepts_provenance_suite_assets(
             "parity_lanes": ["B5"],
         } in detail["checks"]
     rows = _row_readiness_by_lane(payload)
-    _assert_row_readiness_shape(rows["B5"], has_exists=True)
+    _assert_row_readiness_shape(
+        rows["B5"],
+        has_exists=True,
+        has_provider=True,
+        has_ready=True,
+    )
     assert rows["B5"]["input_artifacts_complete"] is True
     assert rows["B5"]["missing_input_artifacts"] == []
     assert rows["B5"]["input_artifact_errors"] == []
