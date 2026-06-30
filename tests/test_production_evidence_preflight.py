@@ -11,7 +11,10 @@ from typing import Any, Callable
 
 import pytest
 
-from mnemosyne.cli import PRODUCTION_RELEASE_REQUIRED_COMMANDS
+from mnemosyne.cli import (
+    PRODUCTION_RELEASE_REQUIRED_COMMANDS,
+    PRODUCTION_RELEASE_REQUIRED_PROVIDER_CHECKS,
+)
 from mnemosyne.evidence_redaction import scan_evidence_paths, scan_evidence_tree
 from mnemosyne.production_parity import build_parity_row_readiness
 
@@ -74,6 +77,21 @@ def _minimal_production_manifest(
     if mutate is not None:
         mutate(manifest)
     path.write_text(json.dumps(manifest), encoding="utf-8")
+
+
+def _production_provider_manifest_payload(
+    *,
+    command_env: str = "MNEMOSYNE_TEST_PROVIDER_COMMAND",
+) -> dict[str, Any]:
+    return {
+        "forbid_local": True,
+        "required_checks": list(PRODUCTION_RELEASE_REQUIRED_PROVIDER_CHECKS),
+        "providers": {
+            "session_secret": {
+                "command": {"env": command_env},
+            },
+        },
+    }
 
 
 def test_redaction_scan_rejects_symlinked_tree_root(tmp_path: Path) -> None:
@@ -1108,15 +1126,7 @@ def test_capture_production_evidence_records_provider_command_executable_digest(
     tool.chmod(0o755)
     provider_manifest = tmp_path / "provider-manifest.production.json"
     provider_manifest.write_text(
-        json.dumps(
-            {
-                "providers": {
-                    "session_secret": {
-                        "command": {"env": "MNEMOSYNE_TEST_PROVIDER_COMMAND"}
-                    }
-                }
-            }
-        ),
+        json.dumps(_production_provider_manifest_payload()),
         encoding="utf-8",
     )
 
@@ -1242,15 +1252,7 @@ def test_capture_production_evidence_rejects_relative_provider_command_executabl
     out_root = tmp_path / "capture"
     provider_manifest = tmp_path / "provider-manifest.production.json"
     provider_manifest.write_text(
-        json.dumps(
-            {
-                "providers": {
-                    "session_secret": {
-                        "command": {"env": "MNEMOSYNE_TEST_PROVIDER_COMMAND"}
-                    }
-                }
-            }
-        ),
+        json.dumps(_production_provider_manifest_payload()),
         encoding="utf-8",
     )
 
@@ -1294,15 +1296,7 @@ def test_capture_production_evidence_rejects_provider_command_argument(
     tool.chmod(0o755)
     provider_manifest = tmp_path / "provider-manifest.production.json"
     provider_manifest.write_text(
-        json.dumps(
-            {
-                "providers": {
-                    "session_secret": {
-                        "command": {"env": "MNEMOSYNE_TEST_PROVIDER_COMMAND"}
-                    }
-                }
-            }
-        ),
+        json.dumps(_production_provider_manifest_payload()),
         encoding="utf-8",
     )
 
@@ -1334,6 +1328,81 @@ def test_capture_production_evidence_rejects_provider_command_argument(
     assert proc.returncode == 65
     assert "provider-manifest.command must be a single external executable" in proc.stderr
     assert "unretained_provider" not in proc.stderr
+
+
+def _run_preflight_with_provider_manifest(
+    tmp_path: Path,
+    provider_payload: dict[str, Any],
+) -> subprocess.CompletedProcess[str]:
+    manifest = tmp_path / "production-soak.json"
+    out_root = tmp_path / "capture"
+    tool = tmp_path / "bin" / "session-secret-provider"
+    tool.parent.mkdir()
+    tool.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    tool.chmod(0o755)
+    provider_manifest = tmp_path / "provider-manifest.production.json"
+    provider_manifest.write_text(json.dumps(provider_payload), encoding="utf-8")
+
+    def add_provider_manifest(payload: dict[str, Any]) -> None:
+        check = next(
+            item for item in payload["checks"] if item["command"] == "provider-check"
+        )
+        check["args"] = ["--provider-manifest", str(provider_manifest)]
+
+    _minimal_production_manifest(manifest, mutate=add_provider_manifest)
+    env = os.environ.copy()
+    env["MNEMOSYNE_TEST_PROVIDER_COMMAND"] = str(tool)
+
+    return subprocess.run(
+        [
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
+            "--preflight-only",
+            str(manifest),
+            str(out_root),
+        ],
+        cwd=REPO,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def test_capture_production_evidence_preflight_rejects_provider_manifest_without_forbid_local(
+    tmp_path: Path,
+) -> None:
+    provider_payload = _production_provider_manifest_payload()
+    provider_payload.pop("forbid_local")
+
+    proc = _run_preflight_with_provider_manifest(tmp_path, provider_payload)
+
+    assert proc.returncode == 65
+    assert "provider manifest must set forbid_local=true" in proc.stderr
+
+
+def test_capture_production_evidence_preflight_rejects_provider_manifest_check_drift(
+    tmp_path: Path,
+) -> None:
+    provider_payload = _production_provider_manifest_payload()
+    missing_check = list(PRODUCTION_RELEASE_REQUIRED_PROVIDER_CHECKS)[-1]
+    provider_payload["required_checks"] = [
+        check
+        for check in PRODUCTION_RELEASE_REQUIRED_PROVIDER_CHECKS
+        if check != missing_check
+    ] + ["unsupported_provider"]
+
+    proc = _run_preflight_with_provider_manifest(tmp_path, provider_payload)
+
+    assert proc.returncode == 65
+    assert (
+        f"provider manifest missing production provider checks: {missing_check}"
+        in proc.stderr
+    )
+    assert (
+        "provider manifest contains unsupported provider checks: unsupported_provider"
+        in proc.stderr
+    )
 
 
 def test_capture_production_evidence_preflight_rejects_relative_tool_executable(
