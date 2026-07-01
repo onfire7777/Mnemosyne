@@ -15,7 +15,10 @@ ENV PYTHONUNBUFFERED=1 \
 WORKDIR /app
 
 COPY requirements.txt ./
-RUN pip install --upgrade pip && pip install -r requirements.txt
+# CPU wheel index: default aarch64/x86 torch wheels bundle multi-GB CUDA deps this
+# CPU-only service never uses.
+RUN pip install --upgrade pip \
+    && pip install --extra-index-url https://download.pytorch.org/whl/cpu -r requirements.txt
 
 COPY app.py selftest.py ./
 
@@ -23,6 +26,17 @@ EXPOSE 8000
 
 # Hermetic, offline contract check at build time (forces deterministic fallback).
 RUN EMBEDDING_SERVICE_FORCE_FALLBACK=1 python selftest.py
+
+# Bake the real models into the image so the container can run on an
+# egress-free network (read-only rootfs friendly; no runtime downloads).
+RUN python -c "from sentence_transformers import SentenceTransformer, CrossEncoder; \
+SentenceTransformer('BAAI/bge-small-en-v1.5'); \
+CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')" \
+    && chmod -R a+rX /models
+
+# Non-root runtime (matches the hardened compose profile).
+RUN useradd --uid 10001 --user-group --no-create-home --shell /usr/sbin/nologin embedder
+USER 10001:10001
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
   CMD python -c "import urllib.request,os,sys; \

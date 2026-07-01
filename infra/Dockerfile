@@ -17,7 +17,11 @@ COPY src ./src
 RUN pip install --no-cache-dir '.[postgres,mcp]'
 
 COPY infra/entrypoint.sh /usr/local/bin/mnemo-entrypoint
-RUN chmod 0755 /usr/local/bin/mnemo-entrypoint
+# Command-backed providers at the paths the self-hosted profile references.
+COPY infra/vault/vault-object-key-provider.py /opt/mnemosyne/bin/vault-object-key
+COPY infra/vault/vault-session-secret-provider.py /opt/mnemosyne/bin/vault-session-secret
+COPY infra/providers/role-llm.py /opt/mnemosyne/bin/role-llm
+RUN chmod 0755 /usr/local/bin/mnemo-entrypoint /opt/mnemosyne/bin/*
 
 # Non-root; matches the compose hardening (read_only, cap_drop ALL, no-new-privileges).
 RUN useradd --uid 10001 --user-group --no-create-home --shell /usr/sbin/nologin mnemosyne

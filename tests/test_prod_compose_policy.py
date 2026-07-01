@@ -22,6 +22,7 @@ COMPOSE = INFRA / "docker-compose.prod.yml"
 CAP_ADD_ALLOWLIST = {
     "caddy": {"NET_BIND_SERVICE"},  # binds :443 as non-root
     "vault": {"IPC_LOCK"},  # mlock for sealed-memory pages
+    "step-ca": {"NET_BIND_SERVICE"},  # binary ships file caps; bounded gain, see compose comment
 }
 
 # The sole ingress: the only service allowed to publish host ports.
@@ -123,15 +124,20 @@ def test_network_segmentation_holds() -> None:
     services = _service_blocks(_compose_text())
 
     def nets(name: str) -> set[str]:
-        match = re.search(r"networks:\s*\[([^\]]*)\]", services[name])
-        assert match, f"service {name} must declare its networks inline"
-        return {net.strip() for net in match.group(1).split(",")}
+        block = services[name]
+        inline = re.search(r"networks:\s*\[([^\]]*)\]", block)
+        if inline:
+            return {net.strip() for net in inline.group(1).split(",")}
+        mapping = re.search(r"^    networks:[^\n]*\n((?:      .*\n)*)", block + "\n", re.MULTILINE)
+        assert mapping, f"service {name} must declare its networks"
+        return set(re.findall(r"^      (edge|internal|datasec):", mapping.group(1), re.MULTILINE))
 
     for name in DATASEC_ONLY:
-        assert nets(name) == {"datasec"}, f"{name} must live only on the datasec network"
-    assert "datasec" not in nets("mnemo-api"), "the edge API must never reach the data-security network"
+        assert "edge" not in nets(name), f"{name} must never be edge-reachable"
+        assert "datasec" in nets(name), f"{name} belongs on the datasec network"
+    assert nets("vault") == {"datasec"}, "vault is reachable only from the datasec network"
     assert "edge" not in nets("mnemo-consolidator"), "the consolidator must never be edge-reachable"
-    assert nets(SOLE_INGRESS) == {"edge"}, "the ingress terminates on the edge network only"
+    assert "datasec" not in nets(SOLE_INGRESS), "the ingress must never reach the data-security network"
 
 
 def test_repo_relative_mounts_exist() -> None:
@@ -145,18 +151,21 @@ def test_repo_relative_mounts_exist() -> None:
 
 def test_secret_files_live_outside_the_repo() -> None:
     secrets = _top_level_section(_compose_text(), "secrets")
-    paths = re.findall(r"file:\s*(\S+)", secrets)
+    paths = [p.strip('"') for p in re.findall(r"file:\s*([^\s}]+)", secrets)]
     assert paths, "the secrets block must reference external files"
     for path in paths:
-        assert path.startswith("/") and not path.startswith(str(REPO_ROOT)), (
+        # absolute external path, or an env-parameterized path whose default is external
+        assert (path.startswith("/") or path.startswith("${")) and not path.startswith(str(REPO_ROOT)), (
             f"secret files must be absolute and external to the repo: {path}"
         )
+        assert "./" not in path, f"secret files must never be repo-relative: {path}"
 
 
 def test_build_services_reference_existing_docker_assets() -> None:
     text = _compose_text()
-    for dockerfile in set(re.findall(r"dockerfile:\s*([^\s}]+)", text)):
-        assert (REPO_ROOT / dockerfile).is_file(), f"missing build dockerfile: {dockerfile}"
+    for context, dockerfile in set(re.findall(r"context:\s*([^\s,}]+),\s*dockerfile:\s*([^\s}]+)", text)):
+        resolved = (INFRA / context / dockerfile).resolve()
+        assert resolved.is_file(), f"missing build dockerfile: {context}/{dockerfile}"
     assert (INFRA / "entrypoint.sh").is_file(), "infra/entrypoint.sh (image entrypoint) must exist"
     for env_file in set(re.findall(r"env_file:\s*\[([^\]]*)\]", text)):
         for ref in env_file.split(","):

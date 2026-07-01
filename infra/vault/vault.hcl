@@ -5,7 +5,10 @@
 # and place vault.crt / vault.key under $MNEMO_SECRETS_DIR/vault-tls/ (mounted at /vault/tls).
 
 ui            = false
-disable_mlock = false   # IPC_LOCK is granted to the vault service in the compose file
+# Containerized profile: the hardened compose (cap_drop ALL, non-root, no-new-privileges)
+# cannot grant an effective IPC_LOCK, so memory locking is disabled. Compensate by
+# keeping the vault volume on encrypted host storage (LUKS/FileVault) and no swap exposure.
+disable_mlock = true
 
 storage "file" {
   path = "/vault/file"

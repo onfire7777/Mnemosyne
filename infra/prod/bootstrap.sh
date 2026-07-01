@@ -16,6 +16,15 @@ umask 077
 echo "==> 1. Secret material (generated locally, stored OUTSIDE the repo, mode 0600)"
 [ -f "$SECRETS_DIR/pg_superuser_pw" ]  || openssl rand -base64 32 > "$SECRETS_DIR/pg_superuser_pw"
 [ -f "$SECRETS_DIR/grafana_admin_pw" ] || openssl rand -base64 24 > "$SECRETS_DIR/grafana_admin_pw"
+[ -f "$SECRETS_DIR/kc_db_pw" ]         || openssl rand -hex 24 > "$SECRETS_DIR/kc_db_pw"
+[ -f "$SECRETS_DIR/kc_admin_pw" ]      || openssl rand -hex 24 > "$SECRETS_DIR/kc_admin_pw"
+for role in app consolidator eval; do
+  [ -f "$SECRETS_DIR/${role}_db_pw" ] || openssl rand -hex 24 > "$SECRETS_DIR/${role}_db_pw"
+done
+# pgpass files: password custody for the least-privilege DSNs (PGPASSFILE in compose)
+printf 'postgres.mnemo.local:5432:mnemosyne:app_user:%s\n' "$(cat "$SECRETS_DIR/app_db_pw")" > "$SECRETS_DIR/pgpass_app"
+printf 'postgres.mnemo.local:5432:mnemosyne:consolidator_user:%s\n' "$(cat "$SECRETS_DIR/consolidator_db_pw")" > "$SECRETS_DIR/pgpass_consolidator"
+chmod 0600 "$SECRETS_DIR"/pgpass_* 2>/dev/null || true
 if [ ! -f "$SECRETS_DIR/seaweed-s3.json" ]; then   # S3 identity for SeaweedFS (mounted read-only by compose)
   SEAWEED_ACCESS_KEY="$(openssl rand -hex 16)"
   SEAWEED_SECRET_KEY="$(openssl rand -base64 32 | tr -d '\n')"
@@ -65,6 +74,8 @@ echo "    Role-LLM: install Qwen3-4B GGUF for /opt/mnemosyne/bin/role-llm, OR po
 
 echo "==> Bootstrap prepared. Next:"
 echo "    cp infra/profiles/self-hosted.env $SECRETS_DIR/production-render.env   # fill non-secret values"
+echo "    export MNEMO_SECRETS_DIR=$SECRETS_DIR"
+echo "    export KC_DB_PASSWORD=\$(cat $SECRETS_DIR/kc_db_pw) KC_ADMIN_PASSWORD=\$(cat $SECRETS_DIR/kc_admin_pw)"
 echo "    docker compose -f infra/docker-compose.prod.yml up -d"
 echo "    infra/scripts/render-production-soak-manifest.sh --check-environment"
 echo "    # then the per-row capture (infra/PRODUCTION-EVIDENCE.md) for B1-B8, B10."

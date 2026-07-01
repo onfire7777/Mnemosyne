@@ -31,3 +31,32 @@ CREATE ROLE eval_user          LOGIN IN ROLE mnemosyne_readonly;
 -- tenant_id is set per request via SET LOCAL from the VERIFIED session claim only.
 
 REVOKE ALL ON DATABASE mnemosyne FROM PUBLIC;
+
+-- ---------------------------------------------------------------------------
+-- Concrete grants. In the prod compose, sql/schema.sql runs FIRST (mounted as
+-- /docker-entrypoint-initdb.d/05-schema.sql), so the 24 tables exist here.
+-- ---------------------------------------------------------------------------
+GRANT CONNECT ON DATABASE mnemosyne TO mnemosyne_app, mnemosyne_consolidator, mnemosyne_readonly;
+GRANT USAGE ON SCHEMA public TO mnemosyne_app, mnemosyne_consolidator, mnemosyne_readonly;
+GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA public TO mnemosyne_app;            -- no DELETE/TRUNCATE
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO mnemosyne_consolidator;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO mnemosyne_readonly;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO mnemosyne_app, mnemosyne_consolidator;
+
+-- The engine's runtime side-state layer creates and ALTERs its own tables at
+-- startup, so the app roles need schema CREATE and the runtime tables must be
+-- app-owned. FORCE RLS still binds table owners, so tenant isolation holds.
+GRANT CREATE ON SCHEMA public TO mnemosyne_app, mnemosyne_consolidator;
+ALTER TABLE runtime_state OWNER TO mnemosyne_app;
+ALTER TABLE runtime_jobs OWNER TO mnemosyne_app;
+GRANT mnemosyne_app TO consolidator_user;   -- consolidator may manage runtime side-state too
+
+-- Tables created at runtime by one login role stay usable by the other.
+ALTER DEFAULT PRIVILEGES FOR ROLE app_user IN SCHEMA public
+  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO mnemosyne_consolidator;
+ALTER DEFAULT PRIVILEGES FOR ROLE app_user IN SCHEMA public
+  GRANT SELECT, INSERT, UPDATE ON TABLES TO mnemosyne_app;
+ALTER DEFAULT PRIVILEGES FOR ROLE consolidator_user IN SCHEMA public
+  GRANT SELECT, INSERT, UPDATE ON TABLES TO mnemosyne_app;
+ALTER DEFAULT PRIVILEGES FOR ROLE consolidator_user IN SCHEMA public
+  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO mnemosyne_consolidator;
