@@ -30,27 +30,41 @@ volumes:
   vmdata: {}
   grafana: {}
   caddy_data: {}
-  tei_models: {}
+  ollama: {}
+  mnemo_api_data: {}
+  mnemo_consolidator_data: {}
 
 services:
   caddy:                                   # SOLE ingress: terminates TLS (step-ca ACME), the only published port
     <<: *hardened
     image: caddy:2.8
     cap_add: ["NET_BIND_SERVICE"]
-    depends_on: [step-ca, mnemo-api, keycloak, grafana, tei, seaweedfs]
+    depends_on: [step-ca, mnemo-api, keycloak, grafana, embedder, seaweedfs]
     ports: ["443:443"]                     # bind to a concrete LAN/VPN iface in prod, never 0.0.0.0/WAN
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
+      - ${MNEMO_SECRETS_DIR:-/secure/outside/repo}/step-ca-root.crt:/data/step-ca-root.crt:ro
     tmpfs: ["/config:size=16m"]
-    networks: [edge]
+    networks:                              # internal = proxy backhaul to tei/s3/grafana; aliases give
+      edge:                                # every service one HTTPS name that resolves to the ingress
+        aliases: [mcp.mnemo.local, kc.mnemo.local, tei.mnemo.local, s3.mnemo.local, grafana.mnemo.local]
+      internal:
+        aliases: [mcp.mnemo.local, kc.mnemo.local, tei.mnemo.local, s3.mnemo.local, grafana.mnemo.local]
 
   step-ca:                                 # internal ACME CA -> real, non-self-signed chains (TLS gate)
     <<: *hardened
-    image: smallstep/step-ca:0.27
+    image: smallstep/step-ca:0.28.4
+    # The step-ca binary ships file capabilities (setcap NET_BIND_SERVICE), which
+    # no-new-privileges blocks at exec for a non-root user. Exception: permit that
+    # single bounded gain (cap_add) and drop only the no-new-privileges bit here.
+    security_opt: []
+    cap_add: ["NET_BIND_SERVICE"]
     environment: { DOCKER_STEPCA_INIT_NAME: Mnemosyne, DOCKER_STEPCA_INIT_DNS_NAMES: ca.mnemo.local }
     volumes: [stepca:/home/step]
-    networks: [edge, internal]
+    networks:
+      edge: { aliases: [ca.mnemo.local] }
+      internal: { aliases: [ca.mnemo.local] }
 
   postgres:                                # NATIVE retrieval engine: FTS + pgvector HNSW + recursive-PPR
     <<: *hardened
@@ -60,56 +74,72 @@ services:
       POSTGRES_DB: mnemosyne
       POSTGRES_USER: mnemosyne_superuser   # bootstrap only; apps use least-privilege roles (roles.sql)
       POSTGRES_PASSWORD_FILE: /run/secrets/pg_superuser_pw
-    secrets: [pg_superuser_pw]
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - ../sql/schema.sql:/docker-entrypoint-initdb.d/05-schema.sql:ro
       - ./postgres/roles.sql:/docker-entrypoint-initdb.d/10-roles.sql:ro
+      - ./postgres/20-keycloak-db.sh:/docker-entrypoint-initdb.d/20-keycloak-db.sh:ro
+    secrets: [pg_superuser_pw, kc_db_pw, app_db_pw, consolidator_db_pw, eval_db_pw]
     tmpfs: ["/tmp:size=64m", "/run/postgresql:size=64m"]
     command: ["postgres", "-c", "shared_buffers=512MB", "-c", "maintenance_work_mem=512MB"]
     healthcheck: { test: ["CMD-SHELL", "pg_isready -U mnemosyne_superuser -d mnemosyne"], interval: 10s, retries: 6 }
-    networks: [datasec]
+    networks:                              # internal = RLS-scoped least-privilege reads for the API;
+      internal: { aliases: [postgres.mnemo.local] }   # datasec = write/KMS side (consolidator, keycloak, vault)
+      datasec: { aliases: [postgres.mnemo.local] }
 
-  tei:                                     # CPU embeddings (arctic-embed-l-v2.0, 1024-dim) + cross-encoder reranker
+  embedder:                                # real embeddings (1024-dim) + real cross-encoder reranker
+    # The repo's own SLO-proven provider service (services/embedding/) — implements the
+    # exact HttpEmbeddingProvider/HttpReranker contract, arch-native (TEI ships amd64-only).
+    # Models are baked into the image at build time: the internal network has no egress.
     <<: *hardened
-    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.5
-    user: "1000:1000"
-    environment: { MODEL_ID: Snowflake/snowflake-arctic-embed-l-v2.0, HF_HOME: /models }
-    volumes: [tei_models:/models]
+    build: { context: ../services/embedding, dockerfile: Dockerfile }
+    environment: { HF_HUB_OFFLINE: "1", EMBEDDING_SERVICE_DIMS: "1024" }
     tmpfs: ["/tmp:size=128m"]
     mem_limit: 4g
     networks: [internal]
-    # Reranker: run a second TEI instance (MODEL_ID=BAAI/bge-reranker-v2-m3) or Infinity; wire HttpReranker to it.
 
   keycloak:                                # OIDC/JWKS (FR-7/9) — production realm imported by bootstrap
     <<: *hardened
-    image: quay.io/keycloak/keycloak:25.0
+    build: { context: ./keycloak, dockerfile: Dockerfile }   # optimized image: kc.sh build baked in
     user: "1000:0"
-    command: ["start", "--optimized", "--hostname=kc.mnemo.local", "--proxy-headers=xforwarded"]
+    command: ["start", "--optimized", "--hostname=kc.mnemo.local", "--proxy-headers=xforwarded", "--import-realm"]
     environment:
       KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres.mnemo.local:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: ${KC_DB_PASSWORD:?export from $MNEMO_SECRETS_DIR/kc_db_pw before compose up}
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_ADMIN_PASSWORD:?export from $MNEMO_SECRETS_DIR/kc_admin_pw before compose up}
       KC_HEALTH_ENABLED: "true"
       KC_HTTP_ENABLED: "true"               # TLS terminated at Caddy; KC reachable only on internal net
-    volumes: [kc:/opt/keycloak/data]
+    volumes:
+      - kc:/opt/keycloak/data
+      - ./keycloak/realm-mnemosyne.json:/opt/keycloak/data/import/realm-mnemosyne.json:ro
     tmpfs: ["/tmp:size=64m"]
-    mem_limit: 768m
+    mem_limit: 1g
     networks: [edge, datasec]
 
   vault:                                   # KMS transit (crypto-shred) — PRODUCTION: sealed, no dev root token
     <<: *hardened
     image: hashicorp/vault:1.17
-    cap_add: ["IPC_LOCK"]
+    # Non-root from the start: the image entrypoint then skips its root-only setcap
+    # (blocked by cap_drop ALL). mlock is disabled in vault.hcl for the container
+    # profile — put the vault volume on encrypted host storage instead.
+    user: "100:100"
+    environment: { SKIP_SETCAP: "true" }   # setcap is root-only and blocked by cap_drop ALL
     command: ["vault", "server", "-config=/vault/config/vault.hcl"]
     volumes:
       - vault:/vault/file
       - ./vault/vault.hcl:/vault/config/vault.hcl:ro
       - ${MNEMO_SECRETS_DIR:-/secure/outside/repo}/vault-tls:/vault/tls:ro   # step-ca-issued leaf (bootstrap.sh)
     tmpfs: ["/tmp:size=16m"]
-    networks: [datasec]
+    networks:
+      datasec: { aliases: [vault.mnemo.local] }
     # bootstrap.sh runs `vault operator init` + transit enable + AppRole; NEVER a committed root token.
 
   seaweedfs:                               # S3 object store (native AES256) for multimodal (B6)
     <<: *hardened
-    image: chrislusf/seaweedfs:3.73
+    image: chrislusf/seaweedfs:3.79
     command: ["server", "-s3", "-dir=/data", "-s3.config=/etc/seaweed/s3.json"]
     volumes:
       - seaweed:/data
@@ -137,24 +167,91 @@ services:
     tmpfs: ["/tmp:size=32m"]
     networks: [edge, internal]
 
-  mnemo-api:                               # EDGE: MCP/HTTP surface. NO secrets, NO KMS, NO direct DB writes.
+  mnemo-api:                               # EDGE: MCP/HTTP surface. Least-privilege DB role; Vault for key custody only.
     <<: *hardened
     build: { context: .., dockerfile: infra/Dockerfile }   # adjust to the app Dockerfile path
     env_file: [./profiles/self-hosted.env]
-    environment: { MNEMOSYNE_MCP_PRODUCTION_PROFILE: "1", MNEMOSYNE_MCP_REQUIRE_SESSION: "1", MNEMOSYNE_ROLE: api }
+    environment:
+      MNEMOSYNE_MCP_PRODUCTION_PROFILE: "1"
+      MNEMOSYNE_MCP_REQUIRE_SESSION: "1"
+      MNEMOSYNE_ROLE: api
+      MNEMOSYNE_MCP_HTTP_HEALTH_PATH: /health  # match the profile's published URLs
+      MNEMOSYNE_MCP_HTTP_RPC_PATH: /rpc
+      MNEMOSYNE_MCP_SESSION_SECRET_COMMAND: /opt/mnemosyne/bin/vault-session-secret
+      PGPASSFILE: /run/secrets/pgpass_app      # password for the least-privilege app_user DSN
+      SSL_CERT_FILE: /run/secrets/step_ca_root # trust the internal CA for https://*.mnemo.local
+      VAULT_ADDR: https://vault.mnemo.local:8200
+      VAULT_CACERT: /run/secrets/step_ca_root
+      VAULT_TOKEN_FILE: /run/secrets/vault_app_token
+      MNEMOSYNE_VAULT_WRAP_DIR: /data/wrapped-keys
+    secrets: [pgpass_app, step_ca_root, vault_app_token]
+    volumes: [mnemo_api_data:/data]            # AES-GCM object store + wrapped-DEK sidecars
     tmpfs: ["/tmp:size=64m"]
-    networks: [edge, internal]
-    depends_on: [keycloak, tei]
+    # datasec: required for command-backed Vault key custody (session verify + object DEK wrap);
+    # DB writes stay least-privilege via app_user (no DELETE/TRUNCATE, RLS forced).
+    networks: [edge, internal, datasec]
+    depends_on: [keycloak, embedder]
 
   mnemo-consolidator:                      # BACK: sole write + KMS authority. NO edge reachability.
     <<: *hardened
     build: { context: .., dockerfile: infra/Dockerfile }
     env_file: [./profiles/self-hosted.env]
-    environment: { MNEMOSYNE_ROLE: consolidator }
+    environment:
+      MNEMOSYNE_ROLE: consolidator
+      # sole write authority: overrides the env_file's read-path app_user DSN
+      MNEMOSYNE_POSTGRES_DSN: postgresql://consolidator_user@postgres.mnemo.local:5432/mnemosyne
+      PGPASSFILE: /run/secrets/pgpass_consolidator
+      SSL_CERT_FILE: /run/secrets/step_ca_root
+      VAULT_ADDR: https://vault.mnemo.local:8200
+      VAULT_CACERT: /run/secrets/step_ca_root
+      VAULT_TOKEN_FILE: /run/secrets/vault_app_token
+      MNEMOSYNE_VAULT_WRAP_DIR: /data/wrapped-keys
+      OLLAMA_URL: http://ollama.mnemo.local:11434
+    secrets: [pgpass_consolidator, step_ca_root, vault_app_token]
+    volumes: [mnemo_consolidator_data:/data]
     tmpfs: ["/tmp:size=64m"]
     networks: [internal, datasec]
-    depends_on: [postgres, vault]
+    depends_on: [postgres, vault, ollama]
+
+  ollama:                                  # local role-LLM (Qwen3-4B) for the consolidation commands
+    <<: *hardened
+    image: ollama/ollama:0.13.1
+    volumes: [ollama:/root/.ollama]
+    tmpfs: ["/tmp:size=64m"]
+    mem_limit: 5g
+    networks:                              # edge grants egress for `ollama pull`; serving happens on internal
+      edge: {}
+      internal: { aliases: [ollama.mnemo.local] }
+
+  operator:                                # bastion for Tier-B capture runs (not started by default)
+    <<: *hardened
+    profiles: ["operator"]
+    build: { context: .., dockerfile: infra/Dockerfile }
+    entrypoint: ["sleep", "infinity"]
+    environment:
+      SSL_CERT_FILE: /run/secrets/step_ca_root
+      VAULT_ADDR: https://vault.mnemo.local:8200
+      VAULT_CACERT: /run/secrets/step_ca_root
+      VAULT_TOKEN_FILE: /run/secrets/vault_app_token
+      PGPASSFILE: /run/secrets/pgpass_consolidator
+      OLLAMA_URL: http://ollama.mnemo.local:11434
+    secrets: [step_ca_root, vault_app_token, pgpass_consolidator, pgpass_app]
+    volumes:
+      # identical absolute paths inside and out so evidence manifests stay portable
+      - ../:/Users/admin/Mnemosyne
+      - ${MNEMO_CUSTODY_DIR:-/secure/outside/repo-custody}:${MNEMO_CUSTODY_DIR:-/secure/outside/repo-custody}
+      - ${MNEMO_EVIDENCE_OUT:-/secure/outside/repo-evidence}:${MNEMO_EVIDENCE_OUT:-/secure/outside/repo-evidence}
+    tmpfs: ["/tmp:size=256m"]
+    networks: [edge, internal, datasec]
 
 secrets:
-  pg_superuser_pw: { file: /secure/outside/repo/pg_superuser_pw }
-  grafana_admin_pw: { file: /secure/outside/repo/grafana_admin_pw }
+  pg_superuser_pw: { file: "${MNEMO_SECRETS_DIR:-/secure/outside/repo}/pg_superuser_pw" }
+  grafana_admin_pw: { file: "${MNEMO_SECRETS_DIR:-/secure/outside/repo}/grafana_admin_pw" }
+  kc_db_pw: { file: "${MNEMO_SECRETS_DIR:-/secure/outside/repo}/kc_db_pw" }
+  app_db_pw: { file: "${MNEMO_SECRETS_DIR:-/secure/outside/repo}/app_db_pw" }
+  consolidator_db_pw: { file: "${MNEMO_SECRETS_DIR:-/secure/outside/repo}/consolidator_db_pw" }
+  eval_db_pw: { file: "${MNEMO_SECRETS_DIR:-/secure/outside/repo}/eval_db_pw" }
+  pgpass_app: { file: "${MNEMO_SECRETS_DIR:-/secure/outside/repo}/pgpass_app" }
+  pgpass_consolidator: { file: "${MNEMO_SECRETS_DIR:-/secure/outside/repo}/pgpass_consolidator" }
+  step_ca_root: { file: "${MNEMO_SECRETS_DIR:-/secure/outside/repo}/step-ca-root.crt" }
+  vault_app_token: { file: "${MNEMO_SECRETS_DIR:-/secure/outside/repo}/vault_app_token" }

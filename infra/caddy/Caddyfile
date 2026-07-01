@@ -1,12 +1,20 @@
 # Caddy — sole ingress. Real certs from step-ca ACME (NOT Caddy's self-signed `internal`).
 # Every backend is HTTPS on a non-loopback hostname -> satisfies the locality + real-CA gates.
+# NOTE: Caddy classifies *.local names as "internal" and would silently fall back to its
+# self-signed local CA — so every site imports the explicit step-ca ACME issuer below.
 
 {
-	# Issue leaf certs from the self-hosted step-ca ACME directory (real chain, not self-signed).
-	acme_ca https://ca.mnemo.local/acme/acme/directory
-	acme_ca_root /data/step-ca-root.crt
 	servers {
 		protocols h1 h2
+	}
+}
+
+(internal_acme) {
+	tls {
+		issuer acme {
+			dir https://ca.mnemo.local:9000/acme/acme/directory
+			trusted_roots /data/step-ca-root.crt
+		}
 	}
 }
 
@@ -24,11 +32,13 @@
 }
 
 mcp.mnemo.local {
+	import internal_acme
 	import secure_headers
 	reverse_proxy mnemo-api:8080
 }
 
 kc.mnemo.local {
+	import internal_acme
 	import secure_headers
 	# Block the admin console from the public ingress; admin is internal-only.
 	@admin path /admin* /metrics*
@@ -37,16 +47,21 @@ kc.mnemo.local {
 }
 
 tei.mnemo.local {
+	# model-server hostname (kept stable for the render env); backend is the
+	# repo's own embeddings+reranker service on :8000
+	import internal_acme
 	import secure_headers
-	reverse_proxy tei:80
+	reverse_proxy embedder:8000
 }
 
 s3.mnemo.local {
+	import internal_acme
 	import secure_headers
 	reverse_proxy seaweedfs:8333
 }
 
 grafana.mnemo.local {
+	import internal_acme
 	import secure_headers
 	reverse_proxy grafana:3000
 }
