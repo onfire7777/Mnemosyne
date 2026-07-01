@@ -43,13 +43,22 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO mnemosyne
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO mnemosyne_readonly;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO mnemosyne_app, mnemosyne_consolidator;
 
--- The engine's runtime side-state layer creates and ALTERs its own tables at
--- startup, so the app roles need schema CREATE and the runtime tables must be
--- app-owned. FORCE RLS still binds table owners, so tenant isolation holds.
+-- The engine ensures/ALTERs its schema at connection time (runtime side-state
+-- AND domain-table column ensures), so the app group must own the tables.
+-- FORCE RLS binds owners too, so tenant isolation holds; DELETE/TRUNCATE are
+-- explicitly revoked from the app group below (residual: an owner could
+-- re-grant itself — the hard delete boundary remains RLS + the capability layer).
 GRANT CREATE ON SCHEMA public TO mnemosyne_app, mnemosyne_consolidator;
-ALTER TABLE runtime_state OWNER TO mnemosyne_app;
-ALTER TABLE runtime_jobs OWNER TO mnemosyne_app;
-GRANT mnemosyne_app TO consolidator_user;   -- consolidator may manage runtime side-state too
+GRANT mnemosyne_app TO consolidator_user;   -- consolidator manages runtime side-state too
+DO $$
+DECLARE t record;
+BEGIN
+  FOR t IN SELECT tablename FROM pg_tables WHERE schemaname='public' LOOP
+    EXECUTE format('ALTER TABLE public.%I OWNER TO mnemosyne_app', t.tablename);
+  END LOOP;
+END $$;
+REVOKE DELETE, TRUNCATE ON ALL TABLES IN SCHEMA public FROM mnemosyne_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO mnemosyne_consolidator;
 
 -- Tables created at runtime by one login role stay usable by the other.
 ALTER DEFAULT PRIVILEGES FOR ROLE app_user IN SCHEMA public
