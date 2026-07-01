@@ -41,4 +41,6 @@ where = ["src"]
 [tool.pytest.ini_options]
 addopts = "-q"
 testpaths = ["tests"]
-pythonpath = ["src"]
+# repo root ("."), so the top-level `eval` package imports under any invocation
+# (`pytest` as well as `python -m pytest`); `src` for the installed package.
+pythonpath = ["src", "."]
