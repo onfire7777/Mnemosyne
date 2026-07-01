@@ -281,7 +281,7 @@ Exact 1:1 blueprint parity is in progress, but the headline guarantees are prove
 
 > SLO evidence is the Wave-5 definitive run summarized in [`docs/ROADMAP-TO-100.md`](docs/ROADMAP-TO-100.md) and `eval/calibration/report.json` (`ece.policy_threshold.meets_target: true`). Hard-QA multi-hop answer-synthesis (recall/nDCG 0.625/0.594) is a known, non-headline gap, tracked separately.
 
-**Blended completion ≈ 82%** (up from a long ~70% plateau). Roughly 85% functional/architectural scaffold; the mandatory Tier-A `src` reconciliation wirings (A1–A10, A13, A14) landed 2026-06-24. The remaining ~18% is **Tier-B operator-captured production-infrastructure evidence** (real IdP/Keycloak, Vault/KMS, ParadeDB/Apache AGE, hosted embedding/reranker/trainer endpoints, C2PA trust roots) captured via `deployment-soak` + `release-audit` — evidence capture, not feature code. The 10 audit gap rows currently stand at "Partial".
+**Blended completion ≈ 82%** (up from a long ~70% plateau). Roughly 85% functional/architectural scaffold; the mandatory Tier-A `src` reconciliation wirings (A1–A10, A13, A14) landed 2026-06-24, with A12 cached-PPR also closed as a default-off Postgres cache seam. The remaining ~18% is **Tier-B operator-captured production-infrastructure evidence** (real IdP/Keycloak, Vault/KMS, ParadeDB/Apache AGE, hosted embedding/reranker/trainer endpoints, C2PA trust roots) captured via `deployment-soak` + `release-audit` — evidence capture, not feature code. The 10 audit gap rows currently stand at "Partial".
 
 Controlling artifacts: [`docs/ROADMAP-TO-100.md`](docs/ROADMAP-TO-100.md) (blended figure + sequenced path), `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md` (status), and `infra/PRODUCTION-EVIDENCE.md` (capture/offline-custody handoff).
 
