@@ -16,6 +16,21 @@ umask 077
 echo "==> 1. Secret material (generated locally, stored OUTSIDE the repo, mode 0600)"
 [ -f "$SECRETS_DIR/pg_superuser_pw" ]  || openssl rand -base64 32 > "$SECRETS_DIR/pg_superuser_pw"
 [ -f "$SECRETS_DIR/grafana_admin_pw" ] || openssl rand -base64 24 > "$SECRETS_DIR/grafana_admin_pw"
+if [ ! -f "$SECRETS_DIR/seaweed-s3.json" ]; then   # S3 identity for SeaweedFS (mounted read-only by compose)
+  SEAWEED_ACCESS_KEY="$(openssl rand -hex 16)"
+  SEAWEED_SECRET_KEY="$(openssl rand -base64 32 | tr -d '\n')"
+  cat > "$SECRETS_DIR/seaweed-s3.json" <<SEAWEED
+{
+  "identities": [
+    {
+      "name": "mnemosyne",
+      "credentials": [{"accessKey": "$SEAWEED_ACCESS_KEY", "secretKey": "$SEAWEED_SECRET_KEY"}],
+      "actions": ["Read", "Write", "List", "Tagging"]
+    }
+  ]
+}
+SEAWEED
+fi
 
 echo "==> 2. step-ca: bring up, export the ROOT cert so Caddy chains to a real (non-self-signed) CA"
 docker compose -f "$REPO_ROOT/infra/docker-compose.prod.yml" up -d step-ca
@@ -24,6 +39,10 @@ docker compose -f "$REPO_ROOT/infra/docker-compose.prod.yml" exec -T step-ca \
   cat /home/step/certs/root_ca.crt > "$SECRETS_DIR/step-ca-root.crt"
 echo "    Add an ACME provisioner:  step ca provisioner add acme --type ACME"
 echo "    Trust the root on the host so backends validate the chain (security/no-skip-verify)."
+echo "    Issue the Vault leaf (infra/vault/vault.hcl expects it under \$MNEMO_SECRETS_DIR/vault-tls/):"
+echo "      mkdir -p $SECRETS_DIR/vault-tls"
+echo "      step ca certificate vault.mnemo.local $SECRETS_DIR/vault-tls/vault.crt \\"
+echo "        $SECRETS_DIR/vault-tls/vault.key --ca-url https://ca.mnemo.local --root $SECRETS_DIR/step-ca-root.crt"
 
 echo "==> 3. Vault: init + unseal (PRODUCTION = sealed, NO dev mode, NO committed root token)"
 echo "    Run the real flow against the vault service, store unseal/root material in your"
