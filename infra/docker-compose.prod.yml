@@ -218,7 +218,7 @@ services:
     image: ollama/ollama:0.13.1
     volumes: [ollama:/root/.ollama]
     tmpfs: ["/tmp:size=64m"]
-    mem_limit: 5g
+    mem_limit: 6g   # qwen3:4b needs ~3.3GiB resident + page cache headroom for the blob
     networks:                              # edge grants egress for `ollama pull`; serving happens on internal
       edge: {}
       internal: { aliases: [ollama.mnemo.local] }

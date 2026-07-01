@@ -40,26 +40,49 @@ OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen3:4b")
 TIMEOUT = float(os.environ.get("OLLAMA_TIMEOUT", "25"))
 
 
-def _chat(system: str, user: str) -> dict:
-    body = json.dumps(
-        {
-            "model": OLLAMA_MODEL,
-            "stream": False,
-            "think": False,
-            "format": "json",
-            "options": {"temperature": 0, "num_predict": 700},
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-        }
-    ).encode("utf-8")
-    request = urllib.request.Request(
-        f"{OLLAMA_URL}/api/chat", data=body, headers={"Content-Type": "application/json"}
-    )
-    with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
-        reply = json.load(response)
-    return json.loads(reply["message"]["content"])
+def _chat(system: str, user: str, required_key: str) -> dict:
+    """Chat with schema enforcement: retry with a corrective turn when the
+    model returns JSON that misses the required top-level key (small local
+    models like to describe the task instead of answering it)."""
+    messages = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user},
+    ]
+    last: dict = {}
+    for _ in range(3):
+        body = json.dumps(
+            {
+                "model": OLLAMA_MODEL,
+                "stream": False,
+                "think": False,
+                "format": "json",
+                "options": {"temperature": 0, "num_predict": 700},
+                "messages": messages,
+            }
+        ).encode("utf-8")
+        request = urllib.request.Request(
+            f"{OLLAMA_URL}/api/chat", data=body, headers={"Content-Type": "application/json"}
+        )
+        with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
+            reply = json.load(response)
+        content = reply["message"]["content"]
+        try:
+            last = json.loads(content)
+        except json.JSONDecodeError:
+            last = {}
+        if isinstance(last, dict) and required_key in last:
+            return last
+        messages.append({"role": "assistant", "content": content})
+        messages.append(
+            {
+                "role": "user",
+                "content": (
+                    f'Wrong shape. Reply with ONLY a JSON object whose single top-level key is "{required_key}". '
+                    "No other keys, no commentary."
+                ),
+            }
+        )
+    return last if isinstance(last, dict) else {}
 
 
 def _slug(text: str) -> str:
@@ -92,7 +115,9 @@ def evidence_summarizer(request: dict) -> dict:
     parsed = _chat(
         BOUNDARY,
         "Summarize the following evidence rows into one faithful, compact paragraph. "
-        'Return {"summary": "<paragraph>"}.\nDATA:\n' + data,
+        'Example response: {"summary": "The user prefers X and asked for Y."}\n'
+        'Return exactly that shape.\nDATA:\n' + data,
+        "summary",
     )
     summary = str(parsed.get("summary") or "").strip()
     if not summary:
@@ -109,6 +134,7 @@ def candidate_extractor(request: dict) -> dict:
         'Return {"candidates": [{"subject": s, "predicate": p, "object": o, '
         '"confidence": 0..1}, ...]} with at most 8 rows.\n'
         f"PAYLOAD HINT: {json.dumps(payload, sort_keys=True)[:400]}\nDATA:\n{data}",
+        "candidates",
     )
     rows = parsed.get("candidates")
     if not isinstance(rows, list) or not rows:
@@ -145,6 +171,7 @@ def lesson_distiller(request: dict) -> dict:
         "From these consolidation candidates, distill up to 3 reusable lessons. "
         'Return {"lessons": [{"content": text, "failure_signature": short-key}, ...]} '
         "(empty list if none).\nDATA:\n" + json.dumps(candidates, sort_keys=True)[:4000],
+        "lessons",
     )
     lessons = []
     for row in parsed.get("lessons") or []:
@@ -171,6 +198,7 @@ def skill_inducer(request: dict) -> dict:
         "From these candidates, induce up to 2 reusable procedures (checklists). "
         'Return {"procedures": [{"name": short-name, "body": steps-text}, ...]} '
         "(empty list if none).\nDATA:\n" + json.dumps(candidates, sort_keys=True)[:4000],
+        "procedures",
     )
     procedures = []
     for row in parsed.get("procedures") or []:
@@ -202,6 +230,7 @@ def entity_resolver(request: dict) -> dict:
             "real-world entities must share one key. Return "
             '{"mapping": {"<signature>": "<entity-key>", ...}} covering every signature.\n'
             "DATA:\n" + json.dumps(subjects, sort_keys=True)[:4000],
+            "mapping",
         )
         mapping = parsed.get("mapping")
         if isinstance(mapping, dict):
