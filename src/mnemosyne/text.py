@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import re
 from collections import Counter
+from functools import lru_cache
 from hashlib import blake2b
 from typing import Iterable
 
@@ -41,7 +42,8 @@ def lexical_score(query: str, text: str) -> float:
     return score / math.sqrt(doc_len)
 
 
-def hashing_embedding(text: str, dims: int = 256) -> list[float]:
+@lru_cache(maxsize=8192)
+def _hashing_embedding_cached(text: str, dims: int) -> tuple[float, ...]:
     vec = [0.0] * dims
     for token in tokenize(text):
         digest = blake2b(token.encode("utf-8"), digest_size=8).digest()
@@ -50,8 +52,17 @@ def hashing_embedding(text: str, dims: int = 256) -> list[float]:
         vec[bucket] += sign
     norm = math.sqrt(sum(x * x for x in vec))
     if norm == 0.0:
-        return vec
-    return [x / norm for x in vec]
+        return tuple(vec)
+    return tuple(x / norm for x in vec)
+
+
+def hashing_embedding(text: str, dims: int = 256) -> list[float]:
+    # Memoized on (text, dims): the function is pure and deterministic, so cache
+    # hits return byte-identical values while skipping the tokenize + per-token
+    # blake2b work. A fresh list is returned each call so callers may still mutate
+    # it safely (the cache holds an immutable tuple). Retrieval (esp. MMR) embeds
+    # the same hit texts thousands of times per query, so this is a large win.
+    return list(_hashing_embedding_cached(text, dims))
 
 
 def cosine(a: Iterable[float], b: Iterable[float]) -> float:
