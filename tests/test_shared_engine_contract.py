@@ -42,7 +42,7 @@ def _live_dsn() -> str | None:
 
 
 def _runtime_state_for_engine(engine: Any, tenant_id: str, tmp_path: Path) -> Any:
-    if isinstance(engine, PostgresEngine):
+    if "live_db" in engine_capabilities(engine):
         from mnemosyne.postgres_runtime_state import PostgresRuntimeState
 
         dsn = _live_dsn()
@@ -85,11 +85,11 @@ def _seed_live_legacy_unscoped_evidence(
         cid=cid,
         created_at=datetime.now(UTC),
     )
-    if isinstance(engine, LocalMemoryEngine):
+    if "in_memory" in engine_capabilities(engine):
         engine._require_branch(branch)
         engine.evidence[engine._evidence_key(tenant, branch, cid)] = evidence
         return cid
-    if isinstance(engine, PostgresEngine):
+    if "live_db" in engine_capabilities(engine):
         engine.ensure_tenant_and_branch(tenant, branch)
         db_tenant_id = _stable_uuid("tenant", tenant)
         db_user_id = _stable_uuid("user", user)
@@ -221,6 +221,17 @@ def engine_bundle(request: pytest.FixtureRequest, tmp_path: Path) -> tuple[Any, 
         pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
     pytest.importorskip("psycopg")
     return PostgresEngine(dsn), tenant, user
+
+
+def engine_capabilities(engine: Any) -> frozenset[str]:
+    """Contract-level capability flags replacing isinstance() branching.
+
+    A new engine adds its flags here and to the engine_bundle fixture params —
+    tests must key on capabilities, never on concrete engine types.
+    """
+    if isinstance(engine, PostgresEngine):
+        return frozenset({"sql_fts", "graph_ppr_cache_table", "rls", "live_db"})
+    return frozenset({"in_memory"})
 
 
 def test_shared_engine_contract_retrieves_and_exports_evidence(engine_bundle: tuple[Any, str, str]) -> None:
@@ -2017,7 +2028,7 @@ def test_shared_engine_contract_postgres_cached_ppr_is_default_off_and_equivalen
     engine_bundle: tuple[Any, str, str],
 ) -> None:
     engine, tenant, user = engine_bundle
-    if not isinstance(engine, PostgresEngine):
+    if "graph_ppr_cache_table" not in engine_capabilities(engine):
         pytest.skip("cached PPR is a Postgres materialization path")
     cid = _append_evidence(
         engine,
@@ -2081,7 +2092,7 @@ def test_shared_engine_contract_postgres_cached_ppr_invalidates_source_custody_c
     engine_bundle: tuple[Any, str, str],
 ) -> None:
     engine, tenant, user = engine_bundle
-    if not isinstance(engine, PostgresEngine):
+    if "graph_ppr_cache_table" not in engine_capabilities(engine):
         pytest.skip("cached PPR is a Postgres materialization path")
     cid = _append_evidence(
         engine,
@@ -2123,7 +2134,7 @@ def test_shared_engine_contract_postgres_cached_ppr_requires_sufficient_depth(
     engine_bundle: tuple[Any, str, str],
 ) -> None:
     engine, tenant, user = engine_bundle
-    if not isinstance(engine, PostgresEngine):
+    if "graph_ppr_cache_table" not in engine_capabilities(engine):
         pytest.skip("cached PPR is a Postgres materialization path")
     cid = _append_evidence(
         engine,
