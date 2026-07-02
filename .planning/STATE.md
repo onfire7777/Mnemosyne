@@ -1,3 +1,19 @@
+---
+gsd_state_version: 1.0
+milestone: v1.0
+milestone_name: milestone
+status: executing
+stopped_at: context exhaustion at 75% (2026-07-02)
+last_updated: "2026-07-02T21:52:23.661Z"
+last_activity: 2026-06-20 — Added CLI-first runtime coverage, selectable CLI Postgres backend support, Postgres retrieval parity for SQL FTS/pgvector/graph/explain, shared local/Postgres engine contract coverage, durable Postgres queue leasing/drain support, fail-closed capability enforcement, Postgres tenant RLS, explicit erasure modes, HTTP-compatible embedding/reranker provider adapters, strict HTTP provider response validation, fail-closed CLI `provider-check` health probes for embedding/reranker/media-extractor/object-key-manager/parametric-provider contracts plus residency-policy reporting, and manifest-backed provider deployment gates that require named checks, resolve secrets from environment variables, and fail closed on forbidden local retrieval adapters, CLI file ingestion through a C2PA verifier adapter with asset hash binding and trusted certificate-root enforcement, scoped JSON trust-policy enforcement, provenance validity/trust/binding capability tags, AES-GCM encrypted local object storage with JSON and command-backed key management plus legal hard-delete key shredding, configurable fail-closed ingestion data-residency enforcement, strict runtime-residency enforcement, explicit runtime-residency and cross-region `source->target` transfer allowlists, CLI/MCP residency-policy inspection, MCP object-store encryption/key-provider/residency/runtime-residency config parity, transitive source-to-derived evidence erasure for media extraction outputs plus assertion/preference/relation projection recompute, blueprint-correct trust-tier semantics, deterministic ingest classification, persisted local queue-backed consolidation jobs from ingestion, gated deterministic fact extraction for direct-user evidence, persisted protected regression gate cases, local queued calibration/lifecycle/eval/observability job handlers, tenant-aware promotion gates for Postgres, blueprint-facing CLI/MCP ABI aliases, signature-derived MCP tool schemas, optional MCP tools/call auth, JSON-RPC/SDK MCP tool-call input schema validation including explicit optional-null support, CLI `tools` MCP inputSchema parity, optional official MCP Python SDK stdio mode with schema validation and auth-token enforcement, expanded live Postgres shared-contract coverage for bitemporal supersession, tenant isolation, tenant-scoped branch names, branch merge retrieval plus exported merge-log parity, active-only temporal graph/PPR relation filtering with historical `as_of` support, stored evidence pgvector retrieval with null-embedding legacy fallback, local export-all calibration/entity/tenant snapshot parity with erased evidence filtered, branch discard TMS justification/contradiction pruning including dependency-only orphan cleanup, immutable evidence CID semantics, tombstone replay prevention, lossless evidence-envelope preservation including external session identity, explain channels/rails/provenance, metadata-derived OCR/transcript/caption indexing for externalized object evidence, an async `media_extract` provider job that appends derived media text without mutating source evidence, fail-closed write-path authorization for fact/relation/proposal/supersession/correction/parametric writes, explicit branch/promotion/discard authorization through `MemoryTools` and CLI, capability-mediated lesson promotion plus procedure validation/promotion/rollback through CLI and MCP, a CLI `ops-report` JSON snapshot with durable retrieval-channel, p95 latency, gate promotion/rollback, and contradiction-backlog tripwire metrics, static HTML `ops-report --dashboard-html` export with retrieval/calibration/learning/gate sections and renderer/CLI smoke coverage, deterministic consolidation entity resolution plus summarizer/lesson-distiller/skill-inducer role outputs persisted through runtime learning state, a local isolated parametric artifact sidecar with CLI/MCP rollback metadata plus operator-authorized command-backed LoRA/test-time-training provider proposal/evaluation/rollback and structural local rails, TOOL_SPEC-allowlisted MCP dispatch with JSON-RPC non-object argument rejection, generated schema validation, local stateless MCP mode that rebuilds engine/tools per call from durable state, hosted HTTP JSON-RPC MCP transport with bearer/session-header binding and stateless restart coverage, tenant-scoped Postgres runtime state for CLI/MCP profile and learning tools mirrored into `preferences`, `user_latent`, `trajectories`, `lessons`, and `procedures`, JWKS cache/rotation support for CLI/hosted MCP OIDC session exchange, fail-closed OIDC authz policy mapping, redacted `idp-authz-policy-check` validation/audit summaries, fingerprint-acknowledged `idp-authz-policy-rollout-check` diffs with claim-simulation change gates, command-backed session-secret custody for CLI/MCP signing and verification plus provider-check OIDC/JWKS/authz-policy preflight, and hosted HTTP TLS plus client-certificate enforcement. The test suite now collects 287 tests and has 248 passing tests plus 39 skipped live-DB tests locally; a fresh-schema DSN-backed live Postgres run passes 63 engine/CLI/consolidation/shared-contract smokes including persisted residency-transfer policy, stored evidence pgvector retrieval, null-embedding legacy fallback, Postgres MCP runtime profile/learning state persistence, temporal graph validity filtering, and merge-log export. Strict audit remains open for exact production parity.
+progress:
+  total_phases: 9
+  completed_phases: 2
+  total_plans: 15
+  completed_plans: 15
+  percent: 22
+---
+
 # Project State
 
 ## Project Reference
@@ -542,6 +558,7 @@ Progress: [███████░░░] local scaffold verified; production p
 ## Performance Metrics
 
 **Velocity:**
+
 - Total plans completed: 12
 - Average duration: not yet measured
 - Total execution time: not yet measured; latest P5 local verification completed on 2026-06-28
@@ -689,8 +706,8 @@ Latest checkpoint (2026-06-28): T-SEC protected registry breadth is reconciled w
 
 ## Session Continuity
 
-Last session: 2026-06-28 America/Los_Angeles
-Stopped at: Phase 7 P5 operational-toggle retirement locally verified; strict-parity continuation is Tier-B production/operator evidence.
+Last session: 2026-07-02T21:52:23.647Z
+Stopped at: context exhaustion at 75% (2026-07-02)
 
 Latest active checkpoint (2026-06-30): Continuing the unpaused exact-parity goal from the canonical checkout `/Users/admin/Mnemosyne`, with focus on Tier-B production/control gaps rather than redundant gates. The current source-hardening lane is closing the Phase 8 MFA elevation defect: elevated OIDC authz rules now require non-tenant claim evidence, configured `required_acr`/`required_amr`, positive `max_auth_age_seconds`, and fresh token `auth_time` before minting operator/consolidator or trust-tier≤1 sessions. This is source/control progress only; live Keycloak/MFA rollout evidence remains operator-run and required before Tier-B production parity can be claimed.
 

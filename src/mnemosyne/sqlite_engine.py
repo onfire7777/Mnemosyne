@@ -33,10 +33,20 @@ dense seam feeding ``dense_scan_packed`` with zero per-call conversion),
 rescore), and ``graph_ppr`` (live PPR). They keep byte-parity with the
 LocalMemoryEngine oracle by hydrating a scoped, policy/adapter-sharing Local
 instance from SQL and reusing its exact candidate/graph bodies (see the
-``scan surfaces`` block). The remaining ``MemoryEngine`` Protocol methods stay
-``NotImplementedError`` stubs naming their Phase-2 task, so
-``isinstance(engine, MemoryEngine)`` already holds — the runtime_checkable
-Protocol checks method presence.
+``scan surfaces`` block).
+
+Phase-2 Task 5 adds the assertion / bitemporal / remaining-write surface —
+``upsert_assertion`` (replay/supersede/contest), ``add_relation``,
+``add_preference`` (supersession), ``register_entity``, ``set_calibration`` /
+``_calibration_for``, ``as_of`` (half-open [valid_from, valid_to) window over
+``dt_to_json`` TEXT), ``correct``, and the ``deep_search`` / ``explain``
+delegators. The stateful writes run Local's actual body over a scoped oracle
+and persist only new/changed rows (rowid preserved) plus Local's audit rows, so
+``export_tenant`` byte-matches the oracle (see the ``assertions`` block). The
+remaining ``MemoryEngine`` Protocol methods (``branch`` / ``merge`` /
+``discard`` / ``retrieve`` / ``forget``) stay ``NotImplementedError`` stubs
+naming their Phase-2 task, so ``isinstance(engine, MemoryEngine)`` already holds
+— the runtime_checkable Protocol checks method presence.
 """
 from __future__ import annotations
 
@@ -46,7 +56,7 @@ import json
 import re
 import sqlite3
 import threading
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -161,6 +171,85 @@ INSERT INTO evidence (
     access_policy, created_at, erased
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
+
+# Task-5 assertion / relation column writers. The column order matches
+# ``_assertion_from_row`` / ``_relation_from_row`` (which feed the byte-parity
+# export). ``_ASSERTION_UPDATE`` rewrites every mutable column in place (rowid
+# preserved → ``export_tenant``'s ``ORDER BY rowid`` parity holds) while
+# ``_ASSERTION_INSERT`` appends a genuinely new row.
+_ASSERTION_INSERT = """
+INSERT INTO assertions (
+    tenant_id, branch, id, user_id, subject, predicate, object, scope,
+    confidence, calibration, valid_from, valid_to, transaction_time, expired_at,
+    justification_id, source_evidence_cids, status, version, superseded_by,
+    trust_tier, sensitivity, access_policy, last_accessed, access_count
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+"""
+
+_ASSERTION_UPDATE = """
+UPDATE assertions SET
+    user_id = ?, subject = ?, predicate = ?, object = ?, scope = ?,
+    confidence = ?, calibration = ?, valid_from = ?, valid_to = ?,
+    transaction_time = ?, expired_at = ?, justification_id = ?,
+    source_evidence_cids = ?, status = ?, version = ?, superseded_by = ?,
+    trust_tier = ?, sensitivity = ?, access_policy = ?, last_accessed = ?,
+    access_count = ?
+WHERE tenant_id = ? AND branch = ? AND id = ?
+"""
+
+_RELATION_INSERT = """
+INSERT INTO relations (
+    tenant_id, branch, id, source, predicate, target, confidence,
+    valid_from, valid_to, source_evidence_cids, access_policy
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+"""
+
+
+def _assertion_insert_values(a: Assertion) -> tuple[Any, ...]:
+    """INSERT bind tuple for an ``Assertion`` (dt columns via ``dt_to_json``,
+    JSON columns via ``json_text`` — byte-identical to the export round-trip)."""
+    return (
+        a.tenant_id,
+        a.branch,
+        a.id,
+        a.user_id,
+        a.subject,
+        a.predicate,
+        a.object,
+        json_text(a.scope),
+        float(a.confidence),
+        json_text(a.calibration),
+        dt_to_json(a.valid_from),
+        dt_to_json(a.valid_to),
+        dt_to_json(a.transaction_time),
+        dt_to_json(a.expired_at),
+        a.justification_id,
+        json_text(a.source_evidence_cids),
+        a.status,
+        int(a.version),
+        a.superseded_by,
+        int(a.trust_tier),
+        int(a.sensitivity),
+        json_text(a.access_policy),
+        dt_to_json(a.last_accessed),
+        int(a.access_count),
+    )
+
+
+def _relation_insert_values(rel: Relation) -> tuple[Any, ...]:
+    return (
+        rel.tenant_id,
+        rel.branch,
+        rel.id,
+        rel.source,
+        rel.predicate,
+        rel.target,
+        float(rel.confidence),
+        dt_to_json(rel.valid_from),
+        dt_to_json(rel.valid_to),
+        json_text(rel.source_evidence_cids),
+        json_text(rel.access_policy),
+    )
 
 
 def _evidence_from_row(row: sqlite3.Row) -> Evidence:
@@ -1294,20 +1383,282 @@ class SqliteEngine:
             filt=filt,
         )
 
+    # --- assertions / bitemporal / remaining writes (Task 5) -----------------
+    #
+    # Parity strategy: the graph/scan surfaces already established the
+    # "hydrate a scoped LocalMemoryEngine from SQL and reuse its exact body"
+    # pattern for read paths. The stateful WRITE paths whose cross-row semantics
+    # are non-trivial — ``upsert_assertion`` (replay/supersede/contest +
+    # projection-reality-monitoring + schema-fast-path calibration mutation),
+    # ``add_preference`` (supersession), ``register_entity`` (merge upsert) —
+    # run Local's ACTUAL method over an oracle hydrated from SQL, then persist
+    # only the genuinely new/changed rows back (rowid preserved for unchanged
+    # rows → ``export_tenant`` ORDER BY rowid parity holds) and replay Local's
+    # emitted audit rows verbatim. That guarantees the resulting assertions
+    # table + audit_log byte-match ``LocalMemoryEngine.export_tenant``. The
+    # simple, single-row writes (``add_relation``, ``set_calibration``,
+    # ``correct``) mirror Local's short body directly over SQL.
+
+    def _assertion_oracle(
+        self, conn: sqlite3.Connection, tenant_id: str, branch: str
+    ) -> LocalMemoryEngine:
+        """Hydrate an upsert-scope oracle: the tenant's branch registry (so
+        Local's own ``_require_branch`` passes), the (tenant, branch) evidence
+        (read by projection-reality-monitoring + independent-corroboration), and
+        the (tenant, branch) assertions (the supersede/contest peer set). Keys
+        match Local's internal keying exactly (``_evidence_key`` / ``_branch_key``)."""
+        oracle = LocalMemoryEngine(policy=self.policy, adapters=self.adapters)
+        with self._lock:
+            branch_rows = conn.execute(
+                "SELECT name, from_branch, kind, created_at FROM branches "
+                "WHERE tenant_id = ? ORDER BY rowid",
+                (tenant_id,),
+            ).fetchall()
+            ev_rows = conn.execute(
+                "SELECT * FROM evidence WHERE tenant_id = ? AND branch = ? ORDER BY rowid",
+                (tenant_id, branch),
+            ).fetchall()
+            a_rows = conn.execute(
+                "SELECT * FROM assertions WHERE tenant_id = ? AND branch = ? ORDER BY rowid",
+                (tenant_id, branch),
+            ).fetchall()
+        for row in branch_rows:
+            oracle.branches[row["name"]] = {
+                "from": row["from_branch"],
+                "kind": row["kind"],
+                "created_at": row["created_at"],
+            }
+        for row in ev_rows:
+            ev = _evidence_from_row(row)
+            oracle.evidence[oracle._evidence_key(ev.tenant_id, ev.branch, ev.cid or "")] = ev
+        for row in a_rows:
+            assertion = _assertion_from_row(row)
+            oracle.assertions[oracle._branch_key(assertion.tenant_id, assertion.branch, assertion.id)] = assertion
+        return oracle
+
+    def _preference_oracle(self, conn: sqlite3.Connection, tenant_id: str) -> LocalMemoryEngine:
+        """Hydrate a preference-scope oracle: all of the tenant's preferences
+        (supersession is tenant/user/category/scope-scoped, never branch-scoped)."""
+        oracle = LocalMemoryEngine(policy=self.policy, adapters=self.adapters)
+        with self._lock:
+            rows = conn.execute(
+                "SELECT record FROM preferences WHERE tenant_id = ? ORDER BY rowid",
+                (tenant_id,),
+            ).fetchall()
+        for row in rows:
+            pref = Preference.from_dict(json.loads(row["record"]))
+            oracle.preferences[pref.id] = pref
+        return oracle
+
+    def _entity_oracle(self, conn: sqlite3.Connection, tenant_id: str) -> LocalMemoryEngine:
+        """Hydrate an entity-scope oracle: all of the tenant's entities keyed
+        by (tenant_id, canonical) exactly as Local keys them."""
+        oracle = LocalMemoryEngine(policy=self.policy, adapters=self.adapters)
+        with self._lock:
+            rows = conn.execute(
+                "SELECT canonical, record FROM entities WHERE tenant_id = ? ORDER BY rowid",
+                (tenant_id,),
+            ).fetchall()
+        for row in rows:
+            oracle.entities[(tenant_id, row["canonical"])] = json.loads(row["record"])
+        return oracle
+
+    @staticmethod
+    def _replay_audit(conn: sqlite3.Connection, records: list[dict[str, Any]]) -> None:
+        """Persist the audit rows Local emitted (already in Local's exact shape)
+        verbatim, riding the caller's transaction."""
+        for record in records:
+            conn.execute(
+                "INSERT INTO audit_log(tenant_id, record) VALUES (?, ?)",
+                (record.get("tenant_id"), json_text(record)),
+            )
+
+    def _insert_assertion_row(self, conn: sqlite3.Connection, assertion: Assertion) -> None:
+        conn.execute(_ASSERTION_INSERT, _assertion_insert_values(assertion))
+
+    def _update_assertion_row(self, conn: sqlite3.Connection, assertion: Assertion) -> None:
+        values = _assertion_insert_values(assertion)
+        conn.execute(_ASSERTION_UPDATE, (*values[3:], assertion.tenant_id, assertion.branch, assertion.id))
+
     def upsert_assertion(self, assertion: Assertion, branch: str = "main") -> str:
-        raise NotImplementedError("SqliteEngine.upsert_assertion lands in Phase-2 Task 5")
+        """Replay/supersede/contest over SQL, byte-parity with Local.
+
+        ``validate_access_policy`` (fail-closed, Local-parity error text) →
+        ``_require_branch`` (ValueError BEFORE the composite FK can fire) →
+        run ``LocalMemoryEngine.upsert_assertion`` over a scoped oracle (so the
+        projection-reality-monitoring + schema-fast-path calibration/status
+        mutations and the trust/valid_from resolution are byte-identical) →
+        write back the new/changed assertion rows and Local's emitted audit rows
+        in one transaction. Returns the same id Local returns (winner.id on the
+        reinforce path, incoming.id otherwise)."""
+        validate_access_policy(
+            assertion.access_policy,
+            tenant_id=assertion.tenant_id,
+            location="assertion.access_policy",
+        )
+        with self._lock:
+            conn = self._connect(assertion.tenant_id)
+            self._require_branch(conn, assertion.tenant_id, branch)
+            oracle = self._assertion_oracle(conn, assertion.tenant_id, branch)
+            before = {item.id: item.to_dict() for item in oracle.assertions.values()}
+            result_id = oracle.upsert_assertion(copy.deepcopy(assertion), branch=branch)
+            with conn:
+                for item in oracle.assertions.values():
+                    if item.tenant_id != assertion.tenant_id or item.branch != branch:
+                        continue
+                    snapshot = before.get(item.id)
+                    if snapshot is None:
+                        self._insert_assertion_row(conn, item)
+                    elif item.to_dict() != snapshot:
+                        self._update_assertion_row(conn, item)
+                self._replay_audit(conn, oracle.audit_log)
+            return result_id
 
     def add_relation(self, relation: Relation, branch: str = "main") -> str:
-        raise NotImplementedError("SqliteEngine.add_relation lands in Phase-2 Task 5")
+        """Single-row relation write mirroring ``LocalMemoryEngine.add_relation``:
+        validate policy, require the branch (ValueError before the FK), deepcopy,
+        set access_policy/branch, INSERT + audit atomically, return the id."""
+        access_policy = validate_access_policy(
+            relation.access_policy,
+            tenant_id=relation.tenant_id,
+            location="relation.access_policy",
+        )
+        with self._lock:
+            conn = self._connect(relation.tenant_id)
+            self._require_branch(conn, relation.tenant_id, branch)
+            item = copy.deepcopy(relation)
+            item.access_policy = access_policy
+            item.branch = branch
+            with conn:
+                conn.execute(_RELATION_INSERT, _relation_insert_values(item))
+                self._audit(
+                    conn,
+                    item.tenant_id,
+                    "engine",
+                    "add_relation",
+                    item.id,
+                    {
+                        "relation_source": item.source,
+                        "target": item.target,
+                        "source_evidence_cids": item.source_evidence_cids,
+                    },
+                    source="relation",
+                )
+            return item.id
 
     def add_preference(self, preference: Preference) -> str:
-        raise NotImplementedError("SqliteEngine.add_preference lands in Phase-2 Task 5")
+        """Tenant-scoped preference supersession, byte-parity with Local.
 
-    def as_of(self, subject: str, predicate: str, t: datetime, tenant_id: str | None = None, branch: str = "main") -> list[Assertion]:
-        raise NotImplementedError("SqliteEngine.as_of lands in Phase-2 Task 5")
+        Runs ``LocalMemoryEngine.add_preference`` (same
+        tenant/user/category/scope/active supersession + explicit/retracted
+        logic) over an oracle hydrated from every tenant preference, then
+        persists the new row and any superseded/retracted rows (record JSON,
+        rowid preserved) plus Local's audit rows in one transaction."""
+        with self._lock:
+            conn = self._connect(preference.tenant_id)
+            oracle = self._preference_oracle(conn, preference.tenant_id)
+            before = {pref.id: pref.to_dict() for pref in oracle.preferences.values()}
+            result_id = oracle.add_preference(copy.deepcopy(preference))
+            with conn:
+                for pref in oracle.preferences.values():
+                    if pref.tenant_id != preference.tenant_id:
+                        continue
+                    current = pref.to_dict()
+                    snapshot = before.get(pref.id)
+                    if snapshot is None:
+                        conn.execute(
+                            "INSERT INTO preferences(id, tenant_id, record) VALUES (?, ?, ?)",
+                            (pref.id, pref.tenant_id, json_text(current)),
+                        )
+                    elif current != snapshot:
+                        conn.execute(
+                            "UPDATE preferences SET record = ? WHERE id = ?",
+                            (json_text(current), pref.id),
+                        )
+                self._replay_audit(conn, oracle.audit_log)
+            return result_id
+
+    def as_of(
+        self,
+        subject: str,
+        predicate: str,
+        t: datetime,
+        tenant_id: str | None = None,
+        branch: str = "main",
+    ) -> list[Assertion]:
+        """Bitemporal read over the half-open [valid_from, valid_to) UTC window.
+
+        Coerces ``t`` to UTC exactly like Local, then serialises the moment with
+        :func:`mnemosyne.models.dt_to_json` (trailing ``"Z"``) so the TEXT
+        comparison is lexicographically sound against the ``dt_to_json`` columns
+        — a naive ``isoformat()`` ``"+00:00"`` parameter would sort the boundary
+        wrong (R7 Z-format regression). Tenant-optional like Local: with a tenant
+        the one file is queried; without one every tenant file is scanned. Rows
+        return as deep-copied ``Assertion`` objects sorted by ``valid_from``."""
+        moment = t.astimezone(UTC) if t.tzinfo else t.replace(tzinfo=UTC)
+        moment_param = dt_to_json(moment)
+        sql = (
+            "SELECT * FROM assertions "
+            "WHERE tenant_id = ? AND branch = ? AND subject = ? AND predicate = ? "
+            "AND valid_from <= ? AND (valid_to IS NULL OR valid_to > ?) "
+            "AND status IN ('active', 'superseded', 'contested') "
+            "ORDER BY valid_from ASC"
+        )
+        matches: list[Assertion] = []
+        with self._lock:
+            if tenant_id:
+                conn = self._connect(tenant_id)
+                rows = conn.execute(
+                    sql, (tenant_id, branch, subject, predicate, moment_param, moment_param)
+                ).fetchall()
+                matches.extend(_assertion_from_row(row) for row in rows)
+            else:
+                for path in self._iter_tenant_db_paths():
+                    conn, owned = self._borrow_conn(path)
+                    try:
+                        for (tid,) in conn.execute("SELECT DISTINCT tenant_id FROM assertions"):
+                            rows = conn.execute(
+                                sql, (tid, branch, subject, predicate, moment_param, moment_param)
+                            ).fetchall()
+                            matches.extend(_assertion_from_row(row) for row in rows)
+                    finally:
+                        if owned:
+                            conn.close()
+        return sorted(matches, key=lambda item: item.valid_from)
 
     def set_calibration(self, calibration: CalibrationSet) -> None:
-        raise NotImplementedError("SqliteEngine.set_calibration lands in Phase-2 Task 5")
+        """Store the conformal calibration set at PK(tenant_id, memory_type),
+        mirroring ``LocalMemoryEngine.set_calibration`` (deepcopy semantics + the
+        same audit shape). ON CONFLICT DO UPDATE preserves rowid on replacement."""
+        with self._lock:
+            conn = self._connect(calibration.tenant_id)
+            stored = copy.deepcopy(calibration)
+            with conn:
+                conn.execute(
+                    "INSERT INTO calibrations(tenant_id, memory_type, record) VALUES (?, ?, ?) "
+                    "ON CONFLICT(tenant_id, memory_type) DO UPDATE SET record = excluded.record",
+                    (stored.tenant_id, stored.memory_type, json_text(stored.to_dict())),
+                )
+                self._audit(
+                    conn,
+                    calibration.tenant_id,
+                    "engine",
+                    "set_calibration",
+                    calibration.memory_type,
+                    {"scores": len(calibration.scores), "target_coverage": calibration.target_coverage},
+                )
+
+    def _calibration_for(self, tenant_id: str, memory_type: str) -> CalibrationSet | None:
+        """Rehydrate the stored ``CalibrationSet`` (or None), matching Local."""
+        with self._lock:
+            conn = self._connect(tenant_id)
+            row = conn.execute(
+                "SELECT record FROM calibrations WHERE tenant_id = ? AND memory_type = ?",
+                (tenant_id, memory_type),
+            ).fetchone()
+        if row is None:
+            return None
+        return CalibrationSet(**json.loads(row["record"]))
 
     def register_entity(
         self,
@@ -1320,13 +1671,48 @@ class SqliteEngine:
         source_evidence_cids: list[str] | None = None,
         access_policy: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        raise NotImplementedError("SqliteEngine.register_entity lands in Phase-2 Task 5")
+        """Entity upsert at PK(tenant_id, canonical), byte-parity with Local.
+
+        Runs ``LocalMemoryEngine.register_entity`` (canonical normalisation,
+        alias/source-cid union, access-policy merge on repeat) over an
+        entity-scope oracle, persists the resulting record (rowid preserved on
+        update via ON CONFLICT DO UPDATE) plus Local's audit, and returns the
+        same ``dict`` shape Local returns."""
+        with self._lock:
+            conn = self._connect(tenant_id)
+            oracle = self._entity_oracle(conn, tenant_id)
+            row = oracle.register_entity(
+                tenant_id,
+                canonical,
+                alias=alias,
+                entity_type=entity_type,
+                summary=summary,
+                source_evidence_cids=source_evidence_cids,
+                access_policy=access_policy,
+            )
+            key = (tenant_id, canonical.strip() or "unknown-entity")
+            record = oracle.entities[key]
+            with conn:
+                conn.execute(
+                    "INSERT INTO entities(tenant_id, canonical, record) VALUES (?, ?, ?) "
+                    "ON CONFLICT(tenant_id, canonical) DO UPDATE SET record = excluded.record",
+                    (key[0], key[1], json_text(record)),
+                )
+                self._replay_audit(conn, oracle.audit_log)
+            return row
 
     def deep_search(self, query: str, tenant_id: str, branch: str = "main", filt: dict[str, Any] | None = None) -> RetrievalResult:
-        raise NotImplementedError("SqliteEngine.deep_search lands in Phase-2 Task 5")
+        """Thin delegator to :meth:`retrieve` (deep=True), identical to
+        ``LocalMemoryEngine.deep_search``. Full behaviour arrives with the
+        ``retrieve()`` pipeline in Phase-2 Task 7; until then this raises
+        ``NotImplementedError`` transitively (never as a separate stub)."""
+        return self.retrieve(query=query, tenant_id=tenant_id, branch=branch, deep=True, filt=filt)
 
     def explain(self, query: str, tenant_id: str, branch: str = "main") -> dict[str, Any]:
-        raise NotImplementedError("SqliteEngine.explain lands in Phase-2 Task 5")
+        """Thin delegator to :meth:`retrieve` (deep=True) → ``to_dict()``,
+        identical to ``LocalMemoryEngine.explain``. Full behaviour arrives with
+        the ``retrieve()`` pipeline in Phase-2 Task 7."""
+        return self.retrieve(query=query, tenant_id=tenant_id, branch=branch, deep=True).to_dict()
 
     def correct(
         self,
@@ -1339,7 +1725,35 @@ class SqliteEngine:
         branch: str = "main",
         confidence: float = 0.95,
     ) -> str:
-        raise NotImplementedError("SqliteEngine.correct lands in Phase-2 Task 5")
+        """Append corrective evidence then upsert the corrected assertion —
+        Local's exact body over the now-implemented ledger + assertion writes."""
+        cid = self.append_evidence(
+            Evidence(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                actor="user",
+                source_type="correction",
+                content=correction_text,
+                trust_tier=0,
+                access_policy={"tenant": tenant_id},
+            ),
+            branch=branch,
+        )
+        return self.upsert_assertion(
+            Assertion(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                subject=subject,
+                predicate=predicate,
+                object=object_value,
+                confidence=confidence,
+                source_evidence_cids=[cid],
+                status="active",
+                trust_tier=0,
+                access_policy={"tenant": tenant_id},
+            ),
+            branch=branch,
+        )
 
     def branch(self, name: str, frm: str = "main", kind: str = "scratch", tenant_id: str | None = None) -> None:
         raise NotImplementedError("SqliteEngine.branch lands in Phase-2 Task 6")
