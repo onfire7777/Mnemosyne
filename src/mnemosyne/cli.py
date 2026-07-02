@@ -21,89 +21,34 @@ from dataclasses import asdict
 from datetime import UTC, datetime
 from hashlib import sha256
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib import error as urlerror, request as urlrequest
 from urllib.parse import urljoin, urlsplit, urlunsplit
 from uuid import UUID
 
-from cryptography import x509
-
-from mnemosyne.belief import validate_belief_revision_cases
-from mnemosyne.calibration import calibration_examples_from_rows, tune_calibration_set
-from mnemosyne.consolidation import (
-    CONSOLIDATE_EVIDENCE_JOB,
-    CandidateExtractor,
-    CommandCandidateExtractor,
-    CommandEntityResolver,
-    CommandEvidenceSummarizer,
-    CommandLessonDistiller,
-    CommandProcedureInducer,
-    EntityResolver,
-    EvidenceSummarizer,
-    LessonDistiller,
-    ProcedureInducer,
-)
-from mnemosyne.engine import LocalMemoryEngine, MemoryEngine
-from mnemosyne.evidence_redaction import manifest_argument_secret_errors, scan_evidence_paths
-from mnemosyne.eval import run_seed_suite
-from mnemosyne.gate import RegressionCase
-from mnemosyne.ingestion import IngestionPipeline
-from mnemosyne.jobs import PROJECTION_RECOMPUTE_JOB, RuntimeJobHandlers
-from mnemosyne.learning import Lesson, Procedure
-from mnemosyne.lifecycle import parse_lifecycle_datetime, validate_forgetting_policy_cases
-from mnemosyne.media import (
-    MEDIA_EXTRACT_JOB,
-    CommandMediaTextExtractor,
-    MediaTextExtractor,
-    MetadataMediaTextExtractor,
-)
-from mnemosyne.media_limits import DEFAULT_MAX_INGEST_BYTES, ensure_file_within_limit, validate_byte_limit
-from mnemosyne.mcp_tools import MemoryTools, TOOL_SPEC
-from mnemosyne.models import Evidence, Hit
-from mnemosyne.network_safety import (
-    ValidatedFetchUrl,
-    is_loopback_host,
-    safe_urlopen,
-    validate_fetch_url,
-)
-from mnemosyne.observability import MetricsRegistry, build_ops_report, render_ops_dashboard
-from mnemosyne.oidc_jwks import load_oidc_authorization_policy, load_oidc_jwks, oidc_jwks_loader
-from mnemosyne.parametric import (
-    CommandParametricTrainer,
-    ParametricArtifactStore,
-    ParametricTier,
-    protected_suite_report,
-)
-from mnemosyne.privacy import classify_privacy
-from mnemosyne.production_parity import build_parity_row_readiness
-from mnemosyne.providers import default_registry
-from mnemosyne.provenance import C2paToolVerifier, ProvenanceTrustPolicy, SignedProvenanceVerifier
-from mnemosyne.queue import InProcessQueue, PostgresQueue, QueueWorker
-from mnemosyne.retrieval import (
-    CommandGraphRetriever,
-    CommandLexicalRetriever,
-    CommandMediaEmbeddingProvider,
-    HashingEmbeddingProvider,
-    HttpEmbeddingProvider,
-    HttpReranker,
-    LocalSimilarityReranker,
-    RetrievalAdapters,
-)
-from mnemosyne.postgres_runtime_state import PostgresRuntimeState
-from mnemosyne.runtime_state import RuntimeState
-from mnemosyne.security import (
-    OidcAuthorizationPolicy,
-    OidcJwtVerifier,
-    SessionAuthError,
-    SessionIdentity,
-    SessionTokenVerifier,
-    issue_session_from_oidc,
-    load_session_secret_command,
-    parse_session_keyring,
-    parse_session_revoke_list,
-)
-from mnemosyne.self_optimization import validate_policy_ops_bundle
-from mnemosyne.storage import CommandKeyManager, EncryptedLocalObjectStore, JsonKeyManager, LocalObjectStore
+if TYPE_CHECKING:
+    from cryptography import x509
+    from mnemosyne.consolidation import (
+        CandidateExtractor,
+        EntityResolver,
+        EvidenceSummarizer,
+        LessonDistiller,
+        ProcedureInducer,
+    )
+    from mnemosyne.engine import MemoryEngine
+    from mnemosyne.gate import RegressionCase
+    from mnemosyne.mcp_tools import MemoryTools
+    from mnemosyne.media import MediaTextExtractor
+    from mnemosyne.network_safety import ValidatedFetchUrl
+    from mnemosyne.observability import MetricsRegistry
+    from mnemosyne.parametric import ParametricTier
+    from mnemosyne.postgres_runtime_state import PostgresRuntimeState
+    from mnemosyne.provenance import C2paToolVerifier, ProvenanceTrustPolicy, SignedProvenanceVerifier
+    from mnemosyne.queue import InProcessQueue, PostgresQueue, QueueWorker
+    from mnemosyne.retrieval import CommandMediaEmbeddingProvider, RetrievalAdapters
+    from mnemosyne.runtime_state import RuntimeState
+    from mnemosyne.security import OidcAuthorizationPolicy, OidcJwtVerifier, SessionTokenVerifier
+    from mnemosyne.storage import CommandKeyManager, JsonKeyManager, LocalObjectStore
 
 DEPLOYMENT_SOAK_COMMANDS = {
     "belief-revision-check",
@@ -291,6 +236,8 @@ def env_flag(name: str, *, default: bool = False) -> bool:
 
 
 def apply_session_identity(args: argparse.Namespace) -> None:
+    from mnemosyne.security import SessionAuthError
+
     token = getattr(args, "session_token", None)
     if token:
         try:
@@ -308,6 +255,8 @@ def apply_session_identity(args: argparse.Namespace) -> None:
 
 
 def _session_verifier_from_args(args: argparse.Namespace) -> SessionTokenVerifier:
+    from mnemosyne.security import SessionTokenVerifier, parse_session_revoke_list
+
     material, active_key_id = _session_material_from_args(args, purpose="--session-token")
     revoked_key_ids = parse_session_revoke_list(getattr(args, "session_revoked_key_ids", None))
     revoked_session_ids = parse_session_revoke_list(getattr(args, "session_revoked_ids", None))
@@ -322,6 +271,8 @@ def _session_verifier_from_args(args: argparse.Namespace) -> SessionTokenVerifie
 
 
 def _session_signer_from_args(args: argparse.Namespace) -> SessionTokenVerifier:
+    from mnemosyne.security import SessionTokenVerifier
+
     material, active_key_id = _session_material_from_args(args, purpose="session-exchange")
     if isinstance(material, dict):
         return SessionTokenVerifier(material, active_key_id=active_key_id)
@@ -333,6 +284,8 @@ def _session_material_from_args(
     *,
     purpose: str,
 ) -> tuple[str | dict[str, str], str | None]:
+    from mnemosyne.security import SessionAuthError, load_session_secret_command, parse_session_keyring
+
     keyring = parse_session_keyring(getattr(args, "session_keyring", None))
     secret = getattr(args, "session_secret", None)
     command = getattr(args, "session_secret_command", None)
@@ -395,6 +348,16 @@ def _require_authorization_context(args: argparse.Namespace) -> None:
 
 
 def load_retrieval_adapters(args: argparse.Namespace) -> RetrievalAdapters:
+    from mnemosyne.retrieval import (
+        CommandGraphRetriever,
+        CommandLexicalRetriever,
+        HashingEmbeddingProvider,
+        HttpEmbeddingProvider,
+        HttpReranker,
+        LocalSimilarityReranker,
+        RetrievalAdapters,
+    )
+
     dims = int(args.embedding_dims)
     timeout = float(args.retrieval_timeout)
     if args.embedding_provider == "http":
@@ -453,6 +416,8 @@ def load_retrieval_adapters(args: argparse.Namespace) -> RetrievalAdapters:
 
 
 def max_ingest_bytes(args: argparse.Namespace) -> int:
+    from mnemosyne.media_limits import DEFAULT_MAX_INGEST_BYTES, validate_byte_limit
+
     return validate_byte_limit(
         int(getattr(args, "max_ingest_bytes", DEFAULT_MAX_INGEST_BYTES)),
         name="max_ingest_bytes",
@@ -460,6 +425,8 @@ def max_ingest_bytes(args: argparse.Namespace) -> int:
 
 
 def load_media_embedding_provider(args: argparse.Namespace) -> CommandMediaEmbeddingProvider | None:
+    from mnemosyne.retrieval import CommandMediaEmbeddingProvider
+
     if args.media_embedding_provider == "command":
         if not args.media_embedding_command:
             raise SystemExit("command media embedding provider requires --media-embedding-command.")
@@ -473,6 +440,8 @@ def load_media_embedding_provider(args: argparse.Namespace) -> CommandMediaEmbed
 
 
 def load_engine(args: argparse.Namespace) -> MemoryEngine:
+    from mnemosyne.engine import LocalMemoryEngine
+
     if args.backend == "postgres":
         dsn = args.postgres_dsn
         if not dsn:
@@ -493,6 +462,8 @@ def load_engine(args: argparse.Namespace) -> MemoryEngine:
 
 
 def load_provenance_verifier(args: argparse.Namespace) -> SignedProvenanceVerifier | C2paToolVerifier:
+    from mnemosyne.provenance import C2paToolVerifier, SignedProvenanceVerifier
+
     if args.c2pa_tool:
         trust_policy = load_provenance_trust_policy(args)
         return C2paToolVerifier(
@@ -504,6 +475,8 @@ def load_provenance_verifier(args: argparse.Namespace) -> SignedProvenanceVerifi
 
 
 def load_provenance_trust_policy(args: argparse.Namespace) -> ProvenanceTrustPolicy:
+    from mnemosyne.provenance import ProvenanceTrustPolicy
+
     trusted_issuers = [str(item).strip() for item in (args.trusted_provenance_issuer or []) if str(item).strip()]
     trusted_roots = [str(item).strip() for item in (args.trusted_provenance_root or []) if str(item).strip()]
     require_trusted_issuer = True
@@ -528,12 +501,16 @@ def load_provenance_trust_policy(args: argparse.Namespace) -> ProvenanceTrustPol
 
 
 def load_object_store(args: argparse.Namespace) -> LocalObjectStore:
+    from mnemosyne.storage import EncryptedLocalObjectStore, LocalObjectStore
+
     if args.object_store_encryption == "aesgcm":
         return EncryptedLocalObjectStore(Path(args.object_store), load_object_key_manager(args))
     return LocalObjectStore(Path(args.object_store))
 
 
 def load_object_key_manager(args: argparse.Namespace) -> JsonKeyManager | CommandKeyManager:
+    from mnemosyne.storage import CommandKeyManager, JsonKeyManager
+
     if args.object_key_provider == "command":
         if not args.object_key_command:
             raise SystemExit("--object-key-provider command requires --object-key-command.")
@@ -545,6 +522,8 @@ def load_object_key_manager(args: argparse.Namespace) -> JsonKeyManager | Comman
 
 
 def load_media_extractor(args: argparse.Namespace) -> MediaTextExtractor:
+    from mnemosyne.media import CommandMediaTextExtractor, MetadataMediaTextExtractor
+
     if args.media_extractor_command:
         return CommandMediaTextExtractor(
             args.media_extractor_command,
@@ -555,6 +534,8 @@ def load_media_extractor(args: argparse.Namespace) -> MediaTextExtractor:
 
 
 def load_entity_resolver(args: argparse.Namespace) -> EntityResolver | None:
+    from mnemosyne.consolidation import CommandEntityResolver
+
     if args.entity_resolver_provider == "command":
         if not args.entity_resolver_command:
             raise SystemExit("--entity-resolver-provider command requires --entity-resolver-command.")
@@ -566,6 +547,8 @@ def load_entity_resolver(args: argparse.Namespace) -> EntityResolver | None:
 
 
 def load_candidate_extractor(args: argparse.Namespace) -> CandidateExtractor | None:
+    from mnemosyne.consolidation import CommandCandidateExtractor
+
     if args.candidate_extractor_provider == "command":
         if not args.candidate_extractor_command:
             raise SystemExit("--candidate-extractor-provider command requires --candidate-extractor-command.")
@@ -577,6 +560,8 @@ def load_candidate_extractor(args: argparse.Namespace) -> CandidateExtractor | N
 
 
 def load_consolidation_summarizer(args: argparse.Namespace) -> EvidenceSummarizer | None:
+    from mnemosyne.consolidation import CommandEvidenceSummarizer
+
     if args.summarizer_provider == "command":
         if not args.summarizer_command:
             raise SystemExit("--summarizer-provider command requires --summarizer-command.")
@@ -588,6 +573,8 @@ def load_consolidation_summarizer(args: argparse.Namespace) -> EvidenceSummarize
 
 
 def load_lesson_distiller(args: argparse.Namespace) -> LessonDistiller | None:
+    from mnemosyne.consolidation import CommandLessonDistiller
+
     if args.lesson_distiller_provider == "command":
         if not args.lesson_distiller_command:
             raise SystemExit("--lesson-distiller-provider command requires --lesson-distiller-command.")
@@ -599,6 +586,8 @@ def load_lesson_distiller(args: argparse.Namespace) -> LessonDistiller | None:
 
 
 def load_procedure_inducer(args: argparse.Namespace) -> ProcedureInducer | None:
+    from mnemosyne.consolidation import CommandProcedureInducer
+
     if args.skill_inducer_provider == "command":
         if not args.skill_inducer_command:
             raise SystemExit("--skill-inducer-provider command requires --skill-inducer-command.")
@@ -610,6 +599,8 @@ def load_procedure_inducer(args: argparse.Namespace) -> ProcedureInducer | None:
 
 
 def load_parametric_tier(args: argparse.Namespace) -> ParametricTier:
+    from mnemosyne.parametric import CommandParametricTrainer, ParametricArtifactStore, ParametricTier
+
     root = args.parametric_artifact_store
     if not root:
         store = Path(args.store).expanduser()
@@ -633,6 +624,9 @@ def runtime_state_tenant(args: argparse.Namespace) -> str:
 
 
 def load_runtime_state(args: argparse.Namespace) -> RuntimeState | PostgresRuntimeState | None:
+    from mnemosyne.postgres_runtime_state import PostgresRuntimeState
+    from mnemosyne.runtime_state import RuntimeState
+
     if args.backend == "postgres":
         dsn = args.postgres_dsn
         if not dsn:
@@ -649,6 +643,8 @@ def load_queue(
     args: argparse.Namespace,
     runtime_state: RuntimeState | PostgresRuntimeState | None = None,
 ) -> InProcessQueue | PostgresQueue:
+    from mnemosyne.queue import InProcessQueue, PostgresQueue
+
     if args.queue_backend == "postgres":
         dsn = args.postgres_dsn
         if not dsn:
@@ -671,6 +667,9 @@ def load_tools(
     ingestion_queue: InProcessQueue | PostgresQueue | None = None,
     runtime_state: RuntimeState | PostgresRuntimeState | None = None,
 ) -> MemoryTools:
+    from mnemosyne.ingestion import IngestionPipeline
+    from mnemosyne.mcp_tools import MemoryTools
+
     engine = load_engine(args)
     resolved_runtime_state = runtime_state if runtime_state is not None else load_runtime_state(args)
     ingestion = IngestionPipeline(
@@ -717,6 +716,9 @@ def emit(value: Any) -> None:
 def _oidc_verifier_components(
     args: argparse.Namespace,
 ) -> tuple[OidcJwtVerifier, dict[str, Any], OidcAuthorizationPolicy | None]:
+    from mnemosyne.oidc_jwks import load_oidc_authorization_policy, load_oidc_jwks, oidc_jwks_loader
+    from mnemosyne.security import OidcJwtVerifier
+
     jwks_document = load_oidc_jwks(
         jwks=args.idp_jwks,
         jwks_file=args.idp_jwks_file,
@@ -766,6 +768,8 @@ def _idp_jwks_source(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def cmd_session_exchange(args: argparse.Namespace) -> None:
+    from mnemosyne.security import SessionAuthError, issue_session_from_oidc
+
     if not args.idp_token:
         raise SystemExit("session-exchange requires --idp-token or MNEMOSYNE_IDP_TOKEN")
     try:
@@ -791,6 +795,8 @@ def cmd_session_exchange(args: argparse.Namespace) -> None:
 
 
 def cmd_idp_jwks_live_check(args: argparse.Namespace) -> None:
+    from mnemosyne.security import SessionAuthError
+
     if not args.idp_token:
         raise SystemExit("idp-jwks-live-check requires --idp-token or MNEMOSYNE_IDP_TOKEN")
     started = time.monotonic()
@@ -853,6 +859,9 @@ def cmd_idp_jwks_live_check(args: argparse.Namespace) -> None:
 
 
 def cmd_idp_authz_policy_check(args: argparse.Namespace) -> None:
+    from mnemosyne.oidc_jwks import load_oidc_authorization_policy
+    from mnemosyne.security import SessionAuthError
+
     try:
         policy = load_oidc_authorization_policy(
             policy=args.idp_authz_policy,
@@ -871,6 +880,9 @@ def _load_required_oidc_authz_policy(
     policy: str | None,
     policy_file: str | None,
 ) -> OidcAuthorizationPolicy:
+    from mnemosyne.oidc_jwks import load_oidc_authorization_policy
+    from mnemosyne.security import SessionAuthError
+
     try:
         loaded = load_oidc_authorization_policy(policy=policy, policy_file=policy_file)
     except SessionAuthError as exc:
@@ -902,6 +914,7 @@ def _policy_diff_summary(
     current_summary: Mapping[str, Any],
     candidate_summary: Mapping[str, Any],
 ) -> dict[str, Any]:
+
     current_rules = current.canonical_mapping()["rules"]
     candidate_rules = candidate.canonical_mapping()["rules"]
     compared_rules = min(len(current_rules), len(candidate_rules))
@@ -950,6 +963,8 @@ def _load_policy_simulations(path: str | None) -> list[Mapping[str, Any]]:
 
 
 def _policy_authorization_outcome(policy: OidcAuthorizationPolicy, simulation: Mapping[str, Any]) -> dict[str, Any]:
+    from mnemosyne.security import SessionAuthError
+
     expires_at = simulation.get("expires_at")
     session_id = simulation.get("session_id")
     try:
@@ -975,6 +990,7 @@ def _policy_simulation_report(
     candidate: OidcAuthorizationPolicy,
     simulations: list[Mapping[str, Any]],
 ) -> list[dict[str, Any]]:
+
     report: list[dict[str, Any]] = []
     for index, simulation in enumerate(simulations):
         current_outcome = _policy_authorization_outcome(current, simulation)
@@ -1067,6 +1083,12 @@ def load_signed_provenance(args: argparse.Namespace) -> dict[str, Any] | None:
 
 
 def cmd_ingest(args: argparse.Namespace) -> None:
+    from mnemosyne.consolidation import CONSOLIDATE_EVIDENCE_JOB
+    from mnemosyne.jobs import RuntimeJobHandlers
+    from mnemosyne.media_limits import ensure_file_within_limit
+    from mnemosyne.observability import MetricsRegistry
+    from mnemosyne.queue import QueueWorker
+
     runtime_state = load_runtime_state(args)
     ingestion_queue = None if args.no_enqueue_consolidation else load_queue(args, runtime_state)
     tools = load_tools(args, ingestion_queue=ingestion_queue, runtime_state=runtime_state)
@@ -1368,6 +1390,8 @@ def _load_calibration_dataset(args: argparse.Namespace) -> list[dict[str, Any]]:
 
 
 def cmd_calibration_tune(args: argparse.Namespace) -> None:
+    from mnemosyne.calibration import calibration_examples_from_rows, tune_calibration_set
+
     try:
         examples = calibration_examples_from_rows(_load_calibration_dataset(args))
         tuning = tune_calibration_set(
@@ -1411,6 +1435,8 @@ def _load_forgetting_policy_cases(args: argparse.Namespace) -> list[Mapping[str,
 
 
 def cmd_forgetting_policy_check(args: argparse.Namespace) -> None:
+    from mnemosyne.lifecycle import parse_lifecycle_datetime, validate_forgetting_policy_cases
+
     now = parse_lifecycle_datetime(args.now) or datetime.now(UTC)
     report = validate_forgetting_policy_cases(
         _load_forgetting_policy_cases(args),
@@ -1450,6 +1476,8 @@ def _load_policy_ops_bundle(args: argparse.Namespace) -> Mapping[str, Any]:
 
 
 def cmd_policy_ops_check(args: argparse.Namespace) -> None:
+    from mnemosyne.self_optimization import validate_policy_ops_bundle
+
     report = validate_policy_ops_bundle(
         _load_policy_ops_bundle(args),
         min_variants=args.min_variants,
@@ -1703,6 +1731,8 @@ def _privacy_backfill_scan(
     pii_sensitivity: int,
     include_clean: bool,
 ) -> dict[str, Any]:
+    from mnemosyne.privacy import classify_privacy
+
     exported = engine.export_tenant(tenant_id)
     rows = exported.get("evidence")
     if not isinstance(rows, list):
@@ -4223,6 +4253,9 @@ def _worker_ops_forbidden_raw_paths(value: Any, *, path: str = "$") -> list[str]
 
 
 def cmd_worker_ops_check(args: argparse.Namespace) -> None:
+    from mnemosyne.consolidation import CONSOLIDATE_EVIDENCE_JOB
+    from mnemosyne.jobs import PROJECTION_RECOMPUTE_JOB
+
     bundle = _load_worker_ops_bundle(args)
     findings: list[dict[str, str]] = []
     checks: list[dict[str, Any]] = []
@@ -4694,6 +4727,9 @@ def _consolidation_projection_details(section: Mapping[str, Any]) -> Mapping[str
 
 
 def cmd_consolidation_ops_check(args: argparse.Namespace) -> None:
+    from mnemosyne.consolidation import CONSOLIDATE_EVIDENCE_JOB
+    from mnemosyne.jobs import PROJECTION_RECOMPUTE_JOB
+
     bundle = _load_consolidation_ops_bundle(args)
     findings: list[dict[str, str]] = []
     checks: list[dict[str, Any]] = []
@@ -5680,6 +5716,8 @@ def _load_belief_revision_cases(args: argparse.Namespace) -> list[Mapping[str, A
 
 
 def cmd_belief_revision_check(args: argparse.Namespace) -> None:
+    from mnemosyne.belief import validate_belief_revision_cases
+
     report = validate_belief_revision_cases(
         _load_belief_revision_cases(args),
         min_cases=args.min_cases,
@@ -5754,6 +5792,8 @@ def _provenance_trust_fingerprint(report: Mapping[str, Any]) -> str:
 
 
 def cmd_provenance_trust_check(args: argparse.Namespace) -> None:
+    from mnemosyne.provenance import C2paToolVerifier, ProvenanceTrustPolicy, SignedProvenanceVerifier
+
     suite = _load_provenance_trust_suite(args)
     cases = list(suite["cases"])
     tool_path = str(args.c2pa_tool or suite.get("tool") or suite.get("c2pa_tool") or "").strip()
@@ -6738,6 +6778,8 @@ def _multimodal_forbidden_raw_paths(value: Any, *, path: str = "$") -> list[str]
 
 
 def cmd_multimodal_ops_check(args: argparse.Namespace) -> None:
+    from mnemosyne.media import MEDIA_EXTRACT_JOB
+
     bundle = _load_multimodal_ops_bundle(args)
     findings: list[dict[str, str]] = []
     checks: list[dict[str, Any]] = []
@@ -7537,12 +7579,16 @@ def cmd_discard(args: argparse.Namespace) -> None:
 
 
 def cmd_tools(args: argparse.Namespace) -> None:
+    from mnemosyne.mcp_tools import TOOL_SPEC
+
     from mnemosyne.mcp_server import _to_mcp_tool_spec
 
     emit({"tools": [_to_mcp_tool_spec(item) for item in TOOL_SPEC]})
 
 
 def cmd_eval(args: argparse.Namespace) -> None:
+    from mnemosyne.eval import run_seed_suite
+
     if getattr(args, "suite", "seed") == "g0":
         repo_root = args.repo_root.resolve()
         repo_root_text = str(repo_root)
@@ -7581,6 +7627,8 @@ def cmd_queue_snapshot(args: argparse.Namespace) -> None:
 
 
 def cmd_gate_case_add(args: argparse.Namespace) -> None:
+    from mnemosyne.gate import RegressionCase
+
     runtime_state = load_runtime_state(args)
     cases = {case.id: case for case in runtime_state.load_gate_cases()}
     case = RegressionCase(
@@ -7615,6 +7663,7 @@ def cmd_gate_case_list(args: argparse.Namespace) -> None:
 
 
 def gate_suite_fingerprint(cases: list[RegressionCase]) -> str:
+
     canonical = [
         case.to_dict()
         for case in sorted(
@@ -7626,6 +7675,8 @@ def gate_suite_fingerprint(cases: list[RegressionCase]) -> str:
 
 
 def cmd_gate_suite_check(args: argparse.Namespace) -> None:
+    from mnemosyne.parametric import protected_suite_report
+
     runtime_state = load_runtime_state(args)
     cases = runtime_state.load_gate_cases()
     suite = protected_suite_report(cases)
@@ -7683,6 +7734,8 @@ def projection_recompute_payload(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def cmd_projection_recompute_enqueue(args: argparse.Namespace) -> None:
+    from mnemosyne.jobs import PROJECTION_RECOMPUTE_JOB
+
     runtime_state = load_runtime_state(args)
     queue = load_queue(args, runtime_state)
     job = queue.enqueue(PROJECTION_RECOMPUTE_JOB, projection_recompute_payload(args), max_attempts=args.max_attempts)
@@ -7692,6 +7745,8 @@ def cmd_projection_recompute_enqueue(args: argparse.Namespace) -> None:
 
 
 def cmd_projection_recompute_once(args: argparse.Namespace) -> None:
+    from mnemosyne.jobs import PROJECTION_RECOMPUTE_JOB
+
     runtime_state, queue, tools, metrics, worker = _runtime_worker_components(args)
     queued = queue.enqueue(PROJECTION_RECOMPUTE_JOB, projection_recompute_payload(args), max_attempts=args.max_attempts)
     job = worker.run_once(PROJECTION_RECOMPUTE_JOB)
@@ -7709,6 +7764,10 @@ def cmd_projection_recompute_once(args: argparse.Namespace) -> None:
 def _runtime_worker_components(
     args: argparse.Namespace,
 ) -> tuple[RuntimeState | PostgresRuntimeState | None, InProcessQueue | PostgresQueue, MemoryTools, MetricsRegistry, QueueWorker]:
+    from mnemosyne.jobs import RuntimeJobHandlers
+    from mnemosyne.observability import MetricsRegistry
+    from mnemosyne.queue import QueueWorker
+
     runtime_state = load_runtime_state(args)
     queue = load_queue(args, runtime_state)
     tools = load_tools(args, ingestion_queue=queue, runtime_state=runtime_state)
@@ -7739,6 +7798,7 @@ def _persist_worker_state(
     queue: InProcessQueue | PostgresQueue,
     tools: MemoryTools,
 ) -> None:
+
     if runtime_state and queue_uses_runtime_state(args):
         runtime_state.save_queue(queue)
         runtime_state.save_learning(tools.learning)
@@ -7749,6 +7809,8 @@ def _persist_worker_state(
 
 
 def cmd_consolidate_once(args: argparse.Namespace) -> None:
+    from mnemosyne.consolidation import CONSOLIDATE_EVIDENCE_JOB
+
     runtime_state, queue, tools, metrics, worker = _runtime_worker_components(args)
     job = worker.run_once(CONSOLIDATE_EVIDENCE_JOB)
     _persist_worker_state(args, runtime_state, queue, tools)
@@ -7842,6 +7904,9 @@ def cmd_worker_run(args: argparse.Namespace) -> None:
 
 
 def cmd_ops_report(args: argparse.Namespace) -> None:
+    from mnemosyne.observability import build_ops_report, render_ops_dashboard
+    from mnemosyne.queue import InProcessQueue
+
     runtime_state = load_runtime_state(args)
     queue = runtime_state.load_queue() if runtime_state else InProcessQueue()
     tools = load_tools(args, ingestion_queue=queue, runtime_state=runtime_state)
@@ -8079,6 +8144,8 @@ def _fetch_dashboard_url(
     timeout: float,
     max_bytes: int,
 ) -> tuple[bytes, dict[str, Any]]:
+    from mnemosyne.network_safety import safe_urlopen
+
     validated_url = _validate_hosted_fetch_url(
         url,
         allow_insecure_localhost=allow_insecure_localhost,
@@ -8485,6 +8552,8 @@ def _http_json_probe(
     timeout_seconds: float,
     payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    from mnemosyne.network_safety import safe_urlopen, validate_fetch_url
+
     encoded_payload = None
     request_headers = {"Accept": "application/json", **dict(headers)}
     if payload is not None:
@@ -8632,6 +8701,8 @@ def _sse_probe(
     max_events: int,
     expected_event: str | None,
 ) -> dict[str, Any]:
+    from mnemosyne.network_safety import safe_urlopen, validate_fetch_url
+
     request_headers = {"Accept": "text/event-stream", "Cache-Control": "no-cache", **dict(headers)}
     started = time.monotonic()
     try:
@@ -9042,6 +9113,8 @@ async def _streamable_http_iteration(
 
 
 def cmd_mcp_streamable_http_soak(args: argparse.Namespace) -> None:
+    from mnemosyne.network_safety import validate_fetch_url
+
     streamable_url = args.mcp_streamable_http_url or _join_endpoint(args.mcp_streamable_http_base_url, "/mcp")
     health_url = args.mcp_streamable_http_health_url or _join_endpoint(args.mcp_streamable_http_base_url, "/healthz")
     if not streamable_url or not health_url:
@@ -11587,6 +11660,8 @@ def _verify_production_evidence_preflight(
     bundle_dir: Path,
     findings: list[dict[str, Any]],
 ) -> bool:
+    from mnemosyne.production_parity import build_parity_row_readiness
+
     if preflight is None:
         return False
     ok = True
@@ -12042,6 +12117,8 @@ def _verify_production_evidence_redaction_scan(
     preflight: Mapping[str, Any] | None,
     findings: list[dict[str, Any]],
 ) -> bool:
+    from mnemosyne.evidence_redaction import scan_evidence_paths
+
     if redaction_scan is None:
         return False
     ok = True
@@ -12183,6 +12260,8 @@ def _verify_production_evidence_operator_manifest(
     label: str = "operator-soak-manifest.json",
     code_prefix: str = "operator_manifest",
 ) -> bool:
+    from mnemosyne.evidence_redaction import manifest_argument_secret_errors
+
     if operator_manifest is None:
         return False
     ok = True
@@ -13263,6 +13342,8 @@ def cmd_tls_cert_check(args: argparse.Namespace) -> None:
 
 
 def _load_x509_certificate(path: str | Path) -> x509.Certificate:
+    from cryptography import x509
+
     try:
         return x509.load_pem_x509_certificate(Path(path).expanduser().read_bytes())
     except Exception as exc:  # noqa: BLE001 - deployment checks return structured failures.
@@ -13270,6 +13351,7 @@ def _load_x509_certificate(path: str | Path) -> x509.Certificate:
 
 
 def _x509_time(certificate: x509.Certificate, attr: str) -> datetime:
+
     utc_attr = f"{attr}_utc"
     value = getattr(certificate, utc_attr, None)
     if value is None:
@@ -13280,6 +13362,8 @@ def _x509_time(certificate: x509.Certificate, attr: str) -> datetime:
 
 
 def _x509_sans(certificate: x509.Certificate) -> tuple[list[str], list[str]]:
+    from cryptography import x509
+
     try:
         san = certificate.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
     except x509.ExtensionNotFound:
@@ -13290,6 +13374,7 @@ def _x509_sans(certificate: x509.Certificate) -> tuple[list[str], list[str]]:
 
 
 def _x509_matches_hostname(certificate: x509.Certificate, hostname: str) -> bool:
+
     dns_names, ip_addresses = _x509_sans(certificate)
     try:
         host_ip = ipaddress.ip_address(hostname)
@@ -13310,6 +13395,7 @@ def _x509_matches_hostname(certificate: x509.Certificate, hostname: str) -> bool
 
 
 def _x509_report(certificate: x509.Certificate, *, now: datetime) -> dict[str, Any]:
+
     not_before = _x509_time(certificate, "not_valid_before")
     not_after = _x509_time(certificate, "not_valid_after")
     dns_names, ip_addresses = _x509_sans(certificate)
@@ -13328,6 +13414,7 @@ def _x509_report(certificate: x509.Certificate, *, now: datetime) -> dict[str, A
 
 
 def _hostname_checks(certificate: x509.Certificate, hostnames: list[str]) -> dict[str, bool]:
+
     return {hostname: _x509_matches_hostname(certificate, hostname) for hostname in hostnames}
 
 
@@ -14107,10 +14194,14 @@ def _read_hosted_llm_manifest(path: str) -> dict[str, Any]:
 
 
 def _is_loopback_host(host: str | None) -> bool:
+    from mnemosyne.network_safety import is_loopback_host
+
     return is_loopback_host(host)
 
 
 def _validate_hosted_fetch_url(url: str, *, allow_insecure_localhost: bool) -> ValidatedFetchUrl:
+    from mnemosyne.network_safety import validate_fetch_url
+
     try:
         return validate_fetch_url(
             url,
@@ -14293,6 +14384,8 @@ def _run_hosted_provider_check(
     default_timeout: float,
     allow_insecure_localhost: bool,
 ) -> dict[str, Any]:
+    from mnemosyne.network_safety import safe_urlopen
+
     name = str(provider.get("name") or provider.get("role") or "hosted-provider")
     role = str(provider["role"])
     protocol = str(provider.get("protocol") or "role-json")
@@ -14413,6 +14506,19 @@ def cmd_hosted_llm_check(args: argparse.Namespace) -> None:
 
 
 def cmd_provider_check(args: argparse.Namespace) -> None:
+    from mnemosyne.gate import RegressionCase
+    from mnemosyne.learning import Lesson, Procedure
+    from mnemosyne.models import Evidence, Hit
+    from mnemosyne.oidc_jwks import load_oidc_authorization_policy, load_oidc_jwks
+    from mnemosyne.parametric import (
+        CommandParametricTrainer,
+        ParametricArtifactStore,
+        ParametricTier,
+        protected_suite_report,
+    )
+    from mnemosyne.retrieval import CommandMediaEmbeddingProvider
+    from mnemosyne.security import SessionAuthError, SessionIdentity, SessionTokenVerifier, load_session_secret_command
+
     manifest = apply_provider_manifest(args)
     checks: dict[str, dict[str, Any]] = {}
     ok = True
@@ -14913,6 +15019,8 @@ def cmd_provider_check(args: argparse.Namespace) -> None:
 
 
 def cmd_specialist_manifest(args: argparse.Namespace) -> None:
+    from mnemosyne.providers import default_registry
+
     registry = default_registry()
     specialists = registry.specialist_manifest()
     if args.role:
@@ -14935,6 +15043,8 @@ def cmd_residency_policy(args: argparse.Namespace) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    from mnemosyne.media_limits import DEFAULT_MAX_INGEST_BYTES
+
     def subparser_factory(*args: Any, **kwargs: Any) -> argparse.ArgumentParser:
         kwargs.setdefault("allow_abbrev", False)
         return argparse.ArgumentParser(*args, **kwargs)
