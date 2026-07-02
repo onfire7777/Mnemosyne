@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 from unittest import mock
 
+from mnemosyne.cli import _is_local_retrieval_backend
 from mnemosyne.postgres_engine import PostgresEngine
 from mnemosyne.retrieval import RetrievalAdapters, retrieval_adapters_from_env
 
@@ -42,3 +43,24 @@ def test_postgres_engine_default_adapter_names_are_pinned():
     engine = PostgresEngine("postgresql://unused")
     assert engine.adapters.lexical_backend == "postgres-fts"
     assert engine.adapters.graph_backend == "postgres-recursive-ppr"
+
+
+def test_sqlite_engine_default_adapter_names_are_pinned(tmp_path):
+    """SqliteEngine self-reports the Tier-B gate names for its scan surfaces.
+
+    Construction opens no tenant file (per-tenant DBs are created lazily on
+    first tenant access), so this runs everywhere.
+    """
+    from mnemosyne.sqlite_engine import SqliteEngine
+
+    engine = SqliteEngine(tmp_path)
+    assert engine.adapters.lexical_backend == "sqlite-fts5"
+    assert engine.adapters.graph_backend == "sqlite-cached-ppr"
+
+
+def test_sqlite_backend_names_escape_forbid_local():
+    """The sqlite-* retrieval names must NOT classify as local backends, so
+    forbid_local / retrieval-ops-check semantics treat SqliteEngine as a
+    non-local (self-hosted) backend — never the local denylist."""
+    assert not _is_local_retrieval_backend("sqlite-fts5")
+    assert not _is_local_retrieval_backend("sqlite-cached-ppr")
