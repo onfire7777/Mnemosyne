@@ -1,0 +1,293 @@
+{
+  "deep": {
+    "abstained": false,
+    "adapters": {
+      "embedding": "local-hashing",
+      "embedding_dims": 256,
+      "graph_backend": "local-ppr",
+      "lexical_backend": "local-bm25-lite",
+      "reranker": "local-similarity"
+    },
+    "channels": {
+      "dense_hash": 2,
+      "graph_ppr": 1,
+      "lexical": 1
+    },
+    "confidence": "0x1.0000000000000p+0",
+    "confidence_block": {
+      "answer_score": "0x1.0000000000000p+0",
+      "prediction_set_size": 2,
+      "score": "0x1.0000000000000p+0",
+      "source": "evidence_quality",
+      "threshold": "0x1.ccccccccccccdp-2"
+    },
+    "explain_keys": [
+      "activation",
+      "adapters",
+      "answer_grounding_floor",
+      "calibration",
+      "channels",
+      "confidence",
+      "gist_support",
+      "mmr_lambda",
+      "rails",
+      "read_marks",
+      "reality_monitoring",
+      "rrf_k",
+      "schema_fast_path",
+      "semantic_entropy",
+      "standing",
+      "workspace_broadcast",
+      "workspace_retrieval_advisory"
+    ],
+    "hits": [
+      [
+        "relation",
+        "33333333-3333-3333-3333-333333333333",
+        "0x1.0eef8243d670ap+0",
+        "graph_ppr+rerank"
+      ],
+      [
+        "evidence",
+        "0ee9d316a95986bbef080abeb9a4b8c71996ba1572de71e9d372e54d07fc5965",
+        "0x1.91a26cb5414a3p-5",
+        "dense_hash+rerank"
+      ],
+      [
+        "evidence",
+        "8806ebd91f0559ba3999176a896381179a4db78201c9ed7e6c203793bd7d41f3",
+        "0x1.0e0b2c3b192f2p-1",
+        "dense_hash+lexical+rerank"
+      ]
+    ],
+    "mmr_lambda": 0.72,
+    "query": "beacon topaz glow",
+    "rails": {
+      "branch_promotion_requires_gate": true,
+      "erasure_propagates_to_derived_indexes": true,
+      "explicit_preferences_outrank_inferred": true,
+      "retrieved_text_is_data_not_instruction": true,
+      "sensitive_and_destructive_writes_audited": true,
+      "source_trust_filter_required": true,
+      "tenant_isolation_required": true,
+      "writes_are_append_only_or_superseding": true
+    },
+    "read_marks": {
+      "assertions": 0,
+      "evidence": 2
+    },
+    "rrf_k": 60,
+    "token_budget": 4096,
+    "uncertainty_note": null,
+    "used_tokens": 34
+  },
+  "empty": {
+    "abstained": true,
+    "adapters": {
+      "embedding": "local-hashing",
+      "embedding_dims": 256,
+      "graph_backend": "local-ppr",
+      "lexical_backend": "local-bm25-lite",
+      "reranker": "local-similarity"
+    },
+    "channels": {
+      "dense_hash": 0,
+      "graph_ppr": 0,
+      "lexical": 0
+    },
+    "confidence": "0x0.0p+0",
+    "confidence_block": {
+      "answer_score": "0x0.0p+0",
+      "prediction_set_size": 0,
+      "score": "0x0.0p+0",
+      "source": "evidence_quality",
+      "threshold": "0x1.ccccccccccccdp-2"
+    },
+    "explain_keys": [
+      "activation",
+      "adapters",
+      "answer_grounding_floor",
+      "calibration",
+      "channels",
+      "confidence",
+      "gist_support",
+      "mmr_lambda",
+      "rails",
+      "read_marks",
+      "reality_monitoring",
+      "rrf_k",
+      "schema_fast_path",
+      "semantic_entropy",
+      "standing",
+      "workspace_broadcast",
+      "workspace_retrieval_advisory"
+    ],
+    "hits": [],
+    "mmr_lambda": 0.72,
+    "query": "deployment runbook",
+    "rails": {
+      "branch_promotion_requires_gate": true,
+      "erasure_propagates_to_derived_indexes": true,
+      "explicit_preferences_outrank_inferred": true,
+      "retrieved_text_is_data_not_instruction": true,
+      "sensitive_and_destructive_writes_audited": true,
+      "source_trust_filter_required": true,
+      "tenant_isolation_required": true,
+      "writes_are_append_only_or_superseding": true
+    },
+    "read_marks": {
+      "assertions": 0,
+      "evidence": 0
+    },
+    "rrf_k": 60,
+    "token_budget": 4096,
+    "uncertainty_note": "Retrieved evidence did not cover enough query terms; abstaining until stronger support is available.",
+    "used_tokens": 0
+  },
+  "fast": {
+    "abstained": false,
+    "adapters": {
+      "embedding": "local-hashing",
+      "embedding_dims": 256,
+      "graph_backend": "local-ppr",
+      "lexical_backend": "local-bm25-lite",
+      "reranker": "local-similarity"
+    },
+    "channels": {
+      "dense_hash": 2,
+      "graph_ppr": 0,
+      "lexical": 2
+    },
+    "confidence": "0x1.0000000000000p+0",
+    "confidence_block": {
+      "answer_score": "0x1.0000000000000p+0",
+      "prediction_set_size": 2,
+      "score": "0x1.0000000000000p+0",
+      "source": "evidence_quality",
+      "threshold": "0x1.ccccccccccccdp-2"
+    },
+    "explain_keys": [
+      "activation",
+      "adapters",
+      "answer_grounding_floor",
+      "calibration",
+      "channels",
+      "confidence",
+      "gist_support",
+      "mmr_lambda",
+      "rails",
+      "read_marks",
+      "reality_monitoring",
+      "rrf_k",
+      "schema_fast_path",
+      "semantic_entropy",
+      "standing",
+      "workspace_broadcast",
+      "workspace_retrieval_advisory"
+    ],
+    "hits": [
+      [
+        "assertion",
+        "11111111-1111-1111-1111-111111111111",
+        "0x1.be0d2a3dc7301p-1",
+        "dense_hash+lexical+rerank"
+      ],
+      [
+        "evidence",
+        "f1d73067327c146e0158efcd6d0c624acb2bb86f3856b638fb227178f9f63409",
+        "0x1.4ab0fd645af4cp-1",
+        "dense_hash+lexical+rerank"
+      ]
+    ],
+    "mmr_lambda": 0.72,
+    "query": "deployment runbook operations",
+    "rails": {
+      "branch_promotion_requires_gate": true,
+      "erasure_propagates_to_derived_indexes": true,
+      "explicit_preferences_outrank_inferred": true,
+      "retrieved_text_is_data_not_instruction": true,
+      "sensitive_and_destructive_writes_audited": true,
+      "source_trust_filter_required": true,
+      "tenant_isolation_required": true,
+      "writes_are_append_only_or_superseding": true
+    },
+    "read_marks": {
+      "assertions": 1,
+      "evidence": 1
+    },
+    "rrf_k": 60,
+    "token_budget": 4096,
+    "uncertainty_note": null,
+    "used_tokens": 24
+  },
+  "low_support_abstention": {
+    "abstained": true,
+    "adapters": {
+      "embedding": "local-hashing",
+      "embedding_dims": 256,
+      "graph_backend": "local-ppr",
+      "lexical_backend": "local-bm25-lite",
+      "reranker": "local-similarity"
+    },
+    "channels": {
+      "dense_hash": 1,
+      "graph_ppr": 0,
+      "lexical": 1
+    },
+    "confidence": "0x1.3333333333334p-6",
+    "confidence_block": {
+      "answer_score": "0x1.3333333333334p-6",
+      "prediction_set_size": 1,
+      "score": "0x1.3333333333334p-6",
+      "source": "evidence_quality",
+      "threshold": "0x1.ccccccccccccdp-2"
+    },
+    "explain_keys": [
+      "activation",
+      "adapters",
+      "answer_grounding_floor",
+      "calibration",
+      "channels",
+      "confidence",
+      "gist_support",
+      "mmr_lambda",
+      "rails",
+      "read_marks",
+      "reality_monitoring",
+      "rrf_k",
+      "schema_fast_path",
+      "semantic_entropy",
+      "standing",
+      "workspace_broadcast",
+      "workspace_retrieval_advisory"
+    ],
+    "hits": [
+      [
+        "evidence",
+        "8806ebd91f0559ba3999176a896381179a4db78201c9ed7e6c203793bd7d41f3",
+        "0x1.96e5da6364fc5p-3",
+        "dense_hash+lexical+rerank"
+      ]
+    ],
+    "mmr_lambda": 0.72,
+    "query": "glow quantum espresso protocols",
+    "rails": {
+      "branch_promotion_requires_gate": true,
+      "erasure_propagates_to_derived_indexes": true,
+      "explicit_preferences_outrank_inferred": true,
+      "retrieved_text_is_data_not_instruction": true,
+      "sensitive_and_destructive_writes_audited": true,
+      "source_trust_filter_required": true,
+      "tenant_isolation_required": true,
+      "writes_are_append_only_or_superseding": true
+    },
+    "read_marks": {
+      "assertions": 0,
+      "evidence": 1
+    },
+    "rrf_k": 60,
+    "token_budget": 4096,
+    "uncertainty_note": "Retrieved evidence did not cover enough query terms; abstaining until stronger support is available.",
+    "used_tokens": 14
+  }
+}
