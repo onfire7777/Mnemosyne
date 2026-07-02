@@ -27,6 +27,7 @@ from mnemosyne.access_policy import (
     validate_access_policy,
     vector_partition_for_item,
 )
+from mnemosyne.algorithms import rrf_fuse
 from mnemosyne.calibration import CalibrationSet, conformal_threshold, should_abstain
 from mnemosyne.consciousness import RealityMonitor
 from mnemosyne.ids import evidence_cid, evidence_unscoped_cid, new_id
@@ -2751,22 +2752,7 @@ class LocalMemoryEngine:
         return self.adapters.embedding.embed(text)
 
     def _rrf(self, ranked_lists: list[list[Hit]], k: int) -> list[Hit]:
-        by_id: dict[tuple[str, str], Hit] = {}
-        scores: dict[tuple[str, str], float] = defaultdict(float)
-        channels: dict[tuple[str, str], list[str]] = defaultdict(list)
-        for ranked in ranked_lists:
-            for rank, hit in enumerate(ranked, start=1):
-                key = (hit.kind, hit.id)
-                by_id[key] = hit
-                scores[key] += 1.0 / (self.policy.rrf_k + rank)
-                channels[key].append(hit.channel)
-        fused = []
-        for key, hit in by_id.items():
-            item = copy.deepcopy(hit)
-            item.score = scores[key]
-            item.channel = "+".join(sorted(set(channels[key])))
-            fused.append(item)
-        return sorted(fused, key=lambda item: item.score, reverse=True)[:k]
+        return rrf_fuse(ranked_lists, k, rrf_k=self.policy.rrf_k)
 
     def _mmr(self, query: str, hits: list[Hit], k: int) -> list[Hit]:
         selected: list[Hit] = []
