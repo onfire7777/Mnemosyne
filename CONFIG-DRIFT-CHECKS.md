@@ -55,6 +55,13 @@ Realized over these concrete loci:
   `--queue-tenant` on `python -m mnemosyne.cli`.
 - **`MNEMOSYNE_POSTGRES_DSN`** — Postgres connection string for the `postgres`
   backend.
+- **`MNEMOSYNE_BENCH_ABSOLUTE`** — set to `1` to opt the benchmark suite
+  (`tests/benchmarks/`) into the absolute `§22.5` latency budgets
+  (reference-machine nightly); unset, only the relative-regression gate runs
+  under `--benchmark-only`, and a plain run skips the suite entirely.
+- **`journal_dir`** — optional `LocalMemoryEngine` constructor kwarg
+  (`engine.py`): directory for the per-tenant append-only CID journals
+  (`journal.py`); unset, no journal is written.
 - **`docker-compose.yml`** — declared local-first Postgres service
   (`pgvector/pgvector:pg16`, port `54329`, schema mount).
 - **Gitignored `.env`, `.env.*`, secret patterns** (`*.pem`, `*.key`,
