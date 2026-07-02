@@ -25,24 +25,38 @@ erased-replay blocklist + CID-journal wiring, ``get_evidence``,
 ``update_evidence_metadata``, ``set_evidence_embedding``,
 ``backfill_evidence_privacy``, and the ``export_tenant`` /
 ``export_tenant_filtered`` / ``export_all`` byte-compatible exports) over
-these primitives, reproducing ``LocalMemoryEngine``'s flow exactly. The
-remaining ``MemoryEngine`` Protocol methods stay ``NotImplementedError`` stubs
-naming their Phase-2 task, so ``isinstance(engine, MemoryEngine)`` already
-holds — the runtime_checkable Protocol checks method presence.
+these primitives, reproducing ``LocalMemoryEngine``'s flow exactly.
+
+Phase-2 Task 4 adds the scan surfaces — ``vector_search`` (the PACKED-BLOB
+dense seam feeding ``dense_scan_packed`` with zero per-call conversion),
+``lexical_search`` (FTS5-safe candidate prefilter + shared ``lexical_score``
+rescore), and ``graph_ppr`` (live PPR). They keep byte-parity with the
+LocalMemoryEngine oracle by hydrating a scoped, policy/adapter-sharing Local
+instance from SQL and reusing its exact candidate/graph bodies (see the
+``scan surfaces`` block). The remaining ``MemoryEngine`` Protocol methods stay
+``NotImplementedError`` stubs naming their Phase-2 task, so
+``isinstance(engine, MemoryEngine)`` already holds — the runtime_checkable
+Protocol checks method presence.
 """
 from __future__ import annotations
 
+import array
 import copy
 import json
+import re
 import sqlite3
 import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from mnemosyne import text as text_kernels
 from mnemosyne.access_policy import (
+    VECTOR_PARTITION_PUBLIC,
     filter_export_for_context,
     may_embed_item,
+    may_read_item,
+    may_use_stored_embedding,
     validate_access_policy,
     vector_partition_for_item,
 )
@@ -73,6 +87,7 @@ from mnemosyne.retrieval import (
     HashingEmbeddingProvider,
     LocalSimilarityReranker,
     RetrievalAdapters,
+    validate_adapter_hit_scope,
 )
 from mnemosyne.sqlite_schema import (
     ENSURE_STATEMENTS,
@@ -82,10 +97,61 @@ from mnemosyne.sqlite_schema import (
     pack_embedding,
     unpack_embedding,
 )
+from mnemosyne.text import cosine, lexical_score, tokenize
 from mnemosyne.workspace import self_generation_budget_report
 
 LEXICAL_BACKEND = "sqlite-fts5"
 GRAPH_BACKEND = "sqlite-cached-ppr"
+
+# A query token is FTS5-safe when it is a bare word under the unicode61
+# tokenizer (which we configure with ``tokenchars '_'`` so ``_`` counts too).
+_FTS_SAFE_TOKEN = re.compile(r"[a-z0-9_]+")
+
+
+def fts_safe_query(tokens: list[str]) -> bool:
+    """True IFF every query token is unicode61-safe (``[a-z0-9_]+`` after
+    :func:`mnemosyne.text.tokenize`).
+
+    Rationale (tokenizer-mismatch): the ``evidence_fts`` index tokenizes with
+    unicode61 (``tokenchars '_'``), which splits on ``:+./-`` — characters the
+    app-side tokenizer keeps INSIDE a token (URLs, ``v1.2.3``, ``data-only``).
+    When a query token carries any of those characters the two tokenizers can
+    disagree on the term boundary, so an FTS MATCH could MISS a row that
+    ``lexical_score`` would rank > 0 (a recall regression vs the Local oracle,
+    which full-scans every candidate). This predicate is the deterministic
+    guard: only when EVERY query token is a bare ``[a-z0-9_]+`` word — for
+    which unicode61 and the app tokenizer provably agree — is the FTS MATCH
+    candidate set a superset of the rescored-positive rows, making the FTS
+    prefilter safe. Otherwise the engine full-scans. Empty (no tokens) is
+    vacuously true; the caller guards the empty case before building a MATCH.
+    """
+    return all(bool(_FTS_SAFE_TOKEN.fullmatch(token)) for token in tokens)
+
+
+def sqlite_vec_available() -> bool:
+    """Whether the optional ``sqlitevec`` extra could register a vec0 dense index.
+
+    True only when the ``sqlite_vec`` package imports AND this Python's sqlite3
+    build actually permits loadable extensions (``enable_load_extension``). The
+    DEFAULT dense path is ALWAYS the packed-BLOB kernel exact scan
+    (:func:`SqliteEngine.vector_search` → ``dense_scan_packed``); this detector
+    is the gate for the OPTIONAL vec0 approximate candidate index, whose full
+    wiring behind the projection registry is deferred to Task 8. It lets tests
+    skip vec0-specific paths when the extra is absent without touching the
+    default scan (which is unaffected either way).
+    """
+    try:
+        import sqlite_vec  # noqa: F401  # type: ignore[import-not-found]
+    except Exception:
+        return False
+    probe = sqlite3.connect(":memory:")
+    try:
+        probe.enable_load_extension(True)
+        return True
+    except (AttributeError, sqlite3.OperationalError, sqlite3.NotSupportedError):
+        return False
+    finally:
+        probe.close()
 
 _EVIDENCE_INSERT = """
 INSERT INTO evidence (
@@ -920,11 +986,282 @@ class SqliteEngine:
             "tenants": tenant_exports,
         }
 
+    # --- scan surfaces (dense / lexical / graph) -----------------------------
+    #
+    # Parity strategy (Task 4): LocalMemoryEngine is the byte-parity ORACLE.
+    # Rather than re-derive the ~200-line candidate/graph security+redaction
+    # surface over SQL (a copy that could drift), the scan methods hydrate a
+    # SCOPED LocalMemoryEngine from SQL — one that SHARES this engine's policy
+    # and adapters — and reuse Local's ACTUAL ``_candidate_hits`` / ``graph_ppr``
+    # / ``_embedding_for_hit`` bodies (the strongest form of the task-3
+    # "import Local's pure helpers, do not re-derive" rule; it transitively
+    # reuses ``_relation_hit_security`` / ``_valid_at`` /
+    # ``_filter_graph_adapter_hits`` / ``_projection_reality_monitoring_from_calibration``
+    # etc. verbatim). The SQL SELECT is the permitted prefilter; ``may_read_item``
+    # + redactions stay the app-side authority inside Local's bodies. The two
+    # genuinely SQLite-specific seams — the PACKED-BLOB dense scan and the FTS5
+    # lexical prefilter — are implemented directly on top of that oracle.
+
+    def _embed_text(self, text: str) -> list[float]:
+        return self.adapters.embedding.embed(text)
+
+    def _scan_oracle(
+        self, filt: dict[str, Any], *, with_blobs: bool = False
+    ) -> LocalMemoryEngine | tuple[LocalMemoryEngine, dict[str, bytes | None]]:
+        """Hydrate a candidate-scope oracle: evidence + assertions for
+        (tenant, branch) and preferences for the tenant. ``with_blobs`` also
+        returns the raw packed-embedding BLOBs keyed by evidence key, so the
+        dense seam can feed them to ``dense_scan_packed`` with zero conversion."""
+        tenant_id = filt.get("tenant_id")
+        branch = str(filt.get("branch", "main"))
+        oracle = LocalMemoryEngine(policy=self.policy, adapters=self.adapters)
+        raw_blobs: dict[str, bytes | None] = {}
+        if tenant_id:
+            conn = self._connect(tenant_id)
+            with self._lock:
+                # ORDER BY rowid == insertion order, matching LocalMemoryEngine's
+                # dict-values iteration order (a bare WHERE would use the PK
+                # index and return cid/id order, breaking equal-score tie parity).
+                ev_rows = conn.execute(
+                    "SELECT * FROM evidence WHERE tenant_id = ? AND branch = ? ORDER BY rowid",
+                    (tenant_id, branch),
+                ).fetchall()
+                a_rows = conn.execute(
+                    "SELECT * FROM assertions WHERE tenant_id = ? AND branch = ? ORDER BY rowid",
+                    (tenant_id, branch),
+                ).fetchall()
+                p_rows = conn.execute(
+                    "SELECT record FROM preferences WHERE tenant_id = ? ORDER BY rowid",
+                    (tenant_id,),
+                ).fetchall()
+            for row in ev_rows:
+                ev = _evidence_from_row(row)
+                key = oracle._evidence_key(ev.tenant_id, ev.branch, ev.cid or "")
+                oracle.evidence[key] = ev
+                if with_blobs:
+                    raw_blobs[key] = row["embedding"]
+            for row in a_rows:
+                assertion = _assertion_from_row(row)
+                oracle.assertions[assertion.id] = assertion
+            for row in p_rows:
+                pref = Preference.from_dict(json.loads(row["record"]))
+                oracle.preferences[pref.id] = pref
+        return (oracle, raw_blobs) if with_blobs else oracle
+
+    def _graph_oracle(
+        self,
+        tenant_id: str | None,
+        branch: str | None,
+        filt: dict[str, Any] | None,
+    ) -> LocalMemoryEngine:
+        """Hydrate a graph-scope oracle: relations plus the evidence their
+        source-CID security lookups read. Scoped to (tenant, branch) when a
+        branch is given, else tenant-wide (Local considers all branches)."""
+        target = tenant_id or dict(filt or {}).get("tenant_id")
+        oracle = LocalMemoryEngine(policy=self.policy, adapters=self.adapters)
+        if not target:
+            return oracle
+        conn = self._connect(target)
+        if branch is not None:
+            rel_sql = "SELECT * FROM relations WHERE tenant_id = ? AND branch = ? ORDER BY rowid"
+            ev_sql = "SELECT * FROM evidence WHERE tenant_id = ? AND branch = ? ORDER BY rowid"
+            params: tuple[str, ...] = (target, branch)
+        else:
+            rel_sql = "SELECT * FROM relations WHERE tenant_id = ? ORDER BY rowid"
+            ev_sql = "SELECT * FROM evidence WHERE tenant_id = ? ORDER BY rowid"
+            params = (target,)
+        with self._lock:
+            rel_rows = conn.execute(rel_sql, params).fetchall()
+            ev_rows = conn.execute(ev_sql, params).fetchall()
+        for row in rel_rows:
+            rel = _relation_from_row(row)
+            oracle.relations[rel.id] = rel
+        for row in ev_rows:
+            ev = _evidence_from_row(row)
+            oracle.evidence[oracle._evidence_key(ev.tenant_id, ev.branch, ev.cid or "")] = ev
+        return oracle
+
+    def _packed_embedding_for_hit(
+        self,
+        hit: Hit,
+        filt: dict[str, Any] | None,
+        dims: int,
+        *,
+        oracle: LocalMemoryEngine,
+        raw_blobs: dict[str, bytes | None],
+    ) -> bytes | None:
+        """Packed-BLOB analogue of ``LocalMemoryEngine._embedding_for_hit``
+        (allow_fallback default): identical gating and identical metadata
+        side-effects, but returns the RAW stored packed f64 BLOB (zero per-call
+        conversion) when the gate passes, packs a fresh re-embed exactly once for
+        the fallback branch, and returns ``None`` where Local returns ``None``.
+        The uniform-dims guard in :meth:`vector_search` handles heterogeneous
+        BLOB widths."""
+        if hit.kind == "evidence":
+            key = oracle._evidence_key(hit.tenant_id, hit.branch, hit.id)
+            ev = oracle.evidence.get(key)
+            if ev and ev.embedding:
+                decision = may_read_item(
+                    item_tenant_id=ev.tenant_id,
+                    sensitivity=int(ev.sensitivity),
+                    access_policy=ev.access_policy,
+                    context=filt,
+                    policy_max_sensitivity=self.policy.max_sensitivity,
+                    status="active",
+                    erased=ev.erased,
+                )
+                if may_use_stored_embedding(
+                    decision=decision,
+                    sensitivity=int(ev.sensitivity),
+                    access_policy=ev.access_policy,
+                    embedding_partition=ev.metadata.get("embedding_partition"),
+                ):
+                    hit.metadata["stored_embedding_used"] = True
+                    return raw_blobs.get(key)
+        partition = str(hit.metadata.get("embedding_partition") or VECTOR_PARTITION_PUBLIC)
+        if partition == "none":
+            return None
+        hit.metadata["stored_embedding_used"] = False
+        return array.array("d", self._embed_text(hit.text)).tobytes()
+
+    @staticmethod
+    def _apply_dense_channel(hit: Hit, score: float) -> None:
+        hit.score = score
+        stored_raw = bool(hit.metadata.get("stored_embedding_used"))
+        hit.channel = (
+            "dense_media" if stored_raw and hit.metadata.get("stored_media_embedding") else "dense_hash"
+        )
+
+    def _fts_candidate_cids(
+        self, conn: sqlite3.Connection, tenant_id: str, branch: str, tokens: list[str]
+    ) -> set[str]:
+        """FTS5 MATCH recall set: evidence cids whose content matches ANY query
+        token (OR-of-quoted-terms). Prefilter only — never ranking."""
+        match_query = " OR ".join(f'"{token}"' for token in tokens)
+        with self._lock:
+            rows = conn.execute(
+                "SELECT cid FROM evidence_fts "
+                "WHERE evidence_fts MATCH ? AND tenant_id = ? AND branch = ?",
+                (match_query, tenant_id, branch),
+            ).fetchall()
+        return {row[0] for row in rows}
+
     def vector_search(self, query: str, k: int, filt: dict[str, Any]) -> list[Hit]:
-        raise NotImplementedError("SqliteEngine.vector_search lands in Phase-2 Task 4")
+        """Dense scan over the PACKED-BLOB seam (spec §8 Phase-1 exit item).
+
+        Candidates come from the hydrated-oracle ``_candidate_hits`` (byte
+        identical to Local). The native path feeds the RAW stored packed f64
+        BLOBs to ``dense_scan_packed`` with ZERO per-call float conversion
+        (bit-parity-proven vs ``dense_scan`` over equal-dims inputs); the
+        fallback re-embed is packed exactly once. GUARD: if any PRESENT stored
+        BLOB length != ``dims*8`` (heterogeneous dims — e.g. a media embedding),
+        the whole call falls back to the list ``dense_scan`` path (still native,
+        byte-parity) so mixed-width corpora stay correct; a uniform-dims corpus
+        hits the packed fast path. Pure mode uses the per-hit ``cosine`` loop.
+        Channels: dense_hash / dense_media."""
+        query_vec = self._embed_text(query)
+        dims = len(query_vec)
+        oracle, raw_blobs = self._scan_oracle(filt, with_blobs=True)
+        candidates = oracle._candidate_hits(filt)
+        hits: list[Hit] = []
+        if text_kernels.NATIVE is not None:
+            chunks = [
+                self._packed_embedding_for_hit(hit, filt, dims, oracle=oracle, raw_blobs=raw_blobs)
+                for hit in candidates
+            ]
+            heterogeneous = any(chunk is not None and len(chunk) != dims * 8 for chunk in chunks)
+            if heterogeneous:
+                # GUARD path: mixed embedding widths — reuse Local's exact list
+                # dense_scan fast path (byte-parity), never the packed seam.
+                vectors = [oracle._embedding_for_hit(hit, filt) for hit in candidates]
+                scores = text_kernels.NATIVE.dense_scan(query_vec, vectors)
+                for hit, hit_vec, score in zip(candidates, vectors, scores, strict=True):
+                    if hit_vec is None:
+                        continue
+                    if score > 0:
+                        self._apply_dense_channel(hit, score)
+                        hits.append(hit)
+            else:
+                rows_bytes = b"".join(chunk if chunk else b"\x00" * (dims * 8) for chunk in chunks)
+                row_mask = bytes(1 if chunk else 0 for chunk in chunks)
+                query_bytes = array.array("d", query_vec).tobytes()
+                scores = text_kernels.NATIVE.dense_scan_packed(query_bytes, rows_bytes, dims, row_mask)
+                for hit, chunk, score in zip(candidates, chunks, scores, strict=True):
+                    if chunk is None:
+                        continue
+                    if score > 0:
+                        self._apply_dense_channel(hit, score)
+                        hits.append(hit)
+        else:
+            for hit in candidates:
+                hit_vec = oracle._embedding_for_hit(hit, filt)
+                if hit_vec is None:
+                    continue
+                score = cosine(query_vec, hit_vec)
+                if score > 0:
+                    self._apply_dense_channel(hit, score)
+                    hits.append(hit)
+        return LocalMemoryEngine._mark_retrieved_text_as_data(
+            sorted(hits, key=lambda item: item.score, reverse=True)[:k]
+        )
 
     def lexical_search(self, query: str, k: int, filt: dict[str, Any]) -> list[Hit]:
-        raise NotImplementedError("SqliteEngine.lexical_search lands in Phase-2 Task 4")
+        """FTS5-prefiltered lexical scan (spec §4.2).
+
+        The adapter branch is honoured first (mirrors Local). Fallback: the FTS5
+        MATCH is candidate RECALL ONLY — it never ranks. When every query token
+        is :func:`fts_safe_query`-safe the evidence candidates are narrowed to
+        the FTS MATCH set (a proven superset of the rows the shared
+        ``lexical_score`` would score > 0); otherwise the engine full-scans (the
+        unicode61 tokenizer-mismatch guard). Either way the shared
+        ``lexical_score`` rescore over the surviving candidates is the SOLE
+        ranking authority, so results byte-match Local's full-scan. Assertions
+        and preferences are always rescored (never FTS-narrowed — the index
+        covers evidence content only). Channel: lexical."""
+        tenant_id = str(filt.get("tenant_id") or "")
+        branch = str(filt.get("branch") or "main")
+        if self.adapters.lexical_retriever is not None:
+            hits = self.adapters.lexical_retriever.search(
+                query, tenant_id=tenant_id, branch=branch, k=k, filt=filt
+            )
+            hits = validate_adapter_hit_scope(
+                hits, tenant_id=tenant_id, branch=branch, k=k, adapter_name="lexical"
+            )
+            return LocalMemoryEngine._mark_retrieved_text_as_data(hits)
+        oracle = self._scan_oracle(filt)
+        candidates = oracle._candidate_hits(filt)
+        allowed_evidence_cids: set[str] | None = None
+        tokens = tokenize(query)
+        if tenant_id and tokens and fts_safe_query(tokens):
+            conn = self._connect(tenant_id)
+            allowed_evidence_cids = self._fts_candidate_cids(conn, tenant_id, branch, tokens)
+        scored = [
+            hit
+            for hit in candidates
+            if not (
+                allowed_evidence_cids is not None
+                and hit.kind == "evidence"
+                and hit.id not in allowed_evidence_cids
+            )
+        ]
+        hits = []
+        if text_kernels.NATIVE is not None:
+            scores = text_kernels.NATIVE.lexical_scan(query, [hit.text for hit in scored])
+            for hit, score in zip(scored, scores, strict=True):
+                if score > 0:
+                    hit.score = score
+                    hit.channel = "lexical"
+                    hits.append(hit)
+        else:
+            for hit in scored:
+                score = lexical_score(query, hit.text)
+                if score > 0:
+                    hit.score = score
+                    hit.channel = "lexical"
+                    hits.append(hit)
+        return LocalMemoryEngine._mark_retrieved_text_as_data(
+            sorted(hits, key=lambda item: item.score, reverse=True)[:k]
+        )
 
     def graph_ppr(
         self,
@@ -936,7 +1273,26 @@ class SqliteEngine:
         use_cache: bool = False,
         filt: dict[str, Any] | None = None,
     ) -> list[Hit]:
-        raise NotImplementedError("SqliteEngine.graph_ppr lands in Phase-2 Task 4")
+        """Live personalized-PageRank over the relations graph (spec §4.2).
+
+        Delegated to LocalMemoryEngine's exact ``graph_ppr`` body over a
+        graph-scope oracle hydrated from SQL (relations + the evidence their
+        security lookups read). Seed lowercasing, the bitemporal validity window
+        (``_valid_at``), ``_relation_hit_security`` + ``may_read_item`` gating,
+        the graph adapter branch, ``ppr_power_iteration``, direct-seed-first Hit
+        construction, and ``_mark_retrieved_text_as_data`` are thereby reused
+        verbatim — byte-identical to the oracle. ``use_cache`` matches Local
+        (computes live; the durable cached-PPR read lands in Task 8)."""
+        oracle = self._graph_oracle(tenant_id, branch, filt)
+        return oracle.graph_ppr(
+            seeds,
+            k,
+            as_of=as_of,
+            tenant_id=tenant_id,
+            branch=branch,
+            use_cache=use_cache,
+            filt=filt,
+        )
 
     def upsert_assertion(self, assertion: Assertion, branch: str = "main") -> str:
         raise NotImplementedError("SqliteEngine.upsert_assertion lands in Phase-2 Task 5")

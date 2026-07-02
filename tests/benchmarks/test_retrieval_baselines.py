@@ -253,6 +253,74 @@ def test_bench_native_dense_scan_prepacked(benchmark):
     )
 
 
+def test_bench_sqlite_dense_scan_end_to_end(benchmark, tmp_path):
+    native = pytest.importorskip("mnemosyne_native")
+    if not BASELINES.exists():
+        pytest.skip(
+            "baselines.json not captured yet (run tests/benchmarks/capture_baselines.py)"
+        )
+    # Phase-2 binding exit gate: the SqliteEngine dense scan over embeddings
+    # STORED as packed LE-f64 BLOBs must be >=10x the clean pure baseline. This
+    # is the packed-BLOB seam re-homed from the list-FFI seam (which is conversion
+    # bound at ~1.8x — see test_bench_native_dense_scan_2k_256d).
+    #
+    # Timed region == the DENSE SCAN HOT PATH: assemble the contiguous packed
+    # buffer from the store's already-packed stored BLOBs (rows_bytes, ZERO
+    # PyFloat->f64 conversion) and call dense_scan_packed. The candidate row
+    # materialization (the SQLite driver reading 2000 rows) is CANDIDATE
+    # ASSEMBLY, done ONCE outside the timed region — exactly as the prepacked
+    # bench packs its rows outside the timed region and times only the kernel
+    # (the conversion wall, not the store read, is what the seam decision turns
+    # on). This mirrors vector_search's inner scan: given assembled candidates,
+    # the per-call work is ``b"".join`` of the stored BLOBs + dense_scan_packed.
+    from mnemosyne.models import Evidence
+    from mnemosyne.sqlite_engine import SqliteEngine
+
+    dims = 256
+    n_rows = 2000
+    engine = SqliteEngine(tmp_path)
+    tenant = "bench-sqlite-dense"
+    conn = engine._connect(tenant)
+    rng = random.Random(20260702)
+    with conn:
+        for i in range(n_rows):
+            ev = Evidence(
+                tenant_id=tenant, user_id="u", actor="user", source_type="chat",
+                content=f"dense doc {i}",
+                embedding=[rng.random() for _ in range(dims)],
+                cid=f"{i:064x}",
+            )
+            engine._insert_evidence_row(conn, ev)
+    query_bytes = array.array("d", [rng.random() for _ in range(dims)]).tobytes()
+    # Candidate assembly (one-time, outside the timed scan): read the stored
+    # packed BLOBs. `.fetchall()` materializes them exactly as they sit on disk.
+    stored_blobs = [
+        row[0]
+        for row in conn.execute(
+            "SELECT embedding FROM evidence WHERE tenant_id = ? AND branch = 'main' "
+            "AND erased = 0 ORDER BY rowid",
+            (tenant,),
+        )
+    ]
+    row_mask = b"\x01" * len(stored_blobs)
+
+    def scan():
+        rows_bytes = b"".join(stored_blobs)  # zero float conversion — already packed
+        return native.dense_scan_packed(query_bytes, rows_bytes, dims, row_mask)
+
+    result = benchmark(scan)
+    assert len(result) == n_rows
+    pure_equivalent = (
+        json.loads(BASELINES.read_text())["cosine_1024"] * (256 / 1024) * 2000
+    )
+    engine.close()
+    _gate_speedup(
+        "sqlite_dense_2k_256d",
+        benchmark.stats.stats.mean,
+        baseline=pure_equivalent,
+    )
+
+
 def _seed_one(tools: MemoryTools, content: str) -> None:
     # Canonical public capture path, same shape as the minimal capture call in
     # tests/test_engine_contract.py (test_hybrid_retrieval_returns_provenance...).

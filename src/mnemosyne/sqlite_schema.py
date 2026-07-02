@@ -34,7 +34,10 @@ calibrations, entities) with exactly the uniqueness keys the Local dicts
 encode, and three append-ordered log tables (audit_log, deletion_log,
 merge_log). ``runtime_jobs`` mirrors PostgresQueue's DDL shape for the
 durable queue lane (Task 6); ``meta`` carries ``schema_version`` and
-projection watermarks (Task 8).
+projection watermarks (Task 8). Task 4 adds ``evidence_fts`` (an FTS5 virtual
+table + INSERT/UPDATE/DELETE sync triggers) as the lexical candidate-recall
+index; it is prefilter-only — the shared ``lexical_score`` rescore is the sole
+ranking authority.
 """
 from __future__ import annotations
 
@@ -247,6 +250,49 @@ ENSURE_STATEMENTS: list[str] = [
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
     )
+    """,
+    # evidence_fts (Task 4) — FTS5 candidate-recall index over evidence.content.
+    #
+    # The unicode61 tokenizer is configured with ``tokenchars '_'`` so an
+    # underscore is a token character on BOTH sides (matching mnemosyne.text's
+    # tokenizer, whose TOKEN_RE keeps ``_``). That makes the ``[a-z0-9_]+``
+    # ``fts_safe_query`` predicate sound: for a query whose every token is
+    # unicode61-safe, the FTS MATCH candidate set is a SUPERSET of the rows
+    # ``lexical_score`` would score > 0, so the app-side rescore (which is the
+    # ONLY ranking authority — FTS5 never ranks) reproduces LocalMemoryEngine's
+    # full-scan result exactly. Tokens carrying ``:+./-`` are unsafe (unicode61
+    # would split them differently) → the engine full-scans instead of
+    # prefiltering. The shadow tables (evidence_fts_{data,idx,content,docsize,
+    # config}) are created implicitly; table-presence assertions use ``<=`` so
+    # they are additive.
+    """
+    CREATE VIRTUAL TABLE IF NOT EXISTS evidence_fts USING fts5(
+        cid UNINDEXED,
+        tenant_id UNINDEXED,
+        branch UNINDEXED,
+        content,
+        tokenize = "unicode61 tokenchars '_'"
+    )
+    """,
+    # Keep evidence_fts in lockstep with the evidence table (standard external
+    # trigger pattern). rowid mirrors evidence.rowid so lookups can join back.
+    """
+    CREATE TRIGGER IF NOT EXISTS evidence_fts_ai AFTER INSERT ON evidence BEGIN
+        INSERT INTO evidence_fts(rowid, cid, tenant_id, branch, content)
+        VALUES (new.rowid, new.cid, new.tenant_id, new.branch, new.content);
+    END
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS evidence_fts_ad AFTER DELETE ON evidence BEGIN
+        DELETE FROM evidence_fts WHERE rowid = old.rowid;
+    END
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS evidence_fts_au AFTER UPDATE ON evidence BEGIN
+        DELETE FROM evidence_fts WHERE rowid = old.rowid;
+        INSERT INTO evidence_fts(rowid, cid, tenant_id, branch, content)
+        VALUES (new.rowid, new.cid, new.tenant_id, new.branch, new.content);
+    END
     """,
 ]
 
