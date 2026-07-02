@@ -23,6 +23,7 @@ from mnemosyne.access_policy import (
     validate_access_policy,
     vector_partition_for_item,
 )
+from mnemosyne.algorithms import rrf_fuse
 from mnemosyne.calibration import CalibrationSet, conformal_threshold, should_abstain
 from mnemosyne.consciousness import RealityMonitor
 from mnemosyne.engine import (
@@ -4163,38 +4164,7 @@ class PostgresEngine:
         return hits
 
     def _rrf(self, ranked_lists: list[list[Hit]], k: int) -> list[Hit]:
-        by_id: dict[tuple[str, str], Hit] = {}
-        scores: dict[tuple[str, str], float] = defaultdict(float)
-        channels: dict[tuple[str, str], list[str]] = defaultdict(list)
-        channel_scores: dict[tuple[str, str], dict[str, float]] = defaultdict(dict)
-        for ranked in ranked_lists:
-            for rank, hit in enumerate(ranked, start=1):
-                key = (hit.kind, hit.id)
-                by_id[key] = hit
-                scores[key] += 1.0 / (self.policy.rrf_k + rank)
-                channels[key].append(hit.channel)
-                channel_scores[key][hit.channel] = max(channel_scores[key].get(hit.channel, 0.0), hit.score)
-        fused = []
-        for key, hit in by_id.items():
-            item = Hit(
-                id=hit.id,
-                kind=hit.kind,
-                tenant_id=hit.tenant_id,
-                branch=hit.branch,
-                text=hit.text,
-                score=scores[key],
-                channel="+".join(sorted(set(channels[key]))),
-                provenance=list(hit.provenance),
-                trust_tier=hit.trust_tier,
-                sensitivity=hit.sensitivity,
-                metadata={
-                    **hit.metadata,
-                    "channels": sorted(set(channels[key])),
-                    "channel_scores": dict(sorted(channel_scores[key].items())),
-                },
-            )
-            fused.append(item)
-        return sorted(fused, key=lambda item: item.score, reverse=True)[:k]
+        return rrf_fuse(ranked_lists, k, rrf_k=self.policy.rrf_k, annotate_channel_scores=True)
 
     def _mmr(self, query: str, hits: list[Hit], k: int) -> list[Hit]:
         selected: list[Hit] = []
