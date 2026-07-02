@@ -61,7 +61,9 @@ Realized over these concrete loci:
   under `--benchmark-only`, and a plain run skips the suite entirely.
 - **`journal_dir`** — optional `LocalMemoryEngine` constructor kwarg
   (`engine.py`): directory for the per-tenant append-only CID journals
-  (`journal.py`); unset, no journal is written.
+  (`journal.py`); unset, no journal is written. Engine erasure wiring lands in
+  Phase 2 — enabling `journal_dir` before then means erased ledger content is
+  retained in the journal until that wiring exists.
 - **`docker-compose.yml`** — declared local-first Postgres service
   (`pgvector/pgvector:pg16`, port `54329`, schema mount).
 - **Gitignored `.env`, `.env.*`, secret patterns** (`*.pem`, `*.key`,

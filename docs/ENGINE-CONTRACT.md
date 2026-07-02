@@ -41,8 +41,8 @@ oracle.
 
 ## Current implementation mapping
 
-All symbols below are verified against the codebase on branch
-`phase0/seam-hardening`; both engines implement `append_evidence`, `branch`,
+All symbols below are verified against the codebase as of Phase 0
+completion; both engines implement `append_evidence`, `branch`,
 `discard`, and `as_of` under those exact names.
 
 | Capability | LocalMemoryEngine (`src/mnemosyne/engine.py`) | PostgresEngine (`src/mnemosyne/postgres_engine.py`) |

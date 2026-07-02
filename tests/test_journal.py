@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
 import pytest
 
-from mnemosyne.journal import CIDJournal
+from mnemosyne.journal import CIDJournal, journal_filename
 
 
 def _rec(cid: str) -> dict:
@@ -114,6 +115,37 @@ def test_records_raises_on_corrupt_middle_line(tmp_path: Path):
     path.write_bytes(b"".join(lines))
     with pytest.raises(json.JSONDecodeError):
         list(j.records())
+
+
+def test_journal_filename_sane_tenant_ids_map_verbatim():
+    assert journal_filename("t-a") == "t-a.journal"
+    assert journal_filename("tenant.1_x-2") == "tenant.1_x-2.journal"
+    assert journal_filename("A9") == "A9.journal"
+
+
+def test_journal_filename_hostile_tenant_ids_map_to_safe_hashed_names():
+    for hostile in ["../evil", "a/b", "..", ".", "", ".hidden", "a\\b", "-flag"]:
+        expected = "t-" + hashlib.sha256(hostile.encode()).hexdigest()[:32] + ".journal"
+        name = journal_filename(hostile)
+        assert name == expected
+        assert "/" not in name and "\\" not in name
+        assert not name.startswith((".", "-"))
+
+
+def test_local_engine_hostile_tenant_id_journals_inside_journal_dir(tmp_path: Path):
+    from mnemosyne.engine import LocalMemoryEngine
+
+    journal_dir = tmp_path / "journals"
+    engine = LocalMemoryEngine(journal_dir=journal_dir)
+    cid = engine.append_evidence(_evidence("../evil", "Traversal containment check."))
+    # The append landed inside journal_dir under the hashed name...
+    hashed = journal_dir / journal_filename("../evil")
+    assert hashed.exists()
+    assert cid in {r["cid"] for r in CIDJournal(hashed).records()}
+    # ...and NOT at the traversal target (tmp_path / "evil.journal"), nor
+    # anywhere else outside journal_dir.
+    assert not (tmp_path / "evil.journal").exists()
+    assert [p.name for p in tmp_path.iterdir()] == ["journals"]
 
 
 def test_local_engine_without_journal_dir_writes_no_journal(monkeypatch: pytest.MonkeyPatch):
