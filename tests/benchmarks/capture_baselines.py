@@ -3,7 +3,9 @@
 Runs the benchmark suite in --benchmark-only mode, extracts each benchmark's
 mean, and (re)writes tests/benchmarks/baselines.json. Baselines are
 machine-specific by design: capture them on the reference machine and commit
-the result. Usage:
+the result. The capture subprocess is forced to MNEMOSYNE_PURE=1 — baselines
+are the PURE opponent by definition, and must stay pure even when the native
+extension is installed in the capturing environment. Usage:
 
     uv run --locked python tests/benchmarks/capture_baselines.py
 """
@@ -11,6 +13,7 @@ the result. Usage:
 from __future__ import annotations
 
 import json
+import os
 import pathlib
 import subprocess
 import tempfile
@@ -35,6 +38,19 @@ def main() -> None:
             "--benchmark-only", f"--benchmark-json={tmp}",
         ],
         check=True,
+        # Baselines are the PURE opponent BY DEFINITION: force MNEMOSYNE_PURE=1
+        # so an environment with mnemosyne-native installed cannot leak the
+        # native path into the capture (the dispatchers in mnemosyne.text would
+        # otherwise pick native and this file would record native means as
+        # "pure" baselines — exactly the contamination this guards against).
+        # MNEMOSYNE_BASELINE_CAPTURE=1 tells _gate not to compare against the
+        # committed baselines.json: a re-capture must not be vetoed by the very
+        # baseline it is replacing (check=True still aborts on real errors).
+        env={
+            **os.environ,
+            "MNEMOSYNE_PURE": "1",
+            "MNEMOSYNE_BASELINE_CAPTURE": "1",
+        },
     )
     data = json.loads(pathlib.Path(tmp).read_text())
     baselines = {
