@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import copy
 from collections import defaultdict
+from collections.abc import Callable
 
 from mnemosyne.retrieval import Hit
 from mnemosyne.text import approx_tokens
@@ -103,3 +104,34 @@ def fit_budget(hits: list[Hit], budget: int) -> tuple[list[Hit], int]:
         kept.append(hit)
         used += cost
     return kept, used
+
+
+def ppr_power_iteration(
+    adjacency: dict[str, list[str]],
+    matches_seed: Callable[[str], bool],
+    *,
+    iterations: int = 12,
+    damping: float = 0.85,
+    teleport: float = 0.15,
+) -> dict[str, float]:
+    """Personalized PageRank by power iteration (blueprint §22.2 deep mode).
+
+    Constants 12/0.85/0.15 are load-bearing for parity with both shipped
+    engines — do not change defaults without a cross-engine golden update.
+
+    ``teleport`` defaults to the literal ``0.15`` rather than being derived
+    as ``1.0 - damping``: in IEEE 754 doubles ``1.0 - 0.85`` is
+    ``0.15000000000000002 != 0.15``, and the inline code this replaces used
+    the literal — deriving it would break bit-exact parity with both engines.
+    """
+    ranks = {node: (1.0 if matches_seed(node) else 0.0) for node in adjacency}
+    for _ in range(iterations):
+        next_ranks = {node: teleport * (1.0 if matches_seed(node) else 0.0) for node in ranks}
+        for node, neighbors in adjacency.items():
+            if not neighbors:
+                continue
+            share = damping * ranks.get(node, 0.0) / len(neighbors)
+            for neighbor in neighbors:
+                next_ranks[neighbor] = next_ranks.get(neighbor, 0.0) + share
+        ranks = next_ranks
+    return ranks
