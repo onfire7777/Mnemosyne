@@ -1,0 +1,19 @@
+[package]
+name = "mnemosyne-native"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+
+[lib]
+name = "mnemosyne_native"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.29", features = ["abi3-py312"] }
+blake2 = "0.10"
+regex = "1"
+rayon = "1"
+
+[profile.release]
+lto = true
+codegen-units = 1
