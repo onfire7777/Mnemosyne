@@ -9,10 +9,13 @@ name = "mnemosyne_native"
 crate-type = ["cdylib"]
 
 [dependencies]
-pyo3 = { version = "0.29", features = ["abi3-py312"] }
+pyo3 = { version = "0.29", features = ["abi3-py312", "extension-module"] }
 blake2 = "0.10"
 regex = "1"
 rayon = "1"
+
+[build-dependencies]
+pyo3-build-config = "0.29"
 
 [profile.release]
 lto = true

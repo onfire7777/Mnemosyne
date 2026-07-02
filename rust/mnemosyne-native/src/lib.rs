@@ -6,6 +6,10 @@
 
 use pyo3::prelude::*;
 
+mod hashing;
+mod lexical;
+mod tokenize;
+
 #[pyfunction]
 fn parity_marker() -> &'static str {
     "strict-ieee-scalar-v1"
@@ -15,5 +19,10 @@ fn parity_marker() -> &'static str {
 fn mnemosyne_native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     m.add_function(wrap_pyfunction!(parity_marker, m)?)?;
+    m.add_function(wrap_pyfunction!(hashing::hashing_embedding, m)?)?;
+    m.add_function(wrap_pyfunction!(tokenize::tokenize, m)?)?;
+    m.add_function(wrap_pyfunction!(lexical::lexical_score, m)?)?;
+    m.add_function(wrap_pyfunction!(lexical::lexical_scan, m)?)?;
+    m.add_function(wrap_pyfunction!(lexical::_ln, m)?)?;
     Ok(())
 }
