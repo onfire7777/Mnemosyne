@@ -13,6 +13,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal, Protocol, runtime_checkable
 
+from mnemosyne import text as text_kernels
 from mnemosyne.access_policy import (
     VECTOR_PARTITION_PUBLIC,
     apply_relation_redactions,
@@ -1206,16 +1207,35 @@ class LocalMemoryEngine:
     def vector_search(self, query: str, k: int, filt: dict[str, Any]) -> list[Hit]:
         query_vec = self._embed_text(query)
         hits: list[Hit] = []
-        for hit in self._candidate_hits(filt):
-            hit_vec = self._embedding_for_hit(hit, filt)
-            if hit_vec is None:
-                continue
-            score = cosine(query_vec, hit_vec)
-            if score > 0:
-                hit.score = score
-                stored_raw = bool(hit.metadata.get("stored_embedding_used"))
-                hit.channel = "dense_media" if stored_raw and hit.metadata.get("stored_media_embedding") else "dense_hash"
-                hits.append(hit)
+        if text_kernels.NATIVE is not None:
+            # Batched fast path: embedding acquisition stays per-hit in Python
+            # (same security-gated _embedding_for_hit call, same metadata side
+            # effects, once per hit, in candidate order), then ONE dense_scan
+            # FFI crossing scores every row. The kernel is byte-parity-proven
+            # against the per-hit cosine loop (tests/test_native_parity.py);
+            # None vectors pass through as None, keeping results index-aligned.
+            candidates = self._candidate_hits(filt)
+            vectors = [self._embedding_for_hit(hit, filt) for hit in candidates]
+            scores = text_kernels.NATIVE.dense_scan(query_vec, vectors)
+            for hit, hit_vec, score in zip(candidates, vectors, scores, strict=True):
+                if hit_vec is None:
+                    continue
+                if score > 0:
+                    hit.score = score
+                    stored_raw = bool(hit.metadata.get("stored_embedding_used"))
+                    hit.channel = "dense_media" if stored_raw and hit.metadata.get("stored_media_embedding") else "dense_hash"
+                    hits.append(hit)
+        else:
+            for hit in self._candidate_hits(filt):
+                hit_vec = self._embedding_for_hit(hit, filt)
+                if hit_vec is None:
+                    continue
+                score = cosine(query_vec, hit_vec)
+                if score > 0:
+                    hit.score = score
+                    stored_raw = bool(hit.metadata.get("stored_embedding_used"))
+                    hit.channel = "dense_media" if stored_raw and hit.metadata.get("stored_media_embedding") else "dense_hash"
+                    hits.append(hit)
         return self._mark_retrieved_text_as_data(sorted(hits, key=lambda item: item.score, reverse=True)[:k])
 
     def lexical_search(self, query: str, k: int, filt: dict[str, Any]) -> list[Hit]:
@@ -1238,12 +1258,24 @@ class LocalMemoryEngine:
             )
             return self._mark_retrieved_text_as_data(hits)
         hits: list[Hit] = []
-        for hit in self._candidate_hits(filt):
-            score = lexical_score(query, hit.text)
-            if score > 0:
-                hit.score = score
-                hit.channel = "lexical"
-                hits.append(hit)
+        if text_kernels.NATIVE is not None:
+            # Batched fast path (adapterless fallback only): ONE lexical_scan
+            # FFI crossing scores every candidate text; byte-parity-proven
+            # against the per-hit lexical_score loop (tests/test_native_parity.py).
+            candidates = self._candidate_hits(filt)
+            scores = text_kernels.NATIVE.lexical_scan(query, [hit.text for hit in candidates])
+            for hit, score in zip(candidates, scores, strict=True):
+                if score > 0:
+                    hit.score = score
+                    hit.channel = "lexical"
+                    hits.append(hit)
+        else:
+            for hit in self._candidate_hits(filt):
+                score = lexical_score(query, hit.text)
+                if score > 0:
+                    hit.score = score
+                    hit.channel = "lexical"
+                    hits.append(hit)
         return self._mark_retrieved_text_as_data(sorted(hits, key=lambda item: item.score, reverse=True)[:k])
 
     def graph_ppr(
