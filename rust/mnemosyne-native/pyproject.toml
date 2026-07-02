@@ -1,0 +1,13 @@
+[build-system]
+requires = ["maturin>=1.14,<2"]
+build-backend = "maturin"
+
+[project]
+name = "mnemosyne-native"
+version = "0.1.0"
+description = "Byte-parity native kernels for Mnemosyne (optional accelerator)"
+requires-python = ">=3.12"
+license = { text = "Apache-2.0" }
+
+[tool.maturin]
+module-name = "mnemosyne_native"

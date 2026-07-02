@@ -24,6 +24,10 @@ classifiers = [
 [project.optional-dependencies]
 postgres = ["psycopg[binary]>=3.2"]
 mcp = ["mcp>=1.28,<2"]
+native = ["mnemosyne-native"]
+
+[tool.uv.sources]
+mnemosyne-native = { path = "rust/mnemosyne-native" }
 
 [dependency-groups]
 dev = [

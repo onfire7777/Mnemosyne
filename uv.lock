@@ -316,6 +316,9 @@ dependencies = [
 mcp = [
     { name = "mcp" },
 ]
+native = [
+    { name = "mnemosyne-native" },
+]
 postgres = [
     { name = "psycopg", extra = ["binary"] },
 ]
@@ -332,9 +335,10 @@ dev = [
 requires-dist = [
     { name = "cryptography", specifier = ">=42" },
     { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.28,<2" },
+    { name = "mnemosyne-native", marker = "extra == 'native'", directory = "rust/mnemosyne-native" },
     { name = "psycopg", extras = ["binary"], marker = "extra == 'postgres'", specifier = ">=3.2" },
 ]
-provides-extras = ["postgres", "mcp"]
+provides-extras = ["postgres", "mcp", "native"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -343,6 +347,11 @@ dev = [
     { name = "pytest-benchmark", specifier = ">=5.1" },
     { name = "ruff", specifier = "==0.15.20" },
 ]
+
+[[package]]
+name = "mnemosyne-native"
+version = "0.1.0"
+source = { directory = "rust/mnemosyne-native" }
 
 [[package]]
 name = "packaging"
