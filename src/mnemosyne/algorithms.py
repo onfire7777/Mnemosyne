@@ -12,6 +12,7 @@ import copy
 from collections import defaultdict
 
 from mnemosyne.retrieval import Hit
+from mnemosyne.text import approx_tokens
 
 
 def rrf_fuse(
@@ -69,3 +70,36 @@ def rrf_fuse(
             item.channel = "+".join(sorted(set(channels[key])))
         fused.append(item)
     return sorted(fused, key=lambda item: item.score, reverse=True)[:k]
+
+
+def u_curve_order(hits: list[Hit]) -> list[Hit]:
+    """U-curve reorder: strongest hits at the ends, weakest in the middle.
+
+    Even-indexed hits fill the front in order; odd-indexed hits are pushed
+    to the back in reverse, countering LLM lost-in-the-middle attention.
+    """
+    front: list[Hit] = []
+    back: list[Hit] = []
+    for idx, hit in enumerate(hits):
+        if idx % 2 == 0:
+            front.append(hit)
+        else:
+            back.insert(0, hit)
+    return front + back
+
+
+def fit_budget(hits: list[Hit], budget: int) -> tuple[list[Hit], int]:
+    """Greedy token-budget packing preserving hit order.
+
+    Skips (rather than stops at) any hit whose ``approx_tokens`` cost would
+    exceed the remaining budget; returns the kept hits and tokens used.
+    """
+    kept: list[Hit] = []
+    used = 0
+    for hit in hits:
+        cost = approx_tokens(hit.text)
+        if used + cost > budget:
+            continue
+        kept.append(hit)
+        used += cost
+    return kept, used

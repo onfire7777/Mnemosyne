@@ -78,3 +78,33 @@ def test_rrf_fuse_channel_score_annotation():
     b_plain = next(h for h in plain if h.id == "b")
     assert "channels" not in b_plain.metadata
     assert "channel_scores" not in b_plain.metadata
+
+
+def test_u_curve_order_interleaves_front_back():
+    from mnemosyne.algorithms import u_curve_order
+
+    hits = [_hit("evidence", str(i), 1.0 - i * 0.1, "lexical") for i in range(5)]
+    ordered = u_curve_order(hits)
+    assert [h.id for h in ordered] == ["0", "2", "4", "3", "1"]
+
+
+def test_fit_budget_skips_items_over_budget_and_reports_usage():
+    from mnemosyne.algorithms import fit_budget
+    from mnemosyne.text import approx_tokens
+
+    small = _hit("evidence", "s", 1.0, "lexical")
+    small.text = "tiny"
+    big = _hit("evidence", "b", 0.9, "lexical")
+    big.text = "x" * 4000
+    kept, used = fit_budget([big, small], budget=approx_tokens("tiny") + 1)
+    assert [h.id for h in kept] == ["s"]
+    assert used == approx_tokens("tiny")
+
+
+def test_extracted_helpers_match_engine_statics():
+    from mnemosyne.algorithms import fit_budget, u_curve_order
+
+    engine = LocalMemoryEngine()
+    hits = [_hit("evidence", str(i), 1.0 - i * 0.05, "lexical") for i in range(7)]
+    assert [h.id for h in u_curve_order(hits)] == [h.id for h in engine._u_curve_order(hits)]
+    assert fit_budget(hits, 50) == engine._fit_budget(hits, 50)

@@ -23,7 +23,7 @@ from mnemosyne.access_policy import (
     validate_access_policy,
     vector_partition_for_item,
 )
-from mnemosyne.algorithms import rrf_fuse
+from mnemosyne.algorithms import fit_budget, rrf_fuse, u_curve_order
 from mnemosyne.calibration import CalibrationSet, conformal_threshold, should_abstain
 from mnemosyne.consciousness import RealityMonitor
 from mnemosyne.engine import (
@@ -75,7 +75,7 @@ from mnemosyne.standing import (
     standing_erasure_cascade_report,
     standing_observability_record,
 )
-from mnemosyne.text import approx_tokens, cosine, hashing_embedding, lexical_score, tokenize
+from mnemosyne.text import cosine, hashing_embedding, lexical_score, tokenize
 from mnemosyne.workspace import self_generation_budget_report
 
 
@@ -4191,26 +4191,11 @@ class PostgresEngine:
 
     @staticmethod
     def _u_curve_order(hits: list[Hit]) -> list[Hit]:
-        front: list[Hit] = []
-        back: list[Hit] = []
-        for idx, hit in enumerate(hits):
-            if idx % 2 == 0:
-                front.append(hit)
-            else:
-                back.insert(0, hit)
-        return front + back
+        return u_curve_order(hits)
 
     @staticmethod
     def _fit_budget(hits: list[Hit], budget: int) -> tuple[list[Hit], int]:
-        kept: list[Hit] = []
-        used = 0
-        for hit in hits:
-            cost = approx_tokens(hit.text)
-            if used + cost > budget:
-                continue
-            kept.append(hit)
-            used += cost
-        return kept, used
+        return fit_budget(hits, budget)
 
     @staticmethod
     def _confidence(query: str, hits: list[Hit], *, support_score: float | None = None) -> float:
