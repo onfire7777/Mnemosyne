@@ -28,6 +28,10 @@ def main() -> None:
     subprocess.run(
         [
             "uv", "run", "--locked", "python", "-m", "pytest", "tests/benchmarks",
+            # Capture is PURE-baselines-only by design: the native gate tests
+            # compare against the file this script writes, so they must not run
+            # (and must not be able to abort the capture) while re-capturing.
+            "-k", "not native",
             "--benchmark-only", f"--benchmark-json={tmp}",
         ],
         check=True,
