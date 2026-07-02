@@ -129,3 +129,20 @@ def test_ppr_power_iteration_is_deterministic():
     r1 = ppr_power_iteration(adjacency, lambda n: n == "s")
     r2 = ppr_power_iteration(adjacency, lambda n: n == "s")
     assert r1 == r2
+
+
+def test_ppr_power_iteration_defaults_are_pinned_exactly():
+    """teleport MUST be the literal 0.15: 1.0 - 0.85 != 0.15 in IEEE-754.
+
+    These defaults are load-bearing for cross-engine bit parity (plan §Global
+    Constraints) and for the Phase-1 native kernel, which must mirror the
+    literal, never derive it.
+    """
+    from mnemosyne.algorithms import ppr_power_iteration
+
+    assert ppr_power_iteration.__kwdefaults__ == {
+        "iterations": 12,
+        "damping": 0.85,
+        "teleport": 0.15,
+    }
+    assert ppr_power_iteration.__kwdefaults__["teleport"] != 1.0 - 0.85

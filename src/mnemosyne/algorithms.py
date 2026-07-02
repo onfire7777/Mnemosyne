@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import copy
 from collections import defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Collection, Mapping
 
 from mnemosyne.retrieval import Hit
 from mnemosyne.text import approx_tokens
@@ -107,7 +107,7 @@ def fit_budget(hits: list[Hit], budget: int) -> tuple[list[Hit], int]:
 
 
 def ppr_power_iteration(
-    adjacency: dict[str, list[str]],
+    adjacency: Mapping[str, Collection[str]],
     matches_seed: Callable[[str], bool],
     *,
     iterations: int = 12,
