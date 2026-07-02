@@ -108,3 +108,24 @@ def test_extracted_helpers_match_engine_statics():
     hits = [_hit("evidence", str(i), 1.0 - i * 0.05, "lexical") for i in range(7)]
     assert [h.id for h in u_curve_order(hits)] == [h.id for h in engine._u_curve_order(hits)]
     assert fit_budget(hits, 50) == engine._fit_budget(hits, 50)
+
+
+def test_ppr_power_iteration_constants_and_ranking():
+    from mnemosyne.algorithms import ppr_power_iteration
+
+    adjacency = {"seed": ["a", "b"], "a": ["b"], "b": [], "island": []}
+    ranks = ppr_power_iteration(adjacency, lambda n: n == "seed")
+    # b receives mass from both seed and a -> outranks a; island gets nothing
+    assert ranks["b"] > ranks["a"] > 0.0
+    assert ranks.get("island", 0.0) == 0.0
+    # teleport keeps the seed's own rank anchored at >= 0.15
+    assert ranks["seed"] >= 0.15
+
+
+def test_ppr_power_iteration_is_deterministic():
+    from mnemosyne.algorithms import ppr_power_iteration
+
+    adjacency = {"s": ["x", "y"], "x": ["y"], "y": ["x"]}
+    r1 = ppr_power_iteration(adjacency, lambda n: n == "s")
+    r2 = ppr_power_iteration(adjacency, lambda n: n == "s")
+    assert r1 == r2

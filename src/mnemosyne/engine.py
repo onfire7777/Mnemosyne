@@ -27,7 +27,7 @@ from mnemosyne.access_policy import (
     validate_access_policy,
     vector_partition_for_item,
 )
-from mnemosyne.algorithms import fit_budget, rrf_fuse, u_curve_order
+from mnemosyne.algorithms import fit_budget, ppr_power_iteration, rrf_fuse, u_curve_order
 from mnemosyne.calibration import CalibrationSet, conformal_threshold, should_abstain
 from mnemosyne.consciousness import RealityMonitor
 from mnemosyne.ids import evidence_cid, evidence_unscoped_cid, new_id
@@ -1364,18 +1364,9 @@ class LocalMemoryEngine:
             )
             if len(hits) >= k:
                 return self._mark_retrieved_text_as_data(hits)
-        ranks = {node: (1.0 if matches_seed(node) else 0.0) for node in adjacency}
         for seed in seed_set:
-            ranks.setdefault(seed, 1.0)
-        for _ in range(12):
-            next_ranks = {node: 0.15 * (1.0 if matches_seed(node) else 0.0) for node in ranks}
-            for node, neighbors in adjacency.items():
-                if not neighbors:
-                    continue
-                share = 0.85 * ranks.get(node, 0.0) / len(neighbors)
-                for neighbor in neighbors:
-                    next_ranks[neighbor] = next_ranks.get(neighbor, 0.0) + share
-            ranks = next_ranks
+            adjacency.setdefault(seed, [])
+        ranks = ppr_power_iteration(adjacency, matches_seed)
         for node, score in sorted(ranks.items(), key=lambda item: item[1], reverse=True):
             if matches_seed(node) or score <= 0:
                 continue
