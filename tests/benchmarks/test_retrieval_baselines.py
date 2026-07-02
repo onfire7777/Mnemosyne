@@ -55,6 +55,12 @@ def _text(n: int) -> str:
 DOCS = [_text(80) for _ in range(2000)]
 QUERY = _text(12)
 
+# Dense-scan inputs: 2000 rows x 256 dims plus a 256-dim query, generated once
+# at import time downstream of DOCS/QUERY on the same module-local RNG, so the
+# byte-identical-inputs guarantee extends to the native dense bench.
+DENSE_QUERY = [_RNG.random() for _ in range(256)]
+DENSE_ROWS = [[_RNG.random() for _ in range(256)] for _ in range(2000)]
+
 
 def _gate(name: str, seconds: float) -> None:
     if not BASELINES.exists():
@@ -62,6 +68,29 @@ def _gate(name: str, seconds: float) -> None:
     baseline = json.loads(BASELINES.read_text())[name]
     assert seconds <= baseline * RELATIVE_CEILING, (
         f"{name}: {seconds:.4f}s exceeds {RELATIVE_CEILING}x baseline {baseline:.4f}s"
+    )
+
+
+def _gate_speedup(
+    name: str, seconds: float, factor: float = 10.0, *, baseline: float | None = None
+) -> None:
+    """Phase-1 exit gate: the native mean must be <= the pure baseline / factor.
+
+    ``baseline`` defaults to the committed ``baselines.json`` entry for
+    ``name``; pass it explicitly for derived pure-equivalent baselines (see
+    the dense-scan bound arithmetic below).
+    """
+    if not BASELINES.exists():
+        pytest.skip(
+            "baselines.json not captured yet (run tests/benchmarks/capture_baselines.py)"
+        )
+    if baseline is None:
+        baseline = json.loads(BASELINES.read_text())[name]
+    bound = baseline / factor
+    multiple = baseline / seconds if seconds > 0 else float("inf")
+    assert seconds <= bound, (
+        f"{name}: native mean {seconds:.6e}s is only {multiple:.1f}x faster than the pure "
+        f"baseline {baseline:.6e}s — phase exit requires >={factor:.0f}x (<= {bound:.6e}s)"
     )
 
 
@@ -91,6 +120,57 @@ def test_bench_hashing_embedding_cold(benchmark):
 def test_bench_lexical_scan_2k(benchmark):
     benchmark(lambda: [lexical_score(QUERY, d) for d in DOCS])
     _gate("lexical_scan_2k", benchmark.stats.stats.mean)
+
+
+# --- Phase-1 native kernels vs the committed pure baselines ----------------
+# These benches call the native kernels DIRECTLY (not through dispatch) so
+# they measure kernel cost, not dispatch overhead, over inputs byte-identical
+# to the pure benches above. They do not gate against baselines.json the
+# relative-regression way; each asserts the >=10x phase-exit bar instead.
+
+
+def test_bench_native_lexical_scan_2k(benchmark):
+    native = pytest.importorskip("mnemosyne_native")
+    # One whole-corpus scan per round, mirroring the pure bench's
+    # [lexical_score(QUERY, d) for d in DOCS] loop.
+    benchmark(native.lexical_scan, QUERY, DOCS)
+    _gate_speedup("lexical_scan_2k", benchmark.stats.stats.mean)
+
+
+def test_bench_native_hashing_embedding_cold(benchmark):
+    native = pytest.importorskip("mnemosyne_native")
+    # Same salt-cold pattern as the pure bench: a unique per-call salt keeps
+    # every invocation on the cold (tokenize + blake2b) path. dims=256 matches
+    # the pure hashing_embedding default the pure bench relies on.
+    counter = itertools.count()
+
+    def run() -> None:
+        i = next(counter)
+        native.hashing_embedding(DOCS[i % len(DOCS)] + f" salt{i}", 256)
+
+    benchmark(run)
+    _gate_speedup("hashing_embedding", benchmark.stats.stats.mean)
+
+
+def test_bench_native_dense_scan_2k_256d(benchmark):
+    native = pytest.importorskip("mnemosyne_native")
+    if not BASELINES.exists():
+        pytest.skip(
+            "baselines.json not captured yet (run tests/benchmarks/capture_baselines.py)"
+        )
+    # Pure-equivalent bound derivation: the committed cosine_1024 baseline is
+    # the mean of ONE pure 1024-dim cosine (~3.085e-05 s). Pure cosine is
+    # O(dims), so one 256-dim cosine costs cosine_1024 * (256/1024), and a
+    # full scan over 2000 rows costs
+    #     cosine_1024 * (256/1024) * 2000   (~1.54e-02 s at the committed value)
+    # — the pure-equivalent scan cost this bench must beat by >=10x.
+    pure_equivalent = (
+        json.loads(BASELINES.read_text())["cosine_1024"] * (256 / 1024) * 2000
+    )
+    benchmark(native.dense_scan, DENSE_QUERY, DENSE_ROWS)
+    _gate_speedup(
+        "dense_scan_2k_256d", benchmark.stats.stats.mean, baseline=pure_equivalent
+    )
 
 
 def _seed_one(tools: MemoryTools, content: str) -> None:
