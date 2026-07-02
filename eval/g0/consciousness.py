@@ -65,7 +65,7 @@ INDICATORS: tuple[IndicatorSpec, ...] = (
         "limited-capacity workspace bottleneck",
         "Source exposes token/priority bottlenecks and explicit low-bandwidth workspace selection.",
         ("token_budget", "workspace_bottleneck", "priority"),
-        ("src/mnemosyne/engine.py", "src/mnemosyne/consciousness.py"),
+        ("src/mnemosyne/engine.py", "src/mnemosyne/pipeline.py", "src/mnemosyne/consciousness.py"),
     ),
     IndicatorSpec(
         "GWT-3",
@@ -89,7 +89,7 @@ INDICATORS: tuple[IndicatorSpec, ...] = (
         "metacognitive confidence and abstention",
         "Source exposes calibrated confidence, conformal thresholds, and abstention.",
         ("conformal_threshold", "confidence", "abstained"),
-        ("src/mnemosyne/calibration.py", "src/mnemosyne/engine.py"),
+        ("src/mnemosyne/calibration.py", "src/mnemosyne/pipeline.py", "src/mnemosyne/engine.py"),
     ),
     IndicatorSpec(
         "HOT-2",
@@ -97,7 +97,7 @@ INDICATORS: tuple[IndicatorSpec, ...] = (
         "reality monitoring over representations",
         "Source exposes confidence-bearing reality tags that feed abstention.",
         ("RealityMonitor", "reality_class", "ungrounded_reality_only"),
-        ("src/mnemosyne/consciousness.py", "src/mnemosyne/engine.py"),
+        ("src/mnemosyne/consciousness.py", "src/mnemosyne/pipeline.py", "src/mnemosyne/engine.py"),
     ),
     IndicatorSpec(
         "HOT-3",
