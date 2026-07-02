@@ -74,6 +74,115 @@ def test_tokenize_and_cosine_route_through_dispatch():
     assert active[1:] == forced[1:]
 
 
+# --- Task 7: engine batch call sites (single FFI crossing per scan) ---------
+
+TENANT = "t-dispatch"
+
+# Canonical public capture path (append_evidence), ~20 items: every 3rd gets a
+# stored embedding (so the stored-embedding gate path fires) and every 6th is
+# non-text modality (so the dense_media channel fires); the rest fall back to
+# the hashing embedding (dense_hash). Shared verbatim between the in-process
+# tests (exec) and the subprocess equivalence code so both seed identically.
+SEED_SRC = """
+from mnemosyne import text
+from mnemosyne.engine import LocalMemoryEngine
+from mnemosyne.models import Evidence
+
+engine = LocalMemoryEngine()
+tenant = "t-dispatch"
+for i in range(20):
+    engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id="user-a",
+            actor="user",
+            source_type="chat",
+            content=f"alpha beta gamma item {i} delta-{i % 5}",
+            trust_tier=0,
+            access_policy={"tenant": tenant},
+            modality="image" if i % 6 == 0 else "text",
+            embedding=text.hashing_embedding(f"alpha beta stored {i}", 256) if i % 3 == 0 else None,
+        )
+    )
+"""
+
+ENGINE_SCANS_CODE = SEED_SRC + """
+import struct
+
+rows = ["native=" + str(text.NATIVE is not None)]
+for hit in engine.vector_search("alpha beta", 12, {"tenant_id": tenant}):
+    rows.append("|".join((hit.id, struct.pack("<d", hit.score).hex(), hit.channel)))
+rows.append("--")
+for hit in engine.lexical_search("alpha beta item", 12, {"tenant_id": tenant}):
+    rows.append("|".join((hit.id, struct.pack("<d", hit.score).hex(), hit.channel)))
+print("\\n".join(rows))
+"""
+
+
+def _seed_engine():
+    ns: dict[str, object] = {}
+    exec(SEED_SRC, ns)  # noqa: S102 - our own constant; keeps seeds identical
+    return ns["engine"]
+
+
+def test_engine_scans_byte_identical_both_modes():
+    active = _run(ENGINE_SCANS_CODE, pure=False).splitlines()
+    forced = _run(ENGINE_SCANS_CODE, pure=True).splitlines()
+    assert active[0] == "native=True" and forced[0] == "native=False"
+    assert active[1:] == forced[1:]  # full (id, score-bits, channel) tuples
+    body = active[1:]
+    # 20 candidates all score > 0, so both scans truncate to k=12: the
+    # score>0 filter, sort, and truncation paths are all exercised.
+    assert len(body) == 25  # 12 dense + "--" separator + 12 lexical
+    channels = {line.rsplit("|", 1)[-1] for line in body if "|" in line}
+    assert {"dense_media", "dense_hash", "lexical"} <= channels
+
+
+def test_vector_search_native_single_dense_scan_crossing(monkeypatch):
+    """Native vector_search makes exactly ONE dense_scan FFI crossing covering
+    every candidate row (embeddings stay per-hit in Python for the security
+    gate + metadata side effects)."""
+    from mnemosyne import text as text_mod
+
+    if text_mod.NATIVE is None:
+        pytest.skip("pure mode active (MNEMOSYNE_PURE=1); no batch path")
+
+    engine = _seed_engine()
+    calls: list[int] = []
+    real = native.dense_scan
+
+    def counting(query_vec, rows):
+        calls.append(len(rows))
+        return real(query_vec, rows)
+
+    monkeypatch.setattr(native, "dense_scan", counting)
+    hits = engine.vector_search("alpha beta", 12, {"tenant_id": TENANT})
+    assert len(hits) == 12
+    assert calls == [20]  # one crossing, all 20 candidates in the batch
+
+
+def test_lexical_search_native_single_lexical_scan_crossing(monkeypatch):
+    """Native adapterless lexical_search makes exactly ONE lexical_scan FFI
+    crossing covering every candidate text."""
+    from mnemosyne import text as text_mod
+
+    if text_mod.NATIVE is None:
+        pytest.skip("pure mode active (MNEMOSYNE_PURE=1); no batch path")
+
+    engine = _seed_engine()
+    calls: list[int] = []
+    real = native.lexical_scan
+
+    def counting(query, texts):
+        calls.append(len(texts))
+        return real(query, texts)
+
+    monkeypatch.setattr(native, "lexical_scan", counting)
+    hits = engine.lexical_search("alpha beta item", 12, {"tenant_id": TENANT})
+    assert len(hits) == 12
+    assert calls == [20]  # one crossing, all 20 candidate texts in the batch
+
+
 def test_mmr_native_path_calls_embed_hit_exactly_once_per_hit():
     """The native fast path materializes vectors = [embed_hit(h) for h in hits]
     exactly once per hit, index-aligned 1:1 (the kernel raises ValueError on a
