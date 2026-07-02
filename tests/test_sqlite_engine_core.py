@@ -246,12 +246,8 @@ def test_insert_evidence_requires_cid(tmp_path: Path):
 
 def test_unimplemented_surfaces_name_their_task(tmp_path: Path):
     engine = SqliteEngine(tmp_path / "root")
-    with pytest.raises(NotImplementedError, match="Task 3"):
-        engine.append_evidence(None)  # type: ignore[arg-type]
-    with pytest.raises(NotImplementedError, match="Task 3"):
-        engine.export_tenant("t1")
-    with pytest.raises(NotImplementedError, match="Task 3"):
-        engine.get_evidence("t1", "a" * 64)
+    # Task 3 ledger surface (append_evidence/export_tenant/get_evidence/…) is
+    # implemented; only Task 4+ surfaces remain stubbed.
     with pytest.raises(NotImplementedError, match="Task 4"):
         engine.vector_search("q", 4, {"tenant_id": "t1"})
     with pytest.raises(NotImplementedError, match="Task 5"):
