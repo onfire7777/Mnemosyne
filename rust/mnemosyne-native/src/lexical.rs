@@ -13,44 +13,66 @@
 use pyo3::prelude::*;
 use rayon::prelude::*;
 
-use crate::tokenize::tokenize_str;
+use crate::tokenize::for_each_token;
 
-fn term_counts_ordered(text: &str) -> Vec<(String, u64)> {
-    let mut order: Vec<String> = Vec::new();
-    let mut counts: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
-    for tok in tokenize_str(text) {
-        let entry = counts.entry(tok.clone()).or_insert(0);
-        if *entry == 0 {
-            order.push(tok);
-        }
-        *entry += 1;
-    }
-    order
-        .into_iter()
-        .map(|t| {
-            let c = counts[&t];
-            (t, c)
-        })
-        .collect()
+/// Query terms counted ONCE per call/scan: `terms` is first-occurrence-ordered
+/// (term, count) pairs — Python `Counter.items()` insertion order — and
+/// `index` maps each term to its position in `terms`.
+struct QueryTerms {
+    terms: Vec<(String, u64)>,
+    index: std::collections::HashMap<String, usize>,
 }
 
-pub fn lexical_score_str(query: &str, text: &str) -> f64 {
-    let q = term_counts_ordered(query);
-    if q.is_empty() {
+impl QueryTerms {
+    fn new(query: &str) -> Self {
+        let mut terms: Vec<(String, u64)> = Vec::new();
+        let mut index: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
+        for_each_token(query, |tok| {
+            if let Some(&i) = index.get(tok) {
+                terms[i].1 += 1;
+            } else {
+                index.insert(tok.to_owned(), terms.len());
+                terms.push((tok.to_owned(), 1));
+            }
+        });
+        QueryTerms { terms, index }
+    }
+}
+
+/// Score one text against pre-counted query terms. The pure path builds the
+/// full doc Counter, but only two doc-side quantities ever reach the score:
+/// each QUERY term's tf and the doc's TOTAL token count (`doc_len` = sum of
+/// all counts). Accumulating exactly those (tf per query term in `tfs`, one
+/// token counter) over the zero-alloc token visitor produces bit-identical
+/// results: same integer tf/doc_len values, same float ops in the same
+/// first-occurrence query order.
+fn lexical_score_counted(q: &QueryTerms, tfs: &mut [u64], text: &str) -> f64 {
+    if q.terms.is_empty() {
         return 0.0;
     }
-    let doc = term_counts_ordered(text);
-    let doc_map: std::collections::HashMap<&str, u64> =
-        doc.iter().map(|(t, c)| (t.as_str(), *c)).collect();
-    let doc_len: u64 = doc.iter().map(|(_, c)| *c).sum::<u64>().max(1);
+    tfs.fill(0);
+    let mut doc_len: u64 = 0;
+    for_each_token(text, |tok| {
+        doc_len += 1;
+        if let Some(&i) = q.index.get(tok) {
+            tfs[i] += 1;
+        }
+    });
+    let doc_len = doc_len.max(1);
     let mut score = 0.0f64;
-    for (term, q_count) in &q {
-        let tf = *doc_map.get(term.as_str()).unwrap_or(&0);
-        if tf != 0 {
-            score += (1.0 + (tf as f64).ln()) * (*q_count as f64);
+    for ((_, q_count), tf) in q.terms.iter().zip(tfs.iter()) {
+        if *tf != 0 {
+            score += (1.0 + (*tf as f64).ln()) * (*q_count as f64);
         }
     }
     score / (doc_len as f64).sqrt()
+}
+
+pub fn lexical_score_str(query: &str, text: &str) -> f64 {
+    let q = QueryTerms::new(query);
+    let mut tfs = vec![0u64; q.terms.len()];
+    lexical_score_counted(&q, &mut tfs, text)
 }
 
 #[pyfunction]
@@ -59,11 +81,23 @@ pub fn lexical_score(query: &str, text: &str) -> f64 {
 }
 
 /// Rayon ACROSS texts only (per plan constraints); each per-text score is the
-/// scalar-sequential `lexical_score_str`, and `collect` on the indexed
-/// parallel iterator keeps results aligned to input order.
+/// scalar-sequential `lexical_score_counted` over query term counts computed
+/// ONCE and shared (the pure loop recomputes them per text, but they are
+/// input-only — hoisting cannot change any per-text result). `map_init` gives
+/// each rayon worker a reusable tf buffer; `collect` on the indexed parallel
+/// iterator keeps results aligned to input order.
 #[pyfunction]
 pub fn lexical_scan(py: Python<'_>, query: &str, texts: Vec<String>) -> Vec<f64> {
-    py.detach(|| texts.par_iter().map(|t| lexical_score_str(query, t)).collect())
+    let q = QueryTerms::new(query);
+    py.detach(|| {
+        texts
+            .par_iter()
+            .map_init(
+                || vec![0u64; q.terms.len()],
+                |tfs, t| lexical_score_counted(&q, tfs, t),
+            )
+            .collect()
+    })
 }
 
 /// TEST-ONLY: the exact `ln` used by `lexical_score`, exposed so the parity
