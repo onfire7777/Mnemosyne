@@ -133,6 +133,14 @@ def mmr_select(
     The native fast path instead materializes ``embed_hit`` exactly once per
     hit and delegates to the byte-parity-proven ``mmr_select_indices`` kernel.
     """
+    if k <= 0:
+        # Both modes already agree on the result: the pure loop's
+        # ``while remaining and len(selected) < k`` condition is False from
+        # the start (len(selected) == 0 is never < k), so it returns [].
+        # Guarding BEFORE the native branch keeps the native path from
+        # materializing embed_hit for every hit — the only mode-divergent
+        # side effect — when nothing can be selected.
+        return []
     if text.NATIVE is not None:
         # Index-aligned 1:1 with hits (the kernel raises ValueError on a
         # length mismatch); one embed_hit call per hit preserves the

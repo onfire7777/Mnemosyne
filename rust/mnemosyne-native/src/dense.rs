@@ -26,10 +26,11 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use rayon::prelude::*;
 
-/// CPython 3.12 `sum()` float fast path (Neumaier) over a product stream —
-/// the single summation core shared by the slice and packed-bytes cosines.
+/// CPython 3.12 `sum()` float fast path (Neumaier) over any f64 stream —
+/// the single summation core shared by the slice and packed-bytes cosines,
+/// and reused by `hashing`'s sum-of-squares norm (crate-internal).
 /// Monomorphized per call site; the float ops and their order are identical.
-fn neumaier_sum(mut prods: impl Iterator<Item = f64>) -> f64 {
+pub(crate) fn neumaier_sum(mut prods: impl Iterator<Item = f64>) -> f64 {
     let Some(first) = prods.next() else {
         // Empty zip: pure sum() returns int 0 => the bits of +0.0.
         return 0.0;
