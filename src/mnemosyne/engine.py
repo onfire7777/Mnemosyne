@@ -31,6 +31,7 @@ from mnemosyne.algorithms import fit_budget, mmr_select, ppr_power_iteration, rr
 from mnemosyne.calibration import CalibrationSet, conformal_threshold, should_abstain
 from mnemosyne.consciousness import RealityMonitor
 from mnemosyne.ids import evidence_cid, evidence_unscoped_cid, new_id
+from mnemosyne.journal import CIDJournal
 from mnemosyne.models import (
     Assertion,
     Contradiction,
@@ -373,8 +374,10 @@ class LocalMemoryEngine:
         store_path: str | os.PathLike[str] | None = None,
         policy: OperatingPolicy | None = None,
         adapters: RetrievalAdapters | None = None,
+        journal_dir: str | os.PathLike[str] | None = None,
     ):
         self.store_path = Path(store_path).expanduser() if store_path else None
+        self._journal_dir = Path(journal_dir).expanduser() if journal_dir else None
         self.policy = policy or OperatingPolicy()
         if adapters is None:
             embedding = HashingEmbeddingProvider()
@@ -664,6 +667,16 @@ class LocalMemoryEngine:
                 capability_tags=ev.capability_tags,
             )
             self._persist()
+            if self._journal_dir is not None:
+                CIDJournal(self._journal_dir / f"{stored.tenant_id}.journal").append(
+                    {
+                        "cid": stored.cid,
+                        "tenant_id": stored.tenant_id,
+                        "kind": "evidence",
+                        "content": stored.content,
+                        "created_at": stored.created_at.isoformat(),
+                    }
+                )
             return cid
 
     def _self_generation_budget_usage(self, *, tenant_id: str, branch: str) -> tuple[int, int]:
