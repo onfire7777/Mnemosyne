@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from mnemosyne.journal import CIDJournal
 
 
@@ -83,9 +85,46 @@ def test_local_engine_dedup_reingest_does_not_duplicate_journal_line(tmp_path: P
     assert [r["cid"] for r in journal.records()].count(first) == 1
 
 
-def test_local_engine_without_journal_dir_writes_no_journal(tmp_path: Path):
+def test_records_tolerates_torn_final_line_and_verify_flags_it(tmp_path: Path):
+    j = CIDJournal(tmp_path / "t.journal")
+    j.append(_rec("cid-1"))
+    j.append(_rec("cid-2"))
+    j.append(_rec("cid-3"))
+    # Simulate a crash between the buffered write and fsync: the final line is
+    # torn mid-record and the trailing newline never lands.
+    path = tmp_path / "t.journal"
+    lines = path.read_bytes().splitlines(keepends=True)
+    path.write_bytes(b"".join(lines[:2]) + lines[2][: len(lines[2]) // 2])
+    assert [r["cid"] for r in j.records()] == ["cid-1", "cid-2"]
+    d = j.verify_against({"cid-1", "cid-2"})
+    assert d.torn_tail is True
+    assert d.diverged is True
+    assert d.journal_only == []
+    assert d.missing_from_journal == []
+
+
+def test_records_raises_on_corrupt_middle_line(tmp_path: Path):
+    j = CIDJournal(tmp_path / "t.journal")
+    j.append(_rec("cid-1"))
+    j.append(_rec("cid-2"))
+    j.append(_rec("cid-3"))
+    path = tmp_path / "t.journal"
+    lines = path.read_bytes().splitlines(keepends=True)
+    lines[1] = b'{"cid": not-json garbage\n'
+    path.write_bytes(b"".join(lines))
+    with pytest.raises(json.JSONDecodeError):
+        list(j.records())
+
+
+def test_local_engine_without_journal_dir_writes_no_journal(monkeypatch: pytest.MonkeyPatch):
+    import mnemosyne.engine as engine_mod
     from mnemosyne.engine import LocalMemoryEngine
 
+    class ForbiddenJournal:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError("journal must not be constructed")
+
+    monkeypatch.setattr(engine_mod, "CIDJournal", ForbiddenJournal)
     engine = LocalMemoryEngine()
-    engine.append_evidence(_evidence("t-a", "No journal configured."))
-    assert list(tmp_path.iterdir()) == []
+    cid = engine.append_evidence(_evidence("t-a", "No journal configured."))
+    assert cid  # append succeeded without ever touching the journal path

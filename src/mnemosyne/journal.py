@@ -21,14 +21,32 @@ def _canonical(record: dict[str, Any]) -> str:
     return json.dumps(record, sort_keys=True, separators=(",", ":"))
 
 
+def _fsync_dir(path: Path) -> None:
+    """Best-effort directory fsync so a rename survives power loss.
+
+    Some platforms/filesystems reject fsync on directories; ignore OSError.
+    """
+    try:
+        fd = os.open(path, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(fd)
+    except OSError:
+        pass  # best-effort: directory fsync unsupported here
+    finally:
+        os.close(fd)
+
+
 @dataclass
 class JournalDivergence:
     missing_from_journal: list[str] = field(default_factory=list)
     journal_only: list[str] = field(default_factory=list)
+    torn_tail: bool = False
 
     @property
     def diverged(self) -> bool:
-        return bool(self.missing_from_journal or self.journal_only)
+        return bool(self.missing_from_journal or self.journal_only or self.torn_tail)
 
 
 class CIDJournal:
@@ -45,14 +63,41 @@ class CIDJournal:
             fh.flush()
             os.fsync(fh.fileno())
 
-    def records(self) -> Iterator[dict[str, Any]]:
+    def _read(self) -> tuple[list[dict[str, Any]], bool]:
+        """Parse the journal; return ``(records, torn_tail)``.
+
+        Because ``append`` fsyncs every line, only the FINAL line can be
+        legitimately torn (crash in the buffered-write-to-fsync window), so an
+        unparseable final line stops iteration cleanly while an unparseable
+        non-final line is real corruption and raises json.JSONDecodeError.
+        """
+        records: list[dict[str, Any]] = []
         if not self.path.exists():
-            return
+            return records, False
         with open(self.path, encoding="utf-8") as fh:
-            for line in fh:
-                line = line.strip()
-                if line:
-                    yield json.loads(line)
+            lines = fh.read().splitlines()
+        last = len(lines) - 1
+        for i, raw in enumerate(lines):
+            line = raw.strip()
+            if not line:
+                continue
+            try:
+                records.append(json.loads(line))
+            except json.JSONDecodeError:
+                if i == last:
+                    return records, True
+                raise
+        return records, False
+
+    def records(self) -> Iterator[dict[str, Any]]:
+        """Yield complete records, tolerating a torn trailing line.
+
+        A torn FINAL line (post-crash) yields the complete records then stops;
+        a bad non-final line raises json.JSONDecodeError. Callers needing the
+        loud signal use ``verify_against(...).torn_tail``.
+        """
+        records, _ = self._read()
+        yield from records
 
     def _rewrite(self, transform: Callable[[dict[str, Any]], dict[str, Any] | None]) -> None:
         """Atomic rewrite-and-swap: write tmp, fsync, rename over original."""
@@ -65,6 +110,7 @@ class CIDJournal:
             fh.flush()
             os.fsync(fh.fileno())
         os.replace(tmp, self.path)
+        _fsync_dir(self.path.parent)
 
     def tombstone(self, cid: str, *, salted_hash: str, erased_at: str) -> None:
         def transform(record: dict[str, Any]) -> dict[str, Any] | None:
@@ -85,8 +131,10 @@ class CIDJournal:
         self._rewrite(lambda r: None if r.get("cid") == cid else r)
 
     def verify_against(self, ledger_cids: set[str]) -> JournalDivergence:
-        journal_cids = {r["cid"] for r in self.records()}
+        records, torn_tail = self._read()
+        journal_cids = {r["cid"] for r in records}
         return JournalDivergence(
             missing_from_journal=sorted(ledger_cids - journal_cids),
             journal_only=sorted(journal_cids - ledger_cids),
+            torn_tail=torn_tail,
         )
