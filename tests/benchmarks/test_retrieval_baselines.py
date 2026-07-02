@@ -37,17 +37,21 @@ from mnemosyne.text import cosine, hashing_embedding, lexical_score
 
 BASELINES = Path(__file__).parent / "baselines.json"
 RELATIVE_CEILING = 1.5  # fail if >1.5x recorded baseline
-random.seed(20260701)
+# Module-local RNG: same seed (and therefore the same byte-identical DOCS /
+# QUERY as the original process-global random.seed(20260701)) without
+# mutating global RNG state for the rest of the process.
+_RNG = random.Random(20260701)
 
 _WORDS = ["postgres", "memory", "belief", "evidence", "tenant", "branch", "vector", "graph"]
 
 
 def _text(n: int) -> str:
-    return " ".join(random.choice(_WORDS) + str(random.randint(0, 500)) for _ in range(n))
+    return " ".join(_RNG.choice(_WORDS) + str(_RNG.randint(0, 500)) for _ in range(n))
 
 
-# Generated at import time, directly downstream of the module-level seed, so
-# benchmark inputs are byte-identical across runs and machines.
+# Generated at import time, directly downstream of the freshly seeded
+# module-local RNG, so benchmark inputs are byte-identical across runs and
+# machines.
 DOCS = [_text(80) for _ in range(2000)]
 QUERY = _text(12)
 

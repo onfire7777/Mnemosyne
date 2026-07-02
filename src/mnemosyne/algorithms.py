@@ -3,7 +3,8 @@
 
 Single source of truth for algorithms previously duplicated across
 LocalMemoryEngine and PostgresEngine. Pure functions only: no engine
-state, no I/O, no policy object — every tunable is a parameter.
+state, no I/O, no policy object — tunables are parameters, though
+fit_budget binds approx_tokens as its token-cost model.
 Phase-1 native kernels (mnemosyne._native) mirror these signatures.
 """
 from __future__ import annotations

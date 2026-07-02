@@ -1,6 +1,6 @@
 """Hypothesis property tests for the Phase-0 storage invariants (spec §4.0):
 append-only-ness, rebuild determinism, tombstone safety, and torn-tail
-recovery, plus cheap lane-invariant predicates.
+recovery.
 Chaos/DST fault injection arrives in Phase 2 with SqliteEngine (spec §8)."""
 from __future__ import annotations
 

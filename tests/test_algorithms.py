@@ -53,8 +53,9 @@ def test_rrf_fuse_merges_channels_and_dedups_by_kind_id():
 
 
 def test_rrf_fuse_matches_postgres_private_rrf():
-    """The Postgres `_rrf` body carries extra channel-score annotation logic;
-    rrf_fuse(annotate_channel_scores=True) must reproduce it byte-identically."""
+    """The Postgres `_rrf` seam carries extra channel-score annotation logic;
+    comparing it against rrf_fuse(annotate_channel_scores=True) pins the
+    delegation wiring (characterized pre-delegation)."""
     from mnemosyne.algorithms import rrf_fuse
 
     fake_self = SimpleNamespace(policy=SimpleNamespace(rrf_k=60.0))

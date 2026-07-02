@@ -3,14 +3,20 @@
 Dual-durability copy of the evidence ledger: engine commit happens FIRST,
 journal append SECOND; on divergence the engine ledger is authoritative and
 journal segments are re-derived, while journal-only CIDs are an alarm.
-Erasure is mode-aware: tombstone_recompute keeps a tombstone line (salted
-hash + timestamps), hard_delete_legal removes the line entirely.
+``tombstone``/``purge`` are the Phase-2 erasure primitives (mode-aware:
+tombstone_recompute keeps a tombstone line — salted hash + timestamps —
+while hard_delete_legal removes the line entirely). Engine erasure wiring
+lands in Phase 2: ``forget()`` does not call them yet, so enabling
+``journal_dir`` before then means erased ledger content is retained in the
+journal until that wiring exists.
 Stdlib only. CIDs are never computed here.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import re
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -36,6 +42,24 @@ def _fsync_dir(path: Path) -> None:
         pass  # best-effort: directory fsync unsupported here
     finally:
         os.close(fd)
+
+
+_SAFE_TENANT_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+
+
+def journal_filename(tenant_id: str) -> str:
+    """Map a tenant id to a filesystem-safe journal filename.
+
+    Filesystem-safe ids (``^[A-Za-z0-9][A-Za-z0-9._-]*$``, and not ``.`` or
+    ``..``) map verbatim to ``<tenant_id>.journal``, preserving existing
+    journal filenames for every sane id. Anything else (path separators,
+    traversal sequences, leading dots, empty strings, ...) maps to the stable
+    hashed name ``t-<sha256(tenant_id)[:32]>.journal`` so a hostile tenant id
+    can never name a file outside the journal directory.
+    """
+    if tenant_id not in (".", "..") and _SAFE_TENANT_ID.fullmatch(tenant_id):
+        return f"{tenant_id}.journal"
+    return "t-" + hashlib.sha256(tenant_id.encode()).hexdigest()[:32] + ".journal"
 
 
 @dataclass

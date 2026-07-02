@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 from unittest import mock
 
+from mnemosyne.postgres_engine import PostgresEngine
 from mnemosyne.retrieval import RetrievalAdapters, retrieval_adapters_from_env
 
 
@@ -29,3 +30,15 @@ def test_env_default_backend_names_are_pinned():
         adapters = retrieval_adapters_from_env()
     assert adapters.lexical_backend == "postgres-fts"
     assert adapters.graph_backend == "postgres-recursive-ppr"
+
+
+def test_postgres_engine_default_adapter_names_are_pinned():
+    """PostgresEngine self-reports the Tier-B gate names.
+
+    Construction is lazy — no connection is opened and psycopg is only
+    imported on connect() — so this runs everywhere, even without psycopg
+    installed (verified: this env has no psycopg and constructs fine).
+    """
+    engine = PostgresEngine("postgresql://unused")
+    assert engine.adapters.lexical_backend == "postgres-fts"
+    assert engine.adapters.graph_backend == "postgres-recursive-ppr"
