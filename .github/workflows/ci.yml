@@ -55,6 +55,21 @@ jobs:
           tests/test_g0_harness.py::test_committed_g0_preregistrations_have_passing_decisions
           tests/test_g0_harness.py::test_current_g0_candidate_replays_preregistrations_without_regression
           -q
+      # Native parity leg: runs ONLY when the runner image already ships a Rust
+      # toolchain (ubuntu-latest does today). If cargo is absent we skip rather
+      # than install one — the default lane stays rust-free by design (the pure
+      # path is canonical and must keep passing with no toolchain). This step
+      # runs LAST in the job so the `--extra native` sync cannot leak a native
+      # environment into the rust-free steps above.
+      - name: Native parity (both modes; skips if runner has no Rust)
+        run: |
+          if ! command -v cargo >/dev/null 2>&1; then
+            echo "Rust toolchain not present on runner; skipping native parity leg (default lane is rust-free by design)"
+            exit 0
+          fi
+          uv sync --locked --extra mcp --extra native --group dev
+          uv run --locked python -m pytest tests/test_native_parity.py tests/test_native_dispatch.py -q
+          MNEMOSYNE_PURE=1 uv run --locked python -m pytest tests/test_native_parity.py tests/test_native_dispatch.py -q
 
   postgres:
     name: Postgres integration
@@ -91,3 +106,31 @@ jobs:
         run: psql "$MNEMOSYNE_POSTGRES_DSN" -f sql/schema.sql
       - name: Run Postgres-backed live tests
         run: uv run --locked python -m pytest tests/test_postgres_engine_live.py -q
+
+  native-wheels:
+    name: Native wheels (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    # NON-GATING until the first release that ships wheels: the native
+    # extension is an optional accelerator (the pure-Python path is canonical
+    # and fully covered by the jobs above), so a wheel-build break must not
+    # block merges. Flip this off when wheels become a release deliverable.
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, ubuntu-latest]  # macos-14 = arm64; ubuntu-latest = x86_64
+    steps:
+      # actions/checkout v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      # PyO3/maturin-action v1 (v1.51.0) — abi3-py312 comes from the crate's
+      # pyo3 feature flags, so one wheel per platform covers CPython >=3.12.
+      - uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b
+        with:
+          working-directory: rust/mnemosyne-native
+          args: --release --out dist
+      # actions/upload-artifact v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: mnemosyne-native-wheels-${{ matrix.os }}
+          path: rust/mnemosyne-native/dist/*.whl
+          if-no-files-found: error
