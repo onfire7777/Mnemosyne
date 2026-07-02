@@ -109,7 +109,12 @@ pub fn dense_scan_packed(
     dims: usize,
     row_mask: &[u8],
 ) -> PyResult<Vec<Option<f64>>> {
-    let row_bytes = dims * 8;
+    // checked_mul: dims / n are caller-controlled, so the expected-length
+    // arithmetic must not wrap on overflow (a wrapped product could make a
+    // malformed buffer pass the length checks). Overflow -> ValueError.
+    let row_bytes = dims
+        .checked_mul(8)
+        .ok_or_else(|| PyValueError::new_err(format!("dims*8 overflows usize (dims = {dims})")))?;
     if query.len() != row_bytes {
         return Err(PyValueError::new_err(format!(
             "query is {} bytes, expected dims*8 = {row_bytes}",
@@ -117,11 +122,15 @@ pub fn dense_scan_packed(
         )));
     }
     let n = row_mask.len();
-    if rows.len() != n * row_bytes {
+    let expected_rows_len = n.checked_mul(row_bytes).ok_or_else(|| {
+        PyValueError::new_err(format!(
+            "n*dims*8 overflows usize (n = {n}, dims = {dims})"
+        ))
+    })?;
+    if rows.len() != expected_rows_len {
         return Err(PyValueError::new_err(format!(
-            "rows is {} bytes, expected n*dims*8 = {}",
+            "rows is {} bytes, expected n*dims*8 = {expected_rows_len}",
             rows.len(),
-            n * row_bytes
         )));
     }
     let query_vec: Vec<f64> = query
