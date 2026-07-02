@@ -19,11 +19,14 @@ from hypothesis import given, settings, strategies as st
 
 native = pytest.importorskip("mnemosyne_native")
 
+# The _*_pure functions are THE oracles: parity is native-vs-PURE by
+# construction, never native-vs-native, regardless of which path the
+# dispatching public functions take in this process (Task 6).
 from mnemosyne.text import (  # noqa: E402
-    _hashing_embedding_cached,
-    cosine,
-    lexical_score,
-    tokenize,
+    _cosine_pure as cosine,
+    _hashing_embedding_pure,
+    _lexical_score_pure as lexical_score,
+    _tokenize_pure as tokenize,
 )
 
 
@@ -43,9 +46,10 @@ texts = st.text(
 @given(texts, st.sampled_from([16, 256, 1024]))
 @settings(max_examples=200, deadline=None)
 def test_hashing_embedding_bit_identical(text, dims):
-    # __wrapped__ = the uncached pure function (lru_cache would otherwise
-    # serve tuples cached across examples; parity target is the raw compute).
-    pure = _hashing_embedding_cached.__wrapped__(text, dims)
+    # _hashing_embedding_pure = the raw uncached pure compute (the lru_cache
+    # now wraps the DISPATCHING compute, whose __wrapped__ would be
+    # native-vs-native in native mode; parity target is the raw pure compute).
+    pure = _hashing_embedding_pure(text, dims)
     assert bits(native.hashing_embedding(text, dims)) == bits(list(pure))
 
 
@@ -62,7 +66,7 @@ def test_hashing_embedding_golden_examples_bit_identical():
         ("The THE the", 256),  # lower() folding into one bucket
     ]
     for text, dims in cases:
-        pure = _hashing_embedding_cached.__wrapped__(text, dims)
+        pure = _hashing_embedding_pure(text, dims)
         assert bits(native.hashing_embedding(text, dims)) == bits(list(pure))
 
 

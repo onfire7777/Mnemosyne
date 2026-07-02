@@ -19,8 +19,8 @@
 //!
 //! `zip(strict=False)` = SILENT TRUNCATION to the shorter input; Rust's
 //! `zip` truncates identically. Ops used: `+ - * abs` — all inside the
-//! kernel float-op allowlist (no mul_add: each `x * y` is one rounded
-//! multiply, exactly like the pure generator).
+//! kernel float-op allowlist (no fused multiply-add: each `x * y` is one
+//! rounded multiply, exactly like the pure generator).
 
 use pyo3::prelude::*;
 use rayon::prelude::*;

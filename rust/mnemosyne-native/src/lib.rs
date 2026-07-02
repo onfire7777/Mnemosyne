@@ -2,7 +2,8 @@
 //!
 //! PARITY CONTRACT (plan Global Constraints): every function is bit-identical
 //! to its pure-Python counterpart. Scalar sequential f64 per item; rayon only
-//! ACROSS items; no mul_add, no transcendentals; allowed ops: + - * / sqrt abs.
+//! ACROSS items; no fused multiply-add, no transcendentals; allowed ops:
+//! + - * / sqrt abs.
 
 use pyo3::prelude::*;
 
