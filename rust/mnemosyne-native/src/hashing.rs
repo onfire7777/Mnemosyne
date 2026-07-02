@@ -11,6 +11,7 @@ use blake2::digest::{Update, VariableOutput};
 use blake2::Blake2bVar;
 use pyo3::prelude::*;
 
+use crate::dense::neumaier_sum;
 use crate::tokenize::for_each_token;
 
 #[pyfunction]
@@ -30,11 +31,14 @@ pub fn hashing_embedding(text: &str, dims: usize) -> Vec<f64> {
         let sign = if digest[4] % 2 == 0 { 1.0 } else { -1.0 };
         vec[bucket] += sign;
     });
-    let mut sum_sq = 0.0f64;
-    for x in &vec {
-        sum_sq += x * x;
-    }
-    let norm = sum_sq.sqrt();
+    // Pure oracle: `math.sqrt(sum(x * x for x in vec))` — CPython's builtin
+    // sum() over floats is Neumaier-compensated, so route through dense.rs's
+    // shared core to make that port literal. Bucket values are integer-valued
+    // (each is a running total of +/-1.0 increments), so every x * x and every
+    // partial sum is an exact small integer and the compensation term is
+    // provably 0.0 for reachable inputs — bit-identical to a naive
+    // `sum_sq += x * x` loop.
+    let norm = neumaier_sum(vec.iter().map(|x| x * x)).sqrt();
     if norm == 0.0 {
         return vec;
     }

@@ -15,6 +15,7 @@ import math
 import os
 import re
 from collections import Counter
+from collections.abc import Sequence
 from functools import lru_cache
 from hashlib import blake2b
 from typing import Iterable
@@ -115,7 +116,7 @@ def _cosine_pure(a: Iterable[float], b: Iterable[float]) -> float:
     return sum(x * y for x, y in zip(a, b, strict=False))
 
 
-def cosine(a: Iterable[float], b: Iterable[float]) -> float:
+def cosine(a: Sequence[float], b: Sequence[float]) -> float:
     # Type nuance on empty inputs: the pure path returns int 0 (builtin sum of
     # an empty stream) while the native kernel returns float 0.0. The two are
     # == equal and bit-equal under struct.pack('<d'); neither side is
