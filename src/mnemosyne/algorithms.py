@@ -13,7 +13,7 @@ from collections import defaultdict
 from collections.abc import Callable, Collection, Mapping
 
 from mnemosyne.retrieval import Hit
-from mnemosyne.text import approx_tokens
+from mnemosyne.text import approx_tokens, cosine
 
 
 def rrf_fuse(
@@ -104,6 +104,58 @@ def fit_budget(hits: list[Hit], budget: int) -> tuple[list[Hit], int]:
         kept.append(hit)
         used += cost
     return kept, used
+
+
+def mmr_select(
+    hits: list[Hit],
+    k: int,
+    *,
+    query_vec: list[float],
+    embed_hit: Callable[[Hit], list[float] | None],
+    mmr_lambda: float,
+) -> list[Hit]:
+    """Maximal-marginal-relevance selection (spec §4.1 kernel ABI).
+
+    Objective per candidate: ``mmr_lambda * relevance - (1 - mmr_lambda) *
+    max_similarity + hit.score``. A missing vector (``embed_hit`` returns
+    ``None``) means relevance 0.0 AND no diversity penalty; the strict ``>``
+    argmax gives first-wins tie-breaking on input order.
+
+    Embedding sourcing is deliberately NOT unified (spec §4.0): the two
+    engines stay behaviorally divergent via ``embed_hit`` —
+    LocalMemoryEngine passes its security-gated
+    ``_embedding_for_hit(hit, allow_fallback=True)`` path, PostgresEngine
+    passes ``hashing_embedding(hit.text)``. Selected-item vectors are
+    recomputed inside every candidate loop on purpose: byte parity with the
+    shipped engines over speed in this phase — do not cache.
+    """
+    selected: list[Hit] = []
+    remaining = list(hits)
+    while remaining and len(selected) < k:
+        best: Hit | None = None
+        best_score = float("-inf")
+        for hit in remaining:
+            hit_vec = embed_hit(hit)
+            relevance = cosine(query_vec, hit_vec) if hit_vec is not None else 0.0
+            diversity_penalty = 0.0
+            if selected and hit_vec is not None:
+                selected_vectors = [
+                    selected_vec
+                    for item in selected
+                    if (selected_vec := embed_hit(item)) is not None
+                ]
+                if selected_vectors:
+                    diversity_penalty = max(cosine(hit_vec, selected_vec) for selected_vec in selected_vectors)
+            score = mmr_lambda * relevance - (1.0 - mmr_lambda) * diversity_penalty
+            score += hit.score
+            if score > best_score:
+                best = hit
+                best_score = score
+        if best is None:
+            break
+        selected.append(best)
+        remaining.remove(best)
+    return selected
 
 
 def ppr_power_iteration(

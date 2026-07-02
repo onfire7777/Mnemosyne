@@ -146,3 +146,60 @@ def test_ppr_power_iteration_defaults_are_pinned_exactly():
         "teleport": 0.15,
     }
     assert ppr_power_iteration.__kwdefaults__["teleport"] != 1.0 - 0.85
+
+
+def test_mmr_select_matches_local_engine_mmr():
+    from mnemosyne.algorithms import mmr_select
+
+    engine = LocalMemoryEngine()
+    hits = [_hit("evidence", str(i), 0.5 + i * 0.1, "lexical") for i in range(4)]
+    for h in hits:
+        h.text = f"unique text {h.id}"
+    expected = engine._mmr("some query", list(hits), k=3)
+    query_vec = engine._embed_text("some query")
+    actual = mmr_select(
+        list(hits), 3,
+        query_vec=query_vec,
+        embed_hit=lambda h: engine._embedding_for_hit(h, allow_fallback=True),
+        mmr_lambda=engine.policy.mmr_lambda,
+    )
+    assert [h.id for h in actual] == [h.id for h in expected]
+
+
+def test_mmr_select_matches_postgres_private_mmr():
+    """The Postgres `_mmr` hardcodes hashing_embedding for BOTH query and hit
+    vectors (deliberately divergent from Local's security-gated sourcing,
+    spec §4.0); mmr_select with those exact closures must reproduce it."""
+    from mnemosyne.algorithms import mmr_select
+    from mnemosyne.text import hashing_embedding
+
+    fake_self = SimpleNamespace(policy=SimpleNamespace(mmr_lambda=0.7))
+    hits = [_hit("evidence", str(i), 0.5 + i * 0.1, "lexical") for i in range(4)]
+    for h in hits:
+        h.text = f"unique text {h.id}"
+    expected = PostgresEngine._mmr(fake_self, "some query", list(hits), k=3)
+    actual = mmr_select(
+        list(hits), 3,
+        query_vec=hashing_embedding("some query"),
+        embed_hit=lambda h: hashing_embedding(h.text),
+        mmr_lambda=0.7,
+    )
+    assert [h.id for h in actual] == [h.id for h in expected]
+
+
+def test_mmr_select_base_score_dominates_and_ties_are_first_wins():
+    from mnemosyne.algorithms import mmr_select
+
+    a = _hit("evidence", "a", 5.0, "lexical")
+    b = _hit("evidence", "b", 5.0, "lexical")  # identical score: 'a' must win (input order)
+    picked = mmr_select([a, b], 1, query_vec=[0.0], embed_hit=lambda h: None, mmr_lambda=0.7)
+    assert picked[0].id == "a"
+
+
+def test_mmr_select_missing_vector_means_zero_relevance_no_penalty():
+    from mnemosyne.algorithms import mmr_select
+
+    strong = _hit("evidence", "strong", 1.0, "lexical")
+    weak = _hit("evidence", "weak", 0.0, "lexical")
+    picked = mmr_select([weak, strong], 2, query_vec=[1.0], embed_hit=lambda h: None, mmr_lambda=0.7)
+    assert {h.id for h in picked} == {"weak", "strong"}

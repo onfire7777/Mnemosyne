@@ -27,7 +27,7 @@ from mnemosyne.access_policy import (
     validate_access_policy,
     vector_partition_for_item,
 )
-from mnemosyne.algorithms import fit_budget, ppr_power_iteration, rrf_fuse, u_curve_order
+from mnemosyne.algorithms import fit_budget, mmr_select, ppr_power_iteration, rrf_fuse, u_curve_order
 from mnemosyne.calibration import CalibrationSet, conformal_threshold, should_abstain
 from mnemosyne.consciousness import RealityMonitor
 from mnemosyne.ids import evidence_cid, evidence_unscoped_cid, new_id
@@ -2746,34 +2746,15 @@ class LocalMemoryEngine:
         return rrf_fuse(ranked_lists, k, rrf_k=self.policy.rrf_k)
 
     def _mmr(self, query: str, hits: list[Hit], k: int) -> list[Hit]:
-        selected: list[Hit] = []
-        remaining = list(hits)
-        query_vec = self._embed_text(query)
-        while remaining and len(selected) < k:
-            best: Hit | None = None
-            best_score = float("-inf")
-            for hit in remaining:
-                hit_vec = self._embedding_for_hit(hit, allow_fallback=True)
-                relevance = cosine(query_vec, hit_vec) if hit_vec is not None else 0.0
-                diversity_penalty = 0.0
-                if selected and hit_vec is not None:
-                    selected_vectors = [
-                        selected_vec
-                        for item in selected
-                        if (selected_vec := self._embedding_for_hit(item, allow_fallback=True)) is not None
-                    ]
-                    if selected_vectors:
-                        diversity_penalty = max(cosine(hit_vec, selected_vec) for selected_vec in selected_vectors)
-                score = self.policy.mmr_lambda * relevance - (1.0 - self.policy.mmr_lambda) * diversity_penalty
-                score += hit.score
-                if score > best_score:
-                    best = hit
-                    best_score = score
-            if best is None:
-                break
-            selected.append(best)
-            remaining.remove(best)
-        return selected
+        # Embedding sourcing stays security-gated via _embedding_for_hit
+        # (deliberately divergent from PostgresEngine, spec §4.0).
+        return mmr_select(
+            hits,
+            k,
+            query_vec=self._embed_text(query),
+            embed_hit=lambda hit: self._embedding_for_hit(hit, allow_fallback=True),
+            mmr_lambda=self.policy.mmr_lambda,
+        )
 
     @staticmethod
     def _u_curve_order(hits: list[Hit]) -> list[Hit]:
