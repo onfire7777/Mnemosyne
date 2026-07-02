@@ -142,6 +142,14 @@ def test_bench_native_hashing_embedding_cold(benchmark):
     # Same salt-cold pattern as the pure bench: a unique per-call salt keeps
     # every invocation on the cold (tokenize + blake2b) path. dims=256 matches
     # the pure hashing_embedding default the pure bench relies on.
+    #
+    # GATE = 1.5x, NOT the 10x phase-exit bar: hashing is not in the spec's
+    # Phase-1 exit bar (that names the DENSE and LEXICAL scan benches), and
+    # 10x was never the right bar for this kernel — the pure path's blake2b is
+    # C-backed hashlib, so the only pure-Python work the native kernel can
+    # beat is tokenize + bucket accumulation. Measured clean floor on the
+    # reference machine: ~1.8x (native ~14.4us vs pure ~25.6us); 1.5x gates
+    # against regressing below an honestly achievable margin.
     counter = itertools.count()
 
     def run() -> None:
@@ -149,7 +157,7 @@ def test_bench_native_hashing_embedding_cold(benchmark):
         native.hashing_embedding(DOCS[i % len(DOCS)] + f" salt{i}", 256)
 
     benchmark(run)
-    _gate_speedup("hashing_embedding", benchmark.stats.stats.mean)
+    _gate_speedup("hashing_embedding", benchmark.stats.stats.mean, factor=1.5)
 
 
 def test_bench_native_dense_scan_2k_256d(benchmark):
@@ -159,11 +167,25 @@ def test_bench_native_dense_scan_2k_256d(benchmark):
             "baselines.json not captured yet (run tests/benchmarks/capture_baselines.py)"
         )
     # Pure-equivalent bound derivation: the committed cosine_1024 baseline is
-    # the mean of ONE pure 1024-dim cosine (~3.085e-05 s). Pure cosine is
-    # O(dims), so one 256-dim cosine costs cosine_1024 * (256/1024), and a
-    # full scan over 2000 rows costs
-    #     cosine_1024 * (256/1024) * 2000   (~1.54e-02 s at the committed value)
-    # — the pure-equivalent scan cost this bench must beat by >=10x.
+    # the mean of ONE pure 1024-dim cosine. Pure cosine is O(dims), so one
+    # 256-dim cosine costs cosine_1024 * (256/1024), and a full scan over
+    # 2000 rows costs
+    #     cosine_1024 * (256/1024) * 2000   (~6.0e-03 s at the clean capture)
+    # — the pure-equivalent scan cost this bench must beat by >=10x. This
+    # derivation is STRICTER than a measured pure scan (a real
+    # [_cosine_pure(q, r) for r in DENSE_ROWS] loop measures ~16 ms on the
+    # reference machine: per-call generator/zip/sum setup dominates at 256
+    # dims), i.e. the gate assumes an idealized zero-overhead pure opponent.
+    #
+    # SEAM CHOICE (measured 2026-07-02, clean machine): this bench measures the
+    # list-of-lists path because that is what the engine ships. A packed-bytes
+    # kernel (dense_scan_packed) exists and its Rust side is ~0.2 ms on
+    # pre-packed buffers (~30x even vs the idealized bound), but END-TO-END —
+    # packing 2000x256 Python floats with array.array('d') included — the
+    # packed path costs ~6.0 ms vs ~3.1 ms for the list path, so it was NOT
+    # adopted (per-call PyFloat->f64 conversion dominates both, and Python-side
+    # packing is the slower converter). Adopting it would have made this bench
+    # dishonest; the conversion wall is the blocker either way.
     pure_equivalent = (
         json.loads(BASELINES.read_text())["cosine_1024"] * (256 / 1024) * 2000
     )

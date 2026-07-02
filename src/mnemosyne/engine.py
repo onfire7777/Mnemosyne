@@ -1214,6 +1214,10 @@ class LocalMemoryEngine:
             # FFI crossing scores every row. The kernel is byte-parity-proven
             # against the per-hit cosine loop (tests/test_native_parity.py);
             # None vectors pass through as None, keeping results index-aligned.
+            # NOTE: dense_scan_packed (flat LE-f64 bytes) was measured here and
+            # NOT adopted — packing list vectors with array.array('d') per call
+            # costs more than the list FFI path end-to-end (see the seam-choice
+            # comment in tests/benchmarks/test_retrieval_baselines.py).
             candidates = self._candidate_hits(filt)
             vectors = [self._embedding_for_hit(hit, filt) for hit in candidates]
             scores = text_kernels.NATIVE.dense_scan(query_vec, vectors)
