@@ -12,6 +12,7 @@ test-only native._ln helper).
 from __future__ import annotations
 
 import math
+import array
 import struct
 
 import pytest
@@ -168,6 +169,45 @@ def test_cosine_golden_truncation():
 def test_dense_scan_matches_per_row_loop(q, rows):
     expected = [None if r is None else cosine(q, r) for r in rows]
     got = native.dense_scan(q, rows)
+    assert len(got) == len(expected)
+    for g, e in zip(got, expected, strict=True):
+        if e is None:
+            assert g is None
+        else:
+            assert struct.pack("<d", g) == struct.pack("<d", e)
+
+
+@st.composite
+def _packed_dense_cases(draw):
+    # dense_scan_packed's contract is equal-dims rows (the packed layout has
+    # no per-row length), so every present row is exactly `dims` long.
+    dims = draw(st.integers(min_value=0, max_value=8))
+    fixed_vec = st.lists(floats, min_size=dims, max_size=dims)
+    q = draw(fixed_vec)
+    rows = draw(st.lists(st.one_of(st.none(), fixed_vec), min_size=0, max_size=20))
+    return dims, q, rows
+
+
+@given(_packed_dense_cases())
+@settings(max_examples=200, deadline=None)
+def test_dense_scan_packed_matches_dense_scan_bitwise(case):
+    # dense_scan is the bit-parity-proven oracle (vs pure cosine above), so
+    # packed-vs-dense_scan bit-equality transitively proves packed-vs-pure.
+    dims, q, rows = case
+    packed = bytearray()
+    mask = bytearray()
+    placeholder = bytes(8 * dims)  # masked-out rows: bytes never read
+    for r in rows:
+        if r is None:
+            mask.append(0)
+            packed += placeholder
+        else:
+            mask.append(1)
+            packed += array.array("d", r).tobytes()
+    got = native.dense_scan_packed(
+        array.array("d", q).tobytes(), bytes(packed), dims, bytes(mask)
+    )
+    expected = native.dense_scan(q, rows)
     assert len(got) == len(expected)
     for g, e in zip(got, expected, strict=True):
         if e is None:
