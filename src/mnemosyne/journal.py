@@ -47,19 +47,29 @@ def _fsync_dir(path: Path) -> None:
 _SAFE_TENANT_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 
 
+def safe_tenant_filename(tenant_id: str, suffix: str) -> str:
+    """Map a tenant id to a filesystem-safe filename ``<tenant_id><suffix>``.
+
+    Filesystem-safe ids (``^[A-Za-z0-9][A-Za-z0-9._-]*$``, and not ``.`` or
+    ``..``) map verbatim to ``<tenant_id><suffix>``, preserving existing
+    filenames for every sane id. Anything else (path separators, traversal
+    sequences, leading dots, empty strings, ...) maps to the stable hashed
+    name ``t-<sha256(tenant_id)[:32]><suffix>`` so a hostile tenant id can
+    never name a file outside the target directory. Shared by the per-tenant
+    CID journals (``.journal``) and SqliteEngine tenant databases (``.db``).
+    """
+    if tenant_id not in (".", "..") and _SAFE_TENANT_ID.fullmatch(tenant_id):
+        return f"{tenant_id}{suffix}"
+    return "t-" + hashlib.sha256(tenant_id.encode()).hexdigest()[:32] + suffix
+
+
 def journal_filename(tenant_id: str) -> str:
     """Map a tenant id to a filesystem-safe journal filename.
 
-    Filesystem-safe ids (``^[A-Za-z0-9][A-Za-z0-9._-]*$``, and not ``.`` or
-    ``..``) map verbatim to ``<tenant_id>.journal``, preserving existing
-    journal filenames for every sane id. Anything else (path separators,
-    traversal sequences, leading dots, empty strings, ...) maps to the stable
-    hashed name ``t-<sha256(tenant_id)[:32]>.journal`` so a hostile tenant id
-    can never name a file outside the journal directory.
+    Thin wrapper over :func:`safe_tenant_filename` with the ``.journal``
+    suffix; the containment rule and resulting filenames are unchanged.
     """
-    if tenant_id not in (".", "..") and _SAFE_TENANT_ID.fullmatch(tenant_id):
-        return f"{tenant_id}.journal"
-    return "t-" + hashlib.sha256(tenant_id.encode()).hexdigest()[:32] + ".journal"
+    return safe_tenant_filename(tenant_id, ".journal")
 
 
 @dataclass
