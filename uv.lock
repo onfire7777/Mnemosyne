@@ -350,7 +350,6 @@ dev = [
 
 [[package]]
 name = "mnemosyne-native"
-version = "0.1.0"
 source = { directory = "rust/mnemosyne-native" }
 
 [[package]]

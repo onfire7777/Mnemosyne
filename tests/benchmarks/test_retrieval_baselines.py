@@ -80,8 +80,11 @@ def _gate(name: str, seconds: float) -> None:
         # capture_baselines.py is re-capturing: the mean just measured becomes
         # the new baseline, so comparing it against the committed (possibly
         # intentionally-changed or previously-contaminated) baseline would
-        # veto the very re-capture that fixes it.
-        return
+        # veto the very re-capture that fixes it. Skip VISIBLY (not a silent
+        # return) so a capture run shows these as skipped, never as "passed a
+        # gate". The benchmark stats were already recorded by the benchmark
+        # fixture before this call, so the capture JSON still gets its means.
+        pytest.skip("baseline capture mode: relative-regression gate bypassed")
     if not BASELINES.exists():
         pytest.skip("baselines.json not captured yet (run tests/benchmarks/capture_baselines.py)")
     baseline = json.loads(BASELINES.read_text())[name]

@@ -1,5 +1,7 @@
 [package]
 name = "mnemosyne-native"
+# Single source of truth for the wheel version too: pyproject.toml declares
+# `dynamic = ["version"]` and maturin reads this field.
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.85"
