@@ -6,8 +6,10 @@
 
 use pyo3::prelude::*;
 
+mod dense;
 mod hashing;
 mod lexical;
+mod mmr;
 mod tokenize;
 
 #[pyfunction]
@@ -24,5 +26,8 @@ fn mnemosyne_native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(lexical::lexical_score, m)?)?;
     m.add_function(wrap_pyfunction!(lexical::lexical_scan, m)?)?;
     m.add_function(wrap_pyfunction!(lexical::_ln, m)?)?;
+    m.add_function(wrap_pyfunction!(dense::cosine, m)?)?;
+    m.add_function(wrap_pyfunction!(dense::dense_scan, m)?)?;
+    m.add_function(wrap_pyfunction!(mmr::mmr_select_indices, m)?)?;
     Ok(())
 }

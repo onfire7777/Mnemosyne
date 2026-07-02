@@ -3,10 +3,11 @@
 Every comparison is on struct.pack('<d') bytes — parity means BITS, not ==.
 (Python float == would conflate NaN and blur ±0.0; byte comparison does not.)
 
-Covers Phase-1 Tasks 2–3: hashing_embedding, tokenize, lexical_score /
-lexical_scan, plus the single documented transcendental exception: the `ln`
-inside lexical_score must match CPython's math.log bit-for-bit (proven by the
-tf=1..10_000 loop below via the test-only native._ln helper).
+Covers Phase-1 Tasks 2–5: hashing_embedding, tokenize, lexical_score /
+lexical_scan, cosine / dense_scan, mmr_select_indices, plus the single
+documented transcendental exception: the `ln` inside lexical_score must match
+CPython's math.log bit-for-bit (proven by the tf=1..10_000 loop below via the
+test-only native._ln helper).
 """
 from __future__ import annotations
 
@@ -20,6 +21,7 @@ native = pytest.importorskip("mnemosyne_native")
 
 from mnemosyne.text import (  # noqa: E402
     _hashing_embedding_cached,
+    cosine,
     lexical_score,
     tokenize,
 )
@@ -136,3 +138,130 @@ def test_ln_matches_math_log_bitwise_property(tf):
     assert struct.pack("<d", native._ln(float(tf))) == struct.pack(
         "<d", math.log(tf)
     )
+
+
+# --- Task 4: cosine / dense_scan --------------------------------------------
+
+
+floats = st.floats(allow_nan=False, allow_infinity=False, width=64)
+vecs = st.lists(floats, min_size=0, max_size=64)
+
+
+@given(vecs, vecs)
+@settings(max_examples=300, deadline=None)
+def test_cosine_bit_identical_incl_truncation(a, b):
+    assert struct.pack("<d", native.cosine(a, b)) == struct.pack("<d", cosine(a, b))
+
+
+def test_cosine_golden_truncation():
+    # zip(strict=False) semantics: silently truncate to the shorter input.
+    assert native.cosine([1.0, 2.0, 3.0], [4.0, 5.0]) == 14.0
+    assert native.cosine([], [1.0, 2.0]) == 0.0
+
+
+@given(vecs, st.lists(st.one_of(st.none(), vecs), min_size=0, max_size=20))
+@settings(max_examples=200, deadline=None)
+def test_dense_scan_matches_per_row_loop(q, rows):
+    expected = [None if r is None else cosine(q, r) for r in rows]
+    got = native.dense_scan(q, rows)
+    assert len(got) == len(expected)
+    for g, e in zip(got, expected, strict=True):
+        if e is None:
+            assert g is None
+        else:
+            assert struct.pack("<d", g) == struct.pack("<d", e)
+
+
+# --- Task 5: mmr_select_indices ---------------------------------------------
+
+
+def _reference_mmr(base_scores, vectors, query_vec, k, mmr_lambda):
+    """Pure mirror of algorithms.mmr_select over pre-materialized vectors.
+
+    THE oracle for the native kernel — line-for-line faithful to the pure
+    code: two-statement objective (`lam * rel - (1.0 - lam) * penalty` THEN
+    `+= base`), strict `>` argmax (first-wins on input index), penalty SKIPS
+    None vectors of selected items and stays 0.0 when all of them are None.
+    """
+    selected: list[int] = []
+    remaining = list(range(len(base_scores)))
+    while remaining and len(selected) < k:
+        best = None
+        best_score = float("-inf")
+        for i in remaining:
+            vec = vectors[i]
+            relevance = cosine(query_vec, vec) if vec is not None else 0.0
+            diversity_penalty = 0.0
+            if selected and vec is not None:
+                selected_vectors = [v for j in selected if (v := vectors[j]) is not None]
+                if selected_vectors:
+                    diversity_penalty = max(cosine(vec, sv) for sv in selected_vectors)
+            score = mmr_lambda * relevance - (1.0 - mmr_lambda) * diversity_penalty
+            score += base_scores[i]
+            if score > best_score:
+                best = i
+                best_score = score
+        if best is None:
+            break
+        selected.append(best)
+        remaining.remove(best)
+    return selected
+
+
+@given(
+    st.lists(floats, min_size=0, max_size=12),  # base_scores
+    st.data(),
+)
+@settings(max_examples=200, deadline=None)
+def test_mmr_select_indices_matches_reference(base_scores, data):
+    n = len(base_scores)
+    vectors = data.draw(
+        st.lists(
+            st.one_of(st.none(), st.lists(floats, min_size=3, max_size=3)),
+            min_size=n,
+            max_size=n,
+        )
+    )
+    k = data.draw(st.integers(min_value=0, max_value=n + 2))
+    lam = data.draw(st.floats(min_value=0.0, max_value=1.0, allow_nan=False))
+    q = data.draw(st.lists(floats, min_size=3, max_size=3))
+    assert native.mmr_select_indices(base_scores, vectors, q, k, lam) == _reference_mmr(
+        base_scores, vectors, q, k, lam
+    )
+
+
+def test_mmr_ties_first_wins_on_input_order():
+    # identical base scores, no vectors: argmax ties resolve to lowest index
+    assert native.mmr_select_indices(
+        [5.0, 5.0, 5.0], [None, None, None], [1.0], 2, 0.7
+    ) == [0, 1]
+
+
+def test_mmr_penalty_skips_none_selected_vectors():
+    # Selected item 0 has NO vector => later candidates see ZERO diversity
+    # penalty (the pure comprehension skips None vectors of selected items;
+    # empty => penalty stays 0.0). Ranking is then lam*relevance + base only.
+    base = [10.0, 0.0, 0.0]
+    vectors = [None, [1.0, 0.0, 0.0], [0.9, 0.0, 0.0]]
+    q = [1.0, 0.0, 0.0]
+    got = native.mmr_select_indices(base, vectors, q, 3, 0.5)
+    assert got == _reference_mmr(base, vectors, q, 3, 0.5)
+    assert got == [0, 1, 2]
+
+
+def test_mmr_k_nonpositive_or_exhaustion():
+    # k <= 0 selects nothing (mirrors `len(selected) < k` in the pure loop);
+    # k > n exhausts remaining and returns all indices in selection order.
+    assert native.mmr_select_indices([1.0], [None], [], 0, 0.5) == []
+    assert native.mmr_select_indices([1.0], [None], [], -1, 0.5) == []
+    assert native.mmr_select_indices(
+        [0.0, 1.0], [None, None], [1.0, 2.0, 3.0], 5, 0.3
+    ) == [1, 0]
+
+
+def test_mmr_rejects_length_mismatch():
+    # Kernel contract: vectors are PRE-materialized 1:1 with base_scores
+    # (Task 6 owns materialization). A mismatch is a caller bug, not a
+    # truncation case.
+    with pytest.raises(ValueError):
+        native.mmr_select_indices([1.0, 2.0], [None], [1.0], 1, 0.5)
