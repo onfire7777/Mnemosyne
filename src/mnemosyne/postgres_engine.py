@@ -24,7 +24,7 @@ from mnemosyne.access_policy import (
     vector_partition_for_item,
 )
 from mnemosyne.algorithms import fit_budget, mmr_select, ppr_power_iteration, rrf_fuse, u_curve_order
-from mnemosyne.calibration import CalibrationSet, conformal_threshold, should_abstain
+from mnemosyne.calibration import CalibrationSet
 from mnemosyne.consciousness import RealityMonitor
 from mnemosyne.engine import (
     _normalise_privacy_tags,
@@ -47,6 +47,7 @@ from mnemosyne.models import (
     parse_dt,
     utc_now,
 )
+from mnemosyne.pipeline import run_retrieval_pipeline
 from mnemosyne.policy import OperatingPolicy
 from mnemosyne.postgres_security import assert_postgres_safe_role, postgres_safe_role_required
 from mnemosyne.privacy import ErasureMode
@@ -55,18 +56,9 @@ from mnemosyne.retrieval import (
     LocalSimilarityReranker,
     QUERY_SUPPORT_THRESHOLD,
     RetrievalAdapters,
-    activation_explain,
-    answer_grounding_floor_report,
-    apply_workspace_retrieval_advisory,
-    apply_activation_scores,
-    gist_support_report,
     is_retired_summary_metadata,
     query_support,
-    schema_fast_path_rerank,
-    semantic_entropy,
-    strip_workspace_broadcast_filter,
     validate_adapter_hit_scope,
-    workspace_broadcast_from_context,
 )
 from mnemosyne.security import TrustTier, is_write_tainted, sanitize_retrieved_text, trust_weight
 from mnemosyne.standing import (
@@ -2305,137 +2297,22 @@ class PostgresEngine:
                 )
                 return [_row_to_assertion(row) for row in cur.fetchall()]
 
+    #: explain["channels"] key names consumed by the shared pipeline.
+    retrieval_explain_channel_keys: tuple[str, str, str] = (
+        "postgres_dense",
+        "postgres_lexical",
+        "postgres_graph_ppr",
+    )
+
     def retrieve(self, query: str, tenant_id: str, branch: str = "main", deep: bool = False, filt: dict[str, Any] | None = None) -> RetrievalResult:
-        workspace_broadcast = workspace_broadcast_from_context(filt)
-        effective_filter = strip_workspace_broadcast_filter(filt)
-        effective_filter.update({"tenant_id": tenant_id, "branch": branch})
-        k = self.policy.deep_top_k if deep else self.policy.top_k
-        dense = self.vector_search(query, self.policy.rerank_width, effective_filter)
-        lexical = self.lexical_search(query, self.policy.rerank_width, effective_filter)
-        graph = (
-            self.graph_ppr(tokenize(query), max(4, k // 2), tenant_id=tenant_id, branch=branch, filt=effective_filter)
-            if deep
-            else []
-        )
-        fused = self._rrf([dense, lexical, graph], k=max(k * 2, self.policy.rerank_width))
-        reranked = self.adapters.reranker.rerank(query, fused, k=max(k * 2, k))
-        reranked, schema_fast_path = schema_fast_path_rerank(query, reranked, self.policy)
-        diversified = self._mmr(query, reranked, k=max(k, 1))
-        activated = self._apply_standing_scores(apply_activation_scores(diversified, self.policy))
-        ordered = self._u_curve_order(activated)
-        ordered, schema_fast_path_final = schema_fast_path_rerank(query, ordered, self.policy)
-        schema_fast_path = self._merge_schema_fast_path_reports(schema_fast_path, schema_fast_path_final)
-        ordered, workspace_retrieval_advisory = apply_workspace_retrieval_advisory(
-            ordered,
-            filt,
+        return run_retrieval_pipeline(
+            self,
+            query=query,
             tenant_id=tenant_id,
             branch=branch,
+            deep=deep,
+            filt=filt,
             policy=self.policy,
-        )
-        budgeted, used_tokens = self._fit_budget(ordered, self.policy.token_budget)
-        budgeted = self._mark_retrieved_text_as_data(budgeted)
-        read_marks = self._record_retrieval_access(budgeted)
-        support_report = query_support(query, budgeted)
-        insufficient_support = support_report["score"] < QUERY_SUPPORT_THRESHOLD
-        confidence = self._confidence(query, budgeted, support_score=support_report["score"])
-        calibration = self._calibration_for(tenant_id, "fact")
-        threshold = conformal_threshold(calibration) if calibration else self.policy.abstention_threshold
-        prediction_set_size = self._prediction_set_size(budgeted, threshold)
-        entropy = semantic_entropy([hit.text for hit in budgeted])
-        gist_support = gist_support_report(budgeted)
-        gist_only = bool(gist_support["applied"])
-        reality_monitoring = self._reality_monitoring_report(budgeted)
-        standing_report = reality_monitoring["standing"]
-        ungrounded_reality_only = bool(standing_report["abstention_gate"]["active"])
-        if ungrounded_reality_only != bool(reality_monitoring["ungrounded_only"]):
-            raise AssertionError("Standing P1 mirror diverged from reality-monitoring abstention gate")
-        answer_grounding_floor = answer_grounding_floor_report(budgeted, self.policy)
-        answer_grounding_floor_active = bool(answer_grounding_floor["active"])
-        if gist_only:
-            confidence = min(confidence, threshold * 0.95)
-        if ungrounded_reality_only:
-            confidence = min(confidence, threshold * 0.95)
-        if answer_grounding_floor_active:
-            confidence = min(confidence, threshold * 0.95)
-        if calibration:
-            abstained = (
-                should_abstain(confidence, calibration, prediction_set_size=prediction_set_size)
-                or insufficient_support
-                or gist_only
-                or ungrounded_reality_only
-                or answer_grounding_floor_active
-            )
-        else:
-            abstained = (
-                confidence < threshold
-                or prediction_set_size == 0
-                or insufficient_support
-                or gist_only
-                or ungrounded_reality_only
-                or answer_grounding_floor_active
-            )
-        if gist_only:
-            note = "Only gist-tier memory support was retrieved; inspect source evidence before answering."
-        elif ungrounded_reality_only:
-            note = (
-                "Retrieved support has low groundedness or insufficient independent "
-                "external support; abstaining until grounded evidence is available."
-            )
-        elif answer_grounding_floor_active:
-            note = (
-                "Retrieved support is dominated by low-grounded self-generated content; "
-                "flagging as hypothesis and abstaining until grounded support is available."
-            )
-        elif insufficient_support:
-            note = "Retrieved evidence did not cover enough query terms; abstaining until stronger support is available."
-        elif abstained:
-            note = "Evidence is too thin, low-trust, or conflicting for a confident answer."
-        else:
-            note = None
-        return RetrievalResult(
-            query=query,
-            hits=budgeted,
-            confidence=confidence,
-            abstained=abstained,
-            uncertainty_note=note,
-            token_budget=self.policy.token_budget,
-            used_tokens=used_tokens,
-            explain={
-                "channels": {
-                    "postgres_dense": len(dense),
-                    "postgres_lexical": len(lexical),
-                    "postgres_graph_ppr": len(graph),
-                },
-                "rrf_k": self.policy.rrf_k,
-                "mmr_lambda": self.policy.mmr_lambda,
-                "activation": activation_explain(budgeted, self.policy),
-                "calibration": self._calibration_explain(calibration, threshold),
-                "confidence": {
-                    "score": confidence,
-                    "answer_score": confidence,
-                    "prediction_set_size": prediction_set_size,
-                    "threshold": threshold,
-                    "source": "conformal" if calibration else "evidence_quality",
-                    "query_support": support_report,
-                },
-                "semantic_entropy": entropy,
-                "gist_support": gist_support,
-                "reality_monitoring": reality_monitoring,
-                "standing": standing_report,
-                "answer_grounding_floor": answer_grounding_floor,
-                "schema_fast_path": schema_fast_path,
-                "workspace_broadcast": workspace_broadcast,
-                "workspace_retrieval_advisory": workspace_retrieval_advisory,
-                "read_marks": read_marks,
-                "adapters": {
-                    "embedding": self.adapters.embedding.name,
-                    "embedding_dims": self.adapters.embedding.dims,
-                    "reranker": self.adapters.reranker.name,
-                    "lexical_backend": self.adapters.lexical_backend,
-                    "graph_backend": self.adapters.graph_backend,
-                },
-                "rails": self.policy.immutable_rails,
-            },
         )
 
     def set_calibration(self, calibration: CalibrationSet) -> None:
