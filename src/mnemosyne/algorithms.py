@@ -13,6 +13,7 @@ import copy
 from collections import defaultdict
 from collections.abc import Callable, Collection, Mapping
 
+from mnemosyne import text
 from mnemosyne.retrieval import Hit
 from mnemosyne.text import approx_tokens, cosine
 
@@ -126,10 +127,21 @@ def mmr_select(
     engines stay behaviorally divergent via ``embed_hit`` —
     LocalMemoryEngine passes its security-gated
     ``_embedding_for_hit(hit, allow_fallback=True)`` path, PostgresEngine
-    passes ``hashing_embedding(hit.text)``. Selected-item vectors are
-    recomputed inside every candidate loop on purpose: byte parity with the
-    shipped engines over speed in this phase — do not cache.
+    passes ``hashing_embedding(hit.text)``. In the pure loop below,
+    selected-item vectors are recomputed inside every candidate loop on
+    purpose: byte parity with the shipped engines over speed — do not cache.
+    The native fast path instead materializes ``embed_hit`` exactly once per
+    hit and delegates to the byte-parity-proven ``mmr_select_indices`` kernel.
     """
+    if text.NATIVE is not None:
+        # Index-aligned 1:1 with hits (the kernel raises ValueError on a
+        # length mismatch); one embed_hit call per hit preserves the
+        # one-metadata-side-effect-per-hit behavior of embedding sourcing.
+        vectors = [embed_hit(hit) for hit in hits]
+        indices = text.NATIVE.mmr_select_indices(
+            [hit.score for hit in hits], vectors, query_vec, k, mmr_lambda
+        )
+        return [hits[i] for i in indices]
     selected: list[Hit] = []
     remaining = list(hits)
     while remaining and len(selected) < k:

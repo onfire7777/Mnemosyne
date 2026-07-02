@@ -55,6 +55,13 @@ Realized over these concrete loci:
   `--queue-tenant` on `python -m mnemosyne.cli`.
 - **`MNEMOSYNE_POSTGRES_DSN`** — Postgres connection string for the `postgres`
   backend.
+- **`MNEMOSYNE_PURE`** — set to `1` to force the pure-Python kernel path:
+  `mnemosyne.text` then skips importing the optional `mnemosyne_native`
+  extension at import time (`NATIVE = None`); unset, the native kernels are
+  active whenever the extension is installed. The two paths are
+  byte-parity-proven (`tests/test_native_parity.py`), so this selects speed,
+  never behavior; the `mnemosyne.native` logger states the active path once at
+  import.
 - **`MNEMOSYNE_BENCH_ABSOLUTE`** — set to `1` to opt the benchmark suite
   (`tests/benchmarks/`) into the absolute `§22.5` latency budgets
   (reference-machine nightly); unset, only the relative-regression gate runs
