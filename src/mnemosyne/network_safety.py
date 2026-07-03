@@ -5,7 +5,9 @@ from __future__ import annotations
 import http.client
 import ipaddress
 import socket
+import ssl
 import urllib.request
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlsplit
@@ -94,8 +96,8 @@ class _PinnedHTTPHandler(urllib.request.HTTPHandler):
 
 
 class _PinnedHTTPSHandler(urllib.request.HTTPSHandler):
-    def __init__(self, validated: ValidatedFetchUrl) -> None:
-        super().__init__()
+    def __init__(self, validated: ValidatedFetchUrl, context: ssl.SSLContext | None = None) -> None:
+        super().__init__(context=context)
         self._validated = validated
 
     def https_open(self, req):  # type: ignore[no-untyped-def]
@@ -135,6 +137,8 @@ def validate_fetch_url(
     *,
     allow_insecure_localhost: bool,
     purpose: str,
+    allow_internal_hosts: Iterable[str] = (),
+    allow_insecure_internal_hosts: Iterable[str] = (),
 ) -> ValidatedFetchUrl:
     parsed = urlsplit(url)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
@@ -145,22 +149,31 @@ def validate_fetch_url(
         explicit_port = parsed.port
     except ValueError as exc:
         raise ValueError(f"{purpose} port is invalid") from exc
+    normalized_host = _normalize_host(parsed.hostname)
+    internal_hosts = _normalized_hosts(allow_internal_hosts)
+    insecure_internal_hosts = _normalized_hosts(allow_insecure_internal_hosts)
+    allow_insecure_internal = (
+        parsed.scheme != "https" and normalized_host in insecure_internal_hosts
+    )
     if parsed.scheme != "https" and not (
         allow_insecure_localhost and is_loopback_host(parsed.hostname)
-    ):
+    ) and not allow_insecure_internal:
         raise ValueError(
-            f"{purpose} requires https unless insecure localhost is explicitly allowed"
+            f"{purpose} requires https unless insecure localhost is explicitly allowed "
+            "or the host is on the internal HTTP allowlist"
         )
     allow_loopback = (
         parsed.scheme != "https"
         and allow_insecure_localhost
         and is_loopback_host(parsed.hostname)
     )
+    allow_internal = normalized_host in internal_hosts or allow_insecure_internal
     port = explicit_port or (443 if parsed.scheme == "https" else 80)
     addresses = _resolve_allowed_addresses(
         parsed.hostname,
         port=port,
         allow_loopback=allow_loopback,
+        allow_internal=allow_internal,
         purpose=purpose,
     )
     return ValidatedFetchUrl(
@@ -179,12 +192,13 @@ def safe_urlopen(
     *,
     validated: ValidatedFetchUrl,
     timeout: float,
+    context: ssl.SSLContext | None = None,
 ):
     _validate_request_matches(request, validated)
     opener = urllib.request.build_opener(
         NoRedirectHandler(),
         _PinnedHTTPHandler(validated),
-        _PinnedHTTPSHandler(validated),
+        _PinnedHTTPSHandler(validated, context=context),
     )
     return opener.open(request, timeout=timeout)
 
@@ -194,6 +208,7 @@ def _resolve_allowed_addresses(
     *,
     port: int,
     allow_loopback: bool,
+    allow_internal: bool,
     purpose: str,
 ) -> tuple[str, ...]:
     try:
@@ -217,11 +232,27 @@ def _resolve_allowed_addresses(
             raise ValueError(f"{purpose} hostname resolved to invalid address: {address}") from exc
         if allow_loopback and ip.is_loopback:
             continue
+        if allow_internal and _is_allowed_internal_address(ip):
+            continue
         if not ip.is_global:
             raise ValueError(
                 f"{purpose} hostname must not resolve to private, loopback, link-local, reserved, or metadata addresses"
             )
     return tuple(resolved)
+
+
+def _is_allowed_internal_address(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    if ip.is_link_local or ip.is_multicast or ip.is_reserved or ip.is_unspecified:
+        return False
+    return bool(ip.is_private or ip.is_loopback)
+
+
+def _normalized_hosts(hosts: Iterable[str]) -> frozenset[str]:
+    return frozenset(filter(None, (_normalize_host(host) for host in hosts)))
+
+
+def _normalize_host(host: str) -> str:
+    return host.strip().lower().strip("[]")
 
 
 def _origin(scheme: str, host: str, explicit_port: int | None) -> str:
