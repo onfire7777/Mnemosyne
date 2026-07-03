@@ -4,8 +4,8 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: null
-last_updated: "2026-07-03T20:35:34Z"
-last_activity: 2026-07-03 — Branch `phase3/providers-consolidation` was rechecked clean and synchronized at `cf040ae19e413a3033148c05f4a201de65ecc40f`, with GitHub CI run `28681784399` passing for that head before this continuation. A fresh Tier-B custody refresh still exits `78`: no render env values are missing, but six provider manifest env refs remain blank/unset and 23 production input artifacts are missing from the external custody packet. Phase 8.1 profile/compose deliverables remain complete. Phase 8.5 supply-chain source hardening progressed: production registry images are tag+digest pinned, Vault/role-LLM/embedding helper HTTP calls now route through the shared `network_safety` guard with explicit internal-host allowlists, and a raw-egress policy test freezes the remaining explicit exceptions. Scanner evidence, deploy-time cosign verification, runtime default-deny egress evidence, and operator-captured bundles still keep the parent security items open. No Tier-B row is marked Done by this cleanup.
+last_updated: "2026-07-03T21:01:49Z"
+last_activity: 2026-07-03 — Branch `phase3/providers-consolidation` was rechecked clean and synchronized at `e7459090156b2e84df5bbf34bfc549719ffc0b6d`, with GitHub CI run `28682755372` passing for that head before this continuation. A fresh Tier-B custody refresh still exits `78`: no render env values are missing, but six provider manifest env refs remain blank/unset and 23 production input artifacts are missing from the external custody packet. Phase 8.1 profile/compose deliverables remain complete. Phase 8.5 source hardening progressed again: production registry images remain tag+digest pinned, Vault/role-LLM/embedding helper HTTP calls route through the shared `network_safety` guard, and `infra/scripts/verify-supply-chain.sh` now wires the required gitleaks, Trivy, Syft, Grype, and deploy-time cosign checks into an operator-retained external artifact gate. Scanner/signature evidence, runtime default-deny egress evidence, and operator-captured bundles still keep the parent security items open. No Tier-B row is marked Done by this cleanup.
 progress:
   total_phases: 9
   completed_phases: 7
@@ -32,8 +32,8 @@ Current status (2026-06-30): Mandatory Tier A source wirings are closed on `main
 
 Latest checkpoint (2026-07-03): The active branch is
 `phase3/providers-consolidation`, synchronized at
-`cf040ae19e413a3033148c05f4a201de65ecc40f`, with GitHub CI run
-`28681784399` passing for that head before this continuation. The GSD roadmap
+`e7459090156b2e84df5bbf34bfc549719ffc0b6d`, with GitHub CI run
+`28682755372` passing for that head before this continuation. The GSD roadmap
 counters still match `.planning/ROADMAP.md`: 7 of 9 phases complete and 14 of
 15 tracked plan files complete, with Phase 6 still production-evidence-gated
 and Phase 8 still open. Fresh Tier-B custody refresh against
@@ -49,8 +49,12 @@ deliverables are now checked off: both profiles point at the retained
 tests pass locally. Phase 8.5 supply-chain hardening now also has source-owned
 digest pinning: every committed production registry image is tag+digest pinned
 in `infra/docker-compose.prod.yml`, and the compose policy suite rejects
-tag-only registry images. Scanner evidence and deploy-time cosign verification
-remain required before the parent item can be checked off. Do not copy ignored
+tag-only registry images. It now also ships
+`infra/scripts/verify-supply-chain.sh`, a fail-closed deploy-time gate that
+requires an external output directory, gitleaks git/tree scans, Trivy
+filesystem/image scans, Syft SBOMs, Grype vulnerability scans, and cosign
+verification for tag+digest registry images. Scanner/signature output must
+still be operator-retained before the parent item can be checked off. Do not copy ignored
 local files such as
 `production-inputs/provenance-trust-suite.json` into the custody packet;
 production rows remain Partial until real operator-captured bundles pass

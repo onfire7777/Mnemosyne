@@ -140,7 +140,8 @@ byte-binding). The work is closing **intent-vs-enforcement** gaps and shipping *
     evidence.
 - **Host/container:** policy-as-code CI gate (fail on `docker.sock` mount, `privileged`, unpinned
   image, secret-in-env, missing `read_only`/`cap_drop:[ALL]`/non-root/`no-new-privileges`/limits);
-  **digest-pin every image**; Trivy/Grype/Syft + gitleaks required gates; cosign verify-at-deploy.
+  **digest-pin every image**; `infra/scripts/verify-supply-chain.sh` runs gitleaks, Trivy,
+  Syft, Grype, and deploy-time cosign verification before Tier-B capture.
 - **Privilege separation:** split Mnemosyne into an edge API/MCP container (no secrets/data) and a back
   consolidator (sole KMS + write authority); no container holds edge+data+secrets at once.
 - **Data:** mandatory AES-GCM at rest; **per-tenant-scoped** crypto-shred keys (not a wildcard delete);
