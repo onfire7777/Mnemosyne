@@ -1,0 +1,18 @@
+groups:
+  - name: mnemosyne-production-tripwires
+    interval: 30s
+    rules:
+      - alert: MnemosyneOpsReportStale
+        expr: time() - mnemosyne_ops_report_timestamp_seconds > 300
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Mnemosyne ops report timestamp is stale
+      - alert: MnemosyneReleaseGateOpen
+        expr: mnemosyne_release_gate_open == 1
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: Mnemosyne production release gate is open

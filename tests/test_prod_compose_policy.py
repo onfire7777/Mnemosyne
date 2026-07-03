@@ -31,6 +31,23 @@ SOLE_INGRESS = "caddy"
 # Data-plane services must be isolated from the edge network.
 DATASEC_ONLY = {"postgres", "vault"}
 
+EXPECTED_SERVICES = {
+    "caddy",
+    "step-ca",
+    "postgres",
+    "embedder",
+    "keycloak",
+    "vault",
+    "seaweedfs",
+    "victoriametrics",
+    "vmalert",
+    "grafana",
+    "mnemo-api",
+    "mnemo-consolidator",
+    "ollama",
+    "operator",
+}
+
 
 def _compose_text() -> str:
     return COMPOSE.read_text(encoding="utf-8")
@@ -80,6 +97,18 @@ def test_every_service_inherits_the_hardened_anchor() -> None:
     assert services, "no services parsed from docker-compose.prod.yml"
     missing = [name for name, block in services.items() if "<<: *hardened" not in block]
     assert not missing, f"services missing the hardened anchor: {missing}"
+
+
+def test_expected_phase8_services_are_present() -> None:
+    services = set(_service_blocks(_compose_text()))
+    missing = EXPECTED_SERVICES - services
+    assert not missing, f"production compose is missing Phase 8 services: {sorted(missing)}"
+
+
+def test_profiles_retain_forbid_local_guidance() -> None:
+    for profile in ("self-hosted.env", "cloud.env"):
+        text = (INFRA / "profiles" / profile).read_text(encoding="utf-8").lower()
+        assert "forbid_local:true" in text or "forbid_local: true" in text
 
 
 def test_docker_socket_is_never_mounted() -> None:

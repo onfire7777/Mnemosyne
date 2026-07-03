@@ -45,7 +45,7 @@ corrected an earlier "phantom stack" (ParadeDB/AGE/Dex/OpenBao) back to the depl
 
 ## Ordered action checklist for the loop
 1. **Maintain the ledger**: Phase 8 is recorded in `.planning/ROADMAP.md`, `.planning/MILESTONES.md`, and `.planning/STATE.md`; keep those entries subordinate to `.planning/ACTIVE-GOAL-OPERATING-CONTRACT.md` and do not mark any Tier-B row Done without retained production evidence.
-2. **Prune stale docs** (archive, don't delete): `docs/CODEX-RECONCILIATION.md`, `docs/BLUEPRINT-COMPLETION-PLAN.md`, `docs/STATE-OF-COMPLETION.md`, `docs/TIER-B-LOCAL-REAL-SERVICE-EVIDENCE-2026-06-24.md`, `.planning/INGEST-CONFLICTS.md`, `REVIEW.md` → `docs/_archive/`. (Keep the two ROADMAPs split.)
+2. **Prune stale docs** (archive, don't delete): done 2026-07-03. The named stale files now live under `docs/_archive/2026-07-03/` for audit/history only. (Keep the two ROADMAPs split.)
 3. **Implement the 16 security must-dos** (`08-SECURITY-FINDINGS.md`) — start with #9 (policy-as-code CI) and #2/#3 (fail-closed auth + RLS roles). These are prerequisites to a *trustworthy* capture.
 4. **Execute Phase 8.1–8.6** (`08-01-PLAN.md`): profiles + prod compose → models/retrieval wiring → identity/secrets/TLS → object-store/obs → security → capture.
 5. **Capture B1–B8 + B10** via `infra/PRODUCTION-EVIDENCE.md` (render → preflight → capture → verify → release-audit); flip each row Partial→Done on **real** evidence.
