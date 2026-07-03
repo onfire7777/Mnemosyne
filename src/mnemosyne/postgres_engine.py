@@ -32,6 +32,7 @@ from mnemosyne.engine import (
     _privacy_backfill_controls,
     _privacy_backfill_metadata,
 )
+from mnemosyne.erasure_ids import erasure_deletion_record_id
 from mnemosyne.ids import evidence_cid, evidence_unscoped_cid
 from mnemosyne.models import (
     Assertion,
@@ -3207,7 +3208,7 @@ class PostgresEngine:
                 self._set_tenant(cur, db_tenant_id)
                 cur.execute(
                     """
-                    SELECT cid, source_type, trust_tier, capability_tags, metadata
+                    SELECT cid, source_type, trust_tier, capability_tags, metadata, user_id
                     FROM evidence
                     WHERE tenant_id = %s AND branch = %s AND cid = %s
                     """,
@@ -3414,12 +3415,27 @@ class PostgresEngine:
                     else:
                         cur.execute("DELETE FROM entities WHERE id = %s", (row["id"],))
                         propagated["removed_entities"].append(row["canonical"])
+                # Spec §7 privacy invariant 13: the retained deletion record for a
+                # hard delete must not carry the cid (a salted sha256 of the content,
+                # so sha256(guess) could confirm it). Store a non-recomputable HMAC id
+                # instead; tombstone_recompute keeps the cid (the tombstone row lives).
+                if mode is ErasureMode.HARD_DELETE_LEGAL:
+                    deletion_cid_value = bytes.fromhex(
+                        erasure_deletion_record_id(cid, tenant_id, evidence_row.get("user_id") or "")
+                    )
+                else:
+                    deletion_cid_value = cid_bytes
                 cur.execute(
                     """
                     INSERT INTO deletion_log(tenant_id, evidence_cid, requested_by, propagated)
                     VALUES (%s, %s, %s, %s)
                     """,
-                    (db_tenant_id, cid_bytes, requested_by, self._jsonb({**propagated, "erasure_mode": mode.value})),
+                    (
+                        db_tenant_id,
+                        deletion_cid_value,
+                        requested_by,
+                        self._jsonb({**propagated, "erasure_mode": mode.value}),
+                    ),
                 )
                 self._audit(
                     cur,

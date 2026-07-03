@@ -244,13 +244,19 @@ def test_insert_evidence_requires_cid(tmp_path: Path):
 # --- protocol stubs ---------------------------------------------------------
 
 
-def test_unimplemented_surfaces_name_their_task(tmp_path: Path):
+def test_all_engine_surfaces_are_implemented(tmp_path: Path):
     engine = SqliteEngine(tmp_path / "root")
     # Task 3 ledger + Task 4 scan surfaces + Task 5 assertion/bitemporal/write
-    # surfaces + Task 6 branch/merge/discard + Task 7 retrieve pipeline are
-    # implemented; only the erasure (Task 9) surface remains stubbed.
+    # surfaces + Task 6 branch/merge/discard + Task 7 retrieve pipeline + Task 9
+    # erasure are all implemented — no MemoryEngine surface remains stubbed.
     from mnemosyne.models import RetrievalResult
 
     assert isinstance(engine.retrieve("q", "t1"), RetrievalResult)
-    with pytest.raises(NotImplementedError, match="Task 9"):
-        engine.forget("t1", "a" * 64)
+    # forget no longer raises NotImplementedError; a missing cid returns the
+    # Local-parity not-found result.
+    assert engine.forget("t1", "a" * 64) == {
+        "erased": False,
+        "reason": "evidence_not_found",
+        "cid": "a" * 64,
+        "erasure_mode": "tombstone_recompute",
+    }
