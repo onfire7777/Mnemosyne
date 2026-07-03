@@ -6224,6 +6224,88 @@ def production_bundle_ops_stdout(command: str) -> dict:
     }
 
 
+def production_mcp_ops_stdout() -> dict:
+    transport_checks = [
+        {
+            "name": "http_json_rpc",
+            "ok": True,
+            "transport": "http-json-rpc",
+            "url_present": True,
+            "local_url": False,
+            "loop_count": 4,
+            "avg_latency_ms": 120.0,
+            "p95_latency_ms": 250.0,
+            "auth_token_configured": True,
+            "session_token_configured": True,
+            "missing_controls": [],
+        },
+        {
+            "name": "streamable_http",
+            "ok": True,
+            "transport": "mcp-sdk-streamable-http",
+            "url_present": True,
+            "local_url": False,
+            "loop_count": 4,
+            "avg_latency_ms": 110.0,
+            "p95_latency_ms": 240.0,
+            "auth_token_configured": True,
+            "session_token_configured": True,
+            "missing_controls": [],
+        },
+    ]
+    redaction_flags = {
+        "raw_tokens_omitted": True,
+        "raw_session_tokens_omitted": True,
+        "raw_requests_omitted": True,
+        "raw_responses_omitted": True,
+    }
+    return {
+        "ok": True,
+        "bundle": {
+            "name": "production-mcp-ops",
+            "http_transport_present": True,
+            "streamable_transport_present": True,
+            "legacy_sse_present": True,
+        },
+        "requirements": {
+            "min_loops": 3,
+            "max_avg_latency_ms": 750.0,
+            "max_p95_latency_ms": 1500.0,
+            "min_cert_days": 30.0,
+            "require_legacy_sse": True,
+            "min_sse_events": 1,
+            "require_client_cert": True,
+            "allow_localhost": False,
+        },
+        "checks": [
+            *transport_checks,
+            {
+                "name": "legacy_sse",
+                "ok": True,
+                "local_url": False,
+                "event_count": 3,
+                "endpoint_data_present": True,
+                "auth_token_configured": True,
+                "session_token_configured": True,
+            },
+            {
+                "name": "tls",
+                "ok": True,
+                "days_remaining": 90.0,
+                "client_certificate_required": True,
+            },
+            {
+                "name": "redaction",
+                "ok": True,
+                **redaction_flags,
+                "forbidden_raw_paths": [],
+            },
+        ],
+        "findings": [],
+        "redaction": {**redaction_flags, "forbidden_raw_fields_present": False},
+    }
+
+
 def production_ops_report_audit() -> dict:
     return {
         "hash_chain": {"provider": "vault-hmac", "verified": True, "retained": True},
@@ -6235,11 +6317,12 @@ def production_ops_report_audit() -> dict:
 def production_release_stdout(command: str, provider_stdout: dict) -> dict:
     if command == "provider-check":
         return provider_stdout
+    if command == "mcp-ops-check":
+        return production_mcp_ops_stdout()
     if command == "worker-ops-check":
         return production_worker_ops_stdout()
     if command in {
         "auth-ops-check",
-        "mcp-ops-check",
         "tls-lifecycle-ops-check",
         "retrieval-ops-check",
         "consolidation-ops-check",
@@ -9324,6 +9407,55 @@ def test_cli_release_audit_rejects_hollow_bundle_ops_evidence(tmp_path: Path) ->
     assert "checks" in messages
 
 
+def test_cli_release_audit_rejects_weak_mcp_ops_evidence(tmp_path: Path) -> None:
+    report_path, manifest_path = write_release_report(tmp_path)
+    stdout_json = production_mcp_ops_stdout()
+    stdout_json["requirements"]["allow_localhost"] = True
+    stdout_json["requirements"]["require_client_cert"] = False
+    for check in stdout_json["checks"]:
+        if check["name"] in {"http_json_rpc", "streamable_http"}:
+            check["local_url"] = True
+            check["auth_token_configured"] = False
+            check["session_token_configured"] = False
+        if check["name"] == "legacy_sse":
+            check["auth_token_configured"] = False
+            check["session_token_configured"] = False
+        if check["name"] == "tls":
+            check["client_certificate_required"] = False
+        if check["name"] == "redaction":
+            check["raw_session_tokens_omitted"] = False
+            check["forbidden_raw_paths"] = ["$.http_json_rpc.auth_token"]
+    rewrite_release_check_stdout(
+        report_path,
+        manifest_path,
+        command="mcp-ops-check",
+        stdout_json=stdout_json,
+    )
+
+    result = run_raw_cli(
+        tmp_path / "mnemosyne.json",
+        "release-audit",
+        "--evidence-manifest",
+        str(manifest_path),
+        "--require-production-validated",
+        "--require-provider-forbid-local",
+    )
+    payload = json.loads(result.stdout)
+    output_findings = [
+        finding
+        for finding in payload["findings"]
+        if finding["code"] == "required_mcp_ops_evidence_incomplete"
+    ]
+    messages = "\n".join(finding["message"] for finding in output_findings)
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert "mcp-ops-check must prove localhost transports are disallowed" in messages
+    assert "mcp-ops-check must prove client certificates are required" in messages
+    assert "mcp-ops-check http_json_rpc must prove bearer-token enforcement" in messages
+    assert "mcp-ops-check redaction flag raw_session_tokens_omitted is not proven" in messages
+
+
 def test_cli_release_audit_rejects_empty_worker_runtime_evidence(tmp_path: Path) -> None:
     report_path, _manifest_path = write_release_report(tmp_path)
     report = json.loads(report_path.read_text(encoding="utf-8"))
@@ -9796,6 +9928,11 @@ def test_cli_mcp_ops_check_validates_hosted_transport_bundle(tmp_path: Path) -> 
     assert report["bundle"]["http_transport_present"] is True
     assert report["bundle"]["streamable_transport_present"] is True
     assert report["redaction"]["forbidden_raw_fields_present"] is False
+    checks_by_name = {item["name"]: item for item in report["checks"]}
+    assert checks_by_name["http_json_rpc"]["auth_token_configured"] is True
+    assert checks_by_name["http_json_rpc"]["session_token_configured"] is True
+    assert checks_by_name["legacy_sse"]["auth_token_configured"] is True
+    assert checks_by_name["legacy_sse"]["session_token_configured"] is True
     assert "raw-secret-token" not in serialized
     assert acknowledged["ok"] is True
     assert acknowledged["expected_fingerprint_present"] is True

@@ -4,8 +4,8 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: null
-last_updated: "2026-07-03T22:16:57Z"
-last_activity: 2026-07-03 — Phase 8.2 source gating now makes `provider-check` collect embedding/reranker latency samples and makes production `release-audit` reject provider evidence that lacks repeated p95 timing for those checks. Prior query-prefix and audit-retention source gates remain intact. TEI/Infinity deployment, real cross-encoder evidence, real CPU P95 artifacts, scanner/signature evidence, runtime default-deny egress evidence, real Vault-HMAC/pgaudit/WORM artifacts, and operator-captured bundles still keep Phase 8/Tier-B rows open. No Tier-B row is marked Done.
+last_updated: "2026-07-03T22:33:05Z"
+last_activity: 2026-07-03 — Production `release-audit` now rejects weak `mcp-ops-check` evidence unless the replayed evidence proves hosted non-local transports, bearer-token enforcement, signed-session binding, client-certificate enforcement, transport health/control loops, latency bounds, and raw token/request/response redaction. Prior query-prefix, provider-latency, and audit-retention source gates remain intact. TEI/Infinity deployment, real cross-encoder evidence, real CPU P95 artifacts, scanner/signature evidence, runtime default-deny egress evidence, real Vault-HMAC/pgaudit/WORM artifacts, hosted MCP operator evidence, and operator-captured bundles still keep Phase 8/Tier-B rows open. No Tier-B row is marked Done.
 progress:
   total_phases: 9
   completed_phases: 7
