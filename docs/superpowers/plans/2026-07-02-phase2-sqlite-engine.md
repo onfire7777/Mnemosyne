@@ -8,6 +8,8 @@
 
 **Tech Stack:** Python 3.12 stdlib sqlite3 (verified: 3.50.x with `enable_load_extension` in the dev venv), optional `sqlite-vec` (new optional extra), existing `mnemosyne_native` kernels via `text.NATIVE`, hypothesis, honeytokens, CIDJournal, ProjectionRegistry.
 
+**Current status (2026-07-03):** Tasks 1-8 are implemented on local branch `phase2/sqlite-engine` through `789b5f9` (`feat(sqlite): subject-scoped embedding cache + registered rebuildable projections`). Remaining planned work starts at Task 9 (erasure wiring) and continues through the contract/CLI/drift, chaos, L4/ops, and benchmark exit gates. This branch is still local-only; do not treat it as remote CI-approved or production/operator-evidence complete.
+
 ## GROUNDING FILE (mandatory reading per task)
 
 `.superpowers/sdd/phase2-grounding.md` — verified facts with file:line evidence (2026-07-02). Section map: **R1**=branch/merge/as-of/queue; **R2**=L4 poison/drift/config; **R3**=persistence/projections/consolidation-contract; **R4**=erasure/forget/blocklist/partitions; **R5**=engine construction/scan/model surfaces; **R6**=ops-checks/observability/audit; **R7**=critic gaps (CR-03 IDs, dt_to_json, workspace filters, retrieve-pipeline inventory, contract-suite construction, schema conventions). Line anchors drift — re-grep every anchor before editing.
