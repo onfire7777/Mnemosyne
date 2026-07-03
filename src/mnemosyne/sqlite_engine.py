@@ -89,6 +89,7 @@ from mnemosyne.models import (
     Relation,
     RetrievalResult,
     dt_to_json,
+    parse_dt,
     utc_now,
 )
 from mnemosyne.policy import OperatingPolicy
@@ -1588,19 +1589,35 @@ class SqliteEngine:
     ) -> list[Assertion]:
         """Bitemporal read over the half-open [valid_from, valid_to) UTC window.
 
-        Coerces ``t`` to UTC exactly like Local, then serialises the moment with
-        :func:`mnemosyne.models.dt_to_json` (trailing ``"Z"``) so the TEXT
-        comparison is lexicographically sound against the ``dt_to_json`` columns
-        — a naive ``isoformat()`` ``"+00:00"`` parameter would sort the boundary
-        wrong (R7 Z-format regression). Tenant-optional like Local: with a tenant
-        the one file is queried; without one every tenant file is scanned. Rows
-        return as deep-copied ``Assertion`` objects sorted by ``valid_from``."""
+        Coerces ``t`` to UTC exactly like Local, loads the subject/predicate-scoped
+        candidate rows with the cheap indexable predicates (tenant, branch, subject,
+        predicate, status) in SQL, then applies the half-open ``[valid_from,
+        valid_to)`` window in Python via :func:`mnemosyne.models.parse_dt` — mirroring
+        :meth:`LocalMemoryEngine._valid_at` exactly. The window filter must run in
+        Python, NOT as a lexical TEXT comparison in SQL, because ``dt_to_json`` emits
+        variable-width fractional seconds (0 or 6 digits): ``'...00Z'`` sorts *after*
+        ``'...00.500000Z'`` lexically even though it precedes it chronologically, so a
+        SQL TEXT compare would include/exclude sub-second boundary rows differently
+        from the Local oracle (a byte-parity divergence). Tenant-optional like Local:
+        with a tenant the one file is queried; without one every tenant file is
+        scanned. Rows return as deep-copied ``Assertion`` objects sorted by
+        ``valid_from``."""
         moment = t.astimezone(UTC) if t.tzinfo else t.replace(tzinfo=UTC)
-        moment_param = dt_to_json(moment)
+
+        def _valid_at(valid_from: datetime | str | None, valid_to: datetime | str | None) -> bool:
+            start = parse_dt(valid_from)
+            end = parse_dt(valid_to)
+            if start is None:
+                return False
+            if start.tzinfo is None:
+                start = start.replace(tzinfo=UTC)
+            if end is not None and end.tzinfo is None:
+                end = end.replace(tzinfo=UTC)
+            return start <= moment and (end is None or moment < end)
+
         sql = (
             "SELECT * FROM assertions "
             "WHERE tenant_id = ? AND branch = ? AND subject = ? AND predicate = ? "
-            "AND valid_from <= ? AND (valid_to IS NULL OR valid_to > ?) "
             "AND status IN ('active', 'superseded', 'contested') "
             "ORDER BY valid_from ASC"
         )
@@ -1608,19 +1625,21 @@ class SqliteEngine:
         with self._lock:
             if tenant_id:
                 conn = self._connect(tenant_id)
-                rows = conn.execute(
-                    sql, (tenant_id, branch, subject, predicate, moment_param, moment_param)
-                ).fetchall()
-                matches.extend(_assertion_from_row(row) for row in rows)
+                rows = conn.execute(sql, (tenant_id, branch, subject, predicate)).fetchall()
+                for row in rows:
+                    assertion = _assertion_from_row(row)
+                    if _valid_at(assertion.valid_from, assertion.valid_to):
+                        matches.append(assertion)
             else:
                 for path in self._iter_tenant_db_paths():
                     conn, owned = self._borrow_conn(path)
                     try:
                         for (tid,) in conn.execute("SELECT DISTINCT tenant_id FROM assertions"):
-                            rows = conn.execute(
-                                sql, (tid, branch, subject, predicate, moment_param, moment_param)
-                            ).fetchall()
-                            matches.extend(_assertion_from_row(row) for row in rows)
+                            rows = conn.execute(sql, (tid, branch, subject, predicate)).fetchall()
+                            for row in rows:
+                                assertion = _assertion_from_row(row)
+                                if _valid_at(assertion.valid_from, assertion.valid_to):
+                                    matches.append(assertion)
                     finally:
                         if owned:
                             conn.close()

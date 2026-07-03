@@ -507,6 +507,80 @@ def test_as_of_valid_to_upper_boundary_is_half_open(tmp_path: Path):
     assert at_t2 == _as_of_projection(local.as_of("beacon", "is", T2, tenant_id=tenant))
 
 
+# --- mixed-precision (variable-width fractional seconds) regression ----------
+#
+# ``dt_to_json`` emits 0- or 6-digit fractional seconds, so a lexical TEXT
+# compare orders ``'...00Z'`` AFTER ``'...00.500000Z'`` even though it precedes
+# it chronologically. ``as_of`` must resolve the [valid_from, valid_to) window
+# in Python (``parse_dt``) so a whole-second moment brackets a sub-second bound
+# byte-identically to the Local oracle. These tests fail against a SQL TEXT
+# comparison and pass against the Python window.
+
+
+def test_as_of_mixed_precision_valid_from_window_parity_vs_local(tmp_path: Path):
+    """Sub-second ``valid_from``, whole-second moments on either side of it.
+
+    A lexical SQL compare would WRONGLY INCLUDE the row for the whole-second
+    moment BEFORE the sub-second lower bound (``'...00.500000Z' <= '...00Z'`` is
+    lexically true); the Python window excludes it, matching Local exactly."""
+    sqlite, local = _engines(tmp_path)
+    tenant = "t-mixedprec-vf"
+    vf = parse_dt("2026-03-15T12:00:00.500000Z")  # sub-second lower bound
+    for engine in (sqlite, local):
+        cid = _seed_evidence(engine, tenant, "Grounded note about the beacon.")
+        engine.upsert_assertion(_assertion(tenant, id="idM", object="cobalt", valid_from=vf, cids=[cid]))
+    assert dt_to_json(vf).endswith(".500000Z")  # 6-digit fraction stored
+
+    before = parse_dt("2026-03-15T12:00:00Z")  # whole second BEFORE vf (.5) → EXCLUDE
+    after = parse_dt("2026-03-15T12:00:01Z")  # whole second AFTER vf (.5) → INCLUDE
+
+    # (ii) whole-second moment BEFORE the sub-second valid_from → EXCLUDE.
+    assert _as_of_projection(sqlite.as_of("beacon", "is", before, tenant_id=tenant)) == _as_of_projection(
+        local.as_of("beacon", "is", before, tenant_id=tenant)
+    )
+    assert sqlite.as_of("beacon", "is", before, tenant_id=tenant) == []  # oracle excludes
+
+    # (i) whole-second moment AFTER the sub-second valid_from → INCLUDE.
+    assert _as_of_projection(sqlite.as_of("beacon", "is", after, tenant_id=tenant)) == _as_of_projection(
+        local.as_of("beacon", "is", after, tenant_id=tenant)
+    )
+    assert [row.id for row in sqlite.as_of("beacon", "is", after, tenant_id=tenant)] == ["idM"]
+
+    # Lower bound is inclusive at exactly the sub-second valid_from.
+    assert [row.id for row in sqlite.as_of("beacon", "is", vf, tenant_id=tenant)] == ["idM"]
+
+
+def test_as_of_mixed_precision_valid_to_boundary_parity_vs_local(tmp_path: Path):
+    """(iii) Symmetric sub-second ``valid_to``: a supersession whose incoming
+    ``valid_from`` carries microseconds sets the prior row's upper bound to a
+    sub-second timestamp. A lexical SQL compare would WRONGLY EXCLUDE the prior
+    row for the whole-second moment BEFORE that bound (``'...00.500000Z' > '...00Z'``
+    is lexically false); the Python window keeps it, matching Local exactly."""
+    sqlite, local = _engines(tmp_path)
+    tenant = "t-mixedprec-vt"
+    incoming_vf = parse_dt("2026-03-15T12:00:00.500000Z")  # becomes idA's sub-second valid_to
+    for engine in (sqlite, local):
+        cid = _seed_evidence(engine, tenant, "Grounded note about the beacon.")
+        engine.upsert_assertion(_assertion(tenant, id="idA", object="topaz", valid_from=T1, cids=[cid]))
+        engine.upsert_assertion(_assertion(tenant, id="idB", object="ruby", valid_from=incoming_vf, cids=[cid]))
+
+    before = parse_dt("2026-03-15T12:00:00Z")  # whole second BEFORE the .5 valid_to → idA still valid
+    after = parse_dt("2026-03-15T12:00:01Z")  # whole second AFTER the .5 valid_to → idA closed, idB open
+
+    # BEFORE the sub-second valid_to: idA (superseded) is still within [T1, .5).
+    assert _as_of_projection(sqlite.as_of("beacon", "is", before, tenant_id=tenant)) == _as_of_projection(
+        local.as_of("beacon", "is", before, tenant_id=tenant)
+    )
+    assert [row.id for row in local.as_of("beacon", "is", before, tenant_id=tenant)] == ["idA"]  # oracle keeps it
+    assert [row.id for row in sqlite.as_of("beacon", "is", before, tenant_id=tenant)] == ["idA"]
+
+    # AFTER the sub-second valid_to: idA is closed, only the open-ended idB remains.
+    assert _as_of_projection(sqlite.as_of("beacon", "is", after, tenant_id=tenant)) == _as_of_projection(
+        local.as_of("beacon", "is", after, tenant_id=tenant)
+    )
+    assert [row.id for row in sqlite.as_of("beacon", "is", after, tenant_id=tenant)] == ["idB"]
+
+
 # --- hostile branch (pinned T2/T3 handoff) -----------------------------------
 
 
