@@ -179,6 +179,33 @@ def test_http_embedding_openai_shape(monkeypatch: pytest.MonkeyPatch) -> None:
     assert provider.embed("hello") == pytest.approx([1.0, 0.0, 0.0])
 
 
+def test_http_embedding_posts_compact_mnemosyne_contract(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str, dict[str, object], str | None, float]] = []
+
+    def _capture(url: str, payload: dict[str, object], api_key: str | None, timeout: float) -> dict[str, object]:
+        calls.append((url, payload, api_key, timeout))
+        return {"embedding": [3.0, 4.0]}
+
+    monkeypatch.setattr("mnemosyne.retrieval._post_json", _capture)
+    provider = HttpEmbeddingProvider(
+        url="https://embed.test/embed",
+        model="embeddinggemma-300m-q",
+        api_key="secret-token",
+        dims=2,
+        timeout_seconds=7.5,
+    )
+
+    assert provider.embed("contract text") == pytest.approx([0.6, 0.8])
+    assert calls == [
+        (
+            "https://embed.test/embed",
+            {"input": "contract text", "model": "embeddinggemma-300m-q"},
+            "secret-token",
+            7.5,
+        )
+    ]
+
+
 def test_http_embedding_truncates_and_pads_to_target_dims(monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_post_json(monkeypatch, {"embedding": [1.0, 0.0, 0.0, 0.0]})
     assert HttpEmbeddingProvider(url="https://e.test", dims=2).embed("x") == pytest.approx([1.0, 0.0])
@@ -251,6 +278,38 @@ def test_http_reranker_generic_score_shape_and_top_n(monkeypatch: pytest.MonkeyP
     assert [hit.id for hit in ranked] == ["b", "c"]
 
 
+def test_http_reranker_posts_compact_mnemosyne_contract(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str, dict[str, object], str | None, float]] = []
+
+    def _capture(url: str, payload: dict[str, object], api_key: str | None, timeout: float) -> dict[str, object]:
+        calls.append((url, payload, api_key, timeout))
+        return {"results": [{"index": 1, "score": 0.75}, {"index": 0, "score": 0.25}]}
+
+    monkeypatch.setattr("mnemosyne.retrieval._post_json", _capture)
+    hits = [_hit("a", "first document", score=0.1), _hit("b", "second document", score=0.1)]
+    ranked = HttpReranker(
+        url="https://rerank.test/rerank",
+        model="jina-reranker-v1-turbo-en",
+        api_key="secret-token",
+        timeout_seconds=8.0,
+    ).rerank("contract query", hits, k=2)
+
+    assert [hit.id for hit in ranked] == ["b", "a"]
+    assert calls == [
+        (
+            "https://rerank.test/rerank",
+            {
+                "query": "contract query",
+                "documents": ["first document", "second document"],
+                "top_n": 2,
+                "model": "jina-reranker-v1-turbo-en",
+            },
+            "secret-token",
+            8.0,
+        )
+    ]
+
+
 def test_http_reranker_short_circuits_without_work(monkeypatch: pytest.MonkeyPatch) -> None:
     def _boom(*_args: object, **_kwargs: object) -> object:
         raise AssertionError("transport must not be called")
@@ -278,6 +337,27 @@ def test_http_reranker_rejects_bad_responses(
     hits = [_hit("a", "1", score=0.5), _hit("b", "2", score=0.5)]
     with pytest.raises(ValueError, match=match):
         HttpReranker(url="https://rr.test").rerank("q", hits, k=2)
+
+
+def test_http_failures_propagate_without_runtime_local_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _fail(*_args: object, **_kwargs: object) -> dict[str, object]:
+        raise ValueError("provider request failed: sidecar down")
+
+    monkeypatch.setenv("MNEMOSYNE_EMBEDDING_PROVIDER", "http")
+    monkeypatch.setenv("MNEMOSYNE_EMBEDDING_URL", "https://embed.test/embed")
+    monkeypatch.setenv("MNEMOSYNE_RERANKER_PROVIDER", "http")
+    monkeypatch.setenv("MNEMOSYNE_RERANKER_URL", "https://rerank.test/rerank")
+    monkeypatch.setattr("mnemosyne.retrieval._post_json", _fail)
+
+    adapters = retrieval_adapters_from_env()
+    assert isinstance(adapters.embedding, HttpEmbeddingProvider)
+    assert isinstance(adapters.reranker, HttpReranker)
+    with pytest.raises(ValueError, match="sidecar down"):
+        adapters.embedding.embed("no fallback to hashing")
+    with pytest.raises(ValueError, match="sidecar down"):
+        adapters.reranker.rerank("no fallback to local similarity", [_hit("a", "x", score=0.1)], k=1)
 
 
 # --------------------------------------------------------------------------- #
