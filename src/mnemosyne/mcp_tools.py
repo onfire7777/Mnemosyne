@@ -1633,6 +1633,23 @@ class MemoryTools:
             destructive=destructive,
             target_sink=target_sink,
         )
+        self.engine.record_audit_event(
+            None,
+            str(role),
+            "authorize_write",
+            None,
+            {
+                "operation": operation,
+                "allowed": decision.allowed,
+                "reason": decision.reason,
+                "source_trust_tier": source_trust_tier,
+                "destructive": destructive,
+                "target_sink": target_sink,
+            },
+            source="mcp_tools",
+            trust_tier=source_trust_tier,
+            capability_tags=["authz", "allowed" if decision.allowed else "denied"],
+        )
         if not decision.allowed:
             raise PermissionError(f"{operation} denied: {decision.reason}")
         return decision.to_dict()

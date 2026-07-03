@@ -655,12 +655,23 @@ def test_memory_tools_direct_branch_merge_discard_facades() -> None:
         for section in ("evidence", "assertions", "relations")
         for item in denied_export[section]
     )
-    assert len(engine.audit_log) == initial_audit_count
+    denied_auth_audits = engine.audit_log[initial_audit_count:]
+    assert len(denied_auth_audits) == 1
+    assert denied_auth_audits[0]["op"] == "authorize_write"
+    assert denied_auth_audits[0]["actor"] == "agent"
+    assert denied_auth_audits[0]["source"] == "mcp_tools"
+    assert denied_auth_audits[0]["trust_tier"] == 4
+    assert denied_auth_audits[0]["capability_tags"] == ["authz", "denied"]
+    assert denied_auth_audits[0]["diff"]["operation"] == "branch"
+    assert denied_auth_audits[0]["diff"]["allowed"] is False
+    assert denied_auth_audits[0]["diff"]["reason"] == "branch writes require normal-or-stronger source trust"
     with pytest.raises(PermissionError, match="branch promotion requires operator/consolidator authority"):
         tools.merge("denied-direct-merge", role="reader", source_trust_tier=0, tenant_id=TENANT)
     with pytest.raises(PermissionError, match="branch promotion requires operator/consolidator authority"):
         tools.discard("denied-direct-discard", role="reader", source_trust_tier=0, tenant_id=TENANT)
-    assert len(engine.audit_log) == initial_audit_count
+    denied_auth_audits = engine.audit_log[initial_audit_count:]
+    assert [item["diff"]["operation"] for item in denied_auth_audits] == ["branch", "merge", "discard"]
+    assert all(item["diff"]["allowed"] is False for item in denied_auth_audits)
 
     tools.branch(
         "low-trust-promotion-branch",
@@ -686,12 +697,16 @@ def test_memory_tools_direct_branch_merge_discard_facades() -> None:
     assert engine.get_evidence(TENANT, low_trust_cid, branch="main") is None
     assert engine.get_evidence(TENANT, low_trust_cid, branch="low-trust-promotion-branch") is not None
     assert "low-trust-promotion-branch" in engine.branches
-    assert len(engine.audit_log) == low_trust_audit_count
+    low_trust_auth_audits = engine.audit_log[low_trust_audit_count:]
+    assert [item["diff"]["operation"] for item in low_trust_auth_audits] == ["merge"]
+    assert low_trust_auth_audits[0]["diff"]["allowed"] is False
     with pytest.raises(PermissionError, match="branch promotion requires operator/consolidator authority"):
         tools.discard("low-trust-promotion-branch", role="operator", source_trust_tier=3, tenant_id=TENANT)
     assert engine.get_evidence(TENANT, low_trust_cid, branch="low-trust-promotion-branch") is not None
     assert "low-trust-promotion-branch" in engine.branches
-    assert len(engine.audit_log) == low_trust_audit_count
+    low_trust_auth_audits = engine.audit_log[low_trust_audit_count:]
+    assert [item["diff"]["operation"] for item in low_trust_auth_audits] == ["merge", "discard"]
+    assert all(item["diff"]["allowed"] is False for item in low_trust_auth_audits)
 
     branched = tools.branch(
         "direct-merge-branch",
@@ -761,6 +776,26 @@ def test_memory_tools_direct_branch_merge_discard_facades() -> None:
     assert engine.get_evidence(TENANT, discard_cid, branch="main") is None
     assert "direct-discard-branch" not in engine.branches
     assert not any(item["name"] == "direct-discard-branch" for item in engine.export_all()["branches"])
+
+
+def test_memory_tools_denied_auth_decision_persists_audit_only_event(tmp_path: Path) -> None:
+    store_path = tmp_path / "memory-store.json"
+    engine = LocalMemoryEngine(store_path=store_path)
+    tools = MemoryTools(engine)
+
+    with pytest.raises(PermissionError, match="branch writes require normal-or-stronger source trust"):
+        tools.branch("denied-persistent-branch", role="agent", source_trust_tier=4, tenant_id=TENANT)
+
+    reloaded = LocalMemoryEngine(store_path=store_path)
+    audit = [
+        item
+        for item in reloaded.audit_log
+        if item["op"] == "authorize_write" and item["diff"].get("operation") == "branch"
+    ]
+    assert len(audit) == 1
+    assert audit[0]["source"] == "mcp_tools"
+    assert audit[0]["capability_tags"] == ["authz", "denied"]
+    assert audit[0]["diff"]["allowed"] is False
 
 
 def test_memory_tools_direct_assert_fact_and_preference_write_paths() -> None:

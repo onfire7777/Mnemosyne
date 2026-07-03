@@ -274,6 +274,20 @@ class MemoryEngine(Protocol):
     def add_preference(self, preference: Preference) -> str:
         raise NotImplementedError
 
+    def record_audit_event(
+        self,
+        tenant_id: str | None,
+        actor: str,
+        op: str,
+        target_id: str | None,
+        diff: dict[str, Any],
+        *,
+        source: str | None = None,
+        trust_tier: int | None = None,
+        capability_tags: list[str] | None = None,
+    ) -> None:
+        raise NotImplementedError
+
     def vector_search(self, query: str, k: int, filt: dict[str, Any]) -> list[Hit]:
         raise NotImplementedError
 
@@ -426,7 +440,7 @@ class LocalMemoryEngine:
 
     def _audit(
         self,
-        tenant_id: str,
+        tenant_id: str | None,
         actor: str,
         op: str,
         target_id: str | None,
@@ -457,6 +471,30 @@ class LocalMemoryEngine:
                 "at": utc_now().isoformat(),
             }
         )
+
+    def record_audit_event(
+        self,
+        tenant_id: str | None,
+        actor: str,
+        op: str,
+        target_id: str | None,
+        diff: dict[str, Any],
+        *,
+        source: str | None = None,
+        trust_tier: int | None = None,
+        capability_tags: list[str] | None = None,
+    ) -> None:
+        self._audit(
+            tenant_id,
+            actor,
+            op,
+            target_id,
+            diff,
+            source=source,
+            trust_tier=trust_tier,
+            capability_tags=capability_tags,
+        )
+        self._persist()
 
     def _persist(self) -> None:
         if not self.store_path:

@@ -3863,6 +3863,45 @@ def test_shared_audit_log_records_actor_source_tier_and_diff_for_every_write(
     assert sorted(forget_audit["capability_tags"]) == ["signed", "tool-import"]
 
 
+def test_shared_engine_contract_records_auth_decision_audit_events(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, _user = engine_bundle
+    engine.record_audit_event(
+        tenant,
+        "operator",
+        "authorize_write",
+        None,
+        {
+            "operation": "merge",
+            "allowed": False,
+            "reason": "branch promotion requires operator/consolidator authority",
+            "source_trust_tier": 3,
+            "destructive": False,
+            "target_sink": "branch_promotion",
+        },
+        source="mcp_tools",
+        trust_tier=3,
+        capability_tags=["authz", "denied"],
+    )
+
+    audit = [
+        item
+        for item in engine.export_tenant(tenant)["audit_log"]
+        if item["op"] == "authorize_write" and item["diff"].get("operation") == "merge"
+    ]
+    assert len(audit) == 1
+    auth_audit = audit[0]
+    assert auth_audit["actor"] == "operator"
+    assert auth_audit["source"] == "mcp_tools"
+    assert auth_audit["trust_tier"] == 3
+    assert sorted(auth_audit["capability_tags"]) == ["authz", "denied"]
+    assert auth_audit["target_id"] is None
+    assert auth_audit["diff"]["allowed"] is False
+    assert auth_audit["diff"]["reason"] == "branch promotion requires operator/consolidator authority"
+    assert auth_audit["diff"]["target_sink"] == "branch_promotion"
+
+
 def _append_evidence(
     engine: Any,
     tenant: str,
