@@ -160,6 +160,14 @@ byte-binding). The work is closing **intent-vs-enforcement** gaps and shipping *
   consolidator (sole KMS + write authority); no container holds edge+data+secrets at once.
 - **Data:** mandatory AES-GCM at rest; **per-tenant-scoped** crypto-shred keys (not a wildcard delete);
   LUKS for PGDATA/Vault storage; encrypted PITR backups with **scheduled verified restores**.
+  - 2026-07-03 implementation note: production `release-audit` now rejects
+    weak `privacy-ops-check` evidence unless the replayed output proves
+    non-local KMS/key custody, key lifecycle and shred checks, strict residency
+    allow/deny cases, tombstone plus legal hard-delete erasure, operator delete
+    corroboration, case-count coverage, and raw key/object/subject/KMS
+    redaction. This closes the source-side placeholder-acceptance gap; live
+    object-store/KMS/privacy evidence, LUKS, PITR, and restore proof remain
+    operator-owned before this item can close.
 - **Monitoring:** tamper-evident **hash-chained append-only audit log** (Vault-HMAC keyed, BEFORE
   UPDATE/DELETE trigger, INSERT-only grant) + pgaudit + an out-of-band WORM copy the app role cannot
   rewrite; log every write and every auth decision.

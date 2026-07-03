@@ -6306,6 +6306,105 @@ def production_mcp_ops_stdout() -> dict:
     }
 
 
+def production_privacy_ops_stdout() -> dict:
+    redaction_flags = {
+        "raw_key_material_omitted": True,
+        "raw_object_bytes_omitted": True,
+        "raw_subject_identifiers_omitted": True,
+        "raw_kms_responses_omitted": True,
+    }
+    return {
+        "ok": True,
+        "bundle": {
+            "name": "production-privacy-ops",
+            "case_count": 5,
+            "kms_provider": "vault-transit-prod",
+        },
+        "requirements": {
+            "min_cases": 3,
+            "required_case_ids": ["legal-delete", "operator-delete", "residency-allow"],
+            "non_local_kms": True,
+            "strict_runtime_residency": True,
+            "requires_allow_and_deny_residency": True,
+            "requires_tombstone_and_legal_delete": True,
+            "requires_operator_delete_corroboration": True,
+        },
+        "checks": [
+            {
+                "name": "kms",
+                "ok": True,
+                "provider": "vault-transit-prod",
+                "provider_local": False,
+                "missing_lifecycle_flags": [],
+                "key_id_hash_present": True,
+            },
+            {
+                "name": "residency",
+                "ok": True,
+                "strict_runtime_residency": True,
+                "case_count": 2,
+                "cases": [
+                    {
+                        "id": "residency-allow",
+                        "ok": True,
+                        "expected_decision": "allow",
+                        "actual_decision": "allow",
+                        "enforced": True,
+                    },
+                    {
+                        "id": "residency-deny",
+                        "ok": True,
+                        "expected_decision": "deny",
+                        "actual_decision": "deny",
+                        "enforced": True,
+                    },
+                ],
+            },
+            {
+                "name": "erasure",
+                "ok": True,
+                "case_count": 3,
+                "modes": ["legal_hard_delete", "tombstone_recompute"],
+                "operator_delete_case_present": True,
+                "cases": [
+                    {
+                        "id": "tombstone",
+                        "ok": True,
+                        "mode": "tombstone_recompute",
+                        "missing_flags": [],
+                        "cid_hash_present": True,
+                        "operator_delete": {"required": False, "ok": True, "missing": []},
+                    },
+                    {
+                        "id": "legal-delete",
+                        "ok": True,
+                        "mode": "legal_hard_delete",
+                        "missing_flags": [],
+                        "cid_hash_present": True,
+                        "operator_delete": {"required": False, "ok": True, "missing": []},
+                    },
+                    {
+                        "id": "operator-delete",
+                        "ok": True,
+                        "mode": "legal_hard_delete",
+                        "missing_flags": [],
+                        "cid_hash_present": True,
+                        "operator_delete": {"required": True, "ok": True, "missing": []},
+                    },
+                ],
+            },
+            {
+                "name": "redaction",
+                "ok": True,
+                **redaction_flags,
+                "forbidden_raw_paths": [],
+            },
+        ],
+        "findings": [],
+        "redaction": {**redaction_flags, "forbidden_raw_fields_present": False},
+    }
+
+
 def production_ops_report_audit() -> dict:
     return {
         "hash_chain": {"provider": "vault-hmac", "verified": True, "retained": True},
@@ -6319,6 +6418,8 @@ def production_release_stdout(command: str, provider_stdout: dict) -> dict:
         return provider_stdout
     if command == "mcp-ops-check":
         return production_mcp_ops_stdout()
+    if command == "privacy-ops-check":
+        return production_privacy_ops_stdout()
     if command == "worker-ops-check":
         return production_worker_ops_stdout()
     if command in {
@@ -6327,7 +6428,6 @@ def production_release_stdout(command: str, provider_stdout: dict) -> dict:
         "retrieval-ops-check",
         "consolidation-ops-check",
         "multimodal-ops-check",
-        "privacy-ops-check",
         "parametric-trainer-check",
         "provenance-ops-check",
         "policy-ops-check",
@@ -9454,6 +9554,63 @@ def test_cli_release_audit_rejects_weak_mcp_ops_evidence(tmp_path: Path) -> None
     assert "mcp-ops-check must prove client certificates are required" in messages
     assert "mcp-ops-check http_json_rpc must prove bearer-token enforcement" in messages
     assert "mcp-ops-check redaction flag raw_session_tokens_omitted is not proven" in messages
+
+
+def test_cli_release_audit_rejects_weak_privacy_ops_evidence(tmp_path: Path) -> None:
+    report_path, manifest_path = write_release_report(tmp_path)
+    stdout_json = production_privacy_ops_stdout()
+    stdout_json["requirements"]["non_local_kms"] = False
+    stdout_json["bundle"]["case_count"] = 1
+    for check in stdout_json["checks"]:
+        if check["name"] == "kms":
+            check["provider_local"] = True
+            check["missing_lifecycle_flags"] = ["key_shredded"]
+            check["key_id_hash_present"] = False
+        if check["name"] == "residency":
+            check["strict_runtime_residency"] = False
+            check["cases"] = [case for case in check["cases"] if case["expected_decision"] == "allow"]
+        if check["name"] == "erasure":
+            check["modes"] = ["tombstone_recompute"]
+            check["operator_delete_case_present"] = False
+            operator_case = next(case for case in check["cases"] if case["id"] == "operator-delete")
+            operator_case["operator_delete"] = {
+                "required": True,
+                "ok": False,
+                "missing": ["operator_delete.delete_receipt_hash"],
+            }
+        if check["name"] == "redaction":
+            check["raw_kms_responses_omitted"] = False
+            check["forbidden_raw_paths"] = ["$.kms.raw_kms_response"]
+    rewrite_release_check_stdout(
+        report_path,
+        manifest_path,
+        command="privacy-ops-check",
+        stdout_json=stdout_json,
+    )
+
+    result = run_raw_cli(
+        tmp_path / "mnemosyne.json",
+        "release-audit",
+        "--evidence-manifest",
+        str(manifest_path),
+        "--require-production-validated",
+        "--require-provider-forbid-local",
+    )
+    payload = json.loads(result.stdout)
+    output_findings = [
+        finding
+        for finding in payload["findings"]
+        if finding["code"] == "required_privacy_ops_evidence_incomplete"
+    ]
+    messages = "\n".join(finding["message"] for finding in output_findings)
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert "privacy-ops-check requirement non_local_kms is not proven" in messages
+    assert "privacy-ops-check kms provider must be non-local" in messages
+    assert "privacy-ops-check residency evidence requires enforced allow and deny cases" in messages
+    assert "privacy-ops-check erasure evidence requires operator delete corroboration" in messages
+    assert "privacy-ops-check redaction flag raw_kms_responses_omitted is not proven" in messages
 
 
 def test_cli_release_audit_rejects_empty_worker_runtime_evidence(tmp_path: Path) -> None:
