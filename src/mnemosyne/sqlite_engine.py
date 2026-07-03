@@ -583,7 +583,7 @@ class SqliteEngine:
 
     def _audit(
         self,
-        tenant_id: str,
+        tenant_id: str | None,
         actor: str,
         op: str,
         target_id: str | None,
@@ -600,7 +600,7 @@ class SqliteEngine:
         connection + transaction; internal engine methods that already own a
         transaction call :meth:`_audit_row` directly."""
         with self._lock:
-            conn = self._connect(tenant_id)
+            conn = self._connect(tenant_id or "__system__")
             with conn:
                 self._audit_row(
                     conn,
@@ -614,10 +614,33 @@ class SqliteEngine:
                     capability_tags=capability_tags,
                 )
 
+    def record_audit_event(
+        self,
+        tenant_id: str | None,
+        actor: str,
+        op: str,
+        target_id: str | None,
+        diff: dict[str, Any],
+        *,
+        source: str | None = None,
+        trust_tier: int | None = None,
+        capability_tags: list[str] | None = None,
+    ) -> None:
+        self._audit(
+            tenant_id,
+            actor,
+            op,
+            target_id,
+            diff,
+            source=source,
+            trust_tier=trust_tier,
+            capability_tags=capability_tags,
+        )
+
     def _audit_row(
         self,
         conn: sqlite3.Connection,
-        tenant_id: str,
+        tenant_id: str | None,
         actor: str,
         op: str,
         target_id: str | None,

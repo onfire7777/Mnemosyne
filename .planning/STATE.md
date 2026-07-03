@@ -4,8 +4,8 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: null
-last_updated: "2026-07-03T21:16:25Z"
-last_activity: 2026-07-03 — Branch `phase3/providers-consolidation` was rechecked clean and synchronized at `58fa10b93f424c6abdffede9fb0fa76f902efd1c`, with GitHub CI run `28683408141` passing for that head before this continuation. Phase 8.5 source hardening progressed again: production registry images remain tag+digest pinned, Vault/role-LLM/embedding helper HTTP calls route through the shared `network_safety` guard, `infra/scripts/verify-supply-chain.sh` wires gitleaks/Trivy/Syft/Grype/cosign checks into an external artifact gate, and the Postgres audit log now has a schema-level BEFORE UPDATE/DELETE append-only trigger plus SELECT/INSERT-only runtime role grants. Scanner/signature evidence, runtime default-deny egress evidence, Vault-HMAC hash-chain evidence, pgaudit/WORM-copy evidence, and operator-captured bundles still keep the parent security items open. No Tier-B row is marked Done by this cleanup.
+last_updated: "2026-07-03T21:37:31Z"
+last_activity: 2026-07-03 — Branch `phase3/providers-consolidation` was rechecked clean and synchronized at `57d4732ccf3a0b6a505557cc7c098f55b92e8503` before this continuation. Phase 8.5 source hardening progressed again: production registry images remain tag+digest pinned, Vault/role-LLM/embedding helper HTTP calls route through the shared `network_safety` guard, `infra/scripts/verify-supply-chain.sh` wires gitleaks/Trivy/Syft/Grype/cosign checks into an external artifact gate, the Postgres audit log has a schema-level BEFORE UPDATE/DELETE append-only trigger plus SELECT/INSERT-only runtime role grants, and shared engine auth-decision audit events now record `MemoryTools._authorize` allow/deny decisions. Scanner/signature evidence, runtime default-deny egress evidence, Vault-HMAC hash-chain evidence, pgaudit/WORM-copy evidence, and operator-captured bundles still keep the parent security items open. No Tier-B row is marked Done by this cleanup.
 progress:
   total_phases: 9
   completed_phases: 7

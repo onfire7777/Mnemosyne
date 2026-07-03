@@ -4046,7 +4046,7 @@ class PostgresEngine:
     def _audit(
         self,
         cur: Any,
-        tenant_id: str,
+        tenant_id: str | None,
         actor: str,
         op: str,
         target_id: str | None,
@@ -4073,6 +4073,35 @@ class PostgresEngine:
             """,
             (tenant_id, actor, op, target_uuid, trust_tier, normalized_tags, self._jsonb(audit_diff)),
         )
+
+    def record_audit_event(
+        self,
+        tenant_id: str | None,
+        actor: str,
+        op: str,
+        target_id: str | None,
+        diff: dict[str, Any],
+        *,
+        source: str | None = None,
+        trust_tier: int | None = None,
+        capability_tags: list[str] | None = None,
+    ) -> None:
+        db_tenant_id = _stable_uuid("tenant", tenant_id) if tenant_id else None
+        with self.connect() as conn:
+            with conn.cursor() as cur:
+                if db_tenant_id is not None:
+                    self._set_tenant(cur, db_tenant_id)
+                self._audit(
+                    cur,
+                    db_tenant_id,
+                    actor,
+                    op,
+                    target_id,
+                    diff,
+                    source=source,
+                    trust_tier=trust_tier,
+                    capability_tags=capability_tags,
+                )
 
     @staticmethod
     def _mark_retrieved_text_as_data(hits: list[Hit]) -> list[Hit]:
