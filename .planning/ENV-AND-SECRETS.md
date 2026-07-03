@@ -31,8 +31,10 @@ row-local manifests.
 `infra/scripts/render-production-soak-manifest.sh --check-environment` parses
 that external provider manifest when present, reports the referenced provider
 environment-variable names under `provider_manifest_env_refs`, and fails before
-capture if any referenced provider env var is unset in either the process
-environment or the strict external `--runtime-env-file`. Use
+capture if any referenced provider env var is unset or empty in both the process
+environment and the strict external `--runtime-env-file`. A key with a blank
+value in the runtime env file still appears in `missing_provider_manifest_env_refs`.
+Use
 `--runtime-env-file "$RUNTIME_ENV_FILE"` for the same secret-bearing
 runtime/provider values later passed to
 `capture-production-evidence.sh --env-file "$RUNTIME_ENV_FILE"`; the renderer allowlist-loads those
