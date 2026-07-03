@@ -10150,6 +10150,133 @@ def _release_mcp_ops_evidence_findings(stdout_json: Mapping[str, Any]) -> list[d
     return findings
 
 
+def _release_privacy_ops_evidence_findings(stdout_json: Mapping[str, Any]) -> list[dict[str, Any]]:
+    findings: list[dict[str, Any]] = []
+
+    def add(message: str) -> None:
+        findings.append(_release_finding("required_privacy_ops_evidence_incomplete", message))
+
+    def as_int(value: Any) -> int | None:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    requirements = stdout_json.get("requirements")
+    checks_raw = stdout_json.get("checks")
+    bundle = stdout_json.get("bundle")
+    if not isinstance(requirements, Mapping):
+        add("privacy-ops-check requirements must be structured")
+        requirements = {}
+    if not isinstance(checks_raw, list):
+        add("privacy-ops-check checks must be a structured list")
+        return findings
+    if not isinstance(bundle, Mapping):
+        bundle = {}
+
+    for flag in (
+        "non_local_kms",
+        "strict_runtime_residency",
+        "requires_allow_and_deny_residency",
+        "requires_tombstone_and_legal_delete",
+        "requires_operator_delete_corroboration",
+    ):
+        if requirements.get(flag) is not True:
+            add(f"privacy-ops-check requirement {flag} is not proven")
+
+    min_cases = as_int(requirements.get("min_cases"))
+    if min_cases is None or min_cases < 1:
+        add("privacy-ops-check min_cases requirement must be positive")
+        min_cases = 1
+    case_count = as_int(bundle.get("case_count"))
+    if case_count is None or case_count < min_cases:
+        add("privacy-ops-check bundle case count is below requirement")
+
+    checks = [check for check in checks_raw if isinstance(check, Mapping)]
+    checks_by_name = {str(check.get("name") or ""): check for check in checks}
+    required_names = {"kms", "residency", "erasure", "redaction"}
+    missing_names = sorted(name for name in required_names if name not in checks_by_name)
+    if missing_names:
+        add("privacy-ops-check missing required checks: " + ", ".join(missing_names))
+
+    kms = checks_by_name.get("kms")
+    if isinstance(kms, Mapping):
+        if kms.get("ok") is not True:
+            add("privacy-ops-check kms check must be ok")
+        if kms.get("provider_local") is not False:
+            add("privacy-ops-check kms provider must be non-local")
+        if not str(kms.get("provider") or "").strip():
+            add("privacy-ops-check kms provider identity is missing")
+        if kms.get("missing_lifecycle_flags") not in ([], None):
+            add("privacy-ops-check kms lifecycle flags are incomplete")
+        if kms.get("key_id_hash_present") is not True:
+            add("privacy-ops-check kms key id hash is missing")
+
+    residency = checks_by_name.get("residency")
+    if isinstance(residency, Mapping):
+        if residency.get("ok") is not True:
+            add("privacy-ops-check residency check must be ok")
+        if residency.get("strict_runtime_residency") is not True:
+            add("privacy-ops-check runtime residency must be strict")
+        residency_cases = residency.get("cases")
+        if not isinstance(residency_cases, list) or not residency_cases:
+            add("privacy-ops-check residency cases are missing")
+        else:
+            decisions = {
+                str(case.get("expected_decision") or "")
+                for case in residency_cases
+                if isinstance(case, Mapping) and case.get("ok") is True and case.get("enforced") is True
+            }
+            if not {"allow", "deny"}.issubset(decisions):
+                add("privacy-ops-check residency evidence requires enforced allow and deny cases")
+
+    erasure = checks_by_name.get("erasure")
+    if isinstance(erasure, Mapping):
+        if erasure.get("ok") is not True:
+            add("privacy-ops-check erasure check must be ok")
+        modes = {str(mode) for mode in erasure.get("modes", [])} if isinstance(erasure.get("modes"), list) else set()
+        if not {"tombstone_recompute", "legal_hard_delete"}.issubset(modes):
+            add("privacy-ops-check erasure evidence requires tombstone and legal hard-delete modes")
+        if erasure.get("operator_delete_case_present") is not True:
+            add("privacy-ops-check erasure evidence requires operator delete corroboration")
+        erasure_cases = erasure.get("cases")
+        if not isinstance(erasure_cases, list) or not erasure_cases:
+            add("privacy-ops-check erasure cases are missing")
+        else:
+            for case in erasure_cases:
+                if not isinstance(case, Mapping):
+                    add("privacy-ops-check erasure cases must be structured")
+                    continue
+                case_id = str(case.get("id") or "unknown")
+                if case.get("ok") is not True:
+                    add(f"privacy-ops-check erasure case {case_id} must be ok")
+                if case.get("cid_hash_present") is not True:
+                    add(f"privacy-ops-check erasure case {case_id} cid hash is missing")
+                operator_delete = case.get("operator_delete")
+                if isinstance(operator_delete, Mapping) and operator_delete.get("required") is True:
+                    if operator_delete.get("ok") is not True:
+                        add(f"privacy-ops-check erasure case {case_id} operator delete proof is incomplete")
+                    if operator_delete.get("missing") not in ([], None):
+                        add(f"privacy-ops-check erasure case {case_id} operator delete fields are missing")
+
+    redaction = checks_by_name.get("redaction")
+    if isinstance(redaction, Mapping):
+        if redaction.get("ok") is not True:
+            add("privacy-ops-check redaction check must be ok")
+        for flag in (
+            "raw_key_material_omitted",
+            "raw_object_bytes_omitted",
+            "raw_subject_identifiers_omitted",
+            "raw_kms_responses_omitted",
+        ):
+            if redaction.get(flag) is not True:
+                add(f"privacy-ops-check redaction flag {flag} is not proven")
+        if redaction.get("forbidden_raw_paths") not in ([], None):
+            add("privacy-ops-check redaction must omit raw key/object/subject/KMS paths")
+
+    return findings
+
+
 def _release_worker_ops_evidence_findings(stdout_json: Mapping[str, Any]) -> list[dict[str, Any]]:
     findings: list[dict[str, Any]] = []
 
@@ -10478,6 +10605,8 @@ def _release_command_output_findings(check: Mapping[str, Any]) -> list[dict[str,
         findings.extend(_release_worker_ops_evidence_findings(stdout_json))
     if command == "mcp-ops-check":
         findings.extend(_release_mcp_ops_evidence_findings(stdout_json))
+    if command == "privacy-ops-check":
+        findings.extend(_release_privacy_ops_evidence_findings(stdout_json))
     return findings
 
 
