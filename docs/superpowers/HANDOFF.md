@@ -1,6 +1,6 @@
 # Native Acceleration Program — Agent Handoff
 
-**As of:** 2026-07-03 · **main @ `ec6f404`** (pushed to `origin`) · Phases 0, 1, 2 complete; Phases 3, 4 + final claims remain.
+**As of:** 2026-07-03 · branch `phase3/providers-consolidation` · Phases 0, 1, 2, and 3 complete; Phase 4 remains evidence-gated.
 
 You are taking over an in-progress, multi-phase engineering program on the Mnemosyne codebase.
 Work from the repo root. Read the on-disk artifacts below FIRST — they are the source of truth;
@@ -24,7 +24,7 @@ change (byte-parity discipline).
 5. **Grounding** (*gitignored*, verified file:line facts): `.superpowers/sdd/phase2-grounding.md`,
    `.superpowers/sdd/phase3-grounding.md`. Re-grep anchors before editing — line numbers drift.
 
-## Done (merged + pushed to origin/main @ ec6f404)
+## Done
 
 - **Phase 0** (seam hardening): `src/mnemosyne/{algorithms,journal,projections,honeytokens}.py`;
   `retrieve()` pipeline extracted to `src/mnemosyne/pipeline.py` (`RetrievalPipelineOps`).
@@ -35,26 +35,28 @@ change (byte-parity discipline).
   `queue.py`; the 3rd `MemoryEngine` backend, one SQLite file per tenant; validated as the 3rd
   param in `tests/test_shared_engine_contract.py`. retrieve p-mean 9ms/10k-tenant vs §22.5 400ms;
   packed-BLOB dense 43×; L4 poison corpus 100% block; 191-test chaos harness + differential oracle.
+- **Phase 3** (providers + consolidation ladder): `rust/mneme-providers/` serves the existing compact
+  `HttpEmbeddingProvider` / `HttpReranker` contracts; provider manifest/log-redaction gates cover
+  HTTP embedding/rerank, command retrieval backends, and all five proposal roles. The consolidation
+  proposal-role path now has prompt boundaries, disclosure-axis gates, replayable low-trust
+  `provider-proposal` records, and a shell-free role ladder. Provider bake-off remains
+  pending/no-default-flip because no strict-judge confidence-interval run has promoted a default.
 
-Suite on main: **1578 passed / 127 skipped** native; **1575 / 130** pure; DSN parity **394 / 6**.
+Latest Phase 3 exit suite on this branch: **1592 passed / 127 skipped** native; **1589 / 130**
+pure; DSN parity + `postgres_live` **434 / 6**; focused provider/security/consolidation slice
+**216 / 5**; both Rust crates fmt/test/clippy clean.
 
 ## Remaining work
 
-- **Phase 3 (providers + consolidation ladder):** write `docs/superpowers/plans/phase3-providers.md`
-  from `phase3-grounding.md`, then execute it. Per spec §4.3/§4.5:
-  - **C3** — a Rust `mneme-providers` sidecar serving the **existing** `HttpEmbeddingProvider`/
-    `HttpReranker` contracts. The production embedder speaks Mnemosyne's **own compact** `POST /embed`
-    + `POST /rerank` + `GET /health` API (**not** the HuggingFace TEI API); mirror
-    `infra/docker-compose.prod.yml`'s `embedder` service shape.
-  - **A3** — the consolidation role-LLM ladder. The 5 proposal roles already have `Command*` adapters,
-    but the `MNEMOSYNE_*_PROVIDER=command` switches are unset in infra and 3/5 `Command` payloads omit
-    `prompt_boundary`. The spec-required **proposal-ledger** (record frontier outputs as replayable
-    proposals) is **unimplemented**; **disclosure invariants** (S3+ never verbatim to an external model,
-    per-disclosure salting) are **unimplemented**. These are the Phase-3 tasks.
-- **Phase 4 (rmcp front-end):** **evidence-gated** — do not build until you have measured proof that
-  per-session MCP spawn latency actually matters (spec §4.4). Ship A4-style wins first otherwise.
-- **Final:** README/claims pass using **measured numbers only**. Public benchmark sets (LongMemEval,
-  LoCoMo, …) are internal sanity gates ONLY, never headline claims (spec §9).
+- **Phase 4 (rmcp front-end):** **evidence-gated/deferred**. Do not build `mneme-native` until a real
+  client workflow trace proves repeated `mneme-mcp` process spawn/handshake cost is material
+  (spec §4.4). Current local measurements are about 116 ms median for stdio initialize+tools/list,
+  which is below the threshold for adding daemon lifecycle complexity.
+- **Final claims pass:** use **measured numbers only**. Public benchmark sets (LongMemEval, LoCoMo, …)
+  are internal sanity gates ONLY, never headline claims (spec §9). Do not claim blueprint parity,
+  Tier-B completion, or production readiness without operator-captured production evidence.
+- **Tier-B / production:** still blocked on real deployed infrastructure evidence and release-audit
+  custody. This is an operator-evidence blocker, not unfinished Phase 3 code.
 
 ## Non-negotiable constraints (violating these = wrong)
 
@@ -63,7 +65,9 @@ Suite on main: **1578 passed / 127 skipped** native; **1575 / 130** pure; DSN pa
   behavior would diverge from Local, that is a bug — fix it to match the oracle; if the spec genuinely
   wants more than the oracle offers, escalate rather than silently diverge.
 - Runtime deps stay exactly `["cryptography>=42"]`. New deps go under **optional extras only**.
-- **Do NOT touch:** gates/rails logic, `sql/schema.sql`, `infra/`, CID computation, `mcp_tools.py`.
+- **Do NOT touch casually:** gates/rails logic, `sql/schema.sql`, CID computation, or `mcp_tools.py`.
+  `infra/` already has the named Phase-3 provider/profile exceptions; further infra edits need a
+  concrete provider evidence or production-capture defect.
 - Both kernel modes must stay green: default (native) **and** `MNEMOSYNE_PURE=1`.
 - Production topology stays Postgres-only (SqliteEngine in a prod profile = config-drift check D).
 - The accepted spec>shipped gaps are recorded in the ledger + `docs/adr/0001-sqlite-per-tenant-file-isolation.md`;
@@ -99,6 +103,7 @@ run). Do not skip the review step.
 
 ## Start here
 
-Read the ledger end-to-end, then `phase3-grounding.md`, then write the Phase 3 plan and begin executing
-it task-by-task with the oracle-parity + independent-review discipline above. Confirm your understanding
-of the parity-oracle rule before writing code.
+Read the ledger end-to-end, then `docs/superpowers/plans/phase3-providers.md` and
+`docs/superpowers/plans/phase4-front-end.md`. Do **not** restart Phase 3; it is complete through the
+local exit gates above. If no real C4 latency trace exists, the next useful work is final claims/status
+hygiene or Tier-B operator-evidence capture, not more native/front-end code.

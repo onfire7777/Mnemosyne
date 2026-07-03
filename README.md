@@ -1,12 +1,12 @@
 # Mnemosyne
 
-**A local-first memory compiler for AI agents.** Content-addressed evidence ledger, rebuildable typed projections, bitemporal beliefs, hybrid retrieval, calibrated abstention, and hard invariant rails — runs on a JSON file or PostgreSQL, and speaks the Model Context Protocol.
+**A local-first memory compiler for AI agents.** Content-addressed evidence ledger, rebuildable typed projections, bitemporal beliefs, hybrid retrieval, calibrated abstention, and hard invariant rails — runs in memory, on per-tenant SQLite, or on PostgreSQL, and speaks the Model Context Protocol.
 
 ![Python](https://img.shields.io/badge/python-3.12%2B-blue)
 ![License](https://img.shields.io/badge/license-Apache--2.0-green)
 ![Status](https://img.shields.io/badge/SLOs-6%2F6%20proven-success)
-![Completion](https://img.shields.io/badge/blueprint%20parity-~82%25-yellow)
-![Backend](https://img.shields.io/badge/postgres-pgvector%20%2B%20RLS-informational)
+![Completion](https://img.shields.io/badge/strict%20parity-Tier--B%20evidence%20pending-yellow)
+![Backend](https://img.shields.io/badge/backends-local%20%7C%20sqlite%20%7C%20postgres-informational)
 ![Protocol](https://img.shields.io/badge/MCP-stdio%20%7C%20HTTP%20%7C%20SDK-blueviolet)
 
 Mnemosyne (`mnemosyne-memory`, v0.1.0) implements the **Mnemosyne v2 build blueprint**: agent memory as a *compiler*, not a vector dump. Every write lands first in an append-only, content-addressed **evidence** ledger; typed **projections** (assertions, entities, relations, preferences, procedures, lessons) are derived from that ledger and can be rebuilt deterministically. Beliefs are **bitemporal** (valid-time + transaction-time), retrieval is **hybrid** (lexical + dense + graph, reranked), confidence is **conformally calibrated** so the system *abstains* rather than guess, and a warm-loop **consolidation** pipeline promotes new beliefs only through a protected regression gate guarded by seven non-negotiable invariant rails.
@@ -32,7 +32,7 @@ source for this repository and depends on no external local path.
 - **Hard invariant rails.** Seven §31 rails (bounded supersession, corroborated deletion, bounded pruning, monotonic trust, external-only reward, retrieved-text-is-data, bounded cadence) are enforced and regression-tested.
 - **Capability-mediated, fail-closed writes.** Trust tiers, sensitivity ceilings, signed CLI/MCP sessions, OIDC→role mapping, and prompt-injection sanitization on every retrieved span.
 - **Branchable memory.** Fork a tenant's memory, experiment, then `merge` or `discard` — like git for beliefs.
-- **Two backends, proven equivalent.** A zero-dependency in-memory engine and a PostgreSQL-backed engine pass a shared contract + parity test suite; production parity still requires the Tier-B operator evidence described below.
+- **Three backends, proven equivalent.** A zero-dependency in-memory engine, a PostgreSQL-backed engine, and a per-tenant SQLite engine pass the shared contract + parity test suite; production parity still requires the Tier-B operator evidence described below.
 - **Local-first.** Single core dependency (`cryptography`). No network, no Postgres, and no model server required to start.
 
 ---
@@ -58,6 +58,7 @@ flowchart TD
     ENGINE{{"MemoryEngine contract"}} -.backs.-> EV
     ENGINE -.implemented by.-> LOCAL["LocalMemoryEngine<br/>in-memory"]
     ENGINE -.implemented by.-> PG["PostgresEngine<br/>RLS · HNSW · recursive PPR · as-of"]
+    ENGINE -.implemented by.-> SQLITE["SqliteEngine<br/>per-tenant WAL file · FTS5 · parity oracle"]
 ```
 
 ---
@@ -109,6 +110,19 @@ mneme --backend postgres --queue-backend postgres \
 ```
 
 > `--trust-tier 0` means **most trusted** (direct user / operator). Trust tiers are a monotonic 0–5 ladder with **0 = most trusted** and **5 = least trusted**; the default for new agent writes is `3` (`NORMAL`) — see [Core concepts](#core-concepts).
+
+### SQLite backend
+
+The SQLite backend is the local-first third engine: one WAL-backed database file
+per tenant, SQL-backed ledger/projection scans, durable branch/merge/discard
+copies, queue leases, and the shared retrieval pipeline with SQL predicate
+pushdown. It is a development/local backend only; production profiles remain
+Postgres-only.
+
+```bash
+uv run --locked mneme --backend sqlite --store .mnemosyne/sqlite search \
+  --tenant tenant-a --query "preferred database"
+```
 
 ### MCP server
 
@@ -186,7 +200,7 @@ The runtime queue moves jobs through a non-linear lifecycle — `queued → runn
 
 ### Providers (shell-free command adapters)
 
-All command adapters are shell-free: JSON on stdin, JSON on stdout, **no secret-bearing argv**. Each provider has a deterministic local fallback so nothing external is required to run.
+All command adapters are shell-free: JSON on stdin, JSON on stdout, **no secret-bearing argv**. Core provider boundaries keep deterministic local defaults so nothing external is required to start; model-backed providers are explicit configuration choices, not silent runtime fallbacks.
 
 | Boundary | Default / fallback | Pluggable adapter |
 | --- | --- | --- |
@@ -196,6 +210,12 @@ All command adapters are shell-free: JSON on stdin, JSON on stdout, **no secret-
 | Graph | native recursive PPR | `CommandGraphRetriever` (e.g. Apache AGE) |
 | Object key / KMS | local AES-GCM keystore | `CommandKeyManager` → Vault transit |
 | Provenance | `SignedProvenanceVerifier` | `C2paToolVerifier` (C2PA) |
+
+`rust/mneme-providers/` is the local provider sidecar for the compact
+`/embed`, `/rerank`, and `/health` HTTP contracts. Consolidation proposal roles
+can use shell-free command adapters with prompt boundaries, disclosure-axis
+gates, replayable low-trust `provider-proposal` records, and deterministic
+fallbacks when explicitly configured.
 
 ### MCP transports
 
@@ -242,6 +262,7 @@ Mnemosyne/
 ├── src/mnemosyne/
 │   ├── engine.py            # MemoryEngine contract + LocalMemoryEngine; route() + RoutePlan
 │   ├── postgres_engine.py   # PostgresEngine: RLS, FTS, pgvector, recursive PPR, as-of
+│   ├── sqlite_engine.py     # SqliteEngine: per-tenant WAL file, shared retrieval pipeline
 │   ├── mcp_tools.py         # 48 MCP tool definitions (the TOOL_SPEC facade)
 │   ├── mcp_server.py        # stdio shim · SDK stdio · SDK StreamableHTTP · hosted HTTP
 │   ├── cli.py               # 91-subcommand CLI (mneme)
@@ -259,6 +280,8 @@ Mnemosyne/
 ├── tests/                   # invariant, parity, contract, and completion suites
 ├── eval/                    # §33 eval harness: recall@k / nDCG / ECE / latency SLOs
 ├── infra/                   # Keycloak (OIDC), Vault, C2PA, provider compose stack
+├── rust/mneme-providers/    # Provider sidecar for compact embed/rerank contracts
+├── rust/mnemosyne-native/   # Optional PyO3 native retrieval kernels
 ├── services/embedding/      # standalone embedding provider service
 ├── docs/ROADMAP-TO-100.md   # sequenced path to 1:1 blueprint parity
 └── .github/workflows/ci.yml # ruff + pytest + Postgres integration job
@@ -281,7 +304,20 @@ Exact 1:1 blueprint parity is in progress, but the headline guarantees are prove
 
 > SLO evidence is the Wave-5 definitive run summarized in [`docs/ROADMAP-TO-100.md`](docs/ROADMAP-TO-100.md) and `eval/calibration/report.json` (`ece.policy_threshold.meets_target: true`). Hard-QA multi-hop answer-synthesis (recall/nDCG 0.625/0.594) is a known, non-headline gap, tracked separately.
 
-**Blended completion ≈ 82%** (up from a long ~70% plateau). Roughly 85% functional/architectural scaffold; the mandatory Tier-A `src` reconciliation wirings (A1–A10, A13, A14) landed 2026-06-24, with A12 cached-PPR also closed as a default-off Postgres cache seam. The remaining ~18% is **Tier-B operator-captured production-infrastructure evidence** (real IdP/Keycloak, Vault/KMS, ParadeDB/Apache AGE, hosted embedding/reranker/trainer endpoints, C2PA trust roots) captured via `deployment-soak` + `release-audit` — evidence capture, not feature code. The 10 audit gap rows currently stand at "Partial".
+The local implementation surface has moved past the original two-engine
+posture: the native retrieval kernels, per-tenant SQLite engine, provider
+sidecar, and proposal-role consolidation ladder are locally gate-proven on the
+active Phase 3 branch. The latest Phase 3 exit record reports **1592 passed /
+127 skipped** native, **1589 / 130** with `MNEMOSYNE_PURE=1`, **434 / 6**
+DSN-armed parity plus `postgres_live`, and clean Rust/ruff/diff checks. These
+are local engineering gates, not production sign-off.
+
+Strict blueprint parity remains blocked on **Tier-B operator-captured
+production-infrastructure evidence** (real IdP/Keycloak, Vault/KMS,
+ParadeDB/Apache AGE, hosted embedding/reranker/trainer endpoints, C2PA trust
+roots, hosted MCP/dashboard surfaces) captured via `deployment-soak` +
+`release-audit`. The 10 audit gap rows currently stand at "Partial"; no code or
+local test run flips them to Done.
 
 Controlling artifacts: [`docs/ROADMAP-TO-100.md`](docs/ROADMAP-TO-100.md) (blended figure + sequenced path), `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md` (status), and `infra/PRODUCTION-EVIDENCE.md` (capture/offline-custody handoff).
 
