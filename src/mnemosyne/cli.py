@@ -14586,7 +14586,7 @@ def cmd_provider_check(args: argparse.Namespace) -> None:
         ParametricTier,
         protected_suite_report,
     )
-    from mnemosyne.retrieval import CommandMediaEmbeddingProvider
+    from mnemosyne.retrieval import CommandMediaEmbeddingProvider, embed_query
     from mnemosyne.security import SessionAuthError, SessionIdentity, SessionTokenVerifier, load_session_secret_command
 
     manifest = apply_provider_manifest(args)
@@ -14594,7 +14594,7 @@ def cmd_provider_check(args: argparse.Namespace) -> None:
     ok = True
     try:
         adapters = load_retrieval_adapters(args)
-        vector = adapters.embedding.embed("Mnemosyne provider health check")
+        vector = embed_query(adapters.embedding, "Mnemosyne provider health check")
         checks["embedding"] = {
             "ok": True,
             "provider": args.embedding_provider,

@@ -4,8 +4,8 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: null
-last_updated: "2026-07-03T21:37:31Z"
-last_activity: 2026-07-03 — Branch `phase3/providers-consolidation` was rechecked clean and synchronized at `57d4732ccf3a0b6a505557cc7c098f55b92e8503` before this continuation. Phase 8.5 source hardening progressed again: production registry images remain tag+digest pinned, Vault/role-LLM/embedding helper HTTP calls route through the shared `network_safety` guard, `infra/scripts/verify-supply-chain.sh` wires gitleaks/Trivy/Syft/Grype/cosign checks into an external artifact gate, the Postgres audit log has a schema-level BEFORE UPDATE/DELETE append-only trigger plus SELECT/INSERT-only runtime role grants, and shared engine auth-decision audit events now record `MemoryTools._authorize` allow/deny decisions. Scanner/signature evidence, runtime default-deny egress evidence, Vault-HMAC hash-chain evidence, pgaudit/WORM-copy evidence, and operator-captured bundles still keep the parent security items open. No Tier-B row is marked Done by this cleanup.
+last_updated: "2026-07-03T21:52:19Z"
+last_activity: 2026-07-03 — Branch `phase3/providers-consolidation` continued from synchronized head `f585c3be5f43cffdfa322a994b64fa1f9b0d02a8`. Phase 8.2 source wiring now applies the required `query:` prefix only on query paths: dense vector search, MMR query vectors, local similarity rerank queries, HTTP rerank queries, and provider-check embedding probes use the query-aware adapter helper, while stored/document embeddings remain unprefixed. Phase 8.5 source hardening remains intact: digest-pinned production images, guarded internal HTTP egress, external supply-chain evidence gate, append-only Postgres audit DDL, narrowed audit grants, and shared auth-decision audit events. TEI/Infinity deployment, CPU P95 evidence, scanner/signature evidence, runtime default-deny egress evidence, Vault-HMAC hash-chain evidence, pgaudit/WORM-copy evidence, and operator-captured bundles still keep Phase 8/Tier-B rows open. No Tier-B row is marked Done by this cleanup.
 progress:
   total_phases: 9
   completed_phases: 7

@@ -53,6 +53,7 @@ from mnemosyne.retrieval import (
     LocalSimilarityReranker,
     QUERY_SUPPORT_THRESHOLD,
     RetrievalAdapters,
+    embed_query,
     is_retired_summary_metadata,
     query_support,
     validate_adapter_hit_scope,
@@ -1264,7 +1265,7 @@ class LocalMemoryEngine:
             return pref.id
 
     def vector_search(self, query: str, k: int, filt: dict[str, Any]) -> list[Hit]:
-        query_vec = self._embed_text(query)
+        query_vec = embed_query(self.adapters.embedding, query)
         hits: list[Hit] = []
         if text_kernels.NATIVE is not None:
             # Batched fast path: embedding acquisition stays per-hit in Python
@@ -2762,7 +2763,7 @@ class LocalMemoryEngine:
         return mmr_select(
             hits,
             k,
-            query_vec=self._embed_text(query),
+            query_vec=embed_query(self.adapters.embedding, query),
             embed_hit=lambda hit: self._embedding_for_hit(hit, allow_fallback=True),
             mmr_lambda=self.policy.mmr_lambda,
         )
