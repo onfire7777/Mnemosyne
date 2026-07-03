@@ -40,6 +40,11 @@ DEFAULT_CONSOLIDATION_PASSES = [
     "user_model_updater",
 ]
 REPLAY_PRIORITY_FACTORS = ("importance", "novelty", "surprise", "reward")
+PROVIDER_PROPOSAL_SOURCE_TYPE = "provider-proposal"
+_PROVIDER_PROPOSAL_VERSION = 1
+_PROVIDER_PROPOSAL_MAX_STRING_CHARS = 1024
+_PROVIDER_PROPOSAL_MAX_ITEMS = 32
+_PROVIDER_PROPOSAL_MAX_DEPTH = 6
 
 
 def _summary_source_fingerprint(source_cids: Sequence[str], *, level: int = 1) -> str:
@@ -301,6 +306,7 @@ class ConsolidationWorker:
 
         tenant_id = str(payload["tenant_id"])
         branch = str(payload.get("branch", "main"))
+        self._attach_provider_proposal_ledger(branch)
         source_evidence_cids = [str(cid) for cid in payload.get("source_evidence_cids", [])]
         if not source_evidence_cids:
             raise ValueError("consolidation payload requires source_evidence_cids")
@@ -620,6 +626,19 @@ class ConsolidationWorker:
             "user_model_updater": "latent_user_model_updater",
         }.get(pass_name, "local_pass")
 
+    def _attach_provider_proposal_ledger(self, branch: str) -> None:
+        ledger = ProviderProposalLedger(self.engine)
+        for provider in (
+            self.candidate_extractor,
+            self.entity_resolver,
+            self.summarizer,
+            self.lesson_distiller,
+            self.procedure_inducer,
+        ):
+            if hasattr(provider, "proposal_ledger"):
+                setattr(provider, "proposal_ledger", ledger)
+                setattr(provider, "proposal_branch", branch)
+
     def _prioritize_replay(self, evidence: list[Evidence], payload: dict[str, Any]) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
         for index, item in enumerate(evidence):
@@ -852,6 +871,7 @@ class ConsolidationWorker:
         distilled = self.lesson_distiller.distill(tenant_id, candidates)
         lesson_rows = distilled["lessons"]
         details = distilled.get("details", {})
+        proposal_record = details.get("proposal_record") if isinstance(details, dict) else None
         lesson_ids: list[str] = []
         created = 0
         for row in lesson_rows:
@@ -878,13 +898,16 @@ class ConsolidationWorker:
             self.learning.lessons[lesson.id] = lesson
             lesson_ids.append(lesson.id)
             created += 1
-        return {
+        result = {
             "lessons": lesson_ids,
             "created": created,
             "reused": len(lesson_ids) - created,
             "provider": details.get("strategy", getattr(self.lesson_distiller, "strategy", "lesson_distiller")),
             "metadata": details.get("metadata", {}),
         }
+        if isinstance(proposal_record, dict):
+            result["proposal_record"] = proposal_record
+        return result
 
     def _induce_procedures(self, tenant_id: str, candidates: list[dict[str, Any]]) -> dict[str, Any]:
         if self.learning is None or not candidates:
@@ -892,6 +915,7 @@ class ConsolidationWorker:
         induced = self.procedure_inducer.induce(tenant_id, candidates)
         procedure_rows = induced["procedures"]
         details = induced.get("details", {})
+        proposal_record = details.get("proposal_record") if isinstance(details, dict) else None
         procedure_ids: list[str] = []
         created = 0
         for row in procedure_rows:
@@ -918,13 +942,16 @@ class ConsolidationWorker:
             self.learning.procedures[procedure.id] = procedure
             procedure_ids.append(procedure.id)
             created += 1
-        return {
+        result = {
             "procedures": procedure_ids,
             "created": created,
             "reused": len(procedure_ids) - created,
             "provider": details.get("strategy", getattr(self.procedure_inducer, "strategy", "procedure_inducer")),
             "metadata": details.get("metadata", {}),
         }
+        if isinstance(proposal_record, dict):
+            result["proposal_record"] = proposal_record
+        return result
 
     def _update_user_model(
         self,
@@ -1773,6 +1800,161 @@ class ProviderDisclosurePolicy:
         }
 
 
+class ProviderProposalLedger:
+    """Replay ledger for model-backed proposal roles.
+
+    Proposal rows are evidence-like audit records, not authoritative memory.
+    They are intentionally tainted and low-trust so they cannot corroborate
+    truth promotion without independent source evidence.
+    """
+
+    def __init__(self, engine: Any):
+        self.engine = engine
+
+    def load_or_run(
+        self,
+        *,
+        tenant_id: str,
+        branch: str,
+        role: str,
+        strategy: str,
+        request: dict[str, Any],
+        run: Callable[[], dict[str, Any]],
+    ) -> dict[str, Any]:
+        identity = _provider_proposal_identity(
+            tenant_id=tenant_id,
+            branch=branch,
+            role=role,
+            strategy=strategy,
+            request=request,
+        )
+        replayed = self._load(tenant_id, branch, identity)
+        if replayed is not None:
+            response, cid = replayed
+            return _provider_response_with_record(
+                response,
+                cid=cid,
+                source_identity=identity,
+                replayed=True,
+            )
+
+        parsed = run()
+        max_sensitivity = _provider_request_max_sensitivity(request)
+        response = _provider_proposal_record_value(parsed, max_sensitivity=max_sensitivity)
+        cid = self._record(
+            tenant_id=tenant_id,
+            branch=branch,
+            role=role,
+            strategy=strategy,
+            source_identity=identity,
+            request=request,
+            response=response,
+            max_sensitivity=max_sensitivity,
+        )
+        return _provider_response_with_record(
+            response,
+            cid=cid,
+            source_identity=identity,
+            replayed=False,
+        )
+
+    def _load(self, tenant_id: str, branch: str, source_identity: str) -> tuple[dict[str, Any], str] | None:
+        export_tenant = getattr(self.engine, "export_tenant", None)
+        if not callable(export_tenant):
+            return None
+        try:
+            snapshot = export_tenant(tenant_id)
+        except Exception:
+            return None
+        for row in snapshot.get("evidence", []):
+            if not isinstance(row, dict):
+                continue
+            if row.get("branch") != branch:
+                continue
+            if row.get("source_type") != PROVIDER_PROPOSAL_SOURCE_TYPE:
+                continue
+            if row.get("source_identity") != source_identity:
+                continue
+            metadata = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
+            record = metadata.get("provider_proposal") if isinstance(metadata.get("provider_proposal"), dict) else {}
+            response = record.get("response")
+            if isinstance(response, dict):
+                return response, str(row.get("cid") or "")
+        return None
+
+    def _record(
+        self,
+        *,
+        tenant_id: str,
+        branch: str,
+        role: str,
+        strategy: str,
+        source_identity: str,
+        request: dict[str, Any],
+        response: dict[str, Any],
+        max_sensitivity: int,
+    ) -> str:
+        append_evidence = getattr(self.engine, "append_evidence", None)
+        if not callable(append_evidence):
+            return ""
+        input_cids = _provider_request_input_cids(request)
+        content = json.dumps(
+            {
+                "kind": "provider_proposal",
+                "version": _PROVIDER_PROPOSAL_VERSION,
+                "role": role,
+                "strategy": strategy,
+                "source_identity": source_identity,
+                "input_cids": input_cids,
+                "request": _provider_proposal_request_summary(request),
+                "response": response,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        metadata = {
+            "provider_proposal": {
+                "version": _PROVIDER_PROPOSAL_VERSION,
+                "role": role,
+                "strategy": strategy,
+                "source_identity": source_identity,
+                "input_cids": input_cids,
+                "request": _provider_proposal_request_summary(request),
+                "response": response,
+                "response_sha256": sha256(
+                    json.dumps(response, sort_keys=True, separators=(",", ":")).encode("utf-8")
+                ).hexdigest(),
+                "max_input_sensitivity": max_sensitivity,
+                "raw_content_omitted": True,
+                "raw_fingerprint_omitted": True,
+            },
+            "reality_class": "externally_suggested",
+        }
+        cid = append_evidence(
+            Evidence(
+                tenant_id=tenant_id,
+                user_id="system",
+                actor="system",
+                source_type=PROVIDER_PROPOSAL_SOURCE_TYPE,
+                source_identity=source_identity,
+                content=content,
+                modality="text",
+                metadata=metadata,
+                trust_tier=int(TrustTier.UNTRUSTED_EXTERNAL),
+                capability_tags=[
+                    "provider-proposal",
+                    "derived-proposal",
+                    "data-only",
+                    "no-write-authority",
+                ],
+                sensitivity=max_sensitivity,
+                access_policy=_provider_request_access_policy(request, tenant_id=tenant_id),
+            ),
+            branch=branch,
+        )
+        return str(cid)
+
+
 def _provider_payload_view(
     payload: Mapping[str, Any],
     disclosure_policy: ProviderDisclosurePolicy | None = None,
@@ -1935,6 +2117,205 @@ def _redact_provider_string(value: str) -> str:
     return _SECRET_VALUE_RE.sub("[secret-omitted]", redacted)
 
 
+def _provider_proposal_identity(
+    *,
+    tenant_id: str,
+    branch: str,
+    role: str,
+    strategy: str,
+    request: dict[str, Any],
+) -> str:
+    payload = {
+        "version": _PROVIDER_PROPOSAL_VERSION,
+        "tenant_id": tenant_id,
+        "branch": branch,
+        "role": role,
+        "strategy": strategy,
+        "input_cids": _provider_request_input_cids(request),
+        "request": _provider_proposal_identity_view(request),
+    }
+    digest = sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+    return f"provider-proposal:{digest}"
+
+
+def _provider_proposal_identity_view(request: dict[str, Any]) -> dict[str, Any]:
+    view = _provider_proposal_record_value(request, max_sensitivity=0)
+    return _provider_strip_content_fields(view)
+
+
+def _provider_proposal_request_summary(request: dict[str, Any]) -> dict[str, Any]:
+    view = _provider_proposal_record_value(request, max_sensitivity=_provider_request_max_sensitivity(request))
+    return _provider_strip_content_fields(view)
+
+
+def _provider_strip_content_fields(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        stripped: dict[str, Any] = {}
+        for key, child in value.items():
+            if key == "content":
+                continue
+            stripped[str(key)] = _provider_strip_content_fields(child)
+        return stripped
+    if isinstance(value, list):
+        return [_provider_strip_content_fields(child) for child in value]
+    return value
+
+
+def _provider_response_with_record(
+    response: dict[str, Any],
+    *,
+    cid: str,
+    source_identity: str,
+    replayed: bool,
+) -> dict[str, Any]:
+    copied = json.loads(json.dumps(response, sort_keys=True))
+    copied["_proposal_record"] = {
+        "cid": cid,
+        "source_identity": source_identity,
+        "replayed": replayed,
+    }
+    return copied
+
+
+def _provider_pop_proposal_record(response: dict[str, Any]) -> dict[str, Any]:
+    record = response.pop("_proposal_record", None)
+    return dict(record) if isinstance(record, dict) else {}
+
+
+def _provider_proposal_record_value(
+    value: Any,
+    *,
+    max_sensitivity: int,
+    depth: int = 0,
+) -> Any:
+    if depth > _PROVIDER_PROPOSAL_MAX_DEPTH:
+        return "[provider-proposal-depth-omitted]"
+    if isinstance(value, Mapping):
+        result: dict[str, Any] = {}
+        for key, child in value.items():
+            key_text = str(key)
+            if not _provider_proposal_safe_key(key_text):
+                continue
+            result[key_text] = _provider_proposal_record_value(
+                child,
+                max_sensitivity=max_sensitivity,
+                depth=depth + 1,
+            )
+        return result
+    if isinstance(value, list | tuple):
+        return [
+            _provider_proposal_record_value(child, max_sensitivity=max_sensitivity, depth=depth + 1)
+            for child in list(value)[:_PROVIDER_PROPOSAL_MAX_ITEMS]
+        ]
+    if isinstance(value, str):
+        return _provider_proposal_string(value, max_sensitivity=max_sensitivity)
+    if isinstance(value, int | float | bool) or value is None:
+        return value
+    return _provider_proposal_string(str(value), max_sensitivity=max_sensitivity)
+
+
+def _provider_proposal_safe_key(key: str) -> bool:
+    if not _provider_safe_key(key):
+        return False
+    return key not in {
+        "embedding",
+        "raw_content",
+        "raw_sha256",
+        "signed_provenance",
+        "system_prompt",
+        "developer_prompt",
+        "chain_of_thought",
+    }
+
+
+def _provider_proposal_string(value: str, *, max_sensitivity: int) -> str:
+    redacted = _redact_provider_string(value)
+    if max_sensitivity >= 3:
+        digest = sha256(redacted.encode("utf-8")).hexdigest()[:16]
+        return f"[sensitive-provider-output:{digest}]"
+    if len(redacted) > _PROVIDER_PROPOSAL_MAX_STRING_CHARS:
+        trimmed = redacted[:_PROVIDER_PROPOSAL_MAX_STRING_CHARS].rsplit(" ", 1)[0].strip()
+        return f"{trimmed} ..." if trimmed else "[provider-output-omitted]"
+    return redacted
+
+
+def _provider_request_input_cids(request: dict[str, Any]) -> list[str]:
+    cids: list[str] = []
+
+    def add(value: Any) -> None:
+        if isinstance(value, str) and value and value not in cids:
+            cids.append(value)
+
+    payload = request.get("payload")
+    if isinstance(payload, Mapping):
+        source_cids = payload.get("source_evidence_cids")
+        if isinstance(source_cids, list | tuple):
+            for cid in source_cids:
+                add(str(cid))
+    for row in request.get("evidence", []) if isinstance(request.get("evidence"), list) else []:
+        if isinstance(row, Mapping):
+            cid = row.get("cid")
+            if cid is not None:
+                add(str(cid))
+    for row in request.get("candidates", []) if isinstance(request.get("candidates"), list) else []:
+        if not isinstance(row, Mapping):
+            continue
+        for key in ("proposal_cid",):
+            cid = row.get(key)
+            if cid is not None:
+                add(str(cid))
+        proposal_cids = row.get("proposal_cids")
+        if isinstance(proposal_cids, list | tuple):
+            for cid in proposal_cids:
+                add(str(cid))
+        source_cids = row.get("source_evidence_cids")
+        if isinstance(source_cids, list | tuple):
+            for cid in source_cids:
+                add(str(cid))
+    return sorted(cids)
+
+
+def _provider_request_max_sensitivity(request: dict[str, Any]) -> int:
+    values: list[int] = []
+
+    def add(value: Any) -> None:
+        values.append(_provider_sensitivity(value))
+
+    payload = request.get("payload")
+    if isinstance(payload, Mapping):
+        add(payload.get("sensitivity", 0))
+        content_view = payload.get("content_view")
+        if isinstance(content_view, Mapping):
+            add(content_view.get("sensitivity", 0))
+    for key in ("evidence", "candidates"):
+        rows = request.get(key)
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if not isinstance(row, Mapping):
+                continue
+            add(row.get("sensitivity", 0))
+            content_view = row.get("content_view")
+            if isinstance(content_view, Mapping):
+                add(content_view.get("sensitivity", 0))
+    return max(values or [0])
+
+
+def _provider_request_access_policy(request: dict[str, Any], *, tenant_id: str) -> dict[str, Any]:
+    policies: list[dict[str, Any]] = []
+    for key in ("evidence", "candidates"):
+        rows = request.get(key)
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if isinstance(row, Mapping) and isinstance(row.get("access_policy"), dict):
+                policies.append(dict(row["access_policy"]))
+    payload = request.get("payload")
+    if isinstance(payload, Mapping) and isinstance(payload.get("access_policy"), dict):
+        policies.append(dict(payload["access_policy"]))
+    return merge_access_policies(policies, tenant_id=tenant_id)
+
+
 class CommandCandidateExtractor:
     """Shell-free candidate extractor adapter for model-backed consolidation."""
 
@@ -1950,6 +2331,8 @@ class CommandCandidateExtractor:
         self.command = _command_argv(command)
         self.timeout_seconds = timeout_seconds
         self.disclosure_policy = disclosure_policy or ProviderDisclosurePolicy()
+        self.proposal_ledger: ProviderProposalLedger | None = None
+        self.proposal_branch = "main"
 
     def extract(self, tenant_id: str, payload: dict[str, Any], evidence: Sequence[Evidence]) -> dict[str, Any]:
         parsed = _run_json_command(
@@ -1962,21 +2345,34 @@ class CommandCandidateExtractor:
             },
             timeout_seconds=self.timeout_seconds,
             provider_name="candidate extractor",
+            proposal_ledger=self.proposal_ledger,
+            tenant_id=tenant_id,
+            branch=self.proposal_branch,
+            role="candidate_extractor",
+            strategy=self.strategy,
         )
+        proposal_record = _provider_pop_proposal_record(parsed)
         rows = parsed.get("candidates")
         if not isinstance(rows, list):
             raise ValueError("candidate extractor response requires candidates array")
         candidates = [_normalize_candidate(row, evidence, payload) for row in rows]
+        if proposal_record.get("cid"):
+            for candidate in candidates:
+                candidate["proposal_cids"] = [str(proposal_record["cid"])]
         metadata = parsed.get("metadata", {})
         if metadata is not None and not isinstance(metadata, dict):
             raise ValueError("candidate extractor metadata must be a JSON object")
+        metadata = dict(metadata or {})
+        details = {
+            "strategy": self.strategy,
+            "evidence_count": len(evidence),
+            "metadata": metadata,
+        }
+        if proposal_record:
+            details["proposal_record"] = proposal_record
         return {
             "candidates": candidates,
-            "details": {
-                "strategy": self.strategy,
-                "evidence_count": len(evidence),
-                "metadata": metadata or {},
-            },
+            "details": details,
         }
 
 
@@ -2019,6 +2415,8 @@ class CommandEvidenceSummarizer:
         self.command = _command_argv(command)
         self.timeout_seconds = timeout_seconds
         self.disclosure_policy = disclosure_policy or ProviderDisclosurePolicy()
+        self.proposal_ledger: ProviderProposalLedger | None = None
+        self.proposal_branch = "main"
 
     def summarize(self, tenant_id: str, evidence: Sequence[Evidence]) -> dict[str, Any] | None:
         if not evidence:
@@ -2032,20 +2430,30 @@ class CommandEvidenceSummarizer:
             },
             timeout_seconds=self.timeout_seconds,
             provider_name="evidence summarizer",
+            proposal_ledger=self.proposal_ledger,
+            tenant_id=tenant_id,
+            branch=self.proposal_branch,
+            role="evidence_summarizer",
+            strategy=self.strategy,
         )
+        proposal_record = _provider_pop_proposal_record(parsed)
         summary = str(parsed.get("summary") or "").strip()
         if not summary:
             raise ValueError("evidence summarizer response requires non-empty summary")
         metadata = parsed.get("metadata", {})
         if metadata is not None and not isinstance(metadata, dict):
             raise ValueError("evidence summarizer metadata must be a JSON object")
-        return {
+        metadata = dict(metadata or {})
+        result: dict[str, Any] = {
             "strategy": self.strategy,
             "evidence_count": len(evidence),
             "summary": summary,
             "source_cids": [item.cid for item in evidence if item.cid],
-            "metadata": metadata or {},
+            "metadata": metadata,
         }
+        if proposal_record:
+            result["proposal_record"] = proposal_record
+        return result
 
 
 class LessonDistiller(Protocol):
@@ -2095,6 +2503,8 @@ class CommandLessonDistiller:
         self.command = _command_argv(command)
         self.timeout_seconds = timeout_seconds
         self.disclosure_policy = disclosure_policy or ProviderDisclosurePolicy()
+        self.proposal_ledger: ProviderProposalLedger | None = None
+        self.proposal_branch = "main"
 
     def distill(self, tenant_id: str, candidates: Sequence[dict[str, Any]]) -> dict[str, Any]:
         parsed = _run_json_command(
@@ -2106,20 +2516,30 @@ class CommandLessonDistiller:
             },
             timeout_seconds=self.timeout_seconds,
             provider_name="lesson distiller",
+            proposal_ledger=self.proposal_ledger,
+            tenant_id=tenant_id,
+            branch=self.proposal_branch,
+            role="lesson_distiller",
+            strategy=self.strategy,
         )
+        proposal_record = _provider_pop_proposal_record(parsed)
         rows = parsed.get("lessons")
         if not isinstance(rows, list):
             raise ValueError("lesson distiller response requires lessons array")
         metadata = parsed.get("metadata", {})
         if metadata is not None and not isinstance(metadata, dict):
             raise ValueError("lesson distiller metadata must be a JSON object")
+        metadata = dict(metadata or {})
+        details = {
+            "strategy": self.strategy,
+            "candidate_count": len(candidates),
+            "metadata": metadata,
+        }
+        if proposal_record:
+            details["proposal_record"] = proposal_record
         return {
             "lessons": [_normalize_lesson_row(row) for row in rows],
-            "details": {
-                "strategy": self.strategy,
-                "candidate_count": len(candidates),
-                "metadata": metadata or {},
-            },
+            "details": details,
         }
 
 
@@ -2175,6 +2595,8 @@ class CommandProcedureInducer:
         self.command = _command_argv(command)
         self.timeout_seconds = timeout_seconds
         self.disclosure_policy = disclosure_policy or ProviderDisclosurePolicy()
+        self.proposal_ledger: ProviderProposalLedger | None = None
+        self.proposal_branch = "main"
 
     def induce(self, tenant_id: str, candidates: Sequence[dict[str, Any]]) -> dict[str, Any]:
         parsed = _run_json_command(
@@ -2186,20 +2608,30 @@ class CommandProcedureInducer:
             },
             timeout_seconds=self.timeout_seconds,
             provider_name="skill inducer",
+            proposal_ledger=self.proposal_ledger,
+            tenant_id=tenant_id,
+            branch=self.proposal_branch,
+            role="skill_inducer",
+            strategy=self.strategy,
         )
+        proposal_record = _provider_pop_proposal_record(parsed)
         rows = parsed.get("procedures")
         if not isinstance(rows, list):
             raise ValueError("skill inducer response requires procedures array")
         metadata = parsed.get("metadata", {})
         if metadata is not None and not isinstance(metadata, dict):
             raise ValueError("skill inducer metadata must be a JSON object")
+        metadata = dict(metadata or {})
+        details = {
+            "strategy": self.strategy,
+            "candidate_count": len(candidates),
+            "metadata": metadata,
+        }
+        if proposal_record:
+            details["proposal_record"] = proposal_record
         return {
             "procedures": [_normalize_procedure_row(row) for row in rows],
-            "details": {
-                "strategy": self.strategy,
-                "candidate_count": len(candidates),
-                "metadata": metadata or {},
-            },
+            "details": details,
         }
 
 
@@ -2242,6 +2674,8 @@ class CommandEntityResolver:
         self.command = _command_argv(command)
         self.timeout_seconds = timeout_seconds
         self.disclosure_policy = disclosure_policy or ProviderDisclosurePolicy()
+        self.proposal_ledger: ProviderProposalLedger | None = None
+        self.proposal_branch = "main"
 
     def resolve(self, tenant_id: str, candidates: Sequence[dict[str, Any]]) -> dict[str, Any]:
         payload = {
@@ -2249,28 +2683,24 @@ class CommandEntityResolver:
             "prompt_boundary": _provider_prompt_boundary("entity_resolver", self.disclosure_policy),
             "candidates": [dict(candidate) for candidate in candidates],
         }
-        try:
-            completed = subprocess.run(
-                self.command,
-                input=json.dumps(payload),
-                text=True,
-                capture_output=True,
-                timeout=self.timeout_seconds,
-                check=False,
-            )
-        except subprocess.TimeoutExpired as exc:
-            raise TimeoutError("entity resolver timed out") from exc
-        if completed.returncode != 0:
-            detail = completed.stderr.strip()[:512]
-            suffix = f": {detail}" if detail else ""
-            raise ValueError(f"entity resolver failed{suffix}")
-        try:
-            parsed = json.loads(completed.stdout or "{}")
-        except json.JSONDecodeError as exc:
-            raise ValueError("entity resolver response must be valid JSON") from exc
-        if not isinstance(parsed, dict):
-            raise ValueError("entity resolver response must be a JSON object")
-        return _apply_resolver_response(candidates, parsed)
+        parsed = _run_json_command(
+            self.command,
+            payload,
+            timeout_seconds=self.timeout_seconds,
+            provider_name="entity resolver",
+            proposal_ledger=self.proposal_ledger,
+            tenant_id=tenant_id,
+            branch=self.proposal_branch,
+            role="entity_resolver",
+            strategy=self.strategy,
+        )
+        proposal_record = _provider_pop_proposal_record(parsed)
+        result = _apply_resolver_response(candidates, parsed)
+        if proposal_record:
+            details = dict(result["details"])
+            details["proposal_record"] = proposal_record
+            result["details"] = details
+        return result
 
 
 def _deterministic_candidates(payload: dict[str, Any], evidence: Sequence[Evidence]) -> list[dict[str, Any]]:
@@ -2387,6 +2817,40 @@ def _merged_access_policy(evidence: Sequence[Evidence], *, tenant_id: str | None
 
 
 def _run_json_command(
+    command: Sequence[str],
+    payload: dict[str, Any],
+    *,
+    timeout_seconds: float,
+    provider_name: str,
+    proposal_ledger: ProviderProposalLedger | None = None,
+    tenant_id: str | None = None,
+    branch: str = "main",
+    role: str | None = None,
+    strategy: str | None = None,
+) -> dict[str, Any]:
+    if proposal_ledger is not None and tenant_id and role and strategy:
+        return proposal_ledger.load_or_run(
+            tenant_id=tenant_id,
+            branch=branch,
+            role=role,
+            strategy=strategy,
+            request=payload,
+            run=lambda: _run_json_command_raw(
+                command,
+                payload,
+                timeout_seconds=timeout_seconds,
+                provider_name=provider_name,
+            ),
+        )
+    return _run_json_command_raw(
+        command,
+        payload,
+        timeout_seconds=timeout_seconds,
+        provider_name=provider_name,
+    )
+
+
+def _run_json_command_raw(
     command: Sequence[str],
     payload: dict[str, Any],
     *,
