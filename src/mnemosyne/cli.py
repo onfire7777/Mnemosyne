@@ -2811,8 +2811,41 @@ def _retrieval_ops_sha256_present(value: Any) -> bool:
     return "sha256:" in str(value or "").strip().lower()
 
 
+# Ops-check bundles are PROFILE-scoped. Production stays Postgres-ONLY (the spec's
+# Global Constraints: production topology is Postgres-only). Production manifests
+# declare no `profile`, so they default to "production" and are unchanged — a
+# production bundle carrying a sqlite backend therefore still FAILS. A self-hosted
+# SqliteEngine tier declares `profile: "sqlite"`, which accepts the sqlite storage
+# backend and its file-per-tenant isolation analog (SQLite has no RLS; isolation is
+# one database file per tenant). Any unrecognized/absent profile falls back to
+# production. This parameterization is the ONLY relaxation — every other control
+# (production_validated, forbid_local, redaction, hashing) is enforced unchanged.
+OPS_CHECK_PRODUCTION_PROFILE = "production"
+OPS_CHECK_SQLITE_PROFILE = "sqlite"
+_OPS_CHECK_PROFILES = frozenset({OPS_CHECK_PRODUCTION_PROFILE, OPS_CHECK_SQLITE_PROFILE})
+
+
+def _ops_check_profile(bundle: Mapping[str, Any]) -> str:
+    """Resolve the bundle's declared deployment profile (default: production)."""
+    raw = str(bundle.get("profile") or OPS_CHECK_PRODUCTION_PROFILE).strip().lower()
+    return raw if raw in _OPS_CHECK_PROFILES else OPS_CHECK_PRODUCTION_PROFILE
+
+
+def _ops_check_backend_accepted(
+    backend: str, profile: str, production_backends: frozenset[str]
+) -> bool:
+    """Profile-scoped backend acceptance. The sqlite profile accepts only the
+    ``sqlite`` backend; every other profile requires one of ``production_backends``
+    (Postgres) — so production release bundles remain Postgres-only."""
+    normalized = backend.strip().lower()
+    if profile == OPS_CHECK_SQLITE_PROFILE:
+        return normalized == "sqlite"
+    return normalized in production_backends
+
+
 def cmd_retrieval_ops_check(args: argparse.Namespace) -> None:
     bundle = _load_retrieval_ops_bundle(args)
+    profile = _ops_check_profile(bundle)
     findings: list[dict[str, str]] = []
     checks: list[dict[str, Any]] = []
 
@@ -2923,7 +2956,7 @@ def cmd_retrieval_ops_check(args: argparse.Namespace) -> None:
         findings.append(_retrieval_ops_finding("retrieval_cases_invalid", "retrieval cases must be an array"))
     if retrieval.get("production_validated") is not True:
         findings.append(_retrieval_ops_finding("retrieval_production_validation_missing", "retrieval evidence must be marked production_validated"))
-    if str(retrieval.get("backend") or "").strip().lower() != "postgres":
+    if not _ops_check_backend_accepted(str(retrieval.get("backend") or ""), profile, frozenset({"postgres"})):
         findings.append(_retrieval_ops_finding("retrieval_backend_not_postgres", "retrieval evidence must target the Postgres backend"))
     if len(cases) < args.min_cases:
         findings.append(_retrieval_ops_finding("insufficient_retrieval_cases", "retrieval evidence has too few cases"))
@@ -3263,7 +3296,7 @@ def cmd_retrieval_ops_check(args: argparse.Namespace) -> None:
         "requirements": {
             "required_provider_checks": required_provider_checks,
             "provider_forbid_local": True,
-            "backend": "postgres",
+            "backend": "sqlite" if profile == OPS_CHECK_SQLITE_PROFILE else "postgres",
             "min_cases": args.min_cases,
             "min_lexical_cases": args.min_lexical_cases,
             "min_vector_cases": args.min_vector_cases,
@@ -3391,6 +3424,7 @@ def _auth_ops_forbidden_raw_paths(value: Any, *, path: str = "$") -> list[str]:
 
 def cmd_auth_ops_check(args: argparse.Namespace) -> None:
     bundle = _load_auth_ops_bundle(args)
+    profile = _ops_check_profile(bundle)
     findings: list[dict[str, str]] = []
     checks: list[dict[str, Any]] = []
 
@@ -3684,8 +3718,15 @@ def cmd_auth_ops_check(args: argparse.Namespace) -> None:
             denied_count += 1
         if actual == "allow":
             allowed_count += 1
+    # Profile-scoped isolation control: production requires Postgres RLS; the
+    # sqlite profile has no RLS, so its isolation analog is one database file per
+    # tenant (`sqlite_file_per_tenant`). Production stays RLS-only — a production
+    # (default-profile) bundle cannot substitute the sqlite flag.
+    isolation_control_flag = (
+        "sqlite_file_per_tenant" if profile == OPS_CHECK_SQLITE_PROFILE else "postgres_rls_enabled"
+    )
     tenant_ok = (
-        tenant_isolation.get("postgres_rls_enabled") is True
+        tenant_isolation.get(isolation_control_flag) is True
         and tenant_isolation.get("cross_tenant_read_denied") is True
         and tenant_isolation.get("cross_tenant_write_denied") is True
         and tenant_isolation.get("signed_session_tenant_binding") is True
@@ -3694,7 +3735,7 @@ def cmd_auth_ops_check(args: argparse.Namespace) -> None:
         and denied_count >= args.min_tenant_denied_cases
         and allowed_count >= args.min_tenant_allowed_cases
     )
-    for flag in ("postgres_rls_enabled", "cross_tenant_read_denied", "cross_tenant_write_denied", "signed_session_tenant_binding"):
+    for flag in (isolation_control_flag, "cross_tenant_read_denied", "cross_tenant_write_denied", "signed_session_tenant_binding"):
         if tenant_isolation.get(flag) is not True:
             findings.append(_auth_ops_finding("tenant_isolation_control_missing", f"tenant isolation control {flag} is not proven"))
     if tenant_count < args.min_tenants:
@@ -6154,6 +6195,7 @@ def _provenance_ops_forbidden_raw_paths(value: Any, *, path: str = "$") -> list[
 
 def cmd_provenance_ops_check(args: argparse.Namespace) -> None:
     bundle = _load_provenance_ops_bundle(args)
+    profile = _ops_check_profile(bundle)
     findings: list[dict[str, Any]] = []
     checks: list[dict[str, Any]] = []
 
@@ -6489,9 +6531,12 @@ def cmd_provenance_ops_check(args: argparse.Namespace) -> None:
     )
     required_tags = {"asset-bound-provenance", "provenance-valid", "provenance-verified", "quarantined"}
     missing_tags = sorted(required_tags - capability_tags)
+    ingestion_backend_ok = _ops_check_backend_accepted(
+        ingestion_backend, profile, frozenset({"postgres", "postgresql"})
+    )
     ingestion_ok = (
         ingestion.get("ok") is True
-        and ingestion_backend in {"postgres", "postgresql"}
+        and ingestion_backend_ok
         and ingestion.get("production_validated") is True
         and bool(ingestion.get("tenant_hash"))
         and len(evidence_hashes) >= args.min_cases
@@ -6501,7 +6546,7 @@ def cmd_provenance_ops_check(args: argparse.Namespace) -> None:
     )
     if ingestion.get("ok") is not True:
         findings.append(_provenance_finding("ingestion_not_ok", "provenance ingestion evidence must be ok"))
-    if ingestion_backend not in {"postgres", "postgresql"}:
+    if not ingestion_backend_ok:
         findings.append(_provenance_finding("ingestion_backend_not_postgres", "provenance ingestion backend must be postgres"))
     if ingestion.get("production_validated") is not True:
         findings.append(_provenance_finding("ingestion_production_validation_missing", "provenance ingestion must be production validated"))
@@ -6646,7 +6691,7 @@ def cmd_provenance_ops_check(args: argparse.Namespace) -> None:
             "min_trusted_issuers": args.min_trusted_issuers,
             "max_verifier_timeout_seconds": args.max_verifier_timeout_seconds,
             "max_deployment_latency_ms": args.max_deployment_latency_ms,
-            "ingestion_backend": "postgres",
+            "ingestion_backend": "sqlite" if profile == OPS_CHECK_SQLITE_PROFILE else "postgres",
         },
         "redaction": {**redaction_flags, "forbidden_raw_fields_present": bool(forbidden_raw_paths)},
         "checks": checks,

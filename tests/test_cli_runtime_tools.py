@@ -13294,3 +13294,133 @@ def test_cli_profile_graph_learning_and_parametric_flows_persist(tmp_path: Path)
     assert rolled_back_search["procedures"][0]["id"] == procedure["id"]
     assert ops["tripwires"]["gate_promotions"] >= 2
     assert ops["tripwires"]["gate_rollbacks"] >= 2
+
+
+# --------------------------------------------------------------------------- #
+# Phase-2 Task 12: ops-check bundles are PROFILE-scoped. A self-hosted
+# SqliteEngine tier declares profile="sqlite" and is accepted; production
+# manifests declare no profile (default "production") and stay Postgres-ONLY, so
+# a production bundle carrying a sqlite backend still FAILS. (spec Global
+# Constraints: production topology is Postgres-only.)
+# --------------------------------------------------------------------------- #
+
+
+def _sqlite_retrieval_bundle() -> dict:
+    bundle = retrieval_ops_bundle()
+    bundle["profile"] = "sqlite"
+    bundle["retrieval"]["backend"] = "sqlite"
+    rb = bundle["provider_check"]["checks"]["retrieval_backends"]
+    rb["lexical_backend"] = "sqlite-fts5"
+    rb["graph_backend"] = "sqlite-cached-ppr"
+    return bundle
+
+
+def test_cli_retrieval_ops_check_accepts_sqlite_profile(tmp_path: Path) -> None:
+    bundle = tmp_path / "sqlite-retrieval-ops.json"
+    bundle.write_text(json.dumps(_sqlite_retrieval_bundle()), encoding="utf-8")
+    report = run_cli(
+        tmp_path / "mnemosyne.json",
+        "retrieval-ops-check",
+        "--bundle",
+        str(bundle),
+        "--min-cases",
+        "3",
+        "--min-calibration-examples",
+        "50",
+    )
+    codes = {finding["code"] for finding in report["findings"]}
+    assert "retrieval_backend_not_postgres" not in codes
+    assert report["ok"] is True
+    assert report["requirements"]["backend"] == "sqlite"
+
+
+def test_cli_retrieval_ops_check_production_bundle_rejects_sqlite_backend(tmp_path: Path) -> None:
+    # GUARD: a production-profile bundle (no `profile` key) that names a sqlite
+    # backend must still FAIL — production stays Postgres-only.
+    payload = retrieval_ops_bundle()
+    payload["retrieval"]["backend"] = "sqlite"
+    bundle = tmp_path / "prod-retrieval-sqlite.json"
+    bundle.write_text(json.dumps(payload), encoding="utf-8")
+    result = run_raw_cli(
+        tmp_path / "mnemosyne.json",
+        "retrieval-ops-check",
+        "--bundle",
+        str(bundle),
+        "--min-cases",
+        "3",
+        "--min-calibration-examples",
+        "50",
+    )
+    report = json.loads(result.stdout)
+    codes = {finding["code"] for finding in report["findings"]}
+    assert result.returncode == 1
+    assert report["ok"] is False
+    assert "retrieval_backend_not_postgres" in codes
+    assert report["requirements"]["backend"] == "postgres"
+
+
+def _sqlite_auth_bundle() -> dict:
+    bundle = auth_ops_bundle()
+    bundle["profile"] = "sqlite"
+    isolation = bundle["tenant_isolation"]
+    # SQLite has no RLS: the isolation analog is one database file per tenant.
+    isolation.pop("postgres_rls_enabled", None)
+    isolation["sqlite_file_per_tenant"] = True
+    return bundle
+
+
+def test_cli_auth_ops_check_accepts_sqlite_file_per_tenant_profile(tmp_path: Path) -> None:
+    bundle = tmp_path / "sqlite-auth-ops.json"
+    bundle.write_text(json.dumps(_sqlite_auth_bundle()), encoding="utf-8")
+    report = run_cli(tmp_path / "mnemosyne.json", "auth-ops-check", "--bundle", str(bundle))
+    codes = {finding["code"] for finding in report["findings"]}
+    assert "tenant_isolation_control_missing" not in codes
+    assert report["ok"] is True
+
+
+def test_cli_auth_ops_check_production_bundle_rejects_sqlite_isolation(tmp_path: Path) -> None:
+    # GUARD: without profile=sqlite, the file-per-tenant flag is NOT accepted as
+    # the isolation control — production still requires Postgres RLS.
+    payload = auth_ops_bundle()
+    payload["tenant_isolation"].pop("postgres_rls_enabled", None)
+    payload["tenant_isolation"]["sqlite_file_per_tenant"] = True
+    bundle = tmp_path / "prod-auth-sqlite-isolation.json"
+    bundle.write_text(json.dumps(payload), encoding="utf-8")
+    result = run_raw_cli(tmp_path / "mnemosyne.json", "auth-ops-check", "--bundle", str(bundle))
+    report = json.loads(result.stdout)
+    codes = {finding["code"] for finding in report["findings"]}
+    assert result.returncode == 1
+    assert report["ok"] is False
+    assert "tenant_isolation_control_missing" in codes
+
+
+def _sqlite_provenance_bundle() -> dict:
+    bundle = provenance_ops_bundle()
+    bundle["profile"] = "sqlite"
+    bundle["ingestion"]["backend"] = "sqlite"
+    return bundle
+
+
+def test_cli_provenance_ops_check_accepts_sqlite_profile(tmp_path: Path) -> None:
+    bundle = tmp_path / "sqlite-provenance-ops.json"
+    bundle.write_text(json.dumps(_sqlite_provenance_bundle()), encoding="utf-8")
+    report = run_cli(tmp_path / "mnemosyne.json", "provenance-ops-check", "--bundle", str(bundle))
+    codes = {finding["code"] for finding in report["findings"]}
+    assert "ingestion_backend_not_postgres" not in codes
+    assert report["ok"] is True
+    assert report["requirements"]["ingestion_backend"] == "sqlite"
+
+
+def test_cli_provenance_ops_check_production_bundle_rejects_sqlite_backend(tmp_path: Path) -> None:
+    # GUARD: production-profile provenance bundle with a sqlite ingestion backend FAILS.
+    payload = provenance_ops_bundle()
+    payload["ingestion"]["backend"] = "sqlite"
+    bundle = tmp_path / "prod-provenance-sqlite.json"
+    bundle.write_text(json.dumps(payload), encoding="utf-8")
+    result = run_raw_cli(tmp_path / "mnemosyne.json", "provenance-ops-check", "--bundle", str(bundle))
+    report = json.loads(result.stdout)
+    codes = {finding["code"] for finding in report["findings"]}
+    assert result.returncode == 1
+    assert report["ok"] is False
+    assert "ingestion_backend_not_postgres" in codes
+    assert report["requirements"]["ingestion_backend"] == "postgres"

@@ -343,6 +343,19 @@ class MemoryEngine(Protocol):
     ) -> dict[str, Any]:
         raise NotImplementedError
 
+    def evidence_is_erased(self, tenant_id: str, cid: str, branch: str = "main") -> bool:
+        """Engine-neutral tombstone probe.
+
+        Returns True iff a row for ``cid`` still exists for (tenant, branch) AND
+        it is erased/tombstoned. Distinct from :meth:`get_evidence`, which masks
+        erased rows (returns ``None``): the adversarial poison corpus needs to
+        confirm the erased row is *retained-but-hidden* (the replay blocklist)
+        without reaching into any engine's private storage. Local retains the row
+        in-memory, Postgres/SQLite retain it as ``erased = true`` in the evidence
+        table; a hard-deleted (legal) row is gone and returns False.
+        """
+        raise NotImplementedError
+
     def export_tenant(self, tenant_id: str) -> dict[str, Any]:
         raise NotImplementedError
 
@@ -697,6 +710,16 @@ class LocalMemoryEngine:
             if ev and not ev.erased:
                 return copy.deepcopy(ev)
             return None
+
+    def evidence_is_erased(self, tenant_id: str, cid: str, branch: str = "main") -> bool:
+        """Engine-neutral tombstone probe (see ``MemoryEngine.evidence_is_erased``).
+
+        The erased row is retained in-memory as the replay blocklist; a legal
+        hard-delete removes it entirely and returns False.
+        """
+        with self._lock:
+            ev = self.evidence.get(self._evidence_key(tenant_id, branch, cid))
+            return bool(ev and ev.erased)
 
     def set_evidence_embedding(
         self,
