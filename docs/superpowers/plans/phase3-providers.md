@@ -148,6 +148,56 @@
 
 **Steps:** run gates -> adversarial whole-phase review -> fix findings -> final docs/ledger update -> commit `docs(phase3): record provider and consolidation exit verification`.
 
+## Exit Verification (2026-07-03)
+
+Phase 3 is code-complete on `phase3/providers-consolidation` through Task 10.
+The exit record is local-only until this branch is pushed and CI runs against the
+current head.
+
+Measured gates:
+
+- Full native suite: `uv run --locked python -m pytest -q --junitxml=<tmp>` ->
+  **1592 passed / 127 skipped**, 0 failures, 0 errors, 144 seconds.
+- Full pure suite: `MNEMOSYNE_PURE=1 uv run --locked python -m pytest -q
+  --junitxml=<tmp>` -> **1589 passed / 130 skipped**, 0 failures, 0 errors, 152
+  seconds.
+- Focused provider/security/consolidation slice:
+  `tests/test_provider_manifest_phase3.py`,
+  `tests/test_phase3_provider_profiles.py`,
+  `tests/test_runtime_parity_extensions.py`, honeytoken/session/parity security,
+  belief/calibration, production manifest, poison corpus, and consolidation
+  cadence tests -> **216 passed / 5 skipped**, 0 failures, 0 errors.
+- DSN-armed parity/live subset with the local compose Postgres DSN on port 54329:
+  `tests/test_parity_*`, `tests/test_shared_engine_contract.py`, and
+  `tests/test_postgres_engine_live.py` -> **434 passed / 6 skipped**, 0
+  failures, 0 errors, 332 seconds.
+- Sidecar Rust checks: `rust/mneme-providers` cargo fmt/test/clippy green;
+  default feature tests **10 passed**, `--features models` tests **12 passed**.
+- Native Rust checks: `rust/mnemosyne-native` cargo fmt/test/clippy green.
+- Live provider-check smoke: generated a temporary `forbid_local=true` provider
+  manifest, exercised local HTTP `/embed` and `/rerank`, command-backed lexical
+  and graph retrieval, and all five proposal roles
+  (`candidate_extractor`, `summarizer`, `entity_resolver`, `lesson_distiller`,
+  `skill_inducer`) through `python -m mnemosyne.cli provider-check`; report
+  `ok=true`.
+- Static checks: `uv run --locked ruff check` clean and `git diff --check`
+  clean.
+- CBM graph was refreshed and verified current for `/Users/admin/Mnemosyne`:
+  project `Users-admin-Mnemosyne`, status `ready`, 13909 nodes, 52277 edges.
+
+Bake-off and production evidence status:
+
+- The provider bake-off protocol and deterministic sidecar smoke fixture exist,
+  but this exit run did **not** generate strict-judge confidence intervals over a
+  private suite. Provider default flips remain blocked and must be recorded as
+  `pending/no-default-flip`.
+- Frontier/provider production enablement remains blocked until a fresh
+  operator-captured §9.2 production evidence bundle proves gist-packet behavior,
+  no raw prompt/request/response/evidence logging, forbid-local provider
+  manifests, and release-audit custody against deployed infrastructure.
+- These results do not claim blueprint parity, Tier-B completion, or production
+  operator readiness.
+
 ## Explicit Non-Goals
 
 - No C4/rmcp daemon work.
