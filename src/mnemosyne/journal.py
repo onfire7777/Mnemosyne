@@ -5,10 +5,13 @@ journal append SECOND; on divergence the engine ledger is authoritative and
 journal segments are re-derived, while journal-only CIDs are an alarm.
 ``tombstone``/``purge`` are the Phase-2 erasure primitives (mode-aware:
 tombstone_recompute keeps a tombstone line — salted hash + timestamps —
-while hard_delete_legal removes the line entirely). Engine erasure wiring
-lands in Phase 2: ``forget()`` does not call them yet, so enabling
-``journal_dir`` before then means erased ledger content is retained in the
-journal until that wiring exists.
+while hard_delete_legal removes the line entirely). As of Phase-2 Task 9
+``SqliteEngine.forget`` drives them: a tombstone_recompute erasure rewrites
+each affected cid's line to a ``salted_hash`` marker (no plaintext), and a
+hard_delete_legal erasure purges the lines outright, so a post-erasure
+journal-rebuild stays byte-equivalent to a ledger-rebuild. ``append`` is
+repair-before-append: it truncates an unfsynced torn tail (Phase-0 T8) before
+writing so a crash-torn final fragment can never wedge later appends.
 Stdlib only. CIDs are never computed here.
 """
 from __future__ import annotations
@@ -88,9 +91,33 @@ class CIDJournal:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
+    def _repair_torn_tail(self) -> None:
+        """Truncate an unfsynced torn final fragment before appending (Phase-0 T8).
+
+        ``append`` writes each record as one ``\\n``-terminated line and fsyncs
+        it, so a fully-committed record ALWAYS ends in ``\\n``. A crash in the
+        write→flush→fsync window can leave a trailing fragment with no
+        terminating newline (and possibly unparseable JSON). That fragment is by
+        construction unacknowledged, so truncating it back to the last complete
+        newline (byte offset 0 when there is none) is loss-free and restores an
+        append-safe tail — otherwise a subsequent ``append`` would leave the torn
+        fragment as a NON-final line, which ``_read`` rejects as real corruption."""
+        if not self.path.exists():
+            return
+        data = self.path.read_bytes()
+        if not data or data.endswith(b"\n"):
+            return
+        keep = data.rfind(b"\n") + 1  # 0 when no complete line precedes the fragment
+        with open(self.path, "r+b") as fh:
+            fh.truncate(keep)
+            fh.flush()
+            os.fsync(fh.fileno())
+        _fsync_dir(self.path.parent)
+
     def append(self, record: dict[str, Any]) -> None:
         if "cid" not in record:
             raise ValueError("journal records must carry a cid")
+        self._repair_torn_tail()
         line = _canonical(record) + "\n"
         with open(self.path, "a", encoding="utf-8") as fh:
             fh.write(line)

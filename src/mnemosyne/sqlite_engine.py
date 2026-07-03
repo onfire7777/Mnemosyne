@@ -81,6 +81,7 @@ from mnemosyne.engine import (
     _privacy_backfill_controls,
     _privacy_backfill_metadata,
 )
+from mnemosyne.erasure_ids import erasure_deletion_record_id, erasure_tombstone_hash
 from mnemosyne.ids import evidence_cid, evidence_unscoped_cid, new_id
 from mnemosyne.journal import CIDJournal, journal_filename, safe_tenant_filename
 from mnemosyne.models import (
@@ -114,6 +115,7 @@ from mnemosyne.sqlite_schema import (
     pack_embedding,
     unpack_embedding,
 )
+from mnemosyne.standing import standing_erasure_cascade_report
 from mnemosyne.text import cosine, lexical_score, tokenize
 from mnemosyne.workspace import self_generation_budget_report
 
@@ -2868,4 +2870,303 @@ class SqliteEngine:
         requested_by: str = "user",
         erasure_mode: ErasureMode | str = ErasureMode.TOMBSTONE_RECOMPUTE,
     ) -> dict[str, Any]:
-        raise NotImplementedError("SqliteEngine.forget lands in Phase-2 Task 9")
+        """Erase evidence + cascade, byte-parity with ``LocalMemoryEngine.forget``.
+
+        A direct SQL port of ``PostgresEngine.forget`` (the derived-evidence plan is
+        the shared engine-independent ``postgres_engine._derived_evidence_forget_plan``
+        — imported here, ``legal_blind=True`` on a legal shred):
+
+        * ``tombstone_recompute`` — ``UPDATE evidence SET content='', erased=1`` on the
+          target + its derived footprint (every other column, incl. the cid, is kept;
+          the erased row IS the replay blocklist ``append_evidence`` probes).
+        * ``hard_delete_legal`` — ``DELETE`` those rows outright.
+
+        Cascade asymmetry mirrors Local exactly: assertions/relations are
+        branch-scoped, preferences/entities tenant-scoped. An operator (non-``legal``)
+        hard delete is refused (``min_corroboration_for_delete``) when it would strand
+        an active assertion below the corroboration floor. Erasure propagation:
+        the embedding cache is purged for every affected cid (both modes, privacy
+        class 13), the branch's cached-PPR rows are dropped (targeted invalidation —
+        ``evidence_fts`` self-syncs via its UPDATE/DELETE triggers; the relations
+        watermark self-invalidates the rest), the deletion_log records an HMAC id for
+        hard deletes (spec §7 invariant 13; the cid is kept for tombstones), and the
+        CID journal is tombstoned/purged per affected cid AFTER commit so a
+        journal-rebuild stays byte-equivalent to a ledger-rebuild.
+
+        BRANCH SCOPE (Local-match, ledgered): Local/Postgres both scope the
+        evidence/assertion/relation cascade to the single ``branch`` argument (the
+        spec §4.2 ideal is erase-across-all-branches). This port MATCHES the shipped
+        oracle rather than diverging; the spec>shipped gap is recorded in the Task-9
+        report."""
+        mode = ErasureMode(erasure_mode)
+        from mnemosyne.postgres_engine import (
+            _bytes_to_cid,
+            _cid_to_bytes,
+            _derived_evidence_forget_plan,
+        )
+
+        propagated: dict[str, Any] = {
+            "retracted_assertions": [],
+            "trimmed_assertions": [],
+            "retracted_preferences": [],
+            "trimmed_preferences": [],
+            "expired_relations": [],
+            "trimmed_relations": [],
+            "removed_entities": [],
+            "trimmed_entities": [],
+            "erased_derived_evidence": [],
+            "retained_derived_evidence": [],
+            "trimmed_derived_evidence": [],
+        }
+        with self._lock:
+            conn = self._connect(tenant_id)
+            with conn:
+                target = conn.execute(
+                    "SELECT cid, source_type, trust_tier, capability_tags, metadata, user_id "
+                    "FROM evidence WHERE tenant_id = ? AND branch = ? AND cid = ?",
+                    (tenant_id, branch, cid),
+                ).fetchone()
+                if target is None:
+                    return {"erased": False, "reason": "evidence_not_found", "cid": cid, "erasure_mode": mode.value}
+                candidate_rows = conn.execute(
+                    "SELECT cid, metadata, source_type FROM evidence "
+                    "WHERE tenant_id = ? AND branch = ? AND erased = 0 AND cid <> ? ORDER BY rowid",
+                    (tenant_id, branch, cid),
+                ).fetchall()
+                candidates = [
+                    (_cid_to_bytes(row["cid"]), json.loads(row["metadata"] or "{}")) for row in candidate_rows
+                ]
+                cascade_metadata: dict[str, dict[str, Any]] = {
+                    cid: {**json.loads(target["metadata"] or "{}"), "source_type": target["source_type"]}
+                }
+                for row in candidate_rows:
+                    cascade_metadata[row["cid"]] = {
+                        **json.loads(row["metadata"] or "{}"),
+                        "source_type": row["source_type"] or "",
+                    }
+                legal_blind = mode is ErasureMode.HARD_DELETE_LEGAL and requested_by == "legal"
+                if legal_blind:
+                    _derived_bytes, derived_cids, retained_metadata = _derived_evidence_forget_plan(
+                        cid, candidates, legal_blind=True
+                    )
+                else:
+                    _derived_bytes, derived_cids, retained_metadata = _derived_evidence_forget_plan(cid, candidates)
+                affected_cids = {cid, *derived_cids}
+                propagated["erased_derived_evidence"] = derived_cids
+                propagated["retained_derived_evidence"] = sorted(_bytes_to_cid(item) for item in retained_metadata)
+                propagated["trimmed_derived_evidence"] = list(propagated["retained_derived_evidence"])
+                retained_cascade_metadata = {
+                    _bytes_to_cid(retained_bytes): {
+                        **dict(metadata),
+                        "source_type": cascade_metadata.get(_bytes_to_cid(retained_bytes), {}).get("source_type", ""),
+                    }
+                    for retained_bytes, metadata in retained_metadata.items()
+                }
+                propagated["standing_cascade"] = standing_erasure_cascade_report(
+                    source_cid=cid,
+                    erasure_mode=mode.value,
+                    affected_cids=affected_cids | set(propagated["retained_derived_evidence"]),
+                    erased_derived_cids=derived_cids,
+                    retained_metadata_by_cid=retained_cascade_metadata,
+                    metadata_by_cid=cascade_metadata,
+                )
+                if mode is ErasureMode.HARD_DELETE_LEGAL and requested_by != "legal":
+                    minimum = self.policy.min_corroboration_for_delete
+                    blocking: list[str] = []
+                    for row in conn.execute(
+                        "SELECT id, source_evidence_cids FROM assertions "
+                        "WHERE tenant_id = ? AND branch = ? AND status = 'active' ORDER BY rowid",
+                        (tenant_id, branch),
+                    ).fetchall():
+                        sources = set(json.loads(row["source_evidence_cids"] or "[]"))
+                        if sources and sources <= affected_cids and len(sources) < minimum:
+                            blocking.append(row["id"])
+                    if blocking:
+                        return {
+                            "erased": False,
+                            "reason": "min_corroboration_for_delete",
+                            "cid": cid,
+                            "erasure_mode": mode.value,
+                            "min_corroboration_for_delete": minimum,
+                            "blocking_assertions": blocking,
+                        }
+                affected_order = [cid, *derived_cids]
+                # Capture original content/user before erasing (needed for the
+                # tombstone journal salted-hash — the UPDATE nulls content).
+                originals: dict[str, tuple[str, str]] = {}
+                if affected_order:
+                    placeholders = ",".join("?" for _ in affected_order)
+                    for row in conn.execute(
+                        f"SELECT cid, content, user_id FROM evidence "
+                        f"WHERE tenant_id = ? AND branch = ? AND cid IN ({placeholders})",
+                        (tenant_id, branch, *affected_order),
+                    ).fetchall():
+                        originals[row["cid"]] = (row["content"] or "", row["user_id"] or "")
+                if mode is ErasureMode.HARD_DELETE_LEGAL:
+                    for affected_cid in affected_order:
+                        conn.execute(
+                            "DELETE FROM evidence WHERE tenant_id = ? AND branch = ? AND cid = ?",
+                            (tenant_id, branch, affected_cid),
+                        )
+                else:
+                    for affected_cid in affected_order:
+                        conn.execute(
+                            "UPDATE evidence SET content = '', erased = 1 "
+                            "WHERE tenant_id = ? AND branch = ? AND cid = ?",
+                            (tenant_id, branch, affected_cid),
+                        )
+                for retained_bytes, metadata in retained_metadata.items():
+                    conn.execute(
+                        "UPDATE evidence SET metadata = ? WHERE tenant_id = ? AND branch = ? AND cid = ?",
+                        (json_text(metadata), tenant_id, branch, _bytes_to_cid(retained_bytes)),
+                    )
+                # Assertions (branch-scoped): trim surviving sources or retract.
+                for row in conn.execute(
+                    "SELECT id, source_evidence_cids FROM assertions "
+                    "WHERE tenant_id = ? AND branch = ? ORDER BY rowid",
+                    (tenant_id, branch),
+                ).fetchall():
+                    sources = json.loads(row["source_evidence_cids"] or "[]")
+                    if not affected_cids.intersection(sources):
+                        continue
+                    surviving = [item for item in sources if item not in affected_cids]
+                    if surviving:
+                        conn.execute(
+                            "UPDATE assertions SET source_evidence_cids = ? "
+                            "WHERE tenant_id = ? AND branch = ? AND id = ?",
+                            (json_text(surviving), tenant_id, branch, row["id"]),
+                        )
+                        propagated["trimmed_assertions"].append(row["id"])
+                    else:
+                        conn.execute(
+                            "UPDATE assertions SET status = 'retracted', expired_at = ?, source_evidence_cids = ? "
+                            "WHERE tenant_id = ? AND branch = ? AND id = ?",
+                            (dt_to_json(utc_now()), json_text([]), tenant_id, branch, row["id"]),
+                        )
+                        propagated["retracted_assertions"].append(row["id"])
+                # Preferences (tenant-scoped): rehydrate to keep the record byte-shape.
+                for row in conn.execute(
+                    "SELECT id, record FROM preferences WHERE tenant_id = ? ORDER BY rowid",
+                    (tenant_id,),
+                ).fetchall():
+                    pref = Preference.from_dict(json.loads(row["record"]))
+                    sources = list(pref.source_evidence_cids)
+                    if not affected_cids.intersection(sources):
+                        continue
+                    surviving = [item for item in sources if item not in affected_cids]
+                    if surviving:
+                        pref.source_evidence_cids = surviving
+                        propagated["trimmed_preferences"].append(pref.id)
+                    else:
+                        pref.status = "retracted"
+                        pref.valid_to = utc_now()
+                        pref.source_evidence_cids = []
+                        propagated["retracted_preferences"].append(pref.id)
+                    conn.execute(
+                        "UPDATE preferences SET record = ? WHERE id = ?",
+                        (json_text(pref.to_dict()), pref.id),
+                    )
+                # Relations (branch-scoped).
+                for row in conn.execute(
+                    "SELECT id, source_evidence_cids FROM relations "
+                    "WHERE tenant_id = ? AND branch = ? ORDER BY rowid",
+                    (tenant_id, branch),
+                ).fetchall():
+                    sources = json.loads(row["source_evidence_cids"] or "[]")
+                    if not affected_cids.intersection(sources):
+                        continue
+                    surviving = [item for item in sources if item not in affected_cids]
+                    if surviving:
+                        conn.execute(
+                            "UPDATE relations SET source_evidence_cids = ? "
+                            "WHERE tenant_id = ? AND branch = ? AND id = ?",
+                            (json_text(surviving), tenant_id, branch, row["id"]),
+                        )
+                        propagated["trimmed_relations"].append(row["id"])
+                    else:
+                        conn.execute(
+                            "UPDATE relations SET valid_to = ?, source_evidence_cids = ? "
+                            "WHERE tenant_id = ? AND branch = ? AND id = ?",
+                            (dt_to_json(utc_now()), json_text([]), tenant_id, branch, row["id"]),
+                        )
+                        propagated["expired_relations"].append(row["id"])
+                # Entities (tenant-scoped, plain dict record).
+                for row in conn.execute(
+                    "SELECT canonical, record FROM entities WHERE tenant_id = ? ORDER BY rowid",
+                    (tenant_id,),
+                ).fetchall():
+                    record = json.loads(row["record"])
+                    sources = list(record.get("source_evidence_cids") or [])
+                    if not sources or not affected_cids.intersection(sources):
+                        continue
+                    surviving = [item for item in sources if item not in affected_cids]
+                    if surviving:
+                        record["source_evidence_cids"] = surviving
+                        record["updated_at"] = utc_now().isoformat()
+                        conn.execute(
+                            "UPDATE entities SET record = ? WHERE tenant_id = ? AND canonical = ?",
+                            (json_text(record), tenant_id, row["canonical"]),
+                        )
+                        propagated["trimmed_entities"].append(record["canonical"])
+                    else:
+                        conn.execute(
+                            "DELETE FROM entities WHERE tenant_id = ? AND canonical = ?",
+                            (tenant_id, row["canonical"]),
+                        )
+                        propagated["removed_entities"].append(record["canonical"])
+                # deletion_log — HMAC id for a hard delete (spec §7 invariant 13),
+                # cid kept for a tombstone (the row still exists).
+                deletion_record_cid = (
+                    erasure_deletion_record_id(cid, tenant_id, target["user_id"] or "")
+                    if mode is ErasureMode.HARD_DELETE_LEGAL
+                    else cid
+                )
+                entry = {
+                    "id": new_id(),
+                    "tenant_id": tenant_id,
+                    "evidence_cid": deletion_record_cid,
+                    "requested_by": requested_by,
+                    "erasure_mode": mode.value,
+                    "propagated": propagated,
+                    "at": utc_now().isoformat(),
+                }
+                conn.execute(
+                    "INSERT INTO deletion_log(tenant_id, record) VALUES (?, ?)",
+                    (tenant_id, json_text(entry)),
+                )
+                self._audit(
+                    conn,
+                    tenant_id,
+                    requested_by,
+                    "forget",
+                    cid,
+                    {**propagated, "erasure_mode": mode.value, "source_type": target["source_type"]},
+                    source=target["source_type"],
+                    trust_tier=target["trust_tier"],
+                    capability_tags=json.loads(target["capability_tags"] or "[]"),
+                )
+                # Erasure propagation (both modes): purge every affected cid's cached
+                # vector, then drop this branch's cached-PPR payloads (targeted — no
+                # full projection rebuild; the relations watermark handles the rest).
+                for affected_cid in affected_order:
+                    self._purge_embedding_cache_row(conn, tenant_id, affected_cid)
+                conn.execute(
+                    "DELETE FROM graph_ppr_cache WHERE tenant_id = ? AND branch = ?",
+                    (tenant_id, branch),
+                )
+            # Journal AFTER commit (append-parity): tombstone keeps a salted-hash
+            # marker per affected cid; a hard delete purges the lines outright.
+            if self._journal_dir is not None:
+                journal = CIDJournal(self._journal_dir / journal_filename(tenant_id))
+                erased_at = utc_now().isoformat()
+                for affected_cid in affected_order:
+                    if mode is ErasureMode.HARD_DELETE_LEGAL:
+                        journal.purge(affected_cid)
+                    else:
+                        original_content, original_user = originals.get(affected_cid, ("", ""))
+                        journal.tombstone(
+                            affected_cid,
+                            salted_hash=erasure_tombstone_hash(original_content, tenant_id, original_user),
+                            erased_at=erased_at,
+                        )
+        return {"erased": True, "cid": cid, "erasure_mode": mode.value, "propagated": propagated}

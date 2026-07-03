@@ -3670,11 +3670,18 @@ def test_shared_engine_contract_hard_delete_records_audit_and_deletion_log(engin
     assert result["erasure_mode"] == "hard_delete_legal"
     assert engine.get_evidence(tenant, cid) is None
     assert all(item["cid"] != cid for item in exported["evidence"])
-    assert any(
-        item["evidence_cid"] == cid
-        and (item.get("erasure_mode") or item.get("propagated", {}).get("erasure_mode")) == "hard_delete_legal"
+    # Spec §7 privacy invariant 13: a hard delete is unrecoverable, so the retained
+    # deletion record replaces the cid (a salted sha256 of the content) with a
+    # non-recomputable HMAC id — otherwise sha256(guess) could confirm the erased
+    # cid. The record is still present (matched by erasure_mode), but its
+    # evidence_cid is NOT the cid, and NO retained record exposes the cid.
+    hard_delete_records = [
+        item
         for item in exported["deletion_log"]
-    )
+        if (item.get("erasure_mode") or item.get("propagated", {}).get("erasure_mode")) == "hard_delete_legal"
+    ]
+    assert hard_delete_records
+    assert all(item["evidence_cid"] != cid for item in exported["deletion_log"])
     assert any(item["op"] == "forget" and item["target_id"] == cid for item in exported["audit_log"])
 
 

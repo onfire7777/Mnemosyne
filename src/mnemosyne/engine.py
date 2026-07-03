@@ -66,6 +66,7 @@ from mnemosyne.security import (
     sanitize_retrieved_text,
     trust_weight,
 )
+from mnemosyne.erasure_ids import erasure_deletion_record_id
 from mnemosyne.standing import (
     standing,
     standing_abstention_report,
@@ -2273,10 +2274,20 @@ class LocalMemoryEngine:
                 else:
                     self.entities.pop(key, None)
                     propagated["removed_entities"].append(entity["canonical"])
+            # Spec §7 privacy invariant 13: a hard delete is unrecoverable, so the
+            # retained deletion record must NOT carry the cid (a salted sha256 of
+            # the content) — that would let sha256(guess) confirm the erased cid.
+            # Replace it with a non-recomputable HMAC id; tombstone_recompute keeps
+            # the cid because the tombstone row still exists in the ledger.
+            deletion_record_cid = (
+                erasure_deletion_record_id(cid, tenant_id, ev.user_id)
+                if mode is ErasureMode.HARD_DELETE_LEGAL
+                else cid
+            )
             entry = {
                 "id": new_id(),
                 "tenant_id": tenant_id,
-                "evidence_cid": cid,
+                "evidence_cid": deletion_record_cid,
                 "requested_by": requested_by,
                 "erasure_mode": mode.value,
                 "propagated": propagated,

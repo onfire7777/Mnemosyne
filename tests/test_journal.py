@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 import pytest
+from hypothesis import given, settings, strategies as st
 
 from mnemosyne.journal import CIDJournal, journal_filename
 
@@ -115,6 +116,75 @@ def test_records_raises_on_corrupt_middle_line(tmp_path: Path):
     path.write_bytes(b"".join(lines))
     with pytest.raises(json.JSONDecodeError):
         list(j.records())
+
+
+# --- repair-before-append (Phase-0 T8 handoff, first journal item) -----------
+
+
+def test_append_after_torn_tail_repairs_and_preserves_records(tmp_path: Path):
+    """append detects a torn tail and truncates the unfsynced fragment BEFORE
+    writing, so all complete records + the new one survive and the file is clean.
+
+    Without repair the torn fragment would become a NON-final line after the
+    append and wedge every future read with a JSONDecodeError."""
+    path = tmp_path / "t.journal"
+    j = CIDJournal(path)
+    j.append(_rec("cid-1"))
+    j.append(_rec("cid-2"))
+    j.append(_rec("cid-3"))
+    # Simulate a crash between the buffered write and fsync: the final line is
+    # torn (mid-record, no trailing newline).
+    lines = path.read_bytes().splitlines(keepends=True)
+    path.write_bytes(b"".join(lines[:2]) + lines[2][: len(lines[2]) // 2])
+
+    j.append(_rec("cid-4"))
+
+    assert [r["cid"] for r in j.records()] == ["cid-1", "cid-2", "cid-4"]
+    assert path.read_bytes().endswith(b"\n")  # append-safe tail restored
+    divergence = j.verify_against({"cid-1", "cid-2", "cid-4"})
+    assert divergence.torn_tail is False
+    assert divergence.diverged is False
+
+
+def test_append_after_torn_only_fragment_starts_clean(tmp_path: Path):
+    """A torn fragment with no complete line before it truncates to empty."""
+    path = tmp_path / "t.journal"
+    j = CIDJournal(path)
+    path.write_bytes(b'{"cid": "cid-torn", "conte')  # never-fsynced fragment
+    j.append(_rec("cid-1"))
+    assert [r["cid"] for r in j.records()] == ["cid-1"]
+    assert path.read_bytes().endswith(b"\n")
+
+
+@given(
+    st.lists(st.uuids().map(str), min_size=1, max_size=12, unique=True),
+    st.integers(min_value=1, max_value=2**32),
+)
+@settings(max_examples=40, deadline=None)
+def test_append_after_torn_tail_property(cid_list, cut_seed):
+    """Property: for any journal and any mid-line tear of the final record, an
+    append repairs the torn fragment and yields exactly the complete prefix +
+    the new record, with no torn tail remaining."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as d:
+        path = Path(d) / "t.journal"
+        j = CIDJournal(path)
+        for cid in cid_list:
+            j.append({"cid": cid, "tenant_id": "t", "kind": "evidence", "content": cid})
+        body = path.read_bytes()
+        lines = body[:-1].split(b"\n")  # drop trailing newline, split complete lines
+        last = lines[-1]
+        keep = cut_seed % len(last)  # 0..len-1: torn (never the full line + newline)
+        torn = b"".join(line + b"\n" for line in lines[:-1]) + last[:keep]
+        path.write_bytes(torn)
+
+        j.append({"cid": "post-repair", "tenant_id": "t", "kind": "evidence", "content": "x"})
+
+        got = [r["cid"] for r in j.records()]
+        assert got == cid_list[:-1] + ["post-repair"]
+        assert j.verify_against(set(got)).torn_tail is False
+        assert path.read_bytes().endswith(b"\n")
 
 
 def test_journal_filename_sane_tenant_ids_map_verbatim():
