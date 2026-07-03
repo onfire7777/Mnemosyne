@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: context exhaustion at 75% (2026-07-02)
-last_updated: "2026-07-02T21:52:23.661Z"
-last_activity: 2026-06-20 — Added CLI-first runtime coverage, selectable CLI Postgres backend support, Postgres retrieval parity for SQL FTS/pgvector/graph/explain, shared local/Postgres engine contract coverage, durable Postgres queue leasing/drain support, fail-closed capability enforcement, Postgres tenant RLS, explicit erasure modes, HTTP-compatible embedding/reranker provider adapters, strict HTTP provider response validation, fail-closed CLI `provider-check` health probes for embedding/reranker/media-extractor/object-key-manager/parametric-provider contracts plus residency-policy reporting, and manifest-backed provider deployment gates that require named checks, resolve secrets from environment variables, and fail closed on forbidden local retrieval adapters, CLI file ingestion through a C2PA verifier adapter with asset hash binding and trusted certificate-root enforcement, scoped JSON trust-policy enforcement, provenance validity/trust/binding capability tags, AES-GCM encrypted local object storage with JSON and command-backed key management plus legal hard-delete key shredding, configurable fail-closed ingestion data-residency enforcement, strict runtime-residency enforcement, explicit runtime-residency and cross-region `source->target` transfer allowlists, CLI/MCP residency-policy inspection, MCP object-store encryption/key-provider/residency/runtime-residency config parity, transitive source-to-derived evidence erasure for media extraction outputs plus assertion/preference/relation projection recompute, blueprint-correct trust-tier semantics, deterministic ingest classification, persisted local queue-backed consolidation jobs from ingestion, gated deterministic fact extraction for direct-user evidence, persisted protected regression gate cases, local queued calibration/lifecycle/eval/observability job handlers, tenant-aware promotion gates for Postgres, blueprint-facing CLI/MCP ABI aliases, signature-derived MCP tool schemas, optional MCP tools/call auth, JSON-RPC/SDK MCP tool-call input schema validation including explicit optional-null support, CLI `tools` MCP inputSchema parity, optional official MCP Python SDK stdio mode with schema validation and auth-token enforcement, expanded live Postgres shared-contract coverage for bitemporal supersession, tenant isolation, tenant-scoped branch names, branch merge retrieval plus exported merge-log parity, active-only temporal graph/PPR relation filtering with historical `as_of` support, stored evidence pgvector retrieval with null-embedding legacy fallback, local export-all calibration/entity/tenant snapshot parity with erased evidence filtered, branch discard TMS justification/contradiction pruning including dependency-only orphan cleanup, immutable evidence CID semantics, tombstone replay prevention, lossless evidence-envelope preservation including external session identity, explain channels/rails/provenance, metadata-derived OCR/transcript/caption indexing for externalized object evidence, an async `media_extract` provider job that appends derived media text without mutating source evidence, fail-closed write-path authorization for fact/relation/proposal/supersession/correction/parametric writes, explicit branch/promotion/discard authorization through `MemoryTools` and CLI, capability-mediated lesson promotion plus procedure validation/promotion/rollback through CLI and MCP, a CLI `ops-report` JSON snapshot with durable retrieval-channel, p95 latency, gate promotion/rollback, and contradiction-backlog tripwire metrics, static HTML `ops-report --dashboard-html` export with retrieval/calibration/learning/gate sections and renderer/CLI smoke coverage, deterministic consolidation entity resolution plus summarizer/lesson-distiller/skill-inducer role outputs persisted through runtime learning state, a local isolated parametric artifact sidecar with CLI/MCP rollback metadata plus operator-authorized command-backed LoRA/test-time-training provider proposal/evaluation/rollback and structural local rails, TOOL_SPEC-allowlisted MCP dispatch with JSON-RPC non-object argument rejection, generated schema validation, local stateless MCP mode that rebuilds engine/tools per call from durable state, hosted HTTP JSON-RPC MCP transport with bearer/session-header binding and stateless restart coverage, tenant-scoped Postgres runtime state for CLI/MCP profile and learning tools mirrored into `preferences`, `user_latent`, `trajectories`, `lessons`, and `procedures`, JWKS cache/rotation support for CLI/hosted MCP OIDC session exchange, fail-closed OIDC authz policy mapping, redacted `idp-authz-policy-check` validation/audit summaries, fingerprint-acknowledged `idp-authz-policy-rollout-check` diffs with claim-simulation change gates, command-backed session-secret custody for CLI/MCP signing and verification plus provider-check OIDC/JWKS/authz-policy preflight, and hosted HTTP TLS plus client-certificate enforcement. The test suite now collects 287 tests and has 248 passing tests plus 39 skipped live-DB tests locally; a fresh-schema DSN-backed live Postgres run passes 63 engine/CLI/consolidation/shared-contract smokes including persisted residency-transfer policy, stored evidence pgvector retrieval, null-embedding legacy fallback, Postgres MCP runtime profile/learning state persistence, temporal graph validity filtering, and merge-log export. Strict audit remains open for exact production parity.
+stopped_at: null
+last_updated: "2026-07-03T18:25:26Z"
+last_activity: 2026-07-03 — Branch `phase3/providers-consolidation` is clean, pushed, and green in GitHub CI at `8527825497feb73af65e63932391b36897f60965`. Focused Tier-B custody refresh still exits `78`: provider manifest env ref keys are present in the external runtime env file but six required values are blank, and 23 production input artifacts are still missing from the external custody packet. Operator docs now clarify that blank runtime env-file values count as missing provider refs. Strict audit remains open for exact production parity.
 progress:
   total_phases: 9
-  completed_phases: 2
+  completed_phases: 7
   total_plans: 15
-  completed_plans: 15
-  percent: 22
+  completed_plans: 14
+  percent: 78
 ---
 
 # Project State
@@ -29,6 +29,22 @@ Phase: Strict parity continuation after Phase 5 scaffold
 Plan: Exact blueprint parity audit and runtime gap closure
 Status: In progress; exact 1:1 blueprint parity is not complete.
 Current status (2026-06-30): Mandatory Tier A source wirings are closed on `main`; FR-20 local and live-Postgres image/audio/video breadth, FR-21 local and live-Postgres parametric trainer/rollback validation, full compose-Postgres runtime readiness, belief-revision CLI validation, local hosted-MCP JSON-RPC/StreamableHTTP/SSE readiness, direct A12 cached-PPR live materialization coverage, G1 projection-level reality monitoring, G1 functional consciousness scorecard/proto-self seed, native workspace service with the `service.enabled` default-off gate retired, operational specialist-budget toggle retirement, cold-loop ignition enforcement, protected gate-case ratchet enforcement, Rail 6 serve-time sink enforcement, §24 support-strategy runtime durability plus public CLI/MCP mutation surfaces, Phase 7 plans 01-04, and the P5 H8/H12 cascade/observability pre-check are now done and gate-proven. The remaining strict-parity blocker is Tier B production operator evidence against deployed infrastructure before final v1.0 sign-off.
+
+Latest checkpoint (2026-07-03): The active branch is
+`phase3/providers-consolidation`, pushed to `origin` at
+`8527825497feb73af65e63932391b36897f60965`, with GitHub CI run
+`28677249557` passing for that head. The GSD roadmap counters now match
+`.planning/ROADMAP.md`: 7 of 9 phases complete and 14 of 15 tracked plan files
+complete, with Phase 6 still production-evidence-gated and Phase 8 still open.
+Fresh Tier-B custody refresh against `/Users/admin/mnemosyne-tier-b-custody`
+still reports `ready_for_capture=false`: six provider manifest env refs are
+present as key names in the external runtime env file but have blank values,
+and 23 production input artifacts are missing from the packet's external
+`input-artifacts/` directory. Operator docs now explicitly state that blank
+runtime env-file values count as missing provider refs. Do not copy ignored
+local files such as `production-inputs/provenance-trust-suite.json` into the
+custody packet; production rows remain Partial until real operator-captured
+bundles pass release audit and offline custody verification.
 
 Latest checkpoint (2026-06-30): The active goal remains unpaused and the
 professional continuation objective is now governed by the repo-owned operating
