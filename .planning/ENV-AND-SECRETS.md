@@ -110,6 +110,9 @@ the committed template and outside soak-manifest `args`.
 | `MNEMOSYNE_PROVIDER_OIDC_AUTHZ_POLICY_FILE` | Provider-check OIDC authz policy artifact | Versioned deployment artifact | `provider-check` oidc |
 | `MNEMOSYNE_PROVIDER_OIDC_ISSUER` | Provider-check OIDC issuer | IdP provider config | `provider-check` oidc |
 | `MNEMOSYNE_PROVIDER_OIDC_JWKS_URL` | Provider-check OIDC JWKS endpoint | IdP provider config | `provider-check` oidc |
+| `MNEMOSYNE_PROPOSAL_PROVIDER_CLASS` | Classifies proposal role endpoint as local or frontier | Provider profile/runtime env | CLI disclosure policy |
+| `MNEMOSYNE_PROPOSAL_PROVIDER_REGION` | Processing region for proposal role endpoint | Provider profile/runtime env | CLI disclosure policy |
+| `MNEMOSYNE_PROPOSAL_PROVIDER_RETENTION` | Retention contract for proposal role endpoint | Provider profile/runtime env | CLI disclosure policy |
 | `MNEMOSYNE_SKILL_INDUCER_COMMAND` | Command-backed skill/procedure inducer | Provider custody file or deployment env | `provider-check` skill_inducer |
 | `MNEMOSYNE_SKILL_INDUCER_PROVIDER` | Enables command-backed skill/procedure inducer | Provider profile/runtime env | CLI consolidation/provider-check |
 | `MNEMOSYNE_SUMMARIZER_COMMAND` | Command-backed evidence summarizer | Provider custody file or deployment env | `provider-check` summarizer |

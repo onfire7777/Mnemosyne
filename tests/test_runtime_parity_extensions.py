@@ -18,6 +18,7 @@ from mnemosyne.consolidation import (
     CommandLessonDistiller,
     CommandProcedureInducer,
     ConsolidationWorker,
+    ProviderDisclosurePolicy,
 )
 from mnemosyne.cli import (
     DEPLOYMENT_SOAK_COMMANDS,
@@ -240,6 +241,126 @@ def test_command_model_providers_receive_prompt_boundary_for_untrusted_evidence(
             assert "signed_provenance" not in evidence_packet
     assert requests[0]["payload"]["content_view"]["raw_content_omitted"] is True
     assert requests[0]["payload"]["content_view"]["control_directives_omitted"] is True
+
+
+def test_command_provider_disclosure_policy_pseudonymizes_sensitive_frontier_packets(tmp_path) -> None:
+    requests_path = tmp_path / "provider-requests.json"
+    provider = tmp_path / "provider.py"
+    provider.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env python3",
+                "import json, pathlib, sys",
+                "request_path = pathlib.Path(sys.argv[1])",
+                "request = json.loads(sys.stdin.read())",
+                "request_path.write_text(json.dumps(request, sort_keys=True))",
+                "print(json.dumps({'summary': 'ok'}))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    provider.chmod(0o755)
+    policy = ProviderDisclosurePolicy(
+        endpoint_class="frontier",
+        retention="retentive",
+        endpoint_region="us",
+        runtime_region="eu",
+        pseudonym_salt="test-disclosure-salt",
+    )
+    summarizer = CommandEvidenceSummarizer(
+        [sys.executable, str(provider), str(requests_path)],
+        disclosure_policy=policy,
+    )
+
+    summarizer.summarize(
+        TENANT,
+        [
+            Evidence(
+                tenant_id=TENANT,
+                user_id=USER,
+                actor="user",
+                source_type="chat",
+                content="Project Atlas account alpha-123 is sensitive S2.",
+                sensitivity=2,
+                access_policy={"tenant": TENANT},
+            ),
+            Evidence(
+                tenant_id=TENANT,
+                user_id=USER,
+                actor="user",
+                source_type="chat",
+                content="S3 medical note: diagnosis zebra fever with raw details.",
+                sensitivity=3,
+                access_policy={"tenant": TENANT},
+            ),
+        ],
+    )
+
+    request = json.loads(requests_path.read_text(encoding="utf-8"))
+    boundary_policy = request["prompt_boundary"]["disclosure_policy"]
+    assert boundary_policy["endpoint_class"] == "frontier"
+    assert boundary_policy["retention"] == "retentive"
+    assert boundary_policy["in_region"] is False
+    s2_packet, s3_packet = request["evidence"]
+    assert s2_packet["content"].startswith("[pseudonymized-content:")
+    assert s2_packet["content_view"]["pseudonymized"] is True
+    assert s2_packet["content_view"]["raw_content_omitted"] is True
+    assert "Project Atlas" not in s2_packet["content"]
+    assert "alpha-123" not in s2_packet["content"]
+    assert s3_packet["content"].startswith("[sensitive-content-omitted:")
+    assert s3_packet["content_view"]["sensitive_content_withheld"] is True
+    assert "diagnosis zebra fever" not in s3_packet["content"]
+    assert "raw_sha256" not in json.dumps(request, sort_keys=True)
+
+
+def test_command_provider_disclosure_policy_keeps_s2_gist_for_zero_retention_in_region(tmp_path) -> None:
+    requests_path = tmp_path / "provider-requests.json"
+    provider = tmp_path / "provider.py"
+    provider.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env python3",
+                "import json, pathlib, sys",
+                "request_path = pathlib.Path(sys.argv[1])",
+                "request = json.loads(sys.stdin.read())",
+                "request_path.write_text(json.dumps(request, sort_keys=True))",
+                "print(json.dumps({'summary': 'ok'}))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    provider.chmod(0o755)
+    summarizer = CommandEvidenceSummarizer(
+        [sys.executable, str(provider), str(requests_path)],
+        disclosure_policy=ProviderDisclosurePolicy(
+            endpoint_class="frontier",
+            retention="zero_retention",
+            endpoint_region="eu",
+            runtime_region="eu",
+            pseudonym_salt="test-disclosure-salt",
+        ),
+    )
+
+    summarizer.summarize(
+        TENANT,
+        [
+            Evidence(
+                tenant_id=TENANT,
+                user_id=USER,
+                actor="user",
+                source_type="chat",
+                content="Project Atlas account alpha-123 is sensitive S2.",
+                sensitivity=2,
+                access_policy={"tenant": TENANT},
+            )
+        ],
+    )
+
+    request = json.loads(requests_path.read_text(encoding="utf-8"))
+    packet = request["evidence"][0]
+    assert "Project Atlas account alpha-123" in packet["content"]
+    assert packet["content_view"]["pseudonymized"] is False
+    assert packet["content_view"]["raw_content_omitted"] is True
 
 
 def test_local_object_store_addresses_bytes_and_blocks_bad_uris(tmp_path) -> None:

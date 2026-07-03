@@ -548,6 +548,7 @@ def load_entity_resolver(args: argparse.Namespace) -> EntityResolver | None:
         return CommandEntityResolver(
             args.entity_resolver_command,
             timeout_seconds=float(args.entity_resolver_timeout),
+            disclosure_policy=load_proposal_disclosure_policy(args),
         )
     return None
 
@@ -561,6 +562,7 @@ def load_candidate_extractor(args: argparse.Namespace) -> CandidateExtractor | N
         return CommandCandidateExtractor(
             args.candidate_extractor_command,
             timeout_seconds=float(args.candidate_extractor_timeout),
+            disclosure_policy=load_proposal_disclosure_policy(args),
         )
     return None
 
@@ -574,6 +576,7 @@ def load_consolidation_summarizer(args: argparse.Namespace) -> EvidenceSummarize
         return CommandEvidenceSummarizer(
             args.summarizer_command,
             timeout_seconds=float(args.summarizer_timeout),
+            disclosure_policy=load_proposal_disclosure_policy(args),
         )
     return None
 
@@ -587,6 +590,7 @@ def load_lesson_distiller(args: argparse.Namespace) -> LessonDistiller | None:
         return CommandLessonDistiller(
             args.lesson_distiller_command,
             timeout_seconds=float(args.lesson_distiller_timeout),
+            disclosure_policy=load_proposal_disclosure_policy(args),
         )
     return None
 
@@ -600,8 +604,20 @@ def load_procedure_inducer(args: argparse.Namespace) -> ProcedureInducer | None:
         return CommandProcedureInducer(
             args.skill_inducer_command,
             timeout_seconds=float(args.skill_inducer_timeout),
+            disclosure_policy=load_proposal_disclosure_policy(args),
         )
     return None
+
+
+def load_proposal_disclosure_policy(args: argparse.Namespace):
+    from mnemosyne.consolidation import ProviderDisclosurePolicy
+
+    return ProviderDisclosurePolicy(
+        endpoint_class=args.proposal_provider_class,
+        retention=args.proposal_provider_retention,
+        endpoint_region=args.proposal_provider_region or args.runtime_residency or "local",
+        runtime_region=args.runtime_residency or "local",
+    )
 
 
 def load_parametric_tier(args: argparse.Namespace) -> ParametricTier:
@@ -15230,6 +15246,23 @@ def build_parser() -> argparse.ArgumentParser:
         "--entity-resolver-timeout",
         type=float,
         default=float(os.environ.get("MNEMOSYNE_ENTITY_RESOLVER_TIMEOUT", "30")),
+    )
+    parser.add_argument(
+        "--proposal-provider-class",
+        choices=["local", "frontier"],
+        default=os.environ.get("MNEMOSYNE_PROPOSAL_PROVIDER_CLASS", "local"),
+        help="Disclosure class for model-backed proposal role providers",
+    )
+    parser.add_argument(
+        "--proposal-provider-retention",
+        choices=["zero_retention", "retentive"],
+        default=os.environ.get("MNEMOSYNE_PROPOSAL_PROVIDER_RETENTION", "zero_retention"),
+        help="Retention contract for model-backed proposal role providers",
+    )
+    parser.add_argument(
+        "--proposal-provider-region",
+        default=os.environ.get("MNEMOSYNE_PROPOSAL_PROVIDER_REGION"),
+        help="Processing region for model-backed proposal role providers",
     )
     parser.add_argument(
         "--candidate-extractor-provider",

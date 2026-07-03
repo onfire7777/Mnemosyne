@@ -39,6 +39,9 @@ def _load_role_llm():
 def test_self_hosted_profile_activates_all_role_llm_command_providers() -> None:
     profile = _parse_env(SELF_HOSTED_PROFILE)
 
+    assert profile["MNEMOSYNE_PROPOSAL_PROVIDER_CLASS"] == "local"
+    assert profile["MNEMOSYNE_PROPOSAL_PROVIDER_RETENTION"] == "zero_retention"
+    assert profile["MNEMOSYNE_PROPOSAL_PROVIDER_REGION"] == "local"
     for prefix in ROLE_PREFIXES.values():
         assert profile[f"{prefix}_PROVIDER"] == "command"
         assert profile[f"{prefix}_COMMAND"] == "/opt/mnemosyne/bin/role-llm"
