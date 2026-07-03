@@ -70,7 +70,7 @@ echo "==> 5. Postgres roles are applied automatically via /docker-entrypoint-ini
 echo "    After tables exist, apply the GRANTs + ENABLE/FORCE RLS + tenant policies from roles.sql."
 
 echo "==> 6. Models: pull arctic-embed + reranker into the TEI volume on first up (auto)."
-echo "    Role-LLM: install Qwen3-4B GGUF for /opt/mnemosyne/bin/role-llm, OR point it at the frontier adapter."
+echo "    Role-LLM: install Qwen3-4B GGUF for /opt/mnemosyne/bin/role-llm; frontier role adapters plug into /opt/mnemosyne/bin/role-ladder."
 
 echo "==> Bootstrap prepared. Next:"
 echo "    cp infra/profiles/self-hosted.env $SECRETS_DIR/production-render.env   # fill non-secret values"

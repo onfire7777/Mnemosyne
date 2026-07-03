@@ -113,6 +113,13 @@ the committed template and outside soak-manifest `args`.
 | `MNEMOSYNE_PROPOSAL_PROVIDER_CLASS` | Classifies proposal role endpoint as local or frontier | Provider profile/runtime env | CLI disclosure policy |
 | `MNEMOSYNE_PROPOSAL_PROVIDER_REGION` | Processing region for proposal role endpoint | Provider profile/runtime env | CLI disclosure policy |
 | `MNEMOSYNE_PROPOSAL_PROVIDER_RETENTION` | Retention contract for proposal role endpoint | Provider profile/runtime env | CLI disclosure policy |
+| `MNEMOSYNE_ROLE_LADDER_ALLOW_DETERMINISTIC` | Enables deterministic last-rung fallback for proposal role wrapper | Provider profile/runtime env | `role-ladder` |
+| `MNEMOSYNE_ROLE_LADDER_FRONTIER_COMMAND` | Optional shared frontier role-provider command | Provider custody file or deployment env | `role-ladder` |
+| `MNEMOSYNE_ROLE_LADDER_FRONTIER_ROLES` | Explicit roles eligible for frontier rung | Provider profile/runtime env | `role-ladder` |
+| `MNEMOSYNE_ROLE_LADDER_FRONTIER_TIMEOUT` | Per-frontier-rung timeout budget | Provider profile/runtime env | `role-ladder` |
+| `MNEMOSYNE_ROLE_LADDER_LOCAL_COMMAND` | Local role-provider command, defaulting to Qwen role-LLM | Provider profile/runtime env | `role-ladder` |
+| `MNEMOSYNE_ROLE_LADDER_LOCAL_TIMEOUT` | Per-local-rung timeout budget | Provider profile/runtime env | `role-ladder` |
+| `MNEMOSYNE_ROLE_LADDER_TIMEOUT` | Total wrapper timeout budget across rungs | Provider profile/runtime env | `role-ladder` |
 | `MNEMOSYNE_SKILL_INDUCER_COMMAND` | Command-backed skill/procedure inducer | Provider custody file or deployment env | `provider-check` skill_inducer |
 | `MNEMOSYNE_SKILL_INDUCER_PROVIDER` | Enables command-backed skill/procedure inducer | Provider profile/runtime env | CLI consolidation/provider-check |
 | `MNEMOSYNE_SUMMARIZER_COMMAND` | Command-backed evidence summarizer | Provider custody file or deployment env | `provider-check` summarizer |
