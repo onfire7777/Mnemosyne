@@ -135,6 +135,8 @@ PRODUCTION_RELEASE_REQUIRED_PROVIDER_CHECKS = (
     "session_secret",
     "residency_policy",
 )
+PRODUCTION_RELEASE_LATENCY_PROVIDER_CHECKS = frozenset({"embedding", "reranker"})
+PRODUCTION_RELEASE_MIN_LATENCY_SAMPLES = 3
 RELEASE_AUDIT_REQUIRED_OUTPUT_KEYS: dict[str, tuple[str, ...]] = {
     "belief-revision-check": ("fingerprint", "summary", "results", "findings"),
     "auth-ops-check": ("bundle", "requirements", "checks", "findings"),
@@ -10416,9 +10418,47 @@ def _release_provider_check_summary(
                 "present": isinstance(check, Mapping),
                 "ok": isinstance(check, Mapping) and check.get("ok") is True,
                 "skipped": isinstance(check, Mapping) and check.get("skipped") is True,
+                "latency": check.get("latency") if isinstance(check, Mapping) else None,
             }
         )
     return rows
+
+
+def _release_provider_latency_findings(
+    provider_report: Mapping[str, Any] | None,
+    required_provider_checks: list[str],
+) -> list[dict[str, Any]]:
+    provider_checks = provider_report.get("checks") if isinstance(provider_report, Mapping) else None
+    findings: list[dict[str, Any]] = []
+    for name in sorted(PRODUCTION_RELEASE_LATENCY_PROVIDER_CHECKS.intersection(required_provider_checks)):
+        check = provider_checks.get(name) if isinstance(provider_checks, Mapping) else None
+        latency = check.get("latency") if isinstance(check, Mapping) else None
+        if not isinstance(latency, Mapping):
+            findings.append(
+                _release_finding(
+                    "provider_check_latency_evidence_incomplete",
+                    f"provider-check subcheck {name} is missing latency evidence",
+                )
+            )
+            continue
+        samples = latency.get("samples")
+        p95_latency_ms = latency.get("p95_latency_ms")
+        if not isinstance(samples, int) or isinstance(samples, bool) or samples < PRODUCTION_RELEASE_MIN_LATENCY_SAMPLES:
+            findings.append(
+                _release_finding(
+                    "provider_check_latency_evidence_incomplete",
+                    f"provider-check subcheck {name} must include at least "
+                    f"{PRODUCTION_RELEASE_MIN_LATENCY_SAMPLES} latency samples",
+                )
+            )
+        if not isinstance(p95_latency_ms, int | float) or isinstance(p95_latency_ms, bool):
+            findings.append(
+                _release_finding(
+                    "provider_check_latency_evidence_incomplete",
+                    f"provider-check subcheck {name} must include numeric p95_latency_ms",
+                )
+            )
+    return findings
 
 
 def _build_release_audit_report(args: argparse.Namespace) -> dict[str, Any]:
@@ -10563,6 +10603,7 @@ def _build_release_audit_report(args: argparse.Namespace) -> dict[str, Any]:
                 )
             )
     provider_check_summary = _release_provider_check_summary(provider_report, required_provider_checks)
+    findings.extend(_release_provider_latency_findings(provider_report, required_provider_checks))
     for row in provider_check_summary:
         if not row["present"]:
             findings.append(
@@ -14619,6 +14660,28 @@ def cmd_hosted_llm_check(args: argparse.Namespace) -> None:
         raise SystemExit(1)
 
 
+def _provider_latency_summary_ms(values: list[float]) -> dict[str, float | int]:
+    ordered = sorted(values)
+    p50_index = min(len(ordered) - 1, int(len(ordered) * 0.50))
+    p95_index = min(len(ordered) - 1, int(len(ordered) * 0.95))
+    return {
+        "samples": len(ordered),
+        "p50_latency_ms": ordered[p50_index],
+        "p95_latency_ms": ordered[p95_index],
+        "max_latency_ms": max(ordered),
+    }
+
+
+def _run_provider_latency_samples(samples: int, callback: Any) -> tuple[Any, dict[str, float | int]]:
+    result: Any = None
+    durations: list[float] = []
+    for _ in range(max(1, samples)):
+        start = time.perf_counter()
+        result = callback()
+        durations.append((time.perf_counter() - start) * 1000.0)
+    return result, _provider_latency_summary_ms(durations)
+
+
 def cmd_provider_check(args: argparse.Namespace) -> None:
     from mnemosyne.gate import RegressionCase
     from mnemosyne.learning import Lesson, Procedure
@@ -14634,17 +14697,27 @@ def cmd_provider_check(args: argparse.Namespace) -> None:
     from mnemosyne.security import SessionAuthError, SessionIdentity, SessionTokenVerifier, load_session_secret_command
 
     manifest = apply_provider_manifest(args)
+    latency_samples = max(1, int(getattr(args, "provider_latency_samples", 1)))
+    max_provider_p95_latency_ms = float(getattr(args, "max_provider_p95_latency_ms", 2000.0))
     checks: dict[str, dict[str, Any]] = {}
     ok = True
     try:
         adapters = load_retrieval_adapters(args)
-        vector = embed_query(adapters.embedding, "Mnemosyne provider health check")
+        vector, latency = _run_provider_latency_samples(
+            latency_samples,
+            lambda: embed_query(adapters.embedding, "Mnemosyne provider health check"),
+        )
+        latency_ok = float(latency["p95_latency_ms"]) <= max_provider_p95_latency_ms
         checks["embedding"] = {
-            "ok": True,
+            "ok": latency_ok,
             "provider": args.embedding_provider,
             "dimensions": len(vector),
             "model": args.embedding_model,
+            "latency": latency,
         }
+        if not latency_ok:
+            ok = False
+            checks["embedding"]["error"] = "embedding p95 latency exceeds provider-check threshold"
     except Exception as exc:  # noqa: BLE001 - health checks return structured failures.
         ok = False
         checks["embedding"] = {"ok": False, "provider": args.embedding_provider, "error": str(exc)}
@@ -14652,38 +14725,43 @@ def cmd_provider_check(args: argparse.Namespace) -> None:
 
     try:
         reranker = adapters.reranker if adapters else load_retrieval_adapters(args).reranker
-        ranked = reranker.rerank(
-            "provider health",
-            [
-                Hit(
-                    id="a",
-                    kind="evidence",
-                    tenant_id="health",
-                    branch="main",
-                    text="irrelevant text",
-                    score=0.1,
-                    channel="health",
-                ),
-                Hit(
-                    id="b",
-                    kind="evidence",
-                    tenant_id="health",
-                    branch="main",
-                    text="provider health check",
-                    score=0.1,
-                    channel="health",
-                ),
-            ],
-            k=2,
+        hits = [
+            Hit(
+                id="a",
+                kind="evidence",
+                tenant_id="health",
+                branch="main",
+                text="irrelevant text",
+                score=0.1,
+                channel="health",
+            ),
+            Hit(
+                id="b",
+                kind="evidence",
+                tenant_id="health",
+                branch="main",
+                text="provider health check",
+                score=0.1,
+                channel="health",
+            ),
+        ]
+        ranked, latency = _run_provider_latency_samples(
+            latency_samples,
+            lambda: reranker.rerank("provider health", hits, k=2),
         )
         if not ranked:
             raise ValueError("reranker returned no health-check hits")
+        latency_ok = float(latency["p95_latency_ms"]) <= max_provider_p95_latency_ms
         checks["reranker"] = {
-            "ok": True,
+            "ok": latency_ok,
             "provider": args.reranker_provider,
             "top_id": ranked[0].id if ranked else None,
             "model": args.reranker_model,
+            "latency": latency,
         }
+        if not latency_ok:
+            ok = False
+            checks["reranker"]["error"] = "reranker p95 latency exceeds provider-check threshold"
     except Exception as exc:  # noqa: BLE001 - health checks return structured failures.
         ok = False
         checks["reranker"] = {"ok": False, "provider": args.reranker_provider, "error": str(exc)}
@@ -16391,6 +16469,18 @@ def build_parser() -> argparse.ArgumentParser:
 
     provider_check = sub.add_parser("provider-check")
     provider_check.add_argument("--provider-manifest", help="JSON deployment manifest for provider health gates")
+    provider_check.add_argument(
+        "--provider-latency-samples",
+        type=int,
+        default=int(os.environ.get("MNEMOSYNE_PROVIDER_CHECK_LATENCY_SAMPLES", "1")),
+        help="Number of embedding/reranker health-call latency samples to collect",
+    )
+    provider_check.add_argument(
+        "--max-provider-p95-latency-ms",
+        type=float,
+        default=float(os.environ.get("MNEMOSYNE_PROVIDER_CHECK_MAX_P95_LATENCY_MS", "2000")),
+        help="Fail provider-check when embedding or reranker p95 latency exceeds this threshold",
+    )
     provider_check.set_defaults(func=cmd_provider_check)
 
     specialist_manifest = sub.add_parser("specialist-manifest")

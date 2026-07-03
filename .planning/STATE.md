@@ -4,8 +4,8 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: null
-last_updated: "2026-07-03T22:02:16Z"
-last_activity: 2026-07-03 — Branch `phase3/providers-consolidation` continued from synchronized head `f585c3be5f43cffdfa322a994b64fa1f9b0d02a8`. Phase 8.2 source wiring now applies the required `query:` prefix only on query paths: dense vector search, MMR query vectors, local similarity rerank queries, HTTP rerank queries, and provider-check embedding probes use the query-aware adapter helper, while stored/document embeddings remain unprefixed. Phase 8.5 source hardening now also makes production `release-audit` reject ops-report evidence unless it proves Vault-HMAC hash-chain verification/retention, pgaudit enablement/retention, and external retained WORM-copy evidence. Prior source hardening remains intact: digest-pinned production images, guarded internal HTTP egress, external supply-chain evidence gate, append-only Postgres audit DDL, narrowed audit grants, and shared auth-decision audit events. TEI/Infinity deployment, CPU P95 evidence, scanner/signature evidence, runtime default-deny egress evidence, real Vault-HMAC hash-chain artifacts, real pgaudit/WORM-copy artifacts, and operator-captured bundles still keep Phase 8/Tier-B rows open. No Tier-B row is marked Done by this cleanup.
+last_updated: "2026-07-03T22:16:57Z"
+last_activity: 2026-07-03 — Phase 8.2 source gating now makes `provider-check` collect embedding/reranker latency samples and makes production `release-audit` reject provider evidence that lacks repeated p95 timing for those checks. Prior query-prefix and audit-retention source gates remain intact. TEI/Infinity deployment, real cross-encoder evidence, real CPU P95 artifacts, scanner/signature evidence, runtime default-deny egress evidence, real Vault-HMAC/pgaudit/WORM artifacts, and operator-captured bundles still keep Phase 8/Tier-B rows open. No Tier-B row is marked Done.
 progress:
   total_phases: 9
   completed_phases: 7
