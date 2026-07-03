@@ -4,8 +4,8 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: null
-last_updated: "2026-07-03T20:02:23Z"
-last_activity: 2026-07-03 — Branch `phase3/providers-consolidation` was rechecked clean and synchronized at `61120d315a759c1e21f61efd4ca9b538c0f3a991`, with GitHub CI run `28677518645` passing for that head before this continuation. A fresh Tier-B custody refresh still exits `78`: no render env values are missing, but six provider manifest env refs remain blank/unset and 23 production input artifacts are missing from the external custody packet. Phase 8 stale completion/reconciliation docs were archived under `docs/_archive/2026-07-03/`, and Phase 8.1 profile/compose deliverables were completed with an internal `vmalert` service and passing compose policy tests. No Tier-B row is marked Done by this cleanup.
+last_updated: "2026-07-03T20:32:00Z"
+last_activity: 2026-07-03 — Branch `phase3/providers-consolidation` was rechecked clean and synchronized at `aaf13422a4f79d15ac5f3083cfad4d6f1bb8949d`, with GitHub CI run `28681189928` passing for that head before this continuation. A fresh Tier-B custody refresh still exits `78`: no render env values are missing, but six provider manifest env refs remain blank/unset and 23 production input artifacts are missing from the external custody packet. Phase 8.1 profile/compose deliverables remain complete. Phase 8.5 supply-chain source hardening progressed: production registry images are now tag+digest pinned and the compose policy suite enforces that shape. Scanner evidence and deploy-time cosign verification still keep the parent supply-chain item open. No Tier-B row is marked Done by this cleanup.
 progress:
   total_phases: 9
   completed_phases: 7
@@ -32,8 +32,8 @@ Current status (2026-06-30): Mandatory Tier A source wirings are closed on `main
 
 Latest checkpoint (2026-07-03): The active branch is
 `phase3/providers-consolidation`, synchronized at
-`61120d315a759c1e21f61efd4ca9b538c0f3a991`, with GitHub CI run
-`28677518645` passing for that head before this cleanup. The GSD roadmap
+`aaf13422a4f79d15ac5f3083cfad4d6f1bb8949d`, with GitHub CI run
+`28681189928` passing for that head before this continuation. The GSD roadmap
 counters still match `.planning/ROADMAP.md`: 7 of 9 phases complete and 14 of
 15 tracked plan files complete, with Phase 6 still production-evidence-gated
 and Phase 8 still open. Fresh Tier-B custody refresh against
@@ -46,7 +46,12 @@ under `docs/_archive/2026-07-03/` for audit/history only. Phase 8.1 file/profile
 deliverables are now checked off: both profiles point at the retained
 `forbid_local:true` provider-manifest gate, production compose includes internal
 `vmalert` beside VictoriaMetrics and Grafana, and the focused compose policy
-tests pass locally. Do not copy ignored local files such as
+tests pass locally. Phase 8.5 supply-chain hardening now also has source-owned
+digest pinning: every committed production registry image is tag+digest pinned
+in `infra/docker-compose.prod.yml`, and the compose policy suite rejects
+tag-only registry images. Scanner evidence and deploy-time cosign verification
+remain required before the parent item can be checked off. Do not copy ignored
+local files such as
 `production-inputs/provenance-trust-suite.json` into the custody packet;
 production rows remain Partial until real operator-captured bundles pass
 release audit and offline custody verification.
