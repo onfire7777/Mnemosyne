@@ -163,7 +163,7 @@ RELEASE_AUDIT_REQUIRED_OUTPUT_KEYS: dict[str, tuple[str, ...]] = {
     "ops-dashboard-check": ("mode", "source", "checks", "findings", "redaction"),
     "parametric-trainer-check": ("bundle", "requirements", "checks", "findings"),
     "worker-ops-check": ("bundle", "requirements", "checks", "findings", "redaction"),
-    "ops-report": ("counts", "tripwires"),
+    "ops-report": ("counts", "tripwires", "audit"),
 }
 RELEASE_AUDIT_BUNDLE_OPS_COMMANDS = frozenset(
     command
@@ -10240,6 +10240,46 @@ def _release_ops_dashboard_evidence_findings(stdout_json: Mapping[str, Any]) -> 
     return findings
 
 
+def _release_ops_report_evidence_findings(stdout_json: Mapping[str, Any]) -> list[dict[str, Any]]:
+    findings: list[dict[str, Any]] = []
+
+    def add(message: str) -> None:
+        findings.append(_release_finding("required_ops_report_audit_evidence_incomplete", message))
+
+    audit = stdout_json.get("audit")
+    if not isinstance(audit, Mapping):
+        add("ops-report audit evidence is missing")
+        return findings
+
+    hash_chain = audit.get("hash_chain")
+    if not isinstance(hash_chain, Mapping):
+        add("ops-report hash-chain evidence is missing")
+    else:
+        if str(hash_chain.get("provider") or "").lower() != "vault-hmac":
+            add("ops-report hash-chain provider must be Vault-HMAC")
+        for flag in ("verified", "retained"):
+            if hash_chain.get(flag) is not True:
+                add(f"ops-report hash-chain flag {flag} is not proven")
+
+    pgaudit = audit.get("pgaudit")
+    if not isinstance(pgaudit, Mapping):
+        add("ops-report pgaudit evidence is missing")
+    else:
+        for flag in ("enabled", "retained"):
+            if pgaudit.get(flag) is not True:
+                add(f"ops-report pgaudit flag {flag} is not proven")
+
+    worm_copy = audit.get("worm_copy")
+    if not isinstance(worm_copy, Mapping):
+        add("ops-report WORM-copy evidence is missing")
+    else:
+        for flag in ("enabled", "external", "retained"):
+            if worm_copy.get(flag) is not True:
+                add(f"ops-report WORM-copy flag {flag} is not proven")
+
+    return findings
+
+
 def _release_command_output_findings(check: Mapping[str, Any]) -> list[dict[str, Any]]:
     command = check.get("command")
     if not isinstance(command, str) or command not in RELEASE_AUDIT_REQUIRED_OUTPUT_KEYS:
@@ -10258,10 +10298,14 @@ def _release_command_output_findings(check: Mapping[str, Any]) -> list[dict[str,
         report = stdout_json.get("report")
         required_keys = RELEASE_AUDIT_REQUIRED_OUTPUT_KEYS[command]
         if isinstance(report, Mapping):
-            return _release_required_output_evidence_findings(command, report, required_keys)
-        missing_ops_report = [key for key in ("counts", "tripwires") if key not in stdout_json]
+            findings = _release_required_output_evidence_findings(command, report, required_keys)
+            findings.extend(_release_ops_report_evidence_findings(report))
+            return findings
+        missing_ops_report = [key for key in required_keys if key not in stdout_json]
         if not missing_ops_report:
-            return _release_required_output_evidence_findings(command, stdout_json, required_keys)
+            findings = _release_required_output_evidence_findings(command, stdout_json, required_keys)
+            findings.extend(_release_ops_report_evidence_findings(stdout_json))
+            return findings
         return [
             _release_finding(
                 "required_command_output_incomplete",

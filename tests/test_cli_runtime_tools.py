@@ -6210,6 +6210,14 @@ def production_bundle_ops_stdout(command: str) -> dict:
     }
 
 
+def production_ops_report_audit() -> dict:
+    return {
+        "hash_chain": {"provider": "vault-hmac", "verified": True, "retained": True},
+        "pgaudit": {"enabled": True, "retained": True},
+        "worm_copy": {"enabled": True, "external": True, "retained": True},
+    }
+
+
 def production_release_stdout(command: str, provider_stdout: dict) -> dict:
     if command == "provider-check":
         return provider_stdout
@@ -6404,7 +6412,12 @@ def production_release_stdout(command: str, provider_stdout: dict) -> dict:
             },
         }
     if command == "ops-report":
-        return {"ok": True, "counts": {"memories": 10}, "tripwires": {"passed": True}}
+        return {
+            "ok": True,
+            "counts": {"memories": 10},
+            "tripwires": {"passed": True},
+            "audit": production_ops_report_audit(),
+        }
     return {"ok": True}
 
 
@@ -8906,6 +8919,7 @@ def test_cli_release_audit_rejects_placeholder_ops_report_evidence(tmp_path: Pat
         "ok": True,
         "counts": {"value": "placeholder"},
         "tripwires": {"passed": True},
+        "audit": production_ops_report_audit(),
     }
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
 
@@ -8942,6 +8956,7 @@ def test_cli_release_audit_rejects_hollow_ops_report_evidence(tmp_path: Path) ->
         "ok": True,
         "counts": {},
         "tripwires": {},
+        "audit": production_ops_report_audit(),
     }
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
 
@@ -8968,6 +8983,40 @@ def test_cli_release_audit_rejects_hollow_ops_report_evidence(tmp_path: Path) ->
     assert result.returncode == 1
     assert payload["ok"] is False
     assert "required_command_output_hollow" in codes
+
+
+def test_cli_release_audit_rejects_weak_ops_report_audit_evidence(tmp_path: Path) -> None:
+    report_path, manifest_path = write_release_report(tmp_path)
+    rewrite_release_check_stdout(
+        report_path,
+        manifest_path,
+        command="ops-report",
+        stdout_json={
+            "ok": True,
+            "counts": {"memories": 10},
+            "tripwires": {"passed": True},
+            "audit": {
+                "hash_chain": {"provider": "local-hmac", "verified": True, "retained": True},
+                "pgaudit": {"enabled": True, "retained": False},
+                "worm_copy": {"enabled": True, "external": False, "retained": True},
+            },
+        },
+    )
+
+    result = run_raw_cli(
+        tmp_path / "mnemosyne.json",
+        "release-audit",
+        "--evidence-manifest",
+        str(manifest_path),
+        "--require-production-validated",
+        "--require-provider-forbid-local",
+    )
+    payload = json.loads(result.stdout)
+    codes = {finding["code"] for finding in payload["findings"]}
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert "required_ops_report_audit_evidence_incomplete" in codes
 
 
 def test_cli_release_audit_requires_manifest_file_digests(tmp_path: Path) -> None:
