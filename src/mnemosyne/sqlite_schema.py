@@ -251,6 +251,50 @@ ENSURE_STATEMENTS: list[str] = [
         value TEXT NOT NULL
     )
     """,
+    # embedding_cache (Task 8, A1) — subject-scoped embedding cache. The
+    # PRIMARY KEY is (cache_key, model_id); ``cache_key`` is the STORED evidence
+    # row cid, which ``ids.evidence_cid`` already subject-salts (mixes user_id
+    # into the content address) for sensitivity >= 2 or detected PII. Reusing
+    # that cid as the key is what CLOSES the dedup-oracle rail: two subjects with
+    # identical S2+/PII plaintext get different cids, so a cross-subject probe
+    # can never confirm a hit (privacy class 10). ``tenant_id`` is redundant in a
+    # one-file-per-tenant store but kept for SQL portability. Admission is gated
+    # app-side by ``vector_partition_for_item`` (never S4/embed_ok:false/
+    # restricted/held/unknown-policy; S3 only under a sensitive-embedding
+    # deployment flag which does not exist today → S3 fails closed).
+    """
+    CREATE TABLE IF NOT EXISTS embedding_cache (
+        tenant_id TEXT NOT NULL,
+        cache_key TEXT NOT NULL,
+        model_id TEXT NOT NULL,
+        embedding BLOB NOT NULL,
+        dims INTEGER NOT NULL,
+        sensitivity INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (tenant_id, cache_key, model_id)
+    )
+    """,
+    # graph_ppr_cache (Task 8) — materialized cached-PPR payloads read by
+    # ``graph_ppr(use_cache=True)``. Keyed by (branch, seed_hash, as_of_key);
+    # ``relation_fingerprint`` is the relations+source-custody watermark captured
+    # BEFORE the live recompute (TOCTOU-safe), so a later read recomputes the
+    # watermark and serves the payload only on an exact match (else falls through
+    # to a live traversal). Freshness/versioning is tracked out-of-band in a
+    # per-tenant ``ProjectionRegistry`` (projections.json).
+    """
+    CREATE TABLE IF NOT EXISTS graph_ppr_cache (
+        tenant_id TEXT NOT NULL,
+        branch TEXT NOT NULL DEFAULT 'main',
+        seed_hash TEXT NOT NULL,
+        as_of_key TEXT NOT NULL,
+        relation_fingerprint TEXT NOT NULL,
+        cache_depth INTEGER NOT NULL,
+        seeds TEXT NOT NULL,
+        hits TEXT NOT NULL,
+        refreshed_at TEXT NOT NULL,
+        PRIMARY KEY (tenant_id, branch, seed_hash, as_of_key)
+    )
+    """,
     # evidence_fts (Task 4) — FTS5 candidate-recall index over evidence.content.
     #
     # The unicode61 tokenizer is configured with ``tokenchars '_'`` so an

@@ -52,6 +52,7 @@ from __future__ import annotations
 
 import array
 import copy
+import hashlib
 import json
 import re
 import sqlite3
@@ -62,6 +63,7 @@ from typing import Any
 
 from mnemosyne import text as text_kernels
 from mnemosyne.access_policy import (
+    VECTOR_PARTITION_NONE,
     VECTOR_PARTITION_PUBLIC,
     effective_max_sensitivity,
     filter_export_for_context,
@@ -96,6 +98,7 @@ from mnemosyne.models import (
 from mnemosyne.pipeline import run_retrieval_pipeline
 from mnemosyne.policy import OperatingPolicy
 from mnemosyne.privacy import ErasureMode
+from mnemosyne.projections import ProjectionRegistry, ProjectionSpec
 from mnemosyne.retrieval import (
     HashingEmbeddingProvider,
     LocalSimilarityReranker,
@@ -166,6 +169,48 @@ def sqlite_vec_available() -> bool:
         return False
     finally:
         probe.close()
+
+
+# --- Task 8 embedding-cache admission (A1) ----------------------------------
+#
+# The A1 embedding cache never admits an item whose vector partition is ``none``
+# (S4, ``embed_ok: false``, ``restricted``, any ``hold``/``hold:*`` flag, an
+# unknown access-policy key, or an erased/non-live row — all collapse to
+# VECTOR_PARTITION_NONE in ``access_policy.vector_partition_for_item``). S3
+# (sensitivity 3) has a non-none partition but is admitted ONLY under a
+# sensitive-embedding deployment flag. No such flag exists anywhere in
+# ``access_policy.py`` / ``OperatingPolicy`` today (verified 2026-07-02), so S3
+# (and, by the partition rule, S4) FAILS CLOSED — never cached. If such a
+# deployment flag is introduced later, gate it here rather than inventing new
+# salting (the subject-scoped cid already closes the dedup-oracle rail).
+_SENSITIVE_EMBEDDING_CACHE_ENABLED = False
+
+
+def _graph_ppr_seed_hash(seed_set: set[str]) -> str:
+    """Order-independent hash of a lowercased seed set — the cached-PPR key
+    discipline mirrored from PostgresEngine's materialization path."""
+    payload = json.dumps(sorted(seed_set), separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _graph_ppr_as_of_key(as_of: datetime | None, moment: datetime) -> str:
+    """Cache partition key for the as-of dimension: ``"live"`` for a ``None``
+    as_of (the common ``now()`` traversal) else the fixed-width ``dt_to_json``
+    moment (never compared lexically as a window bound — the DATETIME HAZARD)."""
+    return "live" if as_of is None else dt_to_json(moment)
+
+
+def _metadata_patch_tightens_privacy(patch: dict[str, Any]) -> bool:
+    """Whether a metadata patch signals a restriction/hold/quarantine change (or
+    drops the embedding partition) that must invalidate a cached embedding."""
+    for key, value in patch.items():
+        name = str(key)
+        if name in {"restricted", "hold", "quarantine_reason", "quarantined"} or name.startswith("hold:"):
+            return True
+        if name == "embedding_partition" and str(value) == "none":
+            return True
+    return False
+
 
 _EVIDENCE_INSERT = """
 INSERT INTO evidence (
@@ -400,6 +445,12 @@ class SqliteEngine:
         self._lock = threading.RLock()
         self._connections: dict[str, sqlite3.Connection] = {}
         self._integrity_checked: set[str] = set()
+        # Task 8: tenant-granular embedding-cache hit/miss telemetry (never
+        # per-cid — a per-key counter would itself be a presence oracle), and
+        # the per-tenant projection registries (cached-ppr / evidence-fts /
+        # optional vec0), built lazily on first use.
+        self._cache_telemetry: dict[str, dict[str, int]] = {}
+        self._registries: dict[str, ProjectionRegistry] = {}
 
     # --- store core (connections, schema, row marshalling) -------------------
 
@@ -785,6 +836,10 @@ class SqliteEngine:
                 ev.embedding = None
             with conn:
                 self._write_evidence_mutable(conn, ev)
+                # Privacy tightening (raised sensitivity / added restriction /
+                # nulled embedding) always invalidates any cached vector for this
+                # cid — purge unconditionally (restriction/hold purge rail, R4).
+                self._purge_embedding_cache_row(conn, tenant_id, cid)
                 self._audit(
                     conn,
                     tenant_id,
@@ -832,6 +887,13 @@ class SqliteEngine:
             ev.metadata = {**ev.metadata, **metadata_patch}
             with conn:
                 self._write_evidence_mutable(conn, ev)
+                # A metadata patch that signals a restriction/hold/quarantine
+                # change (or drops the embedding partition to "none") invalidates
+                # the cached vector for this cid — purge on those paths (R4).
+                if _metadata_patch_tightens_privacy(metadata_patch) or not self._embedding_cache_admits(
+                    sensitivity=int(ev.sensitivity), access_policy=ev.access_policy, erased=ev.erased
+                ):
+                    self._purge_embedding_cache_row(conn, tenant_id, cid)
                 self._audit(
                     conn,
                     tenant_id,
@@ -892,6 +954,15 @@ class SqliteEngine:
             )
             with conn:
                 self._write_evidence_mutable(conn, ev)
+                # A1: mirror the just-set embedding into the subject-scoped cache
+                # when admissible (same txn; invisible to export parity). The
+                # cache_key is the STORED cid (already subject-salted for S2+/PII).
+                if self._embedding_cache_admits(
+                    sensitivity=int(ev.sensitivity), access_policy=ev.access_policy, erased=ev.erased
+                ):
+                    self._embedding_cache_store_row(
+                        conn, tenant_id, cid, self._model_id(), list(embedding), int(ev.sensitivity)
+                    )
                 self._audit(
                     conn,
                     tenant_id,
@@ -1416,8 +1487,36 @@ class SqliteEngine:
         (``_valid_at``), ``_relation_hit_security`` + ``may_read_item`` gating,
         the graph adapter branch, ``ppr_power_iteration``, direct-seed-first Hit
         construction, and ``_mark_retrieved_text_as_data`` are thereby reused
-        verbatim — byte-identical to the oracle. ``use_cache`` matches Local
-        (computes live; the durable cached-PPR read lands in Task 8)."""
+        verbatim — byte-identical to the oracle.
+
+        ``use_cache=True`` (Task 8): when a materialized cached-PPR payload for
+        this (branch, seed-set, as-of) exists AND its relations+custody watermark
+        still matches AND it holds >= k hits AND the context is the default
+        reader, that payload is served (each hit re-tagged
+        ``metadata['graph_signal_cached'] = True`` — GraphSignalCache-compatible;
+        the hit ``channel`` is unchanged so results are signature-identical to a
+        live traversal). Any miss/staleness/elevated-context falls THROUGH to the
+        live path, so ``use_cache=False`` and an unpopulated/stale cache are both
+        byte-identical to the pre-Task-8 oracle behaviour."""
+        if use_cache:
+            cached = self._read_ppr_cache(seeds, k, as_of=as_of, tenant_id=tenant_id, branch=branch, filt=filt)
+            if cached is not None:
+                return cached
+        return self._compute_graph_ppr(seeds, k, as_of=as_of, tenant_id=tenant_id, branch=branch, filt=filt)
+
+    def _compute_graph_ppr(
+        self,
+        seeds: list[str],
+        k: int,
+        *,
+        as_of: datetime | None = None,
+        tenant_id: str | None = None,
+        branch: str | None = None,
+        filt: dict[str, Any] | None = None,
+    ) -> list[Hit]:
+        """Live traversal (the pre-Task-8 ``graph_ppr`` body). A distinct method
+        so ``refresh_graph_ppr_cache`` and the TOCTOU tests can hook the compute
+        step between the pre-rebuild fingerprint capture and the payload write."""
         oracle = self._graph_oracle(tenant_id, branch, filt)
         return oracle.graph_ppr(
             seeds,
@@ -1425,8 +1524,539 @@ class SqliteEngine:
             as_of=as_of,
             tenant_id=tenant_id,
             branch=branch,
-            use_cache=use_cache,
+            use_cache=False,
             filt=filt,
+        )
+
+    # --- Task 8: embedding cache (A1) ----------------------------------------
+    #
+    # A subject-scoped embedding cache keyed by (cache_key, model_id), where
+    # cache_key is the STORED evidence cid. ``ids.evidence_cid`` already mixes
+    # user_id into the content address for sensitivity >= 2 / detected PII, so
+    # two subjects with identical S2+/PII plaintext produce different cids —
+    # that reused salt is precisely what closes the dedup-oracle rail (no new
+    # salting is invented here). The cache is invisible to ``export_tenant`` /
+    # parity: it is a pure recompute-avoidance + privacy surface.
+
+    def _model_id(self) -> str:
+        """Stable identity of the active embedding model (cache key component)."""
+        provider = self.adapters.embedding
+        for attr in ("model_id", "model", "name"):
+            value = getattr(provider, attr, None)
+            if value:
+                return str(value)
+        return type(provider).__name__
+
+    def _embedding_cache_admits(
+        self, *, sensitivity: int, access_policy: Any, erased: bool = False, status: str = "active"
+    ) -> bool:
+        """Admission predicate (spec §4.2 A1). Never admits a ``none`` partition
+        (S4 / ``embed_ok:false`` / ``restricted`` / ``hold`` / unknown-policy /
+        erased). S3 is admitted only under the sensitive-embedding deployment
+        flag, which does not exist → S3 fails closed. S0–S2 with a usable
+        partition are admitted (their cid is already subject-salted for S2)."""
+        partition = vector_partition_for_item(
+            sensitivity=int(sensitivity), access_policy=access_policy, status=status, erased=erased
+        )
+        if partition == VECTOR_PARTITION_NONE:
+            return False
+        if int(sensitivity) >= 3:
+            return _SENSITIVE_EMBEDDING_CACHE_ENABLED
+        return True
+
+    @staticmethod
+    def _embedding_cache_store_row(
+        conn: sqlite3.Connection,
+        tenant_id: str,
+        cache_key: str,
+        model_id: str,
+        vector: list[float],
+        sensitivity: int,
+    ) -> None:
+        conn.execute(
+            "INSERT OR REPLACE INTO embedding_cache "
+            "(tenant_id, cache_key, model_id, embedding, dims, sensitivity, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                tenant_id,
+                str(cache_key),
+                model_id,
+                pack_embedding(list(vector)),
+                len(vector),
+                int(sensitivity),
+                dt_to_json(utc_now()),
+            ),
+        )
+
+    def _embedding_cache_fetch(
+        self, conn: sqlite3.Connection, tenant_id: str, cache_key: str, model_id: str
+    ) -> list[float] | None:
+        with self._lock:
+            row = conn.execute(
+                "SELECT embedding FROM embedding_cache WHERE tenant_id = ? AND cache_key = ? AND model_id = ?",
+                (tenant_id, str(cache_key), model_id),
+            ).fetchone()
+        return None if row is None else unpack_embedding(row["embedding"])
+
+    @staticmethod
+    def _purge_embedding_cache_row(conn: sqlite3.Connection, tenant_id: str, cache_key: str) -> int:
+        cur = conn.execute(
+            "DELETE FROM embedding_cache WHERE tenant_id = ? AND cache_key = ?", (tenant_id, str(cache_key))
+        )
+        return cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+
+    def purge_embedding_cache(self, tenant_id: str, cid: str) -> int:
+        """Purge every cached vector for ``cid`` (all model_ids). Exposed for the
+        Task-9 ``forget`` wiring and invoked internally by the restriction/hold
+        privacy paths. Removes the row entirely so no cid-recoverable trace of
+        the erased content survives in the cache (privacy class 13)."""
+        with self._lock:
+            conn = self._connect(tenant_id)
+            with conn:
+                removed = self._purge_embedding_cache_row(conn, tenant_id, cid)
+        return removed
+
+    def _cache_record(self, tenant_id: str, hit: bool) -> None:
+        """Tenant-granular hit/miss telemetry ONLY — a per-cid counter would
+        itself be a presence oracle."""
+        stats = self._cache_telemetry.setdefault(str(tenant_id), {"hits": 0, "misses": 0})
+        stats["hits" if hit else "misses"] += 1
+
+    def cache_stats(self, tenant_id: str) -> dict[str, int]:
+        """Tenant-granular embedding-cache hit/miss counters."""
+        return dict(self._cache_telemetry.get(str(tenant_id), {"hits": 0, "misses": 0}))
+
+    def cached_embedding(
+        self,
+        tenant_id: str,
+        cid: str,
+        text: str,
+        *,
+        sensitivity: int,
+        access_policy: Any,
+        erased: bool = False,
+        embedding_partition: str | None = None,
+        context: dict[str, Any] | None = None,
+        model_id: str | None = None,
+        store: bool = True,
+    ) -> list[float]:
+        """A1 read-through embedding cache with ``may_use_stored_embedding``
+        read gating. A DENIED context (or a cross-subject cid that isn't present)
+        goes through the IDENTICAL miss branch as any genuine miss — the provider
+        is always called and the fresh vector returned; it is stored only when
+        the read gate permits AND the item is admissible. This makes a
+        cross-subject S2+ probe indistinguishable from a miss (class 10)."""
+        model = model_id or self._model_id()
+        decision = may_read_item(
+            item_tenant_id=tenant_id,
+            sensitivity=int(sensitivity),
+            access_policy=access_policy,
+            context=context,
+            policy_max_sensitivity=self.policy.max_sensitivity,
+            status="active",
+            erased=erased,
+        )
+        gate = may_use_stored_embedding(
+            decision=decision,
+            sensitivity=int(sensitivity),
+            access_policy=access_policy,
+            embedding_partition=embedding_partition,
+        )
+        if gate:
+            conn = self._connect(tenant_id)
+            cached = self._embedding_cache_fetch(conn, tenant_id, str(cid), model)
+            if cached is not None:
+                self._cache_record(tenant_id, True)
+                return cached
+        self._cache_record(tenant_id, False)
+        vector = self._embed_text(text)
+        if gate and store and self._embedding_cache_admits(
+            sensitivity=int(sensitivity), access_policy=access_policy, erased=erased
+        ):
+            with self._lock:
+                conn = self._connect(tenant_id)
+                with conn:
+                    self._embedding_cache_store_row(conn, tenant_id, str(cid), model, vector, int(sensitivity))
+        return vector
+
+    # --- Task 8: cached-PPR projection + projection registry -----------------
+
+    def _relations_fingerprint(self, tenant_id: str, branch: str) -> str:
+        """Relations+source-custody watermark for (tenant, branch): a stable hash
+        over relation rows AND the custody (trust/sensitivity/metadata/erased/
+        access_policy/presence) of their source evidence. Adding/removing/editing
+        a relation OR changing a source's custody (quarantine, erasure, backfill)
+        changes the digest, so a dependent cached-PPR payload self-invalidates on
+        the next read. Timestamps are hashed verbatim (never compared lexically —
+        the DATETIME HAZARD does not apply to equality)."""
+        conn = self._connect(tenant_id)
+        branch_key = str(branch or "main")
+        with self._lock:
+            rel_rows = conn.execute(
+                "SELECT id, source, predicate, target, confidence, valid_from, valid_to, "
+                "source_evidence_cids, access_policy FROM relations "
+                "WHERE tenant_id = ? AND branch = ? ORDER BY id",
+                (tenant_id, branch_key),
+            ).fetchall()
+            rel_payload: list[tuple[sqlite3.Row, list[str]]] = []
+            wanted: set[str] = set()
+            for row in rel_rows:
+                source_cids = [str(c) for c in json.loads(row["source_evidence_cids"] or "[]") if c]
+                wanted.update(source_cids)
+                rel_payload.append((row, source_cids))
+            custody: dict[str, sqlite3.Row] = {}
+            if wanted:
+                ordered = sorted(wanted)
+                placeholders = ",".join("?" for _ in ordered)
+                ev_rows = conn.execute(
+                    "SELECT cid, trust_tier, sensitivity, metadata, erased, source_type, actor, access_policy "
+                    f"FROM evidence WHERE tenant_id = ? AND branch = ? AND cid IN ({placeholders})",
+                    (tenant_id, branch_key, *ordered),
+                ).fetchall()
+                custody = {row["cid"]: row for row in ev_rows}
+        payload = [
+            {
+                "id": row["id"],
+                "source": row["source"],
+                "predicate": row["predicate"],
+                "target": row["target"],
+                "confidence": float(row["confidence"]),
+                "valid_from": row["valid_from"],
+                "valid_to": row["valid_to"],
+                "source_evidence_cids": list(source_cids),
+                "access_policy": json.loads(row["access_policy"] or "{}"),
+                "source_evidence_custody": [
+                    {
+                        "cid": cid,
+                        "present": cid in custody,
+                        "trust_tier": int(custody[cid]["trust_tier"]) if cid in custody else None,
+                        "sensitivity": int(custody[cid]["sensitivity"]) if cid in custody else None,
+                        "metadata": json.loads(custody[cid]["metadata"] or "{}") if cid in custody else None,
+                        "erased": bool(custody[cid]["erased"]) if cid in custody else None,
+                        "source_type": str(custody[cid]["source_type"]) if cid in custody else None,
+                        "actor": str(custody[cid]["actor"]) if cid in custody else None,
+                        "access_policy": json.loads(custody[cid]["access_policy"] or "{}") if cid in custody else None,
+                    }
+                    for cid in source_cids
+                ],
+            }
+            for row, source_cids in rel_payload
+        ]
+        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+    def _relations_fingerprint_all(self, tenant_id: str) -> str:
+        """Tenant-wide relations watermark (all branches) for the registered
+        ``cached-ppr`` ProjectionSpec fingerprint."""
+        conn = self._connect(tenant_id)
+        with self._lock:
+            rows = conn.execute(
+                "SELECT branch, id, source, predicate, target, confidence, valid_from, valid_to, "
+                "source_evidence_cids, access_policy FROM relations WHERE tenant_id = ? ORDER BY branch, id",
+                (tenant_id,),
+            ).fetchall()
+        encoded = json.dumps([list(row) for row in rows], sort_keys=True, separators=(",", ":")).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+    def _is_default_reader_context(self, filt: dict[str, Any] | None) -> bool:
+        """Whether ``filt`` is the default reader visibility the cache was
+        materialized under. Any elevation (quarantine, raised trust/sensitivity,
+        non-reader role, extra context keys) bypasses the cache and goes live, so
+        the cache can never leak elevated-visibility hits to a plain reader."""
+        ctx = dict(filt or {})
+        if bool(ctx.get("include_quarantined", False)):
+            return False
+        default_max_trust = int(self.policy.max_trust_tier)
+        if "max_trust_tier" in ctx or "min_trust_tier" in ctx:
+            max_trust = int(ctx.get("max_trust_tier", ctx.get("min_trust_tier", default_max_trust)))
+            if max_trust != default_max_trust:
+                return False
+        role = str(ctx.get("role") or ctx.get("mnemosyne_role") or "reader").lower()
+        if role != "reader":
+            return False
+        default_reader_sensitivity = effective_max_sensitivity({"role": "reader"}, self.policy.max_sensitivity)
+        if effective_max_sensitivity(ctx, self.policy.max_sensitivity) != default_reader_sensitivity:
+            return False
+        if set(ctx) - {"tenant_id", "tenant", "branch", "role", "mnemosyne_role"}:
+            return False
+        return True
+
+    @staticmethod
+    def _store_ppr_cache(
+        conn: sqlite3.Connection,
+        tenant_id: str,
+        branch: str,
+        seed_hash: str,
+        as_of_key: str,
+        fingerprint: str,
+        depth: int,
+        seeds: list[str],
+        hits: list[Hit],
+    ) -> None:
+        conn.execute(
+            "INSERT OR REPLACE INTO graph_ppr_cache "
+            "(tenant_id, branch, seed_hash, as_of_key, relation_fingerprint, cache_depth, seeds, hits, refreshed_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                tenant_id,
+                branch,
+                seed_hash,
+                as_of_key,
+                fingerprint,
+                int(depth),
+                json.dumps(list(seeds), separators=(",", ":")),
+                json.dumps([hit.to_dict() for hit in hits], separators=(",", ":")),
+                dt_to_json(utc_now()),
+            ),
+        )
+
+    def _read_ppr_cache(
+        self,
+        seeds: list[str],
+        k: int,
+        *,
+        as_of: datetime | None,
+        tenant_id: str | None,
+        branch: str | None,
+        filt: dict[str, Any] | None = None,
+    ) -> list[Hit] | None:
+        """Serve a materialized cached-PPR payload iff the seed-set/as-of key
+        exists, the relations+custody watermark still matches, the payload holds
+        >= k hits, and the context is the default reader. Each served hit is
+        re-tagged ``metadata['graph_signal_cached'] = True`` (channel unchanged →
+        signature-identical to a live traversal). Any failure returns ``None`` so
+        the caller falls through to the live path (byte-parity preserved)."""
+        seed_set = {str(seed).lower() for seed in seeds}
+        if not seed_set or not tenant_id:
+            return None
+        if not self._is_default_reader_context(filt):
+            return None
+        branch_key = str(branch or "main")
+        moment = as_of or utc_now()
+        moment = moment.astimezone(UTC) if moment.tzinfo else moment.replace(tzinfo=UTC)
+        seed_hash = _graph_ppr_seed_hash(seed_set)
+        as_of_key = _graph_ppr_as_of_key(as_of, moment)
+        fingerprint = self._relations_fingerprint(tenant_id, branch_key)
+        conn = self._connect(tenant_id)
+        with self._lock:
+            row = conn.execute(
+                "SELECT relation_fingerprint, cache_depth, hits FROM graph_ppr_cache "
+                "WHERE tenant_id = ? AND branch = ? AND seed_hash = ? AND as_of_key = ?",
+                (tenant_id, branch_key, seed_hash, as_of_key),
+            ).fetchone()
+        if row is None or row["relation_fingerprint"] != fingerprint:
+            return None
+        stored = json.loads(row["hits"] or "[]")
+        if int(row["cache_depth"] or 0) < k or len(stored) < k:
+            return None
+        hits: list[Hit] = []
+        for item in stored[:k]:
+            data = dict(item)
+            metadata = dict(data.get("metadata") or {})
+            metadata["graph_signal_cached"] = True
+            data["metadata"] = metadata
+            hits.append(Hit(**data))
+        return hits
+
+    def refresh_graph_ppr_cache(
+        self,
+        seeds: list[str],
+        k: int,
+        as_of: datetime | None = None,
+        tenant_id: str | None = None,
+        branch: str = "main",
+    ) -> dict[str, Any]:
+        """Materialize the cached-PPR payload for this (seed-set, as-of), mirroring
+        PostgresEngine.refresh_graph_ppr_cache. The relations+custody watermark is
+        captured BEFORE the live recompute (TOCTOU handoff, Phase-0 T9 review): if
+        relations mutate during the compute, the stored fingerprint is the
+        pre-mutation snapshot, so the next read recomputes rather than serving a
+        payload that never reflected a consistent graph."""
+        seed_set = {str(seed).lower() for seed in seeds}
+        if not seed_set or not tenant_id:
+            return {"refreshed": False, "reason": "missing_seed_or_tenant", "hit_count": 0}
+        tenant_id = str(tenant_id)
+        branch_key = str(branch or "main")
+        moment = as_of or utc_now()
+        moment = moment.astimezone(UTC) if moment.tzinfo else moment.replace(tzinfo=UTC)
+        seed_hash = _graph_ppr_seed_hash(seed_set)
+        as_of_key = _graph_ppr_as_of_key(as_of, moment)
+        with self._lock:
+            fingerprint = self._relations_fingerprint(tenant_id, branch_key)  # BEFORE compute (TOCTOU)
+            hits = self._compute_graph_ppr(seeds, k, as_of=as_of, tenant_id=tenant_id, branch=branch_key)
+            conn = self._connect(tenant_id)
+            with conn:
+                self._store_ppr_cache(
+                    conn, tenant_id, branch_key, seed_hash, as_of_key, fingerprint, k, sorted(seed_set), hits
+                )
+        return {
+            "refreshed": True,
+            "hit_count": len(hits),
+            "seed_hash": seed_hash,
+            "as_of_key": as_of_key,
+            "relation_fingerprint": fingerprint,
+        }
+
+    def _rebuild_cached_ppr(self, tenant_id: str) -> None:
+        """ProjectionRegistry rebuild for ``cached-ppr``: re-materialize every
+        stored ``live`` payload against the current graph (as-of-pinned payloads
+        are left for their own refresh — the original moment isn't recoverable
+        from the key alone)."""
+        conn = self._connect(tenant_id)
+        with self._lock:
+            rows = conn.execute(
+                "SELECT branch, seeds, cache_depth FROM graph_ppr_cache "
+                "WHERE tenant_id = ? AND as_of_key = 'live'",
+                (tenant_id,),
+            ).fetchall()
+        for row in rows:
+            seeds = json.loads(row["seeds"] or "[]")
+            self.refresh_graph_ppr_cache(seeds, int(row["cache_depth"] or 0), tenant_id=tenant_id, branch=row["branch"])
+
+    def _evidence_fts_fingerprint(self, tenant_id: str) -> str:
+        conn = self._connect(tenant_id)
+        with self._lock:
+            rows = conn.execute(
+                "SELECT branch, cid, content FROM evidence WHERE tenant_id = ? ORDER BY branch, cid",
+                (tenant_id,),
+            ).fetchall()
+        encoded = json.dumps(
+            [[row["branch"], row["cid"], row["content"]] for row in rows], sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+    def _rebuild_evidence_fts(self, tenant_id: str) -> None:
+        """Re-derive the FTS5 candidate-recall index from evidence rows (the
+        triggers keep it in lockstep in steady state; this is the disaster/first-
+        run rebuild path the ProjectionRegistry drives on a fingerprint miss)."""
+        conn = self._connect(tenant_id)
+        with self._lock, conn:
+            conn.execute("DELETE FROM evidence_fts")
+            conn.execute(
+                "INSERT INTO evidence_fts(rowid, cid, tenant_id, branch, content) "
+                "SELECT rowid, cid, tenant_id, branch, content FROM evidence WHERE tenant_id = ?",
+                (tenant_id,),
+            )
+
+    def _evidence_vec0_fingerprint(self, tenant_id: str) -> str:  # pragma: no cover - needs sqlite-vec
+        conn = self._connect(tenant_id)
+        with self._lock:
+            rows = conn.execute(
+                "SELECT branch, cid FROM evidence WHERE tenant_id = ? AND embedding IS NOT NULL ORDER BY branch, cid",
+                (tenant_id,),
+            ).fetchall()
+        encoded = json.dumps(
+            [[row["branch"], row["cid"]] for row in rows], sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+    def _rebuild_evidence_vec0(self, tenant_id: str) -> None:  # pragma: no cover - needs sqlite-vec
+        """OPTIONAL dense candidate index (vec0). Only registered/run when
+        ``sqlite_vec_available()``; the DEFAULT dense channel is always the
+        packed-BLOB kernel exact scan, so this is a pure approximate-recall
+        optimization behind the projection registry."""
+        import sqlite_vec  # type: ignore[import-not-found]
+
+        conn = self._connect(tenant_id)
+        with self._lock, conn:
+            conn.enable_load_extension(True)
+            sqlite_vec.load(conn)
+            conn.enable_load_extension(False)
+            probe = conn.execute(
+                "SELECT embedding FROM evidence WHERE tenant_id = ? AND embedding IS NOT NULL LIMIT 1",
+                (tenant_id,),
+            ).fetchone()
+            if probe is None:
+                return
+            dims = len(unpack_embedding(probe["embedding"]) or [])
+            if dims <= 0:
+                return
+            conn.execute(f"CREATE VIRTUAL TABLE IF NOT EXISTS evidence_vec0 USING vec0(cid TEXT, embedding float[{dims}])")
+            conn.execute("DELETE FROM evidence_vec0")
+            for row in conn.execute(
+                "SELECT cid, embedding FROM evidence WHERE tenant_id = ? AND embedding IS NOT NULL",
+                (tenant_id,),
+            ).fetchall():
+                vector = unpack_embedding(row["embedding"]) or []
+                if len(vector) == dims:
+                    conn.execute(
+                        "INSERT INTO evidence_vec0(cid, embedding) VALUES (?, ?)", (row["cid"], json.dumps(vector))
+                    )
+
+    def _projection_registry(self, tenant_id: str) -> ProjectionRegistry:
+        """Per-tenant ProjectionRegistry (state in ``<tenant>.proj/projections.json``)
+        registering the rebuildable projections: cached-ppr, evidence-fts, and —
+        only when ``sqlite_vec_available()`` — the optional evidence-vec0 index."""
+        key = str(tenant_id)
+        registry = self._registries.get(key)
+        if registry is not None:
+            return registry
+        state_dir = self.root_dir / safe_tenant_filename(key, ".proj")
+        registry = ProjectionRegistry(state_dir)
+        registry.register(
+            ProjectionSpec(
+                name="cached-ppr",
+                version=1,
+                fingerprint=lambda t=key: self._relations_fingerprint_all(t),
+                rebuild=lambda t=key: self._rebuild_cached_ppr(t),
+            )
+        )
+        registry.register(
+            ProjectionSpec(
+                name="evidence-fts",
+                version=1,
+                fingerprint=lambda t=key: self._evidence_fts_fingerprint(t),
+                rebuild=lambda t=key: self._rebuild_evidence_fts(t),
+            )
+        )
+        if sqlite_vec_available():  # pragma: no cover - needs sqlite-vec
+            registry.register(
+                ProjectionSpec(
+                    name="evidence-vec0",
+                    version=1,
+                    fingerprint=lambda t=key: self._evidence_vec0_fingerprint(t),
+                    rebuild=lambda t=key: self._rebuild_evidence_vec0(t),
+                )
+            )
+        self._registries[key] = registry
+        return registry
+
+    def ensure_projections(self, tenant_id: str, branch: str = "main") -> dict[str, bool]:
+        """Consolidation/maintenance hook: rebuild-on-mismatch for every
+        registered projection (mirrors ``refresh_graph_ppr_cache`` for the graph
+        signal). Returns which projections were rebuilt this call."""
+        registry = self._projection_registry(str(tenant_id))
+        rebuilt = {
+            "cached-ppr": registry.ensure("cached-ppr"),
+            "evidence-fts": registry.ensure("evidence-fts"),
+        }
+        if sqlite_vec_available():  # pragma: no cover - needs sqlite-vec
+            rebuilt["evidence-vec0"] = registry.ensure("evidence-vec0")
+        return rebuilt
+
+    def projection_status(self, tenant_id: str) -> dict[str, dict[str, Any]]:
+        """Per-projection ``{version, fresh, stored}`` (observability §rebuild-lag)."""
+        return self._projection_registry(str(tenant_id)).status()
+
+    def dense_channel(self, tenant_id: str | None = None) -> str:
+        """Active dense retrieval channel: the packed-BLOB kernel exact scan by
+        default; ``sqlite-vec-vec0`` only when the optional extra is present AND
+        its projection is fresh for the tenant."""
+        if tenant_id is not None and sqlite_vec_available():  # pragma: no cover - needs sqlite-vec
+            registry = self._projection_registry(str(tenant_id))
+            try:
+                if registry.check("evidence-vec0"):
+                    return "sqlite-vec-vec0"
+            except KeyError:
+                pass
+        return "packed-blob-exact-scan"
+
+    def dense_channel_report(self, tenant_id: str | None = None) -> str:
+        """doctor/startup line reporting the active dense channel."""
+        vec = "available" if sqlite_vec_available() else "absent"
+        return (
+            f"[sqlite] dense channel active: {self.dense_channel(tenant_id)} "
+            f"(sqlite-vec {vec}; default = packed-BLOB kernel exact scan)"
         )
 
     # --- assertions / bitemporal / remaining writes (Task 5) -----------------
