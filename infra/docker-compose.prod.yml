@@ -4,7 +4,7 @@
 #
 # FIRST-RUN: run infra/prod/bootstrap.sh first (step-ca, Vault transit, Keycloak realm,
 # Postgres roles, model pull). Then `docker compose -f infra/docker-compose.prod.yml up -d`.
-# CI MUST digest-pin every image (the `:tag` pins below are the pre-pin baseline) and run
+# CI MUST digest-pin every registry image and run
 # the policy-as-code gate (no docker.sock, non-root, read_only, cap_drop ALL, limits).
 
 x-hardened: &hardened
@@ -37,7 +37,7 @@ volumes:
 services:
   caddy:                                   # SOLE ingress: terminates TLS (step-ca ACME), the only published port
     <<: *hardened
-    image: caddy:2.8
+    image: caddy:2.8@sha256:226d1f059b75399fe19182893c7184591c07b97afc8dfcf44eeb80c9a77a530f
     cap_add: ["NET_BIND_SERVICE"]
     depends_on: [step-ca, mnemo-api, keycloak, grafana, embedder, seaweedfs]
     ports: ["443:443"]                     # bind to a concrete LAN/VPN iface in prod, never 0.0.0.0/WAN
@@ -54,7 +54,7 @@ services:
 
   step-ca:                                 # internal ACME CA -> real, non-self-signed chains (TLS gate)
     <<: *hardened
-    image: smallstep/step-ca:0.28.4
+    image: smallstep/step-ca:0.28.4@sha256:0f88382ac5af5c6b7bbba0c6e8fcefef52aee6f22ea364df8e02a09ffd0d22f3
     # The step-ca binary ships file capabilities (setcap NET_BIND_SERVICE), which
     # no-new-privileges blocks at exec for a non-root user. Exception: permit that
     # single bounded gain (cap_add) and drop only the no-new-privileges bit here.
@@ -68,7 +68,7 @@ services:
 
   postgres:                                # NATIVE retrieval engine: FTS + pgvector HNSW + recursive-PPR
     <<: *hardened
-    image: pgvector/pgvector:pg16
+    image: pgvector/pgvector:pg16@sha256:ad2e18408bf447f62092a8a5259e7df10505c5a0360bd1a1853ac8b8b0763da2
     user: "999:999"
     environment:
       POSTGRES_DB: mnemosyne
@@ -121,7 +121,7 @@ services:
 
   vault:                                   # KMS transit (crypto-shred) — PRODUCTION: sealed, no dev root token
     <<: *hardened
-    image: hashicorp/vault:1.17
+    image: hashicorp/vault:1.17@sha256:74a4ab138ab5d64725e89cd9a9c73f7040c7fe49e98b71697b275ca9a69919df
     # Non-root from the start: the image entrypoint then skips its root-only setcap
     # (blocked by cap_drop ALL). mlock is disabled in vault.hcl for the container
     # profile — put the vault volume on encrypted host storage instead.
@@ -139,7 +139,7 @@ services:
 
   seaweedfs:                               # S3 object store (native AES256) for multimodal (B6)
     <<: *hardened
-    image: chrislusf/seaweedfs:3.79
+    image: chrislusf/seaweedfs:3.79@sha256:21425305e04b355904ef350ff75a4e81b8afc5124f63e0485b946164b58562d3
     command: ["server", "-s3", "-dir=/data", "-s3.config=/etc/seaweed/s3.json"]
     volumes:
       - seaweed:/data
@@ -149,14 +149,14 @@ services:
 
   victoriametrics:
     <<: *hardened
-    image: victoriametrics/victoria-metrics:v1.102.1
+    image: victoriametrics/victoria-metrics:v1.102.1@sha256:8d34a7572df2ef57ef3e55257c112b1ba1c3ca0fecb138fea5cfed882c0cdb07
     command: ["--storageDataPath=/vmdata", "--retentionPeriod=90d"]
     volumes: [vmdata:/vmdata]
     networks: [internal]
 
   vmalert:
     <<: *hardened
-    image: victoriametrics/vmalert:v1.102.1
+    image: victoriametrics/vmalert:v1.102.1@sha256:53c9a4a0a136c73b0a8ab74db42c1a2c0c4b511ec037761a42a6029996652e9e
     command:
       - "-datasource.url=http://victoriametrics:8428"
       - "-remoteRead.url=http://victoriametrics:8428"
@@ -170,7 +170,7 @@ services:
 
   grafana:                                 # hosted dashboard URL for B8 (mode=hosted_url)
     <<: *hardened
-    image: grafana/grafana:11.1.0
+    image: grafana/grafana:11.1.0@sha256:079600c9517b678c10cda6006b4487d3174512fd4c6cface37df7822756ed7a5
     user: "472:472"
     environment:
       GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana_admin_pw
@@ -229,7 +229,7 @@ services:
 
   ollama:                                  # local role-LLM (Qwen3-4B) for the consolidation commands
     <<: *hardened
-    image: ollama/ollama:0.13.1
+    image: ollama/ollama:0.13.1@sha256:8850b8b33936b9fb246e7b3e02849941f1151ea847e5fb15511f17de9589aea1
     volumes: [ollama:/root/.ollama]
     tmpfs: ["/tmp:size=64m"]
     mem_limit: 6g   # qwen3:4b needs ~3.3GiB resident + page cache headroom for the blob

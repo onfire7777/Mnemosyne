@@ -133,13 +133,15 @@ def test_cap_add_is_allowlisted() -> None:
         assert caps <= allowed, f"service {name} adds capabilities beyond its allowlist: {caps - allowed}"
 
 
-def test_every_image_is_tag_pinned() -> None:
+def test_every_registry_image_is_digest_pinned() -> None:
     for line in _compose_text().splitlines():
         match = re.match(r"^\s+image:\s*(\S+)", line)
         if not match:
             continue
         image = match.group(1)
-        assert ":" in image and not image.endswith(":latest"), f"image must be tag-pinned (not :latest): {image}"
+        assert re.match(r"^[^@\s]+:[^@\s]+@sha256:[0-9a-f]{64}$", image), (
+            f"registry image must be tag+digest pinned: {image}"
+        )
 
 
 def test_internal_networks_are_internal() -> None:
