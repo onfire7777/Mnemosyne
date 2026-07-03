@@ -47,6 +47,17 @@ elevation, fail-closed provenance); Postgres least-privilege roles (`roles.sql`)
 `rolsuper`/`rolbypassrls` probe; single egress chokepoint; one published port (Caddy); digest-pinned
 images + policy-as-code CI; tamper-evident audit log.
 
+Before Tier-B capture, retain the supply-chain gate output outside the repo:
+
+```bash
+export MNEMOSYNE_COSIGN_CERTIFICATE_IDENTITY="expected signer identity"
+export MNEMOSYNE_COSIGN_CERTIFICATE_OIDC_ISSUER="https://token.actions.githubusercontent.com"
+infra/scripts/verify-supply-chain.sh --out-dir /secure/outside/repo-evidence/supply-chain
+```
+
+This fails closed unless gitleaks, Trivy, Syft, Grype, and cosign all run and every registry image is
+tag+digest pinned and signature-verified.
+
 ## Cloud / GPU (B9)
 ```bash
 set -a; . infra/profiles/self-hosted.env; . infra/profiles/cloud.env; set +a   # adds the GPU trainer

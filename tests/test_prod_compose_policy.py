@@ -12,11 +12,13 @@ than fully parsing YAML.
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 INFRA = REPO_ROOT / "infra"
 COMPOSE = INFRA / "docker-compose.prod.yml"
+SUPPLY_CHAIN_SCRIPT = INFRA / "scripts" / "verify-supply-chain.sh"
 
 # cap_add is allowed only where the service cannot function without it.
 CAP_ADD_ALLOWLIST = {
@@ -97,6 +99,28 @@ def test_every_service_inherits_the_hardened_anchor() -> None:
     assert services, "no services parsed from docker-compose.prod.yml"
     missing = [name for name, block in services.items() if "<<: *hardened" not in block]
     assert not missing, f"services missing the hardened anchor: {missing}"
+
+
+def test_service_blocks_do_not_repeat_singleton_keys() -> None:
+    singleton_keys = {
+        "build",
+        "cap_add",
+        "command",
+        "depends_on",
+        "entrypoint",
+        "environment",
+        "healthcheck",
+        "image",
+        "networks",
+        "ports",
+        "secrets",
+        "user",
+        "volumes",
+    }
+    for name, block in _service_blocks(_compose_text()).items():
+        keys = re.findall(r"^    ([A-Za-z0-9_-]+):", block, flags=re.MULTILINE)
+        repeated = sorted({key for key in keys if key in singleton_keys and keys.count(key) > 1})
+        assert not repeated, f"service {name} repeats singleton compose keys: {repeated}"
 
 
 def test_expected_phase8_services_are_present() -> None:
@@ -202,3 +226,47 @@ def test_build_services_reference_existing_docker_assets() -> None:
         for ref in env_file.split(","):
             ref_path = INFRA / ref.strip()[2:] if ref.strip().startswith("./") else Path(ref.strip())
             assert ref_path.is_file(), f"missing env_file referenced by compose: {ref.strip()}"
+
+
+def test_supply_chain_gate_is_wired_for_required_tools() -> None:
+    body = SUPPLY_CHAIN_SCRIPT.read_text(encoding="utf-8")
+    assert SUPPLY_CHAIN_SCRIPT.stat().st_mode & 0o111, "supply-chain gate must be executable"
+    for tool in ("docker", "gitleaks", "trivy", "syft", "grype", "cosign"):
+        assert f"require_tool {tool}" in body
+    for command in (
+        "gitleaks git",
+        "gitleaks dir",
+        "trivy fs",
+        "trivy image",
+        "syft \"$REPO_ROOT\"",
+        "syft \"registry:$image\"",
+        "grype \"dir:$REPO_ROOT\"",
+        "cosign verify",
+        "config --images",
+        "supply-chain-placeholder",
+    ):
+        assert command in body
+    assert "MNEMOSYNE_COSIGN_CERTIFICATE_IDENTITY" in body
+    assert "MNEMOSYNE_COSIGN_CERTIFICATE_OIDC_ISSUER" in body
+    assert "MNEMOSYNE_COSIGN_KEY" in body
+    assert ".artifacts" not in body
+
+
+def test_supply_chain_gate_shell_syntax_is_valid() -> None:
+    result = subprocess.run(
+        ["/bin/bash", "-n", str(SUPPLY_CHAIN_SCRIPT)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_prod_docs_call_the_supply_chain_gate() -> None:
+    docs = [
+        INFRA / "prod" / "README.md",
+        REPO_ROOT / "docs" / "SELF-HOSTED-PRODUCTION-ARCHITECTURE.md",
+        REPO_ROOT / ".planning" / "phases" / "08-self-hosted-first-production" / "08-01-PLAN.md",
+    ]
+    for path in docs:
+        assert "infra/scripts/verify-supply-chain.sh" in path.read_text(encoding="utf-8")

@@ -4,8 +4,9 @@
 #
 # FIRST-RUN: run infra/prod/bootstrap.sh first (step-ca, Vault transit, Keycloak realm,
 # Postgres roles, model pull). Then `docker compose -f infra/docker-compose.prod.yml up -d`.
-# CI MUST digest-pin every registry image and run
-# the policy-as-code gate (no docker.sock, non-root, read_only, cap_drop ALL, limits).
+# CI MUST digest-pin every registry image and run the policy-as-code gate
+# (no docker.sock, non-root, read_only, cap_drop ALL, limits). Operators MUST
+# retain infra/scripts/verify-supply-chain.sh output before Tier-B capture.
 
 x-hardened: &hardened
   read_only: true
