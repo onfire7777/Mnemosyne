@@ -32,7 +32,11 @@ from mnemosyne.engine import (
     _privacy_backfill_controls,
     _privacy_backfill_metadata,
 )
-from mnemosyne.erasure_ids import erasure_deletion_record_id
+from mnemosyne.erasure_ids import (
+    build_erasure_placeholder_map,
+    erasure_deletion_record_id,
+    redact_erased_cids,
+)
 from mnemosyne.ids import evidence_cid, evidence_unscoped_cid
 from mnemosyne.models import (
     Assertion,
@@ -3415,16 +3419,25 @@ class PostgresEngine:
                     else:
                         cur.execute("DELETE FROM entities WHERE id = %s", (row["id"],))
                         propagated["removed_entities"].append(row["canonical"])
-                # Spec §7 privacy invariant 13: the retained deletion record for a
-                # hard delete must not carry the cid (a salted sha256 of the content,
-                # so sha256(guess) could confirm it). Store a non-recomputable HMAC id
-                # instead; tombstone_recompute keeps the cid (the tombstone row lives).
+                # Spec §7 privacy invariant 13: NO retained record for a hard delete
+                # may carry the erased cid (a salted sha256 of the content, so
+                # sha256(guess) could confirm it) — not the deletion_log evidence_cid,
+                # not the provenance/standing-cascade refs inside `propagated`, and not
+                # the audit target_id. Redact every retained copy with one per-erasure
+                # placeholder map (stable within the record, non-recomputable). The
+                # dict RETURNED to the caller keeps the real cids. tombstone_recompute
+                # keeps the cid (the tombstone row lives in the ledger).
                 if mode is ErasureMode.HARD_DELETE_LEGAL:
+                    placeholder_map = build_erasure_placeholder_map({cid, *derived_cids}, tenant_id)
+                    stored_propagated = redact_erased_cids(propagated, placeholder_map)
                     deletion_cid_value = bytes.fromhex(
                         erasure_deletion_record_id(cid, tenant_id, evidence_row.get("user_id") or "")
                     )
+                    audit_target_id = placeholder_map[cid]
                 else:
+                    stored_propagated = propagated
                     deletion_cid_value = cid_bytes
+                    audit_target_id = cid
                 cur.execute(
                     """
                     INSERT INTO deletion_log(tenant_id, evidence_cid, requested_by, propagated)
@@ -3434,7 +3447,7 @@ class PostgresEngine:
                         db_tenant_id,
                         deletion_cid_value,
                         requested_by,
-                        self._jsonb({**propagated, "erasure_mode": mode.value}),
+                        self._jsonb({**stored_propagated, "erasure_mode": mode.value}),
                     ),
                 )
                 self._audit(
@@ -3442,8 +3455,8 @@ class PostgresEngine:
                     db_tenant_id,
                     requested_by,
                     "forget",
-                    cid,
-                    {**propagated, "erasure_mode": mode.value, "source_type": evidence_row["source_type"]},
+                    audit_target_id,
+                    {**stored_propagated, "erasure_mode": mode.value, "source_type": evidence_row["source_type"]},
                     source=evidence_row["source_type"],
                     trust_tier=evidence_row["trust_tier"],
                     capability_tags=list(evidence_row["capability_tags"] or []),

@@ -190,6 +190,31 @@ def test_hard_delete_deletion_log_uses_hmac_not_cid(tmp_path: Path):
     assert len(entry["evidence_cid"]) == 64
 
 
+def _walk_strings(value) -> "list[str]":
+    """Every string anywhere in a nested dict/list/tuple structure."""
+    out: list[str] = []
+    if isinstance(value, str):
+        out.append(value)
+    elif isinstance(value, dict):
+        for item in value.values():
+            out.extend(_walk_strings(item))
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            out.extend(_walk_strings(item))
+    return out
+
+
+def _source_plus_derived(engine, tenant: str, content: str) -> tuple[str, str]:
+    """A source cid + a derived note (source_evidence_cids=[source]) that the
+    cascade erases, so ``propagated`` carries an erased-derived cid to redact."""
+    cid = engine.append_evidence(_ev(tenant, content))
+    derived = engine.append_evidence(
+        _ev(tenant, f"Derived note about: {content}", source_type="derived-note",
+            metadata={"source_evidence_cids": [cid]})
+    )
+    return cid, derived
+
+
 def test_class13_sha256_guess_finds_no_cid_in_deletion_log(tmp_path: Path):
     """Spec §7 invariant 13: after a hard delete, no retained deletion record
     exposes the cid, nor any sha256 of guessable inputs that could confirm it."""
@@ -204,6 +229,74 @@ def test_class13_sha256_guess_finds_no_cid_in_deletion_log(tmp_path: Path):
         hashlib.sha256(cid.encode()).hexdigest(),
     }
     assert all(entry["evidence_cid"] not in guesses for entry in deletion_log)
+
+
+def test_class13_no_erased_cid_in_deletion_log_propagated_or_audit(tmp_path: Path):
+    """Spec §7 invariant 13: NO retained record — the deletion_log record's WHOLE
+    nested ``propagated`` structure and the forget audit row — exposes the erased
+    source cid, any erased-derived cid, or sha256(guess) of either."""
+    engine = _make(tmp_path / "root")
+    cid, derived = _source_plus_derived(engine, "t", "Legally shredded fact.")
+    result = engine.forget("t", cid, requested_by="legal", erasure_mode=HARD)
+    assert derived in result["propagated"]["erased_derived_evidence"]
+
+    export = engine.export_tenant("t")
+    erased = {cid, derived}
+    guesses = {hashlib.sha256(item.encode()).hexdigest() for item in erased}
+
+    for entry in export["deletion_log"]:
+        strings = set(_walk_strings(entry))
+        assert not (erased & strings), "erased/derived cid leaked into deletion_log propagated"
+        assert not (guesses & strings), "sha256(guess) leaked into deletion_log"
+
+    forget_rows = [row for row in export["audit_log"] if row["op"] == "forget"]
+    assert forget_rows
+    for row in forget_rows:
+        strings = set(_walk_strings(row))
+        assert not (erased & strings), "erased/derived cid leaked into the forget audit row"
+        assert not (guesses & strings), "sha256(guess) leaked into the forget audit row"
+
+
+def test_hard_delete_audit_target_is_placeholder_tombstone_keeps_cid(tmp_path: Path):
+    """The hard-delete forget audit row uses a placeholder target_id (invariant 13),
+    while a tombstone_recompute forget KEEPS target_id == cid (its ledger row is
+    the replay blocklist, so no confirmation oracle is created)."""
+    engine = _make(tmp_path / "root")
+    hard_cid = engine.append_evidence(_ev("t", "Hard-delete target."))
+    engine.forget("t", hard_cid, requested_by="legal", erasure_mode=HARD)
+    hard_forget = next(r for r in engine.export_tenant("t")["audit_log"] if r["op"] == "forget")
+    assert hard_forget["target_id"] != hard_cid
+    assert len(hard_forget["target_id"]) == 64  # HMAC placeholder
+
+    tomb_cid = engine.append_evidence(_ev("t", "Tombstone target."))
+    engine.forget("t", tomb_cid, erasure_mode=TOMBSTONE)
+    tomb_forget = next(
+        r for r in engine.export_tenant("t")["audit_log"]
+        if r["op"] == "forget" and r["target_id"] == tomb_cid
+    )
+    assert tomb_forget["target_id"] == tomb_cid
+
+
+def test_hard_delete_referential_consistency_and_caller_return_truth(tmp_path: Path):
+    """Within the retained record the erased source cid maps to ONE stable
+    placeholder wherever it is referenced (still internally analyzable), and
+    forget's RETURN value keeps the real cids (the caller sees the truth)."""
+    engine = _make(tmp_path / "root")
+    cid, derived = _source_plus_derived(engine, "t", "Consistency target.")
+    result = engine.forget("t", cid, requested_by="legal", erasure_mode=HARD)
+
+    # Caller sees real cids.
+    assert result["cid"] == cid
+    assert derived in result["propagated"]["erased_derived_evidence"]
+
+    export = engine.export_tenant("t")
+    entry = next(e for e in export["deletion_log"] if e.get("erasure_mode") == "hard_delete_legal")
+    cascade = entry["propagated"]["standing_cascade"]
+    source_placeholder = cascade["source_cid"]
+    assert source_placeholder != cid
+    assert source_placeholder in cascade["affected_cids"]
+    forget_rows = [r for r in export["audit_log"] if r["op"] == "forget"]
+    assert forget_rows and all(r["target_id"] == source_placeholder for r in forget_rows)
 
 
 # --- erasure propagation: embedding cache + projections ----------------------
