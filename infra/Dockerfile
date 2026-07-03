@@ -21,6 +21,7 @@ COPY infra/entrypoint.sh /usr/local/bin/mnemo-entrypoint
 COPY infra/vault/vault-object-key-provider.py /opt/mnemosyne/bin/vault-object-key
 COPY infra/vault/vault-session-secret-provider.py /opt/mnemosyne/bin/vault-session-secret
 COPY infra/providers/role-llm.py /opt/mnemosyne/bin/role-llm
+COPY infra/providers/role-ladder.py /opt/mnemosyne/bin/role-ladder
 RUN chmod 0755 /usr/local/bin/mnemo-entrypoint /opt/mnemosyne/bin/*
 
 # Non-root; matches the compose hardening (read_only, cap_drop ALL, no-new-privileges).
