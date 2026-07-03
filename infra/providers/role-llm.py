@@ -35,9 +35,19 @@ import re
 import sys
 import urllib.request
 
+from mnemosyne.network_safety import safe_urlopen, validate_fetch_url
+
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://ollama.mnemo.local:11434")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen3:4b")
 TIMEOUT = float(os.environ.get("OLLAMA_TIMEOUT", "25"))
+
+
+def _ollama_internal_hosts() -> tuple[str, ...]:
+    raw = os.environ.get(
+        "MNEMOSYNE_OLLAMA_ALLOWED_INTERNAL_HOSTS",
+        "ollama.mnemo.local,localhost,127.0.0.1,::1",
+    )
+    return tuple(host.strip() for host in raw.split(",") if host.strip())
 
 
 def _chat(system: str, user: str, required_key: str) -> dict:
@@ -60,10 +70,17 @@ def _chat(system: str, user: str, required_key: str) -> dict:
                 "messages": messages,
             }
         ).encode("utf-8")
+        url = f"{OLLAMA_URL.rstrip('/')}/api/chat"
         request = urllib.request.Request(
-            f"{OLLAMA_URL}/api/chat", data=body, headers={"Content-Type": "application/json"}
+            url, data=body, headers={"Content-Type": "application/json"}
         )
-        with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
+        validated_url = validate_fetch_url(
+            url,
+            allow_insecure_localhost=True,
+            allow_insecure_internal_hosts=_ollama_internal_hosts(),
+            purpose="Ollama role-LLM URL",
+        )
+        with safe_urlopen(request, validated=validated_url, timeout=TIMEOUT) as response:
             reply = json.load(response)
         content = reply["message"]["content"]
         try:

@@ -4,8 +4,8 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: null
-last_updated: "2026-07-03T20:32:00Z"
-last_activity: 2026-07-03 — Branch `phase3/providers-consolidation` was rechecked clean and synchronized at `aaf13422a4f79d15ac5f3083cfad4d6f1bb8949d`, with GitHub CI run `28681189928` passing for that head before this continuation. A fresh Tier-B custody refresh still exits `78`: no render env values are missing, but six provider manifest env refs remain blank/unset and 23 production input artifacts are missing from the external custody packet. Phase 8.1 profile/compose deliverables remain complete. Phase 8.5 supply-chain source hardening progressed: production registry images are now tag+digest pinned and the compose policy suite enforces that shape. Scanner evidence and deploy-time cosign verification still keep the parent supply-chain item open. No Tier-B row is marked Done by this cleanup.
+last_updated: "2026-07-03T20:35:34Z"
+last_activity: 2026-07-03 — Branch `phase3/providers-consolidation` was rechecked clean and synchronized at `cf040ae19e413a3033148c05f4a201de65ecc40f`, with GitHub CI run `28681784399` passing for that head before this continuation. A fresh Tier-B custody refresh still exits `78`: no render env values are missing, but six provider manifest env refs remain blank/unset and 23 production input artifacts are missing from the external custody packet. Phase 8.1 profile/compose deliverables remain complete. Phase 8.5 supply-chain source hardening progressed: production registry images are tag+digest pinned, Vault/role-LLM/embedding helper HTTP calls now route through the shared `network_safety` guard with explicit internal-host allowlists, and a raw-egress policy test freezes the remaining explicit exceptions. Scanner evidence, deploy-time cosign verification, runtime default-deny egress evidence, and operator-captured bundles still keep the parent security items open. No Tier-B row is marked Done by this cleanup.
 progress:
   total_phases: 9
   completed_phases: 7
@@ -32,8 +32,8 @@ Current status (2026-06-30): Mandatory Tier A source wirings are closed on `main
 
 Latest checkpoint (2026-07-03): The active branch is
 `phase3/providers-consolidation`, synchronized at
-`aaf13422a4f79d15ac5f3083cfad4d6f1bb8949d`, with GitHub CI run
-`28681189928` passing for that head before this continuation. The GSD roadmap
+`cf040ae19e413a3033148c05f4a201de65ecc40f`, with GitHub CI run
+`28681784399` passing for that head before this continuation. The GSD roadmap
 counters still match `.planning/ROADMAP.md`: 7 of 9 phases complete and 14 of
 15 tracked plan files complete, with Phase 6 still production-evidence-gated
 and Phase 8 still open. Fresh Tier-B custody refresh against
@@ -55,6 +55,21 @@ local files such as
 `production-inputs/provenance-trust-suite.json` into the custody packet;
 production rows remain Partial until real operator-captured bundles pass
 release audit and offline custody verification.
+
+Latest checkpoint (2026-07-03): Phase 8.5 network source hardening now routes
+the Vault transit provider, Vault session-secret provider, internal Ollama
+role-LLM provider, and embedding self-test through the shared
+`mnemosyne.network_safety` URL validation and DNS-pinned opener. `safe_urlopen`
+accepts a custom TLS context so Vault can keep using the step-ca CA bundle
+without bypassing the shared redirect/DNS guard. Internal private-address
+resolution remains default-deny unless the host is explicitly allowlisted
+through `MNEMOSYNE_VAULT_ALLOWED_INTERNAL_HOSTS` or
+`MNEMOSYNE_OLLAMA_ALLOWED_INTERNAL_HOSTS`. `tests/test_network_egress_policy.py`
+now fails on new raw outbound HTTP clients unless the call is routed through
+the guard or explicitly allowlisted with its trust boundary. This is
+source-control progress only: the container-local Docker health check and the
+official MCP SDK `httpx.AsyncClient` transport remain documented exceptions,
+and real default-deny egress/proxy/firewall evidence is still operator-run.
 
 Latest checkpoint (2026-06-30): The active goal remains unpaused and the
 professional continuation objective is now governed by the repo-owned operating

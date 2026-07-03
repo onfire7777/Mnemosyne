@@ -17,6 +17,9 @@ Environment:
     VAULT_TOKEN         token scoped to read the KV path (or VAULT_TOKEN_FILE)
     VAULT_CACERT        CA bundle for the step-ca chain
     MNEMOSYNE_VAULT_SESSION_KV_PATH   override KV path
+    MNEMOSYNE_VAULT_ALLOWED_INTERNAL_HOSTS
+                        comma-separated host allowlist for private Vault
+                        service addresses
 """
 
 from __future__ import annotations
@@ -26,6 +29,16 @@ import os
 import ssl
 import sys
 import urllib.request
+
+from mnemosyne.network_safety import safe_urlopen, validate_fetch_url
+
+
+def _allowed_internal_hosts() -> tuple[str, ...]:
+    raw = os.environ.get(
+        "MNEMOSYNE_VAULT_ALLOWED_INTERNAL_HOSTS",
+        "vault.mnemo.local,localhost,127.0.0.1,::1",
+    )
+    return tuple(host.strip() for host in raw.split(",") if host.strip())
 
 
 def main() -> int:
@@ -41,11 +54,16 @@ def main() -> int:
         "MNEMOSYNE_VAULT_SESSION_KV_PATH", "secret/data/mnemosyne/session-keyring"
     )
     context = ssl.create_default_context(cafile=os.environ.get("VAULT_CACERT"))
-    request = urllib.request.Request(
-        f"{address}/v1/{path}", headers={"X-Vault-Token": token}
-    )
+    url = f"{address}/v1/{path}"
+    request = urllib.request.Request(url, headers={"X-Vault-Token": token})
     try:
-        with urllib.request.urlopen(request, timeout=15, context=context) as response:
+        validated_url = validate_fetch_url(
+            url,
+            allow_insecure_localhost=True,
+            allow_internal_hosts=_allowed_internal_hosts(),
+            purpose="Vault session-secret URL",
+        )
+        with safe_urlopen(request, validated=validated_url, timeout=15, context=context) as response:
             payload = json.load(response)
     except Exception as exc:  # fail closed
         print(f"vault-session-secret: vault read failed: {exc}", file=sys.stderr)

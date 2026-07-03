@@ -42,6 +42,9 @@ Configuration (environment):
     MNEMOSYNE_VAULT_WRAP_DIR         dir for wrapped-DEK sidecars
                                      (default infra/vault/out/wrapped-keys)
     MNEMOSYNE_VAULT_TIMEOUT          HTTP timeout seconds (default 15)
+    MNEMOSYNE_VAULT_ALLOWED_INTERNAL_HOSTS
+                                     comma-separated host allowlist for private
+                                     Vault service addresses
 
 No third-party dependencies: uses only the Python standard library so it runs
 anywhere Mnemosyne runs.
@@ -58,6 +61,8 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any
+
+from mnemosyne.network_safety import safe_urlopen, validate_fetch_url
 
 
 class ProviderError(RuntimeError):
@@ -87,6 +92,14 @@ def _timeout() -> float:
     return float(os.environ.get("MNEMOSYNE_VAULT_TIMEOUT", "15"))
 
 
+def _allowed_internal_hosts() -> tuple[str, ...]:
+    raw = os.environ.get(
+        "MNEMOSYNE_VAULT_ALLOWED_INTERNAL_HOSTS",
+        "vault.mnemo.local,localhost,127.0.0.1,::1",
+    )
+    return tuple(host.strip() for host in raw.split(",") if host.strip())
+
+
 def _wrap_dir() -> Path:
     raw = os.environ.get("MNEMOSYNE_VAULT_WRAP_DIR")
     if raw:
@@ -111,13 +124,21 @@ def _wrap_path(key_id: str) -> Path:
 def _vault_request(method: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     url = f"{_vault_addr()}/v1/{path}"
     data = json.dumps(payload).encode("utf-8") if payload is not None else None
-    req = urllib.request.Request(url=url, data=data, method=method)  # noqa: S310 - operator-configured Vault.
+    req = urllib.request.Request(url=url, data=data, method=method)
     req.add_header("X-Vault-Token", _vault_token())
     if data is not None:
         req.add_header("Content-Type", "application/json")
     try:
-        with urllib.request.urlopen(req, timeout=_timeout()) as response:  # noqa: S310
+        validated_url = validate_fetch_url(
+            url,
+            allow_insecure_localhost=True,
+            allow_internal_hosts=_allowed_internal_hosts(),
+            purpose="Vault transit URL",
+        )
+        with safe_urlopen(req, validated=validated_url, timeout=_timeout()) as response:
             body = response.read()
+    except ValueError as exc:
+        raise ProviderError(f"vault {method} {path} rejected: {exc}") from exc
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", "replace")[:512]
         raise ProviderError(f"vault {method} {path} -> HTTP {exc.code}: {detail}") from exc

@@ -46,6 +46,7 @@ if SRC.is_dir():
 os.environ.setdefault("EMBEDDING_SERVICE_FORCE_FALLBACK", "1")
 
 import app as service  # noqa: E402  (after sys.path setup)
+from mnemosyne.network_safety import safe_urlopen, validate_fetch_url  # noqa: E402
 
 EXPECTED_DIMS = 1024
 
@@ -61,12 +62,22 @@ def _post(url: str, payload: dict) -> dict:
     req = urllib.request.Request(
         url, data=body, headers={"Content-Type": "application/json"}, method="POST"
     )
-    with urllib.request.urlopen(req, timeout=10) as resp:
+    validated_url = validate_fetch_url(
+        url,
+        allow_insecure_localhost=True,
+        purpose="embedding self-test URL",
+    )
+    with safe_urlopen(req, validated=validated_url, timeout=10) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
 
 def _get(url: str) -> dict:
-    with urllib.request.urlopen(url, timeout=10) as resp:
+    validated_url = validate_fetch_url(
+        url,
+        allow_insecure_localhost=True,
+        purpose="embedding self-test URL",
+    )
+    with safe_urlopen(url, validated=validated_url, timeout=10) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
 
