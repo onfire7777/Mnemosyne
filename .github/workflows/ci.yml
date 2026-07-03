@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Nightly soak window for the gated DST/chaos suite (Task 11). Runs off-hours;
+  # never gates push/PR.
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -134,3 +139,30 @@ jobs:
           name: mnemosyne-native-wheels-${{ matrix.os }}
           path: rust/mnemosyne-native/dist/*.whl
           if-no-files-found: error
+
+  chaos:
+    name: DST / chaos soak (nightly, non-gating)
+    runs-on: ubuntu-latest
+    # Nightly / manual only — the gated chaos dir is deselected in a plain run
+    # (MNEMOSYNE_CHAOS unset), so this job is the ONLY place it executes.
+    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    # NON-GATING until the suite has soaked: seeded DST fault injection is a
+    # durability/parity backstop, not a merge gate. A red night must surface a
+    # ratchet-able seed, not block anything. Flip off once it has proven stable.
+    continue-on-error: true
+    env:
+      MNEMOSYNE_CHAOS: "1"
+    steps:
+      # actions/checkout v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      # actions/setup-python v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: "3.12"
+      - name: Install uv
+        run: python -m pip install pip==26.1.2 uv==0.11.16
+      - name: Sync locked chaos test environment
+        run: |
+          uv sync --locked --extra mcp --group dev
+      - name: Run seeded DST / chaos suite (differential oracle + lane invariants)
+        run: uv run --locked python -m pytest tests/chaos -q
