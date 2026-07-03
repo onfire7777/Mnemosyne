@@ -638,7 +638,10 @@ def test_deep_search_and_explain_delegate_to_retrieve(tmp_path: Path):
     assert payload["explain"] == {"delegated": True}
 
 
-def test_deep_search_transitively_raises_until_retrieve_lands(tmp_path: Path):
+def test_deep_search_delegates_through_the_shared_pipeline(tmp_path: Path):
+    # Task 7 landed retrieve(): deep_search is now a live thin delegator to
+    # retrieve(deep=True) through the shared pipeline (no longer a stub).
     sqlite, _ = _engines(tmp_path)
-    with pytest.raises(NotImplementedError, match="Task 7"):
-        sqlite.deep_search("q", "t")
+    result = sqlite.deep_search("q", "t")
+    assert isinstance(result, RetrievalResult)
+    assert result.explain["channels"]  # a real pipeline explain dict, not a stub

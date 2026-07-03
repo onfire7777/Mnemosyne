@@ -63,6 +63,7 @@ from typing import Any
 from mnemosyne import text as text_kernels
 from mnemosyne.access_policy import (
     VECTOR_PARTITION_PUBLIC,
+    effective_max_sensitivity,
     filter_export_for_context,
     may_embed_item,
     may_read_item,
@@ -92,6 +93,7 @@ from mnemosyne.models import (
     parse_dt,
     utc_now,
 )
+from mnemosyne.pipeline import run_retrieval_pipeline
 from mnemosyne.policy import OperatingPolicy
 from mnemosyne.privacy import ErasureMode
 from mnemosyne.retrieval import (
@@ -100,6 +102,7 @@ from mnemosyne.retrieval import (
     RetrievalAdapters,
     validate_adapter_hit_scope,
 )
+from mnemosyne.security import TrustTier
 from mnemosyne.sqlite_schema import (
     ENSURE_STATEMENTS,
     PRAGMA_STATEMENTS,
@@ -1103,15 +1106,44 @@ class SqliteEngine:
     def _embed_text(self, text: str) -> list[float]:
         return self.adapters.embedding.embed(text)
 
+    def _candidate_scope_bounds(self, filt: dict[str, Any]) -> tuple[Any, str, int, int]:
+        """Replicate ``LocalMemoryEngine._candidate_hits``'s cheap, indexable
+        filter bounds (tenant, branch, max_trust_tier, max_sensitivity) VERBATIM
+        (engine.py ``_candidate_hits`` head, incl. the ``min_trust_tier`` legacy
+        fallback and the ``include_quarantined`` trust ceiling) so the SQL
+        prefilter selects EXACTLY the superset ``_candidate_hits`` iterates —
+        the app-side ``may_read_item`` + quarantine/retired/redaction authority
+        then narrows identically. NOTE: no valid-window bound is computed here —
+        ``_candidate_hits`` has none (bitemporal windows live only in
+        ``graph_ppr``/``as_of``, kept in Python), so the DATETIME HAZARD never
+        touches this path."""
+        tenant_id = filt.get("tenant_id")
+        branch = str(filt.get("branch", "main"))
+        include_quarantined = bool(filt.get("include_quarantined", False))
+        default_max_trust = int(TrustTier.UNTRUSTED_EXTERNAL) if include_quarantined else self.policy.max_trust_tier
+        max_trust = int(filt.get("max_trust_tier", filt.get("min_trust_tier", default_max_trust)))
+        max_sensitivity = effective_max_sensitivity(filt, self.policy.max_sensitivity)
+        return tenant_id, branch, max_trust, max_sensitivity
+
     def _scan_oracle(
         self, filt: dict[str, Any], *, with_blobs: bool = False
     ) -> LocalMemoryEngine | tuple[LocalMemoryEngine, dict[str, bytes | None]]:
-        """Hydrate a candidate-scope oracle: evidence + assertions for
-        (tenant, branch) and preferences for the tenant. ``with_blobs`` also
-        returns the raw packed-embedding BLOBs keyed by evidence key, so the
-        dense seam can feed them to ``dense_scan_packed`` with zero conversion."""
-        tenant_id = filt.get("tenant_id")
-        branch = str(filt.get("branch", "main"))
+        """Hydrate a candidate-scope oracle by SQL-PREDICATE PUSHDOWN (Task 7,
+        spec §4.2 binding scale requirement): rather than loading the whole
+        (tenant, branch) — O(tenant-rows) — the WHERE pushes the cheap, indexable
+        subset of ``_candidate_hits``'s filter (tenant, branch, NOT erased,
+        ``trust_tier <= max_trust``, ``sensitivity <= max_sensitivity``, and for
+        assertions ``status IN ('active','contested')``) so only the O(candidates)
+        superset is read. The scoped oracle then runs Local's ACTUAL
+        ``_candidate_hits`` app-side, applying ``may_read_item`` +
+        quarantine/retired/redaction — a superset-preserving narrowing, so the
+        result is BYTE-IDENTICAL to Local (the Python gate only removes MORE
+        rows). ``ORDER BY rowid`` preserves Local's dict-insertion iteration
+        order. Preferences stay tenant-scoped (few, tenant-bounded not
+        evidence-bounded; their ``status='active'`` lives in the JSON record and
+        is filtered app-side). ``with_blobs`` also returns the raw packed
+        embedding BLOBs keyed by evidence key for the dense seam."""
+        tenant_id, branch, max_trust, max_sensitivity = self._candidate_scope_bounds(filt)
         oracle = LocalMemoryEngine(policy=self.policy, adapters=self.adapters)
         raw_blobs: dict[str, bytes | None] = {}
         if tenant_id:
@@ -1120,13 +1152,18 @@ class SqliteEngine:
                 # ORDER BY rowid == insertion order, matching LocalMemoryEngine's
                 # dict-values iteration order (a bare WHERE would use the PK
                 # index and return cid/id order, breaking equal-score tie parity).
+                # The trust/sensitivity/erased predicates are the pushed-down
+                # superset of _candidate_hits' per-row skips.
                 ev_rows = conn.execute(
-                    "SELECT * FROM evidence WHERE tenant_id = ? AND branch = ? ORDER BY rowid",
-                    (tenant_id, branch),
+                    "SELECT * FROM evidence WHERE tenant_id = ? AND branch = ? "
+                    "AND erased = 0 AND trust_tier <= ? AND sensitivity <= ? ORDER BY rowid",
+                    (tenant_id, branch, max_trust, max_sensitivity),
                 ).fetchall()
                 a_rows = conn.execute(
-                    "SELECT * FROM assertions WHERE tenant_id = ? AND branch = ? ORDER BY rowid",
-                    (tenant_id, branch),
+                    "SELECT * FROM assertions WHERE tenant_id = ? AND branch = ? "
+                    "AND status IN ('active', 'contested') "
+                    "AND trust_tier <= ? AND sensitivity <= ? ORDER BY rowid",
+                    (tenant_id, branch, max_trust, max_sensitivity),
                 ).fetchall()
                 p_rows = conn.execute(
                     "SELECT record FROM preferences WHERE tenant_id = ? ORDER BY rowid",
@@ -2019,8 +2056,179 @@ class SqliteEngine:
             if record.get("a") in orphaned or record.get("b") in orphaned:
                 conn.execute("DELETE FROM contradictions WHERE id = ?", (row["id"],))
 
+    # --- retrieve() via the shared pipeline (Task 7) -------------------------
+    #
+    # SqliteEngine satisfies ``pipeline.RetrievalPipelineOps`` so ``retrieve()``
+    # is a thin delegation to the SAME ``run_retrieval_pipeline`` orchestrator
+    # LocalMemoryEngine and PostgresEngine use (spec §4.0 — no third copy). The
+    # channel searches push their candidate filter into SQL (see ``_scan_oracle``
+    # / ``graph_ppr``). Every PURE pipeline helper is reused VERBATIM from
+    # LocalMemoryEngine (class-attribute aliases below — the spec forbids a third
+    # copy of pure pipeline logic); the store-touching helpers run Local's ACTUAL
+    # bodies over a hits-scoped oracle (O(hits)) for byte-parity.
+    #
+    # ``_record_retrieval_access`` is a SYNCHRONOUS write-on-read, matching the
+    # shipped Local/Postgres engines (test_shared_engine_contract asserts
+    # read_marks["assertions"] >= 1 synchronously); the spec's async-telemetry
+    # optimization is DEFERRED here — shipped-behaviour parity wins (ledger).
+    retrieval_explain_channel_keys: tuple[str, str, str] = ("dense_hash", "lexical", "graph_ppr")
+
+    # Pure pipeline helpers reused VERBATIM from LocalMemoryEngine (same code,
+    # not a re-implementation): _rrf/_calibration_explain are plain methods whose
+    # only ``self`` access is ``self.policy`` (present on SqliteEngine) / none;
+    # the rest are staticmethods.
+    _rrf = LocalMemoryEngine._rrf
+    _calibration_explain = LocalMemoryEngine._calibration_explain
+    _u_curve_order = staticmethod(LocalMemoryEngine._u_curve_order)
+    _fit_budget = staticmethod(LocalMemoryEngine._fit_budget)
+    _confidence = staticmethod(LocalMemoryEngine._confidence)
+    _prediction_set_size = staticmethod(LocalMemoryEngine._prediction_set_size)
+    _mark_retrieved_text_as_data = staticmethod(LocalMemoryEngine._mark_retrieved_text_as_data)
+    _merge_schema_fast_path_reports = staticmethod(LocalMemoryEngine._merge_schema_fast_path_reports)
+
+    def _hits_oracle(self, hits: list[Hit]) -> LocalMemoryEngine:
+        """Hydrate a minimal oracle with ONLY the evidence rows the given hits
+        reference (each hit's own cid when it is evidence, plus its provenance
+        and metadata ``source_evidence_cids``) — the exact rows Local's
+        ``_embedding_for_hit`` / ``_independent_corroboration_report`` read for
+        these hits. O(hits), never O(tenant-rows). Fetched by cid WITHOUT the
+        trust/erased prefilter (corroboration inspects erased/low-trust sources
+        too), so the store-touching pipeline helpers delegate to Local's ACTUAL
+        bodies with byte-identical inputs."""
+        oracle = LocalMemoryEngine(policy=self.policy, adapters=self.adapters)
+        wanted: dict[str, dict[str, set[str]]] = {}
+        for hit in hits:
+            cids: set[str] = set()
+            if hit.kind == "evidence" and hit.id:
+                cids.add(str(hit.id))
+            for cid in hit.provenance:
+                if cid:
+                    cids.add(str(cid))
+            raw = hit.metadata.get("source_evidence_cids") if isinstance(hit.metadata, dict) else None
+            if isinstance(raw, list | tuple):
+                cids.update(str(c) for c in raw if c)
+            elif isinstance(raw, str) and raw:
+                cids.add(raw)
+            if cids and hit.tenant_id:
+                wanted.setdefault(hit.tenant_id, {}).setdefault(hit.branch, set()).update(cids)
+        for tenant_id, branches in wanted.items():
+            conn = self._connect(tenant_id)
+            with self._lock:
+                for branch, cids in branches.items():
+                    for cid in sorted(cids):
+                        row = conn.execute(
+                            "SELECT * FROM evidence WHERE tenant_id = ? AND branch = ? AND cid = ?",
+                            (tenant_id, branch, cid),
+                        ).fetchone()
+                        if row is not None:
+                            ev = _evidence_from_row(row)
+                            oracle.evidence[oracle._evidence_key(ev.tenant_id, ev.branch, ev.cid or "")] = ev
+        return oracle
+
+    def _mmr(self, query: str, hits: list[Hit], k: int) -> list[Hit]:
+        """Security-gated MMR (spec §4.0): Local's ACTUAL ``_mmr`` over a hits-
+        scoped oracle so the embedding sourcing (``_embedding_for_hit``,
+        stored-embedding gating + metadata side-effects) is byte-identical."""
+        return LocalMemoryEngine._mmr(self._hits_oracle(hits), query, hits, k)
+
+    def _apply_standing_scores(self, hits: list[Hit]) -> list[Hit]:
+        """Standing re-rank (spec §4.1): Local's ACTUAL body over a hits-scoped
+        oracle (independent-corroboration reads only referenced evidence),
+        byte-identical to Local."""
+        return LocalMemoryEngine._apply_standing_scores(self._hits_oracle(hits), hits)
+
+    def _reality_monitoring_report(self, hits: list[Hit]) -> dict[str, Any]:
+        """Reality-monitoring + standing abstention report: Local's ACTUAL body
+        over a hits-scoped oracle, byte-identical to Local."""
+        return LocalMemoryEngine._reality_monitoring_report(self._hits_oracle(hits), hits)
+
+    def _record_retrieval_access(self, hits: list[Hit]) -> dict[str, int]:
+        """SYNCHRONOUS write-on-read, byte-parity with
+        ``LocalMemoryEngine._record_retrieval_access`` (the async-telemetry
+        optimization is DEFERRED — shipped-engine parity wins). Run Local's
+        ACTUAL body over an oracle hydrated with ONLY the assertions and evidence
+        the hits reference (O(hits), not O(tenant-rows)), then persist the touched
+        assertion lifecycle fields + evidence lifecycle metadata back to SQLite
+        and return Local's counts verbatim."""
+        if not hits:
+            return {"assertions": 0, "evidence": 0}
+        oracle = LocalMemoryEngine(policy=self.policy, adapters=self.adapters)
+        # 1. assertions referenced by assertion hits, keyed EXACTLY as Local keys
+        #    them so oracle.assertions.get(_branch_key(...)) resolves.
+        assertion_refs: dict[str, set[tuple[str, str]]] = {}
+        for hit in hits:
+            if hit.kind == "assertion" and hit.id:
+                assertion_refs.setdefault(hit.tenant_id, set()).add((hit.branch, hit.id))
+        for tenant_id, refs in assertion_refs.items():
+            conn = self._connect(tenant_id)
+            with self._lock:
+                for branch, aid in refs:
+                    row = conn.execute(
+                        "SELECT * FROM assertions WHERE tenant_id = ? AND branch = ? AND id = ?",
+                        (tenant_id, branch, aid),
+                    ).fetchone()
+                    if row is not None:
+                        a = _assertion_from_row(row)
+                        oracle.assertions[oracle._branch_key(a.tenant_id, a.branch, a.id)] = a
+        # 2. evidence refs from hits + hydrated assertions' source cids.
+        ev_refs: dict[str, set[tuple[str, str]]] = {}
+
+        def _want(tenant: str, branch: str, cid: Any) -> None:
+            if tenant and cid:
+                ev_refs.setdefault(tenant, set()).add((branch, str(cid)))
+
+        for hit in hits:
+            if hit.kind == "evidence" and hit.id:
+                _want(hit.tenant_id, hit.branch, hit.id)
+            for cid in hit.provenance:
+                _want(hit.tenant_id, hit.branch, cid)
+        for a in oracle.assertions.values():
+            for cid in a.source_evidence_cids:
+                _want(a.tenant_id, a.branch, cid)
+        for tenant_id, refs in ev_refs.items():
+            conn = self._connect(tenant_id)
+            with self._lock:
+                for branch, cid in refs:
+                    row = conn.execute(
+                        "SELECT * FROM evidence WHERE tenant_id = ? AND branch = ? AND cid = ?",
+                        (tenant_id, branch, cid),
+                    ).fetchone()
+                    if row is not None:
+                        ev = _evidence_from_row(row)
+                        oracle.evidence[oracle._evidence_key(ev.tenant_id, ev.branch, ev.cid or "")] = ev
+        # 3. Local's exact body mutates the oracle dicts in place (its _persist is
+        #    a no-op with no store_path); snapshot for the write-back delta.
+        a_before = {key: item.to_dict() for key, item in oracle.assertions.items()}
+        ev_before = {key: item.to_dict() for key, item in oracle.evidence.items()}
+        result = LocalMemoryEngine._record_retrieval_access(oracle, hits)
+        # 4. persist only the genuinely-changed rows, per tenant, in one txn each.
+        for tenant_id in {*assertion_refs, *ev_refs}:
+            conn = self._connect(tenant_id)
+            with self._lock, conn:
+                for key, item in oracle.assertions.items():
+                    if item.tenant_id == tenant_id and item.to_dict() != a_before.get(key):
+                        self._update_assertion_row(conn, item)
+                for key, item in oracle.evidence.items():
+                    if item.tenant_id == tenant_id and item.to_dict() != ev_before.get(key):
+                        self._write_evidence_mutable(conn, item)
+        return result
+
     def retrieve(self, query: str, tenant_id: str, branch: str = "main", deep: bool = False, filt: dict[str, Any] | None = None) -> RetrievalResult:
-        raise NotImplementedError("SqliteEngine.retrieve lands in Phase-2 Task 7")
+        """Delegate to the engine-agnostic shared pipeline exactly as
+        ``LocalMemoryEngine.retrieve`` does (spec §4.0). SqliteEngine implements
+        ``RetrievalPipelineOps`` via the SQL-pushdown channel searches + the ops
+        members above; the workspace strip, activation, u-curve, budget,
+        calibration/abstention and explain assembly all live in the shared
+        orchestrator."""
+        return run_retrieval_pipeline(
+            self,
+            query=query,
+            tenant_id=tenant_id,
+            branch=branch,
+            deep=deep,
+            filt=filt,
+            policy=self.policy,
+        )
 
     def forget(
         self,

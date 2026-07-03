@@ -349,3 +349,85 @@ def test_fast_path_retrieve_absolute_budget():
         engine.retrieve(QUERY, tenant_id="bench-tenant")
     p_mean_ms = (time.perf_counter() - start) / 20 * 1000
     assert p_mean_ms <= 400, f"fast path {p_mean_ms:.0f} ms exceeds §22.5 budget"
+
+
+def test_sqlite_retrieve_pushdown_10k_absolute_budget(tmp_path):
+    """Phase-2 Task 7 end-to-end retrieve on a seeded ~10k-row SqliteEngine
+    tenant. The SQL-predicate pushdown makes the candidate load O(candidates),
+    not O(tenant-rows): a selective trust ceiling hydrates only the matching
+    rows. Asserts the end-to-end retrieve p-mean stays within the §22.5 400 ms
+    fast-path budget AND that the pushdown scan is strictly cheaper than the
+    old full-tenant hydration on the SAME 10k tenant (the before/after proof).
+
+    Absolute budget runs on the reference machine only (MNEMOSYNE_BENCH_ABSOLUTE);
+    the collection gate in conftest keeps this out of plain CI runs.
+    """
+    if os.environ.get("MNEMOSYNE_BENCH_ABSOLUTE") != "1":
+        pytest.skip("absolute §22.5 budget runs on the reference machine only")
+    import time
+
+    from mnemosyne.models import Evidence
+    from mnemosyne.sqlite_engine import SqliteEngine
+
+    tenant = "bench-sqlite-retrieve"
+    n_rows = 10_000
+    selective = 100  # rows at trust_tier 0; the rest sit above a max_trust=0 ceiling
+    engine = SqliteEngine(tmp_path / "engine")
+    conn = engine._connect(tenant)
+    with conn:
+        for i in range(n_rows):
+            ev = Evidence(
+                tenant_id=tenant,
+                user_id="u",
+                actor="user",
+                source_type="chat",
+                content=f"postgres memory belief evidence tenant branch vector graph row {i}",
+                trust_tier=0 if i < selective else 3,
+                access_policy={"tenant": tenant},
+                cid=f"{i:064x}",
+            )
+            engine._insert_evidence_row(conn, ev)
+
+    restrictive = {"tenant_id": tenant, "branch": "main", "max_trust_tier": 0}
+    permissive = {"tenant_id": tenant, "branch": "main", "max_trust_tier": 3}
+
+    # Before/after candidate-hydration cost on the SAME 10k tenant: the pushdown
+    # (restrictive ceiling → ~100 rows) vs the O(tenant-rows) full hydration
+    # (permissive ceiling → all 10k rows), each measured through _scan_oracle +
+    # _candidate_hits (the exact seam retrieve() drives).
+    def _hydrate(filt):
+        oracle = engine._scan_oracle(dict(filt))
+        oracle._candidate_hits(dict(filt))
+
+    for _ in range(3):  # warm the connection / caches
+        _hydrate(restrictive)
+        _hydrate(permissive)
+    reps = 20
+    t = time.perf_counter()
+    for _ in range(reps):
+        _hydrate(permissive)
+    full_ms = (time.perf_counter() - t) / reps * 1000
+    t = time.perf_counter()
+    for _ in range(reps):
+        _hydrate(restrictive)
+    pushdown_ms = (time.perf_counter() - t) / reps * 1000
+
+    # End-to-end retrieve p-mean under the selective ceiling (the shipped path).
+    for _ in range(3):
+        engine.retrieve(QUERY, tenant_id=tenant, filt=dict(restrictive))
+    t = time.perf_counter()
+    for _ in range(reps):
+        engine.retrieve(QUERY, tenant_id=tenant, filt=dict(restrictive))
+    retrieve_ms = (time.perf_counter() - t) / reps * 1000
+
+    print(
+        f"\n[task7-bench] sqlite retrieve on {n_rows} rows: "
+        f"end_to_end={retrieve_ms:.1f}ms  candidate_hydration before(O-rows)={full_ms:.2f}ms "
+        f"after(pushdown)={pushdown_ms:.2f}ms  speedup={full_ms / max(pushdown_ms, 1e-9):.1f}x"
+    )
+    engine.close()
+    assert retrieve_ms <= 400, f"sqlite retrieve {retrieve_ms:.0f} ms exceeds §22.5 budget"
+    assert pushdown_ms < full_ms, (
+        f"pushdown hydration {pushdown_ms:.2f}ms is not cheaper than the O(rows) "
+        f"full hydration {full_ms:.2f}ms — pushdown did not reduce cost"
+    )
