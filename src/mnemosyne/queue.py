@@ -2,14 +2,21 @@
 
 from __future__ import annotations
 
+import json
+import sqlite3
+import threading
 from collections import Counter, deque
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, Callable
 from uuid import NAMESPACE_URL, uuid5
 
 from mnemosyne.ids import new_id
+from mnemosyne.journal import safe_tenant_filename
+from mnemosyne.models import dt_to_json
 from mnemosyne.postgres_security import assert_postgres_safe_role, postgres_safe_role_required
+from mnemosyne.sqlite_schema import ENSURE_STATEMENTS, PRAGMA_STATEMENTS
 
 
 @dataclass(slots=True)
@@ -373,10 +380,202 @@ class PostgresQueue:
         cur.execute("SELECT set_config('mnemosyne.tenant_id', %s, true)", (db_tenant_id,))
 
 
+class SqliteQueue:
+    """Tenant-scoped durable queue over the per-tenant SQLite file's
+    ``runtime_jobs`` table (the SqliteEngine store lane, spec §4.2).
+
+    Mirrors the ``InProcessQueue`` / ``PostgresQueue`` public surface —
+    ``enqueue`` / ``lease`` / ``complete`` / ``fail`` / ``snapshot`` plus
+    ``list_jobs`` and the ``jobs`` property — over the shared :class:`QueueJob`
+    shape. Selection ordering matches ``InProcessQueue`` byte-for-byte:
+    ``write_priority.effective_score`` → ``score`` (numeric, else 0.0) DESC,
+    then ``created_at`` ASC, then ``id`` ASC (via the shared ``_job_priority``).
+
+    ``lease`` is a single ``BEGIN IMMEDIATE`` claim — the SQLite analogue of
+    PostgresQueue's ``FOR UPDATE SKIP LOCKED``: the reserved write lock
+    serialises concurrent leasers so one job is never handed out twice. There is
+    NO lease timeout / visibility reclaim, matching BOTH shipped queues (the
+    grounding is explicit: do not invent one). The connection runs in autocommit
+    mode (``isolation_level=None``) so the explicit ``BEGIN IMMEDIATE`` claim is
+    the sole transaction and single-statement writes commit immediately.
+    """
+
+    def __init__(self, root_dir: str | Path, tenant_id: str, *, db_path: str | Path | None = None):
+        self.tenant_id = tenant_id
+        if db_path is not None:
+            self._path = Path(db_path).expanduser()
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+        else:
+            root = Path(root_dir).expanduser()
+            root.mkdir(parents=True, exist_ok=True)
+            self._path = root / safe_tenant_filename(tenant_id, ".db")
+        existed = self._path.exists()
+        self._lock = threading.RLock()
+        self._conn = sqlite3.connect(self._path, check_same_thread=False, isolation_level=None)
+        self._conn.row_factory = sqlite3.Row
+        for pragma in PRAGMA_STATEMENTS:
+            self._conn.execute(pragma)
+        self.ensure_schema()
+        if not existed:
+            self._path.chmod(0o600)
+        self._leased: dict[str, QueueJob] = {}
+
+    def ensure_schema(self) -> None:
+        """Apply the shared per-tenant SQLite schema idempotently (the same
+        ``ENSURE_STATEMENTS`` the engine applies — reused so the runtime_jobs DDL
+        never drifts; all statements are ``IF NOT EXISTS`` so co-opening the file
+        the SqliteEngine already created is a no-op)."""
+        with self._lock:
+            self._conn.execute("BEGIN")
+            try:
+                for statement in ENSURE_STATEMENTS:
+                    self._conn.execute(statement)
+                self._conn.execute("COMMIT")
+            except Exception:
+                self._conn.execute("ROLLBACK")
+                raise
+
+    def enqueue(self, kind: str, payload: dict[str, Any], max_attempts: int = 3) -> QueueJob:
+        job = QueueJob(kind=kind, payload=dict(payload), max_attempts=max_attempts)
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO runtime_jobs(id, tenant_id, kind, payload, status, attempts, "
+                "max_attempts, last_error, result, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    job.id,
+                    self.tenant_id,
+                    job.kind,
+                    json.dumps(job.payload, sort_keys=True),
+                    job.status,
+                    job.attempts,
+                    job.max_attempts,
+                    job.last_error,
+                    None if job.result is None else json.dumps(job.result, sort_keys=True),
+                    dt_to_json(job.created_at),
+                    dt_to_json(job.updated_at),
+                ),
+            )
+        return job
+
+    def lease(self, kind: str | None = None) -> QueueJob | None:
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                if kind:
+                    rows = self._conn.execute(
+                        "SELECT * FROM runtime_jobs WHERE tenant_id = ? "
+                        "AND status IN ('queued', 'retry') AND kind = ?",
+                        (self.tenant_id, kind),
+                    ).fetchall()
+                else:
+                    rows = self._conn.execute(
+                        "SELECT * FROM runtime_jobs WHERE tenant_id = ? "
+                        "AND status IN ('queued', 'retry')",
+                        (self.tenant_id,),
+                    ).fetchall()
+                best_job: QueueJob | None = None
+                best_key: tuple[float, datetime, str] | None = None
+                for row in rows:
+                    job = _sqlite_job_from_row(row)
+                    key = (_job_priority(job), job.created_at, job.id)
+                    if (
+                        best_key is None
+                        or key[0] > best_key[0]
+                        or (key[0] == best_key[0] and key[1:] < best_key[1:])
+                    ):
+                        best_job = job
+                        best_key = key
+                if best_job is None:
+                    self._conn.execute("ROLLBACK")
+                    return None
+                now = datetime.now(UTC)
+                self._conn.execute(
+                    "UPDATE runtime_jobs SET status = 'running', attempts = attempts + 1, "
+                    "updated_at = ? WHERE id = ? AND tenant_id = ?",
+                    (dt_to_json(now), best_job.id, self.tenant_id),
+                )
+                self._conn.execute("COMMIT")
+            except Exception:
+                self._conn.execute("ROLLBACK")
+                raise
+            best_job.status = "running"
+            best_job.attempts += 1
+            best_job.updated_at = now
+            self._leased[best_job.id] = best_job
+            return best_job
+
+    def complete(self, job_id: str) -> None:
+        with self._lock:
+            job = self._leased.pop(job_id, None)
+            result = job.result if job else None
+            now = datetime.now(UTC)
+            self._conn.execute(
+                "UPDATE runtime_jobs SET status = 'complete', result = COALESCE(?, result), "
+                "updated_at = ? WHERE id = ? AND tenant_id = ?",
+                (
+                    None if result is None else json.dumps(result, sort_keys=True),
+                    dt_to_json(now),
+                    job_id,
+                    self.tenant_id,
+                ),
+            )
+            if job:
+                job.status = "complete"
+                job.updated_at = now
+
+    def fail(self, job_id: str, error: str) -> None:
+        with self._lock:
+            job = self._leased.pop(job_id, None) or self._get_job(job_id)
+            status = "dead" if job and job.attempts >= job.max_attempts else "retry"
+            now = datetime.now(UTC)
+            self._conn.execute(
+                "UPDATE runtime_jobs SET status = ?, last_error = COALESCE(?, last_error), "
+                "updated_at = ? WHERE id = ? AND tenant_id = ?",
+                (status, error, dt_to_json(now), job_id, self.tenant_id),
+            )
+            if job:
+                job.status = status
+                job.last_error = error
+                job.updated_at = now
+
+    def snapshot(self) -> dict[str, int]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT status, COUNT(*) AS count FROM runtime_jobs WHERE tenant_id = ? GROUP BY status",
+                (self.tenant_id,),
+            ).fetchall()
+        return {str(row["status"]): int(row["count"]) for row in rows}
+
+    def list_jobs(self) -> list[QueueJob]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM runtime_jobs WHERE tenant_id = ? ORDER BY created_at ASC, id ASC",
+                (self.tenant_id,),
+            ).fetchall()
+        return [_sqlite_job_from_row(row) for row in rows]
+
+    @property
+    def jobs(self) -> dict[str, QueueJob]:
+        return {job.id: job for job in self.list_jobs()}
+
+    def _get_job(self, job_id: str) -> QueueJob | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM runtime_jobs WHERE id = ? AND tenant_id = ?",
+                (job_id, self.tenant_id),
+            ).fetchone()
+        return _sqlite_job_from_row(row) if row else None
+
+    def close(self) -> None:
+        with self._lock:
+            self._conn.close()
+
+
 class QueueWorker:
     def __init__(
         self,
-        queue: InProcessQueue | PostgresQueue,
+        queue: InProcessQueue | PostgresQueue | SqliteQueue,
         handlers: dict[str, Callable[[dict[str, Any]], Any]],
         metrics: Any | None = None,
     ):
@@ -463,4 +662,23 @@ def _job_from_row(row: dict[str, Any]) -> QueueJob:
         updated_at=_parse_dt(row["updated_at"]),
         last_error=row.get("last_error"),
         result=row.get("result"),
+    )
+
+
+def _sqlite_job_from_row(row: sqlite3.Row) -> QueueJob:
+    """Rehydrate a QueueJob from a runtime_jobs SQLite row (payload/result are
+    JSON TEXT, created_at/updated_at are dt_to_json TEXT parsed via _parse_dt)."""
+    payload = row["payload"]
+    result = row["result"]
+    return QueueJob(
+        id=str(row["id"]),
+        kind=str(row["kind"]),
+        payload=json.loads(payload) if payload else {},
+        max_attempts=int(row["max_attempts"]),
+        status=str(row["status"]),
+        attempts=int(row["attempts"]),
+        created_at=_parse_dt(row["created_at"]),
+        updated_at=_parse_dt(row["updated_at"]),
+        last_error=row["last_error"],
+        result=json.loads(result) if result else None,
     )
