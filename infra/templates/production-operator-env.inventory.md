@@ -34,7 +34,8 @@ in the external custody packet's `production-render.env`. Pass that file with
 
 These names are referenced by `provider-manifest.production.template.json`.
 The renderer's `--check-environment` parses the external provider manifest and
-reports these names only when a referenced variable is unset.
+reports these names when a referenced variable is unset or empty. A blank value
+in the runtime env file is still reported as missing.
 Pass a separate strict external mode-`0600` runtime env file with
 `render-production-soak-manifest.sh --runtime-env-file` when these values should
 not be exported into the shell during readiness checks. The same file can be
