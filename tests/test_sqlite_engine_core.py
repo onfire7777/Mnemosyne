@@ -247,9 +247,10 @@ def test_insert_evidence_requires_cid(tmp_path: Path):
 def test_unimplemented_surfaces_name_their_task(tmp_path: Path):
     engine = SqliteEngine(tmp_path / "root")
     # Task 3 ledger + Task 4 scan surfaces + Task 5 assertion/bitemporal/write
-    # surfaces + Task 6 branch/merge/discard are implemented; only the retrieve
-    # pipeline (Task 7) and erasure (Task 9) surfaces remain stubbed.
-    with pytest.raises(NotImplementedError, match="Task 7"):
-        engine.retrieve("q", "t1")
+    # surfaces + Task 6 branch/merge/discard + Task 7 retrieve pipeline are
+    # implemented; only the erasure (Task 9) surface remains stubbed.
+    from mnemosyne.models import RetrievalResult
+
+    assert isinstance(engine.retrieve("q", "t1"), RetrievalResult)
     with pytest.raises(NotImplementedError, match="Task 9"):
         engine.forget("t1", "a" * 64)
