@@ -194,6 +194,14 @@ Checkpoint: Phase 7 plans 01-05 are implemented and gate-recorded. P1 proves Sta
 - [ ] 08-01-PLAN.md — Self-hosted-first production architecture, profiles, security hardening, live bring-up, and evidence capture.
 - [ ] 08-SECURITY-FINDINGS.md — Adversarial security findings and must-do controls to complete before trustworthy capture.
 
+Latest checkpoint: Production release-audit now has an explicit B9/FR-21
+parametric trainer replay gate. Retained `parametric-trainer-check` output must
+prove a non-local trainer provider, runtime-state protected suite, promoted
+zero-regression gate, rollback fingerprint, HTTPS deployment, external-only rail
+report, bounded metrics, report fingerprint, and raw training/credential/artifact
+redaction. This is source-side gate hardening only; B9 stays Partial until real
+cloud/GPU operator evidence passes the same custody/release-audit path.
+
 Latest checkpoint: Phase 8 stale completion/reconciliation docs named in
 `08-HANDOFF-INDEX.md` were archived under `docs/_archive/2026-07-03/` for
 audit/history only. This removes obsolete operator guidance from active paths
