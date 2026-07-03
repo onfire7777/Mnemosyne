@@ -10250,6 +10250,240 @@ def _release_retrieval_ops_evidence_findings(stdout_json: Mapping[str, Any]) -> 
     return findings
 
 
+def _release_parametric_trainer_evidence_findings(stdout_json: Mapping[str, Any]) -> list[dict[str, Any]]:
+    findings: list[dict[str, Any]] = []
+
+    def add(message: str) -> None:
+        findings.append(_release_finding("required_parametric_trainer_evidence_incomplete", message))
+
+    def as_int(value: Any) -> int | None:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    def as_float(value: Any) -> float | None:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    bundle = stdout_json.get("bundle")
+    requirements = stdout_json.get("requirements")
+    checks_raw = stdout_json.get("checks")
+    redaction = stdout_json.get("redaction")
+    if not isinstance(bundle, Mapping):
+        add("parametric-trainer-check bundle must be structured")
+        bundle = {}
+    if not isinstance(requirements, Mapping):
+        add("parametric-trainer-check requirements must be structured")
+        requirements = {}
+    if not isinstance(checks_raw, list):
+        add("parametric-trainer-check checks must be a structured list")
+        return findings
+
+    for flag in (
+        "non_local_trainer_provider",
+        "immutable_rail_service",
+        "credentials_isolated",
+        "artifact_uri_hash",
+        "protected_suite_source_non_synthetic",
+        "gate_candidate_matches_artifact",
+        "monotonic_trust",
+    ):
+        if requirements.get(flag) is not True:
+            add(f"parametric-trainer-check requirement {flag} is not proven")
+    if requirements.get("external_reward_signal") != "external_only":
+        add("parametric-trainer-check must prove external-only reward signals")
+    if requirements.get("eval_source_overlap") is not False:
+        add("parametric-trainer-check must prove no eval-source overlap")
+
+    min_cases = as_int(requirements.get("min_cases"))
+    min_protected = as_int(requirements.get("min_protected"))
+    min_gate_margin = as_float(requirements.get("min_gate_margin"))
+    max_deployment_latency = as_float(requirements.get("max_deployment_latency_ms"))
+    max_mutation_rate = as_float(requirements.get("max_mutation_rate"))
+    min_reward = as_float(requirements.get("min_reward"))
+    max_sink_score = as_float(requirements.get("max_sink_score"))
+    if min_cases is None or min_cases < 1:
+        add("parametric-trainer-check min_cases requirement must be positive")
+        min_cases = 1
+    if min_protected is None or min_protected < 1:
+        add("parametric-trainer-check min_protected requirement must be positive")
+        min_protected = 1
+    if min_gate_margin is None or min_gate_margin <= 0:
+        add("parametric-trainer-check min_gate_margin requirement must be positive")
+        min_gate_margin = 0.0
+    if max_deployment_latency is None or max_deployment_latency <= 0:
+        add("parametric-trainer-check max_deployment_latency_ms requirement must be positive")
+        max_deployment_latency = 0.0
+    if max_mutation_rate is None or max_mutation_rate < 0:
+        add("parametric-trainer-check max_mutation_rate requirement must be non-negative")
+        max_mutation_rate = 0.0
+    if min_reward is None:
+        add("parametric-trainer-check min_reward requirement must be numeric")
+        min_reward = 0.0
+    if max_sink_score is None or max_sink_score < 0:
+        add("parametric-trainer-check max_sink_score requirement must be non-negative")
+        max_sink_score = 0.0
+
+    trainer_provider = str(bundle.get("trainer_provider") or "").strip().lower()
+    if not trainer_provider or trainer_provider in {"local", "mock", "test", "filesystem"}:
+        add("parametric-trainer-check trainer provider must be non-local")
+    if bundle.get("protected_suite_fingerprint_present") is not True:
+        add("parametric-trainer-check protected suite fingerprint is missing")
+    suite_source = str(bundle.get("protected_suite_source") or "").strip().lower()
+    if not suite_source or suite_source == "synthetic":
+        add("parametric-trainer-check protected suite source must be non-synthetic")
+    fingerprint = str(stdout_json.get("fingerprint") or "").strip()
+    if len(fingerprint) != 64:
+        add("parametric-trainer-check report fingerprint is missing")
+
+    checks = [check for check in checks_raw if isinstance(check, Mapping)]
+    if len(checks) != len(checks_raw):
+        add("parametric-trainer-check checks must be structured objects")
+    checks_by_name = {str(check.get("name") or ""): check for check in checks}
+    required_names = {
+        "trainer",
+        "protected_suite",
+        "gate",
+        "rollback",
+        "deployment",
+        "rail_report",
+        "metrics",
+        "redaction",
+    }
+    missing_names = sorted(name for name in required_names if name not in checks_by_name)
+    if missing_names:
+        add("parametric-trainer-check missing required checks: " + ", ".join(missing_names))
+
+    trainer = checks_by_name.get("trainer")
+    if isinstance(trainer, Mapping):
+        if trainer.get("ok") is not True:
+            add("parametric-trainer-check trainer check must be ok")
+        if trainer.get("provider_local") is not False:
+            add("parametric-trainer-check trainer provider must be non-local")
+        if trainer.get("missing_controls") not in ([], None):
+            add("parametric-trainer-check trainer controls are incomplete")
+        if trainer.get("artifact_uri_present") is not True or trainer.get("artifact_uri_hash_present") is not True:
+            add("parametric-trainer-check trainer artifact hash evidence is incomplete")
+
+    protected_suite = checks_by_name.get("protected_suite")
+    if isinstance(protected_suite, Mapping):
+        case_count = as_int(protected_suite.get("case_count"))
+        protected_count = as_int(protected_suite.get("protected_case_count"))
+        if protected_suite.get("ok") is not True:
+            add("parametric-trainer-check protected_suite check must be ok")
+        if case_count is None or case_count < min_cases:
+            add("parametric-trainer-check protected suite case count is below requirement")
+        if protected_count is None or protected_count < min_protected:
+            add("parametric-trainer-check protected suite protected-case count is below requirement")
+        if protected_suite.get("source_synthetic") is not False:
+            add("parametric-trainer-check protected suite source must be non-synthetic")
+        if protected_suite.get("missing_tiers") not in ([], None):
+            add("parametric-trainer-check protected suite is missing required tiers")
+        if protected_suite.get("fingerprint_present") is not True:
+            add("parametric-trainer-check protected suite fingerprint is missing")
+        if protected_suite.get("case_id_count_matches") is not True:
+            add("parametric-trainer-check protected suite case id counts must match")
+
+    gate = checks_by_name.get("gate")
+    if isinstance(gate, Mapping):
+        if gate.get("ok") is not True:
+            add("parametric-trainer-check gate check must be ok")
+        if gate.get("promoted") is not True:
+            add("parametric-trainer-check gate must prove promoted candidate")
+        if as_int(gate.get("protected_regression_count")) != 0:
+            add("parametric-trainer-check gate must prove zero protected regressions")
+        if as_int(gate.get("failed_case_count")) != 0:
+            add("parametric-trainer-check gate must prove zero failed cases")
+        passed_protected = gate.get("passed_protected_cases")
+        if not isinstance(passed_protected, list) or len(passed_protected) < min_protected:
+            add("parametric-trainer-check gate must prove protected cases passed")
+        margin = as_float(gate.get("margin"))
+        if margin is None or margin < min_gate_margin:
+            add("parametric-trainer-check gate margin is below requirement")
+
+    rollback = checks_by_name.get("rollback")
+    if isinstance(rollback, Mapping):
+        if rollback.get("ok") is not True:
+            add("parametric-trainer-check rollback check must be ok")
+        if rollback.get("missing_controls") not in ([], None):
+            add("parametric-trainer-check rollback controls are incomplete")
+        if rollback.get("rollback_fingerprint_present") is not True:
+            add("parametric-trainer-check rollback fingerprint is missing")
+
+    deployment = checks_by_name.get("deployment")
+    if isinstance(deployment, Mapping):
+        if deployment.get("ok") is not True:
+            add("parametric-trainer-check deployment check must be ok")
+        if deployment.get("endpoint_https") is not True:
+            add("parametric-trainer-check deployment endpoint must be HTTPS")
+        latency = as_float(deployment.get("latency_ms"))
+        if latency is None or latency > max_deployment_latency:
+            add("parametric-trainer-check deployment latency is missing or above requirement")
+        if deployment.get("missing_controls") not in ([], None):
+            add("parametric-trainer-check deployment controls are incomplete")
+        for flag in (
+            "protected_suite_fingerprint_matches",
+            "artifact_uri_hash_matches",
+            "rollback_fingerprint_matches",
+        ):
+            if deployment.get(flag) is not True:
+                add(f"parametric-trainer-check deployment {flag} is not proven")
+
+    rail_report = checks_by_name.get("rail_report")
+    if isinstance(rail_report, Mapping):
+        if rail_report.get("ok") is not True:
+            add("parametric-trainer-check rail_report check must be ok")
+        if rail_report.get("provider_metadata_checked") is not True:
+            add("parametric-trainer-check rail_report must prove provider metadata check")
+        if rail_report.get("reward_signal") != "external_only":
+            add("parametric-trainer-check rail_report reward signal must be external_only")
+        if rail_report.get("monotonic_trust") is not True:
+            add("parametric-trainer-check rail_report must prove monotonic trust")
+        trust_delta = as_float(rail_report.get("trust_tier_delta"))
+        if trust_delta is None or trust_delta < 0:
+            add("parametric-trainer-check rail_report trust_tier_delta must be non-negative")
+        if str(rail_report.get("target_sink") or "") == "system_prompt":
+            add("parametric-trainer-check rail_report target sink must not be system_prompt")
+        if rail_report.get("eval_source_overlap") is not False:
+            add("parametric-trainer-check rail_report must prove no eval-source overlap")
+
+    metrics = checks_by_name.get("metrics")
+    if isinstance(metrics, Mapping):
+        if metrics.get("ok") is not True:
+            add("parametric-trainer-check metrics check must be ok")
+        mutation_rate = as_float(metrics.get("mutation_rate"))
+        reward = as_float(metrics.get("reward"))
+        sink_score = as_float(metrics.get("sink_score"))
+        if mutation_rate is None or mutation_rate > max_mutation_rate:
+            add("parametric-trainer-check mutation rate is missing or above requirement")
+        if reward is None or reward < min_reward:
+            add("parametric-trainer-check reward is missing or below requirement")
+        if sink_score is None or sink_score > max_sink_score:
+            add("parametric-trainer-check sink score is missing or above requirement")
+
+    redaction_check = checks_by_name.get("redaction")
+    redaction_maps = [item for item in (redaction, redaction_check) if isinstance(item, Mapping)]
+    if not redaction_maps:
+        add("parametric-trainer-check redaction evidence is missing")
+    for redaction_map in redaction_maps:
+        for flag in (
+            "raw_training_data_omitted",
+            "raw_credentials_omitted",
+            "raw_artifact_bytes_omitted",
+        ):
+            if redaction_map.get(flag) is not True:
+                add(f"parametric-trainer-check redaction flag {flag} is not proven")
+        if redaction_map.get("forbidden_raw_paths") not in ([], None):
+            add("parametric-trainer-check redaction contains raw field paths")
+        if redaction_map.get("forbidden_raw_fields_present") is True:
+            add("parametric-trainer-check redaction must prove no raw fields are present")
+
+    return findings
+
+
 def _release_mcp_ops_evidence_findings(stdout_json: Mapping[str, Any]) -> list[dict[str, Any]]:
     findings: list[dict[str, Any]] = []
 
@@ -10841,6 +11075,8 @@ def _release_command_output_findings(check: Mapping[str, Any]) -> list[dict[str,
         findings.extend(_release_worker_ops_evidence_findings(stdout_json))
     if command == "retrieval-ops-check":
         findings.extend(_release_retrieval_ops_evidence_findings(stdout_json))
+    if command == "parametric-trainer-check":
+        findings.extend(_release_parametric_trainer_evidence_findings(stdout_json))
     if command == "mcp-ops-check":
         findings.extend(_release_mcp_ops_evidence_findings(stdout_json))
     if command == "privacy-ops-check":

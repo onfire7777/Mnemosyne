@@ -147,6 +147,15 @@ byte-binding). The work is closing **intent-vs-enforcement** gaps and shipping *
      query/embedding/document/credential redaction. This closes a source-side
      placeholder-acceptance gap; retained production retrieval evidence remains
      operator-owned before the row can close.
+   - 2026-07-03 implementation note: production `release-audit` now rejects
+     weak `parametric-trainer-check` evidence unless the replayed output proves
+     a non-local cloud/GPU trainer provider, runtime-state protected suite,
+     promoted zero-regression gate, rollback fingerprint, HTTPS deployment with
+     matching suite/artifact/rollback hashes, external-only rail report, bounded
+     mutation/reward/sink metrics, report fingerprint, and raw training
+     data/credential/artifact redaction. This closes a source-side
+     placeholder-acceptance gap for B9; retained cloud/GPU trainer evidence
+     remains operator-owned before strict 100% can close.
 
 ### 4.2 Layered defense-in-depth
 

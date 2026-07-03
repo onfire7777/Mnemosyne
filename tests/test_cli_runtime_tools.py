@@ -6224,6 +6224,124 @@ def production_bundle_ops_stdout(command: str) -> dict:
     }
 
 
+def production_parametric_trainer_stdout() -> dict:
+    return {
+        "ok": True,
+        "bundle": {
+            "name": "production-parametric-trainer",
+            "trainer_provider": "vertex-ai-training-prod",
+            "protected_suite_fingerprint_present": True,
+            "protected_suite_source": "runtime-state",
+        },
+        "requirements": {
+            "non_local_trainer_provider": True,
+            "immutable_rail_service": True,
+            "credentials_isolated": True,
+            "artifact_uri_hash": True,
+            "min_cases": 5,
+            "min_protected": 2,
+            "required_tiers": ["archive", "core", "smoke"],
+            "protected_suite_source_non_synthetic": True,
+            "gate_candidate_matches_artifact": True,
+            "min_gate_margin": 0.01,
+            "max_deployment_latency_ms": 1000,
+            "external_reward_signal": "external_only",
+            "monotonic_trust": True,
+            "eval_source_overlap": False,
+            "max_mutation_rate": 0.05,
+            "min_reward": 0.5,
+            "max_sink_score": 0.05,
+        },
+        "redaction": {
+            "raw_training_data_omitted": True,
+            "raw_credentials_omitted": True,
+            "raw_artifact_bytes_omitted": True,
+            "forbidden_raw_fields_present": False,
+        },
+        "checks": [
+            {
+                "name": "trainer",
+                "ok": True,
+                "provider": "vertex-ai-training-prod",
+                "provider_local": False,
+                "missing_controls": [],
+                "artifact_uri_present": True,
+                "artifact_uri_hash_present": True,
+            },
+            {
+                "name": "protected_suite",
+                "ok": True,
+                "case_count": 6,
+                "protected_case_count": 2,
+                "source": "runtime-state",
+                "source_synthetic": False,
+                "missing_tiers": [],
+                "fingerprint_present": True,
+                "case_id_count_matches": True,
+            },
+            {
+                "name": "gate",
+                "ok": True,
+                "artifact_id_present": True,
+                "candidate_id_present": True,
+                "promoted": True,
+                "protected_regression_count": 0,
+                "failed_case_count": 0,
+                "passed_protected_cases": ["core-protected", "archive-protected"],
+                "margin": 0.08,
+                "min_gate_margin": 0.01,
+            },
+            {
+                "name": "rollback",
+                "ok": True,
+                "missing_controls": [],
+                "rollback_fingerprint_present": True,
+            },
+            {
+                "name": "deployment",
+                "ok": True,
+                "endpoint_https": True,
+                "latency_ms": 320,
+                "max_latency_ms": 1000,
+                "missing_controls": [],
+                "protected_suite_fingerprint_matches": True,
+                "artifact_uri_hash_matches": True,
+                "rollback_fingerprint_matches": True,
+            },
+            {
+                "name": "rail_report",
+                "ok": True,
+                "provider_metadata_checked": True,
+                "reward_signal": "external_only",
+                "monotonic_trust": True,
+                "trust_tier_delta": 0,
+                "target_sink": "parametric_adapter",
+                "eval_source_overlap": False,
+            },
+            {
+                "name": "metrics",
+                "ok": True,
+                "mutation_rate": 0.01,
+                "max_mutation_rate": 0.05,
+                "reward": 0.83,
+                "min_reward": 0.5,
+                "sink_score": 0.01,
+                "max_sink_score": 0.05,
+            },
+            {
+                "name": "redaction",
+                "ok": True,
+                "raw_training_data_omitted": True,
+                "raw_credentials_omitted": True,
+                "raw_artifact_bytes_omitted": True,
+                "forbidden_raw_paths": [],
+            },
+        ],
+        "findings": [],
+        "fingerprint": "9" * 64,
+    }
+
+
 def production_mcp_ops_stdout() -> dict:
     transport_checks = [
         {
@@ -6424,12 +6542,13 @@ def production_release_stdout(command: str, provider_stdout: dict) -> dict:
         return production_retrieval_ops_stdout()
     if command == "worker-ops-check":
         return production_worker_ops_stdout()
+    if command == "parametric-trainer-check":
+        return production_parametric_trainer_stdout()
     if command in {
         "auth-ops-check",
         "tls-lifecycle-ops-check",
         "consolidation-ops-check",
         "multimodal-ops-check",
-        "parametric-trainer-check",
         "provenance-ops-check",
         "policy-ops-check",
     }:
@@ -9689,6 +9808,87 @@ def test_cli_release_audit_rejects_weak_retrieval_ops_evidence(tmp_path: Path) -
     assert "retrieval-ops-check retrieval backend must be postgres" in messages
     assert "retrieval-ops-check adapter probes have missing adapters" in messages
     assert "retrieval-ops-check redaction flag raw_embeddings_omitted is not proven" in messages
+
+
+def test_cli_release_audit_rejects_weak_parametric_trainer_evidence(tmp_path: Path) -> None:
+    report_path, manifest_path = write_release_report(tmp_path)
+    stdout_json = production_parametric_trainer_stdout()
+    stdout_json["bundle"]["trainer_provider"] = "local"
+    stdout_json["bundle"]["protected_suite_fingerprint_present"] = False
+    stdout_json["bundle"]["protected_suite_source"] = "synthetic"
+    stdout_json["fingerprint"] = ""
+    for check in stdout_json["checks"]:
+        if check["name"] == "trainer":
+            check["provider_local"] = True
+            check["missing_controls"] = ["credentials_isolated"]
+            check["artifact_uri_hash_present"] = False
+        if check["name"] == "protected_suite":
+            check["case_count"] = 1
+            check["protected_case_count"] = 0
+            check["source_synthetic"] = True
+            check["missing_tiers"] = ["archive", "core"]
+            check["fingerprint_present"] = False
+        if check["name"] == "gate":
+            check["promoted"] = False
+            check["protected_regression_count"] = 1
+            check["failed_case_count"] = 1
+            check["margin"] = 0.0
+        if check["name"] == "rollback":
+            check["missing_controls"] = ["rollback_verified"]
+            check["rollback_fingerprint_present"] = False
+        if check["name"] == "deployment":
+            check["endpoint_https"] = False
+            check["latency_ms"] = 5000
+            check["missing_controls"] = ["canary_passed"]
+            check["protected_suite_fingerprint_matches"] = False
+            check["artifact_uri_hash_matches"] = False
+            check["rollback_fingerprint_matches"] = False
+        if check["name"] == "rail_report":
+            check["provider_metadata_checked"] = False
+            check["reward_signal"] = "internal_proxy"
+            check["monotonic_trust"] = False
+            check["trust_tier_delta"] = -1
+            check["target_sink"] = "system_prompt"
+            check["eval_source_overlap"] = True
+        if check["name"] == "metrics":
+            check["mutation_rate"] = 0.5
+            check["reward"] = 0.1
+            check["sink_score"] = 0.8
+        if check["name"] == "redaction":
+            check["raw_training_data_omitted"] = False
+            check["forbidden_raw_paths"] = ["$.trainer.raw_training_rows"]
+    stdout_json["redaction"]["raw_credentials_omitted"] = False
+    stdout_json["redaction"]["forbidden_raw_fields_present"] = True
+    rewrite_release_check_stdout(
+        report_path,
+        manifest_path,
+        command="parametric-trainer-check",
+        stdout_json=stdout_json,
+    )
+
+    result = run_raw_cli(
+        tmp_path / "mnemosyne.json",
+        "release-audit",
+        "--evidence-manifest",
+        str(manifest_path),
+        "--require-production-validated",
+        "--require-provider-forbid-local",
+    )
+    payload = json.loads(result.stdout)
+    output_findings = [
+        finding
+        for finding in payload["findings"]
+        if finding["code"] == "required_parametric_trainer_evidence_incomplete"
+    ]
+    messages = "\n".join(finding["message"] for finding in output_findings)
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert "parametric-trainer-check trainer provider must be non-local" in messages
+    assert "parametric-trainer-check protected suite source must be non-synthetic" in messages
+    assert "parametric-trainer-check deployment endpoint must be HTTPS" in messages
+    assert "parametric-trainer-check rail_report reward signal must be external_only" in messages
+    assert "parametric-trainer-check redaction flag raw_training_data_omitted is not proven" in messages
 
 
 def test_cli_release_audit_rejects_empty_worker_runtime_evidence(tmp_path: Path) -> None:
