@@ -13,6 +13,7 @@ import pytest
 from mnemosyne.consolidation import (
     CONSOLIDATE_EVIDENCE_JOB,
     CommandCandidateExtractor,
+    CommandEntityResolver,
     CommandEvidenceSummarizer,
     CommandLessonDistiller,
     CommandProcedureInducer,
@@ -137,8 +138,16 @@ def test_command_model_providers_receive_prompt_boundary_for_untrusted_evidence(
                 "        'candidate_predicate': 'has total',",
                 "        'candidate_object': '$42',",
                 "    }]}))",
-                "else:",
+                "elif role == 'evidence_summarizer':",
                 "    print(json.dumps({'summary': 'Provider summary from bounded evidence.'}))",
+                "elif role == 'lesson_distiller':",
+                "    print(json.dumps({'lessons': [{'content': 'Provider lesson from bounded candidates.', 'failure_signature': 'provider:invoice-total', 'votes': 1}]}))",
+                "elif role == 'skill_inducer':",
+                "    print(json.dumps({'procedures': [{'signature': {'name': 'provider-invoice-total'}, 'name': 'Provider invoice procedure', 'body': 'Check provider invoice total.'}]}))",
+                "elif role == 'entity_resolver':",
+                "    print(json.dumps({'candidates': [{'signature': 'provider:invoice-total', 'entity_key': 'provider-invoice'}], 'entities': [{'key': 'provider-invoice', 'label': 'Provider Invoice', 'candidate_signatures': ['provider:invoice-total']}]}))",
+                "else:",
+                "    raise SystemExit(f'unexpected role {role}')",
             ]
         ),
         encoding="utf-8",
@@ -158,6 +167,9 @@ def test_command_model_providers_receive_prompt_boundary_for_untrusted_evidence(
 
     extractor = CommandCandidateExtractor([sys.executable, str(provider), str(requests_path)])
     summarizer = CommandEvidenceSummarizer([sys.executable, str(provider), str(requests_path)])
+    distiller = CommandLessonDistiller([sys.executable, str(provider), str(requests_path)])
+    inducer = CommandProcedureInducer([sys.executable, str(provider), str(requests_path)])
+    resolver = CommandEntityResolver([sys.executable, str(provider), str(requests_path)])
     extracted = extractor.extract(
         TENANT,
         {
@@ -174,12 +186,24 @@ def test_command_model_providers_receive_prompt_boundary_for_untrusted_evidence(
         [evidence],
     )
     summarized = summarizer.summarize(TENANT, [evidence])
+    distilled = distiller.distill(TENANT, extracted["candidates"])
+    induced = inducer.induce(TENANT, extracted["candidates"])
+    resolved = resolver.resolve(TENANT, extracted["candidates"])
     requests = json.loads(requests_path.read_text(encoding="utf-8"))
 
     assert extracted["candidates"][0]["candidate_object"] == "$42"
     assert summarized is not None
     assert summarized["summary"] == "Provider summary from bounded evidence."
-    assert [item["prompt_boundary"]["role"] for item in requests] == ["candidate_extractor", "evidence_summarizer"]
+    assert distilled["lessons"][0]["content"] == "Provider lesson from bounded candidates."
+    assert induced["procedures"][0]["name"] == "Provider invoice procedure"
+    assert resolved["candidates"][0]["entity_key"] == "provider-invoice"
+    assert [item["prompt_boundary"]["role"] for item in requests] == [
+        "candidate_extractor",
+        "evidence_summarizer",
+        "lesson_distiller",
+        "skill_inducer",
+        "entity_resolver",
+    ]
     for request in requests:
         boundary = request["prompt_boundary"]
         serialized_boundary = json.dumps(boundary)
@@ -202,17 +226,18 @@ def test_command_model_providers_receive_prompt_boundary_for_untrusted_evidence(
     assert requests[0]["payload"]["content"] == "[untrusted-content-omitted]"
     assert requests[0]["payload"]["metadata"]["provider_context"] == {"job": "fact"}
     for request in requests:
-        evidence_packet = request["evidence"][0]
-        assert evidence_packet["content_view"]["mode"] == "bounded_pii_redacted_gist"
-        assert evidence_packet["content_view"]["raw_content_omitted"] is True
-        assert evidence_packet["content_view"]["raw_fingerprint_omitted"] is True
-        assert "raw_sha256" not in evidence_packet["content_view"]
-        assert evidence_packet["content_view"]["control_directives_omitted"] is True
-        assert set(evidence_packet["content_view"]["pii_tags_redacted"]) >= {"email", "ssn"}
-        assert "Invoice total for [REDACTED:email] is $42." in evidence_packet["content"]
-        assert "[REDACTED:ssn]" in evidence_packet["content"]
-        assert "embedding" not in evidence_packet
-        assert "signed_provenance" not in evidence_packet
+        if "evidence" in request:
+            evidence_packet = request["evidence"][0]
+            assert evidence_packet["content_view"]["mode"] == "bounded_pii_redacted_gist"
+            assert evidence_packet["content_view"]["raw_content_omitted"] is True
+            assert evidence_packet["content_view"]["raw_fingerprint_omitted"] is True
+            assert "raw_sha256" not in evidence_packet["content_view"]
+            assert evidence_packet["content_view"]["control_directives_omitted"] is True
+            assert set(evidence_packet["content_view"]["pii_tags_redacted"]) >= {"email", "ssn"}
+            assert "Invoice total for [REDACTED:email] is $42." in evidence_packet["content"]
+            assert "[REDACTED:ssn]" in evidence_packet["content"]
+            assert "embedding" not in evidence_packet
+            assert "signed_provenance" not in evidence_packet
     assert requests[0]["payload"]["content_view"]["raw_content_omitted"] is True
     assert requests[0]["payload"]["content_view"]["control_directives_omitted"] is True
 

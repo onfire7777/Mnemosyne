@@ -101,14 +101,19 @@ the committed template and outside soak-manifest `args`.
 | Variable | Purpose | Source | Consumed by |
 |---|---|---|---|
 | `MNEMOSYNE_CANDIDATE_EXTRACTOR_COMMAND` | Command-backed candidate extractor | Provider custody file or deployment env | `provider-check` candidate_extractor |
+| `MNEMOSYNE_CANDIDATE_EXTRACTOR_PROVIDER` | Enables command-backed candidate extractor | Provider profile/runtime env | CLI consolidation/provider-check |
 | `MNEMOSYNE_ENTITY_RESOLVER_COMMAND` | Command-backed entity resolver | Provider custody file or deployment env | `provider-check` entity_resolver |
+| `MNEMOSYNE_ENTITY_RESOLVER_PROVIDER` | Enables command-backed entity resolver | Provider profile/runtime env | CLI consolidation/provider-check |
 | `MNEMOSYNE_LESSON_DISTILLER_COMMAND` | Command-backed lesson distiller | Provider custody file or deployment env | `provider-check` lesson_distiller |
+| `MNEMOSYNE_LESSON_DISTILLER_PROVIDER` | Enables command-backed lesson distiller | Provider profile/runtime env | CLI consolidation/provider-check |
 | `MNEMOSYNE_PROVIDER_OIDC_AUDIENCE` | Provider-check OIDC audience | IdP provider config | `provider-check` oidc |
 | `MNEMOSYNE_PROVIDER_OIDC_AUTHZ_POLICY_FILE` | Provider-check OIDC authz policy artifact | Versioned deployment artifact | `provider-check` oidc |
 | `MNEMOSYNE_PROVIDER_OIDC_ISSUER` | Provider-check OIDC issuer | IdP provider config | `provider-check` oidc |
 | `MNEMOSYNE_PROVIDER_OIDC_JWKS_URL` | Provider-check OIDC JWKS endpoint | IdP provider config | `provider-check` oidc |
 | `MNEMOSYNE_SKILL_INDUCER_COMMAND` | Command-backed skill/procedure inducer | Provider custody file or deployment env | `provider-check` skill_inducer |
+| `MNEMOSYNE_SKILL_INDUCER_PROVIDER` | Enables command-backed skill/procedure inducer | Provider profile/runtime env | CLI consolidation/provider-check |
 | `MNEMOSYNE_SUMMARIZER_COMMAND` | Command-backed evidence summarizer | Provider custody file or deployment env | `provider-check` summarizer |
+| `MNEMOSYNE_SUMMARIZER_PROVIDER` | Enables command-backed evidence summarizer | Provider profile/runtime env | CLI consolidation/provider-check |
 
 ## Environment Catalog
 
