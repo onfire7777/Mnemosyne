@@ -830,6 +830,22 @@ class EmbeddingProvider(Protocol):
         """Return a normalized embedding vector for text."""
 
 
+def _with_query_prefix(text: str, prefix: str) -> str:
+    if not prefix:
+        return text
+    marker = prefix.rstrip()
+    if text.startswith(prefix) or (marker and text.startswith(marker)):
+        return text
+    return f"{prefix}{text}"
+
+
+def embed_query(provider: EmbeddingProvider, query: str) -> list[float]:
+    query_embed = getattr(provider, "embed_query", None)
+    if callable(query_embed):
+        return query_embed(query)
+    return provider.embed(query)
+
+
 class MediaEmbeddingProvider(Protocol):
     """Boundary for image/audio/video embedding providers."""
 
@@ -1059,7 +1075,7 @@ class LocalSimilarityReranker:
     name: str = "local-similarity"
 
     def rerank(self, query: str, hits: Sequence[Hit], k: int) -> list[Hit]:
-        query_vec = self.embedding_provider.embed(query)
+        query_vec = embed_query(self.embedding_provider, query)
         scored: list[Hit] = []
         for hit in hits:
             dense = cosine(query_vec, self.embedding_provider.embed(hit.text))
@@ -1096,6 +1112,7 @@ class HttpEmbeddingProvider:
     dims: int = 1024
     timeout_seconds: float = 30.0
     name: str = "http-embedding"
+    query_prefix: str = "query: "
 
     def embed(self, text: str) -> list[float]:
         payload: dict[str, object] = {"input": text}
@@ -1104,6 +1121,9 @@ class HttpEmbeddingProvider:
         response = _post_json(self.url, payload, self.api_key, self.timeout_seconds)
         vector = _extract_embedding(response)
         return _normalize_vector(vector, self.dims)
+
+    def embed_query(self, query: str) -> list[float]:
+        return self.embed(_with_query_prefix(query, self.query_prefix))
 
 
 class CommandMediaEmbeddingProvider:
@@ -1308,12 +1328,17 @@ class HttpReranker:
     api_key: str | None = None
     timeout_seconds: float = 30.0
     name: str = "http-reranker"
+    query_prefix: str = "query: "
 
     def rerank(self, query: str, hits: Sequence[Hit], k: int) -> list[Hit]:
         if k <= 0 or not hits:
             return []
         documents = [hit.text for hit in hits]
-        payload: dict[str, object] = {"query": query, "documents": documents, "top_n": k}
+        payload: dict[str, object] = {
+            "query": _with_query_prefix(query, self.query_prefix),
+            "documents": documents,
+            "top_n": k,
+        }
         if self.model:
             payload["model"] = self.model
         response = _post_json(self.url, payload, self.api_key, self.timeout_seconds)

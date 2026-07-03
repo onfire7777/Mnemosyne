@@ -61,6 +61,7 @@ from mnemosyne.retrieval import (
     LocalSimilarityReranker,
     QUERY_SUPPORT_THRESHOLD,
     RetrievalAdapters,
+    embed_query,
     is_retired_summary_metadata,
     query_support,
     validate_adapter_hit_scope,
@@ -1604,7 +1605,7 @@ class PostgresEngine:
         default_max_trust = int(TrustTier.UNTRUSTED_EXTERNAL) if include_quarantined else self.policy.max_trust_tier
         max_trust = int(filt.get("max_trust_tier", filt.get("min_trust_tier", default_max_trust)))
         max_sensitivity = effective_max_sensitivity(filt, self.policy.max_sensitivity)
-        query_vec = self.adapters.embedding.embed(query)
+        query_vec = embed_query(self.adapters.embedding, query)
         query_literal = _vector_literal(query_vec)
         hits: list[Hit] = []
         with self.connect() as conn:

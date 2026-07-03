@@ -57,6 +57,7 @@ from mnemosyne.retrieval import (
     activation_explain,
     apply_activation_scores,
     build_channel_hits,
+    embed_query,
     gist_support_report,
     is_retired_summary_metadata,
     marginal_gain_cutoff,
@@ -206,6 +207,44 @@ def test_http_embedding_posts_compact_mnemosyne_contract(monkeypatch: pytest.Mon
     ]
 
 
+def test_http_embedding_query_prefix_is_query_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str] = []
+
+    def _capture(url: str, payload: dict[str, object], api_key: str | None, timeout: float) -> dict[str, object]:
+        calls.append(str(payload["input"]))
+        return {"embedding": [1.0, 0.0]}
+
+    monkeypatch.setattr("mnemosyne.retrieval._post_json", _capture)
+    provider = HttpEmbeddingProvider(url="https://embed.test/embed", dims=2)
+
+    provider.embed("document text")
+    embed_query(provider, "search text")
+    embed_query(provider, "query: already prefixed")
+
+    assert calls == ["document text", "query: search text", "query: already prefixed"]
+
+
+def test_local_similarity_reranker_prefixes_http_query_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str] = []
+
+    def _capture(url: str, payload: dict[str, object], api_key: str | None, timeout: float) -> dict[str, object]:
+        calls.append(str(payload["input"]))
+        return {"embedding": [1.0, 0.0]}
+
+    monkeypatch.setattr("mnemosyne.retrieval._post_json", _capture)
+    reranker = LocalSimilarityReranker(
+        embedding_provider=HttpEmbeddingProvider(url="https://embed.test/embed", dims=2)
+    )
+
+    reranker.rerank(
+        "target query",
+        [_hit("a", "target document", score=0.1), _hit("b", "other document", score=0.1)],
+        k=2,
+    )
+
+    assert calls == ["query: target query", "target document", "other document"]
+
+
 def test_http_embedding_truncates_and_pads_to_target_dims(monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_post_json(monkeypatch, {"embedding": [1.0, 0.0, 0.0, 0.0]})
     assert HttpEmbeddingProvider(url="https://e.test", dims=2).embed("x") == pytest.approx([1.0, 0.0])
@@ -299,7 +338,7 @@ def test_http_reranker_posts_compact_mnemosyne_contract(monkeypatch: pytest.Monk
         (
             "https://rerank.test/rerank",
             {
-                "query": "contract query",
+                "query": "query: contract query",
                 "documents": ["first document", "second document"],
                 "top_n": 2,
                 "model": "jina-reranker-v1-turbo-en",

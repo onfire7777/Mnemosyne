@@ -113,6 +113,7 @@ from mnemosyne.retrieval import (
     HashingEmbeddingProvider,
     LocalSimilarityReranker,
     RetrievalAdapters,
+    embed_query,
     validate_adapter_hit_scope,
 )
 from mnemosyne.security import TrustTier
@@ -1466,7 +1467,7 @@ class SqliteEngine:
         byte-parity) so mixed-width corpora stay correct; a uniform-dims corpus
         hits the packed fast path. Pure mode uses the per-hit ``cosine`` loop.
         Channels: dense_hash / dense_media."""
-        query_vec = self._embed_text(query)
+        query_vec = embed_query(self.adapters.embedding, query)
         dims = len(query_vec)
         oracle, raw_blobs = self._scan_oracle(filt, with_blobs=True)
         candidates = oracle._candidate_hits(filt)
