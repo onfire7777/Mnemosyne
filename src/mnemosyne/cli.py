@@ -4027,6 +4027,8 @@ def _mcp_transport_check(
         "loop_count": loop_count,
         "avg_latency_ms": avg_latency,
         "p95_latency_ms": p95_latency,
+        "auth_token_configured": evidence.get("auth_token_configured") is True,
+        "session_token_configured": evidence.get("session_token_configured") is True,
         "missing_controls": missing_flags,
     }
 
@@ -4107,6 +4109,8 @@ def cmd_mcp_ops_check(args: argparse.Namespace) -> None:
                 "local_url": sse_local,
                 "event_count": sse_event_count,
                 "endpoint_data_present": sse.get("endpoint_data_present") is True,
+                "auth_token_configured": sse.get("auth_token_configured") is True,
+                "session_token_configured": sse.get("session_token_configured") is True,
             }
         )
     elif isinstance(sse, Mapping):
@@ -10010,6 +10014,142 @@ def _release_bundle_ops_evidence_findings(command: str, stdout_json: Mapping[str
     return findings
 
 
+def _release_mcp_ops_evidence_findings(stdout_json: Mapping[str, Any]) -> list[dict[str, Any]]:
+    findings: list[dict[str, Any]] = []
+
+    def add(message: str) -> None:
+        findings.append(_release_finding("required_mcp_ops_evidence_incomplete", message))
+
+    def as_float(value: Any) -> float | None:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    def as_int(value: Any) -> int | None:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    requirements = stdout_json.get("requirements")
+    checks_raw = stdout_json.get("checks")
+    if not isinstance(requirements, Mapping):
+        add("mcp-ops-check requirements must be structured")
+        requirements = {}
+    if not isinstance(checks_raw, list):
+        add("mcp-ops-check checks must be a structured list")
+        return findings
+
+    if requirements.get("allow_localhost") is not False:
+        add("mcp-ops-check must prove localhost transports are disallowed")
+    if requirements.get("require_client_cert") is not True:
+        add("mcp-ops-check must prove client certificates are required")
+
+    min_loops = as_int(requirements.get("min_loops"))
+    max_avg_latency = as_float(requirements.get("max_avg_latency_ms"))
+    max_p95_latency = as_float(requirements.get("max_p95_latency_ms"))
+    min_cert_days = as_float(requirements.get("min_cert_days"))
+    min_sse_events = as_int(requirements.get("min_sse_events"))
+    if min_loops is None or min_loops < 1:
+        add("mcp-ops-check min_loops requirement must be positive")
+        min_loops = 1
+    if max_avg_latency is None or max_avg_latency <= 0:
+        add("mcp-ops-check max_avg_latency_ms requirement must be positive")
+        max_avg_latency = 0.0
+    if max_p95_latency is None or max_p95_latency <= 0:
+        add("mcp-ops-check max_p95_latency_ms requirement must be positive")
+        max_p95_latency = 0.0
+    if min_cert_days is None or min_cert_days < 1:
+        add("mcp-ops-check min_cert_days requirement must be positive")
+        min_cert_days = 1.0
+    if min_sse_events is None or min_sse_events < 1:
+        min_sse_events = 1
+
+    checks = [check for check in checks_raw if isinstance(check, Mapping)]
+    checks_by_name = {str(check.get("name") or ""): check for check in checks}
+    required_names = {"http_json_rpc", "streamable_http", "tls", "redaction"}
+    if requirements.get("require_legacy_sse") is True:
+        required_names.add("legacy_sse")
+    missing_names = sorted(name for name in required_names if name not in checks_by_name)
+    if missing_names:
+        add("mcp-ops-check missing required checks: " + ", ".join(missing_names))
+
+    transport_expectations = {
+        "http_json_rpc": "http-json-rpc",
+        "streamable_http": "mcp-sdk-streamable-http",
+    }
+    for name, expected_transport in transport_expectations.items():
+        check = checks_by_name.get(name)
+        if not isinstance(check, Mapping):
+            continue
+        if check.get("ok") is not True:
+            add(f"mcp-ops-check {name} check must be ok")
+        if check.get("transport") != expected_transport:
+            add(f"mcp-ops-check {name} transport must be {expected_transport}")
+        if check.get("url_present") is not True or check.get("local_url") is not False:
+            add(f"mcp-ops-check {name} must prove HTTPS non-local transport")
+        loop_count = as_int(check.get("loop_count"))
+        if loop_count is None or loop_count < min_loops:
+            add(f"mcp-ops-check {name} loop count is below requirement")
+        avg_latency = as_float(check.get("avg_latency_ms"))
+        if avg_latency is None or avg_latency > max_avg_latency:
+            add(f"mcp-ops-check {name} average latency is missing or above requirement")
+        p95_latency = as_float(check.get("p95_latency_ms"))
+        if p95_latency is None or p95_latency > max_p95_latency:
+            add(f"mcp-ops-check {name} p95 latency is missing or above requirement")
+        if check.get("auth_token_configured") is not True:
+            add(f"mcp-ops-check {name} must prove bearer-token enforcement")
+        if check.get("session_token_configured") is not True:
+            add(f"mcp-ops-check {name} must prove signed-session binding")
+        missing_controls = check.get("missing_controls")
+        if missing_controls not in ([], None):
+            add(f"mcp-ops-check {name} has missing transport controls")
+
+    legacy_sse = checks_by_name.get("legacy_sse")
+    if requirements.get("require_legacy_sse") is True and isinstance(legacy_sse, Mapping):
+        if legacy_sse.get("ok") is not True:
+            add("mcp-ops-check legacy_sse check must be ok")
+        if legacy_sse.get("local_url") is not False:
+            add("mcp-ops-check legacy_sse must prove HTTPS non-local transport")
+        event_count = as_int(legacy_sse.get("event_count"))
+        if event_count is None or event_count < min_sse_events:
+            add("mcp-ops-check legacy_sse event count is below requirement")
+        if legacy_sse.get("endpoint_data_present") is not True:
+            add("mcp-ops-check legacy_sse must prove endpoint data events")
+        if legacy_sse.get("auth_token_configured") is not True:
+            add("mcp-ops-check legacy_sse must prove bearer-token enforcement")
+        if legacy_sse.get("session_token_configured") is not True:
+            add("mcp-ops-check legacy_sse must prove signed-session binding")
+
+    tls = checks_by_name.get("tls")
+    if isinstance(tls, Mapping):
+        if tls.get("ok") is not True:
+            add("mcp-ops-check tls check must be ok")
+        days_remaining = as_float(tls.get("days_remaining"))
+        if days_remaining is None or days_remaining < min_cert_days:
+            add("mcp-ops-check tls certificate days remaining is below requirement")
+        if tls.get("client_certificate_required") is not True:
+            add("mcp-ops-check tls must prove client certificate enforcement")
+
+    redaction = checks_by_name.get("redaction")
+    if isinstance(redaction, Mapping):
+        if redaction.get("ok") is not True:
+            add("mcp-ops-check redaction check must be ok")
+        for flag in (
+            "raw_tokens_omitted",
+            "raw_session_tokens_omitted",
+            "raw_requests_omitted",
+            "raw_responses_omitted",
+        ):
+            if redaction.get(flag) is not True:
+                add(f"mcp-ops-check redaction flag {flag} is not proven")
+        if redaction.get("forbidden_raw_paths") not in ([], None):
+            add("mcp-ops-check redaction must omit raw token/request/response paths")
+
+    return findings
+
+
 def _release_worker_ops_evidence_findings(stdout_json: Mapping[str, Any]) -> list[dict[str, Any]]:
     findings: list[dict[str, Any]] = []
 
@@ -10336,6 +10476,8 @@ def _release_command_output_findings(check: Mapping[str, Any]) -> list[dict[str,
         findings.extend(_release_ops_dashboard_evidence_findings(stdout_json))
     if command == "worker-ops-check":
         findings.extend(_release_worker_ops_evidence_findings(stdout_json))
+    if command == "mcp-ops-check":
+        findings.extend(_release_mcp_ops_evidence_findings(stdout_json))
     return findings
 
 

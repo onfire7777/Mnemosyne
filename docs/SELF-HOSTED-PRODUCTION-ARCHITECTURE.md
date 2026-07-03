@@ -108,6 +108,14 @@ byte-binding). The work is closing **intent-vs-enforcement** gaps and shipping *
      Root-only trust remains possible only through an explicit policy that disables issuer
      matching and requires the configured root. This closes the source fail-open; the Tier-B
      row still requires retained live C2PA issuer/root rotation evidence.
+   - 2026-07-03 implementation note: production `release-audit` now rejects
+     weak `mcp-ops-check` evidence unless the replayed output proves hosted
+     non-local JSON-RPC/StreamableHTTP transports, bearer-token enforcement,
+     signed-session binding, required client certificates, transport
+     health/control loops, bounded latency, and raw token/request/response
+     redaction. This closes the source-side placeholder-acceptance gap; hosted
+     MCP evidence still has to be captured and retained from real production
+     infrastructure before the Tier-B row can close.
 2. **Postgres role separation under RLS:** ship `mnemosyne_app` (NOSUPERUSER, NOBYPASSRLS, no
    DELETE/TRUNCATE), a separate `mnemosyne_consolidator` (sole write/destructive authority), and
    SELECT-only eval roles; an ops-check that live-probes `rolsuper`/`rolbypassrls` and fails if true.
