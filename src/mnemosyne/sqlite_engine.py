@@ -173,6 +173,10 @@ INSERT INTO evidence (
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
 
+# Branch row-copy variant: evidence keeps its cid, so an INSERT OR IGNORE on the
+# unique key (tenant_id, branch, cid) is the idempotent copy (T6 handoff).
+_EVIDENCE_INSERT_OR_IGNORE = _EVIDENCE_INSERT.replace("INSERT INTO", "INSERT OR IGNORE INTO", 1)
+
 # Task-5 assertion / relation column writers. The column order matches
 # ``_assertion_from_row`` / ``_relation_from_row`` (which feed the byte-parity
 # export). ``_ASSERTION_UPDATE`` rewrites every mutable column in place (rowid
@@ -234,6 +238,36 @@ def _assertion_insert_values(a: Assertion) -> tuple[Any, ...]:
         json_text(a.access_policy),
         dt_to_json(a.last_accessed),
         int(a.access_count),
+    )
+
+
+def _evidence_insert_values(ev: Evidence) -> tuple[Any, ...]:
+    """INSERT bind tuple for an ``Evidence`` row (column order matches
+    ``_EVIDENCE_INSERT`` and ``_evidence_from_row``; embedding packed LE f64,
+    JSON columns via ``json_text``, timestamps via ``dt_to_json``)."""
+    if not ev.cid:
+        raise ValueError("sqlite evidence rows require a cid")
+    return (
+        ev.tenant_id,
+        ev.branch,
+        ev.cid,
+        ev.user_id,
+        ev.actor,
+        ev.source_type,
+        ev.content,
+        ev.source_identity,
+        ev.session_id,
+        json_text(ev.metadata),
+        ev.content_pointer,
+        ev.modality,
+        pack_embedding(ev.embedding),
+        None if ev.signed_provenance is None else json_text(ev.signed_provenance),
+        int(ev.trust_tier),
+        json_text(ev.capability_tags),
+        int(ev.sensitivity),
+        json_text(ev.access_policy),
+        dt_to_json(ev.created_at),
+        int(bool(ev.erased)),
     )
 
 
@@ -440,33 +474,7 @@ class SqliteEngine:
     @staticmethod
     def _insert_evidence_row(conn: sqlite3.Connection, ev: Evidence) -> None:
         """Execute the evidence INSERT on ``conn`` without owning the transaction."""
-        if not ev.cid:
-            raise ValueError("sqlite evidence rows require a cid")
-        conn.execute(
-            _EVIDENCE_INSERT,
-            (
-                ev.tenant_id,
-                ev.branch,
-                ev.cid,
-                ev.user_id,
-                ev.actor,
-                ev.source_type,
-                ev.content,
-                ev.source_identity,
-                ev.session_id,
-                json_text(ev.metadata),
-                ev.content_pointer,
-                ev.modality,
-                pack_embedding(ev.embedding),
-                None if ev.signed_provenance is None else json_text(ev.signed_provenance),
-                int(ev.trust_tier),
-                json_text(ev.capability_tags),
-                int(ev.sensitivity),
-                json_text(ev.access_policy),
-                dt_to_json(ev.created_at),
-                int(bool(ev.erased)),
-            ),
-        )
+        conn.execute(_EVIDENCE_INSERT, _evidence_insert_values(ev))
 
     @staticmethod
     def _write_evidence_mutable(conn: sqlite3.Connection, ev: Evidence) -> None:
@@ -1774,14 +1782,242 @@ class SqliteEngine:
             branch=branch,
         )
 
+    # --- branch / merge / discard (Task 6) -----------------------------------
+    #
+    # Parity strategy: one SQLite file per tenant means these ops are strictly
+    # tenant-scoped (PostgresEngine-style: tenant_id REQUIRED, ValueError when
+    # falsy — Local's tenant=None broadcast has no single-file analogue). The
+    # branch registry is the per-file ``branches`` table T2 seeded (protected
+    # ``main`` per tenant) with the composite FK evidence/assertions/relations
+    # reference; the registry row is therefore written BEFORE any row-copy.
+    # ``branch`` row-copies verbatim (PG-shaped: evidence keeps its cid via
+    # INSERT OR IGNORE, assertions/relations get fresh uuid4 ids). ``merge`` is
+    # the Local-style replay-upsert — each frm assertion is cloned onto ``into``
+    # and pushed through this engine's OWN :meth:`upsert_assertion` (so the
+    # supersede/contest resolution runs), counting added-vs-merged by the
+    # (tenant, into) row-count delta; evidence/relations copy with dedup.
+    # ``discard`` deletes the branch-scoped rows (child rows BEFORE the registry
+    # row — foreign_keys=ON), then prunes justifications/contradictions that
+    # referenced now-orphaned assertion ids, mirroring Local's discard body.
+
+    @property
+    def branches(self) -> dict[str, dict[str, Any]]:
+        """Dict-shaped branch registry aggregated across every tenant file
+        (``PromotionGate._reset_branch`` requirement, R3). Shape mirrors
+        ``LocalMemoryEngine.branches``: ``{name: {"from", "kind", "created_at"}}``.
+        A ``PromotionGate`` binds to one engine and mints per-candidate branch
+        names, so single-tenant gate usage sees exactly that tenant's registry."""
+        result: dict[str, dict[str, Any]] = {}
+        with self._lock:
+            for path in self._iter_tenant_db_paths():
+                conn, owned = self._borrow_conn(path)
+                try:
+                    for row in conn.execute(
+                        "SELECT name, from_branch, kind, created_at FROM branches ORDER BY rowid"
+                    ):
+                        result[row["name"]] = {
+                            "from": row["from_branch"],
+                            "kind": row["kind"],
+                            "created_at": row["created_at"],
+                        }
+                finally:
+                    if owned:
+                        conn.close()
+        return result
+
+    @staticmethod
+    def _count_assertions(conn: sqlite3.Connection, tenant_id: str, branch: str) -> int:
+        return conn.execute(
+            "SELECT COUNT(*) FROM assertions WHERE tenant_id = ? AND branch = ?",
+            (tenant_id, branch),
+        ).fetchone()[0]
+
     def branch(self, name: str, frm: str = "main", kind: str = "scratch", tenant_id: str | None = None) -> None:
-        raise NotImplementedError("SqliteEngine.branch lands in Phase-2 Task 6")
+        """Row-copy branch, tenant-scoped (PG-shaped).
+
+        Registry row FIRST (composite FK), then copy evidence (cid kept, INSERT
+        OR IGNORE), assertions and relations (fresh uuid4 ids, PG-style) from
+        ``frm`` onto ``name`` — copies include the packed embedding BLOB,
+        ``embedding_partition`` (inside evidence metadata), ``last_accessed`` and
+        ``access_count``. No-op when ``name == frm`` or the branch already exists
+        (idempotent, matching PG's ON CONFLICT..RETURNING skip). ``frm`` must
+        exist (``ValueError('unknown branch: ...')``)."""
+        if not tenant_id:
+            raise ValueError("SqliteEngine.branch requires tenant_id")
+        if name == frm:
+            return
+        with self._lock:
+            conn = self._connect(tenant_id)
+            self._require_branch(conn, tenant_id, frm)
+            if conn.execute(
+                "SELECT 1 FROM branches WHERE tenant_id = ? AND name = ?", (tenant_id, name)
+            ).fetchone() is not None:
+                return
+            with conn:
+                conn.execute(
+                    "INSERT INTO branches(tenant_id, name, from_branch, kind, created_at) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (tenant_id, name, frm, kind, dt_to_json(utc_now())),
+                )
+                for row in conn.execute(
+                    "SELECT * FROM evidence WHERE tenant_id = ? AND branch = ? ORDER BY rowid",
+                    (tenant_id, frm),
+                ).fetchall():
+                    ev = _evidence_from_row(row)
+                    ev.branch = name
+                    conn.execute(_EVIDENCE_INSERT_OR_IGNORE, _evidence_insert_values(ev))
+                for row in conn.execute(
+                    "SELECT * FROM assertions WHERE tenant_id = ? AND branch = ? ORDER BY rowid",
+                    (tenant_id, frm),
+                ).fetchall():
+                    assertion = _assertion_from_row(row)
+                    assertion.branch = name
+                    assertion.id = new_id()
+                    self._insert_assertion_row(conn, assertion)
+                for row in conn.execute(
+                    "SELECT * FROM relations WHERE tenant_id = ? AND branch = ? ORDER BY rowid",
+                    (tenant_id, frm),
+                ).fetchall():
+                    rel = _relation_from_row(row)
+                    rel.branch = name
+                    rel.id = new_id()
+                    conn.execute(_RELATION_INSERT, _relation_insert_values(rel))
+                self._audit(conn, tenant_id, "engine", "branch", name, {"from": frm, "kind": kind})
 
     def merge(self, frm: str, into: str = "main", tenant_id: str | None = None) -> MergeReport:
-        raise NotImplementedError("SqliteEngine.merge lands in Phase-2 Task 6")
+        """Local-style replay-upsert merge, tenant-scoped.
+
+        Evidence: non-erased ``frm`` rows copied onto ``into`` with cid-dedup
+        (``evidence_added`` counts genuinely new rows; erased rows skipped,
+        matching Local not PG). Assertions: each ``frm`` assertion is cloned onto
+        ``into`` and pushed through this engine's OWN :meth:`upsert_assertion`
+        (supersede/contest runs) — ``assertions_added`` when the (tenant, into)
+        row count grows, else ``assertions_merged`` (the reinforce path).
+        Relations: id-dedup copy. Returns ``MergeReport(frm, into, evidence_added,
+        assertions_added, assertions_merged, relations_added, conflicts=[])``
+        constructed POSITIONALLY (R1 field order); ``conflicts`` is always ``[]``.
+        The report is appended to ``merge_log`` and audited (op ``merge``,
+        target ``frm``) so ``export_tenant`` reconstructs the merge_log."""
+        if not tenant_id:
+            raise ValueError("SqliteEngine.merge requires tenant_id")
+        with self._lock:
+            conn = self._connect(tenant_id)
+            self._require_branch(conn, tenant_id, frm)
+            self._require_branch(conn, tenant_id, into)
+            report = MergeReport(frm, into, 0, 0, 0, 0, [])
+            ev_rows = conn.execute(
+                "SELECT * FROM evidence WHERE tenant_id = ? AND branch = ? AND erased = 0 ORDER BY rowid",
+                (tenant_id, frm),
+            ).fetchall()
+            with conn:
+                for row in ev_rows:
+                    ev = _evidence_from_row(row)
+                    if not ev.cid:
+                        continue
+                    present = conn.execute(
+                        "SELECT 1 FROM evidence WHERE tenant_id = ? AND branch = ? AND cid = ?",
+                        (tenant_id, into, ev.cid),
+                    ).fetchone()
+                    if present is None:
+                        ev.branch = into
+                        self._insert_evidence_row(conn, ev)
+                        report.evidence_added += 1
+            # Replay-upsert OUTSIDE any open transaction — upsert_assertion opens
+            # (and commits) its own per-call transaction on the same connection.
+            a_rows = conn.execute(
+                "SELECT * FROM assertions WHERE tenant_id = ? AND branch = ? ORDER BY rowid",
+                (tenant_id, frm),
+            ).fetchall()
+            for row in a_rows:
+                cloned = copy.deepcopy(_assertion_from_row(row))
+                cloned.branch = into
+                before = self._count_assertions(conn, tenant_id, into)
+                self.upsert_assertion(cloned, branch=into)
+                after = self._count_assertions(conn, tenant_id, into)
+                if after > before:
+                    report.assertions_added += 1
+                else:
+                    report.assertions_merged += 1
+            rel_rows = conn.execute(
+                "SELECT * FROM relations WHERE tenant_id = ? AND branch = ? ORDER BY rowid",
+                (tenant_id, frm),
+            ).fetchall()
+            with conn:
+                for row in rel_rows:
+                    rel = _relation_from_row(row)
+                    present = conn.execute(
+                        "SELECT 1 FROM relations WHERE tenant_id = ? AND branch = ? AND id = ?",
+                        (tenant_id, into, rel.id),
+                    ).fetchone()
+                    if present is None:
+                        rel.branch = into
+                        conn.execute(_RELATION_INSERT, _relation_insert_values(rel))
+                        report.relations_added += 1
+                conn.execute(
+                    "INSERT INTO merge_log(tenant_id, record) VALUES (?, ?)",
+                    (tenant_id, json_text(report.to_dict())),
+                )
+                self._audit(conn, tenant_id, "engine", "merge", frm, report.to_dict())
+            return report
 
     def discard(self, branch: str, tenant_id: str | None = None) -> None:
-        raise NotImplementedError("SqliteEngine.discard lands in Phase-2 Task 6")
+        """Delete a branch and its rows, tenant-scoped.
+
+        Guards ``main`` (``ValueError``). Deletes relations → assertions →
+        evidence (child rows before the registry row, since foreign_keys=ON),
+        then prunes justifications whose ``assertion_id``/``dependency_ids`` and
+        contradictions whose ``a``/``b`` reference assertion ids orphaned by the
+        discard (present on no surviving branch), mirroring Local's discard body,
+        then deletes the branch registry row and audits."""
+        if branch == "main":
+            raise ValueError("main branch cannot be discarded")
+        if not tenant_id:
+            raise ValueError("SqliteEngine.discard requires tenant_id")
+        with self._lock:
+            conn = self._connect(tenant_id)
+            self._require_branch(conn, tenant_id, branch)
+            with conn:
+                discarded_ids = {
+                    row[0]
+                    for row in conn.execute(
+                        "SELECT id FROM assertions WHERE tenant_id = ? AND branch = ?",
+                        (tenant_id, branch),
+                    )
+                }
+                conn.execute("DELETE FROM relations WHERE tenant_id = ? AND branch = ?", (tenant_id, branch))
+                conn.execute("DELETE FROM assertions WHERE tenant_id = ? AND branch = ?", (tenant_id, branch))
+                conn.execute("DELETE FROM evidence WHERE tenant_id = ? AND branch = ?", (tenant_id, branch))
+                if discarded_ids:
+                    surviving = {
+                        row[0]
+                        for row in conn.execute(
+                            "SELECT id FROM assertions WHERE tenant_id = ?", (tenant_id,)
+                        )
+                    }
+                    orphaned = discarded_ids - surviving
+                    if orphaned:
+                        self._prune_dangling(conn, tenant_id, orphaned)
+                conn.execute("DELETE FROM branches WHERE tenant_id = ? AND name = ?", (tenant_id, branch))
+                self._audit(conn, tenant_id, "engine", "discard", branch, {})
+
+    @staticmethod
+    def _prune_dangling(conn: sqlite3.Connection, tenant_id: str, orphaned: set[str]) -> None:
+        """Prune justifications/contradictions that reference orphaned assertion
+        ids (Local discard parity: justification kept iff its assertion_id and
+        every dependency_id survive; contradiction kept iff both a and b survive)."""
+        for row in conn.execute(
+            "SELECT id, record FROM justifications WHERE tenant_id = ?", (tenant_id,)
+        ).fetchall():
+            record = json.loads(row["record"])
+            dependency_ids = set(record.get("dependency_ids") or [])
+            if record.get("assertion_id") in orphaned or (dependency_ids & orphaned):
+                conn.execute("DELETE FROM justifications WHERE id = ?", (row["id"],))
+        for row in conn.execute(
+            "SELECT id, record FROM contradictions WHERE tenant_id = ?", (tenant_id,)
+        ).fetchall():
+            record = json.loads(row["record"])
+            if record.get("a") in orphaned or record.get("b") in orphaned:
+                conn.execute("DELETE FROM contradictions WHERE id = ?", (row["id"],))
 
     def retrieve(self, query: str, tenant_id: str, branch: str = "main", deep: bool = False, filt: dict[str, Any] | None = None) -> RetrievalResult:
         raise NotImplementedError("SqliteEngine.retrieve lands in Phase-2 Task 7")

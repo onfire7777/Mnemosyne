@@ -247,14 +247,8 @@ def test_insert_evidence_requires_cid(tmp_path: Path):
 def test_unimplemented_surfaces_name_their_task(tmp_path: Path):
     engine = SqliteEngine(tmp_path / "root")
     # Task 3 ledger + Task 4 scan surfaces + Task 5 assertion/bitemporal/write
-    # surfaces are implemented; only the branch/merge/discard (Task 6),
-    # retrieve pipeline (Task 7), and erasure (Task 9) surfaces remain stubbed.
-    with pytest.raises(NotImplementedError, match="Task 6"):
-        engine.branch("cand", tenant_id="t1")
-    with pytest.raises(NotImplementedError, match="Task 6"):
-        engine.merge("cand", tenant_id="t1")
-    with pytest.raises(NotImplementedError, match="Task 6"):
-        engine.discard("cand", tenant_id="t1")
+    # surfaces + Task 6 branch/merge/discard are implemented; only the retrieve
+    # pipeline (Task 7) and erasure (Task 9) surfaces remain stubbed.
     with pytest.raises(NotImplementedError, match="Task 7"):
         engine.retrieve("q", "t1")
     with pytest.raises(NotImplementedError, match="Task 9"):
