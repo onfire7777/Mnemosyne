@@ -310,6 +310,19 @@ CREATE TABLE IF NOT EXISTS audit_log (
   at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE OR REPLACE FUNCTION mnemosyne_audit_log_append_only()
+RETURNS trigger AS $$
+BEGIN
+  RAISE EXCEPTION 'audit_log is append-only; % is not allowed', TG_OP
+    USING ERRCODE = '42501';
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS audit_log_append_only ON audit_log;
+CREATE TRIGGER audit_log_append_only
+  BEFORE UPDATE OR DELETE ON audit_log
+  FOR EACH ROW EXECUTE FUNCTION mnemosyne_audit_log_append_only();
+
 CREATE TABLE IF NOT EXISTS runtime_jobs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,

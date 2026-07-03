@@ -173,6 +173,27 @@ def test_schema_enables_tenant_row_level_security() -> None:
         assert f"CREATE POLICY {table}_tenant_isolation ON {table}" in schema
 
 
+def test_schema_makes_audit_log_append_only() -> None:
+    schema = Path("sql/schema.sql").read_text(encoding="utf-8")
+
+    assert "CREATE OR REPLACE FUNCTION mnemosyne_audit_log_append_only()" in schema
+    assert "RAISE EXCEPTION 'audit_log is append-only; % is not allowed', TG_OP" in schema
+    assert "DROP TRIGGER IF EXISTS audit_log_append_only ON audit_log;" in schema
+    assert "BEFORE UPDATE OR DELETE ON audit_log" in schema
+
+
+def test_postgres_roles_keep_audit_log_insert_only() -> None:
+    roles = Path("infra/postgres/roles.sql").read_text(encoding="utf-8")
+
+    assert (
+        "REVOKE UPDATE, DELETE, TRUNCATE ON audit_log "
+        "FROM mnemosyne_app, mnemosyne_consolidator;"
+    ) in roles
+    assert "GRANT SELECT, INSERT ON audit_log TO mnemosyne_app, mnemosyne_consolidator;" in roles
+    assert "GRANT SELECT, INSERT, UPDATE ON audit_log" not in roles
+    assert "GRANT SELECT, INSERT, UPDATE, DELETE ON audit_log" not in roles
+
+
 def test_compose_file_mounts_schema_for_postgres_parity() -> None:
     compose = Path("docker-compose.yml").read_text(encoding="utf-8")
 
