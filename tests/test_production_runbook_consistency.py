@@ -476,7 +476,6 @@ def test_operator_docs_do_not_use_unbound_production_release_audit() -> None:
         REPO / "infra" / "PRODUCTION-EVIDENCE.md",
         REPO / "infra" / "README.md",
         REPO / "docs" / "ROADMAP-TO-100.md",
-        REPO / "docs" / "STATE-OF-COMPLETION.md",
         REPO / ".planning" / "OPS-HANDOFF-AND-OWNERSHIP.md",
         REPO / ".planning" / "PARTIAL-ITEMS-KEY-SCHEMA.md",
         REPO / ".planning" / "ROADMAP.md",

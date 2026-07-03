@@ -4,8 +4,8 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: null
-last_updated: "2026-07-03T18:25:26Z"
-last_activity: 2026-07-03 — Branch `phase3/providers-consolidation` is clean, pushed, and green in GitHub CI at `8527825497feb73af65e63932391b36897f60965`. Focused Tier-B custody refresh still exits `78`: provider manifest env ref keys are present in the external runtime env file but six required values are blank, and 23 production input artifacts are still missing from the external custody packet. Operator docs now clarify that blank runtime env-file values count as missing provider refs. Strict audit remains open for exact production parity.
+last_updated: "2026-07-03T20:02:23Z"
+last_activity: 2026-07-03 — Branch `phase3/providers-consolidation` was rechecked clean and synchronized at `61120d315a759c1e21f61efd4ca9b538c0f3a991`, with GitHub CI run `28677518645` passing for that head before this continuation. A fresh Tier-B custody refresh still exits `78`: no render env values are missing, but six provider manifest env refs remain blank/unset and 23 production input artifacts are missing from the external custody packet. Phase 8 stale completion/reconciliation docs were archived under `docs/_archive/2026-07-03/`, and Phase 8.1 profile/compose deliverables were completed with an internal `vmalert` service and passing compose policy tests. No Tier-B row is marked Done by this cleanup.
 progress:
   total_phases: 9
   completed_phases: 7
@@ -31,20 +31,25 @@ Status: In progress; exact 1:1 blueprint parity is not complete.
 Current status (2026-06-30): Mandatory Tier A source wirings are closed on `main`; FR-20 local and live-Postgres image/audio/video breadth, FR-21 local and live-Postgres parametric trainer/rollback validation, full compose-Postgres runtime readiness, belief-revision CLI validation, local hosted-MCP JSON-RPC/StreamableHTTP/SSE readiness, direct A12 cached-PPR live materialization coverage, G1 projection-level reality monitoring, G1 functional consciousness scorecard/proto-self seed, native workspace service with the `service.enabled` default-off gate retired, operational specialist-budget toggle retirement, cold-loop ignition enforcement, protected gate-case ratchet enforcement, Rail 6 serve-time sink enforcement, §24 support-strategy runtime durability plus public CLI/MCP mutation surfaces, Phase 7 plans 01-04, and the P5 H8/H12 cascade/observability pre-check are now done and gate-proven. The remaining strict-parity blocker is Tier B production operator evidence against deployed infrastructure before final v1.0 sign-off.
 
 Latest checkpoint (2026-07-03): The active branch is
-`phase3/providers-consolidation`, pushed to `origin` at
-`8527825497feb73af65e63932391b36897f60965`, with GitHub CI run
-`28677249557` passing for that head. The GSD roadmap counters now match
-`.planning/ROADMAP.md`: 7 of 9 phases complete and 14 of 15 tracked plan files
-complete, with Phase 6 still production-evidence-gated and Phase 8 still open.
-Fresh Tier-B custody refresh against `/Users/admin/mnemosyne-tier-b-custody`
-still reports `ready_for_capture=false`: six provider manifest env refs are
-present as key names in the external runtime env file but have blank values,
-and 23 production input artifacts are missing from the packet's external
-`input-artifacts/` directory. Operator docs now explicitly state that blank
-runtime env-file values count as missing provider refs. Do not copy ignored
-local files such as `production-inputs/provenance-trust-suite.json` into the
-custody packet; production rows remain Partial until real operator-captured
-bundles pass release audit and offline custody verification.
+`phase3/providers-consolidation`, synchronized at
+`61120d315a759c1e21f61efd4ca9b538c0f3a991`, with GitHub CI run
+`28677518645` passing for that head before this cleanup. The GSD roadmap
+counters still match `.planning/ROADMAP.md`: 7 of 9 phases complete and 14 of
+15 tracked plan files complete, with Phase 6 still production-evidence-gated
+and Phase 8 still open. Fresh Tier-B custody refresh against
+`/Users/admin/mnemosyne-tier-b-custody` still reports `ready_for_capture=false`:
+six provider manifest env refs are present as key names in the external runtime
+env file but have blank values, and 23 production input artifacts are missing
+from the packet's external `input-artifacts/` directory. Phase 8 stale
+completion/reconciliation docs named by the self-hosted handoff were archived
+under `docs/_archive/2026-07-03/` for audit/history only. Phase 8.1 file/profile
+deliverables are now checked off: both profiles point at the retained
+`forbid_local:true` provider-manifest gate, production compose includes internal
+`vmalert` beside VictoriaMetrics and Grafana, and the focused compose policy
+tests pass locally. Do not copy ignored local files such as
+`production-inputs/provenance-trust-suite.json` into the custody packet;
+production rows remain Partial until real operator-captured bundles pass
+release audit and offline custody verification.
 
 Latest checkpoint (2026-06-30): The active goal remains unpaused and the
 professional continuation objective is now governed by the repo-owned operating

@@ -20,14 +20,13 @@ ADR changes the audit. No gate weakened; §31 rails + §16 SLOs preserved.
 - **`.planning/MILESTONES.md`** now includes the self-hosted-first production milestone.
 - **`.planning/STATE.md`** records Phase 8 checkpoints without marking any Tier-B evidence row Done.
 
-## Stale-doc prune candidates (recommend; do NOT delete in-flight — most self-label superseded)
-Move to `docs/_archive/` or add a one-line "Superseded by ROADMAP-TO-100 / STRICT-AUDIT" banner:
-- `docs/CODEX-RECONCILIATION.md` (self-labeled archived)
-- `docs/BLUEPRINT-COMPLETION-PLAN.md` ("do not execute as current plan")
-- `docs/STATE-OF-COMPLETION.md` (duplicates ROADMAP-TO-100 §1)
-- `docs/TIER-B-LOCAL-REAL-SERVICE-EVIDENCE-2026-06-24.md` (point-in-time; superseded by PRODUCTION-EVIDENCE)
-- `.planning/INGEST-CONFLICTS.md` (stale 2026-06-21 scratch)
-- `REVIEW.md` (root; old snapshot, 9 days stale)
+## Stale-doc prune result
+Completed 2026-07-03: the stale files named below were moved to
+`docs/_archive/2026-07-03/` for audit/history only:
+`CODEX-RECONCILIATION.md`, `BLUEPRINT-COMPLETION-PLAN.md`,
+`STATE-OF-COMPLETION.md`, `TIER-B-LOCAL-REAL-SERVICE-EVIDENCE-2026-06-24.md`,
+`INGEST-CONFLICTS.md`, and `REVIEW.md`.
+
 Keep (correctly quarantined): `docs/blueprint/earlier-versions/*`, `.planning/v1.0-MILESTONE-AUDIT.md`,
 `.planning/BLUEPRINT-PARITY-MATRIX.md` (already banners historical). Do **not** merge the two ROADMAPs —
 `.planning/ROADMAP.md` (machine ledger) and `docs/ROADMAP-TO-100.md` (narrative) are intentionally split.
