@@ -6420,12 +6420,13 @@ def production_release_stdout(command: str, provider_stdout: dict) -> dict:
         return production_mcp_ops_stdout()
     if command == "privacy-ops-check":
         return production_privacy_ops_stdout()
+    if command == "retrieval-ops-check":
+        return production_retrieval_ops_stdout()
     if command == "worker-ops-check":
         return production_worker_ops_stdout()
     if command in {
         "auth-ops-check",
         "tls-lifecycle-ops-check",
-        "retrieval-ops-check",
         "consolidation-ops-check",
         "multimodal-ops-check",
         "parametric-trainer-check",
@@ -9613,6 +9614,83 @@ def test_cli_release_audit_rejects_weak_privacy_ops_evidence(tmp_path: Path) -> 
     assert "privacy-ops-check redaction flag raw_kms_responses_omitted is not proven" in messages
 
 
+def test_cli_release_audit_rejects_weak_retrieval_ops_evidence(tmp_path: Path) -> None:
+    report_path, manifest_path = write_release_report(tmp_path)
+    stdout_json = production_retrieval_ops_stdout()
+    stdout_json["requirements"]["provider_forbid_local"] = False
+    stdout_json["requirements"]["backend"] = "sqlite"
+    stdout_json["requirements"]["min_cases"] = 5
+    stdout_json["requirements"]["required_adapter_probes"] = ["lexical"]
+    stdout_json["bundle"]["lexical_backend"] = "local-bm25-lite"
+    stdout_json["bundle"]["retrieval_case_count"] = 1
+    stdout_json["bundle"]["adapter_probe_count"] = 1
+    stdout_json["bundle"]["calibration_dataset_fingerprint_present"] = False
+    for check in stdout_json["checks"]:
+        if check["name"] == "provider_check":
+            check["forbid_local"] = False
+            check["provider_rows"][0]["local_provider"] = True
+            check["retrieval_backends"]["lexical_local"] = True
+            check["retrieval_backends"]["graph_probe_present"] = False
+        if check["name"] == "retrieval":
+            check["backend"] = "sqlite"
+            check["case_count"] = 1
+            check["graph_cases"] = 0
+            check["reranked_cases"] = 0
+            check["calibrated_cases"] = 0
+            check["cases"][0]["query_hash_present"] = False
+        if check["name"] == "adapter_probes":
+            check["missing_adapters"] = ["graph"]
+            check["ok_probe_count"] = 1
+            probe = check["probes"][0]
+            probe["ok"] = False
+            probe["production_validated"] = False
+            probe["backend_local"] = True
+            probe["provider_local"] = True
+            probe["command_fingerprint_present"] = False
+            probe["result_fingerprint_present"] = False
+            probe["hit_count"] = 0
+            probe["latency_ms"] = 5000.0
+        if check["name"] == "calibration":
+            check["production_dataset"] = False
+            check["dataset_fingerprint_present"] = False
+            check["example_count"] = 1
+            check["empirical_coverage"] = 0.1
+            check["false_accept_rate"] = 0.9
+        if check["name"] == "redaction":
+            check["raw_embeddings_omitted"] = False
+            check["forbidden_raw_paths"] = ["$.adapter_probes[0].raw_stdout"]
+    rewrite_release_check_stdout(
+        report_path,
+        manifest_path,
+        command="retrieval-ops-check",
+        stdout_json=stdout_json,
+    )
+
+    result = run_raw_cli(
+        tmp_path / "mnemosyne.json",
+        "release-audit",
+        "--evidence-manifest",
+        str(manifest_path),
+        "--require-production-validated",
+        "--require-provider-forbid-local",
+    )
+    payload = json.loads(result.stdout)
+    output_findings = [
+        finding
+        for finding in payload["findings"]
+        if finding["code"] == "required_retrieval_ops_evidence_incomplete"
+    ]
+    messages = "\n".join(finding["message"] for finding in output_findings)
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert "retrieval-ops-check must prove local providers are forbidden" in messages
+    assert "retrieval-ops-check lexical backend must be non-local" in messages
+    assert "retrieval-ops-check retrieval backend must be postgres" in messages
+    assert "retrieval-ops-check adapter probes have missing adapters" in messages
+    assert "retrieval-ops-check redaction flag raw_embeddings_omitted is not proven" in messages
+
+
 def test_cli_release_audit_rejects_empty_worker_runtime_evidence(tmp_path: Path) -> None:
     report_path, _manifest_path = write_release_report(tmp_path)
     report = json.loads(report_path.read_text(encoding="utf-8"))
@@ -10843,6 +10921,155 @@ def retrieval_ops_bundle(
     if raw_secret:
         bundle["token"] = "raw-secret-token"
     return bundle
+
+
+def production_retrieval_ops_stdout() -> dict:
+    evidence = retrieval_ops_bundle()
+    provider_check = evidence["provider_check"]
+    provider_checks = provider_check["checks"]
+    retrieval = evidence["retrieval"]
+    cases = retrieval["cases"]
+    adapter_probes = evidence["adapter_probes"]
+    calibration = evidence["calibration"]
+    redaction_flags = {
+        "raw_queries_omitted": True,
+        "raw_embeddings_omitted": True,
+        "raw_documents_omitted": True,
+        "raw_credentials_omitted": True,
+    }
+    return {
+        "ok": True,
+        "bundle": {
+            "name": evidence["name"],
+            "lexical_backend": provider_checks["retrieval_backends"]["lexical_backend"],
+            "graph_backend": provider_checks["retrieval_backends"]["graph_backend"],
+            "retrieval_case_count": len(cases),
+            "adapter_probe_count": len(adapter_probes),
+            "calibration_dataset_fingerprint_present": True,
+        },
+        "requirements": {
+            "required_provider_checks": ["embedding", "reranker", "retrieval_backends"],
+            "provider_forbid_local": True,
+            "backend": "postgres",
+            "min_cases": 3,
+            "min_lexical_cases": 1,
+            "min_vector_cases": 1,
+            "min_graph_cases": 1,
+            "min_reranked_cases": 1,
+            "min_calibration_examples": 50,
+            "min_calibration_correct": 1,
+            "min_calibration_incorrect": 1,
+            "min_empirical_coverage": 0.9,
+            "max_false_accept_rate": 0.05,
+            "required_adapter_probes": ["graph", "lexical", "reranker", "vector"],
+            "max_adapter_latency_ms": 250.0,
+        },
+        "checks": [
+            {
+                "name": "provider_check",
+                "ok": True,
+                "required_provider_checks": ["embedding", "reranker", "retrieval_backends"],
+                "forbid_local": provider_check["manifest"]["forbid_local"],
+                "provider_rows": [
+                    {
+                        "check": name,
+                        "present": True,
+                        "ok": check["ok"],
+                        "provider": check.get("provider"),
+                        "local_provider": False,
+                    }
+                    for name, check in provider_checks.items()
+                    if name != "retrieval_backends"
+                ],
+                "retrieval_backends": {
+                    "lexical_provider": provider_checks["retrieval_backends"]["lexical_provider"],
+                    "lexical_backend": provider_checks["retrieval_backends"]["lexical_backend"],
+                    "lexical_probe_required": True,
+                    "lexical_probe_present": True,
+                    "graph_provider": provider_checks["retrieval_backends"]["graph_provider"],
+                    "graph_backend": provider_checks["retrieval_backends"]["graph_backend"],
+                    "graph_probe_required": True,
+                    "graph_probe_present": True,
+                    "lexical_local": False,
+                    "graph_local": False,
+                },
+            },
+            {
+                "name": "retrieval",
+                "ok": True,
+                "backend": "postgres",
+                "case_count": len(cases),
+                "lexical_cases": len(cases),
+                "vector_cases": len(cases),
+                "graph_cases": len(cases),
+                "reranked_cases": len(cases),
+                "calibrated_cases": len(cases),
+                "cases": [
+                    {
+                        "id": case["id"],
+                        "query_hash_present": True,
+                        "tenant_hash_present": True,
+                        "lexical_hit_count": case["lexical_hit_count"],
+                        "vector_hit_count": case["vector_hit_count"],
+                        "graph_hit_count": case["graph_hit_count"],
+                        "reranked_hit_count": case["reranked_hit_count"],
+                        "calibrated": case["calibrated"],
+                    }
+                    for case in cases
+                ],
+            },
+            {
+                "name": "adapter_probes",
+                "ok": True,
+                "required_adapters": ["graph", "lexical", "reranker", "vector"],
+                "missing_adapters": [],
+                "probe_count": len(adapter_probes),
+                "ok_probe_count": len(adapter_probes),
+                "max_adapter_latency_ms": 250.0,
+                "probes": [
+                    {
+                        "id": probe["id"],
+                        "adapter": probe["adapter"],
+                        "backend": probe["backend"],
+                        "provider": probe["provider"],
+                        "ok": True,
+                        "production_validated": True,
+                        "backend_local": False,
+                        "provider_local": False,
+                        "command_fingerprint_present": True,
+                        "query_hash_present": True,
+                        "tenant_hash_present": True,
+                        "result_fingerprint_present": True,
+                        "source_snapshot_fingerprint_present": True,
+                        "top_id_hash_present": True,
+                        "hit_count": probe["hit_count"],
+                        "latency_ms": probe["latency_ms"],
+                    }
+                    for probe in adapter_probes
+                ],
+            },
+            {
+                "name": "calibration",
+                "ok": True,
+                "production_dataset": True,
+                "dataset_fingerprint_present": True,
+                "example_count": calibration["example_count"],
+                "correct_count": calibration["correct_count"],
+                "incorrect_count": calibration["incorrect_count"],
+                "empirical_coverage": calibration["empirical_coverage"],
+                "false_accept_rate": calibration["false_accept_rate"],
+                "threshold_present": True,
+            },
+            {
+                "name": "redaction",
+                "ok": True,
+                **redaction_flags,
+                "forbidden_raw_paths": [],
+            },
+        ],
+        "findings": [],
+        "redaction": {**redaction_flags, "forbidden_raw_fields_present": False},
+    }
 
 
 def test_cli_retrieval_ops_check_validates_production_evidence_bundle(tmp_path: Path) -> None:
