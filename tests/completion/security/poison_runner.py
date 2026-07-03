@@ -289,9 +289,12 @@ def _eval_tombstone_replay(case: PoisonCase, tools: MemoryTools) -> CaseResult:
     )
     same_cid = replay["cid"] == cid
     engine = tools.engine
-    key = engine._evidence_key(tenant, "main", cid)  # contract: erased rows retained
-    stored = engine.evidence.get(key)
-    still_erased = bool(stored and stored.erased)
+    # Engine-neutral probe: the erased row is retained-but-hidden as the replay
+    # blocklist. `evidence_is_erased` is implemented by Local, Postgres, AND
+    # SQLite (contract: erased rows retained); it replaces the old reach into
+    # `engine._evidence_key` / `engine.evidence`, which only LocalMemoryEngine
+    # exposed and which kept the corpus from ever running against PG/SQLite.
+    still_erased = engine.evidence_is_erased(tenant, cid, "main")
     result = tools.search(tenant, case.effective_query())
     surfaced, leaked = _marker_surfaced(result, case.effective_leak_marker())
     # Block requires: forget succeeded, replay collided on the same cid, the row

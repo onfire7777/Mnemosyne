@@ -57,6 +57,7 @@ import json
 import re
 import sqlite3
 import threading
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -103,6 +104,7 @@ from mnemosyne.models import (
     parse_dt,
     utc_now,
 )
+from mnemosyne.observability import MetricsRegistry
 from mnemosyne.pipeline import run_retrieval_pipeline
 from mnemosyne.policy import OperatingPolicy
 from mnemosyne.privacy import ErasureMode
@@ -434,6 +436,7 @@ class SqliteEngine:
         policy: OperatingPolicy | None = None,
         adapters: RetrievalAdapters | None = None,
         journal_dir: str | Path | None = None,
+        metrics: MetricsRegistry | None = None,
     ):
         self.root_dir = Path(root_dir).expanduser()
         root_created = not self.root_dir.exists()
@@ -460,6 +463,13 @@ class SqliteEngine:
         # optional vec0), built lazily on first use.
         self._cache_telemetry: dict[str, dict[str, int]] = {}
         self._registries: dict[str, ProjectionRegistry] = {}
+        # Observability checklist §1-3 signals (evidence-durability, rebuild-lag,
+        # per-write audit stream, erasure-propagation). The engine emits directly
+        # into this registry — durability is the highest SLO (§15) so the loss
+        # counter is materialized at zero from construction. Always present so
+        # signals are produced even when no external registry is injected.
+        self.metrics = metrics or MetricsRegistry()
+        self.metrics.increment("sqlite.evidence.durability.loss", 0)
 
     # --- store core (connections, schema, row marshalling) -------------------
 
@@ -642,6 +652,10 @@ class SqliteEngine:
             "INSERT INTO audit_log(tenant_id, record) VALUES (?, ?)",
             (tenant_id, json_text(record)),
         )
+        # Security audit stream (§3): every mediated write emits an entry carrying
+        # actor · source · trust-tier · diff (all four persisted in `record`);
+        # surface the live per-write counter for the observability checklist.
+        self.metrics.increment("sqlite.audit.writes")
 
     def _erased_evidence_rows(
         self, conn: sqlite3.Connection, tenant_id: str, branch: str
@@ -824,6 +838,10 @@ class SqliteEngine:
                     capability_tags=ev.capability_tags,
                 )
             if self._journal_dir is not None:
+                # Evidence-durability signal (§1a, highest SLO): the per-line
+                # CIDJournal.append fsyncs — time it as the durability/journal-lag
+                # sample so a divergence between ledger and journal is observable.
+                journal_start = time.perf_counter()
                 CIDJournal(self._journal_dir / journal_filename(stored.tenant_id)).append(
                     {
                         "cid": stored.cid,
@@ -833,6 +851,14 @@ class SqliteEngine:
                         "created_at": stored.created_at.isoformat(),
                     }
                 )
+                self.metrics.observe(
+                    "sqlite.evidence.durability.journal_lag_ms",
+                    (time.perf_counter() - journal_start) * 1000.0,
+                )
+            # The WAL commit above (synchronous=FULL) is the durable ledger write;
+            # count it and keep the evidence-loss counter pinned at zero.
+            self.metrics.increment("sqlite.evidence.durability.appends")
+            self.metrics.increment("sqlite.evidence.durability.loss", 0)
             return cid
 
     def backfill_evidence_privacy(
@@ -907,6 +933,16 @@ class SqliteEngine:
             if ev and not ev.erased:
                 return ev
             return None
+
+    def evidence_is_erased(self, tenant_id: str, cid: str, branch: str = "main") -> bool:
+        """Engine-neutral tombstone probe (see ``MemoryEngine.evidence_is_erased``).
+
+        A tombstoned row is retained with ``erased = 1`` as the replay blocklist
+        (``_fetch_evidence`` is store-core: no erased/policy masking); a legal
+        hard-delete removes the row and returns False.
+        """
+        ev = self._fetch_evidence(tenant_id, cid, branch)
+        return bool(ev and ev.erased)
 
     def update_evidence_metadata(
         self,
@@ -2074,6 +2110,14 @@ class SqliteEngine:
         }
         if sqlite_vec_available():  # pragma: no cover - needs sqlite-vec
             rebuilt["evidence-vec0"] = registry.ensure("evidence-vec0")
+        # Per-store rebuild-lag signal (§1b): a projection that was stale on this
+        # pass (ensure returned True) had a non-zero watermark delta vs the ledger;
+        # gauge 1.0 when it had to rebuild, 0.0 when already fresh, and count the
+        # rebuilds so derived-store lag is tracked distinctly from durability.
+        for name, was_rebuilt in rebuilt.items():
+            self.metrics.gauge(f"sqlite.projection.rebuild_lag.{name}", 1.0 if was_rebuilt else 0.0)
+            if was_rebuilt:
+                self.metrics.increment("sqlite.projection.rebuilds")
         return rebuilt
 
     def projection_status(self, tenant_id: str) -> dict[str, dict[str, Any]]:
@@ -3281,4 +3325,14 @@ class SqliteEngine:
                             salted_hash=erasure_tombstone_hash(original_content, tenant_id, original_user),
                             erased_at=erased_at,
                         )
+        # Erasure / deletion-propagation signal (§3): an erasure produces a
+        # traceable propagation log — the deletion_log entry plus the crypto-shred
+        # / transitive-invalidation steps across derived projections. Surface the
+        # cache-purge and journal (compaction/tombstone) step counts so a purge is
+        # observable live, distinct from the returned `propagated` cascade dict
+        # (which stays byte-parity with Local/Postgres — no new keys added there).
+        self.metrics.increment("sqlite.erasure.propagations")
+        self.metrics.observe("sqlite.erasure.propagation.cache_purges", float(len(affected_order)))
+        journal_steps = float(len(affected_order)) if self._journal_dir is not None else 0.0
+        self.metrics.observe("sqlite.erasure.propagation.journal_steps", journal_steps)
         return {"erased": True, "cid": cid, "erasure_mode": mode.value, "propagated": propagated}

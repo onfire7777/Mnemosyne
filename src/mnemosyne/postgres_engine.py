@@ -605,6 +605,29 @@ class PostgresEngine:
                 row = cur.fetchone()
         return _row_to_evidence(row, cid) if row else None
 
+    def evidence_is_erased(self, tenant_id: str, cid: str, branch: str = "main") -> bool:
+        """Engine-neutral tombstone probe (see ``MemoryEngine.evidence_is_erased``).
+
+        A tombstoned row is retained with ``erased = true`` as the replay
+        blocklist; a legal hard-delete removes the row and returns False. This
+        closes the pre-existing gap where the poison corpus reached into
+        ``LocalMemoryEngine`` internals and so never ran against PostgresEngine.
+        """
+        db_tenant_id = _stable_uuid("tenant", tenant_id)
+        with self.connect() as conn:
+            with conn.cursor() as cur:
+                self._ensure_entity_registry_schema(cur)
+                self._set_tenant(cur, db_tenant_id)
+                cur.execute(
+                    """
+                    SELECT erased FROM evidence
+                    WHERE tenant_id = %s AND branch = %s AND cid = %s
+                    """,
+                    (db_tenant_id, branch, _cid_to_bytes(cid)),
+                )
+                row = cur.fetchone()
+        return bool(row) and bool(row[0])
+
     def set_evidence_embedding(
         self,
         tenant_id: str,
