@@ -32,6 +32,11 @@ resolution_status: remediated
 
 # Phase ad-hoc-runtime-surfaces: Code Review Report
 
+> Historical remediated review. Retained for lineage only; do not use as the
+> active gap list. Current status lives in `docs/ROADMAP-TO-100.md`,
+> `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md`, and
+> `docs/superpowers/plans/2026-07-01-native-acceleration-program.md`.
+
 **Reviewed:** 2026-06-19T21:23:12Z
 **Depth:** deep
 **Files Reviewed:** 17

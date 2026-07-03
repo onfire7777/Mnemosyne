@@ -1,5 +1,10 @@
 # Ingest Conflicts
 
+> Historical snapshot from 2026-06-21. Retained for lineage only; do not use as
+> the active completion checklist. Current status lives in
+> `docs/ROADMAP-TO-100.md`, `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md`, and
+> `docs/superpowers/plans/2026-07-01-native-acceleration-program.md`.
+
 ## Auto-Resolved
 
 | Conflict | Resolution |
