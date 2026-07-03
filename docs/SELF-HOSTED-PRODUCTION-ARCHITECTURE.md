@@ -154,8 +154,11 @@ byte-binding). The work is closing **intent-vs-enforcement** gaps and shipping *
     narrows runtime audit-log grants back to SELECT/INSERT after the broad table
     grants. `MemoryTools._authorize` also records source-side auth-decision
     audit events through the shared engine contract, including allowed/denied,
-    reason, operation, actor, source, trust tier, and authz tags. Vault-HMAC row
-    hashes, pgaudit, WORM export, and retained live evidence remain
+    reason, operation, actor, source, trust tier, and authz tags. Production
+    `release-audit` now also rejects `ops-report` evidence unless it proves
+    retained Vault-HMAC hash-chain verification, pgaudit enablement/retention,
+    and an external retained WORM copy. Vault-HMAC row hashes, pgaudit,
+    WORM export, and retained live evidence remain
     operator-owned before this item can close.
 
 ### 4.3 Accepted residual risks (mitigated structurally, not eliminated)
