@@ -81,7 +81,12 @@ from mnemosyne.engine import (
     _privacy_backfill_controls,
     _privacy_backfill_metadata,
 )
-from mnemosyne.erasure_ids import erasure_deletion_record_id, erasure_tombstone_hash
+from mnemosyne.erasure_ids import (
+    build_erasure_placeholder_map,
+    erasure_deletion_record_id,
+    erasure_tombstone_hash,
+    redact_erased_cids,
+)
 from mnemosyne.ids import evidence_cid, evidence_unscoped_cid, new_id
 from mnemosyne.journal import CIDJournal, journal_filename, safe_tenant_filename
 from mnemosyne.models import (
@@ -3114,20 +3119,29 @@ class SqliteEngine:
                             (tenant_id, row["canonical"]),
                         )
                         propagated["removed_entities"].append(record["canonical"])
-                # deletion_log — HMAC id for a hard delete (spec §7 invariant 13),
-                # cid kept for a tombstone (the row still exists).
-                deletion_record_cid = (
-                    erasure_deletion_record_id(cid, tenant_id, target["user_id"] or "")
-                    if mode is ErasureMode.HARD_DELETE_LEGAL
-                    else cid
-                )
+                # deletion_log — spec §7 invariant 13: NO retained record for a hard
+                # delete may carry the erased cid (deletion evidence_cid, the
+                # provenance/standing-cascade refs inside `propagated`, or the audit
+                # target_id). Redact every retained copy with one per-erasure
+                # placeholder map (stable within the record, non-recomputable); the
+                # dict RETURNED to the caller keeps the real cids. A tombstone keeps
+                # the cid (the row still exists as the replay blocklist).
+                if mode is ErasureMode.HARD_DELETE_LEGAL:
+                    placeholder_map = build_erasure_placeholder_map({cid, *derived_cids}, tenant_id)
+                    stored_propagated = redact_erased_cids(propagated, placeholder_map)
+                    deletion_record_cid = erasure_deletion_record_id(cid, tenant_id, target["user_id"] or "")
+                    audit_target_id = placeholder_map[cid]
+                else:
+                    stored_propagated = propagated
+                    deletion_record_cid = cid
+                    audit_target_id = cid
                 entry = {
                     "id": new_id(),
                     "tenant_id": tenant_id,
                     "evidence_cid": deletion_record_cid,
                     "requested_by": requested_by,
                     "erasure_mode": mode.value,
-                    "propagated": propagated,
+                    "propagated": stored_propagated,
                     "at": utc_now().isoformat(),
                 }
                 conn.execute(
@@ -3139,8 +3153,8 @@ class SqliteEngine:
                     tenant_id,
                     requested_by,
                     "forget",
-                    cid,
-                    {**propagated, "erasure_mode": mode.value, "source_type": target["source_type"]},
+                    audit_target_id,
+                    {**stored_propagated, "erasure_mode": mode.value, "source_type": target["source_type"]},
                     source=target["source_type"],
                     trust_tier=target["trust_tier"],
                     capability_tags=json.loads(target["capability_tags"] or "[]"),

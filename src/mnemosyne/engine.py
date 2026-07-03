@@ -66,7 +66,11 @@ from mnemosyne.security import (
     sanitize_retrieved_text,
     trust_weight,
 )
-from mnemosyne.erasure_ids import erasure_deletion_record_id
+from mnemosyne.erasure_ids import (
+    build_erasure_placeholder_map,
+    erasure_deletion_record_id,
+    redact_erased_cids,
+)
 from mnemosyne.standing import (
     standing,
     standing_abstention_report,
@@ -2274,23 +2278,34 @@ class LocalMemoryEngine:
                 else:
                     self.entities.pop(key, None)
                     propagated["removed_entities"].append(entity["canonical"])
-            # Spec §7 privacy invariant 13: a hard delete is unrecoverable, so the
-            # retained deletion record must NOT carry the cid (a salted sha256 of
-            # the content) — that would let sha256(guess) confirm the erased cid.
-            # Replace it with a non-recomputable HMAC id; tombstone_recompute keeps
-            # the cid because the tombstone row still exists in the ledger.
-            deletion_record_cid = (
-                erasure_deletion_record_id(cid, tenant_id, ev.user_id)
-                if mode is ErasureMode.HARD_DELETE_LEGAL
-                else cid
-            )
+            # Spec §7 privacy invariant 13: a hard delete is unrecoverable, so NO
+            # retained record may carry the erased cid — not the deletion_log
+            # evidence_cid, not the provenance arrays / standing-cascade refs inside
+            # `propagated`, and not the audit row's target_id (all are retained). A
+            # plaintext cid (a salted sha256 of the content) would let sha256(guess)
+            # confirm the erasure. Build one per-erasure placeholder map (erased
+            # source + erased-derived cids) and redact every retained copy; the map
+            # is stable within the record (so it stays internally analyzable) yet
+            # each token is a discarded-salt HMAC that sha256(guess) can't reproduce.
+            # The dict RETURNED to the caller keeps the real cids — only the
+            # persisted copies are redacted. tombstone_recompute keeps the real cids
+            # (the tombstone row still lives in the ledger as the replay blocklist).
+            if mode is ErasureMode.HARD_DELETE_LEGAL:
+                placeholder_map = build_erasure_placeholder_map({cid, *derived_cids}, tenant_id)
+                stored_propagated = redact_erased_cids(propagated, placeholder_map)
+                deletion_record_cid = erasure_deletion_record_id(cid, tenant_id, ev.user_id)
+                audit_target_id = placeholder_map[cid]
+            else:
+                stored_propagated = propagated
+                deletion_record_cid = cid
+                audit_target_id = cid
             entry = {
                 "id": new_id(),
                 "tenant_id": tenant_id,
                 "evidence_cid": deletion_record_cid,
                 "requested_by": requested_by,
                 "erasure_mode": mode.value,
-                "propagated": propagated,
+                "propagated": stored_propagated,
                 "at": utc_now().isoformat(),
             }
             self.deletion_log.append(entry)
@@ -2298,8 +2313,8 @@ class LocalMemoryEngine:
                 tenant_id,
                 requested_by,
                 "forget",
-                cid,
-                {**propagated, "erasure_mode": mode.value, "source_type": ev.source_type},
+                audit_target_id,
+                {**stored_propagated, "erasure_mode": mode.value, "source_type": ev.source_type},
                 source=ev.source_type,
                 trust_tier=ev.trust_tier,
                 capability_tags=ev.capability_tags,

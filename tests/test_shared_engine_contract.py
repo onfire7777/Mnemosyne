@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -3659,30 +3661,89 @@ def test_shared_engine_contract_deep_graph_respects_tenant_and_branch(engine_bun
     assert branch_relation_id in {hit.id for hit in branch_result.hits}
 
 
+def _walk_strings(value: Any) -> Iterator[str]:
+    """Yield every string anywhere in a nested dict/list/tuple structure."""
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for item in value.values():
+            yield from _walk_strings(item)
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            yield from _walk_strings(item)
+
+
 def test_shared_engine_contract_hard_delete_records_audit_and_deletion_log(engine_bundle: tuple[Any, str, str]) -> None:
     engine, tenant, user = engine_bundle
+    # A source cid plus a derived summary so the cascade carries erased-derived
+    # cids in propagated (standing_cascade.source_cid / affected_cids /
+    # derived_actions and erased_derived_evidence) — the exact fields the review
+    # found leaking the plaintext cid past the top-level evidence_cid swap.
     cid = _append_evidence(engine, tenant, user, "Shared hard-delete contract evidence.")
+    summary_cid = engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id=user,
+            actor="user",
+            source_type="derived-note",
+            content="Derived summary of the hard-delete target.",
+            metadata={"source_evidence_cids": [cid]},
+            access_policy={"tenant": tenant},
+        )
+    )
 
-    result = engine.forget(tenant, cid, requested_by=user, erasure_mode=ErasureMode.HARD_DELETE_LEGAL)
+    result = engine.forget(tenant, cid, requested_by="legal", erasure_mode=ErasureMode.HARD_DELETE_LEGAL)
     exported = engine.export_tenant(tenant)
 
     assert result["erased"] is True
     assert result["erasure_mode"] == "hard_delete_legal"
     assert engine.get_evidence(tenant, cid) is None
     assert all(item["cid"] != cid for item in exported["evidence"])
-    # Spec §7 privacy invariant 13: a hard delete is unrecoverable, so the retained
-    # deletion record replaces the cid (a salted sha256 of the content) with a
-    # non-recomputable HMAC id — otherwise sha256(guess) could confirm the erased
-    # cid. The record is still present (matched by erasure_mode), but its
-    # evidence_cid is NOT the cid, and NO retained record exposes the cid.
+    # forget's RETURN value keeps the real cids — the caller sees the truth; only
+    # the RETAINED records are sanitized.
+    assert result["cid"] == cid
+    assert summary_cid in result["propagated"]["erased_derived_evidence"]
+
+    # Spec §7 privacy invariant 13: NO retained record (deletion_log OR the forget
+    # audit row) exposes the erased source cid or any erased-derived cid — not the
+    # top-level evidence_cid, and not any nested provenance/standing-cascade ref.
+    erased = {cid, summary_cid}
+    guesses = {hashlib.sha256(item.encode()).hexdigest() for item in erased}
     hard_delete_records = [
         item
         for item in exported["deletion_log"]
         if (item.get("erasure_mode") or item.get("propagated", {}).get("erasure_mode")) == "hard_delete_legal"
     ]
     assert hard_delete_records
-    assert all(item["evidence_cid"] != cid for item in exported["deletion_log"])
-    assert any(item["op"] == "forget" and item["target_id"] == cid for item in exported["audit_log"])
+    for entry in exported["deletion_log"]:
+        assert entry["evidence_cid"] != cid
+        strings = set(_walk_strings(entry))
+        assert not (erased & strings), "erased cid leaked into deletion_log"
+        assert not (guesses & strings), "sha256(guess) of an erased cid leaked into deletion_log"
+
+    forget_rows = [item for item in exported["audit_log"] if item["op"] == "forget"]
+    assert forget_rows
+    for row in forget_rows:
+        assert row["target_id"] != cid  # placeholder, not the plaintext cid
+        strings = set(_walk_strings(row))
+        assert not (erased & strings), "erased cid leaked into the forget audit row"
+        assert not (guesses & strings), "sha256(guess) leaked into the forget audit row"
+
+    # Referential consistency: the erased source cid maps to ONE stable placeholder
+    # everywhere it is referenced in the retained record (still internally
+    # analyzable) — the deletion_log standing-cascade source_cid, its affected_cids,
+    # and the forget audit target_id all agree.
+    hard_entry = hard_delete_records[-1]
+    source_placeholder = hard_entry["propagated"]["standing_cascade"]["source_cid"]
+    assert source_placeholder != cid
+    assert source_placeholder in hard_entry["propagated"]["standing_cascade"]["affected_cids"]
+    assert all(row["target_id"] == source_placeholder for row in forget_rows)
+
+    # A tombstone_recompute forget KEEPS the cid (its ledger row is the blocklist).
+    keep_cid = _append_evidence(engine, tenant, user, "Tombstone keeps its cid.")
+    engine.forget(tenant, keep_cid, requested_by=user, erasure_mode=ErasureMode.TOMBSTONE_RECOMPUTE)
+    tomb_audit = engine.export_tenant(tenant)["audit_log"]
+    assert any(item["op"] == "forget" and item["target_id"] == keep_cid for item in tomb_audit)
 
 
 def test_shared_audit_log_records_actor_source_tier_and_diff_for_every_write(
@@ -3773,7 +3834,10 @@ def test_shared_audit_log_records_actor_source_tier_and_diff_for_every_write(
     exported_preference = next(item for item in exported["preferences"] if item["id"] == preference_id)
     assert exported_preference["access_policy"] == {"tenant": tenant, "purpose": "audit-contract"}
 
-    forget_audit = next(item for item in audit_log if item["op"] == "forget" and item["target_id"] == cid)
+    # Spec §7 invariant 13: the hard-delete forget audit row's target_id is a
+    # non-recomputable placeholder (NOT the erased cid), so look it up by op alone.
+    forget_audit = next(item for item in audit_log if item["op"] == "forget")
+    assert forget_audit["target_id"] != cid
     assert forget_audit["actor"] == user
     assert forget_audit["source"] == "workflow-log"
     assert forget_audit["trust_tier"] == 2
