@@ -7,5 +7,7 @@ async fn main() {
     let listener = tokio::net::TcpListener::bind(&bind)
         .await
         .unwrap_or_else(|err| panic!("failed to bind {bind}: {err}"));
-    axum::serve(listener, app(state_from_env())).await.unwrap();
+    let state =
+        state_from_env().unwrap_or_else(|err| panic!("failed to initialize provider state: {err}"));
+    axum::serve(listener, app(state)).await.unwrap();
 }

@@ -2,9 +2,18 @@
 name = "mneme-providers"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.85"
+rust-version = "1.88"
+
+[[bin]]
+name = "mneme-providers-prefetch"
+path = "src/bin/prefetch_models.rs"
+
+[features]
+default = []
+models = ["dep:fastembed"]
 
 [dependencies]
 axum = "0.8"
+fastembed = { version = "5.17.2", optional = true }
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread"] }
