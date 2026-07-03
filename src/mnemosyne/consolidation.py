@@ -2001,7 +2001,11 @@ class CommandLessonDistiller:
     def distill(self, tenant_id: str, candidates: Sequence[dict[str, Any]]) -> dict[str, Any]:
         parsed = _run_json_command(
             self.command,
-            {"tenant_id": tenant_id, "candidates": [dict(candidate) for candidate in candidates]},
+            {
+                "tenant_id": tenant_id,
+                "prompt_boundary": _provider_prompt_boundary("lesson_distiller"),
+                "candidates": [dict(candidate) for candidate in candidates],
+            },
             timeout_seconds=self.timeout_seconds,
             provider_name="lesson distiller",
         )
@@ -2070,7 +2074,11 @@ class CommandProcedureInducer:
     def induce(self, tenant_id: str, candidates: Sequence[dict[str, Any]]) -> dict[str, Any]:
         parsed = _run_json_command(
             self.command,
-            {"tenant_id": tenant_id, "candidates": [dict(candidate) for candidate in candidates]},
+            {
+                "tenant_id": tenant_id,
+                "prompt_boundary": _provider_prompt_boundary("skill_inducer"),
+                "candidates": [dict(candidate) for candidate in candidates],
+            },
             timeout_seconds=self.timeout_seconds,
             provider_name="skill inducer",
         )
@@ -2124,7 +2132,11 @@ class CommandEntityResolver:
         self.timeout_seconds = timeout_seconds
 
     def resolve(self, tenant_id: str, candidates: Sequence[dict[str, Any]]) -> dict[str, Any]:
-        payload = {"tenant_id": tenant_id, "candidates": [dict(candidate) for candidate in candidates]}
+        payload = {
+            "tenant_id": tenant_id,
+            "prompt_boundary": _provider_prompt_boundary("entity_resolver"),
+            "candidates": [dict(candidate) for candidate in candidates],
+        }
         try:
             completed = subprocess.run(
                 self.command,
