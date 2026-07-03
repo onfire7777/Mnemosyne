@@ -125,6 +125,12 @@ byte-binding). The work is closing **intent-vs-enforcement** gaps and shipping *
    + Vault key gone; provider-check round-trips the live endpoint) and evidence
    bundles signed by a collector-only key the gate verifies. This is not a
    reason to add generic gates ahead of the active Tier-B capture path.
+   - 2026-07-03 implementation note: `provider-check` now supports repeated
+     embedding/reranker latency samples and records p95 timing in structured
+     provider evidence. Production `release-audit` requires repeated p95 timing
+     evidence for the embedding and reranker subchecks before accepting the
+     provider row. This is source-side evidence gating only; the Tier-B row still
+     needs real target-host CPU P95 artifacts.
 
 ### 4.2 Layered defense-in-depth
 

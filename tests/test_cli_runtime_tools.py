@@ -1508,19 +1508,32 @@ def test_cli_provider_check_exercises_http_and_media_contracts(tmp_path: Path) -
             "--media-embedding-dims",
             "3",
             "provider-check",
+            "--provider-latency-samples",
+            "3",
+            "--max-provider-p95-latency-ms",
+            "10000",
         )
     finally:
         server.shutdown()
 
     assert report["ok"] is True
     assert report["checks"]["embedding"]["dimensions"] == 3
+    assert report["checks"]["embedding"]["latency"]["samples"] == 3
     assert report["checks"]["reranker"]["top_id"] == "b"
+    assert report["checks"]["reranker"]["latency"]["samples"] == 3
     assert report["checks"]["media_extractor"]["provider"] == "command"
     assert report["checks"]["media_extractor"]["sources"] == ["probe"]
     assert report["checks"]["media_embedding"]["ok"] is True
     assert report["checks"]["media_embedding"]["dimensions"] == 3
-    assert [item["path"] for item in requests] == ["/embed", "/rerank"]
-    assert [item["auth"] for item in requests] == ["Bearer embed-secret", "Bearer rank-secret"]
+    assert [item["path"] for item in requests] == ["/embed", "/embed", "/embed", "/rerank", "/rerank", "/rerank"]
+    assert [item["auth"] for item in requests] == [
+        "Bearer embed-secret",
+        "Bearer embed-secret",
+        "Bearer embed-secret",
+        "Bearer rank-secret",
+        "Bearer rank-secret",
+        "Bearer rank-secret",
+    ]
 
 
 def test_cli_provider_check_exercises_command_retrieval_adapters(tmp_path: Path) -> None:
@@ -6057,8 +6070,9 @@ def production_provider_stdout(*, forbid_local: bool = True, local_retrieval: bo
         name: {"ok": True, "provider": "command"}
         for name in PRODUCTION_RELEASE_REQUIRED_PROVIDER_CHECKS
     }
-    checks["embedding"] = {"ok": True, "provider": "http", "dimensions": 1024}
-    checks["reranker"] = {"ok": True, "provider": "http", "top_id": "b"}
+    provider_latency = {"samples": 3, "p50_latency_ms": 120.0, "p95_latency_ms": 180.0, "max_latency_ms": 180.0}
+    checks["embedding"] = {"ok": True, "provider": "http", "dimensions": 1024, "latency": provider_latency}
+    checks["reranker"] = {"ok": True, "provider": "http", "top_id": "b", "latency": provider_latency}
     checks["retrieval_backends"] = {
         "ok": True,
         "lexical_backend": "local-bm25-lite" if local_retrieval else "paradedb-bm25",
@@ -6993,10 +7007,39 @@ def test_cli_release_audit_verifies_production_deployment_evidence(tmp_path: Pat
     assert all(item["ok"] for item in report["commands"])
     assert set(item["check"] for item in report["provider"]["checks"]) == set(PRODUCTION_RELEASE_REQUIRED_PROVIDER_CHECKS)
     assert all(item["ok"] and not item["skipped"] for item in report["provider"]["checks"])
+    provider_latency = {
+        item["check"]: item["latency"]
+        for item in report["provider"]["checks"]
+        if item["check"] in {"embedding", "reranker"}
+    }
+    assert provider_latency["embedding"]["samples"] == 3
+    assert provider_latency["reranker"]["p95_latency_ms"] == 180.0
     assert report["provider"]["manifest"]["forbid_local"] is True
     assert report["provider"]["retrieval_backends"]["lexical_backend"] == "paradedb-bm25"
     assert report["provider"]["retrieval_backends"]["graph_backend"] == "apache-age"
     assert report["validation_scope"]["production_validated"] is True
+
+
+def test_cli_release_audit_rejects_missing_provider_latency_evidence(tmp_path: Path) -> None:
+    provider_stdout = production_provider_stdout()
+    provider_stdout["checks"]["embedding"].pop("latency")
+    provider_stdout["checks"]["reranker"]["latency"] = {"samples": 1, "p95_latency_ms": 180.0}
+    _report_path, manifest_path = write_release_report(tmp_path, provider_stdout=provider_stdout)
+
+    result = run_raw_cli(
+        tmp_path / "mnemosyne.json",
+        "release-audit",
+        "--evidence-manifest",
+        str(manifest_path),
+        "--require-production-validated",
+        "--require-provider-forbid-local",
+    )
+    payload = json.loads(result.stdout)
+    codes = {finding["code"] for finding in payload["findings"]}
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert "provider_check_latency_evidence_incomplete" in codes
 
 
 def test_cli_release_audit_rejects_package_only_ops_dashboard_evidence(tmp_path: Path) -> None:
