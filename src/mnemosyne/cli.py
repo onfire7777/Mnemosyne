@@ -10014,6 +10014,242 @@ def _release_bundle_ops_evidence_findings(command: str, stdout_json: Mapping[str
     return findings
 
 
+def _release_retrieval_ops_evidence_findings(stdout_json: Mapping[str, Any]) -> list[dict[str, Any]]:
+    findings: list[dict[str, Any]] = []
+
+    def add(message: str) -> None:
+        findings.append(_release_finding("required_retrieval_ops_evidence_incomplete", message))
+
+    def as_int(value: Any) -> int | None:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    def as_float(value: Any) -> float | None:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    requirements = stdout_json.get("requirements")
+    checks_raw = stdout_json.get("checks")
+    bundle = stdout_json.get("bundle")
+    redaction = stdout_json.get("redaction")
+    if not isinstance(requirements, Mapping):
+        add("retrieval-ops-check requirements must be structured")
+        requirements = {}
+    if not isinstance(checks_raw, list):
+        add("retrieval-ops-check checks must be a structured list")
+        return findings
+    if not isinstance(bundle, Mapping):
+        add("retrieval-ops-check bundle must be structured")
+        bundle = {}
+    if not isinstance(redaction, Mapping):
+        redaction = {}
+
+    min_cases = as_int(requirements.get("min_cases")) or 1
+    min_lexical_cases = as_int(requirements.get("min_lexical_cases")) or 1
+    min_vector_cases = as_int(requirements.get("min_vector_cases")) or 1
+    min_graph_cases = as_int(requirements.get("min_graph_cases")) or 1
+    min_reranked_cases = as_int(requirements.get("min_reranked_cases")) or 1
+    min_calibration_examples = as_int(requirements.get("min_calibration_examples")) or 1
+    min_calibration_correct = as_int(requirements.get("min_calibration_correct")) or 1
+    min_calibration_incorrect = as_int(requirements.get("min_calibration_incorrect")) or 1
+    min_empirical_coverage = as_float(requirements.get("min_empirical_coverage")) or 0.0
+    max_false_accept_rate = as_float(requirements.get("max_false_accept_rate"))
+    if max_false_accept_rate is None:
+        max_false_accept_rate = 1.0
+    max_adapter_latency_ms = as_float(requirements.get("max_adapter_latency_ms")) or 0.0
+    required_adapter_probes = requirements.get("required_adapter_probes")
+    if not isinstance(required_adapter_probes, list):
+        required_adapter_probes = []
+    required_adapters = {"graph", "lexical", "reranker", "vector"}
+
+    if requirements.get("provider_forbid_local") is not True:
+        add("retrieval-ops-check must prove local providers are forbidden")
+    if requirements.get("backend") != "postgres":
+        add("retrieval-ops-check must require the Postgres backend")
+    for field in (
+        "min_cases",
+        "min_lexical_cases",
+        "min_vector_cases",
+        "min_graph_cases",
+        "min_reranked_cases",
+        "min_calibration_examples",
+        "min_calibration_correct",
+        "min_calibration_incorrect",
+    ):
+        value = as_int(requirements.get(field))
+        if value is None or value < 1:
+            add(f"retrieval-ops-check requirement {field} must be positive")
+    if min_empirical_coverage <= 0:
+        add("retrieval-ops-check requirement min_empirical_coverage must be positive")
+    if max_false_accept_rate <= 0:
+        add("retrieval-ops-check requirement max_false_accept_rate must be positive")
+    if max_adapter_latency_ms <= 0:
+        add("retrieval-ops-check requirement max_adapter_latency_ms must be positive")
+    if not required_adapters.issubset({str(item) for item in required_adapter_probes}):
+        add("retrieval-ops-check must require graph, lexical, reranker, and vector adapter probes")
+
+    lexical_backend = str(bundle.get("lexical_backend") or "").strip()
+    graph_backend = str(bundle.get("graph_backend") or "").strip()
+    if not lexical_backend or _is_local_retrieval_backend(lexical_backend):
+        add("retrieval-ops-check lexical backend must be non-local")
+    if not graph_backend or _is_local_retrieval_backend(graph_backend):
+        add("retrieval-ops-check graph backend must be non-local")
+    if (as_int(bundle.get("retrieval_case_count")) or 0) < min_cases:
+        add("retrieval-ops-check retrieval case count is below requirement")
+    if (as_int(bundle.get("adapter_probe_count")) or 0) < len(required_adapters):
+        add("retrieval-ops-check adapter probe count is below requirement")
+    if bundle.get("calibration_dataset_fingerprint_present") is not True:
+        add("retrieval-ops-check calibration dataset fingerprint is missing")
+
+    checks = [check for check in checks_raw if isinstance(check, Mapping)]
+    checks_by_name = {str(check.get("name") or ""): check for check in checks}
+    required_names = {"provider_check", "retrieval", "adapter_probes", "calibration", "redaction"}
+    missing_names = sorted(name for name in required_names if name not in checks_by_name)
+    if missing_names:
+        add("retrieval-ops-check missing required checks: " + ", ".join(missing_names))
+
+    provider = checks_by_name.get("provider_check")
+    if isinstance(provider, Mapping):
+        if provider.get("ok") is not True:
+            add("retrieval-ops-check provider_check must be ok")
+        if provider.get("forbid_local") is not True:
+            add("retrieval-ops-check provider_check must prove forbid_local")
+        provider_rows = provider.get("provider_rows")
+        if not isinstance(provider_rows, list) or not provider_rows:
+            add("retrieval-ops-check provider rows are missing")
+        else:
+            for row in provider_rows:
+                if not isinstance(row, Mapping):
+                    add("retrieval-ops-check provider rows must be structured")
+                    continue
+                check_name = str(row.get("check") or "unknown")
+                if row.get("ok") is not True:
+                    add(f"retrieval-ops-check provider row {check_name} must be ok")
+                if row.get("local_provider") is not False:
+                    add(f"retrieval-ops-check provider row {check_name} must be non-local")
+        backends = provider.get("retrieval_backends")
+        if isinstance(backends, Mapping):
+            for flag in ("lexical_local", "graph_local"):
+                if backends.get(flag) is not False:
+                    add(f"retrieval-ops-check backend flag {flag} must be false")
+            for flag in ("lexical_probe_present", "graph_probe_present"):
+                if backends.get(flag) is not True:
+                    add(f"retrieval-ops-check backend flag {flag} is not proven")
+
+    retrieval = checks_by_name.get("retrieval")
+    if isinstance(retrieval, Mapping):
+        if retrieval.get("ok") is not True:
+            add("retrieval-ops-check retrieval check must be ok")
+        if retrieval.get("backend") != "postgres":
+            add("retrieval-ops-check retrieval backend must be postgres")
+        case_count = as_int(retrieval.get("case_count")) or 0
+        calibrated_cases = as_int(retrieval.get("calibrated_cases")) or 0
+        for key, minimum in (
+            ("case_count", min_cases),
+            ("lexical_cases", min_lexical_cases),
+            ("vector_cases", min_vector_cases),
+            ("graph_cases", min_graph_cases),
+            ("reranked_cases", min_reranked_cases),
+        ):
+            if (as_int(retrieval.get(key)) or 0) < minimum:
+                add(f"retrieval-ops-check retrieval {key} is below requirement")
+        if calibrated_cases != case_count:
+            add("retrieval-ops-check all retrieval cases must be calibrated")
+        cases = retrieval.get("cases")
+        if not isinstance(cases, list) or not cases:
+            add("retrieval-ops-check retrieval cases are missing")
+        else:
+            for case in cases:
+                if not isinstance(case, Mapping):
+                    add("retrieval-ops-check retrieval cases must be structured")
+                    continue
+                case_id = str(case.get("id") or "unknown")
+                for flag in ("query_hash_present", "tenant_hash_present"):
+                    if case.get(flag) is not True:
+                        add(f"retrieval-ops-check retrieval case {case_id} missing {flag}")
+
+    adapter_probes = checks_by_name.get("adapter_probes")
+    if isinstance(adapter_probes, Mapping):
+        if adapter_probes.get("ok") is not True:
+            add("retrieval-ops-check adapter_probes check must be ok")
+        missing_adapters = adapter_probes.get("missing_adapters")
+        if missing_adapters not in ([], None):
+            add("retrieval-ops-check adapter probes have missing adapters")
+        if (as_int(adapter_probes.get("ok_probe_count")) or 0) < len(required_adapters):
+            add("retrieval-ops-check adapter probes have too few ok probes")
+        probes = adapter_probes.get("probes")
+        if not isinstance(probes, list) or not probes:
+            add("retrieval-ops-check adapter probe rows are missing")
+        else:
+            for probe in probes:
+                if not isinstance(probe, Mapping):
+                    add("retrieval-ops-check adapter probe rows must be structured")
+                    continue
+                probe_id = str(probe.get("id") or "unknown")
+                if probe.get("ok") is not True:
+                    add(f"retrieval-ops-check adapter probe {probe_id} must be ok")
+                for flag in ("production_validated", "command_fingerprint_present", "query_hash_present", "tenant_hash_present", "result_fingerprint_present", "source_snapshot_fingerprint_present", "top_id_hash_present"):
+                    if probe.get(flag) is not True:
+                        add(f"retrieval-ops-check adapter probe {probe_id} missing {flag}")
+                for flag in ("backend_local", "provider_local"):
+                    if probe.get(flag) is not False:
+                        add(f"retrieval-ops-check adapter probe {probe_id} must be non-local")
+                if (as_int(probe.get("hit_count")) or 0) <= 0:
+                    add(f"retrieval-ops-check adapter probe {probe_id} hit count must be positive")
+                latency_ms = as_float(probe.get("latency_ms"))
+                if latency_ms is None or latency_ms > max_adapter_latency_ms:
+                    add(f"retrieval-ops-check adapter probe {probe_id} latency exceeds threshold")
+
+    calibration = checks_by_name.get("calibration")
+    if isinstance(calibration, Mapping):
+        if calibration.get("ok") is not True:
+            add("retrieval-ops-check calibration check must be ok")
+        if calibration.get("production_dataset") is not True:
+            add("retrieval-ops-check calibration must use a production dataset")
+        if calibration.get("dataset_fingerprint_present") is not True:
+            add("retrieval-ops-check calibration dataset fingerprint is missing")
+        for key, minimum in (
+            ("example_count", min_calibration_examples),
+            ("correct_count", min_calibration_correct),
+            ("incorrect_count", min_calibration_incorrect),
+        ):
+            if (as_int(calibration.get(key)) or 0) < minimum:
+                add(f"retrieval-ops-check calibration {key} is below requirement")
+        empirical_coverage = as_float(calibration.get("empirical_coverage"))
+        if empirical_coverage is None or empirical_coverage < min_empirical_coverage:
+            add("retrieval-ops-check calibration empirical coverage is too low")
+        false_accept_rate = as_float(calibration.get("false_accept_rate"))
+        if false_accept_rate is None or false_accept_rate > max_false_accept_rate:
+            add("retrieval-ops-check calibration false accept rate is too high")
+        if calibration.get("threshold_present") is not True:
+            add("retrieval-ops-check calibration threshold is missing")
+
+    redaction_check = checks_by_name.get("redaction")
+    redaction_maps = [item for item in (redaction, redaction_check) if isinstance(item, Mapping)]
+    if not redaction_maps:
+        add("retrieval-ops-check redaction evidence is missing")
+    for redaction_map in redaction_maps:
+        for flag in (
+            "raw_queries_omitted",
+            "raw_embeddings_omitted",
+            "raw_documents_omitted",
+            "raw_credentials_omitted",
+        ):
+            if redaction_map.get(flag) is not True:
+                add(f"retrieval-ops-check redaction flag {flag} is not proven")
+        forbidden_paths = redaction_map.get("forbidden_raw_paths")
+        if isinstance(forbidden_paths, list) and forbidden_paths:
+            add("retrieval-ops-check redaction contains raw field paths")
+        if redaction_map.get("forbidden_raw_fields_present") is True:
+            add("retrieval-ops-check redaction must prove no raw fields are present")
+
+    return findings
+
+
 def _release_mcp_ops_evidence_findings(stdout_json: Mapping[str, Any]) -> list[dict[str, Any]]:
     findings: list[dict[str, Any]] = []
 
@@ -10603,6 +10839,8 @@ def _release_command_output_findings(check: Mapping[str, Any]) -> list[dict[str,
         findings.extend(_release_ops_dashboard_evidence_findings(stdout_json))
     if command == "worker-ops-check":
         findings.extend(_release_worker_ops_evidence_findings(stdout_json))
+    if command == "retrieval-ops-check":
+        findings.extend(_release_retrieval_ops_evidence_findings(stdout_json))
     if command == "mcp-ops-check":
         findings.extend(_release_mcp_ops_evidence_findings(stdout_json))
     if command == "privacy-ops-check":

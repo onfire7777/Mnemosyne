@@ -139,6 +139,14 @@ byte-binding). The work is closing **intent-vs-enforcement** gaps and shipping *
      evidence for the embedding and reranker subchecks before accepting the
      provider row. This is source-side evidence gating only; the Tier-B row still
      needs real target-host CPU P95 artifacts.
+   - 2026-07-03 implementation note: production `release-audit` now rejects
+     weak `retrieval-ops-check` evidence unless the replayed output proves
+     non-local Postgres lexical/graph backends, provider forbid-local posture,
+     adapter probe coverage for graph/lexical/reranker/vector, production
+     calibrated retrieval cases, adapter fingerprints, latency bounds, and raw
+     query/embedding/document/credential redaction. This closes a source-side
+     placeholder-acceptance gap; retained production retrieval evidence remains
+     operator-owned before the row can close.
 
 ### 4.2 Layered defense-in-depth
 

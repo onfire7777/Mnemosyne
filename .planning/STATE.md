@@ -4,8 +4,8 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: null
-last_updated: "2026-07-03T22:48:24Z"
-last_activity: 2026-07-03 — Production `release-audit` now rejects weak `privacy-ops-check` evidence unless the replayed evidence proves non-local KMS/Vault-transit-style custody, key lifecycle and shred proof, strict residency allow/deny cases, tombstone and legal hard-delete erasure cases, operator delete corroboration, case-count coverage, and raw key/object/subject/KMS redaction. Prior query-prefix, provider-latency, audit-retention, and MCP-runtime source gates remain intact. TEI/Infinity deployment, real cross-encoder evidence, real CPU P95 artifacts, scanner/signature evidence, runtime default-deny egress evidence, real Vault-HMAC/pgaudit/WORM artifacts, hosted MCP operator evidence, privacy/operator evidence, and operator-captured bundles still keep Phase 8/Tier-B rows open. No Tier-B row is marked Done.
+last_updated: "2026-07-03T23:03:34Z"
+last_activity: 2026-07-03 — Production `release-audit` now rejects weak `retrieval-ops-check` evidence unless replayed evidence proves non-local Postgres lexical/graph backends, required adapter probes, production calibrated cases, adapter fingerprints, latency bounds, and retrieval redaction. Prior query-prefix, provider-latency, audit-retention, MCP-runtime, and privacy/object-store source gates remain intact. TEI/Infinity deployment, real cross-encoder evidence, real CPU P95 artifacts, scanner/signature evidence, runtime default-deny egress evidence, real Vault-HMAC/pgaudit/WORM artifacts, hosted MCP operator evidence, privacy/operator evidence, retrieval operator evidence, and operator-captured bundles still keep Phase 8/Tier-B rows open. No Tier-B row is marked Done.
 progress:
   total_phases: 9
   completed_phases: 7
@@ -29,6 +29,16 @@ Phase: Strict parity continuation after Phase 5 scaffold
 Plan: Exact blueprint parity audit and runtime gap closure
 Status: In progress; exact 1:1 blueprint parity is not complete.
 Current status (2026-06-30): Mandatory Tier A source wirings are closed on `main`; FR-20 local and live-Postgres image/audio/video breadth, FR-21 local and live-Postgres parametric trainer/rollback validation, full compose-Postgres runtime readiness, belief-revision CLI validation, local hosted-MCP JSON-RPC/StreamableHTTP/SSE readiness, direct A12 cached-PPR live materialization coverage, G1 projection-level reality monitoring, G1 functional consciousness scorecard/proto-self seed, native workspace service with the `service.enabled` default-off gate retired, operational specialist-budget toggle retirement, cold-loop ignition enforcement, protected gate-case ratchet enforcement, Rail 6 serve-time sink enforcement, §24 support-strategy runtime durability plus public CLI/MCP mutation surfaces, Phase 7 plans 01-04, and the P5 H8/H12 cascade/observability pre-check are now done and gate-proven. The remaining strict-parity blocker is Tier B production operator evidence against deployed infrastructure before final v1.0 sign-off.
+
+Latest checkpoint (2026-07-03): Production release-audit now has an explicit
+source-side retrieval evidence gate for the Phase 8.2 retrieval row.
+`retrieval-ops-check` retained output must prove non-local Postgres
+lexical/graph backends, provider forbid-local posture, adapter probe coverage
+for graph/lexical/reranker/vector, production calibrated retrieval cases,
+adapter fingerprints, latency bounds, and raw query/embedding/document/credential
+redaction. Focused retrieval/release-audit verification passes locally. This
+does not create operator retrieval artifacts; real production retrieval evidence
+remains required.
 
 Latest checkpoint (2026-07-03): The active branch is
 `phase3/providers-consolidation`, synchronized at
