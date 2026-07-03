@@ -59,6 +59,10 @@ BEGIN
 END $$;
 REVOKE DELETE, TRUNCATE ON ALL TABLES IN SCHEMA public FROM mnemosyne_app;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO mnemosyne_consolidator;
+-- Audit rows are append-only even for write-capable runtime roles; schema.sql
+-- installs the BEFORE UPDATE/DELETE trigger that enforces this at execution.
+REVOKE UPDATE, DELETE, TRUNCATE ON audit_log FROM mnemosyne_app, mnemosyne_consolidator;
+GRANT SELECT, INSERT ON audit_log TO mnemosyne_app, mnemosyne_consolidator;
 
 -- Tables created at runtime by one login role stay usable by the other.
 ALTER DEFAULT PRIVILEGES FOR ROLE app_user IN SCHEMA public
