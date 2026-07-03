@@ -44,7 +44,7 @@ if TYPE_CHECKING:
     from mnemosyne.parametric import ParametricTier
     from mnemosyne.postgres_runtime_state import PostgresRuntimeState
     from mnemosyne.provenance import C2paToolVerifier, ProvenanceTrustPolicy, SignedProvenanceVerifier
-    from mnemosyne.queue import InProcessQueue, PostgresQueue, QueueWorker
+    from mnemosyne.queue import InProcessQueue, PostgresQueue, QueueWorker, SqliteQueue
     from mnemosyne.retrieval import CommandMediaEmbeddingProvider, RetrievalAdapters
     from mnemosyne.runtime_state import RuntimeState
     from mnemosyne.security import OidcAuthorizationPolicy, OidcJwtVerifier, SessionTokenVerifier
@@ -458,6 +458,12 @@ def load_engine(args: argparse.Namespace) -> MemoryEngine:
             )
         except PostgresUnavailableError as exc:
             raise SystemExit(str(exc)) from exc
+    if args.backend == "sqlite":
+        from mnemosyne.sqlite_engine import SqliteEngine
+
+        # --store doubles as the per-tenant SQLite root directory (one
+        # <tenant>.db per tenant), mirroring how local/postgres read --store/DSN.
+        return SqliteEngine(Path(args.store), adapters=load_retrieval_adapters(args))
     return LocalMemoryEngine(store_path=Path(args.store), adapters=load_retrieval_adapters(args))
 
 
@@ -642,8 +648,8 @@ def load_runtime_state(args: argparse.Namespace) -> RuntimeState | PostgresRunti
 def load_queue(
     args: argparse.Namespace,
     runtime_state: RuntimeState | PostgresRuntimeState | None = None,
-) -> InProcessQueue | PostgresQueue:
-    from mnemosyne.queue import InProcessQueue, PostgresQueue
+) -> InProcessQueue | PostgresQueue | SqliteQueue:
+    from mnemosyne.queue import InProcessQueue, PostgresQueue, SqliteQueue
 
     if args.queue_backend == "postgres":
         dsn = args.postgres_dsn
@@ -655,6 +661,9 @@ def load_queue(
             tenant_id=tenant_id,
             require_safe_role=bool(getattr(args, "postgres_require_safe_role", False)),
         )
+    if args.queue_backend == "sqlite":
+        # Durable per-tenant runtime_jobs table under the SQLite --store root.
+        return SqliteQueue(Path(args.store), tenant_id=runtime_state_tenant(args))
     return runtime_state.load_queue() if runtime_state else InProcessQueue()
 
 
@@ -15054,7 +15063,7 @@ def build_parser() -> argparse.ArgumentParser:
         description="Mnemosyne local memory compiler CLI",
         allow_abbrev=False,
     )
-    parser.add_argument("--backend", choices=["local", "postgres"], default=default_backend(), help="Storage backend")
+    parser.add_argument("--backend", choices=["local", "postgres", "sqlite"], default=default_backend(), help="Storage backend")
     parser.add_argument("--store", default=str(default_store()), help="Path to local JSON store")
     parser.add_argument("--postgres-dsn", default=default_postgres_dsn(), help="PostgreSQL DSN for --backend postgres")
     parser.add_argument(
@@ -15065,7 +15074,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--queue-backend",
-        choices=["local", "postgres"],
+        choices=["local", "postgres", "sqlite"],
         default=os.environ.get("MNEMOSYNE_QUEUE_BACKEND", "local"),
         help="Runtime job queue backend",
     )

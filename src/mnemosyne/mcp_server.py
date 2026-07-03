@@ -24,7 +24,7 @@ from mnemosyne.oidc_jwks import load_oidc_authorization_policy, load_oidc_jwks, 
 from mnemosyne.parametric import CommandParametricTrainer, ParametricArtifactStore, ParametricTier
 from mnemosyne.postgres_security import postgres_safe_role_required
 from mnemosyne.postgres_runtime_state import PostgresRuntimeState
-from mnemosyne.queue import InProcessQueue, PostgresQueue
+from mnemosyne.queue import InProcessQueue, PostgresQueue, SqliteQueue
 from mnemosyne.runtime_state import RuntimeState
 from mnemosyne.security import (
     OidcJwtVerifier,
@@ -85,18 +85,20 @@ class MnemosyneMcpServer:
         queue_tenant: str | None = None,
         production_profile: bool | None = None,
     ):
-        if backend not in {"local", "postgres"}:
+        if backend not in {"local", "postgres", "sqlite"}:
             raise ValueError(f"Unsupported MCP backend: {backend}")
         resolved_queue_backend = (
             queue_backend
             or os.environ.get("MNEMOSYNE_MCP_QUEUE_BACKEND")
             or os.environ.get("MNEMOSYNE_QUEUE_BACKEND")
-            or ("postgres" if backend == "postgres" else "local")
+            or ("postgres" if backend == "postgres" else "sqlite" if backend == "sqlite" else "local")
         )
-        if resolved_queue_backend not in {"local", "postgres"}:
+        if resolved_queue_backend not in {"local", "postgres", "sqlite"}:
             raise ValueError(f"Unsupported MCP queue backend: {resolved_queue_backend}")
         if stateless and backend == "local" and not store_path:
             raise ValueError("Stateless local MCP mode requires a durable store_path.")
+        if backend == "sqlite" and not store_path:
+            raise ValueError("SQLite MCP backend requires a durable store_path (per-tenant DB root).")
         self.store_path = store_path
         self.backend = backend
         self.postgres_dsn = postgres_dsn
@@ -189,6 +191,13 @@ class MnemosyneMcpServer:
             require_safe_role = self.production_profile or postgres_safe_role_required()
             engine = PostgresEngine(dsn, require_safe_role=require_safe_role)
             runtime_state = PostgresRuntimeState(dsn, tenant_id=runtime_tenant, require_safe_role=require_safe_role)
+        elif self.backend == "sqlite":
+            from mnemosyne.sqlite_engine import SqliteEngine
+
+            # store_path doubles as the per-tenant SQLite root (enforced non-None
+            # in __init__); runtime state stays the file-based JSON lane.
+            engine = SqliteEngine(self.store_path)
+            runtime_state = RuntimeState.from_store_path(self.store_path)
         else:
             engine = LocalMemoryEngine(store_path=self.store_path)
             runtime_state = RuntimeState.from_store_path(self.store_path)
@@ -202,6 +211,8 @@ class MnemosyneMcpServer:
                 tenant_id=queue_tenant or self.queue_tenant,
                 require_safe_role=require_safe_role,
             )
+        elif self.queue_backend == "sqlite":
+            queue = SqliteQueue(self.store_path, tenant_id=queue_tenant or self.queue_tenant)
         else:
             queue = runtime_state.load_queue() if runtime_state else InProcessQueue()
         ingestion = IngestionPipeline(
@@ -1321,7 +1332,7 @@ def _load_object_store(
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="mneme-mcp", description="Run the Mnemosyne stdio MCP server")
     parser.add_argument("--store", default=str(default_store()), help="Path to local JSON store")
-    parser.add_argument("--backend", choices=["local", "postgres"], default=default_backend(), help="Storage backend for MCP tools")
+    parser.add_argument("--backend", choices=["local", "postgres", "sqlite"], default=default_backend(), help="Storage backend for MCP tools")
     parser.add_argument("--postgres-dsn", default=default_postgres_dsn(), help="Postgres DSN for --backend postgres")
     parser.add_argument("--object-store", default=os.environ.get("MNEMOSYNE_OBJECT_STORE", ".mnemosyne/objects"))
     parser.add_argument(

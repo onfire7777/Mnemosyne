@@ -269,7 +269,7 @@ def test_backend_env_overrides_default(baseline: dict[str, Any], monkeypatch: py
 
 
 def test_declared_backends_are_recognized(baseline: dict[str, Any]) -> None:
-    assert set(baseline["topology"]["backends"]) == {"local", "postgres"}
+    assert set(baseline["topology"]["backends"]) == {"local", "postgres", "sqlite"}
 
 
 # --------------------------------------------------------------------------- #

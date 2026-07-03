@@ -82,8 +82,13 @@ Realized over these concrete loci:
 - **Cold-loop tuning** — machine-written tunable adjustments, valid only within
   rails (`self_optimization.py`).
 - **Topology selector** — `--backend local` (single-binary, JSON runtime state)
-  vs `--backend postgres` (multi-tenant RLS). Selects which expectations apply,
-  not which value wins.
+  vs `--backend postgres` (multi-tenant RLS) vs `--backend sqlite` (one SQLite
+  file per tenant; `--store` is the per-tenant DB root, and `--queue-backend
+  sqlite` uses that file's `runtime_jobs` table). Selects which expectations
+  apply, not which value wins. **Production topology stays Postgres-only (`§32`):**
+  SqliteEngine is a self-hosted/dev-and-edge lane — running it under a
+  production/`postgres` topology is check-D environment drift, exactly like a
+  production instance wired to the local JSON store.
 
 ## Precedence
 
@@ -141,6 +146,10 @@ finding; the correct value is whatever the cited source declares.
 - [ ] Configured backing services match the declared topology (`§32`): a
       `postgres`/production instance still pointing at the local store — or a
       `local` instance wired to hosted services — is environment drift.
+- [ ] Production topology remains Postgres-only. `sqlite` is a recognized
+      self-hosted backend (`backends = [..., "sqlite"]`), but a production/
+      `postgres` profile running SqliteEngine is check-D environment drift — the
+      same class of drift as production pointing at the JSON store.
 - [ ] Isolation matches the topology: per-source trust tiers always enforced
       (`mnemosyne_source_trust_tier`); per-tenant RLS (`mnemosyne_current_tenant()`)
       only where the topology declares it.
