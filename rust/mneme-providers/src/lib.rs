@@ -506,8 +506,77 @@ mod tests {
     }
 
     #[test]
+    fn bearer_auth_error_is_sanitized() {
+        let mut state = AppState::deterministic(4);
+        state.bearer_tokens = vec!["expected-secret".to_string()];
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            AUTHORIZATION,
+            HeaderValue::from_static("Bearer HTKN-S3-foreign-secret"),
+        );
+
+        let err = authorize(&state, &headers).unwrap_err();
+
+        assert_eq!(err.status, StatusCode::UNAUTHORIZED);
+        assert!(!err.message.contains("expected-secret"));
+        assert!(!err.message.contains("HTKN-S3-foreign-secret"));
+    }
+
+    #[test]
     fn app_builds_routes() {
         let _ = app(AppState::deterministic(4));
+    }
+
+    #[tokio::test]
+    async fn health_reports_initialized_backend_state() {
+        let state = AppState::deterministic(8);
+
+        let Json(response) = health(State(state)).await;
+
+        assert_eq!(response.status, "ok");
+        assert_eq!(response.embedding.model, "deterministic-test-embedding");
+        assert_eq!(response.reranker.model, "deterministic-test-reranker");
+        assert!(response.embedding.deterministic_backend);
+        assert!(response.reranker.deterministic_backend);
+    }
+
+    #[tokio::test]
+    async fn validation_errors_do_not_echo_request_content() {
+        let sentinel = "HTKN-S3-foreign-request-content";
+        let result = rerank(
+            State(AppState::deterministic(4)),
+            HeaderMap::new(),
+            Json(RerankRequest {
+                query: sentinel.to_string(),
+                documents: vec![sentinel.to_string()],
+                top_n: Some(0),
+            }),
+        )
+        .await;
+        let err = match result {
+            Ok(_) => panic!("expected invalid top_n to fail"),
+            Err(err) => err,
+        };
+
+        assert_eq!(err.status, StatusCode::BAD_REQUEST);
+        assert_eq!(err.message, "top_n must be positive");
+        assert!(!err.message.contains(sentinel));
+    }
+
+    #[test]
+    fn sidecar_library_has_no_logging_sinks() {
+        let source = include_str!("lib.rs");
+        let forbidden = [
+            format!("{}{}", "print", "ln!"),
+            format!("{}{}", "eprint", "ln!"),
+            format!("{}!", "dbg"),
+            format!("{}{}", "tracing", "::"),
+            format!("{}{}", "log", "::"),
+        ];
+
+        for token in forbidden {
+            assert!(!source.contains(&token), "unexpected logging sink {token}");
+        }
     }
 
     #[test]
