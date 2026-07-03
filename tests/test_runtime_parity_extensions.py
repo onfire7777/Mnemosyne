@@ -19,6 +19,7 @@ from mnemosyne.consolidation import (
     CommandProcedureInducer,
     ConsolidationWorker,
     ProviderDisclosurePolicy,
+    ProviderProposalLedger,
 )
 from mnemosyne.cli import (
     DEPLOYMENT_SOAK_COMMANDS,
@@ -361,6 +362,164 @@ def test_command_provider_disclosure_policy_keeps_s2_gist_for_zero_retention_in_
     assert "Project Atlas account alpha-123" in packet["content"]
     assert packet["content_view"]["pseudonymized"] is False
     assert packet["content_view"]["raw_content_omitted"] is True
+
+
+def test_command_provider_records_and_replays_proposals_before_consumption(tmp_path) -> None:
+    engine = LocalMemoryEngine()
+    source_cid = engine.append_evidence(
+        Evidence(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="chat",
+            content="Atlas release status is green.",
+            access_policy={"tenant": TENANT},
+        )
+    )
+    source = engine.get_evidence(TENANT, source_cid)
+    assert source is not None
+    counter_path = tmp_path / "counter.txt"
+    provider = tmp_path / "provider.py"
+    provider.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env python3",
+                "import json, pathlib, sys",
+                "counter = pathlib.Path(sys.argv[1])",
+                "count = int(counter.read_text()) + 1 if counter.exists() else 1",
+                "counter.write_text(str(count))",
+                "print(json.dumps({'summary': f'Provider summary run {count}.', 'metadata': {'api_key': 'sk-1234567890abcdef'}}))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    provider.chmod(0o755)
+    summarizer = CommandEvidenceSummarizer([sys.executable, str(provider), str(counter_path)])
+    summarizer.proposal_ledger = ProviderProposalLedger(engine)
+
+    first = summarizer.summarize(TENANT, [source])
+    second = summarizer.summarize(TENANT, [source])
+
+    assert first is not None
+    assert second is not None
+    assert first["summary"] == "Provider summary run 1."
+    assert second["summary"] == "Provider summary run 1."
+    assert counter_path.read_text(encoding="utf-8") == "1"
+    first_record = first["proposal_record"]
+    second_record = second["proposal_record"]
+    assert first_record["replayed"] is False
+    assert second_record["replayed"] is True
+    assert first_record["cid"] == second_record["cid"]
+    exported = engine.export_tenant(TENANT)
+    records = [item for item in exported["evidence"] if item["source_type"] == "provider-proposal"]
+    assert len(records) == 1
+    record = records[0]
+    proposal = record["metadata"]["provider_proposal"]
+    assert proposal["role"] == "evidence_summarizer"
+    assert proposal["input_cids"] == [source_cid]
+    assert proposal["response"]["summary"] == "Provider summary run 1."
+    serialized = json.dumps(record, sort_keys=True)
+    assert "sk-1234567890abcdef" not in serialized
+    assert "raw_sha256" not in serialized
+    assert record["trust_tier"] == 5
+    assert {"data-only", "no-write-authority"}.issubset(set(record["capability_tags"]))
+
+
+def test_consolidation_worker_auto_attaches_provider_proposal_ledger(tmp_path) -> None:
+    engine = LocalMemoryEngine()
+    source_cid = engine.append_evidence(
+        Evidence(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="chat",
+            content="Atlas rollout status is steady.",
+            access_policy={"tenant": TENANT},
+        )
+    )
+    counter_path = tmp_path / "counter.txt"
+    provider = tmp_path / "provider.py"
+    provider.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env python3",
+                "import json, pathlib, sys",
+                "counter = pathlib.Path(sys.argv[1])",
+                "count = int(counter.read_text()) + 1 if counter.exists() else 1",
+                "counter.write_text(str(count))",
+                "print(json.dumps({'summary': f'Worker provider summary run {count}.'}))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    provider.chmod(0o755)
+    summarizer = CommandEvidenceSummarizer([sys.executable, str(provider), str(counter_path)])
+    worker = ConsolidationWorker(
+        engine,
+        gate_cases=[],
+        summarizer=summarizer,
+        consolidation_min_steps=0,
+    )
+    payload = {
+        "tenant_id": TENANT,
+        "source_evidence_cids": [source_cid],
+        "passes": ["summarizer"],
+    }
+
+    first = worker.run_queue_payload(payload).to_dict()
+    second = worker.run_queue_payload(payload).to_dict()
+
+    assert counter_path.read_text(encoding="utf-8") == "1"
+    first_summary = next(item for item in first["pass_results"] if item["name"] == "summarizer")
+    second_summary = next(item for item in second["pass_results"] if item["name"] == "summarizer")
+    assert first_summary["details"]["summary"] == "Worker provider summary run 1."
+    assert second_summary["details"]["summary"] == "Worker provider summary run 1."
+    assert first_summary["details"]["proposal_record"]["replayed"] is False
+    assert second_summary["details"]["proposal_record"]["replayed"] is True
+    records = [item for item in engine.export_tenant(TENANT)["evidence"] if item["source_type"] == "provider-proposal"]
+    assert len(records) == 1
+
+
+def test_provider_proposal_records_withhold_sensitive_output(tmp_path) -> None:
+    engine = LocalMemoryEngine()
+    source_cid = engine.append_evidence(
+        Evidence(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="chat",
+            content="S3 diagnosis zebra fever with raw treatment detail.",
+            sensitivity=3,
+            access_policy={"tenant": TENANT, "max_sensitivity": 3},
+        )
+    )
+    source = engine.get_evidence(TENANT, source_cid)
+    assert source is not None
+    provider = tmp_path / "provider.py"
+    provider.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env python3",
+                "import json",
+                "print(json.dumps({'summary': 'diagnosis zebra fever sk-1234567890abcdef raw treatment detail'}))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    provider.chmod(0o755)
+    summarizer = CommandEvidenceSummarizer([sys.executable, str(provider)])
+    summarizer.proposal_ledger = ProviderProposalLedger(engine)
+
+    result = summarizer.summarize(TENANT, [source])
+
+    assert result is not None
+    assert result["summary"].startswith("[sensitive-provider-output:")
+    record = next(item for item in engine.export_tenant(TENANT)["evidence"] if item["source_type"] == "provider-proposal")
+    serialized = json.dumps(record, sort_keys=True)
+    assert "diagnosis zebra fever" not in serialized
+    assert "raw treatment detail" not in serialized
+    assert "sk-1234567890abcdef" not in serialized
+    assert "raw_sha256" not in serialized
 
 
 def test_local_object_store_addresses_bytes_and_blocks_bad_uris(tmp_path) -> None:
