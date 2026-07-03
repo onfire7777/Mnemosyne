@@ -108,7 +108,11 @@ external_sources = ["external_eval", "human_feedback", "protected_suite"]
 default_backend = "local"
 backend_env = "MNEME_BACKEND"
 postgres_dsn_env = "MNEMOSYNE_POSTGRES_DSN"
-backends = ["local", "postgres"]
+# Recognized storage backends. "sqlite" (one file per tenant) is a self-hosted
+# lane alongside local/postgres. NOTE: production topology remains Postgres-only
+# (§32) — a production/postgres profile running SqliteEngine is check-D
+# environment drift, the same as a production instance pointing at the JSON store.
+backends = ["local", "postgres", "sqlite"]
 
 [schema]
 # Stores the system depends on must exist in sql/schema.sql (§19). Drift = a

@@ -35,6 +35,7 @@ from mnemosyne.privacy import ErasureMode
 from mnemosyne.queue import InProcessQueue
 from mnemosyne.retrieval import RetrievalAdapters, gist_support_report
 from mnemosyne.runtime_state import RuntimeState
+from mnemosyne.sqlite_engine import SqliteEngine
 from mnemosyne.storage import LocalObjectStore
 from mnemosyne.text import hashing_embedding
 
@@ -90,6 +91,13 @@ def _seed_live_legacy_unscoped_evidence(
     if "in_memory" in engine_capabilities(engine):
         engine._require_branch(branch)
         engine.evidence[engine._evidence_key(tenant, branch, cid)] = evidence
+        return cid
+    if "sqlite_file" in engine_capabilities(engine):
+        # One-file-per-tenant store: write the legacy unscoped row straight to
+        # the tenant DB (bypassing append_evidence's CID recompute), mirroring
+        # the in_memory direct-dict seed above so the erased-replay blocklist
+        # probe exercises the legacy unscoped CID path.
+        engine._insert_evidence(evidence)
         return cid
     if "live_db" in engine_capabilities(engine):
         engine.ensure_tenant_and_branch(tenant, branch)
@@ -212,12 +220,16 @@ class _ForgedGraphRetriever:
         ][:k]
 
 
-@pytest.fixture(params=["local", "postgres"])
+@pytest.fixture(params=["local", "postgres", "sqlite"])
 def engine_bundle(request: pytest.FixtureRequest, tmp_path: Path) -> tuple[Any, str, str]:
     tenant = f"tenant-shared-{request.param}-{uuid4()}"
     user = f"user-shared-{request.param}"
     if request.param == "local":
         return LocalMemoryEngine(), tenant, user
+    if request.param == "sqlite":
+        # Per-tenant SQLite files under a tmp root — no external service, so the
+        # contract suite RUNS this third param by default (no DSN skip).
+        return SqliteEngine(tmp_path / "sqlite-store"), tenant, user
     dsn = _live_dsn()
     if not dsn:
         pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
@@ -233,6 +245,13 @@ def engine_capabilities(engine: Any) -> frozenset[str]:
     """
     if isinstance(engine, PostgresEngine):
         return frozenset({"sql_fts", "graph_ppr_cache_table", "rls", "live_db"})
+    if isinstance(engine, SqliteEngine):
+        # sqlite_file = one-file-per-tenant store lane (direct-insert seed path);
+        # fts5 = lexical prefilter surface. Deliberately WITHOUT
+        # graph_ppr_cache_table / live_db so the Postgres-materialization and
+        # live-DB gated tests skip (SqliteEngine's cached-PPR lives in its own
+        # projection-registry suite, not the Postgres cache-table contract).
+        return frozenset({"sqlite_file", "fts5"})
     return frozenset({"in_memory"})
 
 

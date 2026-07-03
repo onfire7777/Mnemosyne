@@ -91,8 +91,10 @@ from mnemosyne.ids import evidence_cid, evidence_unscoped_cid, new_id
 from mnemosyne.journal import CIDJournal, journal_filename, safe_tenant_filename
 from mnemosyne.models import (
     Assertion,
+    Contradiction,
     Evidence,
     Hit,
+    Justification,
     MergeReport,
     Preference,
     Relation,
@@ -571,6 +573,39 @@ class SqliteEngine:
 
     def _audit(
         self,
+        tenant_id: str,
+        actor: str,
+        op: str,
+        target_id: str | None,
+        diff: dict[str, Any],
+        *,
+        source: str | None = None,
+        trust_tier: int | None = None,
+        capability_tags: list[str] | None = None,
+    ) -> None:
+        """Public audit entrypoint matching ``LocalMemoryEngine._audit`` (the
+        parity oracle) exactly — no ``conn``/``cur`` first arg — so shared
+        consumers that signature-sniff for a Local-shaped ``_audit`` (e.g.
+        ``learning.py``'s LearningModule) write through here. Opens its own
+        connection + transaction; internal engine methods that already own a
+        transaction call :meth:`_audit_row` directly."""
+        with self._lock:
+            conn = self._connect(tenant_id)
+            with conn:
+                self._audit_row(
+                    conn,
+                    tenant_id,
+                    actor,
+                    op,
+                    target_id,
+                    diff,
+                    source=source,
+                    trust_tier=trust_tier,
+                    capability_tags=capability_tags,
+                )
+
+    def _audit_row(
+        self,
         conn: sqlite3.Connection,
         tenant_id: str,
         actor: str,
@@ -582,7 +617,7 @@ class SqliteEngine:
         trust_tier: int | None = None,
         capability_tags: list[str] | None = None,
     ) -> None:
-        """Append an audit row rideing the caller's transaction; the record dict
+        """Append an audit row riding the caller's transaction; the record dict
         byte-matches ``LocalMemoryEngine._audit`` (round-trips via export)."""
         normalized_tags = sorted(set(capability_tags or []))
         audit_diff = dict(diff)
@@ -704,7 +739,7 @@ class SqliteEngine:
             if existing is not None:
                 op = "append_evidence.blocked_erased_replay" if existing.erased else "append_evidence.noop_dedup"
                 with conn:
-                    self._audit(
+                    self._audit_row(
                         conn,
                         ev.tenant_id,
                         ev.actor,
@@ -731,7 +766,7 @@ class SqliteEngine:
                 )
                 if not budget_report["allowed"]:
                     with conn:
-                        self._audit(
+                        self._audit_row(
                             conn,
                             ev.tenant_id,
                             ev.actor,
@@ -777,7 +812,7 @@ class SqliteEngine:
                 }
             with conn:
                 self._insert_evidence_row(conn, stored)
-                self._audit(
+                self._audit_row(
                     conn,
                     ev.tenant_id,
                     ev.actor,
@@ -847,7 +882,7 @@ class SqliteEngine:
                 # nulled embedding) always invalidates any cached vector for this
                 # cid — purge unconditionally (restriction/hold purge rail, R4).
                 self._purge_embedding_cache_row(conn, tenant_id, cid)
-                self._audit(
+                self._audit_row(
                     conn,
                     tenant_id,
                     actor,
@@ -901,7 +936,7 @@ class SqliteEngine:
                     sensitivity=int(ev.sensitivity), access_policy=ev.access_policy, erased=ev.erased
                 ):
                     self._purge_embedding_cache_row(conn, tenant_id, cid)
-                self._audit(
+                self._audit_row(
                     conn,
                     tenant_id,
                     actor,
@@ -941,7 +976,7 @@ class SqliteEngine:
                 erased=ev.erased,
             ):
                 with conn:
-                    self._audit(
+                    self._audit_row(
                         conn,
                         tenant_id,
                         actor,
@@ -970,7 +1005,7 @@ class SqliteEngine:
                     self._embedding_cache_store_row(
                         conn, tenant_id, cid, self._model_id(), list(embedding), int(ev.sensitivity)
                     )
-                self._audit(
+                self._audit_row(
                     conn,
                     tenant_id,
                     actor,
@@ -2214,7 +2249,7 @@ class SqliteEngine:
             item.branch = branch
             with conn:
                 conn.execute(_RELATION_INSERT, _relation_insert_values(item))
-                self._audit(
+                self._audit_row(
                     conn,
                     item.tenant_id,
                     "engine",
@@ -2228,6 +2263,69 @@ class SqliteEngine:
                     source="relation",
                 )
             return item.id
+
+    def add_justification(self, justification: Justification) -> str:
+        """Store a TMS justification (record JSON, PK id), byte-parity with
+        ``LocalMemoryEngine.add_justification`` — store-then-audit; the row
+        rehydrates through ``Justification.from_dict`` on export."""
+        with self._lock:
+            item = copy.deepcopy(justification)
+            conn = self._connect(item.tenant_id)
+            with conn:
+                conn.execute(
+                    "INSERT OR REPLACE INTO justifications(id, tenant_id, record) VALUES (?, ?, ?)",
+                    (item.id, item.tenant_id, json_text(item.to_dict())),
+                )
+                self._audit_row(
+                    conn,
+                    item.tenant_id,
+                    "engine",
+                    "add_justification",
+                    item.id,
+                    {
+                        "assertion_id": item.assertion_id,
+                        "evidence_cids": item.evidence_cids,
+                        "dependencies": item.dependency_ids,
+                    },
+                    source="justification",
+                )
+            return item.id
+
+    def add_contradiction(self, contradiction: Contradiction) -> str:
+        """Store a TMS contradiction with Local's open-dedup: an existing OPEN
+        row over the same unordered ``{a, b}`` pair for the tenant returns its id
+        without inserting (byte-parity with ``LocalMemoryEngine``)."""
+        with self._lock:
+            item = copy.deepcopy(contradiction)
+            conn = self._connect(item.tenant_id)
+            with conn:
+                rows = conn.execute(
+                    "SELECT record FROM contradictions WHERE tenant_id = ?",
+                    (item.tenant_id,),
+                ).fetchall()
+                for row in rows:
+                    existing = Contradiction.from_dict(json.loads(row["record"]))
+                    if existing.status == "open" and {existing.a, existing.b} == {item.a, item.b}:
+                        return existing.id
+                conn.execute(
+                    "INSERT OR REPLACE INTO contradictions(id, tenant_id, record) VALUES (?, ?, ?)",
+                    (item.id, item.tenant_id, json_text(item.to_dict())),
+                )
+                self._audit_row(
+                    conn,
+                    item.tenant_id,
+                    "engine",
+                    "add_contradiction",
+                    item.id,
+                    {"a": item.a, "b": item.b},
+                    source="contradiction",
+                )
+            return item.id
+
+    def to_json(self) -> str:
+        """Full-store JSON export, byte-shape-identical to
+        ``LocalMemoryEngine.to_json`` (``export_all`` + sorted-key indent)."""
+        return json.dumps(self.export_all(), indent=2, sort_keys=True)
 
     def add_preference(self, preference: Preference) -> str:
         """Tenant-scoped preference supersession, byte-parity with Local.
@@ -2340,7 +2438,7 @@ class SqliteEngine:
                     "ON CONFLICT(tenant_id, memory_type) DO UPDATE SET record = excluded.record",
                     (stored.tenant_id, stored.memory_type, json_text(stored.to_dict())),
                 )
-                self._audit(
+                self._audit_row(
                     conn,
                     calibration.tenant_id,
                     "engine",
@@ -2556,7 +2654,7 @@ class SqliteEngine:
                     rel.branch = name
                     rel.id = new_id()
                     conn.execute(_RELATION_INSERT, _relation_insert_values(rel))
-                self._audit(conn, tenant_id, "engine", "branch", name, {"from": frm, "kind": kind})
+                self._audit_row(conn, tenant_id, "engine", "branch", name, {"from": frm, "kind": kind})
 
     def merge(self, frm: str, into: str = "main", tenant_id: str | None = None) -> MergeReport:
         """Local-style replay-upsert merge, tenant-scoped.
@@ -2631,7 +2729,7 @@ class SqliteEngine:
                     "INSERT INTO merge_log(tenant_id, record) VALUES (?, ?)",
                     (tenant_id, json_text(report.to_dict())),
                 )
-                self._audit(conn, tenant_id, "engine", "merge", frm, report.to_dict())
+                self._audit_row(conn, tenant_id, "engine", "merge", frm, report.to_dict())
             return report
 
     def discard(self, branch: str, tenant_id: str | None = None) -> None:
@@ -2672,7 +2770,7 @@ class SqliteEngine:
                     if orphaned:
                         self._prune_dangling(conn, tenant_id, orphaned)
                 conn.execute("DELETE FROM branches WHERE tenant_id = ? AND name = ?", (tenant_id, branch))
-                self._audit(conn, tenant_id, "engine", "discard", branch, {})
+                self._audit_row(conn, tenant_id, "engine", "discard", branch, {})
 
     @staticmethod
     def _prune_dangling(conn: sqlite3.Connection, tenant_id: str, orphaned: set[str]) -> None:
@@ -3148,7 +3246,7 @@ class SqliteEngine:
                     "INSERT INTO deletion_log(tenant_id, record) VALUES (?, ?)",
                     (tenant_id, json_text(entry)),
                 )
-                self._audit(
+                self._audit_row(
                     conn,
                     tenant_id,
                     requested_by,
