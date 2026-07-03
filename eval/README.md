@@ -110,10 +110,10 @@ move the moment real backends arrive. No harness code changes are required:
    (docker-compose, §I) and forward the CLI flags:
    ```bash
    python eval/run_eval.py \
-     --global-flag --embedding-provider --global-flag http \
-     --global-flag --embedding-url --global-flag http://localhost:8080/embed \
-     --global-flag --reranker-provider --global-flag http \
-     --global-flag --reranker-url --global-flag http://localhost:8081/rerank
+     --global-flag=--embedding-provider --global-flag http \
+     --global-flag=--embedding-url --global-flag http://localhost:8080/embed \
+     --global-flag=--reranker-provider --global-flag http \
+     --global-flag=--reranker-url --global-flag http://localhost:8081/rerank
    ```
    The `cli_driver` forwards them verbatim; recall@k / nDCG / ECE / G2 all sharpen.
 

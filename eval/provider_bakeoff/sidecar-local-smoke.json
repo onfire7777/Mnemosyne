@@ -1,0 +1,75 @@
+{
+  "protocol": "mnemosyne-provider-bakeoff-v1",
+  "purpose": "Local smoke fixture for comparing the deterministic local baseline against the deterministic Phase 3 compact HTTP sidecar.",
+  "promotion_allowed_from_smoke": false,
+  "acceptance": {
+    "non_inferior_required": true,
+    "protected_case_regression_allowed": false,
+    "margin_must_exceed_run_to_run_noise": true,
+    "confidence_intervals_required": true,
+    "public_benchmarks_are_claims": false
+  },
+  "arms": [
+    {
+      "name": "local-deterministic",
+      "kind": "baseline",
+      "command": [
+        "uv",
+        "run",
+        "--locked",
+        "python",
+        "eval/run_eval.py",
+        "--quick",
+        "--out-dir",
+        "/tmp/mnemosyne-provider-bakeoff/local-deterministic"
+      ],
+      "report": "/tmp/mnemosyne-provider-bakeoff/local-deterministic/slo_report_latest.json"
+    },
+    {
+      "name": "deterministic-sidecar",
+      "kind": "candidate-smoke",
+      "sidecar": {
+        "command": [
+          "cargo",
+          "run",
+          "--manifest-path",
+          "rust/mneme-providers/Cargo.toml",
+          "--bin",
+          "mneme-providers"
+        ],
+        "health_url": "http://127.0.0.1:8000/health"
+      },
+      "command": [
+        "uv",
+        "run",
+        "--locked",
+        "python",
+        "eval/run_eval.py",
+        "--quick",
+        "--out-dir",
+        "/tmp/mnemosyne-provider-bakeoff/deterministic-sidecar",
+        "--global-flag=--embedding-provider",
+        "--global-flag",
+        "http",
+        "--global-flag=--embedding-url",
+        "--global-flag",
+        "http://127.0.0.1:8000/embed",
+        "--global-flag=--reranker-provider",
+        "--global-flag",
+        "http",
+        "--global-flag=--reranker-url",
+        "--global-flag",
+        "http://127.0.0.1:8000/rerank"
+      ],
+      "report": "/tmp/mnemosyne-provider-bakeoff/deterministic-sidecar/slo_report_latest.json"
+    }
+  ],
+  "required_evidence": [
+    "baseline_report_json",
+    "candidate_report_json",
+    "baseline_report_markdown",
+    "candidate_report_markdown",
+    "provider_check_report",
+    "noise_or_rerun_notes"
+  ]
+}
