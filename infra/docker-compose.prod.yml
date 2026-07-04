@@ -151,8 +151,25 @@ services:
   victoriametrics:
     <<: *hardened
     image: victoriametrics/victoria-metrics:v1.102.1@sha256:8d34a7572df2ef57ef3e55257c112b1ba1c3ca0fecb138fea5cfed882c0cdb07
-    command: ["--storageDataPath=/vmdata", "--retentionPeriod=90d"]
-    volumes: [vmdata:/vmdata]
+    command:
+      - "--storageDataPath=/vmdata"
+      - "--retentionPeriod=90d"
+      # Scrapes the blackbox TLS probes (B2 lifecycle alerts) and vmalert's
+      # own /metrics so tripwire/alert state is queryable from Grafana.
+      - "--promscrape.config=/etc/victoria/scrape.yml"
+    volumes:
+      - vmdata:/vmdata
+      - ./observability/victoriametrics/scrape.yml:/etc/victoria/scrape.yml:ro
+    networks: [internal]
+
+  blackbox-exporter:                       # TLS chain/hostname/expiry probe source (B2 tls-lifecycle row)
+    <<: *hardened
+    image: prom/blackbox-exporter:v0.25.0@sha256:b04a9fef4fa086a02fc7fcd8dcdbc4b7b35cc30cdee860fdc6a19dd8b208d63e
+    command: ["--config.file=/etc/blackbox/blackbox.yml"]
+    depends_on: [caddy]
+    volumes:
+      - ./observability/blackbox/blackbox.yml:/etc/blackbox/blackbox.yml:ro
+      - ${MNEMO_SECRETS_DIR:-/secure/outside/repo}/step-ca-root.crt:/etc/blackbox/step-ca-root.crt:ro
     networks: [internal]
 
   vmalert:

@@ -16,3 +16,43 @@ groups:
           severity: critical
         annotations:
           summary: Mnemosyne production release gate is open
+  - name: mnemosyne-tls-lifecycle
+    interval: 60s
+    rules:
+      # Chain/hostname mismatch or endpoint down: the probe pins the step-ca
+      # root and verifies the served hostname, so probe_success == 0 covers
+      # cert-mismatch, broken chain, and unreachable ingress.
+      - alert: MnemosyneTlsProbeFailed
+        expr: probe_success{job="blackbox-tls"} == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "TLS probe failed for {{ $labels.instance }} (chain, hostname, or endpoint)"
+      # Caddy renews the 24h step-ca ACME leafs around 2/3 lifetime (~8h
+      # remaining). Under 6h remaining means automated renewal is late.
+      - alert: MnemosyneTlsCertExpiringSoon
+        expr: (probe_ssl_earliest_cert_expiry{job="blackbox-tls"} - time()) < 6 * 3600
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "TLS certificate for {{ $labels.instance }} expires in <6h; automated renewal is late"
+      # Under 2h remaining renewal has effectively failed; serving will break.
+      - alert: MnemosyneTlsRenewalFailed
+        expr: (probe_ssl_earliest_cert_expiry{job="blackbox-tls"} - time()) < 2 * 3600
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "TLS renewal failed for {{ $labels.instance }}; certificate expires in <2h"
+      # Revocation posture for this profile is max-lifetime enforcement:
+      # 24h leafs bound any revocation window by construction. A served
+      # certificate with >26h remaining violates that posture.
+      - alert: MnemosyneTlsLongLivedCertDetected
+        expr: (probe_ssl_earliest_cert_expiry{job="blackbox-tls"} - time()) > 26 * 3600
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Served certificate for {{ $labels.instance }} exceeds the 24h short-lived policy"

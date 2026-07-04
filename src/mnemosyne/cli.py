@@ -18345,9 +18345,25 @@ def build_parser() -> argparse.ArgumentParser:
     tls_lifecycle_ops_check.add_argument("--bundle", help="Path to production TLS lifecycle evidence bundle")
     tls_lifecycle_ops_check.add_argument("--bundle-json", help="Inline production TLS lifecycle evidence bundle JSON")
     tls_lifecycle_ops_check.add_argument("--min-hostnames", type=int, default=1)
-    tls_lifecycle_ops_check.add_argument("--min-current-days-valid", type=float, default=7.0)
-    tls_lifecycle_ops_check.add_argument("--min-candidate-days-valid", type=float, default=30.0)
-    tls_lifecycle_ops_check.add_argument("--min-overlap-days", type=float, default=7.0)
+    # Mirrors tls-rotation-plan-check: deployments with short-lived automated
+    # ACME certificates (e.g. 24h step-ca leafs) declare their real rotation
+    # policy through these environment defaults instead of the long-lived-cert
+    # constants, so honest lifecycle evidence is not rejected structurally.
+    tls_lifecycle_ops_check.add_argument(
+        "--min-current-days-valid",
+        type=float,
+        default=float(os.environ.get("MNEMOSYNE_TLS_LIFECYCLE_MIN_CURRENT_DAYS_VALID", "7")),
+    )
+    tls_lifecycle_ops_check.add_argument(
+        "--min-candidate-days-valid",
+        type=float,
+        default=float(os.environ.get("MNEMOSYNE_TLS_LIFECYCLE_MIN_CANDIDATE_DAYS_VALID", "30")),
+    )
+    tls_lifecycle_ops_check.add_argument(
+        "--min-overlap-days",
+        type=float,
+        default=float(os.environ.get("MNEMOSYNE_TLS_LIFECYCLE_MIN_OVERLAP_DAYS", "7")),
+    )
     tls_lifecycle_ops_check.add_argument("--allow-non-production", action="store_true")
     tls_lifecycle_ops_check.add_argument("--allow-localhost", action="store_true")
     tls_lifecycle_ops_check.add_argument("--expected-fingerprint")

@@ -2553,6 +2553,30 @@ def test_cli_tls_lifecycle_ops_check_fails_closed_on_weak_evidence(tmp_path: Pat
     assert "tls_raw_field_present" in codes
 
 
+def test_cli_tls_lifecycle_ops_check_env_thresholds_cover_short_lived_acme(tmp_path: Path, monkeypatch) -> None:
+    bundle = tmp_path / "short-lived-tls-lifecycle.json"
+    payload = tls_lifecycle_ops_bundle()
+    payload["renewal"]["current_days_remaining"] = 0.9
+    payload["renewal"]["candidate_days_remaining"] = 1.9
+    payload["renewal"]["overlap_days"] = 0.85
+    bundle.write_text(json.dumps(payload), encoding="utf-8")
+
+    rejected = run_raw_cli(tmp_path / "mnemosyne.json", "tls-lifecycle-ops-check", "--bundle", str(bundle))
+    rejected_codes = {finding["code"] for finding in json.loads(rejected.stdout)["findings"]}
+    assert rejected.returncode == 1
+    assert "tls_current_validity_low" in rejected_codes
+    assert "tls_candidate_validity_low" in rejected_codes
+    assert "tls_overlap_low" in rejected_codes
+
+    monkeypatch.setenv("MNEMOSYNE_TLS_LIFECYCLE_MIN_CURRENT_DAYS_VALID", "0.25")
+    monkeypatch.setenv("MNEMOSYNE_TLS_LIFECYCLE_MIN_CANDIDATE_DAYS_VALID", "1")
+    monkeypatch.setenv("MNEMOSYNE_TLS_LIFECYCLE_MIN_OVERLAP_DAYS", "0.25")
+    report = run_cli(tmp_path / "mnemosyne.json", "tls-lifecycle-ops-check", "--bundle", str(bundle))
+    renewal_check = next(item for item in report["checks"] if item["name"] == "renewal")
+    assert report["ok"] is True
+    assert renewal_check["ok"] is True
+
+
 def test_cli_deployment_soak_allows_tls_rotation_plan_check(tmp_path: Path) -> None:
     current_dir = tmp_path / "current"
     candidate_dir = tmp_path / "candidate"

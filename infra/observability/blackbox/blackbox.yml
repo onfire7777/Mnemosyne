@@ -1,0 +1,19 @@
+# Blackbox exporter modules for the self-hosted production profile.
+# Probes the Caddy-terminated HTTPS hosts with the step-ca root pinned so
+# probe_success proves the real chain + hostname, and
+# probe_ssl_earliest_cert_expiry drives the TLS lifecycle alerts (B2 row).
+modules:
+  https_stepca:
+    prober: http
+    timeout: 10s
+    http:
+      method: GET
+      fail_if_not_ssl: true
+      # This module proves TLS chain/hostname/expiry, not application health:
+      # any HTTP status from the TLS-terminated app is acceptable (401/403
+      # from authenticated apps, 404/405 from API roots). An empty list would
+      # mean "2xx only" in blackbox, so the accepted statuses are explicit.
+      valid_status_codes: [200, 201, 202, 204, 301, 302, 303, 307, 308, 400, 401, 403, 404, 405, 418, 429, 500, 501, 502, 503]
+      preferred_ip_protocol: ip4
+      tls_config:
+        ca_file: /etc/blackbox/step-ca-root.crt
