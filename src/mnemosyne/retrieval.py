@@ -1911,6 +1911,19 @@ def _normalize_vector(vector: Sequence[float], dims: int) -> list[float]:
     return [value / norm for value in adjusted]
 
 
+def _retrieval_allowed_internal_hosts() -> tuple[str, ...]:
+    """Internal hostnames the HTTP embedding/reranker providers may reach.
+
+    Self-hosted deployments serve the embedder/reranker on an isolated network
+    (e.g. ``tei.mnemo.local``) whose name resolves to a private address. The
+    network-safety guard blocks private/internal addresses by default; this
+    allowlist is the explicit, operator-scoped escape hatch, matching the Vault
+    and Ollama provider paths (``MNEMOSYNE_*_ALLOWED_INTERNAL_HOSTS``).
+    """
+    raw = os.environ.get("MNEMOSYNE_RETRIEVAL_ALLOWED_INTERNAL_HOSTS", "")
+    return tuple(host.strip() for host in raw.split(",") if host.strip())
+
+
 def _validate_http_provider_config(url: str, timeout: float):
     if not math.isfinite(timeout) or timeout <= 0:
         raise ValueError("retrieval provider timeout must be positive")
@@ -1918,6 +1931,7 @@ def _validate_http_provider_config(url: str, timeout: float):
         return validate_fetch_url(
             url,
             allow_insecure_localhost=True,
+            allow_internal_hosts=_retrieval_allowed_internal_hosts(),
             purpose="retrieval provider URL",
         )
     except ValueError as exc:

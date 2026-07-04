@@ -289,6 +289,30 @@ def test_http_provider_config_rejects_private_https_address() -> None:
         _validate_http_provider_config("https://127.0.0.1/embed", 5.0)
 
 
+def test_http_provider_config_allows_scoped_internal_host(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Self-hosted stacks serve the embedder/reranker on an internal network
+    # whose hostname resolves to a private address. Without the allowlist the
+    # guard blocks it; with the operator-scoped allowlist it is permitted, but
+    # only for the named host — other private hosts still fail closed.
+    monkeypatch.setenv("MNEMOSYNE_RETRIEVAL_ALLOWED_INTERNAL_HOSTS", "tei.mnemo.local")
+    import socket as _socket
+
+    real_getaddrinfo = _socket.getaddrinfo
+
+    def fake_getaddrinfo(host, *args, **kwargs):
+        if host in {"tei.mnemo.local", "other.mnemo.local"}:
+            return [(_socket.AF_INET, _socket.SOCK_STREAM, 6, "", ("10.1.2.3", 0))]
+        return real_getaddrinfo(host, *args, **kwargs)
+
+    monkeypatch.setattr(_socket, "getaddrinfo", fake_getaddrinfo)
+
+    validated = _validate_http_provider_config("https://tei.mnemo.local/embed", 5.0)
+    assert validated.host == "tei.mnemo.local"
+
+    with pytest.raises(ValueError, match="must not resolve to private"):
+        _validate_http_provider_config("https://other.mnemo.local/embed", 5.0)
+
+
 # --------------------------------------------------------------------------- #
 # HTTP cross-encoder reranker (faked transport)
 # --------------------------------------------------------------------------- #
