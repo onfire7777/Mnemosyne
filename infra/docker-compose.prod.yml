@@ -34,6 +34,7 @@ volumes:
   ollama: {}
   mnemo_api_data: {}
   mnemo_consolidator_data: {}
+  ops_dashboard: {}
 
 services:
   caddy:                                   # SOLE ingress: terminates TLS (step-ca ACME), the only published port
@@ -46,12 +47,13 @@ services:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - ${MNEMO_SECRETS_DIR:-/secure/outside/repo}/step-ca-root.crt:/data/step-ca-root.crt:ro
+      - ops_dashboard:/pub:ro
     tmpfs: ["/config:size=16m"]
     networks:                              # internal = proxy backhaul to tei/s3/grafana; aliases give
       edge:                                # every service one HTTPS name that resolves to the ingress
-        aliases: [mcp.mnemo.local, kc.mnemo.local, tei.mnemo.local, s3.mnemo.local, grafana.mnemo.local]
+        aliases: [mcp.mnemo.local, kc.mnemo.local, tei.mnemo.local, s3.mnemo.local, grafana.mnemo.local, ops.mnemo.local]
       internal:
-        aliases: [mcp.mnemo.local, kc.mnemo.local, tei.mnemo.local, s3.mnemo.local, grafana.mnemo.local]
+        aliases: [mcp.mnemo.local, kc.mnemo.local, tei.mnemo.local, s3.mnemo.local, grafana.mnemo.local, ops.mnemo.local]
 
   step-ca:                                 # internal ACME CA -> real, non-self-signed chains (TLS gate)
     <<: *hardened
@@ -173,8 +175,10 @@ services:
       MNEMOSYNE_OPS_METRICS_URL: http://victoriametrics:8428/api/v1/import/prometheus
       MNEMOSYNE_OPS_METRICS_ALLOWED_INTERNAL_HOSTS: victoriametrics
       MNEMOSYNE_OPS_METRICS_INTERVAL: "60"
+      MNEMOSYNE_OPS_DASHBOARD_HTML_OUT: /pub/ops-dashboard.html
     command: ["--tenant", "primary"]
     secrets: [pgpass_app, step_ca_root]
+    volumes: [ops_dashboard:/pub]
     tmpfs: ["/tmp:size=32m"]
     networks: [internal]
     depends_on: [postgres, victoriametrics]

@@ -30,7 +30,7 @@ RUN useradd --uid 10001 --user-group --no-create-home --shell /usr/sbin/nologin 
 # named volume inherits this ownership on first mount, so the AES-GCM object
 # store and Vault-wrapped DEK sidecars (MNEMOSYNE_VAULT_WRAP_DIR=/data/...) are
 # writable without a runtime root chown (the rootfs is read_only).
-RUN mkdir -p /data/wrapped-keys && chown -R 10001:10001 /data
+RUN mkdir -p /data/wrapped-keys /pub && chown -R 10001:10001 /data /pub
 USER 10001:10001
 
 ENTRYPOINT ["/usr/local/bin/mnemo-entrypoint"]

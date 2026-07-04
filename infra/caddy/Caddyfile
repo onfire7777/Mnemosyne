@@ -65,3 +65,17 @@ grafana.mnemo.local {
 	import secure_headers
 	reverse_proxy grafana:3000
 }
+
+ops.mnemo.local {
+	import internal_acme
+	import secure_headers
+	# Network-tier access control: the rendered ops dashboard artifact is
+	# reachable only from the deployment's private ranges (operator bastion,
+	# internal services, LAN/VPN ingress); everything else is denied. The
+	# artifact is a read-only mount refreshed atomically by mnemo-metrics,
+	# so there is no mutation surface.
+	@external not remote_ip private_ranges
+	respond @external 403
+	root * /pub
+	file_server
+}
