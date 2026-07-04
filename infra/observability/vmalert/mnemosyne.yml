@@ -3,12 +3,14 @@ groups:
     interval: 30s
     rules:
       - alert: MnemosyneOpsReportStale
-        expr: time() - mnemosyne_ops_report_timestamp_seconds > 300
+        # absent() guard: before the metrics-pusher role existed this rule
+        # silently watched a nonexistent series and could never fire.
+        expr: (time() - mnemosyne_ops_report_timestamp_seconds > 300) or absent(mnemosyne_ops_report_timestamp_seconds)
         for: 5m
         labels:
           severity: warning
         annotations:
-          summary: Mnemosyne ops report timestamp is stale
+          summary: Mnemosyne ops report timestamp is stale or missing
       - alert: MnemosyneReleaseGateOpen
         expr: mnemosyne_release_gate_open == 1
         for: 1m

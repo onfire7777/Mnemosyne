@@ -33,8 +33,18 @@ case "$ROLE" in
       sleep "$POLL"
     done
     ;;
+  metrics-pusher)
+    # Read-only ops-report -> VictoriaMetrics push loop. Keeps the
+    # mnemosyne_ops_report_timestamp_seconds / mnemosyne_release_gate_open
+    # tripwire series alive so the vmalert rules watch real data.
+    exec mneme \
+      --backend postgres \
+      ops-metrics-push \
+      --interval "${MNEMOSYNE_OPS_METRICS_INTERVAL:-60}" \
+      "$@"
+    ;;
   *)
-    echo "Unknown MNEMOSYNE_ROLE: $ROLE (expected api|consolidator)" >&2
+    echo "Unknown MNEMOSYNE_ROLE: $ROLE (expected api|consolidator|metrics-pusher)" >&2
     exit 64
     ;;
 esac
