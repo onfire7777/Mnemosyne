@@ -10250,6 +10250,186 @@ def _release_retrieval_ops_evidence_findings(stdout_json: Mapping[str, Any]) -> 
     return findings
 
 
+def _release_tls_lifecycle_evidence_findings(stdout_json: Mapping[str, Any]) -> list[dict[str, Any]]:
+    findings: list[dict[str, Any]] = []
+
+    def add(message: str) -> None:
+        findings.append(_release_finding("required_tls_lifecycle_evidence_incomplete", message))
+
+    def as_float(value: Any) -> float | None:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    def as_int(value: Any) -> int | None:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    bundle = stdout_json.get("bundle")
+    requirements = stdout_json.get("requirements")
+    checks_raw = stdout_json.get("checks")
+    redaction = stdout_json.get("redaction")
+    if not isinstance(bundle, Mapping):
+        add("tls-lifecycle-ops-check bundle must be structured")
+        bundle = {}
+    if not isinstance(requirements, Mapping):
+        add("tls-lifecycle-ops-check requirements must be structured")
+        requirements = {}
+    if not isinstance(checks_raw, list):
+        add("tls-lifecycle-ops-check checks must be a structured list")
+        return findings
+
+    if requirements.get("allow_non_production") is not False:
+        add("tls-lifecycle-ops-check must prove non-production evidence is disallowed")
+    if requirements.get("allow_localhost") is not False:
+        add("tls-lifecycle-ops-check must prove localhost endpoints are disallowed")
+    min_hostnames = as_int(requirements.get("min_hostnames"))
+    min_current_days = as_float(requirements.get("min_current_days_valid"))
+    min_candidate_days = as_float(requirements.get("min_candidate_days_valid"))
+    min_overlap_days = as_float(requirements.get("min_overlap_days"))
+    if min_hostnames is None or min_hostnames < 1:
+        add("tls-lifecycle-ops-check min_hostnames requirement must be positive")
+        min_hostnames = 1
+    if min_current_days is None or min_current_days <= 0:
+        add("tls-lifecycle-ops-check min_current_days_valid requirement must be positive")
+        min_current_days = 0.0
+    if min_candidate_days is None or min_candidate_days <= 0:
+        add("tls-lifecycle-ops-check min_candidate_days_valid requirement must be positive")
+        min_candidate_days = 0.0
+    if min_overlap_days is None or min_overlap_days <= 0:
+        add("tls-lifecycle-ops-check min_overlap_days requirement must be positive")
+        min_overlap_days = 0.0
+
+    for flag in (
+        "validation_scope_present",
+        "issuance_present",
+        "renewal_present",
+        "deployment_present",
+        "secret_distribution_present",
+    ):
+        if bundle.get(flag) is not True:
+            add(f"tls-lifecycle-ops-check bundle flag {flag} is not proven")
+
+    checks = [check for check in checks_raw if isinstance(check, Mapping)]
+    if len(checks) != len(checks_raw):
+        add("tls-lifecycle-ops-check checks must be structured objects")
+    checks_by_name = {str(check.get("name") or ""): check for check in checks}
+    required_names = {
+        "validation_scope",
+        "issuance",
+        "renewal",
+        "deployment",
+        "secret_distribution",
+        "monitoring",
+        "redaction",
+    }
+    missing_names = sorted(name for name in required_names if name not in checks_by_name)
+    if missing_names:
+        add("tls-lifecycle-ops-check missing required checks: " + ", ".join(missing_names))
+
+    validation = checks_by_name.get("validation_scope")
+    if isinstance(validation, Mapping):
+        if validation.get("ok") is not True:
+            add("tls-lifecycle-ops-check validation_scope check must be ok")
+        if validation.get("production_validated") is not True:
+            add("tls-lifecycle-ops-check must prove production validation")
+        if validation.get("target_environment") != "production":
+            add("tls-lifecycle-ops-check target environment must be production")
+        if validation.get("operator_asserted") is not True:
+            add("tls-lifecycle-ops-check must prove operator attestation")
+
+    issuance = checks_by_name.get("issuance")
+    if isinstance(issuance, Mapping):
+        provider = str(issuance.get("provider") or "").strip().lower()
+        if issuance.get("ok") is not True:
+            add("tls-lifecycle-ops-check issuance check must be ok")
+        if provider in {"", "local", "self-signed", "self_signed", "test", "manual", "none"}:
+            add("tls-lifecycle-ops-check issuer must be non-local")
+        hostnames = issuance.get("hostnames")
+        if not isinstance(hostnames, list) or len(hostnames) < min_hostnames:
+            add("tls-lifecycle-ops-check hostname coverage is below requirement")
+        for flag in ("certificate_serial_sha256_present", "chain_sha256_present"):
+            if issuance.get(flag) is not True:
+                add(f"tls-lifecycle-ops-check issuance {flag} is not proven")
+
+    renewal = checks_by_name.get("renewal")
+    if isinstance(renewal, Mapping):
+        if renewal.get("ok") is not True:
+            add("tls-lifecycle-ops-check renewal check must be ok")
+        if (as_float(renewal.get("current_days_remaining")) or 0.0) < min_current_days:
+            add("tls-lifecycle-ops-check current certificate validity is below requirement")
+        if (as_float(renewal.get("candidate_days_remaining")) or 0.0) < min_candidate_days:
+            add("tls-lifecycle-ops-check candidate certificate validity is below requirement")
+        if (as_float(renewal.get("overlap_days")) or 0.0) < min_overlap_days:
+            add("tls-lifecycle-ops-check certificate overlap is below requirement")
+        for flag in ("automation_enabled", "renewal_executed"):
+            if renewal.get(flag) is not True:
+                add(f"tls-lifecycle-ops-check renewal {flag} is not proven")
+
+    deployment = checks_by_name.get("deployment")
+    if isinstance(deployment, Mapping):
+        if deployment.get("ok") is not True:
+            add("tls-lifecycle-ops-check deployment check must be ok")
+        if deployment.get("endpoint_https") is not True:
+            add("tls-lifecycle-ops-check deployed endpoint must be HTTPS")
+        if deployment.get("endpoint_local") is not False:
+            add("tls-lifecycle-ops-check deployed endpoint must be non-local")
+        if deployment.get("deployed_serial_matches_candidate") is not True:
+            add("tls-lifecycle-ops-check deployed certificate must match issued candidate")
+        if deployment.get("reload_verified") is not True:
+            add("tls-lifecycle-ops-check reload proof is missing")
+
+    secret = checks_by_name.get("secret_distribution")
+    if isinstance(secret, Mapping):
+        key_source = str(secret.get("private_key_source") or "").strip().lower()
+        if secret.get("ok") is not True:
+            add("tls-lifecycle-ops-check secret_distribution check must be ok")
+        if secret.get("key_source_local") is not False or key_source in {"", "local", "file", "filesystem", "env", "test", "none"}:
+            add("tls-lifecycle-ops-check private key custody must be non-local")
+        if secret.get("deployed_key_id_hash_present") is not True:
+            add("tls-lifecycle-ops-check deployed key id hash is missing")
+
+    monitoring = checks_by_name.get("monitoring")
+    if isinstance(monitoring, Mapping):
+        if monitoring.get("ok") is not True:
+            add("tls-lifecycle-ops-check monitoring check must be ok")
+        for flag in (
+            "expiry_alert_configured",
+            "renewal_failure_alert_configured",
+            "cert_mismatch_alert_configured",
+            "revocation_checked",
+        ):
+            if monitoring.get(flag) is not True:
+                add(f"tls-lifecycle-ops-check monitoring {flag} is not proven")
+
+    redaction_check = checks_by_name.get("redaction")
+    redaction_maps = [item for item in (redaction, redaction_check) if isinstance(item, Mapping)]
+    if not redaction_maps:
+        add("tls-lifecycle-ops-check redaction evidence is missing")
+    for redaction_map in redaction_maps:
+        for flag in (
+            "raw_private_keys_omitted",
+            "raw_certificate_pem_omitted",
+            "raw_acme_tokens_omitted",
+            "raw_deployment_logs_omitted",
+        ):
+            if redaction_map.get(flag) is not True:
+                add(f"tls-lifecycle-ops-check redaction flag {flag} is not proven")
+        if redaction_map.get("forbidden_raw_paths") not in ([], None):
+            add("tls-lifecycle-ops-check redaction contains raw field paths")
+        if redaction_map.get("forbidden_raw_fields_present") is True:
+            add("tls-lifecycle-ops-check redaction must prove no raw fields are present")
+
+    fingerprint = str(stdout_json.get("fingerprint") or "").strip()
+    if len(fingerprint) != 64:
+        add("tls-lifecycle-ops-check report fingerprint is missing")
+
+    return findings
+
+
 def _release_parametric_trainer_evidence_findings(stdout_json: Mapping[str, Any]) -> list[dict[str, Any]]:
     findings: list[dict[str, Any]] = []
 
@@ -11075,6 +11255,8 @@ def _release_command_output_findings(check: Mapping[str, Any]) -> list[dict[str,
         findings.extend(_release_worker_ops_evidence_findings(stdout_json))
     if command == "retrieval-ops-check":
         findings.extend(_release_retrieval_ops_evidence_findings(stdout_json))
+    if command == "tls-lifecycle-ops-check":
+        findings.extend(_release_tls_lifecycle_evidence_findings(stdout_json))
     if command == "parametric-trainer-check":
         findings.extend(_release_parametric_trainer_evidence_findings(stdout_json))
     if command == "mcp-ops-check":
