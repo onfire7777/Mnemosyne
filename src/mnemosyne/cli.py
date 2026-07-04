@@ -8383,6 +8383,69 @@ def cmd_ops_report(args: argparse.Namespace) -> None:
     emit(payload)
 
 
+def cmd_ops_metrics_push(args: argparse.Namespace) -> None:
+    """Render the ops report as Prometheus metrics and push to the store.
+
+    Runs once with ``--interval 0`` (capture/verification), or loops forever as
+    the supervised ``metrics-pusher`` production role. Every push rebuilds the
+    report from live engine/runtime state so the exported timestamp, gate, and
+    tripwire series reflect the deployment now rather than a stale snapshot.
+    """
+
+    import time as _time
+
+    from mnemosyne.observability import build_ops_report
+    from mnemosyne.ops_metrics import ops_report_to_prometheus, push_ops_metrics
+    from mnemosyne.queue import InProcessQueue
+
+    if not args.metrics_url:
+        raise SystemExit("ops-metrics-push requires --metrics-url or MNEMOSYNE_OPS_METRICS_URL")
+    if args.interval < 0:
+        raise SystemExit("ops-metrics-push interval must be zero or greater")
+
+    def push_once() -> dict[str, Any]:
+        runtime_state = load_runtime_state(args)
+        queue = runtime_state.load_queue() if runtime_state else InProcessQueue()
+        tools = load_tools(args, ingestion_queue=queue, runtime_state=runtime_state)
+        report = build_ops_report(
+            engine=tools.engine,
+            tenant_id=args.tenant,
+            queue_snapshot=queue.snapshot(),
+            learning=tools.learning,
+            metrics=tools.metrics.snapshot(),
+            proxy_score=None,
+            true_score=None,
+            min_diversity=args.min_diversity,
+            max_proxy_gap=args.max_proxy_gap,
+            max_open_contradictions=args.max_open_contradictions,
+        )
+        exposition = ops_report_to_prometheus(
+            report, tenant_id=args.tenant, now_seconds=_time.time()
+        )
+        status = push_ops_metrics(args.metrics_url, exposition, timeout=args.timeout)
+        return {
+            "ok": 200 <= status < 300,
+            "status": status,
+            "tripwires_passed": report["tripwires"]["passed"] is True,
+            "series": exposition.count("\n"),
+        }
+
+    if args.interval == 0:
+        result = push_once()
+        emit(result)
+        if not result["ok"]:
+            raise SystemExit(1)
+        return
+    while True:  # supervised production loop (metrics-pusher role)
+        try:
+            result = push_once()
+            if not result["ok"]:
+                print(f"ops-metrics-push non-2xx status {result['status']}", file=sys.stderr)
+        except Exception as exc:  # noqa: BLE001 - keep the supervised loop alive
+            print(f"ops-metrics-push failed: {exc}", file=sys.stderr)
+        _time.sleep(args.interval)
+
+
 def _ops_dashboard_finding(code: str, message: str) -> dict[str, str]:
     return {"code": code, "message": message}
 
@@ -18004,6 +18067,25 @@ def build_parser() -> argparse.ArgumentParser:
         help="Write static dashboard HTML, JSON snapshot, and manifest files to this directory",
     )
     ops_report.set_defaults(func=cmd_ops_report)
+
+    ops_metrics_push = sub.add_parser("ops-metrics-push")
+    ops_metrics_push.add_argument("--tenant", required=True)
+    ops_metrics_push.add_argument(
+        "--metrics-url",
+        default=os.environ.get("MNEMOSYNE_OPS_METRICS_URL"),
+        help="VictoriaMetrics /api/v1/import/prometheus endpoint",
+    )
+    ops_metrics_push.add_argument(
+        "--interval",
+        type=float,
+        default=float(os.environ.get("MNEMOSYNE_OPS_METRICS_INTERVAL", "0")),
+        help="Seconds between pushes; 0 pushes once and exits",
+    )
+    ops_metrics_push.add_argument("--timeout", type=float, default=10.0)
+    ops_metrics_push.add_argument("--min-diversity", type=float, default=0.2)
+    ops_metrics_push.add_argument("--max-proxy-gap", type=float, default=0.15)
+    ops_metrics_push.add_argument("--max-open-contradictions", type=int, default=0)
+    ops_metrics_push.set_defaults(func=cmd_ops_metrics_push)
 
     ops_dashboard_check = sub.add_parser("ops-dashboard-check")
     ops_dashboard_check.add_argument("--dashboard-package-dir", help="Path to an ops-report dashboard package directory")

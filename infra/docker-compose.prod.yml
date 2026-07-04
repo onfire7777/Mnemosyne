@@ -162,6 +162,23 @@ services:
       - ./observability/victoriametrics/scrape.yml:/etc/victoria/scrape.yml:ro
     networks: [internal]
 
+  mnemo-metrics:                           # read-only ops-report -> VictoriaMetrics push (tripwire series source)
+    <<: *hardened
+    build: { context: .., dockerfile: infra/Dockerfile }
+    env_file: [./profiles/self-hosted.env]
+    environment:
+      MNEMOSYNE_ROLE: metrics-pusher
+      PGPASSFILE: /run/secrets/pgpass_app     # read-path app_user; no write or KMS authority
+      SSL_CERT_FILE: /run/secrets/step_ca_root
+      MNEMOSYNE_OPS_METRICS_URL: http://victoriametrics:8428/api/v1/import/prometheus
+      MNEMOSYNE_OPS_METRICS_ALLOWED_INTERNAL_HOSTS: victoriametrics
+      MNEMOSYNE_OPS_METRICS_INTERVAL: "60"
+    command: ["--tenant", "primary"]
+    secrets: [pgpass_app, step_ca_root]
+    tmpfs: ["/tmp:size=32m"]
+    networks: [internal]
+    depends_on: [postgres, victoriametrics]
+
   blackbox-exporter:                       # TLS chain/hostname/expiry probe source (B2 tls-lifecycle row)
     <<: *hardened
     image: prom/blackbox-exporter:v0.25.0@sha256:b04a9fef4fa086a02fc7fcd8dcdbc4b7b35cc30cdee860fdc6a19dd8b208d63e
