@@ -6224,6 +6224,95 @@ def production_bundle_ops_stdout(command: str) -> dict:
     }
 
 
+def production_tls_lifecycle_stdout() -> dict:
+    return {
+        "ok": True,
+        "bundle": {
+            "name": "production-tls-lifecycle",
+            "validation_scope_present": True,
+            "issuance_present": True,
+            "renewal_present": True,
+            "deployment_present": True,
+            "secret_distribution_present": True,
+        },
+        "requirements": {
+            "min_hostnames": 1,
+            "min_current_days_valid": 7,
+            "min_candidate_days_valid": 30,
+            "min_overlap_days": 7,
+            "allow_non_production": False,
+            "allow_localhost": False,
+        },
+        "checks": [
+            {
+                "name": "validation_scope",
+                "ok": True,
+                "production_validated": True,
+                "target_environment": "production",
+                "operator_asserted": True,
+            },
+            {
+                "name": "issuance",
+                "ok": True,
+                "provider": "acme",
+                "hostnames": ["mnemosyne.example.com"],
+                "certificate_serial_sha256_present": True,
+                "chain_sha256_present": True,
+            },
+            {
+                "name": "renewal",
+                "ok": True,
+                "current_days_remaining": 45,
+                "candidate_days_remaining": 120,
+                "overlap_days": 30,
+                "automation_enabled": True,
+                "renewal_executed": True,
+            },
+            {
+                "name": "deployment",
+                "ok": True,
+                "endpoint_https": True,
+                "endpoint_local": False,
+                "deployed_serial_matches_candidate": True,
+                "reload_verified": True,
+            },
+            {
+                "name": "secret_distribution",
+                "ok": True,
+                "private_key_source": "vault",
+                "key_source_local": False,
+                "deployed_key_id_hash_present": True,
+            },
+            {
+                "name": "monitoring",
+                "ok": True,
+                "expiry_alert_configured": True,
+                "renewal_failure_alert_configured": True,
+                "cert_mismatch_alert_configured": True,
+                "revocation_checked": True,
+            },
+            {
+                "name": "redaction",
+                "ok": True,
+                "raw_private_keys_omitted": True,
+                "raw_certificate_pem_omitted": True,
+                "raw_acme_tokens_omitted": True,
+                "raw_deployment_logs_omitted": True,
+                "forbidden_raw_paths": [],
+            },
+        ],
+        "findings": [],
+        "redaction": {
+            "raw_private_keys_omitted": True,
+            "raw_certificate_pem_omitted": True,
+            "raw_acme_tokens_omitted": True,
+            "raw_deployment_logs_omitted": True,
+            "forbidden_raw_fields_present": False,
+        },
+        "fingerprint": "a" * 64,
+    }
+
+
 def production_parametric_trainer_stdout() -> dict:
     return {
         "ok": True,
@@ -6542,11 +6631,12 @@ def production_release_stdout(command: str, provider_stdout: dict) -> dict:
         return production_retrieval_ops_stdout()
     if command == "worker-ops-check":
         return production_worker_ops_stdout()
+    if command == "tls-lifecycle-ops-check":
+        return production_tls_lifecycle_stdout()
     if command == "parametric-trainer-check":
         return production_parametric_trainer_stdout()
     if command in {
         "auth-ops-check",
-        "tls-lifecycle-ops-check",
         "consolidation-ops-check",
         "multimodal-ops-check",
         "provenance-ops-check",
@@ -9731,6 +9821,79 @@ def test_cli_release_audit_rejects_weak_privacy_ops_evidence(tmp_path: Path) -> 
     assert "privacy-ops-check residency evidence requires enforced allow and deny cases" in messages
     assert "privacy-ops-check erasure evidence requires operator delete corroboration" in messages
     assert "privacy-ops-check redaction flag raw_kms_responses_omitted is not proven" in messages
+
+
+def test_cli_release_audit_rejects_weak_tls_lifecycle_evidence(tmp_path: Path) -> None:
+    report_path, manifest_path = write_release_report(tmp_path)
+    stdout_json = production_tls_lifecycle_stdout()
+    stdout_json["requirements"]["allow_non_production"] = True
+    stdout_json["requirements"]["allow_localhost"] = True
+    stdout_json["requirements"]["min_hostnames"] = 2
+    stdout_json["bundle"]["deployment_present"] = False
+    stdout_json["fingerprint"] = ""
+    for check in stdout_json["checks"]:
+        if check["name"] == "validation_scope":
+            check["production_validated"] = False
+            check["target_environment"] = "local"
+            check["operator_asserted"] = False
+        if check["name"] == "issuance":
+            check["provider"] = "local"
+            check["hostnames"] = ["localhost"]
+            check["certificate_serial_sha256_present"] = False
+        if check["name"] == "renewal":
+            check["current_days_remaining"] = 1
+            check["candidate_days_remaining"] = 2
+            check["overlap_days"] = 1
+            check["automation_enabled"] = False
+        if check["name"] == "deployment":
+            check["endpoint_https"] = False
+            check["endpoint_local"] = True
+            check["deployed_serial_matches_candidate"] = False
+            check["reload_verified"] = False
+        if check["name"] == "secret_distribution":
+            check["private_key_source"] = "file"
+            check["key_source_local"] = True
+            check["deployed_key_id_hash_present"] = False
+        if check["name"] == "monitoring":
+            check["expiry_alert_configured"] = False
+            check["renewal_failure_alert_configured"] = False
+        if check["name"] == "redaction":
+            check["raw_private_keys_omitted"] = False
+            check["forbidden_raw_paths"] = ["$.private_key_pem"]
+    stdout_json["redaction"]["raw_acme_tokens_omitted"] = False
+    stdout_json["redaction"]["forbidden_raw_fields_present"] = True
+    rewrite_release_check_stdout(
+        report_path,
+        manifest_path,
+        command="tls-lifecycle-ops-check",
+        stdout_json=stdout_json,
+    )
+
+    result = run_raw_cli(
+        tmp_path / "mnemosyne.json",
+        "release-audit",
+        "--evidence-manifest",
+        str(manifest_path),
+        "--require-production-validated",
+        "--require-provider-forbid-local",
+    )
+    payload = json.loads(result.stdout)
+    output_findings = [
+        finding
+        for finding in payload["findings"]
+        if finding["code"] == "required_tls_lifecycle_evidence_incomplete"
+    ]
+    messages = "\n".join(finding["message"] for finding in output_findings)
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert "tls-lifecycle-ops-check must prove non-production evidence is disallowed" in messages
+    assert "tls-lifecycle-ops-check bundle flag deployment_present is not proven" in messages
+    assert "tls-lifecycle-ops-check issuer must be non-local" in messages
+    assert "tls-lifecycle-ops-check deployed endpoint must be non-local" in messages
+    assert "tls-lifecycle-ops-check private key custody must be non-local" in messages
+    assert "tls-lifecycle-ops-check redaction flag raw_private_keys_omitted is not proven" in messages
+    assert "tls-lifecycle-ops-check report fingerprint is missing" in messages
 
 
 def test_cli_release_audit_rejects_weak_retrieval_ops_evidence(tmp_path: Path) -> None:

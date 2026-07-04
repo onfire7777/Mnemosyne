@@ -4,8 +4,8 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: null
-last_updated: "2026-07-03T23:21:37Z"
-last_activity: 2026-07-03 — Production `release-audit` now rejects weak `parametric-trainer-check` evidence unless replayed evidence proves a non-local cloud/GPU trainer provider, runtime-state protected suite, promoted zero-regression gate, rollback proof, HTTPS deployment, external-only rail report, bounded metrics, fingerprint, and training/credential/artifact redaction. Prior query-prefix, provider-latency, audit-retention, MCP-runtime, privacy/object-store, and retrieval source gates remain intact. TEI/Infinity deployment, real cross-encoder evidence, real CPU P95 artifacts, scanner/signature evidence, runtime default-deny egress evidence, real Vault-HMAC/pgaudit/WORM artifacts, hosted MCP operator evidence, privacy/operator evidence, retrieval operator evidence, B9 cloud/GPU trainer operator evidence, and operator-captured bundles still keep Phase 8/Tier-B rows open. No Tier-B row is marked Done.
+last_updated: "2026-07-04T02:49:51Z"
+last_activity: 2026-07-04 — Production `release-audit` now rejects weak `tls-lifecycle-ops-check` evidence unless replayed evidence proves production/operator validation, non-local CA issuance, renewal validity/automation, HTTPS non-local deployment, non-local private-key custody, monitoring, redaction, and a report fingerprint. Prior query-prefix, provider-latency, audit-retention, MCP-runtime, privacy/object-store, retrieval, and B9 parametric trainer source gates remain intact. TEI/Infinity deployment, real cross-encoder evidence, real CPU P95 artifacts, scanner/signature evidence, runtime default-deny egress evidence, real Vault-HMAC/pgaudit/WORM artifacts, hosted MCP operator evidence, privacy/operator evidence, retrieval operator evidence, TLS lifecycle/operator evidence, B9 cloud/GPU trainer operator evidence, and operator-captured bundles still keep Phase 8/Tier-B rows open. No Tier-B row is marked Done.
 progress:
   total_phases: 9
   completed_phases: 7
@@ -29,6 +29,16 @@ Phase: Strict parity continuation after Phase 5 scaffold
 Plan: Exact blueprint parity audit and runtime gap closure
 Status: In progress; exact 1:1 blueprint parity is not complete.
 Current status (2026-06-30): Mandatory Tier A source wirings are closed on `main`; FR-20 local and live-Postgres image/audio/video breadth, FR-21 local and live-Postgres parametric trainer/rollback validation, full compose-Postgres runtime readiness, belief-revision CLI validation, local hosted-MCP JSON-RPC/StreamableHTTP/SSE readiness, direct A12 cached-PPR live materialization coverage, G1 projection-level reality monitoring, G1 functional consciousness scorecard/proto-self seed, native workspace service with the `service.enabled` default-off gate retired, operational specialist-budget toggle retirement, cold-loop ignition enforcement, protected gate-case ratchet enforcement, Rail 6 serve-time sink enforcement, §24 support-strategy runtime durability plus public CLI/MCP mutation surfaces, Phase 7 plans 01-04, and the P5 H8/H12 cascade/observability pre-check are now done and gate-proven. The remaining strict-parity blocker is Tier B production operator evidence against deployed infrastructure before final v1.0 sign-off.
+
+Latest checkpoint (2026-07-04): Production release-audit now has an explicit
+source-side TLS lifecycle evidence gate for the Phase 8.3 step-ca/Caddy row.
+`tls-lifecycle-ops-check` retained output must prove production/operator
+validation, non-local CA/ACME issuance, hostname and chain evidence, renewal
+validity/automation, HTTPS non-local deployment with matching issued cert,
+non-local private-key custody, lifecycle monitoring, redaction, and a report
+fingerprint. Focused TLS/release-audit verification passes locally. This does
+not create operator TLS lifecycle artifacts; real production TLS/step-ca/Caddy
+evidence remains required.
 
 Latest checkpoint (2026-07-03): Production release-audit now has an explicit
 source-side parametric trainer evidence gate for the B9/FR-21 strict-parity
