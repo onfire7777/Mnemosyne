@@ -255,6 +255,9 @@ services:
     env_file: [./profiles/self-hosted.env]
     environment:
       MNEMOSYNE_ROLE: consolidator
+      # production jobs are enqueued under the primary tenant; without this the
+      # worker drains the default 'system' tenant and never processes them
+      MNEMOSYNE_QUEUE_TENANT: primary
       # sole write authority: overrides the env_file's read-path app_user DSN
       MNEMOSYNE_POSTGRES_DSN: postgresql://consolidator_user@postgres.mnemo.local:5432/mnemosyne
       PGPASSFILE: /run/secrets/pgpass_consolidator
