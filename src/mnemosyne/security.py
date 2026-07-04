@@ -702,6 +702,7 @@ class OidcJwtVerifier:
         jwks_loader: Callable[[], Mapping[str, Any]] | None = None,
         jwks_cache_ttl_seconds: int | None = None,
         refresh_on_unknown_kid: bool = True,
+        expected_kid_sha256: Sequence[str] | None = None,
         authorization_policy: OidcAuthorizationPolicy | None = None,
     ):
         if not issuer:
@@ -728,8 +729,29 @@ class OidcJwtVerifier:
         if self.jwks_cache_ttl_seconds is not None and self.jwks_cache_ttl_seconds < 0:
             raise SessionAuthError("OIDC JWKS cache TTL must be non-negative")
         self.refresh_on_unknown_kid = bool(refresh_on_unknown_kid)
+        self.expected_kid_sha256 = self._normalize_kid_pins(expected_kid_sha256)
         self.authorization_policy = authorization_policy
         self._install_jwks(jwks, loaded_at=self._jwks_loaded_at)
+
+    @staticmethod
+    def _normalize_kid_pins(expected_kid_sha256: Sequence[str] | None) -> frozenset[str]:
+        """Normalize configured kid pins to a set of lowercase sha256 hex digests.
+
+        Blank entries are tolerated (comma-separated env values produce them);
+        any non-blank entry that is not a full sha256 hex digest is rejected so
+        a typo cannot silently disable the pin.
+        """
+        if not expected_kid_sha256:
+            return frozenset()
+        pins: set[str] = set()
+        for entry in expected_kid_sha256:
+            candidate = str(entry or "").strip().lower()
+            if not candidate:
+                continue
+            if len(candidate) != 64 or any(ch not in "0123456789abcdef" for ch in candidate):
+                raise SessionAuthError("OIDC expected kid pins must be sha256 hex digests")
+            pins.add(candidate)
+        return frozenset(pins)
 
     def _install_jwks(self, jwks: Mapping[str, Any], *, loaded_at: int) -> None:
         keys = jwks.get("keys")
@@ -758,6 +780,17 @@ class OidcJwtVerifier:
             keys_by_id[key_id] = key
         if not keys_by_id:
             raise SessionAuthError("OIDC JWKS has no usable signing key")
+        if self.expected_kid_sha256:
+            # Pinned deployments only ever trust keys whose kid hashes to a
+            # configured digest; a swapped or poisoned JWKS document fails
+            # closed here instead of minting sessions from rogue keys.
+            keys_by_id = {
+                key_id: key
+                for key_id, key in keys_by_id.items()
+                if hashlib.sha256(key_id.encode("utf-8")).hexdigest() in self.expected_kid_sha256
+            }
+            if not keys_by_id:
+                raise SessionAuthError("OIDC JWKS has no signing key matching the pinned kid sha256 set")
         with self._jwks_lock:
             self.keys_by_id = keys_by_id
             self._jwks_loaded_at = loaded_at

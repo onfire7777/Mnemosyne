@@ -79,6 +79,7 @@ them outside the repository with
 | `MNEMOSYNE_PROD_DASHBOARD_URL` | Hosted ops dashboard URL | Deployment metadata | dashboard gate |
 | `MNEMOSYNE_PROD_EVIDENCE_DIR` | Prepared absolute external production input-artifact directory outside the repo | Operator workstation or secure artifact store | soak manifest gate commands; capture output is passed separately as `OUT_ROOT` |
 | `MNEMOSYNE_PROD_IDP_AUDIENCE` | Production IdP token audience | IdP client config | IdP/JWKS gates |
+| `MNEMOSYNE_PROD_IDP_EXPECTED_KID_SHA256` | sha256 hex of the expected realm signing kid (JWKS pin, non-secret) | IdP realm config | IdP/JWKS gates (`idp-jwks-live-check` kid pinning) |
 | `MNEMOSYNE_PROD_IDP_ISSUER` | Production IdP issuer URL | IdP realm config | IdP/JWKS gates |
 | `MNEMOSYNE_PROD_IDP_JWKS_URL` | Production JWKS endpoint | IdP realm config | IdP/JWKS gates |
 | `MNEMOSYNE_PROD_MCP_HTTP_BASE_URL` | Hosted JSON-RPC MCP base URL | Deployment metadata | `mcp-http-soak`; `mcp-ops-check` consumes `mcp-ops-bundle.json` |
@@ -131,7 +132,12 @@ the committed template and outside soak-manifest `args`.
 
 | Variable or option | Purpose | Source | Consumed by |
 |---|---|---|---|
-| `MNEMOSYNE_POSTGRES_DSN` | Production Postgres connection | Secret manager or shell env | Postgres backend, live suite, retrieval gates |
+| `MNEMOSYNE_POSTGRES_DSN` | Production Postgres connection | Secret manager or shell env | Postgres backend, live suite, retrieval gates, `postgres-role-check` app probe |
+| `MNEMOSYNE_POSTGRES_CONSOLIDATOR_DSN` | Consolidator (sole-write) Postgres connection | Secret manager or shell env | `postgres-role-check` consolidator probe |
+| `MNEMOSYNE_COLLECTOR_SIGNING_KEY_FILE` | Collector-only Ed25519 private key path (never leaves the collector) | Operator workstation custody | `evidence-sign`, capture-script auto-signing |
+| `MNEMOSYNE_COLLECTOR_PUBLIC_KEY_FILE` | Collector Ed25519 public key path | Operator workstation custody | `evidence-verify`, `release-audit --require-signed-evidence` |
+| `MNEMOSYNE_AUDIT_HMAC_COMMAND` | Vault-transit HMAC adapter command for audit hash chains | Vault custody via adapter | `audit-chain-export`, `audit-chain-verify` |
+| `MNEMOSYNE_AUDIT_LOCAL_HMAC_SECRET_FILE` | Non-production local HMAC secret file for audit chains | Dev workstation only | `audit-chain-export`, `audit-chain-verify` (never satisfies the vault-hmac gate) |
 | `MNEME_BACKEND` | CLI backend selector | Deployment env | CLI runtime |
 | `MNEME_STORE` | Local store path when using local backend | Deployment env | CLI runtime |
 | `MNEMOSYNE_QUEUE_BACKEND` | Worker queue backend | Deployment env | worker gates, `deployment-soak` |

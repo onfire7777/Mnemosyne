@@ -1686,6 +1686,15 @@ fi
   --check-timeout "${MNEMOSYNE_PRODUCTION_SOAK_CHECK_TIMEOUT:-120}" \
   > "${OUT_ROOT}/deployment-soak.stdout.json"
 
+if [ -n "${MNEMOSYNE_COLLECTOR_SIGNING_KEY_FILE:-}" ]; then
+  "${PYTHON}" -m mnemosyne.cli \
+    --store "${OUT_ROOT}/store.json" \
+    evidence-sign \
+    --evidence-manifest "${OUT_ROOT}/evidence/manifest.json" \
+    --private-key-file "${MNEMOSYNE_COLLECTOR_SIGNING_KEY_FILE}" \
+    > "${OUT_ROOT}/evidence-signature.stdout.json"
+fi
+
 AUDIT_ARGS=(
   --store "${OUT_ROOT}/store.json"
   release-audit
@@ -1693,6 +1702,13 @@ AUDIT_ARGS=(
   --require-production-validated
   --require-provider-forbid-local
 )
+
+if [ -n "${MNEMOSYNE_COLLECTOR_PUBLIC_KEY_FILE:-}" ]; then
+  AUDIT_ARGS+=(
+    --require-signed-evidence
+    --collector-public-key-file "${MNEMOSYNE_COLLECTOR_PUBLIC_KEY_FILE}"
+  )
+fi
 
 if [ -n "${MNEMOSYNE_EXPECTED_RELEASE_FINGERPRINT:-}" ]; then
   AUDIT_ARGS+=(--expected-fingerprint "${MNEMOSYNE_EXPECTED_RELEASE_FINGERPRINT}")

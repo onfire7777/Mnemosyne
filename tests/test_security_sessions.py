@@ -366,6 +366,52 @@ def test_oidc_jwt_verifier_rejects_unsafe_jwks_metadata() -> None:
         OidcJwtVerifier(jwks, issuer=ISSUER, audience=AUDIENCE, allowed_algorithms=())
 
 
+def test_oidc_jwt_verifier_kid_sha256_pin_accepts_only_pinned_keys() -> None:
+    """Pinned deployments only trust JWKS keys whose kid hashes to a configured
+    sha256 digest, so a poisoned JWKS document cannot mint sessions from a
+    rogue key even when the IdP endpoint itself is compromised."""
+
+    jwks, token = signed_oidc_token(oidc_payload())
+    pinned = hashlib.sha256(b"idp-key-1").hexdigest()
+
+    identity = OidcJwtVerifier(
+        jwks,
+        issuer=ISSUER,
+        audience=AUDIENCE,
+        expected_kid_sha256=(pinned.upper(), "", "  "),
+    ).verify(token, now=1_900_000_000)
+    assert identity.tenant_id == "tenant-a"
+
+    rogue_jwks, rogue_token = signed_oidc_token(oidc_payload(), kid="rogue-key")
+    with pytest.raises(SessionAuthError, match="pinned kid sha256"):
+        OidcJwtVerifier(
+            rogue_jwks,
+            issuer=ISSUER,
+            audience=AUDIENCE,
+            expected_kid_sha256=(pinned,),
+        )
+
+    mixed = {"keys": [rogue_jwks["keys"][0], jwks["keys"][0]]}
+    pinned_verifier = OidcJwtVerifier(
+        mixed,
+        issuer=ISSUER,
+        audience=AUDIENCE,
+        expected_kid_sha256=(pinned,),
+        refresh_on_unknown_kid=False,
+    )
+    assert set(pinned_verifier.keys_by_id) == {"idp-key-1"}
+    # The rogue key was dropped at install time, so its tokens fail closed.
+    with pytest.raises(SessionAuthError, match="kid is unknown"):
+        pinned_verifier.verify(rogue_token, now=1_900_000_000)
+    assert pinned_verifier.verify(token, now=1_900_000_000).user_id == "user-a"
+
+    with pytest.raises(SessionAuthError, match="sha256 hex digests"):
+        OidcJwtVerifier(jwks, issuer=ISSUER, audience=AUDIENCE, expected_kid_sha256=("not-a-digest",))
+    # All-blank pin input (empty env split) behaves as unpinned.
+    unpinned = OidcJwtVerifier(jwks, issuer=ISSUER, audience=AUDIENCE, expected_kid_sha256=("", ""))
+    assert unpinned.expected_kid_sha256 == frozenset()
+
+
 @pytest.mark.skipif(
     not os.environ.get("MNEMOSYNE_OIDC_JWKS_URL"),
     reason="live IdP JWKS test requires MNEMOSYNE_OIDC_JWKS_URL (e.g. a local Keycloak certs endpoint)",

@@ -295,7 +295,7 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     assert report["packet_docs_complete"] is True
     assert report["packet_docs_added"] == []
     assert report["packet_docs_missing"] == []
-    assert len(report["missing_render_environment"]) == 18
+    assert len(report["missing_render_environment"]) == 19
     assert "MNEMOSYNE_PROD_EVIDENCE_DIR" not in report["missing_render_environment"]
     assert "MNEMOSYNE_EMBEDDING_URL" in report["missing_provider_manifest_env_refs"]
     assert report["missing_input_artifact_count"] == 23
@@ -395,7 +395,7 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     render_env_plan = {
         item["env"]: item for item in report["render_env_action_plan"]
     }
-    assert len(render_env_plan) == 19
+    assert len(render_env_plan) == 20
     assert render_env_plan["MNEMOSYNE_PROD_EVIDENCE_DIR"]["status"] == (
         "present_for_readiness"
     )
@@ -555,7 +555,7 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
         str(row["lane"]) for row in report["rows"] if not row["ready_for_capture"]
     }
     assert blockers["ready_lanes"] == []
-    assert blockers["types"]["render_environment"]["missing_count"] == 18
+    assert blockers["types"]["render_environment"]["missing_count"] == 19
     assert blockers["types"]["provider_manifest_environment"]["missing_count"] == 24
     assert blockers["types"]["input_artifacts"]["missing_count"] == 23
     assert blockers["types"]["packet_docs"]["missing_count"] == 0
@@ -585,7 +585,7 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     assert inventory["production_render_env"]["path"] == str(
         packet_root / "production-render.env"
     )
-    assert inventory["production_render_env"]["missing_count"] == 18
+    assert inventory["production_render_env"]["missing_count"] == 19
     assert (
         "MNEMOSYNE_PROD_EVIDENCE_DIR"
         not in inventory["production_render_env"]["missing"]
@@ -1113,7 +1113,7 @@ def test_prepare_production_evidence_custody_refresh_preserves_operator_inputs(
     )
 
     assert refresh.returncode == 78
-    assert summary["missing_render_environment"] == 17
+    assert summary["missing_render_environment"] == 18
     assert "MNEMOSYNE_PROD_TENANT" not in report["missing_render_environment"]
     assert report["production_render_env"] == str(env_file)
     assert report["production_render_env_loaded"] is True

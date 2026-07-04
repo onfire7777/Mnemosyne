@@ -16,7 +16,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import asdict
 from datetime import UTC, datetime
 from hashlib import sha256
@@ -62,6 +62,7 @@ DEPLOYMENT_SOAK_COMMANDS = {
     "provenance-trust-check",
     "provider-check",
     "retrieval-ops-check",
+    "postgres-role-check",
     "idp-jwks-live-check",
     "idp-authz-policy-rollout-check",
     "tls-cert-check",
@@ -100,6 +101,7 @@ PRODUCTION_RELEASE_REQUIRED_COMMANDS = (
     "provenance-trust-check",
     "provider-check",
     "retrieval-ops-check",
+    "postgres-role-check",
     "idp-jwks-live-check",
     "idp-authz-policy-rollout-check",
     "tls-cert-check",
@@ -137,6 +139,17 @@ PRODUCTION_RELEASE_REQUIRED_PROVIDER_CHECKS = (
 )
 PRODUCTION_RELEASE_LATENCY_PROVIDER_CHECKS = frozenset({"embedding", "reranker"})
 PRODUCTION_RELEASE_MIN_LATENCY_SAMPLES = 3
+POSTGRES_ROLE_CHECK_REQUIRED_CHECKS = (
+    "app_role_safety",
+    "app_group_membership",
+    "app_destructive_writes_denied",
+    "audit_log_append_only_app",
+    "consolidator_role_safety",
+    "consolidator_group_membership",
+    "consolidator_sole_write",
+    "audit_log_append_only_consolidator",
+    "group_role_posture",
+)
 RELEASE_AUDIT_REQUIRED_OUTPUT_KEYS: dict[str, tuple[str, ...]] = {
     "belief-revision-check": ("fingerprint", "summary", "results", "findings"),
     "auth-ops-check": ("bundle", "requirements", "checks", "findings"),
@@ -149,6 +162,7 @@ RELEASE_AUDIT_REQUIRED_OUTPUT_KEYS: dict[str, tuple[str, ...]] = {
     "provenance-trust-check": ("suite", "required_case_ids", "checks", "findings"),
     "provider-check": ("manifest", "checks"),
     "retrieval-ops-check": ("bundle", "requirements", "checks", "findings"),
+    "postgres-role-check": ("target", "requirements", "roles", "checks", "findings"),
     "idp-jwks-live-check": ("issuer", "audience", "jwks", "token", "identity"),
     "idp-authz-policy-rollout-check": ("rollout",),
     "tls-cert-check": ("target", "tls", "certificate", "checks"),
@@ -779,6 +793,7 @@ def _oidc_verifier_components(
         ),
         jwks_cache_ttl_seconds=args.idp_jwks_cache_ttl_seconds,
         refresh_on_unknown_kid=not args.idp_disable_refresh_on_unknown_kid,
+        expected_kid_sha256=tuple(getattr(args, "idp_expected_kid_sha256", None) or ()),
         authorization_policy=policy,
     )
     return verifier, jwks_document, policy
@@ -848,6 +863,11 @@ def cmd_idp_jwks_live_check(args: argparse.Namespace) -> None:
                 "max_bytes": args.idp_jwks_max_bytes,
                 "cache_ttl_seconds": args.idp_jwks_cache_ttl_seconds,
                 "refresh_on_unknown_kid": not args.idp_disable_refresh_on_unknown_kid,
+                "kid_pinning": {
+                    "enabled": bool(verifier.expected_kid_sha256),
+                    "pinned_kid_count": len(verifier.expected_kid_sha256),
+                    "usable_key_count": len(verifier.keys_by_id),
+                },
             },
             "token": {
                 "configured": True,
@@ -883,6 +903,315 @@ def cmd_idp_jwks_live_check(args: argparse.Namespace) -> None:
             }
         )
         raise SystemExit(1) from exc
+
+
+def _postgres_role_finding(code: str, message: str) -> dict[str, str]:
+    return {"code": code, "message": message}
+
+
+def _postgres_role_fingerprint(report: Mapping[str, Any]) -> str:
+    stable = {
+        "target": report.get("target"),
+        "requirements": report.get("requirements"),
+        "roles": report.get("roles"),
+        "checks": report.get("checks"),
+        "findings": report.get("findings"),
+    }
+    return sha256(json.dumps(stable, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def _postgres_role_target(dsn: str) -> dict[str, Any]:
+    """Describe a probe target without ever emitting the raw DSN.
+
+    Key/value DSNs without a parseable host are treated as local so the
+    non-local production gate fails closed rather than passing on ambiguity."""
+    host = ""
+    port: int | None = None
+    dbname = ""
+    if "://" in dsn:
+        try:
+            parsed = urlsplit(dsn)
+            host = parsed.hostname or ""
+            port = parsed.port
+            dbname = (parsed.path or "").lstrip("/")
+        except ValueError:
+            host = ""
+    else:
+        for part in dsn.split():
+            key, _, value = part.partition("=")
+            if key == "host":
+                host = value.strip("'\"")
+            elif key == "port" and value.strip("'\"").isdigit():
+                port = int(value.strip("'\""))
+            elif key == "dbname":
+                dbname = value.strip("'\"")
+    lowered = host.lower()
+    local = (
+        not lowered
+        or lowered in {"localhost", "::1", "[::1]"}
+        or lowered.startswith("127.")
+        or lowered.startswith("/")
+    )
+    return {
+        "configured": True,
+        "host": host or None,
+        "port": port,
+        "dbname": dbname or None,
+        "local": local,
+        "dsn_sha256": "sha256:" + sha256(dsn.encode("utf-8")).hexdigest(),
+    }
+
+
+def _probe_postgres_role_connection(
+    conn: Any,
+    *,
+    expected_group: str,
+    group_names: Sequence[str],
+    audit_table: str,
+) -> dict[str, Any]:
+    """Live-probe one Postgres connection for role-separation posture.
+
+    Answers the questions roles.sql requires an ops-check to prove: the
+    session role is NOSUPERUSER/NOBYPASSRLS, maps onto the expected group,
+    and holds exactly the destructive privileges the separation grants."""
+    from mnemosyne.postgres_security import inspect_postgres_role
+
+    role = inspect_postgres_role(conn)
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = %s),
+                   CASE WHEN EXISTS (SELECT 1 FROM pg_roles WHERE rolname = %s)
+                        THEN pg_has_role(current_user, %s, 'member')
+                        ELSE false END
+            """,
+            (expected_group, expected_group, expected_group),
+        )
+        group_row = cur.fetchone()
+        cur.execute(
+            """
+            SELECT tablename,
+                   has_table_privilege(current_user, 'public.' || quote_ident(tablename), 'DELETE'),
+                   has_table_privilege(current_user, 'public.' || quote_ident(tablename), 'TRUNCATE'),
+                   has_table_privilege(current_user, 'public.' || quote_ident(tablename), 'UPDATE')
+            FROM pg_tables
+            WHERE schemaname = 'public'
+            ORDER BY tablename
+            """
+        )
+        table_rows = cur.fetchall()
+        cur.execute(
+            "SELECT rolname, rolsuper, rolbypassrls, rolcanlogin FROM pg_roles WHERE rolname = ANY(%s)",
+            (list(group_names),),
+        )
+        posture_rows = cur.fetchall()
+    table_names = [str(row[0]) for row in table_rows]
+    return {
+        "current_user": role.current_user,
+        "rolsuper": role.rolsuper,
+        "rolbypassrls": role.rolbypassrls,
+        "expected_group": expected_group,
+        "group_exists": bool(group_row and group_row[0]),
+        "group_member": bool(group_row and group_row[1]),
+        "table_count": len(table_names),
+        "delete_tables": [str(row[0]) for row in table_rows if row[1]],
+        "truncate_tables": [str(row[0]) for row in table_rows if row[2]],
+        "audit_table_present": audit_table in table_names,
+        "audit_update": any(bool(row[3]) for row in table_rows if str(row[0]) == audit_table),
+        "audit_delete": any(bool(row[1]) for row in table_rows if str(row[0]) == audit_table),
+        "audit_truncate": any(bool(row[2]) for row in table_rows if str(row[0]) == audit_table),
+        "groups": {
+            str(row[0]): {
+                "rolsuper": bool(row[1]),
+                "rolbypassrls": bool(row[2]),
+                "rolcanlogin": bool(row[3]),
+            }
+            for row in posture_rows
+        },
+    }
+
+
+def cmd_postgres_role_check(args: argparse.Namespace) -> None:
+    started = time.monotonic()
+    if not args.app_dsn:
+        raise SystemExit("postgres-role-check requires --app-dsn or MNEMOSYNE_POSTGRES_DSN")
+    try:
+        import psycopg
+    except ImportError as exc:  # pragma: no cover - exercised only without the postgres extra.
+        raise SystemExit("postgres-role-check requires the postgres extra (psycopg)") from exc
+
+    group_names: tuple[str, ...] = (
+        args.expected_app_group,
+        args.expected_consolidator_group,
+        args.readonly_group,
+    )
+    findings: list[dict[str, str]] = []
+    checks: list[dict[str, Any]] = []
+    roles: dict[str, Any] = {}
+    target: dict[str, Any] = {
+        "app": _postgres_role_target(args.app_dsn),
+        "consolidator": _postgres_role_target(args.consolidator_dsn)
+        if args.consolidator_dsn
+        else {"configured": False},
+    }
+
+    def add(code: str, message: str) -> None:
+        findings.append(_postgres_role_finding(code, message))
+
+    def check(name: str, ok: bool, message: str, **details: Any) -> None:
+        checks.append({"name": name, "ok": bool(ok), **details})
+        if not ok:
+            add(f"{name}_failed", message)
+
+    probes: dict[str, dict[str, Any] | None] = {"app": None, "consolidator": None}
+    for label, dsn, expected_group in (
+        ("app", args.app_dsn, args.expected_app_group),
+        ("consolidator", args.consolidator_dsn, args.expected_consolidator_group),
+    ):
+        if not dsn:
+            continue
+        if target[label].get("local") and not args.allow_localhost:
+            add(
+                "postgres_role_target_local",
+                f"{label} DSN targets a local host; production role probes must be non-local",
+            )
+        try:
+            with psycopg.connect(dsn, autocommit=True, connect_timeout=args.connect_timeout) as conn:
+                probes[label] = _probe_postgres_role_connection(
+                    conn,
+                    expected_group=expected_group,
+                    group_names=group_names,
+                    audit_table=args.audit_table,
+                )
+        except Exception as exc:  # noqa: BLE001 - live probes must fail closed with evidence.
+            add("postgres_role_probe_failed", f"{label} role probe failed: {exc}")
+
+    app = probes["app"]
+    if app is not None:
+        roles["app"] = {
+            key: app[key]
+            for key in ("current_user", "rolsuper", "rolbypassrls", "expected_group", "group_exists", "group_member")
+        }
+        check(
+            "app_role_safety",
+            not app["rolsuper"] and not app["rolbypassrls"],
+            "app role must be NOSUPERUSER and NOBYPASSRLS",
+            current_user=app["current_user"],
+            rolsuper=app["rolsuper"],
+            rolbypassrls=app["rolbypassrls"],
+        )
+        check(
+            "app_group_membership",
+            app["group_exists"] and app["group_member"],
+            f"app role must be a member of {args.expected_app_group}",
+            expected_group=args.expected_app_group,
+        )
+        check(
+            "app_destructive_writes_denied",
+            not app["delete_tables"] and not app["truncate_tables"],
+            "app role must not hold DELETE or TRUNCATE on any public table",
+            delete_table_count=len(app["delete_tables"]),
+            truncate_table_count=len(app["truncate_tables"]),
+        )
+        check(
+            "audit_log_append_only_app",
+            app["audit_table_present"]
+            and not app["audit_update"]
+            and not app["audit_delete"]
+            and not app["audit_truncate"],
+            f"app role must not hold UPDATE/DELETE/TRUNCATE on {args.audit_table}",
+            audit_table=args.audit_table,
+        )
+        groups = app["groups"]
+        roles["groups"] = groups
+        check(
+            "group_role_posture",
+            all(
+                name in groups
+                and not groups[name]["rolsuper"]
+                and not groups[name]["rolbypassrls"]
+                and not groups[name]["rolcanlogin"]
+                for name in group_names
+            ),
+            "group roles must exist as NOLOGIN NOSUPERUSER NOBYPASSRLS",
+            expected_groups=list(group_names),
+        )
+    else:
+        add("postgres_role_app_probe_missing", "app DSN probe did not produce role evidence")
+
+    consolidator = probes["consolidator"]
+    if consolidator is not None:
+        roles["consolidator"] = {
+            key: consolidator[key]
+            for key in ("current_user", "rolsuper", "rolbypassrls", "expected_group", "group_exists", "group_member")
+        }
+        check(
+            "consolidator_role_safety",
+            not consolidator["rolsuper"] and not consolidator["rolbypassrls"],
+            "consolidator role must be NOSUPERUSER and NOBYPASSRLS",
+            current_user=consolidator["current_user"],
+            rolsuper=consolidator["rolsuper"],
+            rolbypassrls=consolidator["rolbypassrls"],
+        )
+        check(
+            "consolidator_group_membership",
+            consolidator["group_exists"] and consolidator["group_member"],
+            f"consolidator role must be a member of {args.expected_consolidator_group}",
+            expected_group=args.expected_consolidator_group,
+        )
+        deletable = set(consolidator["delete_tables"])
+        check(
+            "consolidator_sole_write",
+            consolidator["table_count"] > 0
+            and args.audit_table not in deletable
+            and len(deletable) >= consolidator["table_count"] - (1 if consolidator["audit_table_present"] else 0),
+            "consolidator role must hold DELETE on every public table except the audit log",
+            delete_table_count=len(deletable),
+            table_count=consolidator["table_count"],
+        )
+        check(
+            "audit_log_append_only_consolidator",
+            consolidator["audit_table_present"]
+            and not consolidator["audit_update"]
+            and not consolidator["audit_delete"]
+            and not consolidator["audit_truncate"],
+            f"consolidator role must not hold UPDATE/DELETE/TRUNCATE on {args.audit_table}",
+            audit_table=args.audit_table,
+        )
+    elif args.consolidator_dsn:
+        add("postgres_role_consolidator_probe_missing", "consolidator DSN probe did not produce role evidence")
+    else:
+        add(
+            "postgres_role_consolidator_dsn_missing",
+            "consolidator DSN is required for sole-write evidence "
+            "(--consolidator-dsn or MNEMOSYNE_POSTGRES_CONSOLIDATOR_DSN)",
+        )
+
+    report: dict[str, Any] = {
+        "ok": not findings,
+        "latency_ms": round((time.monotonic() - started) * 1000, 3),
+        "target": target,
+        "requirements": {
+            "allow_localhost": bool(args.allow_localhost),
+            "expected_app_group": args.expected_app_group,
+            "expected_consolidator_group": args.expected_consolidator_group,
+            "readonly_group": args.readonly_group,
+            "audit_table": args.audit_table,
+        },
+        "roles": roles,
+        "checks": checks,
+        "findings": findings,
+    }
+    report["fingerprint"] = _postgres_role_fingerprint(report)
+    report["expected_fingerprint_present"] = bool(args.expected_fingerprint)
+    if args.expected_fingerprint and args.expected_fingerprint.strip().lower() != report["fingerprint"]:
+        report["ok"] = False
+        report["findings"].append(
+            _postgres_role_finding("fingerprint_mismatch", "postgres-role-check report fingerprint mismatch")
+        )
+    emit(report)
+    if not report["ok"]:
+        raise SystemExit(1)
 
 
 def cmd_idp_authz_policy_check(args: argparse.Namespace) -> None:
@@ -11199,6 +11528,88 @@ def _release_ops_report_evidence_findings(stdout_json: Mapping[str, Any]) -> lis
     return findings
 
 
+def _release_postgres_role_evidence_findings(stdout_json: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Production role-separation evidence must prove live rolsuper/rolbypassrls
+    probes against non-local app and consolidator DSNs, sole-write posture, and
+    DSN redaction — roles.sql mandates this live probe for every prod DSN."""
+    findings: list[dict[str, Any]] = []
+
+    def add(message: str) -> None:
+        findings.append(_release_finding("postgres_role_evidence_weak", message))
+
+    requirements = stdout_json.get("requirements")
+    if not isinstance(requirements, Mapping) or requirements.get("allow_localhost") is not False:
+        add("postgres-role-check must prove localhost targets are disallowed")
+    target = stdout_json.get("target")
+    target = target if isinstance(target, Mapping) else {}
+    for label in ("app", "consolidator"):
+        entry = target.get(label)
+        if not isinstance(entry, Mapping) or entry.get("configured") is not True:
+            add(f"postgres-role-check must probe the {label} DSN")
+            continue
+        if entry.get("local") is not False:
+            add(f"postgres-role-check {label} target must be non-local")
+        if "dsn" in entry or not str(entry.get("dsn_sha256") or "").startswith("sha256:"):
+            add(f"postgres-role-check {label} target must redact the DSN to a sha256 fingerprint")
+    roles = stdout_json.get("roles")
+    roles = roles if isinstance(roles, Mapping) else {}
+    for label in ("app", "consolidator"):
+        entry = roles.get(label)
+        if not isinstance(entry, Mapping):
+            add(f"postgres-role-check is missing live role evidence for {label}")
+            continue
+        if entry.get("rolsuper") is not False or entry.get("rolbypassrls") is not False:
+            add(f"postgres-role-check {label} role must prove rolsuper=false and rolbypassrls=false")
+    checks_raw = stdout_json.get("checks")
+    checks_by_name = (
+        {str(check.get("name") or ""): check for check in checks_raw if isinstance(check, Mapping)}
+        if isinstance(checks_raw, list)
+        else {}
+    )
+    for name in POSTGRES_ROLE_CHECK_REQUIRED_CHECKS:
+        entry = checks_by_name.get(name)
+        if not isinstance(entry, Mapping) or entry.get("ok") is not True:
+            add(f"postgres-role-check check {name} is not proven")
+    emitted = stdout_json.get("findings")
+    if not isinstance(emitted, list) or emitted:
+        add("postgres-role-check report must have an empty findings list")
+    if stdout_json.get("ok") is not True:
+        add("postgres-role-check report must be ok")
+    fingerprint = str(stdout_json.get("fingerprint") or "")
+    if len(fingerprint) != 64 or any(ch not in "0123456789abcdef" for ch in fingerprint):
+        add("postgres-role-check report requires a sha256 fingerprint")
+    return findings
+
+
+def _release_idp_jwks_evidence_findings(stdout_json: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Production IdP evidence must prove JWKS kid-sha256 pinning is active.
+
+    A live check that verified a token against an unpinned JWKS proves the IdP
+    endpoint worked, not that a swapped or poisoned keyset would fail closed."""
+    findings: list[dict[str, Any]] = []
+
+    def add(message: str) -> None:
+        findings.append(_release_finding("idp_jwks_kid_pin_weak", message))
+
+    jwks = stdout_json.get("jwks")
+    if not isinstance(jwks, Mapping):
+        add("idp-jwks-live-check evidence is missing the jwks section")
+        return findings
+    kid_pinning = jwks.get("kid_pinning")
+    if not isinstance(kid_pinning, Mapping):
+        add("idp-jwks-live-check evidence is missing jwks kid_pinning proof")
+        return findings
+    if kid_pinning.get("enabled") is not True:
+        add("production idp-jwks-live-check evidence requires kid sha256 pinning to be enabled")
+    pinned_count = kid_pinning.get("pinned_kid_count")
+    if not isinstance(pinned_count, int) or pinned_count < 1:
+        add("production idp-jwks-live-check evidence requires at least one pinned kid sha256")
+    usable_count = kid_pinning.get("usable_key_count")
+    if not isinstance(usable_count, int) or usable_count < 1:
+        add("production idp-jwks-live-check evidence requires at least one usable pinned signing key")
+    return findings
+
+
 def _release_command_output_findings(check: Mapping[str, Any]) -> list[dict[str, Any]]:
     command = check.get("command")
     if not isinstance(command, str) or command not in RELEASE_AUDIT_REQUIRED_OUTPUT_KEYS:
@@ -11263,6 +11674,10 @@ def _release_command_output_findings(check: Mapping[str, Any]) -> list[dict[str,
         findings.extend(_release_mcp_ops_evidence_findings(stdout_json))
     if command == "privacy-ops-check":
         findings.extend(_release_privacy_ops_evidence_findings(stdout_json))
+    if command == "idp-jwks-live-check":
+        findings.extend(_release_idp_jwks_evidence_findings(stdout_json))
+    if command == "postgres-role-check":
+        findings.extend(_release_postgres_role_evidence_findings(stdout_json))
     return findings
 
 
@@ -11398,6 +11813,39 @@ def _build_release_audit_report(args: argparse.Namespace) -> dict[str, Any]:
     required_provider_checks = sorted(set(args.require_provider_check or PRODUCTION_RELEASE_REQUIRED_PROVIDER_CHECKS))
     fingerprint = _release_audit_fingerprint(report)
     findings: list[dict[str, Any]] = []
+
+    signature_status: dict[str, Any] | None = None
+    require_signed_evidence = bool(getattr(args, "require_signed_evidence", False))
+    collector_public_key_file = getattr(args, "collector_public_key_file", None)
+    if require_signed_evidence or collector_public_key_file:
+        from mnemosyne.evidence_signing import EvidenceSignatureError, verify_evidence_manifest_signature
+
+        if not collector_public_key_file:
+            findings.append(
+                _release_finding(
+                    "evidence_signature_key_missing",
+                    "signed evidence verification requires --collector-public-key-file "
+                    "or MNEMOSYNE_COLLECTOR_PUBLIC_KEY_FILE",
+                )
+            )
+        elif source.get("kind") != "evidence_manifest":
+            findings.append(
+                _release_finding(
+                    "evidence_signature_manifest_required",
+                    "signed evidence verification requires --evidence-manifest so the "
+                    "collector signature binds the digest manifest",
+                )
+            )
+        else:
+            signature_file = getattr(args, "evidence_signature_file", None)
+            try:
+                signature_status = verify_evidence_manifest_signature(
+                    Path(source["manifest_path"]),
+                    Path(collector_public_key_file).expanduser(),
+                    signature_path=Path(signature_file).expanduser() if signature_file else None,
+                )
+            except EvidenceSignatureError as exc:
+                findings.append(_release_finding("evidence_signature_invalid", str(exc)))
 
     if report.get("ok") is not True:
         findings.append(_release_finding("soak_report_not_ok", "deployment-soak report is not ok"))
@@ -11555,7 +12003,9 @@ def _build_release_audit_report(args: argparse.Namespace) -> dict[str, Any]:
             "required_provider_checks": required_provider_checks,
             "require_provider_forbid_local": bool(args.require_provider_forbid_local),
             "require_production_validated": bool(args.require_production_validated),
+            "require_signed_evidence": require_signed_evidence,
         },
+        "signature": signature_status,
         "validation_scope": report.get("validation_scope"),
         "summary": {
             "checks": len(checks),
@@ -11582,6 +12032,136 @@ def cmd_release_audit(args: argparse.Namespace) -> None:
     emit(report_out)
     if report_out["findings"]:
         raise SystemExit(1)
+
+
+def cmd_evidence_keygen(args: argparse.Namespace) -> None:
+    from mnemosyne.evidence_signing import EvidenceSignatureError, generate_collector_keypair
+
+    try:
+        result = generate_collector_keypair(
+            Path(args.private_key_file).expanduser(),
+            Path(args.public_key_file).expanduser(),
+        )
+    except EvidenceSignatureError as exc:
+        emit({"ok": False, "error": str(exc)})
+        raise SystemExit(1) from exc
+    emit({"ok": True, **result})
+
+
+def cmd_evidence_sign(args: argparse.Namespace) -> None:
+    from mnemosyne.evidence_signing import EvidenceSignatureError, sign_evidence_manifest
+
+    try:
+        result = sign_evidence_manifest(
+            Path(args.evidence_manifest).expanduser(),
+            Path(args.private_key_file).expanduser(),
+            signature_path=Path(args.signature_file).expanduser() if args.signature_file else None,
+        )
+    except EvidenceSignatureError as exc:
+        emit({"ok": False, "error": str(exc)})
+        raise SystemExit(1) from exc
+    emit({"ok": True, **result})
+
+
+def cmd_evidence_verify(args: argparse.Namespace) -> None:
+    from mnemosyne.evidence_signing import EvidenceSignatureError, verify_evidence_manifest_signature
+
+    try:
+        result = verify_evidence_manifest_signature(
+            Path(args.evidence_manifest).expanduser(),
+            Path(args.public_key_file).expanduser(),
+            signature_path=Path(args.signature_file).expanduser() if args.signature_file else None,
+        )
+    except EvidenceSignatureError as exc:
+        emit({"ok": False, "error": str(exc)})
+        raise SystemExit(1) from exc
+    emit({"ok": True, **result})
+
+
+def _audit_chain_hmac_provider(args: argparse.Namespace) -> tuple[str, Any]:
+    from mnemosyne.audit_chain import (
+        LOCAL_HMAC_PROVIDER,
+        VAULT_HMAC_PROVIDER,
+        AuditChainError,
+        command_hmac_provider,
+        local_hmac_provider,
+    )
+
+    try:
+        if args.hmac_command:
+            return VAULT_HMAC_PROVIDER, command_hmac_provider(args.hmac_command, timeout=args.hmac_timeout)
+        if args.local_hmac_secret_file:
+            secret = Path(args.local_hmac_secret_file).expanduser().read_text(encoding="utf-8").strip()
+            return LOCAL_HMAC_PROVIDER, local_hmac_provider(secret)
+    except (OSError, AuditChainError) as exc:
+        raise SystemExit(f"audit chain HMAC provider denied: {exc}") from exc
+    raise SystemExit(
+        "audit chain requires --hmac-command (Vault transit adapter) or "
+        "--local-hmac-secret-file (explicitly non-production)"
+    )
+
+
+def _audit_chain_entries(engine: "MemoryEngine", tenant_id: str) -> list[Any]:
+    exported = engine.export_tenant(tenant_id)
+    entries = exported.get("audit_log")
+    if not isinstance(entries, list):
+        raise SystemExit("tenant export did not return an audit_log list")
+    return entries
+
+
+def cmd_audit_chain_export(args: argparse.Namespace) -> None:
+    from mnemosyne.audit_chain import AuditChainError, build_audit_chain
+
+    provider_name, hmac_provider = _audit_chain_hmac_provider(args)
+    entries = _audit_chain_entries(load_engine(args), args.tenant)
+    try:
+        document = build_audit_chain(
+            entries,
+            tenant_id=args.tenant,
+            provider_name=provider_name,
+            hmac_provider=hmac_provider,
+        )
+    except AuditChainError as exc:
+        emit({"ok": False, "tenant_id": args.tenant, "error": str(exc)})
+        raise SystemExit(1) from exc
+    output = Path(args.output).expanduser()
+    output.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    emit(
+        {
+            "ok": True,
+            "output": str(output),
+            "schema": document["schema"],
+            "provider": document["provider"],
+            "non_production": document["non_production"],
+            "tenant_id": args.tenant,
+            "entry_count": document["entry_count"],
+            "head_link_sha256": document["head_link_sha256"],
+            "head_hmac": document["head_hmac"],
+        }
+    )
+
+
+def cmd_audit_chain_verify(args: argparse.Namespace) -> None:
+    from mnemosyne.audit_chain import AuditChainError, verify_audit_chain
+
+    _provider_name, hmac_provider = _audit_chain_hmac_provider(args)
+    try:
+        document = json.loads(Path(args.chain_file).expanduser().read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        emit({"ok": False, "tenant_id": args.tenant, "error": f"audit chain document denied: {exc}"})
+        raise SystemExit(1) from exc
+    entries = _audit_chain_entries(load_engine(args), args.tenant)
+    try:
+        result = verify_audit_chain(
+            document,
+            entries,
+            tenant_id=args.tenant,
+            hmac_provider=hmac_provider,
+        )
+    except AuditChainError as exc:
+        emit({"ok": False, "tenant_id": args.tenant, "error": str(exc)})
+        raise SystemExit(1) from exc
+    emit({"ok": True, **result})
 
 
 def _production_evidence_finding(
@@ -16465,6 +17045,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         default=env_flag("MNEMOSYNE_IDP_DISABLE_REFRESH_ON_UNKNOWN_KID", default=False),
     )
+    session_exchange.add_argument(
+        "--idp-expected-kid-sha256",
+        action="append",
+        default=(os.environ.get("MNEMOSYNE_IDP_EXPECTED_KID_SHA256", "").split(",")),
+    )
     session_exchange.add_argument("--session-max-ttl-seconds", type=int, default=int(os.environ.get("MNEMOSYNE_SESSION_MAX_TTL_SECONDS", "3600")))
     session_exchange.set_defaults(func=cmd_session_exchange)
 
@@ -16540,7 +17125,47 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         default=env_flag("MNEMOSYNE_IDP_DISABLE_REFRESH_ON_UNKNOWN_KID", default=False),
     )
+    idp_jwks_live_check.add_argument(
+        "--idp-expected-kid-sha256",
+        action="append",
+        default=(os.environ.get("MNEMOSYNE_IDP_EXPECTED_KID_SHA256", "").split(",")),
+    )
     idp_jwks_live_check.set_defaults(func=cmd_idp_jwks_live_check)
+
+    postgres_role_check = sub.add_parser("postgres-role-check")
+    postgres_role_check.add_argument("--app-dsn", default=os.environ.get("MNEMOSYNE_POSTGRES_DSN"))
+    postgres_role_check.add_argument(
+        "--consolidator-dsn",
+        default=os.environ.get("MNEMOSYNE_POSTGRES_CONSOLIDATOR_DSN"),
+    )
+    postgres_role_check.add_argument(
+        "--expected-app-group",
+        default=os.environ.get("MNEMOSYNE_POSTGRES_APP_GROUP", "mnemosyne_app"),
+    )
+    postgres_role_check.add_argument(
+        "--expected-consolidator-group",
+        default=os.environ.get("MNEMOSYNE_POSTGRES_CONSOLIDATOR_GROUP", "mnemosyne_consolidator"),
+    )
+    postgres_role_check.add_argument(
+        "--readonly-group",
+        default=os.environ.get("MNEMOSYNE_POSTGRES_READONLY_GROUP", "mnemosyne_readonly"),
+    )
+    postgres_role_check.add_argument("--audit-table", default="audit_log")
+    postgres_role_check.add_argument(
+        "--connect-timeout",
+        type=int,
+        default=int(os.environ.get("MNEMOSYNE_POSTGRES_CONNECT_TIMEOUT", "10")),
+    )
+    postgres_role_check.add_argument(
+        "--allow-localhost",
+        action="store_true",
+        default=env_flag("MNEMOSYNE_POSTGRES_ROLE_CHECK_ALLOW_LOCALHOST", default=False),
+    )
+    postgres_role_check.add_argument(
+        "--expected-fingerprint",
+        default=os.environ.get("MNEMOSYNE_POSTGRES_ROLE_CHECK_EXPECTED_FINGERPRINT"),
+    )
+    postgres_role_check.set_defaults(func=cmd_postgres_role_check)
 
     idp_authz_policy_check = sub.add_parser("idp-authz-policy-check")
     idp_authz_policy_check.add_argument("--idp-authz-policy", default=os.environ.get("MNEMOSYNE_IDP_AUTHZ_POLICY"))
@@ -17511,7 +18136,86 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     release_audit.add_argument("--expected-fingerprint")
+    release_audit.add_argument(
+        "--collector-public-key-file",
+        default=os.environ.get("MNEMOSYNE_COLLECTOR_PUBLIC_KEY_FILE"),
+        help="Collector Ed25519 public key (PEM) used to verify the evidence-bundle signature",
+    )
+    release_audit.add_argument(
+        "--evidence-signature-file",
+        default=os.environ.get("MNEMOSYNE_EVIDENCE_SIGNATURE_FILE"),
+        help="Detached signature document; defaults to <evidence-manifest>.sig.json",
+    )
+    release_audit.add_argument(
+        "--require-signed-evidence",
+        action="store_true",
+        default=env_flag("MNEMOSYNE_REQUIRE_SIGNED_EVIDENCE", default=False),
+        help="Fail unless the evidence manifest carries a valid collector signature",
+    )
     release_audit.set_defaults(func=cmd_release_audit)
+
+    evidence_keygen = sub.add_parser("evidence-keygen")
+    evidence_keygen.add_argument(
+        "--private-key-file",
+        required=not bool(os.environ.get("MNEMOSYNE_COLLECTOR_SIGNING_KEY_FILE")),
+        default=os.environ.get("MNEMOSYNE_COLLECTOR_SIGNING_KEY_FILE"),
+    )
+    evidence_keygen.add_argument(
+        "--public-key-file",
+        required=not bool(os.environ.get("MNEMOSYNE_COLLECTOR_PUBLIC_KEY_FILE")),
+        default=os.environ.get("MNEMOSYNE_COLLECTOR_PUBLIC_KEY_FILE"),
+    )
+    evidence_keygen.set_defaults(func=cmd_evidence_keygen)
+
+    evidence_sign = sub.add_parser("evidence-sign")
+    evidence_sign.add_argument("--evidence-manifest", required=True)
+    evidence_sign.add_argument(
+        "--private-key-file",
+        required=not bool(os.environ.get("MNEMOSYNE_COLLECTOR_SIGNING_KEY_FILE")),
+        default=os.environ.get("MNEMOSYNE_COLLECTOR_SIGNING_KEY_FILE"),
+    )
+    evidence_sign.add_argument("--signature-file", default=os.environ.get("MNEMOSYNE_EVIDENCE_SIGNATURE_FILE"))
+    evidence_sign.set_defaults(func=cmd_evidence_sign)
+
+    evidence_verify = sub.add_parser("evidence-verify")
+    evidence_verify.add_argument("--evidence-manifest", required=True)
+    evidence_verify.add_argument(
+        "--public-key-file",
+        required=not bool(os.environ.get("MNEMOSYNE_COLLECTOR_PUBLIC_KEY_FILE")),
+        default=os.environ.get("MNEMOSYNE_COLLECTOR_PUBLIC_KEY_FILE"),
+    )
+    evidence_verify.add_argument("--signature-file", default=os.environ.get("MNEMOSYNE_EVIDENCE_SIGNATURE_FILE"))
+    evidence_verify.set_defaults(func=cmd_evidence_verify)
+
+    audit_chain_export = sub.add_parser("audit-chain-export")
+    audit_chain_export.add_argument("--tenant", required=True)
+    audit_chain_export.add_argument("--output", required=True)
+    audit_chain_export.add_argument("--hmac-command", default=os.environ.get("MNEMOSYNE_AUDIT_HMAC_COMMAND"))
+    audit_chain_export.add_argument(
+        "--hmac-timeout",
+        type=float,
+        default=float(os.environ.get("MNEMOSYNE_AUDIT_HMAC_TIMEOUT", "30")),
+    )
+    audit_chain_export.add_argument(
+        "--local-hmac-secret-file",
+        default=os.environ.get("MNEMOSYNE_AUDIT_LOCAL_HMAC_SECRET_FILE"),
+    )
+    audit_chain_export.set_defaults(func=cmd_audit_chain_export)
+
+    audit_chain_verify = sub.add_parser("audit-chain-verify")
+    audit_chain_verify.add_argument("--tenant", required=True)
+    audit_chain_verify.add_argument("--chain-file", required=True)
+    audit_chain_verify.add_argument("--hmac-command", default=os.environ.get("MNEMOSYNE_AUDIT_HMAC_COMMAND"))
+    audit_chain_verify.add_argument(
+        "--hmac-timeout",
+        type=float,
+        default=float(os.environ.get("MNEMOSYNE_AUDIT_HMAC_TIMEOUT", "30")),
+    )
+    audit_chain_verify.add_argument(
+        "--local-hmac-secret-file",
+        default=os.environ.get("MNEMOSYNE_AUDIT_LOCAL_HMAC_SECRET_FILE"),
+    )
+    audit_chain_verify.set_defaults(func=cmd_audit_chain_verify)
 
     production_evidence_verify = sub.add_parser("production-evidence-verify")
     production_evidence_verify.add_argument(
