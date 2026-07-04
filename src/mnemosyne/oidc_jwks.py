@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import urllib.error
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +20,7 @@ def load_oidc_jwks(
     allow_insecure_url: bool,
     timeout: float,
     max_bytes: int,
+    allowed_internal_hosts: Iterable[str] = (),
 ) -> dict[str, Any]:
     max_bytes = int(max_bytes)
     if max_bytes <= 0:
@@ -39,6 +40,7 @@ def load_oidc_jwks(
                 allow_insecure_url=allow_insecure_url,
                 timeout=timeout,
                 max_bytes=max_bytes,
+                allowed_internal_hosts=allowed_internal_hosts,
             )
         )
     try:
@@ -58,6 +60,7 @@ def oidc_jwks_loader(
     allow_insecure_url: bool,
     timeout: float,
     max_bytes: int,
+    allowed_internal_hosts: Iterable[str] = (),
 ) -> Callable[[], dict[str, Any]] | None:
     if jwks_file or jwks_url:
         return lambda: load_oidc_jwks(
@@ -67,6 +70,7 @@ def oidc_jwks_loader(
             allow_insecure_url=allow_insecure_url,
             timeout=timeout,
             max_bytes=max_bytes,
+            allowed_internal_hosts=allowed_internal_hosts,
         )
     return None
 
@@ -98,11 +102,19 @@ def _read_file_bytes(path: Path, max_bytes: int) -> bytes:
     return data
 
 
-def _read_url_bytes(url: str, *, allow_insecure_url: bool, timeout: float, max_bytes: int) -> bytes:
+def _read_url_bytes(
+    url: str,
+    *,
+    allow_insecure_url: bool,
+    timeout: float,
+    max_bytes: int,
+    allowed_internal_hosts: Iterable[str] = (),
+) -> bytes:
     try:
         validated_url = validate_fetch_url(
             url,
             allow_insecure_localhost=allow_insecure_url,
+            allow_internal_hosts=allowed_internal_hosts,
             purpose="OIDC JWKS URL",
         )
     except ValueError as exc:

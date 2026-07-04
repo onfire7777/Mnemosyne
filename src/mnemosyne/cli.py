@@ -760,6 +760,11 @@ def _oidc_verifier_components(
     from mnemosyne.oidc_jwks import load_oidc_authorization_policy, load_oidc_jwks, oidc_jwks_loader
     from mnemosyne.security import OidcJwtVerifier
 
+    allowed_internal_hosts = tuple(
+        host.strip()
+        for host in (getattr(args, "idp_allowed_internal_hosts", None) or "").split(",")
+        if host.strip()
+    )
     jwks_document = load_oidc_jwks(
         jwks=args.idp_jwks,
         jwks_file=args.idp_jwks_file,
@@ -767,6 +772,7 @@ def _oidc_verifier_components(
         allow_insecure_url=args.idp_allow_insecure_jwks_url,
         timeout=args.idp_timeout,
         max_bytes=args.idp_jwks_max_bytes,
+        allowed_internal_hosts=allowed_internal_hosts,
     )
     policy = load_oidc_authorization_policy(
         policy=args.idp_authz_policy,
@@ -790,6 +796,7 @@ def _oidc_verifier_components(
             allow_insecure_url=args.idp_allow_insecure_jwks_url,
             timeout=args.idp_timeout,
             max_bytes=args.idp_jwks_max_bytes,
+            allowed_internal_hosts=allowed_internal_hosts,
         ),
         jwks_cache_ttl_seconds=args.idp_jwks_cache_ttl_seconds,
         refresh_on_unknown_kid=not args.idp_disable_refresh_on_unknown_kid,
@@ -17050,6 +17057,10 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         default=(os.environ.get("MNEMOSYNE_IDP_EXPECTED_KID_SHA256", "").split(",")),
     )
+    session_exchange.add_argument(
+        "--idp-allowed-internal-hosts",
+        default=os.environ.get("MNEMOSYNE_IDP_ALLOWED_INTERNAL_HOSTS", ""),
+    )
     session_exchange.add_argument("--session-max-ttl-seconds", type=int, default=int(os.environ.get("MNEMOSYNE_SESSION_MAX_TTL_SECONDS", "3600")))
     session_exchange.set_defaults(func=cmd_session_exchange)
 
@@ -17129,6 +17140,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--idp-expected-kid-sha256",
         action="append",
         default=(os.environ.get("MNEMOSYNE_IDP_EXPECTED_KID_SHA256", "").split(",")),
+    )
+    idp_jwks_live_check.add_argument(
+        "--idp-allowed-internal-hosts",
+        default=os.environ.get("MNEMOSYNE_IDP_ALLOWED_INTERNAL_HOSTS", ""),
     )
     idp_jwks_live_check.set_defaults(func=cmd_idp_jwks_live_check)
 
