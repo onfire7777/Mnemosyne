@@ -1,0 +1,30 @@
+# VictoriaMetrics promscrape config (self-hosted production profile).
+# blackbox-tls: TLS chain/hostname/expiry probes for every Caddy-served host
+#   (drives the mnemosyne-tls-lifecycle vmalert group, B2 row).
+# vmalert: scrapes vmalert's own /metrics so alert/tripwire state is stored
+#   in VictoriaMetrics and visible on the Grafana dashboard (no external
+#   Alertmanager in this profile).
+scrape_configs:
+  - job_name: blackbox-tls
+    metrics_path: /probe
+    scrape_interval: 60s
+    params:
+      module: [https_stepca]
+    static_configs:
+      - targets:
+          - https://mcp.mnemo.local
+          - https://kc.mnemo.local
+          - https://grafana.mnemo.local
+          - https://tei.mnemo.local
+          - https://s3.mnemo.local
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
+  - job_name: vmalert
+    scrape_interval: 30s
+    static_configs:
+      - targets: ["vmalert:8880"]
