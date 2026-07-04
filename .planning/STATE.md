@@ -4,8 +4,8 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: null
-last_updated: "2026-07-04T02:49:51Z"
-last_activity: 2026-07-04 — Production `release-audit` now rejects weak `tls-lifecycle-ops-check` evidence unless replayed evidence proves production/operator validation, non-local CA issuance, renewal validity/automation, HTTPS non-local deployment, non-local private-key custody, monitoring, redaction, and a report fingerprint. Prior query-prefix, provider-latency, audit-retention, MCP-runtime, privacy/object-store, retrieval, and B9 parametric trainer source gates remain intact. TEI/Infinity deployment, real cross-encoder evidence, real CPU P95 artifacts, scanner/signature evidence, runtime default-deny egress evidence, real Vault-HMAC/pgaudit/WORM artifacts, hosted MCP operator evidence, privacy/operator evidence, retrieval operator evidence, TLS lifecycle/operator evidence, B9 cloud/GPU trainer operator evidence, and operator-captured bundles still keep Phase 8/Tier-B rows open. No Tier-B row is marked Done.
+last_updated: "2026-07-04T22:30:00Z"
+last_activity: 2026-07-04 — Four Phase-8 source rails shipped as real code. (1) JWKS kid-sha256 pinning across CLI session-exchange, `idp-jwks-live-check`, and hosted MCP; release-audit rejects unpinned IdP evidence. (2) New required production command `postgres-role-check` live-probes `pg_roles` rolsuper/rolbypassrls, group membership, app DELETE/TRUNCATE denial, consolidator sole-write, and audit_log append-only posture; release-audit rejects weak or local role evidence. (3) Collector-only Ed25519 evidence-bundle signing (`evidence-keygen`/`evidence-sign`/`evidence-verify`; `release-audit --require-signed-evidence`; capture-script auto-sign). (4) Audit hash-chain producer/verifier (`audit-chain-export`/`audit-chain-verify`) anchored by Vault-transit command HMAC with tamper/truncation detection. Prior TLS, query-prefix, provider-latency, audit-retention, MCP-runtime, privacy/object-store, retrieval, and B9 parametric trainer source gates remain intact. Operator-retained evidence from deployed infrastructure still keeps Phase 8/Tier-B rows open. No Tier-B row is marked Done.
 progress:
   total_phases: 9
   completed_phases: 7
@@ -29,6 +29,25 @@ Phase: Strict parity continuation after Phase 5 scaffold
 Plan: Exact blueprint parity audit and runtime gap closure
 Status: In progress; exact 1:1 blueprint parity is not complete.
 Current status (2026-06-30): Mandatory Tier A source wirings are closed on `main`; FR-20 local and live-Postgres image/audio/video breadth, FR-21 local and live-Postgres parametric trainer/rollback validation, full compose-Postgres runtime readiness, belief-revision CLI validation, local hosted-MCP JSON-RPC/StreamableHTTP/SSE readiness, direct A12 cached-PPR live materialization coverage, G1 projection-level reality monitoring, G1 functional consciousness scorecard/proto-self seed, native workspace service with the `service.enabled` default-off gate retired, operational specialist-budget toggle retirement, cold-loop ignition enforcement, protected gate-case ratchet enforcement, Rail 6 serve-time sink enforcement, §24 support-strategy runtime durability plus public CLI/MCP mutation surfaces, Phase 7 plans 01-04, and the P5 H8/H12 cascade/observability pre-check are now done and gate-proven. The remaining strict-parity blocker is Tier B production operator evidence against deployed infrastructure before final v1.0 sign-off.
+
+Latest checkpoint (2026-07-04, later): Phase 8 gained four real source rails in
+one pass. JWKS kid-sha256 pinning is enforced by `OidcJwtVerifier` and exposed
+through the CLI and hosted MCP, with `idp-jwks-live-check` emitting
+`jwks.kid_pinning` evidence and release-audit rejecting unpinned IdP evidence.
+A new `postgres-role-check` command performs the live role-separation probe
+roles.sql mandates (rolsuper/rolbypassrls, group membership, app
+destructive-write denial, consolidator sole-write, audit_log append-only) and
+joined the required production release command set with its own release-audit
+evidence gate. Evidence bundles can now be signed by a collector-only Ed25519
+key (`evidence-keygen`/`evidence-sign`/`evidence-verify`), release-audit
+verifies signatures fail-closed via `--require-signed-evidence`, and the
+production capture script signs automatically when the collector key is
+configured. The tamper-evident audit rail gained a real hash-chain
+producer/verifier (`audit-chain-export`/`audit-chain-verify`) anchored by a
+Vault-transit command HMAC (or an explicitly non-production local secret) that
+detects entry rewrites, truncation, unanchored appends, and forged heads.
+None of this creates operator artifacts; deployed-infrastructure captures
+remain the sole blocker for Tier-B rows.
 
 Latest checkpoint (2026-07-04): Production release-audit now has an explicit
 source-side TLS lifecycle evidence gate for the Phase 8.3 step-ca/Caddy row.
