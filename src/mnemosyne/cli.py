@@ -8394,7 +8394,7 @@ def cmd_ops_metrics_push(args: argparse.Namespace) -> None:
 
     import time as _time
 
-    from mnemosyne.observability import build_ops_report
+    from mnemosyne.observability import build_ops_report, render_ops_dashboard
     from mnemosyne.ops_metrics import ops_report_to_prometheus, push_ops_metrics
     from mnemosyne.queue import InProcessQueue
 
@@ -8423,12 +8423,22 @@ def cmd_ops_metrics_push(args: argparse.Namespace) -> None:
             report, tenant_id=args.tenant, now_seconds=_time.time()
         )
         status = push_ops_metrics(args.metrics_url, exposition, timeout=args.timeout)
-        return {
+        result = {
             "ok": 200 <= status < 300,
             "status": status,
             "tripwires_passed": report["tripwires"]["passed"] is True,
             "series": exposition.count("\n"),
         }
+        if args.dashboard_html_out:
+            # Refresh the hosted ops dashboard artifact atomically each cycle
+            # so the Caddy-served copy is never observed half-written.
+            out = Path(args.dashboard_html_out).expanduser()
+            out.parent.mkdir(parents=True, exist_ok=True)
+            tmp = out.with_name(out.name + ".tmp")
+            tmp.write_text(render_ops_dashboard(report), encoding="utf-8")
+            tmp.replace(out)
+            result["dashboard_html_out"] = str(out)
+        return result
 
     if args.interval == 0:
         result = push_once()
@@ -15931,6 +15941,21 @@ def _is_loopback_host(host: str | None) -> bool:
     return is_loopback_host(host)
 
 
+def _hosted_check_allowed_internal_hosts() -> tuple[str, ...]:
+    """Internal hostnames hosted checks may probe (operator allowlist).
+
+    Self-hosted deployments serve the hosted dashboard, MCP, and role-LLM
+    surfaces on private addresses behind the internal ingress. The
+    network-safety guard blocks private resolution by default; this is the
+    explicit operator-scoped escape hatch, matching the Vault/Ollama/retrieval
+    and OIDC provider paths (``MNEMOSYNE_*_ALLOWED_INTERNAL_HOSTS``). HTTPS is
+    still required for allowlisted hosts.
+    """
+
+    raw = os.environ.get("MNEMOSYNE_HOSTED_CHECK_ALLOWED_INTERNAL_HOSTS", "")
+    return tuple(host.strip() for host in raw.split(",") if host.strip())
+
+
 def _validate_hosted_fetch_url(url: str, *, allow_insecure_localhost: bool) -> ValidatedFetchUrl:
     from mnemosyne.network_safety import validate_fetch_url
 
@@ -15938,6 +15963,7 @@ def _validate_hosted_fetch_url(url: str, *, allow_insecure_localhost: bool) -> V
         return validate_fetch_url(
             url,
             allow_insecure_localhost=allow_insecure_localhost,
+            allow_internal_hosts=_hosted_check_allowed_internal_hosts(),
             purpose="provider url",
         )
     except ValueError as exc:
@@ -18082,6 +18108,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Seconds between pushes; 0 pushes once and exits",
     )
     ops_metrics_push.add_argument("--timeout", type=float, default=10.0)
+    ops_metrics_push.add_argument(
+        "--dashboard-html-out",
+        default=os.environ.get("MNEMOSYNE_OPS_DASHBOARD_HTML_OUT"),
+        help="Also render the ops dashboard HTML artifact to this path each push",
+    )
     ops_metrics_push.add_argument("--min-diversity", type=float, default=0.2)
     ops_metrics_push.add_argument("--max-proxy-gap", type=float, default=0.15)
     ops_metrics_push.add_argument("--max-open-contradictions", type=int, default=0)

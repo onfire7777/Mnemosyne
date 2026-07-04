@@ -55,6 +55,22 @@ def test_exposition_sanitizes_label_values() -> None:
     assert 'tenant="ten_ant__x"' in text
 
 
+def test_hosted_check_internal_allowlist_scopes_private_hosts(monkeypatch: pytest.MonkeyPatch) -> None:
+    from mnemosyne.cli import _validate_hosted_fetch_url
+
+    monkeypatch.delenv("MNEMOSYNE_HOSTED_CHECK_ALLOWED_INTERNAL_HOSTS", raising=False)
+    with pytest.raises(ValueError):
+        _validate_hosted_fetch_url("https://172.19.0.2/ops-dashboard.html", allow_insecure_localhost=False)
+    monkeypatch.setenv("MNEMOSYNE_HOSTED_CHECK_ALLOWED_INTERNAL_HOSTS", "172.19.0.2")
+    validated = _validate_hosted_fetch_url(
+        "https://172.19.0.2/ops-dashboard.html", allow_insecure_localhost=False
+    )
+    assert validated.host == "172.19.0.2"
+    # https stays required for allowlisted internal hosts
+    with pytest.raises(ValueError):
+        _validate_hosted_fetch_url("http://172.19.0.2/ops-dashboard.html", allow_insecure_localhost=False)
+
+
 def test_push_rejects_internal_host_without_allowlist(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("MNEMOSYNE_OPS_METRICS_ALLOWED_INTERNAL_HOSTS", raising=False)
     with pytest.raises(ValueError):
@@ -137,6 +153,8 @@ def test_cli_ops_metrics_push_once_against_local_store(tmp_path) -> None:
                 url,
                 "--interval",
                 "0",
+                "--dashboard-html-out",
+                str(tmp_path / "pub" / "ops-dashboard.html"),
             ],
             check=True,
             text=True,
@@ -150,3 +168,6 @@ def test_cli_ops_metrics_push_once_against_local_store(tmp_path) -> None:
     assert report["status"] == 204
     assert b"mnemosyne_ops_report_timestamp_seconds" in received["body"]
     assert b"mnemosyne_ops_report_info" in received["body"]
+    dashboard_html = (tmp_path / "pub" / "ops-dashboard.html").read_text(encoding="utf-8")
+    assert "Mnemosyne Ops Dashboard" in dashboard_html
+    assert dashboard_html.lower().startswith("<!doctype html")
