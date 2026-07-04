@@ -325,6 +325,7 @@ def _filled_render_env(tmp_path: Path) -> dict[str, str]:
         "MNEMOSYNE_PROD_DASHBOARD_URL": "https://mnemosyne.example.com/dashboards/ops",
         "MNEMOSYNE_PROD_EVIDENCE_DIR": str(evidence_dir),
         "MNEMOSYNE_PROD_IDP_AUDIENCE": "mnemosyne",
+        "MNEMOSYNE_PROD_IDP_EXPECTED_KID_SHA256": "7" * 64,
         "MNEMOSYNE_PROD_IDP_ISSUER": "https://idp.example.com/realms/mnemosyne",
         "MNEMOSYNE_PROD_IDP_JWKS_URL": (
             "https://idp.example.com/realms/mnemosyne/protocol/openid-connect/certs"

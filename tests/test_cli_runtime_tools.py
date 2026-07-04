@@ -6680,9 +6680,67 @@ def production_release_stdout(command: str, provider_stdout: dict) -> dict:
             "ok": True,
             "issuer": "https://idp.example.com/",
             "audience": "mnemosyne",
-            "jwks": {"key_count": 2, "fingerprint": "sha256:" + "1" * 64},
+            "jwks": {
+                "key_count": 2,
+                "fingerprint": "sha256:" + "1" * 64,
+                "kid_pinning": {"enabled": True, "pinned_kid_count": 1, "usable_key_count": 1},
+            },
             "token": {"claims_hash": "sha256:" + "2" * 64},
             "identity": {"subject_hash": "sha256:" + "3" * 64, "roles": ["operator"]},
+        }
+    if command == "postgres-role-check":
+        return {
+            "ok": True,
+            "target": {
+                "app": {
+                    "configured": True,
+                    "host": "postgres.internal.example.com",
+                    "port": 5432,
+                    "dbname": "mnemosyne",
+                    "local": False,
+                    "dsn_sha256": "sha256:" + "7" * 64,
+                },
+                "consolidator": {
+                    "configured": True,
+                    "host": "postgres.internal.example.com",
+                    "port": 5432,
+                    "dbname": "mnemosyne",
+                    "local": False,
+                    "dsn_sha256": "sha256:" + "8" * 64,
+                },
+            },
+            "requirements": {
+                "allow_localhost": False,
+                "expected_app_group": "mnemosyne_app",
+                "expected_consolidator_group": "mnemosyne_consolidator",
+                "readonly_group": "mnemosyne_readonly",
+                "audit_table": "audit_log",
+            },
+            "roles": {
+                "app": {"current_user": "app_user", "rolsuper": False, "rolbypassrls": False},
+                "consolidator": {"current_user": "consolidator_user", "rolsuper": False, "rolbypassrls": False},
+                "groups": {
+                    "mnemosyne_app": {"rolsuper": False, "rolbypassrls": False, "rolcanlogin": False},
+                    "mnemosyne_consolidator": {"rolsuper": False, "rolbypassrls": False, "rolcanlogin": False},
+                    "mnemosyne_readonly": {"rolsuper": False, "rolbypassrls": False, "rolcanlogin": False},
+                },
+            },
+            "checks": [
+                {"name": name, "ok": True}
+                for name in (
+                    "app_role_safety",
+                    "app_group_membership",
+                    "app_destructive_writes_denied",
+                    "audit_log_append_only_app",
+                    "consolidator_role_safety",
+                    "consolidator_group_membership",
+                    "consolidator_sole_write",
+                    "audit_log_append_only_consolidator",
+                    "group_role_posture",
+                )
+            ],
+            "findings": [],
+            "fingerprint": "9" * 64,
         }
     if command == "idp-authz-policy-rollout-check":
         return {"ok": True, "rollout": {"policy_id": "mnemosyne-prod", "simulation_change_count": 0}}
@@ -7411,6 +7469,92 @@ def test_cli_release_audit_verifies_production_deployment_evidence(tmp_path: Pat
     assert report["provider"]["retrieval_backends"]["lexical_backend"] == "paradedb-bm25"
     assert report["provider"]["retrieval_backends"]["graph_backend"] == "apache-age"
     assert report["validation_scope"]["production_validated"] is True
+
+
+def test_cli_release_audit_verifies_collector_signed_evidence(tmp_path: Path) -> None:
+    from mnemosyne.evidence_signing import generate_collector_keypair, sign_evidence_manifest
+
+    store = tmp_path / "mnemosyne.json"
+    _report_path, manifest_path = write_release_report(tmp_path)
+    private_key = tmp_path / "collector.key.pem"
+    public_key = tmp_path / "collector.pub.pem"
+    generate_collector_keypair(private_key, public_key)
+    sign_evidence_manifest(manifest_path, private_key)
+
+    report = run_cli(
+        store,
+        "release-audit",
+        "--evidence-manifest",
+        str(manifest_path),
+        "--require-production-validated",
+        "--require-signed-evidence",
+        "--collector-public-key-file",
+        str(public_key),
+    )
+
+    assert report["ok"] is True
+    assert report["requirements"]["require_signed_evidence"] is True
+    assert report["signature"]["verified"] is True
+    assert report["signature"]["public_key_sha256"].startswith("sha256:")
+
+
+def test_cli_release_audit_rejects_unsigned_or_tampered_evidence(tmp_path: Path) -> None:
+    from mnemosyne.evidence_signing import generate_collector_keypair, sign_evidence_manifest
+
+    store = tmp_path / "mnemosyne.json"
+    _report_path, manifest_path = write_release_report(tmp_path)
+    private_key = tmp_path / "collector.key.pem"
+    public_key = tmp_path / "collector.pub.pem"
+    generate_collector_keypair(private_key, public_key)
+
+    unsigned = run_raw_cli(
+        store,
+        "release-audit",
+        "--evidence-manifest",
+        str(manifest_path),
+        "--require-production-validated",
+        "--require-signed-evidence",
+        "--collector-public-key-file",
+        str(public_key),
+    )
+    unsigned_payload = json.loads(unsigned.stdout)
+    unsigned_codes = {finding["code"] for finding in unsigned_payload["findings"]}
+    assert unsigned.returncode == 1
+    assert "evidence_signature_invalid" in unsigned_codes
+
+    # A signature from a different (rogue) collector key must also fail.
+    rogue_private = tmp_path / "rogue.key.pem"
+    rogue_public = tmp_path / "rogue.pub.pem"
+    generate_collector_keypair(rogue_private, rogue_public)
+    sign_evidence_manifest(manifest_path, rogue_private)
+    rogue = run_raw_cli(
+        store,
+        "release-audit",
+        "--evidence-manifest",
+        str(manifest_path),
+        "--require-production-validated",
+        "--require-signed-evidence",
+        "--collector-public-key-file",
+        str(public_key),
+    )
+    rogue_payload = json.loads(rogue.stdout)
+    rogue_codes = {finding["code"] for finding in rogue_payload["findings"]}
+    assert rogue.returncode == 1
+    assert "evidence_signature_invalid" in rogue_codes
+
+    # Requiring signatures without a configured public key fails closed.
+    keyless = run_raw_cli(
+        store,
+        "release-audit",
+        "--evidence-manifest",
+        str(manifest_path),
+        "--require-production-validated",
+        "--require-signed-evidence",
+    )
+    keyless_payload = json.loads(keyless.stdout)
+    keyless_codes = {finding["code"] for finding in keyless_payload["findings"]}
+    assert keyless.returncode == 1
+    assert "evidence_signature_key_missing" in keyless_codes
 
 
 def test_cli_release_audit_rejects_missing_provider_latency_evidence(tmp_path: Path) -> None:
@@ -9419,6 +9563,115 @@ def test_cli_release_audit_rejects_hollow_ops_report_evidence(tmp_path: Path) ->
     assert result.returncode == 1
     assert payload["ok"] is False
     assert "required_command_output_hollow" in codes
+
+
+def test_cli_release_audit_rejects_unpinned_idp_jwks_evidence(tmp_path: Path) -> None:
+    report_path, manifest_path = write_release_report(tmp_path)
+    rewrite_release_check_stdout(
+        report_path,
+        manifest_path,
+        command="idp-jwks-live-check",
+        stdout_json={
+            "ok": True,
+            "issuer": "https://idp.example.com/",
+            "audience": "mnemosyne",
+            "jwks": {"key_count": 2, "fingerprint": "sha256:" + "1" * 64},
+            "token": {"claims_hash": "sha256:" + "2" * 64},
+            "identity": {"subject_hash": "sha256:" + "3" * 64, "roles": ["operator"]},
+        },
+    )
+
+    result = run_raw_cli(
+        tmp_path / "mnemosyne.json",
+        "release-audit",
+        "--evidence-manifest",
+        str(manifest_path),
+        "--require-production-validated",
+        "--require-provider-forbid-local",
+    )
+    payload = json.loads(result.stdout)
+    codes = {finding["code"] for finding in payload["findings"]}
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert "idp_jwks_kid_pin_weak" in codes
+
+
+def test_cli_release_audit_rejects_disabled_idp_jwks_kid_pin_evidence(tmp_path: Path) -> None:
+    report_path, manifest_path = write_release_report(tmp_path)
+    rewrite_release_check_stdout(
+        report_path,
+        manifest_path,
+        command="idp-jwks-live-check",
+        stdout_json={
+            "ok": True,
+            "issuer": "https://idp.example.com/",
+            "audience": "mnemosyne",
+            "jwks": {
+                "key_count": 2,
+                "fingerprint": "sha256:" + "1" * 64,
+                "kid_pinning": {"enabled": False, "pinned_kid_count": 0, "usable_key_count": 2},
+            },
+            "token": {"claims_hash": "sha256:" + "2" * 64},
+            "identity": {"subject_hash": "sha256:" + "3" * 64, "roles": ["operator"]},
+        },
+    )
+
+    result = run_raw_cli(
+        tmp_path / "mnemosyne.json",
+        "release-audit",
+        "--evidence-manifest",
+        str(manifest_path),
+        "--require-production-validated",
+        "--require-provider-forbid-local",
+    )
+    payload = json.loads(result.stdout)
+    codes = {finding["code"] for finding in payload["findings"]}
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert "idp_jwks_kid_pin_weak" in codes
+
+
+def test_cli_release_audit_rejects_weak_postgres_role_evidence(tmp_path: Path) -> None:
+    report_path, manifest_path = write_release_report(tmp_path)
+    rewrite_release_check_stdout(
+        report_path,
+        manifest_path,
+        command="postgres-role-check",
+        stdout_json={
+            "ok": True,
+            "target": {
+                "app": {
+                    "configured": True,
+                    "host": "localhost",
+                    "local": True,
+                    "dsn_sha256": "sha256:" + "7" * 64,
+                },
+                "consolidator": {"configured": False},
+            },
+            "requirements": {"allow_localhost": True},
+            "roles": {"app": {"current_user": "postgres", "rolsuper": True, "rolbypassrls": True}},
+            "checks": [{"name": "app_role_safety", "ok": False}],
+            "findings": [],
+            "fingerprint": "9" * 64,
+        },
+    )
+
+    result = run_raw_cli(
+        tmp_path / "mnemosyne.json",
+        "release-audit",
+        "--evidence-manifest",
+        str(manifest_path),
+        "--require-production-validated",
+        "--require-provider-forbid-local",
+    )
+    payload = json.loads(result.stdout)
+    codes = {finding["code"] for finding in payload["findings"]}
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert "postgres_role_evidence_weak" in codes
 
 
 def test_cli_release_audit_rejects_weak_ops_report_audit_evidence(tmp_path: Path) -> None:

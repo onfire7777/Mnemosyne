@@ -140,9 +140,17 @@
         "MNEMOSYNE_PROD_IDP_AUDIENCE",
         "--idp-jwks-url",
         "MNEMOSYNE_PROD_IDP_JWKS_URL",
+        "--idp-expected-kid-sha256",
+        "MNEMOSYNE_PROD_IDP_EXPECTED_KID_SHA256",
         "--idp-authz-policy-file",
         "MNEMOSYNE_PROD_EVIDENCE_DIR/idp-authz-policy.current.json"
       ],
+      "timeout": 120
+    },
+    {
+      "name": "postgres-role",
+      "command": "postgres-role-check",
+      "args": [],
       "timeout": 120
     },
     {

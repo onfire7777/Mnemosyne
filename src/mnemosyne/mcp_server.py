@@ -797,6 +797,7 @@ def build_http_server(
     idp_jwks_max_bytes: int = 1024 * 1024,
     idp_jwks_cache_ttl_seconds: int = 300,
     idp_refresh_on_unknown_kid: bool = True,
+    idp_expected_kid_sha256: tuple[str, ...] = (),
     session_max_ttl_seconds: int = 3600,
     tls_cert_file: str | None = None,
     tls_key_file: str | None = None,
@@ -846,6 +847,7 @@ def build_http_server(
             ),
             jwks_cache_ttl_seconds=idp_jwks_cache_ttl_seconds,
             refresh_on_unknown_kid=idp_refresh_on_unknown_kid,
+            expected_kid_sha256=tuple(item for item in idp_expected_kid_sha256 if item),
             authorization_policy=load_oidc_authorization_policy(
                 policy=idp_authz_policy,
                 policy_file=idp_authz_policy_file,
@@ -881,6 +883,9 @@ def build_http_server(
                     "session_exchange_refresh_on_unknown_kid": idp_refresh_on_unknown_kid
                     if idp_verifier is not None
                     else None,
+                    "session_exchange_kid_pinned": bool(idp_verifier.expected_kid_sha256)
+                    if idp_verifier is not None
+                    else False,
                     "session_exchange_authz_policy_configured": idp_verifier.authorization_policy is not None
                     if idp_verifier is not None
                     else False,
@@ -1492,6 +1497,11 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--idp-jwks-max-bytes", type=int, default=int(os.environ.get("MNEMOSYNE_MCP_IDP_JWKS_MAX_BYTES", str(1024 * 1024))))
     parser.add_argument("--idp-jwks-cache-ttl-seconds", type=int, default=int(os.environ.get("MNEMOSYNE_MCP_IDP_JWKS_CACHE_TTL_SECONDS", "300")))
     parser.add_argument(
+        "--idp-expected-kid-sha256",
+        action="append",
+        default=(os.environ.get("MNEMOSYNE_MCP_IDP_EXPECTED_KID_SHA256", "").split(",")),
+    )
+    parser.add_argument(
         "--idp-disable-refresh-on-unknown-kid",
         action="store_true",
         default=_env_flag("MNEMOSYNE_MCP_IDP_DISABLE_REFRESH_ON_UNKNOWN_KID", default=False),
@@ -1623,6 +1633,7 @@ def main(argv: list[str] | None = None) -> None:
             idp_jwks_max_bytes=args.idp_jwks_max_bytes,
             idp_jwks_cache_ttl_seconds=args.idp_jwks_cache_ttl_seconds,
             idp_refresh_on_unknown_kid=not args.idp_disable_refresh_on_unknown_kid,
+            idp_expected_kid_sha256=tuple(args.idp_expected_kid_sha256 or ()),
             session_max_ttl_seconds=args.session_max_ttl_seconds,
             tls_cert_file=args.tls_cert_file,
             tls_key_file=args.tls_key_file,
