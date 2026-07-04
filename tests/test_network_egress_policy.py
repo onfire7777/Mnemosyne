@@ -35,6 +35,10 @@ ALLOWED_RAW_EGRESS = {
         "services/embedding/Dockerfile",
         "urllib.request.urlopen",
     ): "container-local healthcheck against 127.0.0.1",
+    (
+        "services/embedding/selftest.py",
+        "urllib.request.urlopen",
+    ): "hermetic build-time self-test fallback restricted to loopback http when the mnemosyne package is absent from the service image",
 }
 
 

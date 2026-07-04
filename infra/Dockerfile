@@ -26,6 +26,11 @@ RUN chmod 0755 /usr/local/bin/mnemo-entrypoint /opt/mnemosyne/bin/*
 
 # Non-root; matches the compose hardening (read_only, cap_drop ALL, no-new-privileges).
 RUN useradd --uid 10001 --user-group --no-create-home --shell /usr/sbin/nologin mnemosyne
+# Pre-create the runtime data mountpoint owned by the non-root user. A fresh
+# named volume inherits this ownership on first mount, so the AES-GCM object
+# store and Vault-wrapped DEK sidecars (MNEMOSYNE_VAULT_WRAP_DIR=/data/...) are
+# writable without a runtime root chown (the rootfs is read_only).
+RUN mkdir -p /data/wrapped-keys && chown -R 10001:10001 /data
 USER 10001:10001
 
 ENTRYPOINT ["/usr/local/bin/mnemo-entrypoint"]

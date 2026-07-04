@@ -163,6 +163,10 @@ services:
       - "-remoteRead.url=http://victoriametrics:8428"
       - "-remoteWrite.url=http://victoriametrics:8428"
       - "-rule=/etc/vmalert/rules/*.yml"
+      # No external Alertmanager in the self-hosted profile: tripwires are
+      # scraped from vmalert's own /metrics and surfaced on the Grafana
+      # dashboard. Blackhole keeps rule evaluation running without a notifier.
+      - "-notifier.blackhole"
     volumes:
       - ./observability/vmalert:/etc/vmalert/rules:ro
     tmpfs: ["/tmp:size=16m"]

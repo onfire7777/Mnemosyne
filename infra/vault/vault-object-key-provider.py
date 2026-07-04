@@ -76,7 +76,17 @@ def _vault_addr() -> str:
 def _vault_token() -> str:
     token = os.environ.get("VAULT_TOKEN", "").strip()
     if not token:
-        raise ProviderError("VAULT_TOKEN is required")
+        # Prefer file-based token custody in production: the hardened compose
+        # mounts the AppRole token as a read-only secret file and passes
+        # VAULT_TOKEN_FILE, never an inline env value.
+        token_file = os.environ.get("VAULT_TOKEN_FILE", "").strip()
+        if token_file:
+            try:
+                token = Path(token_file).read_text(encoding="utf-8").strip()
+            except OSError as exc:
+                raise ProviderError(f"VAULT_TOKEN_FILE could not be read: {exc}") from exc
+    if not token:
+        raise ProviderError("VAULT_TOKEN or VAULT_TOKEN_FILE is required")
     return token
 
 

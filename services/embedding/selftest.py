@@ -46,7 +46,28 @@ if SRC.is_dir():
 os.environ.setdefault("EMBEDDING_SERVICE_FORCE_FALLBACK", "1")
 
 import app as service  # noqa: E402  (after sys.path setup)
-from mnemosyne.network_safety import safe_urlopen, validate_fetch_url  # noqa: E402
+
+try:
+    from mnemosyne.network_safety import safe_urlopen, validate_fetch_url  # noqa: E402
+
+    def _open_selftest_url(request_or_url, url: str):
+        validated_url = validate_fetch_url(
+            url,
+            allow_insecure_localhost=True,
+            purpose="embedding self-test URL",
+        )
+        return safe_urlopen(request_or_url, validated=validated_url, timeout=10)
+except ModuleNotFoundError:
+    # Hermetic service-image build: the mnemosyne package is not installed.
+    # The shared guard reduces to loopback-only for this self-test, so enforce
+    # exactly that and refuse anything else (fail closed, no egress).
+    from urllib.parse import urlsplit  # noqa: E402
+
+    def _open_selftest_url(request_or_url, url: str):
+        parsed = urlsplit(url)
+        if parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}:
+            raise RuntimeError(f"embedding self-test URL must be loopback http, got {url!r}")
+        return urllib.request.urlopen(request_or_url, timeout=10)
 
 EXPECTED_DIMS = 1024
 
@@ -62,22 +83,12 @@ def _post(url: str, payload: dict) -> dict:
     req = urllib.request.Request(
         url, data=body, headers={"Content-Type": "application/json"}, method="POST"
     )
-    validated_url = validate_fetch_url(
-        url,
-        allow_insecure_localhost=True,
-        purpose="embedding self-test URL",
-    )
-    with safe_urlopen(req, validated=validated_url, timeout=10) as resp:
+    with _open_selftest_url(req, url) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
 
 def _get(url: str) -> dict:
-    validated_url = validate_fetch_url(
-        url,
-        allow_insecure_localhost=True,
-        purpose="embedding self-test URL",
-    )
-    with safe_urlopen(url, validated=validated_url, timeout=10) as resp:
+    with _open_selftest_url(url, url) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
 
