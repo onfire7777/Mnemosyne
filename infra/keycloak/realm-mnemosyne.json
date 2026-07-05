@@ -128,7 +128,7 @@
       "lastName": "A",
       "attributes": {
         "tenant_id": [
-          "tenant-a"
+          "primary"
         ],
         "mnemosyne_role": [
           "operator"
