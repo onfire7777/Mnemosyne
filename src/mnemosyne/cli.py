@@ -555,8 +555,19 @@ def load_media_extractor(args: argparse.Namespace) -> MediaTextExtractor:
     return MetadataMediaTextExtractor()
 
 
+def _role_http_api_key(api_key_env: str | None) -> str | None:
+    """Resolve an optional bearer token for a hosted role provider from the
+    named environment variable (custody-managed, never inline)."""
+    if not api_key_env:
+        return None
+    value = os.environ.get(api_key_env)
+    if not value:
+        raise SystemExit(f"role provider api key env {api_key_env} is not set")
+    return value
+
+
 def load_entity_resolver(args: argparse.Namespace) -> EntityResolver | None:
-    from mnemosyne.consolidation import CommandEntityResolver
+    from mnemosyne.consolidation import CommandEntityResolver, HttpEntityResolver
 
     if args.entity_resolver_provider == "command":
         if not args.entity_resolver_command:
@@ -566,11 +577,20 @@ def load_entity_resolver(args: argparse.Namespace) -> EntityResolver | None:
             timeout_seconds=float(args.entity_resolver_timeout),
             disclosure_policy=load_proposal_disclosure_policy(args),
         )
+    if args.entity_resolver_provider == "http":
+        if not args.entity_resolver_url:
+            raise SystemExit("--entity-resolver-provider http requires --entity-resolver-url.")
+        return HttpEntityResolver(
+            args.entity_resolver_url,
+            api_key=_role_http_api_key(getattr(args, "entity_resolver_api_key_env", None)),
+            timeout_seconds=float(args.entity_resolver_timeout),
+            disclosure_policy=load_proposal_disclosure_policy(args),
+        )
     return None
 
 
 def load_candidate_extractor(args: argparse.Namespace) -> CandidateExtractor | None:
-    from mnemosyne.consolidation import CommandCandidateExtractor
+    from mnemosyne.consolidation import CommandCandidateExtractor, HttpCandidateExtractor
 
     if args.candidate_extractor_provider == "command":
         if not args.candidate_extractor_command:
@@ -580,11 +600,20 @@ def load_candidate_extractor(args: argparse.Namespace) -> CandidateExtractor | N
             timeout_seconds=float(args.candidate_extractor_timeout),
             disclosure_policy=load_proposal_disclosure_policy(args),
         )
+    if args.candidate_extractor_provider == "http":
+        if not args.candidate_extractor_url:
+            raise SystemExit("--candidate-extractor-provider http requires --candidate-extractor-url.")
+        return HttpCandidateExtractor(
+            args.candidate_extractor_url,
+            api_key=_role_http_api_key(getattr(args, "candidate_extractor_api_key_env", None)),
+            timeout_seconds=float(args.candidate_extractor_timeout),
+            disclosure_policy=load_proposal_disclosure_policy(args),
+        )
     return None
 
 
 def load_consolidation_summarizer(args: argparse.Namespace) -> EvidenceSummarizer | None:
-    from mnemosyne.consolidation import CommandEvidenceSummarizer
+    from mnemosyne.consolidation import CommandEvidenceSummarizer, HttpEvidenceSummarizer
 
     if args.summarizer_provider == "command":
         if not args.summarizer_command:
@@ -594,11 +623,20 @@ def load_consolidation_summarizer(args: argparse.Namespace) -> EvidenceSummarize
             timeout_seconds=float(args.summarizer_timeout),
             disclosure_policy=load_proposal_disclosure_policy(args),
         )
+    if args.summarizer_provider == "http":
+        if not args.summarizer_url:
+            raise SystemExit("--summarizer-provider http requires --summarizer-url.")
+        return HttpEvidenceSummarizer(
+            args.summarizer_url,
+            api_key=_role_http_api_key(getattr(args, "summarizer_api_key_env", None)),
+            timeout_seconds=float(args.summarizer_timeout),
+            disclosure_policy=load_proposal_disclosure_policy(args),
+        )
     return None
 
 
 def load_lesson_distiller(args: argparse.Namespace) -> LessonDistiller | None:
-    from mnemosyne.consolidation import CommandLessonDistiller
+    from mnemosyne.consolidation import CommandLessonDistiller, HttpLessonDistiller
 
     if args.lesson_distiller_provider == "command":
         if not args.lesson_distiller_command:
@@ -608,17 +646,35 @@ def load_lesson_distiller(args: argparse.Namespace) -> LessonDistiller | None:
             timeout_seconds=float(args.lesson_distiller_timeout),
             disclosure_policy=load_proposal_disclosure_policy(args),
         )
+    if args.lesson_distiller_provider == "http":
+        if not args.lesson_distiller_url:
+            raise SystemExit("--lesson-distiller-provider http requires --lesson-distiller-url.")
+        return HttpLessonDistiller(
+            args.lesson_distiller_url,
+            api_key=_role_http_api_key(getattr(args, "lesson_distiller_api_key_env", None)),
+            timeout_seconds=float(args.lesson_distiller_timeout),
+            disclosure_policy=load_proposal_disclosure_policy(args),
+        )
     return None
 
 
 def load_procedure_inducer(args: argparse.Namespace) -> ProcedureInducer | None:
-    from mnemosyne.consolidation import CommandProcedureInducer
+    from mnemosyne.consolidation import CommandProcedureInducer, HttpProcedureInducer
 
     if args.skill_inducer_provider == "command":
         if not args.skill_inducer_command:
             raise SystemExit("--skill-inducer-provider command requires --skill-inducer-command.")
         return CommandProcedureInducer(
             args.skill_inducer_command,
+            timeout_seconds=float(args.skill_inducer_timeout),
+            disclosure_policy=load_proposal_disclosure_policy(args),
+        )
+    if args.skill_inducer_provider == "http":
+        if not args.skill_inducer_url:
+            raise SystemExit("--skill-inducer-provider http requires --skill-inducer-url.")
+        return HttpProcedureInducer(
+            args.skill_inducer_url,
+            api_key=_role_http_api_key(getattr(args, "skill_inducer_api_key_env", None)),
             timeout_seconds=float(args.skill_inducer_timeout),
             disclosure_policy=load_proposal_disclosure_policy(args),
         )
@@ -16666,76 +16722,80 @@ def cmd_provider_check(args: argparse.Namespace) -> None:
             "entity_key": "provider-health",
         }
     ]
-    if args.candidate_extractor_provider == "command":
+    if args.candidate_extractor_provider in {"command", "http"}:
+        check_provider = "hosted_http" if args.candidate_extractor_provider == "http" else "command"
         try:
             extractor = load_candidate_extractor(args)
             if extractor is None:
-                raise ValueError("command candidate extractor was not configured")
+                raise ValueError(f"{check_provider} candidate extractor was not configured")
             extracted = extractor.extract("provider-health", {}, sample_evidence)
             candidates = extracted["candidates"]
             if not candidates:
                 raise ValueError("candidate extractor did not return candidates")
             checks["candidate_extractor"] = {
                 "ok": True,
-                "provider": "command",
+                "provider": check_provider,
                 "strategy": extracted["details"]["strategy"],
                 "candidate_count": len(candidates),
                 "signatures": [str(item["signature"]) for item in candidates],
             }
         except Exception as exc:  # noqa: BLE001 - health checks return structured failures.
             ok = False
-            checks["candidate_extractor"] = {"ok": False, "provider": "command", "error": str(exc)}
+            checks["candidate_extractor"] = {"ok": False, "provider": check_provider, "error": str(exc)}
     elif "candidate_extractor" in manifest.get("required_checks", []):
         checks["candidate_extractor"] = {"ok": True, "provider": "deterministic", "skipped": True}
 
-    if args.summarizer_provider == "command":
+    if args.summarizer_provider in {"command", "http"}:
+        check_provider = "hosted_http" if args.summarizer_provider == "http" else "command"
         try:
             summarizer = load_consolidation_summarizer(args)
             if summarizer is None:
-                raise ValueError("command summarizer was not configured")
+                raise ValueError(f"{check_provider} summarizer was not configured")
             summary = summarizer.summarize("provider-health", sample_evidence)
             if not summary or not str(summary.get("summary") or "").strip():
                 raise ValueError("summarizer did not return a summary")
             checks["summarizer"] = {
                 "ok": True,
-                "provider": "command",
+                "provider": check_provider,
                 "strategy": summary["strategy"],
                 "summary_length": len(str(summary["summary"])),
                 "evidence_count": summary["evidence_count"],
             }
         except Exception as exc:  # noqa: BLE001 - health checks return structured failures.
             ok = False
-            checks["summarizer"] = {"ok": False, "provider": "command", "error": str(exc)}
+            checks["summarizer"] = {"ok": False, "provider": check_provider, "error": str(exc)}
     elif "summarizer" in manifest.get("required_checks", []):
         checks["summarizer"] = {"ok": True, "provider": "deterministic", "skipped": True}
 
-    if args.entity_resolver_provider == "command":
+    if args.entity_resolver_provider in {"command", "http"}:
+        check_provider = "hosted_http" if args.entity_resolver_provider == "http" else "command"
         try:
             resolver = load_entity_resolver(args)
             if resolver is None:
-                raise ValueError("command entity resolver was not configured")
+                raise ValueError(f"{check_provider} entity resolver was not configured")
             resolved = resolver.resolve("provider-health", sample_candidates)
             entity_keys = [str(item.get("entity_key") or "") for item in resolved["candidates"]]
             if not entity_keys or not all(entity_keys):
                 raise ValueError("entity resolver did not return entity keys")
             checks["entity_resolver"] = {
                 "ok": True,
-                "provider": "command",
+                "provider": check_provider,
                 "strategy": resolved["details"]["strategy"],
                 "entity_keys": entity_keys,
                 "resolved_entity_count": len(resolved["details"]["resolved_entities"]),
             }
         except Exception as exc:  # noqa: BLE001 - health checks return structured failures.
             ok = False
-            checks["entity_resolver"] = {"ok": False, "provider": "command", "error": str(exc)}
+            checks["entity_resolver"] = {"ok": False, "provider": check_provider, "error": str(exc)}
     else:
         checks["entity_resolver"] = {"ok": True, "provider": "deterministic", "skipped": True}
 
-    if args.lesson_distiller_provider == "command":
+    if args.lesson_distiller_provider in {"command", "http"}:
+        check_provider = "hosted_http" if args.lesson_distiller_provider == "http" else "command"
         try:
             distiller = load_lesson_distiller(args)
             if distiller is None:
-                raise ValueError("command lesson distiller was not configured")
+                raise ValueError(f"{check_provider} lesson distiller was not configured")
             distilled = distiller.distill("provider-health", sample_candidates)
             lessons = distilled["lessons"]
             if not lessons:
@@ -16747,22 +16807,23 @@ def cmd_provider_check(args: argparse.Namespace) -> None:
                     raise ValueError("lesson distiller returned a lesson without failure_signature")
             checks["lesson_distiller"] = {
                 "ok": True,
-                "provider": "command",
+                "provider": check_provider,
                 "strategy": distilled["details"]["strategy"],
                 "lesson_count": len(lessons),
                 "failure_signatures": [str(item["failure_signature"]) for item in lessons[:5]],
             }
         except Exception as exc:  # noqa: BLE001 - health checks return structured failures.
             ok = False
-            checks["lesson_distiller"] = {"ok": False, "provider": "command", "error": str(exc)}
+            checks["lesson_distiller"] = {"ok": False, "provider": check_provider, "error": str(exc)}
     elif "lesson_distiller" in manifest.get("required_checks", []):
         checks["lesson_distiller"] = {"ok": True, "provider": "deterministic", "skipped": True}
 
-    if args.skill_inducer_provider == "command":
+    if args.skill_inducer_provider in {"command", "http"}:
+        check_provider = "hosted_http" if args.skill_inducer_provider == "http" else "command"
         try:
             inducer = load_procedure_inducer(args)
             if inducer is None:
-                raise ValueError("command skill inducer was not configured")
+                raise ValueError(f"{check_provider} skill inducer was not configured")
             induced = inducer.induce("provider-health", sample_candidates)
             procedures = induced["procedures"]
             if not procedures:
@@ -16776,14 +16837,14 @@ def cmd_provider_check(args: argparse.Namespace) -> None:
                     raise ValueError("skill inducer returned a procedure without signature object")
             checks["skill_inducer"] = {
                 "ok": True,
-                "provider": "command",
+                "provider": check_provider,
                 "strategy": induced["details"]["strategy"],
                 "procedure_count": len(procedures),
                 "procedure_names": [str(item["name"]) for item in procedures[:5]],
             }
         except Exception as exc:  # noqa: BLE001 - health checks return structured failures.
             ok = False
-            checks["skill_inducer"] = {"ok": False, "provider": "command", "error": str(exc)}
+            checks["skill_inducer"] = {"ok": False, "provider": check_provider, "error": str(exc)}
     elif "skill_inducer" in manifest.get("required_checks", []):
         checks["skill_inducer"] = {"ok": True, "provider": "deterministic", "skipped": True}
 
@@ -17078,11 +17139,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--entity-resolver-provider",
-        choices=["deterministic", "command"],
+        choices=["deterministic", "command", "http"],
         default=os.environ.get("MNEMOSYNE_ENTITY_RESOLVER_PROVIDER", "deterministic"),
         help="Consolidation entity resolver provider",
     )
     parser.add_argument("--entity-resolver-command", default=os.environ.get("MNEMOSYNE_ENTITY_RESOLVER_COMMAND"))
+    parser.add_argument(
+        "--entity-resolver-url",
+        default=os.environ.get("MNEMOSYNE_ENTITY_RESOLVER_URL"),
+        help="HTTPS endpoint for the hosted entity resolver role provider",
+    )
+    parser.add_argument(
+        "--entity-resolver-api-key-env",
+        default=os.environ.get("MNEMOSYNE_ENTITY_RESOLVER_API_KEY_ENV"),
+        help="Env var holding an optional bearer token for the hosted entity resolver",
+    )
     parser.add_argument(
         "--entity-resolver-timeout",
         type=float,
@@ -17107,11 +17178,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--candidate-extractor-provider",
-        choices=["deterministic", "command"],
+        choices=["deterministic", "command", "http"],
         default=os.environ.get("MNEMOSYNE_CANDIDATE_EXTRACTOR_PROVIDER", "deterministic"),
         help="Consolidation candidate extractor provider",
     )
     parser.add_argument("--candidate-extractor-command", default=os.environ.get("MNEMOSYNE_CANDIDATE_EXTRACTOR_COMMAND"))
+    parser.add_argument(
+        "--candidate-extractor-url",
+        default=os.environ.get("MNEMOSYNE_CANDIDATE_EXTRACTOR_URL"),
+        help="HTTPS endpoint for the hosted candidate extractor role provider",
+    )
+    parser.add_argument(
+        "--candidate-extractor-api-key-env",
+        default=os.environ.get("MNEMOSYNE_CANDIDATE_EXTRACTOR_API_KEY_ENV"),
+        help="Env var holding an optional bearer token for the hosted candidate extractor",
+    )
     parser.add_argument(
         "--candidate-extractor-timeout",
         type=float,
@@ -17119,11 +17200,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--summarizer-provider",
-        choices=["deterministic", "command"],
+        choices=["deterministic", "command", "http"],
         default=os.environ.get("MNEMOSYNE_SUMMARIZER_PROVIDER", "deterministic"),
         help="Consolidation summarizer provider",
     )
     parser.add_argument("--summarizer-command", default=os.environ.get("MNEMOSYNE_SUMMARIZER_COMMAND"))
+    parser.add_argument(
+        "--summarizer-url",
+        default=os.environ.get("MNEMOSYNE_SUMMARIZER_URL"),
+        help="HTTPS endpoint for the hosted summarizer role provider",
+    )
+    parser.add_argument(
+        "--summarizer-api-key-env",
+        default=os.environ.get("MNEMOSYNE_SUMMARIZER_API_KEY_ENV"),
+        help="Env var holding an optional bearer token for the hosted summarizer",
+    )
     parser.add_argument(
         "--summarizer-timeout",
         type=float,
@@ -17131,11 +17222,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--lesson-distiller-provider",
-        choices=["deterministic", "command"],
+        choices=["deterministic", "command", "http"],
         default=os.environ.get("MNEMOSYNE_LESSON_DISTILLER_PROVIDER", "deterministic"),
         help="Consolidation lesson distiller provider",
     )
     parser.add_argument("--lesson-distiller-command", default=os.environ.get("MNEMOSYNE_LESSON_DISTILLER_COMMAND"))
+    parser.add_argument(
+        "--lesson-distiller-url",
+        default=os.environ.get("MNEMOSYNE_LESSON_DISTILLER_URL"),
+        help="HTTPS endpoint for the hosted lesson distiller role provider",
+    )
+    parser.add_argument(
+        "--lesson-distiller-api-key-env",
+        default=os.environ.get("MNEMOSYNE_LESSON_DISTILLER_API_KEY_ENV"),
+        help="Env var holding an optional bearer token for the hosted lesson distiller",
+    )
     parser.add_argument(
         "--lesson-distiller-timeout",
         type=float,
@@ -17143,11 +17244,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--skill-inducer-provider",
-        choices=["deterministic", "command"],
+        choices=["deterministic", "command", "http"],
         default=os.environ.get("MNEMOSYNE_SKILL_INDUCER_PROVIDER", "deterministic"),
         help="Consolidation skill/procedure inducer provider",
     )
     parser.add_argument("--skill-inducer-command", default=os.environ.get("MNEMOSYNE_SKILL_INDUCER_COMMAND"))
+    parser.add_argument(
+        "--skill-inducer-url",
+        default=os.environ.get("MNEMOSYNE_SKILL_INDUCER_URL"),
+        help="HTTPS endpoint for the hosted skill/procedure inducer role provider",
+    )
+    parser.add_argument(
+        "--skill-inducer-api-key-env",
+        default=os.environ.get("MNEMOSYNE_SKILL_INDUCER_API_KEY_ENV"),
+        help="Env var holding an optional bearer token for the hosted skill inducer",
+    )
     parser.add_argument(
         "--skill-inducer-timeout",
         type=float,

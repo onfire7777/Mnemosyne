@@ -1,0 +1,16 @@
+groups:
+  - name: mnemosyne-alert-route
+    rules:
+      # Watchdog / DeadMansSwitch: an always-firing alert whose continuous
+      # delivery to the self-hosted alert-sink proves the vmalert -> notifier
+      # route is live end-to-end (B8). A subscriber polling alert-sink /alerts
+      # sees this alert; its ABSENCE would itself indicate a broken pipeline.
+      - alert: MnemosyneAlertRouteWatchdog
+        expr: vector(1)
+        for: 0s
+        labels:
+          severity: none
+          purpose: alert-route-delivery-verification
+        annotations:
+          summary: "Mnemosyne alerting pipeline delivery watchdog (always firing)"
+          description: "Proves the self-hosted vmalert -> alert-sink route delivers for the consolidation and ops deployments."

@@ -231,6 +231,19 @@ ROLE_NAMES = {
 }
 
 
+# Maps consolidation pass names to the flat role keys the consolidation-ops
+# check reads from ``role_pipeline`` (e.g. ``role_pipeline["candidate_extractor"]
+# == "hosted_http"``). Keeps the flat provider-kind mapping in lockstep with the
+# structured ``roles`` list.
+_ROLE_PIPELINE_FLAT_KEYS = {
+    "extractor": "candidate_extractor",
+    "resolver": "entity_resolver",
+    "summarizer": "summarizer",
+    "lesson_distiller": "lesson_distiller",
+    "skill_inducer": "skill_inducer",
+}
+
+
 class ConsolidationWorker:
     def __init__(
         self,
@@ -586,25 +599,44 @@ class ConsolidationWorker:
 
     def _role_pipeline_report(self, pass_results: list[PassResult]) -> dict[str, Any]:
         roles = []
+        flat_provider_kinds: dict[str, str] = {}
         for item in pass_results:
             provider = self._role_provider(item.name)
-            provider_type = "model_adapter" if provider.startswith("command_") else "deterministic_or_local"
+            provider_kind = self._role_provider_kind(item.name)
+            provider_type = "model_adapter" if provider_kind in {"command", "hosted_http"} else "deterministic_or_local"
             roles.append(
                 {
                     "pass": item.name,
                     "role": ROLE_NAMES.get(item.name, item.name),
                     "provider": provider,
+                    "provider_kind": provider_kind,
                     "provider_type": provider_type,
                     "status": item.status,
                 }
             )
+            flat_key = _ROLE_PIPELINE_FLAT_KEYS.get(item.name)
+            if flat_key:
+                flat_provider_kinds[flat_key] = provider_kind
         return {
             "owner_role": "consolidator",
             "write_authorized": True,
             "roles": roles,
             "role_count": len(roles),
             "model_backed_roles": [item["role"] for item in roles if item["provider_type"] == "model_adapter"],
+            **flat_provider_kinds,
         }
+
+    def _role_provider_kind(self, pass_name: str) -> str:
+        provider = {
+            "extractor": self.candidate_extractor,
+            "resolver": self.entity_resolver,
+            "summarizer": self.summarizer,
+            "lesson_distiller": self.lesson_distiller,
+            "skill_inducer": self.procedure_inducer,
+        }.get(pass_name)
+        if provider is None:
+            return "local"
+        return str(getattr(provider, "provider_kind", "local"))
 
     def _role_provider(self, pass_name: str) -> str:
         if pass_name == "extractor":
@@ -2316,7 +2348,39 @@ def _provider_request_access_policy(request: dict[str, Any], *, tenant_id: str) 
     return merge_access_policies(policies, tenant_id=tenant_id)
 
 
-class CommandCandidateExtractor:
+class _CommandRoleTransport:
+    """Shared subprocess transport for the ``Command*`` consolidation role
+    adapters.
+
+    ``Http*`` subclasses override :meth:`_role_transport` to speak the identical
+    JSON request/response contract over HTTPS (see :func:`_run_json_http`) while
+    reusing the surrounding payload-building and response-normalization logic.
+    ``provider_kind`` is surfaced through the role pipeline report."""
+
+    provider_kind = "command"
+
+    def _role_transport(
+        self,
+        payload: dict[str, Any],
+        *,
+        tenant_id: str,
+        role: str,
+        provider_name: str,
+    ) -> dict[str, Any]:
+        return _run_json_command(
+            self.command,
+            payload,
+            timeout_seconds=self.timeout_seconds,
+            provider_name=provider_name,
+            proposal_ledger=self.proposal_ledger,
+            tenant_id=tenant_id,
+            branch=self.proposal_branch,
+            role=role,
+            strategy=self.strategy,
+        )
+
+
+class CommandCandidateExtractor(_CommandRoleTransport):
     """Shell-free candidate extractor adapter for model-backed consolidation."""
 
     strategy = "command_candidate_extractor"
@@ -2335,21 +2399,16 @@ class CommandCandidateExtractor:
         self.proposal_branch = "main"
 
     def extract(self, tenant_id: str, payload: dict[str, Any], evidence: Sequence[Evidence]) -> dict[str, Any]:
-        parsed = _run_json_command(
-            self.command,
+        parsed = self._role_transport(
             {
                 "tenant_id": tenant_id,
                 "prompt_boundary": _provider_prompt_boundary("candidate_extractor", self.disclosure_policy),
                 "payload": _provider_payload_view(payload, self.disclosure_policy),
                 "evidence": _provider_evidence_view(evidence, self.disclosure_policy),
             },
-            timeout_seconds=self.timeout_seconds,
-            provider_name="candidate extractor",
-            proposal_ledger=self.proposal_ledger,
             tenant_id=tenant_id,
-            branch=self.proposal_branch,
             role="candidate_extractor",
-            strategy=self.strategy,
+            provider_name="candidate extractor",
         )
         proposal_record = _provider_pop_proposal_record(parsed)
         rows = parsed.get("candidates")
@@ -2400,7 +2459,7 @@ class DeterministicEvidenceSummarizer:
         }
 
 
-class CommandEvidenceSummarizer:
+class CommandEvidenceSummarizer(_CommandRoleTransport):
     """Shell-free summarizer adapter for model-backed consolidation."""
 
     strategy = "command_evidence_summarizer"
@@ -2421,20 +2480,15 @@ class CommandEvidenceSummarizer:
     def summarize(self, tenant_id: str, evidence: Sequence[Evidence]) -> dict[str, Any] | None:
         if not evidence:
             return None
-        parsed = _run_json_command(
-            self.command,
+        parsed = self._role_transport(
             {
                 "tenant_id": tenant_id,
                 "prompt_boundary": _provider_prompt_boundary("evidence_summarizer", self.disclosure_policy),
                 "evidence": _provider_evidence_view(evidence, self.disclosure_policy),
             },
-            timeout_seconds=self.timeout_seconds,
-            provider_name="evidence summarizer",
-            proposal_ledger=self.proposal_ledger,
             tenant_id=tenant_id,
-            branch=self.proposal_branch,
             role="evidence_summarizer",
-            strategy=self.strategy,
+            provider_name="evidence summarizer",
         )
         proposal_record = _provider_pop_proposal_record(parsed)
         summary = str(parsed.get("summary") or "").strip()
@@ -2488,7 +2542,7 @@ class DeterministicLessonDistiller:
         }
 
 
-class CommandLessonDistiller:
+class CommandLessonDistiller(_CommandRoleTransport):
     """Shell-free lesson distiller adapter for model-backed consolidation."""
 
     strategy = "command_lesson_distiller"
@@ -2507,20 +2561,15 @@ class CommandLessonDistiller:
         self.proposal_branch = "main"
 
     def distill(self, tenant_id: str, candidates: Sequence[dict[str, Any]]) -> dict[str, Any]:
-        parsed = _run_json_command(
-            self.command,
+        parsed = self._role_transport(
             {
                 "tenant_id": tenant_id,
                 "prompt_boundary": _provider_prompt_boundary("lesson_distiller", self.disclosure_policy),
                 "candidates": [dict(candidate) for candidate in candidates],
             },
-            timeout_seconds=self.timeout_seconds,
-            provider_name="lesson distiller",
-            proposal_ledger=self.proposal_ledger,
             tenant_id=tenant_id,
-            branch=self.proposal_branch,
             role="lesson_distiller",
-            strategy=self.strategy,
+            provider_name="lesson distiller",
         )
         proposal_record = _provider_pop_proposal_record(parsed)
         rows = parsed.get("lessons")
@@ -2580,7 +2629,7 @@ class DeterministicProcedureInducer:
         }
 
 
-class CommandProcedureInducer:
+class CommandProcedureInducer(_CommandRoleTransport):
     """Shell-free procedure/skill inducer adapter for model-backed consolidation."""
 
     strategy = "command_skill_inducer"
@@ -2599,20 +2648,15 @@ class CommandProcedureInducer:
         self.proposal_branch = "main"
 
     def induce(self, tenant_id: str, candidates: Sequence[dict[str, Any]]) -> dict[str, Any]:
-        parsed = _run_json_command(
-            self.command,
+        parsed = self._role_transport(
             {
                 "tenant_id": tenant_id,
                 "prompt_boundary": _provider_prompt_boundary("skill_inducer", self.disclosure_policy),
                 "candidates": [dict(candidate) for candidate in candidates],
             },
-            timeout_seconds=self.timeout_seconds,
-            provider_name="skill inducer",
-            proposal_ledger=self.proposal_ledger,
             tenant_id=tenant_id,
-            branch=self.proposal_branch,
             role="skill_inducer",
-            strategy=self.strategy,
+            provider_name="skill inducer",
         )
         proposal_record = _provider_pop_proposal_record(parsed)
         rows = parsed.get("procedures")
@@ -2659,7 +2703,7 @@ class DeterministicEntityResolver:
         }
 
 
-class CommandEntityResolver:
+class CommandEntityResolver(_CommandRoleTransport):
     """Shell-free entity resolver adapter for production resolver services."""
 
     strategy = "command_entity_resolver"
@@ -2683,16 +2727,11 @@ class CommandEntityResolver:
             "prompt_boundary": _provider_prompt_boundary("entity_resolver", self.disclosure_policy),
             "candidates": [dict(candidate) for candidate in candidates],
         }
-        parsed = _run_json_command(
-            self.command,
+        parsed = self._role_transport(
             payload,
-            timeout_seconds=self.timeout_seconds,
-            provider_name="entity resolver",
-            proposal_ledger=self.proposal_ledger,
             tenant_id=tenant_id,
-            branch=self.proposal_branch,
             role="entity_resolver",
-            strategy=self.strategy,
+            provider_name="entity resolver",
         )
         proposal_record = _provider_pop_proposal_record(parsed)
         result = _apply_resolver_response(candidates, parsed)
@@ -2701,6 +2740,88 @@ class CommandEntityResolver:
             details["proposal_record"] = proposal_record
             result["details"] = details
         return result
+
+
+class _HttpRoleTransport(_CommandRoleTransport):
+    """HTTPS transport for hosted (self-hosted or managed) role providers.
+
+    Subclasses inherit the ``Command*`` role method (payload building + response
+    normalization) unchanged and swap only the transport: an SSRF-guarded,
+    https-only, optionally bearer-authenticated JSON ``POST`` via
+    :func:`_run_json_http` (mirroring the ``HttpEmbeddingProvider`` /
+    ``HttpReranker`` pattern in ``retrieval.py``). ``provider_kind`` is
+    ``hosted_http`` so a real consolidation run records the role as hosted in
+    the role pipeline report."""
+
+    provider_kind = "hosted_http"
+
+    def __init__(
+        self,
+        url: str,
+        *,
+        api_key: str | None = None,
+        timeout_seconds: float = 30.0,
+        disclosure_policy: ProviderDisclosurePolicy | None = None,
+    ):
+        if not url:
+            raise ValueError("hosted role provider requires a url")
+        self.url = url
+        self.api_key = api_key
+        self.timeout_seconds = timeout_seconds
+        self.disclosure_policy = disclosure_policy or ProviderDisclosurePolicy()
+        self.proposal_ledger: ProviderProposalLedger | None = None
+        self.proposal_branch = "main"
+
+    def _role_transport(
+        self,
+        payload: dict[str, Any],
+        *,
+        tenant_id: str,
+        role: str,
+        provider_name: str,
+    ) -> dict[str, Any]:
+        return _run_json_http(
+            self.url,
+            payload,
+            api_key=self.api_key,
+            timeout_seconds=self.timeout_seconds,
+            provider_name=provider_name,
+            proposal_ledger=self.proposal_ledger,
+            tenant_id=tenant_id,
+            branch=self.proposal_branch,
+            role=role,
+            strategy=self.strategy,
+        )
+
+
+class HttpCandidateExtractor(_HttpRoleTransport, CommandCandidateExtractor):
+    """HTTPS candidate extractor adapter (same contract as CommandCandidateExtractor)."""
+
+    strategy = "hosted_http_candidate_extractor"
+
+
+class HttpEvidenceSummarizer(_HttpRoleTransport, CommandEvidenceSummarizer):
+    """HTTPS evidence summarizer adapter (same contract as CommandEvidenceSummarizer)."""
+
+    strategy = "hosted_http_evidence_summarizer"
+
+
+class HttpLessonDistiller(_HttpRoleTransport, CommandLessonDistiller):
+    """HTTPS lesson distiller adapter (same contract as CommandLessonDistiller)."""
+
+    strategy = "hosted_http_lesson_distiller"
+
+
+class HttpProcedureInducer(_HttpRoleTransport, CommandProcedureInducer):
+    """HTTPS procedure/skill inducer adapter (same contract as CommandProcedureInducer)."""
+
+    strategy = "hosted_http_skill_inducer"
+
+
+class HttpEntityResolver(_HttpRoleTransport, CommandEntityResolver):
+    """HTTPS entity resolver adapter (same contract as CommandEntityResolver)."""
+
+    strategy = "hosted_http_entity_resolver"
 
 
 def _deterministic_candidates(payload: dict[str, Any], evidence: Sequence[Evidence]) -> list[dict[str, Any]]:
@@ -2816,6 +2937,31 @@ def _merged_access_policy(evidence: Sequence[Evidence], *, tenant_id: str | None
     return merge_access_policies([item.access_policy for item in evidence], tenant_id=tenant_id)
 
 
+def _dispatch_role_request(
+    payload: dict[str, Any],
+    *,
+    raw_runner: "Callable[[], dict[str, Any]]",
+    proposal_ledger: ProviderProposalLedger | None,
+    tenant_id: str | None,
+    branch: str,
+    role: str | None,
+    strategy: str | None,
+) -> dict[str, Any]:
+    """Run a role provider request, replaying through the proposal ledger when
+    it is attached. Transport-agnostic: ``raw_runner`` performs the actual call
+    (subprocess for ``Command*`` adapters, HTTPS POST for ``Http*`` adapters)."""
+    if proposal_ledger is not None and tenant_id and role and strategy:
+        return proposal_ledger.load_or_run(
+            tenant_id=tenant_id,
+            branch=branch,
+            role=role,
+            strategy=strategy,
+            request=payload,
+            run=raw_runner,
+        )
+    return raw_runner()
+
+
 def _run_json_command(
     command: Sequence[str],
     payload: dict[str, Any],
@@ -2828,25 +2974,74 @@ def _run_json_command(
     role: str | None = None,
     strategy: str | None = None,
 ) -> dict[str, Any]:
-    if proposal_ledger is not None and tenant_id and role and strategy:
-        return proposal_ledger.load_or_run(
-            tenant_id=tenant_id,
-            branch=branch,
-            role=role,
-            strategy=strategy,
-            request=payload,
-            run=lambda: _run_json_command_raw(
-                command,
-                payload,
-                timeout_seconds=timeout_seconds,
-                provider_name=provider_name,
-            ),
-        )
-    return _run_json_command_raw(
-        command,
+    return _dispatch_role_request(
         payload,
-        timeout_seconds=timeout_seconds,
-        provider_name=provider_name,
+        raw_runner=lambda: _run_json_command_raw(
+            command,
+            payload,
+            timeout_seconds=timeout_seconds,
+            provider_name=provider_name,
+        ),
+        proposal_ledger=proposal_ledger,
+        tenant_id=tenant_id,
+        branch=branch,
+        role=role,
+        strategy=strategy,
+    )
+
+
+def _post_json_role(
+    url: str,
+    payload: dict[str, Any],
+    *,
+    api_key: str | None,
+    timeout_seconds: float,
+    provider_name: str,
+) -> dict[str, Any]:
+    """HTTPS transport for hosted role providers.
+
+    Reuses :func:`mnemosyne.retrieval._post_json` (https-only, SSRF-guarded via
+    ``network_safety.safe_urlopen``, optional bearer token) so the ``Http*``
+    role adapters share the exact transport policy as the embedding/reranker
+    hosted providers. Imported lazily to avoid a module import cycle."""
+    from mnemosyne.retrieval import _post_json
+
+    try:
+        parsed = _post_json(url, payload, api_key, timeout_seconds)
+    except ValueError as exc:
+        raise ValueError(f"{provider_name} failed: {exc}") from exc
+    if not isinstance(parsed, dict):
+        raise ValueError(f"{provider_name} response must be a JSON object")
+    return parsed
+
+
+def _run_json_http(
+    url: str,
+    payload: dict[str, Any],
+    *,
+    api_key: str | None,
+    timeout_seconds: float,
+    provider_name: str,
+    proposal_ledger: ProviderProposalLedger | None = None,
+    tenant_id: str | None = None,
+    branch: str = "main",
+    role: str | None = None,
+    strategy: str | None = None,
+) -> dict[str, Any]:
+    return _dispatch_role_request(
+        payload,
+        raw_runner=lambda: _post_json_role(
+            url,
+            payload,
+            api_key=api_key,
+            timeout_seconds=timeout_seconds,
+            provider_name=provider_name,
+        ),
+        proposal_ledger=proposal_ledger,
+        tenant_id=tenant_id,
+        branch=branch,
+        role=role,
+        strategy=strategy,
     )
 
 

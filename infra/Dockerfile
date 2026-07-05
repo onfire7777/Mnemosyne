@@ -22,6 +22,12 @@ COPY infra/vault/vault-object-key-provider.py /opt/mnemosyne/bin/vault-object-ke
 COPY infra/vault/vault-session-secret-provider.py /opt/mnemosyne/bin/vault-session-secret
 COPY infra/providers/role-llm.py /opt/mnemosyne/bin/role-llm
 COPY infra/providers/role-ladder.py /opt/mnemosyne/bin/role-ladder
+# Hosted HTTPS role provider service (B4/B9): wraps role-llm's dispatch over
+# HTTP; fronted by Caddy at roles.mnemo.local. Keeps role-llm's .py-less sibling
+# name resolvable (role-http loads role-llm by explicit source loader).
+COPY infra/providers/role-http.py /opt/mnemosyne/bin/role-http
+# Minimal self-hosted alert receiver (B8 core): vmalert notifier delivery target.
+COPY infra/observability/alert-sink.py /opt/mnemosyne/bin/alert-sink
 RUN chmod 0755 /usr/local/bin/mnemo-entrypoint /opt/mnemosyne/bin/*
 
 # Non-root; matches the compose hardening (read_only, cap_drop ALL, no-new-privileges).

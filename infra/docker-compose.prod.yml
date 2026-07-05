@@ -41,7 +41,7 @@ services:
     <<: *hardened
     image: caddy:2.8@sha256:226d1f059b75399fe19182893c7184591c07b97afc8dfcf44eeb80c9a77a530f
     cap_add: ["NET_BIND_SERVICE"]
-    depends_on: [step-ca, mnemo-api, mnemo-stream, keycloak, grafana, embedder, seaweedfs]
+    depends_on: [step-ca, mnemo-api, mnemo-stream, keycloak, grafana, embedder, seaweedfs, role-http]
     ports: ["443:443"]                     # bind to a concrete LAN/VPN iface in prod, never 0.0.0.0/WAN
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
@@ -51,9 +51,9 @@ services:
     tmpfs: ["/config:size=16m"]
     networks:                              # internal = proxy backhaul to tei/s3/grafana; aliases give
       edge:                                # every service one HTTPS name that resolves to the ingress
-        aliases: [mcp.mnemo.local, kc.mnemo.local, tei.mnemo.local, s3.mnemo.local, grafana.mnemo.local, ops.mnemo.local]
+        aliases: [mcp.mnemo.local, kc.mnemo.local, tei.mnemo.local, s3.mnemo.local, grafana.mnemo.local, ops.mnemo.local, roles.mnemo.local]
       internal:
-        aliases: [mcp.mnemo.local, kc.mnemo.local, tei.mnemo.local, s3.mnemo.local, grafana.mnemo.local, ops.mnemo.local]
+        aliases: [mcp.mnemo.local, kc.mnemo.local, tei.mnemo.local, s3.mnemo.local, grafana.mnemo.local, ops.mnemo.local, roles.mnemo.local]
 
   step-ca:                                 # internal ACME CA -> real, non-self-signed chains (TLS gate)
     <<: *hardened
@@ -211,15 +211,25 @@ services:
       - "-remoteRead.url=http://victoriametrics:8428"
       - "-remoteWrite.url=http://victoriametrics:8428"
       - "-rule=/etc/vmalert/rules/*.yml"
-      # No external Alertmanager in the self-hosted profile: tripwires are
-      # scraped from vmalert's own /metrics and surfaced on the Grafana
-      # dashboard. Blackhole keeps rule evaluation running without a notifier.
-      - "-notifier.blackhole"
+      # Self-hosted delivering alert route (B8): firing alerts are POSTed to the
+      # in-cluster alert-sink (Alertmanager v2 /api/v2/alerts). A subscriber
+      # verifies real end-to-end delivery — no external Alertmanager needed.
+      - "-notifier.url=http://alert-sink:9099"
     volumes:
       - ./observability/vmalert:/etc/vmalert/rules:ro
     tmpfs: ["/tmp:size=16m"]
     networks: [internal]
-    depends_on: [victoriametrics]
+    depends_on: [victoriametrics, alert-sink]
+
+  alert-sink:                              # B8 core: self-hosted alert delivery target + subscriber surface
+    <<: *hardened
+    build: { context: .., dockerfile: infra/Dockerfile }
+    entrypoint: ["python", "/opt/mnemosyne/bin/alert-sink"]
+    environment:
+      ALERT_SINK_HOST: 0.0.0.0
+      ALERT_SINK_PORT: "9099"
+    tmpfs: ["/tmp:size=8m"]
+    networks: [internal]
 
   grafana:                                 # hosted dashboard URL for B8 (mode=hosted_url)
     <<: *hardened
@@ -342,6 +352,26 @@ services:
     networks:                              # edge grants egress for `ollama pull`; serving happens on internal
       edge: {}
       internal: { aliases: [ollama.mnemo.local] }
+
+  role-http:                               # B4/B9: hosted HTTPS role provider (wraps role-llm dispatch)
+    <<: *hardened
+    build: { context: .., dockerfile: infra/Dockerfile }
+    entrypoint: ["python", "/opt/mnemosyne/bin/role-http"]
+    env_file: [./profiles/self-hosted.env]
+    environment:
+      ROLE_HTTP_HOST: 0.0.0.0
+      ROLE_HTTP_PORT: "8791"
+      # Same latency-tuned local role-LLM as the consolidator on this no-GPU host
+      # (qwen3:4b is ~5x slower and unreliable under full-stack contention). 0.6b
+      # returns valid structure for representative inputs (the live consolidation
+      # drill + hosted-llm-check both pass on it); clients retry the small model's
+      # occasional empty return.
+      OLLAMA_URL: http://ollama.mnemo.local:11434
+      OLLAMA_MODEL: qwen3:0.6b
+      OLLAMA_TIMEOUT: "280"
+    tmpfs: ["/tmp:size=32m"]
+    networks: [internal]                    # reachable by Caddy backhaul; reaches ollama on the internal net
+    depends_on: [ollama]
 
   operator:                                # bastion for Tier-B capture runs (not started by default)
     <<: *hardened
