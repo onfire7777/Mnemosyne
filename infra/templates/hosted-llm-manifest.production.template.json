@@ -1,0 +1,68 @@
+{
+  "name": "self-hosted-production-hosted-llm",
+  "forbid_local": true,
+  "required_roles": ["candidate_extractor", "entity_resolver", "summarizer"],
+  "providers": [
+    {
+      "name": "roles-candidate-extractor",
+      "role": "candidate_extractor",
+      "url": "https://roles.mnemo.local/v1/role",
+      "protocol": "role-json",
+      "method": "POST",
+      "timeout_seconds": 300,
+      "request": {
+        "tenant_id": "hosted-provider-health",
+        "prompt_boundary": {"role": "candidate_extractor"},
+        "payload": {"query": "Mnemosyne hosted provider health check"},
+        "evidence": [
+          {
+            "cid": "health-cid",
+            "content": "Mnemosyne stores consolidated evidence in Postgres.",
+            "source_type": "hosted-llm-check"
+          }
+        ]
+      }
+    },
+    {
+      "name": "roles-entity-resolver",
+      "role": "entity_resolver",
+      "url": "https://roles.mnemo.local/v1/role",
+      "protocol": "role-json",
+      "method": "POST",
+      "timeout_seconds": 300,
+      "request": {
+        "tenant_id": "hosted-provider-health",
+        "prompt_boundary": {"role": "entity_resolver"},
+        "candidates": [
+          {
+            "signature": "provider-health",
+            "query": "provider health",
+            "candidate_subject": "Mnemosyne",
+            "candidate_predicate": "stores",
+            "candidate_object": "evidence",
+            "entity_key": "mnemosyne"
+          }
+        ]
+      }
+    },
+    {
+      "name": "roles-summarizer",
+      "role": "summarizer",
+      "url": "https://roles.mnemo.local/v1/role",
+      "protocol": "role-json",
+      "method": "POST",
+      "timeout_seconds": 300,
+      "request": {
+        "tenant_id": "hosted-provider-health",
+        "prompt_boundary": {"role": "summarizer"},
+        "evidence": [
+          {
+            "cid": "health-cid",
+            "content": "Mnemosyne stores consolidated evidence in Postgres.",
+            "source_type": "hosted-llm-check"
+          }
+        ]
+      }
+    }
+  ]
+}

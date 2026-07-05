@@ -67,6 +67,14 @@ s3.mnemo.local {
 	reverse_proxy seaweedfs:8333
 }
 
+roles.mnemo.local {
+	# B4/B9 hosted role provider: engine Http* role adapters + hosted-llm-check
+	# reach the role-llm dispatch here over step-ca TLS. Internal net only.
+	import internal_acme
+	import secure_headers
+	reverse_proxy role-http:8791
+}
+
 grafana.mnemo.local {
 	import internal_acme
 	import secure_headers
