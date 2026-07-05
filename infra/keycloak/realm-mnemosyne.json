@@ -7,7 +7,7 @@
   "loginWithEmailAllowed": true,
   "duplicateEmailsAllowed": false,
   "attributes": {
-    "frontendUrl": "http://localhost:8089"
+    "frontendUrl": "https://kc.mnemo.local"
   },
   "clientScopes": [
     {
@@ -67,9 +67,20 @@
           "protocolMapper": "oidc-audience-mapper",
           "consentRequired": false,
           "config": {
-            "included.custom.audience": "mnemosyne",
+            "included.custom.audience": "mnemosyne-cli",
             "id.token.claim": "true",
             "access.token.claim": "true"
+          }
+        },
+        {
+          "name": "mnemosyne-sub",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-sub-mapper",
+          "consentRequired": false,
+          "config": {
+            "access.token.claim": "true",
+            "introspection.token.claim": "true",
+            "id.token.claim": "true"
           }
         }
       ]
@@ -86,8 +97,12 @@
       "standardFlowEnabled": true,
       "directAccessGrantsEnabled": true,
       "serviceAccountsEnabled": false,
-      "redirectUris": ["http://localhost/*"],
-      "webOrigins": ["+"],
+      "redirectUris": [
+        "http://localhost/*"
+      ],
+      "webOrigins": [
+        "+"
+      ],
       "fullScopeAllowed": true,
       "defaultClientScopes": [
         "openid",
@@ -96,7 +111,11 @@
         "roles",
         "mnemosyne"
       ],
-      "optionalClientScopes": ["address", "phone", "offline_access"]
+      "optionalClientScopes": [
+        "address",
+        "phone",
+        "offline_access"
+      ]
     }
   ],
   "users": [
@@ -108,9 +127,15 @@
       "firstName": "Analyst",
       "lastName": "A",
       "attributes": {
-        "tenant_id": ["tenant-a"],
-        "mnemosyne_role": ["operator"],
-        "mnemosyne_source_trust_tier": ["0"]
+        "tenant_id": [
+          "tenant-a"
+        ],
+        "mnemosyne_role": [
+          "operator"
+        ],
+        "mnemosyne_source_trust_tier": [
+          "0"
+        ]
       },
       "credentials": [
         {
@@ -128,9 +153,15 @@
       "firstName": "Agent",
       "lastName": "A",
       "attributes": {
-        "tenant_id": ["tenant-a"],
-        "mnemosyne_role": ["agent"],
-        "mnemosyne_source_trust_tier": ["3"]
+        "tenant_id": [
+          "tenant-a"
+        ],
+        "mnemosyne_role": [
+          "agent"
+        ],
+        "mnemosyne_source_trust_tier": [
+          "3"
+        ]
       },
       "credentials": [
         {
