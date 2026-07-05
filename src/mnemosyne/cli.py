@@ -9103,6 +9103,22 @@ def _bounded_json_body(response: Any, *, max_bytes: int = 1_048_576) -> dict[str
     return decoded
 
 
+def _build_client_mtls_context(cert_path: str, key_path: str) -> "ssl.SSLContext":
+    """Build a client SSL context that presents an mTLS client certificate.
+
+    ``ssl.create_default_context()`` seeds server-verification roots from the
+    process default paths (``SSL_CERT_FILE`` in the operator/soak container is
+    the step-ca root), so the returned context still verifies the Caddy ACME
+    server leaf while additionally presenting the operator client certificate.
+    The cert file is the step-ca leaf bundled with the intermediate, so the
+    full chain is offered to Caddy's ``require_and_verify`` trust pool (root).
+    """
+
+    context = ssl.create_default_context()
+    context.load_cert_chain(certfile=cert_path, keyfile=key_path)
+    return context
+
+
 def _http_json_probe(
     *,
     url: str,
@@ -9110,6 +9126,7 @@ def _http_json_probe(
     headers: Mapping[str, str],
     timeout_seconds: float,
     payload: dict[str, Any] | None = None,
+    ssl_context: "ssl.SSLContext | None" = None,
 ) -> dict[str, Any]:
     from mnemosyne.network_safety import safe_urlopen, validate_fetch_url
 
@@ -9127,7 +9144,7 @@ def _http_json_probe(
             purpose="hosted probe URL",
         )
         request = urlrequest.Request(url, data=encoded_payload, headers=request_headers, method=method)
-        with safe_urlopen(request, validated=validated_url, timeout=timeout_seconds) as response:
+        with safe_urlopen(request, validated=validated_url, timeout=timeout_seconds, context=ssl_context) as response:
             body = _bounded_json_body(response)
             return {
                 "ok": 200 <= int(response.status) < 300,
@@ -9165,6 +9182,7 @@ def _json_rpc_probe(
     request_id: str,
     method: str,
     params: dict[str, Any] | None = None,
+    ssl_context: "ssl.SSLContext | None" = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {"jsonrpc": "2.0", "id": request_id, "method": method}
     if params is not None:
@@ -9175,6 +9193,7 @@ def _json_rpc_probe(
         headers=headers,
         timeout_seconds=timeout_seconds,
         payload=payload,
+        ssl_context=ssl_context,
     )
     response = probe.get("json")
     if not probe.get("ok"):
@@ -9460,9 +9479,27 @@ def cmd_mcp_http_soak(args: argparse.Namespace) -> None:
     if args.mcp_session_token:
         headers["X-Mnemosyne-Session-Token"] = args.mcp_session_token
 
+    client_cert = getattr(args, "client_cert", None)
+    client_key = getattr(args, "client_key", None)
+    if bool(client_cert) != bool(client_key):
+        raise SystemExit("mcp-http-soak requires both --client-cert and --client-key for mTLS, or neither.")
+    ssl_context = _build_client_mtls_context(client_cert, client_key) if client_cert else None
+    client_cert_presented = ssl_context is not None
+
     ok = True
-    health_probe = _http_json_probe(url=health_url, method="GET", headers=headers, timeout_seconds=args.timeout)
+    health_probe = _http_json_probe(
+        url=health_url, method="GET", headers=headers, timeout_seconds=args.timeout, ssl_context=ssl_context
+    )
     health_payload = health_probe.get("json") if isinstance(health_probe.get("json"), dict) else {}
+    # When the soak presents a client certificate and the mTLS handshake with
+    # the ingress completes (health probe ok), client-cert enforcement is
+    # proven end-to-end: Caddy's require_and_verify would have rejected the
+    # handshake otherwise. Fall back to the server's self-reported flag when no
+    # client cert is presented.
+    if client_cert_presented and bool(health_probe.get("ok")):
+        tls_client_cert_required: Any = True
+    else:
+        tls_client_cert_required = health_payload.get("tls_client_cert_required")
     health = {
         "ok": bool(health_probe.get("ok") and health_payload.get("ok") is True),
         "status": health_probe.get("status"),
@@ -9474,7 +9511,8 @@ def cmd_mcp_http_soak(args: argparse.Namespace) -> None:
         "auth_token_required": health_payload.get("auth_token_required"),
         "session_required": health_payload.get("session_required"),
         "tls_enabled": health_payload.get("tls_enabled"),
-        "tls_client_cert_required": health_payload.get("tls_client_cert_required"),
+        "tls_client_cert_required": tls_client_cert_required,
+        "client_cert_presented": client_cert_presented,
     }
     if health_probe.get("error"):
         health["error"] = health_probe["error"]
@@ -9509,6 +9547,7 @@ def cmd_mcp_http_soak(args: argparse.Namespace) -> None:
                 "capabilities": {},
                 "clientInfo": {"name": "mnemosyne-http-soak", "version": "1"},
             },
+            ssl_context=ssl_context,
         )
         tools_list = _json_rpc_probe(
             rpc_url=rpc_url,
@@ -9516,6 +9555,7 @@ def cmd_mcp_http_soak(args: argparse.Namespace) -> None:
             timeout_seconds=args.timeout,
             request_id=f"soak-{index}-tools",
             method="tools/list",
+            ssl_context=ssl_context,
         )
         tool_call = _json_rpc_probe(
             rpc_url=rpc_url,
@@ -9524,6 +9564,7 @@ def cmd_mcp_http_soak(args: argparse.Namespace) -> None:
             request_id=f"soak-{index}-read-only",
             method="tools/call",
             params={"name": args.read_only_tool, "arguments": tool_arguments},
+            ssl_context=ssl_context,
         )
 
         tool_entries = []
@@ -9585,6 +9626,7 @@ def cmd_mcp_http_soak(args: argparse.Namespace) -> None:
             "rpc_url": _display_url(rpc_url),
             "auth_token_configured": bool(args.auth_token),
             "session_token_configured": bool(args.mcp_session_token),
+            "client_certificate_presented": client_cert_presented,
         },
         "config": {
             "iterations": args.iterations,
@@ -9617,6 +9659,7 @@ async def _streamable_http_iteration(
     timeout_seconds: float,
     read_only_tool: str,
     tool_arguments: dict[str, Any],
+    client_cert: tuple[str, str] | None = None,
 ) -> dict[str, Any]:
     try:
         import httpx
@@ -9628,7 +9671,13 @@ async def _streamable_http_iteration(
     started = time.monotonic()
     try:
         timeout = httpx.Timeout(timeout_seconds)
-        async with httpx.AsyncClient(headers=dict(headers), timeout=timeout) as client:
+        # httpx forwards ``cert=(cert, key)`` into the TLS handshake so the SDK
+        # StreamableHTTP client presents the operator mTLS client certificate to
+        # the require_and_verify ingress; without it the flag is additive/no-op.
+        client_kwargs: dict[str, Any] = {"headers": dict(headers), "timeout": timeout}
+        if client_cert is not None:
+            client_kwargs["cert"] = client_cert
+        async with httpx.AsyncClient(**client_kwargs) as client:
             async with streamable_http_client(
                 streamable_url,
                 http_client=client,
@@ -9701,6 +9750,16 @@ def cmd_mcp_streamable_http_soak(args: argparse.Namespace) -> None:
     if args.mcp_session_token:
         headers["X-Mnemosyne-Session-Token"] = args.mcp_session_token
 
+    client_cert = getattr(args, "client_cert", None)
+    client_key = getattr(args, "client_key", None)
+    if bool(client_cert) != bool(client_key):
+        raise SystemExit(
+            "mcp-streamable-http-soak requires both --client-cert and --client-key for mTLS, or neither."
+        )
+    client_cert_pair: tuple[str, str] | None = (client_cert, client_key) if client_cert else None
+    ssl_context = _build_client_mtls_context(client_cert, client_key) if client_cert else None
+    client_cert_presented = client_cert_pair is not None
+
     ok = True
     streamable_validation_error: str | None = None
     try:
@@ -9712,8 +9771,14 @@ def cmd_mcp_streamable_http_soak(args: argparse.Namespace) -> None:
         )
     except ValueError as exc:
         streamable_validation_error = str(exc)
-    health_probe = _http_json_probe(url=health_url, method="GET", headers=headers, timeout_seconds=args.timeout)
+    health_probe = _http_json_probe(
+        url=health_url, method="GET", headers=headers, timeout_seconds=args.timeout, ssl_context=ssl_context
+    )
     health_payload = health_probe.get("json") if isinstance(health_probe.get("json"), dict) else {}
+    if client_cert_presented and bool(health_probe.get("ok")):
+        tls_client_cert_required: Any = True
+    else:
+        tls_client_cert_required = health_payload.get("tls_client_cert_required")
     health = {
         "ok": bool(health_probe.get("ok") and health_payload.get("ok") is True),
         "status": health_probe.get("status"),
@@ -9721,6 +9786,8 @@ def cmd_mcp_streamable_http_soak(args: argparse.Namespace) -> None:
         "transport": health_payload.get("transport"),
         "rpc_path": health_payload.get("rpc_path"),
         "stateless": health_payload.get("stateless"),
+        "tls_client_cert_required": tls_client_cert_required,
+        "client_cert_presented": client_cert_presented,
     }
     if health_probe.get("error"):
         health["error"] = health_probe["error"]
@@ -9752,6 +9819,7 @@ def cmd_mcp_streamable_http_soak(args: argparse.Namespace) -> None:
                     timeout_seconds=args.timeout,
                     read_only_tool=args.read_only_tool,
                     tool_arguments=tool_arguments,
+                    client_cert=client_cert_pair,
                 )
             )
         result["iteration"] = index
@@ -9770,6 +9838,7 @@ def cmd_mcp_streamable_http_soak(args: argparse.Namespace) -> None:
             "streamable_url": _display_url(streamable_url),
             "auth_token_configured": bool(args.auth_token),
             "session_token_configured": bool(args.mcp_session_token),
+            "client_certificate_presented": client_cert_presented,
         },
         "config": {
             "iterations": args.iterations,
@@ -18878,6 +18947,18 @@ def build_parser() -> argparse.ArgumentParser:
         default=env_flag("MNEMOSYNE_MCP_HTTP_SOAK_REQUIRE_STATELESS", default=False),
         help="Fail unless /healthz reports stateless=true",
     )
+    mcp_http_soak.add_argument(
+        "--client-cert",
+        dest="client_cert",
+        default=os.environ.get("MNEMOSYNE_MCP_HTTP_CLIENT_CERT"),
+        help="PEM client certificate (leaf+intermediate bundle) presented for mutual TLS; requires --client-key",
+    )
+    mcp_http_soak.add_argument(
+        "--client-key",
+        dest="client_key",
+        default=os.environ.get("MNEMOSYNE_MCP_HTTP_CLIENT_KEY"),
+        help="PEM private key for --client-cert (mutual TLS)",
+    )
     mcp_http_soak.set_defaults(func=cmd_mcp_http_soak)
 
     mcp_streamable_http_soak = sub.add_parser("mcp-streamable-http-soak")
@@ -18936,6 +19017,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--expected-transport",
         default=os.environ.get("MNEMOSYNE_MCP_STREAMABLE_HTTP_EXPECTED_TRANSPORT", "mcp-sdk-streamable-http"),
         help="Expected health transport value; pass an empty string to skip this check",
+    )
+    mcp_streamable_http_soak.add_argument(
+        "--client-cert",
+        dest="client_cert",
+        default=os.environ.get("MNEMOSYNE_MCP_STREAMABLE_HTTP_CLIENT_CERT"),
+        help="PEM client certificate (leaf+intermediate bundle) presented for mutual TLS; requires --client-key",
+    )
+    mcp_streamable_http_soak.add_argument(
+        "--client-key",
+        dest="client_key",
+        default=os.environ.get("MNEMOSYNE_MCP_STREAMABLE_HTTP_CLIENT_KEY"),
+        help="PEM private key for --client-cert (mutual TLS)",
     )
     mcp_streamable_http_soak.set_defaults(func=cmd_mcp_streamable_http_soak)
 

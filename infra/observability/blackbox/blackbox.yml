@@ -17,3 +17,9 @@ modules:
       preferred_ip_protocol: ip4
       tls_config:
         ca_file: /etc/blackbox/step-ca-root.crt
+        # B3 mTLS: present the step-ca client leaf (leaf+intermediate bundle) so
+        # the probe of the require_and_verify mcp.mnemo.local ingress completes
+        # its handshake. On the other Caddy hosts (no client-cert requirement)
+        # this certificate is simply never sent, so the probe is unchanged.
+        cert_file: /etc/blackbox/mcp-client.crt
+        key_file: /etc/blackbox/mcp-client.key
