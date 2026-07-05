@@ -17614,7 +17614,11 @@ def build_parser() -> argparse.ArgumentParser:
     auth_ops_check.add_argument("--min-authz-allowed-cases", type=int, default=1)
     auth_ops_check.add_argument("--min-authz-denied-cases", type=int, default=1)
     auth_ops_check.add_argument("--min-session-secret-keys", type=int, default=2)
-    auth_ops_check.add_argument("--min-cert-days", type=float, default=30.0)
+    auth_ops_check.add_argument(
+        "--min-cert-days",
+        type=float,
+        default=float(os.environ.get("MNEMOSYNE_AUTH_OPS_MIN_CERT_DAYS", "30")),
+    )
     auth_ops_check.add_argument("--min-cert-overlap-days", type=float, default=7.0)
     auth_ops_check.add_argument("--min-tenants", type=int, default=2)
     auth_ops_check.add_argument("--min-tenant-cases", type=int, default=2)
