@@ -16297,6 +16297,89 @@ def _run_provider_latency_samples(samples: int, callback: Any) -> tuple[Any, dic
     return result, _provider_latency_summary_ms(durations)
 
 
+def _native_retrieval_probe(args: argparse.Namespace) -> tuple[dict[str, Any] | None, dict[str, Any] | None, list[str]]:
+    """Probe the native Postgres lexical + graph retrieval against a seeded
+    health tenant, returning ``{top_id, hit_count}`` probes for provider-check.
+
+    Native FTS + recursive-PPR are the deployed retrieval backends (provider
+    kind ``postgres``); this proves they answer a live query, mirroring the
+    probe the ``command`` provider path already emits. The ``provider-health``
+    tenant is deterministic and idempotent (content-addressed CIDs dedupe
+    re-seeds), and isolated from tenant data by RLS.
+    """
+    from mnemosyne.models import Evidence, Relation
+    from mnemosyne.postgres_engine import PostgresEngine, PostgresUnavailableError
+
+    errors: list[str] = []
+    dsn = getattr(args, "postgres_dsn", None) or default_postgres_dsn()
+    if not dsn:
+        return None, None, ["native retrieval probe requires --postgres-dsn or MNEMOSYNE_POSTGRES_DSN"]
+    tenant = "provider-health"
+    try:
+        engine = PostgresEngine(dsn, require_safe_role=bool(getattr(args, "postgres_require_safe_role", False)))
+    except PostgresUnavailableError as exc:
+        return None, None, [f"native retrieval probe engine unavailable: {exc}"]
+    try:
+        engine.ensure_tenant_and_branch(tenant, "main")
+    except Exception:  # noqa: BLE001 - tenant/branch may already exist; seed writes below confirm.
+        pass
+    try:
+        evidence_cid = engine.append_evidence(
+            Evidence(
+                tenant_id=tenant,
+                user_id=tenant,
+                actor="system",
+                source_type="provider-health",
+                content="provider health check retrieval lexical probe signal for the native backend",
+                metadata={"reality_class": "grounded"},
+                trust_tier=0,
+                access_policy={"tenant": tenant},
+            )
+        )
+        # The graph_ppr relation-hit security filter drops relations without a
+        # trusted source-evidence CID, so bind the seeded health evidence.
+        engine.add_relation(
+            Relation(
+                tenant_id=tenant,
+                source="provider health retrieval signal",
+                predicate="relates_to",
+                target="native retrieval health node",
+                source_evidence_cids=[evidence_cid],
+            )
+        )
+    except Exception as exc:  # noqa: BLE001 - health checks return structured failures.
+        errors.append(f"native retrieval probe seed failed: {exc}")
+
+    lexical_probe: dict[str, Any] | None = None
+    graph_probe: dict[str, Any] | None = None
+    if args.lexical_provider in {"postgres", "native"}:
+        try:
+            hits = engine.lexical_search(
+                "provider health check retrieval",
+                k=1,
+                filt={"tenant_id": tenant, "branch": "main"},
+            )
+            if not hits:
+                raise ValueError("native lexical provider returned no health-check hits")
+            lexical_probe = {"hit_count": len(hits), "top_id": hits[0].id}
+        except Exception as exc:  # noqa: BLE001 - health checks return structured failures.
+            errors.append(f"native lexical provider failed: {exc}")
+    if args.graph_provider in {"postgres", "native"}:
+        try:
+            hits = engine.graph_ppr(
+                ["provider", "health", "retrieval"],
+                1,
+                tenant_id=tenant,
+                branch="main",
+            )
+            if not hits:
+                raise ValueError("native graph provider returned no health-check hits")
+            graph_probe = {"hit_count": len(hits), "top_id": hits[0].id}
+        except Exception as exc:  # noqa: BLE001 - health checks return structured failures.
+            errors.append(f"native graph provider failed: {exc}")
+    return lexical_probe, graph_probe, errors
+
+
 def cmd_provider_check(args: argparse.Namespace) -> None:
     from mnemosyne.gate import RegressionCase
     from mnemosyne.learning import Lesson, Procedure
@@ -16387,6 +16470,27 @@ def cmd_provider_check(args: argparse.Namespace) -> None:
     lexical_probe: dict[str, Any] | None = None
     graph_probe: dict[str, Any] | None = None
     retrieval_errors: list[str] = []
+    # Native (postgres) lexical/graph providers are the deployed self-hosted
+    # backends; probe them against a seeded health tenant so the non-local
+    # backend proves a live retrieval (previously only the command path emitted
+    # a probe, leaving native deployments without lexical_probe/graph_probe).
+    # Gated on a real Postgres backend + DSN so non-postgres provider-check runs
+    # (local/sqlite contexts) keep the prior no-probe behaviour.
+    native_backend_available = (
+        getattr(args, "backend", "") == "postgres"
+        and bool(getattr(args, "postgres_dsn", None) or default_postgres_dsn())
+    )
+    if native_backend_available and (
+        args.lexical_provider in {"postgres", "native"} or args.graph_provider in {"postgres", "native"}
+    ):
+        native_lexical_probe, native_graph_probe, native_errors = _native_retrieval_probe(args)
+        if native_lexical_probe is not None:
+            lexical_probe = native_lexical_probe
+        if native_graph_probe is not None:
+            graph_probe = native_graph_probe
+        if native_errors:
+            retrieval_backend_ok = False
+            retrieval_errors.extend(native_errors)
     if args.lexical_provider == "command":
         try:
             if adapters is None or adapters.lexical_retriever is None:
