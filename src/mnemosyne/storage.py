@@ -3,19 +3,26 @@
 from __future__ import annotations
 
 import base64
+import hashlib
+import hmac
 import json
 import os
 import shlex
 import subprocess
 import tempfile
+import urllib.error
+import urllib.request
 from dataclasses import asdict, dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol, Sequence
+from urllib.parse import urlsplit
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from mnemosyne.ids import bytes_cid
 from mnemosyne.models import Resource
+from mnemosyne.network_safety import safe_urlopen, validate_fetch_url
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,10 +97,8 @@ class LocalObjectStore:
         metadata: dict[str, Any] | None = None,
     ) -> ObjectRecord:
         cid = bytes_cid(data)
-        path = self._path_for_cid(cid)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        if not path.exists():
-            _atomic_write_bytes(path, data)
+        if not self._object_exists(cid):
+            self._write_object_bytes(cid, data)
         return ObjectRecord(
             tenant_id=tenant_id,
             cid=cid,
@@ -105,12 +110,10 @@ class LocalObjectStore:
         )
 
     def read_bytes(self, uri: str) -> bytes:
-        cid = self._cid_from_uri(uri)
-        return self._path_for_cid(cid).read_bytes()
+        return self._read_object_bytes(self._cid_from_uri(uri))
 
     def exists(self, uri: str) -> bool:
-        cid = self._cid_from_uri(uri)
-        return self._path_for_cid(cid).exists()
+        return self._object_exists(self._cid_from_uri(uri))
 
     def shred(self, uri: str, *, tenant_id: str | None = None) -> dict[str, Any]:
         self._cid_from_uri(uri)
@@ -119,6 +122,25 @@ class LocalObjectStore:
             "crypto_shredded": False,
             "reason": "unencrypted_object_store_has_no_key",
         }
+
+    # -- byte-backend seams -------------------------------------------------
+    # These four methods are the ONLY places the store touches its physical
+    # bytes; the envelope / AAD / CID-verify logic above and in the encrypted
+    # subclass is backend-agnostic. The S3 stores override just these seams to
+    # target SeaweedFS instead of the local filesystem.
+    def _write_object_bytes(self, cid: str, data: bytes) -> None:
+        path = self._path_for_cid(cid)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        _atomic_write_bytes(path, data)
+
+    def _read_object_bytes(self, cid: str) -> bytes:
+        return self._path_for_cid(cid).read_bytes()
+
+    def _object_exists(self, cid: str) -> bool:
+        return self._path_for_cid(cid).exists()
+
+    def _delete_object_bytes(self, cid: str) -> None:
+        self._path_for_cid(cid).unlink(missing_ok=True)
 
     def _path_for_cid(self, cid: str) -> Path:
         if len(cid) != 64 or any(ch not in "0123456789abcdef" for ch in cid):
@@ -300,8 +322,6 @@ class EncryptedLocalObjectStore(LocalObjectStore):
         metadata: dict[str, Any] | None = None,
     ) -> ObjectRecord:
         cid = bytes_cid(data)
-        path = self._path_for_cid(cid)
-        path.parent.mkdir(parents=True, exist_ok=True)
         key = self.key_manager.get_or_create_key(tenant_id, cid)
         nonce = os.urandom(12)
         aad = _object_aad(tenant_id, cid, kind, media_type)
@@ -318,7 +338,7 @@ class EncryptedLocalObjectStore(LocalObjectStore):
             "nonce": _b64encode(nonce),
             "ciphertext": _b64encode(ciphertext),
         }
-        _atomic_write_bytes(path, json.dumps(envelope, sort_keys=True).encode("utf-8"))
+        self._write_object_bytes(cid, json.dumps(envelope, sort_keys=True).encode("utf-8"))
         return ObjectRecord(
             tenant_id=tenant_id,
             cid=cid,
@@ -352,8 +372,7 @@ class EncryptedLocalObjectStore(LocalObjectStore):
 
     def exists(self, uri: str) -> bool:
         cid = self._cid_from_uri(uri)
-        path = self._path_for_cid(cid)
-        if not path.exists():
+        if not self._object_exists(cid):
             return False
         try:
             envelope = self._read_envelope(cid)
@@ -380,7 +399,7 @@ class EncryptedLocalObjectStore(LocalObjectStore):
         }
 
     def _read_envelope(self, cid: str) -> dict[str, Any]:
-        envelope = json.loads(self._path_for_cid(cid).read_text(encoding="utf-8"))
+        envelope = json.loads(self._read_object_bytes(cid).decode("utf-8"))
         if envelope.get("cid") != cid:
             raise ValueError("object envelope cid mismatch")
         if envelope.get("algorithm") != "AES-256-GCM":
@@ -408,3 +427,263 @@ def _command_argv(command: str | Sequence[str]) -> list[str]:
     if isinstance(command, str):
         return shlex.split(command)
     return [str(item) for item in command]
+
+
+# --- S3 / SeaweedFS byte backend ---------------------------------------------
+# A minimal, dependency-free S3 client: stdlib urllib for transport and a
+# hand-rolled AWS Signature V4 (hashlib/hmac). It exposes only the four verbs
+# the object stores need (Put/Get/Head/Delete + CreateBucket), path-style, and
+# routes every request through ``network_safety.safe_urlopen`` with the endpoint
+# host on the internal-host allowlist. Deliberately NOT boto3 — the package
+# dependency set stays exactly ["cryptography>=42"].
+
+
+class S3ObjectStoreError(RuntimeError):
+    """Raised for any S3 backend failure surfaced to the object store."""
+
+
+class S3ObjectNotFoundError(S3ObjectStoreError):
+    """Raised when an object (or bucket) is absent (HTTP 404)."""
+
+
+@dataclass(frozen=True)
+class S3ObjectStoreConfig:
+    endpoint: str
+    bucket: str
+    region: str = "us-east-1"
+    access_key: str = ""
+    secret_key: str = ""
+    timeout_seconds: float = 30.0
+
+
+def _load_seaweed_credentials(path: Path) -> tuple[str, str]:
+    """Read S3 access/secret from a flat ``{"accessKey","secretKey"}`` file or a
+    SeaweedFS ``s3.json`` identities file (``identities[].credentials[]``)."""
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    if isinstance(data, dict) and data.get("accessKey") and data.get("secretKey"):
+        return str(data["accessKey"]), str(data["secretKey"])
+    identities = data.get("identities") if isinstance(data, dict) else None
+    if isinstance(identities, list):
+        for identity in identities:
+            creds = identity.get("credentials") if isinstance(identity, dict) else None
+            if isinstance(creds, list) and creds and isinstance(creds[0], dict):
+                access = creds[0].get("accessKey")
+                secret = creds[0].get("secretKey")
+                if access and secret:
+                    return str(access), str(secret)
+    raise ValueError(f"could not parse S3 credentials from {path}")
+
+
+def s3_config_from_env(environ: dict[str, str] | None = None) -> S3ObjectStoreConfig:
+    """Build an :class:`S3ObjectStoreConfig` from the ``MNEMOSYNE_S3_*`` env.
+
+    Credentials come from ``MNEMOSYNE_S3_ACCESS_KEY``/``MNEMOSYNE_S3_SECRET_KEY``
+    or, failing that, the JSON file named by ``MNEMOSYNE_S3_CREDENTIALS_FILE``.
+    """
+    env = dict(os.environ if environ is None else environ)
+    endpoint = env.get("MNEMOSYNE_S3_ENDPOINT", "https://s3.mnemo.local").rstrip("/")
+    bucket = env.get("MNEMOSYNE_S3_BUCKET", "").strip()
+    if not bucket:
+        raise ValueError("MNEMOSYNE_S3_BUCKET is required for the s3 object store backend")
+    region = env.get("MNEMOSYNE_S3_REGION", "us-east-1").strip() or "us-east-1"
+    access_key = env.get("MNEMOSYNE_S3_ACCESS_KEY", "").strip()
+    secret_key = env.get("MNEMOSYNE_S3_SECRET_KEY", "").strip()
+    creds_file = env.get("MNEMOSYNE_S3_CREDENTIALS_FILE", "").strip()
+    if (not access_key or not secret_key) and creds_file:
+        access_key, secret_key = _load_seaweed_credentials(Path(creds_file))
+    if not access_key or not secret_key:
+        raise ValueError(
+            "s3 object store requires MNEMOSYNE_S3_ACCESS_KEY/MNEMOSYNE_S3_SECRET_KEY "
+            "or MNEMOSYNE_S3_CREDENTIALS_FILE"
+        )
+    timeout = float(env.get("MNEMOSYNE_S3_TIMEOUT", "30"))
+    return S3ObjectStoreConfig(
+        endpoint=endpoint,
+        bucket=bucket,
+        region=region,
+        access_key=access_key,
+        secret_key=secret_key,
+        timeout_seconds=timeout,
+    )
+
+
+def _s3_uri_encode(path: str) -> str:
+    """RFC-3986 path encoding for the SigV4 canonical URI (slashes preserved)."""
+    out: list[str] = []
+    for byte in path.encode("utf-8"):
+        char = chr(byte)
+        if char.isalnum() or char in "/-._~":
+            out.append(char)
+        else:
+            out.append(f"%{byte:02X}")
+    return "".join(out)
+
+
+def _s3_signing_key(secret_key: str, date_stamp: str, region: str, service: str) -> bytes:
+    k_date = hmac.new(("AWS4" + secret_key).encode("utf-8"), date_stamp.encode("utf-8"), hashlib.sha256).digest()
+    k_region = hmac.new(k_date, region.encode("utf-8"), hashlib.sha256).digest()
+    k_service = hmac.new(k_region, service.encode("utf-8"), hashlib.sha256).digest()
+    return hmac.new(k_service, b"aws4_request", hashlib.sha256).digest()
+
+
+class SeaweedS3Client:
+    """Path-style S3 client for SeaweedFS using stdlib urllib + manual SigV4."""
+
+    service = "s3"
+
+    def __init__(self, config: S3ObjectStoreConfig):
+        parsed = urlsplit(config.endpoint)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            raise ValueError("S3 endpoint must be an http(s) URL with a host")
+        self.config = config
+        self._scheme = parsed.scheme
+        self._host = parsed.hostname
+        self._host_header = parsed.netloc
+        self._allowed_hosts = (self._host,)
+
+    def put_object(self, key: str, data: bytes) -> None:
+        self._request("PUT", f"/{self.config.bucket}/{key}", body=data)
+
+    def get_object(self, key: str) -> bytes:
+        return self._request("GET", f"/{self.config.bucket}/{key}")
+
+    def head_object(self, key: str) -> bool:
+        try:
+            self._request("HEAD", f"/{self.config.bucket}/{key}")
+            return True
+        except S3ObjectNotFoundError:
+            return False
+
+    def delete_object(self, key: str) -> None:
+        try:
+            self._request("DELETE", f"/{self.config.bucket}/{key}")
+        except S3ObjectNotFoundError:
+            return
+
+    def create_bucket(self) -> None:
+        """Create the bucket; treats an already-existing bucket as success."""
+        try:
+            self._request("PUT", f"/{self.config.bucket}")
+        except S3ObjectStoreError as exc:
+            if "BucketAlready" not in str(exc) and "409" not in str(exc):
+                raise
+
+    def _request(self, method: str, canonical_uri: str, *, body: bytes = b"") -> bytes:
+        cfg = self.config
+        url = f"{self._scheme}://{self._host_header}{canonical_uri}"
+        now = datetime.now(UTC)
+        amz_date = now.strftime("%Y%m%dT%H%M%SZ")
+        date_stamp = now.strftime("%Y%m%d")
+        payload = body or b""
+        payload_hash = hashlib.sha256(payload).hexdigest()
+        canonical_headers = (
+            f"host:{self._host_header}\n"
+            f"x-amz-content-sha256:{payload_hash}\n"
+            f"x-amz-date:{amz_date}\n"
+        )
+        signed_headers = "host;x-amz-content-sha256;x-amz-date"
+        canonical_request = "\n".join(
+            [method, _s3_uri_encode(canonical_uri), "", canonical_headers, signed_headers, payload_hash]
+        )
+        credential_scope = f"{date_stamp}/{cfg.region}/{self.service}/aws4_request"
+        string_to_sign = "\n".join(
+            [
+                "AWS4-HMAC-SHA256",
+                amz_date,
+                credential_scope,
+                hashlib.sha256(canonical_request.encode("utf-8")).hexdigest(),
+            ]
+        )
+        signing_key = _s3_signing_key(cfg.secret_key, date_stamp, cfg.region, self.service)
+        signature = hmac.new(signing_key, string_to_sign.encode("utf-8"), hashlib.sha256).hexdigest()
+        authorization = (
+            f"AWS4-HMAC-SHA256 Credential={cfg.access_key}/{credential_scope}, "
+            f"SignedHeaders={signed_headers}, Signature={signature}"
+        )
+        headers = {
+            "x-amz-date": amz_date,
+            "x-amz-content-sha256": payload_hash,
+            "Authorization": authorization,
+        }
+        data = payload if method in {"PUT", "POST"} else None
+        request = urllib.request.Request(url, data=data, headers=headers, method=method)
+        validated = validate_fetch_url(
+            url,
+            allow_insecure_localhost=False,
+            allow_internal_hosts=self._allowed_hosts,
+            purpose="s3 object store URL",
+        )
+        try:
+            with safe_urlopen(request, validated=validated, timeout=cfg.timeout_seconds) as response:
+                return response.read()
+        except urllib.error.HTTPError as exc:
+            if exc.code in (403, 404):
+                # SeaweedFS returns 404 for missing objects; some path-style
+                # deployments answer a missing key with 403 — treat both as absent.
+                raise S3ObjectNotFoundError(f"s3 {method} {canonical_uri} -> {exc.code}") from exc
+            detail = ""
+            try:
+                detail = exc.read().decode("utf-8", "replace")[:256]
+            except Exception:  # noqa: BLE001 - best-effort error detail only.
+                detail = ""
+            raise S3ObjectStoreError(f"s3 {method} {canonical_uri} -> HTTP {exc.code}: {detail}") from exc
+        except urllib.error.URLError as exc:
+            raise S3ObjectStoreError(f"s3 {method} {canonical_uri} failed: {exc.reason}") from exc
+
+
+class _S3ByteBackend:
+    """Byte-backend seams that store content-addressed objects in S3.
+
+    Mixed into the local stores AHEAD of them in the MRO so these four seam
+    overrides win while every envelope/AAD/CID-verify code path is inherited
+    unchanged. Object key layout mirrors the local sharding: ``cid[:2]/cid``.
+    """
+
+    _s3: SeaweedS3Client
+
+    def _object_key(self, cid: str) -> str:
+        if len(cid) != 64 or any(ch not in "0123456789abcdef" for ch in cid):
+            raise ValueError("invalid object cid")
+        return f"{cid[:2]}/{cid}"
+
+    def _write_object_bytes(self, cid: str, data: bytes) -> None:
+        self._s3.put_object(self._object_key(cid), data)
+
+    def _read_object_bytes(self, cid: str) -> bytes:
+        try:
+            return self._s3.get_object(self._object_key(cid))
+        except S3ObjectNotFoundError as exc:
+            raise FileNotFoundError(f"object {cid} not found in s3 object store") from exc
+
+    def _object_exists(self, cid: str) -> bool:
+        return self._s3.head_object(self._object_key(cid))
+
+    def _delete_object_bytes(self, cid: str) -> None:
+        self._s3.delete_object(self._object_key(cid))
+
+
+class S3ObjectStore(_S3ByteBackend, LocalObjectStore):
+    """Content-addressed S3/SeaweedFS object store (unencrypted payloads)."""
+
+    uri_prefix = "s3-object://sha256/"
+
+    def __init__(self, client: SeaweedS3Client):
+        self._s3 = client
+
+
+class EncryptedS3ObjectStore(_S3ByteBackend, EncryptedLocalObjectStore):
+    """AES-GCM object store whose ciphertext envelopes live in S3/SeaweedFS.
+
+    The app-layer AES-GCM envelope + external key manager are inherited from
+    ``EncryptedLocalObjectStore`` unchanged, so ``encrypted``/``key_provider``/
+    crypto-shred semantics are byte-identical to the local encrypted store; only
+    the physical byte backend is S3.
+    """
+
+    uri_prefix = "s3-object+aesgcm://sha256/"
+
+    def __init__(self, client: SeaweedS3Client, key_manager: ObjectKeyManager):
+        if key_manager is None:
+            raise ValueError("EncryptedS3ObjectStore requires an object key manager")
+        self._s3 = client
+        self.key_manager = key_manager

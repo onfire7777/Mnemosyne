@@ -26,6 +26,9 @@ COPY infra/providers/role-ladder.py /opt/mnemosyne/bin/role-ladder
 # HTTP; fronted by Caddy at roles.mnemo.local. Keeps role-llm's .py-less sibling
 # name resolvable (role-http loads role-llm by explicit source loader).
 COPY infra/providers/role-http.py /opt/mnemosyne/bin/role-http
+# B6 multimodal: command-backed media text extractor + bge-backed media embedder.
+COPY infra/providers/media-text-extractor.py /opt/mnemosyne/bin/media-text-extractor
+COPY infra/providers/media-embedding.py /opt/mnemosyne/bin/media-embedding
 # Minimal self-hosted alert receiver (B8 core): vmalert notifier delivery target.
 COPY infra/observability/alert-sink.py /opt/mnemosyne/bin/alert-sink
 RUN chmod 0755 /usr/local/bin/mnemo-entrypoint /opt/mnemosyne/bin/*

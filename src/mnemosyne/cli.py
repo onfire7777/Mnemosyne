@@ -523,8 +523,24 @@ def load_provenance_trust_policy(args: argparse.Namespace) -> ProvenanceTrustPol
 
 
 def load_object_store(args: argparse.Namespace) -> LocalObjectStore:
-    from mnemosyne.storage import EncryptedLocalObjectStore, LocalObjectStore
+    from mnemosyne.storage import (
+        EncryptedLocalObjectStore,
+        EncryptedS3ObjectStore,
+        LocalObjectStore,
+        S3ObjectStore,
+        SeaweedS3Client,
+        s3_config_from_env,
+    )
 
+    # Additive byte-backend selector. Default stays "local" so existing
+    # /data/objects payloads are never stranded; "s3" externalizes the same
+    # AES-GCM envelopes to SeaweedFS (identical encrypted/key_provider semantics).
+    backend = getattr(args, "object_store_backend", "local") or "local"
+    if backend == "s3":
+        client = SeaweedS3Client(s3_config_from_env())
+        if args.object_store_encryption == "aesgcm":
+            return EncryptedS3ObjectStore(client, load_object_key_manager(args))
+        return S3ObjectStore(client)
     if args.object_store_encryption == "aesgcm":
         return EncryptedLocalObjectStore(Path(args.object_store), load_object_key_manager(args))
     return LocalObjectStore(Path(args.object_store))
@@ -17047,6 +17063,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Tenant used by standalone Postgres queue commands",
     )
     parser.add_argument("--object-store", default=default_object_store(), help="Path to local object storage for externalized payloads")
+    parser.add_argument(
+        "--object-store-backend",
+        choices=["local", "s3"],
+        default=os.environ.get("MNEMOSYNE_OBJECT_STORE_BACKEND", "local"),
+        help="Object-store byte backend: local filesystem (default) or s3/SeaweedFS (MNEMOSYNE_S3_* env)",
+    )
     parser.add_argument(
         "--object-store-encryption",
         choices=["none", "aesgcm"],
