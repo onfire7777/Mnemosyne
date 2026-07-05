@@ -17619,7 +17619,14 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=float(os.environ.get("MNEMOSYNE_AUTH_OPS_MIN_CERT_DAYS", "30")),
     )
-    auth_ops_check.add_argument("--min-cert-overlap-days", type=float, default=7.0)
+    # Env default mirrors --min-cert-days above: 24h ACME deployments declare
+    # their real rotation-overlap policy instead of being structurally rejected
+    # by the long-lived-cert constant.
+    auth_ops_check.add_argument(
+        "--min-cert-overlap-days",
+        type=float,
+        default=float(os.environ.get("MNEMOSYNE_AUTH_OPS_MIN_CERT_OVERLAP_DAYS", "7")),
+    )
     auth_ops_check.add_argument("--min-tenants", type=int, default=2)
     auth_ops_check.add_argument("--min-tenant-cases", type=int, default=2)
     auth_ops_check.add_argument("--min-tenant-allowed-cases", type=int, default=1)
