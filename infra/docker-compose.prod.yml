@@ -41,10 +41,8 @@ services:
     <<: *hardened
     image: caddy:2.8@sha256:226d1f059b75399fe19182893c7184591c07b97afc8dfcf44eeb80c9a77a530f
     cap_add: ["NET_BIND_SERVICE"]
-    depends_on: [step-ca, mnemo-api, keycloak, grafana, embedder, seaweedfs]
+    depends_on: [step-ca, mnemo-api, mnemo-stream, keycloak, grafana, embedder, seaweedfs]
     ports: ["443:443"]                     # bind to a concrete LAN/VPN iface in prod, never 0.0.0.0/WAN
-    environment:
-      OLLAMA_KEEP_ALIVE: 24h   # role calls must not pay a 2.5GB cold model load (default 5m eviction)
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
@@ -238,15 +236,42 @@ services:
       MNEMOSYNE_MCP_HTTP_HEALTH_PATH: /health  # match the profile's published URLs
       MNEMOSYNE_MCP_HTTP_RPC_PATH: /rpc
       MNEMOSYNE_MCP_SESSION_SECRET_COMMAND: /opt/mnemosyne/bin/vault-session-secret
+      MNEMOSYNE_MCP_TOKEN_FILE: /run/secrets/mcp_bearer_token   # bearer defense-in-depth beside required signed sessions
       PGPASSFILE: /run/secrets/pgpass_app      # password for the least-privilege app_user DSN
       SSL_CERT_FILE: /run/secrets/step_ca_root # trust the internal CA for https://*.mnemo.local
       VAULT_ADDR: https://vault.mnemo.local:8200
       VAULT_CACERT: /run/secrets/step_ca_root
       VAULT_TOKEN_FILE: /run/secrets/vault_app_token
       MNEMOSYNE_VAULT_WRAP_DIR: /data/wrapped-keys
-    secrets: [pgpass_app, step_ca_root, vault_app_token]
+    secrets: [pgpass_app, step_ca_root, vault_app_token, mcp_bearer_token]
     volumes: [mnemo_api_data:/data]            # AES-GCM object store + wrapped-DEK sidecars
     tmpfs: ["/tmp:size=64m"]
+    # datasec: required for command-backed Vault key custody (session verify + object DEK wrap);
+    # DB writes stay least-privilege via app_user (no DELETE/TRUNCATE, RLS forced).
+    networks: [edge, internal, datasec]
+    depends_on: [keycloak, embedder]
+
+
+  mnemo-stream:                               # EDGE: MCP SDK StreamableHTTP transport (B3 streamable_http evidence).
+    <<: *hardened
+    build: { context: .., dockerfile: infra/Dockerfile }   # adjust to the app Dockerfile path
+    env_file: [./profiles/self-hosted.env]
+    environment:
+      MNEMOSYNE_MCP_PRODUCTION_PROFILE: "1"
+      MNEMOSYNE_MCP_REQUIRE_SESSION: "1"
+      MNEMOSYNE_ROLE: mcp-stream
+      MNEMOSYNE_MCP_HTTP_PORT: "8081"
+      MNEMOSYNE_MCP_HTTP_RPC_PATH: /rpc
+      MNEMOSYNE_MCP_SESSION_SECRET_COMMAND: /opt/mnemosyne/bin/vault-session-secret
+      MNEMOSYNE_MCP_TOKEN_FILE: /run/secrets/mcp_bearer_token   # bearer defense-in-depth beside required signed sessions
+      PGPASSFILE: /run/secrets/pgpass_app      # password for the least-privilege app_user DSN
+      SSL_CERT_FILE: /run/secrets/step_ca_root # trust the internal CA for https://*.mnemo.local
+      VAULT_ADDR: https://vault.mnemo.local:8200
+      VAULT_CACERT: /run/secrets/step_ca_root
+      VAULT_TOKEN_FILE: /run/secrets/vault_app_token
+      MNEMOSYNE_VAULT_WRAP_DIR: /data/wrapped-keys
+    secrets: [pgpass_app, step_ca_root, vault_app_token, mcp_bearer_token]
+    tmpfs: ["/data:size=32m", "/tmp:size=64m"]   # ephemeral: object store + wrapped-DEK sidecars
     # datasec: required for command-backed Vault key custody (session verify + object DEK wrap);
     # DB writes stay least-privilege via app_user (no DELETE/TRUNCATE, RLS forced).
     networks: [edge, internal, datasec]
@@ -297,9 +322,11 @@ services:
     networks: [internal, datasec]
     depends_on: [postgres, vault, ollama]
 
-  ollama:                                  # local role-LLM (Qwen3-4B) for the consolidation commands
+  ollama:                                  # local role-LLM for the consolidation commands (qwen3:0.6b on this no-GPU host)
     <<: *hardened
     image: ollama/ollama:0.13.1@sha256:8850b8b33936b9fb246e7b3e02849941f1151ea847e5fb15511f17de9589aea1
+    environment:
+      OLLAMA_KEEP_ALIVE: 24h   # role calls must not pay a cold model reload (default 5m eviction)
     volumes: [ollama:/root/.ollama]
     tmpfs: ["/tmp:size=64m"]
     mem_limit: 6g   # qwen3:4b needs ~3.3GiB resident + page cache headroom for the blob
@@ -319,7 +346,7 @@ services:
       VAULT_TOKEN_FILE: /run/secrets/vault_app_token
       PGPASSFILE: /run/secrets/pgpass_consolidator
       OLLAMA_URL: http://ollama.mnemo.local:11434
-    secrets: [step_ca_root, vault_app_token, pgpass_consolidator, pgpass_app]
+    secrets: [step_ca_root, vault_app_token, pgpass_consolidator, pgpass_app, mcp_bearer_token]
     volumes:
       # identical absolute paths inside and out so evidence manifests stay portable
       - ../:/Users/admin/Mnemosyne
@@ -330,6 +357,7 @@ services:
 
 secrets:
   pg_superuser_pw: { file: "${MNEMO_SECRETS_DIR:-/secure/outside/repo}/pg_superuser_pw" }
+  mcp_bearer_token: { file: "${MNEMO_SECRETS_DIR:-/secure/outside/repo}/mcp_bearer_token" }
   grafana_admin_pw: { file: "${MNEMO_SECRETS_DIR:-/secure/outside/repo}/grafana_admin_pw" }
   kc_db_pw: { file: "${MNEMO_SECRETS_DIR:-/secure/outside/repo}/kc_db_pw" }
   app_db_pw: { file: "${MNEMO_SECRETS_DIR:-/secure/outside/repo}/app_db_pw" }

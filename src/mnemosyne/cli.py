@@ -9051,6 +9051,7 @@ def _http_json_probe(
         validated_url = validate_fetch_url(
             url,
             allow_insecure_localhost=True,
+            allow_internal_hosts=_hosted_check_allowed_internal_hosts(),
             purpose="hosted probe URL",
         )
         request = urlrequest.Request(url, data=encoded_payload, headers=request_headers, method=method)
@@ -9196,6 +9197,7 @@ def _sse_probe(
         validated_url = validate_fetch_url(
             url,
             allow_insecure_localhost=True,
+            allow_internal_hosts=_hosted_check_allowed_internal_hosts(),
             purpose="hosted SSE URL",
         )
         request = urlrequest.Request(url, headers=request_headers, method="GET")
@@ -9569,6 +9571,13 @@ async def _streamable_http_iteration(
                     call_arguments = dict(tool_arguments)
                     if headers.get("Authorization") and "auth_token" not in call_arguments:
                         call_arguments["auth_token"] = headers["Authorization"].removeprefix("Bearer ").strip()
+                    # The stateless SDK tool-call authorizes from the arguments,
+                    # not the HTTP session header, so a --require-session server
+                    # needs the signed session token forwarded here too (mirrors
+                    # the bearer injection above).
+                    session_header = headers.get("X-Mnemosyne-Session-Token")
+                    if session_header and "session_token" not in call_arguments:
+                        call_arguments["session_token"] = session_header
                     tool_call = await session.call_tool(read_only_tool, call_arguments)
                     tool_call_contract = _mcp_tool_call_contract(tool_call)
                     operation_ok = bool(tool_contract["ok"] and tool_call_contract["ok"])
@@ -9626,6 +9635,7 @@ def cmd_mcp_streamable_http_soak(args: argparse.Namespace) -> None:
         validate_fetch_url(
             streamable_url,
             allow_insecure_localhost=True,
+            allow_internal_hosts=_hosted_check_allowed_internal_hosts(),
             purpose="hosted StreamableHTTP URL",
         )
     except ValueError as exc:
@@ -17619,7 +17629,14 @@ def build_parser() -> argparse.ArgumentParser:
     mcp_ops_check.add_argument("--min-loops", type=int, default=3)
     mcp_ops_check.add_argument("--max-avg-latency-ms", type=float, default=750.0)
     mcp_ops_check.add_argument("--max-p95-latency-ms", type=float, default=1500.0)
-    mcp_ops_check.add_argument("--min-cert-days", type=float, default=30.0)
+    # Env default mirrors tls-lifecycle/rotation checks: short-lived automated
+    # ACME deployments (24h step-ca leafs) declare their real policy instead of
+    # being structurally rejected by the long-lived-cert constant.
+    mcp_ops_check.add_argument(
+        "--min-cert-days",
+        type=float,
+        default=float(os.environ.get("MNEMOSYNE_MCP_OPS_MIN_CERT_DAYS", "30")),
+    )
     mcp_ops_check.add_argument("--require-client-cert", action="store_true")
     mcp_ops_check.add_argument("--require-legacy-sse", action="store_true")
     mcp_ops_check.add_argument("--min-sse-events", type=int, default=1)
