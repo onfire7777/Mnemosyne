@@ -131,10 +131,10 @@
           "primary"
         ],
         "mnemosyne_role": [
-          "operator"
+          "agent"
         ],
         "mnemosyne_source_trust_tier": [
-          "0"
+          "2"
         ]
       },
       "credentials": [

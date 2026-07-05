@@ -10705,6 +10705,41 @@ def test_cli_auth_ops_check_fails_closed_on_weak_auth_bundle(tmp_path: Path) -> 
     assert "redaction_raw_field_present" in codes
 
 
+def test_cli_auth_ops_check_cert_thresholds_env_seams(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """24h-ACME deployments declare their real cert policy via env, mirroring
+    the tls-lifecycle/mcp-ops seams; without the env the long-lived defaults
+    still fail closed."""
+    payload = auth_ops_bundle()
+    payload["tls"]["certificate"]["days_remaining"] = 0.9
+    payload["tls"]["rotation"]["overlap_days"] = 0.6
+    bundle = tmp_path / "acme-auth-ops.json"
+    bundle.write_text(json.dumps(payload), encoding="utf-8")
+
+    monkeypatch.delenv("MNEMOSYNE_AUTH_OPS_MIN_CERT_DAYS", raising=False)
+    monkeypatch.delenv("MNEMOSYNE_AUTH_OPS_MIN_CERT_OVERLAP_DAYS", raising=False)
+    rejected = run_raw_cli(tmp_path / "mnemosyne.json", "auth-ops-check", "--bundle", str(bundle))
+    rejected_codes = {finding["code"] for finding in json.loads(rejected.stdout)["findings"]}
+    assert rejected.returncode == 1
+    assert "tls_cert_days_too_low" in rejected_codes
+    assert "tls_overlap_too_low" in rejected_codes
+
+    monkeypatch.setenv("MNEMOSYNE_AUTH_OPS_MIN_CERT_DAYS", "0.25")
+    monkeypatch.setenv("MNEMOSYNE_AUTH_OPS_MIN_CERT_OVERLAP_DAYS", "0.25")
+    report = run_cli(
+        tmp_path / "mnemosyne.json",
+        "auth-ops-check",
+        "--bundle",
+        str(bundle),
+        "--min-token-ttl-seconds",
+        "300",
+    )
+    assert report["ok"] is True
+    assert report["requirements"]["min_cert_days"] == 0.25
+    assert report["requirements"]["min_cert_overlap_days"] == 0.25
+
+
 def mcp_ops_bundle(*, bad_transport: bool = False, weak_tls: bool = False, raw_payload: bool = False) -> dict:
     def transport(name: str, transport_name: str) -> dict:
         return {
