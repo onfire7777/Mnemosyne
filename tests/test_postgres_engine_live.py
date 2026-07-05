@@ -2305,3 +2305,57 @@ def test_schema_sql_persists_every_field_of_core_models() -> None:
     for table, required in blueprint_parity_columns.items():
         absent = sorted(required - columns_for(table))
         assert not absent, f"blueprint-parity columns absent from schema.sql table {table!r}: {absent}"
+
+
+def test_native_retrieval_probe_emits_live_lexical_and_graph_hits() -> None:
+    """B1: native postgres lexical + graph providers must emit a live probe.
+
+    The provider-check retrieval_backends evidence requires a lexical_probe and
+    graph_probe ({top_id, hit_count>0}) for a non-local backend. Native FTS +
+    recursive-PPR are the deployed self-hosted backends; _native_retrieval_probe
+    seeds a health tenant and proves both answer a live query.
+    """
+    import argparse
+
+    from mnemosyne.cli import _native_retrieval_probe
+
+    args = argparse.Namespace(
+        postgres_dsn=live_dsn(),
+        postgres_require_safe_role=False,
+        backend="postgres",
+        lexical_provider="postgres",
+        graph_provider="postgres",
+    )
+    lexical_probe, graph_probe, errors = _native_retrieval_probe(args)
+    assert errors == [], errors
+    assert lexical_probe is not None and int(lexical_probe["hit_count"]) > 0 and lexical_probe["top_id"]
+    assert graph_probe is not None and int(graph_probe["hit_count"]) > 0 and graph_probe["top_id"]
+
+
+def test_provider_check_native_backend_reports_probes() -> None:
+    """End-to-end: provider-check over the live postgres backend must surface
+    non-null lexical_probe/graph_probe for native (postgres) providers."""
+    # Retrieval/provider flags live on the top-level parser, so they must
+    # precede the provider-check subcommand.
+    result = run_postgres_cli_raw(
+        "--lexical-provider",
+        "postgres",
+        "--graph-provider",
+        "postgres",
+        "--lexical-backend",
+        "postgres-fts",
+        "--graph-backend",
+        "postgres-recursive-ppr",
+        "--embedding-provider",
+        "local",
+        "--reranker-provider",
+        "local",
+        "provider-check",
+    )
+    payload = json.loads(result.stdout)
+    backends = payload["checks"]["retrieval_backends"]
+    assert backends["lexical_provider"] == "postgres"
+    assert backends["lexical_local"] is False
+    assert backends["graph_local"] is False
+    assert backends["lexical_probe"] is not None and backends["lexical_probe"]["top_id"]
+    assert backends["graph_probe"] is not None and backends["graph_probe"]["top_id"]
