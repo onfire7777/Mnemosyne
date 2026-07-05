@@ -43,6 +43,8 @@ services:
     cap_add: ["NET_BIND_SERVICE"]
     depends_on: [step-ca, mnemo-api, keycloak, grafana, embedder, seaweedfs]
     ports: ["443:443"]                     # bind to a concrete LAN/VPN iface in prod, never 0.0.0.0/WAN
+    environment:
+      OLLAMA_KEEP_ALIVE: 24h   # role calls must not pay a 2.5GB cold model load (default 5m eviction)
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
@@ -170,6 +172,7 @@ services:
     env_file: [./profiles/self-hosted.env]
     environment:
       MNEMOSYNE_ROLE: metrics-pusher
+      MNEMOSYNE_QUEUE_TENANT: primary   # snapshot the production tenant queue, not the 'system' default
       PGPASSFILE: /run/secrets/pgpass_app     # read-path app_user; no write or KMS authority
       SSL_CERT_FILE: /run/secrets/step_ca_root
       MNEMOSYNE_OPS_METRICS_URL: http://victoriametrics:8428/api/v1/import/prometheus
@@ -258,6 +261,27 @@ services:
       # production jobs are enqueued under the primary tenant; without this the
       # worker drains the default 'system' tenant and never processes them
       MNEMOSYNE_QUEUE_TENANT: primary
+      # Role-LLM sizing for this host: measured warm qwen3:4b inference is
+      # ~0.5 tok/s under full-stack load (unusable); qwen3:0.6b is ~5x faster.
+      # Consolidation is a background warm loop, so slow-but-correct wins over
+      # fail-closed timeouts. Bounds sized to measured latency.
+      OLLAMA_MODEL: qwen3:0.6b
+      OLLAMA_TIMEOUT: "280"
+      MNEMOSYNE_ROLE_LADDER_TIMEOUT: "300"
+      MNEMOSYNE_ROLE_LADDER_LOCAL_TIMEOUT: "280"   # local rung defaults to min(20s, total) — far below measured latency
+      # §31 cadence steps are counted per worker-run PROCESS invocation; with the
+      # default max_cycles=1 the process exits after each job, the counter resets,
+      # and the 5-step consolidation cadence bound can never be satisfied. Keep the
+      # worker long-lived; the entrypoint supervise loop remains for crash recovery.
+      MNEMOSYNE_WORKER_MAX_CYCLES: "1000"
+      MNEMOSYNE_WORKER_IDLE_EXIT_AFTER: "600"
+      # Runtime command-provider subprocess timeouts (default 30s) must cover the
+      # ladder's measured role-call latency on this host.
+      MNEMOSYNE_CANDIDATE_EXTRACTOR_TIMEOUT: "320"
+      MNEMOSYNE_SUMMARIZER_TIMEOUT: "320"
+      MNEMOSYNE_ENTITY_RESOLVER_TIMEOUT: "320"
+      MNEMOSYNE_LESSON_DISTILLER_TIMEOUT: "320"
+      MNEMOSYNE_SKILL_INDUCER_TIMEOUT: "320"
       # sole write authority: overrides the env_file's read-path app_user DSN
       MNEMOSYNE_POSTGRES_DSN: postgresql://consolidator_user@postgres.mnemo.local:5432/mnemosyne
       PGPASSFILE: /run/secrets/pgpass_consolidator

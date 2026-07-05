@@ -8396,7 +8396,6 @@ def cmd_ops_metrics_push(args: argparse.Namespace) -> None:
 
     from mnemosyne.observability import build_ops_report, render_ops_dashboard
     from mnemosyne.ops_metrics import ops_report_to_prometheus, push_ops_metrics
-    from mnemosyne.queue import InProcessQueue
 
     if not args.metrics_url:
         raise SystemExit("ops-metrics-push requires --metrics-url or MNEMOSYNE_OPS_METRICS_URL")
@@ -8405,7 +8404,10 @@ def cmd_ops_metrics_push(args: argparse.Namespace) -> None:
 
     def push_once() -> dict[str, Any]:
         runtime_state = load_runtime_state(args)
-        queue = runtime_state.load_queue() if runtime_state else InProcessQueue()
+        # load_queue(args, ...) honors --queue-backend/--queue-tenant so the
+        # durable Postgres queue is snapshotted, not the serialized in-process
+        # payload from runtime state (which is always empty on this profile).
+        queue = load_queue(args, runtime_state)
         tools = load_tools(args, ingestion_queue=queue, runtime_state=runtime_state)
         report = build_ops_report(
             engine=tools.engine,

@@ -18,6 +18,26 @@ groups:
           severity: critical
         annotations:
           summary: Mnemosyne production release gate is open
+  - name: mnemosyne-worker-health
+    interval: 60s
+    rules:
+      # Worker death/restart detection: a dead or wedged consolidator stops
+      # draining the tenant queue, so dead jobs or a stalled backlog are the
+      # observable signal (container restarts are not exported to the store).
+      - alert: MnemosyneQueueDeadJobs
+        expr: mnemosyne_queue_dead > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Tenant {{ $labels.tenant }} queue has dead jobs; worker processing is failing"
+      - alert: MnemosyneQueueBacklogStalled
+        expr: mnemosyne_queue_queued > 0 and (mnemosyne_queue_queued - (mnemosyne_queue_queued offset 10m)) >= 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Tenant {{ $labels.tenant }} queue backlog is not draining; worker may be down or restart-looping"
   - name: mnemosyne-tls-lifecycle
     interval: 60s
     rules:

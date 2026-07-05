@@ -73,3 +73,15 @@ ALTER DEFAULT PRIVILEGES FOR ROLE consolidator_user IN SCHEMA public
   GRANT SELECT, INSERT, UPDATE ON TABLES TO mnemosyne_app;
 ALTER DEFAULT PRIVILEGES FOR ROLE consolidator_user IN SCHEMA public
   GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO mnemosyne_consolidator;
+
+-- Engine schema-ensure creates new tables at runtime as the connected app role
+-- (mnemosyne_app members own them). "GRANT ... ON ALL TABLES" above only covers
+-- tables that exist at init, so later-created tables (e.g. justifications)
+-- silently lacked consolidator DELETE and broke TMS supersession pruning in
+-- production. Default privileges make future engine-created tables inherit the
+-- same posture; the audit_log append-only revocation above remains named and
+-- explicit.
+ALTER DEFAULT PRIVILEGES FOR ROLE mnemosyne_app IN SCHEMA public
+  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO mnemosyne_consolidator;
+ALTER DEFAULT PRIVILEGES FOR ROLE mnemosyne_app IN SCHEMA public
+  GRANT SELECT, INSERT, UPDATE ON TABLES TO mnemosyne_app;
