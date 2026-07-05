@@ -561,11 +561,15 @@ class SeaweedS3Client:
             return
 
     def create_bucket(self) -> None:
-        """Create the bucket; treats an already-existing bucket as success."""
+        """Best-effort bucket creation. SeaweedFS auto-creates a bucket on the
+        first object write, and the least-privilege object identity is
+        intentionally not granted the admin CreateBucket action, so an
+        AccessDenied / already-exists response is treated as success."""
         try:
             self._request("PUT", f"/{self.config.bucket}")
         except S3ObjectStoreError as exc:
-            if "BucketAlready" not in str(exc) and "409" not in str(exc):
+            message = str(exc)
+            if not any(token in message for token in ("AccessDenied", "BucketAlready", "403", "409")):
                 raise
 
     def _request(self, method: str, canonical_uri: str, *, body: bytes = b"") -> bytes:
@@ -617,10 +621,10 @@ class SeaweedS3Client:
             with safe_urlopen(request, validated=validated, timeout=cfg.timeout_seconds) as response:
                 return response.read()
         except urllib.error.HTTPError as exc:
-            if exc.code in (403, 404):
-                # SeaweedFS returns 404 for missing objects; some path-style
-                # deployments answer a missing key with 403 — treat both as absent.
-                raise S3ObjectNotFoundError(f"s3 {method} {canonical_uri} -> {exc.code}") from exc
+            if exc.code == 404:
+                # SeaweedFS answers a missing object/bucket with 404 for a
+                # signed reader; 403 stays a real AccessDenied (never masked).
+                raise S3ObjectNotFoundError(f"s3 {method} {canonical_uri} -> 404") from exc
             detail = ""
             try:
                 detail = exc.read().decode("utf-8", "replace")[:256]
