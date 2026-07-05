@@ -34,6 +34,13 @@
 mcp.mnemo.local {
 	import internal_acme
 	import secure_headers
+	# Official MCP SDK StreamableHTTP transport (B3 streamable_http evidence)
+	# is served by a separate stateless replica; the JSON-RPC facade handles
+	# everything else on this host. handle_path strips the /stream prefix so
+	# the SDK app sees its own /mcp path.
+	handle_path /stream* {
+		reverse_proxy mnemo-stream:8081
+	}
 	reverse_proxy mnemo-api:8080
 }
 

@@ -140,7 +140,9 @@ class MnemosyneMcpServer:
             else _env_flag("MNEMOSYNE_REQUIRE_RUNTIME_RESIDENCY", default=False)
         )
         self.stateless = stateless
-        self.auth_token = auth_token if auth_token is not None else os.environ.get("MNEMOSYNE_MCP_TOKEN")
+        self.auth_token = (
+            auth_token if auth_token is not None else _env_or_file_secret("MNEMOSYNE_MCP_TOKEN")
+        )
         self.session_secret = (
             session_secret if session_secret is not None else os.environ.get("MNEMOSYNE_MCP_SESSION_SECRET")
         )
@@ -1301,6 +1303,23 @@ def _env_flag(name: str, *, default: bool = False) -> bool:
     if raw is None:
         return default
     return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_or_file_secret(name: str) -> str | None:
+    """Resolve a secret from ``NAME`` or, preferring it, ``NAME_FILE``.
+
+    The hardened production profile mounts secrets as files under
+    ``/run/secrets`` rather than passing them as environment values, so the
+    ``_FILE`` variant lets the bearer token be custodied like every other
+    secret (no raw token in the compose ``environment:`` block). The file wins
+    when present; a blank/whitespace-only file resolves to ``None``.
+    """
+
+    file_path = os.environ.get(f"{name}_FILE")
+    if file_path:
+        value = Path(file_path).read_text(encoding="utf-8").strip()
+        return value or None
+    return os.environ.get(name)
 
 
 def _default_object_key_provider() -> str:
