@@ -326,6 +326,12 @@ services:
       MNEMOSYNE_ENTITY_RESOLVER_TIMEOUT: "320"
       MNEMOSYNE_LESSON_DISTILLER_TIMEOUT: "320"
       MNEMOSYNE_SKILL_INDUCER_TIMEOUT: "320"
+      # B6 multimodal: the supervised worker handles media_extract jobs with a
+      # real embedded-text extractor + bge-backed media embedder (object store
+      # backend stays local by default; the S3 backend is opt-in per tenant).
+      MNEMOSYNE_MEDIA_EXTRACTOR_COMMAND: /opt/mnemosyne/bin/media-text-extractor
+      MNEMOSYNE_MEDIA_EMBEDDING_PROVIDER: command
+      MNEMOSYNE_MEDIA_EMBEDDING_COMMAND: /opt/mnemosyne/bin/media-embedding
       # sole write authority: overrides the env_file's read-path app_user DSN
       MNEMOSYNE_POSTGRES_DSN: postgresql://consolidator_user@postgres.mnemo.local:5432/mnemosyne
       PGPASSFILE: /run/secrets/pgpass_consolidator
