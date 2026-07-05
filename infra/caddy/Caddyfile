@@ -18,6 +18,25 @@
 	}
 }
 
+# Same step-ca ACME server leaf as internal_acme, plus enforced mutual TLS
+# (B3): clients must present a certificate that chains to the step-ca root
+# trust pool. Used only on the MCP ingress — the frozen mcp-ops soak manifest
+# targets this single host, so require_and_verify is the intended strict
+# posture. Client certs are minted from the same step-ca intermediate and
+# mounted into the operator/soak client and the blackbox TLS probe.
+(internal_acme_mtls) {
+	tls {
+		issuer acme {
+			dir https://ca.mnemo.local:9000/acme/acme/directory
+			trusted_roots /data/step-ca-root.crt
+		}
+		client_auth {
+			mode require_and_verify
+			trust_pool file /data/step-ca-root.crt
+		}
+	}
+}
+
 (secure_headers) {
 	header {
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
@@ -32,7 +51,7 @@
 }
 
 mcp.mnemo.local {
-	import internal_acme
+	import internal_acme_mtls
 	import secure_headers
 	# Official MCP SDK StreamableHTTP transport (B3 streamable_http evidence)
 	# is served by a separate stateless replica; the JSON-RPC facade handles

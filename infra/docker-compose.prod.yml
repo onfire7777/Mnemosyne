@@ -201,6 +201,11 @@ services:
     volumes:
       - ./observability/blackbox/blackbox.yml:/etc/blackbox/blackbox.yml:ro
       - ${MNEMO_SECRETS_DIR:-/secure/outside/repo}/step-ca-root.crt:/etc/blackbox/step-ca-root.crt:ro
+      # step-ca client leaf (bundle) + key: the https_stepca probe presents this
+      # for the mTLS-enforced mcp.mnemo.local ingress (B3); harmless on the other
+      # hosts, which never send a CertificateRequest.
+      - ${MNEMO_SECRETS_DIR:-/secure/outside/repo}/mcp-client.crt:/etc/blackbox/mcp-client.crt:ro
+      - ${MNEMO_SECRETS_DIR:-/secure/outside/repo}/mcp-client.key:/etc/blackbox/mcp-client.key:ro
     networks: [internal]
 
   vmalert:
@@ -391,7 +396,7 @@ services:
       VAULT_TOKEN_FILE: /run/secrets/vault_app_token
       PGPASSFILE: /run/secrets/pgpass_consolidator
       OLLAMA_URL: http://ollama.mnemo.local:11434
-    secrets: [step_ca_root, vault_app_token, pgpass_consolidator, pgpass_app, mcp_bearer_token]
+    secrets: [step_ca_root, vault_app_token, pgpass_consolidator, pgpass_app, mcp_bearer_token, mcp_client_cert, mcp_client_key]
     volumes:
       # identical absolute paths inside and out so evidence manifests stay portable
       - ../:/Users/admin/Mnemosyne
@@ -412,3 +417,8 @@ secrets:
   pgpass_consolidator: { file: "${MNEMO_SECRETS_DIR:-/secure/outside/repo}/pgpass_consolidator" }
   step_ca_root: { file: "${MNEMO_SECRETS_DIR:-/secure/outside/repo}/step-ca-root.crt" }
   vault_app_token: { file: "${MNEMO_SECRETS_DIR:-/secure/outside/repo}/vault_app_token" }
+  # B3 mTLS: step-ca client leaf (leaf+intermediate bundle) + unencrypted key,
+  # mounted into the operator/soak client that presents them to the
+  # require_and_verify mcp.mnemo.local ingress.
+  mcp_client_cert: { file: "${MNEMO_SECRETS_DIR:-/secure/outside/repo}/mcp-client.crt" }
+  mcp_client_key: { file: "${MNEMO_SECRETS_DIR:-/secure/outside/repo}/mcp-client.key" }
