@@ -514,6 +514,235 @@ def test_vector_from_literal_parses_and_rejects() -> None:
 
 
 # --------------------------------------------------------------------------- #
+# Lane B: hot-path DDL elimination under a least-privilege role.
+#
+# The ensure-schema steps must (a) skip owner-only DDL entirely when the target
+# already exists — the steady state of every provisioned deployment — and (b)
+# when a target IS missing, attempt the DDL but tolerate an insufficient-
+# privilege failure: a warning for acceleration-only objects (indexes/CHECK),
+# a precise raise for a REQUIRED column the query text references directly.
+# These are unit-tested against a fake cursor that models catalog existence
+# probes plus owner-only DDL rejection (SQLSTATE 42501), no live DB.
+# --------------------------------------------------------------------------- #
+
+
+class FakeInsufficientPrivilege(Exception):
+    """Mimics psycopg errors.InsufficientPrivilege (SQLSTATE 42501)."""
+
+    sqlstate = "42501"
+
+
+class FakeUndefinedTable(Exception):
+    """A non-privilege DB error (SQLSTATE 42P01) — must NOT be swallowed."""
+
+    sqlstate = "42P01"
+
+
+class SchemaEnsureCursor:
+    """Fake cursor: catalog existence probes + owner-only DDL under a
+    least-privilege role. ``present_*`` declare what the privileged migration
+    already created; ``deny_ddl`` makes owner-only DDL raise ``deny_error``
+    (default 42501), exactly as a NOSUPERUSER non-owner role would."""
+
+    def __init__(
+        self,
+        *,
+        present_columns: set[tuple[str, str]] | None = None,
+        present_indexes: set[str] | None = None,
+        present_constraints: set[str] | None = None,
+        deny_ddl: bool = False,
+        deny_error: Exception | None = None,
+    ):
+        self.present_columns = set(present_columns or set())
+        self.present_indexes = set(present_indexes or set())
+        self.present_constraints = set(present_constraints or set())
+        self.deny_ddl = deny_ddl
+        self.deny_error = deny_error or FakeInsufficientPrivilege("permission denied for table")
+        self.statements: list[str] = []
+        self._pending: tuple[Any, ...] | None = None
+
+    def __enter__(self) -> "SchemaEnsureCursor":
+        return self
+
+    def __exit__(self, *exc: Any) -> bool:
+        return False
+
+    @staticmethod
+    def _is_ddl(upper: str) -> bool:
+        return upper.startswith(("ALTER TABLE", "CREATE INDEX", "DROP INDEX", "CREATE UNIQUE INDEX"))
+
+    def execute(self, sql: str, params: tuple[Any, ...] | None = None) -> None:
+        flat = " ".join(sql.split())
+        self.statements.append(flat)
+        self._pending = None
+        # Existence probes: order matters — the column probe SQL also mentions
+        # to_regclass, so match pg_attribute / pg_constraint before to_regclass.
+        if "FROM pg_attribute" in flat:
+            table, column = params  # type: ignore[misc]
+            if (table, column) in self.present_columns:
+                self._pending = (1,)
+            return
+        if "FROM pg_constraint" in flat:
+            (conname,) = params  # type: ignore[misc]
+            if conname in self.present_constraints:
+                self._pending = (1,)
+            return
+        if "to_regclass" in flat:
+            (index_name,) = params  # type: ignore[misc]
+            if index_name in self.present_indexes:
+                self._pending = (1,)
+            return
+        upper = flat.upper()
+        if upper.startswith(("SAVEPOINT", "RELEASE SAVEPOINT", "ROLLBACK TO SAVEPOINT")):
+            return
+        if self.deny_ddl and self._is_ddl(upper):
+            raise self.deny_error
+        # UPDATE / other DML the least-privilege role may run: succeed silently.
+
+    def fetchone(self) -> Any:
+        return self._pending
+
+    def fetchall(self) -> list[Any]:
+        return []
+
+
+def _ddl_statements(cur: SchemaEnsureCursor) -> list[str]:
+    return [s for s in cur.statements if SchemaEnsureCursor._is_ddl(s.upper())]
+
+
+# --- lexeme ensure -------------------------------------------------------- #
+
+
+def test_lexeme_schema_present_issues_no_ddl() -> None:
+    """(a) column + index already present -> only existence SELECTs, no DDL."""
+    cur = SchemaEnsureCursor(
+        present_columns={("evidence", "lexeme")},
+        present_indexes={"evidence_lexeme_gin"},
+        deny_ddl=True,  # would raise if any owner-only DDL were attempted
+    )
+    PostgresEngine._ensure_evidence_lexeme_schema(cur)
+    assert _ddl_statements(cur) == [], "steady state must issue zero owner-only DDL"
+    assert not any("SAVEPOINT" in s for s in cur.statements), "no savepoint when nothing to create"
+    # Exactly two privilege-free probes: the column probe (pg_attribute) and the
+    # index probe (to_regclass); nothing else touches the connection.
+    assert len(cur.statements) == 2
+    assert sum("pg_attribute" in s for s in cur.statements) == 1
+    assert sum(s.startswith("SELECT 1 WHERE to_regclass") for s in cur.statements) == 1
+
+
+def test_lexeme_schema_absent_with_ddl_allowed_creates_column_and_index() -> None:
+    """(b) column + index absent, DDL allowed -> ALTER ADD COLUMN + CREATE INDEX."""
+    cur = SchemaEnsureCursor(deny_ddl=False)
+    PostgresEngine._ensure_evidence_lexeme_schema(cur)
+    ddl = _ddl_statements(cur)
+    assert any(s.startswith("ALTER TABLE evidence ADD COLUMN IF NOT EXISTS lexeme") for s in ddl)
+    assert any("CREATE INDEX IF NOT EXISTS evidence_lexeme_gin" in s for s in ddl)
+    # Each attempt is savepoint-wrapped and released on success.
+    assert any(s == "RELEASE SAVEPOINT mnemosyne_ensure_ddl" for s in cur.statements)
+
+
+def test_lexeme_index_absent_insufficient_privilege_warns_and_continues(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """(c) index absent + role cannot create it -> caught, warned, no raise, and
+    the surrounding transaction is left usable via ROLLBACK TO SAVEPOINT."""
+    cur = SchemaEnsureCursor(
+        present_columns={("evidence", "lexeme")},  # required column already there
+        present_indexes=set(),  # GIN index missing
+        deny_ddl=True,
+    )
+    with caplog.at_level("WARNING", logger="mnemosyne.postgres_engine"):
+        PostgresEngine._ensure_evidence_lexeme_schema(cur)  # must NOT raise
+    assert "ROLLBACK TO SAVEPOINT mnemosyne_ensure_ddl" in cur.statements
+    assert "RELEASE SAVEPOINT mnemosyne_ensure_ddl" in cur.statements
+    assert any("evidence_lexeme_gin" in r.message and "privilege" in r.message for r in caplog.records)
+
+
+def test_lexeme_column_absent_insufficient_privilege_raises_precise_error() -> None:
+    """Required column absent AND uncreatable -> fail loud with an actionable
+    error (the query names e.lexeme directly; a warning would only defer the
+    crash to a cryptic 'column does not exist' mid-serve)."""
+    cur = SchemaEnsureCursor(deny_ddl=True)  # column absent + privilege denied
+    with pytest.raises(RuntimeError, match=r"evidence\.lexeme.*privileged role"):
+        PostgresEngine._ensure_evidence_lexeme_schema(cur)
+    # Transaction was returned to a clean state before raising.
+    assert "ROLLBACK TO SAVEPOINT mnemosyne_ensure_ddl" in cur.statements
+
+
+def test_lexeme_non_privilege_error_propagates_unchanged() -> None:
+    """A non-42501 DB error must not be swallowed or reclassified."""
+    cur = SchemaEnsureCursor(deny_ddl=True, deny_error=FakeUndefinedTable("relation missing"))
+    with pytest.raises(FakeUndefinedTable):
+        PostgresEngine._ensure_evidence_lexeme_schema(cur)
+
+
+# --- vector ensure -------------------------------------------------------- #
+
+
+VECTOR_COLUMNS = {
+    ("evidence", "embedding"),
+    ("evidence", "embedding_partition"),
+    ("assertions", "embedding_partition"),
+}
+VECTOR_INDEXES = {
+    "evidence_embedding_public_hnsw",
+    "assertions_embedding_public_hnsw",
+    "evidence_embedding_private_hnsw",
+    "assertions_embedding_private_hnsw",
+}
+VECTOR_CONSTRAINTS = {"evidence_embedding_partition_check", "assertions_embedding_partition_check"}
+
+
+def test_vector_schema_fully_present_issues_no_ddl_but_runs_backfills() -> None:
+    """Provisioned deployment: zero owner-only DDL on the hot path, yet the DML
+    partition backfills still run (behavior preserved for the fast path)."""
+    cur = SchemaEnsureCursor(
+        present_columns=VECTOR_COLUMNS,
+        present_indexes=VECTOR_INDEXES,  # legacy hnsw names intentionally absent
+        present_constraints=VECTOR_CONSTRAINTS,
+        deny_ddl=True,
+    )
+    PostgresEngine._ensure_evidence_vector_schema(cur)
+    assert _ddl_statements(cur) == [], "steady state must issue zero owner-only DDL"
+    # The four idempotent DML backfills still execute.
+    update_stmts = [s for s in cur.statements if s.upper().startswith("UPDATE ")]
+    assert len(update_stmts) == 4
+    # Legacy single-partition index drop is only attempted when present.
+    assert not any("DROP INDEX" in s for s in cur.statements)
+
+
+def test_vector_schema_required_column_absent_insufficient_privilege_raises() -> None:
+    """A missing-and-uncreatable embedding column fails loud (query references
+    `embedding` verbatim)."""
+    present = {c for c in VECTOR_COLUMNS if c != ("evidence", "embedding")}
+    cur = SchemaEnsureCursor(
+        present_columns=present,
+        present_indexes=VECTOR_INDEXES,
+        present_constraints=VECTOR_CONSTRAINTS,
+        deny_ddl=True,
+    )
+    with pytest.raises(RuntimeError, match=r"evidence\.embedding.*privileged role"):
+        PostgresEngine._ensure_evidence_vector_schema(cur)
+
+
+def test_vector_schema_missing_index_privilege_denied_warns_only(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Columns/constraints present but a partitioned HNSW index missing and the
+    role cannot create it -> warn, no raise; the vector query still runs."""
+    cur = SchemaEnsureCursor(
+        present_columns=VECTOR_COLUMNS,
+        present_indexes=VECTOR_INDEXES - {"evidence_embedding_public_hnsw"},
+        present_constraints=VECTOR_CONSTRAINTS,
+        deny_ddl=True,
+    )
+    with caplog.at_level("WARNING", logger="mnemosyne.postgres_engine"):
+        PostgresEngine._ensure_evidence_vector_schema(cur)  # must NOT raise
+    assert any("evidence_embedding_public_hnsw" in r.message for r in caplog.records)
+    assert "ROLLBACK TO SAVEPOINT mnemosyne_ensure_ddl" in cur.statements
+
+
+# --------------------------------------------------------------------------- #
 # Live coverage — requires MNEMOSYNE_POSTGRES_DSN (dev compose Postgres).
 # --------------------------------------------------------------------------- #
 
