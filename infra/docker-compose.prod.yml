@@ -22,6 +22,7 @@ networks:
   internal:  { internal: true }                 # service-to-service, no NAT/egress
   datasec:   { internal: true }                 # postgres + vault; reachable only by the consolidator
   hostllm:   { internal: true }                 # host-llm-proxy (DEFAULT LLM path) <-> sanctioned clients (consolidator/role-http/operator/test-runner)
+  hostbridge: { driver: bridge }                # host-llm-proxy's SOLE host-gateway egress net (relay-only; keeps the unauth VM->host bridge off edge/api)
 
 volumes:
   stepca: {}
@@ -390,13 +391,13 @@ services:
     # infra/PERF-RUNTIME.md), so this relay is the committed default serving path
     # — no overlay, no manual flip. The LLM clients (consolidator/role-http/
     # test-runner) sit on internal-only networks which have NO route to the host
-    # gateway (probe-verified: 'Network is unreachable'), so this relay on
-    # edge+hostllm is the sole sanctioned egress path — the clients themselves
-    # never gain edge reachability (policy gate: the consolidator must stay off edge).
-    # The relay is deliberately NOT on the general internal network: the
-    # host bridge it exposes is unauthenticated, so only the dedicated
-    # hostllm client net (consolidator/role-http/operator/test-runner) can reach
-    # it — never caddy/api/metrics (policy gate: test_prod_compose_policy).
+    # gateway (probe-verified: 'Network is unreachable'), so this relay is the
+    # sole sanctioned egress path. It sits on hostbridge (its OWN dedicated
+    # non-internal net, for the host-gateway route) + hostllm (the client net) —
+    # deliberately NOT on edge or the general internal net. The host bridge it
+    # exposes is unauthenticated, so keeping it off edge means caddy/api/stream
+    # cannot reach it; only the dedicated hostllm client net (consolidator/
+    # role-http/operator/test-runner) can (policy gate: test_prod_compose_policy).
     # In-VM ollama fallback is opt-in via the 'in-vm-llm' profile.
     <<: *hardened
     image: caddy:2.8@sha256:226d1f059b75399fe19182893c7184591c07b97afc8dfcf44eeb80c9a77a530f
@@ -423,8 +424,8 @@ services:
     tmpfs: ["/config:size=16m", "/data:size=16m", "/tmp:size=8m"]
     mem_limit: 256m
     networks:
-      edge: {}                             # non-internal: this is what routes to the host gateway
-      hostllm: { aliases: [host-llm.mnemo.local] }   # dedicated client net — NOT the general internal net
+      hostbridge: {}                       # relay-ONLY non-internal net: routes to the host gateway (host.docker.internal). NOT edge — keeps the unauth VM->host bridge unreachable from caddy/api/stream.
+      hostllm: { aliases: [host-llm.mnemo.local] }   # dedicated client net — NOT the general internal/edge net
 
   role-http:                               # B4/B9: hosted HTTPS role provider (wraps role-llm dispatch)
     <<: *hardened
