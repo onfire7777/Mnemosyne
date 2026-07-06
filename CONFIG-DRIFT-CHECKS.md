@@ -107,6 +107,17 @@ Realized over these concrete loci:
   ordered as) sequential per-item `embed` calls
   (`tests/test_provider_batching.py`), so it selects speed, never behavior.
   Invalid or non-positive values fall back to the default.
+- **`MNEMO_CONFIRM` / `MNEMO_PERF_VM_CPUS` / `MNEMO_PERF_VM_MEMORY` /
+  `MNEMO_PERF_STATE_FILE`** — operator-invocation knobs of the guarded
+  runtime-flip scripts (`infra/scripts/apply-perf-runtime.sh`,
+  `rollback-perf-runtime.sh`; runbook `infra/PERF-RUNTIME.md`). Never read by
+  application code. `MNEMO_CONFIRM=1` is the execute gate (default: print the
+  plan and refuse — the scripts restart the whole production stack);
+  the VM knobs default to the 6 CPU / 12 GiB resize target; the state file
+  (default `~/.mnemosyne-perf-runtime-state`) records the prior colima size
+  for rollback. The optional host-LLM flip is a runtime overlay + the
+  default-off `host-llm` compose profile — the committed compose defaults
+  stay byte-identical to the deployed topology.
 - **`MNEMOSYNE_CAPABILITY_TIER`** — explicit capability-tier override for
   `capability.resolve_tier` (`capability.py`): one of `floor` / `standard` /
   `accelerated` / `frontier`; always wins over hardware detection, and
