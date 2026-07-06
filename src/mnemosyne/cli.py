@@ -1185,11 +1185,25 @@ def cmd_postgres_role_check(args: argparse.Namespace) -> None:
             f"app role must be a member of {args.expected_app_group}",
             expected_group=args.expected_app_group,
         )
+        allowed_app_delete = {
+            name.strip()
+            for name in str(getattr(args, "app_fk_cascade_delete_tables", "") or "").split(",")
+            if name.strip()
+        }
+        app_delete_outside_cascade = sorted(set(app["delete_tables"]) - allowed_app_delete)
         check(
             "app_destructive_writes_denied",
-            not app["delete_tables"] and not app["truncate_tables"],
-            "app role must not hold DELETE or TRUNCATE on any public table",
+            not app_delete_outside_cascade and not app["truncate_tables"],
+            # roles.sql grants the app role DELETE on exactly the ON DELETE CASCADE
+            # foreign-key targets (justifications, contradictions), which PostgreSQL
+            # executes as the table owner (mnemosyne_app); the hard-delete boundary is
+            # RLS + the capability layer. DELETE on any other table, and all TRUNCATE,
+            # remain forbidden.
+            "app role must not hold DELETE (outside the documented FK-cascade targets) "
+            "or TRUNCATE on any public table",
             delete_table_count=len(app["delete_tables"]),
+            delete_tables_outside_fk_cascade=app_delete_outside_cascade,
+            allowed_fk_cascade_delete_tables=sorted(allowed_app_delete),
             truncate_table_count=len(app["truncate_tables"]),
         )
         check(
@@ -17659,6 +17673,19 @@ def build_parser() -> argparse.ArgumentParser:
         default=os.environ.get("MNEMOSYNE_POSTGRES_READONLY_GROUP", "mnemosyne_readonly"),
     )
     postgres_role_check.add_argument("--audit-table", default="audit_log")
+    postgres_role_check.add_argument(
+        "--app-fk-cascade-delete-tables",
+        default=os.environ.get(
+            "MNEMOSYNE_POSTGRES_APP_FK_CASCADE_DELETE_TABLES",
+            "justifications,contradictions",
+        ),
+        help=(
+            "Comma-separated public tables the app role is permitted to hold DELETE on "
+            "solely because an ON DELETE CASCADE foreign key (assertions -> these tables) "
+            "executes as the table owner (mnemosyne_app). See infra/postgres/roles.sql and "
+            "sql/schema.sql. DELETE on any other table, and all TRUNCATE, remain forbidden."
+        ),
+    )
     postgres_role_check.add_argument(
         "--connect-timeout",
         type=int,

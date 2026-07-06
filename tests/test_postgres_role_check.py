@@ -170,6 +170,7 @@ def make_args(**overrides: Any) -> argparse.Namespace:
         "expected_consolidator_group": "mnemosyne_consolidator",
         "readonly_group": "mnemosyne_readonly",
         "audit_table": "audit_log",
+        "app_fk_cascade_delete_tables": "justifications,contradictions",
         "connect_timeout": 5,
         "allow_localhost": False,
         "expected_fingerprint": None,
@@ -243,6 +244,75 @@ def test_cmd_postgres_role_check_fails_closed_on_privileged_role(
     codes = {finding["code"] for finding in report["findings"]}
     assert report["ok"] is False
     assert "app_role_safety_failed" in codes
+
+
+def test_cmd_postgres_role_check_allows_documented_fk_cascade_app_delete(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # roles.sql grants the app role DELETE on exactly the ON DELETE CASCADE targets
+    # (justifications, contradictions), which PostgreSQL executes as their owner
+    # (mnemosyne_app). The check must accept that documented, narrow exception while
+    # the hard-delete boundary stays RLS + the capability layer.
+    app = role_script(
+        table_rows=[
+            ("audit_log", False, False, False),
+            ("justifications", True, False, True),
+            ("contradictions", True, False, True),
+            ("memories", False, False, True),
+        ]
+    )
+    install_fake_psycopg(
+        monkeypatch,
+        {"app_user": app, "consolidator_user": consolidator_script()},
+    )
+
+    cmd_postgres_role_check(make_args())
+
+    report = json.loads(capsys.readouterr().out)
+    assert report["ok"] is True
+    assert report["findings"] == []
+    destructive = next(
+        c for c in report["checks"] if c["name"] == "app_destructive_writes_denied"
+    )
+    assert destructive["ok"] is True
+    assert destructive["delete_table_count"] == 2
+    assert destructive["delete_tables_outside_fk_cascade"] == []
+    assert destructive["allowed_fk_cascade_delete_tables"] == [
+        "contradictions",
+        "justifications",
+    ]
+
+
+def test_cmd_postgres_role_check_fails_on_app_delete_outside_fk_cascade(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # DELETE on any table beyond the documented FK-cascade allowlist must fail closed,
+    # and TRUNCATE anywhere is never permitted for the app role.
+    app = role_script(
+        table_rows=[
+            ("audit_log", False, False, False),
+            ("justifications", True, False, True),
+            ("memories", True, False, True),
+        ]
+    )
+    install_fake_psycopg(
+        monkeypatch,
+        {"app_user": app, "consolidator_user": consolidator_script()},
+    )
+
+    with pytest.raises(SystemExit):
+        cmd_postgres_role_check(make_args())
+
+    report = json.loads(capsys.readouterr().out)
+    assert report["ok"] is False
+    assert "app_destructive_writes_denied_failed" in {
+        finding["code"] for finding in report["findings"]
+    }
+    destructive = next(
+        c for c in report["checks"] if c["name"] == "app_destructive_writes_denied"
+    )
+    assert destructive["ok"] is False
+    assert destructive["delete_tables_outside_fk_cascade"] == ["memories"]
 
 
 def test_cmd_postgres_role_check_requires_consolidator_dsn(
