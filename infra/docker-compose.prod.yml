@@ -86,6 +86,10 @@ services:
     tmpfs: ["/tmp:size=64m", "/run/postgresql:size=64m"]
     command: ["postgres", "-c", "shared_buffers=512MB", "-c", "maintenance_work_mem=512MB"]
     healthcheck: { test: ["CMD-SHELL", "pg_isready -U mnemosyne_superuser -d mnemosyne"], interval: 10s, retries: 6 }
+    # P1 capacity rebalance (infra/PERF-RUNTIME.md): explicit ceilings so no single
+    # service can monopolize the VM; applied only via scripts/apply-perf-runtime.sh.
+    mem_limit: 2g
+    cpus: 2.0
     networks:                              # internal = RLS-scoped least-privilege reads for the API;
       internal: { aliases: [postgres.mnemo.local] }   # datasec = write/KMS side (consolidator, keycloak, vault)
       datasec: { aliases: [postgres.mnemo.local] }
@@ -99,6 +103,7 @@ services:
     environment: { HF_HUB_OFFLINE: "1", EMBEDDING_SERVICE_DIMS: "1024" }
     tmpfs: ["/tmp:size=128m"]
     mem_limit: 4g
+    cpus: 2.0
     networks: [internal]
 
   keycloak:                                # OIDC/JWKS (FR-7/9) — production realm imported by bootstrap
@@ -270,6 +275,8 @@ services:
     secrets: [pgpass_app, step_ca_root, vault_app_token, mcp_bearer_token]
     volumes: [mnemo_api_data:/data]            # AES-GCM object store + wrapped-DEK sidecars
     tmpfs: ["/tmp:size=64m"]
+    mem_limit: 1g
+    cpus: 2.0
     # datasec: required for command-backed Vault key custody (session verify + object DEK wrap);
     # DB writes stay least-privilege via app_user (no DELETE/TRUNCATE, RLS forced).
     networks: [edge, internal, datasec]
@@ -346,9 +353,16 @@ services:
       VAULT_TOKEN_FILE: /run/secrets/vault_app_token
       MNEMOSYNE_VAULT_WRAP_DIR: /data/wrapped-keys
       OLLAMA_URL: http://ollama.mnemo.local:11434
+      # OPTIONAL host-LLM flip — scripts/apply-perf-runtime.sh --host-llm overlays
+      # exactly this value at runtime (relay ships under the 'host-llm' profile;
+      # see infra/PERF-RUNTIME.md). Kept commented so the committed default stays
+      # byte-identical to the deployed in-VM topology:
+      # OLLAMA_URL: http://host-llm.mnemo.local:11434
     secrets: [pgpass_consolidator, step_ca_root, vault_app_token]
     volumes: [mnemo_consolidator_data:/data]
     tmpfs: ["/tmp:size=64m"]
+    mem_limit: 1g
+    cpus: 2.0
     networks: [internal, datasec]
     depends_on: [postgres, vault, ollama]
 
@@ -360,9 +374,30 @@ services:
     volumes: [ollama:/root/.ollama]
     tmpfs: ["/tmp:size=64m"]
     mem_limit: 6g   # qwen3:4b needs ~3.3GiB resident + page cache headroom for the blob
+    cpus: 3.0       # heaviest CPU burner in the VM; must not starve postgres/api under inference
     networks:                              # edge grants egress for `ollama pull`; serving happens on internal
       edge: {}
       internal: { aliases: [ollama.mnemo.local] }
+
+  host-llm-proxy:                          # OPT-IN (profile host-llm): bridge to host-Metal ollama
+    # Host Metal serves qwen3:4b at ~24-27 tok/s vs ~0.5 tok/s in-VM (measured;
+    # infra/PERF-RUNTIME.md). The LLM clients (consolidator/role-http) sit on
+    # internal-only networks which have NO route to the host gateway
+    # (probe-verified: 'Network is unreachable'), so this relay on edge+internal
+    # is the sole sanctioned egress path — the clients themselves never gain
+    # edge reachability (policy gate: the consolidator must stay off edge).
+    <<: *hardened
+    profiles: ["host-llm"]
+    image: caddy:2.8@sha256:226d1f059b75399fe19182893c7184591c07b97afc8dfcf44eeb80c9a77a530f
+    command: ["caddy", "reverse-proxy", "--from", "http://:11434", "--to", "http://host.docker.internal:11434"]
+    # colima's dockerd resolves host.docker.internal natively (verified 192.168.65.254);
+    # the explicit host-gateway mapping keeps the relay portable to other engines.
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    tmpfs: ["/config:size=16m", "/data:size=16m", "/tmp:size=8m"]
+    mem_limit: 256m
+    networks:
+      edge: {}                             # non-internal: this is what routes to the host gateway
+      internal: { aliases: [host-llm.mnemo.local] }
 
   role-http:                               # B4/B9: hosted HTTPS role provider (wraps role-llm dispatch)
     <<: *hardened
@@ -378,6 +413,8 @@ services:
       # drill + hosted-llm-check both pass on it); clients retry the small model's
       # occasional empty return.
       OLLAMA_URL: http://ollama.mnemo.local:11434
+      # OPTIONAL host-LLM flip (apply-perf-runtime.sh --host-llm; infra/PERF-RUNTIME.md):
+      # OLLAMA_URL: http://host-llm.mnemo.local:11434
       OLLAMA_MODEL: qwen3:0.6b
       OLLAMA_TIMEOUT: "280"
     tmpfs: ["/tmp:size=32m"]
@@ -386,9 +423,12 @@ services:
 
   parametric-http:                         # B9: hosted HTTPS parametric-tier adapter serving
     <<: *hardened
-    # Reuse the built runtime image (no rebuild); the repo is mounted read-only so
-    # the additive mnemosyne.parametric_adapter + parametric-http.py are on the path.
-    image: infra-role-http
+    # Same runtime image as role-http, expressed as a build (layer-cache no-op)
+    # because `image: infra-role-http` violated the digest-pin policy gate and
+    # silently depended on the compose project being named `infra`. The repo is
+    # mounted read-only so mnemosyne.parametric_adapter + parametric-http.py are
+    # on the path.
+    build: { context: .., dockerfile: infra/Dockerfile, target: runtime }
     entrypoint: ["python", "/opt/mnemosyne/repo/infra/providers/parametric-http.py"]
     environment:
       PYTHONPATH: /opt/mnemosyne/repo/src
@@ -420,6 +460,8 @@ services:
       VAULT_TOKEN_FILE: /run/secrets/vault_app_token
       PGPASSFILE: /run/secrets/pgpass_consolidator
       OLLAMA_URL: http://ollama.mnemo.local:11434
+      # OPTIONAL host-LLM flip (apply-perf-runtime.sh --host-llm; infra/PERF-RUNTIME.md):
+      # OLLAMA_URL: http://host-llm.mnemo.local:11434
       # B6 multimodal: the capture bastion runs provider-check, whose media
       # subchecks exercise the real extractor + bge-backed embedder command
       # providers baked into the image. Mirror the consolidator's media wiring
