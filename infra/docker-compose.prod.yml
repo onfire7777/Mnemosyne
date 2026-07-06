@@ -396,6 +396,29 @@ services:
       VAULT_TOKEN_FILE: /run/secrets/vault_app_token
       PGPASSFILE: /run/secrets/pgpass_consolidator
       OLLAMA_URL: http://ollama.mnemo.local:11434
+      # B6 multimodal: the capture bastion runs provider-check, whose media
+      # subchecks exercise the real extractor + bge-backed embedder command
+      # providers baked into the image. Mirror the consolidator's media wiring
+      # so provider-check's media_extractor/media_embedding subchecks are GREEN
+      # here too (previously empty on the bastion -> media subcheck failed).
+      MNEMOSYNE_MEDIA_EXTRACTOR_COMMAND: /opt/mnemosyne/bin/media-text-extractor
+      MNEMOSYNE_MEDIA_EMBEDDING_PROVIDER: command
+      MNEMOSYNE_MEDIA_EMBEDDING_COMMAND: /opt/mnemosyne/bin/media-embedding
+      # provider-check exercises the command role providers (candidate_extractor/
+      # summarizer/entity_resolver/lesson_distiller/skill_inducer -> role-llm ->
+      # ollama). role-llm defaults to qwen3:4b @ 25s, unusable on this no-GPU
+      # host; pin the same latency-tuned model + timeouts the consolidator uses
+      # so the role subchecks return valid structure instead of timing out.
+      OLLAMA_MODEL: qwen3:0.6b
+      OLLAMA_TIMEOUT: "280"
+      MNEMOSYNE_CANDIDATE_EXTRACTOR_TIMEOUT: "320"
+      MNEMOSYNE_SUMMARIZER_TIMEOUT: "320"
+      MNEMOSYNE_ENTITY_RESOLVER_TIMEOUT: "320"
+      MNEMOSYNE_LESSON_DISTILLER_TIMEOUT: "320"
+      MNEMOSYNE_SKILL_INDUCER_TIMEOUT: "320"
+      # object-key provider-check probe writes a wrapped-key envelope; give it a
+      # writable dir on the bastion tmpfs (no /data volume here).
+      MNEMOSYNE_VAULT_WRAP_DIR: /tmp/mnemo-wrapped-keys
     secrets: [step_ca_root, vault_app_token, pgpass_consolidator, pgpass_app, mcp_bearer_token, mcp_client_cert, mcp_client_key]
     volumes:
       # identical absolute paths inside and out so evidence manifests stay portable
