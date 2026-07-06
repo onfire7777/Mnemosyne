@@ -21,7 +21,7 @@ networks:
   edge:      { driver: bridge }                 # caddy <-> public-facing service routes
   internal:  { internal: true }                 # service-to-service, no NAT/egress
   datasec:   { internal: true }                 # postgres + vault; reachable only by the consolidator
-  hostllm:   { internal: true }                 # host-llm-proxy <-> its sole sanctioned LLM clients (consolidator/role-http/operator)
+  hostllm:   { internal: true }                 # host-llm-proxy (DEFAULT LLM path) <-> sanctioned clients (consolidator/role-http/operator/test-runner)
 
 volumes:
   stepca: {}
@@ -318,10 +318,10 @@ services:
       # production jobs are enqueued under the primary tenant; without this the
       # worker drains the default 'system' tenant and never processes them
       MNEMOSYNE_QUEUE_TENANT: primary
-      # Role-LLM sizing: with the host-llm relay active (PERF-RUNTIME.md),
+      # Role-LLM sizing: with the host-llm relay as the DEFAULT path (PERF-RUNTIME.md),
       # qwen3:4b serves from host Metal at ~24 tok/s (measured 2026-07-05) —
-      # the architecture doc's intended model is restored. In-VM CPU serving
-      # of 4b measured ~0.5 tok/s; if rolling back to in-VM ollama, drop to
+      # the architecture doc's intended model. In-VM CPU serving of 4b measured
+      # ~0.5 tok/s; if falling back to in-VM ollama ('in-vm-llm' profile), drop to
       # qwen3:0.6b again. Timeout bounds keep the conservative envelope.
       OLLAMA_MODEL: qwen3:4b
       OLLAMA_TIMEOUT: "280"
@@ -354,22 +354,26 @@ services:
       VAULT_CACERT: /run/secrets/step_ca_root
       VAULT_TOKEN_FILE: /run/secrets/vault_app_token
       MNEMOSYNE_VAULT_WRAP_DIR: /data/wrapped-keys
-      OLLAMA_URL: http://ollama.mnemo.local:11434
-      # OPTIONAL host-LLM flip — scripts/apply-perf-runtime.sh --host-llm overlays
-      # exactly this value at runtime (relay ships under the 'host-llm' profile;
-      # see infra/PERF-RUNTIME.md). Kept commented so the committed default stays
-      # byte-identical to the deployed in-VM topology:
-      # OLLAMA_URL: http://host-llm.mnemo.local:11434
+      # DEFAULT LLM path: host-Metal ollama via the host-llm-proxy relay
+      # (~24 tok/s vs ~0.5 in-VM; infra/PERF-RUNTIME.md). In-VM fallback = the
+      # 'in-vm-llm' profile (then OLLAMA_URL: http://ollama.mnemo.local:11434).
+      OLLAMA_URL: http://host-llm.mnemo.local:11434
     secrets: [pgpass_consolidator, step_ca_root, vault_app_token]
     volumes: [mnemo_consolidator_data:/data]
     tmpfs: ["/tmp:size=64m"]
     mem_limit: 1g
     cpus: 2.0
-    networks: [internal, datasec, hostllm]   # hostllm: sanctioned client of the opt-in host-llm relay
-    depends_on: [postgres, vault, ollama]
+    networks: [internal, datasec, hostllm]   # hostllm: sanctioned client of the default host-llm relay
+    # host-Metal (relay) is the default LLM path; in-VM ollama is opt-in ('in-vm-llm' profile).
+    depends_on: [postgres, vault]
 
-  ollama:                                  # local role-LLM for the consolidation commands (qwen3:0.6b on this no-GPU host)
+  ollama:                                  # FALLBACK role-LLM (opt-in 'in-vm-llm' profile): in-VM CPU serving, OFF by default
+    # Host-Metal via host-llm-proxy is the committed default LLM path
+    # (infra/PERF-RUNTIME.md); in-VM 4b serving measured ~0.5 tok/s. Restore the
+    # in-VM fallback with `COMPOSE_PROFILES=in-vm-llm docker compose up -d ollama`,
+    # then point the LLM clients back at http://ollama.mnemo.local:11434.
     <<: *hardened
+    profiles: ["in-vm-llm"]
     image: ollama/ollama:0.13.1@sha256:8850b8b33936b9fb246e7b3e02849941f1151ea847e5fb15511f17de9589aea1
     environment:
       OLLAMA_KEEP_ALIVE: 24h   # role calls must not pay a cold model reload (default 5m eviction)
@@ -381,19 +385,20 @@ services:
       edge: {}
       internal: { aliases: [ollama.mnemo.local] }
 
-  host-llm-proxy:                          # OPT-IN (profile host-llm): bridge to host-Metal ollama
+  host-llm-proxy:                          # DEFAULT LLM path: relay to host-Metal ollama (starts on a plain `up -d`)
     # Host Metal serves qwen3:4b at ~24-27 tok/s vs ~0.5 tok/s in-VM (measured;
-    # infra/PERF-RUNTIME.md). The LLM clients (consolidator/role-http) sit on
-    # internal-only networks which have NO route to the host gateway
-    # (probe-verified: 'Network is unreachable'), so this relay on edge+hostllm
-    # is the sole sanctioned egress path — the clients themselves never gain
-    # edge reachability (policy gate: the consolidator must stay off edge).
+    # infra/PERF-RUNTIME.md), so this relay is the committed default serving path
+    # — no overlay, no manual flip. The LLM clients (consolidator/role-http/
+    # test-runner) sit on internal-only networks which have NO route to the host
+    # gateway (probe-verified: 'Network is unreachable'), so this relay on
+    # edge+hostllm is the sole sanctioned egress path — the clients themselves
+    # never gain edge reachability (policy gate: the consolidator must stay off edge).
     # The relay is deliberately NOT on the general internal network: the
     # host bridge it exposes is unauthenticated, so only the dedicated
-    # hostllm client net (consolidator/role-http/operator) can reach it —
-    # never caddy/api/metrics (policy gate: test_prod_compose_policy).
+    # hostllm client net (consolidator/role-http/operator/test-runner) can reach
+    # it — never caddy/api/metrics (policy gate: test_prod_compose_policy).
+    # In-VM ollama fallback is opt-in via the 'in-vm-llm' profile.
     <<: *hardened
-    profiles: ["host-llm"]
     image: caddy:2.8@sha256:226d1f059b75399fe19182893c7184591c07b97afc8dfcf44eeb80c9a77a530f
     # The caddy binary ships file-capability cap_net_bind_service; under the
     # hardened anchor (cap_drop ALL + no-new-privileges) execve of a fcap binary
@@ -405,6 +410,16 @@ services:
     # colima's dockerd resolves host.docker.internal natively (verified 192.168.65.254);
     # the explicit host-gateway mapping keeps the relay portable to other engines.
     extra_hosts: ["host.docker.internal:host-gateway"]
+    # Health = full serve path: the relay's :11434 listener proxied through to the
+    # host ollama /api/version (BusyBox wget ships in the alpine-based caddy image;
+    # a non-2xx — e.g. host ollama down — exits non-zero and marks the relay
+    # unhealthy). Nothing depends_on this healthcheck; it makes serve state visible.
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:11434/api/version || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
     tmpfs: ["/config:size=16m", "/data:size=16m", "/tmp:size=8m"]
     mem_limit: 256m
     networks:
@@ -419,19 +434,16 @@ services:
     environment:
       ROLE_HTTP_HOST: 0.0.0.0
       ROLE_HTTP_PORT: "8791"
-      # Same latency-tuned local role-LLM as the consolidator on this no-GPU host
-      # (qwen3:4b is ~5x slower and unreliable under full-stack contention). 0.6b
-      # returns valid structure for representative inputs (the live consolidation
-      # drill + hosted-llm-check both pass on it); clients retry the small model's
-      # occasional empty return.
-      OLLAMA_URL: http://ollama.mnemo.local:11434
-      # OPTIONAL host-LLM flip (apply-perf-runtime.sh --host-llm; infra/PERF-RUNTIME.md):
-      # OLLAMA_URL: http://host-llm.mnemo.local:11434
+      # DEFAULT LLM path: host-Metal ollama via the host-llm-proxy relay, where
+      # the architecture doc's qwen3:4b is viable (~24 tok/s; infra/PERF-RUNTIME.md).
+      # In-VM fallback = 'in-vm-llm' profile (OLLAMA_URL: http://ollama.mnemo.local:11434,
+      # and drop to qwen3:0.6b since in-VM 4b is unusable under full-stack contention).
+      OLLAMA_URL: http://host-llm.mnemo.local:11434
       OLLAMA_MODEL: qwen3:4b
       OLLAMA_TIMEOUT: "280"
     tmpfs: ["/tmp:size=32m"]
-    networks: [internal, hostllm]           # Caddy backhaul on internal; hostllm: sanctioned client of the opt-in relay
-    depends_on: [ollama]
+    networks: [internal, hostllm]           # Caddy backhaul on internal; hostllm: sanctioned client of the default relay
+    # host-Metal (relay) is the default LLM path; in-VM ollama is opt-in ('in-vm-llm' profile).
 
   parametric-http:                         # B9: hosted HTTPS parametric-tier adapter serving
     <<: *hardened
@@ -471,9 +483,9 @@ services:
       VAULT_CACERT: /run/secrets/step_ca_root
       VAULT_TOKEN_FILE: /run/secrets/vault_app_token
       PGPASSFILE: /run/secrets/pgpass_consolidator
-      OLLAMA_URL: http://ollama.mnemo.local:11434
-      # OPTIONAL host-LLM flip (apply-perf-runtime.sh --host-llm; infra/PERF-RUNTIME.md):
-      # OLLAMA_URL: http://host-llm.mnemo.local:11434
+      # DEFAULT LLM path: host-Metal ollama via the host-llm-proxy relay.
+      # In-VM fallback = 'in-vm-llm' profile (OLLAMA_URL: http://ollama.mnemo.local:11434).
+      OLLAMA_URL: http://host-llm.mnemo.local:11434
       # B6 multimodal: the capture bastion runs provider-check, whose media
       # subchecks exercise the real extractor + bge-backed embedder command
       # providers baked into the image. Mirror the consolidator's media wiring
@@ -520,7 +532,11 @@ services:
       VAULT_ADDR: https://vault.mnemo.local:8200
       VAULT_CACERT: /run/secrets/step_ca_root
       VAULT_TOKEN_FILE: /run/secrets/vault_app_token
-      OLLAMA_URL: http://ollama.mnemo.local:11434
+      # DEFAULT LLM path: host-Metal ollama via the host-llm-proxy relay. test-runner
+      # already holds edge (direct host access), so hostllm only resolves the relay
+      # alias — no new privilege. In-VM fallback = 'in-vm-llm' profile
+      # (OLLAMA_URL: http://ollama.mnemo.local:11434).
+      OLLAMA_URL: http://host-llm.mnemo.local:11434
     secrets: [step_ca_root, vault_app_token, pgpass_consolidator, pgpass_app]
     volumes:
       # identical absolute paths inside and out so evidence artifacts stay portable
@@ -530,7 +546,7 @@ services:
     # under /tmp; the default docker tmpfs noexec flag breaks them (that was the
     # bulk of the prior row-10 environmental failures).
     tmpfs: ["/tmp:exec,size=512m,mode=1777"]
-    networks: [edge, internal, datasec]
+    networks: [edge, internal, datasec, hostllm]   # hostllm: sanctioned client of the default host-llm relay
 
 secrets:
   pg_superuser_pw: { file: "${MNEMO_SECRETS_DIR:-/secure/outside/repo}/pg_superuser_pw" }
