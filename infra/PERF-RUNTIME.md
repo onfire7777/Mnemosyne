@@ -59,9 +59,16 @@ Conclusions:
   directly — and must not be given edge membership (policy gate:
   `test_network_segmentation_holds` pins the consolidator off `edge`).
 - Hence the **`host-llm-proxy` relay** (profile `host-llm`, default OFF): a
-  digest-pinned caddy `reverse-proxy` on `edge`+`internal`, forwarding
+  digest-pinned caddy `reverse-proxy` on `edge` + the dedicated `hostllm`
+  client network (`internal: true`), forwarding
   `http://host-llm.mnemo.local:11434` → `host.docker.internal:11434`. Only
-  the relay gains host egress; client topology is unchanged.
+  the relay gains host egress; the clients merely gain `hostllm` membership.
+- The relay is deliberately **NOT on the general `internal` network**: the
+  VM→host bridge it exposes is unauthenticated, so its reach is narrowed to
+  the sanctioned LLM clients only — consolidator, role-http, and the
+  operator bastion are the sole services attached to `hostllm`.
+  caddy/api/metrics (and everything else on `internal`) cannot reach it
+  (policy gate: `test_host_llm_relay_network_is_least_privilege`).
 
 ## What the compose edits do (committed, NOT applied)
 
