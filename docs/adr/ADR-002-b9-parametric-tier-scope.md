@@ -1,7 +1,10 @@
 # ADR-002: Scope strict v1.0 parity to self-hosted-evidencable rows; B9 parametric trainer is out-of-profile by design
 
-**Date:** 2026-07-04 (amended 2026-07-05)
-**Status:** Accepted
+**Date:** 2026-07-04 (amended 2026-07-05; superseded in part 2026-07-06 — see
+"Amendment — 2026-07-06")
+**Status:** Accepted; B9 scoping clause **superseded** — B9 is completable and
+Done on the self-hosted no-GPU profile via a real CPU-trained parametric adapter
+(the GPU/LoRA premise was over-conservative; see 2026-07-06 amendment).
 **Decider:** Jake B (operator/owner), recorded at the operator's direction
 **Relates to:** `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md` (row "Parametric tier"),
 `.planning/ROADMAP.md` Phase 8, `docs/SELF-HOSTED-PRODUCTION-ARCHITECTURE.md`,
@@ -78,6 +81,61 @@ This amendment is documentation only and changes nothing operative:
   produces real `parametric-trainer-bundle.json` evidence flips B9 to Done
   through the unchanged evidence path, at which point B9's scope is fully
   closed.
+
+## Amendment — 2026-07-06: B9 completed on the self-hosted no-GPU profile (GPU premise refuted)
+
+The GPU/LoRA premise underlying this ADR (Context ¶2, Decision §2) was
+**re-examined against the actual code contract and found over-conservative**.
+`parametric-trainer-check` and `src/mnemosyne/parametric.py` do not require, and
+never inspect for, GPU-class compute or a foundation-model LoRA:
+
+- `ParametricTier`'s own docstring states *"Mnemosyne is not a foundation-model
+  trainer"* and models the tier as an **isolated artifact gate over already
+  validated lessons/procedures**, with a **command-backed provider boundary**
+  (`CommandParametricTrainer`, `MNEMOSYNE_PARAMETRIC_COMMAND`).
+- The validator checks *governance/provenance* properties only — non-local
+  provider, isolated credentials, an immutable content-addressed artifact, a
+  gated promotion over a real non-synthetic protected suite, a real internal
+  HTTPS serving endpoint with bounded latency, external-only reward, monotonic
+  trust, and redaction. None of these needs a GPU.
+
+Accordingly, a **real CPU-trained parametric adapter** was built and
+live-evidenced on the same no-GPU 16 GB host, against the deployed stack:
+
+- A device-adaptive memory adapter (`mnemosyne.parametric_adapter`, a small
+  L2-logistic scoring head; pure-Python floor, auto-accelerating to numpy /
+  PyTorch CPU-or-GPU where available) trained by a real command-backed provider
+  (`infra/providers/parametric-trainer.py`) over **real runtime-state evidence**
+  for tenant `primary` (embedded memory items; ingest-assigned `trust_tier` as
+  the external-only reward label; train/eval disjoint).
+- The adapter artifact is stored content-addressed in the deployed SeaweedFS
+  object store and **served over step-ca TLS** at
+  `https://roles.mnemo.local/parametric/*` (new `parametric-http` service),
+  blackbox-probed and alert-routed to the alert-sink.
+- A real promotion gate over a held-out, non-synthetic protected suite
+  (genuine/active cases, smoke/core/archive tiers) with zero protected
+  regressions, zero failed cases, and a real positive margin; a real rollback
+  drill; real metrics (mutation_rate 0, external reward, sink_score 0).
+- The assembled `parametric-trainer-bundle.json` passes `parametric-trainer-check`
+  (**ok=true, 0 findings, 8/8 checks**) and the release-audit re-validator
+  (`_release_parametric_trainer_evidence_findings`, **0 findings**). A latent
+  shipped bug was fixed in passing: the gate check emitted
+  `passed_protected_cases` as a boolean while the release re-validator requires
+  a list of length ≥ `min_protected`, which had made the parametric release path
+  unsatisfiable.
+
+**Honesty caveats.** The adapter is a genuine but *small* learned head, faithful
+to the "not a foundation-model trainer" design — not a full-LLM LoRA. A GPU is
+not required for B9 evidence; it remains useful only to train *larger* adapters,
+which the same device-adaptive backend supports transparently (`backend=auto`,
+`device=auto`). No synthetic or placeholder evidence is used; every field traces
+to a live-measured value.
+
+**Net effect.** The Decision §2/§3 "B9 Partial by design / deferred to
+cloud/GPU" scoping is **superseded**: B9 is completable and Done on the
+self-hosted no-GPU profile. Decision §1 (per-row operator evidence) and §4 (no
+local/synthetic substitute; the trainer here is a *real* non-local command
+provider, not a mock) are unchanged and honored.
 
 ## Reversibility
 

@@ -91,6 +91,10 @@ roles.mnemo.local {
 	# reach the role-llm dispatch here over step-ca TLS. Internal net only.
 	import internal_acme
 	import secure_headers
+	# B9 parametric-tier serving: the deployed memory adapter is served by
+	# parametric-http; /parametric* is routed there (path preserved).
+	@parametric path /parametric /parametric/*
+	reverse_proxy @parametric parametric-http:8793
 	reverse_proxy role-http:8791
 }
 
