@@ -66,6 +66,21 @@ Realized over these concrete loci:
   (`tests/benchmarks/`) into the absolute `§22.5` latency budgets
   (reference-machine nightly); unset, only the relative-regression gate runs
   under `--benchmark-only`, and a plain run skips the suite entirely.
+- **`MNEMOSYNE_PG_CONN_REUSE`** — kill-switch for `PostgresEngine` connection
+  reuse: set to `0` to return to one fresh psycopg connection per
+  `connect()`. Default (unset/`1`) keeps a bounded in-process pool
+  (`postgres_engine.py`). Reuse is a speed decision, not a behavior decision:
+  tenant RLS stays bound per transaction via
+  `set_config('mnemosyne.tenant_id', ..., true)` exactly as on a fresh
+  connection, and every pooled acquire clears session-level tenant residue
+  before the caller can run a statement
+  (`tests/test_postgres_perf_lanes.py` proves cross-tenant reuse safety).
+- **`MNEMOSYNE_PG_MMR_SPACE`** — embedding space for `PostgresEngine` MMR
+  diversity: `hashing` (default, current behavior preserved exactly —
+  deterministic `hashing_embedding` over hit text) or `stored` (opt-in:
+  reuse the stored pgvector embeddings; hits without a stored vector fall
+  back to `mmr_select`'s missing-vector guards). Behavior-affecting, hence
+  DEFAULT-OFF per the perf-program ground rules.
 - **`MNEMOSYNE_CANDIDATE_MEMO`** — set to `0` to disable the candidate-scan
   memo (kill-switch; default ON): `LocalMemoryEngine._candidate_hits` caches
   the access-check + redaction scan in a size-4 LRU keyed on (tenant, branch,

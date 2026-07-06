@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import copy
 import json
+import os
+import threading
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
@@ -54,7 +56,7 @@ from mnemosyne.models import (
 )
 from mnemosyne.pipeline import run_retrieval_pipeline
 from mnemosyne.policy import OperatingPolicy
-from mnemosyne.postgres_security import assert_postgres_safe_role, postgres_safe_role_required
+from mnemosyne.postgres_security import assert_postgres_safe_role, env_flag, postgres_safe_role_required
 from mnemosyne.privacy import ErasureMode
 from mnemosyne.retrieval import (
     HashingEmbeddingProvider,
@@ -90,6 +92,131 @@ def _require_psycopg() -> tuple[Any, Any]:
     return psycopg, Jsonb
 
 
+# Bounded idle-connection count per engine: enough for the 2-3 channels of a
+# retrieve plus queue/audit traffic without hoarding server slots.
+_POOL_MAX_IDLE = 8
+
+# Session-level clear of the RLS tenant GUC. '' maps to NULL through
+# mnemosyne_current_tenant()'s nullif(), i.e. the deny-all posture a fresh
+# connection starts with. Doubles as the acquire-time health check.
+_TENANT_CLEAR_SQL = "SELECT set_config('mnemosyne.tenant_id', '', false)"
+
+
+class _PooledConnection:
+    """Context-managed lease on a pooled psycopg connection.
+
+    Mirrors psycopg's own connection-context semantics (commit on clean exit,
+    rollback on exception) except the physical connection returns to the pool
+    instead of closing, so existing ``with engine.connect() as conn`` call
+    sites keep working unchanged. All other attribute access proxies to the
+    underlying psycopg connection.
+    """
+
+    def __init__(self, pool: _PostgresConnectionPool, conn: Any):
+        self._pool = pool
+        self._conn = conn
+
+    def __enter__(self) -> _PooledConnection:
+        return self
+
+    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> bool:
+        conn, self._conn = self._conn, None
+        try:
+            if exc_type is None:
+                conn.commit()
+            else:
+                conn.rollback()
+        except Exception:
+            self._pool.discard(conn)
+            raise
+        self._pool.release(conn)
+        return False
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._conn, name)
+
+
+class _PostgresConnectionPool:
+    """Bounded, thread-safe reuse of psycopg connections (stdlib threading only).
+
+    Tenant-RLS invariant: row visibility binds to
+    ``set_config('mnemosyne.tenant_id', ..., true)`` issued per transaction by
+    the call sites (``PostgresEngine._set_tenant``), exactly as on a fresh
+    connection — that transaction-local setting reverts at the commit/rollback
+    performed when the lease exits. Defense in depth on top of that: EVERY
+    acquire (fresh or reused) first clears any session-level tenant residue via
+    ``_TENANT_CLEAR_SQL`` before the caller can run a statement, so a
+    connection previously used for tenant A can never present A's tenant
+    binding to the next acquirer. The clear statement is also the health check:
+    a pooled connection that cannot run it is closed and replaced.
+
+    The safe-role assertion (``assert_postgres_safe_role``) runs once per
+    physical connection inside the factory; the session role cannot change
+    afterwards because no engine code path issues SET ROLE / SET SESSION
+    AUTHORIZATION.
+    """
+
+    def __init__(self, factory: Any, max_idle: int = _POOL_MAX_IDLE):
+        self._factory = factory
+        self._max_idle = max_idle
+        self._lock = threading.Lock()
+        self._idle: list[Any] = []
+
+    def acquire(self) -> _PooledConnection:
+        while True:
+            with self._lock:
+                conn = self._idle.pop() if self._idle else None
+            if conn is None:
+                conn = self._factory()
+                try:
+                    self._clear_tenant(conn)
+                except BaseException:
+                    self.discard(conn)
+                    raise
+                return _PooledConnection(self, conn)
+            if self._reset_for_reuse(conn):
+                return _PooledConnection(self, conn)
+            self.discard(conn)
+
+    @staticmethod
+    def _clear_tenant(conn: Any) -> None:
+        with conn.cursor() as cur:
+            cur.execute(_TENANT_CLEAR_SQL)
+        conn.commit()
+
+    @classmethod
+    def _reset_for_reuse(cls, conn: Any) -> bool:
+        try:
+            if getattr(conn, "closed", False):
+                return False
+            conn.rollback()  # drop any aborted-transaction state before reuse
+            cls._clear_tenant(conn)
+        except Exception:
+            return False
+        return True
+
+    def release(self, conn: Any) -> None:
+        if getattr(conn, "closed", False):
+            return
+        with self._lock:
+            if len(self._idle) < self._max_idle:
+                self._idle.append(conn)
+                return
+        self.discard(conn)
+
+    def discard(self, conn: Any) -> None:
+        try:
+            conn.close()
+        except Exception:  # pragma: no cover - a failing close is already terminal
+            pass
+
+    def close_all(self) -> None:
+        with self._lock:
+            idle, self._idle = self._idle, []
+        for conn in idle:
+            self.discard(conn)
+
+
 class PostgresEngine:
     """Production storage adapter for the canonical PostgreSQL schema.
 
@@ -123,14 +250,37 @@ class PostgresEngine:
         self.adapters = adapters
         self._psycopg: Any = None
         self._jsonb: Any = None
+        # Connection reuse is a byte-parity speed decision: tenant RLS stays
+        # bound per transaction via _set_tenant and the pool clears session
+        # residue on every acquire. MNEMOSYNE_PG_CONN_REUSE=0 is the
+        # kill-switch back to one fresh connection per connect().
+        self._conn_reuse = env_flag("MNEMOSYNE_PG_CONN_REUSE", default=True)
+        self._pool: _PostgresConnectionPool | None = None
+        self._pool_lock = threading.Lock()
 
     def connect(self) -> Any:
         if self._psycopg is None or self._jsonb is None:
             self._psycopg, self._jsonb = _require_psycopg()
+        if not self._conn_reuse:
+            return self._new_connection()
+        pool = self._pool
+        if pool is None:
+            with self._pool_lock:
+                pool = self._pool
+                if pool is None:
+                    pool = self._pool = _PostgresConnectionPool(self._new_connection)
+        return pool.acquire()
+
+    def _new_connection(self) -> Any:
         conn = self._psycopg.connect(self.dsn)
         if self.require_safe_role:
             assert_postgres_safe_role(conn, surface="PostgresEngine")
         return conn
+
+    def close_connections(self) -> None:
+        """Close idle pooled connections; the pool refills lazily on demand."""
+        if self._pool is not None:
+            self._pool.close_all()
 
     @staticmethod
     def _set_tenant(cur: Any, db_tenant_id: str) -> None:
@@ -278,6 +428,20 @@ class PostgresEngine:
         cur.execute(
             "CREATE INDEX IF NOT EXISTS assertions_embedding_private_hnsw ON assertions USING hnsw (embedding vector_cosine_ops) WHERE embedding_partition = 'private'"
         )
+
+    @staticmethod
+    def _ensure_evidence_lexeme_schema(cur: Any) -> None:
+        # Stored generated tsvector mirrors the assertions.lexeme pattern so
+        # evidence lexical search stops recomputing to_tsvector per row at
+        # query time. GENERATED ALWAYS pins the column to exactly the prior
+        # query-time expression, so ranking-function inputs stay byte-identical.
+        cur.execute(
+            """
+            ALTER TABLE evidence ADD COLUMN IF NOT EXISTS lexeme TSVECTOR
+              GENERATED ALWAYS AS (to_tsvector('english', coalesce(content, ''))) STORED
+            """
+        )
+        cur.execute("CREATE INDEX IF NOT EXISTS evidence_lexeme_gin ON evidence USING gin (lexeme)")
 
     @staticmethod
     def _ensure_preference_access_policy_schema(cur: Any) -> None:
@@ -1465,12 +1629,13 @@ class PostgresEngine:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
                 self._set_tenant(cur, db_tenant_id)
                 self._ensure_evidence_vector_schema(cur)
+                self._ensure_evidence_lexeme_schema(cur)
                 cur.execute(
                     """
                     WITH q AS (SELECT plainto_tsquery('english', %s) AS query)
                     SELECT e.cid, e.branch, e.content, e.metadata, e.trust_tier, e.sensitivity, e.access_policy,
                       e.actor, e.source_type,
-                      ts_rank_cd(to_tsvector('english', coalesce(e.content, '')), q.query) AS score
+                      ts_rank_cd(coalesce(e.lexeme, to_tsvector('english', coalesce(e.content, ''))), q.query) AS score
                     FROM evidence e, q
                     WHERE e.tenant_id = %s AND e.branch = %s AND e.erased = false
                       AND e.trust_tier <= %s AND e.sensitivity <= %s
@@ -1483,7 +1648,7 @@ class PostgresEngine:
                           OR COALESCE((e.metadata->'summary') ? 'superseded_by', false)
                         )
                       )
-                      AND to_tsvector('english', coalesce(e.content, '')) @@ q.query
+                      AND coalesce(e.lexeme, to_tsvector('english', coalesce(e.content, ''))) @@ q.query
                     ORDER BY score DESC
                     LIMIT %s
                     """,
@@ -4117,8 +4282,22 @@ class PostgresEngine:
         return rrf_fuse(ranked_lists, k, rrf_k=self.policy.rrf_k, annotate_channel_scores=True)
 
     def _mmr(self, query: str, hits: list[Hit], k: int) -> list[Hit]:
-        # Embedding sourcing stays hardcoded to hashing_embedding for BOTH
-        # query and hits (deliberately divergent from LocalMemoryEngine's
+        if os.environ.get("MNEMOSYNE_PG_MMR_SPACE", "hashing") == "stored":
+            # Opt-in (MNEMOSYNE_PG_MMR_SPACE=stored): run MMR diversity in the
+            # engine's real embedding space by reusing the stored pgvector
+            # rows instead of re-hashing hit text. Hits without a stored
+            # vector (partition 'none', erased rows, non-row kinds) hit
+            # mmr_select's missing-vector guards: relevance 0, no penalty.
+            vectors = self._stored_hit_vectors(hits)
+            return mmr_select(
+                hits,
+                k,
+                query_vec=embed_query(self.adapters.embedding, query),
+                embed_hit=lambda hit: vectors.get((hit.kind, hit.id)),
+                mmr_lambda=self.policy.mmr_lambda,
+            )
+        # Default: embedding sourcing stays hardcoded to hashing_embedding for
+        # BOTH query and hits (deliberately divergent from LocalMemoryEngine's
         # security-gated path, spec §4.0). hashing_embedding never returns
         # None and is pure/memoized, so mmr_select's missing-vector guards
         # are no-ops here and per-candidate recomputation is byte-identical.
@@ -4129,6 +4308,55 @@ class PostgresEngine:
             embed_hit=lambda hit: hashing_embedding(hit.text),
             mmr_lambda=self.policy.mmr_lambda,
         )
+
+    def _stored_hit_vectors(self, hits: list[Hit]) -> dict[tuple[str, str], list[float]]:
+        """Fetch stored pgvector embeddings for evidence/assertion hits.
+
+        Policy gating is inherited from the write path: rows restricted to
+        ``embedding_partition = 'none'`` (and erased rows) store NULL
+        embeddings, so they simply produce no vector here.
+        """
+        evidence_scope: dict[tuple[str, str], dict[bytes, str]] = defaultdict(dict)
+        assertion_scope: dict[tuple[str, str], set[str]] = defaultdict(set)
+        for hit in hits:
+            scope = (hit.tenant_id, hit.branch)
+            if hit.kind == "evidence":
+                cid_bytes = _cid_bytes_or_none(hit.id)
+                if cid_bytes is not None:
+                    evidence_scope[scope][cid_bytes] = hit.id
+            elif hit.kind == "assertion":
+                assertion_scope[scope].add(hit.id)
+        if not evidence_scope and not assertion_scope:
+            return {}
+        vectors: dict[tuple[str, str], list[float]] = {}
+        with self.connect() as conn:
+            with conn.cursor() as cur:
+                for scope in sorted(set(evidence_scope) | set(assertion_scope)):
+                    tenant_id, branch = scope
+                    db_tenant_id = _stable_uuid("tenant", tenant_id)
+                    self._set_tenant(cur, db_tenant_id)
+                    cid_map = evidence_scope.get(scope, {})
+                    if cid_map:
+                        cur.execute(
+                            "SELECT cid, embedding::text FROM evidence WHERE tenant_id = %s AND branch = %s AND cid = ANY(%s)",
+                            (db_tenant_id, branch, list(cid_map)),
+                        )
+                        for cid_value, literal in cur.fetchall():
+                            vector = _vector_from_literal(literal)
+                            raw = cid_value.tobytes() if isinstance(cid_value, memoryview) else bytes(cid_value)
+                            if vector is not None and raw in cid_map:
+                                vectors[("evidence", cid_map[raw])] = vector
+                    assertion_ids = assertion_scope.get(scope, set())
+                    if assertion_ids:
+                        cur.execute(
+                            "SELECT id::text, embedding::text FROM assertions WHERE tenant_id = %s AND branch = %s AND id = ANY(%s::uuid[])",
+                            (db_tenant_id, branch, sorted(assertion_ids)),
+                        )
+                        for assertion_id, literal in cur.fetchall():
+                            vector = _vector_from_literal(literal)
+                            if vector is not None and assertion_id in assertion_ids:
+                                vectors[("assertion", assertion_id)] = vector
+        return vectors
 
     @staticmethod
     def _u_curve_order(hits: list[Hit]) -> list[Hit]:
@@ -4184,6 +4412,22 @@ def _cid_bytes_or_none(cid: str) -> bytes | None:
 
 def _vector_literal(vector: list[float]) -> str:
     return "[" + ",".join(f"{value:.8g}" for value in vector) + "]"
+
+
+def _vector_from_literal(literal: Any) -> list[float] | None:
+    """Parse a pgvector text literal ('[1,2,...]') back into floats."""
+    if literal is None:
+        return None
+    text_value = str(literal).strip()
+    if not (text_value.startswith("[") and text_value.endswith("]")):
+        return None
+    body = text_value[1:-1].strip()
+    if not body:
+        return None
+    try:
+        return [float(part) for part in body.split(",")]
+    except ValueError:
+        return None
 
 
 def _json_safe(value: Any) -> Any:
