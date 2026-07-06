@@ -10,8 +10,16 @@ rust-version = "1.85"
 name = "mnemosyne_native"
 crate-type = ["cdylib"]
 
+[features]
+# Default-on so maturin / plain `cargo build` keep producing a proper
+# extension module. `cargo test --no-default-features` drops it so the unit
+# test harness can link libpython (the canonical pyo3 cdylib test pattern —
+# with extension-module on, the test binary cannot resolve _Py* symbols).
+default = ["extension-module"]
+extension-module = ["pyo3/extension-module"]
+
 [dependencies]
-pyo3 = { version = "0.29", features = ["abi3-py312", "extension-module"] }
+pyo3 = { version = "0.29", features = ["abi3-py312"] }
 blake2 = "0.10"
 rayon = "1"
 
