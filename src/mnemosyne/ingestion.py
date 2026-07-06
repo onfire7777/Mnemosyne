@@ -31,6 +31,41 @@ from mnemosyne.storage import LocalObjectStore
 Modality = Literal["text", "image", "audio", "video", "binary", "multimodal"]
 
 
+def residency_policy_report(
+    *,
+    allowed_residencies: tuple[str, ...],
+    runtime_residency: str | None,
+    require_runtime_residency: bool,
+    allowed_residency_transfers: tuple[str, ...],
+) -> dict[str, object]:
+    """Residency-policy posture derived purely from configuration.
+
+    Shared by :meth:`IngestionPipeline.residency_policy` and the CLI
+    ``provider-check`` residency subcheck. The subcheck must not construct the
+    full engine/tools stack: a missing *unrelated* optional provider (e.g. the
+    ADR-002-gated parametric trainer command) would otherwise abort the whole
+    health report via ``SystemExit`` instead of surfacing as that provider's
+    own structured failure.
+    """
+    normalized_allowed = tuple(normalize_residency(item) for item in allowed_residencies)
+    normalized_runtime = normalize_residency(runtime_residency) if runtime_residency else None
+    normalized_transfers = normalize_residency_transfers(tuple(allowed_residency_transfers))
+    warnings: list[str] = []
+    if not normalized_allowed:
+        warnings.append("no allowed residency labels configured; all residency labels are accepted")
+    if not require_runtime_residency:
+        warnings.append("runtime residency is optional; missing processing residency will be accepted")
+    return {
+        "allowed_residencies": list(normalized_allowed),
+        "runtime_residency": normalized_runtime,
+        "require_runtime_residency": require_runtime_residency,
+        "request_runtime_residency_required": require_runtime_residency and normalized_runtime is None,
+        "allowed_residency_transfers": list(normalized_transfers),
+        "cross_region_transfers_allowed": bool(normalized_transfers),
+        "warnings": warnings,
+    }
+
+
 @dataclass(slots=True)
 class IngestRequest:
     tenant_id: str
@@ -357,20 +392,12 @@ class IngestionPipeline:
         return self.engine.upsert_assertion(assertion, branch=branch)
 
     def residency_policy(self) -> dict[str, object]:
-        warnings: list[str] = []
-        if not self.allowed_residencies:
-            warnings.append("no allowed residency labels configured; all residency labels are accepted")
-        if not self.require_runtime_residency:
-            warnings.append("runtime residency is optional; missing processing residency will be accepted")
-        return {
-            "allowed_residencies": list(self.allowed_residencies),
-            "runtime_residency": self.runtime_residency,
-            "require_runtime_residency": self.require_runtime_residency,
-            "request_runtime_residency_required": self.require_runtime_residency and self.runtime_residency is None,
-            "allowed_residency_transfers": list(self.allowed_residency_transfers),
-            "cross_region_transfers_allowed": bool(self.allowed_residency_transfers),
-            "warnings": warnings,
-        }
+        return residency_policy_report(
+            allowed_residencies=self.allowed_residencies,
+            runtime_residency=self.runtime_residency,
+            require_runtime_residency=self.require_runtime_residency,
+            allowed_residency_transfers=self.allowed_residency_transfers,
+        )
 
     def _evidence_exists(self, tenant_id: str, cid: str, branch: str) -> bool:
         get_evidence = getattr(self.engine, "get_evidence", None)
