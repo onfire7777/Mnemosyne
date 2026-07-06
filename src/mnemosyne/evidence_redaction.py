@@ -341,14 +341,36 @@ def scan_evidence_paths(
     max_scan_bytes: int = MAX_SCAN_BYTES,
     forbidden_roots: list[Path] | None = None,
     reject_symlinks: bool = False,
+    binary_custody_roots: list[Path] | None = None,
 ) -> dict[str, object]:
     findings: list[dict[str, object]] = []
     scanned_files: list[str] = []
     skipped_files: list[dict[str, str]] = []
+    binary_custody_files: list[str] = []
     seen: set[str] = set()
     resolved_forbidden_roots = [
         root.resolve(strict=False) for root in (forbidden_roots or [])
     ]
+    # Binary custody roots (e.g. C2PA provenance PNG assets) cannot be UTF-8
+    # text and must stay binary for downstream verification, so they are exempt
+    # from the text secret-scan and recorded as retained binary custody instead
+    # of failing as "not utf-8 text". Mirrors scan_evidence_tree exactly so the
+    # preflight input scan and the final capture scan agree.
+    resolved_binary_custody_roots = [
+        root.resolve(strict=False) for root in (binary_custody_roots or [])
+    ]
+
+    def _is_binary_custody_path(path: Path) -> bool:
+        if not resolved_binary_custody_roots:
+            return False
+        try:
+            resolved = path.resolve(strict=True)
+        except OSError:
+            return False
+        return any(
+            _path_is_relative_to(resolved, custody_root)
+            for custody_root in resolved_binary_custody_roots
+        )
 
     def _is_forbidden(path: Path) -> bool:
         try:
@@ -389,6 +411,9 @@ def scan_evidence_paths(
         if not path.is_file():
             skipped_files.append({"path": str(path), "reason": "not a file"})
             return
+        if _is_binary_custody_path(Path(key)):
+            binary_custody_files.append(key)
+            return
         _scan_file(
             Path(key),
             findings=findings,
@@ -414,12 +439,15 @@ def scan_evidence_paths(
         else:
             _append_candidate(root)
 
-    return redaction_scan(
+    scan = redaction_scan(
         scope=scope,
         scanned_files=scanned_files,
         skipped_files=skipped_files,
         findings=findings,
     )
+    if binary_custody_files:
+        scan["binary_custody_files"] = sorted(binary_custody_files)
+    return scan
 
 
 def scan_evidence_tree(

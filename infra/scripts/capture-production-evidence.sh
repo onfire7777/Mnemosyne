@@ -1188,11 +1188,40 @@ if errors:
         print(f"ERROR: {error}", file=sys.stderr)
     sys.exit(65)
 
+def _is_binary_custody_asset(path: Path) -> bool:
+    # A retained C2PA provenance asset that is not UTF-8 text (e.g. a signed
+    # PNG) cannot be secret-scanned as text; keep it as integrity-pinned binary
+    # custody instead of failing the scan as "not utf-8 text", mirroring how the
+    # retained tool executables are handled. Text assets stay in the ordinary
+    # secret scan so the redaction gate is never weakened.
+    try:
+        path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return True
+    except OSError:
+        return False
+    return False
+
+
+provenance_asset_source_paths = sorted(
+    {
+        str(Path(str(rewrite["path"])).resolve(strict=False))
+        for rewrites in suite_case_artifact_rewrites.values()
+        for rewrite in rewrites
+    }
+)
+binary_custody_source_roots = [
+    Path(source)
+    for source in provenance_asset_source_paths
+    if _is_binary_custody_asset(Path(source))
+]
+
 input_scan = scan_evidence_paths(
     [Path(str(artifact["path"])) for artifact in required_artifacts.values()],
     scope="preflight-inputs",
     forbidden_roots=[repo_dir],
     reject_symlinks=True,
+    binary_custody_roots=binary_custody_source_roots,
 )
 input_findings = input_scan.get("findings", [])
 input_skipped = input_scan.get("skipped_files", [])
@@ -1358,6 +1387,13 @@ for artifact in artifact_metadata:
         Path(str(artifact["path"])),
         Path(str(artifact["snapshot_path"])),
     )
+
+binary_custody_snapshot_roots = [
+    Path(path_rewrites[source])
+    for source in provenance_asset_source_paths
+    if source in path_rewrites
+    and _is_binary_custody_asset(Path(path_rewrites[source]))
+]
 
 tool_snapshot_root = out_root / "tool-artifacts"
 tool_references = sorted(
@@ -1564,6 +1600,7 @@ snapshot_scan = scan_evidence_paths(
     scope="preflight-input-snapshots",
     forbidden_roots=[repo_dir],
     reject_symlinks=True,
+    binary_custody_roots=binary_custody_snapshot_roots,
 )
 snapshot_findings = snapshot_scan.get("findings", [])
 snapshot_skipped = snapshot_scan.get("skipped_files", [])
@@ -1637,6 +1674,7 @@ retained_preflight_scan = scan_evidence_paths(
     scope="preflight",
     forbidden_roots=[repo_dir],
     reject_symlinks=True,
+    binary_custody_roots=binary_custody_snapshot_roots,
 )
 retained_preflight_findings = retained_preflight_scan.get("findings", [])
 retained_preflight_skipped = retained_preflight_scan.get("skipped_files", [])
