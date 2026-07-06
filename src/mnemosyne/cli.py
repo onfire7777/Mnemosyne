@@ -16523,6 +16523,7 @@ def _native_retrieval_probe(args: argparse.Namespace) -> tuple[dict[str, Any] | 
 
 def cmd_provider_check(args: argparse.Namespace) -> None:
     from mnemosyne.gate import RegressionCase
+    from mnemosyne.ingestion import residency_policy_report
     from mnemosyne.learning import Lesson, Procedure
     from mnemosyne.models import Evidence, Hit
     from mnemosyne.oidc_jwks import load_oidc_authorization_policy, load_oidc_jwks
@@ -17064,7 +17065,18 @@ def cmd_provider_check(args: argparse.Namespace) -> None:
         checks["session_secret"] = {"ok": True, "provider": "none", "skipped": True}
 
     try:
-        checks["residency_policy"] = {"ok": True, **load_tools(args).residency_policy()}
+        # Configuration-only: never construct the full tools stack here. An
+        # unrelated missing optional provider (e.g. the parametric trainer
+        # command) must fail its OWN subcheck, not abort the whole report.
+        checks["residency_policy"] = {
+            "ok": True,
+            **residency_policy_report(
+                allowed_residencies=tuple(args.allowed_residency),
+                runtime_residency=args.runtime_residency,
+                require_runtime_residency=args.require_runtime_residency,
+                allowed_residency_transfers=tuple(args.allowed_residency_transfer),
+            ),
+        }
     except Exception as exc:  # noqa: BLE001 - health checks return structured failures.
         ok = False
         checks["residency_policy"] = {"ok": False, "error": str(exc)}

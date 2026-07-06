@@ -1602,6 +1602,30 @@ def test_cli_provider_check_fails_closed_on_bad_command_retrieval_adapter(tmp_pa
     assert "requires text" in payload["checks"]["retrieval_backends"]["error"]
 
 
+def test_cli_provider_check_reports_missing_parametric_command_as_subcheck(tmp_path: Path) -> None:
+    """A missing parametric trainer command fails ONLY its own subcheck.
+
+    Regression: the residency subcheck used to build the full tools stack, whose
+    parametric loader raises ``SystemExit`` when ``--parametric-provider command``
+    has no command configured — aborting the whole provider-check before any
+    JSON was emitted and masking every other subcheck's status.
+    """
+    result = run_raw_cli(
+        tmp_path / "mnemosyne.json",
+        "--parametric-provider",
+        "command",
+        "provider-check",
+    )
+    payload = json.loads(result.stdout)
+
+    assert result.returncode == 1
+    assert payload["ok"] is False
+    assert payload["checks"]["parametric"]["ok"] is False
+    assert "requires --parametric-command" in payload["checks"]["parametric"]["error"]
+    assert payload["checks"]["residency_policy"]["ok"] is True
+    assert payload["checks"]["residency_policy"]["allowed_residencies"]
+
+
 def test_postgres_engine_delegates_to_command_retrieval_adapters(tmp_path: Path) -> None:
     retrieval_command, state = fake_retrieval_command(tmp_path, name="engine-retrieval-adapter")
     embedding = HashingEmbeddingProvider(dims=16)
