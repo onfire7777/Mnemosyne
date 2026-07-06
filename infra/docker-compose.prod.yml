@@ -352,6 +352,7 @@ services:
       MNEMOSYNE_MEDIA_EXTRACTOR_COMMAND: /opt/mnemosyne/bin/media-text-extractor
       MNEMOSYNE_MEDIA_EMBEDDING_PROVIDER: command
       MNEMOSYNE_MEDIA_EMBEDDING_COMMAND: /opt/mnemosyne/bin/media-embedding
+      MNEMOSYNE_PARAMETRIC_COMMAND: /opt/mnemosyne/bin/parametric
       # sole write authority: overrides the env_file's read-path app_user DSN
       MNEMOSYNE_POSTGRES_DSN: postgresql://consolidator_user@postgres.mnemo.local:5432/mnemosyne
       PGPASSFILE: /run/secrets/pgpass_consolidator
@@ -500,6 +501,7 @@ services:
       MNEMOSYNE_MEDIA_EXTRACTOR_COMMAND: /opt/mnemosyne/bin/media-text-extractor
       MNEMOSYNE_MEDIA_EMBEDDING_PROVIDER: command
       MNEMOSYNE_MEDIA_EMBEDDING_COMMAND: /opt/mnemosyne/bin/media-embedding
+      MNEMOSYNE_PARAMETRIC_COMMAND: /opt/mnemosyne/bin/parametric
       # provider-check exercises the command role providers (candidate_extractor/
       # summarizer/entity_resolver/lesson_distiller/skill_inducer -> role-llm ->
       # ollama). role-llm defaults to qwen3:4b @ 25s, unusable on this no-GPU

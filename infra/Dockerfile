@@ -55,6 +55,9 @@ COPY infra/providers/role-http.py /opt/mnemosyne/bin/role-http
 # B6 multimodal: command-backed media text extractor + bge-backed media embedder.
 COPY infra/providers/media-text-extractor.py /opt/mnemosyne/bin/media-text-extractor
 COPY infra/providers/media-embedding.py /opt/mnemosyne/bin/media-embedding
+# B9 parametric-tier command trainer (no-GPU L2-logistic adapter): satisfies the
+# provider-check `parametric` subcheck + the frozen parametric-trainer-check.
+COPY infra/providers/parametric-trainer.py /opt/mnemosyne/bin/parametric
 # Minimal self-hosted alert receiver (B8 core): vmalert notifier delivery target.
 COPY infra/observability/alert-sink.py /opt/mnemosyne/bin/alert-sink
 RUN chmod 0755 /usr/local/bin/mnemo-entrypoint /opt/mnemosyne/bin/*
