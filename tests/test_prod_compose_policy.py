@@ -170,22 +170,29 @@ def test_every_registry_image_is_digest_pinned() -> None:
 
 def test_internal_networks_are_internal() -> None:
     networks = _top_level_section(_compose_text(), "networks")
-    for name in ("internal", "datasec"):
+    for name in ("internal", "datasec", "hostllm"):
         line = re.search(rf"^\s+{name}:\s*(.*)$", networks, flags=re.MULTILINE)
         assert line and "internal: true" in line.group(1), f"network {name} must declare internal: true"
+
+
+def _service_networks(services: dict[str, str], name: str) -> set[str]:
+    block = services[name]
+    inline = re.search(r"networks:\s*\[([^\]]*)\]", block)
+    if inline:
+        return {net.strip() for net in inline.group(1).split(",") if net.strip()}
+    mapping = re.search(r"^    networks:[^\n]*\n((?:      .*\n)*)", block + "\n", re.MULTILINE)
+    if not mapping:
+        return set()
+    return set(re.findall(r"^      (edge|internal|datasec|hostllm):", mapping.group(1), re.MULTILINE))
 
 
 def test_network_segmentation_holds() -> None:
     services = _service_blocks(_compose_text())
 
     def nets(name: str) -> set[str]:
-        block = services[name]
-        inline = re.search(r"networks:\s*\[([^\]]*)\]", block)
-        if inline:
-            return {net.strip() for net in inline.group(1).split(",")}
-        mapping = re.search(r"^    networks:[^\n]*\n((?:      .*\n)*)", block + "\n", re.MULTILINE)
-        assert mapping, f"service {name} must declare its networks"
-        return set(re.findall(r"^      (edge|internal|datasec):", mapping.group(1), re.MULTILINE))
+        networks = _service_networks(services, name)
+        assert networks, f"service {name} must declare its networks"
+        return networks
 
     for name in DATASEC_ONLY:
         assert "edge" not in nets(name), f"{name} must never be edge-reachable"
@@ -193,6 +200,24 @@ def test_network_segmentation_holds() -> None:
     assert nets("vault") == {"datasec"}, "vault is reachable only from the datasec network"
     assert "edge" not in nets("mnemo-consolidator"), "the consolidator must never be edge-reachable"
     assert "datasec" not in nets(SOLE_INGRESS), "the ingress must never reach the data-security network"
+
+
+def test_host_llm_relay_network_is_least_privilege() -> None:
+    """The opt-in host-llm relay bridges to the host's unauthenticated Ollama.
+
+    It must sit on its own dedicated client network (hostllm) plus edge (the
+    host-gateway route) — never the general internal network — and only the
+    sanctioned LLM clients may join hostllm, so caddy/api/metrics can never
+    reach the VM→host bridge.
+    """
+    services = _service_blocks(_compose_text())
+    assert _service_networks(services, "host-llm-proxy") == {"edge", "hostllm"}, (
+        "the relay is edge (host-gateway route) + hostllm only — NOT internal"
+    )
+    on_hostllm = {name for name in services if "hostllm" in _service_networks(services, name)}
+    assert on_hostllm == {"host-llm-proxy", "mnemo-consolidator", "role-http", "operator"}, (
+        "only the sanctioned LLM clients may reach the host-llm relay"
+    )
 
 
 def test_repo_relative_mounts_exist() -> None:

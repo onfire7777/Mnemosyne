@@ -21,6 +21,7 @@ networks:
   edge:      { driver: bridge }                 # caddy <-> public-facing service routes
   internal:  { internal: true }                 # service-to-service, no NAT/egress
   datasec:   { internal: true }                 # postgres + vault; reachable only by the consolidator
+  hostllm:   { internal: true }                 # host-llm-proxy <-> its sole sanctioned LLM clients (consolidator/role-http/operator)
 
 volumes:
   stepca: {}
@@ -363,7 +364,7 @@ services:
     tmpfs: ["/tmp:size=64m"]
     mem_limit: 1g
     cpus: 2.0
-    networks: [internal, datasec]
+    networks: [internal, datasec, hostllm]   # hostllm: sanctioned client of the opt-in host-llm relay
     depends_on: [postgres, vault, ollama]
 
   ollama:                                  # local role-LLM for the consolidation commands (qwen3:0.6b on this no-GPU host)
@@ -383,9 +384,13 @@ services:
     # Host Metal serves qwen3:4b at ~24-27 tok/s vs ~0.5 tok/s in-VM (measured;
     # infra/PERF-RUNTIME.md). The LLM clients (consolidator/role-http) sit on
     # internal-only networks which have NO route to the host gateway
-    # (probe-verified: 'Network is unreachable'), so this relay on edge+internal
+    # (probe-verified: 'Network is unreachable'), so this relay on edge+hostllm
     # is the sole sanctioned egress path — the clients themselves never gain
     # edge reachability (policy gate: the consolidator must stay off edge).
+    # The relay is deliberately NOT on the general internal network: the
+    # host bridge it exposes is unauthenticated, so only the dedicated
+    # hostllm client net (consolidator/role-http/operator) can reach it —
+    # never caddy/api/metrics (policy gate: test_prod_compose_policy).
     <<: *hardened
     profiles: ["host-llm"]
     image: caddy:2.8@sha256:226d1f059b75399fe19182893c7184591c07b97afc8dfcf44eeb80c9a77a530f
@@ -397,7 +402,7 @@ services:
     mem_limit: 256m
     networks:
       edge: {}                             # non-internal: this is what routes to the host gateway
-      internal: { aliases: [host-llm.mnemo.local] }
+      hostllm: { aliases: [host-llm.mnemo.local] }   # dedicated client net — NOT the general internal net
 
   role-http:                               # B4/B9: hosted HTTPS role provider (wraps role-llm dispatch)
     <<: *hardened
@@ -418,7 +423,7 @@ services:
       OLLAMA_MODEL: qwen3:0.6b
       OLLAMA_TIMEOUT: "280"
     tmpfs: ["/tmp:size=32m"]
-    networks: [internal]                    # reachable by Caddy backhaul; reaches ollama on the internal net
+    networks: [internal, hostllm]           # Caddy backhaul on internal; hostllm: sanctioned client of the opt-in relay
     depends_on: [ollama]
 
   parametric-http:                         # B9: hosted HTTPS parametric-tier adapter serving
@@ -496,7 +501,7 @@ services:
       # read-only at the identical path so the capture bastion can resolve it.
       - ${MNEMO_SECRETS_DIR:-/secure/outside/repo}/authz-policy.json:${MNEMO_SECRETS_DIR:-/secure/outside/repo}/authz-policy.json:ro
     tmpfs: ["/tmp:size=256m"]
-    networks: [edge, internal, datasec]
+    networks: [edge, internal, datasec, hostllm]   # hostllm: sanctioned client of the opt-in host-llm relay
 
   test-runner:                             # row-10 live-parity suite runner (profile-gated; never on by default)
     <<: *hardened
