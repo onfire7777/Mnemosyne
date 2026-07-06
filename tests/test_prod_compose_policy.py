@@ -204,19 +204,23 @@ def test_network_segmentation_holds() -> None:
 
 
 def test_host_llm_relay_network_is_least_privilege() -> None:
-    """The opt-in host-llm relay bridges to the host's unauthenticated Ollama.
+    """The default host-llm relay bridges to the host's unauthenticated Ollama.
 
     It must sit on its own dedicated client network (hostllm) plus edge (the
     host-gateway route) — never the general internal network — and only the
     sanctioned LLM clients may join hostllm, so caddy/api/metrics can never
-    reach the VM→host bridge.
+    reach the VM→host bridge. host-Metal is the committed default LLM path, so
+    the sanctioned clients are the consolidator, role-http, and the two
+    profile-gated bastions (operator, test-runner). test-runner already holds
+    edge (direct host access), so hostllm grants it no new reach — only the
+    relay alias resolution.
     """
     services = _service_blocks(_compose_text())
     assert _service_networks(services, "host-llm-proxy") == {"edge", "hostllm"}, (
         "the relay is edge (host-gateway route) + hostllm only — NOT internal"
     )
     on_hostllm = {name for name in services if "hostllm" in _service_networks(services, name)}
-    assert on_hostllm == {"host-llm-proxy", "mnemo-consolidator", "role-http", "operator"}, (
+    assert on_hostllm == {"host-llm-proxy", "mnemo-consolidator", "role-http", "operator", "test-runner"}, (
         "only the sanctioned LLM clients may reach the host-llm relay"
     )
 

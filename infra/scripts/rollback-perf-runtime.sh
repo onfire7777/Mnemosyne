@@ -2,11 +2,14 @@
 #
 # rollback-perf-runtime.sh — undo apply-perf-runtime.sh:
 #   1. Restore the prior colima size (recorded in the apply state file;
-#      falls back to the measured pre-flip default of 4 CPU / 10 GiB).
+#      falls back to the measured pre-perf default of 4 CPU / 10 GiB).
 #   2. git-checkout the previous docker-compose.prod.yml (default ref: the
-#      perf-branch base ee30b5b — the last compose without the perf ceilings).
-#   3. `docker compose up -d --remove-orphans` — restarts in-VM ollama, removes
-#      the host-llm-proxy relay container, restores the pre-flip topology.
+#      perf-branch base ee30b5b — the last compose without the perf ceilings
+#      and BEFORE host-Metal became the default LLM path).
+#   3. `docker compose up -d --remove-orphans` — reverts to the pre-perf
+#      topology: in-VM ollama runs by default again and the host-llm-proxy
+#      relay container is removed (it was default-on in the current compose but
+#      is absent/profile-gated at the rollback ref, so --remove-orphans prunes it).
 #
 # GUARDED: prints the plan and refuses to act unless MNEMO_CONFIRM=1.
 set -euo pipefail
@@ -34,7 +37,8 @@ cat <<EOF
      (from ${STATE_FILE}$([ -f "${STATE_FILE}" ] || echo ' — MISSING, using pre-flip defaults'))
   2. git checkout ${ROLLBACK_REF} -- infra/docker-compose.prod.yml   (in ${REPO_ROOT})
   3. docker compose -f ${COMPOSE_FILE} up -d --remove-orphans
-     (restarts in-VM ollama, removes the host-llm-proxy relay)
+     (reverts to in-VM ollama as the default LLM path; removes the now-orphaned
+      host-llm-proxy relay container)
   4. post-check: docker compose ps
 EOF
 
