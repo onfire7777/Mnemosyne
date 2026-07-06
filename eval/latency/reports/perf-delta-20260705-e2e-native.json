@@ -1,0 +1,93 @@
+{
+  "bench": "perf_e2e_retrieve_baseline",
+  "generated_at": "2026-07-06T05:00:05.092316+00:00",
+  "seed": 20260705,
+  "kernel": {
+    "MNEMOSYNE_PURE": "",
+    "native_active": true,
+    "mode": "native"
+  },
+  "config": {
+    "sizes": [
+      1000,
+      10000
+    ],
+    "calls": 30,
+    "warmup": 2,
+    "n_queries": 30
+  },
+  "cells": {
+    "local/1000/shallow": {
+      "calls": 30,
+      "warmup": 2,
+      "p50_ms": 26.38,
+      "p95_ms": 45.53,
+      "mean_ms": 28.81,
+      "max_ms": 46.376,
+      "seed_ms": 199.4
+    },
+    "local/1000/deep": {
+      "calls": 30,
+      "warmup": 2,
+      "p50_ms": 32.364,
+      "p95_ms": 127.164,
+      "mean_ms": 45.533,
+      "max_ms": 280.865,
+      "seed_ms": 199.4
+    },
+    "sqlite/1000/shallow": {
+      "calls": 30,
+      "warmup": 2,
+      "p50_ms": 42.771,
+      "p95_ms": 64.054,
+      "mean_ms": 46.829,
+      "max_ms": 129.527,
+      "seed_ms": 628.2
+    },
+    "sqlite/1000/deep": {
+      "calls": 30,
+      "warmup": 2,
+      "p50_ms": 63.853,
+      "p95_ms": 97.118,
+      "mean_ms": 68.3,
+      "max_ms": 105.508,
+      "seed_ms": 628.2
+    },
+    "local/10000/shallow": {
+      "calls": 30,
+      "warmup": 2,
+      "p50_ms": 400.971,
+      "p95_ms": 647.084,
+      "mean_ms": 443.898,
+      "max_ms": 1096.168,
+      "seed_ms": 3985.8
+    },
+    "local/10000/deep": {
+      "calls": 30,
+      "warmup": 2,
+      "p50_ms": 422.313,
+      "p95_ms": 502.329,
+      "mean_ms": 430.449,
+      "max_ms": 503.817,
+      "seed_ms": 3985.8
+    },
+    "sqlite/10000/shallow": {
+      "calls": 30,
+      "warmup": 2,
+      "p50_ms": 704.054,
+      "p95_ms": 1075.28,
+      "mean_ms": 719.46,
+      "max_ms": 1196.438,
+      "seed_ms": 66573.8
+    },
+    "sqlite/10000/deep": {
+      "calls": 30,
+      "warmup": 2,
+      "p50_ms": 914.116,
+      "p95_ms": 1747.836,
+      "mean_ms": 1032.024,
+      "max_ms": 2138.063,
+      "seed_ms": 66573.8
+    }
+  }
+}
