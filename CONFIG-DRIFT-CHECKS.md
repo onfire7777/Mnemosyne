@@ -118,9 +118,11 @@ Realized over these concrete loci:
   plan and refuse — the scripts restart the whole production stack);
   the VM knobs default to the 6 CPU / 12 GiB resize target; the state file
   (default `~/.mnemosyne-perf-runtime-state`) records the prior colima size
-  for rollback. The optional host-LLM flip is a runtime overlay + the
-  default-off `host-llm` compose profile — the committed compose defaults
-  stay byte-identical to the deployed topology.
+  for rollback. host-Metal serving is now the committed DEFAULT: the
+  `host-llm-proxy` relay starts on a plain `up -d` (on its own relay-only
+  `hostbridge` egress net, off `edge`) and the LLM clients default `OLLAMA_URL`
+  to it; the in-VM `ollama` service is the opt-in fallback behind the
+  `in-vm-llm` compose profile. The old runtime-overlay flip is retired.
 - **`MNEMOSYNE_CAPABILITY_TIER`** — explicit capability-tier override for
   `capability.resolve_tier` (`capability.py`): one of `floor` / `standard` /
   `accelerated` / `frontier`; always wins over hardware detection, and
