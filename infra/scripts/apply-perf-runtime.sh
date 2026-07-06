@@ -40,7 +40,8 @@ cat <<EOF
   3. docker compose -f ${COMPOSE_FILE} up -d   (applies the committed cpus/mem_limit ceilings)
   4. [--host-llm only] verify host ollama on 127.0.0.1:11434, start the
      host-llm-proxy relay (profile host-llm), overlay OLLAMA_URL ->
-     http://host-llm.mnemo.local:11434 on consolidator/role-http, stop in-VM ollama
+     http://host-llm.mnemo.local:11434 on consolidator/role-http (and on the
+     operator bastion when its profile is running), stop in-VM ollama
   5. post-checks: docker compose ps + role-LLM /api/version probe
 
 PRECONDITION: the pending production evidence capture is COMPLETE (PERF-RUNTIME.md).
@@ -109,6 +110,17 @@ YAML
   echo "  - starting relay + repointing consolidator/role-http (overlay: ${OVERLAY})"
   COMPOSE_PROFILES=host-llm docker compose -f "${COMPOSE_FILE}" -f "${OVERLAY}" \
     up -d host-llm-proxy mnemo-consolidator role-http
+  # operator is profile-gated (profile "operator", not started by default) and
+  # also carries the OLLAMA_URL overlay: recreate it only when it is actually
+  # running, otherwise a live bastion would keep pointing at the in-VM ollama
+  # we are about to stop. Guarded so an inactive profile never fails the flip.
+  if [ -n "$(COMPOSE_PROFILES=operator docker compose -f "${COMPOSE_FILE}" ps -q operator 2>/dev/null || true)" ]; then
+    echo "  - repointing running operator bastion at the relay"
+    COMPOSE_PROFILES=host-llm,operator docker compose -f "${COMPOSE_FILE}" -f "${OVERLAY}" \
+      up -d operator
+  else
+    echo "  - operator not running (profile inactive); skipping its recreate"
+  fi
   echo "  - stopping in-VM ollama (NOTE: any later plain 'up -d' restarts it — re-run this flip after)"
   docker compose -f "${COMPOSE_FILE}" stop ollama
 else
