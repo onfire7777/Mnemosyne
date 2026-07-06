@@ -321,6 +321,24 @@ def test_pool_is_thread_safe_under_concurrent_acquires() -> None:
     assert live, "pool retains reusable connections"
 
 
+def test_engine_collection_closes_idle_connections_without_cyclic_gc(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The pool must not strongly reference the engine: deployed stateless MCP
+    mode builds a throwaway engine per tool call and never calls
+    close_connections(), so dropping the last engine reference alone — no
+    gc.collect() — must close the idle pooled connections (weakref factory +
+    weakref.finalize, not a cyclic-GC-deferred __del__)."""
+    engine, created = make_engine(monkeypatch, reuse=True)
+    with engine.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1")
+    assert len(created) == 1
+    assert not created[0].closed, "connection is idle in the pool while the engine lives"
+    del engine  # refcount drop only; a ref cycle would defer this to gc.collect()
+    assert created[0].closed, "idle pooled connection must close when the engine is dropped"
+
+
 # --------------------------------------------------------------------------- #
 # Env registration + MMR space switch (no live DB).
 # --------------------------------------------------------------------------- #
