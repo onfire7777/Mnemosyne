@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import json
+import logging
 import os
 import threading
 import weakref
@@ -92,6 +93,27 @@ def _require_psycopg() -> tuple[Any, Any]:
     except ModuleNotFoundError as exc:  # pragma: no cover - exercised when optional dep absent.
         raise PostgresUnavailableError("Install mnemosyne-memory[postgres] to use PostgresEngine.") from exc
     return psycopg, Jsonb
+
+
+logger = logging.getLogger(__name__)
+
+# SQLSTATE 42501 == insufficient_privilege. In the hardened deployment the app
+# connects as a NOSUPERUSER role that is NOT the table owner, so owner-only DDL
+# (ALTER TABLE / CREATE INDEX / ADD CONSTRAINT / DROP INDEX) raises this class.
+_INSUFFICIENT_PRIVILEGE_SQLSTATE = "42501"
+
+
+def _is_insufficient_privilege(exc: BaseException) -> bool:
+    """True for a psycopg insufficient-privilege / not-owner error.
+
+    Detected structurally by SQLSTATE so the check needs no psycopg import at
+    module load (the driver is an optional dependency). psycopg3 exposes the
+    code on ``.sqlstate``; ``.pgcode`` is checked as a defensive fallback.
+    """
+    return (
+        getattr(exc, "sqlstate", None) == _INSUFFICIENT_PRIVILEGE_SQLSTATE
+        or getattr(exc, "pgcode", None) == _INSUFFICIENT_PRIVILEGE_SQLSTATE
+    )
 
 
 # Bounded idle-connection count per engine: enough for the 2-3 channels of a
@@ -312,34 +334,151 @@ class PostgresEngine:
         cur.execute("ALTER TABLE entities ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now()")
         cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS entities_tenant_canonical_unique ON entities (tenant_id, canonical)")
 
+    # Fixed savepoint name for privilege-guarded DDL attempts. Each guarded
+    # attempt is a matched SAVEPOINT ... RELEASE (or ROLLBACK TO ... + RELEASE)
+    # pair, so reusing one name across the ensure step is safe and keeps a
+    # caught failure from aborting the surrounding retrieval transaction.
+    _ENSURE_DDL_SAVEPOINT = "mnemosyne_ensure_ddl"
+
     @staticmethod
-    def _ensure_evidence_vector_schema(cur: Any) -> None:
-        cur.execute("ALTER TABLE evidence ADD COLUMN IF NOT EXISTS embedding VECTOR(1024)")
-        cur.execute("ALTER TABLE evidence ADD COLUMN IF NOT EXISTS embedding_partition TEXT NOT NULL DEFAULT 'none'")
-        cur.execute("ALTER TABLE assertions ADD COLUMN IF NOT EXISTS embedding_partition TEXT NOT NULL DEFAULT 'none'")
-        cur.execute("ALTER TABLE evidence ALTER COLUMN embedding_partition SET DEFAULT 'none'")
-        cur.execute("ALTER TABLE assertions ALTER COLUMN embedding_partition SET DEFAULT 'none'")
+    def _column_exists(cur: Any, table: str, column: str) -> bool:
+        """Privilege-free probe: does ``table.column`` exist as the running
+        query would resolve it? ``to_regclass`` mirrors the query's own
+        search_path name resolution and returns NULL (no error) when the table
+        is absent. Any role may read pg_attribute for visible relations."""
         cur.execute(
-            """
-            DO $$
-            BEGIN
-              IF NOT EXISTS (
-                SELECT 1 FROM pg_constraint WHERE conname = 'evidence_embedding_partition_check'
-              ) THEN
-                ALTER TABLE evidence
-                  ADD CONSTRAINT evidence_embedding_partition_check
-                  CHECK (embedding_partition IN ('public', 'private', 'none'));
-              END IF;
-              IF NOT EXISTS (
-                SELECT 1 FROM pg_constraint WHERE conname = 'assertions_embedding_partition_check'
-              ) THEN
-                ALTER TABLE assertions
-                  ADD CONSTRAINT assertions_embedding_partition_check
-                  CHECK (embedding_partition IN ('public', 'private', 'none'));
-              END IF;
-            END $$;
-            """
+            "SELECT 1 FROM pg_attribute"
+            " WHERE attrelid = to_regclass(%s) AND attname = %s"
+            " AND attnum > 0 AND NOT attisdropped",
+            (table, column),
         )
+        return cur.fetchone() is not None
+
+    @staticmethod
+    def _index_exists(cur: Any, index_name: str) -> bool:
+        """Privilege-free probe for an index by name (search_path-resolved)."""
+        cur.execute("SELECT 1 WHERE to_regclass(%s) IS NOT NULL", (index_name,))
+        return cur.fetchone() is not None
+
+    @staticmethod
+    def _constraint_exists(cur: Any, conname: str) -> bool:
+        """Privilege-free probe for a named constraint."""
+        cur.execute("SELECT 1 FROM pg_constraint WHERE conname = %s", (conname,))
+        return cur.fetchone() is not None
+
+    @classmethod
+    def _apply_optional_ddl(cls, cur: Any, statement: str, *, description: str) -> bool:
+        """Run acceleration-only DDL, tolerating a least-privilege role.
+
+        Wrapped in a SAVEPOINT so an insufficient-privilege failure rolls back
+        just this statement and leaves the surrounding transaction usable for
+        the subsequent query — which stays correct, only slower, without the
+        object (indexes and CHECK constraints are not referenced by the query
+        text). Returns True if applied, False if downgraded to a warning.
+        A non-privilege error propagates unchanged (aborts the transaction).
+        """
+        sp = cls._ENSURE_DDL_SAVEPOINT
+        cur.execute(f"SAVEPOINT {sp}")
+        try:
+            cur.execute(statement)
+        except Exception as exc:
+            if _is_insufficient_privilege(exc):
+                cur.execute(f"ROLLBACK TO SAVEPOINT {sp}")
+                cur.execute(f"RELEASE SAVEPOINT {sp}")
+                logger.warning(
+                    "postgres_engine: connecting role lacks privilege to create %s; "
+                    "the query path continues without it (degraded performance). Apply "
+                    "sql/schema.sql via a privileged role to restore acceleration.",
+                    description,
+                )
+                return False
+            raise
+        cur.execute(f"RELEASE SAVEPOINT {sp}")
+        return True
+
+    @classmethod
+    def _ensure_required_column(
+        cls, cur: Any, *, table: str, column: str, ddl: str, extra_ddl: tuple[str, ...] = ()
+    ) -> None:
+        """Ensure a column the retrieval SQL references directly.
+
+        Design note: unlike an index, this column is named verbatim in the
+        query (e.g. ``coalesce(e.lexeme, ...)``, ``embedding <=> ...``), so
+        ``coalesce`` cannot paper over its ABSENCE — a missing column is a plan
+        error, not a NULL. Steady state (schema.sql / a privileged migration
+        already applied) is a single catalog probe with no DDL. When the column
+        is genuinely absent we try to create it; if the least-privilege role
+        cannot, we RAISE a precise, actionable error rather than warn-and-limp,
+        so a mis-provisioned deploy fails LOUD on the first query (pointing the
+        operator at the privileged migration) instead of failing with a cryptic
+        "column does not exist" mid-serve.
+        """
+        if cls._column_exists(cur, table, column):
+            return
+        sp = cls._ENSURE_DDL_SAVEPOINT
+        cur.execute(f"SAVEPOINT {sp}")
+        try:
+            cur.execute(ddl)
+            for stmt in extra_ddl:
+                cur.execute(stmt)
+        except Exception as exc:
+            if _is_insufficient_privilege(exc):
+                cur.execute(f"ROLLBACK TO SAVEPOINT {sp}")
+                cur.execute(f"RELEASE SAVEPOINT {sp}")
+                raise RuntimeError(
+                    f"Postgres column {table}.{column} is absent and the connecting role "
+                    f"lacks privilege to create it (NOSUPERUSER / not table owner). Apply "
+                    f"sql/schema.sql via a privileged role before serving queries: the "
+                    f"retrieval path references this column directly and cannot proceed "
+                    f"without it."
+                ) from exc
+            raise
+        cur.execute(f"RELEASE SAVEPOINT {sp}")
+
+    @classmethod
+    def _ensure_evidence_vector_schema(cls, cur: Any) -> None:
+        # Hot-path DDL elimination: the vector SQL references `embedding` and
+        # `embedding_partition` verbatim, so those are ensured as REQUIRED
+        # columns (existence-probed; created-or-raise). Everything else here is
+        # either DML the least-privilege role may run (the partition backfills,
+        # unchanged below) or acceleration/integrity DDL (CHECK constraints,
+        # partitioned HNSW indexes) that is probe-gated and privilege-tolerant.
+        # A correctly-provisioned deployment therefore issues ZERO owner-only
+        # DDL on the query path — only cheap catalog probes plus the backfills.
+        cls._ensure_required_column(
+            cur,
+            table="evidence",
+            column="embedding",
+            ddl="ALTER TABLE evidence ADD COLUMN IF NOT EXISTS embedding VECTOR(1024)",
+        )
+        cls._ensure_required_column(
+            cur,
+            table="evidence",
+            column="embedding_partition",
+            ddl="ALTER TABLE evidence ADD COLUMN IF NOT EXISTS embedding_partition TEXT NOT NULL DEFAULT 'none'",
+            extra_ddl=("ALTER TABLE evidence ALTER COLUMN embedding_partition SET DEFAULT 'none'",),
+        )
+        cls._ensure_required_column(
+            cur,
+            table="assertions",
+            column="embedding_partition",
+            ddl="ALTER TABLE assertions ADD COLUMN IF NOT EXISTS embedding_partition TEXT NOT NULL DEFAULT 'none'",
+            extra_ddl=("ALTER TABLE assertions ALTER COLUMN embedding_partition SET DEFAULT 'none'",),
+        )
+        if not cls._constraint_exists(cur, "evidence_embedding_partition_check"):
+            cls._apply_optional_ddl(
+                cur,
+                "ALTER TABLE evidence ADD CONSTRAINT evidence_embedding_partition_check"
+                " CHECK (embedding_partition IN ('public', 'private', 'none'))",
+                description="constraint evidence_embedding_partition_check",
+            )
+        if not cls._constraint_exists(cur, "assertions_embedding_partition_check"):
+            cls._apply_optional_ddl(
+                cur,
+                "ALTER TABLE assertions ADD CONSTRAINT assertions_embedding_partition_check"
+                " CHECK (embedding_partition IN ('public', 'private', 'none'))",
+                description="constraint assertions_embedding_partition_check",
+            )
         cur.execute(
             """
             UPDATE evidence
@@ -434,34 +573,56 @@ class PostgresEngine:
             """
         )
         cur.execute("UPDATE assertions SET embedding = NULL WHERE embedding_partition = 'none'")
-        cur.execute("DROP INDEX IF EXISTS evidence_embedding_hnsw")
-        cur.execute("DROP INDEX IF EXISTS assertions_embedding_hnsw")
-        cur.execute(
-            "CREATE INDEX IF NOT EXISTS evidence_embedding_public_hnsw ON evidence USING hnsw (embedding vector_cosine_ops) WHERE embedding_partition = 'public'"
-        )
-        cur.execute(
-            "CREATE INDEX IF NOT EXISTS assertions_embedding_public_hnsw ON assertions USING hnsw (embedding vector_cosine_ops) WHERE embedding_partition = 'public'"
-        )
-        cur.execute(
-            "CREATE INDEX IF NOT EXISTS evidence_embedding_private_hnsw ON evidence USING hnsw (embedding vector_cosine_ops) WHERE embedding_partition = 'private'"
-        )
-        cur.execute(
-            "CREATE INDEX IF NOT EXISTS assertions_embedding_private_hnsw ON assertions USING hnsw (embedding vector_cosine_ops) WHERE embedding_partition = 'private'"
-        )
+        # Legacy single-partition indexes: drop only if actually present, so the
+        # owner-only DROP never fires on the steady-state hot path.
+        for legacy_index in ("evidence_embedding_hnsw", "assertions_embedding_hnsw"):
+            if cls._index_exists(cur, legacy_index):
+                cls._apply_optional_ddl(
+                    cur,
+                    f"DROP INDEX IF EXISTS {legacy_index}",
+                    description=f"drop legacy index {legacy_index}",
+                )
+        # Partitioned HNSW indexes: acceleration only — probe, then create if
+        # missing; a least-privilege role degrades to a warning + seq scan.
+        for index_name, table, partition in (
+            ("evidence_embedding_public_hnsw", "evidence", "public"),
+            ("assertions_embedding_public_hnsw", "assertions", "public"),
+            ("evidence_embedding_private_hnsw", "evidence", "private"),
+            ("assertions_embedding_private_hnsw", "assertions", "private"),
+        ):
+            if not cls._index_exists(cur, index_name):
+                cls._apply_optional_ddl(
+                    cur,
+                    f"CREATE INDEX IF NOT EXISTS {index_name} ON {table} USING hnsw "
+                    f"(embedding vector_cosine_ops) WHERE embedding_partition = '{partition}'",
+                    description=f"index {index_name} (vector acceleration)",
+                )
 
-    @staticmethod
-    def _ensure_evidence_lexeme_schema(cur: Any) -> None:
+    @classmethod
+    def _ensure_evidence_lexeme_schema(cls, cur: Any) -> None:
         # Stored generated tsvector mirrors the assertions.lexeme pattern so
         # evidence lexical search stops recomputing to_tsvector per row at
         # query time. GENERATED ALWAYS pins the column to exactly the prior
         # query-time expression, so ranking-function inputs stay byte-identical.
-        cur.execute(
-            """
-            ALTER TABLE evidence ADD COLUMN IF NOT EXISTS lexeme TSVECTOR
-              GENERATED ALWAYS AS (to_tsvector('english', coalesce(content, ''))) STORED
-            """
+        # Steady state = two catalog probes, no DDL: the column is REQUIRED (the
+        # query names `e.lexeme` under coalesce) so a missing-and-uncreatable
+        # column fails loud; the GIN index is pure acceleration and degrades to
+        # a warning under a least-privilege role.
+        cls._ensure_required_column(
+            cur,
+            table="evidence",
+            column="lexeme",
+            ddl=(
+                "ALTER TABLE evidence ADD COLUMN IF NOT EXISTS lexeme TSVECTOR"
+                " GENERATED ALWAYS AS (to_tsvector('english', coalesce(content, ''))) STORED"
+            ),
         )
-        cur.execute("CREATE INDEX IF NOT EXISTS evidence_lexeme_gin ON evidence USING gin (lexeme)")
+        if not cls._index_exists(cur, "evidence_lexeme_gin"):
+            cls._apply_optional_ddl(
+                cur,
+                "CREATE INDEX IF NOT EXISTS evidence_lexeme_gin ON evidence USING gin (lexeme)",
+                description="index evidence_lexeme_gin (evidence lexical acceleration)",
+            )
 
     @staticmethod
     def _ensure_preference_access_policy_schema(cur: Any) -> None:
