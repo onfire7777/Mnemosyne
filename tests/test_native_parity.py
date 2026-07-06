@@ -309,3 +309,172 @@ def test_mmr_rejects_length_mismatch():
     # truncation case.
     with pytest.raises(ValueError):
         native.mmr_select_indices([1.0, 2.0], [None], [1.0], 1, 0.5)
+
+
+# --- Wave 2: ppr_power_iteration ---------------------------------------------
+
+# THE oracle: the raw pure body (the public ppr_power_iteration dispatches to
+# the native kernel when installed — comparing against it would be
+# native-vs-native in a native environment).
+from mnemosyne.algorithms import _ppr_power_iteration_pure  # noqa: E402
+
+
+def _native_ppr(adjacency, matches_seed, *, iterations=12, damping=0.85, teleport=0.15):
+    """Mirror of the algorithms.ppr_power_iteration native branch's ordered-
+    structure building (via the always-correct slow walk, not the dispatch's
+    C-level fast pipeline), calling the kernel DIRECTLY so parity stays
+    native-vs-pure regardless of which path the dispatcher takes in this
+    process (same rationale as _packed_dense_cases building packed buffers)."""
+    nodes = list(adjacency)
+    index = {node: slot for slot, node in enumerate(nodes)}
+    row_lens: list[int] = []
+    slots: list[int] = []
+    for neighbors in adjacency.values():
+        row_lens.append(len(neighbors))
+        for neighbor in neighbors:
+            slot = index.get(neighbor)
+            if slot is None:
+                slot = len(nodes)
+                index[neighbor] = slot
+                nodes.append(neighbor)
+            slots.append(slot)
+    seeds = [bool(matches_seed(node)) for node in nodes]
+    scores = native.ppr_power_iteration(
+        seeds,
+        array.array("Q", slots).tobytes(),
+        array.array("Q", row_lens).tobytes(),
+        iterations,
+        damping,
+        teleport,
+    )
+    return dict(zip(nodes, scores, strict=True))
+
+
+def _assert_ppr_bit_identical(adjacency, matches_seed, **kwargs):
+    got = _native_ppr(adjacency, matches_seed, **kwargs)
+    expected = _ppr_power_iteration_pure(
+        adjacency,
+        matches_seed,
+        iterations=kwargs.get("iterations", 12),
+        damping=kwargs.get("damping", 0.85),
+        teleport=kwargs.get("teleport", 0.15),
+    )
+    # Key ORDER is part of parity: the returned dict's insertion order must
+    # be the pure pass's (adjacency keys, then externals in first-touch order).
+    assert list(got) == list(expected)
+    assert bits(list(got.values())) == bits(list(expected.values()))
+
+
+_ppr_names = st.integers(min_value=0, max_value=15).map(lambda i: f"n{i}")
+
+
+@st.composite
+def _ppr_graphs(draw):
+    # Keys are unique (Mapping contract); neighbor lists draw from a WIDER
+    # name universe than the keys, so out-of-adjacency neighbors (nodes with
+    # no outgoing edges) occur, along with self-loops and DUPLICATE neighbor
+    # entries (each occurrence adds `share` again in both implementations).
+    keys = draw(st.lists(_ppr_names, unique=True, max_size=10))
+    adjacency = {key: draw(st.lists(_ppr_names, max_size=6)) for key in keys}
+    seed_nodes = draw(st.frozensets(_ppr_names, max_size=4))
+    return adjacency, seed_nodes
+
+
+@given(_ppr_graphs(), st.integers(min_value=1, max_value=12))
+@settings(max_examples=200, deadline=None)
+def test_ppr_bit_identical_random_graphs(case, iterations):
+    adjacency, seed_nodes = case
+    _assert_ppr_bit_identical(adjacency, seed_nodes.__contains__, iterations=iterations)
+
+
+@given(
+    _ppr_graphs(),
+    st.floats(min_value=-2.0, max_value=2.0, allow_nan=False),
+    st.floats(min_value=-2.0, max_value=2.0, allow_nan=False),
+)
+@settings(max_examples=100, deadline=None)
+def test_ppr_bit_identical_arbitrary_damping_teleport(case, damping, teleport):
+    # The kernel replicates the float STATEMENTS, not the constants: parity
+    # must hold for any finite damping/teleport, not just the pinned 0.85/0.15.
+    adjacency, seed_nodes = case
+    _assert_ppr_bit_identical(
+        adjacency, seed_nodes.__contains__, damping=damping, teleport=teleport
+    )
+
+
+def test_ppr_golden_edge_shapes_bit_identical():
+    cases = [
+        ({}, frozenset()),  # empty graph
+        ({"a": []}, frozenset("a")),  # single isolated seed node
+        ({"a": ["a"]}, frozenset("a")),  # self-loop
+        ({"a": ["b"], "b": ["a"], "c": ["d"], "d": ["c"]}, frozenset("a")),  # disconnected
+        ({"a": ["b", "b", "a"]}, frozenset("a")),  # duplicate neighbors + self-loop
+        ({"a": ["x", "y"], "b": []}, frozenset(["a", "x"])),  # external neighbors, one a seed
+        ({"a": ["b"], "b": []}, frozenset()),  # no seeds at all -> all-zero ranks
+    ]
+    for adjacency, seed_nodes in cases:
+        _assert_ppr_bit_identical(adjacency, seed_nodes.__contains__)
+
+
+def test_ppr_external_neighbor_first_iteration_teleport_gap():
+    # iterations=1 isolates the dict-membership nuance: an out-of-adjacency
+    # neighbor discovered during the sweep starts from the .get default 0.0
+    # (NO teleport term that iteration), even when it is itself a seed.
+    adjacency = {"a": ["x"]}
+    for iterations in (1, 2, 3):
+        _assert_ppr_bit_identical(
+            adjacency, frozenset(["a", "x"]).__contains__, iterations=iterations
+        )
+
+
+def test_ppr_engine_shaped_set_adjacency_bit_identical():
+    # Both shipped engines pass dict[str, set[str]] (defaultdict(set)) plus
+    # setdefault(seed, []) entries. Set iteration order is process-stable for
+    # an unmutated set, and the ordered structures freeze the SAME order the
+    # pure loop iterates, so parity holds for set-valued adjacency too.
+    adjacency: dict[str, object] = {
+        "alpha": {"beta", "gamma", "delta"},
+        "beta": {"alpha", "gamma"},
+        "gamma": {"alpha", "beta"},
+        "delta": {"alpha"},
+        "seed-only": [],
+    }
+    _assert_ppr_bit_identical(adjacency, frozenset(["seed-only", "alpha"]).__contains__)
+
+
+@given(_ppr_graphs(), st.integers(min_value=1, max_value=12))
+@settings(max_examples=100, deadline=None)
+def test_ppr_dispatch_fast_build_bit_identical(case, iterations):
+    # The DISPATCHING function's native branch builds structures via a
+    # C-level map/chain pipeline with a KeyError fallback for graphs with
+    # out-of-adjacency neighbors; this proves that build (both branches, the
+    # drawn graphs regularly hit each) reproduces the pure oracle bit-for-bit.
+    from mnemosyne import text as text_mod
+    from mnemosyne.algorithms import ppr_power_iteration
+
+    if text_mod.NATIVE is None:
+        pytest.skip("pure mode active (MNEMOSYNE_PURE=1); no native build path")
+    adjacency, seed_nodes = case
+    got = ppr_power_iteration(adjacency, seed_nodes.__contains__, iterations=iterations)
+    expected = _ppr_power_iteration_pure(
+        adjacency, seed_nodes.__contains__, iterations=iterations, damping=0.85, teleport=0.15
+    )
+    assert list(got) == list(expected)
+    assert bits(list(got.values())) == bits(list(expected.values()))
+
+
+def test_ppr_kernel_rejects_malformed_structures():
+    # Caller-bug guards, mirroring the MMR length-mismatch contract: more row
+    # lengths than seed flags, a neighbor slot outside the universe, row
+    # lengths inconsistent with the flat buffer, and a non-8-multiple buffer.
+    def pack(*ints):
+        return array.array("Q", ints).tobytes()
+
+    with pytest.raises(ValueError):
+        native.ppr_power_iteration([True], pack(0, 0), pack(1, 1), 12, 0.85, 0.15)
+    with pytest.raises(ValueError):
+        native.ppr_power_iteration([True, False], pack(2), pack(1), 12, 0.85, 0.15)
+    with pytest.raises(ValueError):
+        native.ppr_power_iteration([True, False], pack(1, 0), pack(1), 12, 0.85, 0.15)
+    with pytest.raises(ValueError):
+        native.ppr_power_iteration([True], pack(0)[:-3], pack(1), 12, 0.85, 0.15)

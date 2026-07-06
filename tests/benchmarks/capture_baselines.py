@@ -22,6 +22,7 @@ NAMES = {
     "test_bench_cosine_1024": "cosine_1024",
     "test_bench_hashing_embedding_cold": "hashing_embedding",
     "test_bench_lexical_scan_2k": "lexical_scan_2k",
+    "test_bench_ppr_pure_512n": "ppr_512n",
 }
 
 

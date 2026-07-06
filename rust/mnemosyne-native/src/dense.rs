@@ -124,9 +124,7 @@ pub fn dense_scan_packed(
     }
     let n = row_mask.len();
     let expected_rows_len = n.checked_mul(row_bytes).ok_or_else(|| {
-        PyValueError::new_err(format!(
-            "n*dims*8 overflows usize (n = {n}, dims = {dims})"
-        ))
+        PyValueError::new_err(format!("n*dims*8 overflows usize (n = {n}, dims = {dims})"))
     })?;
     if rows.len() != expected_rows_len {
         return Err(PyValueError::new_err(format!(

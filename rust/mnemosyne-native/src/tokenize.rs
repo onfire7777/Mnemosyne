@@ -52,8 +52,7 @@ pub fn for_each_token(text: &str, mut f: impl FnMut(&str)) {
         while i < bytes.len() && is_cont(bytes[i]) {
             i += 1;
         }
-        let trimmed =
-            text[start..i].trim_matches(|c| matches!(c, '.' | '/' | ':' | '+' | '-'));
+        let trimmed = text[start..i].trim_matches(|c| matches!(c, '.' | '/' | ':' | '+' | '-'));
         if trimmed.is_empty() {
             continue;
         }

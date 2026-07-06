@@ -74,6 +74,27 @@ def test_tokenize_and_cosine_route_through_dispatch():
     assert active[1:] == forced[1:]
 
 
+PPR_CODE = (
+    "import struct; from mnemosyne import text;"
+    "from mnemosyne.algorithms import ppr_power_iteration;"
+    # Deliberate shape stressors: an empty neighbor list ('d'), duplicate
+    # neighbors + a self-loop ('c'), and an out-of-adjacency neighbor that is
+    # itself a seed ('x') — the external-teleport and key-order edge cases.
+    "adjacency = {'a': ['b', 'c'], 'b': ['a'], 'c': ['d', 'd', 'c'], 'd': [], 'e': ['x']};"
+    "ranks = ppr_power_iteration(adjacency, lambda n: n in {'a', 'x'});"
+    "print(text.NATIVE is not None, ';'.join("
+    "node + '=' + struct.pack('<d', score).hex() for node, score in ranks.items()))"
+)
+
+
+def test_ppr_power_iteration_identical_both_modes():
+    active = _run(PPR_CODE, pure=False).split()
+    forced = _run(PPR_CODE, pure=True).split()
+    assert active[0] == "True" and forced[0] == "False"
+    # Joined in dict order: same nodes, same INSERTION ORDER, same score bits.
+    assert active[1] == forced[1]
+
+
 # --- Task 7: engine batch call sites (single FFI crossing per scan) ---------
 
 TENANT = "t-dispatch"

@@ -26,8 +26,7 @@ struct QueryTerms {
 impl QueryTerms {
     fn new(query: &str) -> Self {
         let mut terms: Vec<(String, u64)> = Vec::new();
-        let mut index: std::collections::HashMap<String, usize> =
-            std::collections::HashMap::new();
+        let mut index: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
         for_each_token(query, |tok| {
             if let Some(&i) = index.get(tok) {
                 terms[i].1 += 1;

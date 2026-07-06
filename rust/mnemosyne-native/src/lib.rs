@@ -11,6 +11,7 @@ mod dense;
 mod hashing;
 mod lexical;
 mod mmr;
+mod ppr;
 mod tokenize;
 
 #[pyfunction]
@@ -31,5 +32,6 @@ fn mnemosyne_native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(dense::dense_scan, m)?)?;
     m.add_function(wrap_pyfunction!(dense::dense_scan_packed, m)?)?;
     m.add_function(wrap_pyfunction!(mmr::mmr_select_indices, m)?)?;
+    m.add_function(wrap_pyfunction!(ppr::ppr_power_iteration, m)?)?;
     Ok(())
 }
