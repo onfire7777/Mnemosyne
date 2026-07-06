@@ -409,6 +409,82 @@ def test_mmr_stored_space_missing_vectors_fall_back_to_guards(
     assert [hit.id for hit in got] == [hits[0].id, hits[1].id]
 
 
+class _StoredVectorFakeCursor(FakeCursor):
+    """FakeCursor that serves canned rows for the _stored_hit_vectors query."""
+
+    def __init__(self, conn: "_StoredVectorFakeConnection"):
+        super().__init__(conn)
+        self._rows: list[tuple[Any, ...]] = []
+
+    def execute(self, sql: str, params: tuple[Any, ...] | None = None) -> None:
+        super().execute(sql, params)
+        flat = " ".join(sql.split())
+        if "FROM evidence" in flat and "embedding::text" in flat:
+            self._rows = self._conn.evidence_rows
+        else:
+            self._rows = []
+
+    def fetchall(self) -> list[Any]:
+        return self._rows
+
+
+class _StoredVectorFakeConnection(FakeConnection):
+    def __init__(self, name: str, evidence_rows: list[tuple[Any, ...]]):
+        super().__init__(name)
+        self.evidence_rows = evidence_rows
+
+    def cursor(self, *args: Any, **kwargs: Any) -> FakeCursor:
+        return _StoredVectorFakeCursor(self)
+
+
+def test_stored_hit_vectors_gate_redacted_private_hits_to_hashing_space(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Mirror of the vector channel's may_use_stored_embedding gate
+    (postgres_engine vector_search): a private-partition hit whose caller
+    decision was redacted must not expose its stored raw vector to MMR — it
+    falls back to the hashing embedding of the (already redacted) hit text.
+    Permitted hits keep the stored vector."""
+    engine, _ = make_engine(monkeypatch, reuse=True)
+    public_redacted = _hit(0, "public partition text")
+    private_ok = _hit(1, "private partition, full-read caller")
+    private_redacted = _hit(2, "private partition, [REDACTED] projection")
+    private_no_privacy_meta = _hit(3, "private partition, unrecorded decision")
+    public_redacted.metadata = {"privacy": {"redacted": True}}  # public: redaction irrelevant
+    private_ok.metadata = {"privacy": {"redacted": False}}
+    private_redacted.metadata = {"privacy": {"redacted": True}}
+    private_no_privacy_meta.metadata = {}
+
+    def row(hit: Hit, literal: str, partition: str) -> tuple[Any, ...]:
+        # (cid, embedding::text, sensitivity, access_policy, embedding_partition)
+        return (bytes.fromhex(hit.id), literal, 2, {}, partition)
+
+    conn = _StoredVectorFakeConnection(
+        "stored-vec",
+        [
+            row(public_redacted, "[1,0]", "public"),
+            row(private_ok, "[0,1]", "private"),
+            row(private_redacted, "[1,1]", "private"),
+            row(private_no_privacy_meta, "[0.5,0.5]", "private"),
+        ],
+    )
+    monkeypatch.setattr(engine, "connect", lambda: conn)
+    hits = [public_redacted, private_ok, private_redacted, private_no_privacy_meta]
+    vectors = engine._stored_hit_vectors(hits)
+    assert vectors[("evidence", public_redacted.id)] == [1.0, 0.0], (
+        "public partition keeps the stored vector even for a redacted decision"
+    )
+    assert vectors[("evidence", private_ok.id)] == [0.0, 1.0], (
+        "non-redacted caller keeps the private stored vector"
+    )
+    assert vectors[("evidence", private_redacted.id)] == hashing_embedding(private_redacted.text), (
+        "redacted caller decision must fall back to hashing of the redacted text"
+    )
+    assert vectors[("evidence", private_no_privacy_meta.id)] == hashing_embedding(
+        private_no_privacy_meta.text
+    ), "missing privacy metadata is conservatively treated as redacted"
+
+
 def test_vector_from_literal_parses_and_rejects() -> None:
     assert _vector_from_literal("[1,2.5,-3]") == [1.0, 2.5, -3.0]
     assert _vector_from_literal(" [0.1, 0.2] ") == [0.1, 0.2]
