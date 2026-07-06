@@ -107,6 +107,27 @@ Realized over these concrete loci:
   ordered as) sequential per-item `embed` calls
   (`tests/test_provider_batching.py`), so it selects speed, never behavior.
   Invalid or non-positive values fall back to the default.
+- **`MNEMOSYNE_CAPABILITY_TIER`** — explicit capability-tier override for
+  `capability.resolve_tier` (`capability.py`): one of `floor` / `standard` /
+  `accelerated` / `frontier`; always wins over hardware detection, and
+  `frontier` is reachable *only* through this env (never detected). An
+  unrecognized value is ignored (detection applies). Read-only advisory unless
+  autotune is opted into below.
+- **`MNEMOSYNE_CAPABILITY_AUTOTUNE`** — set to `1` to let `capability.apply()`
+  fill env **defaults** at CLI startup from the tier's recommendation dict
+  (`mnemosyne.cli main` calls `capability.maybe_autotune()`). Default OFF —
+  a strict no-op unless set. Even when on, it only sets keys the operator has
+  NOT set (a present key, even empty, is never overwritten — human wins), and
+  only keys from the recommendation dict over knobs that already exist:
+  `MNEMOSYNE_PARAMETRIC_BACKEND` / `MNEMOSYNE_PARAMETRIC_DEVICE`
+  (`parametric_adapter.py` selection order), `MNEMOSYNE_EMBED_BATCH_SIZE`
+  (`consolidation.py`), `MNEMOSYNE_PARALLEL_CHANNELS` (`pipeline.py`), and an
+  `OLLAMA_MODEL` suggestion for the production role-LLM stack. The probe also
+  reads (presence-only, never values) `OLLAMA_HOST` / `OLLAMA_URL` /
+  `OLLAMA_MODEL` / `MNEMOSYNE_EMBEDDING_URL` / `MNEMOSYNE_RERANKER_URL` to
+  report whether a hosted LLM endpoint is configured, and `MNEMOSYNE_PURE` to
+  report the forced-pure posture. Inspect via `python -m mnemosyne.cli
+  capability [--json]` (read-only; semantics in `tests/test_capability.py`).
 - **`journal_dir`** — optional `LocalMemoryEngine` constructor kwarg
   (`engine.py`): directory for the per-tenant append-only CID journals
   (`journal.py`); unset, no journal is written. Engine erasure wiring lands in

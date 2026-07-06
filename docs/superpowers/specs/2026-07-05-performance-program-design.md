@@ -154,6 +154,23 @@ boundary, protected-suite gate, and rollback — but the trainer backend, adapte
 width, and (on gpu/frontier, opt-in) a genuine LoRA rung scale with hardware
 instead of being pinned to the floor.
 
+**Implemented (lane D, 2026-07-05, advisory-first slice):**
+`src/mnemosyne/capability.py` ships the probe (RAM via `hw.memsize` sysctl on
+darwin / `SC_PHYS_PAGES` elsewhere, cpu count, apple-silicon, import-guarded
+torch cuda/mps, `mnemosyne_native` importability, hosted-LLM-endpoint env
+presence), the floor/standard/accelerated/frontier tier map (`frontier` =
+explicit `MNEMOSYNE_CAPABILITY_TIER` only; the env override always wins), and
+`recommended_env(tier)` over the knobs that already exist
+(`MNEMOSYNE_PARAMETRIC_BACKEND`/`_DEVICE`, `MNEMOSYNE_EMBED_BATCH_SIZE`,
+`MNEMOSYNE_PARALLEL_CHANNELS`, `OLLAMA_MODEL` suggestion), clamped to what the
+host can actually run. No rerank-width / PPR-iteration recommendations were
+added: no such env knobs exist yet (`rerank_width` is an `OperatingPolicy`
+tunable) — those await the runtime-knob rows of this table. Read-only CLI:
+`mneme capability [--json]`. Opt-in autotune: `MNEMOSYNE_CAPABILITY_AUTOTUNE=1`
+lets `capability.maybe_autotune()` (hooked at `cli.main` startup, strict no-op
+by default) fill env defaults for operator-unset keys only. Both env vars are
+registered in CONFIG-DRIFT-CHECKS.md; semantics in `tests/test_capability.py`.
+
 ## 8. Phase P6 — Gated items (open only on evidence)
 
 - **Rust rmcp front-end / warm daemon**: decided by the P0 trace against the

@@ -17126,6 +17126,31 @@ def cmd_residency_policy(args: argparse.Namespace) -> None:
     emit(tools.residency_policy())
 
 
+def cmd_capability(args: argparse.Namespace) -> None:
+    from mnemosyne import capability
+
+    facts = capability.probe()
+    tier, tier_source = capability.resolve_tier(facts=facts)
+    recommendations = capability.recommended_env(tier, facts=facts)
+    if getattr(args, "as_json", False):
+        emit(
+            {
+                "ok": True,
+                "tier": tier,
+                "tier_source": tier_source,
+                "autotune_enabled": capability.autotune_enabled(),
+                "facts": facts,
+                "recommended_env": recommendations,
+            }
+        )
+        return
+    print(f"# capability tier: {tier} ({tier_source}); recommendations only — nothing applied")
+    for key in sorted(facts):
+        print(f"# {key}={json.dumps(facts[key])}")
+    for key, value in sorted(recommendations.items()):
+        print(f"export {key}={shlex.quote(value)}")
+
+
 def build_parser() -> argparse.ArgumentParser:
     from mnemosyne.media_limits import DEFAULT_MAX_INGEST_BYTES
 
@@ -19075,10 +19100,25 @@ def build_parser() -> argparse.ArgumentParser:
 
     consolidate_once = sub.add_parser("consolidate-once")
     consolidate_once.set_defaults(func=cmd_consolidate_once)
+
+    capability = sub.add_parser("capability")
+    capability.add_argument(
+        "--json",
+        dest="as_json",
+        action="store_true",
+        help="Emit the capability report as JSON instead of shell-exportable lines",
+    )
+    capability.set_defaults(func=cmd_capability)
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
+    from mnemosyne.capability import maybe_autotune
+
+    # Opt-in capability autotune (MNEMOSYNE_CAPABILITY_AUTOTUNE=1): fills env
+    # defaults for unset knobs before any command reads them; strict no-op
+    # unless the flag is set (registered in CONFIG-DRIFT-CHECKS.md).
+    maybe_autotune()
     parser = build_parser()
     args = parser.parse_args(argv)
     if args.command not in {"session-exchange", "idp-authz-policy-check"}:
