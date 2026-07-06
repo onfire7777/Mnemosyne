@@ -12,6 +12,20 @@
 #                 compose service for the row-10 live-parity suite. Never deployed
 #                 as a long-running production service.
 
+# Optional native kernels (mnemosyne_native, pyo3 abi3-py312). Pure Python
+# stays canonical: the wheel only accelerates byte-parity-proven kernels and
+# MNEMOSYNE_PURE=1 disables it at runtime (src/mnemosyne/text.py dispatch).
+FROM rust:1.95-slim AS native-builder
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends python3 python3-pip \
+    && rm -rf /var/lib/apt/lists/* \
+    && pip3 install --no-cache-dir --break-system-packages 'maturin>=1.14,<2'
+COPY rust/mnemosyne-native /native/mnemosyne-native
+WORKDIR /native/mnemosyne-native
+# --compatibility linux: installed into our own matching image below, so no
+# manylinux audit is needed (and none of its toolchain enters the image).
+RUN maturin build --release --out /wheels --compatibility linux
+
 FROM python:3.12-slim AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -23,6 +37,10 @@ WORKDIR /opt/mnemosyne
 COPY pyproject.toml README.md LICENSE ./
 COPY src ./src
 RUN pip install --no-cache-dir '.[postgres,mcp]'
+COPY --from=native-builder /wheels /tmp/native-wheels
+RUN pip install --no-cache-dir /tmp/native-wheels/*.whl \
+    && rm -rf /tmp/native-wheels \
+    && python -c "import mnemosyne_native as n; print('native kernels baked:', n.parity_marker())"
 
 COPY infra/entrypoint.sh /usr/local/bin/mnemo-entrypoint
 # Command-backed providers at the paths the self-hosted profile references.

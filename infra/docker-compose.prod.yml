@@ -318,11 +318,12 @@ services:
       # production jobs are enqueued under the primary tenant; without this the
       # worker drains the default 'system' tenant and never processes them
       MNEMOSYNE_QUEUE_TENANT: primary
-      # Role-LLM sizing for this host: measured warm qwen3:4b inference is
-      # ~0.5 tok/s under full-stack load (unusable); qwen3:0.6b is ~5x faster.
-      # Consolidation is a background warm loop, so slow-but-correct wins over
-      # fail-closed timeouts. Bounds sized to measured latency.
-      OLLAMA_MODEL: qwen3:0.6b
+      # Role-LLM sizing: with the host-llm relay active (PERF-RUNTIME.md),
+      # qwen3:4b serves from host Metal at ~24 tok/s (measured 2026-07-05) —
+      # the architecture doc's intended model is restored. In-VM CPU serving
+      # of 4b measured ~0.5 tok/s; if rolling back to in-VM ollama, drop to
+      # qwen3:0.6b again. Timeout bounds keep the conservative envelope.
+      OLLAMA_MODEL: qwen3:4b
       OLLAMA_TIMEOUT: "280"
       MNEMOSYNE_ROLE_LADDER_TIMEOUT: "300"
       MNEMOSYNE_ROLE_LADDER_LOCAL_TIMEOUT: "280"   # local rung defaults to min(20s, total) — far below measured latency
@@ -420,7 +421,7 @@ services:
       OLLAMA_URL: http://ollama.mnemo.local:11434
       # OPTIONAL host-LLM flip (apply-perf-runtime.sh --host-llm; infra/PERF-RUNTIME.md):
       # OLLAMA_URL: http://host-llm.mnemo.local:11434
-      OLLAMA_MODEL: qwen3:0.6b
+      OLLAMA_MODEL: qwen3:4b
       OLLAMA_TIMEOUT: "280"
     tmpfs: ["/tmp:size=32m"]
     networks: [internal, hostllm]           # Caddy backhaul on internal; hostllm: sanctioned client of the opt-in relay
@@ -480,7 +481,7 @@ services:
       # ollama). role-llm defaults to qwen3:4b @ 25s, unusable on this no-GPU
       # host; pin the same latency-tuned model + timeouts the consolidator uses
       # so the role subchecks return valid structure instead of timing out.
-      OLLAMA_MODEL: qwen3:0.6b
+      OLLAMA_MODEL: qwen3:4b
       OLLAMA_TIMEOUT: "280"
       MNEMOSYNE_CANDIDATE_EXTRACTOR_TIMEOUT: "320"
       MNEMOSYNE_SUMMARIZER_TIMEOUT: "320"

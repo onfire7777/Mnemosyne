@@ -25,3 +25,8 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .DS_Store
+
+# Build-context hygiene: toolchain outputs and local venvs never enter images.
+rust/**/target/
+.venv/
+.git/
