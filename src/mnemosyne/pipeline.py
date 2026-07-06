@@ -30,6 +30,8 @@ engine-specific storage access stays behind the ops members.
 
 from __future__ import annotations
 
+import os
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Protocol
 
 from mnemosyne.calibration import CalibrationSet, conformal_threshold, should_abstain
@@ -50,6 +52,17 @@ from mnemosyne.retrieval import (
     workspace_broadcast_from_context,
 )
 from mnemosyne.text import tokenize
+
+#: Default-OFF opt-in to overlap the dense/lexical/graph channel calls on a
+#: 3-worker thread pool (registered in CONFIG-DRIFT-CHECKS.md). Channel
+#: identity and the RRF input order stay exactly [dense, lexical, graph];
+#: flag-on results are byte-identical (tests/test_engine_perf_lanes.py).
+#: Default off because engine RLocks may serialize the work anyway.
+_PARALLEL_CHANNELS_ENV = "MNEMOSYNE_PARALLEL_CHANNELS"
+
+
+def parallel_channels_enabled() -> bool:
+    return os.environ.get(_PARALLEL_CHANNELS_ENV, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 class RetrievalPipelineOps(Protocol):
@@ -130,13 +143,33 @@ def run_retrieval_pipeline(
     effective_filter = strip_workspace_broadcast_filter(filt)
     effective_filter.update({"tenant_id": tenant_id, "branch": branch})
     k = policy.deep_top_k if deep else policy.top_k
-    dense = ops.vector_search(query, policy.rerank_width, effective_filter)
-    lexical = ops.lexical_search(query, policy.rerank_width, effective_filter)
-    graph = (
-        ops.graph_ppr(tokenize(query), max(4, k // 2), tenant_id=tenant_id, branch=branch, filt=effective_filter)
-        if deep
-        else []
-    )
+    if parallel_channels_enabled():
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            dense_future = pool.submit(ops.vector_search, query, policy.rerank_width, effective_filter)
+            lexical_future = pool.submit(ops.lexical_search, query, policy.rerank_width, effective_filter)
+            graph_future = (
+                pool.submit(
+                    ops.graph_ppr,
+                    tokenize(query),
+                    max(4, k // 2),
+                    tenant_id=tenant_id,
+                    branch=branch,
+                    filt=effective_filter,
+                )
+                if deep
+                else None
+            )
+            dense = dense_future.result()
+            lexical = lexical_future.result()
+            graph = graph_future.result() if graph_future is not None else []
+    else:
+        dense = ops.vector_search(query, policy.rerank_width, effective_filter)
+        lexical = ops.lexical_search(query, policy.rerank_width, effective_filter)
+        graph = (
+            ops.graph_ppr(tokenize(query), max(4, k // 2), tenant_id=tenant_id, branch=branch, filt=effective_filter)
+            if deep
+            else []
+        )
     fused = ops._rrf([dense, lexical, graph], k=max(k * 2, policy.rerank_width))
     reranked = ops.adapters.reranker.rerank(query, fused, k=max(k * 2, k))
     reranked, schema_fast_path = schema_fast_path_rerank(query, reranked, policy)

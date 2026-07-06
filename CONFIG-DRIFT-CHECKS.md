@@ -66,6 +66,22 @@ Realized over these concrete loci:
   (`tests/benchmarks/`) into the absolute `§22.5` latency budgets
   (reference-machine nightly); unset, only the relative-regression gate runs
   under `--benchmark-only`, and a plain run skips the suite entirely.
+- **`MNEMOSYNE_CANDIDATE_MEMO`** — set to `0` to disable the candidate-scan
+  memo (kill-switch; default ON): `LocalMemoryEngine._candidate_hits` caches
+  the access-check + redaction scan in a size-4 LRU keyed on (tenant, branch,
+  store version, store sizes, policy ceilings, access-context fingerprint) and
+  hands every caller independent clones, and `SqliteEngine._scan_oracle`
+  memoizes the hydrated scan oracle keyed on the sqlite write fingerprints
+  (`total_changes` + `PRAGMA data_version`). Results are byte-parity-proven
+  against the unmemoized path (`tests/test_engine_perf_lanes.py`), so the
+  switch selects speed, never behavior.
+- **`MNEMOSYNE_PARALLEL_CHANNELS`** — set to `1` to run the dense/lexical/graph
+  retrieval channel calls of `run_retrieval_pipeline` (`pipeline.py`) on a
+  3-worker thread pool. Default OFF — engine RLocks may serialize the work, so
+  this is a concurrency-posture opt-in only. Channel identity and the RRF
+  input order stay exactly `[dense, lexical, graph]`; flag-on results are
+  byte-identical to sequential on the Local and SQLite engines
+  (`tests/test_engine_perf_lanes.py`).
 - **`MNEMOSYNE_EMBED_BATCH_SIZE`** — chunk size (default `32`) for batched
   embedding calls: the consolidation embedder pass collects pending evidence
   texts and feeds them through `consolidation.embed_texts_batched`, which

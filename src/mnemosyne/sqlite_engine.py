@@ -58,6 +58,7 @@ import re
 import sqlite3
 import threading
 import time
+from collections import OrderedDict
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -76,7 +77,9 @@ from mnemosyne.access_policy import (
 )
 from mnemosyne.calibration import CalibrationSet
 from mnemosyne.engine import (
+    _CANDIDATE_MEMO_SIZE,
     LocalMemoryEngine,
+    _candidate_memo_enabled,
     _normalise_privacy_tags,
     _privacy_backfill_access_policy,
     _privacy_backfill_controls,
@@ -464,6 +467,15 @@ class SqliteEngine:
         # optional vec0), built lazily on first use.
         self._cache_telemetry: dict[str, dict[str, int]] = {}
         self._registries: dict[str, ProjectionRegistry] = {}
+        # Scan-oracle memo (see _scan_oracle): one SQL hydration serves the
+        # dense + lexical channels of a retrieve (and repeats until a write).
+        # Keyed on sqlite write fingerprints — conn.total_changes for this
+        # engine's own writes, PRAGMA data_version for other connections — so
+        # any committed change re-hydrates. Shares the Local candidate-memo
+        # kill-switch MNEMOSYNE_CANDIDATE_MEMO=0 (CONFIG-DRIFT-CHECKS.md).
+        self._scan_oracle_memo: OrderedDict[
+            tuple[Any, ...], tuple[LocalMemoryEngine, dict[str, bytes | None]]
+        ] = OrderedDict()
         # Observability checklist §1-3 signals (evidence-durability, rebuild-lag,
         # per-write audit stream, erasure-propagation). The engine emits directly
         # into this registry — durability is the highest SLO (§15) so the loss
@@ -1301,6 +1313,46 @@ class SqliteEngine:
     def _scan_oracle(
         self, filt: dict[str, Any], *, with_blobs: bool = False
     ) -> LocalMemoryEngine | tuple[LocalMemoryEngine, dict[str, bytes | None]]:
+        """Memoizing front for :meth:`_hydrate_scan_oracle`.
+
+        One hydration (and, via the oracle's own candidate memo, ONE
+        may_read_item+redaction scan) serves both the dense and lexical
+        channels of a retrieve. The cache key carries the indexable scope
+        bounds plus two sqlite write fingerprints — ``conn.total_changes``
+        (this engine's writes go through the one cached tenant connection) and
+        ``PRAGMA data_version`` (commits by any other connection) — so any
+        committed change re-hydrates; byte parity with an unmemoized hydration
+        is proven in tests/test_engine_perf_lanes.py. Kill-switch:
+        MNEMOSYNE_CANDIDATE_MEMO=0 (shared with the Local candidate memo).
+        """
+        if not _candidate_memo_enabled():
+            oracle, raw_blobs = self._hydrate_scan_oracle(filt)
+            return (oracle, raw_blobs) if with_blobs else oracle
+        tenant_id, branch, max_trust, max_sensitivity = self._candidate_scope_bounds(filt)
+        key: tuple[Any, ...] | None = None
+        cached: tuple[LocalMemoryEngine, dict[str, bytes | None]] | None = None
+        if tenant_id:
+            conn = self._connect(tenant_id)
+            with self._lock:
+                data_version = conn.execute("PRAGMA data_version").fetchone()[0]
+                key = (tenant_id, branch, max_trust, max_sensitivity, conn.total_changes, data_version)
+                cached = self._scan_oracle_memo.get(key)
+                if cached is not None:
+                    self._scan_oracle_memo.move_to_end(key)
+        if cached is None:
+            cached = self._hydrate_scan_oracle(filt)
+            if key is not None:
+                with self._lock:
+                    self._scan_oracle_memo[key] = cached
+                    self._scan_oracle_memo.move_to_end(key)
+                    while len(self._scan_oracle_memo) > _CANDIDATE_MEMO_SIZE:
+                        self._scan_oracle_memo.popitem(last=False)
+        oracle, raw_blobs = cached
+        return (oracle, raw_blobs) if with_blobs else oracle
+
+    def _hydrate_scan_oracle(
+        self, filt: dict[str, Any]
+    ) -> tuple[LocalMemoryEngine, dict[str, bytes | None]]:
         """Hydrate a candidate-scope oracle by SQL-PREDICATE PUSHDOWN (Task 7,
         spec §4.2 binding scale requirement): rather than loading the whole
         (tenant, branch) — O(tenant-rows) — the WHERE pushes the cheap, indexable
@@ -1314,8 +1366,9 @@ class SqliteEngine:
         rows). ``ORDER BY rowid`` preserves Local's dict-insertion iteration
         order. Preferences stay tenant-scoped (few, tenant-bounded not
         evidence-bounded; their ``status='active'`` lives in the JSON record and
-        is filtered app-side). ``with_blobs`` also returns the raw packed
-        embedding BLOBs keyed by evidence key for the dense seam."""
+        is filtered app-side). The raw packed embedding BLOBs are always
+        collected (cheap row-value references), keyed by evidence key for the
+        dense seam; :meth:`_scan_oracle` hands them out on ``with_blobs``."""
         tenant_id, branch, max_trust, max_sensitivity = self._candidate_scope_bounds(filt)
         oracle = LocalMemoryEngine(policy=self.policy, adapters=self.adapters)
         raw_blobs: dict[str, bytes | None] = {}
@@ -1346,15 +1399,14 @@ class SqliteEngine:
                 ev = _evidence_from_row(row)
                 key = oracle._evidence_key(ev.tenant_id, ev.branch, ev.cid or "")
                 oracle.evidence[key] = ev
-                if with_blobs:
-                    raw_blobs[key] = row["embedding"]
+                raw_blobs[key] = row["embedding"]
             for row in a_rows:
                 assertion = _assertion_from_row(row)
                 oracle.assertions[assertion.id] = assertion
             for row in p_rows:
                 pref = Preference.from_dict(json.loads(row["record"]))
                 oracle.preferences[pref.id] = pref
-        return (oracle, raw_blobs) if with_blobs else oracle
+        return oracle, raw_blobs
 
     def _graph_oracle(
         self,

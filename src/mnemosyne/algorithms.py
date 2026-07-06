@@ -9,7 +9,6 @@ Phase-1 native kernels (mnemosyne._native) mirror these signatures.
 """
 from __future__ import annotations
 
-import copy
 from collections import defaultdict
 from collections.abc import Callable, Collection, Mapping
 
@@ -28,8 +27,9 @@ def rrf_fuse(
     """Reciprocal-rank fusion of per-channel ranked hit lists.
 
     With ``annotate_channel_scores=False`` (default) this reproduces the
-    LocalMemoryEngine behavior: fused hits are deep copies with summed RRF
-    scores and merged channel labels. With ``annotate_channel_scores=True``
+    LocalMemoryEngine behavior: fused hits are fresh reconstructions with
+    summed RRF scores and merged channel labels (equal to the historical
+    deepcopy output). With ``annotate_channel_scores=True``
     it reproduces the PostgresEngine behavior, which additionally records
     ``channels`` and per-channel max ``channel_scores`` in hit metadata.
     """
@@ -68,9 +68,22 @@ def rrf_fuse(
                 },
             )
         else:
-            item = copy.deepcopy(hit)
-            item.score = scores[key]
-            item.channel = "+".join(sorted(set(channels[key])))
+            # Explicit reconstruction (mirrors the postgres branch above) in
+            # place of copy.deepcopy — equal output proven against a deepcopy
+            # reference in tests/test_engine_perf_lanes.py.
+            item = Hit(
+                id=hit.id,
+                kind=hit.kind,
+                tenant_id=hit.tenant_id,
+                branch=hit.branch,
+                text=hit.text,
+                score=scores[key],
+                channel="+".join(sorted(set(channels[key]))),
+                provenance=list(hit.provenance),
+                trust_tier=hit.trust_tier,
+                sensitivity=hit.sensitivity,
+                metadata=dict(hit.metadata),
+            )
         fused.append(item)
     return sorted(fused, key=lambda item: item.score, reverse=True)[:k]
 
