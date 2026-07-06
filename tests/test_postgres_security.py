@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import pytest
 
-import mnemosyne.mcp_server as mcp_server
 from mnemosyne.postgres_engine import PostgresEngine
 from mnemosyne.mcp_server import MnemosyneMcpServer
 from mnemosyne.postgres_security import (
@@ -129,12 +128,18 @@ def test_mcp_production_profile_passes_safe_role_to_postgres_surfaces(
             self.args = args
             self.kwargs = kwargs
 
+    import mnemosyne.mcp_tools as mcp_tools_module
     import mnemosyne.postgres_engine as postgres_engine_module
+    import mnemosyne.postgres_runtime_state as postgres_runtime_state_module
+    import mnemosyne.queue as queue_module
 
+    # mcp_server imports these lazily inside _build_tools (cold-start lane),
+    # so the fakes must be installed on the SOURCE modules the function-local
+    # imports read from — same style as the PostgresEngine patch above.
     monkeypatch.setattr(postgres_engine_module, "PostgresEngine", FakePostgresEngine)
-    monkeypatch.setattr(mcp_server, "PostgresRuntimeState", FakePostgresRuntimeState)
-    monkeypatch.setattr(mcp_server, "PostgresQueue", FakePostgresQueue)
-    monkeypatch.setattr(mcp_server, "MemoryTools", FakeMemoryTools)
+    monkeypatch.setattr(postgres_runtime_state_module, "PostgresRuntimeState", FakePostgresRuntimeState)
+    monkeypatch.setattr(queue_module, "PostgresQueue", FakePostgresQueue)
+    monkeypatch.setattr(mcp_tools_module, "MemoryTools", FakeMemoryTools)
 
     server = MnemosyneMcpServer(
         store_path=tmp_path / "store.json",

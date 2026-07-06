@@ -32,6 +32,10 @@ ALLOWED_RAW_EGRESS = {
         "httpx.AsyncClient",
     ): "official MCP SDK transport after cmd_mcp_streamable_http_soak validates the URL",
     (
+        "infra/scripts/apply-perf-runtime.sh",
+        "urllib.request.urlopen",
+    ): "operator-invoked post-flip probe run INSIDE the role-http container against its own configured OLLAMA_URL (in-cluster diagnostics, not app egress)",
+    (
         "services/embedding/Dockerfile",
         "urllib.request.urlopen",
     ): "container-local healthcheck against 127.0.0.1",
