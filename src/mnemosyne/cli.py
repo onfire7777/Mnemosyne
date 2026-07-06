@@ -17655,7 +17655,17 @@ def build_parser() -> argparse.ArgumentParser:
     idp_jwks_live_check.set_defaults(func=cmd_idp_jwks_live_check)
 
     postgres_role_check = sub.add_parser("postgres-role-check")
-    postgres_role_check.add_argument("--app-dsn", default=os.environ.get("MNEMOSYNE_POSTGRES_DSN"))
+    postgres_role_check.add_argument(
+        "--app-dsn",
+        # Dedicated app-role DSN env (symmetric with --consolidator-dsn /
+        # MNEMOSYNE_POSTGRES_CONSOLIDATOR_DSN) so the role-separation probe does not
+        # collide with the runtime's MNEMOSYNE_POSTGRES_DSN. A unified deployment-soak
+        # runs its runtime/write checks with MNEMOSYNE_POSTGRES_DSN set to the
+        # consolidator DSN; this check still proves the app role's least-privilege
+        # posture via its own app DSN. Falls back to MNEMOSYNE_POSTGRES_DSN.
+        default=os.environ.get("MNEMOSYNE_POSTGRES_APP_DSN")
+        or os.environ.get("MNEMOSYNE_POSTGRES_DSN"),
+    )
     postgres_role_check.add_argument(
         "--consolidator-dsn",
         default=os.environ.get("MNEMOSYNE_POSTGRES_CONSOLIDATOR_DSN"),
