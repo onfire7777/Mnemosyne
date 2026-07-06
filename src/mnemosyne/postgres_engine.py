@@ -6,6 +6,7 @@ import copy
 import json
 import os
 import threading
+import weakref
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
@@ -269,7 +270,25 @@ class PostgresEngine:
             with self._pool_lock:
                 pool = self._pool
                 if pool is None:
-                    pool = self._pool = _PostgresConnectionPool(self._new_connection)
+                    # The pool must never hold a strong reference back to the
+                    # engine (a bound self._new_connection would): deployed
+                    # stateless MCP mode builds a throwaway engine per tool
+                    # call and close_connections() is not on that path, so
+                    # idle sockets would otherwise linger until cyclic GC.
+                    # Routing the factory through a weakref keeps the engine
+                    # refcount-collectable, and weakref.finalize closes the
+                    # pool's idle connections deterministically the moment
+                    # the engine goes away.
+                    engine_ref = weakref.ref(self)
+
+                    def _pool_factory() -> Any:
+                        engine = engine_ref()
+                        if engine is None:  # pragma: no cover - defensive
+                            raise RuntimeError("PostgresEngine was collected; pool factory unavailable")
+                        return engine._new_connection()
+
+                    pool = self._pool = _PostgresConnectionPool(_pool_factory)
+                    weakref.finalize(self, pool.close_all)
         return pool.acquire()
 
     def _new_connection(self) -> Any:
