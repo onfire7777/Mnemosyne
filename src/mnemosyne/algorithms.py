@@ -9,8 +9,10 @@ Phase-1 native kernels (mnemosyne._native) mirror these signatures.
 """
 from __future__ import annotations
 
+from array import array
 from collections import defaultdict
 from collections.abc import Callable, Collection, Mapping
+from itertools import chain
 
 from mnemosyne import text
 from mnemosyne.retrieval import Hit
@@ -192,6 +194,31 @@ def mmr_select(
     return selected
 
 
+def _ppr_power_iteration_pure(
+    adjacency: Mapping[str, Collection[str]],
+    matches_seed: Callable[[str], bool],
+    *,
+    iterations: int,
+    damping: float,
+    teleport: float,
+) -> dict[str, float]:
+    """THE pure oracle for ``ppr_power_iteration`` — the former inline body,
+    unchanged, kept directly callable so the parity suite and the pure
+    baseline bench never route through dispatch (same convention as the
+    ``_*_pure`` bodies in ``mnemosyne.text``)."""
+    ranks = {node: (1.0 if matches_seed(node) else 0.0) for node in adjacency}
+    for _ in range(iterations):
+        next_ranks = {node: teleport * (1.0 if matches_seed(node) else 0.0) for node in ranks}
+        for node, neighbors in adjacency.items():
+            if not neighbors:
+                continue
+            share = damping * ranks.get(node, 0.0) / len(neighbors)
+            for neighbor in neighbors:
+                next_ranks[neighbor] = next_ranks.get(neighbor, 0.0) + share
+        ranks = next_ranks
+    return ranks
+
+
 def ppr_power_iteration(
     adjacency: Mapping[str, Collection[str]],
     matches_seed: Callable[[str], bool],
@@ -209,15 +236,66 @@ def ppr_power_iteration(
     as ``1.0 - damping``: in IEEE 754 doubles ``1.0 - 0.85`` is
     ``0.15000000000000002 != 0.15``, and the inline code this replaces used
     the literal — deriving it would break bit-exact parity with both engines.
+
+    The native fast path (Wave 2, byte-parity-proven in
+    tests/test_native_parity.py) hands the kernel ORDERED index structures so
+    every float accumulation happens in exactly the pure loop's dict
+    insertion-order sequence; it calls ``matches_seed`` exactly once per node
+    (the pure loop re-asks every iteration — both shipped engines pass a pure
+    set-membership predicate), mirroring how the native MMR path materializes
+    ``embed_hit`` exactly once per hit.
     """
-    ranks = {node: (1.0 if matches_seed(node) else 0.0) for node in adjacency}
-    for _ in range(iterations):
-        next_ranks = {node: teleport * (1.0 if matches_seed(node) else 0.0) for node in ranks}
-        for node, neighbors in adjacency.items():
-            if not neighbors:
-                continue
-            share = damping * ranks.get(node, 0.0) / len(neighbors)
-            for neighbor in neighbors:
-                next_ranks[neighbor] = next_ranks.get(neighbor, 0.0) + share
-        ranks = next_ranks
-    return ranks
+    if text.NATIVE is not None and iterations > 0:
+        # iterations <= 0 stays on the canonical pure path: its result is the
+        # seed dict over the adjacency keys ONLY, whereas the kernel's node
+        # universe already includes out-of-adjacency neighbors.
+        #
+        # `nodes` = pure result key order: adjacency keys in mapping order
+        # (the sources), then out-of-adjacency neighbors appended in
+        # first-touch order of the edge sweep — the order the pure dict pass
+        # inserts them. Neighbor slots keep each collection's own iteration
+        # order (the same objects the pure loop would iterate), so the
+        # kernel's summation order is bit-identical. The edge structure
+        # crosses the FFI as packed LE-u64 buffers (flat slots + row lengths,
+        # the dense_scan_packed strategy): boxed-int extraction measured as
+        # the dominant kernel-call cost at a list-of-lists seam.
+        nodes = list(adjacency)
+        index = {node: slot for slot, node in enumerate(nodes)}
+        values = list(adjacency.values())
+        row_lens = list(map(len, values))
+        try:
+            # One C-level pipeline; each dict lookup reuses the key string's
+            # cached hash, so this is the cheapest slot resolution available.
+            flat = array("Q", map(index.__getitem__, chain.from_iterable(values)))
+        except KeyError:
+            # Rare shape: out-of-adjacency neighbor(s) — both shipped engines
+            # add every edge in BOTH directions, so their neighbors are always
+            # keys. Re-walk from the start (Collection values are re-iterable
+            # containers with a stable order — the pure loop already re-walks
+            # them once per iteration), appending externals in first-touch
+            # order — the pure dict pass's insertion order.
+            slots: list[int] = []
+            for neighbors in values:
+                for neighbor in neighbors:
+                    slot = index.get(neighbor)
+                    if slot is None:
+                        slot = len(nodes)
+                        index[neighbor] = slot
+                        nodes.append(neighbor)
+                    slots.append(slot)
+            flat = array("Q", slots)
+        # bool(...) preserves the pure truthiness test (`1.0 if matches_seed(
+        # node) else 0.0`) for predicates returning non-bool truthy values.
+        seeds = [bool(matches_seed(node)) for node in nodes]
+        scores = text.NATIVE.ppr_power_iteration(
+            seeds,
+            flat.tobytes(),
+            array("Q", row_lens).tobytes(),
+            iterations,
+            damping,
+            teleport,
+        )
+        return dict(zip(nodes, scores, strict=True))
+    return _ppr_power_iteration_pure(
+        adjacency, matches_seed, iterations=iterations, damping=damping, teleport=teleport
+    )

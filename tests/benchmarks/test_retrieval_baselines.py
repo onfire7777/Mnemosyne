@@ -46,6 +46,7 @@ from mnemosyne.mcp_tools import MemoryTools
 # The pure benches import the pure bodies directly — NOT the dispatching
 # cosine/hashing_embedding/lexical_score — so a native-installed environment
 # still regression-tests the pure path honestly (see module docstring).
+from mnemosyne.algorithms import _ppr_power_iteration_pure
 from mnemosyne.text import _cosine_pure, _hashing_embedding_pure, _lexical_score_pure
 
 BASELINES = Path(__file__).parent / "baselines.json"
@@ -73,6 +74,17 @@ QUERY = _text(12)
 # byte-identical-inputs guarantee extends to the native dense bench.
 DENSE_QUERY = [_RNG.random() for _ in range(256)]
 DENSE_ROWS = [[_RNG.random() for _ in range(256)] for _ in range(2000)]
+
+# PPR bench graph: 512 nodes with 8 sampled neighbors each (self-loops
+# permitted, no duplicates from sample()) and 5 seed nodes — the deep-mode
+# graph shape ppr_power_iteration serves. Generated downstream of DENSE_ROWS
+# on the same module-local RNG, so all earlier bench inputs stay
+# byte-identical and this one is deterministic too.
+PPR_NODES = [f"node{i}" for i in range(512)]
+PPR_ADJACENCY = {
+    node: [PPR_NODES[j] for j in _RNG.sample(range(512), 8)] for node in PPR_NODES
+}
+PPR_SEEDS = frozenset(PPR_NODES[:5])
 
 
 def _gate(name: str, seconds: float) -> None:
@@ -145,6 +157,20 @@ def test_bench_hashing_embedding_cold(benchmark):
 def test_bench_lexical_scan_2k(benchmark):
     benchmark(lambda: [_lexical_score_pure(QUERY, d) for d in DOCS])
     _gate("lexical_scan_2k", benchmark.stats.stats.mean)
+
+
+def test_bench_ppr_pure_512n(benchmark):
+    # Wave-2 pure baseline: the raw pure body (not the dispatcher) over the
+    # deterministic 512-node graph, engine defaults 12/0.85/0.15.
+    benchmark(
+        _ppr_power_iteration_pure,
+        PPR_ADJACENCY,
+        PPR_SEEDS.__contains__,
+        iterations=12,
+        damping=0.85,
+        teleport=0.15,
+    )
+    _gate("ppr_512n", benchmark.stats.stats.mean)
 
 
 # --- Phase-1 native kernels vs the committed pure baselines ----------------
@@ -251,6 +277,22 @@ def test_bench_native_dense_scan_prepacked(benchmark):
         benchmark.stats.stats.mean,
         baseline=pure_equivalent,
     )
+
+
+def test_bench_native_ppr_512n(benchmark):
+    pytest.importorskip("mnemosyne_native")
+    from mnemosyne import text as text_mod
+    from mnemosyne.algorithms import ppr_power_iteration
+
+    if text_mod.NATIVE is None:
+        pytest.skip("pure mode active (MNEMOSYNE_PURE=1); dispatch would measure pure")
+    # END-TO-END shipped seam, unlike the direct-kernel benches above: the
+    # dispatching ppr_power_iteration, INCLUDING per-call ordered-structure
+    # building, the FFI crossing, and the result-dict rebuild — the engines
+    # rebuild adjacency per query, so structure building is a real per-call
+    # cost and gating only the raw kernel would overstate the win.
+    benchmark(ppr_power_iteration, PPR_ADJACENCY, PPR_SEEDS.__contains__)
+    _gate_speedup("ppr_512n", benchmark.stats.stats.mean)
 
 
 def test_bench_sqlite_dense_scan_end_to_end(benchmark, tmp_path):

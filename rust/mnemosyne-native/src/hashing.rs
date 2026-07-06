@@ -25,9 +25,8 @@ pub fn hashing_embedding(text: &str, dims: usize) -> Vec<f64> {
         hasher.update(token.as_bytes());
         let mut digest = [0u8; 8];
         hasher.finalize_variable(&mut digest).expect("finalize");
-        let bucket = (u32::from_be_bytes([digest[0], digest[1], digest[2], digest[3]])
-            as usize)
-            % dims;
+        let bucket =
+            (u32::from_be_bytes([digest[0], digest[1], digest[2], digest[3]]) as usize) % dims;
         let sign = if digest[4] % 2 == 0 { 1.0 } else { -1.0 };
         vec[bucket] += sign;
     });
