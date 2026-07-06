@@ -14,6 +14,7 @@ import pytest
 from mnemosyne.cli import (
     PRODUCTION_RELEASE_REQUIRED_COMMANDS,
     PRODUCTION_RELEASE_REQUIRED_PROVIDER_CHECKS,
+    _production_evidence_binary_custody_paths,
 )
 from mnemosyne.evidence_redaction import scan_evidence_paths, scan_evidence_tree
 from mnemosyne.production_parity import build_parity_row_readiness
@@ -3864,4 +3865,418 @@ exec "$REAL_PYTHON" "$@"
 
     assert verify.returncode == 0
     assert verify_report["ok"] is True
+    assert json.loads(report_path.read_text(encoding="utf-8")) == verify_report
+
+
+def _is_non_utf8_file(path: Path) -> bool:
+    try:
+        path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return True
+    except OSError:
+        return False
+    return False
+
+
+def test_capture_production_evidence_binary_provenance_asset_is_binary_custody(
+    tmp_path: Path,
+) -> None:
+    # A genuinely non-UTF-8 C2PA provenance asset (e.g. a signed binary manifest) must
+    # survive the FINAL capture scan as integrity-pinned binary custody -- exactly the
+    # way the preflight scans already treat it -- instead of failing the whole bundle as
+    # "not utf-8 text". The text suite JSON must still be secret-scanned, and the final
+    # scan's recorded binary_custody_files must match what the offline verifier expects,
+    # so capture and verify agree end-to-end.
+    manifest = tmp_path / "production-soak.json"
+    out_root = tmp_path / "capture"
+    fingerprint_record = tmp_path / "mnemosyne-production-bundle-fingerprint.json"
+    fake_python = tmp_path / "fake-python"
+
+    # Pre-create the C2PA asset as genuine binary BEFORE the helper writes the manifest,
+    # so _minimal_production_manifest keeps our bytes (it only writes text if absent).
+    input_root = tmp_path / "production-inputs"
+    input_root.mkdir(parents=True, exist_ok=True)
+    binary_asset = input_root / "asset.c2pa"
+    binary_asset_bytes = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rc2pa\xff\xfe\xfd signed-manifest"
+    binary_asset.write_bytes(binary_asset_bytes)
+    with pytest.raises(UnicodeDecodeError):
+        binary_asset.read_text(encoding="utf-8")
+
+    _minimal_production_manifest(manifest)
+
+    fake_python.write_text(
+        f"""#!/usr/bin/env bash
+set -euo pipefail
+REAL_PYTHON={json.dumps(sys.executable)}
+if [ "${{1:-}}" = "-" ]; then
+  exec "$REAL_PYTHON" "$@"
+fi
+if [ "${{1:-}}" = "-m" ] && [ "${{2:-}}" = "mnemosyne.cli" ]; then
+  shift 2
+  mode=""
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --store)
+        shift 2
+        ;;
+      deployment-soak)
+        mode="soak"
+        shift
+        break
+        ;;
+      release-audit)
+        mode="audit"
+        shift
+        break
+        ;;
+      *)
+        shift
+        ;;
+    esac
+  done
+  if [ "$mode" = "soak" ]; then
+    evidence_dir=""
+    soak_manifest=""
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --soak-manifest)
+          soak_manifest="$2"
+          shift 2
+          ;;
+        --evidence-dir)
+          evidence_dir="$2"
+          shift 2
+          ;;
+        *)
+          shift
+          ;;
+      esac
+    done
+    mkdir -p "$evidence_dir"
+    printf '%s\\n' "$soak_manifest" > "$evidence_dir/soak-manifest-path.txt"
+    cat > "$evidence_dir/manifest.json" <<'JSON'
+{{"ok": true, "validation_scope": {{"production_validated": true, "target_environment": "production", "operator_asserted": true}}, "checks": []}}
+JSON
+    printf '%s\\n' '{{"ok": true}}'
+    exit 0
+  fi
+  if [ "$mode" = "audit" ]; then
+    printf '%s\\n' '{{"ok": true, "fingerprint": "fake-fingerprint", "findings": []}}'
+    exit 0
+  fi
+fi
+exec "$REAL_PYTHON" "$@"
+""",
+        encoding="utf-8",
+    )
+    fake_python.chmod(0o755)
+
+    proc = subprocess.run(
+        [
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
+            "--fingerprint-record-output",
+            str(fingerprint_record),
+            str(manifest),
+            str(out_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        env={**os.environ, "MNEMOSYNE_PYTHON": str(fake_python)},
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    redaction_scan = json.loads(
+        (out_root / "redaction-scan.json").read_text(encoding="utf-8")
+    )
+    assert redaction_scan["ok"] is True
+    assert redaction_scan["skipped_files"] == []
+    assert redaction_scan["findings"] == []
+
+    input_artifacts_root = out_root / "input-artifacts"
+    retained_binary_assets = [
+        path
+        for path in input_artifacts_root.rglob("*")
+        if path.is_file() and _is_non_utf8_file(path)
+    ]
+    assert retained_binary_assets, "expected a retained non-utf-8 provenance asset"
+    assert all(
+        path.read_bytes() == binary_asset_bytes for path in retained_binary_assets
+    )
+
+    binary_custody_files = {
+        Path(item).resolve() for item in redaction_scan.get("binary_custody_files", [])
+    }
+    scanned_files = {
+        Path(item).resolve() for item in redaction_scan.get("scanned_files", [])
+    }
+    for asset in retained_binary_assets:
+        assert asset.resolve() in binary_custody_files
+        assert asset.resolve() not in scanned_files
+
+    # The text suite JSON stays in the ordinary secret scan (never exempted).
+    text_snapshots = [
+        path
+        for path in input_artifacts_root.rglob("*")
+        if path.is_file() and not _is_non_utf8_file(path)
+    ]
+    assert text_snapshots
+    assert all(path.resolve() in scanned_files for path in text_snapshots)
+    assert all(path.resolve() not in binary_custody_files for path in text_snapshots)
+
+    # Capture and the offline verifier compute the SAME binary-custody set.
+    preflight = json.loads((out_root / "preflight.json").read_text(encoding="utf-8"))
+    expected = _production_evidence_binary_custody_paths(preflight, bundle_dir=out_root)
+    recorded = {
+        Path(item).resolve().relative_to(out_root.resolve()).as_posix()
+        for item in redaction_scan.get("binary_custody_files", [])
+    }
+    assert recorded == expected
+    assert any(rel.startswith("input-artifacts/") for rel in expected)
+    assert any(rel.startswith("tool-artifacts/") for rel in expected)
+
+
+def test_production_evidence_binary_custody_paths_only_exempts_binary_input_artifacts(
+    tmp_path: Path,
+) -> None:
+    # Gate-preservation invariant: only genuinely non-UTF-8 files under input-artifacts
+    # (plus the retained tool snapshots) are treated as binary custody. A UTF-8 text file
+    # -- even one MIS-NAMED like a binary asset -- stays in the ordinary secret scan and
+    # can never be smuggled past redaction by a bogus declaration.
+    bundle = tmp_path / "bundle"
+    input_artifacts = bundle / "input-artifacts"
+    tool_artifacts = bundle / "tool-artifacts"
+    input_artifacts.mkdir(parents=True)
+    tool_artifacts.mkdir(parents=True)
+
+    (input_artifacts / "0001-asset.c2pa").write_bytes(
+        b"\x89PNG\r\n\x1a\n\xff\xfe c2pa signed"
+    )
+    (input_artifacts / "0002-suite.json").write_text(
+        '{"suite": "text"}\n', encoding="utf-8"
+    )
+    # UTF-8 text that merely LOOKS like a binary asset by name -- must still be scanned.
+    (input_artifacts / "0003-asset.c2pa").write_text(
+        "totally text pretending to be binary\n", encoding="utf-8"
+    )
+    # Nested assets: the custody walk must recurse, and nested text must still be scanned.
+    nested_dir = input_artifacts / "nested" / "deep"
+    nested_dir.mkdir(parents=True)
+    (nested_dir / "asset.bin").write_bytes(b"\xff\xd8\xff\xe0 nested binary blob")
+    (nested_dir / "notes.txt").write_text("nested text notes\n", encoding="utf-8")
+    tool_snapshot = tool_artifacts / "0001-c2patool"
+    tool_snapshot.write_bytes(b"\x00\x01 binary tool bytes")
+
+    preflight = {
+        "executable_tool_references": [{"snapshot_path": str(tool_snapshot.resolve())}],
+        "required_input_artifacts": [],
+    }
+
+    custody = _production_evidence_binary_custody_paths(preflight, bundle_dir=bundle)
+
+    assert custody == {
+        "input-artifacts/0001-asset.c2pa",
+        "input-artifacts/nested/deep/asset.bin",
+        "tool-artifacts/0001-c2patool",
+    }
+    assert "input-artifacts/0002-suite.json" not in custody
+    assert "input-artifacts/0003-asset.c2pa" not in custody
+    assert "input-artifacts/nested/deep/notes.txt" not in custody
+
+
+def _release_capture_fake_python() -> str:
+    # A stand-in `python` that stubs the production deployment-soak and release-audit
+    # subcommands (writing a valid release-report fixture) while delegating every other
+    # invocation -- including the real preflight and final redaction scans -- to the real
+    # interpreter, so a full capture + offline verify can run without production creds.
+    return f"""#!/usr/bin/env bash
+set -euo pipefail
+REAL_PYTHON={json.dumps(sys.executable)}
+if [ "${{1:-}}" = "-" ]; then
+  exec "$REAL_PYTHON" "$@"
+fi
+if [ "${{1:-}}" = "-m" ] && [ "${{2:-}}" = "mnemosyne.cli" ]; then
+  shift 2
+  mode=""
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --store)
+        shift 2
+        ;;
+      deployment-soak)
+        mode="soak"
+        shift
+        break
+        ;;
+      release-audit)
+        mode="audit"
+        shift
+        break
+        ;;
+      *)
+        shift
+        ;;
+    esac
+  done
+  if [ "$mode" = "soak" ]; then
+    evidence_dir=""
+    soak_manifest=""
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --soak-manifest)
+          soak_manifest="$2"
+          shift 2
+          ;;
+        --evidence-dir)
+          evidence_dir="$2"
+          shift 2
+          ;;
+        *)
+          shift
+        ;;
+    esac
+  done
+  EVIDENCE_DIR="$evidence_dir" SOAK_MANIFEST="$soak_manifest" REPO_DIR={json.dumps(str(REPO))} "$REAL_PYTHON" - <<'PY'
+import importlib.util
+import json
+import os
+import shutil
+from hashlib import sha256
+from pathlib import Path
+
+repo_dir = Path(os.environ["REPO_DIR"])
+spec = importlib.util.spec_from_file_location(
+    "mnemosyne_test_cli_runtime_tools",
+    repo_dir / "tests" / "test_cli_runtime_tools.py",
+)
+helpers = importlib.util.module_from_spec(spec)
+assert spec.loader is not None
+spec.loader.exec_module(helpers)
+
+evidence_dir = Path(os.environ["EVIDENCE_DIR"])
+soak_manifest = Path(os.environ["SOAK_MANIFEST"])
+fixture_root = evidence_dir.parent / "release-fixture"
+if fixture_root.exists():
+    shutil.rmtree(fixture_root)
+_report_path, manifest_path = helpers.write_release_report(fixture_root)
+if evidence_dir.exists():
+    shutil.rmtree(evidence_dir)
+shutil.copytree(manifest_path.parent, evidence_dir)
+
+report_path = evidence_dir / "deployment-soak-report.json"
+report = json.loads(report_path.read_text(encoding="utf-8"))
+report["manifest"] = {{
+    **report.get("manifest", {{}}),
+    "path": str(soak_manifest),
+    "check_count": len(helpers.PRODUCTION_RELEASE_REQUIRED_COMMANDS),
+}}
+report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+
+evidence_manifest_path = evidence_dir / "manifest.json"
+evidence_manifest = json.loads(evidence_manifest_path.read_text(encoding="utf-8"))
+evidence_manifest["source_manifest"] = str(soak_manifest)
+evidence_manifest["files"]["report_sha256"] = (
+    "sha256:" + sha256(report_path.read_bytes()).hexdigest()
+)
+evidence_manifest_path.write_text(
+    json.dumps(evidence_manifest, indent=2, sort_keys=True),
+    encoding="utf-8",
+)
+print(json.dumps(report))
+PY
+  exit 0
+  fi
+  if [ "$mode" = "audit" ]; then
+    exec "$REAL_PYTHON" -m mnemosyne.cli release-audit "$@"
+  fi
+fi
+exec "$REAL_PYTHON" "$@"
+"""
+
+
+def test_cli_production_evidence_verify_accepts_binary_provenance_asset(
+    tmp_path: Path,
+) -> None:
+    # End-to-end: capture a full bundle whose retained C2PA provenance asset is genuinely
+    # non-UTF-8, then run the REAL offline production-evidence-verify over it and require
+    # ok=True. This exercises _verify_production_evidence_redaction_scan's binary-custody
+    # exclusion + recompute machinery against a real captured bundle -- the path that was
+    # previously un-capturable and that the unit tests only cover in isolation.
+    manifest = tmp_path / "production-soak.json"
+    out_root = tmp_path / "capture"
+    fingerprint_record = tmp_path / "mnemosyne-production-bundle-fingerprint.json"
+    fake_python = tmp_path / "fake-python"
+    report_path = tmp_path / "mnemosyne-production-evidence-verify.json"
+
+    input_root = tmp_path / "production-inputs"
+    input_root.mkdir(parents=True, exist_ok=True)
+    binary_asset = input_root / "asset.c2pa"
+    binary_asset_bytes = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rc2pa\xff\xfe\xfd signed-manifest"
+    binary_asset.write_bytes(binary_asset_bytes)
+    with pytest.raises(UnicodeDecodeError):
+        binary_asset.read_text(encoding="utf-8")
+
+    _minimal_production_manifest(manifest)
+    fake_python.write_text(_release_capture_fake_python(), encoding="utf-8")
+    fake_python.chmod(0o755)
+
+    capture = subprocess.run(
+        [
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
+            "--fingerprint-record-output",
+            str(fingerprint_record),
+            str(manifest),
+            str(out_root),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        env={**os.environ, "MNEMOSYNE_PYTHON": str(fake_python)},
+    )
+    assert capture.returncode == 0, capture.stderr
+
+    redaction_scan = json.loads(
+        (out_root / "redaction-scan.json").read_text(encoding="utf-8")
+    )
+    assert redaction_scan["ok"] is True
+    retained_binary = [
+        path
+        for path in (out_root / "input-artifacts").rglob("*")
+        if path.is_file() and _is_non_utf8_file(path)
+    ]
+    assert retained_binary, "expected a retained non-utf-8 provenance asset in the bundle"
+    recorded_custody = {
+        Path(item).resolve() for item in redaction_scan.get("binary_custody_files", [])
+    }
+    assert all(path.resolve() in recorded_custody for path in retained_binary)
+
+    verify = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "mnemosyne.cli",
+            "production-evidence-verify",
+            str(out_root),
+            "--fingerprint-record",
+            str(fingerprint_record),
+            "--report-output",
+            str(report_path),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    verify_report = json.loads(verify.stdout)
+
+    assert verify.returncode == 0, verify.stdout + verify.stderr
+    assert verify_report["ok"] is True
+    # The offline verifier reproduced the redaction scan (including binary-custody
+    # exclusion) with no findings against the non-UTF-8 input asset.
+    assert not any(
+        "redaction_scan" in json.dumps(finding)
+        for finding in verify_report.get("findings", [])
+    )
     assert json.loads(report_path.read_text(encoding="utf-8")) == verify_report

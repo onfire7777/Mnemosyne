@@ -13115,6 +13115,21 @@ def _verify_production_evidence_executable_tool_references(
     return ok
 
 
+def _production_evidence_is_non_utf8_file(path: Path) -> bool:
+    """True only if the file's actual bytes are not valid UTF-8 text.
+
+    Anchored on the real bytes, never a declaration, so a text file can never be
+    treated as binary custody and thereby skip the redaction secret-scan.
+    """
+    try:
+        path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return True
+    except OSError:
+        return False
+    return False
+
+
 def _production_evidence_binary_custody_paths(
     preflight: Mapping[str, Any] | None,
     *,
@@ -13122,23 +13137,42 @@ def _production_evidence_binary_custody_paths(
 ) -> set[str]:
     if preflight is None:
         return set()
-    references = preflight.get("executable_tool_references")
-    if not isinstance(references, list):
-        return set()
     paths: set[str] = set()
-    tool_root = (bundle_dir / "tool-artifacts").resolve(strict=False)
-    for reference in references:
-        if not isinstance(reference, Mapping):
-            continue
-        snapshot_path_value = reference.get("snapshot_path")
-        if not isinstance(snapshot_path_value, str) or not snapshot_path_value:
-            continue
-        try:
-            snapshot_path = Path(snapshot_path_value).expanduser().resolve(strict=False)
-            snapshot_path.relative_to(tool_root)
-            paths.add(snapshot_path.relative_to(bundle_dir.resolve(strict=False)).as_posix())
-        except (OSError, ValueError):
-            continue
+    bundle_root = bundle_dir.resolve(strict=False)
+    references = preflight.get("executable_tool_references")
+    if isinstance(references, list):
+        tool_root = (bundle_dir / "tool-artifacts").resolve(strict=False)
+        for reference in references:
+            if not isinstance(reference, Mapping):
+                continue
+            snapshot_path_value = reference.get("snapshot_path")
+            if not isinstance(snapshot_path_value, str) or not snapshot_path_value:
+                continue
+            try:
+                snapshot_path = Path(snapshot_path_value).expanduser().resolve(strict=False)
+                snapshot_path.relative_to(tool_root)
+                paths.add(snapshot_path.relative_to(bundle_root).as_posix())
+            except (OSError, ValueError):
+                continue
+    # Retained C2PA provenance input assets that are genuinely non-UTF-8 (e.g. signed
+    # PNG or C2PA manifests) are integrity-pinned binary custody, mirroring the final
+    # capture scan so capture and verify agree end-to-end. Anchored on the ACTUAL bytes
+    # being non-UTF-8 -- never a declaration -- so a text file under input-artifacts is
+    # always secret-scanned and can never be smuggled past redaction. Symlinks are never
+    # exempted; the input-artifact custody check enforces declared-ness separately.
+    input_root_path = bundle_dir / "input-artifacts"
+    if input_root_path.is_dir() and not input_root_path.is_symlink():
+        input_root = input_root_path.resolve(strict=False)
+        for candidate in sorted(input_root_path.rglob("*")):
+            if candidate.is_symlink() or not candidate.is_file():
+                continue
+            try:
+                resolved = candidate.resolve(strict=True)
+                resolved.relative_to(input_root)
+            except (OSError, ValueError):
+                continue
+            if _production_evidence_is_non_utf8_file(resolved):
+                paths.add(resolved.relative_to(bundle_root).as_posix())
     return paths
 
 
@@ -14147,7 +14181,7 @@ def _verify_production_evidence_redaction_scan(
         _production_evidence_finding(
             findings,
             "redaction_scan_binary_custody_files_mismatch",
-            "redaction-scan.json binary_custody_files do not match retained tool snapshots",
+            "redaction-scan.json binary_custody_files do not match retained tool snapshots and binary input assets",
         )
     return ok
 

@@ -1771,9 +1771,26 @@ out_root = Path(os.environ["OUT_ROOT"])
 soak = json.loads((out_root / "deployment-soak.stdout.json").read_text(encoding="utf-8"))
 audit = json.loads((out_root / "release-audit.json").read_text(encoding="utf-8"))
 preflight = json.loads((out_root / "preflight.json").read_text(encoding="utf-8"))
+input_artifacts_root = out_root / "input-artifacts"
+binary_custody_roots = [out_root / "tool-artifacts"]
+if input_artifacts_root.is_dir() and not input_artifacts_root.is_symlink():
+    for candidate in sorted(input_artifacts_root.rglob("*")):
+        if candidate.is_symlink() or not candidate.is_file():
+            continue
+        try:
+            candidate.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            # A genuinely non-UTF-8 retained provenance asset (e.g. a signed PNG or
+            # C2PA manifest) cannot be secret-scanned as text; keep it as integrity-
+            # pinned binary custody, identical to how the preflight scans already treat
+            # it, so the final scan and the offline verifier agree. Text assets stay in
+            # the ordinary secret scan, so the redaction gate is never weakened.
+            binary_custody_roots.append(candidate)
+        except OSError:
+            continue
 redaction_scan = scan_evidence_tree(
     out_root,
-    binary_custody_roots=[out_root / "tool-artifacts"],
+    binary_custody_roots=binary_custody_roots,
 )
 (out_root / "redaction-scan.json").write_text(
     json.dumps(redaction_scan, indent=2),
