@@ -18,6 +18,7 @@ scrape_configs:
           - https://tei.mnemo.local
           - https://s3.mnemo.local
           - https://ops.mnemo.local/ops-dashboard.html
+          - https://roles.mnemo.local/parametric/healthz   # B9 parametric-tier serving liveness
     relabel_configs:
       - source_labels: [__address__]
         target_label: __param_target

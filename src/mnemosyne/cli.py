@@ -2798,6 +2798,7 @@ def cmd_parametric_trainer_check(args: argparse.Namespace) -> None:
     )
     gate_margin_floor = max(args.min_gate_margin, gate_min_margin)
     gate_rollback_branch = gate.get("rollback_branch")
+    passed_protected_case_ids = sorted(set(protected_case_ids) & set(passed_cases))
     passed_protected_ids = set(protected_case_ids).issubset(set(passed_cases))
     gate_ok = (
         bool(artifact_id)
@@ -2837,7 +2838,10 @@ def cmd_parametric_trainer_check(args: argparse.Namespace) -> None:
             "promoted": gate.get("promoted") is True,
             "protected_regression_count": len(protected_regressions),
             "failed_case_count": len(failed_cases),
-            "passed_protected_cases": passed_protected_ids,
+            # The passed protected-case ids (a list) prove every protected case
+            # cleared the gate; the release re-validator requires a list of
+            # length >= min_protected here, not a bare boolean.
+            "passed_protected_cases": passed_protected_case_ids,
             "margin": gate_margin,
             "min_gate_margin": gate_margin_floor,
         }

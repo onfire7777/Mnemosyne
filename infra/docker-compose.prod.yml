@@ -384,6 +384,30 @@ services:
     networks: [internal]                    # reachable by Caddy backhaul; reaches ollama on the internal net
     depends_on: [ollama]
 
+  parametric-http:                         # B9: hosted HTTPS parametric-tier adapter serving
+    <<: *hardened
+    # Reuse the built runtime image (no rebuild); the repo is mounted read-only so
+    # the additive mnemosyne.parametric_adapter + parametric-http.py are on the path.
+    image: infra-role-http
+    entrypoint: ["python", "/opt/mnemosyne/repo/infra/providers/parametric-http.py"]
+    environment:
+      PYTHONPATH: /opt/mnemosyne/repo/src
+      PARAMETRIC_HTTP_HOST: 0.0.0.0
+      PARAMETRIC_HTTP_PORT: "8793"
+      SSL_CERT_FILE: /run/secrets/step_ca_root       # trust the step-ca S3 ingress
+      # The adapter artifact is loaded from SeaweedFS by content hash at startup.
+      MNEMOSYNE_S3_ENDPOINT: https://s3.mnemo.local
+      MNEMOSYNE_S3_BUCKET: mnemosyne-parametric
+      MNEMOSYNE_S3_CREDENTIALS_FILE: /run/secrets/seaweed_s3
+      PARAMETRIC_S3_KEY: parametric/primary/b4ca456e55d30604455858bc711120122aecbdc2df48e3b85860034d42bcb40a.json
+      PARAMETRIC_ARTIFACT_SHA256: b4ca456e55d30604455858bc711120122aecbdc2df48e3b85860034d42bcb40a
+    secrets: [step_ca_root, seaweed_s3]
+    volumes:
+      - ../:/opt/mnemosyne/repo:ro
+    tmpfs: ["/tmp:size=8m"]
+    networks: [internal]                    # Caddy backhaul reaches it; it reaches s3.mnemo.local on the internal net
+    depends_on: [seaweedfs]
+
   operator:                                # bastion for Tier-B capture runs (not started by default)
     <<: *hardened
     profiles: ["operator"]
@@ -471,3 +495,6 @@ secrets:
   # require_and_verify mcp.mnemo.local ingress.
   mcp_client_cert: { file: "${MNEMO_SECRETS_DIR:-/secure/outside/repo}/mcp-client.crt" }
   mcp_client_key: { file: "${MNEMO_SECRETS_DIR:-/secure/outside/repo}/mcp-client.key" }
+  # B9 parametric-tier serving: SeaweedFS object identity so parametric-http can
+  # load the deployed adapter artifact by content hash (least-privilege R/W/List).
+  seaweed_s3: { file: "${MNEMO_SECRETS_DIR:-/secure/outside/repo}/seaweed-s3.json" }

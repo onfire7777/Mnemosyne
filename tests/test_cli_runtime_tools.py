@@ -12991,6 +12991,30 @@ def test_cli_parametric_trainer_check_validates_deployment_bundle(tmp_path: Path
     assert acknowledged["expected_fingerprint_present"] is True
 
 
+def test_cli_parametric_trainer_check_report_passes_release_revalidation(tmp_path: Path) -> None:
+    from mnemosyne.cli import _release_parametric_trainer_evidence_findings
+
+    bundle = tmp_path / "parametric-trainer.json"
+    bundle.write_text(json.dumps(parametric_trainer_bundle()), encoding="utf-8")
+    report = run_cli(
+        tmp_path / "mnemosyne.json",
+        "parametric-trainer-check",
+        "--bundle",
+        str(bundle),
+        "--min-cases",
+        "5",
+        "--min-protected",
+        "2",
+    )
+    # The gate check must expose the passed protected-case ids as a list so the
+    # release-audit re-validator (which requires len >= min_protected) is
+    # satisfiable, not a bare boolean.
+    gate = next(item for item in report["checks"] if item["name"] == "gate")
+    assert isinstance(gate["passed_protected_cases"], list)
+    assert len(gate["passed_protected_cases"]) >= 2
+    assert _release_parametric_trainer_evidence_findings(report) == []
+
+
 def test_cli_parametric_trainer_check_fails_closed_on_bad_bundle(tmp_path: Path) -> None:
     bundle = tmp_path / "bad-parametric-trainer.json"
     bundle.write_text(

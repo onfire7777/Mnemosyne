@@ -78,3 +78,17 @@ groups:
           severity: warning
         annotations:
           summary: "Served certificate for {{ $labels.instance }} exceeds the 24h short-lived policy"
+  - name: mnemosyne-parametric
+    interval: 60s
+    rules:
+      # B9 parametric-tier serving: the hosted memory-adapter endpoint is
+      # blackbox-probed over step-ca TLS; probe_success == 0 means the adapter
+      # serving is unreachable. Routed to the alert-sink notifier like every
+      # other tripwire in this profile.
+      - alert: MnemosyneParametricEndpointDown
+        expr: probe_success{job="blackbox-tls", instance="https://roles.mnemo.local/parametric/healthz"} == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Parametric-tier adapter serving endpoint is down (B9)"
