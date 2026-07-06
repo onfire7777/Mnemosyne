@@ -1,0 +1,383 @@
+{
+  "attribution": {
+    "importtime": {
+      "module_count": 290,
+      "runs": 3,
+      "selection": "min-total",
+      "top_level": [
+        {
+          "cumulative_ms": 0.113,
+          "depth": 1,
+          "module": "_io",
+          "self_ms": 0.113
+        },
+        {
+          "cumulative_ms": 0.023,
+          "depth": 1,
+          "module": "marshal",
+          "self_ms": 0.023
+        },
+        {
+          "cumulative_ms": 0.143,
+          "depth": 1,
+          "module": "posix",
+          "self_ms": 0.143
+        },
+        {
+          "cumulative_ms": 0.573,
+          "depth": 1,
+          "module": "time",
+          "self_ms": 0.573
+        },
+        {
+          "cumulative_ms": 0.454,
+          "depth": 1,
+          "module": "codecs",
+          "self_ms": 0.407
+        },
+        {
+          "cumulative_ms": 0.361,
+          "depth": 1,
+          "module": "encodings.aliases",
+          "self_ms": 0.361
+        },
+        {
+          "cumulative_ms": 0.115,
+          "depth": 1,
+          "module": "abc",
+          "self_ms": 0.098
+        },
+        {
+          "cumulative_ms": 1.043,
+          "depth": 1,
+          "module": "os",
+          "self_ms": 0.298
+        },
+        {
+          "cumulative_ms": 0.054,
+          "depth": 1,
+          "module": "_sitebuiltins",
+          "self_ms": 0.054
+        },
+        {
+          "cumulative_ms": 0.266,
+          "depth": 1,
+          "module": "encodings.utf_8_sig",
+          "self_ms": 0.266
+        },
+        {
+          "cumulative_ms": 0.261,
+          "depth": 1,
+          "module": "_virtualenv",
+          "self_ms": 0.261
+        },
+        {
+          "cumulative_ms": 0.076,
+          "depth": 1,
+          "module": "sitecustomize",
+          "self_ms": 0.076
+        },
+        {
+          "cumulative_ms": 3.57,
+          "depth": 1,
+          "module": "mnemosyne",
+          "self_ms": 0.155
+        },
+        {
+          "cumulative_ms": 3.484,
+          "depth": 1,
+          "module": "argparse",
+          "self_ms": 1.041
+        },
+        {
+          "cumulative_ms": 22.088,
+          "depth": 1,
+          "module": "asyncio",
+          "self_ms": 0.172
+        },
+        {
+          "cumulative_ms": 1.495,
+          "depth": 1,
+          "module": "hmac",
+          "self_ms": 0.335
+        },
+        {
+          "cumulative_ms": 0.899,
+          "depth": 1,
+          "module": "json",
+          "self_ms": 0.149
+        },
+        {
+          "cumulative_ms": 9.234,
+          "depth": 1,
+          "module": "http.server",
+          "self_ms": 0.637
+        },
+        {
+          "cumulative_ms": 1.788,
+          "depth": 1,
+          "module": "pathlib",
+          "self_ms": 0.13
+        },
+        {
+          "cumulative_ms": 38.017,
+          "depth": 1,
+          "module": "mnemosyne.engine",
+          "self_ms": 0.909
+        },
+        {
+          "cumulative_ms": 22.685,
+          "depth": 1,
+          "module": "mnemosyne.ingestion",
+          "self_ms": 1.279
+        },
+        {
+          "cumulative_ms": 8.818,
+          "depth": 1,
+          "module": "mnemosyne.mcp_tools",
+          "self_ms": 0.612
+        },
+        {
+          "cumulative_ms": 0.572,
+          "depth": 1,
+          "module": "mnemosyne.oidc_jwks",
+          "self_ms": 0.572
+        },
+        {
+          "cumulative_ms": 1.586,
+          "depth": 1,
+          "module": "mnemosyne.postgres_runtime_state",
+          "self_ms": 0.646
+        }
+      ],
+      "top_self": [
+        {
+          "cumulative_ms": 5.64,
+          "depth": 4,
+          "module": "mnemosyne.models",
+          "self_ms": 5.268
+        },
+        {
+          "cumulative_ms": 10.126,
+          "depth": 2,
+          "module": "mnemosyne.consolidation",
+          "self_ms": 4.14
+        },
+        {
+          "cumulative_ms": 22.044,
+          "depth": 3,
+          "module": "mnemosyne.retrieval",
+          "self_ms": 3.824
+        },
+        {
+          "cumulative_ms": 6.429,
+          "depth": 2,
+          "module": "mnemosyne.workspace",
+          "self_ms": 3.538
+        },
+        {
+          "cumulative_ms": 4.036,
+          "depth": 6,
+          "module": "cryptography.hazmat.bindings._rust",
+          "self_ms": 2.864
+        },
+        {
+          "cumulative_ms": 2.596,
+          "depth": 2,
+          "module": "mnemosyne.provenance",
+          "self_ms": 2.596
+        },
+        {
+          "cumulative_ms": 2.073,
+          "depth": 2,
+          "module": "mnemosyne.consciousness",
+          "self_ms": 2.073
+        },
+        {
+          "cumulative_ms": 2.07,
+          "depth": 8,
+          "module": "cryptography.hazmat.primitives._modes",
+          "self_ms": 2.07
+        },
+        {
+          "cumulative_ms": 8.436,
+          "depth": 4,
+          "module": "mnemosyne.security",
+          "self_ms": 1.989
+        },
+        {
+          "cumulative_ms": 1.94,
+          "depth": 2,
+          "module": "mnemosyne.parametric",
+          "self_ms": 1.94
+        },
+        {
+          "cumulative_ms": 1.865,
+          "depth": 3,
+          "module": "mnemosyne.learning",
+          "self_ms": 1.865
+        },
+        {
+          "cumulative_ms": 1.844,
+          "depth": 3,
+          "module": "mnemosyne.gate",
+          "self_ms": 1.844
+        }
+      ],
+      "total_import_ms": 120.972
+    },
+    "initialize_handler_bound_p50_ms": 0.049854512326419353,
+    "interpreter_startup": {
+      "max_ms": 23.17041694186628,
+      "mean_ms": 18.81777929374948,
+      "min_ms": 16.896374989300966,
+      "n": 10,
+      "p50_ms": 17.749916994944215,
+      "p95_ms": 22.708529338706285
+    },
+    "post_import_residual_p50_ms": -4.517958029571915,
+    "uv_run_python_startup": {
+      "max_ms": 56.581250042654574,
+      "mean_ms": 46.64355022832751,
+      "min_ms": 42.23429202102125,
+      "n": 5,
+      "p50_ms": 44.92295905947685,
+      "p95_ms": 54.45402504410595
+    },
+    "uv_wrapper_overhead_p50_ms": 27.173042064532638
+  },
+  "cold": {
+    "uv": {
+      "first_tool_call_ms": {
+        "max_ms": 54.981624940410256,
+        "mean_ms": 32.30706049944274,
+        "min_ms": 27.852999977767467,
+        "n": 20,
+        "p50_ms": 30.645396502222866,
+        "p95_ms": 40.911571116885185
+      },
+      "spawn_initialize_ms": {
+        "max_ms": 289.7988749900833,
+        "mean_ms": 176.7033978481777,
+        "min_ms": 146.03783295024186,
+        "n": 20,
+        "p50_ms": 167.88635402917862,
+        "p95_ms": 206.27966487663804
+      },
+      "teardown_ms": {
+        "max_ms": 71.41529198270291,
+        "mean_ms": 39.329660596558824,
+        "min_ms": 33.96558400709182,
+        "n": 20,
+        "p50_ms": 38.17502100719139,
+        "p95_ms": 40.643010794883615
+      },
+      "tools_list_ms": {
+        "max_ms": 0.4943329840898514,
+        "mean_ms": 0.312097801361233,
+        "min_ms": 0.26820891071110964,
+        "n": 20,
+        "p50_ms": 0.299000006634742,
+        "p95_ms": 0.3637878340668977
+      }
+    },
+    "venv": {
+      "first_tool_call_ms": {
+        "max_ms": 73.71570903342217,
+        "mean_ms": 36.243762593949214,
+        "min_ms": 28.50733301602304,
+        "n": 20,
+        "p50_ms": 32.53020899137482,
+        "p95_ms": 59.40106915659272
+      },
+      "spawn_initialize_ms": {
+        "max_ms": 199.4454578962177,
+        "mean_ms": 139.4591084914282,
+        "min_ms": 124.40895801410079,
+        "n": 20,
+        "p50_ms": 134.2039589653723,
+        "p95_ms": 165.98808157141323
+      },
+      "teardown_ms": {
+        "max_ms": 71.7627500416711,
+        "mean_ms": 38.62508537713438,
+        "min_ms": 34.03537499252707,
+        "n": 20,
+        "p50_ms": 36.62014548899606,
+        "p95_ms": 50.18484611646274
+      },
+      "tools_list_ms": {
+        "max_ms": 0.4737080307677388,
+        "mean_ms": 0.330037489766255,
+        "min_ms": 0.2764998935163021,
+        "n": 20,
+        "p50_ms": 0.3135624574497342,
+        "p95_ms": 0.4358666657935828
+      }
+    }
+  },
+  "config": {
+    "child_env_keys_set": [
+      "MNEME_BACKEND=local",
+      "MNEME_STORE=<per-session tmpdir>/mcp-store.json",
+      "MNEMOSYNE_OBJECT_STORE=<per-session tmpdir>/objects",
+      "MNEMOSYNE_PARAMETRIC_ARTIFACT_STORE=<per-session tmpdir>/parametric"
+    ],
+    "cold_spawns_per_mode": 20,
+    "inherited_mnemosyne_env": "stripped",
+    "read_only_tool": "residency_policy",
+    "spawn_commands": {
+      "uv": [
+        "uv",
+        "run",
+        "--locked",
+        "mneme-mcp"
+      ],
+      "venv": [
+        "/Users/admin/mnemosyne-perf/.venv/bin/mneme-mcp"
+      ]
+    },
+    "warm_calls": 50
+  },
+  "gate": {
+    "justified": false,
+    "near_band_ms": 174.0,
+    "plan_reference_median_ms": 116.0,
+    "reasons": [
+      "direct-entry spawn+initialize p50 134.2 ms is within the plan's 'near today's local numbers' band (<= 174 ms vs the recorded 116 ms median)",
+      "uv-wrapper launch adds 33.7 ms p50 over the direct entry point: client orchestration, fixable by pointing the client at .venv/bin/mneme-mcp, not by a Rust front-end",
+      "warm steady-state read-only call p95 is 1.04 ms: spawn cost is a once-per-session cost, not a per-call tax"
+    ],
+    "rust_handshake_target_ms": 50.0,
+    "verdict": "GATE STAYS CLOSED - do not build the C4 Rust front-end"
+  },
+  "generated_utc": "2026-07-06T03:59:21+00:00",
+  "host": {
+    "cpu_count": 10,
+    "platform": "macOS-26.5-arm64-arm-64bit-Mach-O",
+    "python": "3.13.13"
+  },
+  "plan": "docs/superpowers/plans/phase4-front-end.md",
+  "report": "mcp-client-workflow-trace",
+  "warm": {
+    "first_tool_call_ms": 28.248082962818444,
+    "teardown_ms": 37.98558306880295,
+    "tool_count": 50,
+    "warm_call_ms": {
+      "max_ms": 1.383792026899755,
+      "mean_ms": 0.7265874766744673,
+      "min_ms": 0.5315419984981418,
+      "n": 50,
+      "p50_ms": 0.7051254506222904,
+      "p95_ms": 1.042474847054109
+    },
+    "warm_initialize_rpc_ms": {
+      "max_ms": 0.06324995774775743,
+      "mean_ms": 0.048554211389273405,
+      "min_ms": 0.032957992516458035,
+      "n": 10,
+      "p50_ms": 0.049854512326419353,
+      "p95_ms": 0.06045637419447302
+    }
+  }
+}
