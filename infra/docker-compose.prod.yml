@@ -395,6 +395,12 @@ services:
     <<: *hardened
     profiles: ["host-llm"]
     image: caddy:2.8@sha256:226d1f059b75399fe19182893c7184591c07b97afc8dfcf44eeb80c9a77a530f
+    # The caddy binary ships file-capability cap_net_bind_service; under the
+    # hardened anchor (cap_drop ALL + no-new-privileges) execve of a fcap binary
+    # needs that cap in the bounding set or tini fails with EPERM. The main caddy
+    # ingress grants it for the same reason; the relay only listens on :11434 so
+    # it is functionally unused, but required to exec.
+    cap_add: ["NET_BIND_SERVICE"]
     command: ["caddy", "reverse-proxy", "--from", "http://:11434", "--to", "http://host.docker.internal:11434"]
     # colima's dockerd resolves host.docker.internal natively (verified 192.168.65.254);
     # the explicit host-gateway mapping keeps the relay portable to other engines.

@@ -25,6 +25,7 @@ CAP_ADD_ALLOWLIST = {
     "caddy": {"NET_BIND_SERVICE"},  # binds :443 as non-root
     "vault": {"IPC_LOCK"},  # mlock for sealed-memory pages
     "step-ca": {"NET_BIND_SERVICE"},  # binary ships file caps; bounded gain, see compose comment
+    "host-llm-proxy": {"NET_BIND_SERVICE"},  # caddy binary ships file caps; needed to exec under no-new-privileges (relay listens on :11434)
 }
 
 # The sole ingress: the only service allowed to publish host ports.
