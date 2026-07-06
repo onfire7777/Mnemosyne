@@ -1,0 +1,425 @@
+{
+  "report": "perf-baseline",
+  "lane": "A-baseline",
+  "date": "2026-07-05",
+  "branch": "perf/runtime-and-kernels",
+  "base_commit": "ee30b5b",
+  "machine": {
+    "platform": "macOS-26.5-arm64-arm-64bit-Mach-O",
+    "python": "3.13.13",
+    "machine": "arm64"
+  },
+  "notes": {
+    "micro": "tests/benchmarks --benchmark-only, run once per mode. The three pure baseline benches (cosine_1024 / hashing_embedding_cold / lexical_scan_2k) call the _*_pure bodies DIRECTLY, so they measure the pure kernels in both modes by design; the native_* benches call mnemosyne_native directly in both modes. MNEMOSYNE_PURE only flips the dispatchers, which the e2e bench (not the micro benches) exercises. Units: microseconds (mean over rounds).",
+    "e2e": "eval/latency/perf_e2e_bench.py: warm in-process engine.retrieve() over synthetic corpora (seed 20260705), 30 measured calls per cell after 2 warm-ups, 30 distinct queries cycled. shallow = deep=False fast path; deep = deep=True adds graph PPR. seed_ms is the one-time public append_evidence corpus build, not a per-call cost. Units: milliseconds.",
+    "cold_start": "uv run --locked python -X importtime -c 'import <module>', 3 runs each; total = sum of all importtime self-times per run (ms); median across runs. Run 1 of each triple was FS-cache-cold and visibly slower - the median absorbs it. top5 lists are from the median-total run."
+  },
+  "micro": {
+    "native": {
+      "test_bench_cosine_1024": {
+        "mean_us": 31.941,
+        "median_us": 31.25,
+        "min_us": 30.167,
+        "rounds": 21878
+      },
+      "test_bench_hashing_embedding_cold": {
+        "mean_us": 78.19,
+        "median_us": 72.5,
+        "min_us": 70.417,
+        "rounds": 9475
+      },
+      "test_bench_lexical_scan_2k": {
+        "mean_us": 50766.837,
+        "median_us": 50648.396,
+        "min_us": 50098.917,
+        "rounds": 20
+      },
+      "test_bench_native_lexical_scan_2k": {
+        "mean_us": 1147.439,
+        "median_us": 1062.5,
+        "min_us": 894.625,
+        "rounds": 385
+      },
+      "test_bench_native_hashing_embedding_cold": {
+        "mean_us": 15.287,
+        "median_us": 15.208,
+        "min_us": 14.667,
+        "rounds": 3956
+      },
+      "test_bench_native_dense_scan_2k_256d": {
+        "mean_us": 3247.371,
+        "median_us": 3226.791,
+        "min_us": 3118.541,
+        "rounds": 57
+      },
+      "test_bench_native_dense_scan_prepacked": {
+        "mean_us": 197.942,
+        "median_us": 182.125,
+        "min_us": 134.583,
+        "rounds": 233
+      },
+      "test_bench_sqlite_dense_scan_end_to_end": {
+        "mean_us": 386.558,
+        "median_us": 369.75,
+        "min_us": 301.833,
+        "rounds": 569
+      }
+    },
+    "pure": {
+      "test_bench_cosine_1024": {
+        "mean_us": 31.377,
+        "median_us": 30.916,
+        "min_us": 30.083,
+        "rounds": 21760
+      },
+      "test_bench_hashing_embedding_cold": {
+        "mean_us": 74.816,
+        "median_us": 73.667,
+        "min_us": 70.75,
+        "rounds": 7637
+      },
+      "test_bench_lexical_scan_2k": {
+        "mean_us": 52056.683,
+        "median_us": 51006.292,
+        "min_us": 49608.375,
+        "rounds": 20
+      },
+      "test_bench_native_lexical_scan_2k": {
+        "mean_us": 1231.846,
+        "median_us": 1087.958,
+        "min_us": 902.958,
+        "rounds": 507
+      },
+      "test_bench_native_hashing_embedding_cold": {
+        "mean_us": 15.835,
+        "median_us": 15.292,
+        "min_us": 14.375,
+        "rounds": 34582
+      },
+      "test_bench_native_dense_scan_2k_256d": {
+        "mean_us": 3771.295,
+        "median_us": 3363.125,
+        "min_us": 3079.667,
+        "rounds": 229
+      },
+      "test_bench_native_dense_scan_prepacked": {
+        "mean_us": 349.785,
+        "median_us": 301.167,
+        "min_us": 146.375,
+        "rounds": 3093
+      },
+      "test_bench_sqlite_dense_scan_end_to_end": {
+        "mean_us": 445.558,
+        "median_us": 412.583,
+        "min_us": 302.083,
+        "rounds": 1809
+      }
+    }
+  },
+  "e2e": {
+    "native": {
+      "bench": "perf_e2e_retrieve_baseline",
+      "generated_at": "2026-07-06T03:56:54.190085+00:00",
+      "seed": 20260705,
+      "kernel": {
+        "MNEMOSYNE_PURE": "",
+        "native_active": true,
+        "mode": "native"
+      },
+      "config": {
+        "sizes": [
+          1000,
+          10000
+        ],
+        "calls": 30,
+        "warmup": 2,
+        "n_queries": 30
+      },
+      "cells": {
+        "local/1000/shallow": {
+          "calls": 30,
+          "warmup": 2,
+          "p50_ms": 24.072,
+          "p95_ms": 33.082,
+          "mean_ms": 25.143,
+          "max_ms": 35.764,
+          "seed_ms": 95.7
+        },
+        "local/1000/deep": {
+          "calls": 30,
+          "warmup": 2,
+          "p50_ms": 28.259,
+          "p95_ms": 36.15,
+          "mean_ms": 29.274,
+          "max_ms": 40.938,
+          "seed_ms": 95.7
+        },
+        "sqlite/1000/shallow": {
+          "calls": 30,
+          "warmup": 2,
+          "p50_ms": 46.865,
+          "p95_ms": 59.576,
+          "mean_ms": 47.696,
+          "max_ms": 60.402,
+          "seed_ms": 723.6
+        },
+        "sqlite/1000/deep": {
+          "calls": 30,
+          "warmup": 2,
+          "p50_ms": 62.577,
+          "p95_ms": 73.415,
+          "mean_ms": 63.341,
+          "max_ms": 91.014,
+          "seed_ms": 723.6
+        },
+        "local/10000/shallow": {
+          "calls": 30,
+          "warmup": 2,
+          "p50_ms": 345.016,
+          "p95_ms": 484.591,
+          "mean_ms": 360.258,
+          "max_ms": 500.346,
+          "seed_ms": 3124.9
+        },
+        "local/10000/deep": {
+          "calls": 30,
+          "warmup": 2,
+          "p50_ms": 362.667,
+          "p95_ms": 462.251,
+          "mean_ms": 373.665,
+          "max_ms": 507.543,
+          "seed_ms": 3124.9
+        },
+        "sqlite/10000/shallow": {
+          "calls": 30,
+          "warmup": 2,
+          "p50_ms": 640.184,
+          "p95_ms": 841.097,
+          "mean_ms": 666.535,
+          "max_ms": 875.314,
+          "seed_ms": 40573.6
+        },
+        "sqlite/10000/deep": {
+          "calls": 30,
+          "warmup": 2,
+          "p50_ms": 788.645,
+          "p95_ms": 1007.577,
+          "mean_ms": 818.982,
+          "max_ms": 1410.239,
+          "seed_ms": 40573.6
+        }
+      }
+    },
+    "pure": {
+      "bench": "perf_e2e_retrieve_baseline",
+      "generated_at": "2026-07-06T03:58:55.469052+00:00",
+      "seed": 20260705,
+      "kernel": {
+        "MNEMOSYNE_PURE": "1",
+        "native_active": false,
+        "mode": "pure"
+      },
+      "config": {
+        "sizes": [
+          1000,
+          10000
+        ],
+        "calls": 30,
+        "warmup": 2,
+        "n_queries": 30
+      },
+      "cells": {
+        "local/1000/shallow": {
+          "calls": 30,
+          "warmup": 2,
+          "p50_ms": 47.833,
+          "p95_ms": 49.49,
+          "mean_ms": 48.141,
+          "max_ms": 62.231,
+          "seed_ms": 87.2
+        },
+        "local/1000/deep": {
+          "calls": 30,
+          "warmup": 2,
+          "p50_ms": 153.419,
+          "p95_ms": 227.474,
+          "mean_ms": 165.919,
+          "max_ms": 291.139,
+          "seed_ms": 87.2
+        },
+        "sqlite/1000/shallow": {
+          "calls": 30,
+          "warmup": 2,
+          "p50_ms": 58.276,
+          "p95_ms": 63.316,
+          "mean_ms": 58.603,
+          "max_ms": 64.026,
+          "seed_ms": 472.6
+        },
+        "sqlite/1000/deep": {
+          "calls": 30,
+          "warmup": 2,
+          "p50_ms": 162.407,
+          "p95_ms": 182.095,
+          "mean_ms": 163.867,
+          "max_ms": 194.414,
+          "seed_ms": 472.6
+        },
+        "local/10000/shallow": {
+          "calls": 30,
+          "warmup": 2,
+          "p50_ms": 906.437,
+          "p95_ms": 1100.452,
+          "mean_ms": 925.578,
+          "max_ms": 1104.979,
+          "seed_ms": 3111.1
+        },
+        "local/10000/deep": {
+          "calls": 30,
+          "warmup": 2,
+          "p50_ms": 1024.71,
+          "p95_ms": 1147.518,
+          "mean_ms": 1047.857,
+          "max_ms": 1242.585,
+          "seed_ms": 3111.1
+        },
+        "sqlite/10000/shallow": {
+          "calls": 30,
+          "warmup": 2,
+          "p50_ms": 1070.088,
+          "p95_ms": 1173.427,
+          "mean_ms": 1093.596,
+          "max_ms": 1283.524,
+          "seed_ms": 41135.7
+        },
+        "sqlite/10000/deep": {
+          "calls": 30,
+          "warmup": 2,
+          "p50_ms": 1319.823,
+          "p95_ms": 1504.668,
+          "mean_ms": 1332.26,
+          "max_ms": 1526.019,
+          "seed_ms": 41135.7
+        }
+      }
+    }
+  },
+  "cold_start": {
+    "mnemosyne.mcp_server": {
+      "runs_total_self_ms": [
+        204.1,
+        110.2,
+        112.6
+      ],
+      "median_total_self_ms": 112.6,
+      "runs_target_cumulative_ms": [
+        189.2,
+        104.7,
+        107.5
+      ],
+      "median_target_cumulative_ms": 107.5,
+      "top5_self_ms": [
+        {
+          "module": "mnemosyne.models",
+          "self_ms": 4.6
+        },
+        {
+          "module": "mnemosyne.workspace",
+          "self_ms": 4.0
+        },
+        {
+          "module": "mnemosyne.retrieval",
+          "self_ms": 3.9
+        },
+        {
+          "module": "mnemosyne.consolidation",
+          "self_ms": 3.5
+        },
+        {
+          "module": "cryptography.hazmat.bindings._rust",
+          "self_ms": 2.8
+        }
+      ],
+      "top5_cumulative_ms": [
+        {
+          "module": "mnemosyne.mcp_server",
+          "cumulative_ms": 107.5
+        },
+        {
+          "module": "mnemosyne.engine",
+          "cumulative_ms": 37.3
+        },
+        {
+          "module": "asyncio",
+          "cumulative_ms": 22.9
+        },
+        {
+          "module": "mnemosyne.algorithms",
+          "cumulative_ms": 20.7
+        },
+        {
+          "module": "mnemosyne.retrieval",
+          "cumulative_ms": 20.5
+        }
+      ]
+    },
+    "mnemosyne.cli": {
+      "runs_total_self_ms": [
+        194.2,
+        65.9,
+        53.3
+      ],
+      "median_total_self_ms": 65.9,
+      "runs_target_cumulative_ms": [
+        188.5,
+        60.5,
+        47.1
+      ],
+      "median_target_cumulative_ms": 60.5,
+      "top5_self_ms": [
+        {
+          "module": "json",
+          "self_ms": 3.4
+        },
+        {
+          "module": "mnemosyne.cli",
+          "self_ms": 3.1
+        },
+        {
+          "module": "socket",
+          "self_ms": 2.4
+        },
+        {
+          "module": "asyncio.streams",
+          "self_ms": 2.2
+        },
+        {
+          "module": "http.client",
+          "self_ms": 1.4
+        }
+      ],
+      "top5_cumulative_ms": [
+        {
+          "module": "mnemosyne.cli",
+          "cumulative_ms": 60.5
+        },
+        {
+          "module": "asyncio",
+          "cumulative_ms": 28.9
+        },
+        {
+          "module": "asyncio.base_events",
+          "cumulative_ms": 24.5
+        },
+        {
+          "module": "urllib.request",
+          "cumulative_ms": 6.8
+        },
+        {
+          "module": "http.client",
+          "cumulative_ms": 5.5
+        }
+      ]
+    }
+  }
+}
