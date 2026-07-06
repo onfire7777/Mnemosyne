@@ -7,7 +7,7 @@ import json
 import math
 import os
 import threading
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -387,6 +387,52 @@ class MemoryEngine(Protocol):
         raise NotImplementedError
 
 
+#: Kill-switch for the candidate-scan memo (default ON — byte-parity-proven in
+#: tests/test_engine_perf_lanes.py; registered in CONFIG-DRIFT-CHECKS.md).
+_CANDIDATE_MEMO_ENV = "MNEMOSYNE_CANDIDATE_MEMO"
+_CANDIDATE_MEMO_SIZE = 4
+
+
+def _candidate_memo_enabled() -> bool:
+    return os.environ.get(_CANDIDATE_MEMO_ENV, "1").strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _copy_jsonish(value: Any) -> Any:
+    """Deep-copy the JSON-shaped (dict/list/scalar) metadata trees Hit carries.
+
+    Equivalent to copy.deepcopy for _candidate_hits output — its metadata is
+    built exclusively from dicts, lists, and immutable scalars — without
+    deepcopy's per-object dispatch overhead.
+    """
+    if isinstance(value, dict):
+        return {key: _copy_jsonish(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_copy_jsonish(item) for item in value]
+    return value
+
+
+def _clone_candidate_hit(hit: Hit) -> Hit:
+    """Independent, equal clone of a cached candidate Hit.
+
+    Channels mutate score/channel and write into metadata (e.g.
+    ``stored_embedding_used``), so every _candidate_hits caller gets its own
+    Hit and its own metadata tree — the cached entry stays pristine.
+    """
+    return Hit(
+        id=hit.id,
+        kind=hit.kind,
+        tenant_id=hit.tenant_id,
+        branch=hit.branch,
+        text=hit.text,
+        score=hit.score,
+        channel=hit.channel,
+        provenance=list(hit.provenance),
+        trust_tier=hit.trust_tier,
+        sensitivity=hit.sensitivity,
+        metadata=_copy_jsonish(hit.metadata),
+    )
+
+
 class LocalMemoryEngine:
     """A deterministic local engine that implements the blueprint contract.
 
@@ -428,6 +474,13 @@ class LocalMemoryEngine:
         self.audit_log: list[dict[str, Any]] = []
         self.deletion_log: list[dict[str, Any]] = []
         self.merge_log: list[dict[str, Any]] = []
+        # Candidate-scan memo (see _candidate_hits): _store_version is bumped
+        # by every _persist() call — the single write choke point all mutators
+        # (including belief.py's direct-dict writers) already reach, even when
+        # store_path is unset — so any committed write invalidates the memo.
+        self._store_version = 0
+        self._candidate_memo: OrderedDict[tuple[Any, ...], list[Hit]] = OrderedDict()
+        self._candidate_memo_lock = threading.Lock()
         if self.store_path and self.store_path.exists():
             self._load()
 
@@ -498,6 +551,9 @@ class LocalMemoryEngine:
         self._persist()
 
     def _persist(self) -> None:
+        # Every mutator funnels through here; bump BEFORE the store_path early
+        # return so in-memory engines invalidate the candidate memo too.
+        self._store_version += 1
         if not self.store_path:
             return
         parent = self.store_path.parent
@@ -1476,10 +1532,19 @@ class LocalMemoryEngine:
         for seed in seed_set:
             adjacency.setdefault(seed, [])
         ranks = ppr_power_iteration(adjacency, matches_seed)
+        # node -> relation row index, built once (was an O(V*E) per-node linear
+        # scan). First-match semantics replicated exactly: for each node the
+        # winning row is the one the linear scan found FIRST in relation_by_pair
+        # insertion order — the earliest pair mentioning the node in either slot.
+        relation_by_node: dict[str, tuple[Relation, dict[str, Any], Any]] = {}
+        for pair, row in relation_by_pair.items():
+            for pair_node in pair:
+                if pair_node not in relation_by_node:
+                    relation_by_node[pair_node] = row
         for node, score in sorted(ranks.items(), key=lambda item: item[1], reverse=True):
             if matches_seed(node) or score <= 0:
                 continue
-            relation_row = next((relation_by_pair[pair] for pair in relation_by_pair if pair[0] == node or pair[1] == node), None)
+            relation_row = relation_by_node.get(node)
             if relation_row:
                 rel, security, relation_decision = relation_row
                 if rel.id in seen_relation_ids:
@@ -2554,6 +2619,47 @@ class LocalMemoryEngine:
             self._persist()
 
     def _candidate_hits(self, filt: dict[str, Any]) -> list[Hit]:
+        """Candidate projection with a small cross-call memo.
+
+        The expensive scan (may_read_item + redactions over every evidence /
+        assertion / preference row) is cached keyed on (tenant, branch, store
+        version, store sizes, policy ceilings, access-context fingerprint), so
+        one retrieve()'s vector and lexical channels share ONE scan. Callers
+        always receive independent clones (see _clone_candidate_hit) — byte
+        parity with an uncached scan is proven in
+        tests/test_engine_perf_lanes.py. Kill-switch:
+        MNEMOSYNE_CANDIDATE_MEMO=0.
+        """
+        if not _candidate_memo_enabled():
+            return self._candidate_hits_uncached(filt)
+        key = (
+            filt.get("tenant_id"),
+            filt.get("branch", "main"),
+            self._store_version,
+            len(self.evidence),
+            len(self.assertions),
+            len(self.preferences),
+            int(self.policy.max_trust_tier),
+            int(self.policy.max_sensitivity),
+            # Access-context fingerprint: may_read_item / redactions read
+            # arbitrary filt keys, so the whole mapping participates. Distinct
+            # reprs of equal contexts only cost a miss, never a wrong hit.
+            repr(sorted(filt.items())),
+        )
+        with self._candidate_memo_lock:
+            cached = self._candidate_memo.get(key)
+            if cached is not None:
+                self._candidate_memo.move_to_end(key)
+        if cached is None:
+            cached = self._candidate_hits_uncached(filt)
+            with self._candidate_memo_lock:
+                self._candidate_memo[key] = cached
+                self._candidate_memo.move_to_end(key)
+                while len(self._candidate_memo) > _CANDIDATE_MEMO_SIZE:
+                    self._candidate_memo.popitem(last=False)
+        return [_clone_candidate_hit(hit) for hit in cached]
+
+    def _candidate_hits_uncached(self, filt: dict[str, Any]) -> list[Hit]:
         tenant_id = filt.get("tenant_id")
         branch = filt.get("branch", "main")
         include_quarantined = bool(filt.get("include_quarantined", False))
