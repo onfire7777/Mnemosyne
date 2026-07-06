@@ -66,6 +66,16 @@ Realized over these concrete loci:
   (`tests/benchmarks/`) into the absolute `§22.5` latency budgets
   (reference-machine nightly); unset, only the relative-regression gate runs
   under `--benchmark-only`, and a plain run skips the suite entirely.
+- **`MNEMOSYNE_EMBED_BATCH_SIZE`** — chunk size (default `32`) for batched
+  embedding calls: the consolidation embedder pass collects pending evidence
+  texts and feeds them through `consolidation.embed_texts_batched`, which
+  hands each chunk whole to providers exposing `embed_many` (e.g.
+  `HttpEmbeddingProvider`'s one-request OpenAI-style list input, with
+  sequential per-item fallback when the server lacks the batch route). This is
+  a transport optimization only — batched vectors are identical to (and
+  ordered as) sequential per-item `embed` calls
+  (`tests/test_provider_batching.py`), so it selects speed, never behavior.
+  Invalid or non-positive values fall back to the default.
 - **`journal_dir`** — optional `LocalMemoryEngine` constructor kwarg
   (`engine.py`): directory for the per-tenant append-only CID journals
   (`journal.py`); unset, no journal is written. Engine erasure wiring lands in
