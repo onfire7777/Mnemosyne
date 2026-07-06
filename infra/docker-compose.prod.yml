@@ -425,6 +425,10 @@ services:
       - ../:/Users/admin/Mnemosyne
       - ${MNEMO_CUSTODY_DIR:-/secure/outside/repo-custody}:${MNEMO_CUSTODY_DIR:-/secure/outside/repo-custody}
       - ${MNEMO_EVIDENCE_OUT:-/secure/outside/repo-evidence}:${MNEMO_EVIDENCE_OUT:-/secure/outside/repo-evidence}
+      # provider-check's oidc subcheck validates the deployed OIDC authorization
+      # policy the runtime env references by its external absolute path; mount it
+      # read-only at the identical path so the capture bastion can resolve it.
+      - ${MNEMO_SECRETS_DIR:-/secure/outside/repo}/authz-policy.json:${MNEMO_SECRETS_DIR:-/secure/outside/repo}/authz-policy.json:ro
     tmpfs: ["/tmp:size=256m"]
     networks: [edge, internal, datasec]
 
