@@ -218,7 +218,9 @@ def test_secret_files_live_outside_the_repo() -> None:
 
 def test_build_services_reference_existing_docker_assets() -> None:
     text = _compose_text()
-    for context, dockerfile in set(re.findall(r"context:\s*([^\s,}]+),\s*dockerfile:\s*([^\s}]+)", text)):
+    # dockerfile may be followed by more inline-map keys (e.g. `target: runtime`),
+    # so the capture must stop at a comma as well as whitespace/`}`.
+    for context, dockerfile in set(re.findall(r"context:\s*([^\s,}]+),\s*dockerfile:\s*([^\s,}]+)", text)):
         resolved = (INFRA / context / dockerfile).resolve()
         assert resolved.is_file(), f"missing build dockerfile: {context}/{dockerfile}"
     assert (INFRA / "entrypoint.sh").is_file(), "infra/entrypoint.sh (image entrypoint) must exist"

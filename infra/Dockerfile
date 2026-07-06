@@ -1,10 +1,18 @@
 # Mnemosyne application image for the self-hosted production stack.
 # Built by infra/docker-compose.prod.yml with build context at the repo root:
-#   build: { context: .., dockerfile: infra/Dockerfile }
+#   build: { context: .., dockerfile: infra/Dockerfile, target: runtime }
 # Hardened-runtime friendly: non-root, no writes outside /tmp (tmpfs), single
 # role-dispatching entrypoint (MNEMOSYNE_ROLE=api|consolidator).
+#
+# Stages:
+#   runtime     — the production image every deployed service runs (default target
+#                 for all prod services; compose pins `target: runtime` explicitly).
+#   test-runner — runtime + the repo's dev test extras (pytest/hypothesis/
+#                 pytest-benchmark). Used ONLY by the profile-gated `test-runner`
+#                 compose service for the row-10 live-parity suite. Never deployed
+#                 as a long-running production service.
 
-FROM python:3.12-slim
+FROM python:3.12-slim AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -43,3 +51,21 @@ RUN mkdir -p /data/wrapped-keys /pub && chown -R 10001:10001 /data /pub
 USER 10001:10001
 
 ENTRYPOINT ["/usr/local/bin/mnemo-entrypoint"]
+
+# ---------------------------------------------------------------------------
+# Row-10 live-parity test runner: the exact production runtime plus the repo's
+# pinned dev test extras (pyproject [dependency-groups].dev, minus lint-only
+# ruff). Kept as a separate stage so the deployed images stay byte-identical
+# to `runtime`; compose services all pin `target: runtime`.
+# ---------------------------------------------------------------------------
+FROM runtime AS test-runner
+USER 0
+# git: the g0 harness / evidence-capture tests resolve repo provenance by
+# shelling out to git against the bind-mounted repository.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/* \
+    # the bind-mounted repo is owned by the host user, not uid 10001
+    && git config --system safe.directory /Users/admin/Mnemosyne
+RUN pip install --no-cache-dir 'pytest==9.1.1' 'hypothesis>=6.100' 'pytest-benchmark>=5.1'
+USER 10001:10001

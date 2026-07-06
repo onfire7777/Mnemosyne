@@ -175,7 +175,7 @@ services:
 
   mnemo-metrics:                           # read-only ops-report -> VictoriaMetrics push (tripwire series source)
     <<: *hardened
-    build: { context: .., dockerfile: infra/Dockerfile }
+    build: { context: .., dockerfile: infra/Dockerfile, target: runtime }
     env_file: [./profiles/self-hosted.env]
     environment:
       MNEMOSYNE_ROLE: metrics-pusher
@@ -228,7 +228,7 @@ services:
 
   alert-sink:                              # B8 core: self-hosted alert delivery target + subscriber surface
     <<: *hardened
-    build: { context: .., dockerfile: infra/Dockerfile }
+    build: { context: .., dockerfile: infra/Dockerfile, target: runtime }
     entrypoint: ["python", "/opt/mnemosyne/bin/alert-sink"]
     environment:
       ALERT_SINK_HOST: 0.0.0.0
@@ -251,7 +251,7 @@ services:
 
   mnemo-api:                               # EDGE: MCP/HTTP surface. Least-privilege DB role; Vault for key custody only.
     <<: *hardened
-    build: { context: .., dockerfile: infra/Dockerfile }   # adjust to the app Dockerfile path
+    build: { context: .., dockerfile: infra/Dockerfile, target: runtime }   # adjust to the app Dockerfile path
     env_file: [./profiles/self-hosted.env]
     environment:
       MNEMOSYNE_MCP_PRODUCTION_PROFILE: "1"
@@ -278,7 +278,7 @@ services:
 
   mnemo-stream:                               # EDGE: MCP SDK StreamableHTTP transport (B3 streamable_http evidence).
     <<: *hardened
-    build: { context: .., dockerfile: infra/Dockerfile }   # adjust to the app Dockerfile path
+    build: { context: .., dockerfile: infra/Dockerfile, target: runtime }   # adjust to the app Dockerfile path
     env_file: [./profiles/self-hosted.env]
     environment:
       MNEMOSYNE_MCP_PRODUCTION_PROFILE: "1"
@@ -303,7 +303,7 @@ services:
 
   mnemo-consolidator:                      # BACK: sole write + KMS authority. NO edge reachability.
     <<: *hardened
-    build: { context: .., dockerfile: infra/Dockerfile }
+    build: { context: .., dockerfile: infra/Dockerfile, target: runtime }
     env_file: [./profiles/self-hosted.env]
     environment:
       MNEMOSYNE_ROLE: consolidator
@@ -366,7 +366,7 @@ services:
 
   role-http:                               # B4/B9: hosted HTTPS role provider (wraps role-llm dispatch)
     <<: *hardened
-    build: { context: .., dockerfile: infra/Dockerfile }
+    build: { context: .., dockerfile: infra/Dockerfile, target: runtime }
     entrypoint: ["python", "/opt/mnemosyne/bin/role-http"]
     env_file: [./profiles/self-hosted.env]
     environment:
@@ -387,7 +387,7 @@ services:
   operator:                                # bastion for Tier-B capture runs (not started by default)
     <<: *hardened
     profiles: ["operator"]
-    build: { context: .., dockerfile: infra/Dockerfile }
+    build: { context: .., dockerfile: infra/Dockerfile, target: runtime }
     entrypoint: ["sleep", "infinity"]
     environment:
       SSL_CERT_FILE: /run/secrets/step_ca_root
@@ -403,6 +403,28 @@ services:
       - ${MNEMO_CUSTODY_DIR:-/secure/outside/repo-custody}:${MNEMO_CUSTODY_DIR:-/secure/outside/repo-custody}
       - ${MNEMO_EVIDENCE_OUT:-/secure/outside/repo-evidence}:${MNEMO_EVIDENCE_OUT:-/secure/outside/repo-evidence}
     tmpfs: ["/tmp:size=256m"]
+    networks: [edge, internal, datasec]
+
+  test-runner:                             # row-10 live-parity suite runner (profile-gated; never on by default)
+    <<: *hardened
+    profiles: ["test"]
+    build: { context: .., dockerfile: infra/Dockerfile, target: test-runner }
+    entrypoint: ["sleep", "infinity"]
+    environment:
+      SSL_CERT_FILE: /run/secrets/step_ca_root
+      VAULT_ADDR: https://vault.mnemo.local:8200
+      VAULT_CACERT: /run/secrets/step_ca_root
+      VAULT_TOKEN_FILE: /run/secrets/vault_app_token
+      OLLAMA_URL: http://ollama.mnemo.local:11434
+    secrets: [step_ca_root, vault_app_token, pgpass_consolidator, pgpass_app]
+    volumes:
+      # identical absolute paths inside and out so evidence artifacts stay portable
+      - ../:/Users/admin/Mnemosyne
+      - ${MNEMO_CUSTODY_DIR:-/secure/outside/repo-custody}:${MNEMO_CUSTODY_DIR:-/secure/outside/repo-custody}
+    # exec: the suite writes stub provider/tool executables to pytest tmp_path
+    # under /tmp; the default docker tmpfs noexec flag breaks them (that was the
+    # bulk of the prior row-10 environmental failures).
+    tmpfs: ["/tmp:exec,size=512m,mode=1777"]
     networks: [edge, internal, datasec]
 
 secrets:
