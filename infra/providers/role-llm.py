@@ -45,7 +45,9 @@ TIMEOUT = float(os.environ.get("OLLAMA_TIMEOUT", "25"))
 def _ollama_internal_hosts() -> tuple[str, ...]:
     raw = os.environ.get(
         "MNEMOSYNE_OLLAMA_ALLOWED_INTERNAL_HOSTS",
-        "ollama.mnemo.local,localhost,127.0.0.1,::1",
+        # host-llm.mnemo.local is the default host-Metal relay (plain HTTP on the
+        # internal-only hostllm net); ollama.mnemo.local is the in-vm-llm fallback.
+        "host-llm.mnemo.local,ollama.mnemo.local,localhost,127.0.0.1,::1",
     )
     return tuple(host.strip() for host in raw.split(",") if host.strip())
 

@@ -59,6 +59,12 @@ BEGIN
 END $$;
 REVOKE DELETE, TRUNCATE ON ALL TABLES IN SCHEMA public FROM mnemosyne_app;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO mnemosyne_consolidator;
+-- FK cascade deletes (consolidate_evidence -> justifications/contradictions)
+-- execute as the TABLE OWNER (mnemosyne_app), whose DELETE was just revoked, so
+-- the owner needs a narrow DELETE re-grant on exactly those two cascade targets.
+-- The hard-delete boundary stays RLS + the capability layer; app DELETE remains
+-- revoked everywhere else.
+GRANT DELETE ON justifications, contradictions TO mnemosyne_app;
 -- Audit rows are append-only even for write-capable runtime roles; schema.sql
 -- installs the BEFORE UPDATE/DELETE trigger that enforces this at execution.
 REVOKE UPDATE, DELETE, TRUNCATE ON audit_log FROM mnemosyne_app, mnemosyne_consolidator;
