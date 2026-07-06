@@ -3668,6 +3668,53 @@ def test_cli_provider_check_rejects_unsafe_oidc_jwks_url(tmp_path: Path) -> None
     assert "must not contain userinfo" in payload["checks"]["oidc"]["error"]
 
 
+def test_cli_provider_check_oidc_allows_configured_internal_jwks_host(tmp_path: Path) -> None:
+    """A self-hosted IdP JWKS URL on a private address is refused by default but
+    passes the SSRF guard once its host is on the provider-check OIDC
+    internal-host allowlist (the fetch then fails only at connection, proving the
+    allowlist — not a blanket bypass — is what changed). Regression: the oidc
+    subcheck used to call load_oidc_jwks without allowed_internal_hosts, so a
+    Keycloak behind a private-network ingress could never pass provider-check.
+    """
+    manifest = tmp_path / "providers.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "name": "internal-oidc-provider-check",
+                "required_checks": ["oidc"],
+                "providers": {
+                    "oidc": {
+                        "jwks_url": "https://10.255.255.1/realms/mnemosyne/jwks.json",
+                        "issuer": IDP_ISSUER,
+                        "audience": IDP_AUDIENCE,
+                        "timeout_seconds": 1,
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    rejected = run_raw_cli(tmp_path / "mnemosyne.json", "provider-check", "--provider-manifest", str(manifest))
+    rejected_payload = json.loads(rejected.stdout)
+    assert rejected_payload["checks"]["oidc"]["ok"] is False
+    assert "must not resolve to private" in rejected_payload["checks"]["oidc"]["error"]
+
+    allowed = run_raw_cli(
+        tmp_path / "mnemosyne.json",
+        "provider-check",
+        "--provider-manifest",
+        str(manifest),
+        "--provider-oidc-allowed-internal-hosts",
+        "10.255.255.1",
+    )
+    allowed_payload = json.loads(allowed.stdout)
+    assert allowed_payload["checks"]["oidc"]["ok"] is False
+    allowed_error = allowed_payload["checks"]["oidc"]["error"]
+    assert "must not resolve to private" not in allowed_error
+    assert "could not be loaded" in allowed_error
+
+
 def test_cli_provider_check_validates_session_secret_command_without_sensitive_values(tmp_path: Path) -> None:
     command = fake_session_secret_command(
         tmp_path,

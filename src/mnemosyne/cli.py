@@ -16992,6 +16992,16 @@ def cmd_provider_check(args: argparse.Namespace) -> None:
         try:
             if not oidc_fields["issuer"] or not oidc_fields["audience"]:
                 raise SessionAuthError("OIDC provider check requires issuer and audience")
+            # A self-hosted IdP (e.g. Keycloak behind a private-network Caddy
+            # ingress) resolves to a private address; without this allowlist the
+            # JWKS fetch is rejected as an SSRF risk and the oidc subcheck can
+            # never pass on a self-hosted deployment. Mirrors the idp-jwks-live
+            # and hosted-check allowlist seams (MNEMOSYNE_IDP_ALLOWED_INTERNAL_HOSTS).
+            oidc_allowed_internal_hosts = tuple(
+                host.strip()
+                for host in str(getattr(args, "provider_oidc_allowed_internal_hosts", "") or "").split(",")
+                if host.strip()
+            )
             jwks_document = load_oidc_jwks(
                 jwks=oidc_fields["jwks"],
                 jwks_file=oidc_fields["jwks_file"],
@@ -16999,6 +17009,7 @@ def cmd_provider_check(args: argparse.Namespace) -> None:
                 allow_insecure_url=bool(getattr(args, "provider_oidc_allow_insecure_jwks_url", False)),
                 timeout=float(getattr(args, "provider_oidc_timeout", 10.0)),
                 max_bytes=int(getattr(args, "provider_oidc_jwks_max_bytes", 1024 * 1024)),
+                allowed_internal_hosts=oidc_allowed_internal_hosts,
             )
             keys = jwks_document.get("keys") if isinstance(jwks_document, dict) else None
             if not isinstance(keys, list) or not keys:
@@ -18508,6 +18519,17 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=float(os.environ.get("MNEMOSYNE_PROVIDER_CHECK_MAX_P95_LATENCY_MS", "2000")),
         help="Fail provider-check when embedding or reranker p95 latency exceeds this threshold",
+    )
+    provider_check.add_argument(
+        "--provider-oidc-allowed-internal-hosts",
+        default=os.environ.get("MNEMOSYNE_IDP_ALLOWED_INTERNAL_HOSTS", ""),
+        help=(
+            "Comma-separated internal/private hostnames the OIDC JWKS URL may "
+            "resolve to for a self-hosted IdP behind a private-network ingress. "
+            "Mirrors idp-jwks-live-check's --idp-allowed-internal-hosts; without "
+            "it the JWKS fetch is refused as an SSRF risk and the oidc subcheck "
+            "can never pass on a self-hosted deployment."
+        ),
     )
     provider_check.set_defaults(func=cmd_provider_check)
 
