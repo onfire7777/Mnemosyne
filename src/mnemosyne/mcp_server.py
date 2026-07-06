@@ -14,29 +14,18 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import UnionType
-from typing import Any, Literal, TextIO, Union, get_args, get_origin, get_type_hints
+from typing import TYPE_CHECKING, Any, Literal, TextIO, Union, get_args, get_origin, get_type_hints
 from urllib.parse import parse_qsl, unquote, urlsplit
 
-from mnemosyne.engine import LocalMemoryEngine
-from mnemosyne.ingestion import IngestionPipeline
-from mnemosyne.mcp_tools import MemoryTools, TOOL_SPEC
-from mnemosyne.oidc_jwks import load_oidc_authorization_policy, load_oidc_jwks, oidc_jwks_loader
-from mnemosyne.parametric import CommandParametricTrainer, ParametricArtifactStore, ParametricTier
-from mnemosyne.postgres_security import postgres_safe_role_required
-from mnemosyne.postgres_runtime_state import PostgresRuntimeState
-from mnemosyne.queue import InProcessQueue, PostgresQueue, SqliteQueue
-from mnemosyne.runtime_state import RuntimeState
-from mnemosyne.security import (
-    OidcJwtVerifier,
-    SessionAuthError,
-    SessionIdentity,
-    SessionTokenVerifier,
-    issue_session_from_oidc,
-    load_session_secret_command,
-    parse_session_keyring,
-    parse_session_revoke_list,
-)
-from mnemosyne.storage import CommandKeyManager, EncryptedLocalObjectStore, JsonKeyManager, LocalObjectStore
+# The engine graph, storage, and security modules (which pull `cryptography`)
+# dominate cold-start cost, so they are imported lazily at first use — the
+# same pattern as cli.py. Only annotation-time names live here.
+if TYPE_CHECKING:
+    from mnemosyne.mcp_tools import MemoryTools
+    from mnemosyne.parametric import CommandParametricTrainer
+    from mnemosyne.runtime_state import RuntimeState
+    from mnemosyne.security import SessionIdentity, SessionTokenVerifier
+    from mnemosyne.storage import LocalObjectStore
 
 
 PROTOCOL_VERSION = "2024-11-05"
@@ -174,6 +163,8 @@ class MnemosyneMcpServer:
             else _env_flag("MNEMOSYNE_MCP_REQUIRE_SESSION", default=False)
         )
         self._enforce_production_profile()
+        from mnemosyne.mcp_tools import TOOL_SPEC
+
         self.tool_names = {item["name"] for item in TOOL_SPEC}
         self.tool_specs = [_to_mcp_tool_spec(item) for item in TOOL_SPEC]
         self.tool_schemas_by_name = {item["name"]: item["inputSchema"] for item in self.tool_specs}
@@ -181,6 +172,15 @@ class MnemosyneMcpServer:
             self.engine, self.queue, self.runtime_state, self.tools = self._build_tools()
 
     def _build_tools(self, queue_tenant: str | None = None) -> tuple[Any, Any, Any, MemoryTools]:
+        from mnemosyne.engine import LocalMemoryEngine
+        from mnemosyne.ingestion import IngestionPipeline
+        from mnemosyne.mcp_tools import MemoryTools
+        from mnemosyne.parametric import ParametricArtifactStore, ParametricTier
+        from mnemosyne.postgres_runtime_state import PostgresRuntimeState
+        from mnemosyne.postgres_security import postgres_safe_role_required
+        from mnemosyne.queue import InProcessQueue, PostgresQueue, SqliteQueue
+        from mnemosyne.runtime_state import RuntimeState
+
         if self.backend == "postgres":
             dsn = self.postgres_dsn or os.environ.get("MNEMOSYNE_POSTGRES_DSN")
             if not dsn:
@@ -262,6 +262,8 @@ class MnemosyneMcpServer:
 
     @staticmethod
     def _save_queue(runtime_state: RuntimeState | None, queue: Any) -> None:
+        from mnemosyne.queue import InProcessQueue
+
         if runtime_state and isinstance(queue, InProcessQueue):
             runtime_state.save_queue(queue)
 
@@ -330,6 +332,8 @@ class MnemosyneMcpServer:
     ) -> dict[str, Any]:
         """Strip transport metadata and bind signed session claims to tool args."""
 
+        from mnemosyne.security import SessionAuthError
+
         if not isinstance(arguments, dict):
             raise ValueError("Tool arguments must be a JSON object")
         clean_arguments = dict(arguments)
@@ -360,6 +364,14 @@ class MnemosyneMcpServer:
         return self._bind_session_identity(name, clean_arguments, identity)
 
     def _session_verifier(self) -> SessionTokenVerifier | None:
+        from mnemosyne.security import (
+            SessionAuthError,
+            SessionTokenVerifier,
+            load_session_secret_command,
+            parse_session_keyring,
+            parse_session_revoke_list,
+        )
+
         keyring = parse_session_keyring(self.session_keyring)
         revoked_key_ids = parse_session_revoke_list(self.session_revoked_key_ids)
         revoked_session_ids = parse_session_revoke_list(self.session_revoked_ids)
@@ -437,6 +449,8 @@ class MnemosyneMcpServer:
 
     @staticmethod
     def _tool_parameter_names(name: str) -> set[str]:
+        from mnemosyne.mcp_tools import MemoryTools
+
         if not hasattr(MemoryTools, name):
             return set()
         signature = inspect.signature(getattr(MemoryTools, name))
@@ -472,6 +486,8 @@ class MnemosyneMcpServer:
 
 
 def _to_mcp_tool_spec(spec: dict[str, Any]) -> dict[str, Any]:
+    from mnemosyne.mcp_tools import MemoryTools
+
     method = getattr(MemoryTools, spec["name"], None)
     if method is None:
         properties = {arg: {"type": "string"} for arg in spec["arguments"]}
@@ -809,6 +825,9 @@ def build_http_server(
 ) -> ThreadingHTTPServer:
     """Build a hosted HTTP JSON-RPC transport around the MCP facade."""
 
+    from mnemosyne.oidc_jwks import load_oidc_authorization_policy, load_oidc_jwks, oidc_jwks_loader
+    from mnemosyne.security import OidcJwtVerifier
+
     facade = MnemosyneMcpServer(**kwargs)
     facade_lock = threading.RLock()
     rpc_path = _normalize_http_path(rpc_path)
@@ -941,6 +960,8 @@ def build_http_server(
             return request
 
         def _handle_session_exchange(self) -> None:
+            from mnemosyne.security import SessionAuthError, issue_session_from_oidc
+
             if idp_verifier is None:
                 self._send_json(404, {"ok": False, "error": "session exchange is not configured"})
                 return
@@ -1218,6 +1239,8 @@ def _self_test_auth_params(server: MnemosyneMcpServer, *, include_session: bool)
 
 
 def _self_test_session_token(server: MnemosyneMcpServer) -> str | None:
+    from mnemosyne.security import SessionIdentity
+
     verifier = server._session_verifier()
     if verifier is None:
         return None
@@ -1279,6 +1302,8 @@ def _load_parametric_trainer(
     adapter_kind: str,
     timeout: float,
 ) -> CommandParametricTrainer | None:
+    from mnemosyne.parametric import CommandParametricTrainer
+
     if provider == "local":
         return None
     if provider == "command":
@@ -1336,6 +1361,8 @@ def _load_object_store(
     key_command: str | None,
     key_timeout: float,
 ) -> LocalObjectStore:
+    from mnemosyne.storage import CommandKeyManager, EncryptedLocalObjectStore, JsonKeyManager, LocalObjectStore
+
     if encryption == "aesgcm":
         if key_provider == "command":
             if not key_command:

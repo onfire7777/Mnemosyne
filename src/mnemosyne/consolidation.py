@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import secrets
 import shlex
@@ -19,7 +20,7 @@ from mnemosyne.learning import Lesson, Procedure
 from mnemosyne.lifecycle import FidelityTier, LifecycleState, apply_rehearsal_schedule, demotion_decision
 from mnemosyne.models import Assertion, Evidence, Relation, utc_now
 from mnemosyne.privacy import detect_pii_tags, redact_pii_text
-from mnemosyne.retrieval import is_retired_summary_metadata
+from mnemosyne.retrieval import HashingEmbeddingProvider, is_retired_summary_metadata
 from mnemosyne.security import SecurityPolicy, TrustTier
 from mnemosyne.standing import standing_from_authority_state
 from mnemosyne.text import hashing_embedding
@@ -40,11 +41,56 @@ DEFAULT_CONSOLIDATION_PASSES = [
     "user_model_updater",
 ]
 REPLAY_PRIORITY_FACTORS = ("importance", "novelty", "surprise", "reward")
+DEFAULT_EMBED_BATCH_SIZE = 32
 PROVIDER_PROPOSAL_SOURCE_TYPE = "provider-proposal"
 _PROVIDER_PROPOSAL_VERSION = 1
 _PROVIDER_PROPOSAL_MAX_STRING_CHARS = 1024
 _PROVIDER_PROPOSAL_MAX_ITEMS = 32
 _PROVIDER_PROPOSAL_MAX_DEPTH = 6
+
+
+def _embed_batch_size() -> int:
+    """Chunk size for the embedder pass, from MNEMOSYNE_EMBED_BATCH_SIZE.
+
+    Invalid or non-positive values fall back to the shipped default; chunk
+    size only shapes transport batching, never the resulting vectors.
+    """
+    raw = os.environ.get("MNEMOSYNE_EMBED_BATCH_SIZE", "").strip()
+    if not raw:
+        return DEFAULT_EMBED_BATCH_SIZE
+    try:
+        value = int(raw)
+    except ValueError:
+        return DEFAULT_EMBED_BATCH_SIZE
+    return value if value > 0 else DEFAULT_EMBED_BATCH_SIZE
+
+
+def embed_texts_batched(
+    provider: Any,
+    texts: Sequence[str],
+    *,
+    batch_size: int | None = None,
+) -> list[list[float]]:
+    """Embed ``texts`` in order, chunked so batch-capable providers get one call per chunk.
+
+    Providers exposing ``embed_many`` (e.g. ``HttpEmbeddingProvider``) receive
+    each chunk whole; others fall back to per-item ``embed``. Both paths are
+    order-preserving and must produce vectors identical to sequential
+    ``embed`` calls — chunking is purely a transport optimization.
+    """
+    size = batch_size if batch_size is not None and batch_size > 0 else _embed_batch_size()
+    embed_many = getattr(provider, "embed_many", None)
+    vectors: list[list[float]] = []
+    for start in range(0, len(texts), size):
+        chunk = list(texts[start : start + size])
+        if callable(embed_many):
+            batch = list(embed_many(chunk))
+            if len(batch) != len(chunk):
+                raise ValueError("embed_many must return exactly one vector per input text")
+            vectors.extend(batch)
+        else:
+            vectors.extend(provider.embed(text) for text in chunk)
+    return vectors
 
 
 def _summary_source_fingerprint(source_cids: Sequence[str], *, level: int = 1) -> str:
@@ -1372,13 +1418,22 @@ class ConsolidationWorker:
         failed_cids: list[str] = []
         already_embedded = 0
         dims = self._embedding_dims()
+        pending: list[Evidence] = []
         for item in evidence:
             if not item.cid:
                 continue
             if item.embedding is not None:
                 already_embedded += 1
                 continue
-            vector = hashing_embedding(item.content, dims=dims)
+            pending.append(item)
+        # The canonical per-item function is hashing_embedding(content, dims);
+        # HashingEmbeddingProvider.embed is exactly that call, so the chunked
+        # batch seam yields byte-identical vectors in evidence order.
+        vectors = embed_texts_batched(
+            HashingEmbeddingProvider(dims=dims),
+            [item.content for item in pending],
+        )
+        for item, vector in zip(pending, vectors, strict=True):
             updated = bool(
                 set_embedding(
                     tenant_id,

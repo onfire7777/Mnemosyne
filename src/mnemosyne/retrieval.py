@@ -1064,6 +1064,9 @@ class HashingEmbeddingProvider:
     def embed(self, text: str) -> list[float]:
         return hashing_embedding(text, dims=self.dims)
 
+    def embed_many(self, texts: Sequence[str]) -> list[list[float]]:
+        return [self.embed(text) for text in texts]
+
 
 @dataclass(frozen=True, slots=True)
 class LocalSimilarityReranker:
@@ -1121,6 +1124,35 @@ class HttpEmbeddingProvider:
         response = _post_json(self.url, payload, self.api_key, self.timeout_seconds)
         vector = _extract_embedding(response)
         return _normalize_vector(vector, self.dims)
+
+    def embed_many(self, texts: Sequence[str]) -> list[list[float]]:
+        """Embed a batch of texts through the service's OpenAI-style list input.
+
+        Sends one request with ``{"input": [...]}`` and reads the batch
+        response (``data[i].embedding`` ordered by ``index``). Servers without
+        the batch route (HTTP 4xx on a list payload) and responses without a
+        usable batch shape fall back to per-item ``embed`` calls, so results
+        and their order always match the sequential path exactly.
+        """
+        items = list(texts)
+        if not items:
+            return []
+        if len(items) == 1:
+            return [self.embed(items[0])]
+        payload: dict[str, object] = {"input": items}
+        if self.model:
+            payload["model"] = self.model
+        try:
+            response = _post_json(self.url, payload, self.api_key, self.timeout_seconds)
+        except _ProviderHttpError as exc:
+            if 400 <= exc.code < 500:
+                return [self.embed(text) for text in items]
+            raise
+        try:
+            vectors = _extract_embeddings_batch(response, expected=len(items))
+        except ValueError:
+            return [self.embed(text) for text in items]
+        return [_normalize_vector(vector, self.dims) for vector in vectors]
 
     def embed_query(self, query: str) -> list[float]:
         return self.embed(_with_query_prefix(query, self.query_prefix))
@@ -1845,6 +1877,19 @@ def _required_env(name: str) -> str:
     return value
 
 
+class _ProviderHttpError(ValueError):
+    """HTTP-status failure from a provider endpoint.
+
+    Subclasses ``ValueError`` so existing callers' error handling is
+    unchanged; carries the status code so batch callers can feature-detect a
+    missing batch route (4xx) without parsing the message.
+    """
+
+    def __init__(self, message: str, code: int):
+        super().__init__(message)
+        self.code = code
+
+
 def _post_json(url: str, payload: dict[str, object], api_key: str | None, timeout: float) -> dict[str, object]:
     validated_url = _validate_http_provider_config(url, timeout)
     body = json.dumps(payload).encode("utf-8")
@@ -1858,8 +1903,9 @@ def _post_json(url: str, payload: dict[str, object], api_key: str | None, timeou
     except urllib.error.HTTPError as exc:
         reason = str(getattr(exc, "reason", "") or "").strip()
         suffix = f" {reason}" if reason else ""
-        raise ValueError(
-            f"provider returned HTTP {exc.code}{suffix}; response body omitted"
+        raise _ProviderHttpError(
+            f"provider returned HTTP {exc.code}{suffix}; response body omitted",
+            code=int(exc.code),
         ) from exc
     except urllib.error.URLError as exc:
         raise ValueError(f"provider request failed: {exc.reason}") from exc
@@ -1879,6 +1925,31 @@ def _extract_embedding(response: dict[str, object]) -> list[float]:
     if isinstance(data, list) and data and isinstance(data[0], dict) and isinstance(data[0].get("embedding"), list):
         return _coerce_vector(data[0]["embedding"], field="data[0].embedding")
     raise ValueError("embedding response must contain `embedding` or `data[0].embedding`")
+
+
+def _extract_embeddings_batch(response: dict[str, object], expected: int) -> list[list[float]]:
+    """Parse an OpenAI-style batch embedding response into input order.
+
+    Entries are placed by their ``index`` field (defaulting to list position),
+    so a server may return them out of order; every input index must be
+    covered exactly once.
+    """
+    data = response.get("data")
+    if not isinstance(data, list) or len(data) != expected:
+        raise ValueError("batch embedding response must contain a `data` list matching the input length")
+    vectors: list[list[float] | None] = [None] * expected
+    for position, item in enumerate(data):
+        if not isinstance(item, dict) or not isinstance(item.get("embedding"), list):
+            raise ValueError("batch embedding entries must contain `embedding`")
+        index = item.get("index", position)
+        if not isinstance(index, int) or isinstance(index, bool) or not 0 <= index < expected:
+            raise ValueError("batch embedding entry index out of range")
+        if vectors[index] is not None:
+            raise ValueError("batch embedding entry index duplicated")
+        vectors[index] = _coerce_vector(item["embedding"], field=f"data[{index}].embedding")
+    if any(vector is None for vector in vectors):
+        raise ValueError("batch embedding entries must cover every input index")
+    return [vector for vector in vectors if vector is not None]
 
 
 def _extract_rerank_scores(response: dict[str, object]) -> list[tuple[int, float]]:
