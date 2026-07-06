@@ -184,7 +184,7 @@ def _service_networks(services: dict[str, str], name: str) -> set[str]:
     mapping = re.search(r"^    networks:[^\n]*\n((?:      .*\n)*)", block + "\n", re.MULTILINE)
     if not mapping:
         return set()
-    return set(re.findall(r"^      (edge|internal|datasec|hostllm):", mapping.group(1), re.MULTILINE))
+    return set(re.findall(r"^      (edge|internal|datasec|hostllm|hostbridge):", mapping.group(1), re.MULTILINE))
 
 
 def test_network_segmentation_holds() -> None:
@@ -206,18 +206,15 @@ def test_network_segmentation_holds() -> None:
 def test_host_llm_relay_network_is_least_privilege() -> None:
     """The default host-llm relay bridges to the host's unauthenticated Ollama.
 
-    It must sit on its own dedicated client network (hostllm) plus edge (the
-    host-gateway route) — never the general internal network — and only the
-    sanctioned LLM clients may join hostllm, so caddy/api/metrics can never
-    reach the VM→host bridge. host-Metal is the committed default LLM path, so
-    the sanctioned clients are the consolidator, role-http, and the two
-    profile-gated bastions (operator, test-runner). test-runner already holds
-    edge (direct host access), so hostllm grants it no new reach — only the
-    relay alias resolution.
+    It must sit on its OWN dedicated host-egress network (hostbridge, relay-only)
+    plus the client network (hostllm) — never edge or the general internal
+    network — so caddy/api/stream can never reach the unauthenticated VM→host
+    bridge, and only the sanctioned LLM clients (consolidator, role-http, and the
+    profile-gated operator/test-runner bastions) may join hostllm.
     """
     services = _service_blocks(_compose_text())
-    assert _service_networks(services, "host-llm-proxy") == {"edge", "hostllm"}, (
-        "the relay is edge (host-gateway route) + hostllm only — NOT internal"
+    assert _service_networks(services, "host-llm-proxy") == {"hostbridge", "hostllm"}, (
+        "the relay is hostbridge (relay-only host-gateway route) + hostllm only — NOT edge/internal"
     )
     on_hostllm = {name for name in services if "hostllm" in _service_networks(services, name)}
     assert on_hostllm == {"host-llm-proxy", "mnemo-consolidator", "role-http", "operator", "test-runner"}, (
