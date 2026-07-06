@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS evidence (
   access_policy JSONB NOT NULL DEFAULT '{}'::jsonb,
   embedding VECTOR(1024),
   embedding_partition TEXT NOT NULL DEFAULT 'none' CHECK (embedding_partition IN ('public', 'private', 'none')),
+  lexeme TSVECTOR GENERATED ALWAYS AS (to_tsvector('english', coalesce(content, ''))) STORED,
   erased BOOLEAN NOT NULL DEFAULT false,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (tenant_id, branch, cid),
@@ -48,6 +49,7 @@ CREATE TABLE IF NOT EXISTS evidence (
 
 CREATE INDEX IF NOT EXISTS evidence_embedding_public_hnsw ON evidence USING hnsw (embedding vector_cosine_ops) WHERE embedding_partition = 'public';
 CREATE INDEX IF NOT EXISTS evidence_embedding_private_hnsw ON evidence USING hnsw (embedding vector_cosine_ops) WHERE embedding_partition = 'private';
+CREATE INDEX IF NOT EXISTS evidence_lexeme_gin ON evidence USING gin (lexeme);
 
 CREATE TABLE IF NOT EXISTS assertions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -557,3 +559,12 @@ CREATE TABLE IF NOT EXISTS graph_ppr_cache (
 
 -- preferences: supersession pointer for revised preferences.
 ALTER TABLE preferences ADD COLUMN IF NOT EXISTS superseded_by UUID;
+
+-- evidence: stored lexical tsvector (mirrors assertions.lexeme) + GIN index so
+-- full-text search stops recomputing to_tsvector('english', content) per row
+-- at query time. GENERATED ALWAYS pins the column to exactly the prior
+-- query-time expression, keeping ranking inputs byte-identical; the engine
+-- also applies this idempotently at runtime (_ensure_evidence_lexeme_schema).
+ALTER TABLE evidence ADD COLUMN IF NOT EXISTS lexeme TSVECTOR
+  GENERATED ALWAYS AS (to_tsvector('english', coalesce(content, ''))) STORED;
+CREATE INDEX IF NOT EXISTS evidence_lexeme_gin ON evidence USING gin (lexeme);
