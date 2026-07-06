@@ -48,7 +48,12 @@ services:
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
-      - ${MNEMO_SECRETS_DIR:-/secure/outside/repo}/step-ca-root.crt:/data/step-ca-root.crt:ro
+      # Caddy's ACME issuer + mTLS trust_pool must chain to step-ca's REAL live
+      # root only. The general step-ca-root.crt is a two-root bundle (Vault's
+      # cert is from an orphaned older CA generation); Go x509 rejects the
+      # duplicate-Subject bundle during ACME (ECDSA verify failure), so Caddy
+      # gets a dedicated single-root file = step-ca's current root_ca.crt.
+      - ${MNEMO_SECRETS_DIR:-/secure/outside/repo}/stepca-acme-root.crt:/data/step-ca-root.crt:ro
       - ops_dashboard:/pub:ro
     tmpfs: ["/config:size=16m"]
     networks:                              # internal = proxy backhaul to tei/s3/grafana; aliases give
