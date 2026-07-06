@@ -13,7 +13,6 @@ import zlib
 
 import pytest
 
-from mnemosyne.ids import bytes_cid
 from mnemosyne.media_embedded_text import extract_embedded_text
 from mnemosyne.storage import (
     EncryptedS3ObjectStore,
