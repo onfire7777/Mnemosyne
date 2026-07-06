@@ -87,7 +87,10 @@ Realized over these concrete loci:
   store version, store sizes, policy ceilings, access-context fingerprint) and
   hands every caller independent clones, and `SqliteEngine._scan_oracle`
   memoizes the hydrated scan oracle keyed on the sqlite write fingerprints
-  (`total_changes` + `PRAGMA data_version`). Results are byte-parity-proven
+  (`total_changes` + `PRAGMA data_version`). Memo entries additionally carry
+  the earliest future `access_policy.expires_at` in scope and go stale once
+  the clock crosses it, so a cached scan can never outlive a policy expiry
+  (`tests/test_candidate_memo_expiry.py`). Results are byte-parity-proven
   against the unmemoized path (`tests/test_engine_perf_lanes.py`), so the
   switch selects speed, never behavior.
 - **`MNEMOSYNE_PARALLEL_CHANNELS`** — set to `1` to run the dense/lexical/graph

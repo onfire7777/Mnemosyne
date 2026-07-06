@@ -997,16 +997,31 @@ def _intersects_if_policy_set(policy_value: Any, context_value: Any, *, allow_ab
     return bool(policy_set & context_set)
 
 
-def _expired(value: Any) -> bool:
+def expiry_deadline(value: Any) -> datetime | None:
+    """Aware-UTC instant at which an ``expires_at`` value flips allow→deny.
+
+    Returns None when the value can never change a read decision over time:
+    absent/empty never expires, and an unparseable value is already treated as
+    permanently expired by :func:`_expired` (deny now and forever).
+    """
     if not value:
-        return False
+        return None
     try:
         parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
     except ValueError:
-        return True
+        return None
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=UTC)
-    return parsed.astimezone(UTC) <= datetime.now(UTC)
+    return parsed.astimezone(UTC)
+
+
+def _expired(value: Any) -> bool:
+    if not value:
+        return False
+    deadline = expiry_deadline(value)
+    if deadline is None:
+        return True
+    return deadline <= datetime.now(UTC)
 
 
 def _str_set(value: Any) -> set[str]:

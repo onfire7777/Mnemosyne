@@ -20,6 +20,7 @@ from mnemosyne.access_policy import (
     apply_statement_redactions,
     apply_text_redactions,
     effective_max_sensitivity,
+    expiry_deadline,
     filter_export_for_context,
     may_embed_item,
     may_read_item,
@@ -479,7 +480,10 @@ class LocalMemoryEngine:
         # (including belief.py's direct-dict writers) already reach, even when
         # store_path is unset — so any committed write invalidates the memo.
         self._store_version = 0
-        self._candidate_memo: OrderedDict[tuple[Any, ...], list[Hit]] = OrderedDict()
+        # Entries carry the earliest future access-policy expiry in scope: the
+        # scan is time-dependent through expires_at, so a cached result is only
+        # valid until that first allow→deny flip (None = no pending flip).
+        self._candidate_memo: OrderedDict[tuple[Any, ...], tuple[datetime | None, list[Hit]]] = OrderedDict()
         self._candidate_memo_lock = threading.Lock()
         if self.store_path and self.store_path.exists():
             self._load()
@@ -2646,18 +2650,57 @@ class LocalMemoryEngine:
             # reprs of equal contexts only cost a miss, never a wrong hit.
             repr(sorted(filt.items())),
         )
+        now = utc_now()
+        cached: list[Hit] | None = None
         with self._candidate_memo_lock:
-            cached = self._candidate_memo.get(key)
-            if cached is not None:
-                self._candidate_memo.move_to_end(key)
+            entry = self._candidate_memo.get(key)
+            if entry is not None:
+                deadline, cached = entry
+                if deadline is not None and now >= deadline:
+                    # An access_policy.expires_at in scope has passed: the
+                    # scan's may_read_item decisions changed with NO write, so
+                    # the entry is stale despite the unchanged version key.
+                    del self._candidate_memo[key]
+                    cached = None
+                else:
+                    self._candidate_memo.move_to_end(key)
         if cached is None:
             cached = self._candidate_hits_uncached(filt)
+            # Cutoff at the pre-scan `now`: an expiry crossing during the scan
+            # lands <= a later lookup's clock, forcing a rescan (never a stale
+            # serve). Expiries already past never flip back — no deadline.
+            deadline = self._candidate_memo_deadline(
+                filt.get("tenant_id"), filt.get("branch", "main"), now
+            )
             with self._candidate_memo_lock:
-                self._candidate_memo[key] = cached
+                self._candidate_memo[key] = (deadline, cached)
                 self._candidate_memo.move_to_end(key)
                 while len(self._candidate_memo) > _CANDIDATE_MEMO_SIZE:
                     self._candidate_memo.popitem(last=False)
         return [_clone_candidate_hit(hit) for hit in cached]
+
+    def _candidate_memo_deadline(self, tenant_id: Any, branch: Any, now: datetime) -> datetime | None:
+        """Earliest future ``expires_at`` across the rows a candidate scan reads.
+
+        ``may_read_item`` is time-dependent only through ``expires_at`` (a
+        monotone allow→deny flip), so a memoized scan stays valid exactly until
+        the first future deadline in scope. Denied-for-other-reasons rows are
+        included conservatively: their deadline costs one extra rescan, never a
+        wrong cached hit.
+        """
+        deadline: datetime | None = None
+        policies = (
+            *(ev.access_policy for ev in self.evidence.values() if ev.tenant_id == tenant_id and ev.branch == branch),
+            *(a.access_policy for a in self.assertions.values() if a.tenant_id == tenant_id and a.branch == branch),
+            *(p.access_policy for p in self.preferences.values() if p.tenant_id == tenant_id),
+        )
+        for policy in policies:
+            if not policy:
+                continue
+            candidate = expiry_deadline(policy.get("expires_at"))
+            if candidate is not None and candidate > now and (deadline is None or candidate < deadline):
+                deadline = candidate
+        return deadline
 
     def _candidate_hits_uncached(self, filt: dict[str, Any]) -> list[Hit]:
         tenant_id = filt.get("tenant_id")
