@@ -13,6 +13,7 @@ from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from mnemosyne.access_policy import (
+    AccessDecision,
     apply_relation_redactions,
     apply_statement_redactions,
     apply_text_redactions,
@@ -4288,6 +4289,10 @@ class PostgresEngine:
             # rows instead of re-hashing hit text. Hits without a stored
             # vector (partition 'none', erased rows, non-row kinds) hit
             # mmr_select's missing-vector guards: relevance 0, no penalty.
+            # _stored_hit_vectors applies the same may_use_stored_embedding
+            # gate as the vector channel: a private-partition row whose
+            # caller decision was redacted falls back to the hashing
+            # embedding of its (already redacted) hit text.
             vectors = self._stored_hit_vectors(hits)
             return mmr_select(
                 hits,
@@ -4312,22 +4317,63 @@ class PostgresEngine:
     def _stored_hit_vectors(self, hits: list[Hit]) -> dict[tuple[str, str], list[float]]:
         """Fetch stored pgvector embeddings for evidence/assertion hits.
 
-        Policy gating is inherited from the write path: rows restricted to
-        ``embedding_partition = 'none'`` (and erased rows) store NULL
-        embeddings, so they simply produce no vector here.
+        Policy gating is layered. Rows restricted to ``embedding_partition =
+        'none'`` (and erased rows) store NULL embeddings, so they simply
+        produce no vector here. On top of that, the same
+        ``may_use_stored_embedding`` gate the dense/vector channels apply
+        (see vector_search) runs per returned row: a private-partition raw
+        vector must never influence ranking for a caller whose access
+        decision was redacted — those hits fall back to the hashing
+        embedding of their (already redacted) hit text instead.
         """
         evidence_scope: dict[tuple[str, str], dict[bytes, str]] = defaultdict(dict)
         assertion_scope: dict[tuple[str, str], set[str]] = defaultdict(set)
+        hit_by_key: dict[tuple[str, str], Hit] = {}
         for hit in hits:
             scope = (hit.tenant_id, hit.branch)
             if hit.kind == "evidence":
                 cid_bytes = _cid_bytes_or_none(hit.id)
                 if cid_bytes is not None:
                     evidence_scope[scope][cid_bytes] = hit.id
+                    hit_by_key[("evidence", hit.id)] = hit
             elif hit.kind == "assertion":
                 assertion_scope[scope].add(hit.id)
+                hit_by_key[("assertion", hit.id)] = hit
         if not evidence_scope and not assertion_scope:
             return {}
+
+        def gated_vector(
+            key: tuple[str, str],
+            vector: list[float],
+            sensitivity: Any,
+            access_policy: Any,
+            embedding_partition: Any,
+        ) -> list[float]:
+            hit = hit_by_key[key]
+            privacy = hit.metadata.get("privacy") if isinstance(hit.metadata, dict) else None
+            if not isinstance(privacy, dict):
+                privacy = {}
+            # Reconstruct the caller's per-hit access decision recorded by the
+            # retrieval channel (_redaction_metadata): every hit reaching MMR
+            # already passed may_read_item (allowed=True); the redaction bit
+            # is what may_use_stored_embedding keys on for the private
+            # partition. Missing privacy metadata is treated as redacted.
+            decision = AccessDecision(
+                allowed=True,
+                reason=str(privacy.get("access_decision", "mmr_stored_space")),
+                role=str(privacy.get("role", "")),
+                ceiling=int(privacy.get("effective_max_sensitivity", 0) or 0),
+                redacted=bool(privacy.get("redacted", True)),
+            )
+            if may_use_stored_embedding(
+                decision=decision,
+                sensitivity=int(sensitivity or 0),
+                access_policy=dict(access_policy or {}),
+                embedding_partition=str(embedding_partition or ""),
+            ):
+                return vector
+            return hashing_embedding(hit.text)
+
         vectors: dict[tuple[str, str], list[float]] = {}
         with self.connect() as conn:
             with conn.cursor() as cur:
@@ -4338,24 +4384,28 @@ class PostgresEngine:
                     cid_map = evidence_scope.get(scope, {})
                     if cid_map:
                         cur.execute(
-                            "SELECT cid, embedding::text FROM evidence WHERE tenant_id = %s AND branch = %s AND cid = ANY(%s)",
+                            "SELECT cid, embedding::text, sensitivity, access_policy, embedding_partition"
+                            " FROM evidence WHERE tenant_id = %s AND branch = %s AND cid = ANY(%s)",
                             (db_tenant_id, branch, list(cid_map)),
                         )
-                        for cid_value, literal in cur.fetchall():
+                        for cid_value, literal, sensitivity, access_policy, partition in cur.fetchall():
                             vector = _vector_from_literal(literal)
                             raw = cid_value.tobytes() if isinstance(cid_value, memoryview) else bytes(cid_value)
                             if vector is not None and raw in cid_map:
-                                vectors[("evidence", cid_map[raw])] = vector
+                                key = ("evidence", cid_map[raw])
+                                vectors[key] = gated_vector(key, vector, sensitivity, access_policy, partition)
                     assertion_ids = assertion_scope.get(scope, set())
                     if assertion_ids:
                         cur.execute(
-                            "SELECT id::text, embedding::text FROM assertions WHERE tenant_id = %s AND branch = %s AND id = ANY(%s::uuid[])",
+                            "SELECT id::text, embedding::text, sensitivity, access_policy, embedding_partition"
+                            " FROM assertions WHERE tenant_id = %s AND branch = %s AND id = ANY(%s::uuid[])",
                             (db_tenant_id, branch, sorted(assertion_ids)),
                         )
-                        for assertion_id, literal in cur.fetchall():
+                        for assertion_id, literal, sensitivity, access_policy, partition in cur.fetchall():
                             vector = _vector_from_literal(literal)
                             if vector is not None and assertion_id in assertion_ids:
-                                vectors[("assertion", assertion_id)] = vector
+                                key = ("assertion", assertion_id)
+                                vectors[key] = gated_vector(key, vector, sensitivity, access_policy, partition)
         return vectors
 
     @staticmethod
