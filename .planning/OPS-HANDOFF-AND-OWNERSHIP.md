@@ -1,16 +1,16 @@
 # Mnemosyne — Deployment & Operations Handoff + Ownership Registry
 
-**Date:** 2026-06-29
+**Date:** 2026-06-29; refreshed 2026-07-07 after Tier-B attestation
 **Type:** Ops/deployment coordination + artifact-ownership registry. **NOT a coding plan.**
-**Scope source (do not recompute):** `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md` (10 "Partial" rows) and memory `mnemosyne-topology-and-status`.
+**Scope source (do not recompute):** `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md` (10 rows now Done by attested evidence) and retained `capture-bc10` evidence.
 
 ---
 
 ## 0. DO-NOT-REDERIVE RULE — read first, load-bearing
 
-1. **The current split is SETTLED by `docs/ROADMAP-TO-100.md` and `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md`.** Tier A code/local readiness is closed; all 10 production-evidence rows remain Partial until operator-captured production evidence exists. Do not recompute, re-score, or re-audit percentages.
-2. **The machine-checkable gate layer is COMPLETE.** All 28 `PRODUCTION_RELEASE_REQUIRED_COMMANDS` already have output-shape validators in `RELEASE_AUDIT_REQUIRED_OUTPUT_KEYS` (`cli.py`). **Do NOT add new `*-ops-check` gates** — they add zero parity value and re-derive the split.
-3. **Every "Partial" row is OPS SCOPE, not coding.** Closing a Partial row = run the existing gate against *real infrastructure* and capture operator evidence. If a task reads as "write code to close a Partial row," STOP — it is mis-scoped.
+1. **The current split is SETTLED by `docs/ROADMAP-TO-100.md` and `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md`.** Tier A code/local readiness is closed; the 10 production-evidence rows are now Done because operator-captured production evidence exists. Do not recompute, re-score, or re-audit percentages from planning text.
+2. **The machine-checkable gate layer is COMPLETE.** All 29 `PRODUCTION_RELEASE_REQUIRED_COMMANDS` have output-shape validators in `RELEASE_AUDIT_REQUIRED_OUTPUT_KEYS` (`cli.py`). **Do NOT add new `*-ops-check` gates** — they add zero parity value and re-derive the split.
+3. **Before the 2026-07-07 capture, every "Partial" row was OPS SCOPE, not coding.** Closing a row = run the existing gate against *real infrastructure* and capture operator evidence. If a future task reads as "write code to close a row," STOP unless a new strict-audit finding reopened code scope.
 4. **The only sanctioned acceptance path:** operator evidence → `infra/scripts/capture-production-evidence.sh --env-file "$RUNTIME_ENV_FILE" --fingerprint-record-output "$FINGERPRINT_RECORD"` runs `deployment-soak --evidence-dir` (with `production_validated=true, target_environment=production, operator_asserted=true`) → the wrapper runs `release-audit --evidence-manifest "$OUT_ROOT/evidence/manifest.json" --require-production-validated --require-provider-forbid-local` and the offline `production-evidence-verify` custody check passes with `--fingerprint-record "$FINGERPRINT_RECORD"` plus an external no-overwrite `--report-output` path outside the bundle under review. Use the wrapper to run that path from an operator-authored production soak manifest; treat `summary.json.offline_verify` as retained metadata that the verifier validates, not as the source of authority for the expected fingerprint. If the expected fingerprint mismatches the retained bundle, stop and reconcile the external fingerprint record, reviewed bundle path, and `bundle-manifest.json`; never copy a replacement value from the bundle under review. `--expected-bundle-fingerprint` remains a manual fallback only when populated from the independently retained fingerprint record. `MNEMOSYNE_PROD_EVIDENCE_DIR`, `PRECHECK_OUTPUT_ROOT`, `OUT_ROOT`, `FINGERPRINT_RECORD`, and `RUNTIME_ENV_FILE` must be absolute external custody paths outside the repository; output roots and fingerprint records must be new and must not already exist. Provider-manifest commands must be single retained external executables with no arguments after `argv[0]`, hosted dashboard/probe plus HTTP retrieval provider URLs must flow through shared fail-closed `network_safety` fetching, and retained HTTP provider errors must omit response bodies. Operators may run `infra/scripts/capture-production-evidence.sh --env-file "$RUNTIME_ENV_FILE" --preflight-only "$SOAK_MANIFEST" "$PRECHECK_OUTPUT_ROOT"` first as setup proof only; preflight does not flip any row Partial→Done. No code change is required or wanted to flip a row Partial→Done.
 5. **Renderer row readiness is routing metadata only.** `infra/scripts/render-production-soak-manifest.sh --check-environment` reports `parity_row_readiness` so missing input artifacts and validation errors can be assigned to the correct row owner. It does not add a gate, replace capture, or flip any row.
 
@@ -47,7 +47,13 @@ Mnemosyne depends on gbrain, mempalace, or any external memory system.
 
 ---
 
-## 3. Assignment & acceptance — the 10 ops work items
+## 3. Assignment & acceptance - the 10 ops work items
+
+**Current status:** all 10 rows were accepted by `capture-bc10` on 2026-07-07
+with 29/29 deployment-soak checks green, release-audit `ok:true` with 0
+findings, and offline `production-evidence-verify` `ok:true` with 0 findings.
+The retained bundle fingerprint is
+`sha256:6dc117d6bb95e7a683915d432b2d2b21997133e9bfbd53624427a7317eeb2271`.
 
 Gate commands already exist and are frozen. Work = run each against real infra and capture redacted evidence.
 
@@ -84,6 +90,6 @@ Confirmed distinct as scoped: A↔B and C↔D↔E↔F↔G. Five seams carry over
 
 ## 5. Definition of Done (whole effort)
 
-`release-audit --evidence-manifest ... --require-production-validated --require-provider-forbid-local` passes on a `deployment-soak` evidence bundle in which **every** required command and required provider sub-check carries real-infra operator evidence. At that point all 10 rows flip Partial→Done. Until then: **Partial = ops backlog, never code backlog.**
+`release-audit --evidence-manifest ... --require-production-validated --require-provider-forbid-local` passes on a `deployment-soak` evidence bundle in which **every** required command and required provider sub-check carries real-infra operator evidence, and offline `production-evidence-verify` passes against the independently retained fingerprint record. That happened for `capture-bc10` on 2026-07-07, so all 10 rows are Done. If a future recapture is required, **Partial = ops backlog, never code backlog** until the same path passes again.
 
 Deploy/land flow for each surface: use the external `gstack land-and-deploy` workflow tooling (dry-run -> pre-merge gate -> deploy strategy -> canary verification -> deploy report). Pre-landing diffs (Lane G code only) go through `REVIEW.md`. This tooling reference does not merge Mnemosyne with gstack, gbrain, or mempalace.

@@ -1,27 +1,29 @@
-# Tier-B Completion — Self-Hosted Strict Parity (23/24)
+# Tier-B Completion - Self-Hosted Strict Parity (historical design; superseded)
 
 Status: approved 2026-07-05. Branch: `tier-b/completion-selfhosted` off `main @ 4c59c43`.
+Superseded 2026-07-07 by the attested `capture-bc10` bundle: 29/29
+deployment-soak green, release-audit `ok:true` with 0 findings, and offline
+`production-evidence-verify` `ok:true` with fingerprint
+`sha256:6dc117d6bb95e7a683915d432b2d2b21997133e9bfbd53624427a7317eeb2271`.
 
 ## Goal & end-state
 
-Complete every remaining Tier-B input artifact achievable on the no-GPU 16 GB
-host, each **validator-proven from a real live drill** against the deployed
-stack — reaching **23 of 24** artifacts. B9 `parametric-trainer-bundle.json`
-stays Partial-by-design per ADR-002 (the only true GPU blocker). Strict-audit
-rows **B1–B8 + B10 flip Done** via per-row evidence + the ADR-002 documented
-completion path.
+This document records the July 5 design that originally targeted 23/24
+artifacts. It is retained for lineage only. The operative result is now 24/24:
+B9 completed on the no-GPU self-hosted profile through the ADR-002 amended
+CPU-trained parametric adapter evidence path, without weakening
+`parametric-trainer-check` or the release-audit verifier.
 
-The final production gate is a **frozen, monolithic 28-command capture**
+The final production gate is a **frozen, monolithic 29-command capture**
 (`PRODUCTION_RELEASE_REQUIRED_COMMANDS`, cli.py:92-122) with an **exact
-count-lock** enforced by `production-evidence-verify`. `parametric-trainer-check`
-is one of the 28, so the single signed evidence bundle **cannot** complete
-without GPU/LoRA compute. We do NOT fake a signed 28-command bundle; B1–B8+B10
-close via per-row evidence + ADR-002, honestly documented.
+count-lock** enforced by `production-evidence-verify`. The single signed bundle
+completed only after real retained B1-B10 evidence passed the unchanged gates.
 
 ## Decisions (locked)
 
-- **B9:** ADR-002 path. Complete all seven self-hostable items; keep
-  parametric-trainer Partial-by-design. No cloud spend, no cloud dependency.
+- **B9:** ADR-002 amended path. Complete through the real CPU-trained
+  parametric adapter and retained trainer/serving/rollback evidence; cloud/GPU
+  remains optional scale, not required for the current attestation.
 - **mTLS:** enforce `client_auth require_and_verify` on the shared
   `mcp.mnemo.local` (what the frozen manifest targets — the honest strict-parity
   posture). Mitigate blast radius by issuing + mounting client certs to every
@@ -122,8 +124,8 @@ Produce `row-10-full-suite-evidence.json` = redacted full live-Postgres pytest
 suite output (`MNEMOSYNE_POSTGRES_DSN=<prod> python -m pytest -q`), retained as a
 custody input artifact of `belief-revision-check`. Run the full custody validation
 script across all lanes to prove every non-parametric artifact passes. Update
-ADR-002 + the strict-audit doc: B1–B8+B10 Done via per-row evidence; B9 narrowed
-to parametric-trainer only (calibration + hosted-llm now real).
+ADR-002 + the strict-audit doc: B1-B10 Done via the retained monolithic
+production bundle; B9 no longer remains narrowed to a pending GPU item.
 
 ## Sequencing (dependency-ordered, low-risk first)
 
@@ -146,8 +148,8 @@ Each phase: code + tests green → deploy additively → live drill → assemble
   path-style + `us-east-1`.
 - Role-pipeline dual shape (engine `roles` list vs flat bundle keys) → update the
   fixtures asserting `model_backed_roles`/`provider_type` in lockstep.
-- Monolithic gate → do NOT fake a signed 28-command bundle; close B1–B8+B10 via
-  ADR-002 per-row path, documented.
+- Monolithic gate -> do NOT fake a signed 29-command bundle; close B1-B10 only
+  via the retained wrapper-captured evidence path, documented.
 
 ## Scope boundary (NOT in scope)
 

@@ -13,8 +13,8 @@ services they emulate:
 Blueprint references: `docs/BLUEPRINT-COMPLETION-PLAN.md` rows **FR-7/FR-9** (auth),
 **KMS**, and **FR-19** (signed provenance), plus the "P1 (real services)" line.
 This stack validates local real-service mechanics for FR-7/FR-9/FR-19; it is
-not production validation and does not flip Tier B rows without
-operator-captured production evidence.
+not production validation by itself. Tier-B production evidence is now attested
+by the retained `capture-bc10` bundle.
 
 > These services are **not required** to run in the build environment. Everything
 > here is turnkey and documented so an operator can stand it up on any Docker
@@ -99,10 +99,12 @@ open ./infra/PRODUCTION-EVIDENCE.md
 `deployment-soak --evidence-dir`, and then runs scoped
 `release-audit --allow-provider-local` for Keycloak, Vault/KMS provider,
 retrieval-provider metadata reporting, and C2PA trust verification. It does not
-prove live ParadeDB/AGE/pgvector retrieval and does not claim production
-validation; production parity still requires operator-captured
-`release-audit --evidence-manifest "$OUT_ROOT/evidence/manifest.json" --require-production-validated --require-provider-forbid-local` evidence against deployed
-infrastructure.
+claim production validation. For production Tier-B evidence, use the retained
+`capture-bc10` pattern: operator-captured
+`deployment-soak`, manifest-bound
+`release-audit --evidence-manifest "$OUT_ROOT/evidence/manifest.json" --require-production-validated --require-provider-forbid-local`,
+and offline `production-evidence-verify` against the out-of-band fingerprint
+record.
 
 For production Tier-B evidence, render the production soak manifest outside the
 repository, then use the production runner:

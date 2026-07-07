@@ -171,7 +171,7 @@ Read `docs/blueprint/Mnemosyne-v2-Build-Blueprint.md` and `.planning/BLUEPRINT-P
 
 ## 7. PER-ROW CONTRACT (the 8-step loop)
 
-Per `infra/PRODUCTION-EVIDENCE.md` (the canonical 28-command capture/acceptance runbook) and the row's `.planning/runbooks/row-NN-*.md`:
+Per `infra/PRODUCTION-EVIDENCE.md` (the canonical 29-command capture/acceptance runbook) and the row's `.planning/runbooks/row-NN-*.md`:
 
 1. Read the row runbook. 2. Provision/wire the real service (or consume operator endpoint). 3. Produce the row's `*-ops-bundle.json` (+ artifacts) into `MNEMOSYNE_PROD_EVIDENCE_DIR` (relative refs). 4. Render & preflight:
 ```bash

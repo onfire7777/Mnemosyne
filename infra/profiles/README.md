@@ -6,12 +6,13 @@ They differ **only** in the *values* bound to env references — never code, nev
 
 | Profile | File | Role |
 |---|---|---|
-| `self-hosted` | `self-hosted.env` | **Preferred baseline.** Closes B1–B8 + B10 on real, self-hosted, no-GPU infra. |
-| `cloud` | `cloud.env` | **B9-capable extension.** Required for B9/FR-21 (GPU LoRA/test-time-training) and any capability a no-GPU host cannot evidence. |
+| `self-hosted` | `self-hosted.env` | **Preferred baseline.** Closes B1-B10 on real, self-hosted, no-GPU infra through the attested CPU-parametric path. |
+| `cloud` | `cloud.env` | **Scale/quality extension.** Optional for larger accelerator-backed providers and any capability the no-GPU host cannot evidence. |
 
-**Strict-100% note:** the no-GPU `self-hosted` profile does **not** by itself satisfy the strict v1.0
-parity bar — B9 needs real GPU evidence via `cloud.env` (or an explicit ADR changing the strict audit).
-Do not mark B9 / strict 100% complete on a no-GPU host by declaration.
+**Strict-100% note:** B9 is not marked Done by declaration. It is Done only
+because the 2026-07-07 Tier-B bundle retained real CPU-trained parametric
+adapter evidence that passed the unchanged `parametric-trainer-check`,
+release-audit, and offline verifier path.
 
 ## Use
 ```bash

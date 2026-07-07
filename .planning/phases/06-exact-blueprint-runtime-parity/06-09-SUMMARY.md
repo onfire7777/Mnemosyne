@@ -146,7 +146,7 @@ Checked 2026-06-25 during renderer hardening:
   non-secret production placeholders from a strict external Tier-B custody
   packet `production-render.env` passed through `--env-file`, refuses
   repository-local output by default, validates the production scope, and
-  validates the full 28-command production release profile before writing.
+  validates the full 29-command production release profile before writing.
 - `infra/templates/production-render.env.example` remains the no-secret
   template for generated custody packets; operators fill the packet-local
   `production-render.env`, not a shell-sourced repo copy.

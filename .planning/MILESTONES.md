@@ -71,16 +71,16 @@ This checkpoint verified the deterministic local scaffold and initial GitHub pro
 
 ---
 
-## vNext — Unified Cognitive Substrate (local/gated complete; production evidence pending)
+## vNext — Unified Cognitive Substrate (local/gated complete; Tier-B attested)
 
-**Status:** local/gated implementation complete — Phase 7 plans 01-05 gate-proven; `service.enabled` and `SpecialistBudget.shadow_only` retired; production/operator evidence remains the strict-parity blocker
+**Status:** local/gated implementation complete — Phase 7 plans 01-05 gate-proven; `service.enabled` and `SpecialistBudget.shadow_only` retired; strict Tier-B production evidence attested by `capture-bc10`
 **Spec:** `docs/superpowers/specs/2026-06-27-unified-cognitive-substrate-design.md`
 **Roadmap:** `.planning/ROADMAP.md` → Phase 7 · **Plans:** `.planning/phases/07-unified-cognitive-substrate/`
 
 Turn the consciousness layer from a default-off shadow lane into a single, always-on, deeply-integrated cognitive substrate with **zero compromise to memory reliability**. Replaces the `shadow_only` / `enabled` toggles with one continuous, derived **Standing** signal `(groundedness ⟂ salience)`, runs the cognitive loop always-on via a tiered heartbeat, and lets autonomy grow only as corroboration earns it — all above the unbreakable §31-rails + immutable-ledger floor. This is the ADR-001 **Option E** destination and continues the G1→G4 program; it supersedes the *staging model* of the G4 shadow service, not the substrate, the rails, or the honesty charter.
 
 ### Relationship to v1.0
-Post-v1.0. Does not block, and is not blocked by, the v1.0 strict-parity sign-off (the 10 Partial production-evidence rows). Phase 7 plans `07-01` through `07-05` are additive/gate-proven; `07-05` has H8/H12 cascade/observability checks gate-proven, the `service.enabled` default-off gate retired, `SpecialistBudget.shadow_only` retired, and `g5-toggle-retirement` passed.
+Post-v1.0. Does not block, and is not blocked by, the v1.0 strict-parity sign-off. Phase 7 plans `07-01` through `07-05` are additive/gate-proven; `07-05` has H8/H12 cascade/observability checks gate-proven, the `service.enabled` default-off gate retired, `SpecialistBudget.shadow_only` retired, and `g5-toggle-retirement` passed.
 
 ### Success Criteria (what must be TRUE)
 - `Standing` is the single derived decision signal; P1 is byte-stable (zero divergence vs the boolean path).
@@ -99,17 +99,17 @@ Post-v1.0. Does not block, and is not blocked by, the v1.0 strict-parity sign-of
 
 ## vNext — Self-Hosted-First Production Architecture
 
-**Status:** proposed and scaffolded — live bring-up, hardening, and operator-captured evidence pending
+**Status:** complete and production-attested on 2026-07-07
 **Spec:** `docs/SELF-HOSTED-PRODUCTION-ARCHITECTURE.md`
 **Roadmap:** `.planning/ROADMAP.md` → Phase 8 · **Plans:** `.planning/phases/08-self-hosted-first-production/`
 
-Make the self-hosted profile the preferred production baseline for rows it can honestly prove, without weakening the strict Tier-B audit. The self-hosted/no-GPU profile targets B1-B8+B10 through real evidence bundles; B9/FR-21 still requires real cloud/GPU trainer evidence or an explicit future ADR before strict v1.0 parity can reach 100%.
+Make the self-hosted profile the preferred production baseline without weakening the strict Tier-B audit. The self-hosted/no-GPU profile now targets and has attested B1-B10 through real evidence bundles; B9/FR-21 is closed through ADR-002's amended CPU-parametric evidence path. Cloud/GPU remains an optional scale extension.
 
 ### Success Criteria (what must be TRUE)
 - The `self-hosted` and `cloud` profiles differ by values only and both keep local fallback forbidden for production evidence.
 - The production scaffold is hardened before capture: fail-closed auth/session binding, non-superuser RLS roles, sealed KMS, mandatory object encryption, provenance fail-closed behavior, policy-as-code, secret scanning, digest pins, egress chokepoint, single ingress, and tamper-evident audit logging.
-- B1-B8+B10 flip only after retained, signed, real-infra bundles pass render, preflight, capture, verify, and release-audit.
-- B9 remains Partial until real cloud/GPU trainer evidence passes the same custody path or an explicit ADR changes the strict audit.
+- B1-B10 flip only after retained, signed, real-infra bundles pass render, preflight, capture, verify, and release-audit.
+- B9 remains Done only while retained CPU-parametric trainer evidence continues to pass the same custody path; cloud/GPU is not required for the current attestation.
 - §31 rails, §16 SLOs, G0/G1 guardrails, and the honesty charter remain non-regressed.
 
 ### Verification

@@ -239,15 +239,15 @@ Local infra now available for *some* of these (Postgres :54329, Vault :8211, Key
 > completion-merge overlay. They are retained for lineage only. Current source
 > of truth is `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md`,
 > `.planning/OPS-HANDOFF-AND-OWNERSHIP.md`, and `docs/ROADMAP-TO-100.md`: Tier
-> A/local code readiness is closed, and strict v1.0 parity remains blocked by
-> Tier-B operator-captured production evidence for the 10 Partial rows.
+> A/local code readiness is closed, and strict Tier-B production evidence is
+> attested by `capture-bc10`.
 
 In the historical 2026-06-23 snapshot, no innovation was a total ❌ and the two
 genuinely missing **features** were **§20.7 tier-0 correction shortcut**
 (#23/#15) and **§24 learn-from-user-mistakes strategy** (#24). Those local/code
 gaps were later closed; do not reopen them from this historical section. The
-current parity blocker is the Tier-B operator-captured production evidence path,
-not these old local feature rows.
+current parity status is the Tier-B `capture-bc10` attestation, not these old
+local feature rows.
 
 ---
 
@@ -277,7 +277,7 @@ The `completion/blueprint-parity` bundle landed on `main` (`70f34dd`; additive �
 | #27 | data-never-instruction taint on write path (I11) | `a778b5c` |
 | #29/#30 | CC-RT `route()` + long-horizon anti-degradation (§30.4/§25) | `28decd7` |
 
-Both formerly-missing **features** (#23 tier-0 correction, #24 learn-from-mistakes) are now implemented, collapsing the AUX-XREF "2 ❌ features" headline to 0. At the time, remaining work included residual depth items in §7, the final no-DSN gate (AUX-QA), genuinely-cloud 🔒 evidence (§8), and the CC-SYNC origin push. Those local/code items have since been superseded by the current Tier-A/Tier-B split: strict parity is now blocked by operator-captured production evidence, not by the old merge/push checklist. The §2–§7 status cells above are the pre-completion audit snapshot; this section is retained historical overlay.
+Both formerly-missing **features** (#23 tier-0 correction, #24 learn-from-mistakes) are now implemented, collapsing the AUX-XREF "2 ❌ features" headline to 0. At the time, remaining work included residual depth items in §7, the final no-DSN gate (AUX-QA), genuinely-cloud 🔒 evidence (§8), and the CC-SYNC origin push. Those local/code items have since been superseded by the current Tier-A/Tier-B split and the `capture-bc10` Tier-B attestation, not by the old merge/push checklist. The §2–§7 status cells above are the pre-completion audit snapshot; this section is retained historical overlay.
 
 ---
 

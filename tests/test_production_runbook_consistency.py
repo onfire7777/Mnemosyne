@@ -324,13 +324,13 @@ def test_current_state_docs_do_not_reopen_closed_local_feature_gaps() -> None:
     ).read_text(encoding="utf-8")
     handoff_flat = " ".join(handoff.split())
 
-    assert "current parity blocker is the Tier-B operator-captured production evidence path" in matrix
+    assert "current parity status is the Tier-B `capture-bc10` attestation" in matrix
     assert "The only two genuinely-missing **features** are" not in matrix
     assert "b79cb87a97ebb220ae09de0db2ec69900a84411b" in handoff
     assert "This file intentionally does not freeze a prose \"latest commit\"" in (
         handoff_flat
     )
-    assert "This handoff revision verified" in handoff
+    assert "The earlier 2026-06-30 handoff revision verified" in handoff
     assert "pre-edit resume check" not in handoff
     assert "later commits supersede that checkpoint" in handoff_flat
     assert "GitHub Actions CI run `28477936121` passing" in handoff_flat
@@ -368,11 +368,11 @@ def test_self_hosted_profile_docs_do_not_weaken_strict_tier_b_contract() -> None
     combined_flat = " ".join(combined.split())
     phase_plan_flat = " ".join(phase_plan.split())
 
-    assert "does **not** by itself reach strict 100%" in architecture
-    assert "Current strict parity still requires B9 evidence" in architecture
-    assert "B9 either receives real cloud/GPU trainer evidence" in phase_plan
-    assert "Do not record it as DEFERRED-BY-DESIGN" in phase_plan_flat
-    assert "B9/strict-100%:** cloud/GPU evidence or explicit ADR" in handoff_index
+    assert "self-hosted baseline can target **B1–B10**" in architecture
+    assert "ADR-002's 2026-07-06 amendment" in architecture
+    assert "Resolve B9/FR-21 through ADR-002's amended CPU-parametric" in phase_plan
+    assert "B9 is Done only because the retained evidence passed" in phase_plan_flat
+    assert "B9/strict-100%:** closed by retained CPU-parametric evidence" in handoff_index
     assert "No control here weakens a gate" in security_findings
     assert "Phase 8: Self-Hosted-First Production Architecture" in roadmap
     assert "Self-Hosted-First Production Architecture" in milestones
@@ -620,7 +620,7 @@ def test_roadmap_tier_b_table_routes_rows_through_full_production_manifest() -> 
     assert "Capture command" not in roadmap
     assert (
         roadmap.count(
-            "Full 28-command production manifest via `infra/PRODUCTION-EVIDENCE.md`"
+            "Done via full 29-command `capture-bc10`"
         )
         == 10
     )

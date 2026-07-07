@@ -10,15 +10,15 @@
 
 ## Decision in one line
 Make a **self-hosted stack the preferred production baseline** (cloud/GPU =
-values-only extension for B9), **reusing** the existing Tier-B machinery. This
-can close B1–B8 + B10 with real evidence, but it does not reduce the current
-strict 100% bar: B9 still needs real operator evidence unless an explicit future
-ADR changes the audit. No gate weakened; §31 rails + §16 SLOs preserved.
+values-only extension for larger providers), **reusing** the existing Tier-B
+machinery. This now closes B1-B10 with real retained evidence, including B9 via
+ADR-002's amended CPU-parametric path. No gate weakened; §31 rails + §16 SLOs
+preserved.
 
 ## Ledger status
 - **`.planning/ROADMAP.md`** now includes Phase 8 as a subordinate production-evidence phase.
 - **`.planning/MILESTONES.md`** now includes the self-hosted-first production milestone.
-- **`.planning/STATE.md`** records Phase 8 checkpoints without marking any Tier-B evidence row Done.
+- **`.planning/STATE.md`** records Phase 8 checkpoints and the 2026-07-07 Tier-B attestation.
 
 ## Stale-doc prune result
 Completed 2026-07-03: the stale files named below were moved to
