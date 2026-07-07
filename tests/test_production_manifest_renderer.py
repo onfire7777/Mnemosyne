@@ -1999,13 +1999,17 @@ def test_renderer_writes_private_valid_manifest_outside_repo(tmp_path: Path) -> 
     worker_run = next(
         check for check in manifest["checks"] if check["command"] == "worker-run"
     )
+    # worker-run drains a dedicated, isolated probe tenant (release-worker-probe)
+    # that nothing else consumes, so the supervised-cycle evidence is not raced
+    # by the main production tenant's consumers. This is a template literal, not
+    # a placeholder substitution.
     assert worker_run["global_args"] == [
         "--backend",
         "postgres",
         "--queue-backend",
         "postgres",
         "--queue-tenant",
-        env["MNEMOSYNE_PROD_TENANT"],
+        "release-worker-probe",
     ]
     ops_dashboard = next(
         check

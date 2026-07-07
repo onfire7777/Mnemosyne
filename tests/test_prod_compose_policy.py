@@ -159,11 +159,18 @@ def test_cap_add_is_allowlisted() -> None:
 
 
 def test_every_registry_image_is_digest_pinned() -> None:
-    for line in _compose_text().splitlines():
-        match = re.match(r"^\s+image:\s*(\S+)", line)
-        if not match:
+    # Locally-built images (services that declare build:) are not pulled from a
+    # registry; their supply chain is pinned by the Dockerfile FROM digest, not
+    # the compose image tag (which is only the local build-output name, e.g.
+    # mnemosyne/postgres-pgaudit:pg16). Every image PULLED from a registry must
+    # still be tag+digest pinned.
+    for _name, block in _service_blocks(_compose_text()).items():
+        image_match = re.search(r"^\s+image:\s*(\S+)", block, re.MULTILINE)
+        if not image_match:
             continue
-        image = match.group(1)
+        if re.search(r"^\s+build:", block, re.MULTILINE):
+            continue
+        image = image_match.group(1)
         assert re.match(r"^[^@\s]+:[^@\s]+@sha256:[0-9a-f]{64}$", image), (
             f"registry image must be tag+digest pinned: {image}"
         )
