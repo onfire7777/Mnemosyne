@@ -625,11 +625,16 @@ def test_roadmap_tier_b_table_routes_rows_through_full_production_manifest() -> 
         == 10
     )
 
+    # Tier-B is complete: all 10 strict-blueprint parity rows were flipped
+    # Partial -> Done on attested production-evidence-verify. Select the data
+    # rows by their (now terminal) Done status; the invariant being checked is
+    # that the same 10 parity-row names appear in the strict audit, the roadmap
+    # table, and the per-row runbooks.
     strict_rows = [
         _markdown_table_cells(line)[0]
         for line in strict_audit.splitlines()
         if line.startswith("| ")
-        and " | Partial | " in line
+        and " | Done | " in line
         and len(_markdown_table_cells(line)) >= 3
     ]
     roadmap_rows = [

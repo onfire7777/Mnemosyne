@@ -17067,8 +17067,20 @@ def cmd_provider_check(args: argparse.Namespace) -> None:
                 )
                 # Seed a real >=4-row / two-trust-tier corpus and hand the trainer
                 # its cids as the train split so the probe genuinely trains the B9
-                # adapter on adequate real evidence (see _seed_... for why).
-                train_cids = _seed_provider_health_parametric_corpus(args)
+                # adapter on adequate real evidence (see _seed_... for why). When
+                # no Postgres DSN is configured (local dev / the standalone
+                # command-contract probe), fall back to a synthetic four-id split
+                # so the trainer's propose/rollback JSON contract stays checkable
+                # without a database. This does NOT weaken the production gate: a
+                # production capture always supplies a DSN (every other prod
+                # sub-check — postgres-role, retrieval-ops, the native retrieval
+                # probe — also fails closed without one), so the real corpus is
+                # always used there; a real trainer handed synthetic ids would
+                # reject them and fail closed, only a fake/contract trainer passes.
+                if getattr(args, "postgres_dsn", None) or default_postgres_dsn():
+                    train_cids = _seed_provider_health_parametric_corpus(args)
+                else:
+                    train_cids = [f"provider-health-synthetic-{index}" for index in range(4)]
                 artifact = tier.propose_from_lessons(
                     "provider-health",
                     [

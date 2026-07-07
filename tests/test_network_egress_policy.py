@@ -43,6 +43,14 @@ ALLOWED_RAW_EGRESS = {
         "services/embedding/selftest.py",
         "urllib.request.urlopen",
     ): "hermetic build-time self-test fallback restricted to loopback http when the mnemosyne package is absent from the service image",
+    (
+        "infra/seaweedfs/audit-worm-adapter.py",
+        "urllib.request.urlopen",
+    ): "out-of-process WORM adapter (MNEMOSYNE_AUDIT_WORM_COMMAND), stdlib-only by design (hand-rolled SigV4, no boto3/mnemosyne import so it can be loaded by content-hash), talks only to the in-cluster SeaweedFS S3 endpoint",
+    (
+        "infra/vault/audit-hmac-adapter.py",
+        "urllib.request.urlopen",
+    ): "out-of-process audit-chain HMAC adapter (MNEMOSYNE_AUDIT_HMAC_COMMAND), stdlib-only by design (no mnemosyne import), talks only to the in-cluster Vault transit endpoint",
 }
 
 
