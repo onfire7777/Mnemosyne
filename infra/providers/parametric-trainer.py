@@ -36,7 +36,6 @@ from __future__ import annotations
 import json
 import os
 import pathlib
-import re
 import sys
 import time
 
@@ -73,43 +72,19 @@ def _parse_vector(raw: str) -> list[float]:
     return [float(x) for x in raw.strip().lstrip("[").rstrip("]").split(",") if x.strip()]
 
 
-_EVIDENCE_CID_HEX = re.compile(r"[0-9a-f]{64}")
-
-
-def _train_split_allow(source_ids: list[str] | None) -> set[str] | None:
-    """Return the evidence-cid train-split filter, or ``None`` for no restriction.
-
-    Only content-addressed evidence cids (64-hex) restrict the training corpus.
-    ``source_ids`` may carry a genuine evidence train split (the B9 capture and any
-    caller that holds out an eval set by cid) OR pure provenance ids -- the
-    lesson/procedure UUIDs that ``ParametricTier.propose_from_lessons`` (the MCP
-    ``parametric_propose`` tool and the provider-check health probe) forward, since
-    ``Lesson``/``Procedure`` carry no source-evidence cid. Provenance UUIDs are not
-    evidence cids and must not shrink the corpus to nothing; when no cid-shaped id
-    is present the trainer trains on the tenant's full RLS-scoped evidence. A real
-    evidence-cid split still filters (eval isolation preserved), and a split whose
-    cids do not exist still yields zero rows and fails closed.
-    """
-    if not source_ids:
-        return None
-    cids = {str(s) for s in source_ids if _EVIDENCE_CID_HEX.fullmatch(str(s))}
-    return cids or None
-
-
 def _load_training_rows(cur: psycopg.Cursor, source_ids: list[str] | None) -> list[dict]:
     """Return [{cid_hex, embedding, label}] for the tenant's embedded evidence.
 
     ``label`` = 1 iff the ingest-assigned ``trust_tier`` is high-trust. When
-    ``source_ids`` names an evidence train split (cid hexes) the query is restricted
-    to it so the provider never touches the held-out eval set; provenance ids that
-    are not evidence cids impose no restriction (see ``_train_split_allow``).
+    ``source_ids`` (train cid hexes) is provided the query is restricted to it so
+    the provider never touches the held-out eval set.
     """
     cur.execute(
         "select encode(cid,'hex') as cid_hex, trust_tier, embedding::text "
         "from evidence where embedding is not null and not erased order by cid_hex"
     )
     rows = []
-    allow = _train_split_allow(source_ids)
+    allow = set(source_ids) if source_ids else None
     for cid_hex, trust_tier, emb in cur.fetchall():
         if allow is not None and cid_hex not in allow:
             continue
