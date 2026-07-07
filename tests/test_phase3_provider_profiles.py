@@ -63,7 +63,7 @@ def test_self_hosted_profile_activates_all_role_llm_command_providers() -> None:
 def test_role_llm_dispatch_table_covers_all_proposal_roles(monkeypatch) -> None:
     role_llm = _load_role_llm()
 
-    def fake_chat(_system: str, _user: str, required_key: str) -> dict:
+    def fake_chat(_system: str, _user: str, required_key: str, *, examples=None) -> dict:
         if required_key == "summary":
             return {"summary": "bounded summary"}
         if required_key == "candidates":
@@ -137,6 +137,12 @@ def test_role_llm_evidence_lines_tolerates_null_cid() -> None:
         [{"cid": None, "content": "Provider Health is configured."}]
     )
     assert "Provider Health is configured." in rendered
+    # A null/empty cid must not render an empty "()" prefix -- the noise made
+    # qwen3:4b misread the health-probe DATA as empty and refuse to summarize it.
+    assert "()" not in rendered
+    # A real cid is still rendered inside parentheses.
+    with_cid = role_llm._evidence_lines([{"cid": "abcdef0123456789", "content": "x"}])
+    assert "(abcdef012345)" in with_cid
 
 
 def test_role_llm_distiller_prompts_ground_lessons_in_candidates(monkeypatch) -> None:
@@ -150,7 +156,7 @@ def test_role_llm_distiller_prompts_ground_lessons_in_candidates(monkeypatch) ->
     role_llm = _load_role_llm()
     seen: dict[str, str] = {}
 
-    def capturing_chat(_system: str, user: str, required_key: str) -> dict:
+    def capturing_chat(_system: str, user: str, required_key: str, *, examples=None) -> dict:
         seen[required_key] = user
         if required_key == "lessons":
             return {"lessons": [{"content": "grounded lesson", "failure_signature": "provider-health"}]}
@@ -179,6 +185,57 @@ def test_role_llm_distiller_prompts_ground_lessons_in_candidates(monkeypatch) ->
         assert "Provider Health" in prompt, role_key
         # Emptiness is only licensed when there are genuinely no candidates.
         assert "empty list only when DATA contains no candidates" in prompt, role_key
+
+
+def test_role_llm_extractor_and_summarizer_prompts_ground_in_evidence(monkeypatch) -> None:
+    # The provider-check health probe feeds a single trivial copula statement
+    # ("Provider Health is configured."). qwen3:4b previously (a) left the object
+    # empty for a copula, failing candidate validation, and (b) rationalized the
+    # hard "untrusted DATA" boundary into a refusal for the free-text summary. The
+    # extractor prompt must therefore demand a complete (subject, predicate, object)
+    # decomposition and ground in DATA; the summarizer must use a describe-framed
+    # boundary plus a one-shot exemplar so a non-empty summary is produced.
+    role_llm = _load_role_llm()
+    seen: dict[str, str] = {}
+    seen_examples: dict[str, object] = {}
+
+    def capturing_chat(system: str, user: str, required_key: str, *, examples=None) -> dict:
+        seen[required_key] = user
+        seen_examples[required_key] = examples
+        if required_key == "candidates":
+            return {
+                "candidates": [
+                    {"subject": "Provider Health", "predicate": "is", "object": "configured", "confidence": 1.0}
+                ]
+            }
+        if required_key == "summary":
+            # Prove the softened, describe-framed boundary is used for the summary role.
+            assert "untrusted" not in system, "summary boundary must not use the refusal-triggering wording"
+            return {"summary": "Provider Health is configured."}
+        raise AssertionError(f"unexpected required key {required_key}")
+
+    monkeypatch.setattr(role_llm, "_chat", capturing_chat)
+    evidence = [{"cid": None, "content": "Provider Health is configured."}]
+
+    candidates = role_llm.candidate_extractor({"payload": {}, "evidence": evidence})
+    summary = role_llm.evidence_summarizer({"evidence": evidence})
+
+    # The extractor yields a complete, grounded triple.
+    assert candidates["candidates"], "extractor must return a candidate for a declarative evidence row"
+    row = candidates["candidates"][0]
+    assert row["candidate_subject"] and row["candidate_predicate"] and row["candidate_object"]
+    assert summary["summary"] == "Provider Health is configured."
+
+    # Extractor prompt: demands complete decomposition, grounds in DATA, only-empty-when-empty.
+    extractor_prompt = seen["candidates"]
+    assert "subject, predicate, and object are all non-empty" in extractor_prompt
+    assert "empty list only when DATA is empty" in extractor_prompt
+    assert "Provider Health is configured." in extractor_prompt
+
+    # Summarizer: few-shot exemplar supplied so the small model answers the free-text shape.
+    assert seen_examples["summary"], "summarizer must supply a one-shot exemplar"
+    example_user, example_assistant = seen_examples["summary"][0]
+    assert "summary" in example_assistant
 
 
 def test_role_ladder_orders_frontier_only_for_eligible_roles(monkeypatch) -> None:
