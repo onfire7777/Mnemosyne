@@ -139,6 +139,48 @@ def test_role_llm_evidence_lines_tolerates_null_cid() -> None:
     assert "Provider Health is configured." in rendered
 
 
+def test_role_llm_distiller_prompts_ground_lessons_in_candidates(monkeypatch) -> None:
+    # The DeterministicLessonDistiller / DeterministicProcedureInducer reference
+    # contract emits one grounded lesson/procedure per candidate, and the
+    # provider-check health probe requires non-empty output for a valid grounded
+    # candidate. The model-backed role provider must implement the SAME contract:
+    # its prompt must ground the task in the candidates and must NOT invite an empty
+    # result for a non-empty candidate set (the previous "(empty list if none)"
+    # phrasing let qwen3:4b return {} for the grounded probe and fail provider-check).
+    role_llm = _load_role_llm()
+    seen: dict[str, str] = {}
+
+    def capturing_chat(_system: str, user: str, required_key: str) -> dict:
+        seen[required_key] = user
+        if required_key == "lessons":
+            return {"lessons": [{"content": "grounded lesson", "failure_signature": "provider-health"}]}
+        if required_key == "procedures":
+            return {"procedures": [{"name": "consolidate", "body": "steps"}]}
+        raise AssertionError(f"unexpected required key {required_key}")
+
+    monkeypatch.setattr(role_llm, "_chat", capturing_chat)
+    candidate = {
+        "signature": "provider-health",
+        "candidate_subject": "Provider Health",
+        "candidate_predicate": "is",
+        "candidate_object": "configured",
+    }
+
+    lessons = role_llm.lesson_distiller({"candidates": [candidate]})
+    procedures = role_llm.skill_inducer({"candidates": [candidate]})
+
+    assert lessons["lessons"], "lesson distiller must return a lesson for a grounded candidate"
+    assert procedures["procedures"], "skill inducer must return a procedure for a grounded candidate"
+
+    for role_key, prompt in seen.items():
+        # No unconditional escape hatch that lets the model skip a grounded candidate.
+        assert "empty list if none" not in prompt, role_key
+        # Grounded in the actual candidates (the probe subject is rendered into DATA).
+        assert "Provider Health" in prompt, role_key
+        # Emptiness is only licensed when there are genuinely no candidates.
+        assert "empty list only when DATA contains no candidates" in prompt, role_key
+
+
 def test_role_ladder_orders_frontier_only_for_eligible_roles(monkeypatch) -> None:
     role_ladder = _load_role_ladder()
     calls: list[str] = []

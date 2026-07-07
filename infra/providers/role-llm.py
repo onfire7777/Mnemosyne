@@ -187,9 +187,15 @@ def lesson_distiller(request: dict) -> dict:
     candidates = request.get("candidates") or []
     parsed = _chat(
         BOUNDARY,
-        "From these consolidation candidates, distill up to 3 reusable lessons. "
-        'Return {"lessons": [{"content": text, "failure_signature": short-key}, ...]} '
-        "(empty list if none).\nDATA:\n" + json.dumps(candidates, sort_keys=True)[:4000],
+        "Each DATA item is a grounded (candidate_subject, candidate_predicate, "
+        "candidate_object) fact recovered during memory consolidation. Distill one "
+        "reusable lesson per fact (up to 3) that restates the fact and how to "
+        "consolidate it reliably: resolve the entity, preserve source CIDs, and "
+        "promote only through the gate. Ground every lesson in DATA and key it to the "
+        "candidate signature. "
+        'Return {"lessons": [{"content": text, "failure_signature": short-key}, ...]}. '
+        "Return an empty list only when DATA contains no candidates.\nDATA:\n"
+        + json.dumps(candidates, sort_keys=True)[:4000],
         "lessons",
     )
     lessons = []
@@ -214,9 +220,15 @@ def skill_inducer(request: dict) -> dict:
     candidates = request.get("candidates") or []
     parsed = _chat(
         BOUNDARY,
-        "From these candidates, induce up to 2 reusable procedures (checklists). "
-        'Return {"procedures": [{"name": short-name, "body": steps-text}, ...]} '
-        "(empty list if none).\nDATA:\n" + json.dumps(candidates, sort_keys=True)[:4000],
+        "Each DATA item is a grounded (candidate_subject, candidate_predicate, "
+        "candidate_object) fact recovered during memory consolidation. Induce one "
+        "reusable procedure (checklist) per fact (up to 2) describing how to verify "
+        "and consolidate it: re-read source CIDs, validate the fact, resolve the "
+        "entity key, check trust tier / sensitivity / access policy, and promote only "
+        "through the gate. Ground every procedure in DATA. "
+        'Return {"procedures": [{"name": short-name, "body": steps-text}, ...]}. '
+        "Return an empty list only when DATA contains no candidates.\nDATA:\n"
+        + json.dumps(candidates, sort_keys=True)[:4000],
         "procedures",
     )
     procedures = []
