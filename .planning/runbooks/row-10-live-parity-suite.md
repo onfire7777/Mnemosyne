@@ -18,7 +18,7 @@ Run for the row-10 operator evidence pass:
 - `belief-revision-check`
 - `provider-check` for production adapter/provider coverage
 
-The full suite is not itself one of the frozen 28 production soak manifest
+The full suite is not itself one of the frozen 29 production soak manifest
 commands, so retain its redacted output and coverage summary as row-10 input
 evidence before running the production soak/profile process. Place that
 redacted suite artifact at

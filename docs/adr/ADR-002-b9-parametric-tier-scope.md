@@ -77,9 +77,9 @@ This amendment is documentation only and changes nothing operative:
   parametric path stays default-off, isolated, and rail-gated; its source-side
   gates (`parametric-trainer-check`, the B9 release-audit clamps) and runbook
   (`.planning/runbooks/row-09-parametric-tier.md`) stay intact and fail-closed.
-- The frozen monolithic 28-command production gate
+- The frozen monolithic 29-command production gate
   (`PRODUCTION_RELEASE_REQUIRED_COMMANDS`, which includes
-  `parametric-trainer-check`) is untouched; no signed 28-command bundle is
+  `parametric-trainer-check`) is untouched; no signed 29-command bundle is
   fabricated. B1–B8 and B10 close via per-row operator evidence, exactly as
   Decision §1 provides.
 - The Reversibility clause below is unchanged: a funded cloud/GPU trainer that

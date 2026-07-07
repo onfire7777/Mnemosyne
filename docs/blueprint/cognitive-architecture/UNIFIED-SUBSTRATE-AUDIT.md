@@ -40,6 +40,8 @@ The `g5-toggle-retirement` preregistration protects 68 measured target/guardrail
 
 This audit measures functional architecture properties only. It does not claim phenomenal consciousness, subjective experience, sentience, or welfare status. The welfare-review flag remains a human-review trigger, not a conclusion.
 
-## Remaining Strict-Parity Blocker
+## Tier-B Production Evidence
 
-Strict v1.0 parity still requires Tier-B operator-captured production evidence against deployed infrastructure: real IdP/Keycloak, Vault/KMS, ParadeDB+AGE+pgvector, hosted embedding/reranker/trainer endpoints, C2PA roots, hosted dashboards, supervised workers, and production rollback drills.
+Strict Tier-B production evidence is now attested by the retained `capture-bc10`
+bundle. The Phase 7 P5 audit remains a local/gated functional-substrate proof;
+`capture-bc10` is the production/operator evidence surface.

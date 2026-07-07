@@ -4,8 +4,8 @@
 > phase-planning input. For current status, use `.planning/STATE.md`,
 > `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md`, and `docs/ROADMAP-TO-100.md`.
 > Later work closed the mandatory Tier A source wirings and hardened the
-> production evidence handoff; all production rows still remain Partial until
-> operator-captured production evidence is supplied.
+> production evidence handoff; `capture-bc10` later supplied the retained
+> operator-captured Tier-B evidence.
 
 **Gathered:** 2026-06-24
 **Status:** Historical planning context; superseded by the current state docs
@@ -52,7 +52,7 @@ and COMPLETE what already exists, coordinate, and never `git add -A`.
 
 ### Scope discipline (frozen — from OPS-HANDOFF §0)
 - **D-01:** Every "Partial" strict-audit row is **OPS scope, not coding**. Do NOT write code to
-  "close" a Partial row. The 28 `PRODUCTION_RELEASE_REQUIRED_COMMANDS` gates and their
+  "close" a Partial row. The 29 `PRODUCTION_RELEASE_REQUIRED_COMMANDS` gates and their
   `RELEASE_AUDIT_REQUIRED_OUTPUT_KEYS` validators are **frozen-complete**. Do NOT add new
   `*-ops-check` gates — they add zero parity value. A task that reads "write code to close a Partial
   row" is mis-scoped; STOP.

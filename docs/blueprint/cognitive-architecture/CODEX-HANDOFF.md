@@ -1,12 +1,13 @@
 # Codex Handoff
 
-**Current handoff snapshot:** 2026-06-30 UTC. This file intentionally does not
+**Current handoff snapshot:** refreshed 2026-07-07 UTC. This file intentionally does not
 freeze a prose "latest commit" as current truth. Future agents must refresh
 `git status`, `git log -1`, and GitHub Actions before making current-state
-claims. This handoff revision verified `/Users/admin/Mnemosyne` on `main` at
+claims. The earlier 2026-06-30 handoff revision verified `/Users/admin/Mnemosyne` on `main` at
 `b79cb87a97ebb220ae09de0db2ec69900a84411b`
 (`fix(infra): include runtime env in Tier-B summary`), with GitHub Actions CI
-run `28477936121` passing; later commits supersede that checkpoint.
+run `28477936121` passing; later commits supersede that checkpoint. The current
+Tier-B evidence state is closed by the retained `capture-bc10` bundle.
 
 This snapshot includes the current Tier-B production-evidence handoff stack:
 external custody packet generation, strict external render/runtime env
@@ -24,8 +25,9 @@ previously closed local source/harness work for G0-G5, §24 support
 strategies, protected `T-SEC` cases, replay-fidelity hygiene, hosted-dashboard
 release evidence, network-safety hardening, redaction, retained
 `preflight.json` custody, `summary.json` row-readiness mirroring, and verifier
-`row_review` routing. Strict v1.0 parity remains blocked only on real
-operator-captured Tier-B production evidence and Tier-C real-path sign-off.
+`row_review` routing. Strict Tier-B production evidence is now attested by
+`capture-bc10`; Tier-C real-path SLO/rail sign-off remains a separate next
+stage.
 
 **Canonical checkout:** `/Users/admin/Mnemosyne` on `main`, tracking `origin/main` (`github.com/onfire7777/Mnemosyne`). This is now the single local checkout.
 
@@ -51,8 +53,8 @@ operator-captured Tier-B production evidence and Tier-C real-path sign-off.
 - `04-G0-BENCHMARK-SPEC.md` is already updated to `Implemented (eval/g0/)`.
 - `README.md` and the current roadmap treat G0, the G1-G4 cognitive seeds,
   Phase 7 plans 01-05, the P5 H8/H12 cascade/observability pre-check, and the
-  P5 operational-toggle retirement as wired and gate-measured. Strict v1.0
-  parity is still blocked on Tier-B operator-captured production evidence.
+  P5 operational-toggle retirement as wired and gate-measured. Strict Tier-B
+  production evidence is now attested by `capture-bc10`.
 - The G0 harness is implemented under `eval/g0/` and can be run through both:
   - `python -m eval.g0.runner`
   - `mneme eval g0`

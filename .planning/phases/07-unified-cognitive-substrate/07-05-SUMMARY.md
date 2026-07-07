@@ -44,4 +44,7 @@ Phase 7 P5 is locally implemented and G0-gated. The H8/H12 Standing cascade and 
 
 ## Remaining Work
 
-The remaining strict-parity blocker is Tier-B production/operator evidence against deployed infrastructure. Historical `shadow_only` report labels can be renamed later only through a separate preregistered schema cleanup; they are not live service/shadow operational toggles.
+Tier-B production/operator evidence is now attested by `capture-bc10`. Historical
+`shadow_only` report labels can be renamed later only through a separate
+preregistered schema cleanup; they are not live service/shadow operational
+toggles.

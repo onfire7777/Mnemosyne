@@ -1,11 +1,16 @@
 # Live Self-Hosted Production Deployment — Validation Log (2026-07-04)
 
+**Historical status:** superseded on 2026-07-07 by the retained `capture-bc10`
+Tier-B production evidence bundle. This file remains the live bring-up log that
+explains what the self-hosted stack proved before the final signed/redacted
+production capture.
+
 **What this is:** a real, first bring-up of `infra/docker-compose.prod.yml` on the
 target-class host (macOS, 16 GB, Docker Desktop 12.5 GB, **no GPU**), driven end to
-end. It records what was proven against live infrastructure and what remains. It is
-**not** a Tier-B evidence bundle and does **not** flip any strict-audit row to Done —
-those still require the full operator-captured, signed, redacted `deployment-soak` →
-`release-audit` pass per row. This log is deployment validation + defect-fix evidence.
+end. It records what was proven against live infrastructure before the final
+capture. It was not itself the Tier-B evidence bundle; `capture-bc10` later
+provided the full operator-captured, signed, redacted `deployment-soak` ->
+`release-audit` -> `production-evidence-verify` proof.
 
 ## Stack brought up (14 containers, all healthy)
 
@@ -46,18 +51,24 @@ bring-up. All landed with tests on `phase3/providers-consolidation`:
 6. **OIDC JWKS internal-host allowlist** — the IdP behind Caddy on a LAN/VPN (private) address
    was blocked for JWKS fetch; added `MNEMOSYNE_IDP_ALLOWED_INTERNAL_HOSTS`.
 
-## What remains for a strict-audit Done (honest)
+## Historical Remaining Items Before `capture-bc10`
 
-The full signed Tier-B capture per row is not produced here. It still requires:
+At the time of this validation log, the full signed Tier-B capture per row had
+not been produced here. The later `capture-bc10` bundle is the authoritative
+production-evidence surface.
 
-- **Operator-authored input artifacts** (calibration datasets, authz policies, provenance
-  trust suites, per-row ops bundles) — 23 artifacts the custody packet enumerates.
+- **Operator-authored input artifacts** (calibration datasets, authz policies,
+  provenance trust suites, per-row ops bundles) — later captured and retained
+  in `capture-bc10`.
 - **Specialist adapters** the self-hosted profile deliberately substitutes with native
-  equivalents: ParadeDB BM25 and Apache AGE for the strict B1 lexical/graph rows.
-- **A production realm fixture** — the committed *test* realm strips the `sub` claim, so a
-  clean `idp-jwks-live-check` pass needs a production realm export.
-- **B9 (FR-21) GPU trainer** — a real LoRA / test-time-training deployment. **Not satisfiable
-  on this no-GPU host**; requires the `cloud` profile or an explicit ADR. B9 stays Partial by design.
+  equivalents: ParadeDB BM25 and Apache AGE for the strict B1 lexical/graph
+  rows. Native recursive-PPR remains the accepted self-hosted evidence path
+  unless the audit contract is changed again.
+- **A production realm fixture** — later supplied through the production
+  operator bundle.
+- **B9 (FR-21) trainer** — superseded by ADR-002's amended CPU-parametric
+  self-hosted path; B9 is Done only because the retained `capture-bc10` evidence
+  passed the same release-audit and offline custody gates.
 
-Everything above the B9 line is deployment/operator work against this now-running stack;
-none of it is unfinished application code.
+Everything above remains useful deployment provenance, not a separate current
+completion checklist.

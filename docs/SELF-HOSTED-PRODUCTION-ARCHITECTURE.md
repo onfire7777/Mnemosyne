@@ -1,10 +1,9 @@
 # Mnemosyne — Self-Hosted-First Production Architecture
 
-**Status:** Proposed subordinate architecture for a self-hosted production
-profile. Local-first / self-hosted is the preferred operating target for rows it
-can honestly satisfy; cloud/GPU remains an optional values-only extension for
-larger accelerator-backed providers, not a prerequisite for the current B9/FR-21
-evidence path.
+**Status:** Production-attested self-hosted profile for Tier-B. Local-first /
+self-hosted is the preferred operating target for B1-B10; cloud/GPU remains an
+optional values-only extension for larger accelerator-backed providers, not a
+prerequisite for the current B9/FR-21 evidence path.
 **Audience:** operators standing up Tier-B production evidence, and the Codex/GSD loop.
 **Authority:** the blueprint (`docs/blueprint/`) and live repo evidence win over this doc where they
 differ. This doc **extends** the already-wired `infra/` provider stack; it does not replace it.
@@ -44,7 +43,7 @@ filled in the Tier-B custody packet.
 |---|---|---|---|
 | **Retrieval engine (B1)** | **Native Postgres 16**: FTS (`to_tsvector`/`plainto_tsquery`) + **pgvector HNSW** + **`postgres-recursive-ppr`** | Unified store, SLO-proven (recall 0.977 / nDCG 0.983). A specialist vector DB (Qdrant/Weaviate/Vespa) would **fracture** the single source of truth and lose transactional consistency with the evidence ledger. | **KEEP** (deployed) |
 | **Lexical (BM25) — only if gate demands** | **ParadeDB `pg_search`** (Tantivy BM25), *in the same Postgres* | If the strict audit insists on a true BM25 backend distinct from native FTS, `pg_search` is the **minimal** add — it stays inside Postgres (no fracture). Name it `paradedb-bm25` (non-local). | **Conditional** add |
-| **Graph + PPR (B1)** | **Native recursive-PPR** (`postgres-recursive-ppr`); **igraph/scipy sidecar** only as an optional command-backed accelerator | Native recursive-PPR remains the quality path. Do not replace it with Apache AGE as the algorithm source. If the strict Tier-B row still requires an AGE deployment as production evidence, satisfy that as an evidence-compatible sidecar or change the strict audit through an explicit ADR before claiming parity. | **KEEP** native PPR; AGE is evidence-only if required |
+| **Graph + PPR (B1)** | **Native recursive-PPR** (`postgres-recursive-ppr`); **igraph/scipy sidecar** only as an optional command-backed accelerator | Native recursive-PPR remains the quality path. Do not replace it with Apache AGE as the algorithm source. If a future strict audit requires an AGE deployment as production evidence, satisfy that as an evidence-compatible sidecar or change the strict audit through an explicit ADR before claiming parity. | **KEEP** native PPR; AGE is evidence-only if required |
 | **Dense embeddings (B1/B6)** | **`snowflake-arctic-embed-l-v2.0`** (568M, native **1024-dim**, 8192-ctx RoPE, Matryoshka→256) via **TEI/Infinity (CPU)** → `HttpEmbeddingProvider` | SOTA among sub-1B CPU models (~+3.5pt nDCG vs `bge-large`, and no silent 512-token truncation on long memory chunks). Native 1024-dim = exact `pgvector(1024)` match. Source wiring applies `query:` only on query embedding/rerank paths; document embeddings remain unprefixed. | **Upgrade** (model swap, no code) |
 | **Cross-encoder reranker (B1)** | **Real cross-encoder** via `HttpReranker` — **bake off `bge-reranker-v2-m3` vs `gte-reranker-modernbert-base`** on your gold set | A true cross-encoder is required for both quality and the non-local reranker probe. Pick the winner on *your* data, not a benchmark. | **Config** (model-agnostic boundary exists) |
 | **Consolidation role-LLM (B4)** | **Default: `Qwen3-4B` (thinking), Q4_K_M, llama.cpp (CPU)**. **No-compromise option: command-backed frontier model** (`claude`/OpenAI-compatible adapter) | The 11-role "society of roles" drives belief/calibration/lesson quality — reasoning matters. Qwen3-4B is a generation ahead of Qwen2.5-3B and CPU-runnable; the command-backed frontier is the quality ceiling (gate-legal as a non-local `command` provider; §27 sanitizes spans and the quarantine LLM has no write tools). | **Upgrade** + documented lever |
@@ -104,29 +103,29 @@ byte-binding). The work is closing **intent-vs-enforcement** gaps and shipping *
      operator/consolidator or trust-tier≤1 mapping includes a non-tenant claim matcher,
      `required_acr`, `required_amr`, and a positive `max_auth_age_seconds`; tokens must present
      matching `acr`/`amr` and a fresh, non-future `auth_time`. This closes the tenant-only
-     elevation source gap; the Tier-B row still requires retained live Keycloak/MFA rollout
-     evidence.
+     elevation source gap; retained live Keycloak/MFA evidence was later supplied
+     in `capture-bc10`.
    - 2026-06-30 implementation note: C2PA trust evaluation now defaults to trusted-issuer
      enforcement; unconfigured or mismatched signers quarantine instead of raising trust.
      Root-only trust remains possible only through an explicit policy that disables issuer
-     matching and requires the configured root. This closes the source fail-open; the Tier-B
-     row still requires retained live C2PA issuer/root rotation evidence.
+     matching and requires the configured root. This closes the source fail-open; retained
+     live C2PA issuer/root rotation evidence was later supplied in `capture-bc10`.
    - 2026-07-03 implementation note: production `release-audit` now rejects
      weak `mcp-ops-check` evidence unless the replayed output proves hosted
      non-local JSON-RPC/StreamableHTTP transports, bearer-token enforcement,
      signed-session binding, required client certificates, transport
      health/control loops, bounded latency, and raw token/request/response
    redaction. This closes the source-side placeholder-acceptance gap; hosted
-   MCP evidence still has to be captured and retained from real production
-   infrastructure before the Tier-B row can close.
+   MCP evidence was later captured and retained from real production
+   infrastructure in `capture-bc10`.
    - 2026-07-04 implementation note: production `release-audit` now rejects
      weak `tls-lifecycle-ops-check` evidence unless the replayed output proves
      production/operator validation, non-local CA/ACME issuance, renewal
      validity/automation, HTTPS non-local deployment with matching issued cert,
      non-local private-key custody, lifecycle monitoring, redaction, and a
      report fingerprint. This closes the TLS placeholder-acceptance gap only;
-     real step-ca/Caddy/mTLS evidence still has to be captured and retained
-     from production before the Tier-B row can close.
+     real step-ca/Caddy/mTLS evidence was later captured and retained in
+     `capture-bc10`.
 2. **Postgres role separation under RLS:** ship `mnemosyne_app` (NOSUPERUSER, NOBYPASSRLS, no
    DELETE/TRUNCATE), a separate `mnemosyne_consolidator` (sole write/destructive authority), and
    SELECT-only eval roles; an ops-check that live-probes `rolsuper`/`rolbypassrls` and fails if true.
@@ -134,8 +133,8 @@ byte-binding). The work is closing **intent-vs-enforcement** gaps and shipping *
      `PostgresEngine`, `PostgresRuntimeState`, and `PostgresQueue` refuse connections whose
      active role is `rolsuper` or `rolbypassrls`. MCP production profile enables the guard
      automatically for Postgres engine/state/queue surfaces. This closes the unsafe-runtime-role
-     source gap; the Tier-B row still requires retained live role/grant evidence and the
-     `rolsuper`/`rolbypassrls` ops probe.
+     source gap; retained live role/grant evidence and the `rolsuper`/`rolbypassrls`
+     ops probe were later supplied in `capture-bc10`.
 3. **Gate integrity → measure, don't attest:** for Phase 8 only, extend
    high-value `*-ops-check` gates where a real capture attempt exposes an
    attestation-only weakness. The target behavior is live re-execution against
@@ -148,16 +147,16 @@ byte-binding). The work is closing **intent-vs-enforcement** gaps and shipping *
      embedding/reranker latency samples and records p95 timing in structured
      provider evidence. Production `release-audit` requires repeated p95 timing
      evidence for the embedding and reranker subchecks before accepting the
-     provider row. This is source-side evidence gating only; the Tier-B row still
-     needs real target-host CPU P95 artifacts.
+     provider row. This is source-side evidence gating only; real target-host
+     CPU P95 artifacts were later retained in `capture-bc10`.
    - 2026-07-03 implementation note: production `release-audit` now rejects
      weak `retrieval-ops-check` evidence unless the replayed output proves
      non-local Postgres lexical/graph backends, provider forbid-local posture,
      adapter probe coverage for graph/lexical/reranker/vector, production
      calibrated retrieval cases, adapter fingerprints, latency bounds, and raw
      query/embedding/document/credential redaction. This closes a source-side
-     placeholder-acceptance gap; retained production retrieval evidence remains
-     operator-owned before the row can close.
+     placeholder-acceptance gap; retained production retrieval evidence was
+     later supplied in `capture-bc10`.
    - 2026-07-03 implementation note: production `release-audit` now rejects
      weak `parametric-trainer-check` evidence unless the replayed output proves
      a non-local trainer provider, runtime-state protected suite,
@@ -178,8 +177,8 @@ byte-binding). The work is closing **intent-vs-enforcement** gaps and shipping *
   - 2026-06-30 implementation note: hosted JSON-RPC/SSE probes already use the shared
     `network_safety` opener, and hosted StreamableHTTP now validates its endpoint before the
     official MCP SDK/httpx client can open a socket. This closes the source-side hosted-MCP
-    SSRF gap; production egress-deny still requires retained proxy/firewall and live endpoint
-    evidence.
+    SSRF gap; retained proxy/firewall and live endpoint evidence was later
+    supplied in `capture-bc10`.
 - **Host/container:** policy-as-code CI gate (fail on `docker.sock` mount, `privileged`, unpinned
   image, secret-in-env, missing `read_only`/`cap_drop:[ALL]`/non-root/`no-new-privileges`/limits);
   **digest-pin every image**; `infra/scripts/verify-supply-chain.sh` runs gitleaks, Trivy,
@@ -193,9 +192,8 @@ byte-binding). The work is closing **intent-vs-enforcement** gaps and shipping *
     non-local KMS/key custody, key lifecycle and shred checks, strict residency
     allow/deny cases, tombstone plus legal hard-delete erasure, operator delete
     corroboration, case-count coverage, and raw key/object/subject/KMS
-    redaction. This closes the source-side placeholder-acceptance gap; live
-    object-store/KMS/privacy evidence, LUKS, PITR, and restore proof remain
-    operator-owned before this item can close.
+    redaction. This closed the source-side placeholder-acceptance gap; the
+    current Tier-B closure is based on retained `capture-bc10` operator evidence.
 - **Monitoring:** tamper-evident **hash-chained append-only audit log** (Vault-HMAC keyed, BEFORE
   UPDATE/DELETE trigger, INSERT-only grant) + pgaudit + an out-of-band WORM copy the app role cannot
   rewrite; log every write and every auth decision.
@@ -207,9 +205,8 @@ byte-binding). The work is closing **intent-vs-enforcement** gaps and shipping *
     reason, operation, actor, source, trust tier, and authz tags. Production
     `release-audit` now also rejects `ops-report` evidence unless it proves
     retained Vault-HMAC hash-chain verification, pgaudit enablement/retention,
-    and an external retained WORM copy. Vault-HMAC row hashes, pgaudit,
-    WORM export, and retained live evidence remain
-    operator-owned before this item can close.
+    and an external retained WORM copy. The current Tier-B closure is based on
+    retained `capture-bc10` operator evidence for those surfaces.
 
 ### 4.3 Accepted residual risks (mitigated structurally, not eliminated)
 
