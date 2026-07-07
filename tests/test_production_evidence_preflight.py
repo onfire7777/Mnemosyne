@@ -4280,3 +4280,106 @@ def test_cli_production_evidence_verify_accepts_binary_provenance_asset(
         for finding in verify_report.get("findings", [])
     )
     assert json.loads(report_path.read_text(encoding="utf-8")) == verify_report
+
+
+def test_production_evidence_path_rewrites_fold_in_executable_tool_references(
+    tmp_path: Path,
+) -> None:
+    # Regression: the capture wrapper rewrites executable tool references (e.g.
+    # --c2pa-tool) in the operator manifest to their retained tool-artifacts/
+    # snapshot, and stages the same tool under more than one option (--c2pa-tool
+    # and suite.tool) with last-wins over the (option, path)-sorted references.
+    # The offline source/operator manifest equivalence check must reproduce that
+    # tool rewrite from preflight.executable_tool_references, not only the
+    # input-artifact rewrites -- otherwise a genuine, valid production bundle
+    # fails production-evidence-verify with source_manifest_command_profile_mismatch.
+    from mnemosyne.cli import (
+        _production_evidence_manifest_path_rewrites,
+        _verify_production_evidence_source_soak_manifest,
+    )
+
+    bundle = tmp_path / "capture"
+    (bundle / "tool-artifacts").mkdir(parents=True)
+    (bundle / "input-artifacts").mkdir(parents=True)
+    tool_snapshot_first = bundle / "tool-artifacts" / "0001-c2pa-tool-verify.sh-abc"
+    tool_snapshot_last = bundle / "tool-artifacts" / "0008-suite.tool-verify.sh-abc"
+    suite_snapshot = bundle / "input-artifacts" / "0021-provenance-trust-suite.json"
+    for path in (tool_snapshot_first, tool_snapshot_last):
+        path.write_text("#!/bin/sh\necho ok\n", encoding="utf-8")
+    suite_snapshot.write_text("{}\n", encoding="utf-8")
+
+    custody_tool = "/opt/mnemosyne-custody/c2pa/c2pa-verify-host.sh"
+    custody_suite = "/opt/mnemosyne-custody/input-artifacts/provenance-trust-suite.json"
+
+    preflight = {
+        "required_input_artifacts": [
+            {"path": custody_suite, "snapshot_path": str(suite_snapshot.resolve())},
+        ],
+        # Same source tool staged under two options; the (option, path) sort keeps
+        # "--c2pa-tool" first and "suite.tool" last, so last-wins picks 0008 -- the
+        # exact snapshot the operator manifest arg references.
+        "executable_tool_references": [
+            {"option": "--c2pa-tool", "path": custody_tool, "snapshot_path": str(tool_snapshot_first.resolve())},
+            {"option": "suite.tool", "path": custody_tool, "snapshot_path": str(tool_snapshot_last.resolve())},
+        ],
+    }
+
+    rewrites = _production_evidence_manifest_path_rewrites(preflight)
+    # Tool reference is folded in (previously omitted) and resolves to the last
+    # (suite.tool) snapshot, mirroring the capture wrapper's tool_path_rewrites.
+    assert rewrites.get(custody_tool) == str(tool_snapshot_last.resolve())
+    # Input-artifact rewrites still work unchanged.
+    assert rewrites.get(custody_suite) == str(suite_snapshot.resolve())
+
+    common = {
+        "kind": "deployment-soak-manifest",
+        "validation_scope": {
+            "production_validated": True,
+            "target_environment": "production",
+            "operator_asserted": True,
+        },
+        "operator": {"name": "op", "user": "op"},
+    }
+    source_manifest = {
+        **common,
+        "checks": [
+            {
+                "name": "provenance-trust",
+                "command": "provenance-trust-check",
+                "args": ["--suite", custody_suite, "--c2pa-tool", custody_tool],
+                "timeout": 120,
+            }
+        ],
+    }
+    operator_manifest = {
+        **common,
+        "checks": [
+            {
+                "name": "provenance-trust",
+                "command": "provenance-trust-check",
+                "args": [
+                    "--suite",
+                    str(suite_snapshot.resolve()),
+                    "--c2pa-tool",
+                    str(tool_snapshot_last.resolve()),
+                ],
+                "timeout": 120,
+            }
+        ],
+    }
+
+    findings: list[dict[str, Any]] = []
+    ok = _verify_production_evidence_source_soak_manifest(
+        source_manifest, operator_manifest, preflight, findings
+    )
+    # The source/operator equivalence must no longer flag a command-profile or
+    # payload mismatch now that the tool rewrite is reproduced; other unrelated
+    # production-scope findings are out of scope for this regression.
+    profile_mismatch = [
+        finding
+        for finding in findings
+        if finding.get("code")
+        in {"source_manifest_command_profile_mismatch", "source_manifest_payload_mismatch"}
+    ]
+    assert profile_mismatch == [], profile_mismatch
+    assert isinstance(ok, bool)
