@@ -119,7 +119,7 @@ def _evidence_lines(evidence: list[dict]) -> str:
         content = item.get("content") or item.get("gist") or ""
         if isinstance(content, dict):
             content = json.dumps(content, sort_keys=True)
-        lines.append(f"- ({item.get('cid', '')[:12]}) {str(content)[:400]}")
+        lines.append(f"- ({(item.get('cid') or '')[:12]}) {str(content)[:400]}")
     return "\n".join(lines)
 
 

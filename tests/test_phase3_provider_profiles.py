@@ -127,6 +127,18 @@ def test_role_llm_dispatch_table_covers_all_proposal_roles(monkeypatch) -> None:
     assert role_llm.ROLES["procedure_inducer"] is role_llm.ROLES["skill_inducer"]
 
 
+def test_role_llm_evidence_lines_tolerates_null_cid() -> None:
+    # The provider disclosure evidence view carries an explicit ``cid: None`` for
+    # unpersisted evidence (e.g. the provider-check health probe). ``dict.get``
+    # returns that None rather than the default, so slicing the cid must not
+    # crash the evidence-line renderer.
+    role_llm = _load_role_llm()
+    rendered = role_llm._evidence_lines(
+        [{"cid": None, "content": "Provider Health is configured."}]
+    )
+    assert "Provider Health is configured." in rendered
+
+
 def test_role_ladder_orders_frontier_only_for_eligible_roles(monkeypatch) -> None:
     role_ladder = _load_role_ladder()
     calls: list[str] = []
