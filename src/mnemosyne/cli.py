@@ -16573,6 +16573,61 @@ def _native_retrieval_probe(args: argparse.Namespace) -> tuple[dict[str, Any] | 
     return lexical_probe, graph_probe, errors
 
 
+def _seed_provider_health_parametric_corpus(args: argparse.Namespace) -> list[str]:
+    """Seed (idempotently) a minimal real training corpus for the parametric
+    provider-check probe and return its evidence cids.
+
+    The command trainer (``infra/providers/parametric-trainer.py``) trains on the
+    tenant's embedded evidence restricted to the ``source_ids`` train split and
+    hard-requires >=4 rows spanning >=2 trust tiers. The health probe therefore
+    seeds four ``provider-health`` evidence rows across two trust tiers and hands
+    their cids to the trainer as the train split, so the sub-check genuinely
+    exercises the B9 trainer on adequate real evidence instead of a synthetic
+    two-id proposal that can never satisfy the threshold. Content-addressed cids
+    dedupe re-seeds (idempotent), RLS isolates the health tenant, and the engine's
+    deterministic 1024-dim hashing embeddings give the rows real (non-zero) signal.
+    """
+    from mnemosyne.models import Evidence
+    from mnemosyne.postgres_engine import PostgresEngine
+
+    dsn = getattr(args, "postgres_dsn", None) or default_postgres_dsn()
+    if not dsn:
+        raise ValueError(
+            "parametric provider-check requires --postgres-dsn or MNEMOSYNE_POSTGRES_DSN "
+            "to seed the provider-health training corpus"
+        )
+    tenant = "provider-health"
+    engine = PostgresEngine(dsn, require_safe_role=bool(getattr(args, "postgres_require_safe_role", False)))
+    try:
+        engine.ensure_tenant_and_branch(tenant, "main")
+    except Exception:  # noqa: BLE001 - tenant/branch may already exist; the appends below confirm.
+        pass
+    # Two high-trust (label 1) + two low-trust (label 0) rows => >=4 rows, two classes.
+    corpus = [
+        ("provider health parametric high-trust signal: ingest provenance verified", 5),
+        ("provider health parametric high-trust signal: gate promotion recorded", 5),
+        ("provider health parametric low-trust signal: unverified external note", 0),
+        ("provider health parametric low-trust signal: transient probe artifact", 0),
+    ]
+    cids: list[str] = []
+    for content, trust_tier in corpus:
+        cids.append(
+            engine.append_evidence(
+                Evidence(
+                    tenant_id=tenant,
+                    user_id=tenant,
+                    actor="system",
+                    source_type="provider-health-parametric",
+                    content=content,
+                    metadata={"reality_class": "grounded"},
+                    trust_tier=trust_tier,
+                    access_policy={"tenant": tenant},
+                )
+            )
+        )
+    return cids
+
+
 def cmd_provider_check(args: argparse.Namespace) -> None:
     from mnemosyne.gate import RegressionCase
     from mnemosyne.ingestion import residency_policy_report
@@ -16793,6 +16848,10 @@ def cmd_provider_check(args: argparse.Namespace) -> None:
                         timeout_seconds=float(args.parametric_timeout),
                     ),
                 )
+                # Seed a real >=4-row / two-trust-tier corpus and hand the trainer
+                # its cids as the train split so the probe genuinely trains the B9
+                # adapter on adequate real evidence (see _seed_... for why).
+                train_cids = _seed_provider_health_parametric_corpus(args)
                 artifact = tier.propose_from_lessons(
                     "provider-health",
                     [
@@ -16802,17 +16861,21 @@ def cmd_provider_check(args: argparse.Namespace) -> None:
                             failure_signature="provider-health",
                             content="provider health check",
                             status="active",
+                            id=cid,
                         )
+                        for cid in train_cids[:2]
                     ],
                     [
                         Procedure(
                             tenant_id="provider-health",
                             kind="skill",
-                            name="provider-health",
+                            name=f"provider-health-{index}",
                             body="provider health check",
                             signature={"check": "parametric"},
                             status="validated",
+                            id=cid,
                         )
+                        for index, cid in enumerate(train_cids[2:])
                     ],
                 )
                 protected_cases = [
