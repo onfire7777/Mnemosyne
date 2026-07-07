@@ -55,9 +55,14 @@ mcp.mnemo.local {
 	import secure_headers
 	# Official MCP SDK StreamableHTTP transport (B3 streamable_http evidence)
 	# is served by a separate stateless replica; the JSON-RPC facade handles
-	# everything else on this host. handle_path strips the /stream prefix so
-	# the SDK app sees its own /mcp path.
+	# everything else on this host. The /stream prefix is stripped; the
+	# replica's own /healthz probe is passed through unchanged, and every
+	# other request is rewritten onto the SDK app's single /mcp endpoint (the
+	# transport carries session state in the Mcp-Session-Id header, not the
+	# path).
 	handle_path /stream* {
+		@nothealth not path /healthz
+		rewrite @nothealth /mcp
 		reverse_proxy mnemo-stream:8081
 	}
 	reverse_proxy mnemo-api:8080
