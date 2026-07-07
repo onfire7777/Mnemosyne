@@ -1,7 +1,7 @@
 # Mnemosyne — Roadmap to 100% Blueprint Parity
 
 **Authored:** 2026-06-24 · **Last updated:** 2026-06-30 · **Current baseline:** `main` after Tier A source reconciliation, G1/G4 cognitive-runtime gating, production manifest/custody hardening, full T-SEC protected-registry reconciliation, §24 support-strategy runtime durability, protected gate-case ratchet enforcement, shared network-safety provider/probe fetching, provider-manifest command/executable custody validation, skeletal-capture rejection, symlinked input rejection, required external verifier report output, strict external render/capture env-file loading, refreshable Tier-B custody packets, row-scoped production readiness routing, generated render-env action plans, generated runtime-env examples, capture-blocker summaries, canonical `RUNTIME_ENV_FILE` operator handoff docs, `RUNTIME_ENV_FILE`-parameterized executable packet `next-commands.sh` capture-to-verify handoff, and out-of-band reviewer handoff records. The exact moving baseline must be refreshed with `git log -1 --oneline`, `git status --short --branch`, and GitHub Actions for current `HEAD` before writing new status.
-**Controlling status doc:** `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md` (10 gap rows, all "Partial")
+**Controlling status doc:** `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md` (10 gap rows — all **Done** as of 2026-07-07: Tier-B production evidence captured + offline-verified, bundle fingerprint `sha256:6dc117d6bb95e7a683915d432b2d2b21997133e9bfbd53624427a7317eeb2271`)
 **Verdict source:** blended completion **~82%** as of 2026-06-26 (up from a long ~70% plateau, broken by the 2026-06-24 Tier A wirings) — this doc explains *why it sat at ~70%*, *what moved it to ~82%*, and *exactly what flips it to 100%*.
 
 ---
@@ -12,7 +12,7 @@ The headline number is a **blended** figure, and the blend hides the real shape 
 
 - **~85% functional / architectural scaffold** — nearly every blueprint capability is built and green-tested on the deterministic local engine.
 - **6 of 6 headline SLOs are now empirically PROVEN** across the real retrieval/calibration paths: recall 0.977, nDCG 0.983, G2 lift +0.208 @7% tokens, poison-block 1.0, warm+serial P95 149.5 ms, and ECE 0.0063 vs §16 ≤0.05 from `eval/calibration/runner.py`.
-- **But ~55–60% production-grade 1:1 parity.** Every one of the 10 audit gap rows is "Partial" for the *same* reason: the code contracts and local/compose-Postgres validation are done, but **operator-captured evidence from real production deployments does not yet exist**.
+- **But ~55–60% production-grade 1:1 parity.** Every one of the 10 audit gap rows was "Partial" for the *same* reason: the code contracts and local/compose-Postgres validation were done, but operator-captured evidence from real production deployments did not yet exist. **As of 2026-07-07 that evidence now exists and is offline-verified** — a genuine operator-run production capture over the live self-hosted stack passed the frozen 29-command `deployment-soak`, `release-audit` (`ok:true`, 0 findings), and offline `production-evidence-verify` (`ok:true`), flipping all 10 rows Partial→Done.
 
 The ~70% plateau held for so long — and the remaining ~18% to 100% is slow — because that work is **not "write more code in the same style."** It is two distinct kinds of work that coding-as-usual does not produce:
 

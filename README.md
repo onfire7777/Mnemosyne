@@ -5,7 +5,7 @@
 ![Python](https://img.shields.io/badge/python-3.12%2B-blue)
 ![License](https://img.shields.io/badge/license-Apache--2.0-green)
 ![Status](https://img.shields.io/badge/SLOs-6%2F6%20proven-success)
-![Completion](https://img.shields.io/badge/strict%20parity-Tier--B%20evidence%20pending-yellow)
+![Completion](https://img.shields.io/badge/strict%20parity-Tier--B%20evidence%20verified-success)
 ![Backend](https://img.shields.io/badge/backends-local%20%7C%20sqlite%20%7C%20postgres-informational)
 ![Protocol](https://img.shields.io/badge/MCP-stdio%20%7C%20HTTP%20%7C%20SDK-blueviolet)
 
@@ -32,7 +32,7 @@ source for this repository and depends on no external local path.
 - **Hard invariant rails.** Seven §31 rails (bounded supersession, corroborated deletion, bounded pruning, monotonic trust, external-only reward, retrieved-text-is-data, bounded cadence) are enforced and regression-tested.
 - **Capability-mediated, fail-closed writes.** Trust tiers, sensitivity ceilings, signed CLI/MCP sessions, OIDC→role mapping, and prompt-injection sanitization on every retrieved span.
 - **Branchable memory.** Fork a tenant's memory, experiment, then `merge` or `discard` — like git for beliefs.
-- **Three backends, proven equivalent.** A zero-dependency in-memory engine, a PostgreSQL-backed engine, and a per-tenant SQLite engine pass the shared contract + parity test suite; production parity still requires the Tier-B operator evidence described below.
+- **Three backends, proven equivalent.** A zero-dependency in-memory engine, a PostgreSQL-backed engine, and a per-tenant SQLite engine pass the shared contract + parity test suite; the Tier-B operator production evidence is now captured and offline-verified (2026-07-07 — 29/29 production deployment-soak green, `release-audit` `ok:true`, `production-evidence-verify` `ok:true`; see `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md`).
 - **Local-first.** Single core dependency (`cryptography`). No network, no Postgres, and no model server required to start.
 
 ---
@@ -291,7 +291,7 @@ Mnemosyne/
 
 ## Status
 
-Exact 1:1 blueprint parity is in progress, but the headline guarantees are proven. As of 2026-06-25, **all six headline §16 SLOs PASS** on the real retrieval/calibration paths:
+Exact 1:1 blueprint parity's Tier-B production-evidence rows are now CLOSED (2026-07-07): a genuine operator-run production capture yields a fully green 29-command `deployment-soak`, `release-audit` `ok:true`, and offline `production-evidence-verify` `ok:true` (bundle fingerprint `sha256:6dc117d6bb95e7a683915d432b2d2b21997133e9bfbd53624427a7317eeb2271`), flipping all 10 strict-parity audit rows Partial→Done. The headline guarantees remain proven: as of 2026-06-25, **all six headline §16 SLOs PASS** on the real retrieval/calibration paths:
 
 | SLO | Measured | Target | Result |
 | --- | --- | --- | --- |

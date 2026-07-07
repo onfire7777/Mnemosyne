@@ -101,7 +101,7 @@ Phases 0–5 are checked complete in the roadmap; **Phase 6 is the open mileston
 ## 4. Requirements ledger (REQ-001…REQ-018)
 
 Status mirrors `.planning/REQUIREMENTS.md` (P0/P1) — all P0 must-haves implemented and tested locally;
-several carry production-evidence gates (release-audit / provider-check / OIDC-JWKS) that are 🔒 until operator-run.
+several carry production-evidence gates (release-audit / provider-check / OIDC-JWKS) that are 🔒 until operator-run. **2026-07-07: those 🔒 production-evidence gates are now satisfied** — a genuine operator-run production capture over the live self-hosted stack passed the frozen 29-command `deployment-soak` (fully green), `release-audit` (`ok:true`, 0 findings; 29 required commands + 15 required provider checks), and offline `production-evidence-verify` (`ok:true`; bundle fingerprint `sha256:6dc117d6bb95e7a683915d432b2d2b21997133e9bfbd53624427a7317eeb2271`, captured 2026-07-07T15:53:18Z). See `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md`.
 
 | ID | Blueprint anchor | Status |
 |---|---|---|
