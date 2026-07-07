@@ -46,7 +46,9 @@ docker compose -f "$REPO_ROOT/infra/docker-compose.prod.yml" up -d step-ca
 sleep 5
 docker compose -f "$REPO_ROOT/infra/docker-compose.prod.yml" exec -T step-ca \
   cat /home/step/certs/root_ca.crt > "$SECRETS_DIR/step-ca-root.crt"
-echo "    Add an ACME provisioner:  step ca provisioner add acme --type ACME"
+echo "    ACME provisioner + 90-day (2160h) TLS leaf duration are applied AUTOMATICALLY"
+echo "    by the step-ca CMD wrapper (infra/step-ca/mnemo-entrypoint.sh) at container start —"
+echo "    no manual 'step ca provisioner add acme' needed; it is idempotent on every boot."
 echo "    Trust the root on the host so backends validate the chain (security/no-skip-verify)."
 echo "    Issue the Vault leaf (infra/vault/vault.hcl expects it under \$MNEMO_SECRETS_DIR/vault-tls/):"
 echo "      mkdir -p $SECRETS_DIR/vault-tls"

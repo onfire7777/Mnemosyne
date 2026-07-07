@@ -71,7 +71,18 @@ services:
     security_opt: []
     cap_add: ["NET_BIND_SERVICE"]
     environment: { DOCKER_STEPCA_INIT_NAME: Mnemosyne, DOCKER_STEPCA_INIT_DNS_NAMES: ca.mnemo.local }
-    volumes: [stepca:/home/step]
+    volumes:
+      - stepca:/home/step
+      # Reproducible 90-day TLS leaf duration: the stock image only runs
+      # `step ca init` (24h ACME leaves by default). This wrapper runs after
+      # init and before the CA server starts, idempotently ensuring the ACME
+      # provisioner exists and issues 2160h (90d) leaves so a FRESH volume
+      # reproduces the production TLS posture (see infra/step-ca/mnemo-entrypoint.sh).
+      - ./step-ca/mnemo-entrypoint.sh:/usr/local/bin/mnemo-step-ca-entrypoint.sh:ro
+    # The stock ENTRYPOINT (/bin/bash /entrypoint.sh) still performs `step ca init`
+    # on a fresh volume, then exec's this CMD; the wrapper sets the 90d duration
+    # and hands off to `step-ca`.
+    command: ["/bin/bash", "/usr/local/bin/mnemo-step-ca-entrypoint.sh"]
     networks:
       edge: { aliases: [ca.mnemo.local] }
       internal: { aliases: [ca.mnemo.local] }
