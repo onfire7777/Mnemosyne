@@ -8410,6 +8410,199 @@ def cmd_worker_run(args: argparse.Namespace) -> None:
         raise SystemExit(1)
 
 
+def _ops_report_audit_provider(args: argparse.Namespace) -> "tuple[str, Any] | None":
+    """Resolve the ops-report audit hash-chain HMAC provider.
+
+    Returns ``None`` when audit-retention evidence was not requested (no
+    ``--audit-hmac-command`` and no local secret), keeping ops-report's default
+    behaviour untouched. A Vault-transit command adapter yields the production
+    ``vault-hmac`` provider; a local secret is explicitly non-production and can
+    never satisfy the release-audit gate."""
+    from mnemosyne.audit_chain import (
+        LOCAL_HMAC_PROVIDER,
+        VAULT_HMAC_PROVIDER,
+        AuditChainError,
+        command_hmac_provider,
+        local_hmac_provider,
+    )
+
+    command = getattr(args, "audit_hmac_command", None)
+    secret_file = getattr(args, "audit_local_hmac_secret_file", None)
+    if not command and not secret_file:
+        return None
+    try:
+        if command:
+            return VAULT_HMAC_PROVIDER, command_hmac_provider(
+                command, timeout=float(getattr(args, "audit_hmac_timeout", 30.0))
+            )
+        secret = Path(secret_file).expanduser().read_text(encoding="utf-8").strip()
+        return LOCAL_HMAC_PROVIDER, local_hmac_provider(secret)
+    except (OSError, AuditChainError) as exc:
+        raise SystemExit(f"ops-report audit HMAC provider denied: {exc}") from exc
+
+
+def _ops_report_retain_sink(retention_dir: str, tenant_id: str) -> "Any":
+    """Persist the verified chain document to a durable retention directory and
+    confirm a byte-exact round-trip on read-back, so ``hash_chain.retained`` only
+    reports true when the verified document genuinely landed in durable storage
+    (a mounted volume in production)."""
+
+    def retain(document: dict[str, Any]) -> dict[str, Any]:
+        import hashlib
+
+        target_dir = Path(retention_dir).expanduser()
+        target_dir.mkdir(parents=True, exist_ok=True)
+        head = str(document.get("head_link_sha256") or "")[:16]
+        path = target_dir / f"audit-chain-{tenant_id}-{head}.json"
+        serialized = json.dumps(document, indent=2, sort_keys=True) + "\n"
+        path.write_text(serialized, encoding="utf-8")
+        raw = path.read_bytes()
+        try:
+            reloaded = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            return {"retained": False, "error": f"retained chain document unreadable: {exc}"}
+        if reloaded != document:
+            return {"retained": False, "error": "retained chain document did not round-trip"}
+        return {
+            "retained": True,
+            "path": str(path),
+            "sha256": "sha256:" + hashlib.sha256(raw).hexdigest(),
+        }
+
+    return retain
+
+
+def _probe_pgaudit_evidence(args: argparse.Namespace) -> dict[str, Any]:
+    """Probe the live database for pgaudit enablement and retained output.
+
+    ``enabled`` requires the extension installed, preloaded via
+    ``shared_preload_libraries``, and ``pgaudit.log`` configured with audit
+    classes. ``retained`` additionally requires the logging collector on with a
+    finite log rotation window (durable, rotated audit output). All reads use
+    ``pg_settings``/``pg_extension`` and need no elevated privilege."""
+    from mnemosyne.audit_retention import pgaudit_evidence
+
+    dsn = getattr(args, "audit_pgaudit_dsn", None) or os.environ.get("MNEMOSYNE_POSTGRES_DSN")
+    if not dsn:
+        return pgaudit_evidence(enabled=False, retained=False, error="no postgres dsn for pgaudit probe")
+    try:
+        import psycopg  # type: ignore[import-not-found]
+    except ImportError:
+        return pgaudit_evidence(enabled=False, retained=False, error="psycopg unavailable for pgaudit probe")
+
+    settings: dict[str, Any] = {}
+    try:
+        with psycopg.connect(dsn, connect_timeout=10) as conn, conn.cursor() as cur:
+            for name in (
+                "shared_preload_libraries",
+                "pgaudit.log",
+                "logging_collector",
+                "log_destination",
+                "log_directory",
+                "log_rotation_age",
+            ):
+                try:
+                    cur.execute("SELECT current_setting(%s, true)", (name,))
+                    row = cur.fetchone()
+                    settings[name] = row[0] if row else None
+                except Exception:  # noqa: BLE001 - unknown GUC before the extension loads
+                    settings[name] = None
+            cur.execute("SELECT count(*) FROM pg_extension WHERE extname = 'pgaudit'")
+            installed = bool((cur.fetchone() or [0])[0])
+    except Exception as exc:  # noqa: BLE001 - connection/permission failures stay honest
+        return pgaudit_evidence(enabled=False, retained=False, error=f"pgaudit probe failed: {exc}")
+
+    preloaded = "pgaudit" in (settings.get("shared_preload_libraries") or "")
+    log_classes = (settings.get("pgaudit.log") or "").strip()
+    enabled = bool(installed and preloaded and log_classes)
+    collector_on = str(settings.get("logging_collector") or "").lower() in ("on", "true", "1", "yes")
+    rotation = str(settings.get("log_rotation_age") or "").strip()
+    rotation_ok = bool(rotation) and rotation not in ("0", "0min", "0s")
+    retained = bool(enabled and collector_on and rotation_ok)
+    return pgaudit_evidence(
+        enabled=enabled,
+        retained=retained,
+        installed=installed,
+        shared_preload_libraries=settings.get("shared_preload_libraries"),
+        log=log_classes or None,
+        logging_collector=settings.get("logging_collector"),
+        log_rotation_age=rotation or None,
+    )
+
+
+def _probe_worm_copy_evidence(args: argparse.Namespace, document: "dict[str, Any] | None") -> dict[str, Any]:
+    """Archive the verified chain document to an external object-lock (WORM)
+    store via an adapter command that reads the document on stdin and prints
+    retention evidence JSON. ``enabled``/``external``/``retained`` come straight
+    from the adapter's proven object-lock read-back; nothing is inferred."""
+    from mnemosyne.audit_retention import worm_copy_evidence
+
+    command = getattr(args, "audit_worm_command", None)
+    if not command:
+        return worm_copy_evidence(enabled=False, external=False, retained=False, error="no worm adapter command")
+    if document is None:
+        return worm_copy_evidence(enabled=False, external=False, retained=False, error="no verified chain document")
+    try:
+        completed = subprocess.run(
+            shlex.split(command),
+            input=json.dumps(document).encode("utf-8"),
+            capture_output=True,
+            timeout=float(getattr(args, "audit_worm_timeout", 120.0)),
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return worm_copy_evidence(enabled=False, external=False, retained=False, error=f"worm adapter failed: {exc}")
+    if completed.returncode != 0:
+        detail = completed.stderr.decode("utf-8", errors="replace").strip()[:200]
+        return worm_copy_evidence(
+            enabled=False, external=False, retained=False,
+            error=f"worm adapter exited {completed.returncode}: {detail}",
+        )
+    try:
+        result = json.loads(completed.stdout.decode("utf-8", errors="replace"))
+    except json.JSONDecodeError as exc:
+        return worm_copy_evidence(enabled=False, external=False, retained=False, error=f"worm adapter output invalid: {exc}")
+    if not isinstance(result, dict):
+        return worm_copy_evidence(enabled=False, external=False, retained=False, error="worm adapter output was not an object")
+    return worm_copy_evidence(
+        enabled=result.get("enabled") is True,
+        external=result.get("external") is True,
+        retained=result.get("retained") is True,
+        bucket=result.get("bucket"),
+        key=result.get("key"),
+        mode=result.get("mode"),
+        retain_until=result.get("retain_until"),
+        version_id=result.get("version_id"),
+        object_sha256=result.get("object_sha256"),
+    )
+
+
+def _ops_report_audit_evidence(
+    args: argparse.Namespace, engine: "Any", tenant_id: str
+) -> "dict[str, Any] | None":
+    """Assemble the ops-report ``audit`` section (hash_chain + pgaudit +
+    worm_copy) when audit-retention evidence was requested; otherwise ``None``."""
+    from mnemosyne.audit_retention import audit_section, hash_chain_evidence
+
+    provider = _ops_report_audit_provider(args)
+    if provider is None:
+        return None
+    provider_name, hmac_provider = provider
+    entries = _audit_chain_entries(engine, tenant_id)
+    retention_dir = getattr(args, "audit_retention_dir", None)
+    retain = _ops_report_retain_sink(retention_dir, tenant_id) if retention_dir else None
+    hash_chain, document = hash_chain_evidence(
+        entries,
+        tenant_id=tenant_id,
+        provider_name=provider_name,
+        hmac_provider=hmac_provider,
+        retain=retain,
+    )
+    pgaudit = _probe_pgaudit_evidence(args)
+    worm_copy = _probe_worm_copy_evidence(args, document)
+    return audit_section(hash_chain, pgaudit, worm_copy)
+
+
 def cmd_ops_report(args: argparse.Namespace) -> None:
     from mnemosyne.observability import build_ops_report, render_ops_dashboard
     from mnemosyne.queue import InProcessQueue
@@ -8429,7 +8622,14 @@ def cmd_ops_report(args: argparse.Namespace) -> None:
         max_proxy_gap=args.max_proxy_gap,
         max_open_contradictions=args.max_open_contradictions,
     )
-    payload = {"ok": bool(report["tripwires"]["passed"]), **report}
+    audit_evidence = _ops_report_audit_evidence(args, tools.engine, args.tenant)
+    audit_ok = True
+    if audit_evidence is not None:
+        from mnemosyne.audit_retention import audit_evidence_complete
+
+        report["audit"] = audit_evidence
+        audit_ok = audit_evidence_complete(audit_evidence)
+    payload = {"ok": bool(report["tripwires"]["passed"]) and audit_ok, **report}
     dashboard_html = render_ops_dashboard(report)
     dashboard_path: Path | None = None
     if args.dashboard_html:
@@ -18618,6 +18818,41 @@ def build_parser() -> argparse.ArgumentParser:
     ops_report.add_argument(
         "--dashboard-package-dir",
         help="Write static dashboard HTML, JSON snapshot, and manifest files to this directory",
+    )
+    ops_report.add_argument(
+        "--audit-hmac-command",
+        default=os.environ.get("MNEMOSYNE_AUDIT_HMAC_COMMAND"),
+        help="External Vault-transit HMAC adapter; setting it emits the audit-retention evidence section",
+    )
+    ops_report.add_argument(
+        "--audit-hmac-timeout",
+        type=float,
+        default=float(os.environ.get("MNEMOSYNE_AUDIT_HMAC_TIMEOUT", "30")),
+    )
+    ops_report.add_argument(
+        "--audit-local-hmac-secret-file",
+        default=os.environ.get("MNEMOSYNE_AUDIT_LOCAL_HMAC_SECRET_FILE"),
+        help="Development-only non-production audit HMAC secret (never satisfies the vault-hmac gate)",
+    )
+    ops_report.add_argument(
+        "--audit-retention-dir",
+        default=os.environ.get("MNEMOSYNE_AUDIT_RETENTION_DIR"),
+        help="Durable directory that retains the verified audit hash-chain document (hash_chain.retained)",
+    )
+    ops_report.add_argument(
+        "--audit-pgaudit-dsn",
+        default=os.environ.get("MNEMOSYNE_AUDIT_PGAUDIT_DSN"),
+        help="DSN for the live pgaudit enablement/retention probe (defaults to the postgres backend DSN)",
+    )
+    ops_report.add_argument(
+        "--audit-worm-command",
+        default=os.environ.get("MNEMOSYNE_AUDIT_WORM_COMMAND"),
+        help="External adapter that writes an object-locked WORM copy of the chain and prints retention evidence",
+    )
+    ops_report.add_argument(
+        "--audit-worm-timeout",
+        type=float,
+        default=float(os.environ.get("MNEMOSYNE_AUDIT_WORM_TIMEOUT", "120")),
     )
     ops_report.set_defaults(func=cmd_ops_report)
 
