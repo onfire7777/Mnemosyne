@@ -45,17 +45,14 @@ import copy
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.retrieval import Hit
 
-
 def _hit(kind: str, id_: str, score: float, channel: str) -> Hit:
     return Hit(kind=kind, id=id_, text=f"text-{id_}", score=score, channel=channel)
-
 
 def _sample_lists() -> list[list[Hit]]:
     dense = [_hit("evidence", "a", 0.9, "dense_hash"), _hit("evidence", "b", 0.7, "dense_hash")]
     lexical = [_hit("evidence", "b", 3.0, "lexical"), _hit("evidence", "c", 1.0, "lexical")]
     graph: list[Hit] = []
     return [dense, lexical, graph]
-
 
 def test_rrf_fuse_matches_engine_private_rrf():
     from mnemosyne.algorithms import rrf_fuse
@@ -67,7 +64,6 @@ def test_rrf_fuse_matches_engine_private_rrf():
     assert [(h.kind, h.id, h.score, h.channel) for h in actual] == [
         (h.kind, h.id, h.score, h.channel) for h in expected
     ]
-
 
 def test_rrf_fuse_merges_channels_and_dedups_by_kind_id():
     from mnemosyne.algorithms import rrf_fuse
@@ -104,7 +100,6 @@ import copy
 from collections import defaultdict
 
 from mnemosyne.retrieval import Hit
-
 
 def rrf_fuse(ranked_lists: list[list[Hit]], k: int, *, rrf_k: float) -> list[Hit]:
     by_id: dict[tuple[str, str], Hit] = {}
@@ -180,7 +175,6 @@ def test_u_curve_order_interleaves_front_back():
     ordered = u_curve_order(hits)
     assert [h.id for h in ordered] == ["0", "2", "4", "3", "1"]
 
-
 def test_fit_budget_skips_items_over_budget_and_reports_usage():
     from mnemosyne.algorithms import fit_budget
     from mnemosyne.text import approx_tokens
@@ -192,7 +186,6 @@ def test_fit_budget_skips_items_over_budget_and_reports_usage():
     kept, used = fit_budget([big, small], budget=approx_tokens("tiny") + 1)
     assert [h.id for h in kept] == ["s"]
     assert used == approx_tokens("tiny")
-
 
 def test_extracted_helpers_match_engine_statics():
     from mnemosyne.algorithms import fit_budget, u_curve_order
@@ -213,7 +206,6 @@ Expected: FAIL with `ImportError: cannot import name 'u_curve_order'`
 ```python
 from mnemosyne.text import approx_tokens
 
-
 def u_curve_order(hits: list[Hit]) -> list[Hit]:
     front: list[Hit] = []
     back: list[Hit] = []
@@ -223,7 +215,6 @@ def u_curve_order(hits: list[Hit]) -> list[Hit]:
         else:
             back.insert(0, hit)
     return front + back
-
 
 def fit_budget(hits: list[Hit], budget: int) -> tuple[list[Hit], int]:
     kept: list[Hit] = []
@@ -292,7 +283,6 @@ def test_ppr_power_iteration_constants_and_ranking():
     # teleport keeps the seed's own rank anchored at >= 0.15
     assert ranks["seed"] >= 0.15
 
-
 def test_ppr_power_iteration_is_deterministic():
     from mnemosyne.algorithms import ppr_power_iteration
 
@@ -310,7 +300,6 @@ Run: `uv run --locked python -m pytest tests/test_algorithms.py -v -k ppr`
 
 ```python
 from collections.abc import Callable
-
 
 def ppr_power_iteration(
     adjacency: dict[str, list[str]],
@@ -391,7 +380,6 @@ def test_mmr_select_matches_local_engine_mmr():
     )
     assert [h.id for h in actual] == [h.id for h in expected]
 
-
 def test_mmr_select_base_score_dominates_and_ties_are_first_wins():
     from mnemosyne.algorithms import mmr_select
 
@@ -399,7 +387,6 @@ def test_mmr_select_base_score_dominates_and_ties_are_first_wins():
     b = _hit("evidence", "b", 5.0, "lexical")  # identical score: 'a' must win (input order)
     picked = mmr_select([a, b], 1, query_vec=[0.0], embed_hit=lambda h: None, mmr_lambda=0.7)
     assert picked[0].id == "a"
-
 
 def test_mmr_select_missing_vector_means_zero_relevance_no_penalty():
     from mnemosyne.algorithms import mmr_select
@@ -418,7 +405,6 @@ Run: `uv run --locked python -m pytest tests/test_algorithms.py -v -k mmr`
 
 ```python
 from mnemosyne.text import cosine
-
 
 def mmr_select(
     hits: list[Hit],
@@ -518,12 +504,10 @@ from unittest import mock
 
 from mnemosyne.retrieval import RetrievalAdapters, retrieval_adapters_from_env
 
-
 def test_local_default_backend_names_are_pinned():
     adapters = RetrievalAdapters()
     assert adapters.lexical_backend == "local-bm25-lite"
     assert adapters.graph_backend == "local-ppr"
-
 
 def test_env_default_backend_names_are_pinned():
     with mock.patch.dict(os.environ, {}, clear=False):
@@ -673,10 +657,8 @@ from pathlib import Path
 
 from mnemosyne.journal import CIDJournal
 
-
 def _rec(cid: str) -> dict:
     return {"cid": cid, "tenant_id": "t-a", "content": f"payload-{cid}", "kind": "evidence"}
-
 
 def test_append_writes_canonical_json_lines(tmp_path: Path):
     j = CIDJournal(tmp_path / "t-a.journal")
@@ -685,7 +667,6 @@ def test_append_writes_canonical_json_lines(tmp_path: Path):
     lines = (tmp_path / "t-a.journal").read_text().splitlines()
     assert [json.loads(l)["cid"] for l in lines] == ["cid-1", "cid-2"]
     assert lines[0] == json.dumps(_rec("cid-1"), sort_keys=True, separators=(",", ":"))
-
 
 def test_tombstone_preserves_line_with_marker_not_content(tmp_path: Path):
     j = CIDJournal(tmp_path / "t.journal")
@@ -697,13 +678,11 @@ def test_tombstone_preserves_line_with_marker_not_content(tmp_path: Path):
     assert tomb["erased"] is True and tomb["salted_hash"] == "abc123"
     assert "content" not in tomb
 
-
 def test_purge_removes_line_entirely(tmp_path: Path):
     j = CIDJournal(tmp_path / "t.journal")
     j.append(_rec("cid-1")); j.append(_rec("cid-2"))
     j.purge("cid-1")
     assert [r["cid"] for r in j.records()] == ["cid-2"]
-
 
 def test_verify_against_reports_both_divergence_directions(tmp_path: Path):
     j = CIDJournal(tmp_path / "t.journal")
@@ -712,7 +691,6 @@ def test_verify_against_reports_both_divergence_directions(tmp_path: Path):
     assert d.missing_from_journal == ["cid-2"] and d.journal_only == []
     d2 = j.verify_against(set())
     assert d2.journal_only == ["cid-1"]
-
 
 def test_local_engine_appends_to_journal_when_configured(tmp_path: Path):
     from mnemosyne.engine import LocalMemoryEngine
@@ -751,10 +729,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-
 def _canonical(record: dict[str, Any]) -> str:
     return json.dumps(record, sort_keys=True, separators=(",", ":"))
-
 
 @dataclass
 class JournalDivergence:
@@ -764,7 +740,6 @@ class JournalDivergence:
     @property
     def diverged(self) -> bool:
         return bool(self.missing_from_journal or self.journal_only)
-
 
 class CIDJournal:
     def __init__(self, path: Path) -> None:
@@ -873,7 +848,6 @@ from pathlib import Path
 
 from mnemosyne.projections import ProjectionRegistry, ProjectionSpec
 
-
 def test_ensure_rebuilds_on_fingerprint_mismatch(tmp_path: Path):
     calls: list[str] = []
     state = {"fp": "v1"}
@@ -888,7 +862,6 @@ def test_ensure_rebuilds_on_fingerprint_mismatch(tmp_path: Path):
     state["fp"] = "v2"
     assert reg.ensure("demo") is True and calls == ["rebuilt", "rebuilt"]
 
-
 def test_version_bump_forces_rebuild(tmp_path: Path):
     calls: list[str] = []
     reg = ProjectionRegistry(tmp_path)
@@ -898,7 +871,6 @@ def test_version_bump_forces_rebuild(tmp_path: Path):
     reg2 = ProjectionRegistry(tmp_path)
     reg2.register(ProjectionSpec(name="demo", version=2, fingerprint=lambda: "same", rebuild=lambda: calls.append("r")))
     assert reg2.ensure("demo") is True and len(calls) == 2
-
 
 def test_status_reports_all_registered(tmp_path: Path):
     reg = ProjectionRegistry(tmp_path)
@@ -927,14 +899,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-
 @dataclass(frozen=True)
 class ProjectionSpec:
     name: str
     version: int
     fingerprint: Callable[[], str]
     rebuild: Callable[[], None]
-
 
 class ProjectionRegistry:
     def __init__(self, state_dir: Path) -> None:
@@ -1045,14 +1015,11 @@ random.seed(20260701)
 
 _WORDS = ["postgres", "memory", "belief", "evidence", "tenant", "branch", "vector", "graph"]
 
-
 def _text(n: int) -> str:
     return " ".join(random.choice(_WORDS) + str(random.randint(0, 500)) for _ in range(n))
 
-
 DOCS = [_text(80) for _ in range(2000)]
 QUERY = _text(12)
-
 
 def _gate(name: str, seconds: float) -> None:
     if not BASELINES.exists():
@@ -1062,24 +1029,20 @@ def _gate(name: str, seconds: float) -> None:
         f"{name}: {seconds:.4f}s exceeds {RELATIVE_CEILING}x baseline {baseline:.4f}s"
     )
 
-
 def test_bench_cosine_1024(benchmark):
     a = [random.random() for _ in range(1024)]
     b = [random.random() for _ in range(1024)]
     benchmark(cosine, a, b)
     _gate("cosine_1024", benchmark.stats.stats.mean)
 
-
 def test_bench_hashing_embedding_cold(benchmark):
     docs = iter(DOCS * 50)
     benchmark(lambda: hashing_embedding(next(docs) + " salt"))
     _gate("hashing_embedding", benchmark.stats.stats.mean)
 
-
 def test_bench_lexical_scan_2k(benchmark):
     benchmark(lambda: [lexical_score(QUERY, d) for d in DOCS])
     _gate("lexical_scan_2k", benchmark.stats.stats.mean)
-
 
 def test_fast_path_retrieve_absolute_budget():
     if os.environ.get("MNEMOSYNE_BENCH_ABSOLUTE") != "1":
@@ -1161,7 +1124,6 @@ from mnemosyne.journal import CIDJournal
 
 cids = st.lists(st.uuids().map(str), min_size=1, max_size=30, unique=True)
 
-
 @given(cids)
 @settings(max_examples=50, deadline=None)
 def test_append_only_prefix_property(tmp_path_factory=None, cid_list=None):
@@ -1176,7 +1138,6 @@ def test_append_only_prefix_property(tmp_path_factory=None, cid_list=None):
             assert current[: len(seen)] == seen, "existing prefix mutated by append"
             seen = current
 
-
 @given(cids)
 @settings(max_examples=50, deadline=None)
 def test_rebuild_determinism_same_records_same_bytes(cid_list):
@@ -1189,7 +1150,6 @@ def test_rebuild_determinism_same_records_same_bytes(cid_list):
             j1.append(dict(record))
             j2.append(dict(record))
         assert (Path(d) / "a.journal").read_bytes() == (Path(d) / "b.journal").read_bytes()
-
 
 @given(cids, st.integers(min_value=0, max_value=29))
 @settings(max_examples=50, deadline=None)
@@ -1242,13 +1202,11 @@ from pathlib import Path
 
 from mnemosyne.honeytokens import honeytoken, scan_for_foreign_honeytokens
 
-
 def test_honeytoken_is_deterministic_and_class_tagged():
     t1 = honeytoken("S3", "tenant-a")
     assert t1 == honeytoken("S3", "tenant-a")
     assert t1.startswith("HTKN-S3-")
     assert honeytoken("S3", "tenant-b") != t1
-
 
 def test_scan_flags_only_foreign_tokens():
     own = honeytoken("S3", "tenant-a")
@@ -1256,7 +1214,6 @@ def test_scan_flags_only_foreign_tokens():
     text = f"log line with {own} and {foreign}"
     hits = scan_for_foreign_honeytokens(text, own_tenant_id="tenant-a")
     assert hits == [foreign]
-
 
 def test_cross_tenant_journal_isolation(tmp_path: Path):
     """Spec §4.0: tenant A's journal never contains tenant B's honeytokens."""
@@ -1293,16 +1250,13 @@ import re
 HONEYTOKEN_PREFIX = "HTKN"
 _TOKEN_RE = re.compile(r"HTKN-(S[0-4])-([0-9a-f]{16})")
 
-
 def _tenant_hash(cls: str, tenant_id: str) -> str:
     return hashlib.sha256(f"{cls}:{tenant_id}".encode()).hexdigest()[:16]
-
 
 def honeytoken(cls: str, tenant_id: str) -> str:
     if not re.fullmatch(r"S[0-4]", cls):
         raise ValueError(f"unknown sensitivity class: {cls}")
     return f"{HONEYTOKEN_PREFIX}-{cls}-{_tenant_hash(cls, tenant_id)}"
-
 
 def scan_for_foreign_honeytokens(text: str, *, own_tenant_id: str) -> list[str]:
     own_hashes = {_tenant_hash(f"S{i}", own_tenant_id) for i in range(5)}
