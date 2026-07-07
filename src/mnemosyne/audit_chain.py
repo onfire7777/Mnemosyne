@@ -132,7 +132,8 @@ def verify_audit_chain(
     recorded_links = document.get("links")
     if not isinstance(recorded_links, list):
         raise AuditChainError("audit chain document requires links")
-    if int(document.get("entry_count") or -1) != len(entries):
+    recorded_entry_count = document.get("entry_count")
+    if not isinstance(recorded_entry_count, int) or recorded_entry_count != len(entries):
         raise AuditChainError(
             f"audit chain entry count mismatch: retained {document.get('entry_count')}, live {len(entries)}"
         )

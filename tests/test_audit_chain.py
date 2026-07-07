@@ -39,6 +39,22 @@ def build_local_chain(entries: list[dict], secret: str = "dev-secret") -> dict:
     )
 
 
+def test_empty_audit_log_builds_and_verifies() -> None:
+    # An audit log with zero entries must produce a verifiable (trivial) chain;
+    # entry_count 0 is a real count, not a missing value.
+    document = build_local_chain([])
+    assert document["entry_count"] == 0
+    assert document["head_link_sha256"] == "0" * 64
+    result = verify_audit_chain(
+        document,
+        [],
+        tenant_id=TENANT,
+        hmac_provider=local_hmac_provider("dev-secret"),
+    )
+    assert result["verified"] is True
+    assert result["entry_count"] == 0
+
+
 def test_build_and_verify_round_trip_with_local_anchor() -> None:
     document = build_local_chain(ENTRIES)
 
