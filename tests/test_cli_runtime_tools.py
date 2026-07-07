@@ -5128,6 +5128,7 @@ def test_cli_projection_recompute_tracks_affected_projection_set(tmp_path: Path)
     )
     details = recompute["job"]["result"]["details"]
 
+    assert recompute["ok"] is True
     assert recompute["job"]["status"] == "complete"
     assert details["changed_evidence_cids"] == [ingested["cid"]]
     assert details["affected_evidence_cids"] == [ingested["cid"], summary["cid"]]

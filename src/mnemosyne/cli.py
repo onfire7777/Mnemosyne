@@ -8253,14 +8253,19 @@ def cmd_projection_recompute_once(args: argparse.Namespace) -> None:
     queued = queue.enqueue(PROJECTION_RECOMPUTE_JOB, projection_recompute_payload(args), max_attempts=args.max_attempts)
     job = worker.run_once(PROJECTION_RECOMPUTE_JOB)
     _persist_worker_state(args, runtime_state, queue, tools)
+    job_dict = job.to_dict() if job else None
+    ok = bool(job_dict is not None and job_dict.get("status") == "complete")
     emit(
         {
+            "ok": ok,
             "queue": queue.snapshot(),
             "enqueued_job": queued.to_dict(),
-            "job": job.to_dict() if job else None,
+            "job": job_dict,
             "metrics": metrics.snapshot().to_dict(),
         }
     )
+    if not ok:
+        raise SystemExit(1)
 
 
 def _runtime_worker_components(
