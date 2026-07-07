@@ -6716,9 +6716,48 @@ def production_ops_report_audit() -> dict:
     }
 
 
+def production_policy_ops_stdout() -> dict:
+    """Real policy self-optimization report shape emitted by ``policy-ops-check``.
+
+    ``validate_policy_ops_bundle`` proves the shadow-policy contract through
+    ``summary``/``variants``/``outcomes``/``tripwires``/``promotion`` — not the
+    ``bundle``/``requirements``/``checks`` bundle-ops shape. Mirrors the live
+    capture output so the release-audit output-key gate is exercised against the
+    genuine self-optimization contract.
+    """
+    return {
+        "ok": True,
+        "fingerprint": "a" * 64,
+        "summary": {
+            "tenant_id": "primary",
+            "metric": "retrieval_reward",
+            "variants": 2,
+            "outcomes": 4,
+            "tripwires": 1,
+            "required_variant_ids": ["recall", "stable"],
+            "recommended_variant_id": "recall",
+        },
+        "variants": [
+            {"id": "recall", "rails_ok": True, "shadow_mode": True, "top_k": 8, "abstention_threshold": 0.2},
+            {"id": "stable", "rails_ok": True, "shadow_mode": True, "top_k": 6, "abstention_threshold": 0.3},
+        ],
+        "outcomes": {"counts_by_variant": {"recall": 2, "stable": 2}},
+        "tripwires": [{"id": "latency_guard", "ok": True, "triggered": False}],
+        "cadence": {"window_hours": 24.0, "max_updates_per_day": 1},
+        "promotion": {
+            "mode": "shadow",
+            "production_mutation": False,
+            "expected_recommended_variant_id": "recall",
+        },
+        "findings": [],
+    }
+
+
 def production_release_stdout(command: str, provider_stdout: dict) -> dict:
     if command == "provider-check":
         return provider_stdout
+    if command == "policy-ops-check":
+        return production_policy_ops_stdout()
     if command == "mcp-ops-check":
         return production_mcp_ops_stdout()
     if command == "privacy-ops-check":
@@ -6736,7 +6775,6 @@ def production_release_stdout(command: str, provider_stdout: dict) -> dict:
         "consolidation-ops-check",
         "multimodal-ops-check",
         "provenance-ops-check",
-        "policy-ops-check",
     }:
         return production_bundle_ops_stdout(command)
     if command in {"belief-revision-check", "forgetting-policy-check"}:
@@ -7523,6 +7561,36 @@ def rewrite_production_bundle_manifest(bundle_dir: Path) -> str:
 def test_release_audit_output_key_contract_covers_frozen_production_profile() -> None:
     assert set(RELEASE_AUDIT_REQUIRED_OUTPUT_KEYS) == set(PRODUCTION_RELEASE_REQUIRED_COMMANDS)
     assert all(RELEASE_AUDIT_REQUIRED_OUTPUT_KEYS[command] for command in PRODUCTION_RELEASE_REQUIRED_COMMANDS)
+
+
+def test_release_audit_policy_ops_requires_self_optimization_output() -> None:
+    """policy-ops-check is a self-optimization check, not a bundle-ops check.
+
+    ``cmd_policy_ops_check``/``validate_policy_ops_bundle`` emit
+    ``summary``/``variants``/``outcomes``/``tripwires``/``promotion``/``findings``
+    — never the ``bundle``/``requirements``/``checks`` bundle-ops shape. The gate
+    must require the genuine self-optimization sections so it proves the shadow
+    policy contract instead of demanding sections the command never produces.
+    """
+    from mnemosyne.cli import (
+        RELEASE_AUDIT_BUNDLE_OPS_COMMANDS,
+        _release_required_output_evidence_findings,
+    )
+
+    keys = RELEASE_AUDIT_REQUIRED_OUTPUT_KEYS["policy-ops-check"]
+    assert keys == ("summary", "variants", "outcomes", "tripwires", "promotion", "findings")
+    # A self-optimization check must not be treated as a bundle-ops command.
+    assert "policy-ops-check" not in RELEASE_AUDIT_BUNDLE_OPS_COMMANDS
+
+    # The genuine self-optimization report satisfies the corrected gate.
+    good = production_policy_ops_stdout()
+    assert _release_required_output_evidence_findings("policy-ops-check", good, keys) == []
+
+    # The miscategorized bundle-ops shape no longer satisfies it — the substantive
+    # self-optimization sections are missing, so the gate reports them hollow.
+    bad = production_bundle_ops_stdout("policy-ops-check")
+    bad_findings = _release_required_output_evidence_findings("policy-ops-check", bad, keys)
+    assert any(item["code"] == "required_command_output_hollow" for item in bad_findings)
 
 
 def test_cli_release_audit_verifies_production_deployment_evidence(tmp_path: Path) -> None:

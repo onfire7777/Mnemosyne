@@ -156,7 +156,7 @@ RELEASE_AUDIT_REQUIRED_OUTPUT_KEYS: dict[str, tuple[str, ...]] = {
     "calibration-tune": ("calibration", "threshold", "metrics", "failures"),
     "forgetting-policy-check": ("fingerprint", "summary", "results", "findings"),
     "hosted-llm-check": ("manifest", "required_roles", "checks", "findings"),
-    "policy-ops-check": ("bundle", "requirements", "checks", "findings"),
+    "policy-ops-check": ("summary", "variants", "outcomes", "tripwires", "promotion", "findings"),
     "privacy-ops-check": ("bundle", "requirements", "checks", "findings"),
     "provenance-ops-check": ("bundle", "requirements", "checks", "findings"),
     "provenance-trust-check": ("suite", "required_case_ids", "checks", "findings"),
