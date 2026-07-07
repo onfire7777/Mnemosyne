@@ -1,4 +1,4 @@
-# ADR-002: Scope strict v1.0 parity to self-hosted-evidencable rows; B9 parametric trainer is out-of-profile by design
+# ADR-002: B9 parametric tier scope for the self-hosted production profile
 
 **Date:** 2026-07-04 (amended 2026-07-05; superseded in part 2026-07-06 — see
 "Amendment — 2026-07-06")
@@ -13,18 +13,23 @@ Done on the self-hosted no-GPU profile via a real CPU-trained parametric adapter
 
 ## Context
 
+This section and the original Decision below document the 2026-07-04 rationale.
+They are retained as decision history; the current operative status is the
+2026-07-06 amendment and the Consequences section below.
+
 The strict blueprint parity audit requires operator-captured production
 evidence for ten Tier-B rows. Nine of those rows (B1–B8, B10) are evidencable
 on the deployed self-hosted production profile (16 GB, no GPU), which was
 brought up end to end on 2026-07-04
 (`.planning/runbooks/LIVE-DEPLOYMENT-VALIDATION-2026-07-04.md`).
 
-Row B9 (FR-21, parametric tier) requires evidence from a real LoRA /
-test-time-training trainer deployment. The planning contract has been explicit
-since 2026-06-30 that this is **not satisfiable on the no-GPU self-hosted
-host**: "B9/FR-21 still requires real cloud/GPU trainer evidence or an
-explicit ADR before strict v1.0 parity reaches 100%." The Phase 8 roadmap
-entry likewise routes B9 to "cloud/GPU evidence or explicit ADR."
+Row B9 (FR-21, parametric tier) requires evidence from a real trainer
+deployment. At the time this ADR was opened, the planning contract treated the
+no-GPU self-hosted host as out-of-profile for that row: "B9/FR-21 still
+requires real cloud/GPU trainer evidence or an explicit ADR before strict v1.0
+parity reaches 100%." The Phase 8 roadmap entry likewise routed B9 to
+"cloud/GPU evidence or explicit ADR." The 2026-07-06 amendment below supersedes
+that original assumption.
 
 This ADR is that explicit decision record.
 
@@ -148,21 +153,26 @@ ADR's scoping clause becomes moot without further amendment.
 
 ## Consequences
 
-- The honest completion statement becomes: *"v1.0 strict parity: complete on
-  the self-hosted profile (B1–B8, B10); B9 parametric trainer deferred to a
-  funded cloud/GPU deployment by ADR-002."*
-- Release-audit behavior is unchanged: nothing in this ADR alters code,
-  gates, thresholds, or evidence validation. It changes only what the
-  final sign-off claims and how B9's `Partial` status is categorized.
+- The original completion statement in Decision §2/§3 is superseded by the
+  2026-07-06 amendment. The current honest statement is: *"B9 is Done on the
+  self-hosted no-GPU production profile only because real retained
+  CPU-trained-adapter evidence passed the unchanged `parametric-trainer-check`
+  and release-audit path."*
+- Release-audit behavior is unchanged: nothing in this ADR weakens code, gates,
+  thresholds, or evidence validation. It changes only the accepted scope
+  interpretation after the GPU/LoRA premise was refuted by real evidence.
 - Future sessions must not "finish" B9 with synthetic evidence and must not
-  reopen the GPU-vs-ADR question as if undecided; cite this ADR instead.
+  reopen the GPU-vs-ADR question as if undecided; cite the 2026-07-06
+  amendment in this ADR instead.
 
 ## Alternatives considered
 
-- **Fund cloud/GPU trainer evidence now** — rejected for now on cost/priority
-  grounds; explicitly preserved as the reversal path above.
-- **Mark B9 Done via local command-provider evidence** — rejected: violates
-  the non-local trainer requirement the release-audit gates enforce and the
-  project's evidence-integrity contract.
+- **Fund cloud/GPU trainer evidence immediately** — rejected in the original
+  decision on cost/priority grounds; still preserved as an optional scale path
+  for larger adapters, not as a requirement for current B9 evidence.
+- **Mark B9 Done via local/synthetic command-provider evidence** — rejected:
+  violates the non-local trainer requirement the release-audit gates enforce
+  and the project's evidence-integrity contract. The accepted 2026-07-06 path
+  uses a real non-local command-backed trainer and retained production evidence.
 - **Leave the decision open** — rejected: an undecided B9 blocks an honest
   v1.0 sign-off statement indefinitely and invites either stall or gaming.

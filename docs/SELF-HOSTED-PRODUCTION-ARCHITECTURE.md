@@ -2,8 +2,9 @@
 
 **Status:** Proposed subordinate architecture for a self-hosted production
 profile. Local-first / self-hosted is the preferred operating target for rows it
-can honestly satisfy; cloud/GPU remains the required values-only extension for
-capabilities such as B9/FR-21 that cannot be evidenced on a no-GPU host.
+can honestly satisfy; cloud/GPU remains an optional values-only extension for
+larger accelerator-backed providers, not a prerequisite for the current B9/FR-21
+evidence path.
 **Audience:** operators standing up Tier-B production evidence, and the Codex/GSD loop.
 **Authority:** the blueprint (`docs/blueprint/`) and live repo evidence win over this doc where they
 differ. This doc **extends** the already-wired `infra/` provider stack; it does not replace it.
@@ -11,7 +12,9 @@ differ. This doc **extends** the already-wired `infra/` provider stack; it does 
 runs comfortably on a ~16 GB Mac, must preserve every Tier-B gate, the seven
 §31 rails, and the six §16 SLOs — with **no quality degradation** versus what a
 top engineer would choose, and **no gate weakened**. The no-GPU envelope is not
-a license to mark B9 or strict 100% complete without real B9 evidence.
+a license to mark B9 or strict parity complete without real B9 evidence; the
+current controlling audit records B9 Done only because real retained evidence
+was captured.
 
 ---
 
@@ -26,7 +29,7 @@ inside the envelope, and we **keep** the SLO-proven core untouched.
 
 **Two profiles, one codebase, values only.** The gates key on provider *kind* and
 host/CA *locality*, never on vendor identity. So `self-hosted` (preferred
-baseline) and `cloud` (B9-capable extension) share the identical
+baseline) and `cloud` (optional quality/scale extension) share the identical
 `provider-manifest.production.template.json` and the same checks; they differ
 only in the *values* bound to env references. `forbid_local: true` is retained
 in **both** — it is a property of the schema, not the profile. Profiles live
@@ -69,13 +72,13 @@ with **mandatory signed sessions** (see §4).
 | B6 multimodal | SeaweedFS/MinIO + media extractor/embedder | non-local object store + media commands |
 | B7 privacy/erasure | Vault transit crypto-shred + residency policy | non-local KMS lifecycle; real erasure proof |
 | B8 observability | Grafana (`mode=hosted_url`) | retained non-loopback dashboard URL + tripwires |
-| **B9 parametric** | **Not satisfiable on the no-GPU self-hosted baseline** | Current strict parity still requires real B9 operator evidence before 100%. The self-hosted profile must leave B9 Partial unless the cloud/GPU values-only profile supplies trainer evidence or the strict audit is changed by an explicit ADR. |
+| **B9 parametric** | CPU-trained parametric adapter + command-backed trainer + `parametric-http` service | real non-local trainer provider, content-addressed adapter artifact, protected-suite gate, rollback drill, supervised HTTPS serving, rail report, and redacted retained evidence |
 | B10 live parity | the whole self-hosted stack under one manifest | all non-local providers + belief-revision over real infra |
 
-**Net:** the self-hosted baseline can target **B1–B8 + B10** with real evidence,
-no GPU, and no weakened gate. It does **not** by itself reach strict 100%.
-Current strict parity still requires B9 evidence through a cloud/GPU values-only
-profile or a separately accepted audit decision.
+**Net:** the self-hosted baseline can target **B1–B10** with real evidence, no
+GPU, and no weakened gate. The earlier cloud/GPU-only premise for B9 was
+superseded by ADR-002's 2026-07-06 amendment after a real CPU-trained adapter
+evidence path passed the unchanged gates.
 
 ---
 
@@ -157,13 +160,13 @@ byte-binding). The work is closing **intent-vs-enforcement** gaps and shipping *
      operator-owned before the row can close.
    - 2026-07-03 implementation note: production `release-audit` now rejects
      weak `parametric-trainer-check` evidence unless the replayed output proves
-     a non-local cloud/GPU trainer provider, runtime-state protected suite,
+     a non-local trainer provider, runtime-state protected suite,
      promoted zero-regression gate, rollback fingerprint, HTTPS deployment with
      matching suite/artifact/rollback hashes, external-only rail report, bounded
      mutation/reward/sink metrics, report fingerprint, and raw training
      data/credential/artifact redaction. This closes a source-side
-     placeholder-acceptance gap for B9; retained cloud/GPU trainer evidence
-     remains operator-owned before strict 100% can close.
+     placeholder-acceptance gap for B9; retained production trainer evidence
+     remains operator-owned and is required for the row to stay closed.
 
 ### 4.2 Layered defense-in-depth
 
@@ -234,7 +237,7 @@ with capture/transcode workers run **on-demand** (`--profile capture`) to keep i
 |---|---|---|
 | Embedding quality | LLM-scale embedders (Qwen3-Embedding-4B/8B, ~+8–12 retrieval pts) need GPU and emit 2560/4096-dim (pgvector reindex) | cloud/GPU embedding endpoint |
 | Consolidation reasoning | a local 4B is good, not frontier | command-backed frontier model (already supported) |
-| B9 parametric tier | LoRA / test-time-training needs a GPU | cloud/GPU trainer endpoint flips B9 from DEFERRED to evidenced |
+| B9 parametric tier | larger LoRA / foundation-model-style adapters may need GPU | optional cloud/GPU trainer endpoint improves scale; current B9 evidence does not require it |
 
 Every lever is a **values-only profile swap** — no code change, no gate weakened.
 
@@ -250,8 +253,9 @@ extensions to the high-value `*-ops-check` gates.
 **Unchanged (do not touch):** the gate locality semantics and `forbid_local`;
 the seven §31 rails; the native-Postgres retrieval engine; the SLO-proven
 calibration path; the strict-audit ledger (rows flip only on real evidence).
-Current B9 remains a production-evidence requirement for strict 100% unless a
-future accepted ADR changes the audit. **No gate is weakened anywhere.**
+B9 remains a production-evidence requirement; the current controlling audit
+records it Done only because real self-hosted evidence was captured through the
+unchanged gates. **No gate is weakened anywhere.**
 
 ---
 
