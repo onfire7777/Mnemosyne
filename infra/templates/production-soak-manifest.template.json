@@ -111,7 +111,9 @@
       "command": "provider-check",
       "args": [
         "--provider-manifest",
-        "MNEMOSYNE_PROD_EVIDENCE_DIR/provider-manifest.production.json"
+        "MNEMOSYNE_PROD_EVIDENCE_DIR/provider-manifest.production.json",
+        "--provider-latency-samples",
+        "3"
       ],
       "timeout": 120
     },
@@ -224,7 +226,9 @@
       "args": [
         "--bundle",
         "MNEMOSYNE_PROD_EVIDENCE_DIR/mcp-ops-bundle.json",
-        "--require-client-cert"
+        "--require-client-cert",
+        "--min-cert-days",
+        "30"
       ],
       "timeout": 120
     },
@@ -321,7 +325,7 @@
         "--queue-backend",
         "postgres",
         "--queue-tenant",
-        "MNEMOSYNE_PROD_TENANT"
+        "release-worker-probe"
       ],
       "args": [
         "--max-cycles",
