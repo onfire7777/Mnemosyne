@@ -14553,8 +14553,6 @@ def _production_evidence_manifest_path_rewrites(preflight: Mapping[str, Any] | N
     if preflight is None:
         return {}
     input_artifacts = preflight.get("required_input_artifacts")
-    if not isinstance(input_artifacts, list):
-        return {}
     rewrites: dict[str, str] = {}
 
     def record_rewrite(source: str, snapshot: str) -> None:
@@ -14567,7 +14565,7 @@ def _production_evidence_manifest_path_rewrites(preflight: Mapping[str, Any] | N
         except (OSError, RuntimeError, ValueError):
             pass
 
-    for artifact in input_artifacts:
+    for artifact in input_artifacts if isinstance(input_artifacts, list) else []:
         if not isinstance(artifact, Mapping):
             continue
         source_path = artifact.get("path")
@@ -14589,6 +14587,21 @@ def _production_evidence_manifest_path_rewrites(preflight: Mapping[str, Any] | N
             snapshot_file = file_entry.get("snapshot_path")
             if isinstance(source_file, str) and source_file and isinstance(snapshot_file, str) and snapshot_file:
                 record_rewrite(source_file, snapshot_file)
+    # Retained executable tool references (e.g. --c2pa-tool) are rewritten in the
+    # operator manifest to their tool-artifacts/ snapshot exactly as the capture
+    # wrapper does (capture-production-evidence.sh tool_path_rewrites, last-wins
+    # over the (option, path)-sorted references). Fold the same source->snapshot
+    # map in here so the source/operator manifest equivalence check accounts for
+    # tool-path rewrites, not only input-artifact rewrites.
+    tool_references = preflight.get("executable_tool_references")
+    if isinstance(tool_references, list):
+        for reference in tool_references:
+            if not isinstance(reference, Mapping):
+                continue
+            source_path = reference.get("path")
+            snapshot_path = reference.get("snapshot_path")
+            if isinstance(source_path, str) and source_path and isinstance(snapshot_path, str) and snapshot_path:
+                record_rewrite(source_path, snapshot_path)
     return rewrites
 
 
