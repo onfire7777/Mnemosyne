@@ -1,0 +1,16 @@
+{
+  "_comment": "Reproducibility template (NO real keys) for the external WORM audit-copy S3 identity. Merge this identity into the out-of-repo seaweed-s3.json (the file the seaweedfs service mounts at /etc/seaweed/s3.json), generate real accessKey/secretKey, and hand them to the WORM adapter via MNEMOSYNE_AUDIT_WORM_ACCESS_KEY / _SECRET_KEY. The per-bucket 'Admin:mnemosyne-audit-worm' action is least-privilege: it authorises object-lock/retention/versioning ONLY on the audit-worm bucket and cannot touch the B6 multimodal/parametric buckets used by the 'mnemosyne' app identity.",
+  "identities": [
+    {
+      "name": "mnemosyne-audit-worm",
+      "credentials": [{ "accessKey": "REPLACE_WITH_GENERATED_ACCESS_KEY", "secretKey": "REPLACE_WITH_GENERATED_SECRET_KEY" }],
+      "actions": [
+        "Admin:mnemosyne-audit-worm",
+        "Read:mnemosyne-audit-worm",
+        "Write:mnemosyne-audit-worm",
+        "List:mnemosyne-audit-worm",
+        "Tagging:mnemosyne-audit-worm"
+      ]
+    }
+  ]
+}
