@@ -8490,23 +8490,22 @@ def _probe_pgaudit_evidence(args: argparse.Namespace) -> dict[str, Any]:
     except ImportError:
         return pgaudit_evidence(enabled=False, retained=False, error="psycopg unavailable for pgaudit probe")
 
+    setting_names = (
+        "shared_preload_libraries",
+        "pgaudit.log",
+        "logging_collector",
+        "log_destination",
+        "log_directory",
+        "log_rotation_age",
+    )
     settings: dict[str, Any] = {}
     try:
-        with psycopg.connect(dsn, connect_timeout=10) as conn, conn.cursor() as cur:
-            for name in (
-                "shared_preload_libraries",
-                "pgaudit.log",
-                "logging_collector",
-                "log_destination",
-                "log_directory",
-                "log_rotation_age",
-            ):
-                try:
-                    cur.execute("SELECT current_setting(%s, true)", (name,))
-                    row = cur.fetchone()
-                    settings[name] = row[0] if row else None
-                except Exception:  # noqa: BLE001 - unknown GUC before the extension loads
-                    settings[name] = None
+        # autocommit so an unknown-GUC lookup can never abort a transaction; a
+        # single pg_settings scan returns only registered settings (no per-GUC
+        # error path), keeping the probe robust across pgaudit load states.
+        with psycopg.connect(dsn, connect_timeout=10, autocommit=True) as conn, conn.cursor() as cur:
+            cur.execute("SELECT name, setting FROM pg_settings WHERE name = ANY(%s)", (list(setting_names),))
+            settings = {row[0]: row[1] for row in cur.fetchall()}
             cur.execute("SELECT count(*) FROM pg_extension WHERE extname = 'pgaudit'")
             installed = bool((cur.fetchone() or [0])[0])
     except Exception as exc:  # noqa: BLE001 - connection/permission failures stay honest

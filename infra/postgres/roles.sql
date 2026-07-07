@@ -70,6 +70,11 @@ GRANT DELETE ON justifications, contradictions TO mnemosyne_app;
 REVOKE UPDATE, DELETE, TRUNCATE ON audit_log FROM mnemosyne_app, mnemosyne_consolidator;
 GRANT SELECT, INSERT ON audit_log TO mnemosyne_app, mnemosyne_consolidator;
 
+-- Read-only settings visibility so the ops-report audit-retention probe can
+-- prove pgaudit enablement (shared_preload_libraries is a superuser-only GUC).
+-- This is the standard monitoring role; it grants no data or write authority.
+GRANT pg_read_all_settings TO consolidator_user;
+
 -- Tables created at runtime by one login role stay usable by the other.
 ALTER DEFAULT PRIVILEGES FOR ROLE app_user IN SCHEMA public
   GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO mnemosyne_consolidator;

@@ -78,7 +78,10 @@ services:
 
   postgres:                                # NATIVE retrieval engine: FTS + pgvector HNSW + recursive-PPR
     <<: *hardened
-    image: pgvector/pgvector:pg16@sha256:ad2e18408bf447f62092a8a5259e7df10505c5a0360bd1a1853ac8b8b0763da2
+    # pgvector/pgvector:pg16 (digest-pinned in postgres/Dockerfile) + pgaudit for
+    # the append-only audit rail. pgaudit is preloaded via the command below.
+    build: { context: ., dockerfile: postgres/Dockerfile }
+    image: mnemosyne/postgres-pgaudit:pg16
     user: "999:999"
     environment:
       POSTGRES_DB: mnemosyne
@@ -91,7 +94,21 @@ services:
       - ./postgres/20-keycloak-db.sh:/docker-entrypoint-initdb.d/20-keycloak-db.sh:ro
     secrets: [pg_superuser_pw, kc_db_pw, app_db_pw, consolidator_db_pw, eval_db_pw]
     tmpfs: ["/tmp:size=64m", "/run/postgresql:size=64m"]
-    command: ["postgres", "-c", "shared_buffers=512MB", "-c", "maintenance_work_mem=512MB"]
+    command: ["postgres",
+      "-c", "shared_buffers=512MB",
+      "-c", "maintenance_work_mem=512MB",
+      # pgaudit: preload the extension and audit writes/DDL/role changes. Output
+      # goes to the logging collector on the durable pgdata volume, rotated daily
+      # and never truncated (log_rotation_size=0), so audit output is retained.
+      "-c", "shared_preload_libraries=pgaudit",
+      "-c", "pgaudit.log=write, ddl, role",
+      "-c", "pgaudit.log_catalog=off",
+      "-c", "logging_collector=on",
+      "-c", "log_destination=stderr",
+      "-c", "log_directory=log",
+      "-c", "log_filename=postgresql-%Y-%m-%d_%H%M%S.log",
+      "-c", "log_rotation_age=1d",
+      "-c", "log_rotation_size=0"]
     healthcheck: { test: ["CMD-SHELL", "pg_isready -U mnemosyne_superuser -d mnemosyne"], interval: 10s, retries: 6 }
     # P1 capacity rebalance (infra/PERF-RUNTIME.md): explicit ceilings so no single
     # service can monopolize the VM; applied only via scripts/apply-perf-runtime.sh.
