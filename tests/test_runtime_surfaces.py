@@ -485,6 +485,59 @@ def test_http_embedding_and_reranker_adapters_use_json_provider_contract() -> No
     assert requests[1]["payload"]["model"] == "rank-model"
 
 
+def test_http_embedding_provider_caches_single_and_batch_calls() -> None:
+    requests: list[dict[str, object]] = []
+
+    def vector_for(text: str) -> list[float]:
+        if text == "alpha":
+            return [3.0, 4.0, 0.0]
+        if text == "beta":
+            return [0.0, 5.0, 0.0]
+        return [8.0, 6.0, 0.0]
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:  # noqa: N802 - stdlib callback name.
+            length = int(self.headers.get("Content-Length", "0"))
+            payload = json.loads(self.rfile.read(length).decode("utf-8"))
+            requests.append({"payload": payload})
+            value = payload["input"]
+            if isinstance(value, list):
+                body = {
+                    "data": [
+                        {"index": index, "embedding": vector_for(str(item))}
+                        for index, item in enumerate(value)
+                    ]
+                }
+            else:
+                body = {"data": [{"embedding": vector_for(str(value))}]}
+            encoded = json.dumps(body).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(encoded)))
+            self.end_headers()
+            self.wfile.write(encoded)
+
+        def log_message(self, format: str, *args: object) -> None:  # noqa: A002 - stdlib signature.
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_port}"
+    try:
+        embedding = HttpEmbeddingProvider(f"{base}/embed", model="embed-model", dims=3, cache_size=16)
+        assert embedding.embed("alpha") == [0.6, 0.8, 0.0]
+        assert embedding.embed("alpha") == [0.6, 0.8, 0.0]
+        assert embedding.embed_many(["alpha", "beta"]) == [[0.6, 0.8, 0.0], [0.0, 1.0, 0.0]]
+        assert embedding.embed_many(["beta", "gamma"]) == [[0.0, 1.0, 0.0], [0.8, 0.6, 0.0]]
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        server.server_close()
+
+    assert [request["payload"]["input"] for request in requests] == ["alpha", "beta", "gamma"]
+
+
 def test_http_retrieval_adapters_fail_closed_on_malformed_provider_responses() -> None:
     class Handler(BaseHTTPRequestHandler):
         def do_POST(self) -> None:  # noqa: N802 - stdlib callback name.

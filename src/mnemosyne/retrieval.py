@@ -12,9 +12,10 @@ import subprocess
 import tempfile
 import urllib.error
 import urllib.request
-from collections import Counter
+from collections import Counter, OrderedDict
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
+from threading import RLock
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
 from mnemosyne.media_limits import DEFAULT_MAX_INGEST_BYTES, enforce_byte_limit, validate_byte_limit
@@ -36,6 +37,8 @@ WORKSPACE_RETRIEVAL_ADVISORY_FILTER_KEYS = (
     "workspace_retrieval_advisory_mode",
 )
 WORKSPACE_CONTROLLER_FILTER_KEYS = WORKSPACE_BROADCAST_FILTER_KEYS + WORKSPACE_RETRIEVAL_ADVISORY_FILTER_KEYS
+_HTTP_EMBEDDING_CACHE: OrderedDict[tuple[str, str, str, int, str, str], tuple[float, ...]] = OrderedDict()
+_HTTP_EMBEDDING_CACHE_LOCK = RLock()
 QUERY_SUPPORT_STOPWORDS = {
     "a",
     "about",
@@ -1116,14 +1119,23 @@ class HttpEmbeddingProvider:
     timeout_seconds: float = 30.0
     name: str = "http-embedding"
     query_prefix: str = "query: "
+    model_revision: str | None = None
+    cache_size: int = 8192
 
     def embed(self, text: str) -> list[float]:
+        cache_key = _http_embedding_cache_key(self, text)
+        if self.cache_size > 0:
+            cached = _http_embedding_cache_get(cache_key)
+            if cached is not None:
+                return cached
         payload: dict[str, object] = {"input": text}
         if self.model:
             payload["model"] = self.model
         response = _post_json(self.url, payload, self.api_key, self.timeout_seconds)
         vector = _extract_embedding(response)
-        return _normalize_vector(vector, self.dims)
+        normalized = _normalize_vector(vector, self.dims)
+        _http_embedding_cache_put(cache_key, normalized, self.cache_size)
+        return normalized
 
     def embed_many(self, texts: Sequence[str]) -> list[list[float]]:
         """Embed a batch of texts through the service's OpenAI-style list input.
@@ -1137,25 +1149,78 @@ class HttpEmbeddingProvider:
         items = list(texts)
         if not items:
             return []
-        if len(items) == 1:
-            return [self.embed(items[0])]
-        payload: dict[str, object] = {"input": items}
+        results: list[list[float] | None] = [None] * len(items)
+        missing: list[tuple[int, str, tuple[str, str, str, int, str, str]]] = []
+        for index, text in enumerate(items):
+            cache_key = _http_embedding_cache_key(self, text)
+            cached = _http_embedding_cache_get(cache_key) if self.cache_size > 0 else None
+            if cached is None:
+                missing.append((index, text, cache_key))
+            else:
+                results[index] = cached
+        if not missing:
+            return [vector for vector in results if vector is not None]
+        if len(missing) == 1:
+            index, text, _cache_key = missing[0]
+            results[index] = self.embed(text)
+            return [vector for vector in results if vector is not None]
+        payload: dict[str, object] = {"input": [text for _index, text, _cache_key in missing]}
         if self.model:
             payload["model"] = self.model
         try:
             response = _post_json(self.url, payload, self.api_key, self.timeout_seconds)
         except _ProviderHttpError as exc:
             if 400 <= exc.code < 500:
-                return [self.embed(text) for text in items]
+                for index, text, _cache_key in missing:
+                    results[index] = self.embed(text)
+                return [vector for vector in results if vector is not None]
             raise
         try:
-            vectors = _extract_embeddings_batch(response, expected=len(items))
+            vectors = _extract_embeddings_batch(response, expected=len(missing))
         except ValueError:
-            return [self.embed(text) for text in items]
-        return [_normalize_vector(vector, self.dims) for vector in vectors]
+            for index, text, _cache_key in missing:
+                results[index] = self.embed(text)
+            return [vector for vector in results if vector is not None]
+        for (index, _text, cache_key), vector in zip(missing, vectors, strict=True):
+            normalized = _normalize_vector(vector, self.dims)
+            _http_embedding_cache_put(cache_key, normalized, self.cache_size)
+            results[index] = normalized
+        return [vector for vector in results if vector is not None]
 
     def embed_query(self, query: str) -> list[float]:
         return self.embed(_with_query_prefix(query, self.query_prefix))
+
+
+def _http_embedding_cache_key(
+    provider: HttpEmbeddingProvider,
+    text: str,
+) -> tuple[str, str, str, int, str, str]:
+    auth = hashlib.sha256((provider.api_key or "").encode("utf-8")).hexdigest()
+    text_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    return (provider.url, provider.model or "", provider.model_revision or "", provider.dims, auth, text_hash)
+
+
+def _http_embedding_cache_get(key: tuple[str, str, str, int, str, str]) -> list[float] | None:
+    with _HTTP_EMBEDDING_CACHE_LOCK:
+        vector = _HTTP_EMBEDDING_CACHE.get(key)
+        if vector is None:
+            return None
+        _HTTP_EMBEDDING_CACHE.move_to_end(key)
+        return list(vector)
+
+
+def _http_embedding_cache_put(
+    key: tuple[str, str, str, int, str, str],
+    vector: Sequence[float],
+    max_size: int,
+) -> None:
+    if max_size <= 0:
+        return
+    with _HTTP_EMBEDDING_CACHE_LOCK:
+        _HTTP_EMBEDDING_CACHE[key] = tuple(vector)
+        _HTTP_EMBEDDING_CACHE.move_to_end(key)
+        while len(_HTTP_EMBEDDING_CACHE) > max_size:
+            _HTTP_EMBEDDING_CACHE.popitem(last=False)
 
 
 class CommandMediaEmbeddingProvider:

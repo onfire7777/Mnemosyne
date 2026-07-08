@@ -89,7 +89,7 @@ def embed_server() -> Iterator[ThreadingHTTPServer]:
 
 
 def _provider(server: ThreadingHTTPServer, dims: int = 4) -> HttpEmbeddingProvider:
-    return HttpEmbeddingProvider(url=f"http://127.0.0.1:{server.server_address[1]}/embed", dims=dims)
+    return HttpEmbeddingProvider(url=f"http://127.0.0.1:{server.server_address[1]}/embed", dims=dims, cache_size=0)
 
 
 def test_embed_many_matches_sequential_in_one_batch_request(embed_server: ThreadingHTTPServer) -> None:

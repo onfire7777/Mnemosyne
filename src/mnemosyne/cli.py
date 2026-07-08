@@ -17,7 +17,7 @@ import sys
 import tempfile
 import time
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import UTC, datetime
 from hashlib import sha256
 from pathlib import Path
@@ -16857,7 +16857,7 @@ def cmd_provider_check(args: argparse.Namespace) -> None:
         ParametricTier,
         protected_suite_report,
     )
-    from mnemosyne.retrieval import CommandMediaEmbeddingProvider, embed_query
+    from mnemosyne.retrieval import CommandMediaEmbeddingProvider, HttpEmbeddingProvider, embed_query
     from mnemosyne.security import SessionAuthError, SessionIdentity, SessionTokenVerifier, load_session_secret_command
 
     manifest = apply_provider_manifest(args)
@@ -16867,6 +16867,8 @@ def cmd_provider_check(args: argparse.Namespace) -> None:
     ok = True
     try:
         adapters = load_retrieval_adapters(args)
+        if isinstance(adapters.embedding, HttpEmbeddingProvider):
+            adapters = replace(adapters, embedding=replace(adapters.embedding, cache_size=0))
         vector, latency = _run_provider_latency_samples(
             latency_samples,
             lambda: embed_query(adapters.embedding, "Mnemosyne provider health check"),
