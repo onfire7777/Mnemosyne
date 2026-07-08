@@ -453,3 +453,21 @@ def test_parallel_channels_byte_identical_sqlite(tmp_path: Path, monkeypatch: py
     finally:
         sequential.close()
         parallel.close()
+
+
+def test_fast_retrieve_requests_cached_graph_signal(monkeypatch: pytest.MonkeyPatch) -> None:
+    engine = LocalMemoryEngine()
+    _seed(engine)
+    observed: list[bool] = []
+    real_graph_ppr = engine.graph_ppr
+
+    def recording_graph_ppr(*args, **kwargs):
+        observed.append(bool(kwargs.get("use_cache", False)))
+        return real_graph_ppr(*args, **kwargs)
+
+    monkeypatch.setattr(engine, "graph_ppr", recording_graph_ppr)
+
+    engine.retrieve(QUERY, TENANT)
+    engine.retrieve(QUERY, TENANT, deep=True)
+
+    assert observed == [True, False]

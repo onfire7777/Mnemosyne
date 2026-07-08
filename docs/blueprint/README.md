@@ -16,6 +16,7 @@ A self-optimizing memory architecture for AI agents: complete recall + precise r
 
 **Forward program (extends v2):**
 
+- **`Mnemosyne-Performance-and-Refactoring-Blueprint.md`** / **`.pdf`** — the performance and structural-refactoring program layered on top of v2. It preserves strict byte-parity and local-first defaults while planning native-default execution, graph/retrieval depth, provider/runtime, benchmark, and refactoring waves.
 - **`cognitive-architecture/`** — the brain‑grounded cognitive‑architecture program: vision & honesty charter, the element‑by‑element brain↔system design, the accepted decision (ADR‑001), the **G0** benchmark gate, and a glossary. Builds on this blueprint (innovations I1–I12) and the `eval/` lane; start at `cognitive-architecture/README.md`.
 
 ## The one-paragraph summary
