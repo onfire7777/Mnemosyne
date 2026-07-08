@@ -296,6 +296,10 @@ class PostgresEngine:
         # residue on every acquire. MNEMOSYNE_PG_CONN_REUSE=0 is the
         # kill-switch back to one fresh connection per connect().
         self._conn_reuse = env_flag("MNEMOSYNE_PG_CONN_REUSE", default=True)
+        # psycopg3 already auto-prepares repeated statements, but the retrieval
+        # hot path benefits from preparing immediately on pooled connections.
+        # Keep a kill-switch for PgBouncer transaction-pool or debugging lanes.
+        self._prepare_hot_queries = env_flag("MNEMOSYNE_PG_PREPARE_HOT_QUERIES", default=True)
         self._pool: _PostgresConnectionPool | None = None
         self._pool_lock = threading.Lock()
         self._calibration_cache: dict[tuple[str, str], CalibrationSet] = {}
@@ -351,6 +355,12 @@ class PostgresEngine:
     def _set_pgvector_hnsw_query_settings(cur: Any, filt: dict[str, Any]) -> None:
         cur.execute("SELECT set_config('hnsw.ef_search', %s, true)", (str(_pgvector_hnsw_ef_search(filt)),))
         cur.execute("SELECT set_config('hnsw.iterative_scan', %s, true)", (_PGVECTOR_HNSW_ITERATIVE_SCAN,))
+
+    def _execute_hot_query(self, cur: Any, sql: str, params: tuple[Any, ...]) -> None:
+        if self._prepare_hot_queries:
+            cur.execute(sql, params, prepare=True)
+        else:
+            cur.execute(sql, params)
 
     @staticmethod
     def _ensure_entity_registry_schema(cur: Any) -> None:
@@ -1835,7 +1845,8 @@ class PostgresEngine:
                 self._set_tenant(cur, db_tenant_id)
                 self._ensure_evidence_vector_schema(cur)
                 self._ensure_evidence_lexeme_schema(cur)
-                cur.execute(
+                self._execute_hot_query(
+                    cur,
                     """
                     WITH q AS (SELECT plainto_tsquery('english', %s) AS query)
                     SELECT e.cid, e.branch, e.content, e.metadata, e.trust_tier, e.sensitivity, e.access_policy,
@@ -1906,7 +1917,8 @@ class PostgresEngine:
                             metadata=hit_metadata,
                         )
                     )
-                cur.execute(
+                self._execute_hot_query(
+                    cur,
                     """
                     WITH q AS (SELECT plainto_tsquery('english', %s) AS query)
                     SELECT a.id, a.branch, a.subject, a.predicate, a.object, a.confidence, a.calibration, a.status,
@@ -1982,7 +1994,8 @@ class PostgresEngine:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
                 self._set_tenant(cur, db_tenant_id)
                 self._set_pgvector_hnsw_query_settings(cur, filt)
-                cur.execute(
+                self._execute_hot_query(
+                    cur,
                     """
                     SELECT id, branch, subject, predicate, object, confidence, calibration, status,
                       source_evidence_cids, trust_tier, sensitivity, access_policy, last_accessed, access_count,
@@ -2050,7 +2063,8 @@ class PostgresEngine:
                             },
                         )
                     )
-                cur.execute(
+                self._execute_hot_query(
+                    cur,
                     """
                     SELECT cid, branch, content, content_pointer, modality, metadata,
                       trust_tier, sensitivity, access_policy, actor, source_type,

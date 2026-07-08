@@ -58,8 +58,14 @@ class FakeCursor:
     def __exit__(self, *exc: Any) -> bool:
         return False
 
-    def execute(self, sql: str, params: tuple[Any, ...] | None = None) -> None:
-        self._conn.record(sql, params)
+    def execute(
+        self,
+        sql: str,
+        params: tuple[Any, ...] | None = None,
+        *,
+        prepare: bool | None = None,
+    ) -> None:
+        self._conn.record(sql, params, prepare=prepare)
 
     def fetchall(self) -> list[Any]:
         return []
@@ -87,14 +93,22 @@ class FakeConnection:
         self.session_tenant: str | None = None  # None == never set (fresh)
         self.tx_tenant: str | None = None
         self.statement_params: list[tuple[Any, ...] | None] = []
+        self.statement_prepare_flags: list[bool | None] = []
 
-    def record(self, sql: str, params: tuple[Any, ...] | None) -> None:
+    def record(
+        self,
+        sql: str,
+        params: tuple[Any, ...] | None,
+        *,
+        prepare: bool | None = None,
+    ) -> None:
         if self.fail_next_execute:
             self.fail_next_execute = False
             raise RuntimeError("simulated dead connection")
         flat = " ".join(sql.split())
         self.statements.append(flat)
         self.statement_params.append(params)
+        self.statement_prepare_flags.append(prepare)
         if "set_config('mnemosyne.tenant_id'" in flat:
             if params:
                 self.tx_tenant = str(params[0])
@@ -357,6 +371,7 @@ def test_new_env_vars_registered_in_config_drift_checks() -> None:
     text = (REPO_ROOT / "CONFIG-DRIFT-CHECKS.md").read_text(encoding="utf-8")
     assert "MNEMOSYNE_PG_CONN_REUSE" in text
     assert "MNEMOSYNE_PG_MMR_SPACE" in text
+    assert "MNEMOSYNE_PG_PREPARE_HOT_QUERIES" in text
 
 
 def _hit(idx: int, text: str, *, kind: str = "evidence") -> Hit:
@@ -443,8 +458,14 @@ class _StoredVectorFakeCursor(FakeCursor):
         super().__init__(conn)
         self._rows: list[tuple[Any, ...]] = []
 
-    def execute(self, sql: str, params: tuple[Any, ...] | None = None) -> None:
-        super().execute(sql, params)
+    def execute(
+        self,
+        sql: str,
+        params: tuple[Any, ...] | None = None,
+        *,
+        prepare: bool | None = None,
+    ) -> None:
+        super().execute(sql, params, prepare=prepare)
         flat = " ".join(sql.split())
         if "FROM evidence" in flat and "embedding::text" in flat:
             self._rows = self._conn.evidence_rows
@@ -470,8 +491,14 @@ class _NullFallbackFakeCursor(FakeCursor):
         self._rows: list[dict[str, Any]] = []
         self._row: dict[str, Any] | None = None
 
-    def execute(self, sql: str, params: tuple[Any, ...] | None = None) -> None:
-        super().execute(sql, params)
+    def execute(
+        self,
+        sql: str,
+        params: tuple[Any, ...] | None = None,
+        *,
+        prepare: bool | None = None,
+    ) -> None:
+        super().execute(sql, params, prepare=prepare)
         flat = " ".join(sql.split())
         self._rows = []
         self._row = None
@@ -506,8 +533,14 @@ class _CalibrationFakeCursor(FakeCursor):
         super().__init__(conn)
         self._row: dict[str, Any] | None = None
 
-    def execute(self, sql: str, params: tuple[Any, ...] | None = None) -> None:
-        super().execute(sql, params)
+    def execute(
+        self,
+        sql: str,
+        params: tuple[Any, ...] | None = None,
+        *,
+        prepare: bool | None = None,
+    ) -> None:
+        super().execute(sql, params, prepare=prepare)
         flat = " ".join(sql.split())
         self._row = None
         if "FROM conformal_calibration" in flat:
@@ -588,6 +621,54 @@ def test_postgres_vector_search_sets_hnsw_query_knobs_before_vector_queries(
     assert tenant_idx < ef_idx < iterative_idx < vector_query_idx
     assert conn.statement_params[ef_idx] == (str(_PGVECTOR_HNSW_EF_SEARCH_DEEP),)
     assert conn.statement_params[iterative_idx] == (_PGVECTOR_HNSW_ITERATIVE_SCAN,)
+
+
+def test_postgres_hot_retrieval_selects_force_psycopg_prepare(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("MNEMOSYNE_PG_PREPARE_HOT_QUERIES", raising=False)
+
+    vector_engine, _ = make_engine(monkeypatch, reuse=True)
+    vector_conn = _NullFallbackFakeConnection("vector-prepared", fallback_rows=[])
+    monkeypatch.setattr(vector_engine, "connect", lambda: vector_conn)
+    vector_engine.vector_search("quartz fallback", 5, {"tenant_id": "tenant", "branch": "main"})
+
+    vector_prepared = [
+        sql
+        for sql, prepare in zip(vector_conn.statements, vector_conn.statement_prepare_flags, strict=True)
+        if prepare is True
+    ]
+    assert len([sql for sql in vector_prepared if "ORDER BY embedding <=>" in sql]) == 2
+    assert not any("mnemosyne.tenant_id" in sql for sql in vector_prepared)
+    assert not any("hnsw." in sql for sql in vector_prepared)
+    assert not any("embedding IS NULL" in sql for sql in vector_prepared)
+
+    lexical_engine, _ = make_engine(monkeypatch, reuse=True)
+    lexical_conn = _NullFallbackFakeConnection("lexical-prepared", fallback_rows=[])
+    monkeypatch.setattr(lexical_engine, "connect", lambda: lexical_conn)
+    monkeypatch.setattr(lexical_engine, "_local_rank", lambda *_args, **_kwargs: [])
+    lexical_engine.lexical_search("quartz fallback", 5, {"tenant_id": "tenant", "branch": "main"})
+
+    lexical_prepared = [
+        sql
+        for sql, prepare in zip(lexical_conn.statements, lexical_conn.statement_prepare_flags, strict=True)
+        if prepare is True
+    ]
+    assert len([sql for sql in lexical_prepared if "plainto_tsquery" in sql]) == 2
+    assert not any("mnemosyne.tenant_id" in sql for sql in lexical_prepared)
+
+
+def test_postgres_hot_query_prepare_kill_switch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MNEMOSYNE_PG_PREPARE_HOT_QUERIES", "0")
+    engine, _ = make_engine(monkeypatch, reuse=True)
+    conn = _NullFallbackFakeConnection("prepare-off", fallback_rows=[])
+    monkeypatch.setattr(engine, "connect", lambda: conn)
+
+    engine.vector_search("quartz fallback", 5, {"tenant_id": "tenant", "branch": "main"})
+
+    assert not any(prepare is True for prepare in conn.statement_prepare_flags)
 
 
 def test_pgvector_hnsw_ef_search_uses_fast_default_and_deep_route() -> None:
@@ -783,7 +864,13 @@ class SchemaEnsureCursor:
     def _is_ddl(upper: str) -> bool:
         return upper.startswith(("ALTER TABLE", "CREATE INDEX", "DROP INDEX", "CREATE UNIQUE INDEX"))
 
-    def execute(self, sql: str, params: tuple[Any, ...] | None = None) -> None:
+    def execute(
+        self,
+        sql: str,
+        params: tuple[Any, ...] | None = None,
+        *,
+        prepare: bool | None = None,
+    ) -> None:
         flat = " ".join(sql.split())
         self.statements.append(flat)
         self._pending = None

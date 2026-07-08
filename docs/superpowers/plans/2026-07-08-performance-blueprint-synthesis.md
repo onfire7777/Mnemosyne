@@ -34,10 +34,12 @@
   - Keep validation before detach and arithmetic/order untouched.
   - Run cargo, maturin, native parity, and benchmark guard tests.
 
-- [ ] Task 4: Add Postgres prepared-statement/plan-reuse slice.
-  - Scope to existing pooled connections and hot vector/FTS paths.
-  - Preserve tenant `set_config(..., true)` binding and rollback behavior.
-  - Add perf-lane tests plus one live DSN smoke when available.
+- [x] Task 4: Add Postgres prepared-statement/plan-reuse slice.
+  - Scoped to existing pooled connections and hot vector/FTS SELECT paths.
+  - Preserved tenant and HNSW `set_config(..., true)` calls as explicit
+    transaction-local statements.
+  - Added perf-lane tests for default `prepare=True` use and
+    `MNEMOSYNE_PG_PREPARE_HOT_QUERIES=0` rollback.
 
 - [ ] Task 5: Add provider contract/conformance CI lane.
   - Share `/embed` and `/rerank` contract fixtures across Python service, HTTP adapter, and `mneme-providers`.

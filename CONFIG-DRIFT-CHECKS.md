@@ -75,6 +75,15 @@ Realized over these concrete loci:
   connection, and every pooled acquire clears session-level tenant residue
   before the caller can run a statement
   (`tests/test_postgres_perf_lanes.py` proves cross-tenant reuse safety).
+- **`MNEMOSYNE_PG_PREPARE_HOT_QUERIES`** — kill-switch for immediate Psycopg
+  server-side preparation on hot Postgres retrieval SELECTs. Default
+  (unset/`1`) passes `prepare=True` for repeated FTS and pgvector shortlist
+  queries on the existing connection pool, while leaving tenant and HNSW
+  `set_config(..., true)` calls as explicit transaction-local statements.
+  Set to `0` for PgBouncer transaction-pooling compatibility, driver
+  debugging, or operator rollback. Prepared execution is a plan-reuse speed
+  hint only; query text, parameters, tenant binding, filtering, scoring, and
+  rollback behavior are unchanged (`tests/test_postgres_perf_lanes.py`).
 - **`MNEMOSYNE_PG_MMR_SPACE`** — embedding space for `PostgresEngine` MMR
   diversity: `hashing` (default, current behavior preserved exactly —
   deterministic `hashing_embedding` over hit text) or `stored` (opt-in:
