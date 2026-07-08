@@ -65,6 +65,20 @@ def parallel_channels_enabled() -> bool:
     return os.environ.get(_PARALLEL_CHANNELS_ENV, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _fast_graph_hits(hits: list[Hit], *, deep: bool) -> list[Hit]:
+    if deep:
+        return hits
+    return [
+        hit
+        for hit in hits
+        if not (
+            hit.kind == "relation"
+            and str((hit.metadata if isinstance(hit.metadata, dict) else {}).get("predicate") or "").lower()
+            == "summary-derived-gist"
+        )
+    ]
+
+
 class RetrievalPipelineOps(Protocol):
     """Exactly the per-engine calls the shipped retrieve() bodies make.
 
@@ -143,32 +157,36 @@ def run_retrieval_pipeline(
     effective_filter = strip_workspace_broadcast_filter(filt)
     effective_filter.update({"tenant_id": tenant_id, "branch": branch})
     k = policy.deep_top_k if deep else policy.top_k
+    graph_k = max(4, k // 2)
     if parallel_channels_enabled():
         with ThreadPoolExecutor(max_workers=3) as pool:
             dense_future = pool.submit(ops.vector_search, query, policy.rerank_width, effective_filter)
             lexical_future = pool.submit(ops.lexical_search, query, policy.rerank_width, effective_filter)
-            graph_future = (
-                pool.submit(
-                    ops.graph_ppr,
-                    tokenize(query),
-                    max(4, k // 2),
-                    tenant_id=tenant_id,
-                    branch=branch,
-                    filt=effective_filter,
-                )
-                if deep
-                else None
+            graph_future = pool.submit(
+                ops.graph_ppr,
+                tokenize(query),
+                graph_k,
+                tenant_id=tenant_id,
+                branch=branch,
+                use_cache=not deep,
+                filt=effective_filter,
             )
             dense = dense_future.result()
             lexical = lexical_future.result()
-            graph = graph_future.result() if graph_future is not None else []
+            graph = _fast_graph_hits(graph_future.result(), deep=deep)
     else:
         dense = ops.vector_search(query, policy.rerank_width, effective_filter)
         lexical = ops.lexical_search(query, policy.rerank_width, effective_filter)
-        graph = (
-            ops.graph_ppr(tokenize(query), max(4, k // 2), tenant_id=tenant_id, branch=branch, filt=effective_filter)
-            if deep
-            else []
+        graph = _fast_graph_hits(
+            ops.graph_ppr(
+                tokenize(query),
+                graph_k,
+                tenant_id=tenant_id,
+                branch=branch,
+                use_cache=not deep,
+                filt=effective_filter,
+            ),
+            deep=deep,
         )
     fused = ops._rrf([dense, lexical, graph], k=max(k * 2, policy.rerank_width))
     reranked = ops.adapters.reranker.rerank(query, fused, k=max(k * 2, k))

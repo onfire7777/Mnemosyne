@@ -231,13 +231,13 @@
     },
     "channels": {
       "dense_hash": 1,
-      "graph_ppr": 0,
+      "graph_ppr": 1,
       "lexical": 1
     },
     "confidence": "0x1.3333333333334p-6",
     "confidence_block": {
       "answer_score": "0x1.3333333333334p-6",
-      "prediction_set_size": 1,
+      "prediction_set_size": 2,
       "score": "0x1.3333333333334p-6",
       "source": "evidence_quality",
       "threshold": "0x1.ccccccccccccdp-2"
@@ -263,9 +263,15 @@
     ],
     "hits": [
       [
+        "relation",
+        "33333333-3333-3333-3333-333333333333",
+        "0x1.59b85820a86c2p-2",
+        "graph_ppr+rerank"
+      ],
+      [
         "evidence",
         "8806ebd91f0559ba3999176a896381179a4db78201c9ed7e6c203793bd7d41f3",
-        "0x1.96e5da6364fc5p-3",
+        "0x1.59ca3c30966aep-3",
         "dense_hash+lexical+rerank"
       ]
     ],
@@ -288,6 +294,6 @@
     "rrf_k": 60,
     "token_budget": 4096,
     "uncertainty_note": "Retrieved evidence did not cover enough query terms; abstaining until stronger support is available.",
-    "used_tokens": 14
+    "used_tokens": 20
   }
 }

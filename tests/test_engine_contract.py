@@ -622,6 +622,26 @@ def test_deep_search_uses_graph_channel_when_relations_exist() -> None:
     assert result.explain["channels"]["graph_ppr"] >= 1
 
 
+def test_fast_retrieve_uses_graph_channel_when_relations_exist() -> None:
+    engine = LocalMemoryEngine()
+    cid = _graph_source_cid(engine, content="Mnemosyne uses Postgres backing evidence.")
+    engine.add_relation(
+        Relation(
+            tenant_id=TENANT,
+            source="Mnemosyne",
+            predicate="uses",
+            target="Postgres",
+            source_evidence_cids=[cid],
+            access_policy={"tenant": TENANT},
+        )
+    )
+
+    result = engine.retrieve("Mnemosyne", TENANT)
+
+    assert result.explain["channels"]["graph_ppr"] >= 1
+    assert any(hit.kind == "relation" and "Postgres" in hit.text for hit in result.hits)
+
+
 def test_deep_search_graph_channel_seeds_phrase_nodes_from_query_tokens() -> None:
     engine = LocalMemoryEngine()
     cid = _graph_source_cid(engine, content="Runtime smoke uses Postgres backing evidence.")

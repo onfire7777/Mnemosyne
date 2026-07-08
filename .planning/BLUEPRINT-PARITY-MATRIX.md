@@ -172,8 +172,8 @@ Lane-routed. Status tracked here; owning lane commits only its own files. Cross-
 5. `[C/T]` column-level schema-drift test (catch `gold→expected`, `parent→from_branch`, `window→metric_window`, `calibrated_confidence→calibration` renames). *(coordinate AUX-DOCS `test_config_drift`)*
 
 ### CC-R (B11) — retrieval depth + metrics
-6. `[C]` fast-path cached graph signal (PPR/1-hop) so fast `retrieve()` fuses graph without `deep=True` (§22.5). *(coordinate CC-BC precompute)*
-7. `[C]` add `w_s·spreading(m,q)` term to activation score (§22.4).
+6. `[C]` fast-path cached graph signal (PPR/1-hop) so fast `retrieve()` fuses graph without `deep=True` (§22.5). ✅ shared pipeline now calls `graph_ppr(..., use_cache=True)` for fast retrieval and keeps deep retrieval live; covered by `tests/test_engine_contract.py::test_fast_retrieve_uses_graph_channel_when_relations_exist` and `tests/test_engine_perf_lanes.py::test_fast_retrieve_requests_cached_graph_signal`.
+7. `[C]` add `w_s·spreading(m,q)` term to activation score (§22.4). ✅ `apply_activation_scores()` supports an opt-in `spreading` activation weight, `_spreading_activation()` derives/uses per-hit associative signals, and `tests/test_parity_retrieval.py::{test_activation_default_output_has_no_spreading_component,test_activation_includes_spreading_when_weighted,test_activation_explain_reports_weights}` covers the contract.
 8. `[C]` add preference/procedure/lesson channels to `retrieve()` (§22.2).
 9. `[C]` expected-marginal-gain top-k cutoff (ACT-R `C>pG`) (§22.4).
 10. `[C/T]` recall@k / nDCG benchmark in `benchmarks.py`; latency SLO at larger seed.
