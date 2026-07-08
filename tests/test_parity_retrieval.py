@@ -533,7 +533,9 @@ def test_adapters_from_env_defaults_to_local_and_native() -> None:
 def test_adapters_from_env_builds_http_and_command(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PARITYR_EMBEDDING_PROVIDER", "http")
     monkeypatch.setenv("PARITYR_EMBEDDING_URL", "https://embed.test/v1")
+    monkeypatch.setenv("PARITYR_EMBEDDING_MODEL_REVISION", "sha256:abc")
     monkeypatch.setenv("PARITYR_EMBEDDING_DIMS", "32")
+    monkeypatch.setenv("PARITYR_EMBEDDING_CACHE_SIZE", "17")
     monkeypatch.setenv("PARITYR_RERANKER_PROVIDER", "http")
     monkeypatch.setenv("PARITYR_RERANKER_URL", "https://rr.test/v1")
     monkeypatch.setenv("PARITYR_LEXICAL_PROVIDER", "command")
@@ -543,7 +545,9 @@ def test_adapters_from_env_builds_http_and_command(monkeypatch: pytest.MonkeyPat
     adapters = retrieval_adapters_from_env(prefix="PARITYR")
     assert isinstance(adapters.embedding, HttpEmbeddingProvider)
     assert adapters.embedding.url == "https://embed.test/v1"
+    assert adapters.embedding.model_revision == "sha256:abc"
     assert adapters.embedding.dims == 32
+    assert adapters.embedding.cache_size == 17
     assert isinstance(adapters.reranker, HttpReranker)
     assert isinstance(adapters.lexical_retriever, CommandLexicalRetriever)
     assert isinstance(adapters.graph_retriever, CommandGraphRetriever)
@@ -917,7 +921,9 @@ def test_registry_builds_http_and_command_providers() -> None:
         {
             "embedding_provider": "http",
             "embedding_url": "https://embed.test/v1",
+            "embedding_model_revision": "sha256:def",
             "embedding_dims": 16,
+            "embedding_cache_size": 19,
             "reranker_provider": "http",
             "reranker_url": "https://rr.test/v1",
             "lexical_provider": "command",
@@ -928,6 +934,8 @@ def test_registry_builds_http_and_command_providers() -> None:
     )
     assert isinstance(adapters.embedding, providers_pkg.HttpEmbeddingProvider)
     assert adapters.embedding.dims == 16
+    assert adapters.embedding.model_revision == "sha256:def"
+    assert adapters.embedding.cache_size == 19
     assert isinstance(adapters.reranker, providers_pkg.HttpReranker)
     assert isinstance(adapters.lexical_retriever, providers_pkg.CommandLexicalRetriever)
     assert isinstance(adapters.graph_retriever, providers_pkg.CommandGraphRetriever)

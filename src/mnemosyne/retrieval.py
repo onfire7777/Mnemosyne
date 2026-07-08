@@ -1494,14 +1494,17 @@ def retrieval_adapters_from_env(prefix: str = "MNEMOSYNE") -> RetrievalAdapters:
     lexical_provider = os.environ.get(f"{prefix}_LEXICAL_PROVIDER", "postgres").lower()
     graph_provider = os.environ.get(f"{prefix}_GRAPH_PROVIDER", "postgres").lower()
     dims = int(os.environ.get(f"{prefix}_EMBEDDING_DIMS", "1024"))
+    embedding_cache_size = int(os.environ.get(f"{prefix}_EMBEDDING_CACHE_SIZE", "8192"))
     timeout = float(os.environ.get(f"{prefix}_RETRIEVAL_TIMEOUT", "30"))
     if embedding_provider == "http":
         embedding = HttpEmbeddingProvider(
             url=_required_env(f"{prefix}_EMBEDDING_URL"),
             model=os.environ.get(f"{prefix}_EMBEDDING_MODEL"),
+            model_revision=os.environ.get(f"{prefix}_EMBEDDING_MODEL_REVISION"),
             api_key=os.environ.get(f"{prefix}_EMBEDDING_API_KEY"),
             dims=dims,
             timeout_seconds=timeout,
+            cache_size=embedding_cache_size,
         )
     elif embedding_provider in {"local", "local-hashing", "hashing"}:
         embedding = HashingEmbeddingProvider(dims=dims)
