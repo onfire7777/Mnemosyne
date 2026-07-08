@@ -490,20 +490,25 @@ contract; CONFIG-DRIFT-CHECKS env registry; GSD/CBM/gbrain hygiene.
   5. Native acceleration changes release the GIL only around Rust-owned compute
      loops and preserve scalar arithmetic/order exactly.
 
-**Plans:** 2 plans
+**Plans:** 3 plans
 
 Plans:
 
 - [x] 09-01-PLAN.md — Retrieval channel parallelism defaults from capability tier.
 - [x] 09-02-PLAN.md — Cache drift closure and native MMR/PPR GIL detach.
+- [x] 09-03-PLAN.md — Postgres hot FTS/pgvector retrieval SELECT preparation.
 
-Checkpoint: Phase 9 Plans 01-02 are implemented and locally verified. Retrieval
+Checkpoint: Phase 9 Plans 01-03 are implemented and locally verified. Retrieval
 channel parallelism now defaults from capability tier when
 `MNEMOSYNE_PARALLEL_CHANNELS` is absent (`floor` off, `standard` and above on),
 explicit operator env values still win, and SQLite scan-oracle memo hydration is
 coalesced under the engine lock for the new parallel default. Cache docs now
 match the landed HTTP embedding LRU, retrieval result LRU, and Postgres positive
 calibration cache. MMR/PPR native kernels release the GIL around Rust-owned
-compute loops without changing arithmetic/order. Focused retrieval/capability,
-provider-cache, Postgres perf-lane, cargo, native parity, ruff, `git diff
---check`, GSD consistency, and the full local pytest suite pass.
+compute loops without changing arithmetic/order. Hot Postgres FTS and pgvector
+retrieval SELECTs now request Psycopg server-side preparation behind
+`MNEMOSYNE_PG_PREPARE_HOT_QUERIES=0`, while tenant and HNSW GUC statements stay
+explicit and transaction-local. Focused retrieval/capability, provider-cache,
+Postgres perf-lane, cargo, native parity, ruff, `git diff --check`, GSD
+consistency, and the full local pytest suite pass for the shipped Phase 09
+slices.
