@@ -115,11 +115,9 @@ jobs:
   native-wheels:
     name: Native wheels (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    # NON-GATING until the first release that ships wheels: the native
-    # extension is an optional accelerator (the pure-Python path is canonical
-    # and fully covered by the jobs above), so a wheel-build break must not
-    # block merges. Flip this off when wheels become a release deliverable.
-    continue-on-error: true
+    # GATING: native wheels are part of the performance parity delivery path.
+    # Pure Python remains the canonical fallback, but packaging regressions must
+    # block merges once the wheel path is advertised.
     strategy:
       fail-fast: false
       matrix:

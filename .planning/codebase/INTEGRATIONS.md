@@ -96,7 +96,7 @@
 
 **CI Pipeline:**
 - `.github/workflows/ci.yml` gates pushes and pull requests with ruff, locked Python test runs, config drift checks, G0 preregistration replay, and Postgres-backed live tests.
-- Native wheel and DST/chaos jobs are present but non-gating until those release surfaces are ratcheted.
+- Native wheel builds are merge-gating for the current macOS arm64 / Linux x86_64 matrix; DST/chaos remains a non-gating nightly/manual soak until that suite is ratcheted.
 - Supply-chain and production evidence gates are also available as operator scripts: `infra/scripts/verify-supply-chain.sh`, `infra/scripts/capture-production-evidence.sh`, and `infra/scripts/render-production-soak-manifest.sh`.
 
 ## Environment Configuration

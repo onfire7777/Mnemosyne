@@ -640,22 +640,22 @@ Record both counts. Also register `MNEMOSYNE_PURE` in CONFIG-DRIFT-CHECKS.md (ex
 
 ---
 
-### Task 10: CI wheels job (non-gating) + phase exit
+### Task 10: CI wheels job (now gating) + phase exit
 
 **Files:**
 - Modify: `.github/workflows/ci.yml` (read its existing structure FIRST; add a `native-wheels` job)
 - Modify: `docs/superpowers/plans/2026-07-01-native-acceleration-program.md` (Phase 1 → DONE)
 
 **Interfaces:**
-- The wheels job: PyO3/maturin-action@v1 building `rust/mnemosyne-native` for macos-14 (arm64) and ubuntu-latest x86_64, `--release`, abi3-py312, artifacts uploaded, `continue-on-error: true` (non-gating until first release; comment says why). ALSO add to the existing test job: a step installing the native extra + running `tests/test_native_parity.py tests/test_native_dispatch.py` under both modes IF the runner has Rust (use a matrix flag or `if:` guard; keep the default lane rust-free to preserve the no-toolchain guarantee). Cannot be executed locally — validate YAML with `uv run --locked python -c "import yaml,sys;yaml.safe_load(open('.github/workflows/ci.yml'))"` and state clearly in the report that CI execution is unverified here.
+- The wheels job: PyO3/maturin-action@v1 building `rust/mnemosyne-native` for macos-14 (arm64) and ubuntu-latest x86_64, `--release`, abi3-py312, artifacts uploaded, and merge-gating for the current two-runner matrix. ALSO add to the existing test job: a step installing the native extra + running `tests/test_native_parity.py tests/test_native_dispatch.py` under both modes IF the runner has Rust (use a matrix flag or `if:` guard; keep the default lane rust-free to preserve the no-toolchain guarantee). Cannot be executed locally — validate YAML with `uv run --locked python -c "import yaml,sys;yaml.safe_load(open('.github/workflows/ci.yml'))"` and state clearly in the report that CI execution is unverified here.
 - Phase exit checklist (all run locally): full suite both modes; DSN-armed parity both modes (`MNEMOSYNE_POSTGRES_DSN=postgresql://mnemosyne:mnemosyne-local-dev@127.0.0.1:54329/mnemosyne`, dev compose postgres — start it if down: `docker compose up -d postgres`); benchmarks incl. 10× gates; ruff; `cargo clippy --manifest-path rust/mnemosyne-native/Cargo.toml -- -D warnings`; the mul_add/transcendental lint (`grep -rn 'mul_add\|f64::exp\|f64::sin\|powf' rust/mnemosyne-native/src/ | grep -v ln` must be empty — `ln` is the one documented exception from Task 3). For the 10× gates, the dense end-to-end 10× is re-homed to Phase 2's packed-BLOB seam (2026-07-02-phase2-sqlite-engine.md Task 4): Phase 1 exits on 40.5× lexical and 82.5× kernel-side prepacked dense (both 10×-gated) plus hashing at 4.6× against its 3.0× floor (10× is structurally out of reach — the pure path's blake2b is already C), with the shipped list-FFI dense seam at 4.6× informational (PyFloat→f64 conversion wall; see the bench comments).
 
-- [ ] **Step 1: CI job + YAML validation. Step 2: run the full exit checklist, record every count. Step 3: program map update. Step 4: commit** — `docs(phase1): native kernels complete; CI wheels job (non-gating)`
+- [ ] **Step 1: CI job + YAML validation. Step 2: run the full exit checklist, record every count. Step 3: program map update. Step 4: commit** — `docs(phase1): native kernels complete; CI wheels job gated`
 
 ---
 
 ## Self-Review (performed at authoring time)
 
-1. **Spec coverage (§4.1 + Phase-0 handoffs):** kernels (tokenize/lexical/hashing/cosine) → T2–T4; batched dense_scan/mmr_select → T4/T5/T7; byte-parity + scalar/strict-IEEE + rayon-across-items + tie discipline → parity notes + T2–T5 tests; MNEMOSYNE_PURE dispatch + startup log → T6; wheels → T10 (non-gating, honestly scoped); A4 → T9; ≥10× exit → T8; quantized tier deliberately deferred (spec allows). Packaging deviation (sibling crate vs mixed layout) documented in the header with rationale — flag for the phase's final review.
+1. **Spec coverage (§4.1 + Phase-0 handoffs):** kernels (tokenize/lexical/hashing/cosine) → T2–T4; batched dense_scan/mmr_select → T4/T5/T7; byte-parity + scalar/strict-IEEE + rayon-across-items + tie discipline → parity notes + T2–T5 tests; MNEMOSYNE_PURE dispatch + startup log → T6; wheels → T10 (current two-runner builders merge-gating; broader release matrix still pending); A4 → T9; ≥10× exit → T8; quantized tier deliberately deferred (spec allows). Packaging deviation (sibling crate vs mixed layout) documented in the header with rationale — flag for the phase's final review.
 2. **Known risk, made explicit:** `math.log` bit-parity (T3) is empirically probable on aarch64-apple (same libm) but not RFC-guaranteed — the plan makes it a hard verification with a BLOCKED escape hatch rather than an assumption.
 3. **Type consistency:** `dense_scan(query_vec, rows) -> list[float|None]`, `mmr_select_indices(base_scores, vectors, query_vec, k, mmr_lambda) -> list[int]`, `lexical_scan(query, texts) -> list[float]` are used identically in T4/T5/T6/T7/T8 interface blocks.
