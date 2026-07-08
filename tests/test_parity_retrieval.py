@@ -256,10 +256,10 @@ def test_http_embedding_truncates_and_pads_to_target_dims(monkeypatch: pytest.Mo
 def test_http_embedding_rejects_zero_and_malformed(monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_post_json(monkeypatch, {"embedding": [0.0, 0.0]})
     with pytest.raises(ValueError, match="non-zero"):
-        HttpEmbeddingProvider(url="https://e.test", dims=2).embed("x")
+        HttpEmbeddingProvider(url="https://e.test", dims=2, cache_size=0).embed("x")
     _patch_post_json(monkeypatch, {"unexpected": True})
     with pytest.raises(ValueError, match="embedding response"):
-        HttpEmbeddingProvider(url="https://e.test", dims=2).embed("x")
+        HttpEmbeddingProvider(url="https://e.test", dims=2, cache_size=0).embed("x")
 
 
 @pytest.mark.parametrize(
