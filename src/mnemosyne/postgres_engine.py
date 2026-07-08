@@ -119,11 +119,21 @@ def _is_insufficient_privilege(exc: BaseException) -> bool:
 # Bounded idle-connection count per engine: enough for the 2-3 channels of a
 # retrieve plus queue/audit traffic without hoarding server slots.
 _POOL_MAX_IDLE = 8
+_NULL_EMBEDDING_FALLBACK_MIN_ROWS = 64
+_NULL_EMBEDDING_FALLBACK_MULTIPLIER = 8
+_NULL_EMBEDDING_FALLBACK_MAX_ROWS = 2048
 
 # Session-level clear of the RLS tenant GUC. '' maps to NULL through
 # mnemosyne_current_tenant()'s nullif(), i.e. the deny-all posture a fresh
 # connection starts with. Doubles as the acquire-time health check.
 _TENANT_CLEAR_SQL = "SELECT set_config('mnemosyne.tenant_id', '', false)"
+
+
+def _null_embedding_fallback_limit(k: int) -> int:
+    return min(
+        max(max(int(k), 1) * _NULL_EMBEDDING_FALLBACK_MULTIPLIER, _NULL_EMBEDDING_FALLBACK_MIN_ROWS),
+        _NULL_EMBEDDING_FALLBACK_MAX_ROWS,
+    )
 
 
 class _PooledConnection:
@@ -2126,6 +2136,15 @@ class PostgresEngine:
                             metadata=hit_metadata,
                         )
                     )
+                null_embedding_fallback_limit = _null_embedding_fallback_limit(k)
+                null_embedding_fallback_fetch_limit = null_embedding_fallback_limit + 1
+                null_embedding_params = (
+                    db_tenant_id,
+                    branch,
+                    max_trust,
+                    max_sensitivity,
+                    include_quarantined,
+                )
                 cur.execute(
                     """
                     SELECT cid, branch, content, content_pointer, modality, metadata,
@@ -2143,10 +2162,26 @@ class PostgresEngine:
                         )
                       )
                       AND embedding IS NULL
+                    ORDER BY created_at DESC, cid
+                    LIMIT %s
                     """,
-                    (db_tenant_id, branch, max_trust, max_sensitivity, include_quarantined),
+                    (*null_embedding_params, null_embedding_fallback_fetch_limit),
                 )
-                for row in cur.fetchall():
+                null_embedding_rows = cur.fetchall()
+                null_embedding_candidates_observed = len(null_embedding_rows)
+                null_embedding_fallback_truncated = (
+                    null_embedding_candidates_observed > null_embedding_fallback_limit
+                )
+                if null_embedding_fallback_truncated:
+                    logger.warning(
+                        "postgres dense fallback capped: tenant=%s branch=%s observed_candidates=%s limit=%s",
+                        tenant_id,
+                        branch,
+                        null_embedding_candidates_observed,
+                        null_embedding_fallback_limit,
+                    )
+                    null_embedding_rows = null_embedding_rows[:null_embedding_fallback_limit]
+                for row in null_embedding_rows:
                     text = row["content"] or row["content_pointer"] or f"{row['modality']} evidence"
                     cid = _bytes_to_cid(row["cid"])
                     metadata = dict(row["metadata"] or {})
@@ -2188,6 +2223,9 @@ class PostgresEngine:
                         "embedding_dims": self.adapters.embedding.dims,
                         "stored_embedding": False,
                         "embedding_partition": str(row["embedding_partition"] or ""),
+                        "null_embedding_candidates_observed": null_embedding_candidates_observed,
+                        "null_embedding_fallback_limit": null_embedding_fallback_limit,
+                        "null_embedding_fallback_truncated": null_embedding_fallback_truncated,
                         "source_table": "evidence",
                         "reality_class": self._classify_evidence_row_reality(row, metadata),
                         "privacy": privacy_metadata,
