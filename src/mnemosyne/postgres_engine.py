@@ -298,6 +298,8 @@ class PostgresEngine:
         self._conn_reuse = env_flag("MNEMOSYNE_PG_CONN_REUSE", default=True)
         self._pool: _PostgresConnectionPool | None = None
         self._pool_lock = threading.Lock()
+        self._calibration_cache: dict[tuple[str, str], CalibrationSet] = {}
+        self._calibration_cache_lock = threading.Lock()
 
     def connect(self) -> Any:
         if self._psycopg is None or self._jsonb is None:
@@ -2766,6 +2768,8 @@ class PostgresEngine:
                     None,
                     {"memory_type": calibration.memory_type, "scores": len(calibration.scores)},
                 )
+        with self._calibration_cache_lock:
+            self._calibration_cache[(calibration.tenant_id, calibration.memory_type)] = copy.deepcopy(calibration)
 
     def register_entity(
         self,
@@ -2866,6 +2870,12 @@ class PostgresEngine:
         }
 
     def _calibration_for(self, tenant_id: str, memory_type: str) -> CalibrationSet | None:
+        cache_key = (tenant_id, memory_type)
+        with self._calibration_cache_lock:
+            cached = self._calibration_cache.get(cache_key)
+        if cached is not None:
+            return copy.deepcopy(cached)
+
         db_tenant_id = _stable_uuid("tenant", tenant_id)
         with self.connect() as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
@@ -2881,12 +2891,15 @@ class PostgresEngine:
                 row = cur.fetchone()
         if not row:
             return None
-        return CalibrationSet(
+        calibration = CalibrationSet(
             tenant_id=tenant_id,
             memory_type=str(row["memory_type"]),
             scores=[float(score) for score in row["scores"]],
             target_coverage=float(row["target_coverage"]),
         )
+        with self._calibration_cache_lock:
+            self._calibration_cache[cache_key] = copy.deepcopy(calibration)
+        return calibration
 
     @staticmethod
     def _calibration_explain(calibration: CalibrationSet | None, threshold: float) -> dict[str, Any]:
