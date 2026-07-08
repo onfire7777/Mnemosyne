@@ -32,3 +32,7 @@ secrets.json
 # volatile eval test scratch output (regenerated with a fresh timestamp each run)
 eval/reports/replay_fidelity_test_tmp/
 eval/reports/*.log
+
+# GSD Graphify generated graph artifacts; rebuild with gsd-graphify.
+.planning/graphs/
+graphify-out/

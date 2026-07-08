@@ -61,7 +61,11 @@ from capability tier for capable hosts while preserving explicit
 <deferred>
 ## Deferred Ideas
 
-Provider-layer embedding caches, async provider/SQL I/O, Postgres stored-vector
-MMR defaulting, and larger CLI decomposition remain future Phase 09 slices.
-They need separate measurement and acceptance criteria.
+Durable/privacy-scoped provider cache hardening, async provider/SQL I/O,
+Postgres prepared statements/server tuning/index coverage, stored-vector MMR
+defaulting, and larger CLI decomposition remain future Phase 09 slices. The
+process-local HTTP embedding LRU, retrieval result LRU, and Postgres positive
+calibration lookup cache are already landed and should not be reimplemented.
+Remaining cache work needs separate measurement, cache-safety, and operator
+visibility acceptance criteria.
 </deferred>

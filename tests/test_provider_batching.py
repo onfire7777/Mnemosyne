@@ -88,8 +88,21 @@ def embed_server() -> Iterator[ThreadingHTTPServer]:
         thread.join(timeout=5)
 
 
-def _provider(server: ThreadingHTTPServer, dims: int = 4) -> HttpEmbeddingProvider:
-    return HttpEmbeddingProvider(url=f"http://127.0.0.1:{server.server_address[1]}/embed", dims=dims, cache_size=0)
+def _provider(
+    server: ThreadingHTTPServer,
+    dims: int = 4,
+    *,
+    cache_size: int = 0,
+    model: str | None = None,
+    model_revision: str | None = None,
+) -> HttpEmbeddingProvider:
+    return HttpEmbeddingProvider(
+        url=f"http://127.0.0.1:{server.server_address[1]}/embed",
+        dims=dims,
+        cache_size=cache_size,
+        model=model,
+        model_revision=model_revision,
+    )
 
 
 def test_embed_many_matches_sequential_in_one_batch_request(embed_server: ThreadingHTTPServer) -> None:
@@ -135,6 +148,43 @@ def test_embed_many_single_and_empty_inputs(embed_server: ThreadingHTTPServer) -
     assert provider.embed_many(["solo"]) == [provider.embed("solo")]
     # Single-item batches take the single-input route (no list payloads sent).
     assert all(isinstance(request, str) for request in embed_server.requests)
+
+
+def test_http_embedding_cache_reuses_warm_items_inside_batch(embed_server: ThreadingHTTPServer) -> None:
+    uncached = _provider(embed_server, cache_size=0)
+    texts = ["warm", "cold", "warm", "second"]
+    expected = [uncached.embed(text) for text in texts]
+
+    provider = _provider(embed_server, cache_size=8, model_revision="sha256:cache-a")
+    assert provider.embed("warm") == expected[0]
+    embed_server.requests.clear()
+
+    assert provider.embed_many(texts) == expected
+    assert embed_server.requests == [["cold", "second"]]
+
+
+def test_http_embedding_cache_key_includes_model_revision(embed_server: ThreadingHTTPServer) -> None:
+    rev_a = _provider(embed_server, cache_size=8, model="embed-model", model_revision="sha256:a")
+    rev_b = _provider(embed_server, cache_size=8, model="embed-model", model_revision="sha256:b")
+
+    first = rev_a.embed("stable")
+    embed_server.requests.clear()
+
+    assert rev_a.embed("stable") == first
+    assert embed_server.requests == []
+    assert rev_b.embed("stable") == first
+    assert embed_server.requests == ["stable"]
+
+
+def test_http_embedding_cache_size_zero_disables_reuse(embed_server: ThreadingHTTPServer) -> None:
+    provider = _provider(embed_server, cache_size=0)
+
+    assert provider.embed("repeat") == provider.embed("repeat")
+    assert embed_server.requests == ["repeat", "repeat"]
+    embed_server.requests.clear()
+
+    provider.embed_many(["repeat", "other"])
+    assert embed_server.requests == [["repeat", "other"]]
 
 
 def test_hashing_provider_embed_many_matches_per_item() -> None:

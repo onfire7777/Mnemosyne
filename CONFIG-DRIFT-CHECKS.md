@@ -111,6 +111,18 @@ Realized over these concrete loci:
   `total_changes` / `PRAGMA data_version` changes invalidate stale entries
   instead of replaying obsolete read-lifecycle state
   (`tests/test_engine_perf_lanes.py`).
+- **`MNEMOSYNE_EMBEDDING_CACHE_SIZE`** — in-process LRU size for the HTTP
+  embedding provider (`retrieval.py`). Default `8192`; set to `0` to disable
+  reuse. The key includes provider URL, model, model revision, output dims, API
+  key hash, and text SHA-256, so a hit returns the same normalized vector bytes
+  the provider miss path would return for that exact model identity. This cache
+  is process-local transport acceleration, not the durable subject-scoped
+  SQLite A1 `embedding_cache` table (`tests/test_provider_batching.py`).
+- **`MNEMOSYNE_EMBEDDING_MODEL_REVISION`** — optional model-identity/cache-bust
+  salt for `HttpEmbeddingProvider`. Set it to an immutable model digest or
+  deployment revision whenever the same `MNEMOSYNE_EMBEDDING_MODEL` name can
+  point at different weights; changing it intentionally cold-starts the HTTP
+  embedding LRU without changing request payload semantics.
 - **`MNEMOSYNE_EMBED_BATCH_SIZE`** — chunk size (default `32`) for batched
   embedding calls: the consolidation embedder pass collects pending evidence
   texts and feeds them through `consolidation.embed_texts_batched`, which
