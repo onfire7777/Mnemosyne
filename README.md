@@ -312,12 +312,12 @@ active Phase 3 branch. The latest Phase 3 exit record reports **1592 passed /
 DSN-armed parity plus `postgres_live`, and clean Rust/ruff/diff checks. These
 are local engineering gates, not production sign-off.
 
-Strict blueprint parity remains blocked on **Tier-B operator-captured
-production-infrastructure evidence** (real IdP/Keycloak, Vault/KMS,
-ParadeDB/Apache AGE, hosted embedding/reranker/trainer endpoints, C2PA trust
-roots, hosted MCP/dashboard surfaces) captured via `deployment-soak` +
-`release-audit`. The 10 audit gap rows currently stand at "Partial"; no code or
-local test run flips them to Done.
+Future Tier-B recaptures must use the same operator-owned production evidence
+path: real IdP/Keycloak, Vault/KMS, ParadeDB/Apache AGE, hosted
+embedding/reranker/trainer endpoints, C2PA trust roots, and hosted
+MCP/dashboard surfaces captured via `deployment-soak`, `release-audit`, and
+offline `production-evidence-verify`. Local code, tests, or regenerated docs
+must not replace that custody path.
 
 Controlling artifacts: [`docs/ROADMAP-TO-100.md`](docs/ROADMAP-TO-100.md) (blended figure + sequenced path), `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md` (status), and `infra/PRODUCTION-EVIDENCE.md` (capture/offline-custody handoff).
 
