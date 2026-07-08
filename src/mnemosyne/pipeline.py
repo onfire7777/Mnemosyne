@@ -155,7 +155,7 @@ def run_retrieval_pipeline(
 
     workspace_broadcast = workspace_broadcast_from_context(filt)
     effective_filter = strip_workspace_broadcast_filter(filt)
-    effective_filter.update({"tenant_id": tenant_id, "branch": branch})
+    effective_filter.update({"tenant_id": tenant_id, "branch": branch, "_retrieval_deep": deep})
     k = policy.deep_top_k if deep else policy.top_k
     graph_k = max(4, k // 2)
     if parallel_channels_enabled():

@@ -25,9 +25,13 @@ import mnemosyne.postgres_engine as postgres_engine
 from mnemosyne.algorithms import mmr_select
 from mnemosyne.models import Evidence, Hit
 from mnemosyne.postgres_engine import (
+    _PGVECTOR_HNSW_EF_SEARCH_DEEP,
+    _PGVECTOR_HNSW_EF_SEARCH_FAST,
+    _PGVECTOR_HNSW_ITERATIVE_SCAN,
     PostgresEngine,
     _PostgresConnectionPool,
     _null_embedding_fallback_limit,
+    _pgvector_hnsw_ef_search,
     _vector_from_literal,
 )
 from mnemosyne.text import hashing_embedding
@@ -81,6 +85,7 @@ class FakeConnection:
         self.fail_next_execute = False
         self.session_tenant: str | None = None  # None == never set (fresh)
         self.tx_tenant: str | None = None
+        self.statement_params: list[tuple[Any, ...] | None] = []
 
     def record(self, sql: str, params: tuple[Any, ...] | None) -> None:
         if self.fail_next_execute:
@@ -88,6 +93,7 @@ class FakeConnection:
             raise RuntimeError("simulated dead connection")
         flat = " ".join(sql.split())
         self.statements.append(flat)
+        self.statement_params.append(params)
         if "set_config('mnemosyne.tenant_id'" in flat:
             if params:
                 self.tx_tenant = str(params[0])
@@ -532,6 +538,34 @@ def test_postgres_null_embedding_fallback_is_capped_and_observable(
     assert hit.metadata["null_embedding_candidates_observed"] == fallback_limit + 1
     assert hit.metadata["null_embedding_fallback_limit"] == fallback_limit
     assert hit.metadata["null_embedding_fallback_truncated"] is True
+
+
+def test_postgres_vector_search_sets_hnsw_query_knobs_before_vector_queries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine, _ = make_engine(monkeypatch, reuse=True)
+    conn = _NullFallbackFakeConnection("hnsw", fallback_rows=[])
+    monkeypatch.setattr(engine, "connect", lambda: conn)
+
+    engine.vector_search(
+        "quartz fallback",
+        5,
+        {"tenant_id": "tenant", "branch": "main", "_retrieval_deep": True},
+    )
+
+    tenant_idx = next(i for i, sql in enumerate(conn.statements) if "mnemosyne.tenant_id" in sql)
+    ef_idx = next(i for i, sql in enumerate(conn.statements) if "hnsw.ef_search" in sql)
+    iterative_idx = next(i for i, sql in enumerate(conn.statements) if "hnsw.iterative_scan" in sql)
+    vector_query_idx = next(i for i, sql in enumerate(conn.statements) if "ORDER BY embedding <=>" in sql)
+    assert tenant_idx < ef_idx < iterative_idx < vector_query_idx
+    assert conn.statement_params[ef_idx] == (str(_PGVECTOR_HNSW_EF_SEARCH_DEEP),)
+    assert conn.statement_params[iterative_idx] == (_PGVECTOR_HNSW_ITERATIVE_SCAN,)
+
+
+def test_pgvector_hnsw_ef_search_uses_fast_default_and_deep_route() -> None:
+    assert _pgvector_hnsw_ef_search({}) == _PGVECTOR_HNSW_EF_SEARCH_FAST
+    assert _pgvector_hnsw_ef_search({"_retrieval_deep": False}) == _PGVECTOR_HNSW_EF_SEARCH_FAST
+    assert _pgvector_hnsw_ef_search({"_retrieval_deep": True}) == _PGVECTOR_HNSW_EF_SEARCH_DEEP
 
 
 def test_stored_hit_vectors_gate_redacted_private_hits_to_hashing_space(
