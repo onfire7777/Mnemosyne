@@ -1613,11 +1613,13 @@ def test_postgres_cli_uses_command_retrieval_adapters_live(tmp_path: Path) -> No
     assert any(hit["id"] == "graph-hit-live" for hit in deep["hits"])
     assert any(hit["metadata"]["backend"] == "apache-age" for hit in deep["hits"])
     assert search["explain"]["channels"]["postgres_lexical"] == 1
+    assert search["explain"]["channels"]["postgres_graph_ppr"] == 1
     assert deep["explain"]["channels"]["postgres_graph_ppr"] == 1
     assert search["explain"]["adapters"]["lexical_backend"] == "paradedb-bm25"
+    assert search["explain"]["adapters"]["graph_backend"] == "apache-age"
     assert deep["explain"]["adapters"]["graph_backend"] == "apache-age"
     assert [item["role"] for item in requests].count("lexical_search") == 2
-    assert [item["role"] for item in requests].count("graph_ppr") == 1
+    assert [item["role"] for item in requests].count("graph_ppr") == 2
     assert all(item["tenant_id"] == tenant for item in requests)
 
 
