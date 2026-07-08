@@ -21,11 +21,13 @@ from uuid import uuid4
 
 import pytest
 
+import mnemosyne.postgres_engine as postgres_engine
 from mnemosyne.algorithms import mmr_select
 from mnemosyne.models import Evidence, Hit
 from mnemosyne.postgres_engine import (
     PostgresEngine,
     _PostgresConnectionPool,
+    _null_embedding_fallback_limit,
     _vector_from_literal,
 )
 from mnemosyne.text import hashing_embedding
@@ -453,6 +455,83 @@ class _StoredVectorFakeConnection(FakeConnection):
 
     def cursor(self, *args: Any, **kwargs: Any) -> FakeCursor:
         return _StoredVectorFakeCursor(self)
+
+
+class _NullFallbackFakeCursor(FakeCursor):
+    def __init__(self, conn: "_NullFallbackFakeConnection"):
+        super().__init__(conn)
+        self._rows: list[dict[str, Any]] = []
+        self._row: dict[str, Any] | None = None
+
+    def execute(self, sql: str, params: tuple[Any, ...] | None = None) -> None:
+        super().execute(sql, params)
+        flat = " ".join(sql.split())
+        self._rows = []
+        self._row = None
+        if "FROM evidence" in flat and "embedding IS NULL" in flat and "LIMIT" in flat:
+            self._conn.fallback_query_params = params
+            self._rows = self._conn.fallback_rows
+
+    def fetchall(self) -> list[dict[str, Any]]:
+        return self._rows
+
+    def fetchone(self) -> dict[str, Any] | None:
+        return self._row
+
+
+class _NullFallbackFakeConnection(FakeConnection):
+    def __init__(
+        self,
+        name: str,
+        *,
+        fallback_rows: list[dict[str, Any]],
+    ):
+        super().__init__(name)
+        self.fallback_rows = fallback_rows
+        self.fallback_query_params: tuple[Any, ...] | None = None
+
+    def cursor(self, *args: Any, **kwargs: Any) -> FakeCursor:
+        return _NullFallbackFakeCursor(self)
+
+
+def test_postgres_null_embedding_fallback_is_capped_and_observable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine, _ = make_engine(monkeypatch, reuse=True)
+    fallback_limit = _null_embedding_fallback_limit(5)
+
+    def fallback_row(idx: int) -> dict[str, Any]:
+        return {
+            "cid": idx.to_bytes(32, "big"),
+            "branch": "main",
+            "content": "legacy null embedding quartz fallback",
+            "content_pointer": None,
+            "modality": "text",
+            "metadata": {},
+            "trust_tier": 0,
+            "sensitivity": 0,
+            "access_policy": {},
+            "actor": "user",
+            "source_type": "legacy",
+            "embedding_partition": "public",
+        }
+
+    conn = _NullFallbackFakeConnection(
+        "null-fallback",
+        fallback_rows=[fallback_row(idx) for idx in range(1, fallback_limit + 2)],
+    )
+    monkeypatch.setattr(engine, "connect", lambda: conn)
+    monkeypatch.setattr(postgres_engine, "cosine", lambda *_args: 0.75)
+
+    hits = engine.vector_search("quartz fallback", 5, {"tenant_id": "tenant", "branch": "main"})
+
+    assert conn.fallback_query_params is not None
+    assert conn.fallback_query_params[-1] == fallback_limit + 1
+    hit = next(hit for hit in hits if hit.channel == "postgres_dense_fallback")
+    assert len([hit for hit in hits if hit.channel == "postgres_dense_fallback"]) == 5
+    assert hit.metadata["null_embedding_candidates_observed"] == fallback_limit + 1
+    assert hit.metadata["null_embedding_fallback_limit"] == fallback_limit
+    assert hit.metadata["null_embedding_fallback_truncated"] is True
 
 
 def test_stored_hit_vectors_gate_redacted_private_hits_to_hashing_space(
