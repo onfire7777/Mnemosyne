@@ -93,13 +93,14 @@ Realized over these concrete loci:
   (`tests/test_candidate_memo_expiry.py`). Results are byte-parity-proven
   against the unmemoized path (`tests/test_engine_perf_lanes.py`), so the
   switch selects speed, never behavior.
-- **`MNEMOSYNE_PARALLEL_CHANNELS`** — set to `1` to run the dense/lexical/graph
-  retrieval channel calls of `run_retrieval_pipeline` (`pipeline.py`) on a
-  3-worker thread pool. Default OFF — engine RLocks may serialize the work, so
-  this is a concurrency-posture opt-in only. Channel identity and the RRF
-  input order stay exactly `[dense, lexical, graph]`; flag-on results are
-  byte-identical to sequential on the Local and SQLite engines
-  (`tests/test_engine_perf_lanes.py`).
+- **`MNEMOSYNE_PARALLEL_CHANNELS`** — explicit override for running the
+  dense/lexical/graph retrieval channel calls of `run_retrieval_pipeline`
+  (`pipeline.py`) on a 3-worker thread pool. When unset, the default comes from
+  `capability.resolve_tier`: off for `floor`, on for `standard`,
+  `accelerated`, and `frontier`. Explicit `0`/empty values still force off,
+  and explicit truthy values force on. Channel identity and the RRF input order
+  stay exactly `[dense, lexical, graph]`; parallel results are byte-identical to
+  sequential on the Local and SQLite engines (`tests/test_engine_perf_lanes.py`).
 - **`MNEMOSYNE_RETRIEVAL_RESULT_CACHE_SIZE`** — whole-result retrieval LRU size
   for `run_retrieval_pipeline` (`pipeline.py`). Default OFF (`0`), matching
   current behavior. When set positive, entries are stored only after budget

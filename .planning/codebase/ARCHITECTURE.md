@@ -209,7 +209,7 @@
 
 ## Architectural Constraints
 
-- **Threading:** Python runtime is mostly synchronous; `src/mnemosyne/pipeline.py` can opt into a 3-worker channel thread pool with `MNEMOSYNE_PARALLEL_CHANNELS`, and HTTP/MCP servers use stdlib/FastAPI/uvicorn server concurrency as configured.
+- **Threading:** Python runtime is mostly synchronous; `src/mnemosyne/pipeline.py` can run dense/lexical/graph retrieval channels on a 3-worker thread pool. `MNEMOSYNE_PARALLEL_CHANNELS` is the explicit override, and the unset default follows capability tier (`floor` off; `standard` and above on). HTTP/MCP servers use stdlib/FastAPI/uvicorn server concurrency as configured.
 - **Global state:** Package export cache in `src/mnemosyne/__init__.py`; module-level constants configure consolidation, queue, retrieval, policy, and backend names across `src/mnemosyne/*.py`.
 - **Backend parity:** Put cross-backend behavior in shared modules (`src/mnemosyne/pipeline.py`, `src/mnemosyne/algorithms.py`, `src/mnemosyne/models.py`) and keep backend-specific differences behind `MemoryEngine`/`RetrievalPipelineOps`.
 - **Secrets:** Do not read or embed `.env`, `*.env`, key, credential, or secret file contents in docs or code generation; repo contains env-profile filenames under `infra/profiles/` that should be referenced by path only.

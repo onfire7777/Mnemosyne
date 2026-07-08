@@ -9,7 +9,7 @@ Covers four pure-speed changes:
 * the ``rrf_fuse`` local-branch reconstruction that replaced
   ``copy.deepcopy`` (proven against a deepcopy reference kept here);
 * the graph-PPR node->relation pair index (first-match semantics pinned);
-* the default-OFF ``MNEMOSYNE_PARALLEL_CHANNELS`` channel overlap;
+* the capability-default ``MNEMOSYNE_PARALLEL_CHANNELS`` channel overlap;
 * the default-OFF ``MNEMOSYNE_RETRIEVAL_RESULT_CACHE_SIZE`` LRU, which stores
   only post-sanitization results and invalidates on engine mutation tokens.
 
@@ -410,14 +410,24 @@ def test_rrf_fuse_local_branch_matches_deepcopy_reference() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Task 4 — MNEMOSYNE_PARALLEL_CHANNELS (default OFF, byte-identical when ON)
+# Task 4 — MNEMOSYNE_PARALLEL_CHANNELS (capability default, byte-identical)
 # --------------------------------------------------------------------------- #
 
-def test_parallel_channels_flag_defaults_off(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_parallel_channels_uses_capability_default_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("MNEMOSYNE_PARALLEL_CHANNELS", raising=False)
+    monkeypatch.setattr(pipeline_mod, "_parallel_channels_default_enabled", lambda: True)
+    assert pipeline_mod.parallel_channels_enabled() is True
+
+    monkeypatch.setattr(pipeline_mod, "_parallel_channels_default_enabled", lambda: False)
     assert pipeline_mod.parallel_channels_enabled() is False
+
+
+def test_parallel_channels_flag_overrides_capability_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(pipeline_mod, "_parallel_channels_default_enabled", lambda: False)
     monkeypatch.setenv("MNEMOSYNE_PARALLEL_CHANNELS", "1")
     assert pipeline_mod.parallel_channels_enabled() is True
+
+    monkeypatch.setattr(pipeline_mod, "_parallel_channels_default_enabled", lambda: True)
     monkeypatch.setenv("MNEMOSYNE_PARALLEL_CHANNELS", "0")
     assert pipeline_mod.parallel_channels_enabled() is False
 
