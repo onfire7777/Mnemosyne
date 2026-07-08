@@ -103,6 +103,8 @@ def _clone_hit(hit: Hit) -> Hit:
         score=hit.score,
         channel=hit.channel,
         provenance=list(hit.provenance),
+        trust_tier=hit.trust_tier,
+        sensitivity=hit.sensitivity,
         metadata=copy.deepcopy(hit.metadata),
     )
 
@@ -468,5 +470,18 @@ def run_retrieval_pipeline(
         },
     )
     if cache_key is not None:
-        _result_cache_put(cache_key, result)
+        current_cache_key = _result_cache_key(
+            ops,
+            query=query,
+            tenant_id=tenant_id,
+            branch=branch,
+            deep=deep,
+            effective_filter=effective_filter,
+            workspace_broadcast=workspace_broadcast,
+            k=k,
+            graph_k=graph_k,
+            policy=policy,
+        )
+        if current_cache_key == cache_key:
+            _result_cache_put(cache_key, result)
     return result

@@ -496,6 +496,8 @@ class _ResultCacheProbeEngine(LocalMemoryEngine):
                 text="Project Helios cache probe text.",
                 score=1.0,
                 channel="dense_hash",
+                trust_tier=1,
+                sensitivity=2,
                 metadata={"trust_tier": 0},
             )
         ]
@@ -540,6 +542,8 @@ def test_retrieval_result_cache_reuses_sanitized_defensive_copies(monkeypatch: p
 
     assert engine.channel_calls == 3
     assert engine.access_calls == 2
+    assert second.hits[0].trust_tier == 1
+    assert second.hits[0].sensitivity == 2
     retrieved = second.hits[0].metadata["retrieved_text"]
     assert retrieved["kind"] == "retrieved_memory_data"
     assert retrieved["instruction_authority"] == "none"
@@ -558,6 +562,43 @@ def test_retrieval_result_cache_invalidates_on_store_version(monkeypatch: pytest
     engine.retrieve("cacheable helios probe", TENANT)
     engine._store_version += 1  # noqa: SLF001 - regression-pins mutation-token invalidation.
     engine.retrieve("cacheable helios probe", TENANT)
+
+    assert engine.channel_calls == 6
+
+
+def test_local_retrieval_result_cache_token_changes_across_engine_lifetimes() -> None:
+    first = _ResultCacheProbeEngine()
+    second = _ResultCacheProbeEngine()
+
+    first_token = first._retrieval_result_cache_token(  # noqa: SLF001 - cache-token contract test.
+        TENANT,
+        "main",
+        {"tenant_id": TENANT, "branch": "main", "_retrieval_deep": False},
+    )
+    second_token = second._retrieval_result_cache_token(  # noqa: SLF001 - cache-token contract test.
+        TENANT,
+        "main",
+        {"tenant_id": TENANT, "branch": "main", "_retrieval_deep": False},
+    )
+
+    assert first_token != second_token
+
+
+class _ReadMarkMutatingResultCacheProbeEngine(_ResultCacheProbeEngine):
+    def _record_retrieval_access(self, hits: list[Hit]) -> dict[str, int]:
+        marks = super()._record_retrieval_access(hits)
+        self._store_version += 1  # noqa: SLF001 - pins write-on-read token mutation.
+        return marks
+
+
+def test_retrieval_result_cache_skips_store_when_read_mark_mutates_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MNEMOSYNE_RETRIEVAL_RESULT_CACHE_SIZE", "4")
+    engine = _ReadMarkMutatingResultCacheProbeEngine()
+
+    engine.retrieve("cacheable helios probe with read mark mutation", TENANT)
+    engine.retrieve("cacheable helios probe with read mark mutation", TENANT)
 
     assert engine.channel_calls == 6
 
@@ -590,3 +631,115 @@ def test_sqlite_retrieval_result_cache_token_changes_on_write(tmp_path: Path) ->
         engine.close()
 
     assert before != after
+
+
+def test_sqlite_retrieval_result_cache_token_changes_across_fresh_engine_lifetimes(
+    tmp_path: Path,
+) -> None:
+    first = SqliteEngine(tmp_path)
+    try:
+        before = first._retrieval_result_cache_token(  # noqa: SLF001 - cache-token contract test.
+            TENANT,
+            "main",
+            {"tenant_id": TENANT, "branch": "main", "_retrieval_deep": False},
+        )
+    finally:
+        first.close()
+
+    writer = SqliteEngine(tmp_path)
+    try:
+        writer.append_evidence(
+            Evidence(
+                tenant_id=TENANT,
+                user_id=USER,
+                actor="user",
+                source_type="seed",
+                content="Project Helios has an external cache token write.",
+                trust_tier=0,
+                access_policy={"tenant": TENANT},
+            )
+        )
+    finally:
+        writer.close()
+
+    second = SqliteEngine(tmp_path)
+    try:
+        after = second._retrieval_result_cache_token(  # noqa: SLF001 - cache-token contract test.
+            TENANT,
+            "main",
+            {"tenant_id": TENANT, "branch": "main", "_retrieval_deep": False},
+        )
+    finally:
+        second.close()
+
+    assert before != after
+
+
+def test_sqlite_retrieval_result_cache_token_changes_after_same_engine_close(
+    tmp_path: Path,
+) -> None:
+    engine = SqliteEngine(tmp_path)
+    try:
+        before = engine._retrieval_result_cache_token(  # noqa: SLF001 - cache-token contract test.
+            TENANT,
+            "main",
+            {"tenant_id": TENANT, "branch": "main", "_retrieval_deep": False},
+        )
+        engine.close()
+        writer = SqliteEngine(tmp_path)
+        try:
+            writer.append_evidence(
+                Evidence(
+                    tenant_id=TENANT,
+                    user_id=USER,
+                    actor="user",
+                    source_type="seed",
+                    content="Project Helios has a same-engine reconnect write.",
+                    trust_tier=0,
+                    access_policy={"tenant": TENANT},
+                )
+            )
+        finally:
+            writer.close()
+        after = engine._retrieval_result_cache_token(  # noqa: SLF001 - cache-token contract test.
+            TENANT,
+            "main",
+            {"tenant_id": TENANT, "branch": "main", "_retrieval_deep": False},
+        )
+    finally:
+        engine.close()
+
+    assert before != after
+
+
+def test_sqlite_retrieval_cache_rehydrates_after_same_engine_reconnect(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MNEMOSYNE_RETRIEVAL_RESULT_CACHE_SIZE", "4")
+    query = "same-engine reconnect external write"
+    engine = SqliteEngine(tmp_path)
+    try:
+        first = engine.retrieve(query, TENANT)
+        engine.close()
+        writer = SqliteEngine(tmp_path)
+        try:
+            writer.append_evidence(
+                Evidence(
+                    tenant_id=TENANT,
+                    user_id=USER,
+                    actor="user",
+                    source_type="seed",
+                    content=f"Project Helios has a {query}.",
+                    trust_tier=0,
+                    access_policy={"tenant": TENANT},
+                )
+            )
+        finally:
+            writer.close()
+        second = engine.retrieve(query, TENANT)
+    finally:
+        engine.close()
+
+    assert first.hits == []
+    assert [hit.text for hit in second.hits] == [f"Project Helios has a {query}."]

@@ -6,6 +6,7 @@ import copy
 import json
 import math
 import os
+import secrets
 import threading
 from collections import OrderedDict, defaultdict
 from dataclasses import dataclass
@@ -480,6 +481,7 @@ class LocalMemoryEngine:
         # (including belief.py's direct-dict writers) already reach, even when
         # store_path is unset — so any committed write invalidates the memo.
         self._store_version = 0
+        self._retrieval_result_cache_nonce = secrets.token_hex(16)
         # Entries carry the earliest future access-policy expiry in scope: the
         # scan is time-dependent through expires_at, so a cached result is only
         # valid until that first allow→deny flip (None = no pending flip).
@@ -487,6 +489,18 @@ class LocalMemoryEngine:
         self._candidate_memo_lock = threading.Lock()
         if self.store_path and self.store_path.exists():
             self._load()
+
+    def _retrieval_result_cache_token(
+        self, tenant_id: str, branch: str, effective_filter: dict[str, Any]
+    ) -> tuple[Any, ...] | None:
+        return (
+            "local",
+            self._retrieval_result_cache_nonce,
+            tenant_id,
+            branch,
+            self._store_version,
+            effective_filter.get("_retrieval_deep", False),
+        )
 
     @staticmethod
     def _evidence_key(tenant_id: str, branch: str, cid: str) -> str:

@@ -105,9 +105,10 @@ Realized over these concrete loci:
   current behavior. When set positive, entries are stored only after budget
   fitting, redaction, retrieved-text sanitization, and access marking; callers
   receive defensive copies. Keys include the query, tenant/branch, filter,
-  policy, adapters, and an engine mutation token, so Local store-version bumps
-  and SQLite `total_changes` / `PRAGMA data_version` changes invalidate stale
-  entries instead of replaying obsolete read-lifecycle state
+  policy, adapters, and an engine mutation token, so Local per-engine nonces
+  plus store-version bumps and SQLite per-connection-lifetime nonces plus
+  `total_changes` / `PRAGMA data_version` changes invalidate stale entries
+  instead of replaying obsolete read-lifecycle state
   (`tests/test_engine_perf_lanes.py`).
 - **`MNEMOSYNE_EMBED_BATCH_SIZE`** — chunk size (default `32`) for batched
   embedding calls: the consolidation embedder pass collects pending evidence
