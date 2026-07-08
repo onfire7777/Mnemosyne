@@ -23,6 +23,7 @@ import pytest
 
 import mnemosyne.postgres_engine as postgres_engine
 from mnemosyne.algorithms import mmr_select
+from mnemosyne.calibration import CalibrationSet
 from mnemosyne.models import Evidence, Hit
 from mnemosyne.postgres_engine import (
     _PGVECTOR_HNSW_EF_SEARCH_DEEP,
@@ -500,6 +501,33 @@ class _NullFallbackFakeConnection(FakeConnection):
         return _NullFallbackFakeCursor(self)
 
 
+class _CalibrationFakeCursor(FakeCursor):
+    def __init__(self, conn: "_CalibrationFakeConnection"):
+        super().__init__(conn)
+        self._row: dict[str, Any] | None = None
+
+    def execute(self, sql: str, params: tuple[Any, ...] | None = None) -> None:
+        super().execute(sql, params)
+        flat = " ".join(sql.split())
+        self._row = None
+        if "FROM conformal_calibration" in flat:
+            self._conn.calibration_selects += 1
+            self._row = self._conn.calibration_row
+
+    def fetchone(self) -> dict[str, Any] | None:
+        return self._row
+
+
+class _CalibrationFakeConnection(FakeConnection):
+    def __init__(self, name: str, calibration_row: dict[str, Any] | None):
+        super().__init__(name)
+        self.calibration_row = calibration_row
+        self.calibration_selects = 0
+
+    def cursor(self, *args: Any, **kwargs: Any) -> FakeCursor:
+        return _CalibrationFakeCursor(self)
+
+
 def test_postgres_null_embedding_fallback_is_capped_and_observable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -566,6 +594,77 @@ def test_pgvector_hnsw_ef_search_uses_fast_default_and_deep_route() -> None:
     assert _pgvector_hnsw_ef_search({}) == _PGVECTOR_HNSW_EF_SEARCH_FAST
     assert _pgvector_hnsw_ef_search({"_retrieval_deep": False}) == _PGVECTOR_HNSW_EF_SEARCH_FAST
     assert _pgvector_hnsw_ef_search({"_retrieval_deep": True}) == _PGVECTOR_HNSW_EF_SEARCH_DEEP
+
+
+def test_postgres_calibration_positive_lookup_is_cached(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine, _ = make_engine(monkeypatch, reuse=True)
+    conn = _CalibrationFakeConnection(
+        "calibration-hit",
+        {"memory_type": "fact", "scores": [0.2, 0.4], "target_coverage": 0.91},
+    )
+    monkeypatch.setattr(engine, "connect", lambda: conn)
+
+    first = engine._calibration_for("tenant", "fact")
+    assert first == CalibrationSet(
+        tenant_id="tenant",
+        memory_type="fact",
+        scores=[0.2, 0.4],
+        target_coverage=0.91,
+    )
+    assert first is not None
+    first.scores.append(0.9)
+    second = engine._calibration_for("tenant", "fact")
+
+    assert second is not None
+    assert second.scores == [0.2, 0.4]
+    assert conn.calibration_selects == 1
+
+
+def test_postgres_calibration_misses_are_not_cached(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine, _ = make_engine(monkeypatch, reuse=True)
+    conn = _CalibrationFakeConnection("calibration-miss", None)
+    monkeypatch.setattr(engine, "connect", lambda: conn)
+
+    assert engine._calibration_for("tenant", "missing") is None
+    assert engine._calibration_for("tenant", "missing") is None
+
+    assert conn.calibration_selects == 2
+
+
+def test_postgres_set_calibration_updates_lookup_cache(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine, _ = make_engine(monkeypatch, reuse=True)
+    conn = _CalibrationFakeConnection(
+        "calibration-write",
+        {"memory_type": "fact", "scores": [0.1], "target_coverage": 0.8},
+    )
+    monkeypatch.setattr(engine, "connect", lambda: conn)
+    monkeypatch.setattr(engine, "ensure_tenant_and_branch", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(engine, "_audit", lambda *_args, **_kwargs: None)
+
+    calibration = CalibrationSet(
+        tenant_id="tenant",
+        memory_type="fact",
+        scores=[0.7],
+        target_coverage=0.95,
+    )
+    engine.set_calibration(calibration)
+    calibration.scores.append(0.99)
+
+    got = engine._calibration_for("tenant", "fact")
+
+    assert got == CalibrationSet(
+        tenant_id="tenant",
+        memory_type="fact",
+        scores=[0.7],
+        target_coverage=0.95,
+    )
+    assert conn.calibration_selects == 0
 
 
 def test_stored_hit_vectors_gate_redacted_private_hits_to_hashing_space(
