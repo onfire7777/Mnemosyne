@@ -9,7 +9,9 @@ Covers four pure-speed changes:
 * the ``rrf_fuse`` local-branch reconstruction that replaced
   ``copy.deepcopy`` (proven against a deepcopy reference kept here);
 * the graph-PPR node->relation pair index (first-match semantics pinned);
-* the default-OFF ``MNEMOSYNE_PARALLEL_CHANNELS`` channel overlap.
+* the default-OFF ``MNEMOSYNE_PARALLEL_CHANNELS`` channel overlap;
+* the default-OFF ``MNEMOSYNE_RETRIEVAL_RESULT_CACHE_SIZE`` LRU, which stores
+  only post-sanitization results and invalidates on engine mutation tokens.
 
 Each test proves the optimized path produces results deep-equal to the
 previous/pure path — order, scores, and metadata included.
@@ -471,3 +473,120 @@ def test_fast_retrieve_requests_cached_graph_signal(monkeypatch: pytest.MonkeyPa
     engine.retrieve(QUERY, TENANT, deep=True)
 
     assert observed == [True, False]
+
+
+# --------------------------------------------------------------------------- #
+# Task 5 — MNEMOSYNE_RETRIEVAL_RESULT_CACHE_SIZE (default OFF, sanitized only)
+# --------------------------------------------------------------------------- #
+
+class _ResultCacheProbeEngine(LocalMemoryEngine):
+    def __init__(self) -> None:
+        super().__init__()
+        self.channel_calls = 0
+        self.access_calls = 0
+
+    def vector_search(self, query: str, k: int, filt: dict[str, object]) -> list[Hit]:
+        self.channel_calls += 1
+        return [
+            Hit(
+                id="cache-hit",
+                kind="evidence",
+                tenant_id=TENANT,
+                branch="main",
+                text="Project Helios cache probe text.",
+                score=1.0,
+                channel="dense_hash",
+                metadata={"trust_tier": 0},
+            )
+        ]
+
+    def lexical_search(self, query: str, k: int, filt: dict[str, object]) -> list[Hit]:
+        self.channel_calls += 1
+        return []
+
+    def graph_ppr(
+        self,
+        seeds: list[str],
+        k: int,
+        as_of: object = None,
+        tenant_id: str | None = None,
+        branch: str | None = None,
+        use_cache: bool = False,
+        filt: dict[str, object] | None = None,
+    ) -> list[Hit]:
+        self.channel_calls += 1
+        return []
+
+    def _record_retrieval_access(self, hits: list[Hit]) -> dict[str, int]:
+        self.access_calls += 1
+        return {"assertions": 0, "evidence": len(hits)}
+
+
+def test_retrieval_result_cache_defaults_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("MNEMOSYNE_RETRIEVAL_RESULT_CACHE_SIZE", raising=False)
+    assert pipeline_mod.retrieval_result_cache_size() == 0
+    monkeypatch.setenv("MNEMOSYNE_RETRIEVAL_RESULT_CACHE_SIZE", "bad")
+    assert pipeline_mod.retrieval_result_cache_size() == 0
+    monkeypatch.setenv("MNEMOSYNE_RETRIEVAL_RESULT_CACHE_SIZE", "2")
+    assert pipeline_mod.retrieval_result_cache_size() == 2
+
+
+def test_retrieval_result_cache_reuses_sanitized_defensive_copies(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MNEMOSYNE_RETRIEVAL_RESULT_CACHE_SIZE", "4")
+    engine = _ResultCacheProbeEngine()
+
+    engine.retrieve("cacheable helios probe", TENANT)
+    second = engine.retrieve("cacheable helios probe", TENANT)
+
+    assert engine.channel_calls == 3
+    assert engine.access_calls == 2
+    retrieved = second.hits[0].metadata["retrieved_text"]
+    assert retrieved["kind"] == "retrieved_memory_data"
+    assert retrieved["instruction_authority"] == "none"
+
+    retrieved["content"] = "poisoned cached copy"
+    third = engine.retrieve("cacheable helios probe", TENANT)
+
+    assert engine.channel_calls == 3
+    assert third.hits[0].metadata["retrieved_text"]["content"] == "Project Helios cache probe text."
+
+
+def test_retrieval_result_cache_invalidates_on_store_version(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MNEMOSYNE_RETRIEVAL_RESULT_CACHE_SIZE", "4")
+    engine = _ResultCacheProbeEngine()
+
+    engine.retrieve("cacheable helios probe", TENANT)
+    engine._store_version += 1  # noqa: SLF001 - regression-pins mutation-token invalidation.
+    engine.retrieve("cacheable helios probe", TENANT)
+
+    assert engine.channel_calls == 6
+
+
+def test_sqlite_retrieval_result_cache_token_changes_on_write(tmp_path: Path) -> None:
+    engine = SqliteEngine(tmp_path)
+    try:
+        before = engine._retrieval_result_cache_token(  # noqa: SLF001 - cache-token contract test.
+            TENANT,
+            "main",
+            {"tenant_id": TENANT, "branch": "main", "_retrieval_deep": False},
+        )
+        engine.append_evidence(
+            Evidence(
+                tenant_id=TENANT,
+                user_id=USER,
+                actor="user",
+                source_type="seed",
+                content="Project Helios has a cache token write.",
+                trust_tier=0,
+                access_policy={"tenant": TENANT},
+            )
+        )
+        after = engine._retrieval_result_cache_token(  # noqa: SLF001 - cache-token contract test.
+            TENANT,
+            "main",
+            {"tenant_id": TENANT, "branch": "main", "_retrieval_deep": False},
+        )
+    finally:
+        engine.close()
+
+    assert before != after

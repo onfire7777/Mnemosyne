@@ -486,6 +486,25 @@ class SqliteEngine:
 
     # --- store core (connections, schema, row marshalling) -------------------
 
+    def _retrieval_result_cache_token(
+        self, tenant_id: str, branch: str, effective_filter: dict[str, Any]
+    ) -> tuple[Any, ...] | None:
+        if not tenant_id:
+            return None
+        conn = self._connect(tenant_id)
+        with self._lock:
+            row = conn.execute("PRAGMA data_version").fetchone()
+            data_version = int(row[0]) if row is not None else 0
+            return (
+                "sqlite",
+                str(self.root_dir),
+                tenant_id,
+                branch,
+                conn.total_changes,
+                data_version,
+                effective_filter.get("_retrieval_deep", False),
+            )
+
     def _tenant_db_path(self, tenant_id: str) -> Path:
         """Per-tenant database path; hostile ids hash inside ``root_dir``."""
         return self.root_dir / safe_tenant_filename(tenant_id, ".db")
