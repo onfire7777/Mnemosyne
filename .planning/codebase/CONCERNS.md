@@ -129,11 +129,11 @@
 - Impact: Direct `pip install` or unlocked optional installs can pick newer dependency behavior than CI.
 - Migration plan: Use `uv sync --locked` for development/CI/release checks; review `uv.lock` changes as dependency changes, not incidental churn.
 
-**Optional native wheel path is non-gating:**
-- Risk: Native wheels are allowed to fail in CI until wheels become a release deliverable.
-- Impact: Pure-Python behavior remains canonical, but native acceleration or packaging regressions can go unnoticed by merge gates.
+**Native wheel release surface remains partial:**
+- Risk: The current macOS arm64 / Linux x86_64 `native-wheels` CI job is merge-gating, but the full release matrix and install/import smoke proof for built artifacts are not complete yet.
+- Impact: Pure-Python behavior remains canonical, and current wheel packaging regressions block merges, but advertised wheel support still needs broader release evidence.
 - Files: `.github/workflows/ci.yml`, `rust/mnemosyne-native/Cargo.toml`, `rust/mnemosyne-native/Cargo.lock`
-- Migration plan: Keep parity tests in the default test job; make `native-wheels` gating before advertising wheel support.
+- Migration plan: Keep parity tests in the default test job; add broader wheel matrix coverage and install/import smoke checks before advertising wheel support.
 
 **Embedding service fallback can hide missing real model dependencies:**
 - Risk: `services/embedding/app.py` falls back to deterministic embeddings/reranking when torch/sentence-transformers are unavailable or forced.
