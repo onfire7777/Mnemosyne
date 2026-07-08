@@ -100,6 +100,15 @@ Realized over these concrete loci:
   input order stay exactly `[dense, lexical, graph]`; flag-on results are
   byte-identical to sequential on the Local and SQLite engines
   (`tests/test_engine_perf_lanes.py`).
+- **`MNEMOSYNE_RETRIEVAL_RESULT_CACHE_SIZE`** — whole-result retrieval LRU size
+  for `run_retrieval_pipeline` (`pipeline.py`). Default OFF (`0`), matching
+  current behavior. When set positive, entries are stored only after budget
+  fitting, redaction, retrieved-text sanitization, and access marking; callers
+  receive defensive copies. Keys include the query, tenant/branch, filter,
+  policy, adapters, and an engine mutation token, so Local store-version bumps
+  and SQLite `total_changes` / `PRAGMA data_version` changes invalidate stale
+  entries instead of replaying obsolete read-lifecycle state
+  (`tests/test_engine_perf_lanes.py`).
 - **`MNEMOSYNE_EMBED_BATCH_SIZE`** — chunk size (default `32`) for batched
   embedding calls: the consolidation embedder pass collects pending evidence
   texts and feeds them through `consolidation.embed_texts_batched`, which

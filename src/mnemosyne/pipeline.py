@@ -30,7 +30,11 @@ engine-specific storage access stays behind the ops members.
 
 from __future__ import annotations
 
+import copy
+import json
 import os
+import threading
+from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Protocol
 
@@ -60,9 +64,147 @@ from mnemosyne.text import tokenize
 #: Default off because engine RLocks may serialize the work anyway.
 _PARALLEL_CHANNELS_ENV = "MNEMOSYNE_PARALLEL_CHANNELS"
 
+#: Default-OFF LRU for whole retrieval results. Entries are written only after
+#: budget fitting, policy redaction, retrieved-text sanitization, and access
+#: marking; callers get defensive copies. The cache key includes an engine
+#: mutation token so write-on-read access marks and ordinary writes invalidate
+#: stale result entries instead of replaying obsolete lifecycle scores.
+_RESULT_CACHE_SIZE_ENV = "MNEMOSYNE_RETRIEVAL_RESULT_CACHE_SIZE"
+_RESULT_CACHE: OrderedDict[tuple[Any, ...], RetrievalResult] = OrderedDict()
+_RESULT_CACHE_LOCK = threading.Lock()
+
 
 def parallel_channels_enabled() -> bool:
     return os.environ.get(_PARALLEL_CHANNELS_ENV, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def retrieval_result_cache_size() -> int:
+    raw = os.environ.get(_RESULT_CACHE_SIZE_ENV, "0").strip()
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return 0
+
+
+def _cache_fingerprint(value: Any) -> str:
+    try:
+        return json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
+    except (TypeError, ValueError):
+        return repr(value)
+
+
+def _clone_hit(hit: Hit) -> Hit:
+    return Hit(
+        id=hit.id,
+        kind=hit.kind,
+        tenant_id=hit.tenant_id,
+        branch=hit.branch,
+        text=hit.text,
+        score=hit.score,
+        channel=hit.channel,
+        provenance=list(hit.provenance),
+        metadata=copy.deepcopy(hit.metadata),
+    )
+
+
+def _clone_result(result: RetrievalResult) -> RetrievalResult:
+    return RetrievalResult(
+        query=result.query,
+        hits=[_clone_hit(hit) for hit in result.hits],
+        confidence=result.confidence,
+        abstained=result.abstained,
+        uncertainty_note=result.uncertainty_note,
+        token_budget=result.token_budget,
+        used_tokens=result.used_tokens,
+        explain=copy.deepcopy(result.explain),
+    )
+
+
+def _engine_result_cache_token(
+    ops: RetrievalPipelineOps,
+    *,
+    tenant_id: str,
+    branch: str,
+    effective_filter: dict[str, Any],
+) -> Any | None:
+    token_fn = getattr(ops, "_retrieval_result_cache_token", None)
+    if callable(token_fn):
+        return token_fn(tenant_id, branch, effective_filter)
+    token_fn = getattr(ops, "_retrieval_cache_token", None)
+    if callable(token_fn):
+        return token_fn(tenant_id, branch, effective_filter)
+    store_version = getattr(ops, "_store_version", None)
+    if store_version is not None:
+        return ("local", id(ops), store_version)
+    return None
+
+
+def _adapter_cache_key(ops: RetrievalPipelineOps) -> tuple[Any, ...]:
+    return (
+        ops.adapters.embedding.name,
+        ops.adapters.embedding.dims,
+        ops.adapters.reranker.name,
+        ops.adapters.lexical_backend,
+        ops.adapters.graph_backend,
+    )
+
+
+def _result_cache_key(
+    ops: RetrievalPipelineOps,
+    *,
+    query: str,
+    tenant_id: str,
+    branch: str,
+    deep: bool,
+    effective_filter: dict[str, Any],
+    workspace_broadcast: dict[str, Any],
+    k: int,
+    graph_k: int,
+    policy: OperatingPolicy,
+) -> tuple[Any, ...] | None:
+    if retrieval_result_cache_size() <= 0 or deep or workspace_broadcast.get("applied"):
+        return None
+    token = _engine_result_cache_token(
+        ops,
+        tenant_id=tenant_id,
+        branch=branch,
+        effective_filter=effective_filter,
+    )
+    if token is None:
+        return None
+    return (
+        "retrieval-result-v1",
+        _cache_fingerprint(token),
+        query,
+        tenant_id,
+        branch,
+        deep,
+        k,
+        graph_k,
+        _cache_fingerprint(effective_filter),
+        _cache_fingerprint(policy.to_dict()),
+        _adapter_cache_key(ops),
+    )
+
+
+def _result_cache_get(key: tuple[Any, ...]) -> RetrievalResult | None:
+    with _RESULT_CACHE_LOCK:
+        cached = _RESULT_CACHE.get(key)
+        if cached is None:
+            return None
+        _RESULT_CACHE.move_to_end(key)
+        return _clone_result(cached)
+
+
+def _result_cache_put(key: tuple[Any, ...], result: RetrievalResult) -> None:
+    size = retrieval_result_cache_size()
+    if size <= 0:
+        return
+    with _RESULT_CACHE_LOCK:
+        _RESULT_CACHE[key] = _clone_result(result)
+        _RESULT_CACHE.move_to_end(key)
+        while len(_RESULT_CACHE) > size:
+            _RESULT_CACHE.popitem(last=False)
 
 
 def _fast_graph_hits(hits: list[Hit], *, deep: bool) -> list[Hit]:
@@ -158,6 +300,23 @@ def run_retrieval_pipeline(
     effective_filter.update({"tenant_id": tenant_id, "branch": branch, "_retrieval_deep": deep})
     k = policy.deep_top_k if deep else policy.top_k
     graph_k = max(4, k // 2)
+    cache_key = _result_cache_key(
+        ops,
+        query=query,
+        tenant_id=tenant_id,
+        branch=branch,
+        deep=deep,
+        effective_filter=effective_filter,
+        workspace_broadcast=workspace_broadcast,
+        k=k,
+        graph_k=graph_k,
+        policy=policy,
+    )
+    if cache_key is not None:
+        cached = _result_cache_get(cache_key)
+        if cached is not None:
+            cached.explain["read_marks"] = ops._record_retrieval_access(cached.hits)
+            return cached
     if parallel_channels_enabled():
         with ThreadPoolExecutor(max_workers=3) as pool:
             dense_future = pool.submit(ops.vector_search, query, policy.rerank_width, effective_filter)
@@ -263,7 +422,7 @@ def run_retrieval_pipeline(
     elif abstained:
         note = "Evidence is too thin, low-trust, or conflicting for a confident answer."
     dense_key, lexical_key, graph_key = ops.retrieval_explain_channel_keys
-    return RetrievalResult(
+    result = RetrievalResult(
         query=query,
         hits=budgeted,
         confidence=confidence,
@@ -308,3 +467,6 @@ def run_retrieval_pipeline(
             "rails": policy.immutable_rails,
         },
     )
+    if cache_key is not None:
+        _result_cache_put(cache_key, result)
+    return result
