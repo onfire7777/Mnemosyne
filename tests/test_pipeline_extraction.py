@@ -196,6 +196,23 @@ def test_low_support_abstention_matches_golden() -> None:
     _assert_matches_golden("low_support_abstention")
 
 
+def test_pipeline_marks_retrieval_depth_in_channel_filters() -> None:
+    for deep in (False, True):
+        engine = LocalMemoryEngine()
+        seen_filters: list[dict[str, Any]] = []
+
+        def vector_search(query: str, k: int, filt: dict[str, Any]) -> list[Any]:
+            seen_filters.append(dict(filt))
+            return []
+
+        engine.vector_search = vector_search  # type: ignore[method-assign]
+        engine.retrieve("depth marker", tenant_id=TENANT, branch="main", deep=deep)
+
+        assert seen_filters[0]["_retrieval_deep"] is deep
+        assert seen_filters[0]["tenant_id"] == TENANT
+        assert seen_filters[0]["branch"] == "main"
+
+
 def test_goldens_cover_expected_explain_keyset() -> None:
     """The explain dict's full key-set is pinned (R7 explain-parity checklist)."""
 

@@ -122,6 +122,9 @@ _POOL_MAX_IDLE = 8
 _NULL_EMBEDDING_FALLBACK_MIN_ROWS = 64
 _NULL_EMBEDDING_FALLBACK_MULTIPLIER = 8
 _NULL_EMBEDDING_FALLBACK_MAX_ROWS = 2048
+_PGVECTOR_HNSW_EF_SEARCH_FAST = 40
+_PGVECTOR_HNSW_EF_SEARCH_DEEP = 120
+_PGVECTOR_HNSW_ITERATIVE_SCAN = "strict_order"
 
 # Session-level clear of the RLS tenant GUC. '' maps to NULL through
 # mnemosyne_current_tenant()'s nullif(), i.e. the deny-all posture a fresh
@@ -134,6 +137,10 @@ def _null_embedding_fallback_limit(k: int) -> int:
         max(max(int(k), 1) * _NULL_EMBEDDING_FALLBACK_MULTIPLIER, _NULL_EMBEDDING_FALLBACK_MIN_ROWS),
         _NULL_EMBEDDING_FALLBACK_MAX_ROWS,
     )
+
+
+def _pgvector_hnsw_ef_search(filt: dict[str, Any]) -> int:
+    return _PGVECTOR_HNSW_EF_SEARCH_DEEP if bool(filt.get("_retrieval_deep")) else _PGVECTOR_HNSW_EF_SEARCH_FAST
 
 
 class _PooledConnection:
@@ -337,6 +344,11 @@ class PostgresEngine:
     @staticmethod
     def _set_tenant(cur: Any, db_tenant_id: str) -> None:
         cur.execute("SELECT set_config('mnemosyne.tenant_id', %s, true)", (str(db_tenant_id),))
+
+    @staticmethod
+    def _set_pgvector_hnsw_query_settings(cur: Any, filt: dict[str, Any]) -> None:
+        cur.execute("SELECT set_config('hnsw.ef_search', %s, true)", (str(_pgvector_hnsw_ef_search(filt)),))
+        cur.execute("SELECT set_config('hnsw.iterative_scan', %s, true)", (_PGVECTOR_HNSW_ITERATIVE_SCAN,))
 
     @staticmethod
     def _ensure_entity_registry_schema(cur: Any) -> None:
@@ -1967,6 +1979,7 @@ class PostgresEngine:
         with self.connect() as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
                 self._set_tenant(cur, db_tenant_id)
+                self._set_pgvector_hnsw_query_settings(cur, filt)
                 cur.execute(
                     """
                     SELECT id, branch, subject, predicate, object, confidence, calibration, status,
