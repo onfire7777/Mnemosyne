@@ -486,18 +486,24 @@ contract; CONFIG-DRIFT-CHECKS env registry; GSD/CBM/gbrain hygiene.
   3. Focused tests, lint/hygiene checks, CBM refresh, gbrain sync, and CI stay
      green before changes are considered shipped.
   4. Planning docs and codebase maps describe the current default policy without
-     stale "default off" claims.
+     stale "default off" or missing-cache claims.
+  5. Native acceleration changes release the GIL only around Rust-owned compute
+     loops and preserve scalar arithmetic/order exactly.
 
-**Plans:** 1 plan
+**Plans:** 2 plans
 
 Plans:
 
 - [x] 09-01-PLAN.md — Retrieval channel parallelism defaults from capability tier.
+- [x] 09-02-PLAN.md — Cache drift closure and native MMR/PPR GIL detach.
 
-Checkpoint: Phase 9 Plan 01 is implemented and locally verified. Retrieval
+Checkpoint: Phase 9 Plans 01-02 are implemented and locally verified. Retrieval
 channel parallelism now defaults from capability tier when
 `MNEMOSYNE_PARALLEL_CHANNELS` is absent (`floor` off, `standard` and above on),
 explicit operator env values still win, and SQLite scan-oracle memo hydration is
-coalesced under the engine lock for the new parallel default. Focused
-retrieval/capability checks, ruff, `git diff --check`, GSD consistency, and the
-full local pytest suite pass.
+coalesced under the engine lock for the new parallel default. Cache docs now
+match the landed HTTP embedding LRU, retrieval result LRU, and Postgres positive
+calibration cache. MMR/PPR native kernels release the GIL around Rust-owned
+compute loops without changing arithmetic/order. Focused retrieval/capability,
+provider-cache, Postgres perf-lane, cargo, native parity, ruff, `git diff
+--check`, GSD consistency, and the full local pytest suite pass.

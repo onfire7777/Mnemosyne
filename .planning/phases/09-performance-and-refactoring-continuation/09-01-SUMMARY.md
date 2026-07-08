@@ -57,7 +57,9 @@ remain authoritative.
 
 ## Remaining Work
 
-Future Phase 09 slices should handle provider-layer embedding caches, structured
-async provider/SQL I/O, stored-vector MMR bake-off/recalibration, and CLI
-decomposition. Those are intentionally separate because they either need
-measurement, ranking recalibration, or broader blast-radius review.
+Future Phase 09 slices should handle durable/privacy-scoped provider cache
+hardening, structured async provider/SQL I/O, Postgres prepared statements and
+server/index tuning, stored-vector MMR bake-off/recalibration, and CLI
+decomposition. The process-local HTTP embedding LRU, retrieval result LRU, and
+Postgres positive calibration lookup cache are already landed; future cache work
+should focus on durability, cache-safety, metrics, and operator evidence.

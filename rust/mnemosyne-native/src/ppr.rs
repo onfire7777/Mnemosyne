@@ -123,6 +123,7 @@ fn parse_le_u64(name: &str, buf: &[u8]) -> PyResult<Vec<usize>> {
 /// zips them back onto its ordered node list with `strict=True`).
 #[pyfunction]
 pub fn ppr_power_iteration(
+    py: Python<'_>,
     seeds: Vec<bool>,
     flat_neighbors_le: &[u8],
     row_lens_le: &[u8],
@@ -158,17 +159,19 @@ pub fn ppr_power_iteration(
     if let Some(&bad) = flat_neighbors.iter().find(|&&slot| slot >= n_total) {
         return Err(PyValueError::new_err(format!(
             "ppr_power_iteration: neighbor slot {bad} is out of range for a \
-             {n_total}-node universe"
+            {n_total}-node universe"
         )));
     }
-    Ok(ppr_iterate(
-        &seeds,
-        &flat_neighbors,
-        &row_lens,
-        iterations,
-        damping,
-        teleport,
-    ))
+    Ok(py.detach(move || {
+        ppr_iterate(
+            &seeds,
+            &flat_neighbors,
+            &row_lens,
+            iterations,
+            damping,
+            teleport,
+        )
+    }))
 }
 
 #[cfg(test)]

@@ -51,6 +51,7 @@ fn max_similarity(v: &[f64], selected: &[usize], vectors: &[Option<Vec<f64>>]) -
 /// extraction on negative ints.
 #[pyfunction]
 pub fn mmr_select_indices(
+    py: Python<'_>,
     base_scores: Vec<f64>,
     vectors: Vec<Option<Vec<f64>>>,
     query_vec: Vec<f64>,
@@ -65,43 +66,45 @@ pub fn mmr_select_indices(
             vectors.len()
         )));
     }
-    let mut selected: Vec<usize> = Vec::new();
-    let mut remaining: Vec<usize> = (0..base_scores.len()).collect();
-    while !remaining.is_empty() && (selected.len() as i64) < k {
-        let mut best: Option<usize> = None;
-        let mut best_pos = 0usize; // position in `remaining` for removal
-        let mut best_score = f64::NEG_INFINITY;
-        for (pos, &i) in remaining.iter().enumerate() {
-            let vec = vectors[i].as_deref();
-            let relevance = match vec {
-                Some(v) => cosine_seq(&query_vec, v),
-                None => 0.0,
-            };
-            let diversity_penalty = if selected.is_empty() {
-                0.0
-            } else if let Some(v) = vec {
-                max_similarity(v, &selected, &vectors).unwrap_or(0.0)
-            } else {
-                0.0
-            };
-            let mut score = mmr_lambda * relevance - (1.0 - mmr_lambda) * diversity_penalty;
-            score += base_scores[i];
-            if score > best_score {
-                best = Some(i);
-                best_pos = pos;
-                best_score = score;
+    Ok(py.detach(move || {
+        let mut selected: Vec<usize> = Vec::new();
+        let mut remaining: Vec<usize> = (0..base_scores.len()).collect();
+        while !remaining.is_empty() && (selected.len() as i64) < k {
+            let mut best: Option<usize> = None;
+            let mut best_pos = 0usize; // position in `remaining` for removal
+            let mut best_score = f64::NEG_INFINITY;
+            for (pos, &i) in remaining.iter().enumerate() {
+                let vec = vectors[i].as_deref();
+                let relevance = match vec {
+                    Some(v) => cosine_seq(&query_vec, v),
+                    None => 0.0,
+                };
+                let diversity_penalty = if selected.is_empty() {
+                    0.0
+                } else if let Some(v) = vec {
+                    max_similarity(v, &selected, &vectors).unwrap_or(0.0)
+                } else {
+                    0.0
+                };
+                let mut score = mmr_lambda * relevance - (1.0 - mmr_lambda) * diversity_penalty;
+                score += base_scores[i];
+                if score > best_score {
+                    best = Some(i);
+                    best_pos = pos;
+                    best_score = score;
+                }
+            }
+            match best {
+                Some(i) => {
+                    selected.push(i);
+                    // Same effect as the pure `remaining.remove(best)` (remove by
+                    // value): indices are unique, so removing at the found
+                    // position preserves input order for the rest.
+                    remaining.remove(best_pos);
+                }
+                None => break, // all-NaN scores: nothing beats -inf, mirror the pure break
             }
         }
-        match best {
-            Some(i) => {
-                selected.push(i);
-                // Same effect as the pure `remaining.remove(best)` (remove by
-                // value): indices are unique, so removing at the found
-                // position preserves input order for the rest.
-                remaining.remove(best_pos);
-            }
-            None => break, // all-NaN scores: nothing beats -inf, mirror the pure break
-        }
-    }
-    Ok(selected)
+        selected
+    }))
 }
