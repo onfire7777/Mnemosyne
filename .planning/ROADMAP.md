@@ -7,6 +7,7 @@ This roadmap follows the v2 build blueprint exactly: foundations and contracts f
 ## Phases
 
 **Phase Numbering:**
+
 - Integer phases match the blueprint's Phase 0 through Phase 5.
 - Decimal phases are reserved for urgent insertions if verification discovers missing prerequisites.
 
@@ -23,36 +24,44 @@ This roadmap follows the v2 build blueprint exactly: foundations and contracts f
 ## Phase Details
 
 ### Phase 0: Foundations and Contracts
+
 **Goal**: Capture evidence exactly, deduplicate by content address, isolate by tenant/source/trust, expose a stable agent-facing contract, and run a seed regression suite.
 **Depends on**: Nothing
 **Requirements**: REQ-001, REQ-002, REQ-003, REQ-004, REQ-011
 **Success Criteria** (what must be TRUE):
+
   1. Same evidence ingested twice creates one row keyed by CID.
   2. Evidence can be byte-recalled by CID until explicit erasure.
   3. Branch discard removes candidate memories without touching main.
   4. CLI and MCP facade expose capture, search, deep_search, explain, correct, forget, export.
   5. Seed suite runs in CI-style local command.
+
 **Plans**: 4 plans
 
 Plans:
+
 - [x] 00-01: Initialize Python package, local engine contract, models, and identifiers.
 - [x] 00-02: Implement evidence ledger, branch, merge, discard, audit, and persistence.
 - [x] 00-03: Implement MCP-compatible facade and CLI skeleton.
 - [x] 00-04: Add regression tests for dedup, byte recall, branch rollback, and seed suite.
 
 ### Phase 1: Lossless Memory and Hybrid Retrieval
+
 **Goal**: Add bitemporal assertions, supersession, provenance, hybrid retrieval, explainability, correction, export, and transitive forget behavior.
 **Depends on**: Phase 0
 **Requirements**: REQ-005, REQ-006, REQ-007, REQ-008, REQ-009
 **Success Criteria** (what must be TRUE):
+
   1. Newer contradictory assertions supersede older beliefs without destructive overwrite.
   2. As-of queries return the belief valid at the requested time.
   3. Retrieval fuses lexical, deterministic dense, and graph channels with provenance.
   4. Trust filters block low-trust poisoned memories.
   5. Forget erases evidence content and retracts or trims dependent assertions.
+
 **Plans**: 5 plans
 
 Plans:
+
 - [x] 01-01: Implement assertion model, supersession, contested basics, and as-of queries.
 - [x] 01-02: Implement lexical, dense-hash, graph, RRF, MMR, U-curve, and budgeted retrieval.
 - [x] 01-03: Implement explain output with channel attribution and invariant rails.
@@ -60,18 +69,22 @@ Plans:
 - [x] 01-05: Add tests for retrieval, trust filters, abstention, supersession, and erasure.
 
 ### Phase 2: Belief Core, Graph, and Confidence
+
 **Goal**: Replace baseline supersession with full TMS/AGM semantics, justification DAG cascade invalidation, temporal graph adapters, calibrated confidence, conformal abstention, and multi-hypothesis belief packets.
 **Depends on**: Phase 1
 **Requirements**: REQ-013, REQ-014, REQ-009
 **Success Criteria** (what must be TRUE):
+
   1. Belief operations classify ADD, UPDATE, SUPERSEDE, and NOOP with justifications.
   2. Cascade invalidation recomputes dependent beliefs through the justification DAG.
   3. Contested beliefs surface alternatives with probabilities instead of a forced answer.
   4. Temporal graph retrieval supports cached fast path and live deep path behind the engine contract.
   5. Calibration thresholds are learned from eval cases and drive abstention decisions.
+
 **Plans**: 5 plans
 
 Plans:
+
 - [x] 02-01: Add deterministic local security, lifecycle, gate, graph, and confidence scaffolding.
 - [x] 02-02: Implement full justification DAG storage and cascade invalidation.
 - [x] 02-03: Implement calibrated confidence datasets and conformal threshold updates.
@@ -79,18 +92,22 @@ Plans:
 - [x] 02-05: Add contradiction-conformance and multi-hypothesis test suite.
 
 ### Phase 3: Personalization and Consolidation
+
 **Goal**: Implement the dual user model, warm-loop consolidation, fidelity-tiered forgetting, spaced rehearsal, and long-horizon anti-degradation guard.
 **Depends on**: Phase 2
 **Requirements**: REQ-012, REQ-015, REQ-016
 **Success Criteria** (what must be TRUE):
+
   1. Six typed user-model categories include scope, confidence, validity, exceptions, and override path.
   2. Explicit instructions outrank inferred preferences and latent profile signals.
   3. Consolidation emits candidates through a write-authorized consolidator role.
   4. Fidelity demotion preserves pointers and triggers abstention on sole gist support.
   5. Long-horizon no-degradation metric prevents consolidated memory from dropping below baseline.
+
 **Plans**: 5 plans
 
 Plans:
+
 - [x] 03-01: Add explicit preference precedence and fidelity lifecycle primitives.
 - [x] 03-02: Add deterministic consolidation worker through promotion gate.
 - [x] 03-03: Implement six-category model and scope-matching context assembly.
@@ -98,18 +115,22 @@ Plans:
 - [x] 03-05: Implement spaced rehearsal and anti-degradation metrics.
 
 ### Phase 4: Procedural and Corrective Learning
+
 **Goal**: Capture trajectories, attribute failures, induce lessons and procedures, validate candidates with protected regression and counterfactual replay, and promote or roll back branches safely.
 **Depends on**: Phase 3
 **Requirements**: REQ-017, REQ-010, REQ-011
 **Success Criteria** (what must be TRUE):
+
   1. Trajectories record task, steps, outcome, reward, and memory version.
   2. Failure attribution creates candidate lessons without direct promotion.
   3. Promotion gate scopes regression by relevance and blocks protected-case regressions.
   4. Counterfactual replay runs on canary branches before activation.
   5. Capability mediation prevents untrusted data from reaching preference, policy, or destructive sinks.
+
 **Plans**: 5 plans
 
 Plans:
+
 - [x] 04-01: Add promotion gate, protected cases, rollback, and capability checks.
 - [x] 04-02: Implement trajectory store and failure-attribution checklist.
 - [x] 04-03: Implement lesson and procedure induction.
@@ -117,18 +138,22 @@ Plans:
 - [x] 04-05: Add full protected T-SEC security playbook tier.
 
 ### Phase 5: Profile-Guided Self-Optimization
+
 **Goal**: Learn safe policy variants for routing, activation, thresholds, cadence, and fidelity demotion in shadow mode, promote only through gates, and maintain a self-model with diversity and proxy-divergence tripwires.
 **Depends on**: Phase 4
 **Requirements**: REQ-018, REQ-011, NFR-005
 **Success Criteria** (what must be TRUE):
+
   1. Policy variants are constrained to immutable rails.
   2. Shadow-mode outcomes are logged before any active promotion.
   3. Candidate policy improves measured outcomes without protected regressions.
   4. Self-model records effectiveness by metric and policy version.
   5. Diversity and proxy-vs-true divergence tripwires auto-rollback bad variants.
+
 **Plans**: 5 plans
 
 Plans:
+
 - [x] 05-01: Add shadow policy variant evaluator and invariant-rail checks.
 - [x] 05-02: Implement self-model persistence and outcome windows.
 - [x] 05-03: Implement bandit-style policy proposal.
@@ -136,19 +161,23 @@ Plans:
 - [x] 05-05: Add canary policy promotion and rollback tests.
 
 ### Phase 6: Exact Blueprint Runtime Parity
+
 **Goal**: Convert the verified local scaffold into exact 1:1 blueprint parity across runtime protocols, production storage/retrieval, security, deployment, multimodal ingestion, prefetch, and parametric-tier boundaries.
 **Depends on**: Phase 5
 **Requirements**: FR-3, FR-7, FR-9, FR-12, FR-18, FR-19, FR-20, FR-21, all production NFRs
 **Success Criteria** (what must be TRUE):
+
   1. The same contract suite passes against LocalMemoryEngine and PostgresEngine in Docker.
   2. MCP exposes the full blueprint tool surface with auth/capability enforcement and typed schemas.
   3. Postgres retrieval uses real vector, lexical/BM25, graph, rerank, provenance, and budget paths instead of local fallbacks.
   4. Ingestion verifies signed provenance, externalizes multimodal payloads, and indexes derived text safely.
   5. Queue-backed workers run consolidation, embedding, calibration, eval, and lifecycle demotion off the hot path.
   6. Production privacy/security rails cover tenant isolation, erasure recompute, C2PA trust, poisoning protection, and auditability.
+
 **Plans**: 9 plans
 
 Plans:
+
 - [x] 06-01-PLAN.md — Lane C: 10 per-row operator runbooks + index (.planning/runbooks/).
 - [x] 06-02-PLAN.md — Lane D: env-var catalog + Vault/Keycloak/KMS wiring (.planning/ENV-AND-SECRETS.md, no secrets).
 - [x] 06-03-PLAN.md — Lane F: rollback / canary-abort / parametric-trainer rollback drill (.planning/ROLLBACK.md).
@@ -160,18 +189,22 @@ Plans:
 - [x] 06-09-PLAN.md — Non-autonomous operator gate handoff: 10 per-row production-evidence checkpoints prepared; rows remain Partial until operator-captured release-audit evidence passes.
 
 ### Phase 7: Unified Cognitive Substrate
+
 **Goal**: Turn the consciousness layer from a default-off shadow lane into a single, always-on, deeply-integrated cognitive substrate with zero compromise to memory reliability — replacing the `shadow_only`/`enabled` toggles with one continuous, derived **Standing** signal `(groundedness ⟂ salience)`, an always-on tiered heartbeat, and autonomy that grows only as corroboration earns it, all above the unbreakable §31 + immutable-ledger floor. Implements `docs/superpowers/specs/2026-06-27-unified-cognitive-substrate-design.md` (the ADR-001 Option E destination; continues the G1→G4 program).
 **Depends on**: Phase 5 (cognitive-architecture seeds: G0 harness, reality-monitor, proto-self, shadow workspace). Post-v1.0 — does not block, and is not blocked by, the Phase 6 production-evidence sign-off.
 **Requirements**: FR-5, FR-6, FR-7, FR-8, FR-11, FR-17, OQ4, OQ5, OQ6; design spec §3–§5, §9, §13.
 **Success Criteria** (what must be TRUE):
+
   1. `Standing` is the single derived decision signal and P1 is byte-stable (zero divergence vs the boolean path).
   2. Standing is `(groundedness ⟂ salience)`; answer-authority depends on groundedness only; only independent external evidence raises groundedness; a permanent evidence-dominance gap holds (self < external, always).
   3. The cognitive loop is always-on via a tiered heartbeat with hard anti-rumination + proto-self; self-generation budget, answer-grounding floor, broadcast-as-data, and a fail-closed circuit-breaker hold; rumination_rate ~ 0 and heartbeat compute bounded.
   4. Autonomy grows only as external corroboration earns it; an adversarial echo-chamber/sleeper corpus cannot raise a credential (Goodhart meta-rail).
   5. Retired legacy service/shadow controls remain absent; explicit advisory promotion stays separately gated; every reliability guardrail (ECE, confabulation, poison-block, recall/nDCG, P95, 7 rails, 14 indicators) stays green; honesty charter intact (functional only; welfare flag stays).
+
 **Plans**: 5 plans
 
 Plans:
+
 - [x] 07-01-PLAN.md — P1: Standing as a derived, byte-stable field (mirror today; differential parallel-run zero-divergence gate).
 - [x] 07-02-PLAN.md — P2: Standing continuous + 2-tuple (groundedness ⟂ salience); independent corroboration; evidence-dominance gap; conformal Standing-calibration.
 - [x] 07-03-PLAN.md — P3: tiered always-on heartbeat; hard anti-rumination + proto-self; self-gen budget rail; answer-grounding floor; broadcast-as-data; circuit-breaker.
@@ -181,16 +214,20 @@ Plans:
 Checkpoint: Phase 7 plans 01-05 are implemented and gate-recorded. P1 proves Standing byte-stable parity, P2 proves continuous Standing calibration with independent-corroboration/evidence-dominance rails, P3 proves `g5-always-on-heartbeat` with `always_on_heartbeat_contract=1.0`, `always_on_rumination_rate=0.0`, bounded/reported heartbeat compute, self-generation budget, answer-grounding floor, broadcast-as-data, and fail-closed circuit-breaker contracts all holding, P4 proves `g5-earned-autonomy` with `earned_autonomy_external_expansion=0.24`, `credential_external_only=1.0`, `credential_holdout_validated=1.0`, `credential_provenance_domain_contract=1.0`, `credential_bounded_decay_contract=1.0`, `credential_evidence_dominance_gap=0.05`, and `echo_chamber_uplift=0.0`, and P5 proves `standing_observability_trace_contract=1.0`, `standing_erasure_cascade_contract=1.0`, `belief_standing_cascade_contract=1.0`, `workspace_service_no_enable_toggle_contract=1.0`, and `operational_toggle_retirement_contract=1.0` for the retired legacy controls. Explicit advisory promotion remains separately gated. The fail-closed circuit breaker remains a floor fuse, not an on/off toggle. Remaining strict-parity completion is Tier-B operator-captured production evidence, not additional local Phase 7 toggle code.
 
 ### Phase 8: Self-Hosted-First Production Architecture
+
 **Goal**: Make the self-hosted stack the preferred production profile for B1-B10 while preserving the strict Tier-B contract and keeping cloud/GPU as an optional scale extension.
 **Depends on**: Phase 6 production-evidence machinery. Does not supersede `.planning/ACTIVE-GOAL-OPERATING-CONTRACT.md`.
 **Requirements**: Phase 8 task groups 8.1-8.6; Tier-B rows B1-B10 for self-hosted evidence; §31 rails and §16 SLOs unchanged.
 **Success Criteria** (what must be TRUE):
+
   1. `self-hosted` and `cloud` profiles differ by values only and both keep `forbid_local:true`.
   2. The production scaffold boots with sealed KMS, real IdP, Postgres retrieval, object storage, observability, and a single ingress before any evidence row flips.
   3. The 16 Phase 8 security must-dos are implemented or explicitly blocking capture.
   4. B1-B10 move from Partial to Done only from retained, signed, real-infra evidence bundles through `infra/PRODUCTION-EVIDENCE.md`.
   5. B9 is Done only because retained CPU-parametric trainer evidence passed the unchanged custody/release-audit path; cloud/GPU remains optional scale.
+
 **Plans**:
+
 - [x] 08-01-PLAN.md — Self-hosted-first production architecture, profiles, security hardening, live bring-up, and evidence capture.
 - [x] 08-SECURITY-FINDINGS.md — Adversarial security findings and must-do controls to complete before trustworthy capture.
 
@@ -430,3 +467,37 @@ Latest checkpoint: Production release-audit now has an explicit source-side MCP 
 Latest checkpoint: Production release-audit now has an explicit source-side privacy/object-store evidence gate for the data-protection rows. `privacy-ops-check` retained output must prove non-local KMS/key custody, key lifecycle and shred checks, strict residency allow/deny cases, tombstone plus legal hard-delete erasure, operator delete corroboration, case-count coverage, and raw key/object/subject/KMS redaction. Focused privacy/release-audit verification passes locally. This does not create object-store/KMS/operator privacy artifacts; real production privacy evidence remains required.
 
 Latest checkpoint: Production release-audit now has an explicit source-side retrieval evidence gate for the Phase 8.2 retrieval row. `retrieval-ops-check` retained output must prove non-local Postgres lexical/graph backends, provider forbid-local posture, graph/lexical/reranker/vector adapter probes, production calibrated retrieval cases, adapter fingerprints, latency bounds, and raw query/embedding/document/credential redaction. Focused retrieval/release-audit verification passes locally. This does not create operator retrieval artifacts; real production retrieval evidence remains required.
+
+### Phase 9: Performance and refactoring continuation
+
+**Goal:** Continue the post-attestation performance/refactoring program from the
+blueprint with source-owned, parity-safe slices: default safe performance lanes
+only when behavior is byte-identical, keep operator overrides authoritative, and
+keep docs, CBM, gbrain, tests, and CI synchronized after every slice.
+**Requirements**: Performance blueprint §7.1, §7.5, §11.8; capability tiering
+contract; CONFIG-DRIFT-CHECKS env registry; GSD/CBM/gbrain hygiene.
+**Depends on:** Phase 8
+**Success Criteria** (what must be TRUE):
+
+  1. Performance defaults only flip through existing capability/env contracts and
+     preserve explicit operator overrides.
+  2. Retrieval fusion order and output remain byte-identical across sequential
+     and parallel channel execution on Local and SQLite engines.
+  3. Focused tests, lint/hygiene checks, CBM refresh, gbrain sync, and CI stay
+     green before changes are considered shipped.
+  4. Planning docs and codebase maps describe the current default policy without
+     stale "default off" claims.
+
+**Plans:** 1 plan
+
+Plans:
+
+- [x] 09-01-PLAN.md — Retrieval channel parallelism defaults from capability tier.
+
+Checkpoint: Phase 9 Plan 01 is implemented and locally verified. Retrieval
+channel parallelism now defaults from capability tier when
+`MNEMOSYNE_PARALLEL_CHANNELS` is absent (`floor` off, `standard` and above on),
+explicit operator env values still win, and SQLite scan-oracle memo hydration is
+coalesced under the engine lock for the new parallel default. Focused
+retrieval/capability checks, ruff, `git diff --check`, GSD consistency, and the
+full local pytest suite pass.

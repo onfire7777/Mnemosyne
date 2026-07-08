@@ -182,6 +182,7 @@ def recommended_env(tier: str, facts: dict[str, Any] | None = None) -> dict[str,
         raise ValueError(f"unknown capability tier {tier!r}; valid: {TIERS}")
     if facts is None:
         facts = probe()
+    wants_parallel = tier != "floor"
     wants_accel = tier in ("accelerated", "frontier")
     if wants_accel and facts.get("torch"):
         backend = "torch"
@@ -200,7 +201,7 @@ def recommended_env(tier: str, facts: dict[str, Any] | None = None) -> dict[str,
         "MNEMOSYNE_PARAMETRIC_BACKEND": backend,
         "MNEMOSYNE_PARAMETRIC_DEVICE": device,
         "MNEMOSYNE_EMBED_BATCH_SIZE": batch,
-        "MNEMOSYNE_PARALLEL_CHANNELS": "1" if wants_accel else "0",
+        "MNEMOSYNE_PARALLEL_CHANNELS": "1" if wants_parallel else "0",
         "OLLAMA_MODEL": "qwen3:4b" if wants_accel else "qwen3:0.6b",
     }
 

@@ -1,5 +1,11 @@
 # Project: Mnemosyne Memory
 
+## What This Is
+
+Mnemosyne is a blueprint-controlled memory compiler for AI agents. It stores
+lossless evidence, compiles safe typed projections, supports branchable
+updates, and exposes CLI/MCP/runtime surfaces for local and production use.
+
 ## Core Value
 
 Build a memory compiler for AI agents that keeps an immutable, content-addressed evidence ledger and compiles it into safe, explainable, branchable, typed memory projections without silent corruption.
@@ -11,6 +17,14 @@ Build a memory compiler for AI agents that keeps an immutable, content-addressed
 | `docs/blueprint/Mnemosyne-v2-Build-Blueprint.md` | Research report, PRD, architecture, implementation blueprint, DDL, build plan | Controlling |
 | `docs/blueprint/README.md` | Folder guide and v2-over-v1 precedence note | Supporting |
 | `docs/blueprint/earlier-versions/Mnemosyne-Recursive-Memory-System-Design.md` | Superseded lineage design | Reference only |
+
+## Requirements
+
+The controlling requirements are the v2 blueprint, the active roadmap phases,
+and the strict production evidence gates retained under `.planning/`. Source
+changes must preserve tenant isolation, evidence provenance, bitemporal
+behavior, trust/sensitivity controls, retrieved-content-as-data semantics,
+operator overrides, and parity tests across supported backends.
 
 ## Product Thesis
 

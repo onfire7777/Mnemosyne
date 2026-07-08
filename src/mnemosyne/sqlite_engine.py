@@ -1353,24 +1353,23 @@ class SqliteEngine:
             oracle, raw_blobs = self._hydrate_scan_oracle(filt)
             return (oracle, raw_blobs) if with_blobs else oracle
         tenant_id, branch, max_trust, max_sensitivity = self._candidate_scope_bounds(filt)
-        key: tuple[Any, ...] | None = None
-        cached: tuple[LocalMemoryEngine, dict[str, bytes | None]] | None = None
+        cached: tuple[LocalMemoryEngine, dict[str, bytes | None]]
         if tenant_id:
-            conn = self._connect(tenant_id)
             with self._lock:
+                conn = self._connect(tenant_id)
                 data_version = conn.execute("PRAGMA data_version").fetchone()[0]
                 key = (tenant_id, branch, max_trust, max_sensitivity, conn.total_changes, data_version)
                 cached = self._scan_oracle_memo.get(key)
-                if cached is not None:
-                    self._scan_oracle_memo.move_to_end(key)
-        if cached is None:
-            cached = self._hydrate_scan_oracle(filt)
-            if key is not None:
-                with self._lock:
+                if cached is None:
+                    cached = self._hydrate_scan_oracle(filt)
                     self._scan_oracle_memo[key] = cached
                     self._scan_oracle_memo.move_to_end(key)
                     while len(self._scan_oracle_memo) > _CANDIDATE_MEMO_SIZE:
                         self._scan_oracle_memo.popitem(last=False)
+                else:
+                    self._scan_oracle_memo.move_to_end(key)
+        else:
+            cached = self._hydrate_scan_oracle(filt)
         oracle, raw_blobs = cached
         return (oracle, raw_blobs) if with_blobs else oracle
 

@@ -57,12 +57,14 @@ from mnemosyne.retrieval import (
 )
 from mnemosyne.text import tokenize
 
-#: Default-OFF opt-in to overlap the dense/lexical/graph channel calls on a
-#: 3-worker thread pool (registered in CONFIG-DRIFT-CHECKS.md). Channel
-#: identity and the RRF input order stay exactly [dense, lexical, graph];
-#: flag-on results are byte-identical (tests/test_engine_perf_lanes.py).
-#: Default off because engine RLocks may serialize the work anyway.
+#: Capability-tier default to overlap the dense/lexical/graph channel calls on
+#: a 3-worker thread pool (registered in CONFIG-DRIFT-CHECKS.md). Operators can
+#: still force the knob on/off explicitly. Channel identity and the RRF input
+#: order stay exactly [dense, lexical, graph]; parallel results are
+#: byte-identical (tests/test_engine_perf_lanes.py).
 _PARALLEL_CHANNELS_ENV = "MNEMOSYNE_PARALLEL_CHANNELS"
+_PARALLEL_CHANNELS_TRUTHY = {"1", "true", "yes", "on"}
+_PARALLEL_CHANNELS_DEFAULT_CACHE: tuple[str | None, bool] | None = None
 
 #: Default-OFF LRU for whole retrieval results. Entries are written only after
 #: budget fitting, policy redaction, retrieved-text sanitization, and access
@@ -74,8 +76,32 @@ _RESULT_CACHE: OrderedDict[tuple[Any, ...], RetrievalResult] = OrderedDict()
 _RESULT_CACHE_LOCK = threading.Lock()
 
 
+def _parallel_channels_default_enabled() -> bool:
+    """Default the overlap lane from the resolved capability tier.
+
+    The capability probe may import optional acceleration libraries, so cache the
+    resolved posture per explicit tier override. Hardware facts are stable for a
+    process, while an operator-set ``MNEMOSYNE_PARALLEL_CHANNELS`` bypasses this
+    helper entirely.
+    """
+    global _PARALLEL_CHANNELS_DEFAULT_CACHE
+    override = os.environ.get("MNEMOSYNE_CAPABILITY_TIER")
+    if _PARALLEL_CHANNELS_DEFAULT_CACHE is not None and _PARALLEL_CHANNELS_DEFAULT_CACHE[0] == override:
+        return _PARALLEL_CHANNELS_DEFAULT_CACHE[1]
+
+    from mnemosyne import capability
+
+    tier, _ = capability.resolve_tier()
+    enabled = tier != "floor"
+    _PARALLEL_CHANNELS_DEFAULT_CACHE = (override, enabled)
+    return enabled
+
+
 def parallel_channels_enabled() -> bool:
-    return os.environ.get(_PARALLEL_CHANNELS_ENV, "").strip().lower() in {"1", "true", "yes", "on"}
+    raw = os.environ.get(_PARALLEL_CHANNELS_ENV)
+    if raw is not None:
+        return raw.strip().lower() in _PARALLEL_CHANNELS_TRUTHY
+    return _parallel_channels_default_enabled()
 
 
 def retrieval_result_cache_size() -> int:

@@ -126,6 +126,14 @@ def test_recommended_env_floor_is_conservative() -> None:
     assert rec["OLLAMA_MODEL"] == "qwen3:0.6b"
 
 
+def test_recommended_env_standard_enables_parallel_channels() -> None:
+    rec = capability.recommended_env("standard", facts=_facts(torch=False, numpy=True))
+    assert rec["MNEMOSYNE_PARAMETRIC_BACKEND"] == "numpy"
+    assert rec["MNEMOSYNE_PARAMETRIC_DEVICE"] == "cpu"
+    assert rec["MNEMOSYNE_PARALLEL_CHANNELS"] == "1"
+    assert rec["OLLAMA_MODEL"] == "qwen3:0.6b"
+
+
 def test_recommended_env_accelerated_prefers_cuda_over_mps() -> None:
     rec = capability.recommended_env("accelerated", facts=_facts(torch=True, cuda=True, mps=True))
     assert rec["MNEMOSYNE_PARAMETRIC_BACKEND"] == "torch"
