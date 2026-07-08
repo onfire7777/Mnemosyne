@@ -55,6 +55,7 @@ import copy
 import hashlib
 import json
 import re
+import secrets
 import sqlite3
 import threading
 import time
@@ -461,6 +462,7 @@ class SqliteEngine:
         self._lock = threading.RLock()
         self._connections: dict[str, sqlite3.Connection] = {}
         self._integrity_checked: set[str] = set()
+        self._retrieval_result_cache_nonce = secrets.token_hex(16)
         # Task 8: tenant-granular embedding-cache hit/miss telemetry (never
         # per-cid — a per-key counter would itself be a presence oracle), and
         # the per-tenant projection registries (cached-ppr / evidence-fts /
@@ -497,6 +499,7 @@ class SqliteEngine:
             data_version = int(row[0]) if row is not None else 0
             return (
                 "sqlite",
+                self._retrieval_result_cache_nonce,
                 str(self.root_dir),
                 tenant_id,
                 branch,
@@ -566,6 +569,8 @@ class SqliteEngine:
             for conn in self._connections.values():
                 conn.close()
             self._connections.clear()
+            self._scan_oracle_memo.clear()
+            self._retrieval_result_cache_nonce = secrets.token_hex(16)
 
     def _insert_evidence(self, ev: Evidence) -> None:
         """Store-core evidence row write (append_evidence layers CID computation,
