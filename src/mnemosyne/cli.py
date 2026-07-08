@@ -382,9 +382,11 @@ def load_retrieval_adapters(args: argparse.Namespace) -> RetrievalAdapters:
         embedding = HttpEmbeddingProvider(
             url=args.embedding_url,
             model=args.embedding_model,
+            model_revision=args.embedding_model_revision,
             api_key=args.embedding_api_key,
             dims=dims,
             timeout_seconds=timeout,
+            cache_size=int(args.embedding_cache_size),
         )
     else:
         embedding = HashingEmbeddingProvider(dims=dims)
@@ -17586,8 +17588,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--embedding-provider", choices=["local", "http"], default=os.environ.get("MNEMOSYNE_EMBEDDING_PROVIDER", "local"))
     parser.add_argument("--embedding-url", default=os.environ.get("MNEMOSYNE_EMBEDDING_URL"))
     parser.add_argument("--embedding-model", default=os.environ.get("MNEMOSYNE_EMBEDDING_MODEL"))
+    parser.add_argument("--embedding-model-revision", default=os.environ.get("MNEMOSYNE_EMBEDDING_MODEL_REVISION"))
     parser.add_argument("--embedding-api-key", default=os.environ.get("MNEMOSYNE_EMBEDDING_API_KEY"))
     parser.add_argument("--embedding-dims", type=int, default=int(os.environ.get("MNEMOSYNE_EMBEDDING_DIMS", "1024")))
+    parser.add_argument("--embedding-cache-size", type=int, default=int(os.environ.get("MNEMOSYNE_EMBEDDING_CACHE_SIZE", "8192")))
     parser.add_argument("--reranker-provider", choices=["local", "http"], default=os.environ.get("MNEMOSYNE_RERANKER_PROVIDER", "local"))
     parser.add_argument("--reranker-url", default=os.environ.get("MNEMOSYNE_RERANKER_URL"))
     parser.add_argument("--reranker-model", default=os.environ.get("MNEMOSYNE_RERANKER_MODEL"))

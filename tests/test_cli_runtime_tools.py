@@ -43,6 +43,7 @@ from mnemosyne.retrieval import (
     CommandGraphRetriever,
     CommandLexicalRetriever,
     HashingEmbeddingProvider,
+    HttpEmbeddingProvider,
     LocalSimilarityReranker,
     RetrievalAdapters,
 )
@@ -1159,6 +1160,10 @@ def test_cli_exposes_retrieval_provider_flags() -> None:
             "http://127.0.0.1:9999/embed",
             "--embedding-model",
             "qwen3-embedding",
+            "--embedding-model-revision",
+            "sha256:qwen3",
+            "--embedding-cache-size",
+            "31",
             "--reranker-provider",
             "http",
             "--reranker-url",
@@ -1171,6 +1176,8 @@ def test_cli_exposes_retrieval_provider_flags() -> None:
 
     assert args.embedding_provider == "http"
     assert args.embedding_model == "qwen3-embedding"
+    assert args.embedding_model_revision == "sha256:qwen3"
+    assert args.embedding_cache_size == 31
     assert args.reranker_provider == "http"
     assert args.reranker_model == "qwen3-reranker"
 
@@ -1195,6 +1202,34 @@ def test_load_engine_threads_retrieval_adapters_into_local_backend(tmp_path: Pat
     assert engine.adapters.embedding.dims == 16
     assert isinstance(engine.adapters.reranker, LocalSimilarityReranker)
     assert engine.adapters.reranker.embedding_provider is engine.adapters.embedding
+
+
+def test_load_engine_threads_http_embedding_cache_identity(tmp_path: Path) -> None:
+    args = build_parser().parse_args(
+        [
+            "--backend",
+            "local",
+            "--store",
+            str(tmp_path / "memory.json"),
+            "--embedding-provider",
+            "http",
+            "--embedding-url",
+            "http://127.0.0.1:9999/embed",
+            "--embedding-model",
+            "embed-model",
+            "--embedding-model-revision",
+            "sha256:model",
+            "--embedding-cache-size",
+            "23",
+            "tools",
+        ]
+    )
+
+    engine = load_engine(args)
+
+    assert isinstance(engine.adapters.embedding, HttpEmbeddingProvider)
+    assert engine.adapters.embedding.model_revision == "sha256:model"
+    assert engine.adapters.embedding.cache_size == 23
 
 
 @pytest.mark.parametrize(
