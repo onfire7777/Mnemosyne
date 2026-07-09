@@ -150,10 +150,13 @@
 ## Test Coverage Gaps
 
 **Non-gating CI lanes:**
-- What's not tested as a merge blocker: Native wheel builds and nightly DST/chaos soak failures.
+- What's not tested as a merge blocker: the broader native wheel release matrix
+  beyond current macOS arm64/Linux x86_64 lanes, and nightly DST/chaos soak
+  failures.
 - Files: `.github/workflows/ci.yml`, `tests/chaos`, `rust/mnemosyne-native`
 - Risk: Packaging or chaos durability regressions can exist while required CI is green.
-- Priority: Medium until native wheels or chaos soak become release gates.
+- Priority: Medium for the unreleased wheel matrix; high only when advertising
+  universal wheel support or promoting chaos soak to a release gate.
 
 **Live infrastructure tests self-skip without external services:**
 - What's not tested: Live Postgres parity/performance and external production provider behavior when required DSNs/endpoints are absent.

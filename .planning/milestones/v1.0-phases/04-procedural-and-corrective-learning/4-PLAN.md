@@ -1,3 +1,10 @@
+---
+phase: v1.0-04-procedural-and-corrective-learning
+plan: 4
+status: complete
+wave: 1
+---
+
 # Phase 4: Procedural and Corrective Learning - Plan
 
 ## Tasks

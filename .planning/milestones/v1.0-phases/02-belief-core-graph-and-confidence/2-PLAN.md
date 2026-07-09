@@ -1,3 +1,10 @@
+---
+phase: v1.0-02-belief-core-graph-and-confidence
+plan: 2
+status: complete
+wave: 1
+---
+
 # Phase 2: Belief Core, Graph, and Confidence - Plan
 
 ## Tasks

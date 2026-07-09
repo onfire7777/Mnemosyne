@@ -339,11 +339,11 @@ Each subsection is an independently executable work package.
 
 ### 7.8 Caching strategy — multi-tier, byte-identical
 
-**Current state (corrected in v1.2).** Six cache surfaces already exist: the hashing-embedding LRU (`text.py:96`, 8192 entries, backend-agnostic by design), the process-local `HttpEmbeddingProvider` content-hash LRU (`retrieval.py:1194-1223`), the SqliteEngine subject-scoped A1 `embedding_cache` table (`sqlite_schema.py:254-266`, privacy-aware admit/purge logic in `sqlite_engine.py`), `GraphSignalCache` (per tenant/branch graph hits) plus the persisted `graph_ppr_cache` table, the default-off retrieval result LRU (`pipeline.py:180-239`), and Postgres positive calibration lookup cache (`postgres_engine.py:2872-2902`). **Missing:** durable/privacy-scoped/TTL provider caching for Local/Postgres HTTP embeddings, negative/abstention caching, and broader cache-safety/honeytoken coverage.
+**Current state (corrected in v1.3).** Six cache surfaces already exist: the hashing-embedding LRU (`text.py:96`, 8192 entries, backend-agnostic by design), the `HttpEmbeddingProvider` content-hash LRU plus optional default-off SQLite durable cache with TTL/cache-scope/redaction gates (`retrieval.py:1194-1301`), the SqliteEngine subject-scoped A1 `embedding_cache` table (`sqlite_schema.py:254-266`, privacy-aware admit/purge logic in `sqlite_engine.py`), `GraphSignalCache` (per tenant/branch graph hits) plus the persisted `graph_ppr_cache` table, the default-off retrieval result LRU (`pipeline.py:180-239`), and Postgres positive calibration lookup cache (`postgres_engine.py:2872-2902`). **Missing:** negative/abstention caching, retained production cache-hit/latency evidence, and broader cache-safety/honeytoken coverage.
 
 **Work items (all PARITY-SAFE — a hit returns identical bytes to a miss):**
 
-1. **Durable real-model embedding cache** extending the landed process-local HTTP LRU with subject-scoped admission, TTL/eviction telemetry, and purge behavior matching the A1 SQLite cache. The existing exact key already includes provider URL, model, model revision, output dims, API-key hash, and text SHA-256; the durable layer must preserve that identity and seed honeytokens into the cache namespace (§4.5).
+1. **Durable real-model embedding cache hardening** for the landed optional SQLite provider-cache path: add operator-visible hit/miss/eviction telemetry, production hit-rate evidence, and cache-safety probes that prove the existing full request identity (cache scope, provider URL, model, model revision, output dims, API-key hash, and text SHA-256) cannot cross tenant/privacy boundaries.
 2. **Result cache hardening** for the landed default-off full-context LRU: keep the **post-sanitization, post-redaction** `RetrievalResult` contract, expand cross-engine cache-safety tests across sensitivity/as-of/branch matrices, and add operator-visible hit/miss metrics before enabling outside controlled lanes.
 3. **Calibration lookup cache hardening** for the landed Postgres positive cache: keep misses uncached, prove invalidation/update semantics across live Postgres, and expose metrics so calibration drift can be diagnosed without re-querying on every answer.
 4. **Negative/abstention cache** — cache calibrated abstentions too, so "I don't know" is as fast as an answer and doesn't re-run the funnel.
@@ -352,7 +352,7 @@ Each subsection is an independently executable work package.
 
 ### 7.9 Production runtime & database server tuning — execute the committed flips (new in v1.1)
 
-**Current state.** §3.5 in full: host-Metal LLM topology and VM right-sizing are committed, guarded, and **dormant**; the evidence-capture precondition cleared 2026-07-07. Postgres runs with two memory knobs and no server tuning file (B7).
+**Current state.** §3.5 in full: host-Metal LLM topology and VM right-sizing are committed, guarded, and **dormant**; the evidence-capture precondition cleared 2026-07-07. The conservative Postgres tuning profile is versioned in `infra/postgres/postgresql-perf.conf`, but it is a candidate only until retained before/after operator evidence exists (B7).
 
 **Work items (all PARITY-SAFE — configuration and topology only; zero engine-code change):**
 
