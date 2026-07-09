@@ -42,7 +42,7 @@ Status: Tier-B production evidence attested; exact 1:1 blueprint parity rows B1-
 Current status (2026-07-07): Mandatory Tier A source wirings are closed on `main`; Phase 7 is gate-proven; Phase 8 self-hosted production evidence is complete. The former strict-parity blocker, Tier-B production operator evidence against deployed infrastructure, is closed by `capture-bc10`.
 
 Latest checkpoint (2026-07-09): Phase 9 is open as the post-attestation
-performance/refactoring continuation and Plans 09-01 through 09-10 are complete.
+performance/refactoring continuation and Plans 09-01 through 09-11 are complete.
 Retrieval channel parallelism now defaults from capability tier when
 `MNEMOSYNE_PARALLEL_CHANNELS` is absent (`floor` off, `standard` and above on),
 while explicit operator env values still win. SQLite scan-oracle memo hydration
@@ -64,7 +64,10 @@ transaction-local statements. The provider contract now has a shared fixture
 service, Python HTTP adapters, and Rust `mneme-providers` sidecar through a
 dedicated `provider-conformance` CI job; the sidecar accepts list-input `/embed`
 for wire compatibility. This does not flip provider defaults or supply TEI /
-sidecar bake-off evidence. Postgres `embedding_partition='none'` is now
+sidecar bake-off evidence. The provider bake-off protocol now has an executable
+`eval/provider_bakeoff/run.py` evidence harness that packages retained eval
+reports plus provider-check output, flags candidate regressions, and keeps
+local smoke fixtures non-promotional. Postgres `embedding_partition='none'` is now
 source-modeled as a no-vector partition with btree lifecycle/audit coverage,
 the embeddable-null dense fallback has a partial index and excludes `none`
 before Python embedding, and `infra/postgres/postgresql-perf.conf` versions the

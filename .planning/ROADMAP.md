@@ -490,7 +490,7 @@ contract; CONFIG-DRIFT-CHECKS env registry; GSD/CBM/gbrain hygiene.
   5. Native acceleration changes release the GIL only around Rust-owned compute
      loops and preserve scalar arithmetic/order exactly.
 
-**Plans:** 10 plans
+**Plans:** 11 plans
 
 Plans:
 
@@ -504,8 +504,9 @@ Plans:
 - [x] 09-08-PLAN.md — Postgres vector backfill readiness.
 - [x] 09-09-PLAN.md — Guarded Postgres vector backfill apply.
 - [x] 09-10-PLAN.md — Durable HTTP embedding cache.
+- [x] 09-11-PLAN.md — Provider bake-off evidence harness.
 
-Checkpoint: Phase 9 Plans 01-10 are implemented and locally verified. Retrieval
+Checkpoint: Phase 9 Plans 01-11 are implemented and locally verified. Retrieval
 channel parallelism now defaults from capability tier when
 `MNEMOSYNE_PARALLEL_CHANNELS` is absent (`floor` off, `standard` and above on),
 explicit operator env values still win, and SQLite scan-oracle memo hydration is
@@ -519,7 +520,10 @@ explicit and transaction-local. A shared provider fixture now gates the Python
 embedding service, Python HTTP adapters, and Rust `mneme-providers` sidecar in
 the `provider-conformance` CI job, with Rust sidecar list-input `/embed`
 compatibility added only as a contract fix; provider bake-off/default selection
-remains pending. Postgres `embedding_partition='none'` now has explicit btree
+remains pending. The provider bake-off runbook now has an executable harness
+that packages retained eval reports plus `provider-check` evidence into a
+promotion-safe JSON envelope and flags candidate regressions, while local smoke
+fixtures still cannot flip provider defaults. Postgres `embedding_partition='none'` now has explicit btree
 coverage as a no-vector partition, embeddable null fallback rows have a partial
 btree index and SQL exclusion of `none`, and
 `infra/postgres/postgresql-perf.conf` versions the conservative tuning candidate

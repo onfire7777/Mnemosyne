@@ -87,6 +87,10 @@
   - Commit retained before/after benchmark evidence and rollback proof.
 
 - [ ] Task 9: Complete provider bake-off and production cache evidence.
+  - Source slice landed: `eval/provider_bakeoff/run.py` packages retained
+    baseline/candidate eval reports plus provider-check output into a
+    promotion-safe JSON envelope, detects candidate regressions, and keeps
+    local smoke fixtures non-promotional.
   - Retain provider cache hit-rate/latency evidence from real workloads before
     claiming a production cache win.
   - Run TEI/Rust sidecar/Python provider bake-off with the shared conformance

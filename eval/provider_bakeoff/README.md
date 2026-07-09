@@ -77,6 +77,37 @@ Evidence paths:
 - `/tmp/mnemosyne-provider-bakeoff/deterministic-sidecar/slo_report_latest.json`
 - The matching `.md` files in the same directories.
 
+## Evidence Harness
+
+After the arm reports exist, summarize them with the provider bake-off harness.
+It preserves raw reports and emits a promotion-safe JSON envelope:
+
+```bash
+uv run --locked python eval/provider_bakeoff/run.py \
+  --fixture eval/provider_bakeoff/sidecar-local-smoke.json \
+  --provider-check-report /tmp/mnemosyne-provider-bakeoff/provider-check.json \
+  --noise-notes /tmp/mnemosyne-provider-bakeoff/noise-notes.md \
+  --output /tmp/mnemosyne-provider-bakeoff/bakeoff-report.json \
+  --strict
+```
+
+If a provider manifest is available but a retained provider-check report is not,
+the harness can run the existing check itself:
+
+```bash
+uv run --locked python eval/provider_bakeoff/run.py \
+  --fixture eval/provider_bakeoff/sidecar-local-smoke.json \
+  --provider-manifest /secure/operator/provider-manifest.json \
+  --noise-notes /tmp/mnemosyne-provider-bakeoff/noise-notes.md \
+  --output /tmp/mnemosyne-provider-bakeoff/bakeoff-report.json \
+  --strict
+```
+
+Use `--execute-arms` only when the sidecar/TEI/Python provider processes are
+already started or managed by the calling runbook. The local smoke fixture
+always reports `promotion.allowed=false`; it can prove evidence packaging and
+regression shape, not a production default flip.
+
 ## Review Checklist
 
 For every candidate comparison:

@@ -44,8 +44,8 @@ Mnemosyne/
 
 **`eval/`:**
 - Purpose: Evaluation harnesses and benchmark inputs/outputs.
-- Contains: G0 suites, calibration runners, latency benches, replay fidelity checks, curated datasets, reports.
-- Key files: `eval/README.md`, `eval/harness/cli_driver.py`, `eval/harness/suites.py`, `eval/calibration/runner.py`, `eval/benches/run_benches.py`.
+- Contains: G0 suites, calibration runners, latency benches, replay fidelity checks, provider bake-off fixtures, curated datasets, reports.
+- Key files: `eval/README.md`, `eval/harness/cli_driver.py`, `eval/harness/suites.py`, `eval/provider_bakeoff/run.py`, `eval/calibration/runner.py`, `eval/benches/run_benches.py`.
 
 **`services/embedding/`:**
 - Purpose: Optional embedding/reranker provider service.
@@ -181,6 +181,7 @@ Mnemosyne/
 
 **New Eval or Benchmark:**
 - Harness code: `eval/harness/`.
+- Provider bake-off evidence wrapper: `eval/provider_bakeoff/run.py`.
 - Benchmark script: `eval/benches/`.
 - Dataset: `eval/datasets/`.
 - Tests: `eval/tests/` or `tests/benchmarks/`.
