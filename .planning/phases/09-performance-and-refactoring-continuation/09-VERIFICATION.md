@@ -8,9 +8,9 @@ scope: plan-09-12
 # Phase 09 Verification
 
 Latest verified slice: Phase 09 Plan 12. The source-owned native wheel smoke
-slice is locally verified: the native wheel CI job now installs the built wheel
-from `rust/mnemosyne-native/dist`, imports `mnemosyne_native`, and asserts the
-strict parity marker before artifact upload.
+slice is locally and CI verified: the native wheel CI job now installs the
+built wheel from `rust/mnemosyne-native/dist`, imports `mnemosyne_native`, and
+asserts the strict parity marker before artifact upload.
 
 Previous verified slice: Phase 09 Plan 11. The source-owned provider bake-off
 evidence harness is locally verified: retained baseline/candidate eval reports
@@ -128,6 +128,10 @@ claim provider bake-off evidence.
   passed.
 - `node /Users/admin/.codex/get-shit-done/bin/gsd-tools.cjs verify phase-completeness 09`
   passed.
+- GitHub CI run `28999614665` attempt 2 passed for
+  `29a50e8737844e98e955ac1a21fe908ccb3b7c94`, including the macOS arm64 and
+  Linux x86_64 `Native wheels` jobs with the `Install built wheel and smoke
+  import` step green.
 
 ## Review Notes
 
