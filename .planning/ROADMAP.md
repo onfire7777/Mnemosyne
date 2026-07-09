@@ -490,7 +490,7 @@ contract; CONFIG-DRIFT-CHECKS env registry; GSD/CBM/gbrain hygiene.
   5. Native acceleration changes release the GIL only around Rust-owned compute
      loops and preserve scalar arithmetic/order exactly.
 
-**Plans:** 11 plans
+**Plans:** 12 plans
 
 Plans:
 
@@ -505,8 +505,9 @@ Plans:
 - [x] 09-09-PLAN.md — Guarded Postgres vector backfill apply.
 - [x] 09-10-PLAN.md — Durable HTTP embedding cache.
 - [x] 09-11-PLAN.md — Provider bake-off evidence harness.
+- [x] 09-12-PLAN.md — Native wheel install/import smoke proof.
 
-Checkpoint: Phase 9 Plans 01-11 are implemented and locally verified. Retrieval
+Checkpoint: Phase 9 Plans 01-12 are implemented and locally verified. Retrieval
 channel parallelism now defaults from capability tier when
 `MNEMOSYNE_PARALLEL_CHANNELS` is absent (`floor` off, `standard` and above on),
 explicit operator env values still win, and SQLite scan-oracle memo hydration is
@@ -544,7 +545,10 @@ remain required before production backfill evidence is closed. The HTTP
 embedding cache now has an optional durable SQLite path with TTL and explicit
 cache-scope knobs, stores only hashed identity plus vectors, skips durable use
 for redaction-positive text, and surfaces cache status in `provider-check`
-without using cache hits for latency evidence. Focused
+without using cache hits for latency evidence.
+The native wheel CI job now also installs the wheel it built and imports
+`mnemosyne_native` to assert the strict parity marker before artifact upload.
+Focused
 retrieval/capability, provider-cache/provider-contract, Postgres perf-lane,
 cargo, native parity, ruff, `git diff --check`, GSD consistency, and local
 pytest suites pass for the shipped Phase 09 slices.

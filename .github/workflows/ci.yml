@@ -146,12 +146,27 @@ jobs:
     steps:
       # actions/checkout v7
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      # actions/setup-python v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: "3.12"
       # PyO3/maturin-action v1 (v1.51.0) — abi3-py312 comes from the crate's
       # pyo3 feature flags, so one wheel per platform covers CPython >=3.12.
       - uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b
         with:
           working-directory: rust/mnemosyne-native
           args: --release --out dist
+      - name: Install built wheel and smoke import
+        shell: bash
+        run: |
+          python -m pip install --no-deps --force-reinstall rust/mnemosyne-native/dist/*.whl
+          python - <<'PY'
+          import mnemosyne_native as native
+
+          assert native.__version__
+          assert native.parity_marker() == "strict-ieee-scalar-v1"
+          print(f"mnemosyne_native {native.__version__} {native.parity_marker()}")
+          PY
       # actions/upload-artifact v7.0.1
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
