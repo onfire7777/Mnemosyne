@@ -32,6 +32,7 @@ uv run --locked python -m pytest tests/benchmarks --benchmark-only
 - Completion/release rail tests live under `tests/completion/`.
 - Benchmark tests and baseline capture helpers live in `tests/benchmarks/`.
 - Evaluation harness tests live in `eval/tests/`, `eval/calibration/`, `eval/latency/`, and `eval/replay_fidelity/`.
+- Provider bake-off harness tests live in `eval/tests/test_provider_bakeoff.py`.
 - Service smoke tests live beside service code, such as `services/embedding/selftest.py`.
 
 **Naming:**
@@ -49,6 +50,7 @@ tests/
 
 eval/
 ├── tests/                                # eval harness tests
+├── provider_bakeoff/                     # provider comparison fixtures + evidence wrapper
 ├── calibration/                          # calibration tests and fixtures
 ├── latency/                              # latency benchmarks/tests
 └── replay_fidelity/                      # replay fidelity checks
@@ -146,6 +148,7 @@ uv run --locked python -m pytest
 - SQLite integration tests use real temporary DB files in `tests/test_sqlite_engine_core.py`, `tests/test_sqlite_ledger.py`, and related `tests/test_sqlite_*.py` suites.
 - Postgres live tests live in `tests/test_postgres_engine_live.py`, require `psycopg`, and skip when `MNEMOSYNE_POSTGRES_DSN` is unset.
 - CLI and runtime surface tests use subprocesses and JSON assertions in `tests/test_cli_runtime_tools.py`, `tests/test_runtime_surfaces.py`, and `tests/test_g0_harness.py`.
+- Provider bake-off evidence tests assert complete-evidence smoke reports remain non-promotional and candidate regressions fail the report in `eval/tests/test_provider_bakeoff.py`.
 
 **E2E Tests:**
 - No browser E2E framework is used.

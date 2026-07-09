@@ -2,12 +2,18 @@
 phase: 09-performance-and-refactoring-continuation
 status: passed
 verified: 2026-07-09
-scope: plan-09-10
+scope: plan-09-11
 ---
 
 # Phase 09 Verification
 
-Latest verified slice: Phase 09 Plan 10. The source-owned durable HTTP
+Latest verified slice: Phase 09 Plan 11. The source-owned provider bake-off
+evidence harness is locally verified: retained baseline/candidate eval reports
+and provider-check evidence can be summarized into a promotion-safe JSON
+envelope, local smoke fixtures remain non-promotional, and candidate regressions
+against baseline-passing verdicts fail the report.
+
+Previous verified slice: Phase 09 Plan 10. The source-owned durable HTTP
 embedding cache slice is locally verified: optional SQLite-backed cache entries
 survive provider instances, cache scope isolates durable hits, TTL expiry falls
 back to the provider, secret-like input is not durably persisted, CLI/env/config
@@ -49,6 +55,10 @@ claim provider bake-off evidence.
 
 ## Automated Checks
 
+- `uv run pytest eval/tests/test_provider_bakeoff.py -q`
+  passed.
+- `uv run ruff check eval/provider_bakeoff/run.py eval/tests/test_provider_bakeoff.py`
+  passed.
 - `uv run pytest tests/test_provider_batching.py::test_http_embedding_durable_cache_survives_provider_instances tests/test_provider_batching.py::test_http_embedding_durable_cache_is_scoped tests/test_provider_batching.py::test_http_embedding_durable_cache_honors_ttl tests/test_provider_batching.py::test_http_embedding_durable_cache_skips_secret_like_text tests/test_provider_batching.py::test_http_embedding_cache_report_does_not_create_durable_file tests/test_cli_runtime_tools.py::test_cli_exposes_retrieval_provider_flags tests/test_parity_retrieval.py::test_env_builder_threads_http_embedding_cache_knobs tests/test_parity_retrieval.py::test_registry_builds_http_and_command_providers -q`
   passed.
 - `uv run ruff check src/mnemosyne/retrieval.py src/mnemosyne/cli.py src/mnemosyne/providers/__init__.py tests/test_provider_batching.py tests/test_cli_runtime_tools.py tests/test_parity_retrieval.py`
@@ -120,6 +130,9 @@ claim provider bake-off evidence.
 - The durable provider cache is default-off unless a cache path is configured.
   Local tests prove byte-identical reuse and safety gates, not production
   hit-rate or latency wins.
+- The provider bake-off harness packages evidence and catches regressions; it
+  does not run the production bake-off, prove TEI/sidecar superiority, or select
+  defaults without retained measurements/noise evidence.
 - GSD health has only pre-existing, non-repairable governance warnings: numeric
   phase references inside historical text and intentional root-level planning
   artifacts. No repairable GSD health errors remain for this slice.

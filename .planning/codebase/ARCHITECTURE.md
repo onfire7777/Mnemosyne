@@ -140,7 +140,8 @@
 1. CLI/MCP load helpers choose deterministic local providers unless HTTP or command providers are explicitly configured (`src/mnemosyne/cli.py:366`, `src/mnemosyne/retrieval.py`).
 2. Python sidecar exposes `/health`, `/embed`, and `/rerank` with FastAPI when installed and stdlib HTTP otherwise (`services/embedding/app.py:383`, `services/embedding/app.py:460`).
 3. Rust sidecar exposes the same provider routes via Axum (`rust/mneme-providers/src/lib.rs:83`).
-4. Rust native extension exports strict byte-parity kernels for hashing, lexical, dense scan, MMR, and PPR (`rust/mnemosyne-native/src/lib.rs`).
+4. Provider bake-off evidence is packaged by `eval/provider_bakeoff/run.py` from retained eval reports plus `provider-check` output; smoke fixtures are non-promotional.
+5. Rust native extension exports strict byte-parity kernels for hashing, lexical, dense scan, MMR, and PPR (`rust/mnemosyne-native/src/lib.rs`).
 
 **State Management:**
 - Local state uses `LocalMemoryEngine` and file-backed runtime state under `.mnemosyne/` when configured (`src/mnemosyne/engine.py:437`, `src/mnemosyne/runtime_state.py`).
@@ -205,7 +206,7 @@
 **Evaluation and Benchmarks:**
 - Location: `eval/`, `tests/benchmarks/`
 - Triggers: `python`/`pytest`/`uv run` commands and CLI evidence workflows.
-- Responsibilities: SLO, calibration, replay, latency, parity, and benchmark reporting.
+- Responsibilities: SLO, calibration, replay, latency, parity, provider bake-off evidence packaging, and benchmark reporting.
 
 ## Architectural Constraints
 
