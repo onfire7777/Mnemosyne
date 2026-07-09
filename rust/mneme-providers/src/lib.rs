@@ -14,6 +14,7 @@ pub struct AppState {
     reranker_model: String,
     bearer_tokens: Vec<String>,
     backend: Backend,
+    max_batch: usize,
 }
 
 #[derive(Clone)]
@@ -31,6 +32,7 @@ impl AppState {
             reranker_model: "deterministic-test-reranker".to_string(),
             bearer_tokens: Vec::new(),
             backend: Backend::Deterministic,
+            max_batch: DEFAULT_MAX_BATCH,
         }
     }
 
@@ -39,12 +41,19 @@ impl AppState {
     }
 }
 
+const DEFAULT_MAX_BATCH: usize = 256;
+
 pub fn state_from_env() -> Result<AppState, String> {
     let dims = std::env::var("MNEMOSYNE_EMBEDDING_DIMS")
         .ok()
         .and_then(|value| value.parse::<usize>().ok())
         .filter(|value| *value > 0)
         .unwrap_or(1024);
+    let max_batch = std::env::var("MNEMOSYNE_PROVIDER_MAX_BATCH")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(DEFAULT_MAX_BATCH);
     let backend_name = std::env::var("MNEME_PROVIDERS_BACKEND")
         .or_else(|_| std::env::var("MNEMOSYNE_PROVIDER_BACKEND"))
         .unwrap_or_else(|_| "deterministic".to_string());
@@ -77,6 +86,7 @@ pub fn state_from_env() -> Result<AppState, String> {
         .filter(|token| !token.is_empty())
         .collect(),
         backend,
+        max_batch,
     })
 }
 
@@ -183,7 +193,6 @@ impl ApiError {
         }
     }
 
-    #[cfg(feature = "models")]
     fn unavailable(message: impl Into<String>) -> Self {
         Self {
             status: StatusCode::SERVICE_UNAVAILABLE,
@@ -233,32 +242,51 @@ async fn embed(
             if input.is_empty() {
                 return Err(ApiError::bad("input must be non-empty"));
             }
-            let embedding = embed_text(&state, &input)?;
+            let dims = state.dims;
+            // Model inference is CPU-bound and holds the backend mutex; run it on
+            // the blocking pool so it cannot stall the async worker threads.
+            let embedding = tokio::task::spawn_blocking(move || embed_text(&state, &input))
+                .await
+                .map_err(|_| ApiError::unavailable("embedding backend failed"))??;
             Ok(Json(EmbedResponse::Single {
                 embedding,
                 model,
-                dimensions: state.dims,
+                dimensions: dims,
             }))
         }
         EmbedInput::Batch(inputs) => {
             if inputs.is_empty() {
                 return Err(ApiError::bad("input must be non-empty"));
             }
-            let data = inputs
-                .iter()
-                .enumerate()
-                .map(|(index, input)| {
-                    embed_text(&state, input).map(|embedding| EmbedDatum {
-                        object: "embedding",
-                        index,
-                        embedding,
+            if inputs.len() > state.max_batch {
+                return Err(ApiError::bad(format!(
+                    "input batch exceeds the configured maximum of {} items",
+                    state.max_batch
+                )));
+            }
+            if let Some(index) = inputs.iter().position(|input| input.is_empty()) {
+                return Err(ApiError::bad(format!("input[{index}] must be non-empty")));
+            }
+            let dims = state.dims;
+            let data = tokio::task::spawn_blocking(move || {
+                inputs
+                    .iter()
+                    .enumerate()
+                    .map(|(index, input)| {
+                        embed_text(&state, input).map(|embedding| EmbedDatum {
+                            object: "embedding",
+                            index,
+                            embedding,
+                        })
                     })
-                })
-                .collect::<Result<Vec<_>, _>>()?;
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .await
+            .map_err(|_| ApiError::unavailable("embedding backend failed"))??;
             Ok(Json(EmbedResponse::Batch {
                 object: "list",
                 model,
-                dimensions: state.dims,
+                dimensions: dims,
                 data,
             }))
         }
@@ -274,6 +302,12 @@ async fn rerank(
     if request.documents.is_empty() {
         return Err(ApiError::bad("documents must be non-empty"));
     }
+    if request.documents.len() > state.max_batch {
+        return Err(ApiError::bad(format!(
+            "documents exceed the configured maximum of {} items",
+            state.max_batch
+        )));
+    }
     let top_n = request.top_n.unwrap_or(request.documents.len());
     if top_n == 0 {
         return Err(ApiError::bad("top_n must be positive"));
@@ -281,7 +315,14 @@ async fn rerank(
     let model = request
         .model
         .unwrap_or_else(|| state.reranker_model.clone());
-    let results = rerank_texts(&state, &request.query, &request.documents, top_n)?;
+    let query = request.query;
+    let documents = request.documents;
+    // Same blocking-pool rule as /embed: reranker inference must not pin an
+    // async worker thread.
+    let results =
+        tokio::task::spawn_blocking(move || rerank_texts(&state, &query, &documents, top_n))
+            .await
+            .map_err(|_| ApiError::unavailable("reranker backend failed"))??;
     Ok(Json(RerankResponse { results, model }))
 }
 
@@ -592,6 +633,58 @@ mod tests {
         assert_eq!(err.status, StatusCode::UNAUTHORIZED);
         assert!(!err.message.contains("expected-secret"));
         assert!(!err.message.contains("HTKN-S3-foreign-secret"));
+    }
+
+    #[tokio::test]
+    async fn batch_embed_rejects_empty_items_without_echoing_content() {
+        let request: EmbedRequest =
+            serde_json::from_value(serde_json::json!({ "input": ["alpha memory", ""] })).unwrap();
+
+        let Err(err) = embed(
+            State(AppState::deterministic(8)),
+            HeaderMap::new(),
+            Json(request),
+        )
+        .await
+        else {
+            panic!("expected empty batch item to be rejected");
+        };
+
+        assert_eq!(err.status, StatusCode::BAD_REQUEST);
+        assert!(err.message.contains("input[1]"));
+        assert!(!err.message.contains("alpha memory"));
+    }
+
+    #[tokio::test]
+    async fn batch_embed_enforces_configured_maximum_size() {
+        let mut state = AppState::deterministic(8);
+        state.max_batch = 2;
+        let request: EmbedRequest =
+            serde_json::from_value(serde_json::json!({ "input": ["a", "b", "c"] })).unwrap();
+
+        let Err(err) = embed(State(state), HeaderMap::new(), Json(request)).await else {
+            panic!("expected oversized batch to be rejected");
+        };
+
+        assert_eq!(err.status, StatusCode::BAD_REQUEST);
+        assert!(err.message.contains("maximum"));
+    }
+
+    #[tokio::test]
+    async fn rerank_enforces_configured_maximum_size() {
+        let mut state = AppState::deterministic(8);
+        state.max_batch = 1;
+        let request: RerankRequest = serde_json::from_value(
+            serde_json::json!({ "query": "q", "documents": ["a", "b"] }),
+        )
+        .unwrap();
+
+        let Err(err) = rerank(State(state), HeaderMap::new(), Json(request)).await else {
+            panic!("expected oversized documents to be rejected");
+        };
+
+        assert_eq!(err.status, StatusCode::BAD_REQUEST);
+        assert!(err.message.contains("maximum"));
     }
 
     #[test]
