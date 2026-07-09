@@ -630,7 +630,11 @@ class PostgresEngine:
                 ok = self.set_evidence_embedding(
                     tenant_id,
                     row_id,
-                    self.adapters.embedding.embed(content),
+                    _partition_embed(
+                        self.adapters.embedding,
+                        content,
+                        str(row.get("embedding_partition") or ""),
+                    ),
                     branch=branch,
                     actor=actor,
                     source=source,
@@ -659,7 +663,11 @@ class PostgresEngine:
                         row_id = str(row.get("row_id") or "")
                         statement = f"{row.get('subject') or ''} {row.get('predicate') or ''} {row.get('object') or ''}"
                         try:
-                            embedding = self.adapters.embedding.embed(statement)
+                            embedding = _partition_embed(
+                                self.adapters.embedding,
+                                statement,
+                                str(row.get("embedding_partition") or ""),
+                            )
                             cur.execute(
                                 """
                                 UPDATE assertions
@@ -1909,7 +1917,13 @@ class PostgresEngine:
                     status=incoming.status,
                 )
                 assertion_embedding = (
-                    _vector_literal(self.adapters.embedding.embed(incoming.statement()))
+                    _vector_literal(
+                        _partition_embed(
+                            self.adapters.embedding,
+                            incoming.statement(),
+                            embedding_partition,
+                        )
+                    )
                     if embedding_partition != "none"
                     else None
                 )
@@ -2636,7 +2650,14 @@ class PostgresEngine:
                         fallback_text = text
                     else:
                         fallback_text = text
-                    score = cosine(query_vec, self.adapters.embedding.embed(fallback_text))
+                    score = cosine(
+                        query_vec,
+                        _partition_embed(
+                            self.adapters.embedding,
+                            fallback_text,
+                            str(row["embedding_partition"] or ""),
+                        ),
+                    )
                     if score <= 0:
                         continue
                     hit_metadata = {
@@ -4161,6 +4182,16 @@ class PostgresEngine:
                         """,
                         (db_tenant_id, branch, affected_cid_bytes),
                     )
+                # Erasure hook: cached embedding vectors are derived data keyed
+                # by text hash, so they cannot be invalidated row-precisely once
+                # the source is erased — purge the provider's cache scope
+                # (mirrors SqliteEngine's purge_embedding_cache-on-forget).
+                purge_embedding_cache = getattr(self.adapters.embedding, "purge_cache", None)
+                if purge_embedding_cache is not None:
+                    try:
+                        purge_embedding_cache()
+                    except Exception:  # pragma: no cover - purge must not block erasure.
+                        pass
                 for retained_bytes, metadata in retained_metadata.items():
                     cur.execute(
                         """
@@ -5110,6 +5141,20 @@ def _cid_bytes_or_none(cid: str) -> bytes | None:
         return bytes.fromhex(value)
     except ValueError:
         return None
+
+
+def _partition_embed(provider: Any, text: str, partition: str) -> list[float]:
+    """Embed text with cache admission matched to its vector partition.
+
+    Non-public partitions mirror the SqliteEngine A1 cache-admission rule:
+    sensitivity-tiered text never enters the shared HTTP embedding caches.
+    Providers without a cache-bypassing path fall back to plain embed.
+    """
+    if partition != "public":
+        sensitive = getattr(provider, "embed_sensitive", None)
+        if sensitive is not None:
+            return list(sensitive(text))
+    return list(provider.embed(text))
 
 
 def _vector_literal(vector: list[float]) -> str:

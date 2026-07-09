@@ -1138,15 +1138,48 @@ class HttpEmbeddingProvider:
             if cached is not None:
                 _http_embedding_cache_put(cache_key, cached, self.cache_size)
                 return cached
+        normalized = self.embed_sensitive(text)
+        _http_embedding_cache_put(cache_key, normalized, self.cache_size)
+        _http_embedding_disk_cache_put(self, cache_key, text, normalized, self.cache_size)
+        return normalized
+
+    def embed_sensitive(self, text: str) -> list[float]:
+        """Embed without reading or writing either cache tier.
+
+        Sensitivity-tiered (non-public-partition) text must never enter the
+        process-global LRU or the durable cache — the same fail-closed
+        admission rule SqliteEngine's A1 embedding cache hardcodes. Engines
+        route private-partition content here.
+        """
         payload: dict[str, object] = {"input": text}
         if self.model:
             payload["model"] = self.model
         response = _post_json(self.url, payload, self.api_key, self.timeout_seconds)
-        vector = _extract_embedding(response)
-        normalized = _normalize_vector(vector, self.dims)
-        _http_embedding_cache_put(cache_key, normalized, self.cache_size)
-        _http_embedding_disk_cache_put(self, cache_key, text, normalized, self.cache_size)
-        return normalized
+        return _normalize_vector(_extract_embedding(response), self.dims)
+
+    def purge_cache(self) -> None:
+        """Drop every cached vector in this provider's scope (memory + disk).
+
+        Erasure hook: cache entries are keyed by text hash, so precise row
+        invalidation is impossible once the source row is erased; scope-wide
+        purge is the provably safe form. Erasures are rare, so the cache-warmth
+        cost is acceptable.
+        """
+        scope = _http_embedding_cache_scope(self)
+        with _HTTP_EMBEDDING_CACHE_LOCK:
+            for key in [k for k in _HTTP_EMBEDDING_CACHE if k[0] == scope]:
+                del _HTTP_EMBEDDING_CACHE[key]
+        if not self.cache_path:
+            return
+        path = os.path.expanduser(self.cache_path)
+        if not os.path.exists(path):
+            return
+        scope_hash = _http_embedding_cache_digest(scope)
+        with _HTTP_EMBEDDING_CACHE_LOCK, _http_embedding_disk_cache_connect(self) as conn:
+            conn.execute(
+                "DELETE FROM http_embedding_cache WHERE scope_sha256 = ?",
+                (scope_hash,),
+            )
 
     def embed_many(self, texts: Sequence[str]) -> list[list[float]]:
         """Embed a batch of texts through the service's OpenAI-style list input.
