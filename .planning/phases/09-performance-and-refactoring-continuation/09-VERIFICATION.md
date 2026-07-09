@@ -2,17 +2,23 @@
 phase: 09-performance-and-refactoring-continuation
 status: passed
 verified: 2026-07-09
-scope: plan-09-05
+scope: plan-09-07
 ---
 
 # Phase 09 Verification
 
-Latest verified slice: Phase 09 Plan 06. The source-owned stateless MCP
+Latest verified slice: Phase 09 Plan 07. The source-owned Postgres vector
+hygiene ops gate is locally verified: `ops-report` includes a read-only vector
+hygiene snapshot when a Postgres engine is present, and
+`--require-clean-vector-hygiene` fails the report unless the probe is available
+and clean across evidence and assertion vector tables.
+
+Previous verified slice: Phase 09 Plan 06. The source-owned stateless MCP
 warm-bundle slice is locally verified: repeated same-scope stateless calls reuse
 the warmed tool bundle, cross-tenant calls build a separate bundle, and local
 durable store changes still invalidate a warmed reader before the next call.
 
-Previous verified slice: Phase 09 Plan 05. The source-owned Postgres partition
+Earlier verified slice: Phase 09 Plan 05. The source-owned Postgres partition
 coverage/tuning-profile slice is locally verified: `none` is modeled as a
 no-vector partition with btree coverage, the dense fallback excludes `none`
 before Python embedding, and the Postgres tuning profile is versioned without a
@@ -30,6 +36,12 @@ claim provider bake-off evidence.
 - `uv run pytest tests/test_nfrs_and_schema.py::test_canonical_schema_partitions_sensitive_vector_indexes tests/test_nfrs_and_schema.py::test_postgres_perf_tuning_file_is_versioned_but_evidence_gated tests/test_postgres_perf_lanes.py::test_vector_schema_fully_present_issues_no_ddl_but_runs_backfills tests/test_postgres_perf_lanes.py::test_vector_schema_creates_btree_none_and_null_fallback_indexes tests/test_postgres_perf_lanes.py::test_vector_schema_missing_index_privilege_denied_warns_only tests/test_postgres_perf_lanes.py::test_postgres_null_embedding_fallback_is_capped_and_observable -q`
   passed.
 - `uv run pytest tests/test_runtime_surfaces.py::test_mcp_server_stateless_mode_reuses_warm_tools_for_same_scope tests/test_runtime_surfaces.py::test_mcp_server_stateless_warm_tools_reload_after_external_store_write tests/test_runtime_surfaces.py::test_mcp_server_stateless_mode_reloads_durable_engine_and_runtime_state -q`
+  passed.
+- `uv run pytest tests/test_postgres_perf_lanes.py::test_postgres_vector_hygiene_snapshot_counts_null_vector_backlog tests/test_runtime_parity_extensions.py::test_ops_report_can_gate_postgres_vector_hygiene tests/test_runtime_parity_extensions.py::test_ops_dashboard_renderer_escapes_snapshot_values -q`
+  passed.
+- `uv run pytest tests/test_runtime_parity_extensions.py::test_ops_report_can_gate_postgres_vector_hygiene tests/test_cli_runtime_tools.py::test_cli_ops_report_requires_postgres_vector_hygiene_probe -q`
+  passed.
+- `uv run ruff check src/mnemosyne/postgres_engine.py src/mnemosyne/observability.py src/mnemosyne/cli.py tests/test_postgres_perf_lanes.py tests/test_runtime_parity_extensions.py`
   passed.
 - `uv run ruff check src/mnemosyne/mcp_server.py tests/test_runtime_surfaces.py`
   passed.
@@ -69,6 +81,9 @@ claim provider bake-off evidence.
 - CBM/agent review confirmed `embedding_partition='none'` is non-embeddable,
   so HNSW would be semantically wrong; ADR-003 records btree coverage plus
   fallback exclusion instead.
+- The vector hygiene gate is an observability/operator check only. It does not
+  run a production backfill and does not prove a live production zero-null-vector
+  state without retained operator evidence.
 - GSD health has only pre-existing, non-repairable governance warnings: numeric
   phase references inside historical text and intentional root-level planning
   artifacts. No repairable GSD health errors remain for this slice.

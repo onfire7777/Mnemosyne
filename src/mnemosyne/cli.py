@@ -8622,6 +8622,7 @@ def cmd_ops_report(args: argparse.Namespace) -> None:
         min_diversity=args.min_diversity,
         max_proxy_gap=args.max_proxy_gap,
         max_open_contradictions=args.max_open_contradictions,
+        require_clean_vector_hygiene=args.require_clean_vector_hygiene,
     )
     audit_evidence = _ops_report_audit_evidence(args, tools.engine, args.tenant)
     audit_ok = True
@@ -18844,6 +18845,11 @@ def build_parser() -> argparse.ArgumentParser:
     ops_report.add_argument("--min-diversity", type=float, default=0.2)
     ops_report.add_argument("--max-proxy-gap", type=float, default=0.15)
     ops_report.add_argument("--max-open-contradictions", type=int, default=0)
+    ops_report.add_argument(
+        "--require-clean-vector-hygiene",
+        action="store_true",
+        help="Fail ops-report if Postgres has embeddable NULL vectors or vectors in the non-embeddable none partition",
+    )
     ops_report.add_argument("--dashboard-html", help="Write a static HTML dashboard artifact to this path")
     ops_report.add_argument(
         "--dashboard-package-dir",

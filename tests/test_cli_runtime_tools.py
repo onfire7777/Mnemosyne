@@ -5807,6 +5807,25 @@ def test_cli_ops_report_exports_dashboard_snapshot(tmp_path: Path) -> None:
     assert package_snapshot["report"]["counts"]["evidence"] == 1
 
 
+def test_cli_ops_report_requires_postgres_vector_hygiene_probe(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+
+    report = run_cli(
+        store,
+        "ops-report",
+        "--tenant",
+        TENANT,
+        "--require-clean-vector-hygiene",
+    )
+
+    assert report["ok"] is False
+    assert report["postgres_vector_hygiene"]["available"] is False
+    assert report["tripwires"]["vector_hygiene_required"] is True
+    assert report["tripwires"]["vector_hygiene_available"] is False
+    assert report["tripwires"]["vector_hygiene_clean"] is False
+    assert report["tripwires"]["vector_hygiene_ok"] is False
+
+
 def test_cli_ops_dashboard_check_validates_dashboard_package(tmp_path: Path) -> None:
     store = tmp_path / "mnemosyne.json"
     package_dir = tmp_path / "dashboard-package"

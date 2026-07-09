@@ -19,6 +19,11 @@ Run in the production soak profile:
 - `ops-dashboard-check`
 - `ops-report`
 
+For Postgres production captures, run `ops-report` with
+`--require-clean-vector-hygiene` so embeddable NULL-vector backlog or illegal
+vectors in the non-embeddable `none` partition across evidence/assertions keep
+the ops report red until the backfill evidence is genuinely clean.
+
 ## Required Production Input Artifacts
 
 Place this file in the external `MNEMOSYNE_PROD_EVIDENCE_DIR` before rendering:

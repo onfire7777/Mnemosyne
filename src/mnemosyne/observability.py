@@ -76,6 +76,7 @@ def build_ops_report(
     min_diversity: float = 0.2,
     max_proxy_gap: float = 0.15,
     max_open_contradictions: int = 0,
+    require_clean_vector_hygiene: bool = False,
 ) -> dict[str, Any]:
     exported = engine.export_tenant(tenant_id)
     assertions = exported.get("assertions", [])
@@ -85,10 +86,16 @@ def build_ops_report(
     learning_counts = _learning_counts(learning, tenant_id)
     diversity = learning_counts["lesson_diversity"]
     proxy_gap = abs(proxy_score - true_score) if proxy_score is not None and true_score is not None else None
+    vector_hygiene = _postgres_vector_hygiene(engine, tenant_id)
+    vector_hygiene_passed = (
+        not require_clean_vector_hygiene
+        or (vector_hygiene.get("available") is True and vector_hygiene.get("ok") is True)
+    )
     tripwire_passed = (
         diversity >= min_diversity
         and (proxy_gap is None or proxy_gap <= max_proxy_gap)
         and open_contradictions <= max_open_contradictions
+        and vector_hygiene_passed
     )
     return {
         "tenant_id": tenant_id,
@@ -116,7 +123,12 @@ def build_ops_report(
             "max_open_contradictions": max_open_contradictions,
             "gate_promotions": int(metric_counters.get("gate.promotions", 0)),
             "gate_rollbacks": int(metric_counters.get("gate.rollbacks", 0)),
+            "vector_hygiene_required": require_clean_vector_hygiene,
+            "vector_hygiene_available": vector_hygiene.get("available") is True,
+            "vector_hygiene_clean": vector_hygiene.get("ok") is True,
+            "vector_hygiene_ok": vector_hygiene_passed,
         },
+        "postgres_vector_hygiene": vector_hygiene,
     }
 
 
@@ -133,12 +145,41 @@ def _learning_counts(learning: Any | None, tenant_id: str) -> dict[str, Any]:
     }
 
 
+def _postgres_vector_hygiene(engine: Any, tenant_id: str) -> dict[str, Any]:
+    probe = getattr(engine, "vector_hygiene_snapshot", None)
+    if probe is None:
+        return {
+            "backend": type(engine).__name__,
+            "available": False,
+            "ok": None,
+            "reason": "postgres vector hygiene probe unavailable for this engine",
+        }
+    try:
+        snapshot = probe(tenant_id)
+    except Exception as exc:  # noqa: BLE001 - ops report should surface probe failure, not hide it
+        return {
+            "backend": type(engine).__name__,
+            "available": True,
+            "ok": False,
+            "error": str(exc),
+        }
+    if not isinstance(snapshot, dict):
+        return {
+            "backend": type(engine).__name__,
+            "available": True,
+            "ok": False,
+            "error": "postgres vector hygiene probe returned a non-object",
+        }
+    return {"available": True, **snapshot}
+
+
 def render_ops_dashboard(report: dict[str, Any]) -> str:
     counts = report.get("counts", {})
     queue = report.get("queue", {})
     tripwires = report.get("tripwires", {})
     learning = report.get("learning", {})
     metrics = report.get("metrics", {})
+    vector_hygiene = report.get("postgres_vector_hygiene", {})
     counters = metrics.get("counters", {}) if isinstance(metrics, dict) else {}
     gauges = metrics.get("gauges", {}) if isinstance(metrics, dict) else {}
     samples = metrics.get("samples", {}) if isinstance(metrics, dict) else {}
@@ -191,6 +232,16 @@ def render_ops_dashboard(report: dict[str, Any]) -> str:
         ("Lifecycle sweeps", counters.get("lifecycle.sweeps", 0)),
         ("Lifecycle demotions", counters.get("lifecycle.demotions", 0)),
     ]
+    vector_cards = [
+        ("Probe available", vector_hygiene.get("available", False)),
+        ("Clean", vector_hygiene.get("ok", "n/a")),
+        ("Embeddable null vectors", vector_hygiene.get("embeddable_null_embeddings", "n/a")),
+        ("Evidence null vectors", vector_hygiene.get("evidence_embeddable_null_embeddings", "n/a")),
+        ("Assertion null vectors", vector_hygiene.get("assertion_embeddable_null_embeddings", "n/a")),
+        ("None-partition vectors", vector_hygiene.get("none_partition_vectors", "n/a")),
+        ("Stored vectors", vector_hygiene.get("stored_vectors", "n/a")),
+        ("Live rows", vector_hygiene.get("live_rows", "n/a")),
+    ]
     sections = "\n".join(
         [
             _render_dashboard_section("Memory State", memory_cards),
@@ -199,6 +250,7 @@ def render_ops_dashboard(report: dict[str, Any]) -> str:
             _render_dashboard_section("Calibration", calibration_cards),
             _render_dashboard_section("Learning", learning_cards),
             _render_dashboard_section("Gates and Eval", gate_cards),
+            _render_dashboard_section("Postgres Vector Hygiene", vector_cards),
         ]
     )
     tripwire_class = "ok" if tripwires.get("passed") else "alert"
