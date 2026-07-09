@@ -108,6 +108,10 @@ services:
     command: ["postgres",
       "-c", "shared_buffers=512MB",
       "-c", "maintenance_work_mem=512MB",
+      # Bound autovacuum memory separately: without this, up to 3 default
+      # autovacuum workers each inherit maintenance_work_mem (3×512MB), which
+      # together with shared_buffers already exceeds the 2g service ceiling.
+      "-c", "autovacuum_work_mem=128MB",
       # pgaudit: preload the extension and audit writes/DDL/role changes. Output
       # goes to the logging collector on the durable pgdata volume, rotated daily
       # and never truncated (log_rotation_size=0), so audit output is retained.
@@ -123,6 +127,8 @@ services:
     healthcheck: { test: ["CMD-SHELL", "pg_isready -U mnemosyne_superuser -d mnemosyne"], interval: 10s, retries: 6 }
     # P1 capacity rebalance (infra/PERF-RUNTIME.md): explicit ceilings so no single
     # service can monopolize the VM; applied only via scripts/apply-perf-runtime.sh.
+    # Note: CPU ceilings across services deliberately oversubscribe the 6-vCPU VM
+    # (burst capacity, CFS time-shared under contention); memory ceilings do not.
     mem_limit: 2g
     cpus: 2.0
     networks:                              # internal = RLS-scoped least-privilege reads for the API;

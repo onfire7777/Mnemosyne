@@ -20,7 +20,7 @@
 # re-asserts the durations (no duplicate provisioner, JWK admin provisioner
 # untouched). Only writes to the stepca volume (/home/step), so it is compatible
 # with the hardened read_only rootfs.
-set -eo pipefail
+set -euo pipefail
 
 # Image ENV already provides these; default them defensively so the script is
 # also runnable standalone (e.g. isolated verification).
