@@ -56,8 +56,12 @@
   - Source slice landed: `infra/postgres/postgresql-perf.conf` versions the
     conservative Postgres tuning candidate and documents before/after evidence
     requirements.
+  - Source slice landed: `ops-report` now emits a read-only Postgres vector
+    hygiene snapshot across evidence/assertions and
+    `--require-clean-vector-hygiene` fails unless a real Postgres probe is
+    available and clean.
   - Still open: live Postgres tuning application, before/after benchmark rows,
-    null-embedding production backfill/alert evidence, and any
+    null-embedding production backfill execution/evidence, and any
     halfvec/pgvectorscale APPROX-layer rollout.
 
 - [x] Task 7: Implement stateless MCP warm-bundle reuse.

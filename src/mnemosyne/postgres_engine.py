@@ -362,6 +362,119 @@ class PostgresEngine:
         else:
             cur.execute(sql, params)
 
+    def vector_hygiene_snapshot(self, tenant_id: str, branch: str = "main") -> dict[str, Any]:
+        """Read-only production hygiene probe for vector coverage.
+
+        The dense fallback can keep legacy rows queryable, but production
+        performance evidence should treat embeddable NULL vectors as backlog,
+        not as a silent hot-path feature. This probe gives ops-report a cheap
+        count without mutating rows or changing retrieval semantics.
+        """
+
+        db_tenant_id = _stable_uuid("tenant", tenant_id)
+        with self.connect() as conn:
+            with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                self._set_tenant(cur, db_tenant_id)
+                cur.execute(
+                    """
+                    WITH evidence_hygiene AS (
+                      SELECT
+                        COUNT(*) FILTER (
+                          WHERE erased = false
+                            AND embedding IS NULL
+                            AND embedding_partition <> 'none'
+                        ) AS embeddable_null_embeddings,
+                        COUNT(*) FILTER (
+                          WHERE embedding_partition = 'none'
+                            AND embedding IS NOT NULL
+                        ) AS none_partition_vectors,
+                        COUNT(*) FILTER (
+                          WHERE erased = false
+                            AND embedding IS NOT NULL
+                            AND embedding_partition IN ('public', 'private')
+                        ) AS stored_vectors,
+                        COUNT(*) FILTER (
+                          WHERE embedding_partition = 'none'
+                        ) AS none_partition_rows,
+                        COUNT(*) FILTER (
+                          WHERE erased = false
+                        ) AS live_rows
+                      FROM evidence
+                      WHERE tenant_id = %s AND branch = %s
+                    ),
+                    assertion_hygiene AS (
+                      SELECT
+                        COUNT(*) FILTER (
+                          WHERE embedding IS NULL
+                            AND embedding_partition <> 'none'
+                        ) AS embeddable_null_embeddings,
+                        COUNT(*) FILTER (
+                          WHERE embedding_partition = 'none'
+                            AND embedding IS NOT NULL
+                        ) AS none_partition_vectors,
+                        COUNT(*) FILTER (
+                          WHERE embedding IS NOT NULL
+                            AND embedding_partition IN ('public', 'private')
+                        ) AS stored_vectors,
+                        COUNT(*) FILTER (
+                          WHERE embedding_partition = 'none'
+                        ) AS none_partition_rows,
+                        COUNT(*) FILTER (
+                          WHERE status IN ('active', 'candidate', 'contested')
+                        ) AS live_rows
+                      FROM assertions
+                      WHERE tenant_id = %s AND branch = %s
+                    )
+                    SELECT
+                      evidence_hygiene.embeddable_null_embeddings AS evidence_embeddable_null_embeddings,
+                      assertion_hygiene.embeddable_null_embeddings AS assertion_embeddable_null_embeddings,
+                      evidence_hygiene.none_partition_vectors AS evidence_none_partition_vectors,
+                      assertion_hygiene.none_partition_vectors AS assertion_none_partition_vectors,
+                      evidence_hygiene.stored_vectors AS evidence_stored_vectors,
+                      assertion_hygiene.stored_vectors AS assertion_stored_vectors,
+                      evidence_hygiene.none_partition_rows AS evidence_none_partition_rows,
+                      assertion_hygiene.none_partition_rows AS assertion_none_partition_rows,
+                      evidence_hygiene.live_rows AS live_evidence_rows,
+                      assertion_hygiene.live_rows AS live_assertion_rows,
+                      evidence_hygiene.embeddable_null_embeddings
+                        + assertion_hygiene.embeddable_null_embeddings AS embeddable_null_embeddings,
+                      evidence_hygiene.none_partition_vectors
+                        + assertion_hygiene.none_partition_vectors AS none_partition_vectors,
+                      evidence_hygiene.stored_vectors
+                        + assertion_hygiene.stored_vectors AS stored_vectors,
+                      evidence_hygiene.none_partition_rows
+                        + assertion_hygiene.none_partition_rows AS none_partition_rows,
+                      evidence_hygiene.live_rows
+                        + assertion_hygiene.live_rows AS live_rows
+                    FROM evidence_hygiene, assertion_hygiene
+                    """,
+                    (db_tenant_id, branch, db_tenant_id, branch),
+                )
+                row = dict(cur.fetchone() or {})
+        embeddable_null = int(row.get("embeddable_null_embeddings") or 0)
+        none_vectors = int(row.get("none_partition_vectors") or 0)
+        return {
+            "backend": "postgres",
+            "tenant_id": tenant_id,
+            "branch": branch,
+            "ok": embeddable_null == 0 and none_vectors == 0,
+            "embeddable_null_embeddings": embeddable_null,
+            "none_partition_vectors": none_vectors,
+            "stored_vectors": int(row.get("stored_vectors") or 0),
+            "none_partition_rows": int(row.get("none_partition_rows") or 0),
+            "evidence_embeddable_null_embeddings": int(row.get("evidence_embeddable_null_embeddings") or 0),
+            "assertion_embeddable_null_embeddings": int(row.get("assertion_embeddable_null_embeddings") or 0),
+            "evidence_none_partition_vectors": int(row.get("evidence_none_partition_vectors") or 0),
+            "assertion_none_partition_vectors": int(row.get("assertion_none_partition_vectors") or 0),
+            "evidence_stored_vectors": int(row.get("evidence_stored_vectors") or 0),
+            "assertion_stored_vectors": int(row.get("assertion_stored_vectors") or 0),
+            "evidence_none_partition_rows": int(row.get("evidence_none_partition_rows") or 0),
+            "assertion_none_partition_rows": int(row.get("assertion_none_partition_rows") or 0),
+            "live_evidence_rows": int(row.get("live_evidence_rows") or 0),
+            "live_assertion_rows": int(row.get("live_assertion_rows") or 0),
+            "live_rows": int(row.get("live_rows") or 0),
+        }
+
     @staticmethod
     def _ensure_entity_registry_schema(cur: Any) -> None:
         cur.execute("ALTER TABLE entities ADD COLUMN IF NOT EXISTS source_evidence_cids BYTEA[] NOT NULL DEFAULT '{}'")

@@ -3038,6 +3038,50 @@ def test_ops_report_flags_open_contradiction_backlog() -> None:
     assert report["tripwires"]["passed"] is False
 
 
+def test_ops_report_can_gate_postgres_vector_hygiene() -> None:
+    class VectorHygieneEngine(LocalMemoryEngine):
+        def vector_hygiene_snapshot(self, tenant_id: str) -> dict[str, object]:
+            return {
+                "backend": "postgres",
+                "tenant_id": tenant_id,
+                "branch": "main",
+                "ok": False,
+                "embeddable_null_embeddings": 2,
+                "none_partition_vectors": 0,
+                "stored_vectors": 5,
+                "none_partition_rows": 1,
+                "live_evidence_rows": 8,
+            }
+
+    engine = VectorHygieneEngine()
+
+    relaxed = build_ops_report(engine=engine, tenant_id=TENANT)
+    gated = build_ops_report(
+        engine=engine,
+        tenant_id=TENANT,
+        require_clean_vector_hygiene=True,
+    )
+    local_required = build_ops_report(
+        engine=LocalMemoryEngine(),
+        tenant_id=TENANT,
+        require_clean_vector_hygiene=True,
+    )
+
+    assert relaxed["tripwires"]["passed"] is True
+    assert relaxed["postgres_vector_hygiene"]["embeddable_null_embeddings"] == 2
+    assert relaxed["tripwires"]["vector_hygiene_required"] is False
+    assert gated["tripwires"]["passed"] is False
+    assert gated["tripwires"]["vector_hygiene_required"] is True
+    assert gated["tripwires"]["vector_hygiene_available"] is True
+    assert gated["tripwires"]["vector_hygiene_clean"] is False
+    assert gated["tripwires"]["vector_hygiene_ok"] is False
+    assert local_required["postgres_vector_hygiene"]["available"] is False
+    assert local_required["tripwires"]["vector_hygiene_available"] is False
+    assert local_required["tripwires"]["vector_hygiene_clean"] is False
+    assert local_required["tripwires"]["vector_hygiene_ok"] is False
+    assert local_required["tripwires"]["passed"] is False
+
+
 def test_ops_dashboard_renderer_escapes_snapshot_values() -> None:
     report = {
         "tenant_id": "<tenant>",
@@ -3069,6 +3113,14 @@ def test_ops_dashboard_renderer_escapes_snapshot_values() -> None:
             "gate_promotions": 2,
             "gate_rollbacks": 1,
         },
+        "postgres_vector_hygiene": {
+            "available": True,
+            "ok": False,
+            "embeddable_null_embeddings": 3,
+            "none_partition_vectors": 0,
+            "stored_vectors": 8,
+            "live_evidence_rows": 11,
+        },
     }
 
     dashboard = render_ops_dashboard(report)
@@ -3080,6 +3132,8 @@ def test_ops_dashboard_renderer_escapes_snapshot_values() -> None:
     assert "ATTENTION" in dashboard
     assert "Retrieval" in dashboard
     assert "Calibration" in dashboard
+    assert "Postgres Vector Hygiene" in dashboard
+    assert "Embeddable null vectors" in dashboard
     assert '<div class="label">Active jobs</div><div class="value">2</div>' in dashboard
     assert "p95 latency ms" in dashboard
     assert "0.42" in dashboard

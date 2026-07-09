@@ -528,6 +528,38 @@ class _NullFallbackFakeConnection(FakeConnection):
         return _NullFallbackFakeCursor(self)
 
 
+class _VectorHygieneFakeCursor(FakeCursor):
+    def __init__(self, conn: "_VectorHygieneFakeConnection"):
+        super().__init__(conn)
+        self._row: dict[str, Any] | None = None
+
+    def execute(
+        self,
+        sql: str,
+        params: tuple[Any, ...] | None = None,
+        *,
+        prepare: bool | None = None,
+    ) -> None:
+        super().execute(sql, params, prepare=prepare)
+        flat = " ".join(sql.split())
+        if "embeddable_null_embeddings" in flat and "none_partition_vectors" in flat:
+            self._conn.hygiene_query_params = params
+            self._row = self._conn.hygiene_row
+
+    def fetchone(self) -> dict[str, Any] | None:
+        return self._row
+
+
+class _VectorHygieneFakeConnection(FakeConnection):
+    def __init__(self, name: str, hygiene_row: dict[str, Any]):
+        super().__init__(name)
+        self.hygiene_row = hygiene_row
+        self.hygiene_query_params: tuple[Any, ...] | None = None
+
+    def cursor(self, *args: Any, **kwargs: Any) -> FakeCursor:
+        return _VectorHygieneFakeCursor(self)
+
+
 class _CalibrationFakeCursor(FakeCursor):
     def __init__(self, conn: "_CalibrationFakeConnection"):
         super().__init__(conn)
@@ -603,6 +635,66 @@ def test_postgres_null_embedding_fallback_is_capped_and_observable(
     assert hit.metadata["null_embedding_candidates_observed"] == fallback_limit + 1
     assert hit.metadata["null_embedding_fallback_limit"] == fallback_limit
     assert hit.metadata["null_embedding_fallback_truncated"] is True
+
+
+def test_postgres_vector_hygiene_snapshot_counts_null_vector_backlog(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine, _ = make_engine(monkeypatch, reuse=True)
+    conn = _VectorHygieneFakeConnection(
+        "vector-hygiene",
+        {
+            "evidence_embeddable_null_embeddings": 3,
+            "assertion_embeddable_null_embeddings": 2,
+            "evidence_none_partition_vectors": 1,
+            "assertion_none_partition_vectors": 1,
+            "evidence_stored_vectors": 7,
+            "assertion_stored_vectors": 5,
+            "evidence_none_partition_rows": 4,
+            "assertion_none_partition_rows": 6,
+            "live_evidence_rows": 12,
+            "live_assertion_rows": 9,
+            "embeddable_null_embeddings": 5,
+            "none_partition_vectors": 2,
+            "stored_vectors": 12,
+            "none_partition_rows": 10,
+            "live_rows": 21,
+        },
+    )
+    monkeypatch.setattr(engine, "connect", lambda: conn)
+
+    snapshot = engine.vector_hygiene_snapshot("tenant", branch="main")
+
+    assert any("set_config('mnemosyne.tenant_id'" in sql for sql in conn.statements)
+    stable_tenant = postgres_engine._stable_uuid("tenant", "tenant")
+    assert conn.hygiene_query_params == (stable_tenant, "main", stable_tenant, "main")
+    hygiene_query = next(sql for sql in conn.statements if "embeddable_null_embeddings" in sql)
+    assert "embedding IS NULL" in hygiene_query
+    assert "embedding_partition <> 'none'" in hygiene_query
+    assert "embedding_partition = 'none' AND embedding IS NOT NULL" in hygiene_query
+    assert "FROM evidence" in hygiene_query
+    assert "FROM assertions" in hygiene_query
+    assert snapshot == {
+        "backend": "postgres",
+        "tenant_id": "tenant",
+        "branch": "main",
+        "ok": False,
+        "embeddable_null_embeddings": 5,
+        "none_partition_vectors": 2,
+        "stored_vectors": 12,
+        "none_partition_rows": 10,
+        "evidence_embeddable_null_embeddings": 3,
+        "assertion_embeddable_null_embeddings": 2,
+        "evidence_none_partition_vectors": 1,
+        "assertion_none_partition_vectors": 1,
+        "evidence_stored_vectors": 7,
+        "assertion_stored_vectors": 5,
+        "evidence_none_partition_rows": 4,
+        "assertion_none_partition_rows": 6,
+        "live_evidence_rows": 12,
+        "live_assertion_rows": 9,
+        "live_rows": 21,
+    }
 
 
 def test_postgres_vector_search_sets_hnsw_query_knobs_before_vector_queries(
