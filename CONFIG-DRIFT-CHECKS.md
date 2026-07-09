@@ -38,6 +38,8 @@ In-code source of truth:
 Operational artifacts (this lane):
 
 - `config/drift-baseline.toml` — the **Declared** view the checks compare against.
+- `infra/postgres/postgresql-perf.conf` — versioned Postgres tuning candidate
+  for the resized production VM; not applied silently and not itself evidence.
 - `tests/test_config_drift.py` — the runnable drift checks.
 - `.github/workflows/ci.yml` — runs them in CI.
 
@@ -84,6 +86,16 @@ Realized over these concrete loci:
   debugging, or operator rollback. Prepared execution is a plan-reuse speed
   hint only; query text, parameters, tenant binding, filtering, scoring, and
   rollback behavior are unchanged (`tests/test_postgres_perf_lanes.py`).
+- **Postgres server tuning profile** —
+  `infra/postgres/postgresql-perf.conf` records conservative source-owned
+  values for the post-apply production target (`shared_buffers`,
+  `maintenance_work_mem`, `work_mem`, `effective_cache_size`,
+  `max_parallel_workers_per_gather`, `jit`). It is a candidate profile, not a
+  running override: operators must apply equivalent `postgres -c name=value`
+  flags or a mounted config file in a controlled run and retain before/after
+  evidence before claiming a tuning win. Query-route `hnsw.ef_search` remains
+  owned by `PostgresEngine._set_pgvector_hnsw_query_settings`, not the global
+  server profile.
 - **`MNEMOSYNE_PG_MMR_SPACE`** — embedding space for `PostgresEngine` MMR
   diversity: `hashing` (default, current behavior preserved exactly —
   deterministic `hashing_embedding` over hit text) or `stored` (opt-in:

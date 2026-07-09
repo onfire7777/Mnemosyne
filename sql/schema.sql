@@ -49,6 +49,8 @@ CREATE TABLE IF NOT EXISTS evidence (
 
 CREATE INDEX IF NOT EXISTS evidence_embedding_public_hnsw ON evidence USING hnsw (embedding vector_cosine_ops) WHERE embedding_partition = 'public';
 CREATE INDEX IF NOT EXISTS evidence_embedding_private_hnsw ON evidence USING hnsw (embedding vector_cosine_ops) WHERE embedding_partition = 'private';
+CREATE INDEX IF NOT EXISTS evidence_embedding_none_btree ON evidence (tenant_id, branch, created_at DESC, cid) WHERE embedding_partition = 'none';
+CREATE INDEX IF NOT EXISTS evidence_null_embedding_fallback_idx ON evidence (tenant_id, branch, created_at DESC, cid) WHERE embedding IS NULL AND embedding_partition <> 'none' AND erased = false;
 CREATE INDEX IF NOT EXISTS evidence_lexeme_gin ON evidence USING gin (lexeme);
 
 CREATE TABLE IF NOT EXISTS assertions (
@@ -88,6 +90,7 @@ CREATE TABLE IF NOT EXISTS assertions (
 
 CREATE INDEX IF NOT EXISTS assertions_embedding_public_hnsw ON assertions USING hnsw (embedding vector_cosine_ops) WHERE embedding_partition = 'public';
 CREATE INDEX IF NOT EXISTS assertions_embedding_private_hnsw ON assertions USING hnsw (embedding vector_cosine_ops) WHERE embedding_partition = 'private';
+CREATE INDEX IF NOT EXISTS assertions_embedding_none_btree ON assertions (tenant_id, branch, status, valid_from DESC, id) WHERE embedding_partition = 'none';
 CREATE INDEX IF NOT EXISTS assertions_lexeme_gin ON assertions USING gin (lexeme);
 CREATE INDEX IF NOT EXISTS assertions_current ON assertions (tenant_id, subject, predicate, branch, status, valid_from DESC);
 

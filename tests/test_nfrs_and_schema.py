@@ -139,10 +139,33 @@ def test_canonical_schema_partitions_sensitive_vector_indexes() -> None:
     assert "CHECK (embedding_partition IN ('public', 'private', 'none'))" in schema
     assert "evidence_embedding_public_hnsw" in schema
     assert "evidence_embedding_private_hnsw" in schema
+    assert "evidence_embedding_none_btree" in schema
+    assert "evidence_null_embedding_fallback_idx" in schema
+    assert "WHERE embedding IS NULL AND embedding_partition <> 'none' AND erased = false" in schema
     assert "assertions_embedding_public_hnsw" in schema
     assert "assertions_embedding_private_hnsw" in schema
+    assert "assertions_embedding_none_btree" in schema
+    assert "evidence_embedding_none_hnsw" not in schema
+    assert "assertions_embedding_none_hnsw" not in schema
     assert "CREATE INDEX IF NOT EXISTS evidence_embedding_hnsw" not in schema
     assert "CREATE INDEX IF NOT EXISTS assertions_embedding_hnsw" not in schema
+
+
+def test_postgres_perf_tuning_file_is_versioned_but_evidence_gated() -> None:
+    tuning = Path("infra/postgres/postgresql-perf.conf").read_text(encoding="utf-8")
+
+    for key in [
+        "shared_buffers",
+        "maintenance_work_mem",
+        "work_mem",
+        "effective_cache_size",
+        "max_parallel_workers_per_gather",
+        "jit",
+    ]:
+        assert f"{key} =" in tuning
+    assert "Do not apply silently" in tuning
+    assert "before/after" in tuning
+    assert "hnsw.ef_search stays query-local" in tuning
 
 
 def test_schema_has_single_preference_valid_to_column() -> None:

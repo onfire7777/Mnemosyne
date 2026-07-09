@@ -490,7 +490,7 @@ contract; CONFIG-DRIFT-CHECKS env registry; GSD/CBM/gbrain hygiene.
   5. Native acceleration changes release the GIL only around Rust-owned compute
      loops and preserve scalar arithmetic/order exactly.
 
-**Plans:** 4 plans
+**Plans:** 5 plans
 
 Plans:
 
@@ -498,8 +498,9 @@ Plans:
 - [x] 09-02-PLAN.md — Cache drift closure and native MMR/PPR GIL detach.
 - [x] 09-03-PLAN.md — Postgres hot FTS/pgvector retrieval SELECT preparation.
 - [x] 09-04-PLAN.md — Provider contract conformance CI lane.
+- [x] 09-05-PLAN.md — Postgres `none` partition coverage and tuning profile.
 
-Checkpoint: Phase 9 Plans 01-04 are implemented and locally verified. Retrieval
+Checkpoint: Phase 9 Plans 01-05 are implemented and locally verified. Retrieval
 channel parallelism now defaults from capability tier when
 `MNEMOSYNE_PARALLEL_CHANNELS` is absent (`floor` off, `standard` and above on),
 explicit operator env values still win, and SQLite scan-oracle memo hydration is
@@ -513,6 +514,11 @@ explicit and transaction-local. A shared provider fixture now gates the Python
 embedding service, Python HTTP adapters, and Rust `mneme-providers` sidecar in
 the `provider-conformance` CI job, with Rust sidecar list-input `/embed`
 compatibility added only as a contract fix; provider bake-off/default selection
-remains pending. Focused retrieval/capability, provider-cache/provider-contract,
-Postgres perf-lane, cargo, native parity, ruff, `git diff --check`, GSD
-consistency, and local pytest suites pass for the shipped Phase 09 slices.
+remains pending. Postgres `embedding_partition='none'` now has explicit btree
+coverage as a no-vector partition, embeddable null fallback rows have a partial
+btree index and SQL exclusion of `none`, and
+`infra/postgres/postgresql-perf.conf` versions the conservative tuning candidate
+without silently applying it. Focused retrieval/capability,
+provider-cache/provider-contract, Postgres perf-lane, cargo, native parity,
+ruff, `git diff --check`, GSD consistency, and local pytest suites pass for the
+shipped Phase 09 slices.
