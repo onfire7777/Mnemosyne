@@ -1,3 +1,10 @@
+---
+phase: v1.0-01-lossless-memory-and-hybrid-retrieval
+plan: 1
+status: complete
+wave: 1
+---
+
 # Phase 1: Lossless Memory and Hybrid Retrieval - Plan
 
 ## Tasks
@@ -12,4 +19,3 @@
 
 - [x] Run `python -m pytest`.
 - [x] Confirm `16 passed`.
-

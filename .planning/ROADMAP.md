@@ -490,7 +490,7 @@ contract; CONFIG-DRIFT-CHECKS env registry; GSD/CBM/gbrain hygiene.
   5. Native acceleration changes release the GIL only around Rust-owned compute
      loops and preserve scalar arithmetic/order exactly.
 
-**Plans:** 12 plans
+**Plans:** 13 plans
 
 Plans:
 
@@ -506,8 +506,9 @@ Plans:
 - [x] 09-10-PLAN.md — Durable HTTP embedding cache.
 - [x] 09-11-PLAN.md — Provider bake-off evidence harness.
 - [x] 09-12-PLAN.md — Native wheel install/import smoke proof.
+- [x] 09-13-PLAN.md — Planning metadata and cache blueprint hygiene.
 
-Checkpoint: Phase 9 Plans 01-12 are implemented and locally verified. Retrieval
+Checkpoint: Phase 9 Plans 01-13 are implemented and locally verified. Retrieval
 channel parallelism now defaults from capability tier when
 `MNEMOSYNE_PARALLEL_CHANNELS` is absent (`floor` off, `standard` and above on),
 explicit operator env values still win, and SQLite scan-oracle memo hydration is
@@ -548,6 +549,10 @@ for redaction-positive text, and surfaces cache status in `provider-check`
 without using cache hits for latency evidence.
 The native wheel CI job now also installs the wheel it built and imports
 `mnemosyne_native` to assert the strict parity marker before artifact upload.
+Planning hygiene now classifies the supplemental Phase 7 service-toggle note as
+a report, adds validator-visible wave metadata to the active and historical
+plan files that GSD inspects, and updates the blueprint/codebase notes so
+durable provider caching and native wheel gating are described accurately.
 Focused
 retrieval/capability, provider-cache/provider-contract, Postgres perf-lane,
 cargo, native parity, ruff, `git diff --check`, GSD consistency, and local

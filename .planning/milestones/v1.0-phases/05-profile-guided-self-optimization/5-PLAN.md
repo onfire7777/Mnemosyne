@@ -1,3 +1,10 @@
+---
+phase: v1.0-05-profile-guided-self-optimization
+plan: 5
+status: complete
+wave: 1
+---
+
 # Phase 5: Profile-Guided Self-Optimization - Plan
 
 ## Tasks
@@ -12,4 +19,3 @@
 
 - [x] Run `python -m pytest`.
 - [x] Confirm `34 passed`.
-

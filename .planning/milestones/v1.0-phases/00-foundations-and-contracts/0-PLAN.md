@@ -1,3 +1,10 @@
+---
+phase: v1.0-00-foundations-and-contracts
+plan: 0
+status: complete
+wave: 1
+---
+
 # Phase 0: Foundations and Contracts - Plan
 
 ## Tasks
@@ -13,4 +20,3 @@
 - [x] Confirm evidence deduplication and byte recall.
 - [x] Confirm branch discard rollback.
 - [x] Confirm seed suite passes.
-
