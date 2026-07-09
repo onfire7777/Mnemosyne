@@ -26,7 +26,12 @@ the ops report red until the backfill evidence is genuinely clean. Retain the
 redacted `postgres_vector_hygiene.backfill_plan` section as pre-backfill
 evidence when backlog exists; it reports row ids, content/statement hashes,
 partition/trust/sensitivity metadata, sample count, and truncation without raw
-memory content and without mutating production rows.
+memory content and without mutating production rows. When the operator is ready
+to mutate production rows, run `vector-backfill-apply --tenant "$TENANT" --limit N --confirm-apply`
+against the same production backend and retain its JSON output; it reports only
+row ids plus content/statement hashes. Then re-run
+`ops-report --require-clean-vector-hygiene` and retain the clean post-backfill
+probe. The apply output alone is not enough to flip the row green.
 
 ## Required Production Input Artifacts
 

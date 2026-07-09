@@ -2,18 +2,23 @@
 phase: 09-performance-and-refactoring-continuation
 status: passed
 verified: 2026-07-09
-scope: plan-09-08
+scope: plan-09-09
 ---
 
 # Phase 09 Verification
 
-Latest verified slice: Phase 09 Plan 08. The source-owned Postgres vector
+Latest verified slice: Phase 09 Plan 09. The source-owned guarded Postgres
+vector backfill apply path is locally verified: private assertion partitions
+are embedded on write, `vector-backfill-apply` refuses mutation without
+`--confirm-apply`, and bounded apply reports omit raw evidence/assertion text.
+
+Previous verified slice: Phase 09 Plan 08. The source-owned Postgres vector
 backfill readiness probe is locally verified: `ops-report` can include a
 read-only, redacted backfill plan with evidence/assertion backlog counts,
 sampled candidate ids and hashes, and dashboard metrics, without raw content or
 row mutation.
 
-Previous verified slice: Phase 09 Plan 07. The source-owned Postgres vector
+Earlier verified slice: Phase 09 Plan 07. The source-owned Postgres vector
 hygiene ops gate is locally verified: `ops-report` includes a read-only vector
 hygiene snapshot when a Postgres engine is present, and
 `--require-clean-vector-hygiene` fails the report unless the probe is available
@@ -37,6 +42,10 @@ claim provider bake-off evidence.
 
 ## Automated Checks
 
+- `uv run pytest tests/test_postgres_perf_lanes.py::test_postgres_upsert_assertion_embeds_private_partition tests/test_postgres_perf_lanes.py::test_postgres_vector_backfill_apply_updates_assertions_with_redacted_report tests/test_cli_runtime_tools.py::test_cli_vector_backfill_apply_requires_explicit_confirmation tests/test_cli_runtime_tools.py::test_cli_vector_backfill_apply_emits_redacted_report -q`
+  passed.
+- `uv run ruff check src/mnemosyne/postgres_engine.py src/mnemosyne/cli.py tests/test_postgres_perf_lanes.py tests/test_cli_runtime_tools.py`
+  passed.
 - `uv run pytest tests/test_postgres_perf_lanes.py::test_postgres_vector_backfill_plan_samples_redacted_backlog tests/test_runtime_parity_extensions.py::test_ops_report_can_gate_postgres_vector_hygiene tests/test_runtime_parity_extensions.py::test_ops_dashboard_renderer_escapes_snapshot_values -q`
   passed.
 - `uv run ruff check src/mnemosyne/postgres_engine.py src/mnemosyne/observability.py tests/test_postgres_perf_lanes.py tests/test_runtime_parity_extensions.py`
@@ -94,9 +103,9 @@ claim provider bake-off evidence.
 - The vector hygiene gate is an observability/operator check only. It does not
   run a production backfill and does not prove a live production zero-null-vector
   state without retained operator evidence.
-- The backfill plan is also read-only. It makes candidate evidence easier to
-  retain and review, but it does not generate embeddings or update production
-  rows.
+- The backfill plan is read-only, while `vector-backfill-apply` is the guarded
+  write path. Neither proves production completion without retained operator
+  output and a clean post-backfill hygiene probe.
 - GSD health has only pre-existing, non-repairable governance warnings: numeric
   phase references inside historical text and intentional root-level planning
   artifacts. No repairable GSD health errors remain for this slice.

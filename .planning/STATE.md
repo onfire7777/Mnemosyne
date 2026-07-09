@@ -42,7 +42,7 @@ Status: Tier-B production evidence attested; exact 1:1 blueprint parity rows B1-
 Current status (2026-07-07): Mandatory Tier A source wirings are closed on `main`; Phase 7 is gate-proven; Phase 8 self-hosted production evidence is complete. The former strict-parity blocker, Tier-B production operator evidence against deployed infrastructure, is closed by `capture-bc10`.
 
 Latest checkpoint (2026-07-09): Phase 9 is open as the post-attestation
-performance/refactoring continuation and Plans 09-01 through 09-08 are complete.
+performance/refactoring continuation and Plans 09-01 through 09-09 are complete.
 Retrieval channel parallelism now defaults from capability tier when
 `MNEMOSYNE_PARALLEL_CHANNELS` is absent (`floor` off, `standard` and above on),
 while explicit operator env values still win. SQLite scan-oracle memo hydration
@@ -77,9 +77,13 @@ null-embedding alert/backlog condition is no longer hidden behind retrieval
 hits. The report can now also include a read-only, redacted
 `backfill_plan` for the same Postgres probe, sampling oldest embeddable
 evidence/assertion NULL-vector candidates by row id and SHA-256 hash without
-raw evidence content, raw assertion text, or mutation. This gives operators a
-retained pre-backfill evidence bridge; live backfill execution and retained
-post-backfill proof remain open. Focused
+raw evidence content, raw assertion text, or mutation. The guarded
+`vector-backfill-apply` CLI path now requires `--confirm-apply`, applies a
+bounded Postgres batch, embeds both `public` and `private` assertion partitions
+while keeping `none` non-embeddable, and reports only redacted row ids plus
+content/statement hashes. This gives operators a source-owned execution path;
+retained production backfill output plus a clean post-backfill vector hygiene
+probe remain open. Focused
 retrieval/capability, provider-cache, provider-contract, Postgres perf-lane,
 cargo, native parity, stateless MCP runtime-surface, vector hygiene
 observability, ruff, `git diff --check`, GSD consistency, and local pytest

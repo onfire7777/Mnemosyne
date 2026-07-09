@@ -569,6 +569,169 @@ class PostgresEngine:
             },
         }
 
+    def vector_backfill_apply(
+        self,
+        tenant_id: str,
+        branch: str = "main",
+        limit: int = 100,
+        *,
+        actor: str = "operator",
+        source: str = "vector_backfill_apply",
+    ) -> dict[str, Any]:
+        """Backfill a bounded batch of missing Postgres vectors with redacted output."""
+
+        batch_limit = max(0, int(limit))
+        if batch_limit <= 0:
+            raise ValueError("vector backfill limit must be greater than 0")
+        before = self.vector_hygiene_snapshot(tenant_id, branch=branch)
+        db_tenant_id = _stable_uuid("tenant", tenant_id)
+        with self.connect() as conn:
+            with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                self._set_tenant(cur, db_tenant_id)
+                self._ensure_evidence_vector_schema(cur)
+                cur.execute(
+                    """
+                    SELECT encode(cid, 'hex') AS row_id, content, source_type,
+                           trust_tier, sensitivity, embedding_partition
+                    FROM evidence
+                    WHERE tenant_id = %s
+                      AND branch = %s
+                      AND erased = false
+                      AND embedding IS NULL
+                      AND embedding_partition <> 'none'
+                    ORDER BY transaction_time ASC, cid ASC
+                    LIMIT %s
+                    """,
+                    (db_tenant_id, branch, batch_limit),
+                )
+                evidence_rows = list(cur.fetchall())
+                cur.execute(
+                    """
+                    SELECT id::text AS row_id, subject, predicate, object, scope,
+                           status, trust_tier, sensitivity, embedding_partition
+                    FROM assertions
+                    WHERE tenant_id = %s
+                      AND branch = %s
+                      AND embedding IS NULL
+                      AND embedding_partition <> 'none'
+                    ORDER BY transaction_time ASC, id ASC
+                    LIMIT %s
+                    """,
+                    (db_tenant_id, branch, batch_limit),
+                )
+                assertion_rows = list(cur.fetchall())
+
+        applied: list[dict[str, Any]] = []
+        failures: list[dict[str, Any]] = []
+        for row in evidence_rows:
+            row_id = str(row.get("row_id") or "")
+            content = str(row.get("content") or "")
+            try:
+                ok = self.set_evidence_embedding(
+                    tenant_id,
+                    row_id,
+                    self.adapters.embedding.embed(content),
+                    branch=branch,
+                    actor=actor,
+                    source=source,
+                )
+            except Exception as exc:  # pragma: no cover - defensive for live provider failures.
+                failures.append({"table": "evidence", "row_id": row_id, "reason": type(exc).__name__})
+                continue
+            applied.append(
+                {
+                    "table": "evidence",
+                    "row_id": row_id,
+                    "content_hash_sha256": sha256(content.encode()).hexdigest(),
+                    "embedding_partition": row.get("embedding_partition"),
+                    "applied": bool(ok),
+                }
+            )
+            if not ok:
+                failures.append({"table": "evidence", "row_id": row_id, "reason": "engine_update_failed"})
+
+        if assertion_rows:
+            with self.connect() as conn:
+                with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                    self._set_tenant(cur, db_tenant_id)
+                    self._ensure_evidence_vector_schema(cur)
+                    for row in assertion_rows:
+                        row_id = str(row.get("row_id") or "")
+                        statement = f"{row.get('subject') or ''} {row.get('predicate') or ''} {row.get('object') or ''}"
+                        try:
+                            embedding = self.adapters.embedding.embed(statement)
+                            cur.execute(
+                                """
+                                UPDATE assertions
+                                SET embedding = %s::vector
+                                WHERE tenant_id = %s
+                                  AND branch = %s
+                                  AND id = %s::uuid
+                                  AND embedding IS NULL
+                                  AND embedding_partition <> 'none'
+                                """,
+                                (_vector_literal(embedding), db_tenant_id, branch, row_id),
+                            )
+                            updated = getattr(cur, "rowcount", None)
+                            ok = updated is None or int(updated) > 0
+                            if ok:
+                                self._audit(
+                                    cur,
+                                    db_tenant_id,
+                                    actor,
+                                    "backfill_assertion_embedding",
+                                    row_id,
+                                    {
+                                        "branch": branch,
+                                        "embedding_dims": len(embedding),
+                                        "embedding_partition": row.get("embedding_partition"),
+                                    },
+                                    source=source,
+                                    trust_tier=row.get("trust_tier"),
+                                )
+                        except Exception as exc:  # pragma: no cover - defensive for live provider failures.
+                            failures.append({"table": "assertions", "row_id": row_id, "reason": type(exc).__name__})
+                            continue
+                        applied.append(
+                            {
+                                "table": "assertions",
+                                "row_id": row_id,
+                                "statement_hash_sha256": sha256(
+                                    "\0".join(
+                                        str(row.get(part) or "")
+                                        for part in ("subject", "predicate", "object", "scope")
+                                    ).encode()
+                                ).hexdigest(),
+                                "embedding_partition": row.get("embedding_partition"),
+                                "applied": ok,
+                            }
+                        )
+                        if not ok:
+                            failures.append(
+                                {"table": "assertions", "row_id": row_id, "reason": "engine_update_failed"}
+                            )
+
+        after = self.vector_hygiene_snapshot(tenant_id, branch=branch)
+        return {
+            "backend": "postgres",
+            "tenant_id": tenant_id,
+            "branch": branch,
+            "ok": not failures,
+            "complete": bool(after.get("ok")),
+            "limit_per_table": batch_limit,
+            "applied_count": len([item for item in applied if item["applied"]]),
+            "failed_count": len(failures),
+            "failures": failures,
+            "applied": applied,
+            "before": before,
+            "after": after,
+            "redaction": {
+                "raw_content_omitted": True,
+                "content_hash_sha256_reported": True,
+                "statement_hash_sha256_reported": True,
+            },
+        }
+
     @staticmethod
     def _ensure_entity_registry_schema(cur: Any) -> None:
         cur.execute("ALTER TABLE entities ADD COLUMN IF NOT EXISTS source_evidence_cids BYTEA[] NOT NULL DEFAULT '{}'")
@@ -1747,7 +1910,7 @@ class PostgresEngine:
                 )
                 assertion_embedding = (
                     _vector_literal(self.adapters.embedding.embed(incoming.statement()))
-                    if embedding_partition == "public"
+                    if embedding_partition != "none"
                     else None
                 )
                 cur.execute(
