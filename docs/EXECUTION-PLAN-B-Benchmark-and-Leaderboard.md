@@ -21,7 +21,7 @@ Execution spec, not prose. Two parts: **Part I** benchmarks Mnemosyne credibly; 
 5. **Neutrality is structural, not asserted** (§L0). If we operate the leaderboard *and* compete, the firewall in §L0 is mandatory, or the board is not credible.
 
 **Ground-truth references (source of truth over this doc if they conflict):**
-`docs/research/AI-Memory-Systems-Market-Research-2026.md` (the competitive + benchmark landscape and why LoCoMo is contested), `docs/blueprint/Mnemosyne-Performance-and-Refactoring-Blueprint.md` (§9.2.7 slates LongMemEval/BEAM wiring; §9.7 current honesty charter), `eval/README.md`, `eval/provider_bakeoff/README.md`.
+`docs/research/AI-Memory-Systems-Market-Research-2026.md` (the competitive + benchmark landscape and why LoCoMo is contested), `docs/blueprint/Mnemosyne-Performance-and-Refactoring-Blueprint.md` (§9.2.7 slates LongMemEval/BEAM wiring and carries the current benchmark-posture/honesty rule), `eval/README.md`, `eval/provider_bakeoff/README.md`.
 
 **DoD template:** *Harness/site code merged + artifacts written to the named path + a one-paragraph result note in `leaderboard/reports/` + public data-repo updated (Part II) + independent reproduction on file (headline numbers).*
 
@@ -55,11 +55,11 @@ Execution spec, not prose. Two parts: **Part I** benchmarks Mnemosyne credibly; 
 
 ## 2. Strategic framing — the two hard problems, resolved
 
-**Problem 1 — the honesty-charter tension.** The perf blueprint §9.7 and `eval/provider_bakeoff/README.md` currently forbid citing public benchmarks in headline claims — correct *while none had been run under our discipline.* Resolution: upgrade the prohibition into a **Public-Benchmark Publication Protocol (PBPP)**, stricter than any competitor's practice:
+**Problem 1 — the honesty-charter tension.** The perf blueprint §9.2.7 and `eval/provider_bakeoff/README.md` currently forbid citing public benchmarks in headline claims — correct *while none had been run under our discipline.* Resolution: upgrade the prohibition into a **Public-Benchmark Publication Protocol (PBPP)**, stricter than any competitor's practice:
 
 > **PBPP.** A public number may be published only if (a) produced by the pinned public harness in `eval/public/`, (b) the full artifact bundle (§M2) is released simultaneously, (c) retrieval-recall and LLM-judged-QA are reported in separate columns with judge model + prompt disclosed, (d) the private golden suite is never conflated with it, and (e) an independent third party reproduces it from the bundle. Private-suite numbers remain internal QA and are never headline public claims.
 
-This turns honesty into the moat: our published numbers become the most reproducible in a field full of contested vendor claims. **Task M4:** update `docs/blueprint/…§9.7` and `eval/provider_bakeoff/README.md` to reference PBPP.
+This turns honesty into the moat: our published numbers become the most reproducible in a field full of contested vendor claims. **Task M4:** update `docs/blueprint/…§9.2.7` and `eval/provider_bakeoff/README.md` to reference PBPP.
 
 **Problem 2 — the neutrality paradox.** We cannot be referee and champion on trust alone; vendor-run-where-they-win boards get dismissed (OmniMemEval, omegamax, the LMArena "Illusion"). Resolution (§L0): the leaderboard runs under **independent governance with a hard firewall**; the operator **runs every system itself under one identical harness** (killing the "you misconfigured us" defense that defined the mem0↔Zep dispute); Mnemosyne is entered and scored **by the same rules as everyone else**; all raw artifacts are public. We win by having the best *reproducible* numbers on neutral turf — not by controlling the scoreboard.
 
@@ -84,7 +84,7 @@ Every public result ships: pinned harness commit + `uv`/`pip` runner; per-questi
 Commission a genuine external party to reproduce every headline public number from the bundle before any public claim. **DoD:** signed reproduction note in `leaderboard/reports/`.
 
 ### M4 — Charter → PBPP
-Update `§9.7` and the provider-bakeoff README to reference PBPP (§2). **DoD:** docs updated; CI lint points contributors to PBPP.
+Update blueprint `§9.2.7` and the provider-bakeoff README to reference PBPP (§2). **DoD:** docs updated; CI lint points contributors to PBPP.
 
 ### Benchmark slate (deterministic-first)
 | Tier | Benchmark | Track | Scoring | Why |
