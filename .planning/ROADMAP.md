@@ -490,7 +490,7 @@ contract; CONFIG-DRIFT-CHECKS env registry; GSD/CBM/gbrain hygiene.
   5. Native acceleration changes release the GIL only around Rust-owned compute
      loops and preserve scalar arithmetic/order exactly.
 
-**Plans:** 7 plans
+**Plans:** 8 plans
 
 Plans:
 
@@ -501,8 +501,9 @@ Plans:
 - [x] 09-05-PLAN.md — Postgres `none` partition coverage and tuning profile.
 - [x] 09-06-PLAN.md — Stateless MCP warm-bundle reuse.
 - [x] 09-07-PLAN.md — Postgres vector hygiene ops-report gate.
+- [x] 09-08-PLAN.md — Postgres vector backfill readiness.
 
-Checkpoint: Phase 9 Plans 01-07 are implemented and locally verified. Retrieval
+Checkpoint: Phase 9 Plans 01-08 are implemented and locally verified. Retrieval
 channel parallelism now defaults from capability tier when
 `MNEMOSYNE_PARALLEL_CHANNELS` is absent (`floor` off, `standard` and above on),
 explicit operator env values still win, and SQLite scan-oracle memo hydration is
@@ -524,7 +525,10 @@ without silently applying it. `ops-report` now includes a read-only Postgres
 vector hygiene snapshot and `--require-clean-vector-hygiene` can fail the report
 when evidence/assertion embeddable NULL vectors or illegal `none`-partition
 vectors remain, making the production backfill/alert gate explicit without
-running a backfill. Focused retrieval/capability,
+running a backfill. The report can now also include a read-only, redacted
+backfill plan that samples evidence/assertion backlog candidates by row id and
+hash without raw content or mutation, so operators can correlate retained
+backfill evidence before running the real backfill. Focused retrieval/capability,
 provider-cache/provider-contract, Postgres perf-lane, cargo, native parity,
 ruff, `git diff --check`, GSD consistency, and local pytest suites pass for the
 shipped Phase 09 slices.

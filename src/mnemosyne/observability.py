@@ -170,6 +170,15 @@ def _postgres_vector_hygiene(engine: Any, tenant_id: str) -> dict[str, Any]:
             "ok": False,
             "error": "postgres vector hygiene probe returned a non-object",
         }
+    plan_probe = getattr(engine, "vector_backfill_plan", None)
+    if plan_probe is not None:
+        try:
+            plan = plan_probe(tenant_id)
+        except Exception as exc:  # noqa: BLE001 - ops report should expose probe failure.
+            plan = {"available": True, "ok": False, "error": str(exc)}
+        if not isinstance(plan, dict):
+            plan = {"available": True, "ok": False, "error": "postgres vector backfill plan returned a non-object"}
+        snapshot = {**snapshot, "backfill_plan": {"available": True, **plan}}
     return {"available": True, **snapshot}
 
 
@@ -241,6 +250,9 @@ def render_ops_dashboard(report: dict[str, Any]) -> str:
         ("None-partition vectors", vector_hygiene.get("none_partition_vectors", "n/a")),
         ("Stored vectors", vector_hygiene.get("stored_vectors", "n/a")),
         ("Live rows", vector_hygiene.get("live_rows", "n/a")),
+        ("Backfill backlog", (vector_hygiene.get("backfill_plan") or {}).get("total_backlog", "n/a")),
+        ("Backfill sampled", (vector_hygiene.get("backfill_plan") or {}).get("sampled", "n/a")),
+        ("Backfill truncated", (vector_hygiene.get("backfill_plan") or {}).get("truncated", "n/a")),
     ]
     sections = "\n".join(
         [

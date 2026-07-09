@@ -475,6 +475,100 @@ class PostgresEngine:
             "live_rows": int(row.get("live_rows") or 0),
         }
 
+    def vector_backfill_plan(self, tenant_id: str, branch: str = "main", limit: int = 20) -> dict[str, Any]:
+        """Read-only, redacted sample of rows blocking clean vector hygiene."""
+
+        sample_limit = max(0, int(limit))
+        snapshot = self.vector_hygiene_snapshot(tenant_id, branch=branch)
+        db_tenant_id = _stable_uuid("tenant", tenant_id)
+        evidence_rows: list[dict[str, Any]] = []
+        assertion_rows: list[dict[str, Any]] = []
+        if sample_limit:
+            with self.connect() as conn:
+                with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                    self._set_tenant(cur, db_tenant_id)
+                    cur.execute(
+                        """
+                        SELECT encode(cid, 'hex') AS row_id, content, source_type,
+                               trust_tier, sensitivity, embedding_partition
+                        FROM evidence
+                        WHERE tenant_id = %s
+                          AND branch = %s
+                          AND erased = false
+                          AND embedding IS NULL
+                          AND embedding_partition <> 'none'
+                        ORDER BY transaction_time ASC, cid ASC
+                        LIMIT %s
+                        """,
+                        (db_tenant_id, branch, sample_limit),
+                    )
+                    evidence_rows = list(cur.fetchall())
+                    cur.execute(
+                        """
+                        SELECT id::text AS row_id, subject, predicate, object, scope,
+                               status, trust_tier, sensitivity, embedding_partition
+                        FROM assertions
+                        WHERE tenant_id = %s
+                          AND branch = %s
+                          AND embedding IS NULL
+                          AND embedding_partition <> 'none'
+                        ORDER BY transaction_time ASC, id ASC
+                        LIMIT %s
+                        """,
+                        (db_tenant_id, branch, sample_limit),
+                    )
+                    assertion_rows = list(cur.fetchall())
+        evidence_candidates = [
+            {
+                "table": "evidence",
+                "row_id": str(row.get("row_id") or ""),
+                "content_hash_sha256": sha256(str(row.get("content") or "").encode()).hexdigest(),
+                "source_type": row.get("source_type"),
+                "trust_tier": row.get("trust_tier"),
+                "sensitivity": int(row.get("sensitivity") or 0),
+                "embedding_partition": row.get("embedding_partition"),
+            }
+            for row in evidence_rows
+        ]
+        assertion_candidates = [
+            {
+                "table": "assertions",
+                "row_id": str(row.get("row_id") or ""),
+                "statement_hash_sha256": sha256(
+                    "\0".join(
+                        str(row.get(part) or "")
+                        for part in ("subject", "predicate", "object", "scope")
+                    ).encode()
+                ).hexdigest(),
+                "status": row.get("status"),
+                "trust_tier": row.get("trust_tier"),
+                "sensitivity": int(row.get("sensitivity") or 0),
+                "embedding_partition": row.get("embedding_partition"),
+            }
+            for row in assertion_rows
+        ]
+        evidence_backlog = int(snapshot.get("evidence_embeddable_null_embeddings") or 0)
+        assertion_backlog = int(snapshot.get("assertion_embeddable_null_embeddings") or 0)
+        return {
+            "backend": "postgres",
+            "tenant_id": tenant_id,
+            "branch": branch,
+            "ok": evidence_backlog == 0 and assertion_backlog == 0,
+            "limit_per_table": sample_limit,
+            "evidence_backlog": evidence_backlog,
+            "assertion_backlog": assertion_backlog,
+            "total_backlog": evidence_backlog + assertion_backlog,
+            "sampled": len(evidence_candidates) + len(assertion_candidates),
+            "truncated": evidence_backlog > len(evidence_candidates)
+            or assertion_backlog > len(assertion_candidates),
+            "candidates": evidence_candidates + assertion_candidates,
+            "redaction": {
+                "raw_content_omitted": True,
+                "content_hash_sha256_reported": True,
+                "statement_hash_sha256_reported": True,
+            },
+        }
+
     @staticmethod
     def _ensure_entity_registry_schema(cur: Any) -> None:
         cur.execute("ALTER TABLE entities ADD COLUMN IF NOT EXISTS source_evidence_cids BYTEA[] NOT NULL DEFAULT '{}'")
