@@ -139,6 +139,21 @@ Realized over these concrete loci:
   the provider miss path would return for that exact model identity. This cache
   is process-local transport acceleration, not the durable subject-scoped
   SQLite A1 `embedding_cache` table (`tests/test_provider_batching.py`).
+- **`MNEMOSYNE_EMBEDDING_CACHE_PATH`** — optional SQLite file path for the HTTP
+  embedding provider's durable vector cache. Default unset, so durable provider
+  cache is off. When set, rows store hashed cache scope/provider/model/revision/
+  API-key/text identity plus normalized vector JSON; raw text, raw URLs, and raw
+  API keys are not stored. Existing redaction patterns skip durable cache
+  reads/writes for secret-like input. This is a provider transport cache, not
+  the subject-scoped SQLite engine `embedding_cache` table.
+- **`MNEMOSYNE_EMBEDDING_CACHE_TTL_SECONDS`** — TTL for durable HTTP embedding
+  cache rows. Default `86400`; expired rows are deleted before the provider miss
+  path runs. Non-positive values keep durable rows until evicted by
+  `MNEMOSYNE_EMBEDDING_CACHE_SIZE`.
+- **`MNEMOSYNE_EMBEDDING_CACHE_SCOPE`** — privacy-boundary label included in
+  both process-local and durable HTTP embedding cache keys. Default `default`;
+  multi-tenant deployments that share a durable cache path should set this to a
+  tenant/workload boundary instead of relying on the default shared label.
 - **`MNEMOSYNE_EMBEDDING_MODEL_REVISION`** — optional model-identity/cache-bust
   salt for `HttpEmbeddingProvider`. Set it to an immutable model digest or
   deployment revision whenever the same `MNEMOSYNE_EMBEDDING_MODEL` name can

@@ -1166,6 +1166,12 @@ def test_cli_exposes_retrieval_provider_flags() -> None:
             "sha256:qwen3",
             "--embedding-cache-size",
             "31",
+            "--embedding-cache-path",
+            "/tmp/mnemo-embedding-cache.sqlite",
+            "--embedding-cache-ttl-seconds",
+            "120",
+            "--embedding-cache-scope",
+            "tenant-provider-check",
             "--reranker-provider",
             "http",
             "--reranker-url",
@@ -1180,6 +1186,9 @@ def test_cli_exposes_retrieval_provider_flags() -> None:
     assert args.embedding_model == "qwen3-embedding"
     assert args.embedding_model_revision == "sha256:qwen3"
     assert args.embedding_cache_size == 31
+    assert args.embedding_cache_path == "/tmp/mnemo-embedding-cache.sqlite"
+    assert args.embedding_cache_ttl_seconds == 120
+    assert args.embedding_cache_scope == "tenant-provider-check"
     assert args.reranker_provider == "http"
     assert args.reranker_model == "qwen3-reranker"
 

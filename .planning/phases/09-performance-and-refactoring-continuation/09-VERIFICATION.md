@@ -2,12 +2,19 @@
 phase: 09-performance-and-refactoring-continuation
 status: passed
 verified: 2026-07-09
-scope: plan-09-09
+scope: plan-09-10
 ---
 
 # Phase 09 Verification
 
-Latest verified slice: Phase 09 Plan 09. The source-owned guarded Postgres
+Latest verified slice: Phase 09 Plan 10. The source-owned durable HTTP
+embedding cache slice is locally verified: optional SQLite-backed cache entries
+survive provider instances, cache scope isolates durable hits, TTL expiry falls
+back to the provider, secret-like input is not durably persisted, CLI/env/config
+builders carry the same cache knobs, and `provider-check` exposes cache status
+without using cached latency probes.
+
+Previous verified slice: Phase 09 Plan 09. The source-owned guarded Postgres
 vector backfill apply path is locally verified: private assertion partitions
 are embedded on write, `vector-backfill-apply` refuses mutation without
 `--confirm-apply`, and bounded apply reports omit raw evidence/assertion text.
@@ -42,6 +49,10 @@ claim provider bake-off evidence.
 
 ## Automated Checks
 
+- `uv run pytest tests/test_provider_batching.py::test_http_embedding_durable_cache_survives_provider_instances tests/test_provider_batching.py::test_http_embedding_durable_cache_is_scoped tests/test_provider_batching.py::test_http_embedding_durable_cache_honors_ttl tests/test_provider_batching.py::test_http_embedding_durable_cache_skips_secret_like_text tests/test_provider_batching.py::test_http_embedding_cache_report_does_not_create_durable_file tests/test_cli_runtime_tools.py::test_cli_exposes_retrieval_provider_flags tests/test_parity_retrieval.py::test_env_builder_threads_http_embedding_cache_knobs tests/test_parity_retrieval.py::test_registry_builds_http_and_command_providers -q`
+  passed.
+- `uv run ruff check src/mnemosyne/retrieval.py src/mnemosyne/cli.py src/mnemosyne/providers/__init__.py tests/test_provider_batching.py tests/test_cli_runtime_tools.py tests/test_parity_retrieval.py`
+  passed.
 - `uv run pytest tests/test_postgres_perf_lanes.py::test_postgres_upsert_assertion_embeds_private_partition tests/test_postgres_perf_lanes.py::test_postgres_vector_backfill_apply_updates_assertions_with_redacted_report tests/test_cli_runtime_tools.py::test_cli_vector_backfill_apply_requires_explicit_confirmation tests/test_cli_runtime_tools.py::test_cli_vector_backfill_apply_emits_redacted_report -q`
   passed.
 - `uv run ruff check src/mnemosyne/postgres_engine.py src/mnemosyne/cli.py tests/test_postgres_perf_lanes.py tests/test_cli_runtime_tools.py`
@@ -106,6 +117,9 @@ claim provider bake-off evidence.
 - The backfill plan is read-only, while `vector-backfill-apply` is the guarded
   write path. Neither proves production completion without retained operator
   output and a clean post-backfill hygiene probe.
+- The durable provider cache is default-off unless a cache path is configured.
+  Local tests prove byte-identical reuse and safety gates, not production
+  hit-rate or latency wins.
 - GSD health has only pre-existing, non-repairable governance warnings: numeric
   phase references inside historical text and intentional root-level planning
   artifacts. No repairable GSD health errors remain for this slice.

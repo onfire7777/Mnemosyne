@@ -8,8 +8,10 @@ order as) sequential per-item ``embed`` calls.
 from __future__ import annotations
 
 import json
+import sqlite3
 import threading
 from hashlib import sha256
+from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import SimpleNamespace
 from typing import Any, Iterator
@@ -23,7 +25,12 @@ from mnemosyne.consolidation import (
     embed_texts_batched,
 )
 from mnemosyne.models import Evidence
-from mnemosyne.retrieval import HashingEmbeddingProvider, HttpEmbeddingProvider
+from mnemosyne.retrieval import (
+    _HTTP_EMBEDDING_CACHE,
+    _HTTP_EMBEDDING_CACHE_LOCK,
+    HashingEmbeddingProvider,
+    HttpEmbeddingProvider,
+)
 from mnemosyne.text import hashing_embedding
 
 
@@ -95,6 +102,9 @@ def _provider(
     cache_size: int = 0,
     model: str | None = None,
     model_revision: str | None = None,
+    cache_path: str | None = None,
+    cache_ttl_seconds: float = 86400.0,
+    cache_scope: str = "default",
 ) -> HttpEmbeddingProvider:
     return HttpEmbeddingProvider(
         url=f"http://127.0.0.1:{server.server_address[1]}/embed",
@@ -102,7 +112,15 @@ def _provider(
         cache_size=cache_size,
         model=model,
         model_revision=model_revision,
+        cache_path=cache_path,
+        cache_ttl_seconds=cache_ttl_seconds,
+        cache_scope=cache_scope,
     )
+
+
+def _clear_http_embedding_cache() -> None:
+    with _HTTP_EMBEDDING_CACHE_LOCK:
+        _HTTP_EMBEDDING_CACHE.clear()
 
 
 def test_embed_many_matches_sequential_in_one_batch_request(embed_server: ThreadingHTTPServer) -> None:
@@ -185,6 +203,126 @@ def test_http_embedding_cache_size_zero_disables_reuse(embed_server: ThreadingHT
 
     provider.embed_many(["repeat", "other"])
     assert embed_server.requests == [["repeat", "other"]]
+
+
+def test_http_embedding_durable_cache_survives_provider_instances(
+    embed_server: ThreadingHTTPServer,
+    tmp_path: Path,
+) -> None:
+    cache_path = tmp_path / "embedding-cache.sqlite"
+    first = _provider(
+        embed_server,
+        cache_size=8,
+        cache_path=str(cache_path),
+        cache_scope="tenant-a",
+        model_revision="sha256:durable-a",
+    )
+    expected = first.embed("durable")
+    _clear_http_embedding_cache()
+    embed_server.requests.clear()
+
+    second = _provider(
+        embed_server,
+        cache_size=8,
+        cache_path=str(cache_path),
+        cache_scope="tenant-a",
+        model_revision="sha256:durable-a",
+    )
+    assert second.embed("durable") == expected
+    assert embed_server.requests == []
+    assert second.cache_report()["durable_entries"] == 1
+
+
+def test_http_embedding_durable_cache_is_scoped(
+    embed_server: ThreadingHTTPServer,
+    tmp_path: Path,
+) -> None:
+    cache_path = tmp_path / "embedding-cache.sqlite"
+    _provider(
+        embed_server,
+        cache_size=8,
+        cache_path=str(cache_path),
+        cache_scope="tenant-a",
+        model_revision="sha256:scope-a",
+    ).embed("same text")
+    _clear_http_embedding_cache()
+    embed_server.requests.clear()
+
+    scoped_b = _provider(
+        embed_server,
+        cache_size=8,
+        cache_path=str(cache_path),
+        cache_scope="tenant-b",
+        model_revision="sha256:scope-a",
+    )
+    scoped_b.embed("same text")
+    assert embed_server.requests == ["same text"]
+
+
+def test_http_embedding_durable_cache_honors_ttl(
+    embed_server: ThreadingHTTPServer,
+    tmp_path: Path,
+) -> None:
+    cache_path = tmp_path / "embedding-cache.sqlite"
+    provider = _provider(
+        embed_server,
+        cache_size=8,
+        cache_path=str(cache_path),
+        cache_scope="tenant-ttl",
+        cache_ttl_seconds=1.0,
+        model_revision="sha256:ttl-a",
+    )
+    provider.embed("expires")
+    with sqlite3.connect(cache_path) as conn:
+        conn.execute("UPDATE http_embedding_cache SET created_at = created_at - 5")
+    _clear_http_embedding_cache()
+    embed_server.requests.clear()
+
+    provider.embed("expires")
+    assert embed_server.requests == ["expires"]
+
+
+def test_http_embedding_durable_cache_skips_secret_like_text(
+    embed_server: ThreadingHTTPServer,
+    tmp_path: Path,
+) -> None:
+    cache_path = tmp_path / "embedding-cache.sqlite"
+    secret_text = "token " + "ghp_" + "abcdefghijklmnopqrstuvwxyz123456"
+    provider = _provider(
+        embed_server,
+        cache_size=8,
+        cache_path=str(cache_path),
+        cache_scope="tenant-secret",
+        model_revision="sha256:secret-a",
+    )
+    provider.embed(secret_text)
+    _clear_http_embedding_cache()
+    embed_server.requests.clear()
+
+    provider.embed(secret_text)
+    assert embed_server.requests == [secret_text]
+    with sqlite3.connect(cache_path) as conn:
+        table = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'http_embedding_cache'"
+        ).fetchone()
+        row = conn.execute("SELECT COUNT(*) FROM http_embedding_cache").fetchone() if table else (0,)
+    assert row == (0,)
+
+
+def test_http_embedding_cache_report_does_not_create_durable_file(
+    embed_server: ThreadingHTTPServer,
+    tmp_path: Path,
+) -> None:
+    cache_path = tmp_path / "missing-cache.sqlite"
+    provider = _provider(
+        embed_server,
+        cache_size=8,
+        cache_path=str(cache_path),
+        cache_scope="tenant-report",
+    )
+
+    assert provider.cache_report()["durable_entries"] == 0
+    assert not cache_path.exists()
 
 
 def test_hashing_provider_embed_many_matches_per_item() -> None:

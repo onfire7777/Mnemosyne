@@ -916,6 +916,26 @@ def test_registry_default_build_matches_env_builder() -> None:
     assert from_config.lexical_backend == "postgres-fts"
 
 
+def test_env_builder_threads_http_embedding_cache_knobs(monkeypatch: pytest.MonkeyPatch) -> None:
+    prefix = "PARITYRX"
+    monkeypatch.setenv(f"{prefix}_EMBEDDING_PROVIDER", "http")
+    monkeypatch.setenv(f"{prefix}_EMBEDDING_URL", "https://embed.test/v1")
+    monkeypatch.setenv(f"{prefix}_EMBEDDING_MODEL_REVISION", "sha256:env")
+    monkeypatch.setenv(f"{prefix}_EMBEDDING_CACHE_SIZE", "17")
+    monkeypatch.setenv(f"{prefix}_EMBEDDING_CACHE_PATH", "/tmp/mnemo-env-cache.sqlite")
+    monkeypatch.setenv(f"{prefix}_EMBEDDING_CACHE_TTL_SECONDS", "456")
+    monkeypatch.setenv(f"{prefix}_EMBEDDING_CACHE_SCOPE", "tenant-env")
+
+    adapters = retrieval_mod.retrieval_adapters_from_env(prefix=prefix)
+
+    assert isinstance(adapters.embedding, providers_pkg.HttpEmbeddingProvider)
+    assert adapters.embedding.model_revision == "sha256:env"
+    assert adapters.embedding.cache_size == 17
+    assert adapters.embedding.cache_path == "/tmp/mnemo-env-cache.sqlite"
+    assert adapters.embedding.cache_ttl_seconds == 456.0
+    assert adapters.embedding.cache_scope == "tenant-env"
+
+
 def test_registry_builds_http_and_command_providers() -> None:
     adapters = build_adapters_from_config(
         {
@@ -924,6 +944,9 @@ def test_registry_builds_http_and_command_providers() -> None:
             "embedding_model_revision": "sha256:def",
             "embedding_dims": 16,
             "embedding_cache_size": 19,
+            "embedding_cache_path": "/tmp/mnemo-provider-cache.sqlite",
+            "embedding_cache_ttl_seconds": 123.0,
+            "embedding_cache_scope": "tenant-registry",
             "reranker_provider": "http",
             "reranker_url": "https://rr.test/v1",
             "lexical_provider": "command",
@@ -936,6 +959,9 @@ def test_registry_builds_http_and_command_providers() -> None:
     assert adapters.embedding.dims == 16
     assert adapters.embedding.model_revision == "sha256:def"
     assert adapters.embedding.cache_size == 19
+    assert adapters.embedding.cache_path == "/tmp/mnemo-provider-cache.sqlite"
+    assert adapters.embedding.cache_ttl_seconds == 123.0
+    assert adapters.embedding.cache_scope == "tenant-registry"
     assert isinstance(adapters.reranker, providers_pkg.HttpReranker)
     assert isinstance(adapters.lexical_retriever, providers_pkg.CommandLexicalRetriever)
     assert isinstance(adapters.graph_retriever, providers_pkg.CommandGraphRetriever)

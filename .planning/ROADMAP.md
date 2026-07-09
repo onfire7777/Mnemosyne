@@ -490,7 +490,7 @@ contract; CONFIG-DRIFT-CHECKS env registry; GSD/CBM/gbrain hygiene.
   5. Native acceleration changes release the GIL only around Rust-owned compute
      loops and preserve scalar arithmetic/order exactly.
 
-**Plans:** 9 plans
+**Plans:** 10 plans
 
 Plans:
 
@@ -503,8 +503,9 @@ Plans:
 - [x] 09-07-PLAN.md — Postgres vector hygiene ops-report gate.
 - [x] 09-08-PLAN.md — Postgres vector backfill readiness.
 - [x] 09-09-PLAN.md — Guarded Postgres vector backfill apply.
+- [x] 09-10-PLAN.md — Durable HTTP embedding cache.
 
-Checkpoint: Phase 9 Plans 01-09 are implemented and locally verified. Retrieval
+Checkpoint: Phase 9 Plans 01-10 are implemented and locally verified. Retrieval
 channel parallelism now defaults from capability tier when
 `MNEMOSYNE_PARALLEL_CHANNELS` is absent (`floor` off, `standard` and above on),
 explicit operator env values still win, and SQLite scan-oracle memo hydration is
@@ -535,7 +536,11 @@ now provides the guarded source-owned execution path: it requires
 SHA-256 hashes, and fixes assertion writes so both `public` and `private`
 embedding partitions are stored while `none` remains non-embeddable. Retained
 production output from that command plus a clean post-backfill hygiene probe
-remain required before production backfill evidence is closed. Focused
+remain required before production backfill evidence is closed. The HTTP
+embedding cache now has an optional durable SQLite path with TTL and explicit
+cache-scope knobs, stores only hashed identity plus vectors, skips durable use
+for redaction-positive text, and surfaces cache status in `provider-check`
+without using cache hits for latency evidence. Focused
 retrieval/capability, provider-cache/provider-contract, Postgres perf-lane,
 cargo, native parity, ruff, `git diff --check`, GSD consistency, and local
 pytest suites pass for the shipped Phase 09 slices.

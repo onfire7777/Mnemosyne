@@ -132,6 +132,9 @@ def _build_http_embedding(config: Mapping[str, Any]) -> EmbeddingProvider:
         dims=_as_int(config.get("embedding_dims"), default=1024),
         timeout_seconds=_as_float(config.get("retrieval_timeout"), default=30.0),
         cache_size=_as_int(config.get("embedding_cache_size"), default=8192),
+        cache_path=config.get("embedding_cache_path"),
+        cache_ttl_seconds=_as_float(config.get("embedding_cache_ttl_seconds"), default=86400.0),
+        cache_scope=str(config.get("embedding_cache_scope") or "default"),
     )
 
 
@@ -463,7 +466,9 @@ def build_adapters_from_config(
     Recognized keys (all optional, defaults match the env builder):
     ``embedding_provider`` (default ``"local"``), ``embedding_dims`` (1024),
     ``embedding_url`` / ``embedding_model`` / ``embedding_model_revision`` /
-    ``embedding_api_key`` / ``embedding_cache_size``;
+    ``embedding_api_key`` / ``embedding_cache_size`` /
+    ``embedding_cache_path`` / ``embedding_cache_ttl_seconds`` /
+    ``embedding_cache_scope``;
     ``reranker_provider`` (``"local"``), ``reranker_url`` / ``reranker_model`` /
     ``reranker_api_key``; ``lexical_provider`` (``"postgres"``),
     ``lexical_command`` / ``lexical_backend`` (``"postgres-fts"``);

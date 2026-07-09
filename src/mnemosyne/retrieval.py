@@ -8,8 +8,10 @@ import math
 import os
 import re
 import shlex
+import sqlite3
 import subprocess
 import tempfile
+import time
 import urllib.error
 import urllib.request
 from collections import Counter, OrderedDict
@@ -18,6 +20,7 @@ from datetime import UTC, datetime
 from threading import RLock
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
+from mnemosyne.evidence_redaction import redaction_findings
 from mnemosyne.media_limits import DEFAULT_MAX_INGEST_BYTES, enforce_byte_limit, validate_byte_limit
 from mnemosyne.models import Hit, parse_dt, utc_now
 from mnemosyne.network_safety import safe_urlopen, validate_fetch_url
@@ -37,7 +40,8 @@ WORKSPACE_RETRIEVAL_ADVISORY_FILTER_KEYS = (
     "workspace_retrieval_advisory_mode",
 )
 WORKSPACE_CONTROLLER_FILTER_KEYS = WORKSPACE_BROADCAST_FILTER_KEYS + WORKSPACE_RETRIEVAL_ADVISORY_FILTER_KEYS
-_HTTP_EMBEDDING_CACHE: OrderedDict[tuple[str, str, str, int, str, str], tuple[float, ...]] = OrderedDict()
+HttpEmbeddingCacheKey = tuple[str, str, str, str, int, str, str]
+_HTTP_EMBEDDING_CACHE: OrderedDict[HttpEmbeddingCacheKey, tuple[float, ...]] = OrderedDict()
 _HTTP_EMBEDDING_CACHE_LOCK = RLock()
 QUERY_SUPPORT_STOPWORDS = {
     "a",
@@ -1121,12 +1125,18 @@ class HttpEmbeddingProvider:
     query_prefix: str = "query: "
     model_revision: str | None = None
     cache_size: int = 8192
+    cache_path: str | None = None
+    cache_ttl_seconds: float = 86400.0
+    cache_scope: str = "default"
 
     def embed(self, text: str) -> list[float]:
         cache_key = _http_embedding_cache_key(self, text)
         if self.cache_size > 0:
             cached = _http_embedding_cache_get(cache_key)
+            if cached is None:
+                cached = _http_embedding_disk_cache_get(self, cache_key, text)
             if cached is not None:
+                _http_embedding_cache_put(cache_key, cached, self.cache_size)
                 return cached
         payload: dict[str, object] = {"input": text}
         if self.model:
@@ -1135,6 +1145,7 @@ class HttpEmbeddingProvider:
         vector = _extract_embedding(response)
         normalized = _normalize_vector(vector, self.dims)
         _http_embedding_cache_put(cache_key, normalized, self.cache_size)
+        _http_embedding_disk_cache_put(self, cache_key, text, normalized, self.cache_size)
         return normalized
 
     def embed_many(self, texts: Sequence[str]) -> list[list[float]]:
@@ -1150,13 +1161,18 @@ class HttpEmbeddingProvider:
         if not items:
             return []
         results: list[list[float] | None] = [None] * len(items)
-        missing: list[tuple[int, str, tuple[str, str, str, int, str, str]]] = []
+        missing: list[tuple[int, str, HttpEmbeddingCacheKey]] = []
         for index, text in enumerate(items):
             cache_key = _http_embedding_cache_key(self, text)
-            cached = _http_embedding_cache_get(cache_key) if self.cache_size > 0 else None
+            cached = None
+            if self.cache_size > 0:
+                cached = _http_embedding_cache_get(cache_key)
+                if cached is None:
+                    cached = _http_embedding_disk_cache_get(self, cache_key, text)
             if cached is None:
                 missing.append((index, text, cache_key))
             else:
+                _http_embedding_cache_put(cache_key, cached, self.cache_size)
                 results[index] = cached
         if not missing:
             return [vector for vector in results if vector is not None]
@@ -1184,23 +1200,46 @@ class HttpEmbeddingProvider:
         for (index, _text, cache_key), vector in zip(missing, vectors, strict=True):
             normalized = _normalize_vector(vector, self.dims)
             _http_embedding_cache_put(cache_key, normalized, self.cache_size)
+            _http_embedding_disk_cache_put(self, cache_key, _text, normalized, self.cache_size)
             results[index] = normalized
         return [vector for vector in results if vector is not None]
 
     def embed_query(self, query: str) -> list[float]:
         return self.embed(_with_query_prefix(query, self.query_prefix))
 
+    def cache_report(self) -> dict[str, object]:
+        report: dict[str, object] = {
+            "process_lru_enabled": self.cache_size > 0,
+            "process_lru_limit": max(0, int(self.cache_size)),
+            "process_lru_entries": _http_embedding_memory_cache_size(),
+            "durable_enabled": bool(self.cache_path and self.cache_size > 0),
+            "durable_configured": bool(self.cache_path),
+            "cache_scope_sha256": _http_embedding_cache_digest(_http_embedding_cache_scope(self)),
+            "ttl_seconds": float(self.cache_ttl_seconds),
+        }
+        if self.cache_path and self.cache_size > 0:
+            report.update(_http_embedding_disk_cache_stats(self))
+        return report
+
 
 def _http_embedding_cache_key(
     provider: HttpEmbeddingProvider,
     text: str,
-) -> tuple[str, str, str, int, str, str]:
+) -> HttpEmbeddingCacheKey:
     auth = hashlib.sha256((provider.api_key or "").encode("utf-8")).hexdigest()
     text_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
-    return (provider.url, provider.model or "", provider.model_revision or "", provider.dims, auth, text_hash)
+    return (
+        _http_embedding_cache_scope(provider),
+        provider.url,
+        provider.model or "",
+        provider.model_revision or "",
+        provider.dims,
+        auth,
+        text_hash,
+    )
 
 
-def _http_embedding_cache_get(key: tuple[str, str, str, int, str, str]) -> list[float] | None:
+def _http_embedding_cache_get(key: HttpEmbeddingCacheKey) -> list[float] | None:
     with _HTTP_EMBEDDING_CACHE_LOCK:
         vector = _HTTP_EMBEDDING_CACHE.get(key)
         if vector is None:
@@ -1210,7 +1249,7 @@ def _http_embedding_cache_get(key: tuple[str, str, str, int, str, str]) -> list[
 
 
 def _http_embedding_cache_put(
-    key: tuple[str, str, str, int, str, str],
+    key: HttpEmbeddingCacheKey,
     vector: Sequence[float],
     max_size: int,
 ) -> None:
@@ -1221,6 +1260,239 @@ def _http_embedding_cache_put(
         _HTTP_EMBEDDING_CACHE.move_to_end(key)
         while len(_HTTP_EMBEDDING_CACHE) > max_size:
             _HTTP_EMBEDDING_CACHE.popitem(last=False)
+
+
+def _http_embedding_memory_cache_size() -> int:
+    with _HTTP_EMBEDDING_CACHE_LOCK:
+        return len(_HTTP_EMBEDDING_CACHE)
+
+
+def _http_embedding_cache_scope(provider: HttpEmbeddingProvider) -> str:
+    scope = str(provider.cache_scope or "default").strip()
+    return scope or "default"
+
+
+def _http_embedding_cache_digest(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _http_embedding_disk_cache_key(key: HttpEmbeddingCacheKey) -> tuple[str, str, str, str, int, str, str]:
+    scope, url, model, model_revision, dims, auth, text_hash = key
+    return (
+        _http_embedding_cache_digest(scope),
+        _http_embedding_cache_digest(url),
+        _http_embedding_cache_digest(model),
+        _http_embedding_cache_digest(model_revision),
+        dims,
+        auth,
+        text_hash,
+    )
+
+
+def _http_embedding_disk_cache_safe(provider: HttpEmbeddingProvider, text: str) -> bool:
+    return bool(provider.cache_path and provider.cache_size > 0) and not redaction_findings(
+        "http_embedding_cache_input",
+        text,
+    )
+
+
+def _http_embedding_disk_cache_connect(provider: HttpEmbeddingProvider) -> sqlite3.Connection:
+    if not provider.cache_path:
+        raise ValueError("HTTP embedding durable cache path is not configured")
+    path = os.path.expanduser(provider.cache_path)
+    parent = os.path.dirname(path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    conn = sqlite3.connect(path)
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
+    conn.execute("PRAGMA busy_timeout=5000")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS http_embedding_cache (
+            scope_sha256 TEXT NOT NULL,
+            url_sha256 TEXT NOT NULL,
+            model_sha256 TEXT NOT NULL,
+            model_revision_sha256 TEXT NOT NULL,
+            dims INTEGER NOT NULL,
+            api_key_sha256 TEXT NOT NULL,
+            text_sha256 TEXT NOT NULL,
+            vector_json TEXT NOT NULL,
+            created_at REAL NOT NULL,
+            last_access_at REAL NOT NULL,
+            PRIMARY KEY (
+                scope_sha256,
+                url_sha256,
+                model_sha256,
+                model_revision_sha256,
+                dims,
+                api_key_sha256,
+                text_sha256
+            )
+        )
+        """
+    )
+    return conn
+
+
+def _http_embedding_disk_cache_get(
+    provider: HttpEmbeddingProvider,
+    key: HttpEmbeddingCacheKey,
+    text: str,
+) -> list[float] | None:
+    if not _http_embedding_disk_cache_safe(provider, text):
+        return None
+    disk_key = _http_embedding_disk_cache_key(key)
+    now = time.time()
+    ttl = float(provider.cache_ttl_seconds)
+    with _HTTP_EMBEDDING_CACHE_LOCK, _http_embedding_disk_cache_connect(provider) as conn:
+        row = conn.execute(
+            """
+            SELECT vector_json, created_at
+            FROM http_embedding_cache
+            WHERE scope_sha256 = ?
+              AND url_sha256 = ?
+              AND model_sha256 = ?
+              AND model_revision_sha256 = ?
+              AND dims = ?
+              AND api_key_sha256 = ?
+              AND text_sha256 = ?
+            """,
+            disk_key,
+        ).fetchone()
+        if row is None:
+            return None
+        if ttl > 0 and now - float(row[1]) > ttl:
+            conn.execute(
+                """
+                DELETE FROM http_embedding_cache
+                WHERE scope_sha256 = ?
+                  AND url_sha256 = ?
+                  AND model_sha256 = ?
+                  AND model_revision_sha256 = ?
+                  AND dims = ?
+                  AND api_key_sha256 = ?
+                  AND text_sha256 = ?
+                """,
+                disk_key,
+            )
+            return None
+        try:
+            decoded = json.loads(str(row[0]))
+            vector = [float(value) for value in decoded]
+        except (TypeError, ValueError, json.JSONDecodeError):
+            conn.execute(
+                """
+                DELETE FROM http_embedding_cache
+                WHERE scope_sha256 = ?
+                  AND url_sha256 = ?
+                  AND model_sha256 = ?
+                  AND model_revision_sha256 = ?
+                  AND dims = ?
+                  AND api_key_sha256 = ?
+                  AND text_sha256 = ?
+                """,
+                disk_key,
+            )
+            return None
+        conn.execute(
+            """
+            UPDATE http_embedding_cache
+            SET last_access_at = ?
+            WHERE scope_sha256 = ?
+              AND url_sha256 = ?
+              AND model_sha256 = ?
+              AND model_revision_sha256 = ?
+              AND dims = ?
+              AND api_key_sha256 = ?
+              AND text_sha256 = ?
+            """,
+            (now, *disk_key),
+        )
+        return vector
+
+
+def _http_embedding_disk_cache_put(
+    provider: HttpEmbeddingProvider,
+    key: HttpEmbeddingCacheKey,
+    text: str,
+    vector: Sequence[float],
+    max_size: int,
+) -> None:
+    if not _http_embedding_disk_cache_safe(provider, text):
+        return
+    disk_key = _http_embedding_disk_cache_key(key)
+    now = time.time()
+    with _HTTP_EMBEDDING_CACHE_LOCK, _http_embedding_disk_cache_connect(provider) as conn:
+        conn.execute(
+            """
+            INSERT INTO http_embedding_cache (
+                scope_sha256,
+                url_sha256,
+                model_sha256,
+                model_revision_sha256,
+                dims,
+                api_key_sha256,
+                text_sha256,
+                vector_json,
+                created_at,
+                last_access_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (
+                scope_sha256,
+                url_sha256,
+                model_sha256,
+                model_revision_sha256,
+                dims,
+                api_key_sha256,
+                text_sha256
+            )
+            DO UPDATE SET
+                vector_json = excluded.vector_json,
+                created_at = excluded.created_at,
+                last_access_at = excluded.last_access_at
+            """,
+            (*disk_key, json.dumps([float(value) for value in vector], separators=(",", ":")), now, now),
+        )
+        if max_size > 0:
+            conn.execute(
+                """
+                DELETE FROM http_embedding_cache
+                WHERE scope_sha256 = ?
+                  AND rowid NOT IN (
+                      SELECT rowid
+                      FROM http_embedding_cache
+                      WHERE scope_sha256 = ?
+                      ORDER BY last_access_at DESC
+                      LIMIT ?
+                  )
+                """,
+                (disk_key[0], disk_key[0], max_size),
+            )
+
+
+def _http_embedding_disk_cache_stats(provider: HttpEmbeddingProvider) -> dict[str, object]:
+    try:
+        if not provider.cache_path:
+            return {"durable_entries": 0}
+        path = os.path.expanduser(provider.cache_path)
+        if not os.path.exists(path):
+            return {"durable_entries": 0}
+        scope_hash = _http_embedding_cache_digest(_http_embedding_cache_scope(provider))
+        with _HTTP_EMBEDDING_CACHE_LOCK, sqlite3.connect(f"file:{path}?mode=ro", uri=True) as conn:
+            try:
+                row = conn.execute(
+                    "SELECT COUNT(*) FROM http_embedding_cache WHERE scope_sha256 = ?",
+                    (scope_hash,),
+                ).fetchone()
+            except sqlite3.OperationalError:
+                row = (0,)
+        return {"durable_entries": int(row[0]) if row else 0}
+    except Exception as exc:  # noqa: BLE001 - status reporting must not break provider checks.
+        return {"durable_error": str(exc)}
 
 
 class CommandMediaEmbeddingProvider:
@@ -1495,6 +1767,7 @@ def retrieval_adapters_from_env(prefix: str = "MNEMOSYNE") -> RetrievalAdapters:
     graph_provider = os.environ.get(f"{prefix}_GRAPH_PROVIDER", "postgres").lower()
     dims = int(os.environ.get(f"{prefix}_EMBEDDING_DIMS", "1024"))
     embedding_cache_size = int(os.environ.get(f"{prefix}_EMBEDDING_CACHE_SIZE", "8192"))
+    embedding_cache_ttl_seconds = float(os.environ.get(f"{prefix}_EMBEDDING_CACHE_TTL_SECONDS", "86400"))
     timeout = float(os.environ.get(f"{prefix}_RETRIEVAL_TIMEOUT", "30"))
     if embedding_provider == "http":
         embedding = HttpEmbeddingProvider(
@@ -1505,6 +1778,9 @@ def retrieval_adapters_from_env(prefix: str = "MNEMOSYNE") -> RetrievalAdapters:
             dims=dims,
             timeout_seconds=timeout,
             cache_size=embedding_cache_size,
+            cache_path=os.environ.get(f"{prefix}_EMBEDDING_CACHE_PATH"),
+            cache_ttl_seconds=embedding_cache_ttl_seconds,
+            cache_scope=os.environ.get(f"{prefix}_EMBEDDING_CACHE_SCOPE", "default"),
         )
     elif embedding_provider in {"local", "local-hashing", "hashing"}:
         embedding = HashingEmbeddingProvider(dims=dims)

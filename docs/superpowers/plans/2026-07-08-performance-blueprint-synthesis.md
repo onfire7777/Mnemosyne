@@ -28,6 +28,9 @@
   - Register `MNEMOSYNE_EMBEDDING_CACHE_SIZE` and `MNEMOSYNE_EMBEDDING_MODEL_REVISION`.
   - Update the performance blueprint and Phase 09 docs to show the landed process-local HTTP embedding LRU, retrieval result LRU, and Postgres positive calibration cache.
   - Add provider cache tests for mixed cached/uncached batches, model-revision key busting, and `cache_size=0`.
+  - Follow-up source slice landed: optional SQLite durable HTTP embedding cache
+    with TTL, explicit cache scope, hashed identity storage, secret-pattern
+    durable-skip, and `provider-check` cache status.
 
 - [x] Task 3: Release the GIL for the smallest native-owned kernels.
   - Wrap `mmr_select_indices` and `ppr_power_iteration` compute bodies in `Python::detach`.
@@ -82,3 +85,11 @@
 - [ ] Task 8: Run operator-gated runtime flip evidence.
   - Execute only with operator confirmation against the live stack.
   - Commit retained before/after benchmark evidence and rollback proof.
+
+- [ ] Task 9: Complete provider bake-off and production cache evidence.
+  - Retain provider cache hit-rate/latency evidence from real workloads before
+    claiming a production cache win.
+  - Run TEI/Rust sidecar/Python provider bake-off with the shared conformance
+    fixture before changing provider defaults.
+  - Add negative/abstention caching only for provider responses with an explicit
+    negative or abstention contract.
