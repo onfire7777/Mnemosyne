@@ -60,6 +60,10 @@
     hygiene snapshot across evidence/assertions and
     `--require-clean-vector-hygiene` fails unless a real Postgres probe is
     available and clean.
+  - Source slice landed: `ops-report` can now include a redacted
+    `postgres_vector_hygiene.backfill_plan` with evidence/assertion candidate
+    ids, content/statement hashes, backlog counts, sample counts, and
+    truncation status without raw memory content or mutation.
   - Still open: live Postgres tuning application, before/after benchmark rows,
     null-embedding production backfill execution/evidence, and any
     halfvec/pgvectorscale APPROX-layer rollout.

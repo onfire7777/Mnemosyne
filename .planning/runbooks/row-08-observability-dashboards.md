@@ -22,7 +22,11 @@ Run in the production soak profile:
 For Postgres production captures, run `ops-report` with
 `--require-clean-vector-hygiene` so embeddable NULL-vector backlog or illegal
 vectors in the non-embeddable `none` partition across evidence/assertions keep
-the ops report red until the backfill evidence is genuinely clean.
+the ops report red until the backfill evidence is genuinely clean. Retain the
+redacted `postgres_vector_hygiene.backfill_plan` section as pre-backfill
+evidence when backlog exists; it reports row ids, content/statement hashes,
+partition/trust/sensitivity metadata, sample count, and truncation without raw
+memory content and without mutating production rows.
 
 ## Required Production Input Artifacts
 

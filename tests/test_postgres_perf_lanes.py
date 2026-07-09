@@ -15,6 +15,7 @@ from __future__ import annotations
 import os
 import threading
 import types
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -532,6 +533,7 @@ class _VectorHygieneFakeCursor(FakeCursor):
     def __init__(self, conn: "_VectorHygieneFakeConnection"):
         super().__init__(conn)
         self._row: dict[str, Any] | None = None
+        self._rows: list[dict[str, Any]] = []
 
     def execute(
         self,
@@ -542,19 +544,40 @@ class _VectorHygieneFakeCursor(FakeCursor):
     ) -> None:
         super().execute(sql, params, prepare=prepare)
         flat = " ".join(sql.split())
+        self._rows = []
         if "embeddable_null_embeddings" in flat and "none_partition_vectors" in flat:
             self._conn.hygiene_query_params = params
             self._row = self._conn.hygiene_row
+        elif "FROM evidence" in flat and "embedding IS NULL" in flat and "content" in flat:
+            self._conn.plan_evidence_query_params = params
+            self._rows = self._conn.plan_evidence_rows
+        elif "FROM assertions" in flat and "embedding IS NULL" in flat and "subject" in flat:
+            self._conn.plan_assertion_query_params = params
+            self._rows = self._conn.plan_assertion_rows
+
+    def fetchall(self) -> list[dict[str, Any]]:
+        return self._rows
 
     def fetchone(self) -> dict[str, Any] | None:
         return self._row
 
 
 class _VectorHygieneFakeConnection(FakeConnection):
-    def __init__(self, name: str, hygiene_row: dict[str, Any]):
+    def __init__(
+        self,
+        name: str,
+        hygiene_row: dict[str, Any],
+        *,
+        plan_evidence_rows: list[dict[str, Any]] | None = None,
+        plan_assertion_rows: list[dict[str, Any]] | None = None,
+    ):
         super().__init__(name)
         self.hygiene_row = hygiene_row
         self.hygiene_query_params: tuple[Any, ...] | None = None
+        self.plan_evidence_rows = plan_evidence_rows or []
+        self.plan_assertion_rows = plan_assertion_rows or []
+        self.plan_evidence_query_params: tuple[Any, ...] | None = None
+        self.plan_assertion_query_params: tuple[Any, ...] | None = None
 
     def cursor(self, *args: Any, **kwargs: Any) -> FakeCursor:
         return _VectorHygieneFakeCursor(self)
@@ -695,6 +718,84 @@ def test_postgres_vector_hygiene_snapshot_counts_null_vector_backlog(
         "live_assertion_rows": 9,
         "live_rows": 21,
     }
+
+
+def test_postgres_vector_backfill_plan_samples_redacted_backlog(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine, _ = make_engine(monkeypatch, reuse=True)
+    conn = _VectorHygieneFakeConnection(
+        "vector-backfill-plan",
+        {
+            "evidence_embeddable_null_embeddings": 3,
+            "assertion_embeddable_null_embeddings": 2,
+            "evidence_none_partition_vectors": 0,
+            "assertion_none_partition_vectors": 0,
+            "evidence_stored_vectors": 7,
+            "assertion_stored_vectors": 5,
+            "evidence_none_partition_rows": 4,
+            "assertion_none_partition_rows": 6,
+            "live_evidence_rows": 12,
+            "live_assertion_rows": 9,
+            "embeddable_null_embeddings": 5,
+            "none_partition_vectors": 0,
+            "stored_vectors": 12,
+            "none_partition_rows": 10,
+            "live_rows": 21,
+        },
+        plan_evidence_rows=[
+            {
+                "row_id": "abc123",
+                "content": "private evidence body",
+                "source_type": "operator",
+                "trust_tier": "trusted",
+                "sensitivity": 2,
+                "embedding_partition": "private",
+            }
+        ],
+        plan_assertion_rows=[
+            {
+                "row_id": "assertion-1",
+                "subject": "alice",
+                "predicate": "knows",
+                "object": "bob",
+                "scope": "main",
+                "status": "active",
+                "trust_tier": "trusted",
+                "sensitivity": 1,
+                "embedding_partition": "public",
+            }
+        ],
+    )
+    monkeypatch.setattr(engine, "connect", lambda: conn)
+
+    plan = engine.vector_backfill_plan("tenant", branch="main", limit=1)
+
+    stable_tenant = postgres_engine._stable_uuid("tenant", "tenant")
+    assert conn.plan_evidence_query_params == (stable_tenant, "main", 1)
+    assert conn.plan_assertion_query_params == (stable_tenant, "main", 1)
+    assert any("ORDER BY transaction_time ASC" in sql for sql in conn.statements)
+    assert "private evidence body" not in str(plan)
+    assert "alice" not in str(plan)
+    assert plan["ok"] is False
+    assert plan["total_backlog"] == 5
+    assert plan["sampled"] == 2
+    assert plan["truncated"] is True
+    assert plan["redaction"]["raw_content_omitted"] is True
+    assert plan["candidates"][0] == {
+        "table": "evidence",
+        "row_id": "abc123",
+        "content_hash_sha256": sha256(b"private evidence body").hexdigest(),
+        "source_type": "operator",
+        "trust_tier": "trusted",
+        "sensitivity": 2,
+        "embedding_partition": "private",
+    }
+    assert plan["candidates"][1]["table"] == "assertions"
+    assert plan["candidates"][1]["row_id"] == "assertion-1"
+    assert plan["candidates"][1]["statement_hash_sha256"] == sha256(
+        b"alice\x00knows\x00bob\x00main"
+    ).hexdigest()
 
 
 def test_postgres_vector_search_sets_hnsw_query_knobs_before_vector_queries(

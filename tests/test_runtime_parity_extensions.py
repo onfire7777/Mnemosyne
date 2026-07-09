@@ -3053,6 +3053,25 @@ def test_ops_report_can_gate_postgres_vector_hygiene() -> None:
                 "live_evidence_rows": 8,
             }
 
+        def vector_backfill_plan(self, tenant_id: str) -> dict[str, object]:
+            return {
+                "backend": "postgres",
+                "tenant_id": tenant_id,
+                "branch": "main",
+                "ok": False,
+                "total_backlog": 2,
+                "sampled": 1,
+                "truncated": True,
+                "candidates": [
+                    {
+                        "table": "evidence",
+                        "row_id": "abc123",
+                        "content_hash_sha256": "hash",
+                    }
+                ],
+                "redaction": {"raw_content_omitted": True},
+            }
+
     engine = VectorHygieneEngine()
 
     relaxed = build_ops_report(engine=engine, tenant_id=TENANT)
@@ -3069,6 +3088,8 @@ def test_ops_report_can_gate_postgres_vector_hygiene() -> None:
 
     assert relaxed["tripwires"]["passed"] is True
     assert relaxed["postgres_vector_hygiene"]["embeddable_null_embeddings"] == 2
+    assert relaxed["postgres_vector_hygiene"]["backfill_plan"]["total_backlog"] == 2
+    assert relaxed["postgres_vector_hygiene"]["backfill_plan"]["redaction"]["raw_content_omitted"] is True
     assert relaxed["tripwires"]["vector_hygiene_required"] is False
     assert gated["tripwires"]["passed"] is False
     assert gated["tripwires"]["vector_hygiene_required"] is True
@@ -3120,6 +3141,7 @@ def test_ops_dashboard_renderer_escapes_snapshot_values() -> None:
             "none_partition_vectors": 0,
             "stored_vectors": 8,
             "live_evidence_rows": 11,
+            "backfill_plan": {"total_backlog": 3, "sampled": 2, "truncated": True},
         },
     }
 
@@ -3134,6 +3156,8 @@ def test_ops_dashboard_renderer_escapes_snapshot_values() -> None:
     assert "Calibration" in dashboard
     assert "Postgres Vector Hygiene" in dashboard
     assert "Embeddable null vectors" in dashboard
+    assert "Backfill backlog" in dashboard
+    assert "Backfill sampled" in dashboard
     assert '<div class="label">Active jobs</div><div class="value">2</div>' in dashboard
     assert "p95 latency ms" in dashboard
     assert "0.42" in dashboard
