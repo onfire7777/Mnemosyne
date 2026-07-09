@@ -1,0 +1,34 @@
+{
+  "embedding": {
+    "dimensions": 8,
+    "model": "contract-embedding-model",
+    "single": {
+      "request": {
+        "input": "provider health check",
+        "model": "contract-embedding-model"
+      }
+    },
+    "batch": {
+      "request": {
+        "input": [
+          "alpha memory",
+          "beta memory"
+        ],
+        "model": "contract-embedding-model"
+      }
+    }
+  },
+  "rerank": {
+    "model": "contract-reranker-model",
+    "request": {
+      "query": "query: provider health",
+      "documents": [
+        "unrelated text",
+        "provider health check"
+      ],
+      "top_n": 2,
+      "model": "contract-reranker-model"
+    },
+    "expected_top_index": 1
+  }
+}

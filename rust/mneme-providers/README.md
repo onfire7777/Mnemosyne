@@ -17,6 +17,10 @@ posture.
 
 ## Local Checks
 
+The default test suite includes fixture-backed conformance tests against
+`tests/fixtures/provider_contract.json`, shared with the Python embedding
+service and Python HTTP adapters.
+
 ```bash
 cargo test
 cargo clippy --all-targets -- -D warnings

@@ -41,9 +41,13 @@
   - Added perf-lane tests for default `prepare=True` use and
     `MNEMOSYNE_PG_PREPARE_HOT_QUERIES=0` rollback.
 
-- [ ] Task 5: Add provider contract/conformance CI lane.
+- [x] Task 5: Add provider contract/conformance CI lane.
   - Share `/embed` and `/rerank` contract fixtures across Python service, HTTP adapter, and `mneme-providers`.
   - Keep bake-off output reproducible before any provider default flip.
+  - Added `tests/fixtures/provider_contract.json`, Python service/adapter
+    contract tests, Rust sidecar fixture-backed tests, wire-compatible batch
+    `/embed` support in `mneme-providers`, and a `provider-conformance` CI job.
+    No provider default was flipped; TEI/model bake-off evidence remains open.
 
 - [ ] Task 6: Close Postgres vector coverage/tuning gaps.
   - Add `'none'` partition index coverage before any halfvec/pgvectorscale work.

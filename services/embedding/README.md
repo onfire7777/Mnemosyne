@@ -22,6 +22,11 @@ FastAPI + torch model path with no code changes.
 
 ## Contract (must match Mnemosyne exactly)
 
+The shared conformance fixture is `tests/fixtures/provider_contract.json`. CI's
+`provider-conformance` job drives that fixture through this service, the Python
+HTTP adapters, and the Rust `mneme-providers` sidecar before any bake-off or
+provider-default decision can be trusted.
+
 ### `POST /embed`
 
 Request (single):

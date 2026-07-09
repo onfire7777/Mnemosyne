@@ -90,11 +90,37 @@ pub fn app(state: AppState) -> Router {
 
 #[derive(Deserialize)]
 struct EmbedRequest {
-    input: String,
+    input: EmbedInput,
+    model: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum EmbedInput {
+    Single(String),
+    Batch(Vec<String>),
 }
 
 #[derive(Serialize)]
-struct EmbedResponse {
+#[serde(untagged)]
+enum EmbedResponse {
+    Single {
+        embedding: Vec<f32>,
+        model: String,
+        dimensions: usize,
+    },
+    Batch {
+        object: &'static str,
+        model: String,
+        dimensions: usize,
+        data: Vec<EmbedDatum>,
+    },
+}
+
+#[derive(Serialize)]
+struct EmbedDatum {
+    object: &'static str,
+    index: usize,
     embedding: Vec<f32>,
 }
 
@@ -103,11 +129,13 @@ struct RerankRequest {
     query: String,
     documents: Vec<String>,
     top_n: Option<usize>,
+    model: Option<String>,
 }
 
 #[derive(Serialize)]
 struct RerankResponse {
     results: Vec<RerankResult>,
+    model: String,
 }
 
 #[derive(Serialize)]
@@ -197,11 +225,44 @@ async fn embed(
     Json(request): Json<EmbedRequest>,
 ) -> Result<Json<EmbedResponse>, ApiError> {
     authorize(&state, &headers)?;
-    if request.input.is_empty() {
-        return Err(ApiError::bad("input must be non-empty"));
+    let model = request
+        .model
+        .unwrap_or_else(|| state.embedding_model.clone());
+    match request.input {
+        EmbedInput::Single(input) => {
+            if input.is_empty() {
+                return Err(ApiError::bad("input must be non-empty"));
+            }
+            let embedding = embed_text(&state, &input)?;
+            Ok(Json(EmbedResponse::Single {
+                embedding,
+                model,
+                dimensions: state.dims,
+            }))
+        }
+        EmbedInput::Batch(inputs) => {
+            if inputs.is_empty() {
+                return Err(ApiError::bad("input must be non-empty"));
+            }
+            let data = inputs
+                .iter()
+                .enumerate()
+                .map(|(index, input)| {
+                    embed_text(&state, input).map(|embedding| EmbedDatum {
+                        object: "embedding",
+                        index,
+                        embedding,
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(Json(EmbedResponse::Batch {
+                object: "list",
+                model,
+                dimensions: state.dims,
+                data,
+            }))
+        }
     }
-    let embedding = embed_text(&state, &request.input)?;
-    Ok(Json(EmbedResponse { embedding }))
 }
 
 async fn rerank(
@@ -217,8 +278,11 @@ async fn rerank(
     if top_n == 0 {
         return Err(ApiError::bad("top_n must be positive"));
     }
+    let model = request
+        .model
+        .unwrap_or_else(|| state.reranker_model.clone());
     let results = rerank_texts(&state, &request.query, &request.documents, top_n)?;
-    Ok(Json(RerankResponse { results }))
+    Ok(Json(RerankResponse { results, model }))
 }
 
 fn authorize(state: &AppState, headers: &HeaderMap) -> Result<(), ApiError> {
@@ -472,6 +536,14 @@ fn fit_vector(mut vector: Vec<f32>, dims: usize) -> Result<Vec<f32>, String> {
 mod tests {
     use super::*;
     use axum::http::HeaderValue;
+    use serde_json::Value;
+
+    fn provider_contract() -> Value {
+        serde_json::from_str(include_str!(
+            "../../../tests/fixtures/provider_contract.json"
+        ))
+        .unwrap()
+    }
 
     #[test]
     fn deterministic_embedding_is_non_zero_and_dimensioned() {
@@ -541,6 +613,98 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn embed_satisfies_shared_provider_contract() {
+        let contract = provider_contract();
+        let request: EmbedRequest =
+            serde_json::from_value(contract["embedding"]["single"]["request"].clone()).unwrap();
+
+        let Json(response) = embed(
+            State(AppState::deterministic(8)),
+            HeaderMap::new(),
+            Json(request),
+        )
+        .await
+        .unwrap();
+
+        match response {
+            EmbedResponse::Single {
+                embedding,
+                model,
+                dimensions,
+            } => {
+                assert_eq!(model, contract["embedding"]["model"].as_str().unwrap());
+                assert_eq!(dimensions, 8);
+                assert_eq!(embedding.len(), 8);
+                assert!(embedding.iter().any(|value| *value != 0.0));
+            }
+            EmbedResponse::Batch { .. } => panic!("single input must return compact embedding"),
+        }
+    }
+
+    #[tokio::test]
+    async fn batch_embed_satisfies_shared_provider_contract() {
+        let contract = provider_contract();
+        let request: EmbedRequest =
+            serde_json::from_value(contract["embedding"]["batch"]["request"].clone()).unwrap();
+
+        let Json(response) = embed(
+            State(AppState::deterministic(8)),
+            HeaderMap::new(),
+            Json(request),
+        )
+        .await
+        .unwrap();
+
+        match response {
+            EmbedResponse::Batch {
+                object,
+                model,
+                dimensions,
+                data,
+            } => {
+                assert_eq!(object, "list");
+                assert_eq!(model, contract["embedding"]["model"].as_str().unwrap());
+                assert_eq!(dimensions, 8);
+                assert_eq!(data.len(), 2);
+                assert_eq!(
+                    data.iter().map(|row| row.index).collect::<Vec<_>>(),
+                    vec![0, 1]
+                );
+                assert!(data.iter().all(|row| row.object == "embedding"));
+                assert!(data.iter().all(|row| row.embedding.len() == 8));
+            }
+            EmbedResponse::Single { .. } => panic!("batch input must return list embedding"),
+        }
+    }
+
+    #[tokio::test]
+    async fn rerank_satisfies_shared_provider_contract() {
+        let contract = provider_contract();
+        let request: RerankRequest =
+            serde_json::from_value(contract["rerank"]["request"].clone()).unwrap();
+
+        let Json(response) = rerank(
+            State(AppState::deterministic(8)),
+            HeaderMap::new(),
+            Json(request),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            response.model,
+            contract["rerank"]["model"].as_str().unwrap()
+        );
+        assert_eq!(
+            response.results.first().map(|row| row.index),
+            contract["rerank"]["expected_top_index"]
+                .as_u64()
+                .map(|value| value as usize)
+        );
+        assert!(response.results.iter().all(|row| row.index < 2));
+    }
+
+    #[tokio::test]
     async fn validation_errors_do_not_echo_request_content() {
         let sentinel = "HTKN-S3-foreign-request-content";
         let result = rerank(
@@ -550,6 +714,7 @@ mod tests {
                 query: sentinel.to_string(),
                 documents: vec![sentinel.to_string()],
                 top_n: Some(0),
+                model: None,
             }),
         )
         .await;
