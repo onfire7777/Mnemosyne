@@ -74,6 +74,7 @@ _PARALLEL_CHANNELS_DEFAULT_CACHE: tuple[str | None, bool] | None = None
 _RESULT_CACHE_SIZE_ENV = "MNEMOSYNE_RETRIEVAL_RESULT_CACHE_SIZE"
 _RESULT_CACHE: OrderedDict[tuple[Any, ...], RetrievalResult] = OrderedDict()
 _RESULT_CACHE_LOCK = threading.Lock()
+_RESULT_CACHE_EXPLAIN_KEY = "retrieval_result_cache"
 
 
 def _parallel_channels_default_enabled() -> bool:
@@ -235,6 +236,15 @@ def _result_cache_put(key: tuple[Any, ...], result: RetrievalResult) -> None:
             _RESULT_CACHE.popitem(last=False)
 
 
+def _result_cache_explain(*, hit: bool, stored: bool) -> dict[str, Any]:
+    return {
+        "backend": "process_lru",
+        "enabled": True,
+        "hit": hit,
+        "stored": stored,
+    }
+
+
 def _fast_graph_hits(hits: list[Hit], *, deep: bool) -> list[Hit]:
     if deep:
         return hits
@@ -344,6 +354,7 @@ def run_retrieval_pipeline(
         cached = _result_cache_get(cache_key)
         if cached is not None:
             cached.explain["read_marks"] = ops._record_retrieval_access(cached.hits)
+            cached.explain[_RESULT_CACHE_EXPLAIN_KEY] = _result_cache_explain(hit=True, stored=False)
             return cached
     if parallel_channels_enabled():
         with ThreadPoolExecutor(max_workers=3) as pool:
@@ -508,6 +519,8 @@ def run_retrieval_pipeline(
             graph_k=graph_k,
             policy=policy,
         )
-        if current_cache_key == cache_key:
+        stored = current_cache_key == cache_key
+        result.explain[_RESULT_CACHE_EXPLAIN_KEY] = _result_cache_explain(hit=False, stored=stored)
+        if stored:
             _result_cache_put(cache_key, result)
     return result

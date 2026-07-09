@@ -547,11 +547,23 @@ def test_retrieval_result_cache_reuses_sanitized_defensive_copies(monkeypatch: p
     monkeypatch.setenv("MNEMOSYNE_RETRIEVAL_RESULT_CACHE_SIZE", "4")
     engine = _ResultCacheProbeEngine()
 
-    engine.retrieve("cacheable helios probe", TENANT)
+    first = engine.retrieve("cacheable helios probe", TENANT)
     second = engine.retrieve("cacheable helios probe", TENANT)
 
     assert engine.channel_calls == 3
     assert engine.access_calls == 2
+    assert first.explain["retrieval_result_cache"] == {
+        "backend": "process_lru",
+        "enabled": True,
+        "hit": False,
+        "stored": True,
+    }
+    assert second.explain["retrieval_result_cache"] == {
+        "backend": "process_lru",
+        "enabled": True,
+        "hit": True,
+        "stored": False,
+    }
     assert second.hits[0].trust_tier == 1
     assert second.hits[0].sensitivity == 2
     retrieved = second.hits[0].metadata["retrieved_text"]
@@ -563,6 +575,21 @@ def test_retrieval_result_cache_reuses_sanitized_defensive_copies(monkeypatch: p
 
     assert engine.channel_calls == 3
     assert third.hits[0].metadata["retrieved_text"]["content"] == "Project Helios cache probe text."
+
+
+def test_retrieval_result_cache_misses_on_branch_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MNEMOSYNE_RETRIEVAL_RESULT_CACHE_SIZE", "4")
+    engine = _ResultCacheProbeEngine()
+    query = "cacheable helios branch telemetry"
+
+    first = engine.retrieve(query, TENANT, branch="main")
+    second = engine.retrieve(query, TENANT, branch="experiment")
+    third = engine.retrieve(query, TENANT, branch="main")
+
+    assert engine.channel_calls == 6
+    assert first.explain["retrieval_result_cache"]["hit"] is False
+    assert second.explain["retrieval_result_cache"]["hit"] is False
+    assert third.explain["retrieval_result_cache"]["hit"] is True
 
 
 def test_retrieval_result_cache_invalidates_on_store_version(monkeypatch: pytest.MonkeyPatch) -> None:
