@@ -60,9 +60,12 @@
     null-embedding production backfill/alert evidence, and any
     halfvec/pgvectorscale APPROX-layer rollout.
 
-- [ ] Task 7: Implement stateless MCP warm-bundle reuse.
+- [x] Task 7: Implement stateless MCP warm-bundle reuse.
   - Cache reusable tool/provider bundles without crossing tenant/session boundaries.
   - Add repeated-call reuse and cross-tenant isolation tests.
+  - Source slice landed: stateless MCP mode now reuses same-scope tool bundles
+    and invalidates local/SQLite bundles on durable store or runtime-state file
+    changes.
 
 - [ ] Task 8: Run operator-gated runtime flip evidence.
   - Execute only with operator confirmation against the live stack.

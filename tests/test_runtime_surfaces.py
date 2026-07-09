@@ -3325,6 +3325,64 @@ def test_mcp_server_stateless_mode_reloads_durable_engine_and_runtime_state(tmp_
     assert after_retire["support_strategies"] == []
 
 
+def test_mcp_server_stateless_mode_reuses_warm_tools_for_same_scope(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = tmp_path / "store.json"
+    server = MnemosyneMcpServer(store_path=store, stateless=True)
+    original_build_tools = server._build_tools
+    build_calls: list[str | None] = []
+
+    def counted_build_tools(queue_tenant: str | None = None):
+        build_calls.append(queue_tenant)
+        return original_build_tools(queue_tenant)
+
+    monkeypatch.setattr(server, "_build_tools", counted_build_tools)
+
+    first = mcp_call(server, "profile_context", {"tenant_id": TENANT, "user_id": USER})
+    second = mcp_call(server, "profile_context", {"tenant_id": TENANT, "user_id": USER})
+    mcp_call(server, "profile_context", {"tenant_id": "tenant-other", "user_id": USER})
+
+    assert first == second
+    assert build_calls == [TENANT, "tenant-other"]
+
+
+def test_mcp_server_stateless_warm_tools_reload_after_external_store_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = tmp_path / "store.json"
+    reader = MnemosyneMcpServer(store_path=store, stateless=True)
+    original_build_tools = reader._build_tools
+    build_calls = 0
+
+    def counted_build_tools(queue_tenant: str | None = None):
+        nonlocal build_calls
+        build_calls += 1
+        return original_build_tools(queue_tenant)
+
+    monkeypatch.setattr(reader, "_build_tools", counted_build_tools)
+
+    query = {"tenant_id": TENANT, "query": "externally written warm bundle evidence"}
+    assert mcp_call(reader, "search", query)["hits"] == []
+    time.sleep(0.01)
+    captured = mcp_call(
+        MnemosyneMcpServer(store_path=store, stateless=True),
+        "capture",
+        {
+            "tenant_id": TENANT,
+            "user_id": USER,
+            "actor": "user",
+            "source_type": "chat",
+            "content": "Externally written warm bundle evidence.",
+            "trust_tier": 3,
+        },
+    )
+    refreshed = mcp_call(reader, "search", query)
+
+    assert build_calls == 2
+    assert refreshed["hits"][0]["provenance"] == [captured["cid"]]
+
+
 def test_mcp_server_persists_parametric_artifacts_and_rolls_back(tmp_path: Path) -> None:
     store = tmp_path / "store.json"
     server = MnemosyneMcpServer(store_path=store)
