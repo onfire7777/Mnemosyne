@@ -1,7 +1,9 @@
 # Mnemosyne — Master Execution Plan
 ## Goal: the world's best-benchmarked AI memory system + the field's neutral benchmark leaderboard
 
-**Version:** 1.0 · **Date:** 2026-07-08 · **Status:** Proposed (awaiting go)
+> **SUPERSEDED (2026-07-08).** This combined plan was split into two active documents: [Execution Plan A — The Memory System](../EXECUTION-PLAN-A-Memory-System.md) (builds the capabilities) and [Execution Plan B — Benchmarking & the Leaderboard](../EXECUTION-PLAN-B-Benchmark-and-Leaderboard.md) (measurement, publication protocol, and the neutral leaderboard). Retained verbatim below for history — do not execute from this document.
+
+**Version:** 1.0 · **Date:** 2026-07-08 · **Status:** Superseded — split into Plans A + B
 **Owner surface:** Mnemosyne core (`src/mnemosyne/`, `eval/`) + new greenfield `leaderboard/` and `web/`.
 **Audience:** an autonomous engineering agent (or agent fleet) executing end-to-end, plus human operators for gated evidence capture.
 
