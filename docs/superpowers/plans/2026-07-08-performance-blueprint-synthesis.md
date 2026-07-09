@@ -64,9 +64,13 @@
     `postgres_vector_hygiene.backfill_plan` with evidence/assertion candidate
     ids, content/statement hashes, backlog counts, sample counts, and
     truncation status without raw memory content or mutation.
+  - Source slice landed: `vector-backfill-apply` now requires `--confirm-apply`,
+    applies bounded Postgres batches, reports only redacted row ids and hashes,
+    and stores both public/private assertion vectors while keeping `none`
+    non-embeddable.
   - Still open: live Postgres tuning application, before/after benchmark rows,
-    null-embedding production backfill execution/evidence, and any
-    halfvec/pgvectorscale APPROX-layer rollout.
+    retained production backfill output plus a clean post-backfill hygiene
+    probe, and any halfvec/pgvectorscale APPROX-layer rollout.
 
 - [x] Task 7: Implement stateless MCP warm-bundle reuse.
   - Cache reusable tool/provider bundles without crossing tenant/session boundaries.

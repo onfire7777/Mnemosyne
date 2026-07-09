@@ -25,7 +25,7 @@ import pytest
 import mnemosyne.postgres_engine as postgres_engine
 from mnemosyne.algorithms import mmr_select
 from mnemosyne.calibration import CalibrationSet
-from mnemosyne.models import Evidence, Hit
+from mnemosyne.models import Assertion, Evidence, Hit
 from mnemosyne.postgres_engine import (
     _PGVECTOR_HNSW_EF_SEARCH_DEEP,
     _PGVECTOR_HNSW_EF_SEARCH_FAST,
@@ -583,6 +583,48 @@ class _VectorHygieneFakeConnection(FakeConnection):
         return _VectorHygieneFakeCursor(self)
 
 
+class _VectorBackfillApplyFakeCursor(FakeCursor):
+    rowcount: int | None
+
+    def __init__(self, conn: "_VectorBackfillApplyFakeConnection"):
+        super().__init__(conn)
+        self._conn = conn
+        self._rows: list[dict[str, Any]] = []
+        self.rowcount = None
+
+    def execute(
+        self,
+        sql: str,
+        params: tuple[Any, ...] | None = None,
+        *,
+        prepare: bool | None = None,
+    ) -> None:
+        super().execute(sql, params, prepare=prepare)
+        flat = " ".join(sql.split())
+        self._rows = []
+        self.rowcount = None
+        if "FROM evidence" in flat and "embedding IS NULL" in flat:
+            self._rows = []
+        elif "FROM assertions" in flat and "embedding IS NULL" in flat:
+            self._rows = list(self._conn.assertion_rows)
+        elif flat.startswith("UPDATE assertions"):
+            self._conn.assertion_update_params = params
+            self.rowcount = 1
+
+    def fetchall(self) -> list[dict[str, Any]]:
+        return self._rows
+
+
+class _VectorBackfillApplyFakeConnection(FakeConnection):
+    def __init__(self, assertion_rows: list[dict[str, Any]]):
+        super().__init__("vector-backfill-apply")
+        self.assertion_rows = assertion_rows
+        self.assertion_update_params: tuple[Any, ...] | None = None
+
+    def cursor(self, *args: Any, **kwargs: Any) -> FakeCursor:
+        return _VectorBackfillApplyFakeCursor(self)
+
+
 class _CalibrationFakeCursor(FakeCursor):
     def __init__(self, conn: "_CalibrationFakeConnection"):
         super().__init__(conn)
@@ -795,6 +837,125 @@ def test_postgres_vector_backfill_plan_samples_redacted_backlog(
     assert plan["candidates"][1]["row_id"] == "assertion-1"
     assert plan["candidates"][1]["statement_hash_sha256"] == sha256(
         b"alice\x00knows\x00bob\x00main"
+    ).hexdigest()
+
+
+def test_postgres_upsert_assertion_embeds_private_partition(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine, _ = make_engine(monkeypatch, reuse=True)
+    conn = FakeConnection("assertion-private-vector")
+    embedder = types.SimpleNamespace(calls=[])
+
+    def embed(text: str) -> list[float]:
+        embedder.calls.append(text)
+        return [0.25, 0.5]
+
+    embedder.embed = embed
+    engine.adapters = types.SimpleNamespace(embedding=embedder)
+    engine._jsonb = lambda value: value
+    monkeypatch.setattr(engine, "connect", lambda: conn)
+    monkeypatch.setattr(engine, "ensure_tenant_and_branch", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(engine, "_ensure_entity_registry_schema", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(engine, "_ensure_evidence_vector_schema", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(engine, "_apply_projection_reality_monitoring", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(engine, "_apply_schema_fast_path_projection_status", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(engine, "_audit", lambda *_args, **_kwargs: None)
+
+    assertion_id = engine.upsert_assertion(
+        Assertion(
+            tenant_id="tenant",
+            user_id="user",
+            subject="alice",
+            predicate="handles",
+            object="private-vector",
+            sensitivity=2,
+            access_policy={
+                "tenant": "tenant",
+                "redact_fields": ["object"],
+                "min_role_for_raw": "operator",
+            },
+        ),
+        branch="main",
+    )
+
+    insert_index = next(
+        i for i, sql in enumerate(conn.statements) if sql.startswith("INSERT INTO assertions")
+    )
+    insert_params = conn.statement_params[insert_index]
+    assert assertion_id
+    assert embedder.calls == ["alice handles private-vector"]
+    assert insert_params is not None
+    assert insert_params[22] is not None
+    assert insert_params[23] == "private"
+
+
+def test_postgres_vector_backfill_apply_updates_assertions_with_redacted_report(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine, _ = make_engine(monkeypatch, reuse=True)
+    assertion_id = str(uuid4())
+    conn = _VectorBackfillApplyFakeConnection(
+        [
+            {
+                "row_id": assertion_id,
+                "subject": "alice",
+                "predicate": "handles",
+                "object": "private-vector",
+                "scope": "main",
+                "status": "active",
+                "trust_tier": 0,
+                "sensitivity": 2,
+                "embedding_partition": "private",
+            }
+        ]
+    )
+    snapshots = iter(
+        [
+            {
+                "backend": "postgres",
+                "ok": False,
+                "embeddable_null_embeddings": 1,
+            },
+            {
+                "backend": "postgres",
+                "ok": True,
+                "embeddable_null_embeddings": 0,
+            },
+        ]
+    )
+    embedder = types.SimpleNamespace(calls=[])
+
+    def embed(text: str) -> list[float]:
+        embedder.calls.append(text)
+        return [0.25, 0.5]
+
+    embedder.embed = embed
+    engine.adapters = types.SimpleNamespace(embedding=embedder)
+    engine._jsonb = lambda value: value
+    monkeypatch.setattr(engine, "connect", lambda: conn)
+    monkeypatch.setattr(engine, "_ensure_evidence_vector_schema", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(engine, "vector_hygiene_snapshot", lambda *_args, **_kwargs: next(snapshots))
+
+    report = engine.vector_backfill_apply("tenant", branch="main", limit=1)
+    serialized = str(report)
+
+    assert report["ok"] is True
+    assert report["complete"] is True
+    assert report["applied_count"] == 1
+    assert report["failed_count"] == 0
+    assert report["redaction"]["raw_content_omitted"] is True
+    assert "alice handles private-vector" not in serialized
+    assert "alice" not in serialized
+    assert embedder.calls == ["alice handles private-vector"]
+    assert conn.assertion_update_params is not None
+    assert conn.assertion_update_params[0] is not None
+    assert conn.assertion_update_params[3] == assertion_id
+    assert report["applied"][0]["table"] == "assertions"
+    assert report["applied"][0]["row_id"] == assertion_id
+    assert report["applied"][0]["embedding_partition"] == "private"
+    assert report["applied"][0]["statement_hash_sha256"] == sha256(
+        b"alice\x00handles\x00private-vector\x00main"
     ).hexdigest()
 
 

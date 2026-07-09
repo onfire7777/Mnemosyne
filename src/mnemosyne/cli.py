@@ -2174,6 +2174,31 @@ def cmd_privacy_backfill_apply(args: argparse.Namespace) -> None:
         raise SystemExit(1)
 
 
+def cmd_vector_backfill_apply(args: argparse.Namespace) -> None:
+    if not args.confirm_apply:
+        raise SystemExit("vector-backfill-apply requires --confirm-apply")
+    try:
+        limit = int(args.limit)
+    except (TypeError, ValueError) as exc:
+        raise SystemExit("vector backfill limit must be an integer") from exc
+    if limit <= 0:
+        raise SystemExit("vector backfill limit must be greater than 0")
+    engine = load_engine(args)
+    backfill = getattr(engine, "vector_backfill_apply", None)
+    if not callable(backfill):
+        raise SystemExit("configured engine does not support vector backfill apply")
+    report = backfill(
+        args.tenant,
+        branch=str(args.branch),
+        limit=limit,
+        actor=str(args.actor),
+        source="vector_backfill_apply",
+    )
+    emit(report)
+    if not report.get("ok"):
+        raise SystemExit(1)
+
+
 def _privacy_backfill_scan(
     engine: MemoryEngine,
     *,
@@ -18291,6 +18316,14 @@ def build_parser() -> argparse.ArgumentParser:
     privacy_backfill_apply.add_argument("--actor", default="operator")
     privacy_backfill_apply.add_argument("--confirm-apply", action="store_true")
     privacy_backfill_apply.set_defaults(func=cmd_privacy_backfill_apply)
+
+    vector_backfill_apply = sub.add_parser("vector-backfill-apply")
+    vector_backfill_apply.add_argument("--tenant", required=True)
+    vector_backfill_apply.add_argument("--branch", default="main")
+    vector_backfill_apply.add_argument("--limit", type=int, default=100)
+    vector_backfill_apply.add_argument("--actor", default="operator")
+    vector_backfill_apply.add_argument("--confirm-apply", action="store_true")
+    vector_backfill_apply.set_defaults(func=cmd_vector_backfill_apply)
 
     privacy_ops_check = sub.add_parser("privacy-ops-check")
     privacy_ops_check.add_argument("--bundle", help="Path to production privacy/KMS/residency evidence bundle")

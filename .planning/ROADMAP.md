@@ -490,7 +490,7 @@ contract; CONFIG-DRIFT-CHECKS env registry; GSD/CBM/gbrain hygiene.
   5. Native acceleration changes release the GIL only around Rust-owned compute
      loops and preserve scalar arithmetic/order exactly.
 
-**Plans:** 8 plans
+**Plans:** 9 plans
 
 Plans:
 
@@ -502,8 +502,9 @@ Plans:
 - [x] 09-06-PLAN.md — Stateless MCP warm-bundle reuse.
 - [x] 09-07-PLAN.md — Postgres vector hygiene ops-report gate.
 - [x] 09-08-PLAN.md — Postgres vector backfill readiness.
+- [x] 09-09-PLAN.md — Guarded Postgres vector backfill apply.
 
-Checkpoint: Phase 9 Plans 01-08 are implemented and locally verified. Retrieval
+Checkpoint: Phase 9 Plans 01-09 are implemented and locally verified. Retrieval
 channel parallelism now defaults from capability tier when
 `MNEMOSYNE_PARALLEL_CHANNELS` is absent (`floor` off, `standard` and above on),
 explicit operator env values still win, and SQLite scan-oracle memo hydration is
@@ -528,7 +529,13 @@ vectors remain, making the production backfill/alert gate explicit without
 running a backfill. The report can now also include a read-only, redacted
 backfill plan that samples evidence/assertion backlog candidates by row id and
 hash without raw content or mutation, so operators can correlate retained
-backfill evidence before running the real backfill. Focused retrieval/capability,
-provider-cache/provider-contract, Postgres perf-lane, cargo, native parity,
-ruff, `git diff --check`, GSD consistency, and local pytest suites pass for the
-shipped Phase 09 slices.
+backfill evidence before running the real backfill. `vector-backfill-apply`
+now provides the guarded source-owned execution path: it requires
+`--confirm-apply`, applies a bounded Postgres batch, reports only row ids and
+SHA-256 hashes, and fixes assertion writes so both `public` and `private`
+embedding partitions are stored while `none` remains non-embeddable. Retained
+production output from that command plus a clean post-backfill hygiene probe
+remain required before production backfill evidence is closed. Focused
+retrieval/capability, provider-cache/provider-contract, Postgres perf-lane,
+cargo, native parity, ruff, `git diff --check`, GSD consistency, and local
+pytest suites pass for the shipped Phase 09 slices.

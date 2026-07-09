@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import argparse
+import base64
 import json
 import shutil
 import shlex
@@ -9,7 +11,6 @@ import subprocess
 import sys
 import threading
 import time
-import base64
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -17,6 +18,7 @@ from pathlib import Path
 from typing import Callable
 from urllib import request as urlrequest
 
+import mnemosyne.cli as cli
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives import serialization
@@ -12900,6 +12902,86 @@ def test_cli_privacy_backfill_apply_updates_legacy_pii_without_raw_content(tmp_p
     assert evidence["metadata"]["embedding_partition"] == "private"
     assert audit
     assert audit[-1]["source"] == "privacy_backfill_apply"
+
+
+def test_cli_vector_backfill_apply_requires_explicit_confirmation(tmp_path: Path) -> None:
+    result = run_raw_cli(tmp_path / "mnemosyne.json", "vector-backfill-apply", "--tenant", TENANT)
+
+    assert result.returncode == 1
+    assert "requires --confirm-apply" in result.stderr
+
+
+def test_cli_vector_backfill_apply_emits_redacted_report(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    class FakeEngine:
+        def vector_backfill_apply(
+            self,
+            tenant_id: str,
+            *,
+            branch: str,
+            limit: int,
+            actor: str,
+            source: str,
+        ) -> dict[str, object]:
+            calls.append(
+                {
+                    "tenant_id": tenant_id,
+                    "branch": branch,
+                    "limit": limit,
+                    "actor": actor,
+                    "source": source,
+                }
+            )
+            return {
+                "ok": True,
+                "complete": False,
+                "applied_count": 1,
+                "failed_count": 0,
+                "applied": [
+                    {
+                        "table": "assertions",
+                        "row_id": "assertion-1",
+                        "statement_hash_sha256": sha256(b"alice\x00handles\x00private\x00main").hexdigest(),
+                        "applied": True,
+                    }
+                ],
+                "redaction": {
+                    "raw_content_omitted": True,
+                    "statement_hash_sha256_reported": True,
+                },
+            }
+
+    monkeypatch.setattr(cli, "load_engine", lambda _args: FakeEngine())
+
+    cli.cmd_vector_backfill_apply(
+        argparse.Namespace(
+            tenant=TENANT,
+            branch="main",
+            limit=7,
+            actor="operator",
+            confirm_apply=True,
+        )
+    )
+    output = capsys.readouterr().out
+    report = json.loads(output)
+
+    assert calls == [
+        {
+            "tenant_id": TENANT,
+            "branch": "main",
+            "limit": 7,
+            "actor": "operator",
+            "source": "vector_backfill_apply",
+        }
+    ]
+    assert report["ok"] is True
+    assert report["redaction"]["raw_content_omitted"] is True
+    assert "alice handles private" not in output
+    assert "statement_hash_sha256" in output
 
 
 def test_cli_privacy_ops_check_fails_closed_on_local_kms_and_bad_erasure(tmp_path: Path) -> None:
