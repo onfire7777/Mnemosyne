@@ -8,6 +8,10 @@ defaults, relax protected cases, or authorize product claims.
 
 A candidate provider can be promoted only when all of these are true:
 
+- The shared provider conformance lane passes for the Python service, Python
+  HTTP adapters, and Rust sidecar. The fixture is
+  `tests/fixtures/provider_contract.json`; CI runs it through the
+  `provider-conformance` job.
 - It is non-inferior to the pinned baseline on the scoped private suite.
 - It has no protected-case regression.
 - Its margin is larger than measured run-to-run noise.

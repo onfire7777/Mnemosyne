@@ -1,19 +1,29 @@
 ---
 phase: 09-performance-and-refactoring-continuation
 status: passed
-verified: 2026-07-08
-scope: plan-09-01
+verified: 2026-07-09
+scope: plan-09-04
 ---
 
 # Phase 09 Verification
 
-Phase 09 Plan 01 is verified for local code parity and planning consistency.
-The verified slice is the retrieval channel capability-default change:
-`MNEMOSYNE_PARALLEL_CHANNELS` remains an explicit operator override, while the
-unset default follows capability tier (`floor` off, `standard` and above on).
+Phase 09 Plan 04 is verified for local contract parity and planning
+consistency. The verified slice is the provider conformance lane:
+`tests/fixtures/provider_contract.json` is shared by the Python embedding
+service, Python HTTP adapters, and Rust `mneme-providers` tests, and CI has a
+dedicated `provider-conformance` job. This does not flip provider defaults or
+claim provider bake-off evidence.
 
 ## Automated Checks
 
+- `uv run pytest -q tests/test_provider_contract.py tests/test_provider_batching.py tests/test_parity_retrieval.py tests/test_runtime_surfaces.py::test_http_embedding_and_reranker_adapters_use_json_provider_contract`
+  passed.
+- `EMBEDDING_SERVICE_FORCE_FALLBACK=1 uv run python services/embedding/selftest.py`
+  passed.
+- `cargo test --manifest-path rust/mneme-providers/Cargo.toml`
+  passed.
+- `cargo clippy --manifest-path rust/mneme-providers/Cargo.toml --all-targets -- -D warnings`
+  passed.
 - `uv run pytest -q tests/test_engine_perf_lanes.py tests/test_capability.py`
   passed.
 - `uv run ruff check src/mnemosyne/pipeline.py src/mnemosyne/capability.py src/mnemosyne/sqlite_engine.py tests/test_engine_perf_lanes.py tests/test_capability.py`

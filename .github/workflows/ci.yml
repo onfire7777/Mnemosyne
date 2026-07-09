@@ -76,6 +76,27 @@ jobs:
           uv run --locked python -m pytest tests/test_native_parity.py tests/test_native_dispatch.py -q
           MNEMOSYNE_PURE=1 uv run --locked python -m pytest tests/test_native_parity.py tests/test_native_dispatch.py -q
 
+  provider-conformance:
+    name: Provider conformance
+    runs-on: ubuntu-latest
+    steps:
+      # actions/checkout v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      # actions/setup-python v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: "3.12"
+      - name: Install uv
+        run: python -m pip install pip==26.1.2 uv==0.11.16
+      - name: Sync locked provider test environment
+        run: uv sync --locked --group dev
+      - name: Python provider contract
+        run: uv run --locked python -m pytest tests/test_provider_contract.py tests/test_provider_batching.py -q
+      - name: Embedding service self-test
+        run: EMBEDDING_SERVICE_FORCE_FALLBACK=1 uv run --locked python services/embedding/selftest.py
+      - name: Rust provider sidecar contract
+        run: cargo test --manifest-path rust/mneme-providers/Cargo.toml
+
   postgres:
     name: Postgres integration
     runs-on: ubuntu-latest
