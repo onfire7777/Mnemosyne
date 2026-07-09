@@ -168,8 +168,56 @@ class MnemosyneMcpServer:
         self.tool_names = {item["name"] for item in TOOL_SPEC}
         self.tool_specs = [_to_mcp_tool_spec(item) for item in TOOL_SPEC]
         self.tool_schemas_by_name = {item["name"]: item["inputSchema"] for item in self.tool_specs}
+        self._stateless_tools_cache: dict[
+            tuple[Any, ...],
+            tuple[tuple[tuple[str, int | None], ...], tuple[Any, Any, Any, Any]],
+        ] = {}
+        self._stateless_tools_cache_lock = threading.Lock()
         if not self.stateless:
             self.engine, self.queue, self.runtime_state, self.tools = self._build_tools()
+
+    def _stateless_tools_cache_key(
+        self,
+        queue_tenant: str | None,
+        arguments: dict[str, Any],
+    ) -> tuple[Any, ...]:
+        return (
+            queue_tenant or self.queue_tenant,
+            arguments.get("tenant_id") or arguments.get("tenant"),
+            arguments.get("user_id"),
+            arguments.get("session_id") or arguments.get("source_identity"),
+        )
+
+    def _stateless_tools_stamp(self) -> tuple[tuple[str, int | None], ...]:
+        if self.backend == "postgres" or not self.store_path:
+            return ()
+        store = Path(self.store_path).expanduser()
+        paths = (store, store.with_suffix(store.suffix + ".runtime.json"))
+        return tuple((str(path), path.stat().st_mtime_ns if path.exists() else None) for path in paths)
+
+    def _stateless_tools_for(
+        self,
+        queue_tenant: str | None,
+        arguments: dict[str, Any],
+    ) -> tuple[tuple[Any, Any, Any, Any], tuple[Any, ...]]:
+        key = self._stateless_tools_cache_key(queue_tenant, arguments)
+        stamp = self._stateless_tools_stamp()
+        with self._stateless_tools_cache_lock:
+            cached = self._stateless_tools_cache.get(key)
+            if cached and cached[0] == stamp:
+                return cached[1], key
+            bundle = self._build_tools(queue_tenant)
+            self._stateless_tools_cache[key] = (self._stateless_tools_stamp(), bundle)
+            return bundle, key
+
+    def _refresh_stateless_tools_cache(
+        self,
+        key: tuple[Any, ...],
+        bundle: tuple[Any, Any, Any, Any],
+    ) -> None:
+        with self._stateless_tools_cache_lock:
+            if key in self._stateless_tools_cache:
+                self._stateless_tools_cache[key] = (self._stateless_tools_stamp(), bundle)
 
     def _build_tools(self, queue_tenant: str | None = None) -> tuple[Any, Any, Any, MemoryTools]:
         from mnemosyne.engine import LocalMemoryEngine
@@ -462,9 +510,11 @@ class MnemosyneMcpServer:
         if not isinstance(arguments, dict):
             raise ValueError("Tool arguments must be a JSON object")
         if self.stateless:
-            _, queue, runtime_state, tools = self._build_tools(self._queue_tenant_from_arguments(arguments))
+            bundle, cache_key = self._stateless_tools_for(self._queue_tenant_from_arguments(arguments), arguments)
+            _, queue, runtime_state, tools = bundle
             result = getattr(tools, name)(**arguments)
             self._save_queue(runtime_state, queue)
+            self._refresh_stateless_tools_cache(cache_key, bundle)
             return result
         result = getattr(self.tools, name)(**arguments)
         self._save_queue(self.runtime_state, self.queue)

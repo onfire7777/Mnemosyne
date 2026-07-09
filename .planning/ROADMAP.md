@@ -490,7 +490,7 @@ contract; CONFIG-DRIFT-CHECKS env registry; GSD/CBM/gbrain hygiene.
   5. Native acceleration changes release the GIL only around Rust-owned compute
      loops and preserve scalar arithmetic/order exactly.
 
-**Plans:** 5 plans
+**Plans:** 6 plans
 
 Plans:
 
@@ -499,8 +499,9 @@ Plans:
 - [x] 09-03-PLAN.md — Postgres hot FTS/pgvector retrieval SELECT preparation.
 - [x] 09-04-PLAN.md — Provider contract conformance CI lane.
 - [x] 09-05-PLAN.md — Postgres `none` partition coverage and tuning profile.
+- [x] 09-06-PLAN.md — Stateless MCP warm-bundle reuse.
 
-Checkpoint: Phase 9 Plans 01-05 are implemented and locally verified. Retrieval
+Checkpoint: Phase 9 Plans 01-06 are implemented and locally verified. Retrieval
 channel parallelism now defaults from capability tier when
 `MNEMOSYNE_PARALLEL_CHANNELS` is absent (`floor` off, `standard` and above on),
 explicit operator env values still win, and SQLite scan-oracle memo hydration is

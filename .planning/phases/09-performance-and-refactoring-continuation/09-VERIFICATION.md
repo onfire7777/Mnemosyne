@@ -7,13 +7,18 @@ scope: plan-09-05
 
 # Phase 09 Verification
 
-Latest verified slice: Phase 09 Plan 05. The source-owned Postgres partition
+Latest verified slice: Phase 09 Plan 06. The source-owned stateless MCP
+warm-bundle slice is locally verified: repeated same-scope stateless calls reuse
+the warmed tool bundle, cross-tenant calls build a separate bundle, and local
+durable store changes still invalidate a warmed reader before the next call.
+
+Previous verified slice: Phase 09 Plan 05. The source-owned Postgres partition
 coverage/tuning-profile slice is locally verified: `none` is modeled as a
 no-vector partition with btree coverage, the dense fallback excludes `none`
 before Python embedding, and the Postgres tuning profile is versioned without a
 silent runtime flip.
 
-Previous verified slice: Phase 09 Plan 04 provider conformance. The shared
+Earlier verified slice: Phase 09 Plan 04 provider conformance. The shared
 provider fixture gates the Python embedding service, Python HTTP adapters, and
 Rust `mneme-providers` sidecar in CI. This does not flip provider defaults or
 claim provider bake-off evidence.
@@ -23,6 +28,10 @@ claim provider bake-off evidence.
 - `uv run pytest -q tests/test_provider_contract.py tests/test_provider_batching.py tests/test_parity_retrieval.py tests/test_runtime_surfaces.py::test_http_embedding_and_reranker_adapters_use_json_provider_contract`
   passed.
 - `uv run pytest tests/test_nfrs_and_schema.py::test_canonical_schema_partitions_sensitive_vector_indexes tests/test_nfrs_and_schema.py::test_postgres_perf_tuning_file_is_versioned_but_evidence_gated tests/test_postgres_perf_lanes.py::test_vector_schema_fully_present_issues_no_ddl_but_runs_backfills tests/test_postgres_perf_lanes.py::test_vector_schema_creates_btree_none_and_null_fallback_indexes tests/test_postgres_perf_lanes.py::test_vector_schema_missing_index_privilege_denied_warns_only tests/test_postgres_perf_lanes.py::test_postgres_null_embedding_fallback_is_capped_and_observable -q`
+  passed.
+- `uv run pytest tests/test_runtime_surfaces.py::test_mcp_server_stateless_mode_reuses_warm_tools_for_same_scope tests/test_runtime_surfaces.py::test_mcp_server_stateless_warm_tools_reload_after_external_store_write tests/test_runtime_surfaces.py::test_mcp_server_stateless_mode_reloads_durable_engine_and_runtime_state -q`
+  passed.
+- `uv run ruff check src/mnemosyne/mcp_server.py tests/test_runtime_surfaces.py`
   passed.
 - `uv run ruff check src/mnemosyne/postgres_engine.py tests/test_nfrs_and_schema.py tests/test_postgres_perf_lanes.py`
   passed.
