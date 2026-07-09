@@ -631,6 +631,29 @@ class PostgresEngine:
                     f"(embedding vector_cosine_ops) WHERE embedding_partition = '{partition}'",
                     description=f"index {index_name} (vector acceleration)",
                 )
+        # Rows in the `none` partition are intentionally non-embeddable and
+        # have NULL vectors. Cover them with ordinary btree indexes for
+        # lifecycle/audit scans; do not build dead HNSW indexes over them.
+        for index_name, ddl in (
+            (
+                "evidence_embedding_none_btree",
+                "CREATE INDEX IF NOT EXISTS evidence_embedding_none_btree ON evidence "
+                "(tenant_id, branch, created_at DESC, cid) WHERE embedding_partition = 'none'",
+            ),
+            (
+                "assertions_embedding_none_btree",
+                "CREATE INDEX IF NOT EXISTS assertions_embedding_none_btree ON assertions "
+                "(tenant_id, branch, status, valid_from DESC, id) WHERE embedding_partition = 'none'",
+            ),
+            (
+                "evidence_null_embedding_fallback_idx",
+                "CREATE INDEX IF NOT EXISTS evidence_null_embedding_fallback_idx ON evidence "
+                "(tenant_id, branch, created_at DESC, cid) "
+                "WHERE embedding IS NULL AND embedding_partition <> 'none' AND erased = false",
+            ),
+        ):
+            if not cls._index_exists(cur, index_name):
+                cls._apply_optional_ddl(cur, ddl, description=f"index {index_name}")
 
     @classmethod
     def _ensure_evidence_lexeme_schema(cls, cur: Any) -> None:
@@ -2191,6 +2214,7 @@ class PostgresEngine:
                         )
                       )
                       AND embedding IS NULL
+                      AND embedding_partition <> 'none'
                     ORDER BY created_at DESC, cid
                     LIMIT %s
                     """,

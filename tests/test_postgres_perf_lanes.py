@@ -594,6 +594,10 @@ def test_postgres_null_embedding_fallback_is_capped_and_observable(
 
     assert conn.fallback_query_params is not None
     assert conn.fallback_query_params[-1] == fallback_limit + 1
+    fallback_query = next(
+        sql for sql in conn.statements if "FROM evidence" in sql and "embedding IS NULL" in sql
+    )
+    assert "embedding_partition <> 'none'" in fallback_query
     hit = next(hit for hit in hits if hit.channel == "postgres_dense_fallback")
     assert len([hit for hit in hits if hit.channel == "postgres_dense_fallback"]) == 5
     assert hit.metadata["null_embedding_candidates_observed"] == fallback_limit + 1
@@ -988,6 +992,9 @@ VECTOR_INDEXES = {
     "assertions_embedding_public_hnsw",
     "evidence_embedding_private_hnsw",
     "assertions_embedding_private_hnsw",
+    "evidence_embedding_none_btree",
+    "assertions_embedding_none_btree",
+    "evidence_null_embedding_fallback_idx",
 }
 VECTOR_CONSTRAINTS = {"evidence_embedding_partition_check", "assertions_embedding_partition_check"}
 
@@ -1039,6 +1046,28 @@ def test_vector_schema_missing_index_privilege_denied_warns_only(
         PostgresEngine._ensure_evidence_vector_schema(cur)  # must NOT raise
     assert any("evidence_embedding_public_hnsw" in r.message for r in caplog.records)
     assert "ROLLBACK TO SAVEPOINT mnemosyne_ensure_ddl" in cur.statements
+
+
+def test_vector_schema_creates_btree_none_and_null_fallback_indexes() -> None:
+    missing = {
+        "evidence_embedding_none_btree",
+        "assertions_embedding_none_btree",
+        "evidence_null_embedding_fallback_idx",
+    }
+    cur = SchemaEnsureCursor(
+        present_columns=VECTOR_COLUMNS,
+        present_indexes=VECTOR_INDEXES - missing,
+        present_constraints=VECTOR_CONSTRAINTS,
+        deny_ddl=False,
+    )
+    PostgresEngine._ensure_evidence_vector_schema(cur)
+
+    ddl = _ddl_statements(cur)
+    created = {name for name in missing if any(name in stmt for stmt in ddl)}
+    assert created == missing
+    assert not any("embedding_none_btree" in stmt and "USING hnsw" in stmt for stmt in ddl)
+    fallback = next(stmt for stmt in ddl if "evidence_null_embedding_fallback_idx" in stmt)
+    assert "embedding IS NULL AND embedding_partition <> 'none' AND erased = false" in fallback
 
 
 # --------------------------------------------------------------------------- #

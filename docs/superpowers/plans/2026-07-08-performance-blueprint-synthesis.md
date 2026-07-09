@@ -50,8 +50,15 @@
     No provider default was flipped; TEI/model bake-off evidence remains open.
 
 - [ ] Task 6: Close Postgres vector coverage/tuning gaps.
-  - Add `'none'` partition index coverage before any halfvec/pgvectorscale work.
-  - Version server tuning with before/after evidence instead of silent defaults.
+  - Source slice landed: `none` partition coverage is btree-only, public/private
+    keep HNSW, and the embeddable-null fallback excludes `none` before Python
+    embedding.
+  - Source slice landed: `infra/postgres/postgresql-perf.conf` versions the
+    conservative Postgres tuning candidate and documents before/after evidence
+    requirements.
+  - Still open: live Postgres tuning application, before/after benchmark rows,
+    null-embedding production backfill/alert evidence, and any
+    halfvec/pgvectorscale APPROX-layer rollout.
 
 - [ ] Task 7: Implement stateless MCP warm-bundle reuse.
   - Cache reusable tool/provider bundles without crossing tenant/session boundaries.
