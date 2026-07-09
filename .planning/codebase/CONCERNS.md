@@ -130,10 +130,10 @@
 - Migration plan: Use `uv sync --locked` for development/CI/release checks; review `uv.lock` changes as dependency changes, not incidental churn.
 
 **Native wheel release surface remains partial:**
-- Risk: The current macOS arm64 / Linux x86_64 `native-wheels` CI job is merge-gating, but the full release matrix and install/import smoke proof for built artifacts are not complete yet.
+- Risk: The current macOS arm64 / Linux x86_64 `native-wheels` CI job is merge-gating and now install/import-smokes its built artifacts, but the full release matrix is not complete yet.
 - Impact: Pure-Python behavior remains canonical, and current wheel packaging regressions block merges, but advertised wheel support still needs broader release evidence.
 - Files: `.github/workflows/ci.yml`, `rust/mnemosyne-native/Cargo.toml`, `rust/mnemosyne-native/Cargo.lock`
-- Migration plan: Keep parity tests in the default test job; add broader wheel matrix coverage and install/import smoke checks before advertising wheel support.
+- Migration plan: Keep parity tests in the default test job; add broader wheel matrix coverage and release/publish evidence before advertising universal wheel support.
 
 **Embedding service fallback can hide missing real model dependencies:**
 - Risk: `services/embedding/app.py` falls back to deterministic embeddings/reranking when torch/sentence-transformers are unavailable or forced.

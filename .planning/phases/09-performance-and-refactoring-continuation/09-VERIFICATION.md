@@ -2,12 +2,17 @@
 phase: 09-performance-and-refactoring-continuation
 status: passed
 verified: 2026-07-09
-scope: plan-09-11
+scope: plan-09-12
 ---
 
 # Phase 09 Verification
 
-Latest verified slice: Phase 09 Plan 11. The source-owned provider bake-off
+Latest verified slice: Phase 09 Plan 12. The source-owned native wheel smoke
+slice is locally verified: the native wheel CI job now installs the built wheel
+from `rust/mnemosyne-native/dist`, imports `mnemosyne_native`, and asserts the
+strict parity marker before artifact upload.
+
+Previous verified slice: Phase 09 Plan 11. The source-owned provider bake-off
 evidence harness is locally verified: retained baseline/candidate eval reports
 and provider-check evidence can be summarized into a promotion-safe JSON
 envelope, local smoke fixtures remain non-promotional, and candidate regressions
@@ -55,6 +60,16 @@ claim provider bake-off evidence.
 
 ## Automated Checks
 
+- `ruby -e "require 'yaml'; YAML.load_file('.github/workflows/ci.yml')"`
+  passed.
+- `uv run maturin build --manifest-path rust/mnemosyne-native/Cargo.toml --release --out <tmpdir>`
+  passed locally.
+- `<tmpdir>/venv/bin/python -m pip install --no-deps <tmpdir>/*.whl`
+  passed locally.
+- `<tmpdir>/venv/bin/python -c "import mnemosyne_native as n; assert n.__version__; assert n.parity_marker() == 'strict-ieee-scalar-v1'"`
+  passed locally.
+- `uv run pytest tests/test_native_packaging.py -q`
+  passed.
 - `uv run pytest eval/tests/test_provider_bakeoff.py -q`
   passed.
 - `uv run ruff check eval/provider_bakeoff/run.py eval/tests/test_provider_bakeoff.py`
@@ -133,6 +148,9 @@ claim provider bake-off evidence.
 - The provider bake-off harness packages evidence and catches regressions; it
   does not run the production bake-off, prove TEI/sidecar superiority, or select
   defaults without retained measurements/noise evidence.
+- The native wheel smoke proves install/import for the built CI artifact shape;
+  it does not publish wheels, expand the full release matrix, or prove default
+  production adoption of the native tier.
 - GSD health has only pre-existing, non-repairable governance warnings: numeric
   phase references inside historical text and intentional root-level planning
   artifacts. No repairable GSD health errors remain for this slice.

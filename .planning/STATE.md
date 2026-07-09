@@ -42,7 +42,7 @@ Status: Tier-B production evidence attested; exact 1:1 blueprint parity rows B1-
 Current status (2026-07-07): Mandatory Tier A source wirings are closed on `main`; Phase 7 is gate-proven; Phase 8 self-hosted production evidence is complete. The former strict-parity blocker, Tier-B production operator evidence against deployed infrastructure, is closed by `capture-bc10`.
 
 Latest checkpoint (2026-07-09): Phase 9 is open as the post-attestation
-performance/refactoring continuation and Plans 09-01 through 09-11 are complete.
+performance/refactoring continuation and Plans 09-01 through 09-12 are complete.
 Retrieval channel parallelism now defaults from capability tier when
 `MNEMOSYNE_PARALLEL_CHANNELS` is absent (`floor` off, `standard` and above on),
 while explicit operator env values still win. SQLite scan-oracle memo hydration
@@ -90,7 +90,10 @@ bounded Postgres batch, embeds both `public` and `private` assertion partitions
 while keeping `none` non-embeddable, and reports only redacted row ids plus
 content/statement hashes. This gives operators a source-owned execution path;
 retained production backfill output plus a clean post-backfill vector hygiene
-probe remain open. Focused
+probe remain open. The native wheel CI job now installs the wheel it just built
+and imports `mnemosyne_native` to assert the strict parity marker before
+artifact upload, closing the source-owned install/import smoke gap for the
+current macOS arm64 and Linux x86_64 wheel lanes. Focused
 retrieval/capability, provider-cache, provider-contract, Postgres perf-lane,
 cargo, native parity, stateless MCP runtime-surface, vector hygiene
 observability, ruff, `git diff --check`, GSD consistency, and local pytest

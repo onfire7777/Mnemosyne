@@ -135,7 +135,7 @@ uv run --locked python -m pytest
 ```
 
 **Practical Gate:**
-- CI gates on Ruff, the full local pytest suite, explicit drift checks, G0 preregistration replay, a Postgres integration job, native parity checks when Rust is present, current native wheel builds, and a non-gating nightly chaos suite in `.github/workflows/ci.yml`.
+- CI gates on Ruff, the full local pytest suite, explicit drift checks, G0 preregistration replay, a Postgres integration job, native parity checks when Rust is present, current native wheel builds with install/import smoke, and a non-gating nightly chaos suite in `.github/workflows/ci.yml`.
 - README documents current expected verification surfaces and commands in `README.md`.
 
 ## Test Types
