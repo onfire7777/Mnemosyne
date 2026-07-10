@@ -25,7 +25,11 @@ score: 5/5 must-haves verified
 
 **Score:** 5/5 truths verified
 
+## Requirements Coverage
+
+Verified: REQ-010 and REQ-017. REQ-011 is supporting promotion-gate
+hardening; its canonical primary owner remains Phase 0.
+
 ## Automated Checks
 
 - `python -m pytest` returned `30 passed`.
-

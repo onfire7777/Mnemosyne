@@ -7,6 +7,8 @@ target_metric: retrieval_parallel_channels_tier_default
 target_value: standard_plus_on_floor_off
 gate: focused-local-plus-full-pytest
 gate_result: passed
+requirements-completed:
+  - NFR-001
 ---
 
 # 09-01 Summary: Retrieval Channel Capability Defaults

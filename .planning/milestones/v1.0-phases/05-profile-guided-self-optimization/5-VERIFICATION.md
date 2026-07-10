@@ -25,7 +25,11 @@ score: 5/5 must-haves verified
 
 **Score:** 5/5 truths verified
 
+## Requirements Coverage
+
+Verified: REQ-018 and NFR-005. REQ-011 is supporting no-regression hardening;
+its canonical primary owner remains Phase 0.
+
 ## Automated Checks
 
 - `python -m pytest` returned `34 passed`.
-
