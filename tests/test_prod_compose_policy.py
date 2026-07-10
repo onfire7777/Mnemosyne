@@ -298,6 +298,12 @@ def test_supply_chain_gate_shell_syntax_is_valid() -> None:
     assert result.returncode == 0, result.stderr
 
 
+def test_bounded_heartbeat_keeps_consolidator_as_sole_worker_run_host() -> None:
+    services = _service_blocks(_compose_text())
+    hosts = {name for name, body in services.items() if "worker-run" in body}
+    assert hosts == {"mnemo-consolidator"}
+
+
 def test_prod_docs_call_the_supply_chain_gate() -> None:
     docs = [
         INFRA / "prod" / "README.md",

@@ -4035,6 +4035,15 @@ def test_pyproject_exposes_mcp_script_and_postgres_extra() -> None:
     assert "psycopg[binary]>=3.2" in project["project"]["optional-dependencies"]["postgres"]
 
 
+def test_worker_run_heartbeat_mount_is_public_runtime_scoped() -> None:
+    import mnemosyne.cli as cli
+
+    source = inspect.getsource(cli.cmd_worker_run)
+    assert "_runtime_workspace_service" in source
+    assert "workspace_heartbeat" in source
+    assert "cmd_worker_run" not in inspect.getsource(MnemosyneMcpServer)
+
+
 def test_postgres_cid_helpers_and_audit_uuid_guard() -> None:
     cid = "28e581ee79af77abbdfc97e1d9c9c65a7970bbb7bc06858280303c01c70847de"
 

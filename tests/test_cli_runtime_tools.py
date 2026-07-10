@@ -5779,6 +5779,35 @@ def test_cli_worker_run_supervises_bounded_queue_cycles(tmp_path: Path) -> None:
     assert after["queue"]["complete"] == 2
 
 
+def test_cli_worker_run_workspace_heartbeat_is_bounded_and_additive(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    run_cli(store, "queue-enqueue", "--kind", "observability_snapshot", "--payload", "{}")
+
+    supervised = run_cli(store, "worker-run", "--limit", "1", "--max-cycles", "2")
+
+    heartbeats = [cycle["workspace_heartbeat"] for cycle in supervised["cycles"]]
+    assert [row["tick_count"] for row in heartbeats] == [1, 2]
+    assert supervised["workspace_heartbeat"]["schema_version"] == "worker-workspace-heartbeat.v1"
+    assert supervised["workspace_heartbeat"]["lifecycle"] == "stopped"
+    assert supervised["workspace_heartbeat"]["tick_count"] == heartbeats[-1]["tick_count"]
+    assert supervised["workspace_heartbeat"]["shadow_only"] is True
+    assert supervised["workspace_heartbeat"]["critical_path"] is False
+    assert supervised["workspace_heartbeat"]["production_mutation"] is False
+    assert supervised["workspace_heartbeat"]["promotion_gate_required"] is True
+    serialized = json.dumps({"heartbeats": heartbeats, "final": supervised["workspace_heartbeat"]})
+    for forbidden in ("selected_items", "proto_self", "metacognition", "trace", "stream"):
+        assert forbidden not in serialized
+
+
+def test_worker_run_heartbeat_release_evidence_is_required() -> None:
+    from mnemosyne.cli import _release_worker_run_evidence_findings
+
+    evidence = production_release_stdout("worker-run", production_provider_stdout())
+    evidence.pop("workspace_heartbeat", None)
+    findings = _release_worker_run_evidence_findings(evidence)
+    assert any("workspace heartbeat" in finding["message"] for finding in findings)
+
+
 def test_cli_worker_run_fail_on_dead_returns_nonzero(tmp_path: Path) -> None:
     store = tmp_path / "mnemosyne.json"
     run_cli(store, "queue-enqueue", "--kind", "unknown_job", "--payload", "{}", "--max-attempts", "1")
