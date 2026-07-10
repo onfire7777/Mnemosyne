@@ -565,14 +565,17 @@ pytest suites pass for the shipped Phase 09 slices.
 
 ### Phase 09.3: Close audit gap: complete milestone verification, Nyquist, and requirement traceability (INSERTED)
 
-**Goal:** [Urgent work - to be planned]
-**Requirements**: TBD
-**Depends on:** Phase 9
-**Plans:** 0 plans
+**Goal:** Build a truthful, machine-checkable v1.0 evidence graph: complete
+phase verification and Nyquist coverage, reconstruct missing summaries without
+fabricating history, and resolve every REQ/NFR through canonical three-source
+traceability before the milestone re-audit and archive.
+**Requirements**: REQ-001 through REQ-018; NFR-001 through NFR-005
+**Depends on:** Phase 9, Phase 09.1, Phase 09.2
+**Plans:** 1/1 plan executed; independent verification pending
 
 Plans:
 
-- [ ] TBD (run /gsd-plan-phase 09.3 to break down)
+- [ ] 09.3-01-PLAN.md — Reconstruct truthful missing evidence artifacts, enforce all 23 requirement joins, and pass focused/full/memory/CI/independent milestone gates.
 
 ### Phase 09.2: Close audit gap: mount the bounded heartbeat in the public runtime (INSERTED)
 
