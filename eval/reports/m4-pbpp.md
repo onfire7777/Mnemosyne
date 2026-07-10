@@ -1,0 +1,3 @@
+# M4 — Charter to PBPP
+
+On 2026-07-10, Mnemosyne replaced the blanket public-benchmark prohibition in the performance blueprint and provider bake-off protocol with the Public-Benchmark Publication Protocol from `docs/EXECUTION-PLAN-B-Benchmark-and-Leaderboard.md` §2. Public numbers now require the pinned `eval/public/` harness, a complete artifact bundle, separate retrieval-recall and LLM-judged-QA columns with judge disclosure, strict separation from the private suite, and independent reproduction before any headline claim; provider promotion remains governed by private-suite non-inferiority and protected-case gates. `tests/test_benchmark_publication_policy.py` enforces the contributor-facing policy in CI.
