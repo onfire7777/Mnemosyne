@@ -17866,6 +17866,27 @@ def cmd_capability(args: argparse.Namespace) -> None:
         print(f"export {key}={shlex.quote(value)}")
 
 
+def cmd_eval_public(args: argparse.Namespace) -> None:
+    """Run, verify, or reproduce a custody-preserving public evaluation bundle."""
+    repo_root = Path(__file__).resolve().parents[2]
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
+    from eval.public.bundle import reproduce_bundle, verify_bundle
+    from eval.public.runner import run_public_suite
+
+    if args.verify_bundle:
+        result = verify_bundle(args.verify_bundle)
+    elif args.reproduce_bundle:
+        if args.out_dir is None:
+            raise ValueError("--out-dir is required with --reproduce-bundle")
+        result = reproduce_bundle(args.reproduce_bundle, args.out_dir)
+    else:
+        if args.out_dir is None:
+            raise ValueError("--out-dir is required with --suite")
+        result = run_public_suite(args.suite, args.out_dir)
+    print(json.dumps(result, sort_keys=True))
+
+
 def build_parser() -> argparse.ArgumentParser:
     from mnemosyne.media_limits import DEFAULT_MAX_INGEST_BYTES
 
@@ -19889,6 +19910,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     residency_policy = sub.add_parser("residency-policy")
     residency_policy.set_defaults(func=cmd_residency_policy)
+
+    eval_public = sub.add_parser("eval-public")
+    action = eval_public.add_mutually_exclusive_group(required=True)
+    action.add_argument("--suite", choices=("smoke",))
+    action.add_argument("--verify-bundle", type=Path)
+    action.add_argument("--reproduce-bundle", type=Path)
+    eval_public.add_argument("--out-dir", type=Path)
+    eval_public.set_defaults(func=cmd_eval_public)
 
     consolidate_once = sub.add_parser("consolidate-once")
     consolidate_once.set_defaults(func=cmd_consolidate_once)
