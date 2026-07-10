@@ -3,7 +3,7 @@
     {"content": "The lighthouse access code is amber seven.", "doc_id": "doc-lighthouse"},
     {"content": "The orchard irrigation window starts at dawn.", "doc_id": "doc-orchard"}
   ],
-  "k": 2,
+  "k": 1,
   "questions": [
     {"gold_doc_ids": ["doc-lighthouse"], "query": "lighthouse access code", "question_id": "smoke-001"},
     {"gold_doc_ids": ["doc-orchard"], "query": "orchard irrigation window", "question_id": "smoke-002"}
