@@ -20,7 +20,12 @@
 governance charter that every later benchmark and entrant must use.
 **Requirements:** BENCH-001, BENCH-002, BENCH-003, GOV-001, RAIL-001..004
 **Depends on:** v1.0, completed M4/PBPP
-**Plans:** Not planned
+**Plans:** 0/2 complete
+
+Plans:
+
+- [ ] 10-01-PLAN.md — Public CLI harness and reproducibility bundle scaffold.
+- [ ] 10-02-PLAN.md — Neutral governance, permanent COI, and operator firewall.
 
 ### Phase 11: Deterministic Public Retrieval Tracks
 
