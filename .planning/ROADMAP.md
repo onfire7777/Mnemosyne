@@ -593,4 +593,4 @@ Plans:
 **Plans:** 1 plan
 Plans:
 
-- [ ] 09.1-01-PLAN.md — Preserve caller read context end to end with red-first policy, transport-parity, non-leakage, and exact-state closure evidence.
+- [x] 09.1-01-PLAN.md — Preserve caller read context end to end with red-first policy, transport-parity, non-leakage, and exact-state closure evidence.
