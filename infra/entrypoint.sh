@@ -25,7 +25,8 @@ case "$ROLE" in
     ;;
   consolidator)
     # Sole write + KMS authority. worker-run exits by design after bounded
-    # cycles; supervise it in a loop so the container is a long-running worker.
+    # cycles (including one bounded shadow-heartbeat window); this outer loop is
+    # the sole restart owner so terminal heartbeat state is never reset in process.
     POLL="${MNEMOSYNE_WORKER_SUPERVISOR_INTERVAL:-5}"
     while :; do
       mneme \

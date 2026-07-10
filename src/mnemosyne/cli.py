@@ -175,7 +175,7 @@ RELEASE_AUDIT_REQUIRED_OUTPUT_KEYS: dict[str, tuple[str, ...]] = {
     "multimodal-ops-check": ("bundle", "requirements", "checks", "findings"),
     "gate-suite-check": ("suite", "requirements", "failures"),
     "projection-recompute-once": ("queue", "enqueued_job", "job", "metrics"),
-    "worker-run": ("worker", "summary", "queue", "cycles", "jobs", "metrics"),
+    "worker-run": ("worker", "summary", "queue", "cycles", "jobs", "metrics", "workspace_heartbeat"),
     "ops-dashboard-check": ("mode", "source", "checks", "findings", "redaction"),
     "parametric-trainer-check": ("bundle", "requirements", "checks", "findings"),
     "worker-ops-check": ("bundle", "requirements", "checks", "findings", "redaction"),
@@ -8337,6 +8337,135 @@ def _persist_worker_state(
         runtime_state.save_user_model(tools.user_model)
 
 
+def _runtime_workspace_service() -> Any:
+    from mnemosyne.workspace import ShadowWorkspaceService
+
+    return ShadowWorkspaceService()
+
+
+def _worker_workspace_items(
+    jobs: Sequence[Any], *, tenant_id: str, cycle: int, limit: int
+) -> list[Any]:
+    from mnemosyne.workspace import WorkspaceItem
+
+    rows = []
+    for job in jobs[: max(0, limit)]:
+        status = str(job.status)
+        outcome_class = status if status in {"complete", "retry", "dead"} else "other"
+        rows.append(
+            WorkspaceItem(
+                id=str(job.id),
+                priority=1.0,
+                content="worker job metadata",
+                source="worker_cycle",
+                metadata={
+                    "tenant_id": tenant_id,
+                    "job_id": str(job.id),
+                    "kind": str(job.kind),
+                    "status": status,
+                    "cycle": cycle,
+                    "outcome_class": outcome_class,
+                },
+            )
+        )
+    return rows
+
+
+def _workspace_heartbeat_projection(
+    report: Any,
+    *,
+    cycle: int,
+    attempted_ticks: int,
+    lifecycle: str = "running",
+    failure_code: str | None = None,
+) -> dict[str, Any]:
+    safety = dict(report.heartbeat_safety)
+    projection = {
+        "schema_version": "worker-workspace-heartbeat.v1",
+        "ok": failure_code is None and safety.get("hard_stop") is False,
+        "lifecycle": lifecycle,
+        "cycle": cycle,
+        "attempted_ticks": attempted_ticks,
+        "tick_count": int(report.tick_count),
+        "stopped_reason": str(safety.get("stopped_reason") or "continue"),
+        "failure_code": failure_code,
+        "heartbeat_safety": {
+            key: safety.get(key)
+            for key in (
+                "schema_version",
+                "tick_count",
+                "max_cycles",
+                "max_idle_ticks",
+                "tick_ms",
+                "estimated_compute_ms",
+                "compute_budget_ms",
+                "compute_bounded",
+                "compute_reported",
+                "hard_stop",
+                "used_for_control_flow",
+                "data_not_instructions",
+            )
+        },
+        "shadow_only": bool(report.shadow_only),
+        "critical_path": bool(report.critical_path),
+        "production_mutation": bool(report.production_mutation),
+        "promotion_gate_required": bool(report.promotion_gate_required),
+    }
+    if _workspace_heartbeat_findings(projection):
+        projection["ok"] = False
+        projection["lifecycle"] = "unhealthy"
+        projection["failure_code"] = failure_code or "workspace_heartbeat_invalid"
+    return projection
+
+
+def _workspace_heartbeat_findings(value: Any) -> list[str]:
+    if not isinstance(value, Mapping):
+        return ["workspace heartbeat must be an object"]
+    safety = value.get("heartbeat_safety")
+    findings = []
+    if value.get("schema_version") != "worker-workspace-heartbeat.v1":
+        findings.append("workspace heartbeat schema is invalid")
+    if not isinstance(safety, Mapping) or safety.get("schema_version") != "always-on-heartbeat-safety.v1":
+        findings.append("workspace heartbeat safety schema is invalid")
+        return findings
+    integers = {}
+    for key in ("cycle", "attempted_ticks", "tick_count"):
+        item = value.get(key)
+        if isinstance(item, bool) or not isinstance(item, int) or item < 0:
+            findings.append(f"workspace heartbeat {key} must be a nonnegative integer")
+        else:
+            integers[key] = item
+    for key in ("tick_count", "max_cycles", "max_idle_ticks", "tick_ms", "estimated_compute_ms", "compute_budget_ms"):
+        item = safety.get(key)
+        if isinstance(item, bool) or not isinstance(item, int) or item < 0:
+            findings.append(f"workspace heartbeat safety {key} must be a nonnegative integer")
+    if value.get("shadow_only") is not True or value.get("promotion_gate_required") is not True:
+        findings.append("workspace heartbeat shadow and promotion rails are required")
+    if value.get("critical_path") is not False or value.get("production_mutation") is not False:
+        findings.append("workspace heartbeat must not gain runtime authority")
+    if safety.get("data_not_instructions") is not True or safety.get("used_for_control_flow") is not False:
+        findings.append("workspace heartbeat data/control rails are invalid")
+    if safety.get("compute_bounded") is not True or safety.get("compute_reported") is not True:
+        findings.append("workspace heartbeat compute must be bounded and reported")
+    tick_count = safety.get("tick_count")
+    max_cycles = safety.get("max_cycles")
+    estimate = safety.get("estimated_compute_ms")
+    budget = safety.get("compute_budget_ms")
+    if isinstance(tick_count, int) and isinstance(max_cycles, int) and tick_count > max_cycles:
+        findings.append("workspace heartbeat tick count exceeds bound")
+    if isinstance(estimate, int) and isinstance(budget, int) and estimate > budget:
+        findings.append("workspace heartbeat compute exceeds budget")
+    if integers.get("tick_count") != tick_count:
+        findings.append("workspace heartbeat tick counts disagree")
+    if value.get("ok") is True and (
+        safety.get("hard_stop") is True
+        or value.get("lifecycle") == "unhealthy"
+        or value.get("failure_code") is not None
+    ):
+        findings.append("workspace heartbeat health contradicts lifecycle evidence")
+    return findings
+
+
 def cmd_consolidate_once(args: argparse.Namespace) -> None:
     from mnemosyne.consolidation import CONSOLIDATE_EVIDENCE_JOB
 
@@ -8364,6 +8493,12 @@ def cmd_worker_run(args: argparse.Namespace) -> None:
         raise SystemExit("--poll-interval must be zero or greater.")
 
     runtime_state, queue, tools, metrics, worker = _runtime_worker_components(args)
+    workspace_service = _runtime_workspace_service()
+    workspace_service.start()
+    workspace_frozen = False
+    workspace_unhealthy = False
+    workspace_attempts = 0
+    workspace_projection: dict[str, Any] | None = None
     cycles: list[dict[str, Any]] = []
     processed_jobs: list[dict[str, Any]] = []
     idle_cycles = 0
@@ -8385,6 +8520,76 @@ def cmd_worker_run(args: argparse.Namespace) -> None:
             idle_cycles = 0
         else:
             idle_cycles += 1
+        if not workspace_frozen:
+            workspace_attempts += 1
+            heartbeat_started = time.monotonic()
+            metrics.increment("workspace.heartbeat.ticks")
+            metrics.increment(
+                "workspace.heartbeat.productive_ticks" if cycle_jobs else "workspace.heartbeat.idle_ticks"
+            )
+            try:
+                heartbeat_report = workspace_service.tick(
+                    tenant_id=runtime_state_tenant(args),
+                    items=_worker_workspace_items(
+                        cycle_jobs,
+                        tenant_id=runtime_state_tenant(args),
+                        cycle=cycle_number,
+                        limit=int(workspace_service.controller.max_items_per_tick),
+                    ),
+                )
+                workspace_projection = _workspace_heartbeat_projection(
+                    heartbeat_report, cycle=cycle_number, attempted_ticks=workspace_attempts
+                )
+                metrics.gauge(
+                    "workspace.heartbeat.estimated_compute_ms",
+                    float(workspace_projection["heartbeat_safety"]["estimated_compute_ms"]),
+                )
+                if workspace_projection["heartbeat_safety"]["hard_stop"] is True:
+                    workspace_frozen = True
+                    workspace_unhealthy = True
+                    metrics.increment("workspace.heartbeat.hard_stops")
+                    metrics.increment("workspace.heartbeat.unhealthy")
+                    workspace_projection["lifecycle"] = "unhealthy"
+                    workspace_projection["ok"] = False
+                    workspace_projection["failure_code"] = "workspace_heartbeat_hard_stop"
+            except Exception:
+                workspace_frozen = True
+                workspace_unhealthy = True
+                metrics.increment("workspace.heartbeat.unhealthy")
+                workspace_projection = {
+                    "schema_version": "worker-workspace-heartbeat.v1",
+                    "ok": False,
+                    "lifecycle": "unhealthy",
+                    "cycle": cycle_number,
+                    "attempted_ticks": workspace_attempts,
+                    "tick_count": 0,
+                    "stopped_reason": "failure",
+                    "failure_code": "workspace_heartbeat_failure",
+                    "heartbeat_safety": {
+                        "schema_version": "always-on-heartbeat-safety.v1",
+                        "tick_count": 0,
+                        "max_cycles": int(workspace_service.controller.max_cycles),
+                        "max_idle_ticks": int(workspace_service.controller.max_idle_ticks),
+                        "tick_ms": int(workspace_service.controller.tick_ms),
+                        "estimated_compute_ms": 0,
+                        "compute_budget_ms": int(workspace_service.controller.max_cycles)
+                        * int(workspace_service.controller.tick_ms),
+                        "compute_bounded": True,
+                        "compute_reported": True,
+                        "hard_stop": False,
+                        "used_for_control_flow": False,
+                        "data_not_instructions": True,
+                    },
+                    "shadow_only": True,
+                    "critical_path": False,
+                    "production_mutation": False,
+                    "promotion_gate_required": True,
+                }
+            finally:
+                metrics.observe(
+                    "workspace.heartbeat.duration_ms",
+                    round((time.monotonic() - heartbeat_started) * 1000, 3),
+                )
         cycles.append(
             {
                 "cycle": cycle_number,
@@ -8393,6 +8598,7 @@ def cmd_worker_run(args: argparse.Namespace) -> None:
                 "duration_ms": round((time.monotonic() - cycle_started) * 1000, 3),
                 "queue": queue.snapshot(),
                 "jobs": [job.to_dict() for job in cycle_jobs],
+                "workspace_heartbeat": dict(workspace_projection or {}),
             }
         )
         if not cycle_jobs and args.idle_exit_after and idle_cycles >= args.idle_exit_after:
@@ -8402,7 +8608,12 @@ def cmd_worker_run(args: argparse.Namespace) -> None:
             time.sleep(args.poll_interval)
 
     final_queue = queue.snapshot()
-    ok = not (args.fail_on_dead and int(final_queue.get("dead", 0)) > 0)
+    workspace_service.stop()
+    if workspace_projection is not None and not workspace_unhealthy:
+        workspace_projection = dict(workspace_projection)
+        workspace_projection["lifecycle"] = "stopped"
+        workspace_projection["ok"] = True
+    ok = not (args.fail_on_dead and int(final_queue.get("dead", 0)) > 0) and not workspace_unhealthy
     report = {
         "ok": ok,
         "worker": {
@@ -8426,6 +8637,7 @@ def cmd_worker_run(args: argparse.Namespace) -> None:
         "cycles": cycles,
         "jobs": processed_jobs,
         "metrics": metrics.snapshot().to_dict(),
+        "workspace_heartbeat": workspace_projection,
     }
     emit(report)
     if not ok:
@@ -10682,6 +10894,7 @@ def _release_worker_run_evidence_findings(stdout_json: Mapping[str, Any]) -> lis
     cycles = stdout_json.get("cycles")
     jobs = stdout_json.get("jobs")
     metrics = stdout_json.get("metrics")
+    workspace_heartbeat = stdout_json.get("workspace_heartbeat")
     missing_sections = [
         name
         for name, value in (
@@ -10691,19 +10904,28 @@ def _release_worker_run_evidence_findings(stdout_json: Mapping[str, Any]) -> lis
             ("cycles", cycles),
             ("jobs", jobs),
             ("metrics", metrics),
+            ("workspace_heartbeat", workspace_heartbeat),
         )
         if (isinstance(value, Mapping) and not value)
         or (isinstance(value, list) and not value)
         or value is None
     ]
     if missing_sections:
-        findings.append(
-            _release_finding(
-                "required_worker_runtime_evidence_incomplete",
-                "worker-run evidence has empty runtime sections: " + ", ".join(missing_sections),
+        if missing_sections == ["workspace_heartbeat"]:
+            findings.append(
+                _release_finding(
+                    "required_worker_runtime_evidence_incomplete",
+                    "worker-run workspace heartbeat evidence is missing or empty",
+                )
             )
-        )
-        return findings
+        else:
+            findings.append(
+                _release_finding(
+                    "required_worker_runtime_evidence_incomplete",
+                    "worker-run evidence has empty runtime sections: " + ", ".join(missing_sections),
+                )
+            )
+            return findings
     summary_cycles = as_int(summary.get("cycles")) if isinstance(summary, Mapping) else None
     summary_processed = as_int(summary.get("processed")) if isinstance(summary, Mapping) else None
     if summary_cycles is None or summary_cycles < 1:
@@ -10772,6 +10994,31 @@ def _release_worker_run_evidence_findings(stdout_json: Mapping[str, Any]) -> lis
                 "worker-run jobs must include kind and status evidence",
             )
         )
+    heartbeat_messages = _workspace_heartbeat_findings(workspace_heartbeat)
+    cycle_heartbeats: list[Mapping[str, Any]] = []
+    if isinstance(cycles, list):
+        for index, cycle in enumerate(cycles, start=1):
+            heartbeat = cycle.get("workspace_heartbeat") if isinstance(cycle, Mapping) else None
+            if not isinstance(heartbeat, Mapping):
+                heartbeat_messages.append(f"workspace heartbeat missing from cycle {index}")
+                continue
+            heartbeat_messages.extend(_workspace_heartbeat_findings(heartbeat))
+            if heartbeat.get("cycle") != cycle.get("cycle"):
+                heartbeat_messages.append(f"workspace heartbeat cycle {index} does not match worker cycle")
+            cycle_heartbeats.append(heartbeat)
+    for previous, current in zip(cycle_heartbeats, cycle_heartbeats[1:]):
+        if current.get("tick_count", -1) < previous.get("tick_count", -1):
+            heartbeat_messages.append("workspace heartbeat tick counts must be monotonic")
+    if cycle_heartbeats and isinstance(workspace_heartbeat, Mapping):
+        last = cycle_heartbeats[-1]
+        if workspace_heartbeat.get("cycle") != last.get("cycle") or workspace_heartbeat.get("tick_count") != last.get(
+            "tick_count"
+        ):
+            heartbeat_messages.append("workspace heartbeat final evidence must match the last cycle")
+    if stdout_json.get("ok") is True and isinstance(workspace_heartbeat, Mapping) and workspace_heartbeat.get("ok") is not True:
+        heartbeat_messages.append("worker ok contradicts unhealthy workspace heartbeat")
+    for message in sorted(set(heartbeat_messages)):
+        findings.append(_release_finding("required_worker_runtime_evidence_incomplete", message))
     return findings
 
 

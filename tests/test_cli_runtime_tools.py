@@ -11,6 +11,7 @@ import subprocess
 import sys
 import threading
 import time
+from types import SimpleNamespace
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -5808,6 +5809,35 @@ def test_worker_run_heartbeat_release_evidence_is_required() -> None:
     assert any("workspace heartbeat" in finding["message"] for finding in findings)
 
 
+def test_worker_run_heartbeat_metadata_is_explicitly_allowlisted() -> None:
+    marker = "must-never-enter-heartbeat"
+    jobs = [
+        SimpleNamespace(
+            id="job-1",
+            kind="calibrate",
+            status="complete",
+            payload={"prompt": marker},
+            result={"provider_output": marker},
+            last_error=marker,
+        )
+    ]
+
+    items = cli._worker_workspace_items(jobs, tenant_id="tenant-a", cycle=2, limit=1)
+
+    assert len(items) == 1
+    assert items[0].content == "worker job metadata"
+    assert items[0].source == "worker_cycle"
+    assert set(items[0].metadata) == {
+        "tenant_id",
+        "job_id",
+        "kind",
+        "status",
+        "cycle",
+        "outcome_class",
+    }
+    assert marker not in json.dumps(items[0].to_bottleneck_row())
+
+
 def test_cli_worker_run_fail_on_dead_returns_nonzero(tmp_path: Path) -> None:
     store = tmp_path / "mnemosyne.json"
     run_cli(store, "queue-enqueue", "--kind", "unknown_job", "--payload", "{}", "--max-attempts", "1")
@@ -7085,6 +7115,35 @@ def production_release_stdout(command: str, provider_stdout: dict) -> dict:
             "max_attempts": 3,
         }
         queue = {"queued": 0, "running": 0, "complete": 1, "dead": 0}
+        def heartbeat(cycle: int, *, lifecycle: str = "running") -> dict:
+            return {
+                "schema_version": "worker-workspace-heartbeat.v1",
+                "ok": True,
+                "lifecycle": lifecycle,
+                "cycle": cycle,
+                "attempted_ticks": cycle,
+                "tick_count": cycle,
+                "stopped_reason": "continue",
+                "failure_code": None,
+                "heartbeat_safety": {
+                    "schema_version": "always-on-heartbeat-safety.v1",
+                    "tick_count": cycle,
+                    "max_cycles": 4,
+                    "max_idle_ticks": 2,
+                    "tick_ms": 250,
+                    "estimated_compute_ms": cycle * 250,
+                    "compute_budget_ms": 1000,
+                    "compute_bounded": True,
+                    "compute_reported": True,
+                    "hard_stop": False,
+                    "used_for_control_flow": False,
+                    "data_not_instructions": True,
+                },
+                "shadow_only": True,
+                "critical_path": False,
+                "production_mutation": False,
+                "promotion_gate_required": True,
+            }
         return {
             "ok": True,
             "worker": {
@@ -7100,11 +7159,26 @@ def production_release_stdout(command: str, provider_stdout: dict) -> dict:
             "summary": {"cycles": 2, "processed": 1, "idle_cycles": 1, "stopped_reason": "idle_exit"},
             "queue": queue,
             "cycles": [
-                {"cycle": 1, "processed": 1, "idle": False, "queue": queue, "jobs": [job]},
-                {"cycle": 2, "processed": 0, "idle": True, "queue": queue, "jobs": []},
+                {
+                    "cycle": 1,
+                    "processed": 1,
+                    "idle": False,
+                    "queue": queue,
+                    "jobs": [job],
+                    "workspace_heartbeat": heartbeat(1),
+                },
+                {
+                    "cycle": 2,
+                    "processed": 0,
+                    "idle": True,
+                    "queue": queue,
+                    "jobs": [],
+                    "workspace_heartbeat": heartbeat(2),
+                },
             ],
             "jobs": [job],
             "metrics": {"worker": {"processed_jobs": 1}},
+            "workspace_heartbeat": heartbeat(2, lifecycle="stopped"),
         }
     if command == "ops-dashboard-check":
         return {
