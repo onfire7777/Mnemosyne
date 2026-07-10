@@ -308,7 +308,12 @@ def test_prod_docs_call_the_supply_chain_gate() -> None:
     docs = [
         INFRA / "prod" / "README.md",
         REPO_ROOT / "docs" / "SELF-HOSTED-PRODUCTION-ARCHITECTURE.md",
-        REPO_ROOT / ".planning" / "phases" / "08-self-hosted-first-production" / "08-01-PLAN.md",
+        REPO_ROOT
+        / ".planning"
+        / "milestones"
+        / "v1.0-phases"
+        / "08-self-hosted-first-production"
+        / "08-01-PLAN.md",
     ]
     for path in docs:
         assert "infra/scripts/verify-supply-chain.sh" in path.read_text(encoding="utf-8")
