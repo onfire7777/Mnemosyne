@@ -27,4 +27,3 @@ The following remain explicit non-blocking future evidence obligations: real
 provider default selection, production cache hit-rate/latency, retained
 production vector backfill, broader wheel publication/adoption,
 negative/abstention caching, and runtime-default-flip evidence.
-

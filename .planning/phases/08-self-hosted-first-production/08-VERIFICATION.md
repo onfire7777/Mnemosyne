@@ -42,4 +42,3 @@ evidence; no historical checklist action is inferred from file existence.
 Tier-C six-SLO reproving, LongMemEval R@5, and an official-profile badge are not
 invented by this reconstruction. Historical unchecked boxes remain historical;
 the later custody packet closes only the B1-B10 claims it directly attests.
-

@@ -25,4 +25,3 @@ it does not claim contemporaneous Wave-0 sampling during the historical plan.
 
 Any failed seam blocks the corresponding truth. A missing external packet is an
 operator-evidence failure, not something a local unit test may replace.
-
