@@ -4059,6 +4059,64 @@ def test_cli_export_is_caller_scoped_by_role(tmp_path: Path) -> None:
     assert agent_export["evidence"][0]["content"] == "CLI filtered export S2 secret."
 
 
+def test_cli_read_context_flags_apply_without_leakage(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    query = "cli-caller-context-needle"
+    protected = f"{query} raw-secret-payload"
+    engine = LocalMemoryEngine(store_path=store)
+    cid = engine.append_evidence(
+        Evidence(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="cli-read-context",
+            content=protected,
+            sensitivity=2,
+            trust_tier=0,
+            access_policy={
+                "tenant": TENANT,
+                "allow_roles": ["agent"],
+                "allow_principals": [USER],
+                "require_capabilities": ["pii:read"],
+                "purpose": ["support"],
+                "residency": "us",
+                "lawful_basis": ["consent"],
+            },
+        )
+    )
+    shared = (
+        "--role",
+        "agent",
+        "--user",
+        USER,
+        "--max-sensitivity",
+        "2",
+        "--capability-tag",
+        "pii:read",
+        "--purpose",
+        "support",
+        "--lawful-basis",
+        "consent",
+        "--residency",
+        "us",
+        "--region",
+        "us",
+        "--break-glass",
+    )
+
+    for command in ("search", "deep-search", "explain"):
+        allowed = run_cli(store, command, "--tenant", TENANT, "--query", query, *shared)
+        assert any(hit["id"] == cid for hit in allowed["hits"])
+        denied = run_cli(store, command, "--tenant", TENANT, "--query", query)
+        encoded = json.dumps(denied, sort_keys=True)
+        assert denied["hits"] == []
+        assert protected not in encoded
+        assert cid not in encoded
+        assert denied["explain"]["gist_support"]["gist_hit_ids"] == []
+        assert "denial" not in encoded
+        assert "hidden" not in encoded
+
+
 def test_cli_ingest_rejects_oversized_file_before_read(tmp_path: Path) -> None:
     store = tmp_path / "mnemosyne.json"
     asset = tmp_path / "oversized.bin"

@@ -3885,6 +3885,120 @@ def test_official_mcp_sdk_adapter_binds_signed_session_like_json_rpc(tmp_path: P
     asyncio.run(exercise())
 
 
+def test_caller_context_without_leakage_across_json_rpc_and_sdk(tmp_path: Path) -> None:
+    pytest.importorskip("mcp")
+    from mcp import types
+
+    query = "transport-caller-context-needle"
+    protected = f"{query} raw-secret-payload"
+    agent_token = mcp_session_token(role="agent", source_trust_tier=0)
+    reader_token = mcp_session_token(role="reader", source_trust_tier=0)
+    server = MnemosyneMcpServer(
+        store_path=tmp_path / "json-rpc-context.json",
+        session_secret=MCP_SESSION_SECRET,
+        require_session=True,
+    )
+    captured = mcp_call(
+        server,
+        "ingest",
+        {
+            "session_token": agent_token,
+            "actor": "user",
+            "source_type": "json-rpc-context",
+            "content": protected,
+            "sensitivity": 2,
+        },
+    )
+    cid = captured["cid"]
+
+    for name in ("search", "deep_search", "explain"):
+        allowed = mcp_call(
+            server,
+            name,
+            {"session_token": agent_token, "query": query, "max_sensitivity": 2},
+        )
+        assert any(hit["id"] == cid for hit in allowed["hits"])
+        denied = mcp_call(server, name, {"session_token": reader_token, "query": query})
+        encoded = json.dumps(denied, sort_keys=True)
+        assert denied["hits"] == []
+        assert protected not in encoded
+        assert cid not in encoded
+        assert denied["explain"]["gist_support"]["gist_hit_ids"] == []
+        assert "denial" not in encoded
+        assert "hidden" not in encoded
+
+    mismatch = server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 100,
+            "method": "tools/call",
+            "params": {
+                "name": "deep_search",
+                "arguments": {
+                    "session_token": agent_token,
+                    "query": query,
+                    "user_id": "other-user",
+                },
+            },
+        }
+    )
+    assert mismatch["result"]["isError"] is True
+    assert "session user mismatch" in mismatch["result"]["content"][0]["text"]
+
+    sdk = build_sdk_server(
+        store_path=tmp_path / "sdk-context.json",
+        session_secret=MCP_SESSION_SECRET,
+        require_session=True,
+    )
+
+    async def exercise() -> None:
+        call = sdk.request_handlers[types.CallToolRequest]
+        capture_result = await call(
+            types.CallToolRequest(
+                params={
+                    "name": "ingest",
+                    "arguments": {
+                        "session_token": agent_token,
+                        "actor": "user",
+                        "source_type": "sdk-context",
+                        "content": protected,
+                        "sensitivity": 2,
+                    },
+                }
+            )
+        )
+        sdk_cid = capture_result.root.structuredContent["cid"]
+        for name in ("search", "deep_search", "explain"):
+            allowed = await call(
+                types.CallToolRequest(
+                    params={
+                        "name": name,
+                        "arguments": {
+                            "session_token": agent_token,
+                            "query": query,
+                            "max_sensitivity": 2,
+                        },
+                    }
+                )
+            )
+            assert any(hit["id"] == sdk_cid for hit in allowed.root.structuredContent["hits"])
+            denied = await call(
+                types.CallToolRequest(
+                    params={"name": name, "arguments": {"session_token": reader_token, "query": query}}
+                )
+            )
+            encoded = json.dumps(denied.root.structuredContent, sort_keys=True)
+            assert denied.root.isError is False
+            assert denied.root.structuredContent["hits"] == []
+            assert protected not in encoded
+            assert sdk_cid not in encoded
+            assert denied.root.structuredContent["explain"]["gist_support"]["gist_hit_ids"] == []
+            assert "denial" not in encoded
+            assert "hidden" not in encoded
+
+    asyncio.run(exercise())
+
+
 def test_mcp_server_postgres_backend_requires_dsn(monkeypatch) -> None:
     monkeypatch.delenv("MNEMOSYNE_POSTGRES_DSN", raising=False)
 

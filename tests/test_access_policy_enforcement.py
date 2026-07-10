@@ -407,6 +407,139 @@ def test_public_export_get_and_timeline_are_filtered_by_default() -> None:
     assert [event["record"]["target"] for event in agent_timeline["events"]] == ["filtered facade target"]
 
 
+def test_caller_context_filter_shape_preserves_legacy_positions(monkeypatch: pytest.MonkeyPatch) -> None:
+    engine = LocalMemoryEngine()
+    tools = MemoryTools(engine)
+    seen: list[dict[str, object]] = []
+    original_retrieve = engine.retrieve
+    original_deep_search = engine.deep_search
+
+    def record_retrieve(*args: object, **kwargs: object):
+        seen.append(dict(kwargs["filt"]))
+        return original_retrieve(*args, **kwargs)
+
+    monkeypatch.setattr(engine, "retrieve", record_retrieve)
+    tools.search(
+        TENANT,
+        "caller context",
+        "main",
+        3,
+        1,
+        0,
+        "agent",
+        user_id=USER,
+        capability_tags=["pii:read"],
+        purpose="support",
+        residency="us",
+        region="west",
+        break_glass=True,
+        lawful_basis="consent",
+    )
+    assert seen.pop() == {
+        "tenant_id": TENANT,
+        "tenant": TENANT,
+        "role": "agent",
+        "user_id": USER,
+        "max_sensitivity": 0,
+        "capability_tags": ["pii:read"],
+        "purpose": "support",
+        "residency": "us",
+        "region": "west",
+        "break_glass": True,
+        "lawful_basis": "consent",
+        "max_trust_tier": 1,
+    }
+    tools.search(TENANT, "omitted caller context")
+    assert seen.pop() == {"tenant_id": TENANT, "tenant": TENANT, "role": "reader"}
+
+    def record_deep_search(*args: object, **kwargs: object):
+        seen.append(dict(kwargs["filt"]))
+        return original_deep_search(*args, **kwargs)
+
+    monkeypatch.setattr(engine, "retrieve", original_retrieve)
+    monkeypatch.setattr(engine, "deep_search", record_deep_search)
+    tools.deep_search(
+        TENANT,
+        "legacy role",
+        "main",
+        "agent",
+        user_id=USER,
+        max_sensitivity=0,
+        capability_tags=["pii:read"],
+        purpose="support",
+        residency="us",
+        region="west",
+        break_glass=True,
+        lawful_basis="consent",
+    )
+    assert seen.pop()["role"] == "agent"
+    tools.explain(TENANT, "default reader")
+    assert seen.pop() == {"tenant_id": TENANT, "tenant": TENANT, "role": "reader"}
+
+
+@pytest.mark.parametrize("operation", ["search", "deep_search", "explain"])
+def test_read_context_policy_matrix_is_fail_closed_without_leakage(operation: str) -> None:
+    engine = LocalMemoryEngine()
+    tools = MemoryTools(engine)
+    query = "caller-context-needle"
+    protected = f"{query} raw-secret-payload"
+    cid = _append(
+        engine,
+        protected,
+        sensitivity=2,
+        access_policy={
+            "tenant": TENANT,
+            "allow_roles": ["operator"],
+            "allow_principals": [USER],
+            "require_capabilities": ["pii:read"],
+            "purpose": ["support"],
+            "residency": "us",
+            "lawful_basis": ["consent"],
+            "break_glass": True,
+        },
+    )
+    call = getattr(tools, operation)
+    allowed_context = {
+        "role": "operator",
+        "user_id": USER,
+        "max_sensitivity": 2,
+        "capability_tags": ["pii:read"],
+        "purpose": "support",
+        "residency": "us",
+        "region": "us",
+        "break_glass": True,
+        "lawful_basis": "consent",
+    }
+
+    allowed = call(TENANT, query, **allowed_context)
+    assert any(hit["id"] == cid for hit in allowed["hits"])
+
+    denied_contexts = []
+    for changes in (
+        {"user_id": "other-user"},
+        {"role": "agent"},
+        {"capability_tags": ["wrong:capability"]},
+        {"purpose": "analytics"},
+        {"max_sensitivity": 1},
+        {"residency": "eu", "region": "eu"},
+        {"lawful_basis": "contract"},
+        {"break_glass": False},
+    ):
+        denied_context = dict(allowed_context)
+        denied_context.update(changes)
+        denied_contexts.append(denied_context)
+
+    for denied_context in denied_contexts:
+        denied = call(TENANT, query, **denied_context)
+        encoded = json.dumps(denied, sort_keys=True)
+        assert denied["hits"] == []
+        assert protected not in encoded
+        assert cid not in encoded
+        assert denied["explain"]["gist_support"]["gist_hit_ids"] == []
+        assert "denial" not in encoded
+        assert "hidden" not in encoded
+
+
 def test_unknown_access_policy_keys_are_rejected_at_write_time() -> None:
     engine = LocalMemoryEngine()
     policy = {"tenant": TENANT, "vendor_flag": True}
