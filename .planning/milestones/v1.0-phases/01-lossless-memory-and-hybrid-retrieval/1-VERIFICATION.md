@@ -25,7 +25,10 @@ score: 5/5 must-haves verified
 
 **Score:** 5/5 truths verified
 
+## Requirements Coverage
+
+Verified: REQ-005, REQ-006, REQ-007, REQ-008, REQ-009.
+
 ## Automated Checks
 
 - `python -m pytest` returned `16 passed`.
-

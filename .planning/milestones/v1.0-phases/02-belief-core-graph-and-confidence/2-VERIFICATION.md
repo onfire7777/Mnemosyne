@@ -25,6 +25,11 @@ score: 5/5 must-haves verified
 
 **Score:** 5/5 truths verified
 
+## Requirements Coverage
+
+Verified: REQ-013 and REQ-014. REQ-009 is supporting calibration hardening;
+its canonical primary owner remains Phase 1.
+
 ## Automated Checks
 
 - `python -m pytest` returned `22 passed`.

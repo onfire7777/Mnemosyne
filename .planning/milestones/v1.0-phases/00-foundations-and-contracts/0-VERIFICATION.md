@@ -25,6 +25,10 @@ score: 5/5 must-haves verified
 
 **Score:** 5/5 truths verified
 
+## Requirements Coverage
+
+Verified: REQ-001, REQ-002, REQ-003, REQ-004, REQ-011, NFR-003.
+
 ### Required Artifacts
 
 | Artifact | Expected | Status | Details |
@@ -39,4 +43,3 @@ score: 5/5 must-haves verified
 ## Automated Checks
 
 - `python -m pytest` returned `16 passed`.
-

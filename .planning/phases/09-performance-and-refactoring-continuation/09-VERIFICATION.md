@@ -1,11 +1,48 @@
 ---
 phase: 09-performance-and-refactoring-continuation
 status: passed
-verified: 2026-07-09
-scope: plan-09-13
+verified: 2026-07-10
+scope: plans-09-01-through-09-13
+reconstructed: true
+evidence_classes: current-and-retained
 ---
 
 # Phase 09 Verification
+
+This aggregate Phase 09 verification was reconstructed on 2026-07-10 from all
+thirteen plan summaries, retained CI, and present-day focused/full checks. The
+older body below preserves the cumulative slice evidence; this header broadens
+the verified scope rather than pretending the aggregate artifact existed when
+the early slices ran.
+
+## Phase Goal Achievement
+
+| # | Observable truth | Status | Evidence |
+|---|---|---|---|
+| 1 | Retrieval concurrency defaults are capability-aware, operator-overridable, deterministic, and cache-safe. | VERIFIED | Plans 01-03; engine/capability/SQLite focused tests. |
+| 2 | Embedding/reranker providers share a gated conformance contract. | VERIFIED | Plan 04; provider contract and parity tests. |
+| 3 | Postgres partitions, hygiene, and vector backfill have safe read/apply paths without silent runtime flips. | VERIFIED (source-owned) | Plans 05, 07-09; Postgres/schema tests. |
+| 4 | Stateless MCP warming and durable embedding cache preserve scope, invalidation, TTL, and redaction. | VERIFIED | Plans 06 and 10; runtime/provider cache tests. |
+| 5 | Provider bake-off evidence rejects candidate regressions without selecting a default from local smoke data. | VERIFIED (harness) | Plan 11; bake-off tests. |
+| 6 | Native wheels build, install, import, and expose strict parity markers on required CI platforms. | VERIFIED | Plan 12; native packaging tests and CI. |
+| 7 | Planning metadata and performance documentation reflect landed work and retain open evidence boundaries. | VERIFIED | Plan 13; GSD consistency and docs tests. |
+
+## Requirements
+
+| Requirement | Disposition | Evidence role |
+|---|---|---|
+| NFR-001 | VERIFIED | Primary owner: fast-path capability/performance lanes and latency documentation/tests. |
+| REQ-006 | VERIFIED (supporting) | Retrieval/provider/cache performance preserves hybrid retrieval contracts. |
+| REQ-014 | VERIFIED (supporting) | Postgres graph/vector tuning remains provider/evidence gated. |
+| NFR-002 | VERIFIED (supporting) | Shared provider/native/runtime parity checks remain cross-platform and backend-aware. |
+
+## Retained Non-Blocking Boundaries
+
+Phase 09 does not claim: real provider default selection, production cache
+hit-rate/latency, retained production vector-backfill completion, broader wheel
+publication/adoption, negative/abstention caching, or runtime-default-flip
+evidence. These six obligations remain visible and are not converted into pass
+claims by this aggregate verification.
 
 Latest verified slice: Phase 09 Plan 13. The source-owned planning hygiene
 slice is locally verified: GSD consistency now passes without the stale wave
