@@ -4,9 +4,9 @@
 
 | ID | Requirement | Authority | Status |
 |---|---|---|---|
-| [ ] BENCH-001 | `mneme eval-public --suite X` drives only public CLI surfaces and emits a deterministic, schema-versioned trace bundle. | Plan B M1.1 | Planned |
-| [ ] BENCH-002 | Every public suite pins upstream dataset/code revisions, records build/config fingerprints, and supports one-command reproduction. | Plan B M1.1/M2 | Planned |
-| [ ] BENCH-003 | Public bundles keep deterministic retrieval and disclosed-reader QA in separate columns with Wilson/bootstrap intervals. | PBPP/M1/M2 | Planned |
+| [x] BENCH-001 | `mneme eval-public --suite X` drives only public CLI surfaces and emits a deterministic, schema-versioned trace bundle. | Plan B M1.1 | Complete |
+| [x] BENCH-002 | Every public suite pins upstream dataset/code revisions, records build/config fingerprints, and supports one-command reproduction. | Plan B M1.1/M2 | Complete |
+| [x] BENCH-003 | Public bundles keep deterministic retrieval and disclosed-reader QA in separate columns with Wilson/bootstrap intervals. | PBPP/M1/M2 | Complete |
 | [ ] BENCH-004 | LongMemEval retrieval-recall produces Recall@5, nDCG, confidence intervals, and per-question session/turn traces with no LLM scorer. | Plan B M1.2 | Planned |
 | [ ] BENCH-005 | HippoRAG multi-hop datasets produce deterministic Recall@2/@5 and EM/F1 with graph/PPR channel traces and published-baseline context. | Plan B M1.3 | Planned |
 | [ ] BENCH-006 | MemoryAgentBench has a conforming Mnemosyne adapter and upstream submission path; BEAM runs with a fully disclosed reader/config. | Plan B M1.4/M1.5 | Planned |
@@ -29,7 +29,7 @@
 
 | ID | Requirement | Authority | Status |
 |---|---|---|---|
-| [ ] GOV-001 | An independent governance charter creates a hard operator/firewall boundary, conflict policy, appeals, versioning, and public change control. | Plan B L0 | Planned |
+| [ ] GOV-001 | An independent governance charter creates a hard operator/firewall boundary, conflict policy, appeals, versioning, and public change control. | Plan B L0 | Partial — source policy complete; external ratification pending |
 | [ ] LEAD-001 | The submission methodology runs every system under one identical harness with contamination declarations and public raw artifacts. | Plan B L1 | Planned |
 | [ ] LEAD-002 | The leaderboard data pipeline validates signed bundles and renders separate retrieval, QA, security, calibration, performance, and reproducibility columns. | Plan B L2/L3 | Planned |
 | [ ] LEAD-003 | Public launch remains blocked until PBPP is in force, Part I results exist, governance is active, and Mnemosyne is treated identically to every entrant. | Plan B L4 | Planned |

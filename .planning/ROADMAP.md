@@ -6,7 +6,7 @@
 
 ## v2.0 Phases
 
-- [ ] **Phase 10: Public Harness and Neutral Governance Foundation** - Build M1.1 and L0 without publishing a number.
+- [x] **Phase 10: Public Harness and Neutral Governance Foundation** - Build M1.1 and L0 without publishing a number. (completed 2026-07-10)
 - [ ] **Phase 11: Deterministic Public Retrieval Tracks** - LongMemEval retrieval plus HippoRAG multi-hop deterministic measurement.
 - [ ] **Phase 12: Grounded Multi-Hop Answer Synthesis** - Close Plan A S1 under public and private regression gates.
 - [ ] **Phase 13: External Benchmark Adapters and Scheduled CI** - MemoryAgentBench, BEAM, and regression-only cadence.
@@ -16,16 +16,20 @@
 
 ### Phase 10: Public Harness and Neutral Governance Foundation
 
-**Goal:** Create the isolated public CLI evaluation substrate and independent
-governance charter that every later benchmark and entrant must use.
+**Goal:** Create the isolated public CLI evaluation substrate and neutral
+governance source charter that every later benchmark and entrant must use.
 **Requirements:** BENCH-001, BENCH-002, BENCH-003, GOV-001, RAIL-001..004
 **Depends on:** v1.0, completed M4/PBPP
-**Plans:** 0/2 complete
+**Plans:** 2/2 plans complete
 
 Plans:
 
-- [ ] 10-01-PLAN.md — Public CLI harness and reproducibility bundle scaffold.
-- [ ] 10-02-PLAN.md — Neutral governance, permanent COI, and operator firewall.
+- [x] 10-01-PLAN.md — Public CLI harness and reproducibility bundle scaffold.
+- [x] 10-02-PLAN.md — Neutral governance, permanent COI, and operator firewall.
+
+**Boundary:** Harness and governance source scope are complete. GOV-001 remains
+partial until the external board is seated and ratifies the source policy;
+Phase 16 owns final activation and launch readiness.
 
 ### Phase 11: Deterministic Public Retrieval Tracks
 
@@ -87,15 +91,27 @@ Part I, and reproduction gates pass.
 ## Archived v1.0 Phase Index
 
 ### Phase 00: Foundations and Contracts (archived v1.0)
+
 ### Phase 01: Lossless Memory and Hybrid Retrieval (archived v1.0)
+
 ### Phase 02: Belief Core, Graph, and Confidence (archived v1.0)
+
 ### Phase 03: Personalization and Consolidation (archived v1.0)
+
 ### Phase 04: Procedural and Corrective Learning (archived v1.0)
+
 ### Phase 05: Profile-Guided Self-Optimization (archived v1.0)
+
 ### Phase 06: Exact Blueprint Runtime Parity (archived v1.0)
+
 ### Phase 07: Unified Cognitive Substrate (archived v1.0)
+
 ### Phase 08: Self-Hosted-First Production Architecture (archived v1.0)
+
 ### Phase 09: Performance and Refactoring Continuation (archived v1.0)
+
 ### Phase 09.1: Caller-Context Closure (archived v1.0)
+
 ### Phase 09.2: Public Heartbeat Closure (archived v1.0)
+
 ### Phase 09.3: Milestone Evidence Closure (archived v1.0)
