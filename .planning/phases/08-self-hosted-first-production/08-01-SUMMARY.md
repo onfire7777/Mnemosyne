@@ -55,4 +55,3 @@ captured. External operator artifacts remain outside git.
 - `/Users/admin/mnemosyne-evidence-out/verify-bc10.json`
 - `/Users/admin/mnemosyne-evidence-out/capture-bc10/release-audit.json`
 - `/Users/admin/mnemosyne-evidence-out/capture-bc10/summary.json`
-
