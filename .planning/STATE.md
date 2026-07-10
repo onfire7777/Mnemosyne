@@ -4,8 +4,8 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: context exhaustion at 75% (2026-07-07)
-last_updated: "2026-07-10T17:38:49.827Z"
-last_activity: 2026-07-10 -- Phase 09.1 planning complete
+last_updated: "2026-07-10T17:40:01.097Z"
+last_activity: 2026-07-10 -- Phase 09.1 execution started
 progress:
   total_phases: 13
   completed_phases: 3
@@ -32,13 +32,13 @@ Tier-B is CLOSED. A genuine operator-run production capture over the live self-h
 See: .planning/PROJECT.md (updated 2026-06-19)
 
 **Core value:** Build a memory compiler with lossless evidence, typed projections, safe retrieval, branchable updates, and gated self-improvement.
-**Current focus:** Best-in-world memory capability and neutral public benchmarking, governed by PBPP.
+**Current focus:** Phase 09.1 — Preserve caller context across search, deep search, and explain
 
 ## Current Position
 
-Phase: v1.0 milestone-audit closure (09.1-09.3)
-Plan: `.planning/v1.0-MILESTONE-AUDIT.md`, then `docs/EXECUTION-PLAN-A-Memory-System.md` + `docs/EXECUTION-PLAN-B-Benchmark-and-Leaderboard.md`
-Status: Ready to execute
+Phase: 09.1 (Preserve caller context across search, deep search, and explain) — EXECUTING
+Plan: 1 of 1
+Status: Executing Phase 09.1
 Current status (2026-07-10): M4 is shipped and locally verified. The v1.0 milestone audit found caller-context propagation, public-runtime heartbeat mounting, and GSD verification/traceability gaps. Complete 09.1, 09.2, and 09.3, rerun the audit, then archive v1.0 and resume M1.1. No public benchmark number is authorized until the full PBPP gates and independent reproduction hold.
 
 Phase 9 completion checkpoint (2026-07-09): The post-attestation
@@ -578,7 +578,7 @@ Latest checkpoint (2026-06-27; superseded 2026-06-28 for operational-toggle reti
 Latest checkpoint (2026-06-27; superseded 2026-06-28 for operational-toggle retirement): Phase 7 plan 03 is implemented and gate-proven. Local and Postgres retrieval now enforce an answer-grounding floor that flags/abstains when support is dominated by low-grounded self-generated content. Local and Postgres evidence append paths enforce a tenant/branch self-generation budget rail with audit-custody deferral while leaving grounded user evidence unaffected. Workspace streams now emit `always-on-heartbeat-safety.v1` reports with engaged/idle tick counts, bounded/reported compute, anti-rumination hard stops, circuit-breaker state, self-generation freeze/fallback state, and broadcast-as-data flags. G0 now measures `always_on_heartbeat_contract=1.0`, `always_on_rumination_rate=0.0`, `heartbeat_compute_bounded_contract=1.0`, `heartbeat_compute_reported_contract=1.0`, `circuit_breaker_contract=1.0`, `workspace_broadcast_as_data_contract=1.0`, `self_generation_budget_rail_contract=1.0`, and `answer_grounding_floor_contract=1.0`; `g5-always-on-heartbeat` passed with all guardrails stable.
 
 Latest checkpoint (2026-06-27): Production evidence argument redaction now treats any long option containing `token` as a secret-bearing option, including suffix-style names such as `--access-token`, `--api-token`, and `--github-token`, in both renderer and capture-wrapper preflight paths. The operator docs now remove the stale preflight output-root environment-variable wording and correctly state that preflight/final capture use the wrapper's second positional external output-root argument. The current live production-environment check remains blocked before evidence capture because the required `MNEMOSYNE_PROD_*` operator inputs are absent in this local shell; this is expected setup proof, not production completion.
-Last activity: 2026-07-10 -- Phase 09.1 planning complete
+Last activity: 2026-07-10 -- Phase 09.1 execution started
 
 Latest checkpoint (2026-06-26): G1 projection-level reality monitoring is implemented and gate-proven. Local and Postgres assertion upsert now derive `calibration["reality_monitoring"]` from source evidence reality classes, expose the projection reality class on assertion hits, and force abstention when retrieved projection support is self-generated/simulated/external-only while treating mixed grounded+risky support as grounded with a mixed flag. The new G0 fixture `projection_reality_abstention_recall` passes at `1.0` vs baseline `0.0`, and `eval/g0/gate.py` passed `g1-projection-reality-monitoring` with no ECE, abstention, confabulation, poison-block, or fast-path latency regression. Lane G A12 cached-PPR live coverage now directly exercises `PostgresEngine.refresh_graph_ppr_cache()` materialization, cached reads, default-off recursive equivalence, and relation-fingerprint invalidation against a fresh local Postgres database loaded from `sql/schema.sql`. This was local/live-readiness proof only at that checkpoint; operator-captured production evidence arrived later in capture-bc10.
 

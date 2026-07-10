@@ -1,5 +1,6 @@
 {
   "model_profile": "balanced",
+  "runtime": "codex",
   "commit_docs": true,
   "parallelization": true,
   "search_gitignored": false,
@@ -14,6 +15,7 @@
     "quick_branch_template": null
   },
   "workflow": {
+    "use_worktrees": false,
     "research": true,
     "plan_check": true,
     "verifier": true,
