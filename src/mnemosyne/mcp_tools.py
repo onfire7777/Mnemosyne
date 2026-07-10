@@ -550,7 +550,7 @@ class MemoryTools:
         min_trust_tier: int | None = None,
         max_trust_tier: int | None = None,
         max_sensitivity: int | None = None,
-        role: WriteRole = "agent",
+        role: WriteRole = "reader",
         user_id: str | None = None,
         capability_tags: list[str] | None = None,
         purpose: str | list[str] | None = None,
@@ -559,41 +559,88 @@ class MemoryTools:
         break_glass: bool = False,
         lawful_basis: str | list[str] | None = None,
     ) -> dict[str, Any]:
-        filt: dict[str, Any] = {"role": role}
-        if user_id:
-            filt["user_id"] = user_id
+        filt = self._read_context(
+            tenant_id,
+            role=role,
+            user_id=user_id,
+            max_sensitivity=max_sensitivity,
+            capability_tags=capability_tags,
+            purpose=purpose,
+            residency=residency,
+            region=region,
+            break_glass=break_glass,
+            lawful_basis=lawful_basis,
+        )
         if max_trust_tier is not None:
             filt["max_trust_tier"] = max_trust_tier
         elif min_trust_tier is not None:
             filt["min_trust_tier"] = min_trust_tier
-        if max_sensitivity is not None:
-            filt["max_sensitivity"] = max_sensitivity
-        if capability_tags:
-            filt["capability_tags"] = list(capability_tags)
-        if purpose is not None:
-            filt["purpose"] = purpose
-        if residency:
-            filt["residency"] = residency
-        if region:
-            filt["region"] = region
-        if break_glass:
-            filt["break_glass"] = True
-        if lawful_basis is not None:
-            filt["lawful_basis"] = lawful_basis
         start = perf_counter()
         result = self.engine.retrieve(query=query, tenant_id=tenant_id, branch=branch, filt=filt)
         self._record_retrieval(result.to_dict(), start)
         return result.to_dict()
 
-    def deep_search(self, tenant_id: str, query: str, branch: str = "main", role: WriteRole = "agent") -> dict[str, Any]:
+    def deep_search(
+        self,
+        tenant_id: str,
+        query: str,
+        branch: str = "main",
+        role: WriteRole = "reader",
+        user_id: str | None = None,
+        max_sensitivity: int | None = None,
+        capability_tags: list[str] | None = None,
+        purpose: str | list[str] | None = None,
+        residency: str | None = None,
+        region: str | None = None,
+        break_glass: bool = False,
+        lawful_basis: str | list[str] | None = None,
+    ) -> dict[str, Any]:
         start = perf_counter()
-        result = self.engine.deep_search(query=query, tenant_id=tenant_id, branch=branch, filt={"role": role})
+        filt = self._read_context(
+            tenant_id,
+            role=role,
+            user_id=user_id,
+            max_sensitivity=max_sensitivity,
+            capability_tags=capability_tags,
+            purpose=purpose,
+            residency=residency,
+            region=region,
+            break_glass=break_glass,
+            lawful_basis=lawful_basis,
+        )
+        result = self.engine.deep_search(query=query, tenant_id=tenant_id, branch=branch, filt=filt)
         self._record_retrieval(result.to_dict(), start)
         return result.to_dict()
 
-    def explain(self, tenant_id: str, query: str, branch: str = "main") -> dict[str, Any]:
+    def explain(
+        self,
+        tenant_id: str,
+        query: str,
+        branch: str = "main",
+        role: WriteRole = "reader",
+        user_id: str | None = None,
+        max_sensitivity: int | None = None,
+        capability_tags: list[str] | None = None,
+        purpose: str | list[str] | None = None,
+        residency: str | None = None,
+        region: str | None = None,
+        break_glass: bool = False,
+        lawful_basis: str | list[str] | None = None,
+    ) -> dict[str, Any]:
         start = perf_counter()
-        result = self.engine.deep_search(query=query, tenant_id=tenant_id, branch=branch)
+        filt = self._read_context(
+            tenant_id,
+            role=role,
+            user_id=user_id,
+            max_sensitivity=max_sensitivity,
+            capability_tags=capability_tags,
+            purpose=purpose,
+            residency=residency,
+            region=region,
+            break_glass=break_glass,
+            lawful_basis=lawful_basis,
+        )
+        result = self.engine.deep_search(query=query, tenant_id=tenant_id, branch=branch, filt=filt)
         self._record_retrieval(result.to_dict(), start)
         return result.to_dict()
 
