@@ -5833,12 +5833,35 @@ def test_release_worker_heartbeat_rejects_terminal_state_resurrection() -> None:
 
         assert any("terminal" in finding["message"] for finding in findings), failure_code
 
+    valid_terminal = copy.deepcopy(canonical)
+    valid_terminal["ok"] = False
+    valid_terminal["summary"].update(cycles=1, idle_cycles=0, stopped_reason="max_cycles")
+    valid_terminal["cycles"] = valid_terminal["cycles"][:1]
+    terminal = valid_terminal["cycles"][0]["workspace_heartbeat"]
+    terminal.update(
+        ok=False,
+        lifecycle="unhealthy",
+        failure_code="workspace_heartbeat_hard_stop",
+    )
+    terminal["heartbeat_safety"]["hard_stop"] = True
+    valid_terminal["workspace_heartbeat"] = copy.deepcopy(terminal)
+    assert _release_worker_run_evidence_findings(valid_terminal) == []
+
 
 def test_release_worker_heartbeat_rejects_unbounded_and_inconsistent_attempts() -> None:
     from mnemosyne.cli import _release_worker_run_evidence_findings
 
     canonical = production_release_stdout("worker-run", production_provider_stdout())
     assert _release_worker_run_evidence_findings(canonical) == []
+
+    valid_boundary = copy.deepcopy(canonical)
+    valid_boundary["worker"]["max_cycles"] = 2
+    for heartbeat in (
+        *(cycle["workspace_heartbeat"] for cycle in valid_boundary["cycles"]),
+        valid_boundary["workspace_heartbeat"],
+    ):
+        heartbeat["heartbeat_safety"]["max_cycles"] = 2
+    assert _release_worker_run_evidence_findings(valid_boundary) == []
 
     mutations: dict[str, Callable[[dict], None]] = {
         "unbounded": lambda evidence: [

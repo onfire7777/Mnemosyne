@@ -11006,15 +11006,114 @@ def _release_worker_run_evidence_findings(stdout_json: Mapping[str, Any]) -> lis
             if heartbeat.get("cycle") != cycle.get("cycle"):
                 heartbeat_messages.append(f"workspace heartbeat cycle {index} does not match worker cycle")
             cycle_heartbeats.append(heartbeat)
-    for previous, current in zip(cycle_heartbeats, cycle_heartbeats[1:]):
-        if current.get("tick_count", -1) < previous.get("tick_count", -1):
-            heartbeat_messages.append("workspace heartbeat tick counts must be monotonic")
+
+    terminal_heartbeat: Mapping[str, Any] | None = None
+    previous_attempts = 0
+    previous_ticks = 0
+    safety_keys = (
+        "tick_count",
+        "max_cycles",
+        "max_idle_ticks",
+        "tick_ms",
+        "estimated_compute_ms",
+        "compute_budget_ms",
+        "hard_stop",
+    )
+    for index, heartbeat in enumerate(cycle_heartbeats, start=1):
+        attempts = heartbeat.get("attempted_ticks")
+        ticks = heartbeat.get("tick_count")
+        safety = heartbeat.get("heartbeat_safety")
+        safety_max_cycles = safety.get("max_cycles") if isinstance(safety, Mapping) else None
+        counters_valid = all(
+            not isinstance(value, bool) and isinstance(value, int) and value >= 0
+            for value in (attempts, ticks)
+        )
+        if counters_valid:
+            if attempts > index:
+                heartbeat_messages.append("workspace heartbeat attempted ticks exceed worker cycle")
+            if summary_cycles is not None and attempts > summary_cycles:
+                heartbeat_messages.append("workspace heartbeat attempted ticks exceed summary cycle count")
+            if worker_max_cycles is not None and attempts > worker_max_cycles:
+                heartbeat_messages.append("workspace heartbeat attempted ticks exceed worker max cycles")
+            if (
+                not isinstance(safety_max_cycles, bool)
+                and isinstance(safety_max_cycles, int)
+                and attempts > safety_max_cycles
+            ):
+                heartbeat_messages.append("workspace heartbeat attempted ticks exceed safety max cycles")
+            if attempts < previous_attempts:
+                heartbeat_messages.append("workspace heartbeat attempted ticks must be monotonic")
+            if attempts > previous_attempts + 1:
+                heartbeat_messages.append(
+                    "workspace heartbeat attempted ticks must advance by at most one per live cycle"
+                )
+            if ticks < previous_ticks:
+                heartbeat_messages.append("workspace heartbeat tick counts must be monotonic")
+            if ticks > previous_ticks + 1:
+                heartbeat_messages.append(
+                    "workspace heartbeat tick counts must advance by at most one per live cycle"
+                )
+            if ticks > attempts:
+                heartbeat_messages.append("workspace heartbeat tick count cannot exceed attempted ticks")
+
+        if terminal_heartbeat is not None:
+            terminal_safety = terminal_heartbeat.get("heartbeat_safety")
+            terminal_resumed = (
+                attempts != terminal_heartbeat.get("attempted_ticks")
+                or ticks != terminal_heartbeat.get("tick_count")
+                or heartbeat.get("ok") is not False
+                or heartbeat.get("lifecycle") != "unhealthy"
+                or heartbeat.get("failure_code") != terminal_heartbeat.get("failure_code")
+                or not isinstance(safety, Mapping)
+                or not isinstance(terminal_safety, Mapping)
+                or any(safety.get(key) != terminal_safety.get(key) for key in safety_keys)
+            )
+            if terminal_resumed:
+                heartbeat_messages.append(
+                    "workspace heartbeat terminal evidence cannot resume, advance, or erase failure state"
+                )
+        elif (
+            heartbeat.get("ok") is False
+            or heartbeat.get("lifecycle") == "unhealthy"
+            or heartbeat.get("failure_code") is not None
+            or (isinstance(safety, Mapping) and safety.get("hard_stop") is True)
+        ):
+            terminal_heartbeat = heartbeat
+
+        if counters_valid:
+            previous_attempts = attempts
+            previous_ticks = ticks
+
     if cycle_heartbeats and isinstance(workspace_heartbeat, Mapping):
         last = cycle_heartbeats[-1]
-        if workspace_heartbeat.get("cycle") != last.get("cycle") or workspace_heartbeat.get("tick_count") != last.get(
-            "tick_count"
-        ):
-            heartbeat_messages.append("workspace heartbeat final evidence must match the last cycle")
+        final_safety = workspace_heartbeat.get("heartbeat_safety")
+        last_safety = last.get("heartbeat_safety")
+        expected = terminal_heartbeat or last
+        expected_safety = expected.get("heartbeat_safety")
+        final_mismatch = (
+            workspace_heartbeat.get("cycle") != expected.get("cycle")
+            or workspace_heartbeat.get("attempted_ticks") != expected.get("attempted_ticks")
+            or workspace_heartbeat.get("tick_count") != expected.get("tick_count")
+            or workspace_heartbeat.get("failure_code") != expected.get("failure_code")
+            or not isinstance(final_safety, Mapping)
+            or not isinstance(expected_safety, Mapping)
+            or any(final_safety.get(key) != expected_safety.get(key) for key in safety_keys)
+        )
+        if terminal_heartbeat is not None:
+            final_mismatch = final_mismatch or (
+                workspace_heartbeat.get("ok") is not False
+                or workspace_heartbeat.get("lifecycle") != "unhealthy"
+            )
+        else:
+            final_mismatch = final_mismatch or (
+                workspace_heartbeat.get("ok") != last.get("ok")
+                or workspace_heartbeat.get("lifecycle") not in {last.get("lifecycle"), "stopped"}
+                or not isinstance(last_safety, Mapping)
+            )
+        if final_mismatch:
+            heartbeat_messages.append(
+                "workspace heartbeat final evidence must preserve the last or terminal cycle"
+            )
     if stdout_json.get("ok") is True and isinstance(workspace_heartbeat, Mapping) and workspace_heartbeat.get("ok") is not True:
         heartbeat_messages.append("worker ok contradicts unhealthy workspace heartbeat")
     for message in sorted(set(heartbeat_messages)):
