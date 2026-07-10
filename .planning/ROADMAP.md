@@ -590,7 +590,7 @@ Plans:
 **Goal:** Preserve one canonical, fail-closed caller read context across search, deep search, and explain on direct, CLI, generated MCP, JSON-RPC, and official SDK surfaces without changing response schemas or access-policy semantics.
 **Requirements**: REQ-003, REQ-004, REQ-007, NFR-004
 **Depends on:** Phase 9
-**Plans:** 2/1 plans complete
+**Plans:** 1/1 plans complete
 Plans:
 
 - [x] 09.1-01-PLAN.md — Preserve caller read context end to end with red-first policy, transport-parity, non-leakage, and exact-state closure evidence.
