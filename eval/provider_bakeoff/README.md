@@ -18,17 +18,23 @@ A candidate provider can be promoted only when all of these are true:
 - It reports confidence intervals from the harness output.
 
 If a delta is inside run-to-run noise, record it as `no signal`, not as a win or
-a regression. Public benchmark sets remain internal sanity checks only and must
-not become headline claims.
+a regression. Provider promotion still rests on the scoped private suite. A
+public benchmark number may become a claim only under the Public-Benchmark
+Publication Protocol (PBPP) in
+`docs/EXECUTION-PLAN-B-Benchmark-and-Leaderboard.md` §2: pinned public harness,
+complete artifact bundle, separate retrieval-recall and LLM-judged-QA columns
+with judge disclosure, no private-suite conflation, and independent
+reproduction before any headline claim.
 
 Source policy:
 
 - `docs/blueprint/Mnemosyne-Evaluation-and-Test-Plan.md` lines 246-249:
   promotion requires non-inferior, no protected-case regression, and margin
   greater than run-to-run noise with confidence intervals.
-- `docs/blueprint/Mnemosyne-Evaluation-and-Test-Plan.md` lines 227 and
-  256-260: public sets are sanity gates only, strict judges and confidence
-  intervals are mandatory, and claims rest on the private suite.
+- `docs/EXECUTION-PLAN-B-Benchmark-and-Leaderboard.md` §2: PBPP governs public
+  numbers; private-suite results remain internal QA and never headline claims.
+- `docs/blueprint/Mnemosyne-Evaluation-and-Test-Plan.md` lines 227 and 256-260:
+  strict judges and confidence intervals remain mandatory.
 
 ## Inputs
 
@@ -117,5 +123,6 @@ For every candidate comparison:
 - Preserve the raw JSON reports; summarize from them, do not rewrite them.
 - Mark `promotion: false` unless the non-inferiority, protected-case, noise, and
   CI requirements are all satisfied.
-- Do not cite public benchmark scores in release notes, README claims, or Tier-B
-  status. They are sanity signals only.
+- Do not cite a public benchmark score in release notes, README claims, or
+  Tier-B status unless its PBPP bundle and independent reproduction are on file.
+  Never blend it with private-suite evidence or provider-promotion evidence.

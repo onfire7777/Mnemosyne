@@ -86,6 +86,8 @@ Commission a genuine external party to reproduce every headline public number fr
 ### M4 — Charter → PBPP
 Update blueprint `§9.2.7` and the provider-bakeoff README to reference PBPP (§2). **DoD:** docs updated; CI lint points contributors to PBPP.
 
+**Status (2026-07-10): complete.** Both policy surfaces now adopt PBPP §2 while preserving private-suite provider-promotion rules, and `tests/test_benchmark_publication_policy.py` is the CI regression gate. Result note: `eval/reports/m4-pbpp.md`.
+
 ### Benchmark slate (deterministic-first)
 | Tier | Benchmark | Track | Scoring | Why |
 |---|---|---|---|---|
