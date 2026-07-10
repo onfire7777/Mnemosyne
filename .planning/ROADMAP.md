@@ -576,14 +576,17 @@ Plans:
 
 ### Phase 09.2: Close audit gap: mount the bounded heartbeat in the public runtime (INSERTED)
 
-**Goal:** [Urgent work - to be planned]
-**Requirements**: TBD
-**Depends on:** Phase 9
-**Plans:** 0 plans
-
+**Goal:** Mount one bounded `ShadowWorkspaceService` in the existing public
+`worker-run` / production consolidator lifecycle, tick it once per productive
+or idle worker cycle using metadata-only tenant-scoped inputs, and expose
+additive machine-checkable liveness, safety, and unhealthy-failure evidence
+without granting mutation or critical-path authority.
+**Requirements**: REQ-016, REQ-018, NFR-005
+**Depends on:** Phase 9, Phase 09.1
+**Plans:** 1 plan
 Plans:
 
-- [ ] TBD (run /gsd-plan-phase 09.2 to break down)
+- [ ] 09.2-01-PLAN.md — Mount and verify the bounded public-runtime heartbeat with red-first privacy, safety, release-evidence, and exact-state closure gates.
 
 ### Phase 09.1: Close audit gap: preserve caller context across search, deep_search, and explain (INSERTED)
 
