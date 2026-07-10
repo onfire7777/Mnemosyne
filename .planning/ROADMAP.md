@@ -20,6 +20,7 @@ This roadmap follows the v2 build blueprint exactly: foundations and contracts f
 - [x] **Phase 6: Exact Blueprint Runtime Parity** - Production MCP/Postgres/retrieval/security/deployment parity closed by the 2026-07-07 Tier-B evidence attestation.
 - [x] **Phase 7: Unified Cognitive Substrate** - Always-on, no-toggle consciousness integrated as one cohesive substrate via the derived `Standing` trust gradient; memory reliability protected by construction (post-v1.0 local/gated slice).
 - [x] **Phase 8: Self-Hosted-First Production Architecture** - Preferred production profile for B1-B10 evidence capture; B9 closed through ADR-002's amended CPU-parametric evidence path.
+- [x] **Phase 9: Performance and Refactoring Continuation** - Post-attestation performance lanes, provider/cache hardening, native-wheel verification, and planning hygiene completed across Plans 09-01 through 09-13.
 
 ## Phase Details
 
