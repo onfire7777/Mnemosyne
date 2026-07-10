@@ -2027,3 +2027,10 @@ def test_renderer_writes_private_valid_manifest_outside_repo(tmp_path: Path) -> 
         check for check in manifest["checks"] if check["command"] == "ops-report"
     )
     assert ops_report["args"] == ["--tenant", env["MNEMOSYNE_PROD_TENANT"]]
+
+
+def test_production_manifest_worker_run_heartbeat_uses_existing_route() -> None:
+    template = json.loads(PRODUCTION_TEMPLATE.read_text(encoding="utf-8"))
+    worker_runs = [check for check in template["checks"] if check["command"] == "worker-run"]
+    assert len(worker_runs) == 1
+    assert "workspace-heartbeat" not in json.dumps(worker_runs[0])
