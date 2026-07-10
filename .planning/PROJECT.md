@@ -38,10 +38,10 @@ resurrection, unbounded attempts, or inconsistent counters.
 
 ## Current State
 
-Phases 09.1 and 09.2 are complete and independently verified. Phase 09.3 is
-next: close milestone verification, Nyquist validation, and requirements
-traceability gaps without manufacturing historical evidence, then re-audit and
-archive v1.0.
+Phases 09.1, 09.2, and 09.3 are complete and independently verified. The v1.0
+evidence graph now resolves all 23 canonical requirements without manufacturing
+historical evidence. Final closure-SHA CI and memory/git synchronization are
+next, followed by the milestone re-audit/archive workflow.
 
 ## Product Thesis
 
@@ -70,6 +70,7 @@ Mnemosyne is its own memory system. It is distinct from gbrain and mempalace, an
 | 2026-06-19 | Keep Phase 0-1 executable first, but keep Phases 2-5 mandatory in the roadmap. | Updated goal requires following the full build blueprint precisely and completely. |
 | 2026-07-10 | Use one canonical `_read_context` authorization contract for search, deep search, and explain while preserving legacy positional meaning and narrowing omitted role to `reader`. | Phase 09.1 verification, clean code review, and security audit at `threats_open: 0`. |
 | 2026-07-10 | Treat terminal workspace heartbeat evidence as absorbing and enforce bounded, monotonic, internally consistent counters in release attestation. | Phase 09.2 independent verification 100/100, full suite green, and exact-SHA CI success. |
+| 2026-07-10 | Reconstruct missing milestone artifacts with explicit provenance labels and enforce one-owner, three-source traceability for all 23 canonical requirements. | Phase 09.3 independent re-audit 100/100, deterministic traceability test, retained custody verification, and exact-SHA CI. |
 
 ## Quality Bar
 
