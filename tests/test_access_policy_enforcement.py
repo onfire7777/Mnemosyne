@@ -458,6 +458,19 @@ def test_caller_context_filter_shape_preserves_legacy_positions(monkeypatch: pyt
 
     monkeypatch.setattr(engine, "retrieve", original_retrieve)
     monkeypatch.setattr(engine, "deep_search", record_deep_search)
+    expected_context = {
+        "tenant_id": TENANT,
+        "tenant": TENANT,
+        "role": "agent",
+        "user_id": USER,
+        "max_sensitivity": 0,
+        "capability_tags": ["pii:read"],
+        "purpose": "support",
+        "residency": "us",
+        "region": "us-west-2",
+        "break_glass": True,
+        "lawful_basis": "consent",
+    }
     tools.deep_search(
         TENANT,
         "legacy role",
@@ -468,11 +481,25 @@ def test_caller_context_filter_shape_preserves_legacy_positions(monkeypatch: pyt
         capability_tags=["pii:read"],
         purpose="support",
         residency="us",
-        region="west",
+        region="us-west-2",
         break_glass=True,
         lawful_basis="consent",
     )
-    assert seen.pop()["role"] == "agent"
+    assert seen.pop() == expected_context
+    tools.explain(
+        TENANT,
+        "caller context",
+        role="agent",
+        user_id=USER,
+        max_sensitivity=0,
+        capability_tags=["pii:read"],
+        purpose="support",
+        residency="us",
+        region="us-west-2",
+        break_glass=True,
+        lawful_basis="consent",
+    )
+    assert seen.pop() == expected_context
     tools.explain(TENANT, "default reader")
     assert seen.pop() == {"tenant_id": TENANT, "tenant": TENANT, "role": "reader"}
 

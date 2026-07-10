@@ -184,23 +184,40 @@ def test_generated_input_schema_required_matches_method_signature() -> None:
 
 def test_caller_context_schema_is_optional_and_reader_defaulted() -> None:
     expected = {
-        "role",
-        "user_id",
-        "max_sensitivity",
-        "capability_tags",
-        "purpose",
-        "residency",
-        "region",
-        "break_glass",
-        "lawful_basis",
+        "role": {"enum": ["reader", "agent", "consolidator", "operator"], "type": "string", "default": "reader"},
+        "user_id": {"anyOf": [{"type": "string"}, {"type": "null"}], "default": None},
+        "max_sensitivity": {"anyOf": [{"type": "integer"}, {"type": "null"}], "default": None},
+        "capability_tags": {
+            "anyOf": [{"type": "array", "items": {"type": "string"}}, {"type": "null"}],
+            "default": None,
+        },
+        "purpose": {
+            "anyOf": [
+                {"type": "string"},
+                {"type": "array", "items": {"type": "string"}},
+                {"type": "null"},
+            ],
+            "default": None,
+        },
+        "residency": {"anyOf": [{"type": "string"}, {"type": "null"}], "default": None},
+        "region": {"anyOf": [{"type": "string"}, {"type": "null"}], "default": None},
+        "break_glass": {"type": "boolean", "default": False},
+        "lawful_basis": {
+            "anyOf": [
+                {"type": "string"},
+                {"type": "array", "items": {"type": "string"}},
+                {"type": "null"},
+            ],
+            "default": None,
+        },
     }
     specs = {item["name"]: _to_mcp_tool_spec(item) for item in TOOL_SPEC}
 
     for name in ("search", "deep_search", "explain"):
         schema = specs[name]["inputSchema"]
-        assert expected.issubset(schema["properties"])
-        assert expected.isdisjoint(schema["required"])
-        assert schema["properties"]["role"]["default"] == "reader"
+        assert expected.keys() <= schema["properties"].keys()
+        assert expected.keys().isdisjoint(schema["required"])
+        assert {field: schema["properties"][field] for field in expected} == expected
 
 
 def test_schema_for_type_maps_python_annotations_to_json_schema() -> None:
