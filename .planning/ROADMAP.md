@@ -587,11 +587,10 @@ Plans:
 
 ### Phase 09.1: Close audit gap: preserve caller context across search, deep_search, and explain (INSERTED)
 
-**Goal:** [Urgent work - to be planned]
-**Requirements**: TBD
+**Goal:** Preserve one canonical, fail-closed caller read context across search, deep search, and explain on direct, CLI, generated MCP, JSON-RPC, and official SDK surfaces without changing response schemas or access-policy semantics.
+**Requirements**: REQ-003, REQ-004, REQ-007, NFR-004
 **Depends on:** Phase 9
-**Plans:** 0 plans
-
+**Plans:** 1 plan
 Plans:
 
-- [ ] TBD (run /gsd-plan-phase 09.1 to break down)
+- [ ] 09.1-01-PLAN.md — Preserve caller read context end to end with red-first policy, transport-parity, non-leakage, and exact-state closure evidence.
