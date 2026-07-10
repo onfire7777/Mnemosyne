@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import copy
 import json
 import shutil
 import shlex
@@ -5807,6 +5808,91 @@ def test_worker_run_heartbeat_release_evidence_is_required() -> None:
     evidence.pop("workspace_heartbeat", None)
     findings = _release_worker_run_evidence_findings(evidence)
     assert any("workspace heartbeat" in finding["message"] for finding in findings)
+
+
+def test_release_worker_heartbeat_rejects_terminal_state_resurrection() -> None:
+    from mnemosyne.cli import _release_worker_run_evidence_findings
+
+    canonical = production_release_stdout("worker-run", production_provider_stdout())
+    assert _release_worker_run_evidence_findings(canonical) == []
+
+    for failure_code, hard_stop in (
+        ("workspace_heartbeat_hard_stop", True),
+        ("workspace_heartbeat_failure", False),
+    ):
+        evidence = copy.deepcopy(canonical)
+        terminal = evidence["cycles"][0]["workspace_heartbeat"]
+        terminal.update(
+            ok=False,
+            lifecycle="unhealthy",
+            failure_code=failure_code,
+        )
+        terminal["heartbeat_safety"]["hard_stop"] = hard_stop
+
+        findings = _release_worker_run_evidence_findings(evidence)
+
+        assert any("terminal" in finding["message"] for finding in findings), failure_code
+
+
+def test_release_worker_heartbeat_rejects_unbounded_and_inconsistent_attempts() -> None:
+    from mnemosyne.cli import _release_worker_run_evidence_findings
+
+    canonical = production_release_stdout("worker-run", production_provider_stdout())
+    assert _release_worker_run_evidence_findings(canonical) == []
+
+    mutations: dict[str, Callable[[dict], None]] = {
+        "unbounded": lambda evidence: [
+            heartbeat.update(attempted_ticks=999999)
+            for heartbeat in (
+                *(cycle["workspace_heartbeat"] for cycle in evidence["cycles"]),
+                evidence["workspace_heartbeat"],
+            )
+        ],
+        "greater than worker cycle": lambda evidence: evidence["cycles"][0][
+            "workspace_heartbeat"
+        ].update(attempted_ticks=2),
+        "greater than summary cycles": lambda evidence: evidence["summary"].update(cycles=1),
+        "greater than worker max cycles": lambda evidence: evidence["worker"].update(max_cycles=1),
+        "greater than heartbeat max cycles": lambda evidence: [
+            heartbeat["heartbeat_safety"].update(max_cycles=1)
+            for heartbeat in (
+                *(cycle["workspace_heartbeat"] for cycle in evidence["cycles"]),
+                evidence["workspace_heartbeat"],
+            )
+        ],
+        "attempt and tick disagreement": lambda evidence: evidence["cycles"][1][
+            "workspace_heartbeat"
+        ].update(attempted_ticks=1),
+        "nonmonotonic attempts": lambda evidence: [
+            evidence["cycles"][0]["workspace_heartbeat"].update(attempted_ticks=2),
+            evidence["cycles"][1]["workspace_heartbeat"].update(attempted_ticks=1),
+        ],
+        "more than one attempt per cycle": lambda evidence: evidence["cycles"][1][
+            "workspace_heartbeat"
+        ].update(attempted_ticks=3),
+        "final attempted ticks mismatch": lambda evidence: evidence[
+            "workspace_heartbeat"
+        ].update(attempted_ticks=1),
+        "post-terminal attempt increment": lambda evidence: [
+            evidence["cycles"][0]["workspace_heartbeat"].update(
+                ok=False,
+                lifecycle="unhealthy",
+                failure_code="workspace_heartbeat_failure",
+            ),
+            evidence["cycles"][1]["workspace_heartbeat"].update(attempted_ticks=2),
+        ],
+    }
+    for name, mutate in mutations.items():
+        evidence = copy.deepcopy(canonical)
+        mutate(evidence)
+
+        findings = _release_worker_run_evidence_findings(evidence)
+
+        assert any(
+            keyword in finding["message"]
+            for finding in findings
+            for keyword in ("attempt", "bound", "terminal", "cycle")
+        ), name
 
 
 def test_worker_run_heartbeat_metadata_is_explicitly_allowlisted() -> None:
