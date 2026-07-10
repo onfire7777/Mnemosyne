@@ -55,10 +55,13 @@ reproduction are satisfied.
 
 ## Exact Metric Definitions
 
-- LongMemEval gold unit is an upstream `has_answer=true` turn identified by
-  `(session_id, turn_index)`. Recall@5 is gold-turn recall in the top five,
-  macro-averaged by question. nDCG@5 uses binary gain, `1/log2(rank+1)`
-  discount, and ideal DCG truncated to five, then macro-averages by question.
+- LongMemEval scored gold unit is the cleaned set's `answer_session_ids` entry.
+  The oracle file is joined by question/session to preserve its
+  `has_answer=true` turn indexes in each trace, but scores are not silently
+  changed to turn retrieval. Recall@5 is gold-session recall in the top five,
+  macro-averaged by question. nDCG@5 uses binary session gain,
+  `1/log2(rank+1)` discount, and ideal DCG truncated to five, then
+  macro-averages by question.
 - Hippo passage Recall@k is `|unique retrieved gold passage IDs in top k| /
   |unique gold passage IDs|`, with stable first-occurrence deduplication and
   macro aggregation by question.
