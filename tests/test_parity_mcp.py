@@ -182,6 +182,27 @@ def test_generated_input_schema_required_matches_method_signature() -> None:
         assert schema["additionalProperties"] is False, name
 
 
+def test_caller_context_schema_is_optional_and_reader_defaulted() -> None:
+    expected = {
+        "role",
+        "user_id",
+        "max_sensitivity",
+        "capability_tags",
+        "purpose",
+        "residency",
+        "region",
+        "break_glass",
+        "lawful_basis",
+    }
+    specs = {item["name"]: _to_mcp_tool_spec(item) for item in TOOL_SPEC}
+
+    for name in ("search", "deep_search", "explain"):
+        schema = specs[name]["inputSchema"]
+        assert expected.issubset(schema["properties"])
+        assert expected.isdisjoint(schema["required"])
+        assert schema["properties"]["role"]["default"] == "reader"
+
+
 def test_schema_for_type_maps_python_annotations_to_json_schema() -> None:
     """Primitive and container annotations map to the documented JSON-schema shapes."""
 
