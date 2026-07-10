@@ -16,6 +16,7 @@ from eval.public.bundle import write_bundle
 
 ROOT = Path(__file__).parent
 _HEX = set("0123456789abcdef")
+_ADAPTERS = {"smoke": smoke.run}
 
 
 def load_registry() -> dict[str, dict[str, Any]]:
@@ -37,6 +38,10 @@ def run_public_suite(suite_name: str, out_dir: Path | str, *, benchmark_override
     if suite_name not in registry:
         raise ValueError(f"unknown public suite: {suite_name}")
     suite = registry[suite_name]
+    try:
+        adapter = _ADAPTERS[suite["adapter"]]
+    except KeyError as exc:
+        raise ValueError(f"{suite_name}: unsupported adapter") from exc
     fixture_bytes = (ROOT / suite["fixture"]).read_bytes()
     fixture_data = json.loads(fixture_bytes)
     if hashlib.sha256(_canonical(fixture_data)).hexdigest() != suite["dataset_sha256"]:
@@ -47,7 +52,7 @@ def run_public_suite(suite_name: str, out_dir: Path | str, *, benchmark_override
     with tempfile.TemporaryDirectory(prefix="mneme-public-") as temp:
         cli = MnemoCLI(store=str(Path(temp) / "store.json"), env=allowed_env)
         with patch.dict(os.environ, allowed_env, clear=True):
-            traces, measured = smoke.run(benchmark, cli)
+            traces, measured = adapter(benchmark, cli)
     if measured["family"] != suite["family"] or measured["interval"]["method"] != suite["interval_method"]:
         raise ValueError("metric family or interval metadata mismatch")
     metadata = {**suite, "dataset_sha256": custody_sha, "suite": suite_name}

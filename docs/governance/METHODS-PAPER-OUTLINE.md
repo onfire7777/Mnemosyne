@@ -1,6 +1,6 @@
 # Methods Paper Outline
 
-Version: 0.1.0  
+Version: 0.1.0
 Status: draft; External activation required
 
 This is an outline, not a published or accepted methods paper.

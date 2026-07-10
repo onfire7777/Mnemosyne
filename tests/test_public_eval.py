@@ -103,6 +103,104 @@ def test_bundle_rejects_wrong_or_blended_metric_family(tmp_path: Path) -> None:
         verify_bundle(blended)
 
 
+def test_bundle_rejects_joint_benchmark_and_manifest_tampering(tmp_path: Path) -> None:
+    out = tmp_path / "tampered"
+    run_public_suite("smoke", out)
+    benchmark = json.loads((out / "benchmark.json").read_text())
+    benchmark["data"]["corpus"][0]["content"] = "tampered benchmark content"
+    benchmark["metadata"]["dataset_sha256"] = _canonical_digest(benchmark["data"])
+    _rewrite_json(out / "benchmark.json", benchmark)
+    _refresh_digest(out, "benchmark.json")
+    with pytest.raises(BundleError, match="registry anchor"):
+        verify_bundle(out)
+
+
+def test_bundle_rejects_metrics_that_do_not_recompute_from_traces(tmp_path: Path) -> None:
+    out = tmp_path / "bad-metrics"
+    run_public_suite("smoke", out)
+    metrics = json.loads((out / "metrics.json").read_text())
+    metrics["successes"] = 0
+    metrics["value"] = 0.0
+    _rewrite_json(out / "metrics.json", metrics)
+    _refresh_digest(out, "metrics.json")
+    with pytest.raises(BundleError, match="recompute"):
+        verify_bundle(out)
+
+
+def test_bundle_binds_traces_and_metric_to_anchored_benchmark(tmp_path: Path) -> None:
+    out = tmp_path / "unbound-trace"
+    run_public_suite("smoke", out)
+    traces = [json.loads(line) for line in (out / "traces.jsonl").read_text().splitlines()]
+    traces[0]["question_id"] = "not-in-anchored-benchmark"
+    traces[0]["gold_references"] = ["doc-orchard"]
+    (out / "traces.jsonl").write_text(
+        "".join(
+            json.dumps(trace, sort_keys=True, separators=(",", ":")) + "\n"
+            for trace in traces
+        )
+    )
+    _refresh_digest(out, "traces.jsonl")
+    with pytest.raises(BundleError, match="anchored benchmark questions"):
+        verify_bundle(out)
+
+    metric_out = tmp_path / "unbound-metric"
+    run_public_suite("smoke", metric_out)
+    metrics = json.loads((metric_out / "metrics.json").read_text())
+    metrics["metric"] = "fabricated-label"
+    _rewrite_json(metric_out / "metrics.json", metrics)
+    _refresh_digest(metric_out, "metrics.json")
+    with pytest.raises(BundleError, match="hit_at_k"):
+        verify_bundle(metric_out)
+
+
+def test_registry_rejects_unknown_adapter(monkeypatch: pytest.MonkeyPatch) -> None:
+    registry = load_registry()
+    registry["smoke"]["adapter"] = "not-allowlisted"
+    monkeypatch.setattr("eval.public.runner.load_registry", lambda: registry)
+    with pytest.raises(ValueError, match="unsupported adapter"):
+        run_public_suite("smoke", "/unused")
+
+
+def test_reproduction_rejects_canonical_output_drift(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from eval.public import runner
+
+    source = tmp_path / "source"
+    run_public_suite("smoke", source)
+    original = runner._ADAPTERS["smoke"]
+
+    def reordered(benchmark: object, cli: object) -> tuple[list[dict], dict]:
+        traces, metrics = original(benchmark, cli)
+        return list(reversed(traces)), metrics
+
+    monkeypatch.setitem(runner._ADAPTERS, "smoke", reordered)
+    with pytest.raises(BundleError, match="reproduction mismatch"):
+        reproduce_bundle(source, tmp_path / "drifted")
+    assert not (tmp_path / "drifted").exists()
+
+
+def test_reproduction_cleans_invalid_destination(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from eval.public import runner
+
+    source = tmp_path / "source"
+    run_public_suite("smoke", source)
+    original = runner._ADAPTERS["smoke"]
+
+    def invalid(benchmark: object, cli: object) -> tuple[list[dict], dict]:
+        traces, metrics = original(benchmark, cli)
+        traces[0]["answer"] = "outside-corpus"
+        return traces, metrics
+
+    monkeypatch.setitem(runner._ADAPTERS, "smoke", invalid)
+    destination = tmp_path / "invalid"
+    with pytest.raises(BundleError, match="outside anchored benchmark corpus"):
+        reproduce_bundle(source, destination)
+    assert not destination.exists()
+
+
 def test_qa_family_requires_disclosed_reader_and_judge(tmp_path: Path) -> None:
     out = tmp_path / "qa-without-judge"
     run_public_suite("smoke", out)
@@ -134,3 +232,10 @@ def _refresh_digest(bundle: Path, name: str) -> None:
 
 def _rewrite_json(path: Path, value: object) -> None:
     path.write_text(json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n")
+
+
+def _canonical_digest(value: object) -> str:
+    import hashlib
+
+    raw = (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode()
+    return hashlib.sha256(raw).hexdigest()

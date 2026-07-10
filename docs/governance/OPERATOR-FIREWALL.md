@@ -1,6 +1,6 @@
 # Operator Firewall
 
-Version: 0.1.0  
+Version: 0.1.0
 Status: draft; External activation required
 
 The one harness rule is non-waivable: every evaluated system uses the same

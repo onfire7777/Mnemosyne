@@ -84,6 +84,10 @@ def verify_bundle(bundle: Path | str) -> dict[str, Any]:
     metadata = benchmark.get("metadata", {})
     if hashlib.sha256(_canonical(benchmark.get("data"))).hexdigest() != metadata.get("dataset_sha256"):
         raise BundleError("benchmark custody digest mismatch")
+    _verify_registry_anchor(metadata)
+    if measured.get("family") != family:
+        raise BundleError("metrics/config family mismatch")
+    _verify_metrics(family, benchmark.get("data"), measured, traces)
     if any(metadata.get(flag) is not False for flag in ("publishable", "pbpp_headline_eligible", "independent_external_reproduction")):
         raise BundleError("smoke publication flags must remain false")
     return {"family": family, "suite": metadata.get("suite"), "valid": True}
@@ -93,9 +97,120 @@ def reproduce_bundle(source: Path | str, destination: Path | str) -> dict[str, A
     verify_bundle(source)
     custody = _load_json(Path(source) / "benchmark.json")
     from eval.public.runner import run_public_suite
-    result = run_public_suite(custody["metadata"]["suite"], destination, benchmark_override=custody["data"])
-    verify_bundle(destination)
-    return result
+
+    destination = Path(destination)
+    if destination.exists():
+        raise FileExistsError(f"refusing to overwrite bundle: {destination}")
+    try:
+        result = run_public_suite(
+            custody["metadata"]["suite"],
+            destination,
+            benchmark_override=custody["data"],
+        )
+        verify_bundle(destination)
+        for name in ("benchmark.json", "metrics.json", "traces.jsonl"):
+            if (Path(source) / name).read_bytes() != (destination / name).read_bytes():
+                raise BundleError(f"reproduction mismatch: {name}")
+        return result
+    except BaseException:
+        if destination.is_dir():
+            shutil.rmtree(destination)
+        raise
+
+
+def _verify_registry_anchor(metadata: dict[str, Any]) -> None:
+    from eval.public.runner import load_registry
+
+    suite_name = metadata.get("suite")
+    registry = load_registry()
+    if suite_name not in registry:
+        raise BundleError("suite has no canonical registry anchor")
+    canonical = registry[suite_name]
+    anchored = (
+        "adapter",
+        "dataset_sha256",
+        "family",
+        "independent_external_reproduction",
+        "interval_method",
+        "license",
+        "pbpp_headline_eligible",
+        "publishable",
+        "revision",
+        "split_role",
+    )
+    if any(metadata.get(key) != canonical.get(key) for key in anchored):
+        raise BundleError("bundle metadata does not match canonical registry anchor")
+
+
+def _verify_metrics(
+    family: str,
+    benchmark: Any,
+    measured: dict[str, Any],
+    traces: list[dict[str, Any]],
+) -> None:
+    if family != "deterministic-retrieval":
+        return
+    from eval.harness.metrics import wilson_interval
+
+    if not isinstance(benchmark, dict) or not isinstance(benchmark.get("k"), int):
+        raise BundleError("retrieval benchmark is missing k")
+    questions = benchmark.get("questions")
+    corpus = benchmark.get("corpus")
+    if not isinstance(questions, list) or not isinstance(corpus, list):
+        raise BundleError("retrieval benchmark schema is invalid")
+    gold_by_question = {
+        question.get("question_id"): question.get("gold_doc_ids") for question in questions
+    }
+    doc_ids = {document.get("doc_id") for document in corpus}
+    if (
+        None in gold_by_question
+        or None in doc_ids
+        or set(gold_by_question) != {trace.get("question_id") for trace in traces}
+    ):
+        raise BundleError("traces do not match anchored benchmark questions")
+    for trace in traces:
+        question_id = trace["question_id"]
+        if trace.get("gold_references") != gold_by_question[question_id]:
+            raise BundleError("trace gold does not match anchored benchmark")
+        stored = trace.get("stored_records")
+        ranked = trace.get("ranked_retrieved_hits")
+        if not isinstance(stored, list) or set(stored) != doc_ids:
+            raise BundleError("stored records do not match anchored benchmark corpus")
+        if not isinstance(ranked, list) or any(item not in doc_ids for item in ranked):
+            raise BundleError("retrieved hit is outside anchored benchmark corpus")
+        if trace.get("answer") is not None and trace.get("answer") not in doc_ids:
+            raise BundleError("answer is outside anchored benchmark corpus")
+    if measured.get("metric") != "hit_at_k":
+        raise BundleError("deterministic retrieval metric must be hit_at_k")
+    k = benchmark["k"]
+    successes = sum(
+        bool(
+            set(trace["ranked_retrieved_hits"][:k])
+            & set(gold_by_question[trace["question_id"]])
+        )
+        for trace in traces
+    )
+    expected = wilson_interval(successes, len(traces)).as_dict()
+    interval = measured.get("interval", {})
+    recomputed = {
+        "family": family,
+        "successes": successes,
+        "total": len(traces),
+        "trace_count": len(traces),
+        "value": expected["point"],
+        "interval": {
+            "confidence": 0.95,
+            "high": expected["ci_high"],
+            "low": expected["ci_low"],
+            "method": expected["ci_method"],
+        },
+    }
+    for key, value in recomputed.items():
+        if key == "interval":
+            if any(interval.get(nested) != expected_value for nested, expected_value in value.items()):
+                raise BundleError("metrics do not recompute from traces")
+        elif measured.get(key) != value:
+            raise BundleError("metrics do not recompute from traces")
 
 
 def _write_json(path: Path, value: Any) -> None:

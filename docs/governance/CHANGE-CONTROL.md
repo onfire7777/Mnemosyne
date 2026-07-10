@@ -1,6 +1,6 @@
 # Change and Correction Control
 
-Version: 0.1.0  
+Version: 0.1.0
 Status: draft; External activation required
 
 Policy, dataset, adapter, harness, judge, and scoring changes use semantic

@@ -1,6 +1,6 @@
 # Appeals and Disputes
 
-Version: 0.1.0  
+Version: 0.1.0
 Status: draft; External activation required
 
 Any participant or observer may file an evidence-backed appeal against a run,

@@ -1,6 +1,6 @@
 # Board Status and Activation Register
 
-Version: 0.1.0  
+Version: 0.1.0
 Status: inactive; External activation required
 
 The board is not yet seated and governance is not yet active. This register is
