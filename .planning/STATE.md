@@ -4,14 +4,14 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: context exhaustion at 75% (2026-07-07)
-last_updated: "2026-07-10T17:40:01.097Z"
-last_activity: 2026-07-10 -- Phase 09.1 execution started
+last_updated: "2026-07-10T18:22:24Z"
+last_activity: 2026-07-10 -- Phase 09.1 caller-context parity verified and shipped
 progress:
   total_phases: 13
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 29
-  completed_plans: 27
-  percent: 23
+  completed_plans: 28
+  percent: 31
 ---
 
 # Project State
@@ -32,14 +32,14 @@ Tier-B is CLOSED. A genuine operator-run production capture over the live self-h
 See: .planning/PROJECT.md (updated 2026-06-19)
 
 **Core value:** Build a memory compiler with lossless evidence, typed projections, safe retrieval, branchable updates, and gated self-improvement.
-**Current focus:** Phase 09.1 — Preserve caller context across search, deep search, and explain
+**Current focus:** Phase 09.2 — Mount the bounded heartbeat in the public runtime
 
 ## Current Position
 
-Phase: 09.1 (Preserve caller context across search, deep search, and explain) — EXECUTING
-Plan: 1 of 1
-Status: Executing Phase 09.1
-Current status (2026-07-10): M4 is shipped and locally verified. The v1.0 milestone audit found caller-context propagation, public-runtime heartbeat mounting, and GSD verification/traceability gaps. Complete 09.1, 09.2, and 09.3, rerun the audit, then archive v1.0 and resume M1.1. No public benchmark number is authorized until the full PBPP gates and independent reproduction hold.
+Phase: 09.1 (Preserve caller context across search, deep search, and explain) — COMPLETE
+Plan: 1 of 1 complete
+Status: Ready for Phase 09.2
+Current status (2026-07-10): Phase 09.1 is shipped and verified. Search, deep search, and explain now preserve one fail-closed caller read context across direct, CLI, generated MCP, JSON-RPC, and official SDK surfaces. Phase 09.2 heartbeat mounting and Phase 09.3 milestone verification/traceability remain before the v1.0 re-audit and archive. No public benchmark number is authorized until the full PBPP gates and independent reproduction hold.
 
 Phase 9 completion checkpoint (2026-07-09): The post-attestation
 performance/refactoring continuation and Plans 09-01 through 09-13 are complete.
