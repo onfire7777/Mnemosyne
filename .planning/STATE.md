@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready for Phase 09.2
-stopped_at: context exhaustion at 75% (2026-07-07)
-last_updated: "2026-07-10T19:29:29.823Z"
-last_activity: 2026-07-10 -- Phase 09.1 independently verified 7/7 and completed; Phase 09.2 is next
+stopped_at: Phase 09.2 context gathered
+last_updated: "2026-07-10T19:44:25.050Z"
+last_activity: 2026-07-10 -- Phase 09.1 independently verified 7/7 and completed; Phase 09.2 is next.
 progress:
   total_phases: 13
   completed_phases: 4
@@ -891,8 +891,8 @@ Latest checkpoint (2026-06-28): T-SEC protected registry breadth is reconciled w
 
 ## Session Continuity
 
-Last session: 2026-07-07T05:36:49.795Z
-Stopped at: context exhaustion at 75% (2026-07-07)
+Last session: 2026-07-10T19:44:25.036Z
+Stopped at: Phase 09.2 context gathered
 
 Latest active checkpoint (2026-06-30): Continuing the unpaused exact-parity goal from the canonical checkout `/Users/admin/Mnemosyne`, with focus on Tier-B production/control gaps rather than redundant gates. The current source-hardening lane is closing the Phase 8 MFA elevation defect: elevated OIDC authz rules now require non-tenant claim evidence, configured `required_acr`/`required_amr`, positive `max_auth_age_seconds`, and fresh token `auth_time` before minting operator/consolidator or trust-tier≤1 sessions. This is source/control progress only; live Keycloak/MFA rollout evidence remains operator-run and required before Tier-B production parity can be claimed.
 
