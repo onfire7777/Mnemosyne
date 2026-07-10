@@ -177,6 +177,10 @@ class MnemoCLI:
             args += ["--source-identity", source_identity]
         return self.run("capture", *args).json
 
+    def capture_batch(self, input_jsonl: Path | str) -> dict[str, Any]:
+        """Capture validated JSONL rows through one public CLI process."""
+        return self.run("capture-batch", "--input-jsonl", str(input_jsonl)).json
+
     def search(
         self,
         tenant: str,
