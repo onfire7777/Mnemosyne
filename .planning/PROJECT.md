@@ -58,6 +58,27 @@ The next milestone executes the two authoritative post-v1.0 programs:
 - No public headline number may be published before the pinned harness, complete
   artifact bundle, separate retrieval/QA columns, and independent reproduction.
 
+## Current Milestone: v2.0 Public Benchmark and Memory Leadership
+
+**Goal:** Prove Mnemosyne's capabilities under neutral public measurement,
+close the grounded multi-hop synthesis gap, obtain independent reproduction,
+and launch a governance-separated memory leaderboard without weakening v1.0.
+
+**Target features:**
+
+- Isolated public CLI benchmark harness with PBPP reproducibility bundles.
+- Deterministic LongMemEval retrieval and HippoRAG multi-hop tracks.
+- Grounded iterative multi-hop answer synthesis with evidence-CID claims.
+- MemoryAgentBench, BEAM, security, calibration, performance, and scale columns.
+- Independent reproduction plus neutral governance and leaderboard launch.
+
+## Evolution
+
+This document evolves at phase transitions and milestone boundaries. Each phase
+promotes validated requirements, records decisions and new constraints, and
+rechecks the product description and core value. Each milestone performs a full
+requirements, scope, context, debt, and decision review before archive.
+
 ## Product Thesis
 
 Mnemosyne combines lossless memory, compiled truth, truth-maintenance belief revision, git-like branches, bitemporal queries, fidelity-tiered forgetting, calibrated abstention, user-controlled correction, and shadow-first self-optimization into one portable local-to-production memory substrate.
