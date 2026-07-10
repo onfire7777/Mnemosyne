@@ -583,10 +583,11 @@ additive machine-checkable liveness, safety, and unhealthy-failure evidence
 without granting mutation or critical-path authority.
 **Requirements**: REQ-016, REQ-018, NFR-005
 **Depends on:** Phase 9, Phase 09.1
-**Plans:** 1/1 plans complete
+**Plans:** 1/2 plans complete
 Plans:
 
 - [x] 09.2-01-PLAN.md — Mount and verify the bounded public-runtime heartbeat with red-first privacy, safety, release-evidence, and exact-state closure gates.
+- [ ] 09.2-02-PLAN.md — Fail closed on terminal-state resurrection and unbounded/inconsistent heartbeat attempt evidence, then independently re-verify Phase 09.2.
 
 ### Phase 09.1: Close audit gap: preserve caller context across search, deep_search, and explain (INSERTED)
 
