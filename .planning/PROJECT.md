@@ -26,6 +26,17 @@ changes must preserve tenant isolation, evidence provenance, bitemporal
 behavior, trust/sensitivity controls, retrieved-content-as-data semantics,
 operator overrides, and parity tests across supported backends.
 
+Validated in Phase 09.1: REQ-003, REQ-004, REQ-007, and NFR-004 now preserve
+one fail-closed caller read context across direct, CLI, generated MCP, JSON-RPC,
+and official SDK search/deep-search/explain surfaces without response-schema or
+access-policy drift.
+
+## Current State
+
+Phase 09.1 is complete and independently verified 7/7. Phase 09.2 is next:
+mount the bounded heartbeat into a supported public runtime before the v1.0
+milestone is re-audited and archived.
+
 ## Product Thesis
 
 Mnemosyne combines lossless memory, compiled truth, truth-maintenance belief revision, git-like branches, bitemporal queries, fidelity-tiered forgetting, calibrated abstention, user-controlled correction, and shadow-first self-optimization into one portable local-to-production memory substrate.
@@ -51,6 +62,7 @@ Mnemosyne is its own memory system. It is distinct from gbrain and mempalace, an
 | 2026-06-19 | Build in `/Users/admin/Projects/Mnemosyne` because `/Users/admin/Desktop/Mnemosyne` is write-blocked by macOS. _(Superseded 2026-06-26: canonical checkout is now `/Users/admin/Mnemosyne`; see STATE.md.)_ | Shell write probes returned `Operation not permitted` on Desktop and succeeded in Projects. |
 | 2026-06-30 | Treat `/Users/admin/Mnemosyne` as the canonical live implementation checkout; Desktop/Projects paths are historical unless `git rev-parse` proves a newer valid checkout. | Historical resume checks on 2026-06-30 verified the then-current `main` and CI. Future status claims must refresh `git status`, `git log -1`, and GitHub Actions for the live `HEAD` rather than reusing that snapshot. |
 | 2026-06-19 | Keep Phase 0-1 executable first, but keep Phases 2-5 mandatory in the roadmap. | Updated goal requires following the full build blueprint precisely and completely. |
+| 2026-07-10 | Use one canonical `_read_context` authorization contract for search, deep search, and explain while preserving legacy positional meaning and narrowing omitted role to `reader`. | Phase 09.1 verification, clean code review, and security audit at `threats_open: 0`. |
 
 ## Quality Bar
 
@@ -58,3 +70,5 @@ Mnemosyne is its own memory system. It is distinct from gbrain and mempalace, an
 - Tests must validate user-observable invariants, not just module imports.
 - Security checks must enforce trust boundaries in code and storage, not only in prompts.
 - No phase is complete because files exist; it is complete only when its verification report passes.
+
+Last updated: 2026-07-10
