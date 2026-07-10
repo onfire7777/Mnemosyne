@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -7,6 +8,7 @@ import pytest
 
 from eval.public.bundle import BundleError, reproduce_bundle, verify_bundle
 from eval.public.runner import load_registry, run_public_suite
+from eval.public.scoring import score_profile
 
 
 def test_smoke_registry_is_pinned_and_permanently_non_publishable() -> None:
@@ -219,6 +221,121 @@ def test_qa_family_requires_disclosed_reader_and_judge(tmp_path: Path) -> None:
         _refresh_digest(out, name)
     with pytest.raises(BundleError, match="reader and judge"):
         verify_bundle(out)
+
+
+def test_generalized_registry_profile_recomputes_benchmark_owned_metrics(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from eval.public.bundle import write_bundle
+
+    benchmark = {
+        "corpus": [{"doc_id": "a", "content": "A"}, {"doc_id": "b", "content": "B"}],
+        "questions": [{"question_id": "q", "gold_references": ["a", "b"]}],
+    }
+    traces = [{"question_id": "q", "gold_references": ["a", "b"], "ranked_retrieved_hits": ["a", "b"], "scoring_family": "deterministic-retrieval", "stored_records": ["a", "b"], "answer": None}]
+    metadata = {
+        "adapter": "fixture", "dataset_sha256": _canonical_digest(benchmark),
+        "family": "deterministic-retrieval", "independent_external_reproduction": False,
+        "interval_method": "bootstrap", "license": "MIT", "pbpp_headline_eligible": False,
+        "publishable": False, "revision": "a" * 40, "scoring_profile": "hipporag-retrieval-v1",
+        "split_role": "test", "suite": "generalized-fixture",
+    }
+    monkeypatch.setattr("eval.public.runner.load_registry", lambda: {"generalized-fixture": dict(metadata)})
+    measured = score_profile("hipporag-retrieval-v1", [{"question_id": "q", "gold_references": ["a", "b"]}], traces)
+    out = tmp_path / "generalized"
+    write_bundle(out, benchmark=benchmark, metadata=metadata, metrics=measured, traces=traces)
+    assert verify_bundle(out)["valid"] is True
+    metrics = json.loads((out / "metrics.json").read_text())
+    metrics["metrics"]["recall_at_2"] = 0.0
+    _rewrite_json(out / "metrics.json", metrics)
+    _refresh_digest(out, "metrics.json")
+    with pytest.raises(BundleError, match="anchored scoring profile"):
+        verify_bundle(out)
+
+
+def test_bundle_rejects_config_profile_not_bound_to_registry_metadata(
+    tmp_path: Path,
+) -> None:
+    out = tmp_path / "config-substitution"
+    run_public_suite("smoke", out)
+    config = json.loads((out / "config.json").read_text())
+    config.update(
+        interval_method="bootstrap",
+        scoring_profile="longmemeval-retrieval-v1",
+    )
+    _rewrite_json(out / "config.json", config)
+    _refresh_digest(out, "config.json")
+    with pytest.raises(BundleError, match="config does not match"):
+        verify_bundle(out)
+
+
+def test_external_multi_asset_adapter_reproduces_from_embedded_custody(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from eval.public import runner
+    from eval.public.bundle import reproduce_bundle
+
+    dataset = tmp_path / "dataset"
+    dataset.mkdir()
+    query_raw = b'[{"id":"q","gold":["a"]}]\n'
+    corpus_raw = b'[{"id":"a","text":"alpha"}]\n'
+    (dataset / "queries.json").write_bytes(query_raw)
+    (dataset / "corpus.json").write_bytes(corpus_raw)
+    benchmark = {
+        "corpus": [{"doc_id": "a", "content": "alpha"}],
+        "questions": [{"question_id": "q", "gold_references": ["a"]}],
+    }
+    assets = [
+        {
+            "filename": name,
+            "sha256": hashlib.sha256(raw).hexdigest(),
+            "revision": "b" * 40,
+            "license": "MIT",
+            "citation": "Fixture et al. (2026)",
+            "split_role": "test",
+            "contamination": "none known",
+        }
+        for name, raw in (("queries.json", query_raw), ("corpus.json", corpus_raw))
+    ]
+    suite = {
+        "adapter": "external-fixture",
+        "assets": assets,
+        "dataset_sha256": _canonical_digest(benchmark),
+        "family": "deterministic-retrieval",
+        "independent_external_reproduction": False,
+        "interval_method": "bootstrap",
+        "license": "MIT",
+        "pbpp_headline_eligible": False,
+        "publishable": False,
+        "revision": "b" * 40,
+        "scoring_profile": "hipporag-retrieval-v1",
+        "split_role": "test",
+    }
+
+    def adapter(value: dict, cli: object) -> tuple[dict, list[dict], dict]:
+        normalized = benchmark if "assets" in value else value
+        traces = [
+            {
+                "answer": None,
+                "gold_references": ["a"],
+                "question_id": "q",
+                "ranked_retrieved_hits": ["a"],
+                "scoring_family": "deterministic-retrieval",
+                "stored_records": ["a"],
+            }
+        ]
+        measured = score_profile(
+            "hipporag-retrieval-v1",
+            [{"question_id": "q", "gold_references": ["a"]}],
+            traces,
+        )
+        return normalized, traces, measured
+
+    monkeypatch.setattr(runner, "load_registry", lambda: {"external-fixture": suite})
+    monkeypatch.setitem(runner._ADAPTERS, "external-fixture", adapter)
+    source, reproduced = tmp_path / "source", tmp_path / "reproduced"
+    run_public_suite("external-fixture", source, dataset_dir=dataset)
+    reproduce_bundle(source, reproduced)
+    assert verify_bundle(reproduced)["valid"] is True
+    assert (source / "traces.jsonl").read_bytes() == (reproduced / "traces.jsonl").read_bytes()
 
 
 def _refresh_digest(bundle: Path, name: str) -> None:

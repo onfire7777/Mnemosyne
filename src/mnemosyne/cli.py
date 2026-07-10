@@ -10,6 +10,7 @@ import math
 import os
 import re
 import shlex
+import shutil
 import socket
 import ssl
 import subprocess
@@ -1523,6 +1524,96 @@ def cmd_capture(args: argparse.Namespace) -> None:
             trust_tier=args.trust_tier,
         )
     )
+
+
+def cmd_capture_batch(args: argparse.Namespace) -> None:
+    """Capture a bounded, prevalidated JSONL batch through one engine process."""
+    from mnemosyne.media_limits import ensure_file_within_limit
+
+    if args.backend != "local":
+        raise ValueError("capture-batch currently supports only the atomic local backend")
+    path = Path(args.input_jsonl)
+    if args.max_records < 1:
+        raise ValueError("--max-records must be positive")
+    if path.is_symlink() or not path.is_file():
+        raise ValueError("--input-jsonl must be a real file, not a link")
+    ensure_file_within_limit(str(path), limit=max_ingest_bytes(args), label="capture batch")
+    allowed = {"tenant", "user", "actor", "source_type", "source_identity", "content", "branch", "trust_tier"}
+    required = {"tenant", "user", "source_type", "content"}
+    rows: list[dict[str, Any]] = []
+    with path.open(encoding="utf-8") as handle:
+        for line_number, raw in enumerate(handle, 1):
+            if line_number > args.max_records:
+                raise ValueError(f"capture batch exceeds --max-records={args.max_records}")
+            if not raw.strip():
+                raise ValueError(f"capture batch line {line_number} is blank")
+            try:
+                def unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+                    value: dict[str, Any] = {}
+                    for key, nested in pairs:
+                        if key in value:
+                            raise ValueError(f"duplicate key: {key}")
+                        value[key] = nested
+                    return value
+
+                row = json.loads(
+                    raw,
+                    parse_constant=lambda value: (_ for _ in ()).throw(ValueError(value)),
+                    object_pairs_hook=unique_object,
+                )
+            except (json.JSONDecodeError, ValueError) as exc:
+                raise ValueError(f"capture batch line {line_number} is invalid JSON") from exc
+            if not isinstance(row, dict) or set(row) - allowed or not required <= set(row):
+                raise ValueError(f"capture batch line {line_number} has invalid schema")
+            if any(not isinstance(row[key], str) or not row[key] for key in required):
+                raise ValueError(f"capture batch line {line_number} has invalid required values")
+            actor = row.get("actor", "user")
+            if actor not in {"user", "assistant", "tool", "system", "external"}:
+                raise ValueError(f"capture batch line {line_number} has invalid actor")
+            trust_tier = row.get("trust_tier", 0)
+            if not isinstance(trust_tier, int) or isinstance(trust_tier, bool):
+                raise ValueError(f"capture batch line {line_number} has invalid trust tier")
+            for key in ("branch", "source_identity"):
+                if key in row and (not isinstance(row[key], str) or not row[key]):
+                    raise ValueError(f"capture batch line {line_number} has invalid {key}")
+            rows.append(row)
+    if not rows:
+        raise ValueError("capture batch must contain at least one row")
+    store = Path(args.store).resolve()
+    store.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, staged_name = tempfile.mkstemp(prefix=f".{store.name}-batch-", dir=store.parent)
+    os.close(descriptor)
+    staged = Path(staged_name)
+    try:
+        if store.exists():
+            if store.is_symlink() or not store.is_file():
+                raise ValueError("local capture-batch store must be a real file")
+            shutil.copyfile(store, staged)
+        else:
+            staged.unlink()
+        staged_args = argparse.Namespace(**vars(args))
+        staged_args.store = str(staged)
+        tools = load_tools(staged_args)
+        results = [
+            tools.capture(
+                tenant_id=row["tenant"],
+                user_id=row["user"],
+                actor=row.get("actor", "user"),
+                source_type=row["source_type"],
+                source_identity=row.get("source_identity"),
+                content=row["content"],
+                branch=row.get("branch", "main"),
+                trust_tier=row.get("trust_tier", 0),
+            )
+            for row in rows
+        ]
+        if not staged.is_file() or staged.is_symlink():
+            raise ValueError("capture batch did not produce a real staged store")
+        os.replace(staged, store)
+    except BaseException:
+        staged.unlink(missing_ok=True)
+        raise
+    emit({"count": len(results), "ok": True, "results": results})
 
 
 def load_signed_provenance(args: argparse.Namespace) -> dict[str, Any] | None:
@@ -17871,19 +17962,44 @@ def cmd_eval_public(args: argparse.Namespace) -> None:
     repo_root = Path(__file__).resolve().parents[2]
     if str(repo_root) not in sys.path:
         sys.path.insert(0, str(repo_root))
-    from eval.public.bundle import reproduce_bundle, verify_bundle
+    from eval.public.bundle import reproduce_bundle, verify_bundle, verify_report, write_report
     from eval.public.runner import run_public_suite
 
-    if args.verify_bundle:
+    supplied = {
+        "dataset_dir": args.dataset_dir,
+        "out_dir": args.out_dir,
+        "reproduced_bundle": args.reproduced_bundle,
+        "report_output": args.report_output,
+        "report_note": args.report_note,
+    }
+    if args.verify_report:
+        if any(supplied[key] is not None for key in ("dataset_dir", "out_dir", "reproduced_bundle", "report_output")):
+            raise ValueError("--verify-report accepts only --report-note")
+        if args.report_note is None:
+            raise ValueError("--report-note is required with --verify-report")
+        result = verify_report(args.verify_report, args.report_note)
+    elif args.write_report:
+        if args.dataset_dir is not None or args.out_dir is not None:
+            raise ValueError("--write-report does not accept --dataset-dir or --out-dir")
+        if args.reproduced_bundle is None or args.report_output is None or args.report_note is None:
+            raise ValueError("--reproduced-bundle, --report-output, and --report-note are required with --write-report")
+        result = write_report(args.write_report, args.reproduced_bundle, args.report_output, args.report_note)
+    elif args.verify_bundle:
+        if any(supplied[key] is not None for key in supplied):
+            raise ValueError("--verify-bundle does not accept output/report arguments")
         result = verify_bundle(args.verify_bundle)
     elif args.reproduce_bundle:
+        if any(supplied[key] is not None for key in ("dataset_dir", "reproduced_bundle", "report_output", "report_note")):
+            raise ValueError("--reproduce-bundle accepts only --out-dir")
         if args.out_dir is None:
             raise ValueError("--out-dir is required with --reproduce-bundle")
         result = reproduce_bundle(args.reproduce_bundle, args.out_dir)
     else:
+        if any(supplied[key] is not None for key in ("reproduced_bundle", "report_output", "report_note")):
+            raise ValueError("--suite does not accept report arguments")
         if args.out_dir is None:
             raise ValueError("--out-dir is required with --suite")
-        result = run_public_suite(args.suite, args.out_dir)
+        result = run_public_suite(args.suite, args.out_dir, dataset_dir=args.dataset_dir)
     print(json.dumps(result, sort_keys=True))
 
 
@@ -18468,6 +18584,11 @@ def build_parser() -> argparse.ArgumentParser:
     capture.add_argument("--branch", default="main")
     capture.add_argument("--trust-tier", type=int, default=0)
     capture.set_defaults(func=cmd_capture)
+
+    capture_batch = sub.add_parser("capture-batch")
+    capture_batch.add_argument("--input-jsonl", type=Path, required=True)
+    capture_batch.add_argument("--max-records", type=int, default=100_000)
+    capture_batch.set_defaults(func=cmd_capture_batch)
 
     ingest = sub.add_parser("ingest")
     ingest.add_argument("--tenant", required=True)
@@ -19913,10 +20034,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     eval_public = sub.add_parser("eval-public")
     action = eval_public.add_mutually_exclusive_group(required=True)
-    action.add_argument("--suite", choices=("smoke",))
+    action.add_argument("--suite")
     action.add_argument("--verify-bundle", type=Path)
     action.add_argument("--reproduce-bundle", type=Path)
+    action.add_argument("--write-report", type=Path)
+    action.add_argument("--verify-report", type=Path)
     eval_public.add_argument("--out-dir", type=Path)
+    eval_public.add_argument("--dataset-dir", type=Path)
+    eval_public.add_argument("--reproduced-bundle", type=Path)
+    eval_public.add_argument("--report-output", type=Path)
+    eval_public.add_argument("--report-note", type=Path)
     eval_public.set_defaults(func=cmd_eval_public)
 
     consolidate_once = sub.add_parser("consolidate-once")

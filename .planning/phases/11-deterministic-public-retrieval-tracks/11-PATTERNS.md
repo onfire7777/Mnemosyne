@@ -9,7 +9,9 @@
 - Capture corpus content and retrieve only through `MnemoCLI`; use public
   `explain` data for graph/PPR participation without inventing unavailable
   scores.
+- Large corpora use the bounded public `mneme capture-batch --input-jsonl`
+  surface. It prevalidates the full batch and invokes the same mediated capture
+  method per row in one engine process; adapters never import engine internals.
 - Recompute every metric from benchmark-owned labels and canonical traces.
 - Never use top-k equal to the candidate pool in smoke or publication evidence.
 - Full datasets stay outside git; tiny fixtures are schema tests only.
-

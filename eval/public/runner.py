@@ -12,11 +12,17 @@ from unittest.mock import patch
 
 from eval.harness.cli_driver import MnemoCLI
 from eval.public.adapters import smoke
+from eval.public.assets import AssetSpec, load_asset_set
 from eval.public.bundle import write_bundle
 
 ROOT = Path(__file__).parent
 _HEX = set("0123456789abcdef")
 _ADAPTERS = {"smoke": smoke.run}
+_PROFILE_CONTRACTS = {
+    "smoke-hit-at-k-v1": ("deterministic-retrieval", "wilson"),
+    "longmemeval-retrieval-v1": ("deterministic-retrieval", "bootstrap"),
+    "hipporag-retrieval-v1": ("deterministic-retrieval", "bootstrap"),
+}
 
 
 def load_registry() -> dict[str, dict[str, Any]]:
@@ -27,35 +33,60 @@ def load_registry() -> dict[str, dict[str, Any]]:
             raise ValueError(f"{name}: revision must be an exact 40-hex pin")
         if len(digest) != 64 or set(digest) - _HEX:
             raise ValueError(f"{name}: dataset_sha256 must be exact")
-        required = {"deterministic-retrieval": "wilson", "qa": "bootstrap"}.get(suite.get("family"))
-        if required is None or suite.get("interval_method") != required:
-            raise ValueError(f"{name}: invalid metric family or interval method")
+        contract = _PROFILE_CONTRACTS.get(suite.get("scoring_profile"))
+        if contract != (suite.get("family"), suite.get("interval_method")):
+            raise ValueError(f"{name}: invalid scoring profile, family, or interval method")
     return registry
 
 
-def run_public_suite(suite_name: str, out_dir: Path | str, *, benchmark_override: dict[str, Any] | None = None) -> dict[str, Any]:
+def run_public_suite(
+    suite_name: str,
+    out_dir: Path | str,
+    *,
+    benchmark_override: dict[str, Any] | None = None,
+    dataset_dir: Path | str | None = None,
+) -> dict[str, Any]:
     registry = load_registry()
     if suite_name not in registry:
         raise ValueError(f"unknown public suite: {suite_name}")
     suite = registry[suite_name]
+    if dataset_dir is not None and suite_name == "smoke":
+        raise ValueError("smoke does not accept --dataset-dir")
     try:
         adapter = _ADAPTERS[suite["adapter"]]
     except KeyError as exc:
         raise ValueError(f"{suite_name}: unsupported adapter") from exc
-    fixture_bytes = (ROOT / suite["fixture"]).read_bytes()
-    fixture_data = json.loads(fixture_bytes)
-    if hashlib.sha256(_canonical(fixture_data)).hexdigest() != suite["dataset_sha256"]:
-        raise ValueError(f"{suite_name}: fixture digest does not match registry")
-    benchmark = benchmark_override or fixture_data
-    custody_sha = suite["dataset_sha256"] if benchmark_override is None else hashlib.sha256(_canonical(benchmark)).hexdigest()
+    if benchmark_override is not None:
+        adapter_input = benchmark_override
+    elif "assets" in suite:
+        if dataset_dir is None:
+            raise ValueError(f"{suite_name}: --dataset-dir is required")
+        specs = [AssetSpec(**item) for item in suite["assets"]]
+        adapter_input = {"assets": load_asset_set(dataset_dir, specs)}
+    else:
+        fixture_bytes = (ROOT / suite["fixture"]).read_bytes()
+        adapter_input = json.loads(fixture_bytes)
     allowed_env = {key: os.environ[key] for key in ("LANG", "LC_ALL", "PATH", "TMPDIR") if key in os.environ}
     with tempfile.TemporaryDirectory(prefix="mneme-public-") as temp:
         cli = MnemoCLI(store=str(Path(temp) / "store.json"), env=allowed_env)
         with patch.dict(os.environ, allowed_env, clear=True):
-            traces, measured = adapter(benchmark, cli)
-    if measured["family"] != suite["family"] or measured["interval"]["method"] != suite["interval_method"]:
-        raise ValueError("metric family or interval metadata mismatch")
-    metadata = {**suite, "dataset_sha256": custody_sha, "suite": suite_name}
+            result = adapter(adapter_input, cli)
+    if len(result) == 2:
+        traces, measured = result
+        benchmark = adapter_input
+    elif len(result) == 3:
+        benchmark, traces, measured = result
+    else:
+        raise ValueError("public adapter must return (traces, metrics) or (benchmark, traces, metrics)")
+    if hashlib.sha256(_canonical(benchmark)).hexdigest() != suite["dataset_sha256"]:
+        raise ValueError(f"{suite_name}: normalized benchmark digest does not match registry")
+    if (
+        measured.get("family") != suite["family"]
+        or measured.get("profile", suite["scoring_profile"]) != suite["scoring_profile"]
+        or measured.get("interval", {}).get("method") != suite["interval_method"]
+    ):
+        raise ValueError("scoring profile, family, or interval metadata mismatch")
+    metadata = {**suite, "suite": suite_name}
     write_bundle(Path(out_dir), benchmark=benchmark, metadata=metadata, metrics=measured, traces=traces)
     return {"bundle": str(Path(out_dir).resolve()), "independent_external_reproduction": False, "pbpp_headline_eligible": False, "publishable": False, "suite": suite_name, "system_seam": "public-cli-subprocess"}
 
