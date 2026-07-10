@@ -1,1 +1,84 @@
-{"smoke":{"adapter":"smoke","dataset_sha256":"ee2220bf82175e38ca44db4b82dbe369b74c83b4d40e784f2d834c99b7d43375","family":"deterministic-retrieval","fixture":"fixtures/smoke.json","independent_external_reproduction":false,"interval_method":"wilson","license":"CC0-1.0","pbpp_headline_eligible":false,"publishable":false,"revision":"1f4d6a49828eb6c095d014e1be98cb4514d99649","scoring_profile":"smoke-hit-at-k-v1","split_role":"development-self-test"}}
+{
+  "hipporag-2wiki": {
+    "adapter": "hipporag-multihop",
+    "assets": [
+      {"citation":"Ho et al., 2WikiMultiHopQA (COLING 2020)","contamination":"Released HippoRAG 2 validation sample; no tuning permitted","filename":"2wikimultihopqa.json","license":"Apache-2.0","revision":"5ec05b38deecc3318bb432c69865959c56058990","sha256":"895cba294064df0c3302c76847b1fc08d99b5619f7663dfaa3b65cd780f1cac4","split_role":"held-out-validation"},
+      {"citation":"Ho et al., 2WikiMultiHopQA (COLING 2020)","contamination":"Released HippoRAG 2 corpus; no tuning permitted","filename":"2wikimultihopqa_corpus.json","license":"Apache-2.0","revision":"5ec05b38deecc3318bb432c69865959c56058990","sha256":"9d6e352952aafb18dab22bf8195039461321a44a949df902ae83bce134ad238a","split_role":"evaluation-corpus"}
+    ],
+    "dataset_sha256": "552b4f01f9ede2d5e024a33577fc9dada544a4c369c1ba556b628e093c037c8e",
+    "family": "deterministic-retrieval",
+    "independent_external_reproduction": false,
+    "interval_method": "bootstrap",
+    "license": "Apache-2.0",
+    "pbpp_headline_eligible": false,
+    "publishable": false,
+    "revision": "ad30fc3e2062202d9e975e32cd28212424a56ccb",
+    "scoring_profile": "hipporag-retrieval-v1",
+    "split_role": "held-out-validation"
+  },
+  "hipporag-hotpot": {
+    "adapter": "hipporag-multihop",
+    "assets": [
+      {"citation":"Yang et al., HotpotQA (EMNLP 2018)","contamination":"Released HippoRAG 2 validation sample; no tuning permitted","filename":"hotpotqa.json","license":"CC-BY-SA-4.0","revision":"5ec05b38deecc3318bb432c69865959c56058990","sha256":"3ad9c0bcbf93f41d7004ca6007049c904d2605046b314a2f7ecfb379c64cba6d","split_role":"held-out-validation"},
+      {"citation":"Yang et al., HotpotQA (EMNLP 2018)","contamination":"Released HippoRAG 2 corpus; no tuning permitted","filename":"hotpotqa_corpus.json","license":"CC-BY-SA-4.0","revision":"5ec05b38deecc3318bb432c69865959c56058990","sha256":"9333647b922382776cd2cb02893b390d77984df85a91bfa8be411284978aca7d","split_role":"evaluation-corpus"}
+    ],
+    "dataset_sha256": "685e051965220587c33efe953b191f2556d6cdf5143907612006d69f19e736a3",
+    "family": "deterministic-retrieval",
+    "independent_external_reproduction": false,
+    "interval_method": "bootstrap",
+    "license": "CC-BY-SA-4.0",
+    "pbpp_headline_eligible": false,
+    "publishable": false,
+    "revision": "ad30fc3e2062202d9e975e32cd28212424a56ccb",
+    "scoring_profile": "hipporag-retrieval-v1",
+    "split_role": "held-out-validation"
+  },
+  "hipporag-musique": {
+    "adapter": "hipporag-multihop",
+    "assets": [
+      {"citation":"Trivedi et al., MuSiQue (TACL 2022)","contamination":"Upstream warns seed questions may overlap training data; pinned sample ships no machine-readable exclusion IDs, so applied exclusion count is zero; no tuning permitted","filename":"musique.json","license":"CC-BY-4.0","revision":"5ec05b38deecc3318bb432c69865959c56058990","sha256":"98ed4e21d3076532f6388d42320fb809599c63a0d8dffca8ece5e41922be6b46","split_role":"held-out-validation"},
+      {"citation":"Trivedi et al., MuSiQue (TACL 2022)","contamination":"Released HippoRAG 2 corpus; no tuning permitted","filename":"musique_corpus.json","license":"CC-BY-4.0","revision":"5ec05b38deecc3318bb432c69865959c56058990","sha256":"73157a03ce3f0b1a5673dd5dc12bb970c24976dbffc688af9eecdd758c97ffcb","split_role":"evaluation-corpus"}
+    ],
+    "dataset_sha256": "7c0cbd3382c77d10139eeee25c93f4ff751171931eb1509a6111ce3b03da94f9",
+    "family": "deterministic-retrieval",
+    "independent_external_reproduction": false,
+    "interval_method": "bootstrap",
+    "license": "CC-BY-4.0",
+    "pbpp_headline_eligible": false,
+    "publishable": false,
+    "revision": "ad30fc3e2062202d9e975e32cd28212424a56ccb",
+    "scoring_profile": "hipporag-retrieval-v1",
+    "split_role": "held-out-validation"
+  },
+  "longmemeval-retrieval": {
+    "adapter": "longmemeval",
+    "assets": [
+      {"citation":"Wu et al., LongMemEval (ICLR 2025)","contamination":"Cleaned short evaluation set; no tuning permitted","filename":"longmemeval_s_cleaned.json","license":"MIT","revision":"98d7416c24c778c2fee6e6f3006e7a073259d48f","sha256":"d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442","split_role":"held-out-test"},
+      {"citation":"Wu et al., LongMemEval (ICLR 2025)","contamination":"Oracle support labels only; no answer generation or tuning","filename":"longmemeval_oracle.json","license":"MIT","revision":"98d7416c24c778c2fee6e6f3006e7a073259d48f","sha256":"821a2034d219ab45846873dd14c14f12cfe7776e73527a483f9dac095d38620c","split_role":"evaluation-labels"}
+    ],
+    "dataset_sha256": "91a5f14cf4795d5ed252995fc001142a65e6c0d87058128a05fdb85f454a49ad",
+    "family": "deterministic-retrieval",
+    "independent_external_reproduction": false,
+    "interval_method": "bootstrap",
+    "license": "MIT",
+    "pbpp_headline_eligible": false,
+    "publishable": false,
+    "revision": "9e0b455f4ef0e2ab8f2e582289761153549043fc",
+    "scoring_profile": "longmemeval-retrieval-v1",
+    "split_role": "held-out-test"
+  },
+  "smoke": {
+    "adapter": "smoke",
+    "dataset_sha256": "ee2220bf82175e38ca44db4b82dbe369b74c83b4d40e784f2d834c99b7d43375",
+    "family": "deterministic-retrieval",
+    "fixture": "fixtures/smoke.json",
+    "independent_external_reproduction": false,
+    "interval_method": "wilson",
+    "license": "CC0-1.0",
+    "pbpp_headline_eligible": false,
+    "publishable": false,
+    "revision": "1f4d6a49828eb6c095d014e1be98cb4514d99649",
+    "scoring_profile": "smoke-hit-at-k-v1",
+    "split_role": "development-self-test"
+  }
+}

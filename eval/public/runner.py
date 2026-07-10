@@ -11,13 +11,17 @@ from typing import Any
 from unittest.mock import patch
 
 from eval.harness.cli_driver import MnemoCLI
-from eval.public.adapters import smoke
+from eval.public.adapters import hipporag_multihop, longmemeval, smoke
 from eval.public.assets import AssetSpec, load_asset_set
 from eval.public.bundle import write_bundle
 
 ROOT = Path(__file__).parent
 _HEX = set("0123456789abcdef")
-_ADAPTERS = {"smoke": smoke.run}
+_ADAPTERS = {
+    "hipporag-multihop": hipporag_multihop.run,
+    "longmemeval": longmemeval.run,
+    "smoke": smoke.run,
+}
 _PROFILE_CONTRACTS = {
     "smoke-hit-at-k-v1": ("deterministic-retrieval", "wilson"),
     "longmemeval-retrieval-v1": ("deterministic-retrieval", "bootstrap"),
