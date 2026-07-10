@@ -37,8 +37,10 @@
     (data CC BY-SA 4.0; code Apache-2.0).
 - Published HippoRAG 2 Llama-3.3-70B context, not pass thresholds:
   MuSiQue 56.1/74.7, 2Wiki 76.2/90.4, HotpotQA 83.5/96.3 for Recall@2/@5.
-- MuSiQue carries an upstream seed-question leakage warning; retain exclusion
-  IDs and a contamination declaration.
+- MuSiQue carries an upstream seed-question leakage warning. The pinned
+  HippoRAG sample does not ship a machine-readable exclusion-ID set, so no
+  exclusion is invented; reports must disclose the risk and the zero applied
+  exclusion count.
 - Pinned asset base URL:
   `https://huggingface.co/datasets/osunlp/HippoRAG_2/resolve/5ec05b38deecc3318bb432c69865959c56058990/`.
   Cite the original dataset papers plus HippoRAG 2 (arXiv:2502.14802). Mutable
