@@ -47,3 +47,12 @@ No public benchmark number, headline eligibility, independent reproduction,
 seated board, active neutral governance, or published methods paper is claimed.
 The smoke result is a development self-test only. Phase 16 plus external
 ratification owns final GOV-001 satisfaction.
+
+## Exact-SHA CI External Blocker
+
+GitHub Actions run `29128327918` for closure SHA
+`e6b437bd294b01734ff470f9e5ff1b6b2b341ce1` was retried once. Every job was
+rejected before checkout with GitHub's annotation that recent account payments
+failed or the spending limit must be increased. This is not recorded as a
+passing CI run. Local full/focused/lint gates are green; exact-SHA CI remains an
+external blocker to replay after billing is restored.

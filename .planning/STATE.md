@@ -3,7 +3,7 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: planning
-stopped_at: Phase 10 source scope complete; Phase 11 planning next
+stopped_at: Phase 11 planned; implementation next
 last_updated: "2026-07-10T22:38:56Z"
 last_activity: 2026-07-10
 progress:
@@ -37,9 +37,9 @@ See: .planning/PROJECT.md (updated 2026-06-19)
 ## Current Position
 
 Phase: 11 of 16 — Deterministic Public Retrieval Tracks
-Plan: Not started
-Status: Phase 10 verified; Phase 11 planning next
-Last activity: 2026-07-10 — Phase 10 public harness and governance source foundation completed
+Plan: 0 of 3
+Status: Planned and ready to execute; exact CI externally blocked by GitHub billing
+Last activity: 2026-07-10 — Phase 11 public retrieval research and three execution plans completed
 
 ## Performance Metrics
 
@@ -68,6 +68,9 @@ Last activity: 2026-07-10 — Phase 10 public harness and governance source foun
 ## Accumulated Context
 
 ### Decisions
+
+- [Phase 11]: HippoRAG retrieval is deterministic, but EM/F1 needs real reader-produced predictions; the scorer lands in Phase 11 and Phase 12 owns prediction closure.
+- [CI]: GitHub Actions run 29128327918 and its retry were rejected before checkout because account billing failed or the spending limit was reached; exact-SHA CI remains open.
 
 - [Phase 0]: V2 blueprint is controlling; v1 is lineage only.
 - [Phase 0]: Build originally moved to `/Users/admin/Projects/Mnemosyne` because `/Users/admin/Desktop/Mnemosyne` was write-blocked; the current canonical checkout is `/Users/admin/Mnemosyne`.

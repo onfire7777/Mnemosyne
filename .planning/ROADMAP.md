@@ -37,7 +37,16 @@ Phase 16 owns final activation and launch readiness.
 deterministic scoring, pinned upstream inputs, confidence intervals, and traces.
 **Requirements:** BENCH-004, BENCH-005, RAIL-001..004
 **Depends on:** Phase 10
-**Plans:** Not planned
+**Plans:** 0/3 complete
+
+Plans:
+
+- [ ] 11-01-PLAN.md — Generalize immutable asset and multi-metric bundle custody.
+- [ ] 11-02-PLAN.md — LongMemEval cleaned retrieval-recall track.
+- [ ] 11-03-PLAN.md — HippoRAG three-dataset retrieval and deterministic scorer.
+
+**Boundary:** Phase 11 can complete BENCH-004. BENCH-005 remains partial until
+Phase 12 supplies disclosed grounded-reader predictions for real EM/F1.
 
 ### Phase 12: Grounded Multi-Hop Answer Synthesis
 
