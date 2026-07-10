@@ -1,10 +1,32 @@
 # Milestones
 
+## v1.0 Blueprint-Complete Memory Compiler (Shipped: 2026-07-10)
+
+**Delivered:** Attested local-to-production memory compiler with strict blueprint parity, unified cognitive substrate, self-hosted Tier-B evidence, hardened runtime surfaces, and fully traceable milestone verification.
+
+**Phases completed:** 13 phase identifiers, 38 plans
+
+**Audit:** `.planning/milestones/v1.0-MILESTONE-AUDIT.md` — passed 100/100
+
+**Key accomplishments:**
+
+- One canonical fail-closed caller context now governs search, deep search, and explain across direct, CLI, generated MCP, JSON-RPC, and official SDK calls.
+- A bounded, shadow-only workspace heartbeat is mounted in the public worker runtime and release evidence fails closed on resurrection or unbounded/inconsistent counters.
+- The self-hosted production profile passed retained Tier-B custody verification: 74 artifacts, 10/10 rows, matching fingerprint, and zero findings.
+- All 23 canonical requirements resolve through one-owner, three-source traceability with complete verification and Nyquist coverage.
+- Local, SQLite, and PostgreSQL contracts, production identity/security/retrieval gates, native wheels, and provider conformance are exact-SHA CI verified.
+
+**Git range:** initial v1.0 implementation through `c86c0c4f7150ca30d746372feabd232f7da3bdc1`
+
+**What's next:** Plan B public benchmark harness and neutral governance in parallel with Plan A multi-hop capability work.
+
+---
+
 ## v1.0 — Mnemosyne Local Scaffold Checkpoint
 
 **Status:** superseded by strict blueprint parity continuation  
 **Completed:** 2026-06-19  
-**Audit:** `.planning/v1.0-MILESTONE-AUDIT.md`
+**Audit:** `.planning/milestones/v1.0-MILESTONE-AUDIT-2026-06-19.md`
 
 This checkpoint verified the deterministic local scaffold and initial GitHub project. It does not satisfy the later exact 1:1 blueprint parity objective. Current controlling status: `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md`.
 
@@ -80,9 +102,11 @@ This checkpoint verified the deterministic local scaffold and initial GitHub pro
 Turn the consciousness layer from a default-off shadow lane into a single, always-on, deeply-integrated cognitive substrate with **zero compromise to memory reliability**. Replaces the `shadow_only` / `enabled` toggles with one continuous, derived **Standing** signal `(groundedness ⟂ salience)`, runs the cognitive loop always-on via a tiered heartbeat, and lets autonomy grow only as corroboration earns it — all above the unbreakable §31-rails + immutable-ledger floor. This is the ADR-001 **Option E** destination and continues the G1→G4 program; it supersedes the *staging model* of the G4 shadow service, not the substrate, the rails, or the honesty charter.
 
 ### Relationship to v1.0
+
 Post-v1.0. Does not block, and is not blocked by, the v1.0 strict-parity sign-off. Phase 7 plans `07-01` through `07-05` are additive/gate-proven; `07-05` has H8/H12 cascade/observability checks gate-proven, the `service.enabled` default-off gate retired, `SpecialistBudget.shadow_only` retired, and `g5-toggle-retirement` passed.
 
 ### Success Criteria (what must be TRUE)
+
 - `Standing` is the single derived decision signal; P1 is byte-stable (zero divergence vs the boolean path).
 - Standing is `(groundedness ⟂ salience)`; answer-authority depends on `groundedness` only; only **independent** external evidence raises groundedness; a permanent **evidence-dominance gap** holds (self < external, always).
 - The cognitive loop is always-on via a tiered heartbeat with **hard** anti-rumination + proto-self; self-generation budget, answer-grounding floor, broadcast-as-data, and a fail-closed circuit-breaker hold; rumination ~ 0 and heartbeat compute bounded.
@@ -90,9 +114,11 @@ Post-v1.0. Does not block, and is not blocked by, the v1.0 strict-parity sign-of
 - The retired `service.enabled`, `SpecialistBudget.shadow_only`, and controller `budget.shadow_only` controls remain absent; explicit retrieval/consolidation advisory promotion is CID-validated and separately gated; every reliability guardrail (ECE, confabulation, poison-block, recall/nDCG, P95, 7 rails, 14 indicators) stays green; honesty charter intact (functional only; welfare flag stays; no phenomenal claim).
 
 ### Plans
+
 - `07-01` … `07-05` in `.planning/phases/07-unified-cognitive-substrate/` (P1 byte-stable Standing → P5 retire toggles). Plans `07-01` through `07-05`, the P5 H8/H12 pre-check, the `service.enabled` retirement, and the operational-toggle source inspection are complete and gate-recorded; no plan ships on a guardrail regression.
 
 ### Verification (planned gates)
+
 - `eval/g0/preregistrations/g5-*.json` (bytestable-parity, continuous, always-on-heartbeat, earned-autonomy, unified-substrate-cascade, toggle-retirement) — each must pass target-up / guardrails-not-down against `eval/g0/baselines/baseline-0.json`.
 
 ---
@@ -106,6 +132,7 @@ Post-v1.0. Does not block, and is not blocked by, the v1.0 strict-parity sign-of
 Make the self-hosted profile the preferred production baseline without weakening the strict Tier-B audit. The self-hosted/no-GPU profile now targets and has attested B1-B10 through real evidence bundles; B9/FR-21 is closed through ADR-002's amended CPU-parametric evidence path. Cloud/GPU remains an optional scale extension.
 
 ### Success Criteria (what must be TRUE)
+
 - The `self-hosted` and `cloud` profiles differ by values only and both keep local fallback forbidden for production evidence.
 - The production scaffold is hardened before capture: fail-closed auth/session binding, non-superuser RLS roles, sealed KMS, mandatory object encryption, provenance fail-closed behavior, policy-as-code, secret scanning, digest pins, egress chokepoint, single ingress, and tamper-evident audit logging.
 - B1-B10 flip only after retained, signed, real-infra bundles pass render, preflight, capture, verify, and release-audit.
@@ -113,6 +140,7 @@ Make the self-hosted profile the preferred production baseline without weakening
 - §31 rails, §16 SLOs, G0/G1 guardrails, and the honesty charter remain non-regressed.
 
 ### Verification
+
 - `infra/PRODUCTION-EVIDENCE.md` render/preflight/capture/verify/release-audit for each production row.
 - Phase 8 security must-dos from `.planning/phases/08-self-hosted-first-production/08-SECURITY-FINDINGS.md`.
 - Real-path §16 SLO re-proof and strict parity audit update after evidence capture.

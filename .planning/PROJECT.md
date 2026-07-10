@@ -38,10 +38,25 @@ resurrection, unbounded attempts, or inconsistent counters.
 
 ## Current State
 
-Phases 09.1, 09.2, and 09.3 are complete and independently verified. The v1.0
-evidence graph now resolves all 23 canonical requirements without manufacturing
-historical evidence. Final closure-SHA CI and memory/git synchronization are
-next, followed by the milestone re-audit/archive workflow.
+Milestone v1.0 shipped and was archived on 2026-07-10 after a 100/100 audit.
+All 23 canonical requirements, 13 phase identifiers, six cross-phase
+integrations, and six end-to-end flows passed; the retained Tier-B packet and
+final exact-SHA CI are green. The complete roadmap, requirements, audit, and
+phase artifacts are preserved under `.planning/milestones/`.
+
+## Next Milestone Goals
+
+The next milestone executes the two authoritative post-v1.0 programs:
+
+- Plan B first: M1.1 public benchmark harness, then deterministic LongMemEval
+  retrieval and HippoRAG multi-hop tracks with PBPP reproducibility bundles.
+- Plan A in coordinated sequence: S1 grounded iterative multi-hop answer
+  synthesis, followed by public security/calibration and performance/scale
+  capability close-out.
+- Neutral leaderboard governance L0 begins in parallel with M1; the public site
+  remains blocked until Part I results and PBPP publication gates are satisfied.
+- No public headline number may be published before the pinned harness, complete
+  artifact bundle, separate retrieval/QA columns, and independent reproduction.
 
 ## Product Thesis
 

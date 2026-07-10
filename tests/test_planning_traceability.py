@@ -6,7 +6,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PLANNING = ROOT / ".planning"
-REQUIREMENTS = PLANNING / "REQUIREMENTS.md"
+REQUIREMENTS = PLANNING / "milestones" / "v1.0-REQUIREMENTS.md"
 ID_PATTERN = re.compile(r"(?:REQ|NFR)-\d{3}")
 TRACE_ROW = re.compile(
     r"^\| ((?:REQ|NFR)-\d{3}) \| ([^|]+) \| `([^`]+)` \| `([^`]+)` "
