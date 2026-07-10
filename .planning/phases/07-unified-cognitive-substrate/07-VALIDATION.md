@@ -31,7 +31,7 @@ wave_0_complete: true
 | Earned autonomy and adversarial rails | `uv run --locked python -m pytest tests/test_autonomy_promotion.py tests/test_g1_reliability_core.py tests/test_g0_harness.py -q` | REQ-018, NFR-005 |
 | Erasure, Standing cascade, and no-toggle controls | `uv run --locked python -m pytest tests/test_standing_parity.py tests/test_parity_retrieval.py tests/test_dreamer.py tests/test_g0_harness.py -q` | REQ-008, NFR-004, NFR-005 |
 | Committed preregistration replay | `uv run --locked python -m pytest tests/test_g0_harness.py::test_committed_g0_preregistrations_have_passing_decisions tests/test_g0_harness.py::test_current_g0_candidate_replays_preregistrations_without_regression -q` | All Phase 7 support rows |
-| Later public-runtime mount boundary | `uv run --locked python -m pytest tests/test_worker_runtime.py -q -k "workspace or heartbeat"` | REQ-016, REQ-018, NFR-005; Phase 09.2 evidence only |
+| Later public-runtime mount boundary | `uv run --locked python -m pytest tests/test_cli_runtime_tools.py::test_cli_worker_run_workspace_heartbeat_is_bounded_and_additive tests/test_cli_runtime_tools.py::test_release_worker_heartbeat_rejects_terminal_state_resurrection tests/test_cli_runtime_tools.py::test_release_worker_heartbeat_rejects_unbounded_and_inconsistent_attempts tests/test_runtime_surfaces.py::test_worker_run_heartbeat_mount_is_public_runtime_scoped -q` | REQ-016, REQ-018, NFR-005; Phase 09.2 evidence only |
 | Full repository closure | `uv run --locked ruff check && uv run --locked python -m pytest -q && gsd-sdk validate consistency && git diff --check` | All supporting requirements |
 
 ## Sampling Rule for the Reconstruction
