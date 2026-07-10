@@ -1,6 +1,6 @@
 # Leaderboard Governance
 
-Version: 0.1.0  
+Version: 0.1.0
 Status: draft — External activation required
 
 This directory is the source-owned policy package for a future independently

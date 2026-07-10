@@ -1,6 +1,6 @@
 # Conflict-of-Interest Register
 
-Version: 0.1.0  
+Version: 0.1.0
 Status: draft; External activation required
 
 No independent members have yet accepted appointments. Empty rows are not

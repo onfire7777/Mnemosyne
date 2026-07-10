@@ -1,6 +1,6 @@
 # L0 Governance Readiness
 
-Version: 0.1.0  
+Version: 0.1.0
 Status: draft; External activation required
 
 GOV-001: partial

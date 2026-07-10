@@ -1,6 +1,6 @@
 # Conflict-of-Interest Policy
 
-Version: 0.1.0  
+Version: 0.1.0
 Status: draft; External activation required
 
 Mnemosyne is both a benchmark subject and the source repository's product.
