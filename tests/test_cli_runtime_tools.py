@@ -4100,9 +4100,14 @@ def test_cli_read_context_flags_apply_without_leakage(tmp_path: Path) -> None:
         "--residency",
         "us",
         "--region",
-        "us",
+        "us-west-2",
         "--break-glass",
     )
+
+    for command in ("search", "deep-search", "explain"):
+        parsed = build_parser().parse_args([command, "--tenant", TENANT, "--query", query, *shared])
+        assert parsed.residency == "us"
+        assert parsed.region == "us-west-2"
 
     for command in ("search", "deep-search", "explain"):
         allowed = run_cli(store, command, "--tenant", TENANT, "--query", query, *shared)
