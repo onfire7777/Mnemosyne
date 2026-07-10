@@ -482,12 +482,16 @@ contract; CONFIG-DRIFT-CHECKS env registry; GSD/CBM/gbrain hygiene.
 
   1. Performance defaults only flip through existing capability/env contracts and
      preserve explicit operator overrides.
+
   2. Retrieval fusion order and output remain byte-identical across sequential
      and parallel channel execution on Local and SQLite engines.
+
   3. Focused tests, lint/hygiene checks, CBM refresh, gbrain sync, and CI stay
      green before changes are considered shipped.
+
   4. Planning docs and codebase maps describe the current default policy without
      stale "default off" or missing-cache claims.
+
   5. Native acceleration changes release the GIL only around Rust-owned compute
      loops and preserve scalar arithmetic/order exactly.
 
@@ -558,3 +562,36 @@ Focused
 retrieval/capability, provider-cache/provider-contract, Postgres perf-lane,
 cargo, native parity, ruff, `git diff --check`, GSD consistency, and local
 pytest suites pass for the shipped Phase 09 slices.
+
+### Phase 09.3: Close audit gap: complete milestone verification, Nyquist, and requirement traceability (INSERTED)
+
+**Goal:** [Urgent work - to be planned]
+**Requirements**: TBD
+**Depends on:** Phase 9
+**Plans:** 0 plans
+
+Plans:
+
+- [ ] TBD (run /gsd-plan-phase 09.3 to break down)
+
+### Phase 09.2: Close audit gap: mount the bounded heartbeat in the public runtime (INSERTED)
+
+**Goal:** [Urgent work - to be planned]
+**Requirements**: TBD
+**Depends on:** Phase 9
+**Plans:** 0 plans
+
+Plans:
+
+- [ ] TBD (run /gsd-plan-phase 09.2 to break down)
+
+### Phase 09.1: Close audit gap: preserve caller context across search, deep_search, and explain (INSERTED)
+
+**Goal:** [Urgent work - to be planned]
+**Requirements**: TBD
+**Depends on:** Phase 9
+**Plans:** 0 plans
+
+Plans:
+
+- [ ] TBD (run /gsd-plan-phase 09.1 to break down)
