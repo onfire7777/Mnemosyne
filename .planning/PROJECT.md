@@ -31,11 +31,17 @@ one fail-closed caller read context across direct, CLI, generated MCP, JSON-RPC,
 and official SDK search/deep-search/explain surfaces without response-schema or
 access-policy drift.
 
+Validated in Phase 09.2: REQ-016, REQ-018, and NFR-005 now mount one bounded
+workspace heartbeat in the supported public worker runtime, retain queue
+non-interference, and fail closed when release evidence shows terminal-state
+resurrection, unbounded attempts, or inconsistent counters.
+
 ## Current State
 
-Phase 09.1 is complete and independently verified 7/7. Phase 09.2 is next:
-mount the bounded heartbeat into a supported public runtime before the v1.0
-milestone is re-audited and archived.
+Phases 09.1 and 09.2 are complete and independently verified. Phase 09.3 is
+next: close milestone verification, Nyquist validation, and requirements
+traceability gaps without manufacturing historical evidence, then re-audit and
+archive v1.0.
 
 ## Product Thesis
 
@@ -63,6 +69,7 @@ Mnemosyne is its own memory system. It is distinct from gbrain and mempalace, an
 | 2026-06-30 | Treat `/Users/admin/Mnemosyne` as the canonical live implementation checkout; Desktop/Projects paths are historical unless `git rev-parse` proves a newer valid checkout. | Historical resume checks on 2026-06-30 verified the then-current `main` and CI. Future status claims must refresh `git status`, `git log -1`, and GitHub Actions for the live `HEAD` rather than reusing that snapshot. |
 | 2026-06-19 | Keep Phase 0-1 executable first, but keep Phases 2-5 mandatory in the roadmap. | Updated goal requires following the full build blueprint precisely and completely. |
 | 2026-07-10 | Use one canonical `_read_context` authorization contract for search, deep search, and explain while preserving legacy positional meaning and narrowing omitted role to `reader`. | Phase 09.1 verification, clean code review, and security audit at `threats_open: 0`. |
+| 2026-07-10 | Treat terminal workspace heartbeat evidence as absorbing and enforce bounded, monotonic, internally consistent counters in release attestation. | Phase 09.2 independent verification 100/100, full suite green, and exact-SHA CI success. |
 
 ## Quality Bar
 
