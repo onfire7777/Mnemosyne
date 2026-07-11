@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
-stopped_at: Phase 12 planned; Plan 12-01 implementation next
-last_updated: "2026-07-11T07:40:00Z"
+stopped_at: Phase 12 Plan 12-01 complete; Plan 12-02 implementation next
+last_updated: "2026-07-11T15:30:00Z"
 last_activity: 2026-07-11
 progress:
   total_phases: 7
   completed_phases: 2
-  total_plans: 5
-  completed_plans: 5
+  total_plans: 9
+  completed_plans: 6
   percent: 29
 ---
 
@@ -37,9 +37,9 @@ See: .planning/PROJECT.md (updated 2026-06-19)
 ## Current Position
 
 Phase: 12 of 16 — Grounded Multi-Hop Answer Synthesis
-Plan: 0 of 4
-Status: Planned and ready to execute; exact CI externally blocked by GitHub billing
-Last activity: 2026-07-11 — Phase 12 architecture/evaluation research and four execution plans completed
+Plan: 1 of 4
+Status: Public QA custody complete; bounded orchestration implementation next; exact CI externally blocked by GitHub billing
+Last activity: 2026-07-11 — Frozen public QA custody shipped at `main@b2b07b3`
 
 ## Performance Metrics
 
@@ -65,11 +65,14 @@ Last activity: 2026-07-11 — Phase 12 architecture/evaluation research and four
 | 09.3 | 1 | - | - |
 | 10 | 2 | - | - |
 | 11 | 3 | - | - |
+| 12 | 1 complete | 4 | pending |
 
 ## Accumulated Context
 
 ### Decisions
 
+- [Phase 12]: QA bundle creation and verification are exact-clean-checkout operations; candidate manifests are external no-overwrite artifacts whose canonical bytes are embedded and verified end to end.
+- [Phase 12]: QA claims cite real Mnemosyne evidence CIDs recomputed from complete capture envelopes and corpus custody, with frozen hop/record/character budgets enforced by the verifier.
 - [Phase 12]: Freeze candidate protocol and Phase 11 baselines before implementation; use synthetic/dev fixtures only for iteration, then run `qa_hard_v2` and held-out LongMemEval-QA under preregistered single-pass controls.
 - [Phase 12]: Reuse shared retrieval/PPR and the existing Ollama role-provider boundary; add a narrow orchestration layer with external CID validation, complete caller-context propagation, and ephemeral answers.
 - [Phase 11]: BENCH-004 is complete; BENCH-005 remains partial because all three Hippo tracks measured zero positive graph/PPR participation and Phase 12 still owns real reader-produced EM/F1.
