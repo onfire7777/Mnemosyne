@@ -36,10 +36,19 @@ import sys
 import urllib.request
 
 from mnemosyne.network_safety import safe_urlopen, validate_fetch_url
+from mnemosyne.providers.grounded_protocol import (
+    DECODING_OPTIONS,
+    GENERATION_SPEC,
+    REQUEST_ENVELOPE,
+    render_prompt,
+    role_digests,
+)
 
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://ollama.mnemo.local:11434")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen3:4b")
 TIMEOUT = float(os.environ.get("OLLAMA_TIMEOUT", "25"))
+MAX_RESPONSE_BYTES = int(os.environ.get("MNEMOSYNE_OLLAMA_MAX_RESPONSE_BYTES", str(1024 * 1024)))
+CONSOLIDATION_DECODING_OPTIONS = {"temperature": 0, "num_predict": 700}
 
 
 def _ollama_internal_hosts() -> tuple[str, ...]:
@@ -50,6 +59,30 @@ def _ollama_internal_hosts() -> tuple[str, ...]:
         "host-llm.mnemo.local,ollama.mnemo.local,localhost,127.0.0.1,::1",
     )
     return tuple(host.strip() for host in raw.split(",") if host.strip())
+
+
+def _strict_json_bytes(raw: bytes) -> object:
+    if len(raw) > MAX_RESPONSE_BYTES:
+        raise ValueError("Ollama response exceeds the configured limit")
+
+    def unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        value: dict[str, object] = {}
+        for key, item in pairs:
+            if key in value:
+                raise ValueError("Ollama response contains duplicate JSON keys")
+            value[key] = item
+        return value
+
+    return json.loads(
+        raw,
+        parse_constant=lambda value: (_ for _ in ()).throw(ValueError(value)),
+        object_pairs_hook=unique_object,
+    )
+
+
+def _read_json_response(response: object) -> object:
+    raw = response.read(MAX_RESPONSE_BYTES + 1)  # type: ignore[attr-defined]
+    return _strict_json_bytes(raw)
 
 
 def _chat(
@@ -79,7 +112,7 @@ def _chat(
                 "stream": False,
                 "think": False,
                 "format": "json",
-                "options": {"temperature": 0, "num_predict": 700},
+                "options": CONSOLIDATION_DECODING_OPTIONS,
                 "messages": messages,
             }
         ).encode("utf-8")
@@ -94,10 +127,13 @@ def _chat(
             purpose="Ollama role-LLM URL",
         )
         with safe_urlopen(request, validated=validated_url, timeout=TIMEOUT) as response:
-            reply = json.load(response)
+            reply = _read_json_response(response)
+        if not isinstance(reply, dict):
+            raise ValueError("Ollama chat returned an invalid response")
         content = reply["message"]["content"]
         try:
-            last = json.loads(content)
+            parsed = _strict_json_bytes(content.encode())
+            last = parsed if isinstance(parsed, dict) else {}
         except json.JSONDecodeError:
             last = {}
         if isinstance(last, dict) and required_key in last:
@@ -113,6 +149,120 @@ def _chat(
             }
         )
     return last if isinstance(last, dict) else {}
+
+
+def _chat_once(system: str, user: str) -> dict:
+    """One preregistered attempt for grounded roles; no hidden schema retry."""
+    body = json.dumps(
+        {
+            "model": OLLAMA_MODEL,
+            "stream": REQUEST_ENVELOPE["stream"],
+            "think": REQUEST_ENVELOPE["think"],
+            "format": REQUEST_ENVELOPE["format"],
+            "options": DECODING_OPTIONS,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+        }
+    ).encode("utf-8")
+    url = f"{OLLAMA_URL.rstrip('/')}/api/chat"
+    request = urllib.request.Request(
+        url, data=body, headers={"Content-Type": "application/json"}
+    )
+    validated_url = validate_fetch_url(
+        url,
+        allow_insecure_localhost=True,
+        allow_insecure_internal_hosts=_ollama_internal_hosts(),
+        purpose="Ollama grounded role URL",
+    )
+    with safe_urlopen(request, validated=validated_url, timeout=TIMEOUT) as response:
+        reply = _read_json_response(response)
+    content = reply.get("message", {}).get("content") if isinstance(reply, dict) else None
+    if not isinstance(content, str):
+        raise ValueError("Ollama grounded role returned no content")
+    parsed = _strict_json_bytes(content.encode())
+    if not isinstance(parsed, dict):
+        raise ValueError("Ollama grounded role returned a non-object")
+    return parsed
+
+
+def _canonical(value: object) -> bytes:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+
+
+def _sha256(value: object) -> str:
+    return hashlib.sha256(value if isinstance(value, bytes) else _canonical(value)).hexdigest()
+
+
+def _model_content_digest() -> str:
+    url = f"{OLLAMA_URL.rstrip('/')}/api/tags"
+    validated_url = validate_fetch_url(
+        url,
+        allow_insecure_localhost=True,
+        allow_insecure_internal_hosts=_ollama_internal_hosts(),
+        purpose="Ollama role-LLM model preflight URL",
+    )
+    request = urllib.request.Request(url, headers={"Accept": "application/json"})
+    with safe_urlopen(request, validated=validated_url, timeout=TIMEOUT) as response:
+        payload = _read_json_response(response)
+    models = payload.get("models") if isinstance(payload, dict) else None
+    if not isinstance(models, list):
+        raise ValueError("Ollama model inventory is unavailable")
+    matches = [
+        row for row in models
+        if isinstance(row, dict) and OLLAMA_MODEL in {row.get("name"), row.get("model")}
+    ]
+    if len(matches) != 1:
+        raise ValueError("configured Ollama model did not resolve uniquely")
+    digest = matches[0].get("digest")
+    if not isinstance(digest, str) or not re.fullmatch(r"(?:sha256:)?[0-9a-f]{64}", digest):
+        raise ValueError("configured Ollama model has no exact content digest")
+    return digest.removeprefix("sha256:")
+
+
+def _grounded_metadata(role: str, model_content_digest: str) -> dict[str, object]:
+    digests = role_digests(role)
+    return {
+        "role": role,
+        "model": OLLAMA_MODEL,
+        "model_content_digest": model_content_digest,
+        "prompt_sha256": digests["prompt_sha256"],
+        "serializer_sha256": digests["serializer_sha256"],
+        "decoding_options": GENERATION_SPEC,
+        "decoding_sha256": digests["decoding_sha256"],
+    }
+
+
+def query_decomposer(request: dict) -> dict:
+    model_content_digest = _model_content_digest()
+    parsed = _chat_once(*render_prompt(
+        "query_decomposer", request.get("question"), request.get("evidence")
+    ))
+    queries = parsed.get("queries")
+    if not isinstance(queries, list):
+        raise ValueError("model returned invalid decomposer schema")
+    if _model_content_digest() != model_content_digest:
+        raise ValueError("configured Ollama model changed during generation")
+    return {
+        "queries": queries,
+        "metadata": _grounded_metadata("query_decomposer", model_content_digest),
+    }
+
+
+def grounded_reader(request: dict) -> dict:
+    model_content_digest = _model_content_digest()
+    parsed = _chat_once(*render_prompt(
+        "grounded_reader", request.get("question"), request.get("evidence")
+    ))
+    if set(parsed) != {"claims", "unresolved"}:
+        raise ValueError("model returned invalid grounded-reader schema")
+    if _model_content_digest() != model_content_digest:
+        raise ValueError("configured Ollama model changed during generation")
+    return {
+        **parsed,
+        "metadata": _grounded_metadata("grounded_reader", model_content_digest),
+    }
 
 
 def _slug(text: str) -> str:
@@ -320,6 +470,8 @@ ROLES = {
     "skill_inducer": skill_inducer,
     "procedure_inducer": skill_inducer,
     "entity_resolver": entity_resolver,
+    "query_decomposer": query_decomposer,
+    "grounded_reader": grounded_reader,
 }
 
 

@@ -339,7 +339,7 @@ def test_external_candidate_manifest_is_schema_bound_and_no_overwrite(tmp_path: 
 
     digests = qa_protocol_digests()
     manifest = {
-        "candidate_version": "phase12-candidate-v1", "created_at_utc": "2026-07-11T00:00:00Z",
+        "candidate_version": "phase12-candidate-v2", "created_at_utc": "2026-07-11T00:00:00Z",
         "git_sha": "a" * 40, "model_content_sha256": "b" * 64,
         "prompt_sha256": digests["prompt_sha256"], "serializer_sha256": digests["serializer_sha256"],
         "decoding_sha256": digests["decoding_sha256"], "protocol_sha256": digests["protocol_sha256"],
@@ -362,7 +362,7 @@ def test_candidate_manifest_o_excl_rejects_symlink_and_concurrent_writers(tmp_pa
 
     digests = qa_protocol_digests()
     manifest = {
-        "candidate_version": "phase12-candidate-v1", "created_at_utc": "2026-07-11T00:00:00Z",
+        "candidate_version": "phase12-candidate-v2", "created_at_utc": "2026-07-11T00:00:00Z",
         "git_sha": "a" * 40, "model_content_sha256": "b" * 64, **digests,
         "transport_retries": 0,
     }

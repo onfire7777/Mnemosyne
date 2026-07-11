@@ -26,6 +26,16 @@ class RecordingDecomposer:
         return self.response
 
 
+class RecordingReader:
+    def __init__(self, response: object) -> None:
+        self.response = response
+        self.calls: list[dict[str, object]] = []
+
+    def read(self, payload: dict[str, object]) -> object:
+        self.calls.append(payload)
+        return self.response
+
+
 def _context() -> AnswerReadContext:
     return AnswerReadContext(
         tenant_id="tenant-a",
@@ -249,6 +259,69 @@ def test_answer_assembly_does_not_persist_retrieval_access_or_generated_output()
     ).assemble(AnswerRequest(question="Ada", context=_context()))
     assert result.abstained is False
     assert engine.export_all() == before
+
+
+def test_reader_claims_are_approved_only_against_replayed_authorized_cids() -> None:
+    engine = _engine()
+    assembled = GroundedAnswerOrchestrator(
+        engine, RecordingDecomposer({"queries": []})
+    ).assemble(AnswerRequest(question="Ada", context=_context()))
+    reader = RecordingReader(
+        {
+            "claims": [
+                {
+                    "text": "Ada owns project Zephyr.",
+                    "evidence_cids": [assembled.evidence[0].cid],
+                }
+            ],
+            "unresolved": False,
+        }
+    )
+    before = engine.export_all()
+    result = GroundedAnswerOrchestrator(
+        engine, RecordingDecomposer({"queries": []})
+    ).answer(AnswerRequest(question="Ada", context=_context()), reader)
+    assert result.abstained is False
+    assert result.answer == "Ada owns project Zephyr."
+    assert result.claims[0].evidence_cids == (assembled.evidence[0].cid,)
+    assert set(reader.calls[0]) == {"question", "evidence"}
+    assert engine.export_all() == before
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        {"claims": [{"text": "fabricated", "evidence_cids": ["unknown"]}], "unresolved": False},
+        {"claims": [{"text": "duplicate", "evidence_cids": ["x", "x"]}], "unresolved": False},
+        {"claims": [{"text": "uncited", "evidence_cids": []}], "unresolved": False},
+        {"claims": [{"text": "mismatch", "evidence_cids": ["x"]}], "unresolved": True},
+        {"claims": [], "unresolved": False},
+        {"claims": [], "unresolved": True, "self_validated": True},
+    ],
+)
+def test_reader_schema_citations_and_abstention_fail_closed(response: object) -> None:
+    result = GroundedAnswerOrchestrator(
+        _engine(), RecordingDecomposer({"queries": []})
+    ).answer(AnswerRequest(question="Ada", context=_context()), RecordingReader(response))
+    assert result.abstained is True
+    assert result.answer == "" and result.claims == () and result.evidence == ()
+
+
+def test_retrieval_abstention_prevents_reader_execution(monkeypatch: pytest.MonkeyPatch) -> None:
+    engine = _engine()
+    original = engine.retrieve
+
+    def abstained(*args: object, **kwargs: object) -> RetrievalResult:
+        result = original(*args, **kwargs)  # type: ignore[arg-type]
+        return replace(result, abstained=True, abstain_reason="retrieval-floor")
+
+    monkeypatch.setattr(engine, "retrieve", abstained)
+    reader = RecordingReader({"claims": [], "unresolved": True})
+    result = GroundedAnswerOrchestrator(
+        engine, RecordingDecomposer({"queries": []})
+    ).answer(AnswerRequest(question="Ada", context=_context()), reader)
+    assert result.abstained is True
+    assert reader.calls == []
 
 
 def test_temporal_scope_is_timezone_aware_and_reaches_graph_ppr(

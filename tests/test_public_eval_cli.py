@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sys
+from argparse import Namespace
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import nullcontext
 from dataclasses import replace
@@ -12,6 +14,58 @@ import pytest
 from eval.harness.cli_driver import CLIError, MnemoCLI
 from eval.public.bundle import BundleError, verify_report, write_report
 from eval.public.runner import run_public_suite
+
+
+def test_evaluation_read_only_disables_http_cache_and_command_retrievers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from mnemosyne import cli as cli_module
+    from mnemosyne import retrieval
+
+    observed: dict[str, object] = {}
+
+    class Embedding:
+        def __init__(self, **kwargs: object) -> None:
+            observed.update(kwargs)
+
+    class Reranker:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+    monkeypatch.setattr(retrieval, "HttpEmbeddingProvider", Embedding)
+    monkeypatch.setattr(retrieval, "LocalSimilarityReranker", Reranker)
+    cache = tmp_path / "durable-cache.json"
+    args = Namespace(
+        embedding_dims=8,
+        retrieval_timeout=1.0,
+        evaluation_read_only=True,
+        embedding_provider="http",
+        embedding_url="https://embedding.example.test",
+        embedding_model="model",
+        embedding_model_revision="revision",
+        embedding_api_key=None,
+        embedding_cache_size=100,
+        embedding_cache_path=str(cache),
+        embedding_cache_ttl_seconds=60.0,
+        embedding_cache_scope="scope",
+        reranker_provider="local",
+        reranker_url=None,
+        reranker_model=None,
+        reranker_api_key=None,
+        lexical_provider="postgres",
+        lexical_command=None,
+        lexical_backend="postgres-fts",
+        graph_provider="postgres",
+        graph_command=None,
+        graph_backend="postgres-recursive-ppr",
+    )
+    cli_module.load_retrieval_adapters(args)
+    assert observed["cache_size"] == 0 and observed["cache_path"] is None
+    assert not cache.exists()
+    args.lexical_provider = "command"
+    args.lexical_command = "external"
+    with pytest.raises(SystemExit, match="forbids command"):
+        cli_module.load_retrieval_adapters(args)
 
 
 def test_report_requires_matching_verified_reproduction_and_binds_note(
@@ -306,11 +360,113 @@ def test_evaluation_query_batch_matches_public_search_explain_and_is_read_only(
     assert projections([result]) == projections([reversed_result])
     assert projections([result]) == projections(single_results)
     assert {path.name: path.read_bytes() for path in tmp_path.iterdir()} == before
-
     with pytest.raises(CLIError, match="invalid JSON"):
         read_only.eval_query_batch(duplicate)
     assert {path.name: path.read_bytes() for path in tmp_path.iterdir()} == before
 
+
+def test_public_answer_and_batch_are_ordered_grounded_and_store_immutable(
+    tmp_path: Path,
+) -> None:
+    store = tmp_path / "store.json"
+    ordinary = MnemoCLI(store=str(store))
+    ordinary.capture("answer-tenant", "user-a", "Ada owns project Zephyr.")
+    provider = tmp_path / "grounded-provider.py"
+    provider.write_text(
+        """#!/usr/bin/env python3
+import json, sys
+from mnemosyne.providers.grounded_protocol import GENERATION_SPEC, role_digests
+request = json.load(sys.stdin)
+role = request["prompt_boundary"]["role"]
+metadata = {"role": role, "model": "qwen3:4b", "model_content_digest": "a" * 64,
+            **role_digests(role), "decoding_options": GENERATION_SPEC}
+if role == "query_decomposer":
+    response = {"queries": [], "metadata": metadata}
+else:
+    evidence = request.get("evidence") or []
+    response = ({"claims": [{"text": evidence[0]["content"],
+                "evidence_cids": [evidence[0]["cid"]]}], "unresolved": False,
+                "metadata": metadata} if evidence else
+                {"claims": [], "unresolved": True, "metadata": metadata})
+json.dump(response, sys.stdout)
+"""
+    )
+    provider.chmod(0o700)
+    env = {
+        "MNEMOSYNE_QUERY_DECOMPOSER_PROVIDER": "command",
+        "MNEMOSYNE_QUERY_DECOMPOSER_COMMAND": f"{sys.executable} {provider}",
+        "MNEMOSYNE_GROUNDED_READER_PROVIDER": "command",
+        "MNEMOSYNE_GROUNDED_READER_COMMAND": f"{sys.executable} {provider}",
+        "MNEMOSYNE_GROUNDED_MODEL_CONTENT_SHA256": "a" * 64,
+        "MNEMOSYNE_GROUNDED_MODEL_SELECTOR": "qwen3:4b",
+    }
+    read_only = replace(
+        ordinary, global_flags=["--evaluation-read-only"], env=env
+    )
+    context = {"tenant_id": "answer-tenant", "user_id": "user-a", "role": "reader"}
+    before = {path.name: path.read_bytes() for path in tmp_path.iterdir()}
+    answer = read_only.answer("Ada", context)
+    assert answer["abstained"] is False
+    assert answer["claims"] and answer["claims"][0]["evidence_cids"]
+    assert set(answer) == {"answer", "claims", "abstained", "hops", "reader"}
+    assert set(answer["reader"]) == {"query_decomposer", "grounded_reader"}
+    assert all(set(hop) == {"index", "queries", "channels", "retrieved_cids"} for hop in answer["hops"])
+    assert "content" not in json.dumps(answer["hops"])
+
+    rows = tmp_path / "answer-rows.jsonl"
+    rows.write_text(
+        "".join(
+            json.dumps({"question_id": question_id, "question": "Ada", "context": context}) + "\n"
+            for question_id in ("q2", "q1")
+        )
+    )
+    before[rows.name] = rows.read_bytes()
+    batch = read_only.eval_answer_batch(rows)
+    assert [row["question_id"] for row in batch["results"]] == ["q2", "q1"]
+    assert {path.name: path.read_bytes() for path in tmp_path.iterdir()} == before
+
+
+def test_answer_batch_prevalidates_and_provider_failures_leave_no_state(
+    tmp_path: Path,
+) -> None:
+    store = tmp_path / "store.json"
+    ordinary = MnemoCLI(store=str(store))
+    ordinary.capture("answer-tenant", "user-a", "Ada owns project Zephyr.")
+    marker = tmp_path / "provider-called"
+    provider = tmp_path / "slow-provider.py"
+    provider.write_text(
+        f"import pathlib,time\npathlib.Path({str(marker)!r}).write_text('called')\ntime.sleep(1)\n"
+    )
+    env = {
+        "MNEMOSYNE_QUERY_DECOMPOSER_PROVIDER": "command",
+        "MNEMOSYNE_QUERY_DECOMPOSER_COMMAND": f"{sys.executable} {provider}",
+        "MNEMOSYNE_GROUNDED_READER_PROVIDER": "command",
+        "MNEMOSYNE_GROUNDED_READER_COMMAND": f"{sys.executable} {provider}",
+        "MNEMOSYNE_GROUNDED_MODEL_CONTENT_SHA256": "a" * 64,
+        "MNEMOSYNE_GROUNDED_MODEL_SELECTOR": "qwen3:4b",
+        "MNEMOSYNE_GROUNDED_PROVIDER_TIMEOUT": "0.01",
+    }
+    read_only = replace(ordinary, global_flags=["--evaluation-read-only"], env=env)
+    context = {"tenant_id": "answer-tenant", "user_id": "user-a", "role": "reader"}
+    bad = tmp_path / "bad-answers.jsonl"
+    bad.write_text(
+        json.dumps({"question_id": "q1", "question": "Ada", "context": context})
+        + "\n{}\n"
+    )
+    before = {path.name: path.read_bytes() for path in tmp_path.iterdir()}
+    with pytest.raises(CLIError, match="invalid schema"):
+        read_only.eval_answer_batch(bad)
+    assert not marker.exists()
+    assert {path.name: path.read_bytes() for path in tmp_path.iterdir()} == before
+
+    timed_out = read_only.answer("Ada", context)
+    assert timed_out["abstained"] is True and timed_out["reader"] == {}
+    after_allowed_marker = {
+        path.name: path.read_bytes()
+        for path in tmp_path.iterdir()
+        if path != marker
+    }
+    assert after_allowed_marker == before
 
 def test_capture_batch_rolls_back_a_later_capture_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

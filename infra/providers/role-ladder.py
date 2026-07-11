@@ -19,9 +19,16 @@ import sys
 import time
 from typing import Any
 
+from mnemosyne.providers.bounded_command import (
+    CommandOutputLimitError,
+    run_bounded_command,
+)
+
 LOCAL_ROLE_COMMAND_DEFAULT = "/opt/mnemosyne/bin/role-llm"
 FRONTIER_ROLES_DEFAULT = frozenset({"entity_resolver", "lesson_distiller", "skill_inducer", "procedure_inducer"})
-ALL_ROLES = frozenset({"candidate_extractor", "evidence_summarizer", "entity_resolver", "lesson_distiller", "skill_inducer", "procedure_inducer"})
+ALL_ROLES = frozenset({"candidate_extractor", "evidence_summarizer", "entity_resolver", "lesson_distiller", "skill_inducer", "procedure_inducer", "query_decomposer", "grounded_reader"})
+GROUNDING_ROLES = frozenset({"query_decomposer", "grounded_reader"})
+MAX_OUTPUT_BYTES = int(os.environ.get("MNEMOSYNE_ROLE_LADDER_MAX_OUTPUT_BYTES", str(256 * 1024)))
 
 
 def _env_key(role: str) -> str:
@@ -103,13 +110,11 @@ def _run_command(
 ) -> tuple[dict[str, Any] | None, dict[str, Any]]:
     started = time.monotonic()
     try:
-        completed = subprocess.run(
+        completed = run_bounded_command(
             argv,
-            input=json.dumps(request),
-            text=True,
-            capture_output=True,
-            timeout=timeout_seconds,
-            check=False,
+            json.dumps(request, sort_keys=True, separators=(",", ":")).encode(),
+            timeout_seconds=timeout_seconds,
+            max_stdout_bytes=MAX_OUTPUT_BYTES,
         )
     except subprocess.TimeoutExpired:
         return None, {
@@ -126,19 +131,38 @@ def _run_command(
             "timeout_seconds": round(timeout_seconds, 3),
             "duration_ms": round((time.monotonic() - started) * 1000, 3),
         }
+    except CommandOutputLimitError:
+        return None, {
+            "rung": rung,
+            "status": "output_limit",
+            "timeout_seconds": round(timeout_seconds, 3),
+            "duration_ms": round((time.monotonic() - started) * 1000, 3),
+        }
     duration_ms = round((time.monotonic() - started) * 1000, 3)
     if completed.returncode != 0:
         return None, {
             "rung": rung,
             "status": "failed",
             "returncode": completed.returncode,
-            "stderr_sha256": hashlib.sha256(completed.stderr.encode("utf-8")).hexdigest()[:16] if completed.stderr else None,
+            "stderr_sha256": hashlib.sha256(completed.stderr).hexdigest()[:16] if completed.stderr else None,
             "timeout_seconds": round(timeout_seconds, 3),
             "duration_ms": duration_ms,
         }
     try:
-        parsed = json.loads(completed.stdout or "{}")
-    except json.JSONDecodeError:
+        def unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+            value: dict[str, Any] = {}
+            for key, item in pairs:
+                if key in value:
+                    raise ValueError(key)
+                value[key] = item
+            return value
+
+        parsed = json.loads(
+            (completed.stdout or b"{}").decode("utf-8"),
+            parse_constant=lambda value: (_ for _ in ()).throw(ValueError(value)),
+            object_pairs_hook=unique_object,
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
         return None, {
             "rung": rung,
             "status": "invalid_json",
@@ -250,7 +274,7 @@ def handle(request: dict[str, Any]) -> dict[str, Any]:
     attempts: list[dict[str, Any]] = []
     frontier_roles = _csv_env("MNEMOSYNE_ROLE_LADDER_FRONTIER_ROLES", FRONTIER_ROLES_DEFAULT)
     rungs: list[tuple[str, list[str] | None, float]] = []
-    if role in frontier_roles:
+    if role in frontier_roles and role not in GROUNDING_ROLES:
         rungs.append(("frontier", _command_for(role, "frontier"), _timeout("MNEMOSYNE_ROLE_LADDER_FRONTIER_TIMEOUT", min(12.0, total_timeout))))
     rungs.append(("local", _command_for(role, "local"), _timeout("MNEMOSYNE_ROLE_LADDER_LOCAL_TIMEOUT", min(20.0, total_timeout))))
     for rung, argv, configured_timeout in rungs:
@@ -265,7 +289,7 @@ def handle(request: dict[str, Any]) -> dict[str, Any]:
         attempts.append(attempt)
         if parsed is not None:
             return _with_ladder_metadata(parsed, role=role, selected=rung, attempts=attempts)
-    if _flag("MNEMOSYNE_ROLE_LADDER_ALLOW_DETERMINISTIC"):
+    if role not in GROUNDING_ROLES and _flag("MNEMOSYNE_ROLE_LADDER_ALLOW_DETERMINISTIC"):
         attempts.append({"rung": "deterministic", "status": "ok", "timeout_seconds": 0.0, "duration_ms": 0.0})
         return _with_ladder_metadata(
             _deterministic_response(role, request),

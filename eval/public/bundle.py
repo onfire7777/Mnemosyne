@@ -603,6 +603,7 @@ def _verify_qa_custody(
     build: dict[str, Any],
 ) -> None:
     from eval.public.runner import load_qa_protocol, qa_protocol_digests, require_clean_candidate_checkout, validate_candidate_manifest
+    from mnemosyne.providers.grounded_protocol import PROMPT_BUNDLES, role_digests
 
     protocol = load_qa_protocol()
     custody = metadata.get("reader_custody")
@@ -618,14 +619,18 @@ def _verify_qa_custody(
         raise BundleError("QA reader provider and selector must match preregistration")
     _require_sha256(reader.get("model_content_sha256"), "reader model content")
     prompt = custody.get("prompt")
-    if not isinstance(prompt, dict) or set(prompt) != {"serializer_sha256", "template_sha256"}:
+    if not isinstance(prompt, dict) or set(prompt) != {"aggregate_sha256", "roles", "serializer_sha256"}:
         raise BundleError("QA prompt custody is incomplete")
-    _require_sha256(prompt.get("template_sha256"), "prompt template")
+    _require_sha256(prompt.get("aggregate_sha256"), "aggregate prompt custody")
     _require_sha256(prompt.get("serializer_sha256"), "evidence serializer")
     expected_digests = qa_protocol_digests(protocol)
     if prompt != {
+        "aggregate_sha256": expected_digests["prompt_sha256"],
+        "roles": {
+            role: {"template_sha256": role_digests(role)["prompt_sha256"]}
+            for role in sorted(PROMPT_BUNDLES)
+        },
         "serializer_sha256": expected_digests["serializer_sha256"],
-        "template_sha256": expected_digests["prompt_sha256"],
     }:
         raise BundleError("QA prompt custody does not match preregistration")
     if custody.get("decoding") != protocol["decoding"]:

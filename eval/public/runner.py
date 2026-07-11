@@ -16,6 +16,14 @@ from eval.harness.cli_driver import MnemoCLI
 from eval.public.adapters import hipporag_multihop, longmemeval, qa_smoke, smoke
 from eval.public.assets import AssetSpec, load_asset_set
 from eval.public.bundle import _canonical, write_bundle
+from mnemosyne.providers.grounded_protocol import (
+    GENERATION_SPEC,
+    PROMPT_BUNDLES,
+    SERIALIZER_SPEC,
+    VERSION as GROUNDED_PROTOCOL_VERSION,
+    canonical as grounded_canonical,
+    role_digests,
+)
 
 ROOT = Path(__file__).parent
 _HEX = set("0123456789abcdef")
@@ -77,7 +85,7 @@ def load_qa_protocol() -> dict[str, Any]:
 
 def validate_qa_protocol(protocol: Any) -> None:
     expected_keys = {"abstention", "candidate_manifest_schema", "decoding", "evidence_budget", "held_out_policy", "interval_methods", "model", "phase11_custody", "prompt", "retrieval_baselines", "scoring_profile", "split_roles", "version"}
-    if not isinstance(protocol, dict) or set(protocol) != expected_keys or protocol.get("version") != "phase12-candidate-v1":
+    if not isinstance(protocol, dict) or set(protocol) != expected_keys or protocol.get("version") != GROUNDED_PROTOCOL_VERSION:
         raise ValueError("frozen QA protocol is missing or has the wrong version")
     if protocol.get("retrieval_baselines") != _FROZEN_RETRIEVAL_BASELINES:
         raise ValueError("frozen retrieval baselines may not be weakened")
@@ -87,8 +95,8 @@ def validate_qa_protocol(protocol: Any) -> None:
         raise ValueError("held-out split may not be used as development data")
     expected = {
         "model": {"provider": "ollama", "selector": "qwen3:4b", "resolved_content_sha256_required": True},
-        "prompt": {"template": "Answer only from the serialized authorized evidence. Return ordered atomic claims with evidence CIDs or abstain.", "serializer": "authorized-evidence-json-v1", "template_and_serializer_sha256_required": True},
-        "decoding": {"temperature": 0, "top_p": 1.0, "top_k": 1, "seed": 1234, "num_predict": 512, "stop": []},
+        "prompt": {"roles": PROMPT_BUNDLES, "serializer": SERIALIZER_SPEC, "complete_role_custody_sha256_required": True},
+        "decoding": GENERATION_SPEC,
         "evidence_budget": {"max_records": 20, "max_characters": 24000, "max_hops": 3},
         "abstention": {"answer": "", "claims": [], "abstained": True},
         "split_roles": {"synthetic": "development", "qa_hard_v2": "frozen-internal", "longmemeval-cleaned": "held-out-test", "hipporag-validation": "held-out-validation"},
@@ -129,10 +137,10 @@ def qa_protocol_digests(protocol: dict[str, Any] | None = None) -> dict[str, str
     protocol = protocol or load_qa_protocol()
     validate_qa_protocol(protocol)
     return {
-        "decoding_sha256": hashlib.sha256(_canonical(protocol["decoding"])).hexdigest(),
-        "prompt_sha256": hashlib.sha256(protocol["prompt"]["template"].encode()).hexdigest(),
+        "decoding_sha256": hashlib.sha256(grounded_canonical(protocol["decoding"])).hexdigest(),
+        "prompt_sha256": hashlib.sha256(grounded_canonical(protocol["prompt"]["roles"])).hexdigest(),
         "protocol_sha256": hashlib.sha256(_canonical(protocol)).hexdigest(),
-        "serializer_sha256": hashlib.sha256(protocol["prompt"]["serializer"].encode()).hexdigest(),
+        "serializer_sha256": hashlib.sha256(grounded_canonical(protocol["prompt"]["serializer"])).hexdigest(),
     }
 
 
@@ -267,7 +275,14 @@ def run_public_suite(
             "candidate_manifest_sha256": hashlib.sha256(_canonical(candidate)).hexdigest(),
             "decoding": protocol["decoding"],
             "evidence_budget": protocol["evidence_budget"],
-            "prompt": {"serializer_sha256": digests["serializer_sha256"], "template_sha256": digests["prompt_sha256"]},
+            "prompt": {
+                "aggregate_sha256": digests["prompt_sha256"],
+                "roles": {
+                    role: {"template_sha256": role_digests(role)["prompt_sha256"]}
+                    for role in sorted(PROMPT_BUNDLES)
+                },
+                "serializer_sha256": digests["serializer_sha256"],
+            },
             "protocol_version": protocol["version"],
             "reader": {"model_content_sha256": candidate["model_content_sha256"], "model_revision": protocol["model"]["selector"], "name": "grounded-reader", "provider": protocol["model"]["provider"], "selector": protocol["model"]["selector"]},
             "split_role": suite["split_role"],

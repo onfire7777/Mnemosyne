@@ -377,6 +377,13 @@ def load_retrieval_adapters(args: argparse.Namespace) -> RetrievalAdapters:
 
     dims = int(args.embedding_dims)
     timeout = float(args.retrieval_timeout)
+    evaluation_read_only = bool(getattr(args, "evaluation_read_only", False))
+    if evaluation_read_only and (
+        args.lexical_provider == "command" or args.graph_provider == "command"
+    ):
+        raise SystemExit(
+            "evaluation read-only mode forbids command lexical/graph retrievers"
+        )
     if args.embedding_provider == "http":
         if not args.embedding_url:
             raise SystemExit("HTTP embedding provider requires --embedding-url or MNEMOSYNE_EMBEDDING_URL.")
@@ -387,8 +394,8 @@ def load_retrieval_adapters(args: argparse.Namespace) -> RetrievalAdapters:
             api_key=args.embedding_api_key,
             dims=dims,
             timeout_seconds=timeout,
-            cache_size=int(args.embedding_cache_size),
-            cache_path=args.embedding_cache_path,
+            cache_size=0 if evaluation_read_only else int(args.embedding_cache_size),
+            cache_path=None if evaluation_read_only else args.embedding_cache_path,
             cache_ttl_seconds=float(args.embedding_cache_ttl_seconds),
             cache_scope=args.embedding_cache_scope,
         )
@@ -1736,6 +1743,154 @@ def cmd_eval_query_batch(args: argparse.Namespace) -> None:
                 "explanation": explanation,
             }
         )
+    emit({"count": len(results), "ok": True, "results": results})
+
+
+def _answer_context(value: object) -> Any:
+    from mnemosyne.answering import AnswerReadContext
+
+    if not isinstance(value, dict) or set(value) - set(AnswerReadContext.__dataclass_fields__):
+        raise ValueError("answer context has invalid schema")
+    try:
+        return AnswerReadContext(**value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("answer context is invalid") from exc
+
+
+def _parse_answer_context_json(raw: str) -> Any:
+    def unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        value: dict[str, Any] = {}
+        for key, item in pairs:
+            if key in value:
+                raise ValueError(key)
+            value[key] = item
+        return value
+
+    try:
+        return json.loads(
+            raw,
+            parse_constant=lambda value: (_ for _ in ()).throw(ValueError(value)),
+            object_pairs_hook=unique_object,
+        )
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise ValueError("answer context is invalid JSON") from exc
+
+
+def _public_answer(result: Any, disclosure: dict[str, object]) -> dict[str, object]:
+    return {
+        "answer": result.answer,
+        "claims": [
+            {"text": claim.text, "evidence_cids": list(claim.evidence_cids)}
+            for claim in result.claims
+        ],
+        "abstained": result.abstained,
+        "hops": [
+            {
+                "index": hop.index,
+                "queries": list(hop.queries),
+                "channels": list(hop.channels),
+                "retrieved_cids": list(hop.retrieved_cids),
+            }
+            for hop in result.trace.hops
+        ],
+        "reader": disclosure,
+    }
+
+
+def _answer_one(tools: Any, question: str, context: Any, provider: Any) -> dict[str, object]:
+    from mnemosyne.answering import AnswerRequest, GroundedAnswerOrchestrator
+
+    result = GroundedAnswerOrchestrator(tools.engine, provider).answer(
+        AnswerRequest(question=question, context=context), provider
+    )
+    return _public_answer(result, provider.disclosure)
+
+
+def cmd_answer(args: argparse.Namespace) -> None:
+    """Return a bounded ephemeral answer from authorized active evidence."""
+    from mnemosyne.providers.grounded_reader import CommandGroundedProvider
+
+    if not args.evaluation_read_only:
+        raise ValueError("answer requires --evaluation-read-only")
+    if not args.question.strip() or len(args.question) > 2_000:
+        raise ValueError("answer question is invalid or exceeds the query limit")
+    context = _answer_context(_parse_answer_context_json(args.context_json))
+    args.disable_runtime_state = True
+    tools = load_tools(args)
+    provider = CommandGroundedProvider.from_environment()
+    value = _answer_one(tools, args.question, context, provider)
+    if set(provider.disclosure) != {"query_decomposer", "grounded_reader"}:
+        value["reader"] = {}
+    emit(value)
+
+
+def cmd_eval_answer_batch(args: argparse.Namespace) -> None:
+    """Prevalidate and answer an immutable ordered public-evaluation shard."""
+    from mnemosyne.media_limits import ensure_file_within_limit
+    from mnemosyne.providers.grounded_reader import CommandGroundedProvider
+
+    if not args.evaluation_read_only:
+        raise ValueError("eval-answer-batch requires --evaluation-read-only")
+    path = Path(args.input_jsonl)
+    if args.max_records < 1:
+        raise ValueError("--max-records must be positive")
+    if path.is_symlink() or not path.is_file():
+        raise ValueError("--input-jsonl must be a real file, not a link")
+    ensure_file_within_limit(
+        str(path), limit=max_ingest_bytes(args), label="evaluation answer batch"
+    )
+    rows: list[tuple[str, str, Any]] = []
+    with path.open(encoding="utf-8") as handle:
+        for line_number, raw in enumerate(handle, 1):
+            if line_number > args.max_records:
+                raise ValueError(
+                    f"evaluation answer batch exceeds --max-records={args.max_records}"
+                )
+            try:
+                def unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+                    value: dict[str, Any] = {}
+                    for key, nested in pairs:
+                        if key in value:
+                            raise ValueError(f"duplicate key: {key}")
+                        value[key] = nested
+                    return value
+
+                row = json.loads(
+                    raw,
+                    parse_constant=lambda value: (_ for _ in ()).throw(ValueError(value)),
+                    object_pairs_hook=unique_object,
+                )
+            except (json.JSONDecodeError, ValueError) as exc:
+                raise ValueError(
+                    f"evaluation answer batch line {line_number} is invalid JSON"
+                ) from exc
+            if (
+                not isinstance(row, dict)
+                or set(row) != {"question_id", "question", "context"}
+                or not isinstance(row["question_id"], str)
+                or not row["question_id"]
+                or len(row["question_id"]) > 512
+                or not isinstance(row["question"], str)
+                or not row["question"].strip()
+                or len(row["question"]) > 2_000
+            ):
+                raise ValueError(
+                    f"evaluation answer batch line {line_number} has invalid schema"
+                )
+            rows.append((row["question_id"], row["question"], _answer_context(row["context"])))
+    if not rows:
+        raise ValueError("evaluation answer batch must contain at least one row")
+    if len({question_id for question_id, _, _ in rows}) != len(rows):
+        raise ValueError("evaluation answer batch has duplicate question IDs")
+    args.disable_runtime_state = True
+    tools = load_tools(args)
+    results = []
+    for question_id, question, context in rows:
+        provider = CommandGroundedProvider.from_environment()
+        value = _answer_one(tools, question, context, provider)
+        if set(provider.disclosure) != {"query_decomposer", "grounded_reader"}:
+            value["reader"] = {}
+        results.append({"question_id": question_id, **value})
     emit({"count": len(results), "ok": True, "results": results})
 
 
@@ -18726,6 +18881,16 @@ def build_parser() -> argparse.ArgumentParser:
     eval_query_batch.add_argument("--max-records", type=int, default=10_000)
     eval_query_batch.set_defaults(func=cmd_eval_query_batch)
 
+    answer = sub.add_parser("answer")
+    answer.add_argument("--question", required=True)
+    answer.add_argument("--context-json", required=True)
+    answer.set_defaults(func=cmd_answer)
+
+    eval_answer_batch = sub.add_parser("eval-answer-batch")
+    eval_answer_batch.add_argument("--input-jsonl", type=Path, required=True)
+    eval_answer_batch.add_argument("--max-records", type=int, default=10_000)
+    eval_answer_batch.set_defaults(func=cmd_eval_answer_batch)
+
     ingest = sub.add_parser("ingest")
     ingest.add_argument("--tenant", required=True)
     ingest.add_argument("--user", required=True)
@@ -20208,10 +20373,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.evaluation_read_only and (
         args.backend != "local"
-        or args.command not in {"search", "explain", "eval-query-batch"}
+        or args.command not in {"search", "explain", "answer", "eval-query-batch", "eval-answer-batch"}
     ):
         parser.error(
-            "--evaluation-read-only is restricted to local evaluation query commands"
+            "--evaluation-read-only is restricted to local evaluation query/answer commands"
         )
     if args.command not in {"session-exchange", "idp-authz-policy-check"}:
         apply_session_identity(args)
