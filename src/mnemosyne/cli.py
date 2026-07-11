@@ -1519,7 +1519,18 @@ def cmd_idp_authz_policy_rollout_check(args: argparse.Namespace) -> None:
 
 
 def cmd_capture(args: argparse.Namespace) -> None:
+    from mnemosyne.answering import episode_metadata
+
     tools = load_tools(args)
+    metadata = None
+    if args.session_id is not None or args.turn_index is not None:
+        if args.session_id is None or args.turn_index is None or args.source_identity is None:
+            raise ValueError("episode capture requires --session-id, --source-identity, and --turn-index")
+        metadata = episode_metadata(
+            session_id=args.session_id,
+            source_identity=args.source_identity,
+            turn_index=args.turn_index,
+        )
     emit(
         tools.capture(
             tenant_id=args.tenant,
@@ -1527,6 +1538,8 @@ def cmd_capture(args: argparse.Namespace) -> None:
             actor=args.actor,
             source_type=args.source_type,
             source_identity=args.source_identity,
+            session_id=args.session_id,
+            metadata=metadata,
             content=args.content,
             branch=args.branch,
             trust_tier=args.trust_tier,
@@ -1546,7 +1559,12 @@ def cmd_capture_batch(args: argparse.Namespace) -> None:
     if path.is_symlink() or not path.is_file():
         raise ValueError("--input-jsonl must be a real file, not a link")
     ensure_file_within_limit(str(path), limit=max_ingest_bytes(args), label="capture batch")
-    allowed = {"tenant", "user", "actor", "source_type", "source_identity", "content", "branch", "trust_tier"}
+    from mnemosyne.answering import episode_metadata
+
+    allowed = {
+        "tenant", "user", "actor", "source_type", "source_identity", "session_id",
+        "turn_index", "content", "branch", "trust_tier",
+    }
     required = {"tenant", "user", "source_type", "content"}
     rows: list[dict[str, Any]] = []
     with path.open(encoding="utf-8") as handle:
@@ -1584,6 +1602,20 @@ def cmd_capture_batch(args: argparse.Namespace) -> None:
             for key in ("branch", "source_identity"):
                 if key in row and (not isinstance(row[key], str) or not row[key]):
                     raise ValueError(f"capture batch line {line_number} has invalid {key}")
+            episode_fields = {"session_id", "turn_index"} & set(row)
+            if episode_fields and (
+                episode_fields != {"session_id", "turn_index"}
+                or "source_identity" not in row
+            ):
+                raise ValueError(f"capture batch line {line_number} has incomplete episode metadata")
+            if episode_fields:
+                if not isinstance(row["session_id"], str) or not row["session_id"]:
+                    raise ValueError(f"capture batch line {line_number} has invalid session_id")
+                episode_metadata(
+                    session_id=row["session_id"],
+                    source_identity=row["source_identity"],
+                    turn_index=row["turn_index"],
+                )
             rows.append(row)
     if not rows:
         raise ValueError("capture batch must contain at least one row")
@@ -1611,6 +1643,16 @@ def cmd_capture_batch(args: argparse.Namespace) -> None:
                     actor=row.get("actor", "user"),
                     source_type=row["source_type"],
                     source_identity=row.get("source_identity"),
+                    session_id=row.get("session_id"),
+                    metadata=(
+                        episode_metadata(
+                            session_id=row["session_id"],
+                            source_identity=row["source_identity"],
+                            turn_index=row["turn_index"],
+                        )
+                        if "session_id" in row
+                        else None
+                    ),
                     content=row["content"],
                     branch=row.get("branch", "main"),
                     trust_tier=row.get("trust_tier", 0),
@@ -18667,6 +18709,8 @@ def build_parser() -> argparse.ArgumentParser:
     capture.add_argument("--actor", default="user", choices=["user", "assistant", "tool", "system", "external"])
     capture.add_argument("--source-type", required=True)
     capture.add_argument("--source-identity")
+    capture.add_argument("--session-id")
+    capture.add_argument("--turn-index", type=int)
     capture.add_argument("--content", required=True)
     capture.add_argument("--branch", default="main")
     capture.add_argument("--trust-tier", type=int, default=0)

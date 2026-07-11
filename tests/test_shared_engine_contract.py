@@ -279,6 +279,49 @@ def test_shared_engine_contract_retrieves_and_exports_evidence(engine_bundle: tu
     assert any(item["cid"] == cid for item in exported["evidence"])
 
 
+def test_shared_engine_read_without_access_telemetry_is_store_immutable_cached_and_uncached(
+    engine_bundle: tuple[Any, str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from mnemosyne import pipeline
+
+    engine, tenant, user = engine_bundle
+    engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id=user,
+            actor="user",
+            source_type="chat",
+            content="Read-only answer contract remembers the amber lighthouse.",
+            access_policy={"tenant": tenant},
+        )
+    )
+    if isinstance(engine, LocalMemoryEngine):
+        engine.store_path = tmp_path / "local-store.json"
+        engine._persist()
+    monkeypatch.setenv("MNEMOSYNE_RETRIEVAL_RESULT_CACHE_SIZE", "8")
+    with pipeline._RESULT_CACHE_LOCK:
+        pipeline._RESULT_CACHE.clear()
+    before = engine.export_tenant(tenant)
+    root = getattr(engine, "root_dir", None)
+    paths = (
+        [path for path in Path(root).iterdir() if path.is_file()]
+        if root is not None
+        else ([engine.store_path] if isinstance(engine, LocalMemoryEngine) else [])
+    )
+    before_files = {str(path): path.read_bytes() for path in paths}
+
+    first = engine.retrieve("amber lighthouse", tenant, record_access=False)
+    second = engine.retrieve("amber lighthouse", tenant, record_access=False)
+
+    assert [hit.to_dict() for hit in first.hits] == [hit.to_dict() for hit in second.hits]
+    assert first.explain["read_marks"] == {"assertions": 0, "evidence": 0}
+    assert second.explain["read_marks"] == {"assertions": 0, "evidence": 0}
+    assert engine.export_tenant(tenant) == before
+    assert {str(path): path.read_bytes() for path in paths} == before_files
+
+
 def test_shared_engine_contract_sensitive_ingest_ignores_live_unscoped_legacy_cid(
     engine_bundle: tuple[Any, str, str],
     tmp_path: Path,

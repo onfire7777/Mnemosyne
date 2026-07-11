@@ -323,6 +323,7 @@ class MemoryTools:
         branch: str = "main",
         trust_tier: int = int(TrustTier.DIRECT_USER),
         source_identity: str | None = None,
+        session_id: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         enforce_byte_limit(
@@ -337,6 +338,7 @@ class MemoryTools:
                 actor=actor,  # type: ignore[arg-type]
                 source_type=source_type,
                 source_identity=source_identity,
+                session_id=session_id,
                 content=content,
                 metadata=metadata or {},
                 trust_tier=trust_tier,
