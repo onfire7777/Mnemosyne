@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
-stopped_at: Phase 11 retrieval scope complete; Phase 12 planning next
-last_updated: "2026-07-11T07:15:00Z"
+stopped_at: Phase 12 planned; Plan 12-01 implementation next
+last_updated: "2026-07-11T07:40:00Z"
 last_activity: 2026-07-11
 progress:
   total_phases: 7
@@ -37,9 +37,9 @@ See: .planning/PROJECT.md (updated 2026-06-19)
 ## Current Position
 
 Phase: 12 of 16 — Grounded Multi-Hop Answer Synthesis
-Plan: not yet planned
-Status: Phase 11 retrieval scope complete; exact CI externally blocked by GitHub billing
-Last activity: 2026-07-11 — Four Phase 11 bundles verified/reproduced and closure evidence recorded
+Plan: 0 of 4
+Status: Planned and ready to execute; exact CI externally blocked by GitHub billing
+Last activity: 2026-07-11 — Phase 12 architecture/evaluation research and four execution plans completed
 
 ## Performance Metrics
 
@@ -70,6 +70,8 @@ Last activity: 2026-07-11 — Four Phase 11 bundles verified/reproduced and clos
 
 ### Decisions
 
+- [Phase 12]: Freeze candidate protocol and Phase 11 baselines before implementation; use synthetic/dev fixtures only for iteration, then run `qa_hard_v2` and held-out LongMemEval-QA under preregistered single-pass controls.
+- [Phase 12]: Reuse shared retrieval/PPR and the existing Ollama role-provider boundary; add a narrow orchestration layer with external CID validation, complete caller-context propagation, and ephemeral answers.
 - [Phase 11]: BENCH-004 is complete; BENCH-005 remains partial because all three Hippo tracks measured zero positive graph/PPR participation and Phase 12 still owns real reader-produced EM/F1.
 - [Phase 11]: HippoRAG retrieval is deterministic, but EM/F1 needs real reader-produced predictions; the scorer lands in Phase 11 and Phase 12 owns prediction closure.
 - [CI]: GitHub Actions run 29128327918 and its retry were rejected before checkout because account billing failed or the spending limit was reached; exact-SHA CI remains open.
