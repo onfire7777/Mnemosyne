@@ -27,6 +27,10 @@
   candidate manifest containing the resulting git SHA and all model/prompt/
   config digests. Verify that manifest before every one-shot run. Never patch against individual frozen
   failures without creating and preregistering a new candidate version.
+- Candidate v3 consumed its `qa_hard_v2` attempt and failed systemically with
+  24/24 empty abstentions and zero retrieval hops. No protected per-question
+  inspection occurred; v4 must be committed and preregistered before another
+  protected action.
 - Run public LongMemEval-QA once across all 500 held-out questions after the
   candidate and `qa_hard_v2` result are frozen.
 - Preregister transport retries. A provider failure consumes the held-out
