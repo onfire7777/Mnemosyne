@@ -46,6 +46,9 @@ evidence, cites active evidence CIDs for every claim, and abstains fail-closed.
   returned a possessive entity plus a general intent noun. No v5 protected run
   or ledger exists. Candidate v6 deterministically reduces model proposals to
   literal source-bound atomic anchors before ordinary retrieval.
+- Candidate v6 failed only the synthetic exact-runtime gate and has no protected
+  ledger. Candidate v7 deterministically traverses unseen authorized-evidence
+  anchors and binds an exact-CID, resolved/unresolved XOR reader schema.
 
 ## Completion Boundary
 

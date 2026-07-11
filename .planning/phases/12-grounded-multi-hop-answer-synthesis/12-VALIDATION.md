@@ -35,8 +35,11 @@
   ledger creation; its inferred intent query was not an atomic literal anchor.
   A new candidate was therefore required for any next protected action.
 - Candidate v5 also failed its synthetic direct-provider gate and has no
-  protected ledger. Candidate v6 binds deterministic source-bound anchor
-  normalization and is required before any next protected action.
+  protected ledger. Candidate v6 then bound deterministic source-bound anchor
+  normalization before its synthetic exact-runtime gate.
+- Candidate v6 failed its synthetic exact-runtime gate and has no protected
+  ledger. Candidate v7 binds deterministic later-hop traversal plus dynamic
+  exact-CID/XOR reader schemas before any next protected action.
 - Run public LongMemEval-QA once across all 500 held-out questions after the
   candidate and `qa_hard_v2` result are frozen.
 - Preregister transport retries. A provider failure consumes the held-out
