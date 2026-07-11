@@ -38,8 +38,11 @@
   protected ledger. Candidate v6 then bound deterministic source-bound anchor
   normalization before its synthetic exact-runtime gate.
 - Candidate v6 failed its synthetic exact-runtime gate and has no protected
-  ledger. Candidate v7 binds deterministic later-hop traversal plus dynamic
-  exact-CID/XOR reader schemas before any next protected action.
+  ledger. Candidate v7 then bound deterministic later-hop traversal plus
+  dynamic exact-CID/XOR reader schemas before its reader gate.
+- Candidate v7 failed its synthetic exact-runtime reader gate and has no
+  protected ledger. Candidate v8 binds claims-only exact-CID generation with
+  application-derived unresolved state before any next protected action.
 - Run public LongMemEval-QA once across all 500 held-out questions after the
   candidate and `qa_hard_v2` result are frozen.
 - Preregister transport retries. A provider failure consumes the held-out
