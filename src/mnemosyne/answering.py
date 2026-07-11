@@ -4,14 +4,138 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
+import unicodedata
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from typing import Any, Mapping, Protocol, Sequence
 
 from mnemosyne.engine import MemoryEngine
+from mnemosyne.retrieval import QUERY_SUPPORT_STOPWORDS, normalise_query_term
+from mnemosyne.text import tokenize
 
 
 _PUBLIC_ABSTENTION = "insufficient_authorized_evidence"
+_ANCHOR_TOKEN = re.compile(r"[^\W_]+(?:[-'’][^\W_]+)*", re.UNICODE)
+_CONTROL_LABELS = (
+    re.compile(r"tenant(?:[\s_-]*ids?)\b", re.IGNORECASE),
+    re.compile(r"user(?:[\s_-]*ids?)\b", re.IGNORECASE),
+    re.compile(r"source(?:[\s_-]*identit(?:y|ies))\b", re.IGNORECASE),
+    re.compile(r"auth(?:orization)?(?:[\s_-]*fields?)\b", re.IGNORECASE),
+    re.compile(r"filter(?:[\s_-]*fields?)\b", re.IGNORECASE),
+    re.compile(r"policy(?:[\s_-]*fields?)\b", re.IGNORECASE),
+)
+
+
+def _comparison(value: str) -> str:
+    return " ".join(unicodedata.normalize("NFKC", value).split()).casefold()
+
+
+def _substantive(value: str) -> bool:
+    return any(
+        len(term) > 2 and term not in QUERY_SUPPORT_STOPWORDS
+        for term in (normalise_query_term(token) for token in tokenize(value))
+    )
+
+
+def _control_ranges(source: str) -> tuple[tuple[int, int], ...]:
+    ranges = []
+    for pattern in _CONTROL_LABELS:
+        for match in pattern.finditer(source):
+            end = match.end()
+            value = _ANCHOR_TOKEN.search(source, end)
+            ranges.append((match.start(), value.end() if value else end))
+    return tuple(ranges)
+
+
+def _contains_control_label(value: str) -> bool:
+    normalized = unicodedata.normalize("NFKC", value)
+    return any(pattern.search(normalized) for pattern in _CONTROL_LABELS)
+
+
+def _anchor_tokens(value: str) -> tuple[str, ...]:
+    return tuple(
+        _comparison(re.sub(r"(?:['’]s)$", "", match.group(0), flags=re.IGNORECASE))
+        for match in _ANCHOR_TOKEN.finditer(value)
+    )
+
+
+def _contains_token_span(proposal: str, anchor: str) -> bool:
+    proposed = _anchor_tokens(proposal)
+    expected = _anchor_tokens(anchor)
+    return bool(expected) and any(
+        proposed[index : index + len(expected)] == expected
+        for index in range(len(proposed) - len(expected) + 1)
+    )
+
+
+def _entity_spans(source: str) -> tuple[str, ...]:
+    normalized_source = unicodedata.normalize("NFKC", source)
+    if normalized_source != source and _contains_control_label(normalized_source):
+        return ()
+    words = list(_ANCHOR_TOKEN.finditer(source))
+    control_ranges = _control_ranges(source)
+    spans: list[str] = []
+    start: int | None = None
+    end = 0
+    for match in words:
+        raw = match.group(0)
+        base = re.sub(r"(?:['’]s)$", "", raw, flags=re.IGNORECASE)
+        letters = "".join(character for character in base if character.isalpha())
+        base_terms = [normalise_query_term(token) for token in tokenize(base)]
+        entity_like = bool(letters) and any(
+            len(term) > 2 and term not in QUERY_SUPPORT_STOPWORDS
+            for term in base_terms
+        ) and (
+            base[0].isupper()
+            or letters.isupper()
+            or (any(character.isupper() for character in letters[1:]) and any(character.islower() for character in letters))
+            or (any(character.isdigit() for character in base) and any(character.isalpha() for character in base))
+        )
+        adjacent = start is not None and not source[end:match.start()].strip()
+        if not entity_like or (start is not None and not adjacent):
+            if start is not None:
+                if not any(left < end and start < right for left, right in control_ranges):
+                    spans.append(source[start:end])
+            start = None
+        if entity_like:
+            if start is None:
+                start = match.start()
+            end = match.end() - (len(raw) - len(base))
+        elif start is not None:
+            if not any(left < end and start < right for left, right in control_ranges):
+                spans.append(source[start:end])
+            start = None
+    if start is not None:
+        if not any(left < end and start < right for left, right in control_ranges):
+            spans.append(source[start:end])
+    return tuple(
+        anchor.strip()
+        for anchor in spans
+        if anchor.strip()
+        and _substantive(anchor)
+    )
+
+
+def _source_bound_anchors(
+    proposals: list[str], sources: tuple[str, ...], limits: AnswerLimits
+) -> tuple[str, ...]:
+    catalog = tuple(anchor for source in sources for anchor in _entity_spans(source))
+    selected: list[str] = []
+    seen: set[str] = set()
+    for proposal in proposals:
+        if _contains_control_label(proposal):
+            continue
+        for anchor in catalog:
+            key = _comparison(anchor)
+            if _contains_token_span(proposal, anchor) and key not in seen:
+                if len(anchor) > limits.max_query_characters:
+                    raise ValueError("normalized anchor exceeds query budget")
+                selected.append(anchor)
+                seen.add(key)
+                if len(selected) > limits.max_queries_per_hop:
+                    raise ValueError("normalized anchor count exceeds query budget")
+    return tuple(selected)
 
 
 @dataclass(frozen=True, slots=True)
@@ -295,7 +419,8 @@ class GroundedAnswerOrchestrator:
         if len(request.question) > self.limits.max_query_characters:
             raise ValueError("question budget exceeded")
         queries = self._queries(
-            self.decomposer.decompose({"question": request.question, "evidence": []})
+            self.decomposer.decompose({"question": request.question, "evidence": []}),
+            sources=(request.question,),
         )
         seen_queries: set[str] = set()
         authorized: dict[str, dict[str, Any]] = {}
@@ -343,7 +468,10 @@ class GroundedAnswerOrchestrator:
                     for cid, row in sorted(authorized.items())
                 ],
             }
-            queries = self._queries(self.decomposer.decompose(payload))
+            queries = self._queries(
+                self.decomposer.decompose(payload),
+                sources=tuple(str(row["content"]) for row in payload["evidence"]),
+            )
             if not queries:
                 break
         if not authorized:
@@ -453,22 +581,22 @@ class GroundedAnswerOrchestrator:
             referenced.update(source_cids)
         return referenced, channels
 
-    def _queries(self, value: object) -> tuple[str, ...]:
+    def _queries(self, value: object, *, sources: tuple[str, ...]) -> tuple[str, ...]:
         if not isinstance(value, dict) or set(value) != {"queries"}:
             raise ValueError("invalid decomposer schema")
         raw = value["queries"]
         if not isinstance(raw, list) or len(raw) > self.limits.max_queries_per_hop:
             raise ValueError("invalid decomposer queries")
-        queries: list[str] = []
+        proposals: list[str] = []
         seen: set[str] = set()
         for item in raw:
             if not isinstance(item, str) or not item.strip() or len(item) > self.limits.max_query_characters:
                 raise ValueError("invalid decomposer query")
-            query = item.strip()
-            if query.casefold() not in seen:
-                queries.append(query)
-                seen.add(query.casefold())
-        return tuple(sorted(queries, key=lambda item: (item.casefold(), item)))
+            proposal = item.strip()
+            if proposal.casefold() not in seen:
+                proposals.append(proposal)
+                seen.add(proposal.casefold())
+        return _source_bound_anchors(proposals, sources, self.limits)
 
     @staticmethod
     def _claims(value: object, authorized_cids: set[str]) -> tuple[AnswerClaim, ...]:

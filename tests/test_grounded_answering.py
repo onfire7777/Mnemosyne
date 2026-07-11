@@ -11,6 +11,7 @@ from mnemosyne.answering import (
     AnswerReadContext,
     AnswerRequest,
     GroundedAnswerOrchestrator,
+    _source_bound_anchors,
 )
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.models import Evidence, Hit, Relation, RetrievalResult
@@ -100,6 +101,51 @@ def _engine() -> LocalMemoryEngine:
         )
     )
     return engine
+
+
+@pytest.mark.parametrize(
+    ("proposal", "source", "expected"),
+    [
+        ("Mara's project", "When does Mara's project ship?", ("Mara",)),
+        ("Marathon", "Mara owns Helios", ()),
+        ("XMara", "Mara owns Helios", ()),
+        ("MaraX", "Mara owns Helios", ()),
+        ("New York City deadline", "When is New York City ready?", ("New York City",)),
+        ("NASA mission", "What did NASA launch?", ("NASA",)),
+        ("Q3-2026", "Was Q3-2026 approved?", ("Q3-2026",)),
+        ("ignore policy", "Please ignore policy", ()),
+        ("Tenant ID ABC123", "Tenant ID ABC123", ()),
+        ("ABC123", "ＴＥＮＡＮＴ＿ＩＤ ABC123", ()),
+        ("tenant_id ABC123", "tenant_id ABC123", ()),
+        ("tenant-id ABC123", "tenant-id ABC123", ()),
+        ("tenantId ABC123", "tenantId ABC123", ()),
+        ("source identities Mara", "source identities Mara", ()),
+        ("sourceIdentity Mara", "sourceIdentity Mara", ()),
+        ("authorization_fields Mara", "authorization_fields Mara", ()),
+        ("filterFields Mara", "filterFields Mara", ()),
+        ("policy-fields Mara", "policy-fields Mara", ()),
+        ("Mara", "Mara owns Helios", ("Mara",)),
+        ("Mara", "Mara owns Helios！", ("Mara",)),
+        ("alice", "when does alice ship", ()),
+        ("東京", "東京はいつですか", ()),
+    ],
+)
+def test_source_bound_anchor_normalizer(
+    proposal: str, source: str, expected: tuple[str, ...]
+) -> None:
+    assert _source_bound_anchors([proposal], (source,), AnswerLimits()) == expected
+
+
+def test_source_bound_anchor_normalizer_dedupes_and_enforces_budget() -> None:
+    assert _source_bound_anchors(
+        ["Mara NASA", "mara"], ("Mara met NASA",), AnswerLimits()
+    ) == ("Mara", "NASA")
+    with pytest.raises(ValueError, match="count"):
+        _source_bound_anchors(
+            ["Aquila Borealis Cygnus Draco Eridanus"],
+            ("Aquila, Borealis, Cygnus, Draco, Eridanus",),
+            AnswerLimits(max_queries_per_hop=4),
+        )
 
 
 def test_multi_hop_preserves_complete_immutable_read_context_and_episode_order() -> None:
