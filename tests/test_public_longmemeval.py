@@ -339,7 +339,7 @@ def test_external_candidate_manifest_is_schema_bound_and_no_overwrite(tmp_path: 
 
     digests = qa_protocol_digests()
     manifest = {
-        "candidate_version": "phase12-candidate-v16", "created_at_utc": "2026-07-11T00:00:00Z",
+        "candidate_version": "phase12-candidate-v17", "created_at_utc": "2026-07-11T00:00:00Z",
         "git_sha": "a" * 40, "model_content_sha256": "500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41",
         "anchor_normalizer_sha256": digests["anchor_normalizer_sha256"],
         "reader_schema_sha256": digests["reader_schema_sha256"],
@@ -367,7 +367,7 @@ def test_candidate_manifest_builder_binds_budgets_abstention_and_v10_custody() -
         created_at_utc="2026-07-11T00:00:00Z",
     )
     protocol = load_qa_protocol()
-    assert manifest["candidate_version"] == "phase12-candidate-v16"
+    assert manifest["candidate_version"] == "phase12-candidate-v17"
     assert manifest["anchor_normalizer_sha256"] == qa_protocol_digests()["anchor_normalizer_sha256"]
     assert manifest["evidence_budget"] == protocol["evidence_budget"]
     assert manifest["abstention"] == protocol["abstention"]
@@ -379,7 +379,7 @@ def test_candidate_manifest_o_excl_rejects_symlink_and_concurrent_writers(tmp_pa
 
     digests = qa_protocol_digests()
     manifest = {
-        "candidate_version": "phase12-candidate-v16", "created_at_utc": "2026-07-11T00:00:00Z",
+        "candidate_version": "phase12-candidate-v17", "created_at_utc": "2026-07-11T00:00:00Z",
         "git_sha": "a" * 40, "model_content_sha256": "500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41", **digests,
         "evidence_budget": load_qa_protocol()["evidence_budget"],
         "abstention": load_qa_protocol()["abstention"],

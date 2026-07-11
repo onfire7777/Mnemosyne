@@ -180,13 +180,22 @@ def test_later_hop_literal_fallback_expands_trailing_source_tokens() -> None:
     )
 
 
+def test_later_hop_catalog_traverses_unproposed_lowercase_bridge() -> None:
+    assert _later_hop_anchors(
+        ["project cobalt"],
+        ("project cobalt belongs to team juniper.",),
+        {"project cobalt"},
+        AnswerLimits(),
+    ) == ("juniper", "team", "belongs", "cobalt")
+
+
 def test_later_hop_dedupes_nfkc_equivalent_seen_anchor() -> None:
     assert _later_hop_anchors(
         ["Q３-2026"],
         ("Q３-2026 is planned",),
         {_comparison("Q3-2026")},
         AnswerLimits(),
-    ) == ()
+    ) == ("planned",)
 
 
 def test_multi_hop_preserves_complete_immutable_read_context_and_episode_order() -> None:

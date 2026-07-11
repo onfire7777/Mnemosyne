@@ -4,7 +4,7 @@ Status: in progress — consumed v3 and v13 frozen runs failed systemically; no 
 
 ## Preregistered Candidate
 
-- Protocol: `phase12-candidate-v16` (new candidate required; not yet executed)
+- Protocol: `phase12-candidate-v17` (new candidate required; not yet executed)
 - Reader/decomposer: local Ollama `qwen3:8b`, exact content digest
   `500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41`
 - Transport retries: zero; maximum attempts per protected split: one
@@ -121,5 +121,13 @@ protected ledger. Synthetic-only direct decomposition showed the proposal
 unsupported mandatory query. Candidate v16 therefore keeps hop 0 to the exact
 literal proposal and enables trailing-token expansion only on later hops, where
 the source is authorized retrieved evidence.
+
+Candidate v16 passed the entity case but repeated the first lowercase record in
+both literal repetitions and has no protected ledger. Synthetic-only
+evidence-aware decomposition confirmed the model repeated `project cobalt`
+instead of proposing the unseen bridge. Candidate v17 extends deterministic
+later-hop traversal to safe substantive tokens from authorized evidence in
+reverse source order; control ranges, deny terms, budgets, and ordinary
+retrieval authorization remain enforced.
 
 No CAP-001/CAP-002/CAP-003/BENCH-005 completion or public number is claimed.

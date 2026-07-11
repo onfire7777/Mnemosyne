@@ -108,6 +108,27 @@ def _literal_source_spans(proposal: str, source: str) -> tuple[str, ...]:
     return ()
 
 
+def _authorized_literal_tokens(source: str) -> tuple[str, ...]:
+    normalized_source = unicodedata.normalize("NFKC", source)
+    if normalized_source != source and _contains_control_label(normalized_source):
+        return ()
+    control_ranges = _control_ranges(source)
+    selected: list[str] = []
+    for match in reversed(list(_ANCHOR_TOKEN.finditer(source))):
+        if any(left < match.end() and match.start() < right for left, right in control_ranges):
+            continue
+        raw = match.group(0)
+        tokens = _anchor_tokens(raw)
+        if (
+            not _substantive(raw)
+            or _FALLBACK_DENY_TERMS.intersection(tokens)
+            or _comparison(raw) in {_comparison(value) for value in selected}
+        ):
+            continue
+        selected.append(raw)
+    return tuple(selected)
+
+
 def _entity_spans(source: str) -> tuple[str, ...]:
     normalized_source = unicodedata.normalize("NFKC", source)
     if normalized_source != source and _contains_control_label(normalized_source):
@@ -202,7 +223,11 @@ def _later_hop_anchors(
     selected = _source_bound_anchors(
         proposals, sources, limits, expand_literal_tokens=True
     )
-    catalog = tuple(anchor for source in sources for anchor in _entity_spans(source))
+    catalog = tuple(
+        anchor
+        for source in sources
+        for anchor in (*_entity_spans(source), *_authorized_literal_tokens(source))
+    )
     ordered: list[str] = []
     keys = set(seen)
     for anchor in (*catalog, *selected):

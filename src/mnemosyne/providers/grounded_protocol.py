@@ -7,7 +7,7 @@ import json
 from typing import Any
 
 
-VERSION = "phase12-candidate-v16"
+VERSION = "phase12-candidate-v17"
 MODEL_SELECTOR = "qwen3:8b"
 MODEL_CONTENT_SHA256 = "500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41"
 ANCHOR_NORMALIZER_SPEC = {
@@ -30,6 +30,7 @@ ANCHOR_NORMALIZER_SPEC = {
     "consume_abstained_hits": False,
     "max_queries": 4,
     "later_hop_traversal": "authorized-catalog-source-order-unseen-first",
+    "later_hop_literal_catalog": "safe-substantive-tokens-reverse-source-order",
 }
 READER_SCHEMA_SPEC = {
     "id": "exact-quote-selector-v1",
