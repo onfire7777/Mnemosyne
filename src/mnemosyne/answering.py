@@ -31,6 +31,13 @@ def _comparison(value: str) -> str:
     return " ".join(unicodedata.normalize("NFKC", value).split()).casefold()
 
 
+def _required_content(row: Mapping[str, Any]) -> str:
+    content = row.get("content")
+    if not isinstance(content, str) or not content:
+        raise ValueError("authorized evidence content must be a non-empty string")
+    return content
+
+
 def _substantive(value: str) -> bool:
     return any(
         len(term) > 2 and term not in QUERY_SUPPORT_STOPWORDS
@@ -340,6 +347,15 @@ class AnswerTrace:
 class AnswerClaim:
     text: str
     evidence_cids: tuple[str, ...]
+    spans: tuple[AnswerSpan, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class AnswerSpan:
+    cid: str
+    start: int
+    end: int
+    slice_sha256: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -410,7 +426,7 @@ class GroundedAnswerOrchestrator:
         ):
             return self._abstain()
         try:
-            claims = self._claims(proposal, {row.cid for row in replayed.evidence})
+            claims = self._claims(proposal, {row.cid: row.content for row in replayed.evidence})
             if not claims:
                 return self._reader_abstain(replayed)
             return GroundedAnswer(
@@ -464,7 +480,7 @@ class GroundedAnswerOrchestrator:
                 cid_hop.setdefault(cid, hop_index)
             if len(authorized) > self.limits.max_evidence:
                 raise ValueError("evidence budget exceeded")
-            if sum(len(str(row.get("content") or "")) for row in authorized.values()) > self.limits.max_characters:
+            if sum(len(row["content"]) for row in authorized.values()) > self.limits.max_characters:
                 raise ValueError("character budget exceeded")
             hops.append(
                 AnswerHop(
@@ -486,7 +502,7 @@ class GroundedAnswerOrchestrator:
                 ],
             }
             response = self.decomposer.decompose(payload)
-            sources = tuple(str(row["content"]) for row in payload["evidence"])
+            sources = tuple(row["content"] for row in payload["evidence"])
             proposals = self._query_proposals(response)
             queries = _later_hop_anchors(
                 proposals, sources, seen_queries, self.limits
@@ -546,6 +562,9 @@ class GroundedAnswerOrchestrator:
                 and not bool(row.get("erased"))
                 and not _quarantined(row)
             ):
+                content = row.get("content")
+                if not isinstance(content, str) or not content:
+                    raise ValueError("authorized evidence content must be a non-empty string")
                 raw = self.engine.get_evidence(context.tenant_id, cid, context.branch)
                 if (
                     raw is None
@@ -622,7 +641,12 @@ class GroundedAnswerOrchestrator:
         return proposals
 
     @staticmethod
-    def _claims(value: object, authorized_cids: set[str]) -> tuple[AnswerClaim, ...]:
+    def _claims(value: object, evidence: dict[str, str]) -> tuple[AnswerClaim, ...]:
+        if not evidence or any(
+            not isinstance(cid, str) or not cid or not isinstance(content, str) or not content
+            for cid, content in evidence.items()
+        ):
+            raise ValueError("reader evidence must contain exact non-empty strings")
         if not isinstance(value, dict) or set(value) != {"claims", "unresolved"}:
             raise ValueError("invalid reader schema")
         unresolved = value["unresolved"]
@@ -637,22 +661,28 @@ class GroundedAnswerOrchestrator:
             raise ValueError("reader must return bounded claims")
         claims: list[AnswerClaim] = []
         for row in rows:
-            if not isinstance(row, dict) or set(row) != {"text", "evidence_cids"}:
+            if not isinstance(row, dict) or set(row) != {"spans"}:
                 raise ValueError("invalid claim schema")
-            text = row["text"]
-            citations = row["evidence_cids"]
-            if (
-                not isinstance(text, str)
-                or not text.strip()
-                or len(text) > 2_000
-                or not isinstance(citations, list)
-                or not citations
-                or any(not isinstance(cid, str) or not cid for cid in citations)
-                or len(set(citations)) != len(citations)
-                or not set(citations) <= authorized_cids
-            ):
-                raise ValueError("claim is not grounded in authorized evidence")
-            claims.append(AnswerClaim(text.strip(), tuple(citations)))
+            raw_spans = row["spans"]
+            if not isinstance(raw_spans, list) or not raw_spans or len(raw_spans) > 3:
+                raise ValueError("claim spans are invalid")
+            spans: list[AnswerSpan] = []
+            occupied: dict[str, list[tuple[int, int]]] = {}
+            for raw in raw_spans:
+                if not isinstance(raw, dict) or set(raw) != {"cid", "start", "end"}:
+                    raise ValueError("claim span schema is invalid")
+                cid, start, end = raw["cid"], raw["start"], raw["end"]
+                if not isinstance(cid, str) or cid not in evidence or not isinstance(start, int) or isinstance(start, bool) or not isinstance(end, int) or isinstance(end, bool) or not (0 <= start < end <= len(evidence[cid])):
+                    raise ValueError("claim span is outside authorized evidence")
+                if any(start < right and left < end for left, right in occupied.setdefault(cid, [])):
+                    raise ValueError("claim spans overlap")
+                occupied[cid].append((start, end))
+                text = evidence[cid][start:end]
+                spans.append(AnswerSpan(cid, start, end, hashlib.sha256(text.encode("utf-8")).hexdigest()))
+            rendered = " ".join(evidence[span.cid][span.start:span.end] for span in spans)
+            if not rendered.strip() or len(rendered) > 2_000:
+                raise ValueError("claim span rendering is invalid")
+            claims.append(AnswerClaim(rendered, tuple(dict.fromkeys(span.cid for span in spans)), tuple(spans)))
         return tuple(claims)
 
     @staticmethod
@@ -666,7 +696,7 @@ class GroundedAnswerOrchestrator:
         turn_index = episode.get("turn_index")
         return AnswerEvidence(
             cid=cid,
-            content=str(row.get("content") or ""),
+            content=_required_content(row),
             source_identity=str(source_identity) if source_identity else None,
             session_id=str(session_id) if session_id else None,
             turn_index=turn_index if isinstance(turn_index, int) and not isinstance(turn_index, bool) else None,

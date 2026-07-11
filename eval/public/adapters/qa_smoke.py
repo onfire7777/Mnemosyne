@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+
 from typing import Any
 
 from eval.public.scoring import score_profile
@@ -21,7 +23,14 @@ def run(benchmark: dict[str, Any], _cli: object) -> tuple[list[dict[str, Any]], 
         "answer": "red fox",
         "authorized_evidence_fingerprint": _fingerprint([record["doc_id"]]),
         "authorized_retrieval_hops": [{"hop": 0, "rows": [{"capture": capture, "cid": captured["cid"]}]}],
-        "claims": [{"evidence_cids": [record["doc_id"]], "text": "red fox"}],
+        "claims": [{
+            "evidence_cids": [record["doc_id"]],
+            "spans": [{
+                "cid": record["doc_id"], "start": 0, "end": 7,
+                "slice_sha256": hashlib.sha256(b"red fox").hexdigest(),
+            }],
+            "text": "red fox",
+        }],
         "question_id": "qa-smoke-1",
         "scoring_family": "qa",
     }

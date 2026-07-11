@@ -257,19 +257,26 @@ def grounded_reader(request: dict) -> dict:
     if not isinstance(evidence, list) or not evidence or len(evidence) > 20:
         raise ValueError("grounded reader requires authorized evidence")
     cids = []
+    content_by_cid = {}
     for row in evidence:
         cid = row.get("cid") if isinstance(row, dict) else None
         if not isinstance(cid, str) or not cid or len(cid) > 512 or cid in cids:
             raise ValueError("grounded reader evidence CIDs are invalid")
         cids.append(cid)
-    claim = {
+        content = row.get("content")
+        if not isinstance(content, str) or not content:
+            raise ValueError("grounded reader evidence content must be a non-empty string")
+        content_by_cid[cid] = content
+    span = {
         "type": "object",
         "properties": {
-            "text": {"type": "string", "minLength": 1, "maxLength": 2000},
-            "evidence_cids": {"type": "array", "items": {"type": "string", "enum": cids}, "minItems": 1, "uniqueItems": True},
+            "cid": {"type": "string", "enum": cids},
+            "start": {"type": "integer", "minimum": 0},
+            "end": {"type": "integer", "minimum": 1},
         },
-        "required": ["text", "evidence_cids"], "additionalProperties": False,
+        "required": ["cid", "start", "end"], "additionalProperties": False,
     }
+    claim = {"type": "object", "properties": {"spans": {"type": "array", "items": span, "minItems": 1, "maxItems": 3}}, "required": ["spans"], "additionalProperties": False}
     schema = {
         "type": "object",
         "properties": {"claims": {"type": "array", "items": claim, "maxItems": 20}},
@@ -287,14 +294,19 @@ def grounded_reader(request: dict) -> dict:
     if not isinstance(claims, list) or len(claims) > 20:
         raise ValueError("model returned invalid grounded-reader claims")
     for row in claims:
-        if not isinstance(row, dict) or set(row) != {"text", "evidence_cids"}:
+        if not isinstance(row, dict) or set(row) != {"spans"}:
             raise ValueError("model returned invalid claim schema")
-        text = row["text"]
-        cited = row.get("evidence_cids") if isinstance(row, dict) else None
-        if not isinstance(text, str) or not text.strip() or len(text) > 2000:
-            raise ValueError("model returned invalid claim text")
-        if not isinstance(cited, list) or not cited or any(not isinstance(cid, str) or not cid for cid in cited) or len(cited) != len(set(cited)) or not set(cited) <= set(cids):
-            raise ValueError("model returned unauthorized evidence CID")
+        spans = row["spans"]
+        if not isinstance(spans, list) or not spans or len(spans) > 3:
+            raise ValueError("model returned invalid claim spans")
+        occupied = {}
+        for item in spans:
+            if not isinstance(item, dict) or set(item) != {"cid", "start", "end"} or item["cid"] not in cids or not isinstance(item["start"], int) or isinstance(item["start"], bool) or not isinstance(item["end"], int) or isinstance(item["end"], bool) or not (0 <= item["start"] < item["end"] <= len(content_by_cid[item["cid"]])):
+                raise ValueError("model returned invalid claim span")
+            ranges = occupied.setdefault(item["cid"], [])
+            if any(item["start"] < end and start < item["end"] for start, end in ranges):
+                raise ValueError("model returned overlapping claim spans")
+            ranges.append((item["start"], item["end"]))
     if _model_content_digest() != model_content_digest:
         raise ValueError("configured Ollama model changed during generation")
     return {

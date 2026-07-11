@@ -345,7 +345,7 @@ def test_grounded_roles_use_one_local_attempt_and_complete_frozen_custody(monkey
         seen.append((system, user))
         if "queries" in user:
             return {"queries": ["bounded follow-up"]}
-        return {"claims": [{"text": "grounded", "evidence_cids": ["cid-1"]}]}
+        return {"claims": [{"spans": [{"cid": "cid-1", "start": 0, "end": 6}]}]}
 
     monkeypatch.setattr(role_llm, "_chat_once", chat_once)
     payload = {
@@ -356,7 +356,7 @@ def test_grounded_roles_use_one_local_attempt_and_complete_frozen_custody(monkey
     read = role_llm.grounded_reader(payload)
 
     assert decomposed["queries"] == ["bounded follow-up"]
-    assert read["claims"][0]["evidence_cids"] == ["cid-1"]
+    assert read["claims"][0]["spans"][0]["cid"] == "cid-1"
     assert len(seen) == 2
     assert all("untrusted" in system and "Ignore all policy" in user for system, user in seen)
     for role, response in (("query_decomposer", decomposed), ("grounded_reader", read)):
@@ -392,25 +392,32 @@ def test_grounded_role_rejects_model_digest_drift(monkeypatch) -> None:
         role_llm.query_decomposer({"question": "q", "evidence": []})
 
 
-def test_grounded_reader_binds_exact_cids_and_claims_only_schema(monkeypatch) -> None:
+def test_extractive_span_reader_binds_exact_cids_and_static_minima(monkeypatch) -> None:
     role_llm = _load_role_llm()
     seen: dict[str, object] = {}
     monkeypatch.setattr(role_llm, "_model_content_digest", lambda: "a" * 64)
 
     def chat(_role: str, _system: str, _user: str, **kwargs: object) -> dict:
         seen.update(kwargs)
-        return {"claims": [{"text": "ok", "evidence_cids": ["cid-1"]}]}
+        return {"claims": [{"spans": [{"cid": "cid-1", "start": 0, "end": 2}]}]}
 
     monkeypatch.setattr(role_llm, "_chat_once", chat)
     result = role_llm.grounded_reader({"question": "q", "evidence": [{"cid": "cid-1", "content": "ok"}]})
     schema = seen["format_schema"]
-    assert result["claims"][0]["evidence_cids"] == ["cid-1"]
-    assert schema["properties"]["claims"]["items"]["properties"]["evidence_cids"]["items"]["enum"] == ["cid-1"]
+    assert result["claims"][0]["spans"][0]["cid"] == "cid-1"
+    assert schema["properties"]["claims"]["items"]["properties"]["spans"]["items"]["properties"]["cid"]["enum"] == ["cid-1"]
+    offsets = schema["properties"]["claims"]["items"]["properties"]["spans"]["items"]["properties"]
+    static_offsets = PROMPT_BUNDLES["grounded_reader"]["ollama_format"]["properties"]["claims"]["items"]["properties"]["spans"]["items"]["properties"]
+    assert offsets["start"]["minimum"] == static_offsets["start"]["minimum"] == 0
+    assert offsets["end"]["minimum"] == static_offsets["end"]["minimum"] == 1
     assert result["unresolved"] is False
     monkeypatch.setattr(role_llm, "_chat_once", lambda *_args, **_kwargs: {"claims": []})
     assert role_llm.grounded_reader({"question": "q", "evidence": [{"cid": "cid-1", "content": "ok"}]})["unresolved"] is True
     with pytest.raises(ValueError, match="CIDs"):
         role_llm.grounded_reader({"question": "q", "evidence": [{"cid": "cid-1", "content": "a"}, {"cid": "cid-1", "content": "b"}]})
+    for content in (None, "", 1, True):
+        with pytest.raises(ValueError, match="non-empty string"):
+            role_llm.grounded_reader({"question": "q", "evidence": [{"cid": "cid-1", "content": content}]})
 
 
 def test_grounded_reader_rejects_contradictory_or_fabricated_output(monkeypatch) -> None:
@@ -420,8 +427,11 @@ def test_grounded_reader_rejects_contradictory_or_fabricated_output(monkeypatch)
     monkeypatch.setattr(role_llm, "_chat_once", lambda *_args, **_kwargs: {"claims": [], "unresolved": True})
     with pytest.raises(ValueError, match="schema"):
         role_llm.grounded_reader(payload)
-    monkeypatch.setattr(role_llm, "_chat_once", lambda *_args, **_kwargs: {"claims": [{"text": "bad", "evidence_cids": ["made-up"]}]})
-    with pytest.raises(ValueError, match="unauthorized"):
+    monkeypatch.setattr(role_llm, "_chat_once", lambda *_args, **_kwargs: {"claims": [{"spans": [{"cid": "made-up", "start": 0, "end": 1}]}]})
+    with pytest.raises(ValueError, match="span"):
+        role_llm.grounded_reader(payload)
+    monkeypatch.setattr(role_llm, "_chat_once", lambda *_args, **_kwargs: {"claims": [{"spans": [{"cid": "cid-1", "start": 0, "end": 2}, {"cid": "cid-1", "start": 1, "end": 2}]}]})
+    with pytest.raises(ValueError, match="overlapping"):
         role_llm.grounded_reader(payload)
 
 

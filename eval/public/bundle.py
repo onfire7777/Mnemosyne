@@ -671,6 +671,7 @@ def _verify_qa_custody(
     labels = _scoring_labels(benchmark)
     if any(not isinstance(label.get("answers"), list) or not label["answers"] for label in labels):
         raise BundleError("QA benchmark answer labels are missing")
+    content_by_cid = _benchmark_content_by_cid(benchmark)
     for trace in traces:
         if any(key in trace for key in ("score", "exact_match", "token_f1")):
             raise BundleError("reader traces may not self-score")
@@ -692,17 +693,57 @@ def _verify_qa_custody(
         if abstained is not False or not isinstance(answer, str) or not answer or not isinstance(claims, list) or not claims:
             raise BundleError("non-abstained QA output requires answer and claims")
         for claim in claims:
-            if not isinstance(claim, dict) or set(claim) != {"evidence_cids", "text"}:
+            if not isinstance(claim, dict) or set(claim) != {"evidence_cids", "spans", "text"}:
                 raise BundleError("QA claim schema is invalid")
-            if not isinstance(claim["text"], str) or not claim["text"].strip() or not isinstance(claim["evidence_cids"], list) or not claim["evidence_cids"]:
+            if not isinstance(claim["text"], str) or not claim["text"].strip() or not isinstance(claim["evidence_cids"], list) or not claim["evidence_cids"] or not isinstance(claim["spans"], list) or not 1 <= len(claim["spans"]) <= 3:
                 raise BundleError("every QA claim requires citations")
             if any(not isinstance(cid, str) or not cid for cid in claim["evidence_cids"]):
                 raise BundleError("every QA claim requires valid citations")
             if len(claim["evidence_cids"]) != len(set(claim["evidence_cids"])) or not set(claim["evidence_cids"]) <= set(authorized):
                 raise BundleError("QA claim citations must be a unique authorized subset")
+            rendered_spans: list[str] = []
+            occupied: dict[str, list[tuple[int, int]]] = {}
+            span_cids: list[str] = []
+            for span in claim["spans"]:
+                if not isinstance(span, dict) or set(span) != {"cid", "end", "slice_sha256", "start"}:
+                    raise BundleError("QA claim span schema is invalid")
+                cid, start, end = span["cid"], span["start"], span["end"]
+                if not isinstance(cid, str) or cid not in authorized or cid not in content_by_cid or not isinstance(start, int) or isinstance(start, bool) or not isinstance(end, int) or isinstance(end, bool):
+                    raise BundleError("QA claim span provenance is invalid")
+                content = content_by_cid[cid]
+                if not 0 <= start < end <= len(content):
+                    raise BundleError("QA claim span offsets are invalid")
+                ranges = occupied.setdefault(cid, [])
+                if any(start < right and left < end for left, right in ranges):
+                    raise BundleError("QA claim spans overlap")
+                ranges.append((start, end))
+                selected = content[start:end]
+                if span["slice_sha256"] != hashlib.sha256(selected.encode("utf-8")).hexdigest():
+                    raise BundleError("QA claim span digest mismatch")
+                rendered_spans.append(selected)
+                if cid not in span_cids:
+                    span_cids.append(cid)
+            if claim["evidence_cids"] != span_cids:
+                raise BundleError("QA claim citations do not match ordered spans")
+            if claim["text"] != " ".join(rendered_spans):
+                raise BundleError("QA claim text does not match evidence spans")
         rendered = "\n".join(claim["text"].strip() for claim in claims)
         if answer != rendered:
             raise BundleError("QA answer must render deterministically from ordered claims")
+
+
+def _benchmark_content_by_cid(benchmark: Any) -> dict[str, str]:
+    if not isinstance(benchmark, dict) or not isinstance(benchmark.get("corpus"), list):
+        raise BundleError("QA benchmark corpus is missing")
+    result: dict[str, str] = {}
+    for record in benchmark["corpus"]:
+        if not isinstance(record, dict):
+            raise BundleError("QA benchmark corpus custody is incomplete")
+        cid, content, capture = record.get("doc_id"), record.get("content"), record.get("capture")
+        if not isinstance(cid, str) or not cid or cid in result or not isinstance(content, str) or not content or not isinstance(capture, dict) or capture.get("content") != content:
+            raise BundleError("QA benchmark CID/content mapping is invalid")
+        result[cid] = content
+    return result
 
 
 def _authorized_cids_from_hops(

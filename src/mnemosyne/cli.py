@@ -1780,7 +1780,19 @@ def _public_answer(result: Any, disclosure: dict[str, object]) -> dict[str, obje
     return {
         "answer": result.answer,
         "claims": [
-            {"text": claim.text, "evidence_cids": list(claim.evidence_cids)}
+            {
+                "text": claim.text,
+                "evidence_cids": list(claim.evidence_cids),
+                "spans": [
+                    {
+                        "cid": span.cid,
+                        "start": span.start,
+                        "end": span.end,
+                        "slice_sha256": span.slice_sha256,
+                    }
+                    for span in claim.spans
+                ],
+            }
             for claim in result.claims
         ],
         "abstained": result.abstained,

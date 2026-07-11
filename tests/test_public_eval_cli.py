@@ -385,9 +385,9 @@ if role == "query_decomposer":
     response = {"queries": ([] if evidence else [request["question"]]), "metadata": metadata}
 else:
     evidence = request.get("evidence") or []
-    response = ({"claims": [{"text": evidence[0]["content"],
-                "evidence_cids": [evidence[0]["cid"]]}], "unresolved": False,
-                "metadata": metadata} if evidence else
+    response = ({"claims": [{"spans": [{"cid": evidence[0]["cid"], "start": 0,
+                "end": len(evidence[0]["content"])}]}],
+                "unresolved": False, "metadata": metadata} if evidence else
                 {"claims": [], "unresolved": True, "metadata": metadata})
 json.dump(response, sys.stdout)
 """
@@ -409,6 +409,12 @@ json.dump(response, sys.stdout)
     answer = read_only.answer("Ada", context)
     assert answer["abstained"] is False
     assert answer["claims"] and answer["claims"][0]["evidence_cids"]
+    assert set(answer["claims"][0]) == {"text", "evidence_cids", "spans"}
+    assert set(answer["claims"][0]["spans"][0]) == {"cid", "start", "end", "slice_sha256"}
+    assert answer["claims"][0]["spans"][0]["slice_sha256"] == hashlib.sha256(
+        answer["answer"].encode("utf-8")
+    ).hexdigest()
+    assert "Ada owns project Zephyr." not in json.dumps(answer["claims"][0]["spans"])
     assert set(answer) == {"answer", "claims", "abstained", "hops", "reader"}
     assert set(answer["reader"]) == {"query_decomposer", "grounded_reader"}
     assert all(set(hop) == {"index", "queries", "channels", "retrieved_cids"} for hop in answer["hops"])
@@ -464,7 +470,7 @@ if role == "query_decomposer":
     response = {"queries": queries, "metadata": metadata}
 else:
     row = next(item for item in evidence if "Q3 2026" in item["content"])
-    response = {"claims": [{"text": "Q3 2026", "evidence_cids": [row["cid"]]}],
+    response = {"claims": [{"spans": [{"cid": row["cid"], "start": 16, "end": 23}]}],
                 "unresolved": False, "metadata": metadata}
 json.dump(response, sys.stdout)
 """
